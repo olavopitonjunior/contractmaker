@@ -12,21 +12,23 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
   }
 
-  const template = await prisma.template.findUnique({ where: { id: parsed.data.templateId } });
+  const template = await prisma.legacyTemplate.findUnique({ where: { id: parsed.data.templateId } });
   if (!template) {
     return NextResponse.json({ error: 'Template not found' }, { status: 404 });
   }
 
   const html = renderContratoHTML(template.handlebarsTemplate, parsed.data.dataJson);
+  // Legacy route - dealId is required in new schema, use placeholder for backward compat
   const contract = await prisma.contract.create({
     data: {
       userId: template.userId,
       templateId: template.id,
+      dealId: (parsed.data as any).dealId || "legacy",
       dataJson: parsed.data.dataJson,
-      htmlPreview: html,
+      htmlContent: html,
       status: 'draft'
     }
   });
 
-  return NextResponse.json({ contractId: contract.id, htmlPreview: html });
+  return NextResponse.json({ contractId: contract.id, htmlContent: html });
 }

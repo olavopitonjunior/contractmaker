@@ -22,11 +22,11 @@ export async function exportPdf(html: string, outputPath: string, format = 'A4')
   ensureDir(outputPath);
   const puppeteerModule = await import('puppeteer');
   const puppeteer = puppeteerModule.default ?? puppeteerModule;
-  const browser = await puppeteer.launch({ headless: 'new' });
+  const browser = await puppeteer.launch({ headless: true });
   try {
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: 'networkidle0' });
-    await page.pdf({ path: outputPath, format, printBackground: true });
+    await page.pdf({ path: outputPath, format: format as any, printBackground: true });
   } finally {
     await browser.close();
   }

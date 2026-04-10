@@ -15,12 +15,13 @@ export async function runChat(params: {
   dataJson: Record<string, unknown>;
   htmlPreview: string;
 }): Promise<ChatResult> {
-  const tools = [
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  const tools: Anthropic.Tool[] = [
     {
       name: 'update_data_patch',
       description: 'Retorne um patch JSON com campos para atualizar em dataJson',
       input_schema: {
-        type: 'object',
+        type: 'object' as const,
         properties: {
           patch: { type: 'object' }
         },
@@ -31,7 +32,7 @@ export async function runChat(params: {
       name: 'propose_clause_edit',
       description: 'Propor um ajuste textual no HTML atual. Informe target e replacement',
       input_schema: {
-        type: 'object',
+        type: 'object' as const,
         properties: {
           target: { type: 'string' },
           replacement: { type: 'string' }

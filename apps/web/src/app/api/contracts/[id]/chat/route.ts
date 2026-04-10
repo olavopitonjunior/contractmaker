@@ -40,24 +40,28 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: 'Contract not found' }, { status: 404 });
   }
 
-  let session = contract.chatSessions[0];
+  let session = contract.chatSessions[0] ?? null;
   if (!session) {
-    session = await prisma.chatSession.create({ data: { contractId: contract.id } });
+    const created = await prisma.chatSession.create({
+      data: { contractId: contract.id, userId: contract.userId },
+      include: { messages: true },
+    });
+    session = created;
   }
 
   const dataJson = contract.dataJson as Record<string, unknown>;
-  const templateSource = contract.templateOverride || contract.template.handlebarsTemplate;
-  const htmlPreview = contract.htmlPreview || renderContratoHTML(templateSource, dataJson);
+  const templateSource = contract.templateOverride || contract.template.handlebarsSource;
+  const htmlContent = contract.htmlContent || renderContratoHTML(templateSource, dataJson);
 
   const result = await runChat({
     message: parsed.data.message,
     dataJson,
-    htmlPreview
+    htmlPreview: htmlContent
   });
 
   let updatedData = dataJson;
-  let updatedTemplate = contract.templateOverride || contract.template.handlebarsTemplate;
-  let updatedHtml = htmlPreview;
+  let updatedTemplate = contract.templateOverride || contract.template.handlebarsSource;
+  let updatedHtml = htmlContent;
 
   if (result.dataPatch) {
     updatedData = deepMerge(updatedData, result.dataPatch);
@@ -88,15 +92,15 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   await prisma.contract.update({
     where: { id: contract.id },
     data: {
-      dataJson: updatedData,
+      dataJson: updatedData as any,
       templateOverride: updatedTemplate,
-      htmlPreview: updatedHtml
+      htmlContent: updatedHtml
     }
   });
 
   return NextResponse.json({
     message: result.assistantText,
     dataJson: updatedData,
-    htmlPreview: updatedHtml
+    htmlContent: updatedHtml
   });
 }

@@ -25,8 +25,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: 'Contract not found' }, { status: 404 });
   }
 
-  const templateSource = contract.templateOverride || contract.template.handlebarsTemplate;
-  const html = contract.htmlPreview ?? renderContratoHTML(templateSource, contract.dataJson as Record<string, unknown>);
+  const templateSource = contract.templateOverride || contract.template.handlebarsSource;
+  const html = contract.htmlContent ?? renderContratoHTML(templateSource, contract.dataJson as Record<string, unknown>);
 
   const tmpDir = path.join(os.tmpdir(), 'contractmaker-exports');
   fs.mkdirSync(tmpDir, { recursive: true });
@@ -69,8 +69,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
   await prisma.export.createMany({
     data: [
-      { contractId: contract.id, type: 'pdf', s3Url: pdfUrl },
-      { contractId: contract.id, type: 'docx', s3Url: docxUrl }
+      { contractId: contract.id, format: 'pdf', url: pdfUrl },
+      { contractId: contract.id, format: 'docx', url: docxUrl }
     ]
   });
 

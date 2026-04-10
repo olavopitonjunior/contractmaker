@@ -1,30 +1,25 @@
-﻿import './globals.css';
-import type { ReactNode } from 'react';
+import type { Metadata } from "next";
+import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import "./globals.css";
 
-export const metadata = {
-  title: 'Contractmaker MVP',
-  description: 'MVP de contratos com IA'
+export const metadata: Metadata = {
+  title: "Contractmaker",
+  description: "Plataforma de gestao de vendas e contratos imobiliarios",
 };
 
-export default function RootLayout({ children }: { children: ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="pt-BR">
       <body>
-        <div className="shell">
-          <header className="topbar">
-            <div>
-              <strong>Contractmaker MVP</strong>
-            </div>
-            <nav>
-              <a href="/">Home</a>
-              <a href="/upload">Upload</a>
-              <a href="/mapping.html">Mapping</a>
-              <a href="/chat">Chat</a>
-              <a href="/export">Export</a>
-            </nav>
-          </header>
-          <main className="content">{children}</main>
-        </div>
+        <TooltipProvider>
+          {children}
+          <Toaster richColors position="bottom-right" />
+        </TooltipProvider>
       </body>
     </html>
   );

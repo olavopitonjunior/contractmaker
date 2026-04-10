@@ -21,16 +21,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
 
   const dataJson = parsed.data.dataJson ?? (contract.dataJson as Record<string, unknown>);
-  const templateSource = contract.templateOverride || contract.template.handlebarsTemplate;
+  const templateSource = contract.templateOverride || contract.template.handlebarsSource;
   const html = renderContratoHTML(templateSource, dataJson);
 
   await prisma.contract.update({
     where: { id: contract.id },
     data: {
       dataJson,
-      htmlPreview: html
+      htmlContent: html
     }
   });
 
-  return NextResponse.json({ htmlPreview: html });
+  return NextResponse.json({ htmlContent: html });
 }

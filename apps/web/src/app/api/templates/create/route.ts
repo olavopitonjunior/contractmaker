@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
 
   const result = generateTemplateHandlebars(doc.extractedHtml, analysis);
   const userId = doc.userId;
-  const template = await prisma.template.create({
+  const template = await prisma.legacyTemplate.create({
     data: {
       userId,
       version: '1.0.0',

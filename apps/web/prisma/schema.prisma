@@ -3,20 +3,317 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
+
+// ============================================
+// AUTH (NextAuth.js v5 Prisma Adapter)
+// ============================================
 
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  passwordHash String
-  createdAt    DateTime @default(now())
+  id            String    @id @default(cuid())
+  name          String?
+  email         String    @unique
+  emailVerified DateTime?
+  image         String?
+  passwordHash  String?
+  role          String    @default("user")
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
-  documents  Document[]
-  templates  Template[]
-  contracts  Contract[]
+  accounts       Account[]
+  sessions       Session[]
+  orgMemberships OrgMembership[]
+  deals          Deal[]
+  contracts      Contract[]
+  chatSessions   ChatSession[]
+  documents      Document[]
+  legacyTemplates LegacyTemplate[]
+  clausesAuthored Clause[]   @relation("clauseAuthor")
 }
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+// ============================================
+// MULTI-TENANCY
+// ============================================
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members   OrgMembership[]
+  pipelines Pipeline[]
+  forms     SalesForm[]
+  templates ContractTemplate[]
+  clauses   Clause[]
+}
+
+model OrgMembership {
+  id     String @id @default(cuid())
+  userId String
+  orgId  String
+  role   String @default("member")
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orgId])
+}
+
+// ============================================
+// SALES PIPELINE (Kanban)
+// ============================================
+
+model Pipeline {
+  id        String   @id @default(cuid())
+  orgId     String
+  name      String   @default("Pipeline Principal")
+  createdAt DateTime @default(now())
+
+  org    Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  stages PipelineStage[]
+  deals  Deal[]
+}
+
+model PipelineStage {
+  id         String @id @default(cuid())
+  pipelineId String
+  name       String
+  color      String?
+  position   Int
+
+  pipeline Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  deals    Deal[]
+
+  @@unique([pipelineId, position])
+}
+
+model Deal {
+  id         String   @id @default(cuid())
+  pipelineId String
+  stageId    String
+  userId     String
+  formId     String?  @unique
+  title      String
+  value      Float?
+  dataJson   Json?
+  position   Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  pipeline    Pipeline       @relation(fields: [pipelineId], references: [id])
+  stage       PipelineStage  @relation(fields: [stageId], references: [id])
+  user        User           @relation(fields: [userId], references: [id])
+  form        SalesForm?     @relation(fields: [formId], references: [id])
+  contracts   Contract[]
+  attachments DealAttachment[]
+}
+
+model DealAttachment {
+  id        String   @id @default(cuid())
+  dealId    String
+  filename  String
+  mime      String
+  url       String
+  category  String?
+  createdAt DateTime @default(now())
+
+  deal Deal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// SALES FORMS (Shareable)
+// ============================================
+
+model SalesForm {
+  id         String   @id @default(cuid())
+  orgId      String
+  token      String   @unique @default(cuid())
+  title      String?
+  schemaType String   @default("compra_venda_v1")
+  dataJson   Json     @default("{}")
+  status     String   @default("rascunho")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  deal Deal?
+}
+
+// ============================================
+// CONTRACT TEMPLATES
+// ============================================
+
+model ContractTemplate {
+  id               String   @id @default(cuid())
+  orgId            String
+  name             String
+  description      String?
+  version          String   @default("1.0.0")
+  schemaType       String   @default("compra_venda_v1")
+  handlebarsSource String   @db.Text
+  engine           String   @default("handlebars")
+  status           String   @default("active")
+  isDefault        Boolean  @default(false)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  contracts Contract[]
+}
+
+// ============================================
+// CLAUSE LIBRARY
+// ============================================
+
+model Clause {
+  id          String   @id @default(cuid())
+  orgId       String
+  authorId    String?
+  category    String
+  subcategory String?
+  title       String
+  content     String   @db.Text
+  description String?
+  tags        String[]
+  source      String   @default("manual")
+  status      String   @default("approved")
+  usageCount  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org             Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  author          User?            @relation("clauseAuthor", fields: [authorId], references: [id])
+  contractClauses ContractClause[]
+}
+
+// ============================================
+// CONTRACTS + VERSIONING
+// ============================================
+
+model Contract {
+  id               String   @id @default(cuid())
+  dealId           String
+  templateId       String
+  userId           String
+  version          Int      @default(1)
+  dataJson         Json
+  htmlContent      String?  @db.Text
+  templateOverride String?  @db.Text
+  status           String   @default("rascunho")
+  isLatest         Boolean  @default(true)
+  parentVersionId  String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  deal          Deal              @relation(fields: [dealId], references: [id])
+  template      ContractTemplate  @relation(fields: [templateId], references: [id])
+  user          User              @relation(fields: [userId], references: [id])
+  parentVersion Contract?         @relation("ContractVersions", fields: [parentVersionId], references: [id])
+  childVersions Contract[]        @relation("ContractVersions")
+  chatSessions  ChatSession[]
+  exports       Export[]
+  clauses       ContractClause[]
+}
+
+model ContractClause {
+  id              String  @id @default(cuid())
+  contractId      String
+  clauseId        String
+  position        Int
+  isActive        Boolean @default(true)
+  overrideContent String? @db.Text
+
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  clause   Clause   @relation(fields: [clauseId], references: [id])
+
+  @@unique([contractId, clauseId])
+}
+
+// ============================================
+// AI CHAT
+// ============================================
+
+model ChatSession {
+  id         String   @id @default(cuid())
+  contractId String
+  userId     String
+  createdAt  DateTime @default(now())
+
+  contract Contract     @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  user     User         @relation(fields: [userId], references: [id])
+  messages ChatMessage[]
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  sessionId String
+  role      String
+  content   String   @db.Text
+  metadata  Json?
+  createdAt DateTime @default(now())
+
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// EXPORTS
+// ============================================
+
+model Export {
+  id         String   @id @default(cuid())
+  contractId String
+  format     String
+  url        String
+  fileSize   Int?
+  createdAt  DateTime @default(now())
+
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// LEGACY (preserved for migration)
+// ============================================
 
 model Document {
   id            String   @id @default(uuid())
@@ -24,72 +321,26 @@ model Document {
   filename      String
   mime          String
   s3Url         String
-  extractedHtml String?
-  extractedText String?
-  ocrText       String?
+  extractedHtml String?  @db.Text
+  extractedText String?  @db.Text
+  ocrText       String?  @db.Text
   status        String   @default("uploaded")
   createdAt     DateTime @default(now())
 
-  user     User     @relation(fields: [userId], references: [id])
-  template Template?
+  user           User            @relation(fields: [userId], references: [id])
+  legacyTemplate LegacyTemplate?
 }
 
-model Template {
+model LegacyTemplate {
   id                 String   @id @default(uuid())
   userId             String
   version            String
   sourceDocId        String   @unique
-  handlebarsTemplate String
+  handlebarsTemplate String   @db.Text
   analysisJson       Json
   status             String   @default("draft")
   createdAt          DateTime @default(now())
 
-  user      User     @relation(fields: [userId], references: [id])
-  document  Document @relation(fields: [sourceDocId], references: [id])
-  contracts Contract[]
-}
-
-model Contract {
-  id               String   @id @default(uuid())
-  userId           String
-  templateId       String
-  dataJson         Json
-  htmlPreview      String?
-  templateOverride String?
-  status           String   @default("draft")
-  createdAt        DateTime @default(now())
-
-  user         User        @relation(fields: [userId], references: [id])
-  template     Template    @relation(fields: [templateId], references: [id])
-  exports      Export[]
-  chatSessions ChatSession[]
-}
-
-model Export {
-  id         String   @id @default(uuid())
-  contractId String
-  type       String
-  s3Url      String
-  createdAt  DateTime @default(now())
-
-  contract Contract @relation(fields: [contractId], references: [id])
-}
-
-model ChatSession {
-  id         String   @id @default(uuid())
-  contractId String
-  createdAt  DateTime @default(now())
-
-  contract Contract     @relation(fields: [contractId], references: [id])
-  messages ChatMessage[]
-}
-
-model ChatMessage {
-  id        String   @id @default(uuid())
-  sessionId String
-  role      String
-  content   String
-  createdAt DateTime @default(now())
-
-  session ChatSession @relation(fields: [sessionId], references: [id])
+  user     User     @relation(fields: [userId], references: [id])
+  document Document @relation(fields: [sourceDocId], references: [id])
 }
