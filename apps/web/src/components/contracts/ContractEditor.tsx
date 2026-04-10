@@ -8,7 +8,7 @@ import { TableCell } from "@tiptap/extension-table";
 import { TableHeader } from "@tiptap/extension-table";
 import Highlight from "@tiptap/extension-highlight";
 import TextAlign from "@tiptap/extension-text-align";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -50,7 +50,7 @@ export function ContractEditor({ content, onChange }: ContractEditorProps) {
     editorProps: {
       attributes: {
         class:
-          "prose prose-sm max-w-none p-8 min-h-[600px] focus:outline-none",
+          "prose prose-sm max-w-none focus:outline-none min-h-[700px] p-12",
       },
     },
   });
@@ -61,128 +61,149 @@ export function ContractEditor({ content, onChange }: ContractEditorProps) {
     }
   }, [content, editor]);
 
+  const wordCount = useMemo(() => {
+    if (!editor) return 0;
+    return editor.getText().split(/\s+/).filter(Boolean).length;
+  }, [editor?.getText()]);
+
   if (!editor) return null;
 
+  function ToolbarButton({
+    onClick,
+    active,
+    children,
+    title,
+  }: {
+    onClick: () => void;
+    active?: boolean;
+    children: React.ReactNode;
+    title?: string;
+  }) {
+    return (
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={onClick}
+        title={title}
+        className={`h-8 w-8 p-0 ${active ? "bg-muted text-foreground" : "text-muted-foreground"}`}
+      >
+        {children}
+      </Button>
+    );
+  }
+
   return (
-    <div>
-      {/* Toolbar */}
-      <div className="flex items-center gap-1 p-2 border-b flex-wrap">
-        <Button
-          variant="ghost"
-          size="sm"
+    <div className="flex flex-col h-full">
+      {/* Toolbar - sticky */}
+      <div className="sticky top-0 z-10 flex items-center gap-0.5 px-4 py-2 border-b bg-card/95 backdrop-blur-sm flex-wrap">
+        <ToolbarButton
           onClick={() => editor.chain().focus().toggleBold().run()}
-          className={editor.isActive("bold") ? "bg-muted" : ""}
+          active={editor.isActive("bold")}
+          title="Negrito"
         >
           <Bold className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
+        </ToolbarButton>
+        <ToolbarButton
           onClick={() => editor.chain().focus().toggleItalic().run()}
-          className={editor.isActive("italic") ? "bg-muted" : ""}
+          active={editor.isActive("italic")}
+          title="Italico"
         >
           <Italic className="h-4 w-4" />
-        </Button>
+        </ToolbarButton>
 
-        <Separator orientation="vertical" className="h-6 mx-1" />
+        <Separator orientation="vertical" className="h-5 mx-1" />
 
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() =>
-            editor.chain().focus().toggleHeading({ level: 1 }).run()
-          }
-          className={editor.isActive("heading", { level: 1 }) ? "bg-muted" : ""}
+        <ToolbarButton
+          onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
+          active={editor.isActive("heading", { level: 1 })}
+          title="Titulo 1"
         >
           <Heading1 className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() =>
-            editor.chain().focus().toggleHeading({ level: 2 }).run()
-          }
-          className={editor.isActive("heading", { level: 2 }) ? "bg-muted" : ""}
+        </ToolbarButton>
+        <ToolbarButton
+          onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
+          active={editor.isActive("heading", { level: 2 })}
+          title="Titulo 2"
         >
           <Heading2 className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() =>
-            editor.chain().focus().toggleHeading({ level: 3 }).run()
-          }
-          className={editor.isActive("heading", { level: 3 }) ? "bg-muted" : ""}
+        </ToolbarButton>
+        <ToolbarButton
+          onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
+          active={editor.isActive("heading", { level: 3 })}
+          title="Titulo 3"
         >
           <Heading3 className="h-4 w-4" />
-        </Button>
+        </ToolbarButton>
 
-        <Separator orientation="vertical" className="h-6 mx-1" />
+        <Separator orientation="vertical" className="h-5 mx-1" />
 
-        <Button
-          variant="ghost"
-          size="sm"
+        <ToolbarButton
           onClick={() => editor.chain().focus().toggleBulletList().run()}
-          className={editor.isActive("bulletList") ? "bg-muted" : ""}
+          active={editor.isActive("bulletList")}
+          title="Lista"
         >
           <List className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
+        </ToolbarButton>
+        <ToolbarButton
           onClick={() => editor.chain().focus().toggleOrderedList().run()}
-          className={editor.isActive("orderedList") ? "bg-muted" : ""}
+          active={editor.isActive("orderedList")}
+          title="Lista numerada"
         >
           <ListOrdered className="h-4 w-4" />
-        </Button>
+        </ToolbarButton>
 
-        <Separator orientation="vertical" className="h-6 mx-1" />
+        <Separator orientation="vertical" className="h-5 mx-1" />
 
-        <Button
-          variant="ghost"
-          size="sm"
+        <ToolbarButton
           onClick={() => editor.chain().focus().setTextAlign("left").run()}
-          className={editor.isActive({ textAlign: "left" }) ? "bg-muted" : ""}
+          active={editor.isActive({ textAlign: "left" })}
+          title="Alinhar esquerda"
         >
           <AlignLeft className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
+        </ToolbarButton>
+        <ToolbarButton
           onClick={() => editor.chain().focus().setTextAlign("center").run()}
-          className={editor.isActive({ textAlign: "center" }) ? "bg-muted" : ""}
+          active={editor.isActive({ textAlign: "center" })}
+          title="Centralizar"
         >
           <AlignCenter className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
+        </ToolbarButton>
+        <ToolbarButton
           onClick={() => editor.chain().focus().setTextAlign("right").run()}
-          className={editor.isActive({ textAlign: "right" }) ? "bg-muted" : ""}
+          active={editor.isActive({ textAlign: "right" })}
+          title="Alinhar direita"
         >
           <AlignRight className="h-4 w-4" />
-        </Button>
+        </ToolbarButton>
 
-        <Separator orientation="vertical" className="h-6 mx-1" />
+        <Separator orientation="vertical" className="h-5 mx-1" />
 
-        <Button
-          variant="ghost"
-          size="sm"
+        <ToolbarButton
           onClick={() => editor.chain().focus().undo().run()}
+          title="Desfazer"
         >
           <Undo className="h-4 w-4" />
-        </Button>
-        <Button
-          variant="ghost"
-          size="sm"
+        </ToolbarButton>
+        <ToolbarButton
           onClick={() => editor.chain().focus().redo().run()}
+          title="Refazer"
         >
           <Redo className="h-4 w-4" />
-        </Button>
+        </ToolbarButton>
       </div>
 
-      {/* Editor content */}
-      <EditorContent editor={editor} />
+      {/* Editor - paper effect */}
+      <div className="flex-1 bg-muted/30 overflow-auto py-8">
+        <div className="mx-auto max-w-3xl bg-card rounded-lg shadow-sm border">
+          <EditorContent editor={editor} />
+        </div>
+      </div>
+
+      {/* Status bar */}
+      <div className="flex items-center justify-between px-4 py-2 border-t bg-card text-xs text-muted-foreground">
+        <span>{wordCount} palavras</span>
+        <span>Editor TipTap</span>
+      </div>
     </div>
   );
 }
