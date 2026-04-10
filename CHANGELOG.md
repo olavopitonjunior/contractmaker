@@ -4,20 +4,54 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
-## [Unreleased]
+## [0.2.0] - 2026-04-10 - Esteira de Vendas
 
 ### Adicionado
-- Plano de implementacao para "Esteira de Vendas"
-- Documentacao do projeto: CLAUDE.md, SKILLS.md, AGENTS.md, BUGS.md
-- Definicao do schema de banco de dados com 20+ models
+- **Fase 0: Fundacao**
+  - Tailwind CSS v3 + Shadcn UI (20+ componentes)
+  - NextAuth v5 com Prisma Adapter + Credentials provider (JWT sessions)
+  - Prisma schema com 20+ models (Organization, Pipeline, Deal, SalesForm, ContractTemplate, Clause, Contract versionado)
+  - Seed script: org default, pipeline 6 stages, template base, 14 clausulas categorizadas
+  - Dashboard layout com Sidebar + Header
+  - Paginas de login e registro com auto-criacao de org/pipeline/template/clausulas
 
-### Planejado
-- Fase 0: Fundacao (Tailwind, Shadcn, NextAuth, Prisma schema, seed)
-- Fase 1: Formulario de vendas + link compartilhavel
-- Fase 2: Pipeline Kanban + negocios
-- Fase 3: Geracao de contrato + clausulas
-- Fase 4: Editor TipTap + chat IA
-- Fase 5: Export + deploy Vercel
+- **Fase 1: Formulario de Vendas**
+  - SalesFormWizard com 7 steps (Vendedor, Comprador, Imovel, Status, Pagamento, Posse, Comissao)
+  - Link compartilhavel publico `/f/[token]` (sem autenticacao)
+  - Auto-save com debounce 1500ms + indicador visual
+  - Suporte a PF/PJ, conjuge, procurador, arrays dinamicos
+
+- **Fase 2: Pipeline Kanban**
+  - KanbanBoard com @dnd-kit drag-and-drop entre colunas
+  - DealDetail com tabs (Dados, Anexos, Contratos)
+  - Criacao de deal a partir de formulario completo
+  - Auto-move para stage "Contrato" ao gerar contrato
+
+- **Fase 3: Contratos + Clausulas**
+  - Botao "Confeccionar Contrato" (Handlebars + dados do form)
+  - Biblioteca de 14 clausulas em 9 categorias
+  - API de geracao de clausulas com Claude AI (pending -> approved)
+  - CRUD completo de clausulas com filtros
+
+- **Fase 4: Editor + Chat IA**
+  - Editor TipTap com toolbar (bold, italic, headings, listas, tabelas, alinhamento)
+  - ChatPanel com IA para editar contratos via linguagem natural
+  - Versionamento de contratos (linked-list, isLatest flag)
+  - VersionTimeline no painel lateral
+
+- **Fase 5: Export**
+  - ExportDialog com opcoes PDF e DOCX
+  - Historico de exportacoes anteriores
+
+### Corrigido
+- TipTap SSR hydration error (`immediatelyRender: false`)
+- Registro de usuario nao copiava template e clausulas para nova org
+- Campos legados renomeados (handlebarsTemplate -> handlebarsSource, htmlPreview -> htmlContent)
+- Anthropic SDK tool type error (type: 'object' as const)
+
+### Bugs Conhecidos
+- Secao 8 do contrato (penalidades) mostra campos config vazios quando nao preenchidos
+- Helper `extenso` nao implementado (valores por extenso mostram numero entre parenteses)
 
 ---
 
