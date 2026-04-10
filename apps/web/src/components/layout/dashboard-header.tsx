@@ -29,7 +29,7 @@ export function DashboardHeader() {
   const breadcrumb = getBreadcrumb(pathname);
 
   return (
-    <header className="flex h-14 items-center gap-4 border-b bg-background px-6">
+    <header className="flex h-14 items-center gap-4 border-b bg-background px-4 sm:px-6">
       <SidebarTrigger className="-ml-2" />
       <Separator orientation="vertical" className="h-6" />
 

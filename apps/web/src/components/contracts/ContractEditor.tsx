@@ -50,7 +50,7 @@ export function ContractEditor({ content, onChange }: ContractEditorProps) {
     editorProps: {
       attributes: {
         class:
-          "prose prose-sm max-w-none focus:outline-none min-h-[700px] p-12",
+          "prose prose-sm max-w-none focus:outline-none min-h-[400px] sm:min-h-[600px] p-4 sm:p-8 md:p-12",
       },
     },
   });

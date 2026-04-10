@@ -87,17 +87,17 @@ export function ContractEditorPage({ contract, versions }: ContractEditorPagePro
           </div>
         </div>
 
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap w-full sm:w-auto">
           <Button variant="outline" size="sm" onClick={() => setChatOpen(true)}>
-            <MessageSquare className="h-4 w-4 mr-1" />
-            Chat IA
+            <MessageSquare className="h-4 w-4 sm:mr-1" />
+            <span className="hidden sm:inline">Chat IA</span>
           </Button>
 
           <Sheet>
             <SheetTrigger asChild>
               <Button variant="outline" size="sm">
-                <History className="h-4 w-4 mr-1" />
-                Versoes
+                <History className="h-4 w-4 sm:mr-1" />
+                <span className="hidden sm:inline">Versoes</span>
               </Button>
             </SheetTrigger>
             <SheetContent>
@@ -127,7 +127,7 @@ export function ContractEditorPage({ contract, versions }: ContractEditorPagePro
 
       {/* Chat Panel */}
       <Sheet open={chatOpen} onOpenChange={setChatOpen}>
-        <SheetContent side="right" className="w-[400px] sm:w-[540px]">
+        <SheetContent side="right" className="w-full sm:w-[400px] md:w-[540px]">
           <SheetHeader>
             <SheetTitle>Assistente IA</SheetTitle>
           </SheetHeader>

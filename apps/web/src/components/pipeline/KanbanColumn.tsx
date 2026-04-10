@@ -21,7 +21,7 @@ export function KanbanColumn({ id, name, color, deals }: KanbanColumnProps) {
     <div
       ref={setNodeRef}
       className={cn(
-        "min-w-[300px] w-[300px] rounded-xl bg-muted/30 transition-all flex flex-col",
+        "min-w-[260px] w-[260px] sm:min-w-[300px] sm:w-[300px] rounded-xl bg-muted/30 transition-all flex flex-col",
         isOver && "bg-muted/60 ring-2 ring-primary/20"
       )}
     >

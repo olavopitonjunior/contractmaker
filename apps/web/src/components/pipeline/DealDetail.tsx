@@ -48,7 +48,7 @@ export function DealDetail({ deal }: DealDetailProps) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center gap-4">
+      <div className="flex items-start sm:items-center gap-4 flex-wrap">
         <Button variant="ghost" size="sm" asChild>
           <Link href="/pipeline">
             <ArrowLeft className="h-4 w-4 mr-1" />
@@ -72,7 +72,7 @@ export function DealDetail({ deal }: DealDetailProps) {
             )}
           </div>
         </div>
-        <div className="ml-auto flex gap-2">
+        <div className="w-full sm:w-auto sm:ml-auto flex gap-2 flex-wrap">
           {deal.form && (
             <Button variant="outline" size="sm" asChild>
               <Link href={`/f/${deal.form.token}`} target="_blank">
