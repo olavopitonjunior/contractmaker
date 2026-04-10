@@ -69,5 +69,45 @@ export async function POST(request: Request) {
     },
   });
 
+  // Copy default contract template from seed org (if exists)
+  const seedTemplate = await prisma.contractTemplate.findFirst({
+    where: { isDefault: true, status: "active" },
+  });
+  if (seedTemplate) {
+    await prisma.contractTemplate.create({
+      data: {
+        orgId: org.id,
+        name: seedTemplate.name,
+        description: seedTemplate.description,
+        version: seedTemplate.version,
+        schemaType: seedTemplate.schemaType,
+        handlebarsSource: seedTemplate.handlebarsSource,
+        isDefault: true,
+        status: "active",
+      },
+    });
+  }
+
+  // Copy seed clauses to new org
+  const seedClauses = await prisma.clause.findMany({
+    where: { source: "imported", status: "approved" },
+    take: 50,
+  });
+  if (seedClauses.length > 0) {
+    await prisma.clause.createMany({
+      data: seedClauses.map((c) => ({
+        orgId: org.id,
+        category: c.category,
+        subcategory: c.subcategory,
+        title: c.title,
+        content: c.content,
+        description: c.description,
+        tags: c.tags,
+        source: c.source,
+        status: c.status,
+      })),
+    });
+  }
+
   return NextResponse.json({ id: user.id, email: user.email }, { status: 201 });
 }
