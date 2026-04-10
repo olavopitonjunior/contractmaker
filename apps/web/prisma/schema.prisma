@@ -1,0 +1,95 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  passwordHash String
+  createdAt    DateTime @default(now())
+
+  documents  Document[]
+  templates  Template[]
+  contracts  Contract[]
+}
+
+model Document {
+  id            String   @id @default(uuid())
+  userId        String
+  filename      String
+  mime          String
+  s3Url         String
+  extractedHtml String?
+  extractedText String?
+  ocrText       String?
+  status        String   @default("uploaded")
+  createdAt     DateTime @default(now())
+
+  user     User     @relation(fields: [userId], references: [id])
+  template Template?
+}
+
+model Template {
+  id                 String   @id @default(uuid())
+  userId             String
+  version            String
+  sourceDocId        String   @unique
+  handlebarsTemplate String
+  analysisJson       Json
+  status             String   @default("draft")
+  createdAt          DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id])
+  document  Document @relation(fields: [sourceDocId], references: [id])
+  contracts Contract[]
+}
+
+model Contract {
+  id               String   @id @default(uuid())
+  userId           String
+  templateId       String
+  dataJson         Json
+  htmlPreview      String?
+  templateOverride String?
+  status           String   @default("draft")
+  createdAt        DateTime @default(now())
+
+  user         User        @relation(fields: [userId], references: [id])
+  template     Template    @relation(fields: [templateId], references: [id])
+  exports      Export[]
+  chatSessions ChatSession[]
+}
+
+model Export {
+  id         String   @id @default(uuid())
+  contractId String
+  type       String
+  s3Url      String
+  createdAt  DateTime @default(now())
+
+  contract Contract @relation(fields: [contractId], references: [id])
+}
+
+model ChatSession {
+  id         String   @id @default(uuid())
+  contractId String
+  createdAt  DateTime @default(now())
+
+  contract Contract     @relation(fields: [contractId], references: [id])
+  messages ChatMessage[]
+}
+
+model ChatMessage {
+  id        String   @id @default(uuid())
+  sessionId String
+  role      String
+  content   String
+  createdAt DateTime @default(now())
+
+  session ChatSession @relation(fields: [sessionId], references: [id])
+}

@@ -1,0 +1,15 @@
+﻿{
+  "id": "contrato_compra_venda",
+  "nome": "Contrato Compra e Venda",
+  "descricao": "Modelo padrao de compra e venda de imovel",
+  "versao": "1.0.0",
+  "origem": "library",
+  "status": "active",
+  "compatibilidade": {
+    "schema_dados": "schema_dados_v1",
+    "engine": "handlebars",
+    "exportacao": ["html", "docx", "pdf"]
+  },
+  "criado_em": "2026-02-06T12:00:00Z",
+  "atualizado_em": "2026-02-06T12:00:00Z"
+}

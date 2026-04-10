@@ -1,0 +1,339 @@
+﻿<div class="contrato">
+
+<h1>INSTRUMENTO PARTICULAR DE COMPROMISSO DE COMPRA E VENDA DE IMÓVEL</h1>
+
+<h2>1. PARTES</h2>
+
+<h3>PARTE VENDEDORA</h3>
+
+{{#each vendedores}}
+{{#if (eq this.tipo_pessoa "fisica")}}
+<p><strong>Promitente Vendedor(a):</strong></p>
+<p>
+Nome: {{this.nome}}<br>
+Nacionalidade: {{this.nacionalidade}}<br>
+Estado Civil: {{this.estado_civil}}<br>
+Profissão: {{this.profissao}}<br>
+RG: nº {{this.rg}}<br>
+CPF: nº {{cpf this.cpf}}<br>
+E-mail: {{this.email}}<br>
+Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
+</p>
+
+{{#if (or (eq this.estado_civil "Casado(a)") (eq this.estado_civil "União Estável"))}}
+<p><em>(Cônjuge/Companheiro)</em></p>
+<p>
+Nome Completo: {{this.conjuge.nome}}<br>
+CPF: {{cpf this.conjuge.cpf}}<br>
+RG: {{this.conjuge.rg}}<br>
+Nacionalidade: {{this.conjuge.nacionalidade}}<br>
+Profissão: {{this.conjuge.profissao}}
+</p>
+{{/if}}
+
+{{#if this.tem_procurador}}
+<p><em>Representado(a) por seu(sua) procurador(a):</em></p>
+<p>
+Nome: {{this.procurador.nome}}<br>
+CPF: {{cpf this.procurador.cpf}}<br>
+RG: {{this.procurador.rg}}<br>
+Endereço: {{this.procurador.endereco}}, nº {{this.procurador.numero}}, Cidade: {{this.procurador.cidade}}-{{this.procurador.uf}}
+</p>
+{{/if}}
+
+{{else}}
+<p><strong>Promitente Vendedora:</strong></p>
+<p>
+Razão Social: {{this.razao_social}}<br>
+CNPJ: nº {{cnpj this.cnpj}}<br>
+Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
+</p>
+<p>Neste ato representada por seu(s) representante(s) legal(is):</p>
+<p>
+Nome Completo: {{this.representante.nome}}<br>
+CPF: {{cpf this.representante.cpf}}<br>
+Nacionalidade: {{this.representante.nacionalidade}}<br>
+Estado Civil: {{this.representante.estado_civil}}<br>
+Profissão: {{this.representante.profissao}}
+</p>
+{{/if}}
+{{/each}}
+
+<h3>PARTE COMPRADORA</h3>
+
+{{#each compradores}}
+{{#if (eq this.tipo_pessoa "fisica")}}
+<p><strong>Promissário(a) Comprador(a):</strong></p>
+<p>
+Nome: {{this.nome}}<br>
+Nacionalidade: {{this.nacionalidade}}<br>
+Estado Civil: {{this.estado_civil}}<br>
+Profissão: {{this.profissao}}<br>
+RG: nº {{this.rg}}<br>
+CPF: nº {{cpf this.cpf}}<br>
+E-mail: {{this.email}}<br>
+Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
+</p>
+
+{{#if (or (eq this.estado_civil "Casado(a)") (eq this.estado_civil "União Estável"))}}
+<p><em>(Cônjuge/Companheiro)</em></p>
+<p>
+Nome Completo: {{this.conjuge.nome}}<br>
+CPF: {{cpf this.conjuge.cpf}}<br>
+RG: {{this.conjuge.rg}}<br>
+Nacionalidade: {{this.conjuge.nacionalidade}}<br>
+Profissão: {{this.conjuge.profissao}}
+</p>
+{{/if}}
+
+{{#if this.tem_procurador}}
+<p><em>Representado(a) por seu(sua) procurador(a):</em></p>
+<p>
+Nome: {{this.procurador.nome}}<br>
+CPF: {{cpf this.procurador.cpf}}<br>
+RG: {{this.procurador.rg}}<br>
+Endereço: {{this.procurador.endereco}}, nº {{this.procurador.numero}}, Cidade: {{this.procurador.cidade}}-{{this.procurador.uf}}
+</p>
+{{/if}}
+
+{{else}}
+<p><strong>Promissária Compradora:</strong></p>
+<p>
+Razão Social: {{this.razao_social}}<br>
+CNPJ: nº {{cnpj this.cnpj}}<br>
+Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
+</p>
+<p>Neste ato representada por seu(s) representante(s) legal(is):</p>
+<p>
+Nome Completo: {{this.representante.nome}}<br>
+CPF: {{cpf this.representante.cpf}}<br>
+Nacionalidade: {{this.representante.nacionalidade}}<br>
+Estado Civil: {{this.representante.estado_civil}}<br>
+Profissão: {{this.representante.profissao}}
+</p>
+{{/if}}
+{{/each}}
+
+<p><strong>Declaração:</strong> As partes declaram expressamente não manterem relações de união estável com terceiros não nominados, nos termos do art. 1.723 do Código Civil e sob suas responsabilidades civil e criminal.</p>
+
+{{#if anuente}}
+<p><strong>CLÁUSULA ADICIONAL - ANUENTE</strong></p>
+<p>A Parte Vendedora não é a proprietária tabular do imóvel (à matrícula) e nem devedora fiduciante. A proprietária tabular (à matrícula) irá assinar este instrumento de compromisso como anuente e se comprometendo a outorgar o título definitivo à Parte Compradora.</p>
+<p><strong>Proprietária Tabular e Anuente:</strong> {{anuente.nome}}, {{anuente.qualificacao_completa}}</p>
+{{/if}}
+
+<h2>2. OBJETO</h2>
+
+{{#if (eq status_propriedade "financiado-saldo")}}
+<p>A PARTE VENDEDORA declara-se possuidora direta e detentora de direitos de devedora fiduciante sobre imóvel no qual há saldo devedor aproximado de alienação fiduciária de {{moeda saldo_devedor}}.</p>
+{{else if (eq status_propriedade "quitado-registrado")}}
+<p>A PARTE VENDEDORA declara-se proprietária e possuidora do imóvel acima descrito.</p>
+{{else}}
+<p>A PARTE VENDEDORA declara-se proprietária e possuidora de imóvel sobre o qual consta registro oneroso de alienação fiduciária, mas que já se encontra integralmente quitado e restando pendente tão somente a averbação de cancelamento de tal gravame.</p>
+{{/if}}
+
+<h3>DESCRIÇÃO DO IMÓVEL</h3>
+
+{{#each imoveis}}
+<p>
+Endereço: {{this.rua}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Bairro: {{this.bairro}}, Cidade: {{this.cidade}} - {{this.uf}}, CEP {{cep this.cep}}<br>
+Matrícula: nº {{this.matricula}} do {{this.cartorio}}<br>
+Contribuinte: nº {{this.inscricao_iptu}} junto à Prefeitura local<br>
+Descrição: {{this.descricao}}
+</p>
+{{/each}}
+
+{{#if tem_debitos}}
+<p><strong>2.1.</strong> Declara ainda, tal PARTE VENDEDORA, que inexistem discussões/pleitos quanto à legitimidade dos direitos que detém sobre tal bem, porém tendo sido identificadas pendências de natureza propter rem (IPTU e/ou eventual condomínio), quais sejam:</p>
+<ul>
+{{#if debitos.iptu.selecionado}}
+<li>IPTU no valor de {{moeda debitos.iptu.valor}}.</li>
+{{/if}}
+{{#if debitos.condominio.selecionado}}
+<li>Condomínio no valor de {{moeda debitos.condominio.valor}}.</li>
+{{/if}}
+{{#if (existe debitos.outros)}}
+<li>{{debitos.outros}}</li>
+{{/if}}
+</ul>
+{{else}}
+{{#if (eq status_propriedade "quitado-registrado")}}
+<p><strong>2.1.</strong> Declara ainda, tal PARTE VENDEDORA, que inexistem discussões/pleitos quanto à legitimidade dos direitos que detém sobre tal bem, assim como que o imóvel se encontra livre de quaisquer ônus e dívidas de natureza propter rem (IPTU e/ou eventual condomínio).</p>
+{{/if}}
+{{/if}}
+
+<h2>3. COMPROMISSO</h2>
+
+<p>A PARTE VENDEDORA se compromete a vender à PARTE COMPRADORA, que se compromete a comprar, em caráter ad corpus, todos os direitos que possui sobre o imóvel objeto da presente, sendo que a conclusão do negócio se dará através do instrumento definitivo detalhado no Item 5.</p>
+
+{{#if (eq vicios.opcao "renuncia")}}
+<p><strong>3.1.</strong> A PARTE COMPRADORA vistoriou o imóvel e o aceita no estado em que se encontra, renunciando expressamente aos direitos de reclamações, sejam indenizatórias ou redibitórias (anulação da transação), por vícios redibitórios, ainda que estruturais e/ou ocultos.</p>
+{{else if (eq vicios.opcao "detalhado")}}
+<p><strong>3.1.</strong> A PARTE COMPRADORA vistoriou o imóvel e o aceita no estado em que se encontra, tendo direito a reclamações indenizatórias, mas não à redibição (anulação da transação), apenas quanto a vícios estruturais não aparentes e não explicitados pela PARTE VENDEDORA, e desde que dentro do prazo decadencial do artigo 445 do Código Civil.</p>
+{{else}}
+<p><strong>3.1.</strong> A PARTE COMPRADORA vistoriou o imóvel e o aceita no estado em que se encontra.</p>
+{{/if}}
+
+{{#if (eq vicios.opcao "reparar")}}
+<p><strong>3.1.1.</strong> Excetuando-se à aceitação do imóvel no estado em que se encontra supra, foram constatados vícios específicos sobre os quais a PARTE VENDEDORA assume o compromisso de reparos anteriormente à outorga do título definitivo, quais sejam: {{vicios.descricao_reparar}}.</p>
+{{/if}}
+
+{{#if (eq vicios.opcao "desocultados")}}
+<p><strong>3.1.1.</strong> Excetuando-se ao direito indenizatório e de reclamação, a PARTE COMPRADORA declara conhecimento da existência de determinados vícios ora desocultados pela PARTE VENDEDORA, aceitando assim o imóvel, quais sejam: {{vicios.descricao_desocultados}}.</p>
+{{/if}}
+
+<p><strong>3.2.</strong> Quaisquer débitos e responsabilidades relacionados ao imóvel são obrigações exclusivas da PARTE VENDEDORA até a data da entrega da posse à PARTE COMPRADORA que, constatando pendências de fatos geradores anteriores, poderá quitá-las diretamente e cobrá-las da PARTE VENDEDORA (direito de regresso), ou descontar do preço.</p>
+
+{{#if debitos_assumidos.assume}}
+<p><strong>3.2.1.</strong> Excetuando-se ao enunciado supra, fica acordado que alguns débitos e/ou responsabilidades, ainda que anteriores à entrega da posse, são expressamente assumidos e aceitos pela PARTE COMPRADORA, sem desconto de preço ou direito de regresso, quais sejam: {{debitos_assumidos.descricao}}.</p>
+{{/if}}
+
+{{#if regularizacoes.tem}}
+<p><strong>3.3.</strong> Foram identificadas necessidades de regularizações jurídico-documentais envolvendo o imóvel e/ou seus proprietários que, em um prazo de até {{regularizacoes.prazo_dias}} dias contados da assinatura do presente, compromete-se a PARTE VENDEDORA, às suas exclusivas expensas e esforços, a viabilizar as soluções, quais sejam: {{regularizacoes.descricao}}.</p>
+{{/if}}
+
+<h2>4. PREÇO</h2>
+
+<p>O preço ajustado para a presente transação é de {{moeda pagamento.valor_total}} ({{extenso pagamento.valor_total}}), que será pago da seguinte forma:</p>
+
+<table>
+<tr><th>Forma</th><th>Valor</th></tr>
+{{#if (gt pagamento.sinal_arras 0)}}
+<tr><td>Sinal/Arras</td><td>{{moeda pagamento.sinal_arras}}</td></tr>
+{{/if}}
+{{#if (gt pagamento.recursos_proprios 0)}}
+<tr><td>Recursos Próprios</td><td>{{moeda pagamento.recursos_proprios}}</td></tr>
+{{/if}}
+{{#if (gt pagamento.fgts 0)}}
+<tr><td>FGTS</td><td>{{moeda pagamento.fgts}}</td></tr>
+{{/if}}
+{{#if (gt pagamento.cessao_consorcio 0)}}
+<tr><td>Cessão de Cota de Consórcio ({{pagamento.cessao_consorcio_descricao}})</td><td>{{moeda pagamento.cessao_consorcio}}</td></tr>
+{{/if}}
+{{#if (gt pagamento.alienacao_fiduciaria 0)}}
+<tr><td>Alienação Fiduciária</td><td>{{moeda pagamento.alienacao_fiduciaria}}</td></tr>
+{{/if}}
+{{#if (gt pagamento.outras_formas 0)}}
+<tr><td>Outras Formas ({{pagamento.outras_formas_descricao}})</td><td>{{moeda pagamento.outras_formas}}</td></tr>
+{{/if}}
+{{#each pagamento.parcelas}}
+<tr><td>Parcela {{@index}} ({{this.tipo_texto}}{{#if this.dias}} - {{this.dias}} dias{{/if}})</td><td>{{moeda this.valor}}</td></tr>
+{{/each}}
+<tr><th>TOTAL</th><th>{{moeda pagamento.valor_total}}</th></tr>
+</table>
+
+<p><strong>4.1.</strong> Exceto quanto a eventuais recursos advindos de saque do FGTS ou alienação fiduciária, que terão sua destinação definida em instrumento próprio, os créditos serão feitos através de transferências: {{pagamento.meio_pagamento}}.</p>
+
+<p><strong>4.2.</strong> Além de todos os direitos que a PARTE VENDEDORA detém sobre o imóvel, esclarece-se que o preço contempla: {{incluso_no_preco}}.</p>
+
+<p><strong>4.3.</strong> A presente transação se submete ao "CompraSegura", cujas condições se encontram em www.pipeimob.com.br/comprasegura, termos nos quais convenciona-se que valores pagos a título de sinal, entrada e/ou parcelas do preço, até a superação das premissas deste instrumento, poderão ser custodiados em conta de um terceiro parceiro tecnológico.</p>
+
+<p><strong>4.4.</strong> Uma vez consensuado entre as partes como satisfeitas as condições para o repasse à PARTE VENDEDORA das quantias de seu direito, assim como para o pagamento da comissão, a imobiliária intermediadora operacionalizará a liquidação da comissão e as transferências do saldo remanescente à PARTE VENDEDORA.</p>
+
+<h2>5. POSSE</h2>
+
+{{#if (eq ocupacao "ocupado-terceiro")}}
+<p>O imóvel se encontra atualmente ocupado por locatários - para os quais a PARTE VENDEDORA já estendeu o direito de preferência de que trata o artigo 27 e seguintes da Lei nº 8.245/91 (Data: {{locacao.data_preferencia}}) -, fato de conhecimento da PARTE COMPRADORA que receberá a posse indireta no ato da {{entrega_posse.momento_texto}}.</p>
+{{#if (eq locacao.situacao "vendedor-entregara")}}
+<p>O Vendedor se compromete a entregar o imóvel livre dos locatários.</p>
+{{/if}}
+{{else}}
+<p>A posse do imóvel será entregue à PARTE COMPRADORA, livre de pessoas e objetos não incluídos no preço, no ato da {{entrega_posse.momento_texto}}.</p>
+{{/if}}
+
+<p><strong>5.1.</strong> A partir de tal data, a PARTE COMPRADORA será responsável por todos os tributos e encargos relativos ao imóvel, devendo, desde logo, proceder às transferências das titularidades de contas e lançamentos.</p>
+
+<h2>6. TÍTULO DEFINITIVO</h2>
+
+{{#if (eq titulo_definitivo.opcao "usufruto")}}
+<p>Estando as partes adimplentes com as obrigações deste contrato e considerando prazos e condições nele estabelecidos, lavrar-se-á Escritura Pública de Venda e Compra Bipartida (ou, à discricionariedade da PARTE COMPRADORA, Escritura Pública de Venda e Compra seguida de Doação com Reserva de Usufruto) diretamente à PARTE COMPRADORA ou a quem esta indicar (...), ficando os emolumentos notariais, registrais, ITBI e demais custos atinentes à transferência às exclusivas expensas da PARTE COMPRADORA.</p>
+{{else}}
+<p>Estando as partes adimplentes com as obrigações deste contrato e considerando prazos e condições nele estabelecidos, lavrar-se-á escritura pública de venda e compra diretamente à PARTE COMPRADORA ou a quem esta indicar (...), ficando os emolumentos notariais, registrais, ITBI e demais custos atinentes à transferência às exclusivas expensas da PARTE COMPRADORA.</p>
+{{/if}}
+
+<p><strong>6.1.</strong> Estabelece-se um prazo de {{titulo_definitivo.prazo_dias}} dias para a lavratura do instrumento definitivo de que trata o Item anterior, contados a partir da assinatura do presente instrumento particular de compromisso.</p>
+
+{{#if (eq titulo_definitivo.opcao "certidoes-apos")}}
+<p><strong>6.2.</strong> Em um prazo de até 7 (sete) dias contados da assinatura do presente instrumento de compromisso, a Vendedora (aos seus esforços e expensas) apresentará à Compradora as certidões reais envolvendo o imóvel (matrícula e CNDs junto à Prefeitura), além das certidões forenses e consultas reipersecutórias relativas às pessoas proprietárias.</p>
+<p><strong>6.2.1.</strong> Na ocasião do contexto de tais certidões demonstrarem riscos eviccionais à Compradora, qualquer das partes poderá rescindir o presente, retornando o negócio ao status quo ante.</p>
+{{else}}
+<p><strong>6.2.</strong> Foram apresentadas à PARTE COMPRADORA, tendo suas aceitações, as certidões reais envolvendo o imóvel, tais quais certidões forenses e consultas relativas às pessoas proprietárias, não se constatando, à matrícula, averbações premonitórias, constrições judiciais e/ou administrativas e, às demais certidões e consultas pessoais reipersecutórias, qualquer indício de situações capazes de redução da PARTE VENDEDORA à insolvência ou de configuração deste negócio como fraude a credores.</p>
+{{/if}}
+
+{{#if (eq titulo_definitivo.opcao "usufruto")}}
+<p><strong>6.3.</strong> Atribui-se 1/3 (um terço) do preço à aquisição do usufruto, e os 2/3 (dois terços) restantes do preço à aquisição da nua propriedade.</p>
+{{/if}}
+
+<h2>7. COMISSÕES</h2>
+
+<p>Juntamente ao pagamento do Sinal, a {{comissao.quem_paga_texto}} arcará com honorários pela assessoria e intermediação no valor total de {{moeda comissao.valor}} ({{extenso comissao.valor}}), quantia esta que tem como partícipe e credora:</p>
+
+<p>{{moeda comissao.valor}} ({{extenso comissao.valor}}) à {{comissao.imobiliaria_nome}}, CNPJ nº {{cnpj comissao.imobiliaria_cnpj}}, atuando como Imobiliária.</p>
+
+<p><strong>7.1.</strong> Atendendo à conveniência da {{comissao.quem_paga_texto}}, os intermediadores emitirão cobrança bancária única no valor integral das comissões que, uma vez paga, fará automaticamente a divisão (através de tecnologia de "split") das quantias individuais às contas dos eventuais beneficiários.</p>
+
+<p><strong>7.1.1.</strong> Posteriormente à assinatura do presente instrumento, poderá ser gerada a fatura com previsão de data de vencimento, porém a ser alterada, futuramente, de forma a se ajustar ao momento adequado para o pagamento da comissão ({{comissao.quando_paga_texto}}).</p>
+
+<p><strong>7.2.</strong> Os intermediadores poderão, conjunta ou isoladamente, ceder ou vincular seus direitos de créditos sobre as comissões, inclusive como garantia em operações de crédito e, por serem líquidas e certas as quantias suprarreferidas, a inadimplência da {{comissao.quem_paga_texto}} relativamente ao pagamento da corretagem ensejará ação executiva, na forma da lei.</p>
+
+<h2>8. IRRETRATABILIDADE E COMINAÇÕES</h2>
+
+{{#if desistencia.permite}}
+<p>O presente compromisso vincula herdeiros e sucessores, ficando assegurado o direito de arrependimento à parte que discricionariamente por assim decidir, desde que exerça a denúncia inequivocamente em até {{desistencia.prazo_dias}} dias contados de sua assinatura. Caso o arrependimento exercido seja por parte da PARTE COMPRADORA, perderá esta eventual arras/sinal; caso se dê pela PARTE VENDEDORA, deverá restituir tal eventual arras/sinal à PARTE COMPRADORA, em dobro.</p>
+{{else}}
+<p>O presente compromisso vincula herdeiros e sucessores e, ressalvados os casos previstos neste instrumento e inadimplências das partes, é celebrado sob caracteres de irrevogabilidade e irretratabilidade, pelo que renunciam à faculdade de arrependimento prevista no art. 420 do Código Civil.</p>
+{{/if}}
+
+<p><strong>8.1.</strong> Na eventualidade de haver novos apontamentos em certidões, deverá a Vendedora comprovar não haver qualquer ocasião capaz de reduzi-la à insolvência, respondendo por toda evicção, podendo a outra parte rescindir justificadamente o presente contrato, com a imediata devolução em seu favor de quantias eventualmente por ela pagas.</p>
+
+<p><strong>8.2.</strong> Caso ocorra o atraso do pagamento do preço ou quaisquer de suas eventuais parcelas, parcial ou totalmente, ensejará:</p>
+<ul>
+<li>Multa penal de {{config.multa_penal_moratoria}}% (calculado sobre {{config.base_calculo_multa}}) sobre o valor atrasado</li>
+<li>Juros moratórios mensais de {{config.juros_mensais_atraso}}%</li>
+<li>Atualização monetária conforme {{config.atualizacao_monetaria}} acumulado até a solução</li>
+</ul>
+<p>Transcorridos {{config.prazo_atraso_rescisao}} dias úteis de atraso, ficará à discricionariedade da PARTE VENDEDORA a rescisão da presente e/ou a cobrança extrajudicial ou judicial da quantia devida.</p>
+
+<p><strong>8.3.</strong> Eventuais embaraços ou atrasos causados por alguma das partes relativamente a obrigações não pecuniárias ensejarão multa moratória diária de {{moeda config.multa_cominatoria_diaria}} ({{extenso config.multa_cominatoria_diaria}}), da data na qual se obrigou até que seja efetivamente cumprida a obrigação.</p>
+
+<p><strong>8.4.</strong> Convencionam as partes que, na eventualidade de resolução contratual unilateralmente motivada, por dolo ou culpa, arcará o transgressor com a multa penal compensatória pela rescisão equivalente a {{config.multa_penal_compensatoria}}% (calculado sobre {{config.base_calculo_multa}}) sobre o valor deste contrato, a ser paga à outra parte em até {{config.prazo_multa_rescisoria}} dias corridos da extinção da avença.</p>
+
+<p><strong>8.5.</strong> Concretizada a aproximação das partes, com a assinatura do presente instrumento, eventual resilição ou rescisão deste contrato não prejudica o recebimento da importância estipulada no Item 7, que será ônus de quem der causa ao desfazimento do negócio.</p>
+
+<h2>9. FORO E PRIVACIDADE</h2>
+
+{{#if (eq foro "justica-publica")}}
+<p>Para dirimir eventuais disputas e controvérsias envolvendo o objeto do presente, as partes expressamente elegem o Foro da situação do imóvel, com exclusão de qualquer outro.</p>
+{{else}}
+<p>Para dirimir eventuais disputas e controvérsias envolvendo o objeto do presente, as partes expressamente elegem, por convenção de arbitragem e exclusão de qualquer outro foro, nos termos do artigo 5º e do §1º do artigo 4º da Lei nº 9.307/1996, os seguintes foros privados:</p>
+<ul>
+<li>TASP (Centro de Mediação e Arbitragem de São Paulo) - https://www.arbitragem.com.br/</li>
+<li>ACORDIA - https://acordia.com.br/</li>
+<li>Arbitranet - https://arbitranet.com.br/</li>
+</ul>
+{{/if}}
+
+<p><strong>9.1.</strong> As partes manifestam ciência do respeito, por parte dos intermediadores, à Lei nº 13.709/2018 - Lei Geral de Proteção de Dados (LGPD) - e, respeitando a Política de Privacidade de Dados, autorizam a coleta, uso, armazenamento, tratamento e proteção de seus dados pessoais.</p>
+
+<p><strong>9.2.</strong> Pelo que firmam este instrumento eletronicamente, nos termos da MP nº 2.200-2/2001, em {{assinatura.cidade}}/{{assinatura.uf}}, aos {{dataExtenso assinatura.data}}, juntamente às testemunhas:</p>
+
+<p>
+{{testemunhas.[0].nome}} (CPF nº {{cpf testemunhas.[0].cpf}})<br>
+{{testemunhas.[1].nome}} (CPF nº {{cpf testemunhas.[1].cpf}})
+</p>
+
+<div class="assinaturas">
+{{#each vendedores}}
+<p>_______________________________<br>{{this.nome}}<br>PROMITENTE VENDEDOR(A)</p>
+{{/each}}
+
+{{#each compradores}}
+<p>_______________________________<br>{{this.nome}}<br>PROMISSÁRIO(A) COMPRADOR(A)</p>
+{{/each}}
+
+{{#if anuente}}
+<p>_______________________________<br>{{anuente.nome}}<br>ANUENTE</p>
+{{/if}}
+</div>
+
+</div>

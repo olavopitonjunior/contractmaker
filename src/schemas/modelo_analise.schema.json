@@ -1,0 +1,91 @@
+﻿{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "modelo_analise_v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["campos", "condicionais", "repetiveis", "exclusivas", "confianca_geral", "alertas"],
+  "properties": {
+    "campos": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "padrao_encontrado", "posicao", "tipo", "sugestao_formulario"],
+        "properties": {
+          "id": { "type": "string" },
+          "padrao_encontrado": { "type": "string" },
+          "posicao": {
+            "type": "object",
+            "required": ["inicio", "fim"],
+            "properties": {
+              "inicio": { "type": "number" },
+              "fim": { "type": "number" }
+            }
+          },
+          "tipo": { "type": "string" },
+          "categoria": { "type": "string" },
+          "obrigatorio": { "type": "boolean" },
+          "sugestao_formulario": { "type": "string" }
+        }
+      }
+    },
+    "condicionais": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "texto", "posicao", "condicao_sugerida", "confianca"],
+        "properties": {
+          "id": { "type": "string" },
+          "texto": { "type": "string" },
+          "posicao": {
+            "type": "object",
+            "required": ["inicio", "fim"],
+            "properties": {
+              "inicio": { "type": "number" },
+              "fim": { "type": "number" }
+            }
+          },
+          "condicao_sugerida": { "type": "string" },
+          "confianca": { "type": "number" }
+        }
+      }
+    },
+    "repetiveis": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "texto_exemplo", "entidade"],
+        "properties": {
+          "id": { "type": "string" },
+          "texto_exemplo": { "type": "string" },
+          "entidade": { "type": "string" },
+          "min": { "type": "number" },
+          "max": { "type": ["number", "null"] }
+        }
+      }
+    },
+    "exclusivas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "opcoes", "campo_seletor"],
+        "properties": {
+          "id": { "type": "string" },
+          "opcoes": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["id", "texto"],
+              "properties": {
+                "id": { "type": "string" },
+                "texto": { "type": "string" }
+              }
+            }
+          },
+          "campo_seletor": { "type": "string" }
+        }
+      }
+    },
+    "confianca_geral": { "type": "number" },
+    "alertas": { "type": "array", "items": { "type": "string" } }
+  }
+}

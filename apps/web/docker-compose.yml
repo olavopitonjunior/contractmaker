@@ -1,0 +1,14 @@
+﻿version: '3.9'
+services:
+  postgres:
+    image: postgres:15
+    environment:
+      POSTGRES_USER: contractmaker
+      POSTGRES_PASSWORD: contractmaker
+      POSTGRES_DB: contractmaker
+    ports:
+      - '5432:5432'
+    volumes:
+      - contractmaker_pg:/var/lib/postgresql/data
+volumes:
+  contractmaker_pg:

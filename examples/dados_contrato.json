@@ -1,0 +1,139 @@
+﻿{
+  "vendedores": [
+    {
+      "tipo_pessoa": "fisica",
+      "nome": "Carlos Silva",
+      "nacionalidade": "Brasileiro",
+      "estado_civil": "Casado(a)",
+      "profissao": "Engenheiro",
+      "rg": "1234567",
+      "cpf": "12345678901",
+      "email": "carlos@example.com",
+      "endereco": "Rua das Flores",
+      "numero": "100",
+      "complemento": "Apto 12",
+      "cidade": "Sao Paulo",
+      "uf": "SP",
+      "cep": "01001000",
+      "conjuge": {
+        "nome": "Ana Silva",
+        "cpf": "98765432100",
+        "rg": "7654321",
+        "nacionalidade": "Brasileira",
+        "profissao": "Medica"
+      },
+      "tem_procurador": false
+    }
+  ],
+  "compradores": [
+    {
+      "tipo_pessoa": "fisica",
+      "nome": "Mariana Souza",
+      "nacionalidade": "Brasileira",
+      "estado_civil": "Solteiro(a)",
+      "profissao": "Designer",
+      "rg": "1122334",
+      "cpf": "22233344455",
+      "email": "mariana@example.com",
+      "endereco": "Av Paulista",
+      "numero": "2000",
+      "cidade": "Sao Paulo",
+      "uf": "SP",
+      "cep": "01310923",
+      "tem_procurador": false
+    }
+  ],
+  "imoveis": [
+    {
+      "rua": "Rua A",
+      "numero": "10",
+      "bairro": "Centro",
+      "cidade": "Sao Paulo",
+      "uf": "SP",
+      "cep": "01002000",
+      "matricula": "12345",
+      "cartorio": "1 Cartorio",
+      "inscricao_iptu": "56789",
+      "descricao": "Apartamento com 2 quartos"
+    }
+  ],
+  "status_propriedade": "financiado-saldo",
+  "saldo_devedor": 120000,
+  "tem_debitos": true,
+  "debitos": {
+    "iptu": { "selecionado": true, "valor": 1200 },
+    "condominio": { "selecionado": true, "valor": 800 },
+    "outros": "Taxa de limpeza"
+  },
+  "vicios": {
+    "opcao": "reparar",
+    "descricao_reparar": "Infiltracao no banheiro"
+  },
+  "debitos_assumidos": {
+    "assume": true,
+    "descricao": "Multa condominial pendente"
+  },
+  "regularizacoes": {
+    "tem": false
+  },
+  "pagamento": {
+    "valor_total": 500000,
+    "sinal_arras": 50000,
+    "recursos_proprios": 150000,
+    "fgts": 0,
+    "cessao_consorcio": 0,
+    "alienacao_fiduciaria": 300000,
+    "outras_formas": 0,
+    "meio_pagamento": "transferencia bancaria",
+    "parcelas": [
+      { "tipo_texto": "Entrada", "dias": 0, "valor": 50000 },
+      { "tipo_texto": "Financiamento", "dias": 30, "valor": 300000 }
+    ]
+  },
+  "incluso_no_preco": "Todos os moveis planejados",
+  "ocupacao": "ocupado-terceiro",
+  "locacao": {
+    "data_preferencia": "2026-02-01",
+    "situacao": "vendedor-entregara"
+  },
+  "entrega_posse": {
+    "momento": "assinatura",
+    "momento_texto": "assinatura do contrato"
+  },
+  "titulo_definitivo": {
+    "prazo_dias": 60,
+    "opcao": "certidoes-apos"
+  },
+  "comissao": {
+    "valor": 25000,
+    "quem_paga": "comprador",
+    "quem_paga_texto": "Parte Compradora",
+    "quando_paga": "assinatura",
+    "quando_paga_texto": "no ato da assinatura",
+    "imobiliaria_nome": "Imob XYZ",
+    "imobiliaria_cnpj": "12345678000190"
+  },
+  "desistencia": {
+    "permite": false
+  },
+  "foro": "arbitragem",
+  "assinatura": {
+    "cidade": "Sao Paulo",
+    "uf": "SP",
+    "data": "2026-02-06"
+  },
+  "testemunhas": [
+    { "nome": "Testemunha 1", "cpf": "11122233344" },
+    { "nome": "Testemunha 2", "cpf": "55566677788" }
+  ],
+  "config": {
+    "multa_penal_moratoria": 2,
+    "base_calculo_multa": "valor da parcela",
+    "juros_mensais_atraso": 1,
+    "atualizacao_monetaria": "IPCA",
+    "prazo_atraso_rescisao": 10,
+    "multa_cominatoria_diaria": 150,
+    "multa_penal_compensatoria": 10,
+    "prazo_multa_rescisoria": 7
+  }
+}
