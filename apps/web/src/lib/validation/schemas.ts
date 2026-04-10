@@ -24,5 +24,5 @@ export const chatSchema = z.object({
 });
 
 export const exportSchema = z.object({
-  format: z.enum(['pdf', 'docx', 'html']).optional()
+  format: z.enum(['pdf', 'docx', 'html', 'all']).optional().default('all')
 });

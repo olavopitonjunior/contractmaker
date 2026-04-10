@@ -58,7 +58,7 @@ export function ChatPanel({ contractId, messages: initialMessages, onContentUpda
         {
           id: `ai-${Date.now()}`,
           role: "assistant",
-          content: data.assistantText || "Feito!",
+          content: data.message || data.assistantText || "Feito!",
         },
       ]);
 

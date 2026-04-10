@@ -1,6 +1,9 @@
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { KanbanBoard } from "@/components/pipeline/KanbanBoard";
+import { Button } from "@/components/ui/button";
+import Link from "next/link";
+import { Plus, ClipboardList } from "lucide-react";
 
 export default async function PipelinePage() {
   const session = await auth();
@@ -60,6 +63,20 @@ export default async function PipelinePage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Pipeline de Vendas</h1>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/forms">
+              <ClipboardList className="mr-1 h-4 w-4" />
+              Formularios
+            </Link>
+          </Button>
+          <Button size="sm" asChild>
+            <Link href="/forms/new">
+              <Plus className="mr-1 h-4 w-4" />
+              Novo Formulario
+            </Link>
+          </Button>
+        </div>
       </div>
       <KanbanBoard stages={stages} />
     </div>

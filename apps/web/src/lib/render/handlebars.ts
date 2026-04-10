@@ -1,8 +1,91 @@
 ﻿import Handlebars from 'handlebars';
 
 function valorPorExtenso(valor: number): string {
-  if (Number.isNaN(valor)) return '';
-  return String(valor);
+  if (Number.isNaN(valor) || valor === null || valor === undefined) return '';
+
+  const unidades = ['', 'um', 'dois', 'tres', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove',
+    'dez', 'onze', 'doze', 'treze', 'quatorze', 'quinze', 'dezesseis', 'dezessete', 'dezoito', 'dezenove'];
+  const dezenas = ['', '', 'vinte', 'trinta', 'quarenta', 'cinquenta', 'sessenta', 'setenta', 'oitenta', 'noventa'];
+  const centenas = ['', 'cento', 'duzentos', 'trezentos', 'quatrocentos', 'quinhentos',
+    'seiscentos', 'setecentos', 'oitocentos', 'novecentos'];
+
+  if (valor === 0) return 'zero reais';
+
+  function grupoAteNovecentos(n: number): string {
+    if (n === 0) return '';
+    if (n === 100) return 'cem';
+    const c = Math.floor(n / 100);
+    const resto = n % 100;
+    const d = Math.floor(resto / 10);
+    const u = resto % 10;
+
+    const partes: string[] = [];
+    if (c > 0) partes.push(centenas[c]);
+    if (resto > 0 && resto < 20) {
+      partes.push(unidades[resto]);
+    } else if (resto >= 20) {
+      partes.push(dezenas[d]);
+      if (u > 0) partes.push(unidades[u]);
+    }
+    return partes.join(' e ');
+  }
+
+  const inteiro = Math.floor(Math.abs(valor));
+  const centavosNum = Math.round((Math.abs(valor) - inteiro) * 100);
+
+  const escalas = [
+    { divisor: 1000000000, singular: 'bilhao', plural: 'bilhoes' },
+    { divisor: 1000000, singular: 'milhao', plural: 'milhoes' },
+    { divisor: 1000, singular: 'mil', plural: 'mil' },
+    { divisor: 1, singular: '', plural: '' },
+  ];
+
+  const partes: string[] = [];
+  let resto = inteiro;
+
+  for (const escala of escalas) {
+    const qtd = Math.floor(resto / escala.divisor);
+    resto = resto % escala.divisor;
+    if (qtd > 0) {
+      const grupo = grupoAteNovecentos(qtd);
+      if (escala.divisor === 1) {
+        partes.push(grupo);
+      } else if (qtd === 1) {
+        partes.push(escala.divisor === 1000 ? 'mil' : `${grupo} ${escala.singular}`);
+      } else {
+        partes.push(`${grupo} ${escala.plural}`);
+      }
+    }
+  }
+
+  let resultado = partes.join(', ');
+
+  // Add "e" before last part if there are centenas/dezenas after milhares
+  const lastComma = resultado.lastIndexOf(', ');
+  if (lastComma > 0) {
+    const after = resultado.slice(lastComma + 2);
+    if (!after.includes(' mil') && !after.includes(' milh') && !after.includes(' bilh')) {
+      resultado = resultado.slice(0, lastComma) + ' e ' + after;
+    }
+  }
+
+  if (inteiro === 1) {
+    resultado += ' real';
+  } else if (inteiro > 0) {
+    resultado += ' reais';
+  }
+
+  if (centavosNum > 0) {
+    const centavosExtenso = grupoAteNovecentos(centavosNum);
+    if (inteiro > 0) resultado += ' e ';
+    resultado += centavosExtenso + (centavosNum === 1 ? ' centavo' : ' centavos');
+  }
+
+  if (inteiro === 0 && centavosNum > 0) {
+    // just centavos
+  }
+
+  return resultado;
 }
 
 export function registerHandlebarsHelpers(): void {

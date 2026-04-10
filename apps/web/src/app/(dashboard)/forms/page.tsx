@@ -4,7 +4,8 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, ExternalLink, Copy } from "lucide-react";
+import { Plus, ExternalLink } from "lucide-react";
+import { FormsActions } from "@/components/forms/FormsActions";
 
 export default async function FormsPage() {
   const session = await auth();
@@ -16,7 +17,7 @@ export default async function FormsPage() {
   const forms = await prisma.salesForm.findMany({
     where: { orgId: org.id },
     orderBy: { createdAt: "desc" },
-    include: { deal: true },
+    include: { deal: { select: { id: true, title: true } } },
   });
 
   return (
@@ -47,30 +48,43 @@ export default async function FormsPage() {
           {forms.map((form) => (
             <Card key={form.id}>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
-                <CardTitle className="text-sm font-medium">
+                <CardTitle className="text-sm font-medium truncate mr-2">
                   {form.title || `Formulario ${form.token.slice(0, 8)}...`}
                 </CardTitle>
                 <Badge
                   variant={
-                    form.status === "completo" ? "default" : "secondary"
+                    form.status === "completo"
+                      ? "default"
+                      : form.status === "vinculado"
+                      ? "outline"
+                      : "secondary"
                   }
                 >
                   {form.status}
                 </Badge>
               </CardHeader>
               <CardContent>
-                <p className="text-xs text-muted-foreground mb-3">
-                  Criado em{" "}
-                  {form.createdAt.toLocaleDateString("pt-BR")}
+                <p className="text-xs text-muted-foreground mb-1">
+                  Criado em {form.createdAt.toLocaleDateString("pt-BR")}
                 </p>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" asChild>
-                    <Link href={`/f/${form.token}`} target="_blank">
-                      <ExternalLink className="mr-1 h-3 w-3" />
-                      Abrir
+                {form.deal && (
+                  <p className="text-xs text-muted-foreground mb-3">
+                    Negocio:{" "}
+                    <Link
+                      href={`/deals/${form.deal.id}`}
+                      className="text-primary hover:underline"
+                    >
+                      {form.deal.title}
                     </Link>
-                  </Button>
-                </div>
+                  </p>
+                )}
+                <FormsActions
+                  formId={form.id}
+                  token={form.token}
+                  status={form.status}
+                  hasDeal={!!form.deal}
+                  title={form.title}
+                />
               </CardContent>
             </Card>
           ))}

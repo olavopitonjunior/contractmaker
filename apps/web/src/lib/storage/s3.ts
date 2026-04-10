@@ -1,18 +1,25 @@
-﻿import fs from 'fs';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
-import { Upload } from '@aws-sdk/lib-storage';
 
-const s3 = new S3Client({
-  region: process.env.AWS_REGION,
-  credentials: process.env.AWS_ACCESS_KEY_ID
-    ? {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? ''
-      }
-    : undefined
-});
+let s3Client: any = null;
+
+function getS3Client() {
+  if (s3Client) return s3Client;
+  if (!process.env.AWS_REGION) return null;
+
+  const { S3Client } = require('@aws-sdk/client-s3');
+  s3Client = new S3Client({
+    region: process.env.AWS_REGION,
+    credentials: process.env.AWS_ACCESS_KEY_ID
+      ? {
+          accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+          secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? ''
+        }
+      : undefined
+  });
+  return s3Client;
+}
 
 function getLocalStorageDir(): string {
   return process.env.LOCAL_STORAGE_DIR ?? path.join(process.cwd(), '.storage');
@@ -25,8 +32,12 @@ export async function uploadBufferToStorage(params: {
   contentType?: string;
 }): Promise<string> {
   if (params.bucket) {
+    const client = getS3Client();
+    if (!client) throw new Error('AWS_REGION not configured for S3 storage');
+
+    const { Upload } = require('@aws-sdk/lib-storage');
     const uploader = new Upload({
-      client: s3,
+      client,
       params: {
         Bucket: params.bucket,
         Key: params.key,
@@ -54,13 +65,16 @@ export async function uploadStringToStorage(params: {
   contentType?: string;
 }): Promise<string> {
   if (params.bucket) {
-    const command = new PutObjectCommand({
+    const client = getS3Client();
+    if (!client) throw new Error('AWS_REGION not configured for S3 storage');
+
+    const { PutObjectCommand } = require('@aws-sdk/client-s3');
+    await client.send(new PutObjectCommand({
       Bucket: params.bucket,
       Key: params.key,
       Body: params.body,
       ContentType: params.contentType
-    });
-    await s3.send(command);
+    }));
     return `s3://${params.bucket}/${params.key}`;
   }
 
@@ -74,10 +88,14 @@ export async function uploadStringToStorage(params: {
 
 export async function downloadBufferFromUrl(storageUrl: string): Promise<Buffer> {
   if (storageUrl.startsWith('s3://')) {
+    const client = getS3Client();
+    if (!client) throw new Error('AWS_REGION not configured for S3 storage');
+
+    const { GetObjectCommand } = require('@aws-sdk/client-s3');
     const stripped = storageUrl.replace('s3://', '');
     const [bucket, ...rest] = stripped.split('/');
     const key = rest.join('/');
-    const response = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    const response = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
     if (!response.Body) {
       throw new Error('S3 object body missing');
     }
