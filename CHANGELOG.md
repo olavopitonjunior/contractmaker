@@ -4,6 +4,78 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [0.3.1] - 2026-04-11 - Deploy e Documentacao
+
+### Adicionado
+- Guia de deploy Vercel (`docs/DEPLOYMENT.md`)
+- `.env.example` atualizado com todas as variaveis necessarias
+- README raiz reescrito para refletir a plataforma web (nao mais CLI)
+- `apps/web/README.md` atualizado com rotas, setup Neon e instrucoes de teste
+
+### Corrigido
+- `ignoreDeprecations` no tsconfig corrigido de `"6.0"` para `"5.0"` (TS 5.9 compatibility)
+- `TextractClient` lazy-initialized para evitar "Region is missing" durante build
+- Arquivos de teste excluidos do tsconfig (evita erros de tipo no build)
+
+---
+
+## [0.3.0] - 2026-04-11 - Templates Padronizados e Banco de Clausulas v2
+
+### Adicionado
+- **Templates Padronizados v2** baseados nos modelos Zimmermann
+  - `ccv_a_vista_v2.hbs` - CCV para pagamento a vista (15 clausulas)
+  - `ccv_financiamento_v2.hbs` - CCV para financiamento imobiliario (17 clausulas)
+  - Marcadores `<!-- CLAUSE_SLOT:Gx -->` para insercao semantica de clausulas variaveis
+  - Template legado v1 marcado como deprecated (contratos existentes preservados)
+
+- **Banco de Clausulas Padronizadas** (23 clausulas em 6 grupos)
+  - G1: Sinal, Arras e Inicio de Pagamento (3 clausulas)
+  - G2: Imissao na Posse (4 clausulas)
+  - G3: Rescisao e Condicao Resolutiva (4 clausulas)
+  - G4: Financiamento e Registro (4 clausulas - obrigatorio em financiamento)
+  - G5: Comissao de Corretagem (3 clausulas)
+  - G6: Declaracoes e Disposicoes Especiais (5 clausulas)
+  - Cada clausula com `agentNotes` (orientacao juridica da Zimmermann)
+
+- **Selecao automatica de template por modalidade**
+  - Auto-detecta financiamento quando `alienacao_fiduciaria > 0`
+  - Campo `modalidade` no schema de validacao (step5)
+  - Fallback para template default generico
+
+- **Agente IA aprimorado**
+  - System prompt com descricao dos 2 modelos e 6 grupos de clausulas
+  - `query_clauses` aceita `groupCode` e `isVariable`, retorna `agentNotes`
+  - `suggest_improvements` detecta clausulas obrigatorias: G4 (financiamento), FGTS (G6), socio PJ (G6), pluralidade vendedores (G1)
+  - Context do agente inclui `templateModalidade` e `templateName`
+  - `insert_clause` posiciona clausulas nos CLAUSE_SLOT:Gx corretos
+
+- **Schema Prisma atualizado**
+  - `Clause`: campos `agentNotes`, `groupCode`, `isVariable`
+  - `ContractTemplate`: campo `modalidade`
+  - Migracao: `add_clause_bank_v2_fields`
+
+- **UI da biblioteca de clausulas aprimorada**
+  - Clausulas padronizadas agrupadas por grupo (G1-G6) com labels descritivos
+  - Secao colapsavel "Orientacao de uso" mostrando `agentNotes`
+  - Badges de grupo e status
+  - Clausulas legacy exibidas separadamente como "Clausulas Base"
+
+- **Suite de testes de renderizacao** (21 testes)
+  - Verificacao de ambos templates com dados mockados realistas
+  - Testes de helpers (moeda, extenso, cpf, cnpj, cep)
+  - Testes de renderizacao de clausulas variaveis com dados do contrato
+
+### Corrigido
+- `insert_clause` agora usa CLAUSE_SLOT:Gx para posicionamento semantico (antes inseria sempre no final)
+- Contratos aprovados nao podem mais ser versionados (retorna 403)
+- Registro de novas orgs agora copia ambos templates v2 + 23 clausulas padronizadas
+
+### Alterado
+- Pagina de clausulas agora agrupa por `groupCode` ao inves de so por `category`
+- `suggest_improvements` substituiu sugestao generica de "Condicao Suspensiva" por verificacao especifica de clausulas G4
+
+---
+
 ## [0.2.0] - 2026-04-10 - Esteira de Vendas
 
 ### Adicionado

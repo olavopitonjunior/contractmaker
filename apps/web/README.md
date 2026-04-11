@@ -1,62 +1,75 @@
-﻿# Contractmaker Web MVP
+# Contractmaker Web
+
+App Next.js 14 com App Router. Gestao de vendas imobiliarias, geracao de contratos com IA e exportacao PDF/DOCX.
 
 ## Setup
 
-1. Install deps
+1. Instalar dependencias
 
 ```bash
 npm install
 ```
 
-2. Start Postgres (local)
+2. Configurar environment
+
+Copie `.env.example` para `.env` e preencha:
 
 ```bash
-docker compose up -d
+cp .env.example .env
 ```
 
-3. Configure environment
+Variaveis obrigatorias:
+- `DATABASE_URL` - PostgreSQL (Neon recomendado)
+- `DIRECT_URL` - Conexao direta (sem pooler, para migrations)
+- `AUTH_SECRET` - Gerar com `openssl rand -base64 32`
+- `NEXTAUTH_URL` - URL base (`http://localhost:3000` em dev)
+- `ANTHROPIC_API_KEY` - Chave da Anthropic (funcoes IA)
 
-Create `.env` in `apps/web` with:
-
-```
-DATABASE_URL=postgresql://contractmaker:contractmaker@localhost:5432/contractmaker
-S3_BUCKET=
-AWS_REGION=
-AWS_ACCESS_KEY_ID=
-AWS_SECRET_ACCESS_KEY=
-ANTHROPIC_API_KEY=
-ANTHROPIC_MODEL=claude-3-5-sonnet-20240620
-OCR_ENABLED=false
-ALLOW_SELF_REGISTER=true
-DEFAULT_USER_ID=local-user
-```
-
-Notes:
-- If `S3_BUCKET` is empty, files are stored locally under `apps/web/.storage`.
-- Exports are saved under `apps/web/public/exports` and served as URLs.
-- OCR requires S3 + Textract credentials.
-
-4. Generate prisma client and migrate
+3. Gerar Prisma client e rodar migrations
 
 ```bash
 npm run prisma:generate
-npx prisma migrate dev --name init
+npx prisma migrate dev
 ```
 
-5. Run dev
+4. Seed (dados iniciais)
+
+```bash
+npx prisma db seed
+```
+
+Cria: admin (admin@contractmaker.com / admin123), org default, pipeline 6 stages, 2 templates v2, 23 clausulas padronizadas.
+
+5. Rodar em dev
 
 ```bash
 npm run dev
 ```
 
-## Routes
+## Rotas Principais
 
-- `/upload` upload + extract + analyze
-- `/mapping.html` mapping UI
-- `/chat` chat editor
-- `/export` export DOCX/PDF
+| Rota | Descricao |
+|------|-----------|
+| `/login` | Login |
+| `/register` | Registro (cria org + pipeline + templates + clausulas) |
+| `/pipeline` | Kanban de negocios |
+| `/deals/[dealId]` | Detalhe do negocio |
+| `/contracts/[id]` | Editor de contrato + chat IA |
+| `/clauses` | Biblioteca de clausulas (G1-G6) |
+| `/templates` | Templates de contrato |
+| `/forms` | Formularios de vendas |
+| `/forms/new` | Criar novo formulario |
+| `/f/[token]` | Formulario publico (sem auth) |
+| `/settings` | Configuracoes da organizacao |
 
-## Notes
+## Testes
 
-- Login uses `/api/auth/login` and allows self-register if `ALLOW_SELF_REGISTER=true`.
-- `DEFAULT_USER_ID` lets the upload API work without a UI login.
+```bash
+npm run test
+npm run test:watch
+npm run test:coverage
+```
+
+## Deploy
+
+Veja [docs/DEPLOYMENT.md](../../docs/DEPLOYMENT.md) para deploy no Vercel.

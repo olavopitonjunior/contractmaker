@@ -1,14 +1,21 @@
 ﻿import { TextractClient, StartDocumentTextDetectionCommand, GetDocumentTextDetectionCommand } from '@aws-sdk/client-textract';
 
-const textract = new TextractClient({
-  region: process.env.AWS_REGION,
-  credentials: process.env.AWS_ACCESS_KEY_ID
-    ? {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? ''
-      }
-    : undefined
-});
+let _textract: TextractClient | null = null;
+
+function getTextractClient(): TextractClient {
+  if (!_textract) {
+    _textract = new TextractClient({
+      region: process.env.AWS_REGION,
+      credentials: process.env.AWS_ACCESS_KEY_ID
+        ? {
+            accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+            secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? ''
+          }
+        : undefined
+    });
+  }
+  return _textract;
+}
 
 export async function textractPdfText(params: {
   bucket: string;
@@ -16,6 +23,7 @@ export async function textractPdfText(params: {
   maxAttempts?: number;
   pollIntervalMs?: number;
 }): Promise<string> {
+  const textract = getTextractClient();
   const start = await textract.send(
     new StartDocumentTextDetectionCommand({
       DocumentLocation: {
