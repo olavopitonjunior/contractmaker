@@ -29,9 +29,10 @@ import {
 interface ContractEditorProps {
   content: string;
   onChange: (html: string) => void;
+  readOnly?: boolean;
 }
 
-export function ContractEditor({ content, onChange }: ContractEditorProps) {
+export function ContractEditor({ content, onChange, readOnly }: ContractEditorProps) {
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -44,8 +45,9 @@ export function ContractEditor({ content, onChange }: ContractEditorProps) {
     ],
     content,
     immediatelyRender: false,
+    editable: !readOnly,
     onUpdate: ({ editor }) => {
-      onChange(editor.getHTML());
+      if (!readOnly) onChange(editor.getHTML());
     },
     editorProps: {
       attributes: {

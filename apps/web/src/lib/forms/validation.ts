@@ -112,6 +112,7 @@ export const step4Schema = z.object({
 });
 
 export const step5Schema = z.object({
+  modalidade: z.enum(["a_vista", "financiamento"]).default("a_vista"),
   pagamento: z.object({
     valor_total: z.number().min(0).default(0),
     sinal_arras: z.number().default(0),

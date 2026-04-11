@@ -32,6 +32,7 @@ model User {
   documents      Document[]
   legacyTemplates LegacyTemplate[]
   clausesAuthored Clause[]   @relation("clauseAuthor")
+  changeLogs      ContractChangeLog[] @relation("userChangeLogs")
 }
 
 model Account {
@@ -81,11 +82,12 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members   OrgMembership[]
-  pipelines Pipeline[]
-  forms     SalesForm[]
-  templates ContractTemplate[]
-  clauses   Clause[]
+  members     OrgMembership[]
+  pipelines   Pipeline[]
+  forms       SalesForm[]
+  templates   ContractTemplate[]
+  clauses     Clause[]
+  agentConfig AgentConfig?
 }
 
 model OrgMembership {
@@ -176,8 +178,9 @@ model SalesForm {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  deal Deal?
+  org         Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  deal        Deal?
+  attachments FormAttachment[]
 }
 
 // ============================================
@@ -195,6 +198,7 @@ model ContractTemplate {
   engine           String   @default("handlebars")
   status           String   @default("active")
   isDefault        Boolean  @default(false)
+  modalidade       String?  @default("a_vista")
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -215,6 +219,9 @@ model Clause {
   title       String
   content     String   @db.Text
   description String?
+  agentNotes  String?  @db.Text
+  groupCode   String?
+  isVariable  Boolean  @default(false)
   tags        String[]
   source      String   @default("manual")
   status      String   @default("approved")
@@ -254,6 +261,7 @@ model Contract {
   chatSessions  ChatSession[]
   exports       Export[]
   clauses       ContractClause[]
+  changeLogs    ContractChangeLog[]
 }
 
 model ContractClause {
@@ -309,6 +317,59 @@ model Export {
   createdAt  DateTime @default(now())
 
   contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// AGENT CONFIG
+// ============================================
+
+model AgentConfig {
+  id           String   @id @default(cuid())
+  orgId        String   @unique
+  model        String   @default("claude-sonnet-4-20250514")
+  ocrModel     String   @default("claude-haiku-4-5-20251001")
+  temperature  Float    @default(0.3)
+  maxTokens    Int      @default(4096)
+  systemPrompt String   @db.Text
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// CONTRACT CHANGE LOG
+// ============================================
+
+model ContractChangeLog {
+  id         String   @id @default(cuid())
+  contractId String
+  userId     String?
+  action     String
+  summary    String   @db.Text
+  details    Json?
+  source     String   @default("user")
+  createdAt  DateTime @default(now())
+
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  user     User?    @relation("userChangeLogs", fields: [userId], references: [id])
+}
+
+// ============================================
+// FORM ATTACHMENTS
+// ============================================
+
+model FormAttachment {
+  id            String   @id @default(cuid())
+  formId        String
+  filename      String
+  mime          String
+  url           String
+  category      String?
+  extractedData Json?
+  createdAt     DateTime @default(now())
+
+  form SalesForm @relation(fields: [formId], references: [id], onDelete: Cascade)
 }
 
 // ============================================

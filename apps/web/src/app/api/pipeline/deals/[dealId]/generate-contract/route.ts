@@ -33,10 +33,22 @@ export async function POST(
     ? (deal.form.dataJson as Record<string, unknown>)
     : (deal.dataJson as Record<string, unknown>) || {};
 
-  // Find default template
-  const template = await prisma.contractTemplate.findFirst({
-    where: { orgId: org.id, isDefault: true, status: "active" },
-  });
+  // Detect modalidade: explicit field or auto-detect from payment data
+  const pagamento = dataJson.pagamento as Record<string, unknown> | undefined;
+  const modalidade =
+    (dataJson.modalidade as string) ||
+    (pagamento && Number(pagamento.alienacao_fiduciaria || 0) > 0
+      ? "financiamento"
+      : "a_vista");
+
+  // Find template matching modalidade, fallback to any default
+  const template =
+    (await prisma.contractTemplate.findFirst({
+      where: { orgId: org.id, modalidade, isDefault: true, status: "active" },
+    })) ||
+    (await prisma.contractTemplate.findFirst({
+      where: { orgId: org.id, isDefault: true, status: "active" },
+    }));
 
   if (!template) {
     return NextResponse.json(

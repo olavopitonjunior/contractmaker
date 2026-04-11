@@ -1,0 +1,355 @@
+<div class="contrato">
+
+<h1>INSTRUMENTO PARTICULAR DE COMPROMISSO DE VENDA E COMPRA</h1>
+<h2>Modalidade: Financiamento Imobiliário</h2>
+
+<hr>
+
+<h2>QUALIFICAÇÃO DAS PARTES</h2>
+
+<h3>PARTE VENDEDORA</h3>
+
+{{#each vendedores}}
+{{#if (eq this.tipo_pessoa "fisica")}}
+<p><strong>Promitente Vendedor(a):</strong></p>
+<p>
+Nome: {{this.nome}}<br>
+Nacionalidade: {{this.nacionalidade}}<br>
+Estado Civil: {{this.estado_civil}}<br>
+Profissão: {{this.profissao}}<br>
+RG: nº {{this.rg}}<br>
+CPF: nº {{cpf this.cpf}}<br>
+E-mail: {{this.email}}<br>
+Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
+</p>
+
+{{#if (or (eq this.estado_civil "Casado(a)") (eq this.estado_civil "União Estável"))}}
+<p><em>(Cônjuge/Companheiro)</em></p>
+<p>
+Nome Completo: {{this.conjuge.nome}}<br>
+CPF: {{cpf this.conjuge.cpf}}<br>
+RG: {{this.conjuge.rg}}<br>
+Nacionalidade: {{this.conjuge.nacionalidade}}<br>
+Profissão: {{this.conjuge.profissao}}
+</p>
+{{/if}}
+
+{{#if this.tem_procurador}}
+<p><em>Representado(a) por seu(sua) procurador(a):</em></p>
+<p>
+Nome: {{this.procurador.nome}}<br>
+CPF: {{cpf this.procurador.cpf}}<br>
+RG: {{this.procurador.rg}}<br>
+Endereço: {{this.procurador.endereco}}, nº {{this.procurador.numero}}, Cidade: {{this.procurador.cidade}}-{{this.procurador.uf}}
+</p>
+{{/if}}
+
+{{else}}
+<p><strong>Promitente Vendedora:</strong></p>
+<p>
+Razão Social: {{this.razao_social}}<br>
+CNPJ: nº {{cnpj this.cnpj}}<br>
+Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
+</p>
+<p>Neste ato representada por seu(s) representante(s) legal(is):</p>
+<p>
+Nome Completo: {{this.representante.nome}}<br>
+CPF: {{cpf this.representante.cpf}}<br>
+Nacionalidade: {{this.representante.nacionalidade}}<br>
+Estado Civil: {{this.representante.estado_civil}}<br>
+Profissão: {{this.representante.profissao}}
+</p>
+{{/if}}
+{{/each}}
+
+<h3>PARTE COMPRADORA</h3>
+
+{{#each compradores}}
+{{#if (eq this.tipo_pessoa "fisica")}}
+<p><strong>Promissário(a) Comprador(a):</strong></p>
+<p>
+Nome: {{this.nome}}<br>
+Nacionalidade: {{this.nacionalidade}}<br>
+Estado Civil: {{this.estado_civil}}<br>
+Profissão: {{this.profissao}}<br>
+RG: nº {{this.rg}}<br>
+CPF: nº {{cpf this.cpf}}<br>
+E-mail: {{this.email}}<br>
+Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
+</p>
+
+{{#if (or (eq this.estado_civil "Casado(a)") (eq this.estado_civil "União Estável"))}}
+<p><em>(Cônjuge/Companheiro)</em></p>
+<p>
+Nome Completo: {{this.conjuge.nome}}<br>
+CPF: {{cpf this.conjuge.cpf}}<br>
+RG: {{this.conjuge.rg}}<br>
+Nacionalidade: {{this.conjuge.nacionalidade}}<br>
+Profissão: {{this.conjuge.profissao}}
+</p>
+{{/if}}
+
+{{#if this.tem_procurador}}
+<p><em>Representado(a) por seu(sua) procurador(a):</em></p>
+<p>
+Nome: {{this.procurador.nome}}<br>
+CPF: {{cpf this.procurador.cpf}}<br>
+RG: {{this.procurador.rg}}<br>
+Endereço: {{this.procurador.endereco}}, nº {{this.procurador.numero}}, Cidade: {{this.procurador.cidade}}-{{this.procurador.uf}}
+</p>
+{{/if}}
+
+{{else}}
+<p><strong>Promissária Compradora:</strong></p>
+<p>
+Razão Social: {{this.razao_social}}<br>
+CNPJ: nº {{cnpj this.cnpj}}<br>
+Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
+</p>
+<p>Neste ato representada por seu(s) representante(s) legal(is):</p>
+<p>
+Nome Completo: {{this.representante.nome}}<br>
+CPF: {{cpf this.representante.cpf}}<br>
+Nacionalidade: {{this.representante.nacionalidade}}<br>
+Estado Civil: {{this.representante.estado_civil}}<br>
+Profissão: {{this.representante.profissao}}
+</p>
+{{/if}}
+{{/each}}
+
+<h3>INTERMEDIADORA</h3>
+
+<p>
+Imobiliária: {{comissao.imobiliaria_nome}}<br>
+CNPJ: nº {{cnpj comissao.imobiliaria_cnpj}}
+</p>
+
+<hr>
+
+<p>São partes integrantes do presente instrumento os qualificados acima, que, por estarem de pleno e comum acordo, celebram o presente <strong>Instrumento Particular de Compromisso de Venda e Compra</strong>, na modalidade de <strong>Financiamento Imobiliário</strong>, nos seguintes termos e condições:</p>
+
+<hr>
+
+<h2>CLÁUSULA PRIMEIRA - DO OBJETO</h2>
+
+<p><strong>1.1.</strong> O(s) PROMITENTE(S) VENDEDOR(ES) é(são) legítimo(s) possuidor(es) e proprietário(s) do imóvel adiante descrito, adquirido conforme {{config.titulo_aquisitivo}}, devidamente registrado sob {{config.registro_aquisitivo}}, livre e desembaraçado de quaisquer ônus reais, dívidas, tributos em atraso, ações reais ou pessoais reipersecutórias, salvo as ressalvas expressamente consignadas neste instrumento.</p>
+
+{{#if (existe config.observacao_imovel)}}
+<p><strong>1.2.</strong> {{config.observacao_imovel}}</p>
+{{/if}}
+
+<h3>Descrição do Imóvel</h3>
+
+{{#each imoveis}}
+<p>
+Endereço: {{this.rua}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Bairro: {{this.bairro}}, Cidade: {{this.cidade}} - {{this.uf}}, CEP {{cep this.cep}}<br>
+Matrícula: nº {{this.matricula}} do {{this.cartorio}}<br>
+Contribuinte: nº {{this.inscricao_iptu}} junto à Prefeitura local<br>
+Descrição: {{this.descricao}}
+</p>
+{{/each}}
+
+<hr>
+
+<h2>CLÁUSULA SEGUNDA - DO PREÇO</h2>
+
+<p><strong>2.1.</strong> O preço certo e ajustado para a presente transação é de {{moeda pagamento.valor_total}} ({{extenso pagamento.valor_total}}), a ser pago da seguinte forma:</p>
+
+<p><strong>a)</strong> Sinal e princípio de pagamento (arras confirmatórias): {{moeda pagamento.sinal_arras}} ({{extenso pagamento.sinal_arras}}), a ser creditado na conta do(s) PROMITENTE(S) VENDEDOR(ES) no prazo de 1 (um) dia útil contado da assinatura do presente instrumento.</p>
+
+<!-- CLAUSE_SLOT:G1 -->
+
+<p><strong>b)</strong> Financiamento imobiliário com alienação fiduciária em garantia: {{moeda pagamento.alienacao_fiduciaria}} ({{extenso pagamento.alienacao_fiduciaria}}), cujo valor será liberado pelo agente financeiro em favor do(s) PROMITENTE(S) VENDEDOR(ES) no prazo de até 10 (dez) dias úteis contados do registro do Contrato de Financiamento junto ao Cartório de Registro de Imóveis competente.</p>
+
+{{#if (gt pagamento.fgts 0)}}
+<p><strong>b.1)</strong> Do montante financiado, o valor de {{moeda pagamento.fgts}} ({{extenso pagamento.fgts}}) será proveniente de utilização de saldo do FGTS (Fundo de Garantia do Tempo de Serviço), conforme regras vigentes do agente financeiro e da Caixa Econômica Federal.</p>
+{{/if}}
+
+<!-- CLAUSE_SLOT:G4 -->
+
+<p><strong>2.1.1.</strong> A não creditação do valor do sinal previsto na alínea "a" no prazo estipulado importará em rescisão automática do presente instrumento, independentemente de notificação judicial ou extrajudicial, retornando as partes ao <em>status quo ante</em>.</p>
+
+<p><strong>2.1.2.</strong> Caso o agente financeiro aprove e libere valor inferior ao previsto na alínea "b", o(s) PROMISSÁRIO(S) COMPRADOR(ES) deverá(ão) complementar a diferença com recursos próprios, no prazo de 5 (cinco) dias úteis contados da comunicação da aprovação do financiamento, nos termos do art. 22 da Resolução BCB nº 4.676/2018.</p>
+
+<p><strong>2.1.3.</strong> Os pagamentos referidos nesta cláusula deverão ser efetuados diretamente nas contas bancárias indicadas pelo(s) PROMITENTE(S) VENDEDOR(ES), mediante transferência eletrônica (TED, PIX ou DOC), servindo os comprovantes bancários como recibo de quitação parcial.</p>
+
+{{#if (existe config.saldo_devedor_vendedor)}}
+<p><strong>2.1.4.</strong> Do valor liberado pelo agente financeiro, será automaticamente abatido pela instituição financeira o saldo devedor de alienação fiduciária existente em favor do(s) PROMITENTE(S) VENDEDOR(ES), no montante aproximado de {{moeda config.saldo_devedor_vendedor}} ({{extenso config.saldo_devedor_vendedor}}), sendo o eventual saldo remanescente creditado na conta indicada pelo(s) PROMITENTE(S) VENDEDOR(ES).</p>
+{{/if}}
+
+<hr>
+
+<h2>CLÁUSULA TERCEIRA - DA IMISSÃO NA POSSE</h2>
+
+<p><strong>3.1.</strong> A posse direta do imóvel será transferida ao(s) PROMISSÁRIO(S) COMPRADOR(ES), livre e desembaraçada de pessoas e coisas, no prazo de 1 (um) dia útil contado do <strong>registro do Contrato de Financiamento com Alienação Fiduciária</strong> junto ao Cartório de Registro de Imóveis competente.</p>
+
+<p><strong>3.1.1.</strong> O atraso na entrega da posse por parte do(s) PROMITENTE(S) VENDEDOR(ES) sujeitará ao pagamento de multa diária no valor de {{moeda config.multa_diaria_posse}} ({{extenso config.multa_diaria_posse}}), a ser paga ao(s) PROMISSÁRIO(S) COMPRADOR(ES). Transcorridos 30 (trinta) dias de atraso, a multa diária será acrescida de 20% (vinte por cento) sobre o valor originário, sem prejuízo de eventuais perdas e danos.</p>
+
+<p><strong>3.2.</strong> O imóvel será entregue no estado em que se encontra, tendo o(s) PROMISSÁRIO(S) COMPRADOR(ES) vistoriado e aceito suas condições atuais, incluindo os seguintes itens e acessórios: {{config.itens_entrega}}.</p>
+
+<!-- CLAUSE_SLOT:G2 -->
+
+<hr>
+
+<h2>CLÁUSULA QUARTA - DO INSTRUMENTO DEFINITIVO</h2>
+
+<p><strong>4.1.</strong> O(s) PROMISSÁRIO(S) COMPRADOR(ES) terá(ão) o prazo de 45 (quarenta e cinco) dias úteis, contados da assinatura do presente instrumento, para a formalização do Contrato de Financiamento Imobiliário com Alienação Fiduciária em Garantia junto ao agente financeiro de sua escolha. O(s) PROMITENTE(S) VENDEDOR(ES) compromete(m)-se a atender prontamente todas as convocações do agente financeiro para assinatura do referido contrato.</p>
+
+<p><strong>4.2.</strong> O(s) PROMISSÁRIO(S) COMPRADOR(ES) deverá(ão) apresentar toda a documentação pessoal e financeira exigida pelo agente financeiro no prazo máximo de 20 (vinte) dias úteis contados da assinatura deste instrumento, responsabilizando-se pela veracidade e atualidade dos documentos apresentados.</p>
+
+<p><strong>4.3.</strong> Todas as despesas relativas à formalização do financiamento, incluindo ITBI (Imposto sobre Transmissão de Bens Imóveis), FRJ (Fundo de Reaparelhamento do Judiciário), emolumentos cartorários, taxas de avaliação do imóvel e demais custos atinentes à transferência, correrão por conta exclusiva do(s) PROMISSÁRIO(S) COMPRADOR(ES). O protocolo do título para registro deverá ser realizado no prazo de 1 (um) dia útil após a assinatura do Contrato de Financiamento.</p>
+
+<p><strong>4.4.</strong> As partes comprometem-se a apresentar, tempestivamente, toda a documentação exigida pelo agente financeiro e pelo Cartório de Registro de Imóveis, incluindo, mas não se limitando a: certidões negativas de débitos federais, estaduais e municipais; certidões dos distribuidores cíveis, criminais e trabalhistas; certidão de matrícula atualizada do imóvel; e quaisquer outros documentos que se façam necessários para a aprovação do crédito e o registro do contrato.</p>
+
+<p><strong>4.5.</strong> O registro do Contrato de Financiamento junto ao Cartório de Registro de Imóveis competente deverá ser concluído no prazo de 30 (trinta) dias contados do protocolo. Na hipótese de o Cartório emitir nota de exigência, os prazos previstos nesta cláusula ficarão suspensos até o efetivo cumprimento das exigências pela parte responsável.</p>
+
+<p><strong>4.6.</strong> O(s) PROMITENTE(S) VENDEDOR(ES) declara(m) ter plena ciência de que a liberação dos valores referentes ao financiamento somente ocorrerá após o efetivo registro do Contrato de Financiamento com Alienação Fiduciária junto ao Cartório de Registro de Imóveis, não cabendo qualquer reclamação quanto a eventuais demoras decorrentes do trâmite cartorário.</p>
+
+<p><strong>4.7.</strong> O(s) PROMITENTE(S) VENDEDOR(ES) garante(m) que o imóvel objeto deste instrumento encontra-se em condições de ser aceito pela engenharia do agente financeiro, sem restrições estruturais, legais ou documentais que impeçam ou dificultem a aprovação do financiamento, responsabilizando-se por quaisquer prejuízos decorrentes de informações inverídicas ou omissões.</p>
+
+<hr>
+
+<h2>CLÁUSULA QUINTA - DOS TRIBUTOS E ENCARGOS</h2>
+
+<p><strong>5.1.</strong> Todos os tributos, taxas, contribuições e encargos incidentes sobre o imóvel (incluindo IPTU, taxas de condomínio, água, luz, gás e demais despesas <em>propter rem</em>) são de responsabilidade exclusiva do(s) PROMITENTE(S) VENDEDOR(ES) até a data da efetiva entrega da posse ao(s) PROMISSÁRIO(S) COMPRADOR(ES), passando a ser de responsabilidade deste(s) a partir de então, calculados <em>pro rata die</em> no mês de transição.</p>
+
+<p><strong>5.1.1.</strong> O(s) PROMISSÁRIO(S) COMPRADOR(ES) deverá(ão) providenciar a transferência de titularidade das contas de consumo (água, luz, gás, condomínio) junto aos respectivos órgãos e concessionárias, no prazo de 30 (trinta) dias contados da imissão na posse.</p>
+
+<hr>
+
+<h2>CLÁUSULA SEXTA - DA IRREVOGABILIDADE E IRRETRATABILIDADE</h2>
+
+<p><strong>6.1.</strong> O presente instrumento é celebrado em caráter irrevogável e irretratável, obrigando as partes, seus herdeiros e sucessores, renunciando expressamente à faculdade de arrependimento prevista no art. 420 do Código Civil, ressalvadas as hipóteses de rescisão expressamente previstas neste contrato.</p>
+
+<hr>
+
+<h2>CLÁUSULA SÉTIMA - DA DOCUMENTAÇÃO</h2>
+
+<p><strong>7.1.</strong> No prazo de 7 (sete) dias contados da assinatura do presente instrumento, o(s) PROMITENTE(S) VENDEDOR(ES) deverá(ão) apresentar ao(s) PROMISSÁRIO(S) COMPRADOR(ES) toda a documentação relativa ao imóvel e às pessoas dos proprietários, incluindo certidões reais, forenses e pessoais reipersecutórias.</p>
+
+<p><strong>7.2.</strong> A documentação do imóvel deverá contemplar, no mínimo: certidão de matrícula atualizada (com negativa de ônus e ações reais reipersecutórias), certidões negativas de débitos municipais (IPTU), certidão negativa de débitos condominiais (quando aplicável) e demais documentos exigidos pelo agente financeiro.</p>
+
+<p><strong>7.3.</strong> Na hipótese de qualquer das certidões apresentar apontamento positivo que represente risco eviccionário ao(s) PROMISSÁRIO(S) COMPRADOR(ES), ou que impeça a aprovação do financiamento pelo agente financeiro, qualquer das partes poderá rescindir o presente instrumento, retornando ao <em>status quo ante</em>, com a integral restituição dos valores eventualmente pagos.</p>
+
+<p><strong>7.4.</strong> Enquanto pendente a entrega e análise da documentação prevista nesta cláusula, os pagamentos subsequentes ao sinal ficarão suspensos, sem que isso configure mora do(s) PROMISSÁRIO(S) COMPRADOR(ES).</p>
+
+<hr>
+
+<h2>CLÁUSULA OITAVA - DA INADIMPLÊNCIA</h2>
+
+<p><strong>8.1.</strong> O descumprimento de qualquer obrigação prevista neste instrumento, incluindo, mas não se limitando ao disposto no item 4.1 (prazo para formalização do financiamento), sujeitará a parte inadimplente ao pagamento de multa moratória de 2% (dois por cento) sobre o valor da obrigação descumprida, acrescida de juros moratórios de 1% (um por cento) ao mês, calculados <em>pro rata die</em>, sem prejuízo das demais cominações previstas neste contrato. A parte inadimplente terá o prazo de 15 (quinze) dias para a purgação da mora, contados da notificação escrita.</p>
+
+<hr>
+
+<h2>CLÁUSULA NONA - DA RESCISÃO</h2>
+
+<p><strong>9.1.</strong> Na hipótese de rescisão por culpa exclusiva do(s) PROMISSÁRIO(S) COMPRADOR(ES), este(s) pagará(ão) ao(s) PROMITENTE(S) VENDEDOR(ES) multa compensatória equivalente a 5% (cinco por cento) do valor total do contrato, podendo o(s) PROMITENTE(S) VENDEDOR(ES) reter tal quantia dos valores já pagos, devolvendo o saldo remanescente em até 30 (trinta) dias.</p>
+
+<p><strong>9.2.</strong> Na hipótese de rescisão por culpa exclusiva do(s) PROMITENTE(S) VENDEDOR(ES), este(s) restituirá(ão) integralmente os valores recebidos ao(s) PROMISSÁRIO(S) COMPRADOR(ES), acrescidos de multa compensatória equivalente a 5% (cinco por cento) do valor total do contrato, no prazo de 30 (trinta) dias contados da formalização da rescisão.</p>
+
+<p><strong>9.3.</strong> A rescisão por mútuo acordo dispensará a aplicação das multas previstas nos itens 9.1 e 9.2, devendo os valores pagos ser restituídos integralmente ao(s) PROMISSÁRIO(S) COMPRADOR(ES) no prazo acordado entre as partes.</p>
+
+<p><strong>9.4.</strong> Em qualquer hipótese de rescisão, a comissão de intermediação prevista na Cláusula Décima Quarta será devida por quem der causa ao desfazimento do negócio.</p>
+
+<p><strong>9.5.</strong> Na hipótese de a não obtenção do financiamento imobiliário previsto na alínea "b" da Cláusula Segunda decorrer de reprovação cadastral, documental ou de engenharia pelo agente financeiro, por motivos alheios à vontade do(s) PROMISSÁRIO(S) COMPRADOR(ES) e não imputáveis ao(s) PROMITENTE(S) VENDEDOR(ES), o presente instrumento será rescindido de pleno direito, independentemente de notificação judicial ou extrajudicial, com a <strong>restituição integral e sem penalidades</strong> de todos os valores pagos pelo(s) PROMISSÁRIO(S) COMPRADOR(ES), no prazo de 15 (quinze) dias contados da comunicação formal da negativa do financiamento.</p>
+
+<!-- CLAUSE_SLOT:G3 -->
+
+<hr>
+
+<h2>CLÁUSULA DÉCIMA - DA NÃO MODIFICAÇÃO</h2>
+
+<p><strong>10.1.</strong> As condições estabelecidas neste instrumento deverão ser cumpridas tal como redigidas. A tolerância de qualquer das partes quanto ao descumprimento de quaisquer cláusulas ou condições será considerada mera liberalidade, não configurando novação, renúncia, modificação ou alteração do pactuado, podendo a parte tolerante exigir o cumprimento integral a qualquer tempo.</p>
+
+<hr>
+
+<h2>CLÁUSULA DÉCIMA PRIMEIRA - DAS DECLARAÇÕES</h2>
+
+<p><strong>11.1.</strong> O(s) PROMITENTE(S) VENDEDOR(ES) declara(m) que o imóvel objeto deste instrumento encontra-se livre e desembaraçado de quaisquer ônus reais, gravames, penhoras, arrestos, sequestros, usufrutos, servidões, dívidas, tributos em atraso, ações reais ou pessoais reipersecutórias, salvo as ressalvas expressamente consignadas neste instrumento, responsabilizando-se pela evicção em qualquer grau.</p>
+
+<p><strong>11.2.</strong> O(s) PROMISSÁRIO(S) COMPRADOR(ES) declara(m) possuir aptidão creditícia e condições financeiras para a obtenção do financiamento imobiliário previsto na alínea "b" da Cláusula Segunda, comprometendo-se a envidar os melhores esforços para a aprovação do crédito junto ao agente financeiro.</p>
+
+<p><strong>11.3.</strong> As partes declaram que a presente transação é celebrada em caráter <em>ad corpus</em>, de modo que eventuais diferenças de metragem encontradas não darão ensejo a complemento de preço ou devolução de valores, nos termos do art. 500 do Código Civil.</p>
+
+<p><strong>11.4.</strong> As partes declaram, sob as penas da lei, que não mantêm relações de união estável com terceiros não nominados neste instrumento, nos termos do art. 1.723 do Código Civil, responsabilizando-se civil e criminalmente pela veracidade desta declaração.</p>
+
+<hr>
+
+<h2>CLÁUSULA DÉCIMA SEGUNDA - DO REQUERIMENTO</h2>
+
+<p><strong>12.1.</strong> As partes autorizam e requerem ao Oficial do Cartório de Registro de Imóveis competente que proceda ao registro do Contrato de Financiamento com Alienação Fiduciária em Garantia, bem como às averbações e demais atos registrais necessários à perfeita formalização da presente transação, nos termos da legislação vigente.</p>
+
+<hr>
+
+<h2>CLÁUSULA DÉCIMA TERCEIRA - DAS COMUNICAÇÕES</h2>
+
+<p><strong>13.1.</strong> Todas as comunicações, notificações e interpelações entre as partes serão realizadas preferencialmente por meio eletrônico (e-mail e/ou WhatsApp), nos endereços e números informados na qualificação das partes, considerando-se recebidas na data do envio, desde que haja confirmação de leitura ou entrega. As notificações formais poderão ser realizadas por meio de carta com aviso de recebimento (AR) ou por intermédio de Cartório de Títulos e Documentos, nos endereços constantes deste instrumento.</p>
+
+<hr>
+
+<h2>CLÁUSULA DÉCIMA QUARTA - DA COMISSÃO</h2>
+
+<p><strong>14.1.</strong> Pela intermediação e assessoria prestadas, será devida a comissão de corretagem no valor total de {{moeda comissao.valor}} ({{extenso comissao.valor}}), a ser paga pela {{comissao.quem_paga_texto}} à imobiliária intermediadora {{comissao.imobiliaria_nome}}, inscrita no CNPJ nº {{cnpj comissao.imobiliaria_cnpj}}.</p>
+
+<p><strong>14.2.</strong> O pagamento da comissão está atrelado à liberação dos recursos previstos na alínea "b" da Cláusula Segunda (financiamento imobiliário), devendo ser efetuado no prazo de até 5 (cinco) dias úteis contados da efetiva liberação dos valores pelo agente financeiro em favor do(s) PROMITENTE(S) VENDEDOR(ES).</p>
+
+<p><strong>14.3.</strong> A comissão de corretagem é devida pela efetiva aproximação das partes e conclusão do negócio, sendo líquida, certa e exigível, de modo que eventual inadimplência ensejará cobrança extrajudicial ou ação executiva, na forma da lei.</p>
+
+<p><strong>14.4.</strong> Os intermediadores poderão, conjunta ou isoladamente, ceder ou vincular seus direitos de crédito sobre as comissões, inclusive como garantia em operações de crédito.</p>
+
+<!-- CLAUSE_SLOT:G5 -->
+
+<hr>
+
+<h2>CLÁUSULA DÉCIMA QUINTA - DA LGPD</h2>
+
+<p><strong>15.1.</strong> As partes declaram ciência e concordância com o tratamento de seus dados pessoais, nos termos da Lei nº 13.709/2018 (Lei Geral de Proteção de Dados Pessoais - LGPD), para as finalidades estritamente necessárias à execução do presente contrato, incluindo a coleta, uso, armazenamento, compartilhamento e proteção dos dados, em conformidade com a Política de Privacidade da intermediadora.</p>
+
+<hr>
+
+<h2>CLÁUSULA DÉCIMA SEXTA - DA CONTRATAÇÃO ELETRÔNICA</h2>
+
+<p><strong>16.1.</strong> O presente instrumento é firmado em meio eletrônico, com a utilização de assinaturas eletrônicas, nos termos da Medida Provisória nº 2.200-2/2001, que instituiu a Infraestrutura de Chaves Públicas Brasileira (ICP-Brasil) e equiparou os documentos eletrônicos assinados digitalmente aos documentos físicos.</p>
+
+<p><strong>16.2.</strong> As partes reconhecem a validade jurídica, a eficácia e a força probante do presente instrumento em formato eletrônico, dispensando a necessidade de formalização em meio físico, nos termos do art. 10, §2º, da MP nº 2.200-2/2001.</p>
+
+<hr>
+
+<h2>CLÁUSULA DÉCIMA SÉTIMA - DO FORO</h2>
+
+<p><strong>17.1.</strong> Para dirimir quaisquer dúvidas ou controvérsias oriundas do presente instrumento, as partes elegem o foro da situação do imóvel, com exclusão de qualquer outro, por mais privilegiado que seja.</p>
+
+<hr>
+
+<p>E por estarem assim justas e contratadas, as partes firmam o presente instrumento em meio eletrônico, na presença das testemunhas abaixo identificadas.</p>
+
+<p>{{config.municipio_imovel}}, {{dataExtenso config.data_assinatura}}.</p>
+
+<div class="assinaturas">
+
+<h3>PROMITENTE(S) VENDEDOR(ES)</h3>
+{{#each vendedores}}
+<p>_______________________________<br>{{this.nome}}<br>CPF: {{cpf this.cpf}}</p>
+{{#if (or (eq this.estado_civil "Casado(a)") (eq this.estado_civil "União Estável"))}}
+<p>_______________________________<br>{{this.conjuge.nome}}<br>CPF: {{cpf this.conjuge.cpf}}<br>(Cônjuge/Companheiro(a))</p>
+{{/if}}
+{{/each}}
+
+<h3>PROMISSÁRIO(S) COMPRADOR(ES)</h3>
+{{#each compradores}}
+<p>_______________________________<br>{{this.nome}}<br>CPF: {{cpf this.cpf}}</p>
+{{#if (or (eq this.estado_civil "Casado(a)") (eq this.estado_civil "União Estável"))}}
+<p>_______________________________<br>{{this.conjuge.nome}}<br>CPF: {{cpf this.conjuge.cpf}}<br>(Cônjuge/Companheiro(a))</p>
+{{/if}}
+{{/each}}
+
+<h3>INTERMEDIADORA</h3>
+<p>_______________________________<br>{{comissao.imobiliaria_nome}}<br>CNPJ: {{cnpj comissao.imobiliaria_cnpj}}</p>
+
+<h3>TESTEMUNHAS</h3>
+<p>_______________________________<br>Nome: ___________________________<br>CPF: ___________________________</p>
+<p>_______________________________<br>Nome: ___________________________<br>CPF: ___________________________</p>
+
+</div>
+
+</div>

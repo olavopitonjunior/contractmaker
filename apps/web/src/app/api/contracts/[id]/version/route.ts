@@ -22,6 +22,13 @@ export async function POST(
     return NextResponse.json({ error: "Contract not found" }, { status: 404 });
   }
 
+  if (current.status === "aprovado") {
+    return NextResponse.json(
+      { error: "Contrato aprovado não pode ser versionado. Crie um novo contrato a partir do deal." },
+      { status: 403 }
+    );
+  }
+
   // Mark current as not latest
   await prisma.contract.update({
     where: { id: current.id },

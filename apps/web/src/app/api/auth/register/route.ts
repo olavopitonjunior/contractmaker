@@ -69,29 +69,30 @@ export async function POST(request: Request) {
     },
   });
 
-  // Copy default contract template from seed org (if exists)
-  const seedTemplate = await prisma.contractTemplate.findFirst({
-    where: { isDefault: true, status: "active" },
+  // Copy both default contract templates (A Vista + Financiamento)
+  const seedTemplates = await prisma.contractTemplate.findMany({
+    where: { isDefault: true, status: "active", schemaType: "compra_venda_v2" },
   });
-  if (seedTemplate) {
-    await prisma.contractTemplate.create({
-      data: {
+  if (seedTemplates.length > 0) {
+    await prisma.contractTemplate.createMany({
+      data: seedTemplates.map((t) => ({
         orgId: org.id,
-        name: seedTemplate.name,
-        description: seedTemplate.description,
-        version: seedTemplate.version,
-        schemaType: seedTemplate.schemaType,
-        handlebarsSource: seedTemplate.handlebarsSource,
+        name: t.name,
+        description: t.description,
+        version: t.version,
+        schemaType: t.schemaType,
+        handlebarsSource: t.handlebarsSource,
         isDefault: true,
         status: "active",
-      },
+        modalidade: t.modalidade,
+      })),
     });
   }
 
-  // Copy seed clauses to new org
+  // Copy all seed clauses (legacy + standard v2) to new org
   const seedClauses = await prisma.clause.findMany({
-    where: { source: "imported", status: "approved" },
-    take: 50,
+    where: { status: "approved" },
+    take: 100,
   });
   if (seedClauses.length > 0) {
     await prisma.clause.createMany({
@@ -102,6 +103,9 @@ export async function POST(request: Request) {
         title: c.title,
         content: c.content,
         description: c.description,
+        agentNotes: c.agentNotes,
+        groupCode: c.groupCode,
+        isVariable: c.isVariable,
         tags: c.tags,
         source: c.source,
         status: c.status,

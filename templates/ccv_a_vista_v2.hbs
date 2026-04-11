@@ -1,0 +1,387 @@
+<div class="contrato">
+
+<h1>INSTRUMENTO PARTICULAR DE COMPROMISSO DE VENDA E COMPRA</h1>
+<h2>Modalidade: Pagamento À Vista</h2>
+
+<hr>
+
+<h2>QUALIFICAÇÃO DAS PARTES</h2>
+
+<h3>PARTE VENDEDORA</h3>
+
+{{#each vendedores}}
+{{#if (eq this.tipo_pessoa "fisica")}}
+<p><strong>Promitente Vendedor(a):</strong></p>
+<p>
+Nome: {{this.nome}}<br>
+Nacionalidade: {{this.nacionalidade}}<br>
+Estado Civil: {{this.estado_civil}}<br>
+Profissão: {{this.profissao}}<br>
+RG: nº {{this.rg}}<br>
+CPF: nº {{cpf this.cpf}}<br>
+E-mail: {{this.email}}<br>
+Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
+</p>
+
+{{#if (or (eq this.estado_civil "Casado(a)") (eq this.estado_civil "União Estável"))}}
+<p><em>(Cônjuge/Companheiro)</em></p>
+<p>
+Nome Completo: {{this.conjuge.nome}}<br>
+CPF: {{cpf this.conjuge.cpf}}<br>
+RG: {{this.conjuge.rg}}<br>
+Nacionalidade: {{this.conjuge.nacionalidade}}<br>
+Profissão: {{this.conjuge.profissao}}
+</p>
+{{/if}}
+
+{{#if this.tem_procurador}}
+<p><em>Representado(a) por seu(sua) procurador(a):</em></p>
+<p>
+Nome: {{this.procurador.nome}}<br>
+CPF: {{cpf this.procurador.cpf}}<br>
+RG: {{this.procurador.rg}}<br>
+Endereço: {{this.procurador.endereco}}, nº {{this.procurador.numero}}, Cidade: {{this.procurador.cidade}}-{{this.procurador.uf}}
+</p>
+{{/if}}
+
+{{else}}
+<p><strong>Promitente Vendedora:</strong></p>
+<p>
+Razão Social: {{this.razao_social}}<br>
+CNPJ: nº {{cnpj this.cnpj}}<br>
+Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
+</p>
+<p>Neste ato representada por seu(s) representante(s) legal(is):</p>
+<p>
+Nome Completo: {{this.representante.nome}}<br>
+CPF: {{cpf this.representante.cpf}}<br>
+Nacionalidade: {{this.representante.nacionalidade}}<br>
+Estado Civil: {{this.representante.estado_civil}}<br>
+Profissão: {{this.representante.profissao}}
+</p>
+{{/if}}
+{{/each}}
+
+<h3>PARTE COMPRADORA</h3>
+
+{{#each compradores}}
+{{#if (eq this.tipo_pessoa "fisica")}}
+<p><strong>Promissário(a) Comprador(a):</strong></p>
+<p>
+Nome: {{this.nome}}<br>
+Nacionalidade: {{this.nacionalidade}}<br>
+Estado Civil: {{this.estado_civil}}<br>
+Profissão: {{this.profissao}}<br>
+RG: nº {{this.rg}}<br>
+CPF: nº {{cpf this.cpf}}<br>
+E-mail: {{this.email}}<br>
+Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
+</p>
+
+{{#if (or (eq this.estado_civil "Casado(a)") (eq this.estado_civil "União Estável"))}}
+<p><em>(Cônjuge/Companheiro)</em></p>
+<p>
+Nome Completo: {{this.conjuge.nome}}<br>
+CPF: {{cpf this.conjuge.cpf}}<br>
+RG: {{this.conjuge.rg}}<br>
+Nacionalidade: {{this.conjuge.nacionalidade}}<br>
+Profissão: {{this.conjuge.profissao}}
+</p>
+{{/if}}
+
+{{#if this.tem_procurador}}
+<p><em>Representado(a) por seu(sua) procurador(a):</em></p>
+<p>
+Nome: {{this.procurador.nome}}<br>
+CPF: {{cpf this.procurador.cpf}}<br>
+RG: {{this.procurador.rg}}<br>
+Endereço: {{this.procurador.endereco}}, nº {{this.procurador.numero}}, Cidade: {{this.procurador.cidade}}-{{this.procurador.uf}}
+</p>
+{{/if}}
+
+{{else}}
+<p><strong>Promissária Compradora:</strong></p>
+<p>
+Razão Social: {{this.razao_social}}<br>
+CNPJ: nº {{cnpj this.cnpj}}<br>
+Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
+</p>
+<p>Neste ato representada por seu(s) representante(s) legal(is):</p>
+<p>
+Nome Completo: {{this.representante.nome}}<br>
+CPF: {{cpf this.representante.cpf}}<br>
+Nacionalidade: {{this.representante.nacionalidade}}<br>
+Estado Civil: {{this.representante.estado_civil}}<br>
+Profissão: {{this.representante.profissao}}
+</p>
+{{/if}}
+{{/each}}
+
+<h3>INTERMEDIADORA</h3>
+
+<p>
+Imobiliária: {{comissao.imobiliaria_nome}}<br>
+CNPJ: nº {{cnpj comissao.imobiliaria_cnpj}}<br>
+CRECI: {{comissao.creci}}
+</p>
+
+<hr>
+
+<p>São partes integrantes neste instrumento as pessoas acima qualificadas, doravante denominadas simplesmente <strong>PROMITENTES VENDEDORES</strong> e <strong>PROMISSÁRIOS COMPRADORES</strong>, que, por estarem justos e contratados, celebram o presente <strong>INSTRUMENTO PARTICULAR DE COMPROMISSO DE VENDA E COMPRA</strong>, mediante as cláusulas e condições seguintes:</p>
+
+<hr>
+
+<h2>CLÁUSULA PRIMEIRA - DO OBJETO</h2>
+
+<p><strong>1.1.</strong> Os PROMITENTES VENDEDORES são legítimos proprietários e possuidores do seguinte imóvel:</p>
+
+{{#each imoveis}}
+<p>
+Endereço: {{this.rua}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Bairro: {{this.bairro}}, Cidade: {{this.cidade}} - {{this.uf}}, CEP {{cep this.cep}}<br>
+Matrícula: nº {{this.matricula}} do {{this.cartorio}}<br>
+Inscrição IPTU: nº {{this.inscricao_iptu}} junto à Prefeitura Municipal<br>
+Descrição: {{this.descricao}}
+</p>
+{{/each}}
+
+<p><strong>1.1.1.</strong> O imóvel foi adquirido pelos PROMITENTES VENDEDORES conforme {{titulo_aquisitivo}}, registrado sob {{registro_aquisitivo}} na matrícula supramencionada.</p>
+
+{{#if (existe observacao_imovel)}}
+<p><strong>1.2.</strong> {{observacao_imovel}}</p>
+{{/if}}
+
+<!-- CLAUSE_SLOT:G1 -->
+
+<hr>
+
+<h2>CLÁUSULA SEGUNDA - DO PREÇO</h2>
+
+<p><strong>2.1.</strong> O preço certo e ajustado para a presente transação é de {{moeda pagamento.valor_total}} ({{extenso pagamento.valor_total}}), que será pago da seguinte forma:</p>
+
+<p><strong>a)</strong> A título de sinal e princípio de pagamento (arras confirmatórias), o valor de {{moeda pagamento.sinal_arras}} ({{extenso pagamento.sinal_arras}}), a ser pago em até 1 (um) dia útil contado da assinatura do presente instrumento, mediante transferência bancária (TED/PIX) nas contas indicadas pelos PROMITENTES VENDEDORES.</p>
+
+<p><strong>b)</strong> O saldo remanescente de {{moeda pagamento.recursos_proprios}} ({{extenso pagamento.recursos_proprios}}), a título de recursos próprios, a ser pago à vista mediante transferência bancária (TED/PIX) nas contas indicadas pelos PROMITENTES VENDEDORES.</p>
+
+<p><strong>2.1.1.</strong> Caso o sinal estipulado na alínea "a" não seja efetivamente creditado na conta dos PROMITENTES VENDEDORES no prazo de 1 (um) dia útil contado da assinatura deste instrumento, operar-se-á a rescisão automática do presente contrato, sem qualquer ônus para quaisquer das partes, retornando-se ao <em>status quo ante</em>.</p>
+
+<p><strong>2.1.2.</strong> Todos os pagamentos deverão ser realizados exclusivamente nas contas bancárias indicadas por escrito pelos PROMITENTES VENDEDORES, servindo os comprovantes de transferência como recibos de quitação parcial ou total.</p>
+
+<!-- CLAUSE_SLOT:G1 -->
+
+<hr>
+
+<h2>CLÁUSULA TERCEIRA - DA IMISSÃO NA POSSE</h2>
+
+<p><strong>3.1.</strong> A posse direta do imóvel será transmitida aos PROMISSÁRIOS COMPRADORES em até {{config.prazo_posse_dias}} ({{extenso config.prazo_posse_dias}}) dias corridos contados do pagamento integral do preço estipulado na Cláusula Segunda, livre e desembaraçada de pessoas e coisas.</p>
+
+<p><strong>3.1.1.</strong> O atraso injustificado na entrega da posse por parte dos PROMITENTES VENDEDORES acarretará multa diária de {{moeda config.multa_diaria_posse}} ({{extenso config.multa_diaria_posse}}), sem prejuízo das demais cominações legais. Após 30 (trinta) dias de atraso, a multa diária será acrescida de 20% (vinte por cento) sobre o seu valor.</p>
+
+<p><strong>3.2.</strong> O imóvel será entregue no estado em que se encontra, tendo os PROMISSÁRIOS COMPRADORES vistoriado e aceito o bem na modalidade <em>ad corpus</em>, não cabendo reclamação posterior quanto às suas dimensões, características e estado de conservação.</p>
+
+<!-- CLAUSE_SLOT:G2 -->
+
+<hr>
+
+<h2>CLÁUSULA QUARTA - DA ESCRITURA PÚBLICA</h2>
+
+<p><strong>4.1.</strong> As partes se comprometem a lavrar a Escritura Pública de Compra e Venda no prazo de {{config.prazo_escritura_dias}} ({{extenso config.prazo_escritura_dias}}) dias corridos, contados da assinatura do presente instrumento ou do pagamento integral do preço, o que ocorrer por último.</p>
+
+<p><strong>4.2.</strong> Todas as despesas relativas à transferência da propriedade, incluindo ITBI (Imposto sobre Transmissão de Bens Imóveis), FRJ (Fundo de Reaparelhamento da Justiça), emolumentos cartorários e demais custas, serão de exclusiva responsabilidade dos PROMISSÁRIOS COMPRADORES.</p>
+
+<p><strong>4.3.</strong> O atraso doloso de qualquer das partes na lavratura da escritura pública acarretará multa diária de {{moeda config.multa_diaria_escritura}} ({{extenso config.multa_diaria_escritura}}), sem prejuízo das demais cominações contratuais e legais.</p>
+
+<p><strong>4.4.</strong> Fica assegurado aos PROMISSÁRIOS COMPRADORES o direito de adjudicação compulsória do imóvel, nos termos do artigo 1.418 do Código Civil, caso os PROMITENTES VENDEDORES se recusem injustificadamente a outorgar a escritura definitiva.</p>
+
+<hr>
+
+<h2>CLÁUSULA QUINTA - DOS TRIBUTOS E ENCARGOS</h2>
+
+<p><strong>5.1.</strong> Todos os tributos, taxas, contribuições condominiais e demais encargos incidentes sobre o imóvel serão de responsabilidade dos PROMITENTES VENDEDORES até a data da efetiva entrega das chaves e imissão na posse dos PROMISSÁRIOS COMPRADORES, passando a ser de responsabilidade destes a partir de então.</p>
+
+<p><strong>5.1.1.</strong> Os PROMISSÁRIOS COMPRADORES deverão providenciar a transferência de titularidade das contas de consumo (água, energia elétrica, gás) e demais cadastros perante a Prefeitura Municipal e administradora condominial no prazo de 30 (trinta) dias contados da imissão na posse.</p>
+
+<hr>
+
+<h2>CLÁUSULA SEXTA - DA DOCUMENTAÇÃO</h2>
+
+<p><strong>6.1.</strong> Os PROMITENTES VENDEDORES se obrigam a entregar aos PROMISSÁRIOS COMPRADORES, no prazo de 7 (sete) dias corridos contados da assinatura do presente instrumento, a seguinte documentação:</p>
+
+<p><strong>a) Do imóvel:</strong></p>
+<ul>
+<li>Certidão de matrícula atualizada (emitida há no máximo 30 dias);</li>
+<li>Certidão Negativa de Débitos de IPTU;</li>
+<li>Declaração de quitação condominial (se aplicável);</li>
+<li>Certidões negativas de concessionárias (água, energia, gás).</li>
+</ul>
+
+<p><strong>b) Pessoais dos vendedores:</strong></p>
+<ul>
+<li>Cópias de RG e CPF;</li>
+<li>Certidão de estado civil atualizada;</li>
+<li>Consulta ao CENPROT (Central Nacional de Protesto);</li>
+<li>Certidões dos distribuidores cíveis e criminais da Justiça Estadual e Federal;</li>
+<li>Certidão de feitos da Justiça do Trabalho;</li>
+<li>Certidão Negativa de Débitos Federais.</li>
+</ul>
+
+<p><strong>6.2.</strong> Na hipótese de constar certidão positiva em nome dos PROMITENTES VENDEDORES, estes deverão apresentar esclarecimentos detalhados e demonstrar que seu patrimônio residual é suficiente para fazer frente às obrigações, sob pena de rescisão justificada pelos PROMISSÁRIOS COMPRADORES.</p>
+
+<p><strong>6.3.</strong> O atraso na entrega da documentação por parte dos PROMITENTES VENDEDORES autorizará os PROMISSÁRIOS COMPRADORES a suspenderem quaisquer pagamentos pendentes pelo prazo de até 15 (quinze) dias, sem configuração de mora, até a regularização documental.</p>
+
+<p><strong>6.4.</strong> As certidões deverão ser obtidas tanto na comarca de situação do imóvel quanto na comarca de residência dos PROMITENTES VENDEDORES, quando diversas.</p>
+
+<hr>
+
+<h2>CLÁUSULA SÉTIMA - DA IRREVOGABILIDADE E IRRETRATABILIDADE</h2>
+
+<p><strong>7.1.</strong> O presente instrumento é celebrado em caráter irrevogável e irretratável, obrigando as partes, seus herdeiros e sucessores, renunciando expressamente à faculdade de arrependimento prevista no artigo 420 do Código Civil.</p>
+
+<hr>
+
+<h2>CLÁUSULA OITAVA - DA INADIMPLÊNCIA</h2>
+
+<p><strong>8.1.</strong> O inadimplemento de qualquer obrigação pecuniária prevista neste contrato sujeitará a parte infratora ao pagamento de:</p>
+<ul>
+<li>Multa moratória de 2% (dois por cento) sobre o valor da obrigação inadimplida;</li>
+<li>Juros moratórios de 1% (um por cento) ao mês, calculados <em>pro rata die</em>;</li>
+<li>Correção monetária pelo IPCA/IBGE desde a data do vencimento.</li>
+</ul>
+
+<p><strong>8.1.1.</strong> Transcorrido o prazo de 15 (quinze) dias sem a purgação da mora, a parte credora poderá optar pela rescisão contratual, nos termos da Cláusula Nona, ou pela execução forçada das obrigações.</p>
+
+<!-- CLAUSE_SLOT:G3 -->
+
+<hr>
+
+<h2>CLÁUSULA NONA - DA RESCISÃO</h2>
+
+<p><strong>9.1.</strong> Configurada a inadimplência nos termos da Cláusula Oitava, a parte inadimplente terá o prazo adicional de 15 (quinze) dias para purgação da mora, contados da notificação extrajudicial enviada pela parte credora.</p>
+
+<p><strong>9.2.</strong> Na hipótese de rescisão por culpa dos PROMISSÁRIOS COMPRADORES, os PROMITENTES VENDEDORES reterão 5% (cinco por cento) do valor total do contrato a título de perdas e danos pré-fixadas, devolvendo o saldo remanescente em até 30 (trinta) dias.</p>
+
+<p><strong>9.3.</strong> Na hipótese de rescisão por culpa dos PROMITENTES VENDEDORES, estes deverão devolver integralmente todos os valores recebidos, acrescidos de 5% (cinco por cento) do valor total do contrato a título de perdas e danos pré-fixadas, no prazo de 30 (trinta) dias.</p>
+
+<p><strong>9.4.</strong> O atraso na devolução dos valores devidos por força de rescisão contratual acarretará multa diária de R$ 500,00 (quinhentos reais), além dos encargos moratórios previstos na Cláusula Oitava.</p>
+
+<!-- CLAUSE_SLOT:G3 -->
+
+<hr>
+
+<h2>CLÁUSULA DÉCIMA - DAS DECLARAÇÕES</h2>
+
+<p><strong>10.1.</strong> Os PROMITENTES VENDEDORES declaram, sob as penas da lei:</p>
+<ul>
+<li>Que o imóvel objeto deste contrato encontra-se livre e desembaraçado de quaisquer ônus reais, gravames, penhoras, arrestos, sequestros, usufrutos, servidões ou quaisquer outros impedimentos;</li>
+<li>Que não existem ações reais ou pessoais reipersecutórias que possam afetar o imóvel ou os direitos dos PROMISSÁRIOS COMPRADORES;</li>
+<li>Que respondem integralmente pela evicção, nos termos dos artigos 447 a 457 do Código Civil;</li>
+<li>Que a presente alienação não os reduz à insolvência, possuindo patrimônio suficiente para fazer frente a eventuais obrigações, inclusive de natureza societária.</li>
+</ul>
+
+<p><strong>10.2.</strong> As partes declaram ter lido integralmente o presente contrato, estando cientes de todos os seus termos e condições, firmando-o de livre e espontânea vontade, nos termos do artigo 54 da Lei nº 13.097/2015.</p>
+
+<p><strong>10.3.</strong> A presente venda é realizada na modalidade <em>ad corpus</em>, sendo meramente enunciativas as referências a medidas e confrontações do imóvel, prevalecendo a área existente sobre a área mencionada em eventual descrição.</p>
+
+<!-- CLAUSE_SLOT:G6 -->
+
+<hr>
+
+<h2>CLÁUSULA DÉCIMA PRIMEIRA - DA COMISSÃO</h2>
+
+<p><strong>11.1.</strong> A comissão de intermediação imobiliária devida à INTERMEDIADORA é de {{moeda comissao.valor}} ({{extenso comissao.valor}}), correspondente a {{comissao.percentual}}% ({{extenso comissao.percentual}} por cento) do valor total da transação, a ser paga na forma e condições ajustadas entre as partes.</p>
+
+<p><strong>11.2.</strong> Em caso de rescisão contratual, a responsabilidade pelo pagamento da comissão será de quem der causa ao desfazimento do negócio, nos termos do artigo 723 do Código Civil.</p>
+
+<p><strong>11.3.</strong> O atraso no pagamento da comissão sujeitará o devedor ao pagamento de multa de 2% (dois por cento) sobre o valor devido, acrescida de correção monetária pelo IPCA/IBGE e juros moratórios de 1% (um por cento) ao mês.</p>
+
+<p><strong>11.4.</strong> A responsabilidade da INTERMEDIADORA limita-se exclusivamente à intermediação do negócio, não respondendo por obrigações assumidas pelas partes neste instrumento.</p>
+
+<!-- CLAUSE_SLOT:G5 -->
+
+<hr>
+
+<h2>CLÁUSULA DÉCIMA SEGUNDA - DA LGPD</h2>
+
+<p><strong>12.1.</strong> As partes declaram ciência e concordância com o tratamento de seus dados pessoais para fins de execução do presente contrato, em conformidade com a Lei nº 13.709/2018 (Lei Geral de Proteção de Dados Pessoais), observados os princípios estabelecidos em seu artigo 6º, especialmente os de finalidade, adequação, necessidade, livre acesso, qualidade dos dados, transparência, segurança, prevenção e não discriminação.</p>
+
+<hr>
+
+<h2>CLÁUSULA DÉCIMA TERCEIRA - DAS COMUNICAÇÕES</h2>
+
+<p><strong>13.1.</strong> Todas as comunicações, notificações e interpelações entre as partes deverão ser realizadas por escrito, sendo considerados válidos os seguintes meios: e-mail, aplicativo de mensagens instantâneas (WhatsApp) e notificação judicial ou extrajudicial, sempre direcionados aos endereços e contatos informados na qualificação das partes.</p>
+
+<hr>
+
+<h2>CLÁUSULA DÉCIMA QUARTA - DA CONTRATAÇÃO ELETRÔNICA</h2>
+
+<p><strong>14.1.</strong> O presente instrumento particular, firmado por meio eletrônico, constitui título executivo extrajudicial para todos os fins de direito, nos termos da Medida Provisória nº 2.200-2/2001, que instituiu a Infraestrutura de Chaves Públicas Brasileira (ICP-Brasil), e do artigo 784, inciso III, do Código de Processo Civil.</p>
+
+<p><strong>14.2.</strong> As partes reconhecem que este contrato será considerado assinado e vinculante após a aposição de assinatura eletrônica por todas as partes envolvidas, produzindo todos os seus efeitos legais a partir de então.</p>
+
+<hr>
+
+<h2>CLÁUSULA DÉCIMA QUINTA - DO FORO</h2>
+
+<p><strong>15.1.</strong> Para dirimir quaisquer dúvidas ou controvérsias oriundas do presente contrato, as partes elegem o foro da situação do imóvel, com exclusão de qualquer outro, por mais privilegiado que seja.</p>
+
+<hr>
+
+<p>E por estarem assim justos e contratados, firmam o presente instrumento em meio eletrônico.</p>
+
+<p>{{config.municipio_imovel}}, {{dataExtenso config.data_assinatura}}.</p>
+
+<div class="assinaturas">
+
+<h3>PROMITENTES VENDEDORES</h3>
+{{#each vendedores}}
+<p>
+_______________________________<br>
+{{this.nome}}<br>
+{{#if (eq this.tipo_pessoa "fisica")}}
+CPF: {{cpf this.cpf}}
+{{else}}
+CNPJ: {{cnpj this.cnpj}}<br>
+Representante: {{this.representante.nome}}
+{{/if}}
+</p>
+{{#if (or (eq this.estado_civil "Casado(a)") (eq this.estado_civil "União Estável"))}}
+<p>
+_______________________________<br>
+{{this.conjuge.nome}}<br>
+CPF: {{cpf this.conjuge.cpf}}<br>
+(Cônjuge/Companheiro(a))
+</p>
+{{/if}}
+{{/each}}
+
+<h3>PROMISSÁRIOS COMPRADORES</h3>
+{{#each compradores}}
+<p>
+_______________________________<br>
+{{this.nome}}<br>
+{{#if (eq this.tipo_pessoa "fisica")}}
+CPF: {{cpf this.cpf}}
+{{else}}
+CNPJ: {{cnpj this.cnpj}}<br>
+Representante: {{this.representante.nome}}
+{{/if}}
+</p>
+{{#if (or (eq this.estado_civil "Casado(a)") (eq this.estado_civil "União Estável"))}}
+<p>
+_______________________________<br>
+{{this.conjuge.nome}}<br>
+CPF: {{cpf this.conjuge.cpf}}<br>
+(Cônjuge/Companheiro(a))
+</p>
+{{/if}}
+{{/each}}
+
+<h3>INTERMEDIADORA</h3>
+<p>
+_______________________________<br>
+{{comissao.imobiliaria_nome}}<br>
+CNPJ: {{cnpj comissao.imobiliaria_cnpj}}
+</p>
+
+</div>
+
+</div>
