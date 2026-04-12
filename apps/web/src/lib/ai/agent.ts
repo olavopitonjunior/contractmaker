@@ -6,7 +6,14 @@ import { executeToolHandler } from "./tool-handlers";
 import { DEFAULT_SYSTEM_PROMPT, buildContextMessage } from "./prompts";
 import type { AgentContext, AgentResult, ChangeLogEntry } from "./types";
 
-const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+function getAnthropicClient() {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error("ANTHROPIC_API_KEY não configurada. Adicione a chave no .env");
+  }
+  return new Anthropic({ apiKey });
+}
+const anthropic = getAnthropicClient();
 
 interface AgentParams {
   message: string;

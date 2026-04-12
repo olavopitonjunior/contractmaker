@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
+import { generateContractForDeal } from "@/lib/services/contract-generation";
 
 // GET: public - fetch form data by token
 export async function GET(
@@ -43,18 +44,39 @@ export async function PATCH(
   const currentData = (form.dataJson as Record<string, unknown>) || {};
   const mergedData = { ...currentData, ...body.dataJson };
 
+  const previousStatus = form.status;
+  const newStatus = body.status ?? form.status;
+
   const updated = await prisma.salesForm.update({
     where: { token: params.token },
     data: {
       dataJson: mergedData,
       title: body.title ?? form.title,
-      status: body.status ?? form.status,
+      status: newStatus,
     },
   });
+
+  // Auto-generate contract when form is completed
+  let contractId: string | null = null;
+  if (newStatus === "completo" && previousStatus !== "completo") {
+    const deal = await prisma.deal.findFirst({
+      where: { formId: form.id },
+    });
+
+    if (deal) {
+      try {
+        const result = await generateContractForDeal(deal.id, deal.userId, form.orgId);
+        contractId = result.contractId;
+      } catch (error) {
+        console.error("Auto-generate contract failed:", error);
+      }
+    }
+  }
 
   return NextResponse.json({
     id: updated.id,
     status: updated.status,
     updatedAt: updated.updatedAt,
+    contractId,
   });
 }

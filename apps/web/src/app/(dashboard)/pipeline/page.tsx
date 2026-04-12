@@ -4,7 +4,7 @@ import { KanbanBoard } from "@/components/pipeline/KanbanBoard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import Link from "next/link";
-import { Plus, ClipboardList, TrendingUp, DollarSign, BarChart3 } from "lucide-react";
+import { Plus, TrendingUp, DollarSign, BarChart3 } from "lucide-react";
 
 export default async function PipelinePage() {
   const session = await auth();
@@ -49,9 +49,9 @@ export default async function PipelinePage() {
   const allDeals = pipeline.stages.flatMap((s) => s.deals);
   const totalDeals = allDeals.length;
   const totalValue = allDeals.reduce((sum, d) => sum + (d.value || 0), 0);
-  const wonStage = pipeline.stages.find((s) => s.name === "Fechado Ganho");
-  const wonDeals = wonStage?.deals.length || 0;
-  const conversionRate = totalDeals > 0 ? Math.round((wonDeals / totalDeals) * 100) : 0;
+  const concludedStage = pipeline.stages.find((s) => s.name === "Concluido");
+  const concludedDeals = concludedStage?.deals.length || 0;
+  const conversionRate = totalDeals > 0 ? Math.round((concludedDeals / totalDeals) * 100) : 0;
 
   const stages = pipeline.stages.map((stage) => ({
     id: stage.id,
@@ -72,20 +72,12 @@ export default async function PipelinePage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Pipeline de Vendas</h1>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" asChild>
-            <Link href="/forms">
-              <ClipboardList className="mr-1.5 h-4 w-4" />
-              Formularios
-            </Link>
-          </Button>
-          <Button size="sm" asChild>
-            <Link href="/forms/new">
-              <Plus className="mr-1.5 h-4 w-4" />
-              Novo Formulario
-            </Link>
-          </Button>
-        </div>
+        <Button size="sm" asChild>
+          <Link href="/forms/new">
+            <Plus className="mr-1.5 h-4 w-4" />
+            Novo Formulario
+          </Link>
+        </Button>
       </div>
 
       {/* Metrics */}

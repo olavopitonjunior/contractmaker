@@ -43,33 +43,42 @@ export function ChatPanel({ contractId, messages: initialMessages, onContentUpda
       { id: `temp-${Date.now()}`, role: "user", content: userMessage },
     ]);
 
-    const res = await fetch(`/api/contracts/${contractId}/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ message: userMessage }),
-    });
+    try {
+      const res = await fetch(`/api/contracts/${contractId}/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: userMessage }),
+      });
 
-    const data = await res.json();
-    setLoading(false);
+      const data = await res.json();
 
-    if (res.ok) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `ai-${Date.now()}`,
-          role: "assistant",
-          content: data.message || data.assistantText || "Feito!",
-        },
-      ]);
+      if (res.ok) {
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `ai-${Date.now()}`,
+            role: "assistant",
+            content: data.message || data.assistantText || "Feito!",
+          },
+        ]);
 
-      if (data.htmlContent && onContentUpdate) {
-        onContentUpdate(data.htmlContent);
+        if (data.htmlContent && onContentUpdate) {
+          onContentUpdate(data.htmlContent);
+        }
+      } else {
+        const errorMsg = data.error || `Erro ${res.status}: falha ao processar mensagem.`;
+        setMessages((prev) => [
+          ...prev,
+          { id: `err-${Date.now()}`, role: "assistant", content: errorMsg },
+        ]);
       }
-    } else {
+    } catch (err: any) {
       setMessages((prev) => [
         ...prev,
-        { id: `err-${Date.now()}`, role: "assistant", content: "Erro ao processar mensagem." },
+        { id: `err-${Date.now()}`, role: "assistant", content: `Erro de conexao: ${err.message}` },
       ]);
+    } finally {
+      setLoading(false);
     }
   }
 

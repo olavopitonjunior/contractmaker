@@ -51,12 +51,10 @@ async function main() {
         name: "Pipeline Principal",
         stages: {
           create: [
-            { name: "Novo Lead", color: "#6366f1", position: 0 },
-            { name: "Qualificacao", color: "#f59e0b", position: 1 },
-            { name: "Proposta", color: "#3b82f6", position: 2 },
-            { name: "Contrato", color: "#8b5cf6", position: 3 },
-            { name: "Fechado Ganho", color: "#22c55e", position: 4 },
-            { name: "Fechado Perdido", color: "#ef4444", position: 5 },
+            { name: "Formulario", color: "#6366f1", position: 0 },
+            { name: "Confeccao de Contrato", color: "#f59e0b", position: 1 },
+            { name: "Assinatura", color: "#3b82f6", position: 2 },
+            { name: "Concluido", color: "#22c55e", position: 3 },
           ],
         },
       },

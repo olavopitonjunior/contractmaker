@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { FileText, Plus, ExternalLink, ArrowLeft } from "lucide-react";
+import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2 } from "lucide-react";
+import { toast } from "sonner";
 import Link from "next/link";
 
 interface DealDetailProps {
@@ -26,6 +27,7 @@ interface DealDetailProps {
 export function DealDetail({ deal }: DealDetailProps) {
   const router = useRouter();
   const [generating, setGenerating] = useState(false);
+  const [signing, setSigning] = useState(false);
 
   async function handleGenerateContract() {
     setGenerating(true);
@@ -37,6 +39,27 @@ export function DealDetail({ deal }: DealDetailProps) {
     setGenerating(false);
     if (res.ok) {
       router.push(`/contracts/${data.contractId}`);
+    }
+  }
+
+  async function handleMarkSigned() {
+    setSigning(true);
+    try {
+      const res = await fetch(
+        `/api/pipeline/deals/${deal.id}/mark-signed`,
+        { method: "POST" }
+      );
+      if (res.ok) {
+        toast.success("Negocio marcado como assinado e movido para Concluido!");
+        router.refresh();
+      } else {
+        const data = await res.json();
+        toast.error(data.error || "Erro ao marcar como assinado");
+      }
+    } catch {
+      toast.error("Erro de conexao");
+    } finally {
+      setSigning(false);
     }
   }
 
@@ -89,6 +112,18 @@ export function DealDetail({ deal }: DealDetailProps) {
             <FileText className="h-4 w-4 mr-1" />
             {generating ? "Gerando..." : "Confeccionar Contrato"}
           </Button>
+          {deal.stage.name === "Assinatura" && (
+            <Button
+              size="sm"
+              variant="default"
+              className="bg-green-600 hover:bg-green-700"
+              onClick={handleMarkSigned}
+              disabled={signing}
+            >
+              <CheckCircle2 className="h-4 w-4 mr-1" />
+              {signing ? "Processando..." : "Marcar como Assinado"}
+            </Button>
+          )}
         </div>
       </div>
 

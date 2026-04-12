@@ -12,10 +12,11 @@ interface FormsActionsProps {
   token: string;
   status: string;
   hasDeal: boolean;
+  dealId?: string | null;
   title: string | null;
 }
 
-export function FormsActions({ formId, token, status, hasDeal, title }: FormsActionsProps) {
+export function FormsActions({ formId, token, status, hasDeal, dealId, title }: FormsActionsProps) {
   const router = useRouter();
   const [copied, setCopied] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -70,6 +71,13 @@ export function FormsActions({ formId, token, status, hasDeal, title }: FormsAct
         )}
         {copied ? "Copiado!" : "Copiar"}
       </Button>
+      {hasDeal && dealId && (
+        <Button size="sm" variant="outline" asChild>
+          <Link href={`/deals/${dealId}`}>
+            Ver Negocio
+          </Link>
+        </Button>
+      )}
       {status === "completo" && !hasDeal && (
         <Button
           size="sm"

@@ -25,10 +25,37 @@ export async function POST(request: Request) {
     },
   });
 
+  // Auto-create deal in "Formulario" stage
+  let dealId: string | null = null;
+  const pipeline = await prisma.pipeline.findFirst({
+    where: { orgId: org.id },
+    include: { stages: { orderBy: { position: "asc" } } },
+  });
+
+  if (pipeline && pipeline.stages.length > 0) {
+    const formularioStage = pipeline.stages.find((s) => s.name === "Formulario") || pipeline.stages[0];
+    const dealsInStage = await prisma.deal.count({
+      where: { stageId: formularioStage.id },
+    });
+
+    const deal = await prisma.deal.create({
+      data: {
+        pipelineId: pipeline.id,
+        stageId: formularioStage.id,
+        userId: session.user.id,
+        formId: form.id,
+        title: body.title || `Negocio - ${form.token.slice(0, 8)}`,
+        position: dealsInStage,
+      },
+    });
+    dealId = deal.id;
+  }
+
   return NextResponse.json({
     id: form.id,
     token: form.token,
     url: `/f/${form.token}`,
+    dealId,
   }, { status: 201 });
 }
 

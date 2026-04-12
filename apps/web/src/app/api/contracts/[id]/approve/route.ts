@@ -57,5 +57,22 @@ export async function POST(
     },
   });
 
+  // Auto-move deal to "Assinatura" stage
+  if (contract.dealId) {
+    const deal = await prisma.deal.findUnique({
+      where: { id: contract.dealId },
+      include: { pipeline: { include: { stages: { orderBy: { position: "asc" } } } } },
+    });
+    if (deal?.pipeline) {
+      const assinaturaStage = deal.pipeline.stages.find((s) => s.name === "Assinatura");
+      if (assinaturaStage) {
+        await prisma.deal.update({
+          where: { id: deal.id },
+          data: { stageId: assinaturaStage.id },
+        });
+      }
+    }
+  }
+
   return NextResponse.json({ status: "aprovado" });
 }

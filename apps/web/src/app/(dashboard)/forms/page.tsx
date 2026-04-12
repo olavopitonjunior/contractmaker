@@ -83,6 +83,7 @@ export default async function FormsPage() {
                   token={form.token}
                   status={form.status}
                   hasDeal={!!form.deal}
+                  dealId={form.deal?.id}
                   title={form.title}
                 />
               </CardContent>

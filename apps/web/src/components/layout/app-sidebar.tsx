@@ -24,13 +24,11 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   LayoutDashboard,
-  FileText,
   BookOpen,
   FileStack,
   Settings,
   LogOut,
   ChevronUp,
-  ClipboardList,
 } from "lucide-react";
 
 const navItems = [
@@ -38,16 +36,6 @@ const navItems = [
     title: "Pipeline",
     url: "/pipeline",
     icon: LayoutDashboard,
-  },
-  {
-    title: "Formularios",
-    url: "/forms",
-    icon: ClipboardList,
-  },
-  {
-    title: "Contratos",
-    url: "/contracts",
-    icon: FileText,
   },
   {
     title: "Clausulas",
