@@ -157,16 +157,16 @@ export function PosseTituloStep({ form }: PosseTituloStepProps) {
         </CardContent>
       </Card>
 
-      {/* Titulo Definitivo */}
+      {/* Título Definitivo */}
       <Card className="border border-border">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-semibold">
-            Titulo Definitivo (Escritura)
+            Título Definitivo (Escritura)
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="Opcao para emissao do titulo">
+            <FormField label="Opção para emissao do titulo">
               <Select
                 value={form.watch("titulo_definitivo.opcao") || "certidoes-apos"}
                 onValueChange={(v) =>

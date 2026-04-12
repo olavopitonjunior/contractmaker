@@ -23,11 +23,11 @@ export default async function FormsPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Formularios</h1>
+        <h1 className="text-2xl font-semibold">Formulários</h1>
         <Button asChild>
           <Link href="/forms/new">
             <Plus className="mr-2 h-4 w-4" />
-            Novo Formulario
+            Novo Formulário
           </Link>
         </Button>
       </div>
@@ -39,7 +39,7 @@ export default async function FormsPage() {
               Nenhum formulario criado ainda.
             </p>
             <Button asChild>
-              <Link href="/forms/new">Criar Primeiro Formulario</Link>
+              <Link href="/forms/new">Criar Primeiro Formulário</Link>
             </Button>
           </CardContent>
         </Card>
@@ -49,7 +49,7 @@ export default async function FormsPage() {
             <Card key={form.id}>
               <CardHeader className="flex flex-row items-center justify-between pb-2">
                 <CardTitle className="text-sm font-medium truncate mr-2">
-                  {form.title || `Formulario ${form.token.slice(0, 8)}...`}
+                  {form.title || `Formulário ${form.token.slice(0, 8)}...`}
                 </CardTitle>
                 <Badge
                   variant={
@@ -69,7 +69,7 @@ export default async function FormsPage() {
                 </p>
                 {form.deal && (
                   <p className="text-xs text-muted-foreground mb-3">
-                    Negocio:{" "}
+                    Negócio:{" "}
                     <Link
                       href={`/deals/${form.deal.id}`}
                       className="text-primary hover:underline"

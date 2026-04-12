@@ -30,18 +30,18 @@ export async function POST(
 
   if (deal.stage.name !== "Assinatura") {
     return NextResponse.json(
-      { error: "Deal precisa estar no estagio Assinatura" },
+      { error: "Negócio precisa estar no estágio Assinatura" },
       { status: 400 }
     );
   }
 
   const concluidoStage = deal.pipeline.stages.find(
-    (s) => s.name === "Concluido"
+    (s) => s.name === "Concluído"
   );
 
   if (!concluidoStage) {
     return NextResponse.json(
-      { error: "Estagio Concluido nao encontrado" },
+      { error: "Estágio Concluído não encontrado" },
       { status: 400 }
     );
   }

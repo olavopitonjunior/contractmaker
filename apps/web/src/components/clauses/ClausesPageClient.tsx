@@ -12,7 +12,7 @@ const GROUP_LABELS: Record<string, string> = {
   G2: "G2 — Imissao na Posse",
   G3: "G3 — Rescisao e Condicao Resolutiva",
   G4: "G4 — Financiamento e Registro",
-  G5: "G5 — Comissao de Corretagem",
+  G5: "G5 — Comissão de Corretagem",
   G6: "G6 — Declaracoes e Disposicoes Especiais",
 };
 
@@ -77,10 +77,10 @@ export function ClausesPageClient({ clauses }: ClausesPageClientProps) {
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Biblioteca de Clausulas</h1>
+        <h1 className="text-2xl font-semibold">Biblioteca de Cláusulas</h1>
         <Button size="sm" onClick={handleCreate}>
           <Plus className="mr-1.5 h-4 w-4" />
-          Nova Clausula
+          Nova Cláusula
         </Button>
       </div>
 
@@ -88,7 +88,7 @@ export function ClausesPageClient({ clauses }: ClausesPageClientProps) {
       {Object.keys(groupedVariable).length > 0 && (
         <div className="space-y-6">
           <h2 className="text-lg font-semibold text-primary">
-            Banco de Clausulas Padronizadas
+            Banco de Cláusulas Padronizadas
           </h2>
 
           {["G1", "G2", "G3", "G4", "G5", "G6"].map((groupCode) => {
@@ -137,7 +137,7 @@ export function ClausesPageClient({ clauses }: ClausesPageClientProps) {
                         {clause.agentNotes && (
                           <details className="text-xs text-muted-foreground">
                             <summary className="cursor-pointer font-medium">
-                              Orientacao de uso
+                              Orientação de uso
                             </summary>
                             <p className="mt-1 pl-2 border-l-2 border-muted">
                               {clause.agentNotes}
@@ -158,7 +158,7 @@ export function ClausesPageClient({ clauses }: ClausesPageClientProps) {
       {Object.keys(groupedFixed).length > 0 && (
         <div className="space-y-6">
           <h2 className="text-lg font-semibold text-muted-foreground">
-            Clausulas Base
+            Cláusulas Base
           </h2>
 
           {Object.entries(groupedFixed).map(([category, items]) => (

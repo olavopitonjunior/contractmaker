@@ -81,7 +81,7 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
         toast.error(data.error || "Erro ao salvar template");
       }
     } catch {
-      toast.error("Erro de conexao");
+      toast.error("Erro de conexão");
     } finally {
       setSaving(false);
     }
@@ -119,7 +119,7 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
           <Input id="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: CCV - Pagamento A Vista" />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="version">Versao</Label>
+          <Label htmlFor="version">Versão</Label>
           <Input id="version" value={version} onChange={(e) => setVersion(e.target.value)} placeholder="1.0.0" />
         </div>
         <div className="space-y-2">
@@ -141,8 +141,8 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
       </div>
 
       <div className="space-y-2">
-        <Label htmlFor="description">Descricao</Label>
-        <Input id="description" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Descricao breve do template" />
+        <Label htmlFor="description">Descrição</Label>
+        <Input id="description" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Descrição breve do template" />
       </div>
 
       <div className="space-y-2">
@@ -159,7 +159,7 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
       <div className="flex gap-2">
         <Button onClick={handleSave} disabled={saving}>
           <Save className="h-4 w-4 mr-1" />
-          {saving ? "Salvando..." : mode === "create" ? "Criar Template" : "Salvar Alteracoes"}
+          {saving ? "Salvando..." : mode === "create" ? "Criar Template" : "Salvar Alterações"}
         </Button>
 
         {mode === "edit" && (

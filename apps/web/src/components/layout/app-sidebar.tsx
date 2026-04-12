@@ -38,7 +38,7 @@ const navItems = [
     icon: LayoutDashboard,
   },
   {
-    title: "Clausulas",
+    title: "Cláusulas",
     url: "/clauses",
     icon: BookOpen,
   },
@@ -48,7 +48,7 @@ const navItems = [
     icon: FileStack,
   },
   {
-    title: "Configuracoes",
+    title: "Configurações",
     url: "/settings",
     icon: Settings,
   },
@@ -130,7 +130,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
                 <DropdownMenuItem asChild>
                   <Link href="/settings">
                     <Settings className="mr-2 h-4 w-4" />
-                    Configuracoes
+                    Configurações
                   </Link>
                 </DropdownMenuItem>
                 <DropdownMenuItem

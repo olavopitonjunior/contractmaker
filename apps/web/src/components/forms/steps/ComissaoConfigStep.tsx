@@ -12,15 +12,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { UFSelect } from "@/components/forms/UFSelect";
 
 interface ComissaoConfigStepProps {
   form: UseFormReturn<any>;
 }
-
-const UF_LIST = [
-  "AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG",
-  "PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO",
-];
 
 function FormField({
   label,
@@ -83,16 +79,16 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
 
   return (
     <div className="space-y-4">
-      {/* Comissao */}
+      {/* Comissão */}
       <Card className="border border-border">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-semibold">
-            Comissao Imobiliaria
+            Comissão Imobiliaria
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="Valor da Comissao (R$)">
+            <FormField label="Valor da Comissão (R$)">
               <Input
                 type="number"
                 step="0.01"
@@ -102,7 +98,7 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
               />
             </FormField>
 
-            <FormField label="Quem Paga a Comissao">
+            <FormField label="Quem Paga a Comissão">
               <Select
                 value={quemPaga || "comprador"}
                 onValueChange={(v) => {
@@ -137,7 +133,7 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
               </FormField>
             )}
 
-            <FormField label="Quando Paga a Comissao">
+            <FormField label="Quando Paga a Comissão">
               <Select
                 value={quandoPaga || "assinatura"}
                 onValueChange={(v) => form.setValue("comissao.quando_paga", v)}
@@ -187,7 +183,7 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
       <Card className="border border-border">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-semibold">
-            Clausula de Desistencia
+            Cláusula de Desistencia
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -254,21 +250,10 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
               />
             </FormField>
             <FormField label="UF">
-              <Select
-                value={form.watch("assinatura.uf") || ""}
-                onValueChange={(v) => form.setValue("assinatura.uf", v)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="UF" />
-                </SelectTrigger>
-                <SelectContent>
-                  {UF_LIST.map((uf) => (
-                    <SelectItem key={uf} value={uf}>
-                      {uf}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <UFSelect
+                value={form.watch("assinatura.uf")}
+                onChange={(v) => form.setValue("assinatura.uf", v, { shouldDirty: true })}
+              />
             </FormField>
             <FormField label="Data">
               <Input type="date" {...form.register("assinatura.data")} />
@@ -308,11 +293,11 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
         </CardContent>
       </Card>
 
-      {/* Configuracoes Contratuais */}
+      {/* Configurações Contratuais */}
       <Card className="border border-border">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-semibold">
-            Configuracoes Contratuais
+            Configurações Contratuais
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">

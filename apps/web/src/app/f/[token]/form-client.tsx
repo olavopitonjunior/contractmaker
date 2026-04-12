@@ -15,7 +15,7 @@ export function FormPageClient({ token, initialData }: FormPageClientProps) {
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
             CM
           </div>
-          <h1 className="text-lg font-semibold">Formulario de Venda</h1>
+          <h1 className="text-lg font-semibold">Formulário de Venda</h1>
         </div>
       </header>
       <main className="mx-auto max-w-4xl p-6">

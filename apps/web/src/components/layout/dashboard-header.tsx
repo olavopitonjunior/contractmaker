@@ -9,17 +9,17 @@ import { Search, Bell } from "lucide-react";
 
 const BREADCRUMB_MAP: Record<string, string> = {
   "/pipeline": "Pipeline de Vendas",
-  "/forms": "Formularios",
-  "/forms/new": "Novo Formulario",
+  "/forms": "Formulários",
+  "/forms/new": "Novo Formulário",
   "/contracts": "Contratos",
-  "/clauses": "Biblioteca de Clausulas",
+  "/clauses": "Biblioteca de Cláusulas",
   "/templates": "Templates",
-  "/settings": "Configuracoes",
+  "/settings": "Configurações",
 };
 
 function getBreadcrumb(pathname: string): string {
   if (BREADCRUMB_MAP[pathname]) return BREADCRUMB_MAP[pathname];
-  if (pathname.startsWith("/deals/")) return "Detalhe do Negocio";
+  if (pathname.startsWith("/deals/")) return "Detalhe do Negócio";
   if (pathname.startsWith("/contracts/")) return "Editor de Contrato";
   return "Dashboard";
 }

@@ -4,13 +4,15 @@ import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Send } from "lucide-react";
+import { Send, RotateCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Message {
   id: string;
   role: string;
   content: string;
+  isError?: boolean;
+  retryPayload?: string;
 }
 
 interface ChatPanelProps {
@@ -31,18 +33,8 @@ export function ChatPanel({ contractId, messages: initialMessages, onContentUpda
     }
   }, [messages]);
 
-  async function handleSend() {
-    if (!input.trim() || loading) return;
-
-    const userMessage = input.trim();
-    setInput("");
+  async function sendMessage(userMessage: string) {
     setLoading(true);
-
-    setMessages((prev) => [
-      ...prev,
-      { id: `temp-${Date.now()}`, role: "user", content: userMessage },
-    ]);
-
     try {
       const res = await fetch(`/api/contracts/${contractId}/chat`, {
         method: "POST",
@@ -69,17 +61,45 @@ export function ChatPanel({ contractId, messages: initialMessages, onContentUpda
         const errorMsg = data.error || `Erro ${res.status}: falha ao processar mensagem.`;
         setMessages((prev) => [
           ...prev,
-          { id: `err-${Date.now()}`, role: "assistant", content: errorMsg },
+          {
+            id: `err-${Date.now()}`,
+            role: "assistant",
+            content: errorMsg,
+            isError: true,
+            retryPayload: userMessage,
+          },
         ]);
       }
     } catch (err: any) {
       setMessages((prev) => [
         ...prev,
-        { id: `err-${Date.now()}`, role: "assistant", content: `Erro de conexao: ${err.message}` },
+        {
+          id: `err-${Date.now()}`,
+          role: "assistant",
+          content: `Erro de conexão: ${err.message}`,
+          isError: true,
+          retryPayload: userMessage,
+        },
       ]);
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleSend() {
+    if (!input.trim() || loading) return;
+    const userMessage = input.trim();
+    setInput("");
+    setMessages((prev) => [
+      ...prev,
+      { id: `temp-${Date.now()}`, role: "user", content: userMessage },
+    ]);
+    await sendMessage(userMessage);
+  }
+
+  async function handleRetry(payload: string) {
+    if (loading) return;
+    await sendMessage(payload);
   }
 
   function handleKeyDown(e: React.KeyboardEvent) {
@@ -107,10 +127,24 @@ export function ChatPanel({ contractId, messages: initialMessages, onContentUpda
                 "rounded-lg p-3 text-sm",
                 msg.role === "user"
                   ? "bg-primary text-primary-foreground ml-8"
+                  : msg.isError
+                  ? "bg-destructive/10 border border-destructive/30 text-destructive-foreground mr-8"
                   : "bg-muted mr-8"
               )}
             >
               <p className="whitespace-pre-wrap">{msg.content}</p>
+              {msg.isError && msg.retryPayload && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-2"
+                  disabled={loading}
+                  onClick={() => handleRetry(msg.retryPayload!)}
+                >
+                  <RotateCw className="h-3 w-3 mr-1" />
+                  Tentar novamente
+                </Button>
+              )}
             </div>
           ))}
           {loading && (
@@ -125,7 +159,7 @@ export function ChatPanel({ contractId, messages: initialMessages, onContentUpda
 
       <div className="border-t pt-4 flex gap-2">
         <Input
-          placeholder="Pergunte ou solicite alteracoes..."
+          placeholder="Pergunte ou solicite alterações..."
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}

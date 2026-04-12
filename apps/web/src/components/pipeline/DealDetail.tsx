@@ -10,6 +10,16 @@ import { Separator } from "@/components/ui/separator";
 import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 interface DealDetailProps {
   deal: {
@@ -28,8 +38,9 @@ export function DealDetail({ deal }: DealDetailProps) {
   const router = useRouter();
   const [generating, setGenerating] = useState(false);
   const [signing, setSigning] = useState(false);
+  const [confirmDuplicateOpen, setConfirmDuplicateOpen] = useState(false);
 
-  async function handleGenerateContract() {
+  async function doGenerateContract() {
     setGenerating(true);
     const res = await fetch(
       `/api/pipeline/deals/${deal.id}/generate-contract`,
@@ -39,7 +50,17 @@ export function DealDetail({ deal }: DealDetailProps) {
     setGenerating(false);
     if (res.ok) {
       router.push(`/contracts/${data.contractId}`);
+    } else {
+      toast.error(data.error || "Erro ao gerar contrato");
     }
+  }
+
+  function handleGenerateContract() {
+    if (deal.contracts.length > 0) {
+      setConfirmDuplicateOpen(true);
+      return;
+    }
+    doGenerateContract();
   }
 
   async function handleMarkSigned() {
@@ -50,14 +71,14 @@ export function DealDetail({ deal }: DealDetailProps) {
         { method: "POST" }
       );
       if (res.ok) {
-        toast.success("Negocio marcado como assinado e movido para Concluido!");
+        toast.success("Negócio marcado como assinado e movido para Concluído!");
         router.refresh();
       } else {
         const data = await res.json();
         toast.error(data.error || "Erro ao marcar como assinado");
       }
     } catch {
-      toast.error("Erro de conexao");
+      toast.error("Erro de conexão");
     } finally {
       setSigning(false);
     }
@@ -100,7 +121,7 @@ export function DealDetail({ deal }: DealDetailProps) {
             <Button variant="outline" size="sm" asChild>
               <Link href={`/f/${deal.form.token}`} target="_blank">
                 <ExternalLink className="h-4 w-4 mr-1" />
-                Formulario
+                Formulário
               </Link>
             </Button>
           )}
@@ -173,7 +194,7 @@ export function DealDetail({ deal }: DealDetailProps) {
 
               <Card>
                 <CardHeader>
-                  <CardTitle className="text-sm">Imovel(is)</CardTitle>
+                  <CardTitle className="text-sm">Imóvel(is)</CardTitle>
                 </CardHeader>
                 <CardContent>
                   {imoveis.length > 0 ? (
@@ -268,7 +289,7 @@ export function DealDetail({ deal }: DealDetailProps) {
                           {contract.template.name}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          Versao {contract.version} -{" "}
+                          Versão {contract.version} -{" "}
                           {contract.createdAt.toLocaleDateString("pt-BR")}
                         </p>
                       </div>
@@ -281,6 +302,28 @@ export function DealDetail({ deal }: DealDetailProps) {
           </div>
         </TabsContent>
       </Tabs>
+
+      <AlertDialog open={confirmDuplicateOpen} onOpenChange={setConfirmDuplicateOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Criar nova versão do contrato?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Este negócio já possui {deal.contracts.length} contrato(s). Ao confirmar, será criada uma nova versão (V{deal.contracts.length + 1}) mantendo o histórico das anteriores.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmDuplicateOpen(false);
+                doGenerateContract();
+              }}
+            >
+              Criar Nova Versão
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

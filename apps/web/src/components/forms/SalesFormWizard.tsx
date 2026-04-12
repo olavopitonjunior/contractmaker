@@ -8,7 +8,9 @@ import {
   dadosContratoSchema,
   DadosContratoForm,
   STEP_LABELS,
+  STEP_REQUIRED_FIELDS,
 } from "@/lib/forms/validation";
+import { toast } from "sonner";
 import { useAutoSave } from "@/hooks/use-auto-save";
 import { VendedorStep } from "@/components/forms/steps/VendedorStep";
 import { CompradorStep } from "@/components/forms/steps/CompradorStep";
@@ -257,6 +259,7 @@ export function SalesFormWizard({ token, initialData }: SalesFormWizardProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
+  const [generatedContractId, setGeneratedContractId] = useState<string | null>(null);
 
   const form = useForm<DadosContratoForm>({
     defaultValues: {
@@ -271,7 +274,16 @@ export function SalesFormWizard({ token, initialData }: SalesFormWizardProps) {
 
   const isLastStep = currentStep === TOTAL_STEPS - 1;
 
-  const goToNext = () => {
+  const goToNext = async () => {
+    // Validate required fields for current step before advancing
+    const fieldsToValidate = STEP_REQUIRED_FIELDS[currentStep];
+    if (fieldsToValidate.length > 0) {
+      const isValid = await form.trigger(fieldsToValidate as any);
+      if (!isValid) {
+        toast.error("Preencha os campos obrigatórios antes de avançar.");
+        return;
+      }
+    }
     if (currentStep < TOTAL_STEPS - 1) {
       setCurrentStep((prev) => prev + 1);
       window.scrollTo({ top: 0, behavior: "smooth" });
@@ -298,6 +310,8 @@ export function SalesFormWizard({ token, initialData }: SalesFormWizardProps) {
       });
 
       if (res.ok) {
+        const data = await res.json();
+        if (data.contractId) setGeneratedContractId(data.contractId);
         setIsComplete(true);
       } else {
         console.error("Erro ao finalizar formulario");
@@ -328,12 +342,24 @@ export function SalesFormWizard({ token, initialData }: SalesFormWizardProps) {
           </svg>
         </div>
         <h2 className="text-2xl font-semibold text-foreground mb-2">
-          Formulario Concluido!
+          Formulário Concluído!
         </h2>
-        <p className="text-muted-foreground max-w-md">
-          Todas as informacoes foram salvas com sucesso. O contrato sera gerado
-          em breve.
+        <p className="text-muted-foreground max-w-md mb-6">
+          Todas as informações foram salvas com sucesso.{" "}
+          {generatedContractId
+            ? "O contrato foi gerado automaticamente e está pronto para edição."
+            : "O contrato será gerado automaticamente."}
         </p>
+        <div className="flex gap-3 flex-wrap justify-center">
+          {generatedContractId && (
+            <Button asChild>
+              <a href={`/contracts/${generatedContractId}`}>Abrir Contrato</a>
+            </Button>
+          )}
+          <Button variant="outline" asChild>
+            <a href="/pipeline">Ver Pipeline</a>
+          </Button>
+        </div>
       </div>
     );
   }
@@ -420,7 +446,7 @@ export function SalesFormWizard({ token, initialData }: SalesFormWizardProps) {
               onClick={goToNext}
               className="min-w-[100px]"
             >
-              Proximo
+              Próximo
             </Button>
           )}
         </div>

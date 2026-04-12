@@ -47,11 +47,12 @@ export default async function PipelinePage() {
   }
 
   const allDeals = pipeline.stages.flatMap((s) => s.deals);
-  const totalDeals = allDeals.length;
-  const totalValue = allDeals.reduce((sum, d) => sum + (d.value || 0), 0);
-  const concludedStage = pipeline.stages.find((s) => s.name === "Concluido");
+  const concludedStage = pipeline.stages.find((s) => s.name === "Concluído");
   const concludedDeals = concludedStage?.deals.length || 0;
-  const conversionRate = totalDeals > 0 ? Math.round((concludedDeals / totalDeals) * 100) : 0;
+  const activeDeals = allDeals.length - concludedDeals;
+  const totalValue = allDeals.reduce((sum, d) => sum + (d.value || 0), 0);
+  const conversionRate =
+    allDeals.length > 0 ? Math.round((concludedDeals / allDeals.length) * 100) : 0;
 
   const stages = pipeline.stages.map((stage) => ({
     id: stage.id,
@@ -75,7 +76,7 @@ export default async function PipelinePage() {
         <Button size="sm" asChild>
           <Link href="/forms/new">
             <Plus className="mr-1.5 h-4 w-4" />
-            Novo Formulario
+            Novo Formulário
           </Link>
         </Button>
       </div>
@@ -88,8 +89,8 @@ export default async function PipelinePage() {
               <BarChart3 className="h-5 w-5 text-primary" />
             </div>
             <div>
-              <p className="text-2xl font-bold">{totalDeals}</p>
-              <p className="text-xs text-muted-foreground">Negocios ativos</p>
+              <p className="text-2xl font-bold">{activeDeals}</p>
+              <p className="text-xs text-muted-foreground">Negócios ativos</p>
             </div>
           </CardContent>
         </Card>
@@ -100,7 +101,9 @@ export default async function PipelinePage() {
             </div>
             <div>
               <p className="text-2xl font-bold">
-                R$ {(totalValue / 1000).toFixed(0)}k
+                {totalValue >= 1_000_000
+                  ? `R$ ${(totalValue / 1_000_000).toFixed(1)}M`
+                  : `R$ ${(totalValue / 1000).toFixed(0)}k`}
               </p>
               <p className="text-xs text-muted-foreground">Valor total</p>
             </div>
@@ -113,7 +116,7 @@ export default async function PipelinePage() {
             </div>
             <div>
               <p className="text-2xl font-bold">{conversionRate}%</p>
-              <p className="text-xs text-muted-foreground">Taxa conversao</p>
+              <p className="text-xs text-muted-foreground">Taxa de conversão</p>
             </div>
           </CardContent>
         </Card>

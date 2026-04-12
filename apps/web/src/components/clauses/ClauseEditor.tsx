@@ -84,7 +84,7 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
 
   async function handleSave() {
     if (!title.trim() || !content.trim()) {
-      toast.error("Titulo e conteudo sao obrigatorios.");
+      toast.error("Título e conteudo sao obrigatorios.");
       return;
     }
 
@@ -112,7 +112,7 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
       });
 
       if (res.ok) {
-        toast.success(mode === "create" ? "Clausula criada!" : "Clausula salva!");
+        toast.success(mode === "create" ? "Cláusula criada!" : "Cláusula salva!");
         onClose();
         router.refresh();
       } else {
@@ -120,7 +120,7 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
         toast.error(data.error || "Erro ao salvar clausula");
       }
     } catch {
-      toast.error("Erro de conexao");
+      toast.error("Erro de conexão");
     } finally {
       setSaving(false);
     }
@@ -129,7 +129,7 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
   async function handleDelete() {
     const res = await fetch(`/api/clauses/${clause!.id}`, { method: "DELETE" });
     if (res.ok) {
-      toast.success("Clausula removida!");
+      toast.success("Cláusula removida!");
       onClose();
       router.refresh();
     } else {
@@ -143,14 +143,14 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
       <SheetContent className="overflow-y-auto w-full sm:max-w-lg">
         <SheetHeader>
           <SheetTitle>
-            {mode === "create" ? "Nova Clausula" : `Editar: ${clause?.title}`}
+            {mode === "create" ? "Nova Cláusula" : `Editar: ${clause?.title}`}
           </SheetTitle>
         </SheetHeader>
 
         <div className="space-y-4 mt-6">
           <div className="space-y-2">
-            <Label>Titulo</Label>
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Titulo da clausula" />
+            <Label>Título</Label>
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Título da clausula" />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -170,7 +170,7 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
                   <SelectItem value="G2">G2 - Posse</SelectItem>
                   <SelectItem value="G3">G3 - Rescisao</SelectItem>
                   <SelectItem value="G4">G4 - Financiamento</SelectItem>
-                  <SelectItem value="G5">G5 - Comissao</SelectItem>
+                  <SelectItem value="G5">G5 - Comissão</SelectItem>
                   <SelectItem value="G6">G6 - Declaracoes</SelectItem>
                 </SelectContent>
               </Select>
@@ -193,13 +193,13 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
             </div>
             <div className="flex items-center gap-3 pt-6">
               <Switch checked={isVariable} onCheckedChange={setIsVariable} />
-              <Label>Clausula variavel</Label>
+              <Label>Cláusula variavel</Label>
             </div>
           </div>
 
           <div className="space-y-2">
-            <Label>Descricao</Label>
-            <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Descricao breve" />
+            <Label>Descrição</Label>
+            <Input value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Descrição breve" />
           </div>
 
           <div className="space-y-2">
@@ -217,7 +217,7 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
             <Textarea
               value={agentNotes}
               onChange={(e) => setAgentNotes(e.target.value)}
-              placeholder="Orientacoes para o agente sobre quando usar esta clausula"
+              placeholder="Orientações para o agente sobre quando usar esta clausula"
               className="text-xs min-h-[80px]"
             />
           </div>

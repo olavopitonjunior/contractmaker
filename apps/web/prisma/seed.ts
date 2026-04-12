@@ -51,10 +51,10 @@ async function main() {
         name: "Pipeline Principal",
         stages: {
           create: [
-            { name: "Formulario", color: "#6366f1", position: 0 },
-            { name: "Confeccao de Contrato", color: "#f59e0b", position: 1 },
+            { name: "Formulário", color: "#6366f1", position: 0 },
+            { name: "Confecção de Contrato", color: "#f59e0b", position: 1 },
             { name: "Assinatura", color: "#3b82f6", position: 2 },
-            { name: "Concluido", color: "#22c55e", position: 3 },
+            { name: "Concluído", color: "#22c55e", position: 3 },
           ],
         },
       },

@@ -79,23 +79,39 @@ export async function generateContractForDeal(
     },
   });
 
-  // Move deal to "Confeccao de Contrato" stage
+  // Derive deal title and value from form data
+  const compradorNome = (dataJson.compradores as Array<{ nome?: string }>)?.[0]?.nome;
+  const vendedorNome = (dataJson.vendedores as Array<{ nome?: string }>)?.[0]?.nome;
+  const imovel = (dataJson.imoveis as Array<{ rua?: string; numero?: string; cidade?: string }>)?.[0];
+  const valorTotal = Number(pagamento?.valor_total || 0);
+
+  const derivedTitle =
+    compradorNome && vendedorNome
+      ? `${vendedorNome} → ${compradorNome}`
+      : compradorNome
+      ? `Venda para ${compradorNome}`
+      : imovel?.rua
+      ? `Imóvel: ${imovel.rua}${imovel.numero ? `, ${imovel.numero}` : ""}`
+      : deal.title;
+
+  // Move deal to "Confeccao de Contrato" stage and sync title/value
   const pipeline = await prisma.pipeline.findFirst({
     where: { orgId },
     include: { stages: { orderBy: { position: "asc" } } },
   });
 
-  if (pipeline) {
-    const confeccaoStage = pipeline.stages.find(
-      (s) => s.name === "Confeccao de Contrato"
-    );
-    if (confeccaoStage) {
-      await prisma.deal.update({
-        where: { id: deal.id },
-        data: { stageId: confeccaoStage.id },
-      });
-    }
-  }
+  const confeccaoStage = pipeline?.stages.find(
+    (s) => s.name === "Confecção de Contrato"
+  );
+
+  await prisma.deal.update({
+    where: { id: deal.id },
+    data: {
+      title: derivedTitle,
+      value: valorTotal > 0 ? valorTotal : deal.value,
+      ...(confeccaoStage ? { stageId: confeccaoStage.id } : {}),
+    },
+  });
 
   // Transfer form attachments to deal
   if (deal.formId) {

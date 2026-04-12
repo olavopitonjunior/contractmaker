@@ -50,7 +50,7 @@ export function KanbanCard({ deal, isOverlay }: KanbanCardProps) {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-1.5">
                 <Home className="h-3.5 w-3.5 text-muted-foreground" />
-                <span className="text-[11px] text-muted-foreground font-medium">Imovel</span>
+                <span className="text-[11px] text-muted-foreground font-medium">Imóvel</span>
               </div>
               <div className="flex items-center gap-1 text-muted-foreground">
                 <Clock className="h-3 w-3" />

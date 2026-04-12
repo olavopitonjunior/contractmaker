@@ -33,7 +33,7 @@ export function VersionTimeline({ versions, currentId }: VersionTimelineProps) {
             </div>
             <div className="flex-1">
               <p className="text-sm font-medium">
-                Versao {v.version}
+                Versão {v.version}
                 {v.isLatest && (
                   <Badge variant="default" className="ml-2 text-[10px]">
                     atual

@@ -118,21 +118,21 @@ export function ContractEditor({ content, onChange, readOnly }: ContractEditorPr
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleHeading({ level: 1 }).run()}
           active={editor.isActive("heading", { level: 1 })}
-          title="Titulo 1"
+          title="Título 1"
         >
           <Heading1 className="h-4 w-4" />
         </ToolbarButton>
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleHeading({ level: 2 }).run()}
           active={editor.isActive("heading", { level: 2 })}
-          title="Titulo 2"
+          title="Título 2"
         >
           <Heading2 className="h-4 w-4" />
         </ToolbarButton>
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleHeading({ level: 3 }).run()}
           active={editor.isActive("heading", { level: 3 })}
-          title="Titulo 3"
+          title="Título 3"
         >
           <Heading3 className="h-4 w-4" />
         </ToolbarButton>

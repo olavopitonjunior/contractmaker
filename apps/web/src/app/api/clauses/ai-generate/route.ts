@@ -30,7 +30,7 @@ O content deve usar sintaxe Handlebars quando houver campos variaveis (ex: {{moe
         role: "user",
         content: `Gere uma clausula contratual para a seguinte situacao:
 Categoria: ${category || "customizada"}
-Descricao: ${description}
+Descrição: ${description}
 ${context ? `Contexto adicional: ${context}` : ""}`,
       },
     ],

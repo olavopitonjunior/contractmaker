@@ -5,23 +5,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { UFSelect } from "@/components/forms/UFSelect";
 
 interface ImovelStepProps {
   form: UseFormReturn<any>;
 }
-
-const UF_LIST = [
-  "AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG",
-  "PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO",
-];
 
 function FormField({
   label,
@@ -72,7 +61,7 @@ export function ImovelStep({ form }: ImovelStepProps) {
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base font-semibold">
-                  Imovel {index + 1}
+                  Imóvel {index + 1}
                 </CardTitle>
                 {fields.length > 1 && (
                   <Button
@@ -116,21 +105,10 @@ export function ImovelStep({ form }: ImovelStepProps) {
                 </FormField>
 
                 <FormField label="UF">
-                  <Select
-                    value={form.watch(`${prefix}.uf`) || ""}
-                    onValueChange={(v) => form.setValue(`${prefix}.uf`, v)}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Estado" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {UF_LIST.map((uf) => (
-                        <SelectItem key={uf} value={uf}>
-                          {uf}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <UFSelect
+                    value={form.watch(`${prefix}.uf`)}
+                    onChange={(v) => form.setValue(`${prefix}.uf`, v, { shouldDirty: true })}
+                  />
                 </FormField>
 
                 <FormField label="CEP">
@@ -169,10 +147,10 @@ export function ImovelStep({ form }: ImovelStepProps) {
                 </FormField>
               </div>
 
-              <FormField label="Descricao do Imovel">
+              <FormField label="Descrição do Imóvel">
                 <textarea
                   {...form.register(`${prefix}.descricao`)}
-                  placeholder="Descricao completa do imovel conforme matricula ou contrato..."
+                  placeholder="Descrição completa do imovel conforme matricula ou contrato..."
                   rows={4}
                   className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none"
                 />
@@ -188,7 +166,7 @@ export function ImovelStep({ form }: ImovelStepProps) {
         onClick={addImovel}
         className="w-full border-dashed"
       >
-        + Adicionar Imovel
+        + Adicionar Imóvel
       </Button>
     </div>
   );

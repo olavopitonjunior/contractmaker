@@ -36,7 +36,7 @@ export function FormsActions({ formId, token, status, hasDeal, dealId, title }: 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         formId,
-        title: title || `Negocio - ${token.slice(0, 8)}`,
+        title: title || `Negócio - ${token.slice(0, 8)}`,
         value: 0,
       }),
     });
@@ -44,7 +44,7 @@ export function FormsActions({ formId, token, status, hasDeal, dealId, title }: 
 
     if (res.ok) {
       const deal = await res.json();
-      toast.success("Negocio criado!");
+      toast.success("Negócio criado!");
       router.push(`/deals/${deal.id}`);
     } else {
       toast.error("Erro ao criar negocio");
@@ -74,7 +74,7 @@ export function FormsActions({ formId, token, status, hasDeal, dealId, title }: 
       {hasDeal && dealId && (
         <Button size="sm" variant="outline" asChild>
           <Link href={`/deals/${dealId}`}>
-            Ver Negocio
+            Ver Negócio
           </Link>
         </Button>
       )}
@@ -85,7 +85,7 @@ export function FormsActions({ formId, token, status, hasDeal, dealId, title }: 
           disabled={creating}
         >
           <Plus className="mr-1 h-3 w-3" />
-          {creating ? "Criando..." : "Criar Negocio"}
+          {creating ? "Criando..." : "Criar Negócio"}
         </Button>
       )}
     </div>

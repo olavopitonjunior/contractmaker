@@ -68,7 +68,7 @@ export default function LoginPage() {
 
           <div className="space-y-5">
             {[
-              { icon: FileText, text: "Formularios compartilhaveis com auto-save" },
+              { icon: FileText, text: "Formulários compartilhaveis com auto-save" },
               { icon: LayoutDashboard, text: "Pipeline de vendas com kanban visual" },
               { icon: Sparkles, text: "Contratos gerados e editados com IA" },
             ].map(({ icon: Icon, text }, i) => (

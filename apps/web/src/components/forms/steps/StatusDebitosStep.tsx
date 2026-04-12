@@ -85,7 +85,7 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <FormField label="Situacao do Imovel">
+          <FormField label="Situacao do Imóvel">
             <Select
               value={statusPropriedade || "quitado-registrado"}
               onValueChange={(v) => form.setValue("status_propriedade", v)}
@@ -121,10 +121,10 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
         </CardContent>
       </Card>
 
-      {/* Debitos */}
+      {/* Débitos */}
       <Card className="border border-border">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base font-semibold">Debitos</CardTitle>
+          <CardTitle className="text-base font-semibold">Débitos</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <CheckboxField
@@ -215,7 +215,7 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <FormField label="Clausula de vicios">
+          <FormField label="Cláusula de vicios">
             <Select
               value={viciosOpcao || "renuncia"}
               onValueChange={(v) => form.setValue("vicios.opcao", v)}
@@ -241,7 +241,7 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
           </FormField>
 
           {viciosOpcao === "reparar" && (
-            <FormField label="Descricao dos reparos a realizar">
+            <FormField label="Descrição dos reparos a realizar">
               <textarea
                 {...form.register("vicios.descricao_reparar")}
                 placeholder="Descreva os reparos que o vendedor se compromete a realizar..."
@@ -252,7 +252,7 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
           )}
 
           {viciosOpcao === "desocultados" && (
-            <FormField label="Descricao dos vicios ocultos declarados">
+            <FormField label="Descrição dos vicios ocultos declarados">
               <textarea
                 {...form.register("vicios.descricao_desocultados")}
                 placeholder="Descreva os vicios ocultos que estao sendo declarados..."
@@ -264,11 +264,11 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
         </CardContent>
       </Card>
 
-      {/* Debitos Assumidos */}
+      {/* Débitos Assumidos */}
       <Card className="border border-border">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-semibold">
-            Debitos Assumidos pelo Comprador
+            Débitos Assumidos pelo Comprador
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -280,7 +280,7 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
           />
 
           {debitosAssumidos && (
-            <FormField label="Descricao dos debitos assumidos">
+            <FormField label="Descrição dos debitos assumidos">
               <textarea
                 {...form.register("debitos_assumidos.descricao")}
                 placeholder="Descreva os debitos que o comprador esta assumindo..."
@@ -318,7 +318,7 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
                 />
               </FormField>
 
-              <FormField label="Descricao das regularizacoes">
+              <FormField label="Descrição das regularizacoes">
                 <textarea
                   {...form.register("regularizacoes.descricao")}
                   placeholder="Descreva as regularizacoes pendentes e os prazos..."

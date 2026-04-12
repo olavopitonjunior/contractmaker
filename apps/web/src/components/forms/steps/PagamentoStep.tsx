@@ -122,7 +122,7 @@ export function PagamentoStep({ form }: PagamentoStepProps) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="transferencia bancaria">
-                  Transferencia Bancaria (TED/PIX)
+                  Transferência Bancaria (TED/PIX)
                 </SelectItem>
                 <SelectItem value="cheque">Cheque</SelectItem>
                 <SelectItem value="dinheiro">Dinheiro (Especie)</SelectItem>
@@ -157,7 +157,7 @@ export function PagamentoStep({ form }: PagamentoStepProps) {
               key={field.id}
               className="grid grid-cols-1 md:grid-cols-[1fr_100px_140px_auto] gap-3 items-end p-3 rounded-md border border-border bg-muted/30"
             >
-              <FormField label={`Parcela ${index + 1} - Descricao`}>
+              <FormField label={`Parcela ${index + 1} - Descrição`}>
                 <Input
                   {...form.register(`pagamento.parcelas.${index}.tipo_texto`)}
                   placeholder="Ex: Sinal na assinatura, 1a parcela..."

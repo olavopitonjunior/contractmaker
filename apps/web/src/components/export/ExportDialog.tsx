@@ -46,7 +46,7 @@ export function ExportDialog({ contractId, exports }: ExportDialogProps) {
         toast.error(err.error || "Erro na exportacao");
       }
     } catch {
-      toast.error("Erro de conexao");
+      toast.error("Erro de conexão");
     } finally {
       setExporting(null);
     }

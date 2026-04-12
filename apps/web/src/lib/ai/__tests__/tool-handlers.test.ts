@@ -104,7 +104,7 @@ describe("handleQueryClauses", () => {
         id: "c1",
         category: "objeto",
         subcategory: null,
-        title: "Clausula Objeto",
+        title: "Cláusula Objeto",
         content: "Texto longo da clausula...",
         tags: ["objeto"],
         usageCount: 5,
@@ -117,7 +117,7 @@ describe("handleQueryClauses", () => {
     expect((result.clauses as any[])[0]).toMatchObject({
       id: "c1",
       category: "objeto",
-      title: "Clausula Objeto",
+      title: "Cláusula Objeto",
     });
   });
 

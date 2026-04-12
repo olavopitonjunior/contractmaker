@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { UFSelect } from "@/components/forms/UFSelect";
 
 interface CompradorStepProps {
   form: UseFormReturn<any>;
@@ -22,14 +23,9 @@ const ESTADOS_CIVIS = [
   "Solteiro(a)",
   "Casado(a)",
   "Divorciado(a)",
-  "Viuvo(a)",
-  "Uniao Estavel",
+  "Viúvo(a)",
+  "União Estável",
   "Separado(a)",
-];
-
-const UF_LIST = [
-  "AC","AL","AP","AM","BA","CE","DF","ES","GO","MA","MT","MS","MG",
-  "PA","PB","PR","PE","PI","RJ","RN","RS","RO","RR","SC","SP","SE","TO",
 ];
 
 function FieldError({ error }: { error?: { message?: string } }) {
@@ -124,7 +120,7 @@ function PessoaFisicaFields({
 
       <Separator />
 
-      <p className="text-sm font-semibold text-foreground">Endereco</p>
+      <p className="text-sm font-semibold text-foreground">Endereço</p>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <FormField label="Logradouro" className="md:col-span-2">
           <Input {...form.register(`${prefix}.endereco`)} placeholder="Rua, Avenida..." />
@@ -143,21 +139,10 @@ function PessoaFisicaFields({
         </FormField>
 
         <FormField label="UF">
-          <Select
-            value={form.watch(`${prefix}.uf`) || ""}
-            onValueChange={(v) => form.setValue(`${prefix}.uf`, v)}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="UF" />
-            </SelectTrigger>
-            <SelectContent>
-              {UF_LIST.map((uf) => (
-                <SelectItem key={uf} value={uf}>
-                  {uf}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <UFSelect
+            value={form.watch(`${prefix}.uf`)}
+            onChange={(v) => form.setValue(`${prefix}.uf`, v, { shouldDirty: true })}
+          />
         </FormField>
 
         <FormField label="CEP">
@@ -168,30 +153,30 @@ function PessoaFisicaFields({
       {showConjuge && (
         <>
           <Separator />
-          <p className="text-sm font-semibold text-foreground">Dados do Conjuge</p>
+          <p className="text-sm font-semibold text-foreground">Dados do Cônjuge</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="Nome do Conjuge" className="md:col-span-2">
+            <FormField label="Nome do Cônjuge" className="md:col-span-2">
               <Input
                 {...form.register(`${prefix}.conjuge.nome`)}
                 placeholder="Nome completo do conjuge"
               />
             </FormField>
-            <FormField label="CPF do Conjuge">
+            <FormField label="CPF do Cônjuge">
               <Input
                 {...form.register(`${prefix}.conjuge.cpf`)}
                 placeholder="000.000.000-00"
               />
             </FormField>
-            <FormField label="RG do Conjuge">
+            <FormField label="RG do Cônjuge">
               <Input {...form.register(`${prefix}.conjuge.rg`)} placeholder="RG" />
             </FormField>
-            <FormField label="Nacionalidade do Conjuge">
+            <FormField label="Nacionalidade do Cônjuge">
               <Input
                 {...form.register(`${prefix}.conjuge.nacionalidade`)}
                 placeholder="Brasileiro(a)"
               />
             </FormField>
-            <FormField label="Profissao do Conjuge">
+            <FormField label="Profissao do Cônjuge">
               <Input
                 {...form.register(`${prefix}.conjuge.profissao`)}
                 placeholder="Profissao"
@@ -233,7 +218,7 @@ function PessoaFisicaFields({
             <FormField label="RG do Procurador">
               <Input {...form.register(`${prefix}.procurador.rg`)} placeholder="RG" />
             </FormField>
-            <FormField label="Endereco do Procurador" className="md:col-span-2">
+            <FormField label="Endereço do Procurador" className="md:col-span-2">
               <Input
                 {...form.register(`${prefix}.procurador.endereco`)}
                 placeholder="Logradouro"
@@ -252,21 +237,10 @@ function PessoaFisicaFields({
               />
             </FormField>
             <FormField label="UF">
-              <Select
-                value={form.watch(`${prefix}.procurador.uf`) || ""}
-                onValueChange={(v) => form.setValue(`${prefix}.procurador.uf`, v)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue placeholder="UF" />
-                </SelectTrigger>
-                <SelectContent>
-                  {UF_LIST.map((uf) => (
-                    <SelectItem key={uf} value={uf}>
-                      {uf}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <UFSelect
+                value={form.watch(`${prefix}.procurador.uf`)}
+                onChange={(v) => form.setValue(`${prefix}.procurador.uf`, v, { shouldDirty: true })}
+              />
             </FormField>
           </div>
         </>
@@ -313,21 +287,10 @@ function PessoaJuridicaFields({
         </FormField>
 
         <FormField label="UF">
-          <Select
-            value={form.watch(`${prefix}.uf`) || ""}
-            onValueChange={(v) => form.setValue(`${prefix}.uf`, v)}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="UF" />
-            </SelectTrigger>
-            <SelectContent>
-              {UF_LIST.map((uf) => (
-                <SelectItem key={uf} value={uf}>
-                  {uf}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <UFSelect
+            value={form.watch(`${prefix}.uf`)}
+            onChange={(v) => form.setValue(`${prefix}.uf`, v, { shouldDirty: true })}
+          />
         </FormField>
 
         <FormField label="CEP">

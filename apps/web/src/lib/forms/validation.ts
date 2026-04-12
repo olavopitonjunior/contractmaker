@@ -197,9 +197,20 @@ export type DadosContratoForm = z.infer<typeof dadosContratoSchema>;
 export const STEP_LABELS = [
   "Vendedor(es)",
   "Comprador(es)",
-  "Imovel(is)",
-  "Status e Debitos",
+  "Imóvel(is)",
+  "Status e Débitos",
   "Pagamento",
-  "Posse e Titulo",
-  "Comissao e Config",
+  "Posse e Título",
+  "Comissão e Config",
+] as const;
+
+// Campos obrigatorios por etapa (usado por form.trigger para validacao)
+export const STEP_REQUIRED_FIELDS: ReadonlyArray<ReadonlyArray<string>> = [
+  ["vendedores"],
+  ["compradores"],
+  ["imoveis"],
+  [],
+  ["pagamento.valor_total"],
+  [],
+  [],
 ] as const;

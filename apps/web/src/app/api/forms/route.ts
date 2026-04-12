@@ -33,7 +33,7 @@ export async function POST(request: Request) {
   });
 
   if (pipeline && pipeline.stages.length > 0) {
-    const formularioStage = pipeline.stages.find((s) => s.name === "Formulario") || pipeline.stages[0];
+    const formularioStage = pipeline.stages.find((s) => s.name === "Formulário") || pipeline.stages[0];
     const dealsInStage = await prisma.deal.count({
       where: { stageId: formularioStage.id },
     });
