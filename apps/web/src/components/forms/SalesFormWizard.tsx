@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -228,6 +228,7 @@ const defaultFormValues: Partial<DadosContratoForm> = {
     quando_paga_texto: "no ato da assinatura",
     imobiliaria_nome: "",
     imobiliaria_cnpj: "",
+    creci: "",
   },
   desistencia: {
     permite: false,
@@ -269,7 +270,7 @@ export function SalesFormWizard({ token, initialData }: SalesFormWizardProps) {
     mode: "onChange",
   });
 
-  const watchedData = form.watch() as Record<string, unknown>;
+  const watchedData = useWatch({ control: form.control }) as Record<string, unknown>;
   const { status: saveStatus } = useAutoSave(token, watchedData);
 
   const isLastStep = currentStep === TOTAL_STEPS - 1;
@@ -397,7 +398,7 @@ export function SalesFormWizard({ token, initialData }: SalesFormWizardProps) {
       </div>
 
       {/* Step Content */}
-      <div className="min-h-[400px]">{stepComponents[currentStep]}</div>
+      <div>{stepComponents[currentStep]}</div>
 
       {/* Navigation */}
       <div className="mt-8">

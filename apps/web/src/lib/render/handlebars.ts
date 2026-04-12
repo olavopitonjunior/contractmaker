@@ -102,6 +102,13 @@ export function registerHandlebarsHelpers(): void {
     return valorPorExtenso(valor);
   });
 
+  // Numero por extenso SEM o sufixo "reais" (para prazos, percentuais, quantidades)
+  Handlebars.registerHelper('numeroExtenso', (valor: number) => {
+    if (valor === null || valor === undefined) return '';
+    const full = valorPorExtenso(valor);
+    return full.replace(/\s*reais?$/, '').replace(/\s*real$/, '');
+  });
+
   Handlebars.registerHelper('cpf', (cpf: string) => {
     if (!cpf) return '';
     const digits = cpf.replace(/\D/g, '');

@@ -129,8 +129,8 @@ export function ContractEditorPage({
         </div>
       )}
 
-      {/* Header */}
-      <div className="flex items-start sm:items-center gap-3 flex-wrap">
+      {/* Header - sticky to remain visible while scrolling editor */}
+      <div className="sticky top-0 z-30 -mx-4 px-4 py-3 sm:-mx-6 sm:px-6 bg-background/95 backdrop-blur-sm border-b flex items-start sm:items-center gap-3 flex-wrap">
         <Button variant="ghost" size="sm" asChild>
           <Link href={`/deals/${contract.dealId}`}>
             <ArrowLeft className="h-4 w-4 mr-1" />

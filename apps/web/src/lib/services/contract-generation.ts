@@ -7,6 +7,59 @@ interface GenerateResult {
 }
 
 /**
+ * Enriches form data with sensible defaults for template variables that
+ * aren't captured in the 7-step wizard but are required by the contract
+ * template (delivery deadlines, daily penalties, commission percentage, etc).
+ */
+function enrichContractData(
+  data: Record<string, unknown>
+): Record<string, unknown> {
+  const enriched = { ...data };
+  const config = ((enriched.config as Record<string, unknown>) || {}) as Record<string, unknown>;
+  const tituloDefinitivo = enriched.titulo_definitivo as { prazo_dias?: number } | undefined;
+  const entregaPosse = enriched.entrega_posse as { momento?: string } | undefined;
+  const pagamento = enriched.pagamento as { valor_total?: number } | undefined;
+  const comissao = ((enriched.comissao as Record<string, unknown>) || {}) as Record<string, unknown>;
+
+  // Prazo de posse: default ao prazo do titulo definitivo ou 30 dias
+  if (config.prazo_posse_dias == null) {
+    config.prazo_posse_dias = tituloDefinitivo?.prazo_dias || 30;
+  }
+  // Prazo de escritura: usa prazo do titulo definitivo ou 60 dias
+  if (config.prazo_escritura_dias == null) {
+    config.prazo_escritura_dias = tituloDefinitivo?.prazo_dias || 60;
+  }
+  // Multas diarias: valores default razoaveis
+  if (config.multa_diaria_posse == null) config.multa_diaria_posse = 500;
+  if (config.multa_diaria_escritura == null) config.multa_diaria_escritura = 300;
+
+  enriched.config = config;
+
+  // Percentual da comissao: calculado automaticamente
+  const valorComissao = Number(comissao.valor || 0);
+  const valorTotal = Number(pagamento?.valor_total || 0);
+  if (valorTotal > 0 && valorComissao > 0 && comissao.percentual == null) {
+    comissao.percentual = Number(((valorComissao / valorTotal) * 100).toFixed(2));
+  }
+  enriched.comissao = comissao;
+
+  // Titulo aquisitivo: default generico caso nao informado
+  if (!enriched.titulo_aquisitivo) {
+    enriched.titulo_aquisitivo = "instrumento próprio";
+  }
+  if (!enriched.registro_aquisitivo) {
+    enriched.registro_aquisitivo = "registro próprio";
+  }
+
+  // Momento de posse texto
+  if (entregaPosse && !entregaPosse.momento) {
+    entregaPosse.momento = "assinatura";
+  }
+
+  return enriched;
+}
+
+/**
  * Generates a contract for a deal:
  * 1. Auto-detects modalidade from deal/form data
  * 2. Selects matching template
@@ -50,8 +103,11 @@ export async function generateContractForDeal(
     throw new Error("Nenhum template padrão encontrado para gerar o contrato.");
   }
 
+  // Enrich data with template defaults (multas, prazos, percentual comissao)
+  const enrichedData = enrichContractData(dataJson);
+
   // Render HTML
-  const htmlContent = renderContratoHTML(template.handlebarsSource, dataJson);
+  const htmlContent = renderContratoHTML(template.handlebarsSource, enrichedData);
 
   // Handle versioning
   const existingCount = await prisma.contract.count({
@@ -65,14 +121,14 @@ export async function generateContractForDeal(
     });
   }
 
-  // Create contract
+  // Create contract (save enriched data so re-renders stay consistent)
   const contract = await prisma.contract.create({
     data: {
       dealId: deal.id,
       templateId: template.id,
       userId,
       version: existingCount + 1,
-      dataJson: dataJson as any,
+      dataJson: enrichedData as any,
       htmlContent,
       status: "rascunho",
       isLatest: true,

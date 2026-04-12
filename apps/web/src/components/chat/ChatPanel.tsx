@@ -35,30 +35,33 @@ export function ChatPanel({ contractId, messages: initialMessages, onContentUpda
 
   async function sendMessage(userMessage: string) {
     setLoading(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 280_000);
     try {
       const res = await fetch(`/api/contracts/${contractId}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: userMessage }),
+        signal: controller.signal,
       });
 
-      const data = await res.json();
+      const contentType = res.headers.get("content-type") || "";
+      const isJson = contentType.includes("application/json");
 
-      if (res.ok) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `ai-${Date.now()}`,
-            role: "assistant",
-            content: data.message || data.assistantText || "Feito!",
-          },
-        ]);
-
-        if (data.htmlContent && onContentUpdate) {
-          onContentUpdate(data.htmlContent);
+      if (!res.ok) {
+        let errorMsg = `Erro ${res.status}: `;
+        if (res.status === 504 || res.status === 408) {
+          errorMsg += "o assistente demorou demais para responder. Tente uma pergunta mais simples ou divida em partes menores.";
+        } else if (isJson) {
+          try {
+            const data = await res.json();
+            errorMsg += data.error || "falha ao processar mensagem.";
+          } catch {
+            errorMsg += "resposta invalida do servidor.";
+          }
+        } else {
+          errorMsg += "falha no servidor.";
         }
-      } else {
-        const errorMsg = data.error || `Erro ${res.status}: falha ao processar mensagem.`;
         setMessages((prev) => [
           ...prev,
           {
@@ -69,19 +72,42 @@ export function ChatPanel({ contractId, messages: initialMessages, onContentUpda
             retryPayload: userMessage,
           },
         ]);
+        return;
+      }
+
+      if (!isJson) {
+        throw new Error("Resposta em formato inesperado");
+      }
+
+      const data = await res.json();
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `ai-${Date.now()}`,
+          role: "assistant",
+          content: data.message || data.assistantText || "Feito!",
+        },
+      ]);
+
+      if (data.htmlContent && onContentUpdate) {
+        onContentUpdate(data.htmlContent);
       }
     } catch (err: any) {
+      const isAbort = err?.name === "AbortError";
       setMessages((prev) => [
         ...prev,
         {
           id: `err-${Date.now()}`,
           role: "assistant",
-          content: `Erro de conexão: ${err.message}`,
+          content: isAbort
+            ? "O assistente demorou demais para responder e a requisição foi cancelada. Tente uma pergunta mais simples."
+            : `Erro de conexão: ${err.message || "não foi possível completar a requisição"}`,
           isError: true,
           retryPayload: userMessage,
         },
       ]);
     } finally {
+      clearTimeout(timeoutId);
       setLoading(false);
     }
   }

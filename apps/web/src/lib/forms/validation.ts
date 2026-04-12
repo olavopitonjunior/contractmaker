@@ -156,6 +156,8 @@ export const step7Schema = z.object({
     quando_paga_texto: z.string().optional().default("no ato da assinatura"),
     imobiliaria_nome: z.string().optional().default(""),
     imobiliaria_cnpj: z.string().optional().default(""),
+    creci: z.string().optional().default(""),
+    percentual: z.number().optional(),
   }).optional(),
   desistencia: z.object({
     permite: z.boolean().optional().default(false),

@@ -95,9 +95,9 @@ export function ContractEditor({ content, onChange, readOnly }: ContractEditorPr
   }
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Toolbar - sticky */}
-      <div className="sticky top-0 z-10 flex items-center gap-0.5 px-4 py-2 border-b bg-card/95 backdrop-blur-sm flex-wrap">
+    <div className="flex flex-col">
+      {/* Toolbar - sticky below the page header */}
+      <div className="sticky top-[72px] z-20 flex items-center gap-0.5 px-4 py-2 border-b bg-card/95 backdrop-blur-sm flex-wrap">
         <ToolbarButton
           onClick={() => editor.chain().focus().toggleBold().run()}
           active={editor.isActive("bold")}
@@ -195,7 +195,7 @@ export function ContractEditor({ content, onChange, readOnly }: ContractEditorPr
       </div>
 
       {/* Editor - paper effect */}
-      <div className="flex-1 bg-muted/30 overflow-auto py-8">
+      <div className="bg-muted/30 py-8">
         <div className="mx-auto max-w-3xl bg-card rounded-lg shadow-sm border">
           <EditorContent editor={editor} />
         </div>

@@ -163,16 +163,22 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
             Dados da Imobiliaria
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="Nome da Imobiliaria" className="md:col-span-2">
+            <FormField label="Nome da Imobiliária" className="md:col-span-2">
               <Input
                 {...form.register("comissao.imobiliaria_nome")}
-                placeholder="Razao Social ou Nome Fantasia"
+                placeholder="Razão Social ou Nome Fantasia"
               />
             </FormField>
-            <FormField label="CNPJ da Imobiliaria">
+            <FormField label="CNPJ da Imobiliária">
               <Input
                 {...form.register("comissao.imobiliaria_cnpj")}
                 placeholder="00.000.000/0000-00"
+              />
+            </FormField>
+            <FormField label="CRECI da Imobiliária">
+              <Input
+                {...form.register("comissao.creci")}
+                placeholder="Ex: J-12345"
               />
             </FormField>
           </div>

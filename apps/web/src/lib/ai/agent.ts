@@ -172,7 +172,7 @@ export async function runContractAgent(params: AgentParams): Promise<AgentResult
 
   const changeLogs: ChangeLogEntry[] = [];
   let iterations = 0;
-  const maxIterations = 10;
+  const maxIterations = 5;
 
   // 6. Tool-use loop
   while (response.stop_reason === "tool_use" && iterations < maxIterations) {
