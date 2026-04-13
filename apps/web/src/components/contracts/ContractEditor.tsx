@@ -11,10 +11,23 @@ import { SearchReplace } from "@/lib/editor/SearchReplace";
 import { CommentMark } from "@/lib/editor/CommentMark";
 import { SuggestionMark } from "@/lib/editor/SuggestionMark";
 import { PageBreakNode } from "@/lib/editor/PageBreakNode";
+import { FontSize } from "@/lib/editor/FontSize";
+import { LineHeight } from "@/lib/editor/LineHeight";
+import { TextTransform } from "@/lib/editor/TextTransform";
+import { FormatPainter } from "@/lib/editor/FormatPainter";
+import { TextStyle } from "@tiptap/extension-text-style";
+import { Color } from "@tiptap/extension-color";
+import { FontFamily } from "@tiptap/extension-font-family";
 import { useEffect, useState, forwardRef, useImperativeHandle } from "react";
 import type { Editor } from "@tiptap/react";
 import { FindReplaceBar } from "./FindReplaceBar";
 import { SuggestionsToolbar } from "./SuggestionsToolbar";
+import { FontFamilyDropdown } from "./FontFamilyDropdown";
+import { FontSizeDropdown } from "./FontSizeDropdown";
+import { ColorPicker } from "./ColorPicker";
+import { LineHeightDropdown } from "./LineHeightDropdown";
+import { TextTransformMenu } from "./TextTransformMenu";
+import { ZoomControl } from "./ZoomControl";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -47,6 +60,7 @@ import {
   IndentIncrease,
   IndentDecrease,
   FileText,
+  Paintbrush,
 } from "lucide-react";
 import { EditorBubbleMenu } from "./EditorBubbleMenu";
 
@@ -83,6 +97,7 @@ export const ContractEditor = forwardRef<ContractEditorHandle, ContractEditorPro
     ref
   ) {
     const [findOpen, setFindOpen] = useState(false);
+    const [zoom, setZoom] = useState(100);
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -95,6 +110,13 @@ export const ContractEditor = forwardRef<ContractEditorHandle, ContractEditorPro
           },
         },
       }),
+      TextStyle,
+      Color.configure({ types: ["textStyle"] }),
+      FontFamily.configure({ types: ["textStyle"] }),
+      FontSize,
+      LineHeight,
+      TextTransform,
+      FormatPainter,
       Table.configure({ resizable: true }),
       TableRow,
       TableCell,
@@ -121,6 +143,8 @@ export const ContractEditor = forwardRef<ContractEditorHandle, ContractEditorPro
       attributes: {
         class:
           "prose prose-sm max-w-none focus:outline-none min-h-[400px] sm:min-h-[600px] p-4 sm:p-8 md:p-12",
+        spellcheck: "true",
+        lang: "pt-BR",
       },
     },
   });
@@ -251,6 +275,14 @@ export const ContractEditor = forwardRef<ContractEditorHandle, ContractEditorPro
 
           <GroupSeparator />
 
+          {/* Group: Font (family, size, color, highlight) */}
+          <FontFamilyDropdown editor={editor} />
+          <FontSizeDropdown editor={editor} />
+          <ColorPicker editor={editor} variant="text" />
+          <ColorPicker editor={editor} variant="highlight" />
+
+          <GroupSeparator />
+
           {/* Group: Headings */}
           <ToolbarButton
             onClick={() => editor.chain().focus().setParagraph().run()}
@@ -343,6 +375,15 @@ export const ContractEditor = forwardRef<ContractEditorHandle, ContractEditorPro
             tooltip="Justificar (Ctrl+Shift+J)"
           >
             <AlignJustify className="h-4 w-4" />
+          </ToolbarButton>
+          <LineHeightDropdown editor={editor} />
+          <TextTransformMenu editor={editor} />
+          <ToolbarButton
+            onClick={() => editor.chain().focus().copyFormat().run()}
+            active={editor.storage.formatPainter?.hasClipboard ?? false}
+            tooltip="Copiar formatação (Ctrl+Alt+C) · depois selecione o destino e Ctrl+Alt+V"
+          >
+            <Paintbrush className="h-4 w-4" />
           </ToolbarButton>
 
           <GroupSeparator />
@@ -441,20 +482,27 @@ export const ContractEditor = forwardRef<ContractEditorHandle, ContractEditorPro
           />
         )}
 
-        {/* Editor - A4 paper effect */}
-        <div className="bg-muted/40 py-8 px-4">
-          <div className="a4-page mx-auto bg-card rounded-sm shadow-md border">
+        {/* Editor - A4 paper effect with zoom */}
+        <div className="bg-muted/40 py-8 px-4 overflow-auto">
+          <div
+            className="a4-page mx-auto bg-card rounded-sm shadow-md border transition-transform"
+            style={{
+              transform: zoom === 100 ? undefined : `scale(${zoom / 100})`,
+              transformOrigin: "top center",
+              marginBottom: zoom > 100 ? `${(zoom - 100) * 11}px` : undefined,
+            }}
+          >
             <EditorContent editor={editor} />
           </div>
         </div>
 
         {/* Status bar */}
-        <div className="flex items-center justify-between px-4 py-2 border-t bg-card text-xs text-muted-foreground">
+        <div className="flex items-center justify-between gap-3 px-4 py-2 border-t bg-card text-xs text-muted-foreground">
           <span>
             {wordCount} {wordCount === 1 ? "palavra" : "palavras"} · {charCount}{" "}
             {charCount === 1 ? "caractere" : "caracteres"}
           </span>
-          <span>Editor TipTap</span>
+          <ZoomControl zoom={zoom} onChange={setZoom} />
         </div>
       </div>
     </TooltipProvider>

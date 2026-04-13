@@ -20,6 +20,7 @@ import { CommentsPanel } from "./CommentsPanel";
 import { AddCommentDialog } from "./AddCommentDialog";
 import { ApprovalReviewDialog, type ApprovalReviewData } from "./ApprovalReviewDialog";
 import { ExportDialog } from "@/components/export/ExportDialog";
+import { useAutoAnalyze } from "@/hooks/useAutoAnalyze";
 import {
   ArrowLeft,
   MessageSquare,
@@ -29,6 +30,9 @@ import {
   ShieldCheck,
   ScrollText,
   Lock,
+  AlertTriangle,
+  AlertCircle,
+  Info,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -83,6 +87,46 @@ export function ContractEditorPage({
   const [reviewData, setReviewData] = useState<ApprovalReviewData | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const editorRef = useRef<ContractEditorHandle>(null);
+  const [aiCommentsCount, setAiCommentsCount] = useState<{
+    total: number;
+    errors: number;
+    warnings: number;
+    infos: number;
+    maxSeverity: "error" | "warning" | "info" | null;
+  }>({ total: 0, errors: 0, warnings: 0, infos: 0, maxSeverity: null });
+
+  const isApprovedOrVoid = status === "aprovado";
+
+  async function refreshAiCommentsCount() {
+    try {
+      const res = await fetch(
+        `/api/contracts/${contract.id}/comments/count?authorType=ai&unresolved=true`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        setAiCommentsCount(data);
+      }
+    } catch {
+      // silent
+    }
+  }
+
+  useEffect(() => {
+    refreshAiCommentsCount();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [contract.id, commentsVersion]);
+
+  useAutoAnalyze(
+    editorRef.current?.getEditor() ?? null,
+    isApprovedOrVoid ? null : contract.id,
+    !isApprovedOrVoid,
+    {
+      onAnalysisComplete: () => {
+        setCommentsVersion((v) => v + 1);
+        refreshAiCommentsCount();
+      },
+    }
+  );
 
   function handleAddComment(selectedText: string) {
     setPendingCommentText(selectedText);
@@ -238,14 +282,44 @@ export function ContractEditorPage({
             </Button>
           )}
 
-          {/* Comments */}
+          {/* Comments with proactive AI badge */}
           <Button
             variant="outline"
             size="sm"
             onClick={() => setCommentsOpen(true)}
+            className="relative"
           >
             <MessageSquareText className="h-4 w-4 sm:mr-1" />
             <span className="hidden sm:inline">Comentários</span>
+            {aiCommentsCount.total > 0 && (
+              <Badge
+                variant={
+                  aiCommentsCount.maxSeverity === "error"
+                    ? "destructive"
+                    : aiCommentsCount.maxSeverity === "warning"
+                      ? "default"
+                      : "secondary"
+                }
+                className={`ml-1.5 h-5 min-w-5 px-1 text-[10px] ${
+                  aiCommentsCount.maxSeverity === "error"
+                    ? "animate-pulse"
+                    : aiCommentsCount.maxSeverity === "warning"
+                      ? "bg-amber-500 text-white hover:bg-amber-500"
+                      : ""
+                }`}
+              >
+                {aiCommentsCount.maxSeverity === "error" && (
+                  <AlertCircle className="mr-0.5 h-2.5 w-2.5" />
+                )}
+                {aiCommentsCount.maxSeverity === "warning" && (
+                  <AlertTriangle className="mr-0.5 h-2.5 w-2.5" />
+                )}
+                {aiCommentsCount.maxSeverity === "info" && (
+                  <Info className="mr-0.5 h-2.5 w-2.5" />
+                )}
+                {aiCommentsCount.total}
+              </Badge>
+            )}
           </Button>
 
           {/* Change Log */}

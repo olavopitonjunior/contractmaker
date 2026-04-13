@@ -1,8 +1,11 @@
+import Link from "next/link";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Button } from "@/components/ui/button";
 import { AgentSettings } from "@/components/settings/AgentSettings";
+import { BookOpen } from "lucide-react";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -16,7 +19,15 @@ export default async function SettingsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Configurações</h1>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <h1 className="text-2xl font-semibold">Configurações</h1>
+        <Button variant="outline" size="sm" asChild>
+          <Link href="/settings/knowledge-base">
+            <BookOpen className="h-4 w-4 mr-1" />
+            Base de Conhecimento
+          </Link>
+        </Button>
+      </div>
 
       <Tabs defaultValue="perfil">
         <TabsList>

@@ -385,6 +385,11 @@ CNPJ: {{cnpj comissao.imobiliaria_cnpj}}{{#if (existe comissao.creci)}}<br>
 CRECI: {{comissao.creci}}{{/if}}
 </p>
 
+<h3>TESTEMUNHAS</h3>
+{{#each testemunhas}}
+<p>_______________________________<br>Nome: {{#if this.nome}}{{this.nome}}{{else}}___________________________{{/if}}<br>CPF: {{#if this.cpf}}{{cpf this.cpf}}{{else}}___________________________{{/if}}</p>
+{{/each}}
+
 </div>
 
 </div>

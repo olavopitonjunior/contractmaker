@@ -33,7 +33,7 @@ export function ExportDialog({ contractId, exports }: ExportDialogProps) {
 
       if (res.ok) {
         const data = await res.json();
-        toast.success("Exportacao concluida!");
+        toast.success("Exportação concluída!");
         // Open the file directly
         if (format === "pdf" && data.pdfUrl) {
           window.open(data.pdfUrl, "_blank");
@@ -43,7 +43,7 @@ export function ExportDialog({ contractId, exports }: ExportDialogProps) {
         window.location.reload();
       } else {
         const err = await res.json().catch(() => ({}));
-        toast.error(err.error || "Erro na exportacao");
+        toast.error(err.error || "Erro na exportação");
       }
     } catch {
       toast.error("Erro de conexão");
@@ -113,7 +113,7 @@ export function ExportDialog({ contractId, exports }: ExportDialogProps) {
               <Separator />
               <div className="space-y-2">
                 <p className="text-sm font-medium text-muted-foreground">
-                  Exportacoes anteriores
+                  Exportações anteriores
                 </p>
                 {exports.map((exp) => (
                   <a

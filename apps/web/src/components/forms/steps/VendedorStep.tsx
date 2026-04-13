@@ -62,7 +62,13 @@ function PessoaFisicaFields({
     <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <FormField label="Nome Completo *">
-          <Input {...form.register(`${prefix}.nome`)} placeholder="Nome completo" />
+          <Input
+            {...form.register(`${prefix}.nome`, {
+              required: "Nome é obrigatório",
+              minLength: { value: 2, message: "Nome muito curto" },
+            })}
+            placeholder="Nome completo"
+          />
           <FieldError error={(form.formState.errors?.vendedores as any)?.[index]?.nome} />
         </FormField>
 

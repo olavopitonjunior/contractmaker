@@ -206,6 +206,50 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
       required: ["selectedText", "text", "severity"],
     },
   },
+  {
+    name: "analyze_contradictions",
+    description:
+      "Analisa o contrato em busca de contradições lógicas, matemáticas, de referência interna, duplicação de qualificação e prazos conflitantes. Retorna lista de findings com severity e localização. Use ao iniciar a análise de um contrato ou após mudanças significativas. Para cada finding detectado que justifique atenção do usuário, use add_comment para ancorar no trecho.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        focus: {
+          type: "string",
+          description: "Opcional: foco em uma seção específica. Valores sugeridos: 'pagamento', 'posse', 'comissao', 'financiamento', 'qualificacao', 'prazos'. Se omitido, analisa o contrato inteiro.",
+        },
+        scope: {
+          type: "string",
+          description: "Opcional: trecho específico do contrato a analisar (para análise passiva de uma edição pontual). Se fornecido, o agente deve focar apenas neste trecho + 500 chars de contexto adjacente.",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "query_knowledge_base",
+    description:
+      "Consulta a base de conhecimento do escritório (legislação, modelos referenciais, regras internas, glossário). Use SEMPRE antes de citar base legal, antes de redigir cláusula técnica baseada em lei específica, e antes de decidir sobre termos do escritório. Retorna os itens mais relevantes por similaridade semântica (RAG via Voyage-law-2).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        query: {
+          type: "string",
+          description: "Pergunta ou tema em linguagem natural (ex: 'multa por atraso no pagamento do sinal')",
+        },
+        category: {
+          type: "string",
+          enum: ["legislation", "model", "rule", "glossary"],
+          description:
+            "Filtrar por categoria: 'legislation' (Código Civil, Lei 8.245, LGPD), 'model' (contratos referenciais), 'rule' (regras do escritório), 'glossary' (termos técnicos)",
+        },
+        topK: {
+          type: "number",
+          description: "Quantos resultados retornar (default 5, max 10)",
+        },
+      },
+      required: ["query"],
+    },
+  },
 ];
 
 export function getToolNames(): string[] {

@@ -137,8 +137,8 @@ export function ChatPanel({ contractId, messages: initialMessages, onContentUpda
   }
 
   return (
-    <div className="flex flex-col h-[calc(100dvh-120px)]">
-      <ScrollArea className="flex-1 pr-4" ref={scrollRef}>
+    <div className="flex flex-col h-full max-h-[calc(100dvh-80px)]">
+      <ScrollArea className="flex-1 min-h-0 pr-4" ref={scrollRef}>
         <div className="space-y-4 py-4">
           {messages.length === 0 && (
             <p className="text-sm text-muted-foreground text-center py-8">

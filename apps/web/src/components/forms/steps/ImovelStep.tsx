@@ -29,6 +29,11 @@ function FormField({
   );
 }
 
+function FieldError({ error }: { error?: { message?: string } }) {
+  if (!error?.message) return null;
+  return <p className="text-xs text-destructive mt-1">{error.message}</p>;
+}
+
 export function ImovelStep({ form }: ImovelStepProps) {
   const { fields, append, remove } = useFieldArray({
     control: form.control,
@@ -78,10 +83,15 @@ export function ImovelStep({ form }: ImovelStepProps) {
             </CardHeader>
             <CardContent className="pt-0 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField label="Logradouro (Rua/Avenida)" className="md:col-span-2">
+                <FormField label="Logradouro (Rua/Avenida) *" className="md:col-span-2">
                   <Input
-                    {...form.register(`${prefix}.rua`)}
+                    {...form.register(`${prefix}.rua`, {
+                      required: "Logradouro é obrigatório",
+                    })}
                     placeholder="Ex: Rua das Flores"
+                  />
+                  <FieldError
+                    error={(form.formState.errors?.imoveis as any)?.[index]?.rua}
                   />
                 </FormField>
 
@@ -100,8 +110,16 @@ export function ImovelStep({ form }: ImovelStepProps) {
                   <Input {...form.register(`${prefix}.bairro`)} placeholder="Bairro" />
                 </FormField>
 
-                <FormField label="Cidade">
-                  <Input {...form.register(`${prefix}.cidade`)} placeholder="Cidade" />
+                <FormField label="Cidade *">
+                  <Input
+                    {...form.register(`${prefix}.cidade`, {
+                      required: "Cidade é obrigatória",
+                    })}
+                    placeholder="Cidade"
+                  />
+                  <FieldError
+                    error={(form.formState.errors?.imoveis as any)?.[index]?.cidade}
+                  />
                 </FormField>
 
                 <FormField label="UF">
@@ -147,12 +165,21 @@ export function ImovelStep({ form }: ImovelStepProps) {
                 </FormField>
               </div>
 
-              <FormField label="Descrição do Imóvel">
+              <FormField label="Descrição do Imóvel *">
                 <textarea
-                  {...form.register(`${prefix}.descricao`)}
+                  {...form.register(`${prefix}.descricao`, {
+                    required: "Descrição do imóvel é obrigatória",
+                    minLength: {
+                      value: 10,
+                      message: "Descreva com pelo menos 10 caracteres",
+                    },
+                  })}
                   placeholder="Ex: Apartamento com 3 quartos (sendo 1 suíte), 2 banheiros, sala, cozinha, área de serviço, 1 vaga de garagem coberta, área privativa de 85m²."
                   rows={4}
                   className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none"
+                />
+                <FieldError
+                  error={(form.formState.errors?.imoveis as any)?.[index]?.descricao}
                 />
               </FormField>
             </CardContent>

@@ -84,12 +84,13 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members     OrgMembership[]
-  pipelines   Pipeline[]
-  forms       SalesForm[]
-  templates   ContractTemplate[]
-  clauses     Clause[]
-  agentConfig AgentConfig?
+  members        OrgMembership[]
+  pipelines      Pipeline[]
+  forms          SalesForm[]
+  templates      ContractTemplate[]
+  clauses        Clause[]
+  agentConfig    AgentConfig?
+  knowledgeItems KnowledgeItem[]
 }
 
 model OrgMembership {
@@ -324,6 +325,7 @@ model ContractComment {
   severity     String   @default("info") // "info" | "warning" | "error"
   resolved     Boolean  @default(false)
   parentId     String?
+  dedupeKey    String?  // hash determinístico usado pela IA para evitar duplicatas em re-análises
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -332,7 +334,9 @@ model ContractComment {
   parent   ContractComment?  @relation("CommentReplies", fields: [parentId], references: [id])
   replies  ContractComment[] @relation("CommentReplies")
 
+  @@unique([contractId, dedupeKey])
   @@index([contractId, resolved])
+  @@index([contractId, authorType, resolved])
 }
 
 model ContractSuggestion {
@@ -456,4 +460,32 @@ model LegacyTemplate {
 
   user     User     @relation(fields: [userId], references: [id])
   document Document @relation(fields: [sourceDocId], references: [id])
+}
+
+// ============================================
+// KNOWLEDGE BASE (RAG)
+// ============================================
+
+model KnowledgeItem {
+  id          String   @id @default(cuid())
+  orgId       String
+  category    String   // "legislation" | "model" | "rule" | "glossary"
+  title       String
+  content     String   @db.Text
+  chunkIndex  Int      @default(0)
+  chunkTotal  Int      @default(1)
+  parentId    String?
+  tags        String[]
+  source      String?  // URL, doc id, "manual", "seed"
+  createdBy   String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  // embedding vector(1024) - added via raw migration, not visible to Prisma
+
+  org     Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  parent  KnowledgeItem?  @relation("KnowledgeChunks", fields: [parentId], references: [id], onDelete: Cascade)
+  chunks  KnowledgeItem[] @relation("KnowledgeChunks")
+
+  @@index([orgId, category])
+  @@index([orgId, parentId])
 }

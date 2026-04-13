@@ -4,6 +4,7 @@ import { renderContratoHTML } from "@/lib/render/handlebars";
 import { AGENT_TOOLS } from "./tools";
 import { executeToolHandler } from "./tool-handlers";
 import { DEFAULT_SYSTEM_PROMPT, buildContextMessage } from "./prompts";
+import { quickChecks, shouldSkipLLM, dedupeKeyFor, type QuickFinding } from "./quickChecks";
 import type { AgentContext, AgentResult, ChangeLogEntry } from "./types";
 
 function getAnthropicClient() {
@@ -94,6 +95,9 @@ function mapToolToAction(toolName: string): string {
     validate_contract: "validation",
     suggest_improvements: "validation",
     extract_document_data: "ocr_extraction",
+    add_comment: "ai_query",
+    analyze_contradictions: "validation",
+    query_knowledge_base: "ai_query",
   };
   return map[toolName] || "ai_edit";
 }
@@ -287,4 +291,193 @@ export async function runContractAgent(params: AgentParams): Promise<AgentResult
     dataJson: hasEdits ? context.dataJson : null,
     changeLogs,
   };
+}
+
+// ============================================
+// PASSIVE ANALYSIS (autonomous, triggered by open/edit/approve)
+// ============================================
+
+export type PassiveAnalysisTrigger = "open" | "edit" | "approve";
+
+export interface PassiveAnalysisParams {
+  contractId: string;
+  orgId: string;
+  trigger: PassiveAnalysisTrigger;
+  scope?: {
+    from?: number;
+    to?: number;
+    changedText?: string;
+  };
+}
+
+export interface PassiveFinding {
+  severity: "info" | "warning" | "error";
+  category: string;
+  message: string;
+  selectedText: string;
+  suggestedFix?: string;
+  source: "quickChecks" | "llm";
+}
+
+const PASSIVE_SYSTEM_PROMPT = `Você é um analisador de contratos imobiliários brasileiros. Sua única tarefa é apontar problemas concretos e objetivos: contradições lógicas, erros matemáticos, referências internas quebradas, duplicação de qualificação, prazos conflitantes, cláusulas mutuamente exclusivas.
+
+REGRAS:
+1. Responda APENAS em JSON válido, sem markdown, sem comentários, sem texto antes ou depois.
+2. Formato: { "findings": [ { "severity": "info|warning|error", "category": "math|qualification|reference|format|logic", "message": "...", "selectedText": "trecho EXATO do contrato", "suggestedFix": "..." } ] }
+3. Se não encontrar problemas, retorne { "findings": [] }.
+4. selectedText DEVE ser copiado LITERALMENTE do contrato — qualquer divergência invalida o finding.
+5. Seja específico: "valor X não bate com soma Y" é útil; "pode haver inconsistência" não.
+6. Ignore questões de estilo, gramática e formatação. Foque em conteúdo jurídico.
+7. No máximo 5 findings por chamada — priorize os mais críticos.`;
+
+/**
+ * Runs passive analysis on a contract. Uses Haiku for cheap on-edit passes
+ * and Sonnet for on-open deep passes. Persists findings as ContractComment
+ * with dedupeKey to avoid duplicates on re-analysis.
+ */
+export async function runPassiveAnalysis(
+  params: PassiveAnalysisParams
+): Promise<{ findings: PassiveFinding[]; commentsCreated: number; modelUsed: string }> {
+  const contract = await prisma.contract.findUniqueOrThrow({
+    where: { id: params.contractId },
+    include: { template: true },
+  });
+
+  if (contract.status === "aprovado") {
+    return { findings: [], commentsCreated: 0, modelUsed: "none" };
+  }
+
+  const htmlContent =
+    contract.htmlContent ||
+    renderContratoHTML(
+      contract.templateOverride || contract.template.handlebarsSource,
+      contract.dataJson as Record<string, unknown>
+    );
+
+  // 1. Client-safe deterministic checks first
+  const quick: QuickFinding[] = quickChecks(contract.dataJson, htmlContent);
+  const quickFindings: PassiveFinding[] = quick.map((q) => ({ ...q, source: "quickChecks" }));
+
+  // 2. Decide whether to call LLM
+  // - On 'open' (first load): always call LLM for deep analysis with Sonnet
+  // - On 'edit' (passive): only call LLM if quickChecks is clean (otherwise the
+  //   errors are already actionable without LLM overhead)
+  // - On 'approve': validators run elsewhere, we skip here
+  let llmFindings: PassiveFinding[] = [];
+  let modelUsed = "quickChecks-only";
+
+  if (params.trigger === "approve") {
+    // Nothing to do — /approve route handles validation
+  } else if (params.trigger === "edit" && shouldSkipLLM(quick)) {
+    // Skip — we already have hard errors to show
+  } else {
+    const passiveModel =
+      params.trigger === "open"
+        ? process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514"
+        : process.env.ANTHROPIC_PASSIVE_MODEL || "claude-haiku-4-5-20251001";
+    modelUsed = passiveModel;
+
+    // Build analysis prompt — trim context when doing edit-scoped analysis
+    let analysisInput: string;
+    if (params.scope?.changedText) {
+      const idx = htmlContent.indexOf(params.scope.changedText);
+      const before = idx > 0 ? htmlContent.slice(Math.max(0, idx - 500), idx) : "";
+      const after = idx >= 0 ? htmlContent.slice(idx + params.scope.changedText.length, idx + params.scope.changedText.length + 500) : "";
+      analysisInput = `CONTEXTO ANTES:\n${before}\n\n--- TRECHO EDITADO ---\n${params.scope.changedText}\n--- FIM ---\n\nCONTEXTO DEPOIS:\n${after}`;
+    } else {
+      analysisInput = htmlContent.slice(0, 15000);
+    }
+
+    try {
+      const response = await anthropic.messages.create({
+        model: passiveModel,
+        max_tokens: 2048,
+        temperature: 0.1,
+        system: PASSIVE_SYSTEM_PROMPT,
+        messages: [
+          {
+            role: "user",
+            content: `DADOS DO CONTRATO (JSON):\n${JSON.stringify(contract.dataJson, null, 2)}\n\n---\n\nHTML DO CONTRATO:\n${analysisInput}`,
+          },
+        ],
+      });
+
+      const textBlock = response.content.find((b) => b.type === "text");
+      if (textBlock && textBlock.type === "text") {
+        // Extract JSON from response (model may add stray whitespace)
+        const match = textBlock.text.match(/\{[\s\S]*\}/);
+        if (match) {
+          try {
+            const parsed = JSON.parse(match[0]) as { findings?: PassiveFinding[] };
+            if (Array.isArray(parsed.findings)) {
+              llmFindings = parsed.findings
+                .filter((f) => f && f.selectedText && htmlContent.includes(f.selectedText))
+                .map((f) => ({ ...f, source: "llm" as const }));
+            }
+          } catch {
+            // Invalid JSON — ignore and fall through
+          }
+        }
+      }
+    } catch (err) {
+      // LLM call failed — don't break the whole analysis, just return quickChecks
+      console.error("[runPassiveAnalysis] LLM call failed:", err);
+    }
+  }
+
+  const allFindings = [...quickFindings, ...llmFindings];
+
+  // 3. Persist findings as ContractComment with dedupeKey (upsert pattern)
+  let commentsCreated = 0;
+  for (const finding of allFindings) {
+    const dedupeKey = dedupeKeyFor("ai", finding.selectedText, finding.message);
+    try {
+      await prisma.contractComment.upsert({
+        where: {
+          contractId_dedupeKey: {
+            contractId: params.contractId,
+            dedupeKey,
+          },
+        },
+        create: {
+          contractId: params.contractId,
+          userId: null,
+          authorName: "Assistente IA",
+          authorType: "ai",
+          text: finding.message + (finding.suggestedFix ? `\n\nSugestão: ${finding.suggestedFix}` : ""),
+          anchorId: dedupeKey,
+          selectedText: finding.selectedText,
+          severity: finding.severity,
+          dedupeKey,
+        },
+        update: {
+          // Touch updatedAt so we know the finding is still current
+          updatedAt: new Date(),
+        },
+      });
+      commentsCreated++;
+    } catch (err) {
+      console.error("[runPassiveAnalysis] Failed to upsert comment:", err);
+    }
+  }
+
+  // 4. Log the analysis run
+  await prisma.contractChangeLog.create({
+    data: {
+      contractId: params.contractId,
+      userId: null,
+      action: "validation",
+      summary: `Análise automática (${params.trigger}): ${allFindings.length} findings, ${commentsCreated} comentários persistidos`,
+      details: {
+        trigger: params.trigger,
+        modelUsed,
+        quickFindingsCount: quickFindings.length,
+        llmFindingsCount: llmFindings.length,
+        scope: params.scope || null,
+      },
+      source: "ai",
+    },
+  });
+
+  return { findings: allFindings, commentsCreated, modelUsed };
 }

@@ -3,7 +3,7 @@
 function valorPorExtenso(valor: number): string {
   if (Number.isNaN(valor) || valor === null || valor === undefined) return '';
 
-  const unidades = ['', 'um', 'dois', 'tres', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove',
+  const unidades = ['', 'um', 'dois', 'três', 'quatro', 'cinco', 'seis', 'sete', 'oito', 'nove',
     'dez', 'onze', 'doze', 'treze', 'quatorze', 'quinze', 'dezesseis', 'dezessete', 'dezoito', 'dezenove'];
   const dezenas = ['', '', 'vinte', 'trinta', 'quarenta', 'cinquenta', 'sessenta', 'setenta', 'oitenta', 'noventa'];
   const centenas = ['', 'cento', 'duzentos', 'trezentos', 'quatrocentos', 'quinhentos',
@@ -34,8 +34,8 @@ function valorPorExtenso(valor: number): string {
   const centavosNum = Math.round((Math.abs(valor) - inteiro) * 100);
 
   const escalas = [
-    { divisor: 1000000000, singular: 'bilhao', plural: 'bilhoes' },
-    { divisor: 1000000, singular: 'milhao', plural: 'milhoes' },
+    { divisor: 1000000000, singular: 'bilhão', plural: 'bilhões' },
+    { divisor: 1000000, singular: 'milhão', plural: 'milhões' },
     { divisor: 1000, singular: 'mil', plural: 'mil' },
     { divisor: 1, singular: '', plural: '' },
   ];

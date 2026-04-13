@@ -2,6 +2,8 @@ import { prisma } from "@/lib/db/prisma";
 import { renderContratoHTML } from "@/lib/render/handlebars";
 import { validateContractData } from "./validators";
 import { extractDocumentData } from "./ocr";
+import { quickChecks } from "./quickChecks";
+import { embedOne, toPgVector, VoyageError, isEmbeddingsConfigured } from "./embeddings";
 import type { AgentContext, ValidationIssue, ClauseSuggestion } from "./types";
 
 function deepMerge(
@@ -50,9 +52,179 @@ export async function executeToolHandler(
       return handleExtractDocument(input);
     case "add_comment":
       return handleAddComment(input, context);
+    case "analyze_contradictions":
+      return handleAnalyzeContradictions(input, context);
+    case "query_knowledge_base":
+      return handleQueryKnowledgeBase(input, context);
     default:
       return { error: `Tool desconhecida: ${toolName}` };
   }
+}
+
+async function handleQueryKnowledgeBase(
+  input: Record<string, unknown>,
+  context: AgentContext
+): Promise<Record<string, unknown>> {
+  const query = typeof input.query === "string" ? input.query : "";
+  const category = typeof input.category === "string" ? input.category : undefined;
+  const topK = Math.min(
+    typeof input.topK === "number" && input.topK > 0 ? Math.floor(input.topK) : 5,
+    10
+  );
+
+  if (!query) {
+    return { error: "query é obrigatório" };
+  }
+
+  if (!isEmbeddingsConfigured()) {
+    // Fallback: keyword search via PostgreSQL ILIKE when embeddings are off
+    const rows = await prisma.knowledgeItem.findMany({
+      where: {
+        orgId: context.orgId,
+        ...(category ? { category } : {}),
+        OR: [
+          { title: { contains: query, mode: "insensitive" } },
+          { content: { contains: query, mode: "insensitive" } },
+        ],
+      },
+      take: topK,
+      orderBy: { updatedAt: "desc" },
+      select: {
+        id: true,
+        title: true,
+        content: true,
+        category: true,
+        tags: true,
+        source: true,
+      },
+    });
+    return {
+      results: rows,
+      mode: "keyword_fallback",
+      note: "VOYAGE_API_KEY não configurada — busca por palavra-chave (recall inferior)",
+    };
+  }
+
+  try {
+    const queryVec = await embedOne(query, "query");
+    const vecLiteral = toPgVector(queryVec);
+
+    // Raw SQL with pgvector cosine similarity; filter by org and optional category
+    const rows = await prisma.$queryRawUnsafe<
+      Array<{
+        id: string;
+        title: string;
+        content: string;
+        category: string;
+        tags: string[];
+        source: string | null;
+        similarity: number;
+      }>
+    >(
+      `
+      SELECT
+        id,
+        title,
+        content,
+        category,
+        tags,
+        source,
+        1 - (embedding <=> $1::vector) AS similarity
+      FROM "KnowledgeItem"
+      WHERE "orgId" = $2
+        AND embedding IS NOT NULL
+        ${category ? 'AND category = $3' : ''}
+      ORDER BY embedding <=> $1::vector
+      LIMIT ${topK}
+      `,
+      vecLiteral,
+      context.orgId,
+      ...(category ? [category] : [])
+    );
+
+    return {
+      results: rows.map((r) => ({
+        id: r.id,
+        title: r.title,
+        content: r.content.slice(0, 800),
+        category: r.category,
+        tags: r.tags,
+        source: r.source,
+        similarity: Number(r.similarity?.toFixed?.(3) ?? r.similarity),
+      })),
+      mode: "semantic",
+      topK,
+    };
+  } catch (err) {
+    if (err instanceof VoyageError) {
+      return {
+        error: `Falha na busca semântica: ${err.message}`,
+        fallback_suggestion: "Tente reformular a query ou verifique VOYAGE_API_KEY",
+      };
+    }
+    throw err;
+  }
+}
+
+async function handleAnalyzeContradictions(
+  input: Record<string, unknown>,
+  context: AgentContext
+): Promise<Record<string, unknown>> {
+  const focus = typeof input.focus === "string" ? input.focus : undefined;
+  const scope = typeof input.scope === "string" ? input.scope : undefined;
+
+  // Run deterministic checks first
+  const findings = quickChecks(context.dataJson, context.htmlContent);
+
+  // Add lightweight semantic checks specific to the contract structure
+  const html = scope || context.htmlContent;
+  const semanticFindings: Array<{
+    severity: "info" | "warning" | "error";
+    category: string;
+    message: string;
+    selectedText: string;
+    suggestedFix?: string;
+  }> = [];
+
+  // Check for mutually exclusive clause pairs
+  const mutuallyExclusive: Array<[RegExp, RegExp, string]> = [
+    [
+      /irretratabilidade|irretrata[vb]el/i,
+      /direito de arrependimento|arrependimento/i,
+      "Contrato afirma irretratabilidade mas menciona direito de arrependimento — cláusulas mutuamente exclusivas",
+    ],
+    [
+      /foro\s+(eleito|escolhido|de\s+elei[cç][ãa]o)/i,
+      /arbitragem\s+(obrigat[óo]ria|exclusiva|v[íi]nculativa)/i,
+      "Contrato elege foro judicial mas também obriga arbitragem — conflito de jurisdição",
+    ],
+  ];
+
+  for (const [pattern1, pattern2, message] of mutuallyExclusive) {
+    const m1 = pattern1.exec(html);
+    const m2 = pattern2.exec(html);
+    if (m1 && m2) {
+      semanticFindings.push({
+        severity: "warning",
+        category: "reference",
+        message,
+        selectedText: m1[0],
+        suggestedFix: "Escolha uma única forma de resolução de conflitos.",
+      });
+    }
+  }
+
+  const allFindings = [...findings, ...semanticFindings];
+
+  return {
+    findings: allFindings,
+    focus: focus || "contract_full",
+    scopeProvided: !!scope,
+    totalFindings: allFindings.length,
+    errorCount: allFindings.filter((f) => f.severity === "error").length,
+    warningCount: allFindings.filter((f) => f.severity === "warning").length,
+    infoCount: allFindings.filter((f) => f.severity === "info").length,
+  };
 }
 
 async function handleAddComment(

@@ -186,7 +186,7 @@ Descrição: {{this.descricao}}
 
 <h2>CLÁUSULA TERCEIRA - DA IMISSÃO NA POSSE</h2>
 
-<p><strong>3.1.</strong> A posse direta do imóvel será transferida ao(s) PROMISSÁRIO(S) COMPRADOR(ES), livre e desembaraçada de pessoas e coisas, no prazo de 1 (um) dia útil contado do <strong>registro do Contrato de Financiamento com Alienação Fiduciária</strong> junto ao Cartório de Registro de Imóveis competente.</p>
+<p><strong>3.1.</strong> A posse direta do imóvel será transferida ao(s) PROMISSÁRIO(S) COMPRADOR(ES), livre e desembaraçada de pessoas e coisas, {{#if (existe entrega_posse.momento_texto)}}{{entrega_posse.momento_texto}}{{else}}no prazo de 1 (um) dia útil contado do <strong>registro do Contrato de Financiamento com Alienação Fiduciária</strong> junto ao Cartório de Registro de Imóveis competente{{/if}}.</p>
 
 <p><strong>3.1.1.</strong> O atraso na entrega da posse por parte do(s) PROMITENTE(S) VENDEDOR(ES) sujeitará ao pagamento de multa diária no valor de {{moeda config.multa_diaria_posse}} ({{extenso config.multa_diaria_posse}}), a ser paga ao(s) PROMISSÁRIO(S) COMPRADOR(ES). Transcorridos 30 (trinta) dias de atraso, a multa diária será acrescida de 20% (vinte por cento) sobre o valor originário, sem prejuízo de eventuais perdas e danos.</p>
 
@@ -296,7 +296,7 @@ Descrição: {{this.descricao}}
 
 <p><strong>14.1.</strong> Pela intermediação e assessoria prestadas, será devida a comissão de corretagem no valor total de {{moeda comissao.valor}} ({{extenso comissao.valor}}), a ser paga pela {{comissao.quem_paga_texto}} à imobiliária intermediadora {{comissao.imobiliaria_nome}}, inscrita no CNPJ nº {{cnpj comissao.imobiliaria_cnpj}}{{#if (existe comissao.creci)}}, CRECI nº {{comissao.creci}}{{/if}}.</p>
 
-<p><strong>14.2.</strong> O pagamento da comissão está atrelado à liberação dos recursos previstos na alínea "b" da Cláusula Segunda (financiamento imobiliário), devendo ser efetuado no prazo de até 5 (cinco) dias úteis contados da efetiva liberação dos valores pelo agente financeiro em favor do(s) PROMITENTE(S) VENDEDOR(ES).</p>
+<p><strong>14.2.</strong> {{#if (existe comissao.quando_paga_texto)}}O pagamento da comissão será efetuado {{comissao.quando_paga_texto}}, no prazo de até 5 (cinco) dias úteis contados do respectivo evento.{{else}}O pagamento da comissão está atrelado à liberação dos recursos previstos na alínea "b" da Cláusula Segunda (financiamento imobiliário), devendo ser efetuado no prazo de até 5 (cinco) dias úteis contados da efetiva liberação dos valores pelo agente financeiro em favor do(s) PROMITENTE(S) VENDEDOR(ES).{{/if}}</p>
 
 <p><strong>14.3.</strong> A comissão de corretagem é devida pela efetiva aproximação das partes e conclusão do negócio, sendo líquida, certa e exigível, de modo que eventual inadimplência ensejará cobrança extrajudicial ou ação executiva, na forma da lei.</p>
 
@@ -352,8 +352,9 @@ Descrição: {{this.descricao}}
 <p>_______________________________<br>{{comissao.imobiliaria_nome}}<br>CNPJ: {{cnpj comissao.imobiliaria_cnpj}}{{#if (existe comissao.creci)}}<br>CRECI: {{comissao.creci}}{{/if}}</p>
 
 <h3>TESTEMUNHAS</h3>
-<p>_______________________________<br>Nome: ___________________________<br>CPF: ___________________________</p>
-<p>_______________________________<br>Nome: ___________________________<br>CPF: ___________________________</p>
+{{#each testemunhas}}
+<p>_______________________________<br>Nome: {{#if this.nome}}{{this.nome}}{{else}}___________________________{{/if}}<br>CPF: {{#if this.cpf}}{{cpf this.cpf}}{{else}}___________________________{{/if}}</p>
+{{/each}}
 
 </div>
 
