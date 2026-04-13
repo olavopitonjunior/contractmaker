@@ -1,6 +1,6 @@
 "use client";
 
-import { useFieldArray, UseFormReturn } from "react-hook-form";
+import { useFieldArray, UseFormReturn, Controller } from "react-hook-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { UFSelect } from "@/components/forms/UFSelect";
+import { MoneyInput } from "@/components/forms/MoneyInput";
 
 interface ComissaoConfigStepProps {
   form: UseFormReturn<any>;
@@ -83,18 +84,21 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
       <Card className="border border-border">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-semibold">
-            Comissão Imobiliaria
+            Comissão Imobiliária
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="Valor da Comissão (R$)">
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                {...form.register("comissao.valor", { valueAsNumber: true })}
-                placeholder="0,00"
+            <FormField label="Valor da Comissão">
+              <Controller
+                control={form.control}
+                name="comissao.valor"
+                render={({ field }) => (
+                  <MoneyInput
+                    value={field.value || 0}
+                    onChange={(v) => field.onChange(v)}
+                  />
+                )}
               />
             </FormField>
 
@@ -128,7 +132,7 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
               <FormField label="Especificar quem paga" className="md:col-span-2">
                 <Input
                   {...form.register("comissao.quem_paga_texto")}
-                  placeholder="Especifique quem paga a comissao..."
+                  placeholder="Especifique quem paga a comissão..."
                 />
               </FormField>
             )}
@@ -146,7 +150,7 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
                     Na assinatura do contrato
                   </SelectItem>
                   <SelectItem value="quitacao">
-                    Na quitacao total
+                    Na quitação total
                   </SelectItem>
                   <SelectItem value="registro">
                     No registro da escritura
@@ -160,7 +164,7 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
           <Separator />
 
           <p className="text-sm font-semibold text-foreground">
-            Dados da Imobiliaria
+            Dados da Imobiliária
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormField label="Nome da Imobiliária" className="md:col-span-2">
@@ -189,19 +193,19 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
       <Card className="border border-border">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-semibold">
-            Cláusula de Desistencia
+            Cláusula de Desistência
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <CheckboxField
             id="permite-desistencia"
-            label="Permite desistencia do negocio dentro de prazo"
+            label="Permite desistência do negócio dentro de prazo"
             checked={!!permiteDesistencia}
             onChange={(v) => form.setValue("desistencia.permite", v)}
           />
 
           {permiteDesistencia && (
-            <FormField label="Prazo para desistencia (dias)" className="max-w-xs">
+            <FormField label="Prazo para desistência (dias)" className="max-w-xs">
               <Input
                 type="number"
                 min="1"
@@ -219,11 +223,11 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
       <Card className="border border-border">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-semibold">
-            Foro de Resolucao de Disputas
+            Foro de Resolução de Disputas
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <FormField label="Forma de resolucao de conflitos">
+          <FormField label="Forma de resolução de conflitos">
             <Select
               value={foro || "arbitragem"}
               onValueChange={(v) => form.setValue("foro", v)}
@@ -233,7 +237,7 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="arbitragem">Arbitragem</SelectItem>
-                <SelectItem value="justica-publica">Justica Comum</SelectItem>
+                <SelectItem value="justica-publica">Justiça Comum</SelectItem>
               </SelectContent>
             </Select>
           </FormField>
@@ -308,7 +312,7 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="Multa Penal Moratoria (%)">
+            <FormField label="Multa Penal Moratória (%)">
               <Input
                 type="number"
                 step="0.01"
@@ -320,14 +324,14 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
               />
             </FormField>
 
-            <FormField label="Base de Calculo da Multa">
+            <FormField label="Base de Cálculo da Multa">
               <Input
                 {...form.register("config.base_calculo_multa")}
                 placeholder="valor da parcela"
               />
             </FormField>
 
-            <FormField label="Juros por Atraso (% ao mes)">
+            <FormField label="Juros por Atraso (% ao mês)">
               <Input
                 type="number"
                 step="0.01"
@@ -339,14 +343,14 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
               />
             </FormField>
 
-            <FormField label="Atualizacao Monetaria">
+            <FormField label="Atualização Monetária">
               <Input
                 {...form.register("config.atualizacao_monetaria")}
                 placeholder="IPCA"
               />
             </FormField>
 
-            <FormField label="Prazo de Atraso para Rescisao (dias)">
+            <FormField label="Prazo de Atraso para Rescisão (dias)">
               <Input
                 type="number"
                 min="1"
@@ -357,19 +361,20 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
               />
             </FormField>
 
-            <FormField label="Multa Cominatoria Diaria (R$)">
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                {...form.register("config.multa_cominatoria_diaria", {
-                  valueAsNumber: true,
-                })}
-                placeholder="150,00"
+            <FormField label="Multa Cominatória Diária">
+              <Controller
+                control={form.control}
+                name="config.multa_cominatoria_diaria"
+                render={({ field }) => (
+                  <MoneyInput
+                    value={field.value || 0}
+                    onChange={(v) => field.onChange(v)}
+                  />
+                )}
               />
             </FormField>
 
-            <FormField label="Multa Penal Compensatoria (%)">
+            <FormField label="Multa Penal Compensatória (%)">
               <Input
                 type="number"
                 step="0.01"
@@ -381,7 +386,7 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
               />
             </FormField>
 
-            <FormField label="Prazo para Multa Rescisoria (dias)">
+            <FormField label="Prazo para Multa Rescisória (dias)">
               <Input
                 type="number"
                 min="1"

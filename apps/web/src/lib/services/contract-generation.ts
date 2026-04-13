@@ -43,12 +43,14 @@ function enrichContractData(
   }
   enriched.comissao = comissao;
 
-  // Titulo aquisitivo: default generico caso nao informado
-  if (!enriched.titulo_aquisitivo) {
-    enriched.titulo_aquisitivo = "instrumento próprio";
+  // Titulo/registro aquisitivo: o template usa config.* — mantemos undefined
+  // quando nao informado para que o template renda a frase condicionalmente
+  // em vez de mostrar parenteses vazios.
+  if (enriched.titulo_aquisitivo && !config.titulo_aquisitivo) {
+    config.titulo_aquisitivo = enriched.titulo_aquisitivo;
   }
-  if (!enriched.registro_aquisitivo) {
-    enriched.registro_aquisitivo = "registro próprio";
+  if (enriched.registro_aquisitivo && !config.registro_aquisitivo) {
+    config.registro_aquisitivo = enriched.registro_aquisitivo;
   }
 
   // Momento de posse texto
@@ -141,14 +143,17 @@ export async function generateContractForDeal(
   const imovel = (dataJson.imoveis as Array<{ rua?: string; numero?: string; cidade?: string }>)?.[0];
   const valorTotal = Number(pagamento?.valor_total || 0);
 
+  // Prioridade: titulo personalizado do formulario > vendedor→comprador > outros fallbacks
+  const formTitle = deal.form?.title?.trim();
   const derivedTitle =
-    compradorNome && vendedorNome
+    formTitle ||
+    (compradorNome && vendedorNome
       ? `${vendedorNome} → ${compradorNome}`
       : compradorNome
       ? `Venda para ${compradorNome}`
       : imovel?.rua
       ? `Imóvel: ${imovel.rua}${imovel.numero ? `, ${imovel.numero}` : ""}`
-      : deal.title;
+      : deal.title);
 
   // Move deal to "Confeccao de Contrato" stage and sync title/value
   const pipeline = await prisma.pipeline.findFirst({

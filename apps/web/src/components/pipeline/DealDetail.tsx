@@ -85,10 +85,66 @@ export function DealDetail({ deal }: DealDetailProps) {
   }
 
   const formData = deal.form?.dataJson as Record<string, unknown> | null;
-  const vendedores = (formData?.vendedores as Array<{ nome?: string }>) || [];
-  const compradores = (formData?.compradores as Array<{ nome?: string }>) || [];
-  const imoveis = (formData?.imoveis as Array<{ rua?: string; numero?: string }>) || [];
-  const pagamento = formData?.pagamento as { valor_total?: number } | undefined;
+  type Parte = {
+    nome?: string;
+    razao_social?: string;
+    tipo_pessoa?: string;
+    cpf?: string;
+    cnpj?: string;
+    rg?: string;
+    nacionalidade?: string;
+    estado_civil?: string;
+    profissao?: string;
+    email?: string;
+    endereco?: string;
+    numero?: string;
+    complemento?: string;
+    bairro?: string;
+    cidade?: string;
+    uf?: string;
+    cep?: string;
+  };
+  type Imovel = {
+    rua?: string;
+    numero?: string;
+    complemento?: string;
+    bairro?: string;
+    cidade?: string;
+    uf?: string;
+    cep?: string;
+    matricula?: string;
+    cartorio?: string;
+    inscricao_iptu?: string;
+    descricao?: string;
+  };
+  const vendedores = (formData?.vendedores as Parte[]) || [];
+  const compradores = (formData?.compradores as Parte[]) || [];
+  const imoveis = (formData?.imoveis as Imovel[]) || [];
+  const pagamento = formData?.pagamento as
+    | {
+        valor_total?: number;
+        sinal_arras?: number;
+        recursos_proprios?: number;
+        fgts?: number;
+        alienacao_fiduciaria?: number;
+      }
+    | undefined;
+
+  const formatBRL = (v: number | undefined) =>
+    v != null ? `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : "—";
+
+  const formatAddress = (p: Parte | Imovel) => {
+    const rua = (p as Parte).endereco || (p as Imovel).rua;
+    const parts = [
+      rua,
+      p.numero && `nº ${p.numero}`,
+      p.complemento,
+      p.bairro && `Bairro: ${p.bairro}`,
+      p.cidade && `${p.cidade}${p.uf ? `/${p.uf}` : ""}`,
+      p.cep && `CEP ${p.cep}`,
+    ].filter(Boolean);
+    return parts.length ? parts.join(", ") : "—";
+  };
 
   return (
     <div className="space-y-6">
@@ -119,10 +175,14 @@ export function DealDetail({ deal }: DealDetailProps) {
         <div className="w-full sm:w-auto sm:ml-auto flex gap-2 flex-wrap">
           {deal.form && (
             <Button variant="outline" size="sm" asChild>
-              <Link href={`/f/${deal.form.token}`} target="_blank">
+              <a
+                href={`/f/${deal.form.token}`}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 <ExternalLink className="h-4 w-4 mr-1" />
                 Formulário
-              </Link>
+              </a>
             </Button>
           )}
           <Button
@@ -155,7 +215,7 @@ export function DealDetail({ deal }: DealDetailProps) {
             Anexos ({deal.attachments.length})
           </TabsTrigger>
           <TabsTrigger value="contratos">
-            Contratos ({deal.contracts.length})
+            Contratos ({deal.contracts.length} {deal.contracts.length === 1 ? "versão" : "versões"})
           </TabsTrigger>
         </TabsList>
 
@@ -163,69 +223,125 @@ export function DealDetail({ deal }: DealDetailProps) {
           {formData ? (
             <div className="grid gap-4 md:grid-cols-2">
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-sm">Vendedor(es)</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {vendedores.length > 0 ? (
-                    vendedores.map((v, i) => (
-                      <p key={i} className="text-sm">{v.nome || "—"}</p>
-                    ))
-                  ) : (
-                    <p className="text-sm text-muted-foreground">Nao preenchido</p>
-                  )}
-                </CardContent>
+                <details>
+                  <summary className="cursor-pointer list-none">
+                    <CardHeader className="flex flex-row items-center justify-between">
+                      <CardTitle className="text-sm">Vendedor(es)</CardTitle>
+                      <span className="text-xs text-muted-foreground">▾ detalhes</span>
+                    </CardHeader>
+                  </summary>
+                  <CardContent className="space-y-3 pt-0">
+                    {vendedores.length > 0 ? (
+                      vendedores.map((v, i) => (
+                        <div key={i} className="space-y-1 text-sm border-b last:border-b-0 pb-2 last:pb-0">
+                          <p className="font-medium">{v.nome || v.razao_social || "—"}</p>
+                          {v.tipo_pessoa === "juridica" ? (
+                            <>
+                              {v.cnpj && <p><span className="text-muted-foreground">CNPJ:</span> {v.cnpj}</p>}
+                            </>
+                          ) : (
+                            <>
+                              {v.cpf && <p><span className="text-muted-foreground">CPF:</span> {v.cpf}</p>}
+                              {v.rg && <p><span className="text-muted-foreground">RG:</span> {v.rg}</p>}
+                              {v.estado_civil && <p><span className="text-muted-foreground">Estado civil:</span> {v.estado_civil}</p>}
+                              {v.profissao && <p><span className="text-muted-foreground">Profissão:</span> {v.profissao}</p>}
+                              {v.email && <p><span className="text-muted-foreground">E-mail:</span> {v.email}</p>}
+                            </>
+                          )}
+                          <p className="text-muted-foreground text-xs">{formatAddress(v)}</p>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Não preenchido</p>
+                    )}
+                  </CardContent>
+                </details>
               </Card>
 
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-sm">Comprador(es)</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {compradores.length > 0 ? (
-                    compradores.map((c, i) => (
-                      <p key={i} className="text-sm">{c.nome || "—"}</p>
-                    ))
-                  ) : (
-                    <p className="text-sm text-muted-foreground">Nao preenchido</p>
-                  )}
-                </CardContent>
+                <details>
+                  <summary className="cursor-pointer list-none">
+                    <CardHeader className="flex flex-row items-center justify-between">
+                      <CardTitle className="text-sm">Comprador(es)</CardTitle>
+                      <span className="text-xs text-muted-foreground">▾ detalhes</span>
+                    </CardHeader>
+                  </summary>
+                  <CardContent className="space-y-3 pt-0">
+                    {compradores.length > 0 ? (
+                      compradores.map((c, i) => (
+                        <div key={i} className="space-y-1 text-sm border-b last:border-b-0 pb-2 last:pb-0">
+                          <p className="font-medium">{c.nome || c.razao_social || "—"}</p>
+                          {c.tipo_pessoa === "juridica" ? (
+                            <>
+                              {c.cnpj && <p><span className="text-muted-foreground">CNPJ:</span> {c.cnpj}</p>}
+                            </>
+                          ) : (
+                            <>
+                              {c.cpf && <p><span className="text-muted-foreground">CPF:</span> {c.cpf}</p>}
+                              {c.rg && <p><span className="text-muted-foreground">RG:</span> {c.rg}</p>}
+                              {c.estado_civil && <p><span className="text-muted-foreground">Estado civil:</span> {c.estado_civil}</p>}
+                              {c.profissao && <p><span className="text-muted-foreground">Profissão:</span> {c.profissao}</p>}
+                              {c.email && <p><span className="text-muted-foreground">E-mail:</span> {c.email}</p>}
+                            </>
+                          )}
+                          <p className="text-muted-foreground text-xs">{formatAddress(c)}</p>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Não preenchido</p>
+                    )}
+                  </CardContent>
+                </details>
               </Card>
 
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-sm">Imóvel(is)</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {imoveis.length > 0 ? (
-                    imoveis.map((im, i) => (
-                      <p key={i} className="text-sm">
-                        {im.rua ? `${im.rua}, ${im.numero}` : "—"}
-                      </p>
-                    ))
-                  ) : (
-                    <p className="text-sm text-muted-foreground">Nao preenchido</p>
-                  )}
-                </CardContent>
+                <details>
+                  <summary className="cursor-pointer list-none">
+                    <CardHeader className="flex flex-row items-center justify-between">
+                      <CardTitle className="text-sm">Imóvel(is)</CardTitle>
+                      <span className="text-xs text-muted-foreground">▾ detalhes</span>
+                    </CardHeader>
+                  </summary>
+                  <CardContent className="space-y-3 pt-0">
+                    {imoveis.length > 0 ? (
+                      imoveis.map((im, i) => (
+                        <div key={i} className="space-y-1 text-sm border-b last:border-b-0 pb-2 last:pb-0">
+                          <p className="font-medium">{formatAddress(im)}</p>
+                          {im.matricula && <p><span className="text-muted-foreground">Matrícula:</span> {im.matricula}</p>}
+                          {im.cartorio && <p><span className="text-muted-foreground">Cartório:</span> {im.cartorio}</p>}
+                          {im.inscricao_iptu && <p><span className="text-muted-foreground">Inscrição IPTU:</span> {im.inscricao_iptu}</p>}
+                          {im.descricao && <p className="text-muted-foreground text-xs">{im.descricao}</p>}
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-sm text-muted-foreground">Não preenchido</p>
+                    )}
+                  </CardContent>
+                </details>
               </Card>
 
               <Card>
-                <CardHeader>
-                  <CardTitle className="text-sm">Pagamento</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm">
-                    {pagamento?.valor_total
-                      ? `R$ ${pagamento.valor_total.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`
-                      : "Nao preenchido"}
-                  </p>
-                </CardContent>
+                <details>
+                  <summary className="cursor-pointer list-none">
+                    <CardHeader className="flex flex-row items-center justify-between">
+                      <CardTitle className="text-sm">Pagamento</CardTitle>
+                      <span className="text-xs text-muted-foreground">▾ detalhes</span>
+                    </CardHeader>
+                  </summary>
+                  <CardContent className="space-y-1 text-sm pt-0">
+                    <p><span className="text-muted-foreground">Valor total:</span> <strong>{formatBRL(pagamento?.valor_total)}</strong></p>
+                    {pagamento?.sinal_arras ? <p><span className="text-muted-foreground">Sinal:</span> {formatBRL(pagamento.sinal_arras)}</p> : null}
+                    {pagamento?.recursos_proprios ? <p><span className="text-muted-foreground">Recursos próprios:</span> {formatBRL(pagamento.recursos_proprios)}</p> : null}
+                    {pagamento?.alienacao_fiduciaria ? <p><span className="text-muted-foreground">Financiamento:</span> {formatBRL(pagamento.alienacao_fiduciaria)}</p> : null}
+                    {pagamento?.fgts ? <p><span className="text-muted-foreground">FGTS:</span> {formatBRL(pagamento.fgts)}</p> : null}
+                  </CardContent>
+                </details>
               </Card>
             </div>
           ) : (
             <Card>
               <CardContent className="py-8 text-center text-muted-foreground">
-                Nenhum dado de formulario vinculado.
+                Nenhum dado de formulário vinculado.
               </CardContent>
             </Card>
           )}
@@ -308,7 +424,9 @@ export function DealDetail({ deal }: DealDetailProps) {
           <AlertDialogHeader>
             <AlertDialogTitle>Criar nova versão do contrato?</AlertDialogTitle>
             <AlertDialogDescription>
-              Este negócio já possui {deal.contracts.length} contrato(s). Ao confirmar, será criada uma nova versão (V{deal.contracts.length + 1}) mantendo o histórico das anteriores.
+              Este negócio já possui {deal.contracts.length} versão(ões). A nova versão (V{deal.contracts.length + 1}) será gerada a partir do template padrão com os dados atuais do negócio.
+              <br /><br />
+              <strong>Atenção:</strong> as edições manuais ou via Chat IA feitas na versão anterior <strong>não serão transferidas automaticamente</strong>. O histórico das versões anteriores é mantido para consulta.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

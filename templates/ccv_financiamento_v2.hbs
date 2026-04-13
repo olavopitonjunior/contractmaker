@@ -20,7 +20,7 @@ Profissão: {{this.profissao}}<br>
 RG: nº {{this.rg}}<br>
 CPF: nº {{cpf this.cpf}}<br>
 E-mail: {{this.email}}<br>
-Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
+Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}{{#if this.bairro}}, Bairro: {{this.bairro}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
 </p>
 
 {{#if (or (eq this.estado_civil "Casado(a)") (eq this.estado_civil "União Estável"))}}
@@ -49,7 +49,7 @@ Endereço: {{this.procurador.endereco}}, nº {{this.procurador.numero}}, Cidade:
 <p>
 Razão Social: {{this.razao_social}}<br>
 CNPJ: nº {{cnpj this.cnpj}}<br>
-Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
+Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}{{#if this.bairro}}, Bairro: {{this.bairro}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
 </p>
 <p>Neste ato representada por seu(s) representante(s) legal(is):</p>
 <p>
@@ -75,7 +75,7 @@ Profissão: {{this.profissao}}<br>
 RG: nº {{this.rg}}<br>
 CPF: nº {{cpf this.cpf}}<br>
 E-mail: {{this.email}}<br>
-Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
+Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}{{#if this.bairro}}, Bairro: {{this.bairro}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
 </p>
 
 {{#if (or (eq this.estado_civil "Casado(a)") (eq this.estado_civil "União Estável"))}}
@@ -104,7 +104,7 @@ Endereço: {{this.procurador.endereco}}, nº {{this.procurador.numero}}, Cidade:
 <p>
 Razão Social: {{this.razao_social}}<br>
 CNPJ: nº {{cnpj this.cnpj}}<br>
-Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
+Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}{{#if this.bairro}}, Bairro: {{this.bairro}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
 </p>
 <p>Neste ato representada por seu(s) representante(s) legal(is):</p>
 <p>
@@ -121,7 +121,8 @@ Profissão: {{this.representante.profissao}}
 
 <p>
 Imobiliária: {{comissao.imobiliaria_nome}}<br>
-CNPJ: nº {{cnpj comissao.imobiliaria_cnpj}}
+CNPJ: nº {{cnpj comissao.imobiliaria_cnpj}}{{#if (existe comissao.creci)}}<br>
+CRECI: nº {{comissao.creci}}{{/if}}
 </p>
 
 <hr>
@@ -132,7 +133,7 @@ CNPJ: nº {{cnpj comissao.imobiliaria_cnpj}}
 
 <h2>CLÁUSULA PRIMEIRA - DO OBJETO</h2>
 
-<p><strong>1.1.</strong> O(s) PROMITENTE(S) VENDEDOR(ES) é(são) legítimo(s) possuidor(es) e proprietário(s) do imóvel adiante descrito, adquirido conforme {{config.titulo_aquisitivo}}, devidamente registrado sob {{config.registro_aquisitivo}}, livre e desembaraçado de quaisquer ônus reais, dívidas, tributos em atraso, ações reais ou pessoais reipersecutórias, salvo as ressalvas expressamente consignadas neste instrumento.</p>
+<p><strong>1.1.</strong> O(s) PROMITENTE(S) VENDEDOR(ES) é(são) legítimo(s) possuidor(es) e proprietário(s) do imóvel adiante descrito{{#if (existe config.titulo_aquisitivo)}}, adquirido conforme {{config.titulo_aquisitivo}}{{#if (existe config.registro_aquisitivo)}}, devidamente registrado sob {{config.registro_aquisitivo}}{{/if}}{{/if}}, livre e desembaraçado de quaisquer ônus reais, dívidas, tributos em atraso, ações reais ou pessoais reipersecutórias, salvo as ressalvas expressamente consignadas neste instrumento.</p>
 
 {{#if (existe config.observacao_imovel)}}
 <p><strong>1.2.</strong> {{config.observacao_imovel}}</p>
@@ -163,6 +164,10 @@ Descrição: {{this.descricao}}
 
 {{#if (gt pagamento.fgts 0)}}
 <p><strong>b.1)</strong> Do montante financiado, o valor de {{moeda pagamento.fgts}} ({{extenso pagamento.fgts}}) será proveniente de utilização de saldo do FGTS (Fundo de Garantia do Tempo de Serviço), conforme regras vigentes do agente financeiro e da Caixa Econômica Federal.</p>
+{{/if}}
+
+{{#if (gt pagamento.recursos_proprios 0)}}
+<p><strong>c)</strong> Recursos próprios do(s) PROMISSÁRIO(S) COMPRADOR(ES): {{moeda pagamento.recursos_proprios}} ({{extenso pagamento.recursos_proprios}}), a ser(em) creditado(s) na conta do(s) PROMITENTE(S) VENDEDOR(ES) no prazo de 5 (cinco) dias úteis contados da assinatura do presente instrumento.</p>
 {{/if}}
 
 <!-- CLAUSE_SLOT:G4 -->
@@ -289,7 +294,7 @@ Descrição: {{this.descricao}}
 
 <h2>CLÁUSULA DÉCIMA QUARTA - DA COMISSÃO</h2>
 
-<p><strong>14.1.</strong> Pela intermediação e assessoria prestadas, será devida a comissão de corretagem no valor total de {{moeda comissao.valor}} ({{extenso comissao.valor}}), a ser paga pela {{comissao.quem_paga_texto}} à imobiliária intermediadora {{comissao.imobiliaria_nome}}, inscrita no CNPJ nº {{cnpj comissao.imobiliaria_cnpj}}.</p>
+<p><strong>14.1.</strong> Pela intermediação e assessoria prestadas, será devida a comissão de corretagem no valor total de {{moeda comissao.valor}} ({{extenso comissao.valor}}), a ser paga pela {{comissao.quem_paga_texto}} à imobiliária intermediadora {{comissao.imobiliaria_nome}}, inscrita no CNPJ nº {{cnpj comissao.imobiliaria_cnpj}}{{#if (existe comissao.creci)}}, CRECI nº {{comissao.creci}}{{/if}}.</p>
 
 <p><strong>14.2.</strong> O pagamento da comissão está atrelado à liberação dos recursos previstos na alínea "b" da Cláusula Segunda (financiamento imobiliário), devendo ser efetuado no prazo de até 5 (cinco) dias úteis contados da efetiva liberação dos valores pelo agente financeiro em favor do(s) PROMITENTE(S) VENDEDOR(ES).</p>
 
@@ -344,7 +349,7 @@ Descrição: {{this.descricao}}
 {{/each}}
 
 <h3>INTERMEDIADORA</h3>
-<p>_______________________________<br>{{comissao.imobiliaria_nome}}<br>CNPJ: {{cnpj comissao.imobiliaria_cnpj}}</p>
+<p>_______________________________<br>{{comissao.imobiliaria_nome}}<br>CNPJ: {{cnpj comissao.imobiliaria_cnpj}}{{#if (existe comissao.creci)}}<br>CRECI: {{comissao.creci}}{{/if}}</p>
 
 <h3>TESTEMUNHAS</h3>
 <p>_______________________________<br>Nome: ___________________________<br>CPF: ___________________________</p>

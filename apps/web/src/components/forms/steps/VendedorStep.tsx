@@ -97,8 +97,8 @@ function PessoaFisicaFields({
           </Select>
         </FormField>
 
-        <FormField label="Profissao">
-          <Input {...form.register(`${prefix}.profissao`)} placeholder="Profissao" />
+        <FormField label="Profissão">
+          <Input {...form.register(`${prefix}.profissao`)} placeholder="Profissão" />
         </FormField>
 
         <FormField label="RG">
@@ -126,12 +126,16 @@ function PessoaFisicaFields({
           <Input {...form.register(`${prefix}.endereco`)} placeholder="Rua, Avenida..." />
         </FormField>
 
-        <FormField label="Numero">
+        <FormField label="Número">
           <Input {...form.register(`${prefix}.numero`)} placeholder="123" />
         </FormField>
 
         <FormField label="Complemento">
           <Input {...form.register(`${prefix}.complemento`)} placeholder="Apto, Sala..." />
+        </FormField>
+
+        <FormField label="Bairro">
+          <Input {...form.register(`${prefix}.bairro`)} placeholder="Bairro" />
         </FormField>
 
         <FormField label="Cidade">
@@ -176,10 +180,10 @@ function PessoaFisicaFields({
                 placeholder="Brasileiro(a)"
               />
             </FormField>
-            <FormField label="Profissao do Cônjuge">
+            <FormField label="Profissão do Cônjuge">
               <Input
                 {...form.register(`${prefix}.conjuge.profissao`)}
-                placeholder="Profissao"
+                placeholder="Profissão"
               />
             </FormField>
           </div>
@@ -224,7 +228,7 @@ function PessoaFisicaFields({
                 placeholder="Logradouro"
               />
             </FormField>
-            <FormField label="Numero">
+            <FormField label="Número">
               <Input
                 {...form.register(`${prefix}.procurador.numero`)}
                 placeholder="123"
@@ -274,7 +278,7 @@ function PessoaJuridicaFields({
           <Input {...form.register(`${prefix}.endereco`)} placeholder="Rua, Avenida..." />
         </FormField>
 
-        <FormField label="Numero">
+        <FormField label="Número">
           <Input {...form.register(`${prefix}.numero`)} placeholder="123" />
         </FormField>
 
@@ -338,10 +342,10 @@ function PessoaJuridicaFields({
             </SelectContent>
           </Select>
         </FormField>
-        <FormField label="Profissao">
+        <FormField label="Profissão">
           <Input
             {...form.register(`${prefix}.representante.profissao`)}
-            placeholder="Profissao"
+            placeholder="Profissão"
           />
         </FormField>
       </div>

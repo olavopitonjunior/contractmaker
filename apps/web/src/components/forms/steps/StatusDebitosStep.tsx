@@ -85,7 +85,7 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <FormField label="Situacao do Imóvel">
+          <FormField label="Situação do Imóvel">
             <Select
               value={statusPropriedade || "quitado-registrado"}
               onValueChange={(v) => form.setValue("status_propriedade", v)}
@@ -129,7 +129,7 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
         <CardContent className="space-y-4">
           <CheckboxField
             id="tem-debitos"
-            label="O imovel possui debitos pendentes"
+            label="O imóvel possui débitos pendentes"
             checked={!!temDebitos}
             onChange={(v) => form.setValue("tem_debitos", v)}
           />
@@ -168,7 +168,7 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
                 <div className="flex items-center gap-4 flex-wrap">
                   <CheckboxField
                     id="condominio-selecionado"
-                    label="Condominio"
+                    label="Condomínio"
                     checked={!!condominioSelecionado}
                     onChange={(v) =>
                       form.setValue("debitos.condominio.selecionado", v)
@@ -193,10 +193,10 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
                   )}
                 </div>
 
-                <FormField label="Outros debitos">
+                <FormField label="Outros débitos">
                   <textarea
                     {...form.register("debitos.outros")}
-                    placeholder="Descreva outros debitos existentes..."
+                    placeholder="Descreva outros débitos existentes..."
                     rows={3}
                     className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none"
                   />
@@ -211,11 +211,11 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
       <Card className="border border-border">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-semibold">
-            Vicios Construtivos / Ocultos
+            Vícios Construtivos / Ocultos
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <FormField label="Cláusula de vicios">
+          <FormField label="Cláusula de vícios">
             <Select
               value={viciosOpcao || "renuncia"}
               onValueChange={(v) => form.setValue("vicios.opcao", v)}
@@ -225,16 +225,16 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="renuncia">
-                  Renuncia - Comprador aceita o imovel no estado atual
+                  Renúncia - Comprador aceita o imóvel no estado atual
                 </SelectItem>
                 <SelectItem value="detalhado">
-                  Detalhado - Sem vicios aparentes ou ocultos
+                  Detalhado - Sem vícios aparentes ou ocultos
                 </SelectItem>
                 <SelectItem value="reparar">
                   Reparar - Vendedor se compromete a reparar
                 </SelectItem>
                 <SelectItem value="desocultados">
-                  Desocultados - Vicios ocultos declarados
+                  Desocultados - Vícios ocultos declarados
                 </SelectItem>
               </SelectContent>
             </Select>

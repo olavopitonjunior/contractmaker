@@ -14,6 +14,7 @@ const pessoaFisicaSchema = z.object({
   endereco: z.string().optional().default(""),
   numero: z.string().optional().default(""),
   complemento: z.string().optional().default(""),
+  bairro: z.string().optional().default(""),
   cidade: z.string().optional().default(""),
   uf: z.string().optional().default(""),
   cep: z.string().optional().default(""),
@@ -43,6 +44,7 @@ const pessoaJuridicaSchema = z.object({
   endereco: z.string().optional().default(""),
   numero: z.string().optional().default(""),
   complemento: z.string().optional().default(""),
+  bairro: z.string().optional().default(""),
   cidade: z.string().optional().default(""),
   uf: z.string().optional().default(""),
   cep: z.string().optional().default(""),
@@ -82,7 +84,7 @@ export const step3Schema = z.object({
     matricula: z.string().optional().default(""),
     cartorio: z.string().optional().default(""),
     inscricao_iptu: z.string().optional().default(""),
-    descricao: z.string().optional().default(""),
+    descricao: z.string().min(10, "Descreva o imóvel com ao menos 10 caracteres"),
   })).min(1, "Minimo 1 imovel"),
 });
 
@@ -210,7 +212,7 @@ export const STEP_LABELS = [
 export const STEP_REQUIRED_FIELDS: ReadonlyArray<ReadonlyArray<string>> = [
   ["vendedores"],
   ["compradores"],
-  ["imoveis"],
+  ["imoveis.0.rua", "imoveis.0.cidade", "imoveis.0.uf", "imoveis.0.descricao"],
   [],
   ["pagamento.valor_total"],
   [],

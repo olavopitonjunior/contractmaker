@@ -1,6 +1,6 @@
 "use client";
 
-import { useFieldArray, UseFormReturn } from "react-hook-form";
+import { useFieldArray, UseFormReturn, useWatch, Controller } from "react-hook-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { MoneyInput } from "@/components/forms/MoneyInput";
 
 interface PagamentoStepProps {
   form: UseFormReturn<any>;
@@ -34,24 +35,32 @@ function FormField({
   );
 }
 
-function CurrencyInput({
+function ControlledMoney({
   name,
   form,
-  placeholder = "0,00",
 }: {
   name: string;
   form: UseFormReturn<any>;
-  placeholder?: string;
 }) {
   return (
-    <Input
-      type="number"
-      step="0.01"
-      min="0"
-      {...form.register(name, { valueAsNumber: true })}
-      placeholder={placeholder}
+    <Controller
+      control={form.control}
+      name={name}
+      render={({ field }) => (
+        <MoneyInput
+          value={field.value || 0}
+          onChange={(v) => field.onChange(v)}
+        />
+      )}
     />
   );
+}
+
+function formatBRL(value: number): string {
+  return value.toLocaleString("pt-BR", {
+    style: "currency",
+    currency: "BRL",
+  });
 }
 
 export function PagamentoStep({ form }: PagamentoStepProps) {
@@ -64,6 +73,35 @@ export function PagamentoStep({ form }: PagamentoStepProps) {
     append({ tipo_texto: "", dias: 0, valor: 0 });
   };
 
+  // Soma das parcelas para validacao visual
+  const pagamento = useWatch({
+    control: form.control,
+    name: "pagamento",
+  }) as
+    | {
+        valor_total?: number;
+        sinal_arras?: number;
+        recursos_proprios?: number;
+        fgts?: number;
+        cessao_consorcio?: number;
+        alienacao_fiduciaria?: number;
+        outras_formas?: number;
+      }
+    | undefined;
+
+  const valorTotal = Number(pagamento?.valor_total || 0);
+  const somaParcelas =
+    Number(pagamento?.sinal_arras || 0) +
+    Number(pagamento?.recursos_proprios || 0) +
+    Number(pagamento?.fgts || 0) +
+    Number(pagamento?.cessao_consorcio || 0) +
+    Number(pagamento?.alienacao_fiduciaria || 0) +
+    Number(pagamento?.outras_formas || 0);
+
+  const diferenca = valorTotal - somaParcelas;
+  const bate = Math.abs(diferenca) < 0.01;
+  const hasValue = valorTotal > 0 || somaParcelas > 0;
+
   return (
     <div className="space-y-4">
       {/* Valores */}
@@ -73,34 +111,66 @@ export function PagamentoStep({ form }: PagamentoStepProps) {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="Valor Total da Venda (R$)" className="md:col-span-2">
-              <CurrencyInput name="pagamento.valor_total" form={form} />
+            <FormField label="Valor Total da Venda" className="md:col-span-2">
+              <ControlledMoney name="pagamento.valor_total" form={form} />
             </FormField>
 
-            <FormField label="Sinal / Arras (R$)">
-              <CurrencyInput name="pagamento.sinal_arras" form={form} />
+            <FormField label="Sinal / Arras">
+              <ControlledMoney name="pagamento.sinal_arras" form={form} />
             </FormField>
 
-            <FormField label="Recursos Proprios (R$)">
-              <CurrencyInput name="pagamento.recursos_proprios" form={form} />
+            <FormField label="Recursos Próprios">
+              <ControlledMoney name="pagamento.recursos_proprios" form={form} />
             </FormField>
 
-            <FormField label="FGTS (R$)">
-              <CurrencyInput name="pagamento.fgts" form={form} />
+            <FormField label="FGTS">
+              <ControlledMoney name="pagamento.fgts" form={form} />
             </FormField>
 
-            <FormField label="Cessao de Consorcio (R$)">
-              <CurrencyInput name="pagamento.cessao_consorcio" form={form} />
+            <FormField label="Cessão de Consórcio">
+              <ControlledMoney name="pagamento.cessao_consorcio" form={form} />
             </FormField>
 
-            <FormField label="Alienacao Fiduciaria / Financiamento (R$)">
-              <CurrencyInput name="pagamento.alienacao_fiduciaria" form={form} />
+            <FormField label="Alienação Fiduciária / Financiamento">
+              <ControlledMoney
+                name="pagamento.alienacao_fiduciaria"
+                form={form}
+              />
             </FormField>
 
-            <FormField label="Outras Formas de Pagamento (R$)">
-              <CurrencyInput name="pagamento.outras_formas" form={form} />
+            <FormField label="Outras Formas de Pagamento">
+              <ControlledMoney name="pagamento.outras_formas" form={form} />
             </FormField>
           </div>
+
+          {hasValue && (
+            <div
+              className={`rounded-md border p-3 text-sm ${
+                bate
+                  ? "border-green-300 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-950/30 dark:text-green-400"
+                  : "border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-400"
+              }`}
+            >
+              <div className="flex items-center justify-between flex-wrap gap-2">
+                <span>
+                  Soma das parcelas:{" "}
+                  <strong>{formatBRL(somaParcelas)}</strong>
+                </span>
+                <span>
+                  Valor total: <strong>{formatBRL(valorTotal)}</strong>
+                </span>
+              </div>
+              {!bate && (
+                <p className="mt-1 text-xs">
+                  {diferenca > 0
+                    ? `Faltam ${formatBRL(diferenca)} para fechar o valor total.`
+                    : `As parcelas somam ${formatBRL(
+                        Math.abs(diferenca)
+                      )} a mais que o valor total.`}
+                </p>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
@@ -122,12 +192,12 @@ export function PagamentoStep({ form }: PagamentoStepProps) {
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="transferencia bancaria">
-                  Transferência Bancaria (TED/PIX)
+                  Transferência Bancária (TED/PIX)
                 </SelectItem>
                 <SelectItem value="cheque">Cheque</SelectItem>
-                <SelectItem value="dinheiro">Dinheiro (Especie)</SelectItem>
+                <SelectItem value="dinheiro">Dinheiro (Espécie)</SelectItem>
                 <SelectItem value="financiamento bancario">
-                  Financiamento Bancario
+                  Financiamento Bancário
                 </SelectItem>
                 <SelectItem value="permuta">Permuta</SelectItem>
                 <SelectItem value="misto">Misto</SelectItem>
@@ -155,12 +225,12 @@ export function PagamentoStep({ form }: PagamentoStepProps) {
           {fields.map((field, index) => (
             <div
               key={field.id}
-              className="grid grid-cols-1 md:grid-cols-[1fr_100px_140px_auto] gap-3 items-end p-3 rounded-md border border-border bg-muted/30"
+              className="grid grid-cols-1 md:grid-cols-[1fr_100px_180px_auto] gap-3 items-end p-3 rounded-md border border-border bg-muted/30"
             >
               <FormField label={`Parcela ${index + 1} - Descrição`}>
                 <Input
                   {...form.register(`pagamento.parcelas.${index}.tipo_texto`)}
-                  placeholder="Ex: Sinal na assinatura, 1a parcela..."
+                  placeholder="Ex: Sinal na assinatura, 1ª parcela..."
                 />
               </FormField>
 
@@ -175,15 +245,10 @@ export function PagamentoStep({ form }: PagamentoStepProps) {
                 />
               </FormField>
 
-              <FormField label="Valor (R$)">
-                <Input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  {...form.register(`pagamento.parcelas.${index}.valor`, {
-                    valueAsNumber: true,
-                  })}
-                  placeholder="0,00"
+              <FormField label="Valor">
+                <ControlledMoney
+                  name={`pagamento.parcelas.${index}.valor`}
+                  form={form}
                 />
               </FormField>
 
@@ -212,18 +277,18 @@ export function PagamentoStep({ form }: PagamentoStepProps) {
         </CardContent>
       </Card>
 
-      {/* Incluso no Preco */}
+      {/* Incluso no Preço */}
       <Card className="border border-border">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-semibold">
-            Incluso no Preco
+            Incluso no Preço
           </CardTitle>
         </CardHeader>
         <CardContent>
-          <FormField label="O que esta incluso no preco de venda">
+          <FormField label="O que está incluso no preço de venda">
             <textarea
               {...form.register("incluso_no_preco")}
-              placeholder="Ex: moveis planejados, eletrodomesticos, vaga de garagem..."
+              placeholder="Ex: móveis planejados, eletrodomésticos, vaga de garagem..."
               rows={4}
               className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none"
             />

@@ -45,11 +45,11 @@ export function PosseTituloStep({ form }: PosseTituloStepProps) {
       <Card className="border border-border">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-semibold">
-            Situacao de Ocupacao
+            Situação de Ocupação
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <FormField label="O imovel esta atualmente">
+          <FormField label="O imóvel está atualmente">
             <Select
               value={ocupacao || "desocupado"}
               onValueChange={(v) => form.setValue("ocupacao", v)}
@@ -60,7 +60,7 @@ export function PosseTituloStep({ form }: PosseTituloStepProps) {
               <SelectContent>
                 <SelectItem value="desocupado">Desocupado</SelectItem>
                 <SelectItem value="ocupado-terceiro">
-                  Ocupado por terceiro (locatario ou outros)
+                  Ocupado por terceiro (locatário ou outros)
                 </SelectItem>
               </SelectContent>
             </Select>
@@ -69,20 +69,20 @@ export function PosseTituloStep({ form }: PosseTituloStepProps) {
           {isOcupadoTerceiro && (
             <div className="pl-4 border-l-2 border-border space-y-4">
               <p className="text-sm font-semibold text-foreground">
-                Dados da Locacao / Ocupacao
+                Dados da Locação / Ocupação
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField label="Data de Preferencia para Desocupacao">
+                <FormField label="Data de Preferência para Desocupação">
                   <Input
                     type="date"
                     {...form.register("locacao.data_preferencia")}
                   />
                 </FormField>
 
-                <FormField label="Situacao Atual da Ocupacao" className="md:col-span-2">
+                <FormField label="Situação Atual da Ocupação" className="md:col-span-2">
                   <textarea
                     {...form.register("locacao.situacao")}
-                    placeholder="Descreva a situacao atual da ocupacao (contrato de aluguel, vencimento, etc)..."
+                    placeholder="Descreva a situação atual da ocupação (contrato de aluguel, vencimento, etc)..."
                     rows={3}
                     className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none"
                   />

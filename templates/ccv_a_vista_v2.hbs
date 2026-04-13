@@ -20,7 +20,7 @@ Profissão: {{this.profissao}}<br>
 RG: nº {{this.rg}}<br>
 CPF: nº {{cpf this.cpf}}<br>
 E-mail: {{this.email}}<br>
-Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
+Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}{{#if this.bairro}}, Bairro: {{this.bairro}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
 </p>
 
 {{#if (or (eq this.estado_civil "Casado(a)") (eq this.estado_civil "União Estável"))}}
@@ -49,7 +49,7 @@ Endereço: {{this.procurador.endereco}}, nº {{this.procurador.numero}}, Cidade:
 <p>
 Razão Social: {{this.razao_social}}<br>
 CNPJ: nº {{cnpj this.cnpj}}<br>
-Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
+Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}{{#if this.bairro}}, Bairro: {{this.bairro}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
 </p>
 <p>Neste ato representada por seu(s) representante(s) legal(is):</p>
 <p>
@@ -75,7 +75,7 @@ Profissão: {{this.profissao}}<br>
 RG: nº {{this.rg}}<br>
 CPF: nº {{cpf this.cpf}}<br>
 E-mail: {{this.email}}<br>
-Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
+Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}{{#if this.bairro}}, Bairro: {{this.bairro}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
 </p>
 
 {{#if (or (eq this.estado_civil "Casado(a)") (eq this.estado_civil "União Estável"))}}
@@ -104,7 +104,7 @@ Endereço: {{this.procurador.endereco}}, nº {{this.procurador.numero}}, Cidade:
 <p>
 Razão Social: {{this.razao_social}}<br>
 CNPJ: nº {{cnpj this.cnpj}}<br>
-Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
+Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}{{#if this.bairro}}, Bairro: {{this.bairro}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
 </p>
 <p>Neste ato representada por seu(s) representante(s) legal(is):</p>
 <p>
@@ -144,7 +144,9 @@ Descrição: {{this.descricao}}
 </p>
 {{/each}}
 
-<p><strong>1.1.1.</strong> O imóvel foi adquirido pelos PROMITENTES VENDEDORES conforme {{titulo_aquisitivo}}, registrado sob {{registro_aquisitivo}} na matrícula supramencionada.</p>
+{{#if (existe config.titulo_aquisitivo)}}
+<p><strong>1.1.1.</strong> O imóvel foi adquirido pelos PROMITENTES VENDEDORES conforme {{config.titulo_aquisitivo}}{{#if (existe config.registro_aquisitivo)}}, registrado sob {{config.registro_aquisitivo}}{{/if}} na matrícula supramencionada.</p>
+{{/if}}
 
 {{#if (existe observacao_imovel)}}
 <p><strong>1.2.</strong> {{observacao_imovel}}</p>
@@ -287,7 +289,7 @@ Descrição: {{this.descricao}}
 
 <h2>CLÁUSULA DÉCIMA PRIMEIRA - DA COMISSÃO</h2>
 
-<p><strong>11.1.</strong> A comissão de intermediação imobiliária devida à INTERMEDIADORA é de {{moeda comissao.valor}} ({{extenso comissao.valor}}), correspondente a {{comissao.percentual}}% ({{numeroExtenso comissao.percentual}} por cento) do valor total da transação, a ser paga na forma e condições ajustadas entre as partes.</p>
+<p><strong>11.1.</strong> A comissão de intermediação imobiliária devida à INTERMEDIADORA{{#if (existe comissao.imobiliaria_nome)}}, {{comissao.imobiliaria_nome}}, inscrita no CNPJ nº {{cnpj comissao.imobiliaria_cnpj}}{{#if (existe comissao.creci)}}, CRECI nº {{comissao.creci}}{{/if}},{{/if}} é de {{moeda comissao.valor}} ({{extenso comissao.valor}}), correspondente a {{comissao.percentual}}% ({{numeroExtenso comissao.percentual}} por cento) do valor total da transação, a ser paga na forma e condições ajustadas entre as partes.</p>
 
 <p><strong>11.2.</strong> Em caso de rescisão contratual, a responsabilidade pelo pagamento da comissão será de quem der causa ao desfazimento do negócio, nos termos do artigo 723 do Código Civil.</p>
 
@@ -379,7 +381,8 @@ CPF: {{cpf this.conjuge.cpf}}<br>
 <p>
 _______________________________<br>
 {{comissao.imobiliaria_nome}}<br>
-CNPJ: {{cnpj comissao.imobiliaria_cnpj}}
+CNPJ: {{cnpj comissao.imobiliaria_cnpj}}{{#if (existe comissao.creci)}}<br>
+CRECI: {{comissao.creci}}{{/if}}
 </p>
 
 </div>

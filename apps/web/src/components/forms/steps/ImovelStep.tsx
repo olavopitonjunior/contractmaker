@@ -85,7 +85,7 @@ export function ImovelStep({ form }: ImovelStepProps) {
                   />
                 </FormField>
 
-                <FormField label="Numero">
+                <FormField label="Número">
                   <Input {...form.register(`${prefix}.numero`)} placeholder="123" />
                 </FormField>
 
@@ -125,24 +125,24 @@ export function ImovelStep({ form }: ImovelStepProps) {
                 Dados Registrais
               </p>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <FormField label="Matricula">
+                <FormField label="Matrícula">
                   <Input
                     {...form.register(`${prefix}.matricula`)}
-                    placeholder="Numero da matricula"
+                    placeholder="Número da matrícula"
                   />
                 </FormField>
 
-                <FormField label="Cartorio de Registro">
+                <FormField label="Cartório de Registro">
                   <Input
                     {...form.register(`${prefix}.cartorio`)}
-                    placeholder="Nome do cartorio"
+                    placeholder="Nome do cartório"
                   />
                 </FormField>
 
-                <FormField label="Inscricao IPTU">
+                <FormField label="Inscrição IPTU">
                   <Input
                     {...form.register(`${prefix}.inscricao_iptu`)}
-                    placeholder="Numero da inscricao IPTU"
+                    placeholder="Número da inscrição IPTU"
                   />
                 </FormField>
               </div>
@@ -150,7 +150,7 @@ export function ImovelStep({ form }: ImovelStepProps) {
               <FormField label="Descrição do Imóvel">
                 <textarea
                   {...form.register(`${prefix}.descricao`)}
-                  placeholder="Descrição completa do imovel conforme matricula ou contrato..."
+                  placeholder="Ex: Apartamento com 3 quartos (sendo 1 suíte), 2 banheiros, sala, cozinha, área de serviço, 1 vaga de garagem coberta, área privativa de 85m²."
                   rows={4}
                   className="flex min-h-[80px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:border-ring disabled:cursor-not-allowed disabled:opacity-50 resize-none"
                 />
