@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -12,14 +12,18 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { ContractEditor } from "./ContractEditor";
+import { ContractEditor, type ContractEditorHandle } from "./ContractEditor";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { VersionTimeline } from "./VersionTimeline";
 import { ChangeLogPanel } from "./ChangeLogPanel";
+import { CommentsPanel } from "./CommentsPanel";
+import { AddCommentDialog } from "./AddCommentDialog";
+import { ApprovalReviewDialog, type ApprovalReviewData } from "./ApprovalReviewDialog";
 import { ExportDialog } from "@/components/export/ExportDialog";
 import {
   ArrowLeft,
   MessageSquare,
+  MessageSquareText,
   History,
   Save,
   ShieldCheck,
@@ -64,7 +68,58 @@ export function ContractEditorPage({
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [chatInitialInput, setChatInitialInput] = useState<string>("");
   const [status, setStatus] = useState(contract.status);
+
+  // Sincroniza o conteudo e status quando navega entre versoes (mesma tela, prop muda)
+  useEffect(() => {
+    setHtmlContent(contract.htmlContent);
+    setStatus(contract.status);
+  }, [contract.id, contract.htmlContent, contract.status]);
+  const [commentsOpen, setCommentsOpen] = useState(false);
+  const [addCommentOpen, setAddCommentOpen] = useState(false);
+  const [pendingCommentText, setPendingCommentText] = useState("");
+  const [commentsVersion, setCommentsVersion] = useState(0);
+  const [reviewData, setReviewData] = useState<ApprovalReviewData | null>(null);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const editorRef = useRef<ContractEditorHandle>(null);
+
+  function handleAddComment(selectedText: string) {
+    setPendingCommentText(selectedText);
+    setAddCommentOpen(true);
+  }
+
+  async function submitComment(text: string) {
+    const res = await fetch(`/api/contracts/${contract.id}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text, selectedText: pendingCommentText }),
+    });
+    if (res.ok) {
+      const created = await res.json();
+      editorRef.current?.applyCommentMark(created.anchorId);
+      setCommentsVersion((v) => v + 1);
+      setCommentsOpen(true);
+      toast.success("Comentário adicionado");
+    } else {
+      toast.error("Erro ao criar comentário");
+    }
+  }
+
+  function handleCommentClick(anchorId: string) {
+    editorRef.current?.scrollToComment(anchorId);
+  }
+
+  function handleCommentResolved(anchorId: string) {
+    editorRef.current?.removeCommentMark(anchorId);
+  }
+
+  function handleAskAI(selectedText: string) {
+    const trimmed = selectedText.trim();
+    const preview = trimmed.length > 400 ? `${trimmed.slice(0, 400)}…` : trimmed;
+    setChatInitialInput(`> ${preview.replace(/\n/g, "\n> ")}\n\n`);
+    setChatOpen(true);
+  }
 
   const isApproved = status === "aprovado";
 
@@ -86,25 +141,41 @@ export function ContractEditorPage({
     }
   }
 
-  async function handleApprove() {
+  async function handleApprove(force = false) {
     setApproving(true);
-    const res = await fetch(`/api/contracts/${contract.id}/approve`, {
-      method: "POST",
-    });
-    const data = await res.json();
-    setApproving(false);
+    try {
+      const res = await fetch(`/api/contracts/${contract.id}/approve`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ force }),
+      });
+      const data = await res.json();
 
-    if (res.ok) {
+      if (!res.ok) {
+        toast.error(data.error || "Erro ao aprovar");
+        return;
+      }
+
+      if (data.requiresReview) {
+        setReviewData({
+          canForce: data.canForce,
+          issues: data.issues ?? [],
+          errorCount: data.errorCount ?? 0,
+          warningCount: data.warningCount ?? 0,
+          pendingSuggestions: data.pendingSuggestions ?? 0,
+          unresolvedComments: data.unresolvedComments ?? 0,
+          errorComments: data.errorComments ?? 0,
+        });
+        setReviewOpen(true);
+        return;
+      }
+
       setStatus("aprovado");
+      setReviewOpen(false);
       toast.success("Contrato aprovado!");
       router.refresh();
-    } else if (res.status === 422) {
-      toast.error("Contrato possui erros que impedem a aprovação", {
-        description: data.issues?.map((i: any) => i.message).join("; "),
-        duration: 10000,
-      });
-    } else {
-      toast.error(data.error || "Erro ao aprovar");
+    } finally {
+      setApproving(false);
     }
   }
 
@@ -167,6 +238,16 @@ export function ContractEditorPage({
             </Button>
           )}
 
+          {/* Comments */}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setCommentsOpen(true)}
+          >
+            <MessageSquareText className="h-4 w-4 sm:mr-1" />
+            <span className="hidden sm:inline">Comentários</span>
+          </Button>
+
           {/* Change Log */}
           <Sheet>
             <SheetTrigger asChild>
@@ -217,7 +298,7 @@ export function ContractEditorPage({
 
               <Button
                 size="sm"
-                onClick={handleApprove}
+                onClick={() => handleApprove(false)}
                 disabled={approving}
                 className="bg-green-600 hover:bg-green-700"
               >
@@ -234,16 +315,57 @@ export function ContractEditorPage({
       {/* Editor */}
       <div className="rounded-lg border bg-card overflow-hidden">
         <ContractEditor
+          ref={editorRef}
           content={htmlContent}
           onChange={isApproved ? () => {} : setHtmlContent}
           readOnly={isApproved}
+          onAskAI={isApproved ? undefined : handleAskAI}
+          onAddComment={isApproved ? undefined : handleAddComment}
+          contractId={contract.id}
+          suggestionsVersion={commentsVersion}
         />
       </div>
+
+      {/* Comments Panel */}
+      <Sheet open={commentsOpen} onOpenChange={setCommentsOpen}>
+        <SheetContent side="right" className="w-full sm:w-[420px]">
+          <SheetHeader>
+            <SheetTitle>Comentários</SheetTitle>
+          </SheetHeader>
+          <CommentsPanel
+            key={commentsVersion}
+            contractId={contract.id}
+            onCommentClick={handleCommentClick}
+            onCommentResolved={handleCommentResolved}
+          />
+        </SheetContent>
+      </Sheet>
+
+      {/* Add Comment Dialog */}
+      <AddCommentDialog
+        open={addCommentOpen}
+        selectedText={pendingCommentText}
+        onClose={() => setAddCommentOpen(false)}
+        onSubmit={submitComment}
+      />
+
+      {/* Approval Review Dialog */}
+      <ApprovalReviewDialog
+        open={reviewOpen}
+        data={reviewData}
+        onClose={() => setReviewOpen(false)}
+        onForceApprove={() => handleApprove(true)}
+      />
 
       {/* Chat Panel */}
       {!isApproved && (
         <Sheet open={chatOpen} onOpenChange={setChatOpen}>
-          <SheetContent side="right" className="w-full sm:w-[400px] md:w-[540px]">
+          <SheetContent
+            side="right"
+            className="w-full sm:w-[400px] md:w-[540px]"
+            onInteractOutside={(e) => e.preventDefault()}
+            onPointerDownOutside={(e) => e.preventDefault()}
+          >
             <SheetHeader>
               <SheetTitle>Assistente Jurídico IA</SheetTitle>
             </SheetHeader>
@@ -251,6 +373,7 @@ export function ContractEditorPage({
               contractId={contract.id}
               messages={contract.messages}
               onContentUpdate={handleAIUpdate}
+              initialInput={chatInitialInput}
             />
           </SheetContent>
         </Sheet>

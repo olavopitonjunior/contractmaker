@@ -109,6 +109,18 @@ export function registerHandlebarsHelpers(): void {
     return full.replace(/\s*reais?$/, '').replace(/\s*real$/, '');
   });
 
+  // Formata numero no padrao brasileiro (virgula decimal, ponto milhar).
+  // Ex: 0.71 -> "0,71" | 1234.56 -> "1.234,56"
+  Handlebars.registerHelper('numero', (valor: number, decimais?: number) => {
+    if (valor === null || valor === undefined) return '';
+    const opts: Intl.NumberFormatOptions = {};
+    if (typeof decimais === 'number') {
+      opts.minimumFractionDigits = decimais;
+      opts.maximumFractionDigits = decimais;
+    }
+    return new Intl.NumberFormat('pt-BR', opts).format(Number(valor));
+  });
+
   Handlebars.registerHelper('cpf', (cpf: string) => {
     if (!cpf) return '';
     const digits = cpf.replace(/\D/g, '');

@@ -5,14 +5,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { MoneyInput } from "@/components/forms/MoneyInput";
+import { NativeSelect } from "@/components/forms/NativeSelect";
 
 interface PagamentoStepProps {
   form: UseFormReturn<any>;
@@ -183,26 +177,19 @@ export function PagamentoStep({ form }: PagamentoStepProps) {
         </CardHeader>
         <CardContent>
           <FormField label="Forma de Pagamento Principal">
-            <Select
+            <NativeSelect
+              className="w-full md:w-80"
               value={form.watch("pagamento.meio_pagamento") || "transferencia bancaria"}
-              onValueChange={(v) => form.setValue("pagamento.meio_pagamento", v)}
-            >
-              <SelectTrigger className="w-full md:w-80">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="transferencia bancaria">
-                  Transferência Bancária (TED/PIX)
-                </SelectItem>
-                <SelectItem value="cheque">Cheque</SelectItem>
-                <SelectItem value="dinheiro">Dinheiro (Espécie)</SelectItem>
-                <SelectItem value="financiamento bancario">
-                  Financiamento Bancário
-                </SelectItem>
-                <SelectItem value="permuta">Permuta</SelectItem>
-                <SelectItem value="misto">Misto</SelectItem>
-              </SelectContent>
-            </Select>
+              onChange={(v) => form.setValue("pagamento.meio_pagamento", v, { shouldDirty: true })}
+              options={[
+                { value: "transferencia bancaria", label: "Transferência Bancária (TED/PIX)" },
+                { value: "cheque", label: "Cheque" },
+                { value: "dinheiro", label: "Dinheiro (Espécie)" },
+                { value: "financiamento bancario", label: "Financiamento Bancário" },
+                { value: "permuta", label: "Permuta" },
+                { value: "misto", label: "Misto" },
+              ]}
+            />
           </FormField>
         </CardContent>
       </Card>

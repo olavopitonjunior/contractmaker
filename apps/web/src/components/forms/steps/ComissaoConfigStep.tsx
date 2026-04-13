@@ -4,16 +4,10 @@ import { useFieldArray, UseFormReturn, Controller } from "react-hook-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { UFSelect } from "@/components/forms/UFSelect";
 import { MoneyInput } from "@/components/forms/MoneyInput";
+import { NativeSelect } from "@/components/forms/NativeSelect";
 
 interface ComissaoConfigStepProps {
   form: UseFormReturn<any>;
@@ -103,29 +97,25 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
             </FormField>
 
             <FormField label="Quem Paga a Comissão">
-              <Select
+              <NativeSelect
                 value={quemPaga || "comprador"}
-                onValueChange={(v) => {
-                  form.setValue("comissao.quem_paga", v);
+                onChange={(v) => {
+                  form.setValue("comissao.quem_paga", v, { shouldDirty: true });
                   const textos: Record<string, string> = {
                     comprador: "Parte Compradora",
                     vendedor: "Parte Vendedora",
                     ambos: "Ambas as Partes",
                     outro: "",
                   };
-                  form.setValue("comissao.quem_paga_texto", textos[v] || "");
+                  form.setValue("comissao.quem_paga_texto", textos[v] || "", { shouldDirty: true });
                 }}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="comprador">Comprador</SelectItem>
-                  <SelectItem value="vendedor">Vendedor</SelectItem>
-                  <SelectItem value="ambos">Ambos (50/50)</SelectItem>
-                  <SelectItem value="outro">Outro</SelectItem>
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "comprador", label: "Comprador" },
+                  { value: "vendedor", label: "Vendedor" },
+                  { value: "ambos", label: "Ambos (50/50)" },
+                  { value: "outro", label: "Outro" },
+                ]}
+              />
             </FormField>
 
             {quemPaga === "outro" && (
@@ -138,26 +128,16 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
             )}
 
             <FormField label="Quando Paga a Comissão">
-              <Select
+              <NativeSelect
                 value={quandoPaga || "assinatura"}
-                onValueChange={(v) => form.setValue("comissao.quando_paga", v)}
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="assinatura">
-                    Na assinatura do contrato
-                  </SelectItem>
-                  <SelectItem value="quitacao">
-                    Na quitação total
-                  </SelectItem>
-                  <SelectItem value="registro">
-                    No registro da escritura
-                  </SelectItem>
-                  <SelectItem value="parcelas">Em parcelas</SelectItem>
-                </SelectContent>
-              </Select>
+                onChange={(v) => form.setValue("comissao.quando_paga", v, { shouldDirty: true })}
+                options={[
+                  { value: "assinatura", label: "Na assinatura do contrato" },
+                  { value: "quitacao", label: "Na quitação total" },
+                  { value: "registro", label: "No registro da escritura" },
+                  { value: "parcelas", label: "Em parcelas" },
+                ]}
+              />
             </FormField>
           </div>
 
@@ -228,18 +208,15 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
         </CardHeader>
         <CardContent>
           <FormField label="Forma de resolução de conflitos">
-            <Select
+            <NativeSelect
+              className="w-full md:w-80"
               value={foro || "arbitragem"}
-              onValueChange={(v) => form.setValue("foro", v)}
-            >
-              <SelectTrigger className="w-full md:w-80">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="arbitragem">Arbitragem</SelectItem>
-                <SelectItem value="justica-publica">Justiça Comum</SelectItem>
-              </SelectContent>
-            </Select>
+              onChange={(v) => form.setValue("foro", v, { shouldDirty: true })}
+              options={[
+                { value: "arbitragem", label: "Arbitragem" },
+                { value: "justica-publica", label: "Justiça Comum" },
+              ]}
+            />
           </FormField>
         </CardContent>
       </Card>

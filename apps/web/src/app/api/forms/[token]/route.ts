@@ -56,14 +56,24 @@ export async function PATCH(
     },
   });
 
+  // Keep the deal title in sync with the form title when the user renames the form
+  if (typeof body.title === "string" && body.title.trim() && body.title !== form.title) {
+    await prisma.deal.updateMany({
+      where: { formId: form.id },
+      data: { title: body.title },
+    });
+  }
+
   // Auto-generate contract when form is completed
   let contractId: string | null = null;
+  let dealId: string | null = null;
   if (newStatus === "completo" && previousStatus !== "completo") {
     const deal = await prisma.deal.findFirst({
       where: { formId: form.id },
     });
 
     if (deal) {
+      dealId = deal.id;
       try {
         const result = await generateContractForDeal(deal.id, deal.userId, form.orgId);
         contractId = result.contractId;
@@ -78,5 +88,6 @@ export async function PATCH(
     status: updated.status,
     updatedAt: updated.updatedAt,
     contractId,
+    dealId,
   });
 }

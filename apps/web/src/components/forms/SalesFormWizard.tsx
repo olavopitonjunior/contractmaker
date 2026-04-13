@@ -263,6 +263,7 @@ export function SalesFormWizard({ token, initialData }: SalesFormWizardProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
   const [generatedContractId, setGeneratedContractId] = useState<string | null>(null);
+  const [generatedDealId, setGeneratedDealId] = useState<string | null>(null);
 
   const form = useForm<DadosContratoForm>({
     defaultValues: {
@@ -315,6 +316,7 @@ export function SalesFormWizard({ token, initialData }: SalesFormWizardProps) {
       if (res.ok) {
         const data = await res.json();
         if (data.contractId) setGeneratedContractId(data.contractId);
+        if (data.dealId) setGeneratedDealId(data.dealId);
         setIsComplete(true);
       } else {
         console.error("Erro ao finalizar formulario");
@@ -360,7 +362,9 @@ export function SalesFormWizard({ token, initialData }: SalesFormWizardProps) {
             </Button>
           )}
           <Button variant="outline" asChild>
-            <a href="/pipeline">Ver Pipeline</a>
+            <a href={generatedDealId ? `/pipeline?highlight=${generatedDealId}` : "/pipeline"}>
+              Ver Pipeline
+            </a>
           </Button>
         </div>
       </div>

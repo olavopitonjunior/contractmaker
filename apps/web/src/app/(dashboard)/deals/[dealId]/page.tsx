@@ -18,9 +18,8 @@ export default async function DealPage({
       form: true,
       attachments: { orderBy: { createdAt: "desc" } },
       contracts: {
-        where: { isLatest: true },
         include: { template: { select: { name: true } } },
-        orderBy: { createdAt: "desc" },
+        orderBy: { version: "desc" },
       },
     },
   });

@@ -223,7 +223,7 @@ export function DealDetail({ deal }: DealDetailProps) {
           {formData ? (
             <div className="grid gap-4 md:grid-cols-2">
               <Card>
-                <details>
+                <details open>
                   <summary className="cursor-pointer list-none">
                     <CardHeader className="flex flex-row items-center justify-between">
                       <CardTitle className="text-sm">Vendedor(es)</CardTitle>
@@ -259,7 +259,7 @@ export function DealDetail({ deal }: DealDetailProps) {
               </Card>
 
               <Card>
-                <details>
+                <details open>
                   <summary className="cursor-pointer list-none">
                     <CardHeader className="flex flex-row items-center justify-between">
                       <CardTitle className="text-sm">Comprador(es)</CardTitle>
@@ -295,7 +295,7 @@ export function DealDetail({ deal }: DealDetailProps) {
               </Card>
 
               <Card>
-                <details>
+                <details open>
                   <summary className="cursor-pointer list-none">
                     <CardHeader className="flex flex-row items-center justify-between">
                       <CardTitle className="text-sm">Imóvel(is)</CardTitle>
@@ -321,7 +321,7 @@ export function DealDetail({ deal }: DealDetailProps) {
               </Card>
 
               <Card>
-                <details>
+                <details open>
                   <summary className="cursor-pointer list-none">
                     <CardHeader className="flex flex-row items-center justify-between">
                       <CardTitle className="text-sm">Pagamento</CardTitle>
@@ -424,7 +424,7 @@ export function DealDetail({ deal }: DealDetailProps) {
           <AlertDialogHeader>
             <AlertDialogTitle>Criar nova versão do contrato?</AlertDialogTitle>
             <AlertDialogDescription>
-              Este negócio já possui {deal.contracts.length} versão(ões). A nova versão (V{deal.contracts.length + 1}) será gerada a partir do template padrão com os dados atuais do negócio.
+              Este negócio já possui {deal.contracts.length} versão(ões). A nova versão (V{Math.max(0, ...deal.contracts.map((c) => c.version)) + 1}) será gerada a partir do template padrão com os dados atuais do negócio.
               <br /><br />
               <strong>Atenção:</strong> as edições manuais ou via Chat IA feitas na versão anterior <strong>não serão transferidas automaticamente</strong>. O histórico das versões anteriores é mantido para consulta.
             </AlertDialogDescription>

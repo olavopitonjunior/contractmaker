@@ -4,14 +4,8 @@ import { UseFormReturn } from "react-hook-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { NativeSelect } from "@/components/forms/NativeSelect";
 
 interface StatusDebitosStepProps {
   form: UseFormReturn<any>;
@@ -86,25 +80,16 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
         </CardHeader>
         <CardContent className="space-y-4">
           <FormField label="Situação do Imóvel">
-            <Select
+            <NativeSelect
+              className="w-full md:w-80"
               value={statusPropriedade || "quitado-registrado"}
-              onValueChange={(v) => form.setValue("status_propriedade", v)}
-            >
-              <SelectTrigger className="w-full md:w-80">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="quitado-registrado">
-                  Quitado e Registrado
-                </SelectItem>
-                <SelectItem value="financiado-saldo">
-                  Financiado com Saldo Devedor
-                </SelectItem>
-                <SelectItem value="financiado-quitado">
-                  Financiado mas Quitado (aguardando baixa)
-                </SelectItem>
-              </SelectContent>
-            </Select>
+              onChange={(v) => form.setValue("status_propriedade", v, { shouldDirty: true })}
+              options={[
+                { value: "quitado-registrado", label: "Quitado e Registrado" },
+                { value: "financiado-saldo", label: "Financiado com Saldo Devedor" },
+                { value: "financiado-quitado", label: "Financiado mas Quitado (aguardando baixa)" },
+              ]}
+            />
           </FormField>
 
           {isFinanciado && (
@@ -216,28 +201,17 @@ export function StatusDebitosStep({ form }: StatusDebitosStepProps) {
         </CardHeader>
         <CardContent className="space-y-4">
           <FormField label="Cláusula de vícios">
-            <Select
+            <NativeSelect
+              className="w-full md:w-96"
               value={viciosOpcao || "renuncia"}
-              onValueChange={(v) => form.setValue("vicios.opcao", v)}
-            >
-              <SelectTrigger className="w-full md:w-96">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="renuncia">
-                  Renúncia - Comprador aceita o imóvel no estado atual
-                </SelectItem>
-                <SelectItem value="detalhado">
-                  Detalhado - Sem vícios aparentes ou ocultos
-                </SelectItem>
-                <SelectItem value="reparar">
-                  Reparar - Vendedor se compromete a reparar
-                </SelectItem>
-                <SelectItem value="desocultados">
-                  Desocultados - Vícios ocultos declarados
-                </SelectItem>
-              </SelectContent>
-            </Select>
+              onChange={(v) => form.setValue("vicios.opcao", v, { shouldDirty: true })}
+              options={[
+                { value: "renuncia", label: "Renúncia - Comprador aceita o imóvel no estado atual" },
+                { value: "detalhado", label: "Detalhado - Sem vícios aparentes ou ocultos" },
+                { value: "reparar", label: "Reparar - Vendedor se compromete a reparar" },
+                { value: "desocultados", label: "Desocultados - Vícios ocultos declarados" },
+              ]}
+            />
           </FormField>
 
           {viciosOpcao === "reparar" && (

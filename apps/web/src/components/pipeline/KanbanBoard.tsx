@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   DndContext,
   DragOverlay,
@@ -28,10 +29,26 @@ interface KanbanBoardProps {
 export function KanbanBoard({ stages: initialStages }: KanbanBoardProps) {
   const [stages, setStages] = useState(initialStages);
   const [activeCard, setActiveCard] = useState<DealCard | null>(null);
+  const searchParams = useSearchParams();
+  const highlightId = searchParams.get("highlight");
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
   );
+
+  // Scroll para o card recem-criado e destacar por alguns segundos
+  useEffect(() => {
+    if (!highlightId) return;
+    const el = document.querySelector(`[data-deal-id="${highlightId}"]`);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center", inline: "center" });
+      el.classList.add("ring-2", "ring-primary", "ring-offset-2");
+      const timer = setTimeout(() => {
+        el.classList.remove("ring-2", "ring-primary", "ring-offset-2");
+      }, 3500);
+      return () => clearTimeout(timer);
+    }
+  }, [highlightId]);
 
   function handleDragStart(event: DragStartEvent) {
     const dealId = event.active.id as string;

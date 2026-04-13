@@ -36,7 +36,8 @@ export function KanbanCard({ deal, isOverlay }: KanbanCardProps) {
       ref={setNodeRef}
       {...listeners}
       {...attributes}
-      className={cn(isDragging && "opacity-40")}
+      data-deal-id={deal.id}
+      className={cn("rounded-md transition-all", isDragging && "opacity-40")}
     >
       <Link href={`/deals/${deal.id}`}>
         <Card

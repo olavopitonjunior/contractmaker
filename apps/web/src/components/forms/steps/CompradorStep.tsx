@@ -5,15 +5,9 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { UFSelect } from "@/components/forms/UFSelect";
+import { NativeSelect } from "@/components/forms/NativeSelect";
 
 interface CompradorStepProps {
   form: UseFormReturn<any>;
@@ -62,7 +56,7 @@ function PessoaFisicaFields({
   const estadoCivil = form.watch(`${prefix}.estado_civil`);
   const temProcurador = form.watch(`${prefix}.tem_procurador`);
   const showConjuge =
-    estadoCivil === "Casado(a)" || estadoCivil === "Uniao Estavel";
+    estadoCivil === "Casado(a)" || estadoCivil === "União Estável";
 
   return (
     <div className="space-y-4">
@@ -80,21 +74,11 @@ function PessoaFisicaFields({
         </FormField>
 
         <FormField label="Estado Civil">
-          <Select
+          <NativeSelect
             value={form.watch(`${prefix}.estado_civil`) || "Solteiro(a)"}
-            onValueChange={(v) => form.setValue(`${prefix}.estado_civil`, v)}
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Selecione" />
-            </SelectTrigger>
-            <SelectContent>
-              {ESTADOS_CIVIS.map((ec) => (
-                <SelectItem key={ec} value={ec}>
-                  {ec}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            onChange={(v) => form.setValue(`${prefix}.estado_civil`, v, { shouldDirty: true })}
+            options={ESTADOS_CIVIS.map((ec) => ({ value: ec, label: ec }))}
+          />
         </FormField>
 
         <FormField label="Profissão">
@@ -286,6 +270,10 @@ function PessoaJuridicaFields({
           <Input {...form.register(`${prefix}.complemento`)} placeholder="Sala, Andar..." />
         </FormField>
 
+        <FormField label="Bairro">
+          <Input {...form.register(`${prefix}.bairro`)} placeholder="Bairro" />
+        </FormField>
+
         <FormField label="Cidade">
           <Input {...form.register(`${prefix}.cidade`)} placeholder="Cidade" />
         </FormField>
@@ -324,23 +312,14 @@ function PessoaJuridicaFields({
           />
         </FormField>
         <FormField label="Estado Civil">
-          <Select
+          <NativeSelect
             value={form.watch(`${prefix}.representante.estado_civil`) || ""}
-            onValueChange={(v) =>
-              form.setValue(`${prefix}.representante.estado_civil`, v)
+            onChange={(v) =>
+              form.setValue(`${prefix}.representante.estado_civil`, v, { shouldDirty: true })
             }
-          >
-            <SelectTrigger className="w-full">
-              <SelectValue placeholder="Selecione" />
-            </SelectTrigger>
-            <SelectContent>
-              {ESTADOS_CIVIS.map((ec) => (
-                <SelectItem key={ec} value={ec}>
-                  {ec}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            options={ESTADOS_CIVIS.map((ec) => ({ value: ec, label: ec }))}
+            placeholder="Selecione"
+          />
         </FormField>
         <FormField label="Profissão">
           <Input

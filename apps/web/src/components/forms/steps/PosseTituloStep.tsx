@@ -4,13 +4,7 @@ import { UseFormReturn } from "react-hook-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { NativeSelect } from "@/components/forms/NativeSelect";
 
 interface PosseTituloStepProps {
   form: UseFormReturn<any>;
@@ -50,20 +44,15 @@ export function PosseTituloStep({ form }: PosseTituloStepProps) {
         </CardHeader>
         <CardContent className="space-y-4">
           <FormField label="O imóvel está atualmente">
-            <Select
+            <NativeSelect
+              className="w-full md:w-80"
               value={ocupacao || "desocupado"}
-              onValueChange={(v) => form.setValue("ocupacao", v)}
-            >
-              <SelectTrigger className="w-full md:w-80">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="desocupado">Desocupado</SelectItem>
-                <SelectItem value="ocupado-terceiro">
-                  Ocupado por terceiro (locatário ou outros)
-                </SelectItem>
-              </SelectContent>
-            </Select>
+              onChange={(v) => form.setValue("ocupacao", v, { shouldDirty: true })}
+              options={[
+                { value: "desocupado", label: "Desocupado" },
+                { value: "ocupado-terceiro", label: "Ocupado por terceiro (locatário ou outros)" },
+              ]}
+            />
           </FormField>
 
           {isOcupadoTerceiro && (
@@ -102,39 +91,28 @@ export function PosseTituloStep({ form }: PosseTituloStepProps) {
         </CardHeader>
         <CardContent className="space-y-4">
           <FormField label="Momento da Entrega da Posse">
-            <Select
+            <NativeSelect
+              className="w-full md:w-96"
               value={momentoPosse || "assinatura"}
-              onValueChange={(v) => {
-                form.setValue("entrega_posse.momento", v);
+              onChange={(v) => {
+                form.setValue("entrega_posse.momento", v, { shouldDirty: true });
                 const textos: Record<string, string> = {
-                  assinatura: "assinatura do contrato",
-                  quitacao: "quitacao do preco",
-                  "30-dias": "30 dias apos a assinatura",
-                  "60-dias": "60 dias apos a assinatura",
+                  assinatura: "na data da assinatura do presente instrumento",
+                  quitacao: "no ato da quitação integral do preço",
+                  "30-dias": "em até 30 (trinta) dias corridos contados da assinatura do presente instrumento",
+                  "60-dias": "em até 60 (sessenta) dias corridos contados da assinatura do presente instrumento",
                   outro: "",
                 };
-                form.setValue("entrega_posse.momento_texto", textos[v] || "");
+                form.setValue("entrega_posse.momento_texto", textos[v] || "", { shouldDirty: true });
               }}
-            >
-              <SelectTrigger className="w-full md:w-96">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="assinatura">
-                  Na assinatura do contrato
-                </SelectItem>
-                <SelectItem value="quitacao">
-                  Na quitacao total do preco
-                </SelectItem>
-                <SelectItem value="30-dias">
-                  30 dias apos a assinatura
-                </SelectItem>
-                <SelectItem value="60-dias">
-                  60 dias apos a assinatura
-                </SelectItem>
-                <SelectItem value="outro">Outro (especificar)</SelectItem>
-              </SelectContent>
-            </Select>
+              options={[
+                { value: "assinatura", label: "Na assinatura do contrato" },
+                { value: "quitacao", label: "Na quitação total do preço" },
+                { value: "30-dias", label: "30 dias após a assinatura" },
+                { value: "60-dias", label: "60 dias após a assinatura" },
+                { value: "outro", label: "Outro (especificar)" },
+              ]}
+            />
           </FormField>
 
           {isOutroMomento && (
@@ -166,31 +144,19 @@ export function PosseTituloStep({ form }: PosseTituloStepProps) {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="Opção para emissao do titulo">
-              <Select
+            <FormField label="Opção para emissão do título">
+              <NativeSelect
                 value={form.watch("titulo_definitivo.opcao") || "certidoes-apos"}
-                onValueChange={(v) =>
-                  form.setValue("titulo_definitivo.opcao", v)
+                onChange={(v) =>
+                  form.setValue("titulo_definitivo.opcao", v, { shouldDirty: true })
                 }
-              >
-                <SelectTrigger className="w-full">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="certidoes-apos">
-                    Apos obtencao das certidoes negativas
-                  </SelectItem>
-                  <SelectItem value="quitacao">
-                    Apos quitacao total do preco
-                  </SelectItem>
-                  <SelectItem value="prazo-fixo">
-                    Em prazo fixo (em dias)
-                  </SelectItem>
-                  <SelectItem value="imediato">
-                    Imediatamente (escritura na assinatura)
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "certidoes-apos", label: "Após obtenção das certidões negativas" },
+                  { value: "quitacao", label: "Após quitação total do preço" },
+                  { value: "prazo-fixo", label: "Em prazo fixo (em dias)" },
+                  { value: "imediato", label: "Imediatamente (escritura na assinatura)" },
+                ]}
+              />
             </FormField>
 
             <FormField label="Prazo (dias)">
