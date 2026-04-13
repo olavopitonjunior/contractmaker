@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { AGENT_TOOLS, getToolNames } from "../tools";
 
 describe("AGENT_TOOLS", () => {
-  it("has exactly 10 tools", () => {
-    expect(AGENT_TOOLS).toHaveLength(10);
+  it("has exactly 11 tools", () => {
+    expect(AGENT_TOOLS).toHaveLength(11);
   });
 
   it("each tool has name, description, and input_schema", () => {
@@ -33,6 +33,7 @@ describe("AGENT_TOOLS", () => {
       "validate_contract",
       "suggest_improvements",
       "extract_document_data",
+      "add_comment",
     ];
     for (const name of expected) {
       expect(names).toContain(name);
@@ -41,10 +42,11 @@ describe("AGENT_TOOLS", () => {
 });
 
 describe("getToolNames", () => {
-  it("returns array of 10 tool names", () => {
+  it("returns array of 11 tool names", () => {
     const names = getToolNames();
-    expect(names).toHaveLength(10);
+    expect(names).toHaveLength(11);
     expect(names).toContain("query_clauses");
     expect(names).toContain("validate_contract");
+    expect(names).toContain("add_comment");
   });
 });

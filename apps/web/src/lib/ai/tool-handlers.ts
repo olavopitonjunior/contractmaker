@@ -48,9 +48,59 @@ export async function executeToolHandler(
       return handleSuggestImprovements(input, context);
     case "extract_document_data":
       return handleExtractDocument(input);
+    case "add_comment":
+      return handleAddComment(input, context);
     default:
       return { error: `Tool desconhecida: ${toolName}` };
   }
+}
+
+async function handleAddComment(
+  input: Record<string, unknown>,
+  context: AgentContext
+): Promise<Record<string, unknown>> {
+  const selectedText = typeof input.selectedText === "string" ? input.selectedText : "";
+  const text = typeof input.text === "string" ? input.text : "";
+  const severity =
+    typeof input.severity === "string" &&
+    ["info", "warning", "error"].includes(input.severity)
+      ? (input.severity as string)
+      : "info";
+
+  if (!selectedText || !text) {
+    return { error: "selectedText e text são obrigatórios" };
+  }
+
+  // Verify the selected text exists in the current HTML to avoid hallucinated anchors
+  if (!context.htmlContent.includes(selectedText)) {
+    return {
+      error:
+        "O trecho selecionado não foi encontrado no contrato. Copie exatamente do texto atual.",
+    };
+  }
+
+  const { randomUUID } = await import("node:crypto");
+  const anchorId = randomUUID();
+
+  await prisma.contractComment.create({
+    data: {
+      contractId: context.contractId,
+      userId: null,
+      authorName: "Assistente IA",
+      authorType: "ai",
+      text,
+      anchorId,
+      selectedText,
+      severity,
+    },
+  });
+
+  return {
+    success: true,
+    anchorId,
+    severity,
+    message: `Comentário (${severity}) adicionado ao trecho: "${selectedText.slice(0, 80)}${selectedText.length > 80 ? "…" : ""}"`,
+  };
 }
 
 async function handleQueryClauses(

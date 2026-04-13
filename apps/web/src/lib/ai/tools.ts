@@ -182,6 +182,30 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
       required: ["attachmentId"],
     },
   },
+  {
+    name: "add_comment",
+    description:
+      "Adiciona um comentário lateral no contrato sinalizando um ponto de atenção SEM alterar o texto. Use para observações, avisos ou alertas que merecem a atenção do usuário mas não justificam alteração automática. Defina severity como 'info' (observação), 'warning' (ponto de atenção) ou 'error' (problema que precisa correção).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        selectedText: {
+          type: "string",
+          description: "Trecho EXATO do contrato que o comentário se refere (será usado como âncora)",
+        },
+        text: {
+          type: "string",
+          description: "Texto do comentário — use português claro e objetivo",
+        },
+        severity: {
+          type: "string",
+          enum: ["info", "warning", "error"],
+          description: "Severidade do comentário",
+        },
+      },
+      required: ["selectedText", "text", "severity"],
+    },
+  },
 ];
 
 export function getToolNames(): string[] {

@@ -33,6 +33,8 @@ model User {
   legacyTemplates LegacyTemplate[]
   clausesAuthored Clause[]   @relation("clauseAuthor")
   changeLogs      ContractChangeLog[] @relation("userChangeLogs")
+  contractComments    ContractComment[]    @relation("commentAuthor")
+  contractSuggestions ContractSuggestion[] @relation("suggestionAuthor")
 }
 
 model Account {
@@ -262,6 +264,8 @@ model Contract {
   exports       Export[]
   clauses       ContractClause[]
   changeLogs    ContractChangeLog[]
+  comments      ContractComment[]
+  suggestions   ContractSuggestion[]
 }
 
 model ContractClause {
@@ -302,6 +306,54 @@ model ChatMessage {
   createdAt DateTime @default(now())
 
   session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// COMMENTS & SUGGESTIONS (TRACK CHANGES)
+// ============================================
+
+model ContractComment {
+  id           String   @id @default(cuid())
+  contractId   String
+  userId       String?
+  authorName   String
+  authorType   String   // "user" | "ai"
+  text         String   @db.Text
+  anchorId     String
+  selectedText String   @db.Text
+  severity     String   @default("info") // "info" | "warning" | "error"
+  resolved     Boolean  @default(false)
+  parentId     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  contract Contract          @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  user     User?             @relation("commentAuthor", fields: [userId], references: [id])
+  parent   ContractComment?  @relation("CommentReplies", fields: [parentId], references: [id])
+  replies  ContractComment[] @relation("CommentReplies")
+
+  @@index([contractId, resolved])
+}
+
+model ContractSuggestion {
+  id            String    @id @default(cuid())
+  contractId    String
+  userId        String?
+  authorType    String    // "user" | "ai"
+  type          String    // "insertion" | "deletion" | "replacement"
+  suggestionId  String    // unique anchor id that ties to the mark in the HTML
+  originalText  String?   @db.Text
+  newText       String?   @db.Text
+  reason        String?   @db.Text
+  status        String    @default("pending") // "pending" | "accepted" | "rejected"
+  resolvedAt    DateTime?
+  resolvedBy    String?
+  createdAt     DateTime  @default(now())
+
+  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  user     User?    @relation("suggestionAuthor", fields: [userId], references: [id])
+
+  @@index([contractId, status])
 }
 
 // ============================================

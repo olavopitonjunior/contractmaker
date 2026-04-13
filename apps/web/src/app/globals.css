@@ -80,3 +80,92 @@
     font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
   }
 }
+
+/* A4 page visual wrapper for the contract editor (210mm x 297mm @ 96dpi) */
+.a4-page {
+  width: min(100%, 794px);
+  min-height: 1123px;
+}
+
+/* Manual page break — shown as dashed separator in the editor, respected on print/PDF */
+.ProseMirror .page-break {
+  display: block;
+  height: 0;
+  border-top: 1px dashed hsl(var(--border));
+  margin: 1.5rem -2rem;
+  position: relative;
+  page-break-after: always;
+  break-after: page;
+}
+
+.ProseMirror .page-break::before {
+  content: "Quebra de página";
+  position: absolute;
+  top: -0.65rem;
+  left: 50%;
+  transform: translateX(-50%);
+  background: hsl(var(--card));
+  color: hsl(var(--muted-foreground));
+  font-size: 0.625rem;
+  padding: 0 0.5rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Suggestion marks (track changes) */
+.ProseMirror ins.suggestion-insert {
+  background: hsl(142 76% 94%);
+  color: hsl(142 72% 29%);
+  text-decoration: underline;
+  text-decoration-style: solid;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+.ProseMirror del.suggestion-delete {
+  background: hsl(0 84% 96%);
+  color: hsl(0 72% 45%);
+  text-decoration: line-through;
+  padding: 0 2px;
+  border-radius: 2px;
+}
+
+/* Search & Replace highlights */
+.ProseMirror .search-result {
+  background: hsl(48 100% 80%);
+  border-radius: 2px;
+}
+
+.ProseMirror .search-result-active {
+  background: hsl(27 92% 65%);
+  color: hsl(0 0% 11%);
+  border-radius: 2px;
+  box-shadow: 0 0 0 1px hsl(27 92% 44%);
+}
+
+/* Comment anchor */
+.ProseMirror .comment-anchor {
+  background: hsl(48 100% 94%);
+  border-bottom: 2px solid hsl(48 90% 55%);
+  padding: 0 1px;
+  cursor: pointer;
+}
+
+.ProseMirror .comment-anchor.comment-active {
+  background: hsl(48 100% 85%);
+}
+
+@media print {
+  .a4-page {
+    width: auto;
+    box-shadow: none;
+    border: none;
+  }
+  .ProseMirror .page-break {
+    border: none;
+    margin: 0;
+  }
+  .ProseMirror .page-break::before {
+    display: none;
+  }
+}

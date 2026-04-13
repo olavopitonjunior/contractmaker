@@ -19,11 +19,12 @@ interface ChatPanelProps {
   contractId: string;
   messages: Message[];
   onContentUpdate?: (html: string) => void;
+  initialInput?: string;
 }
 
-export function ChatPanel({ contractId, messages: initialMessages, onContentUpdate }: ChatPanelProps) {
+export function ChatPanel({ contractId, messages: initialMessages, onContentUpdate, initialInput }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(initialInput ?? "");
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 

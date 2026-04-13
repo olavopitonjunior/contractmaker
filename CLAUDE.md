@@ -37,11 +37,14 @@ apps/web/                    # Next.js app principal
       f/[token]/             # Formulario publico (sem auth)
       api/                   # API routes
     components/
-      ui/                    # Shadcn components
+      ui/                    # Shadcn components (inclui popover.tsx)
       layout/                # Sidebar, Header
       pipeline/              # KanbanBoard, KanbanCard
       forms/                 # SalesFormWizard, step forms
-      contracts/             # ContractEditor, ClauseSelector, ChangeLogPanel
+      contracts/             # ContractEditor, ContractEditorPage, EditorBubbleMenu,
+                             # FindReplaceBar, CommentsPanel, AddCommentDialog,
+                             # SuggestionsToolbar, ApprovalReviewDialog, ClauseSelector,
+                             # ChangeLogPanel, VersionTimeline
       chat/                  # ChatPanel, ChatMessage
       export/                # ExportDialog
     hooks/                   # useAutoSave, useDebounce
@@ -52,6 +55,8 @@ apps/web/                    # Next.js app principal
       render/                # Handlebars, PDF, DOCX
       storage/               # Vercel Blob, S3
       forms/                 # Zod schemas, validation
+      editor/                # TipTap custom extensions (CommentMark, SuggestionMark,
+                             # PageBreakNode, SearchReplace)
 templates/                   # Handlebars .hbs files
   contrato_compra_venda.hbs  # Template legado v1 (deprecated)
   ccv_a_vista_v2.hbs         # Template padronizado: pagamento a vista (15 clausulas)
@@ -87,32 +92,85 @@ Templates usam `<!-- CLAUSE_SLOT:Gx -->` como pontos de insercao para clausulas 
 ## Banco de Clausulas Padronizadas (23 clausulas em 6 grupos)
 | Grupo | Tema | Qtd |
 |-------|------|-----|
-| G1 | Sinal, Arras e Inicio de Pagamento | 3 |
-| G2 | Imissao na Posse | 4 |
-| G3 | Rescisao e Condicao Resolutiva | 4 |
-| G4 | Financiamento e Registro (OBRIGATORIO em financiamento) | 4 |
-| G5 | Comissao de Corretagem | 3 |
-| G6 | Declaracoes e Disposicoes Especiais | 5 |
+| G1 | Sinal, Arras e Início de Pagamento | 3 |
+| G2 | Imissão na Posse | 4 |
+| G3 | Rescisão e Condição Resolutiva | 4 |
+| G4 | Financiamento e Registro (OBRIGATÓRIO em financiamento) | 4 |
+| G5 | Comissão de Corretagem | 3 |
+| G6 | Declarações e Disposições Especiais | 5 |
 
 Cada clausula tem `agentNotes` (orientacao juridica interna para a IA) e `groupCode` (G1-G6).
 
-## Agente IA (10 tools)
-O agente roda em `src/lib/ai/agent.ts` com loop de tool-use (max 10 iteracoes):
+## Agente IA (11 tools)
+O agente roda em `src/lib/ai/agent.ts` com loop de tool-use (max 5 iteracoes):
 - **Consulta:** query_clauses (com groupCode/isVariable), query_templates, explain_clause
 - **Edicao:** edit_contract_section, update_contract_data, insert_clause, remove_clause
 - **Analise:** validate_contract, suggest_improvements (detecta G4 obrigatorio, FGTS, socio PJ)
 - **OCR:** extract_document_data
+- **Comentarios:** add_comment (cria comentario lateral ancorado em trecho, severity info/warning/error)
 
 O `insert_clause` usa CLAUSE_SLOT:Gx para posicionar clausulas semanticamente no template.
 O `suggest_improvements` verifica clausulas obrigatorias por modalidade e dados do contrato.
+O `add_comment` valida que o `selectedText` existe no `htmlContent` antes de ancorar (evita alucinacao).
+
+System prompt tem 13 regras fundamentais em `src/lib/ai/prompts.ts`. Regra 10 obriga resposta em markdown com secoes `## Alteracoes Realizadas`, `## Justificativa`, `## Verificacao`. Regra 11 prefere modo sugestao (track changes) a edicao direta. Regra 13 obriga placeholders `[preencher X]` quando dados ausentes + `add_comment` warning listando pendencias.
+
+## Editor de Contratos (TipTap avancado)
+O editor em `src/components/contracts/ContractEditor.tsx` usa TipTap v3 com:
+- **StarterKit v3** (ja inclui Underline, Link, Strike nativamente)
+- **Table** (resizable) + TableRow/Cell/Header
+- **Highlight** multicolor (amarelo user, verde sugestao IA, vermelho problema)
+- **TextAlign** (heading + paragraph, inclui justify)
+- **CharacterCount** (rodape mostra "X palavras · Y caracteres")
+- **Typography** (aspas curvas, travessao automatico)
+- **BubbleMenu** (floating toolbar ao selecionar texto)
+
+Extensoes customizadas em `src/lib/editor/`:
+- `SearchReplace.ts` — Find & Replace via ProseMirror Decorations (Ctrl+F). Comandos `setSearchTerm`, `nextResult`, `replaceCurrent`, `replaceAll`, `clearSearch`.
+- `CommentMark.ts` — Mark `<span data-comment-id>` com classe `comment-anchor`. Comandos `setCommentMark({commentId})`, `unsetCommentMark(id)`.
+- `SuggestionMark.ts` — Mark `<ins>`/`<del>` para track changes com attrs `{suggestionId, type, authorType}`. Comandos `setInsertionMark`, `setDeletionMark`, `acceptSuggestion(id)`, `rejectSuggestion(id)`.
+- `PageBreakNode.ts` — Node de bloco com CSS `page-break-after: always`. Atalho `Ctrl+Enter`.
+
+Toolbar em 6 grupos: Texto (Bold/Italic/Underline/Strike), Headings, Listas (+Indent/Outdent), Alinhamento (+Justify), Inserir (Link/Tabela/HR/PageBreak), Acoes (Undo/Redo/Search). Todos os botoes tem `TooltipProvider` com atalho visivel.
+
+BubbleMenu ([EditorBubbleMenu.tsx]) aparece ao selecionar texto: Bold, Italic, Underline, Strike, Link (popover), Highlight, Comentar (balao), botao "IA" laranja. O botao IA chama `onAskAI(text)` que abre o `ChatPanel` pre-populando o input com o trecho como blockquote.
+
+Wrapper visual A4: editor envolvido em `.a4-page` com `width: 794px` (210mm @ 96dpi), `min-height: 1123px`. CSS em `src/app/globals.css`.
+
+## Comentarios e Track Changes
+Models Prisma:
+- **ContractComment** — id, contractId, userId?, authorName, authorType ("user"|"ai"), text, anchorId, selectedText, severity ("info"|"warning"|"error"), resolved, parentId (replies), createdAt.
+- **ContractSuggestion** — id, contractId, userId?, authorType, type ("insertion"|"deletion"|"replacement"), suggestionId (anchor), originalText, newText, reason, status ("pending"|"accepted"|"rejected"), resolvedAt, resolvedBy.
+
+API routes:
+- `GET/POST /api/contracts/[id]/comments` — lista + cria comentarios
+- `PATCH/DELETE/POST /api/contracts/[id]/comments/[commentId]` — atualiza (resolve), deleta, responde
+- `GET/POST /api/contracts/[id]/suggestions?status=pending` — lista + cria sugestoes
+- `PATCH/DELETE /api/contracts/[id]/suggestions/[suggestionId]` — accept/reject (salva htmlContent), delete
+
+UI:
+- `CommentsPanel.tsx` — Sheet lateral direito, cards com autor/data/severity/selectedText blockquote/replies. Click navega para anchor no editor via `ContractEditorHandle.scrollToComment`.
+- `AddCommentDialog.tsx` — modal pedindo texto do comentario (Ctrl+Enter para enviar).
+- `SuggestionsToolbar.tsx` — barra ambar no topo do editor quando ha sugestoes pendentes. "Aceitar todas" / "Rejeitar todas" em lote (sync com DB via PATCH).
+
+`ContractEditor` expoe um handle via `forwardRef`: `applyCommentMark`, `removeCommentMark`, `scrollToComment`, `focus`, `getHTML`, `getEditor`. `ContractEditorPage` usa o ref para aplicar marcas apos POST de comentario.
+
+## Revisao pre-aprovacao
+`POST /api/contracts/[id]/approve` roda: `validateContractData` + conta `ContractSuggestion` pendentes + `ContractComment` nao-resolvidos (e severity error). Se houver issues, retorna `{requiresReview: true, canForce, issues, errorCount, warningCount, pendingSuggestions, unresolvedComments}`. Frontend abre `ApprovalReviewDialog` com botoes "Revisar" e "Aprovar mesmo assim" (este ultimo oculto quando `canForce=false`, ou seja, quando ha errors). Segunda chamada com `{force: true}` pula validacoes e aprova.
 
 ## Fluxo Principal
-1. Usuario cria formulario -> gera link compartilhavel `/f/{token}`
-2. Qualquer pessoa preenche o formulario (auto-save)
+1. Usuario cria formulario -> gera link compartilhavel `/f/{token}` (titulo do form sincroniza com `deal.title` no Kanban)
+2. Qualquer pessoa preenche o formulario (auto-save via PATCH `/api/forms/[token]`)
 3. Usuario cria negocio a partir do formulario -> aparece no Kanban
 4. Usuario clica "Confeccionar Contrato" -> auto-detecta modalidade -> seleciona template v2 -> renderiza com dados
-5. Usuario edita no TipTap ou via chat IA (clausulas do banco inseridas nos CLAUSE_SLOTs)
-6. Cada versao e salva (contratos aprovados nao podem ser versionados), pode exportar PDF/DOCX
+5. Usuario edita no TipTap ou via chat IA. Opcoes no editor:
+   - Selecao + BubbleMenu: bold/italic/underline/link/highlight/comentar/IA
+   - `Ctrl+F`: Find & Replace
+   - `Ctrl+Enter`: quebra de pagina manual
+   - Comentarios laterais com anchor no texto (usuario ou IA via `add_comment`)
+   - Sugestoes da IA entram como track changes (aceitar/rejeitar individual ou em lote)
+6. Ao clicar "Aprovar": revisao pre-aprovacao roda validate + conta issues. Se houver pendencias, abre `ApprovalReviewDialog`. Usuario pode forcar aprovacao (se nao houver errors).
+7. Contratos aprovados sao imutaveis: chat/edicao/comentarios/versionamento bloqueados. Pode exportar PDF/DOCX.
 
 ## Rotas Publicas (sem auth)
 - `/f/[token]` - formulario de vendas
@@ -120,9 +178,12 @@ O `suggest_improvements` verifica clausulas obrigatorias por modalidade e dados 
 - `/login`, `/register`
 
 ## Alertas
-- Puppeteer requer Vercel Pro (timeout 60s)
+- Puppeteer requer Vercel Pro (timeout 60s). CSS `@media print` em `globals.css` garante que page breaks manuais aparecem no PDF.
 - Handlebars helpers em `src/lib/render/handlebars.ts` NAO devem ser alterados
-- TipTap edita HTML direto; re-render do Handlebars sobrescreve edicoes manuais
+- TipTap edita HTML direto; re-render do Handlebars sobrescreve edicoes manuais (incluindo comment anchors e suggestion marks)
+- Marks customizadas (`CommentMark`, `SuggestionMark`) persistem como HTML (`<span data-comment-id>`, `<ins>/<del>`). Preservam entre reloads desde que o editor nao regenere a partir do template.
 - Forms publicos NAO requerem auth - qualquer um com o link pode editar
 - Template legado v1 (`contrato_compra_venda.hbs`) esta deprecated mas mantido para contratos existentes
-- Contratos aprovados sao imutaveis: chat bloqueado, versionamento bloqueado
+- Contratos aprovados sao imutaveis: chat bloqueado, versionamento bloqueado, comentarios/sugestoes bloqueados. API retorna 403 em POST.
+- `@tiptap/extension-search-and-replace` NAO existe no registro oficial — a extensao custom em `lib/editor/SearchReplace.ts` substitui essa dependencia.
+- Ao modificar `ContractEditor.tsx`, preservar o `forwardRef<ContractEditorHandle>` — `ContractEditorPage` depende do handle para aplicar marks apos POST.

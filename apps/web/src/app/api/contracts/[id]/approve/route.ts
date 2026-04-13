@@ -1,16 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth, getUserOrg } from "@/lib/auth/auth";
+import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { validateContractData } from "@/lib/ai/validators";
 
 export async function POST(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { id: string } }
 ) {
   const session = await auth();
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  const body = await req.json().catch(() => ({}));
+  const force = body?.force === true;
 
   const contract = await prisma.contract.findUnique({
     where: { id: params.id },
@@ -24,15 +27,40 @@ export async function POST(
     return NextResponse.json({ error: "Contrato já está aprovado" }, { status: 400 });
   }
 
-  // Run validation before approval
+  // Run validation
   const issues = validateContractData(contract.dataJson as Record<string, unknown>);
   const errors = issues.filter((i) => i.severity === "error");
+  const warnings = issues.filter((i) => i.severity === "warning");
 
-  if (errors.length > 0) {
+  // Count pending suggestions and unresolved error-level comments
+  const [pendingSuggestions, errorComments, unresolvedComments] = await Promise.all([
+    prisma.contractSuggestion.count({
+      where: { contractId: params.id, status: "pending" },
+    }),
+    prisma.contractComment.count({
+      where: { contractId: params.id, resolved: false, severity: "error" },
+    }),
+    prisma.contractComment.count({
+      where: { contractId: params.id, resolved: false },
+    }),
+  ]);
+
+  const hasHardBlockers = errors.length > 0 || errorComments > 0;
+  const hasSoftIssues =
+    warnings.length > 0 || pendingSuggestions > 0 || unresolvedComments > 0;
+
+  // If there are issues and the user has not confirmed, ask for review
+  if (!force && (hasHardBlockers || hasSoftIssues)) {
     return NextResponse.json({
-      error: "Contrato possui erros que impedem a aprovação",
-      issues: errors,
-    }, { status: 422 });
+      requiresReview: true,
+      canForce: !hasHardBlockers,
+      issues,
+      errorCount: errors.length,
+      warningCount: warnings.length,
+      pendingSuggestions,
+      unresolvedComments,
+      errorComments,
+    });
   }
 
   // Approve
@@ -51,7 +79,10 @@ export async function POST(
       details: {
         previousStatus: contract.status,
         newStatus: "aprovado",
-        warningsIgnored: issues.filter((i) => i.severity === "warning").length,
+        forced: force,
+        warningsIgnored: warnings.length,
+        pendingSuggestionsIgnored: pendingSuggestions,
+        unresolvedCommentsIgnored: unresolvedComments,
       },
       source: "user",
     },

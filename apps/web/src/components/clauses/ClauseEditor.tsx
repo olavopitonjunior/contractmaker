@@ -84,7 +84,7 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
 
   async function handleSave() {
     if (!title.trim() || !content.trim()) {
-      toast.error("Título e conteudo sao obrigatorios.");
+      toast.error("Título e conteúdo são obrigatórios.");
       return;
     }
 
@@ -117,7 +117,7 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
         router.refresh();
       } else {
         const data = await res.json();
-        toast.error(data.error || "Erro ao salvar clausula");
+        toast.error(data.error || "Erro ao salvar cláusula");
       }
     } catch {
       toast.error("Erro de conexão");
@@ -150,13 +150,13 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
         <div className="space-y-4 mt-6">
           <div className="space-y-2">
             <Label>Título</Label>
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Título da clausula" />
+            <Input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Título da cláusula" />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-2">
               <Label>Categoria</Label>
-              <Input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Ex: preco" />
+              <Input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Ex: preço" />
             </div>
             <div className="space-y-2">
               <Label>Grupo</Label>
@@ -168,10 +168,10 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
                   <SelectItem value="none">Nenhum</SelectItem>
                   <SelectItem value="G1">G1 - Sinal/Arras</SelectItem>
                   <SelectItem value="G2">G2 - Posse</SelectItem>
-                  <SelectItem value="G3">G3 - Rescisao</SelectItem>
+                  <SelectItem value="G3">G3 - Rescisão</SelectItem>
                   <SelectItem value="G4">G4 - Financiamento</SelectItem>
                   <SelectItem value="G5">G5 - Comissão</SelectItem>
-                  <SelectItem value="G6">G6 - Declaracoes</SelectItem>
+                  <SelectItem value="G6">G6 - Declarações</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -193,7 +193,7 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
             </div>
             <div className="flex items-center gap-3 pt-6">
               <Switch checked={isVariable} onCheckedChange={setIsVariable} />
-              <Label>Cláusula variavel</Label>
+              <Label>Cláusula variável</Label>
             </div>
           </div>
 
@@ -203,11 +203,11 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
           </div>
 
           <div className="space-y-2">
-            <Label>Conteudo (Handlebars)</Label>
+            <Label>Conteúdo (Handlebars)</Label>
             <Textarea
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              placeholder="Conteudo da clausula com {{variaveis}}"
+              placeholder="Conteúdo da cláusula com {{variáveis}}"
               className="font-mono text-xs min-h-[200px]"
             />
           </div>
@@ -217,7 +217,7 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
             <Textarea
               value={agentNotes}
               onChange={(e) => setAgentNotes(e.target.value)}
-              placeholder="Orientações para o agente sobre quando usar esta clausula"
+              placeholder="Orientações para o agente sobre quando usar esta cláusula"
               className="text-xs min-h-[80px]"
             />
           </div>
@@ -260,9 +260,9 @@ export function ClauseEditor({ clause, open, onClose, mode }: ClauseEditorProps)
                 </AlertDialogTrigger>
                 <AlertDialogContent>
                   <AlertDialogHeader>
-                    <AlertDialogTitle>Excluir clausula?</AlertDialogTitle>
+                    <AlertDialogTitle>Excluir cláusula?</AlertDialogTitle>
                     <AlertDialogDescription>
-                      Se a clausula esta vinculada a contratos, sera arquivada.
+                      Se a cláusula estiver vinculada a contratos, será arquivada.
                     </AlertDialogDescription>
                   </AlertDialogHeader>
                   <AlertDialogFooter>

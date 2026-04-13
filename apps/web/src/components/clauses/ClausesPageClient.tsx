@@ -8,12 +8,12 @@ import { Plus, Pencil } from "lucide-react";
 import { ClauseEditor } from "./ClauseEditor";
 
 const GROUP_LABELS: Record<string, string> = {
-  G1: "G1 — Sinal, Arras e Inicio de Pagamento",
-  G2: "G2 — Imissao na Posse",
-  G3: "G3 — Rescisao e Condicao Resolutiva",
+  G1: "G1 — Sinal, Arras e Início de Pagamento",
+  G2: "G2 — Imissão na Posse",
+  G3: "G3 — Rescisão e Condição Resolutiva",
   G4: "G4 — Financiamento e Registro",
   G5: "G5 — Comissão de Corretagem",
-  G6: "G6 — Declaracoes e Disposicoes Especiais",
+  G6: "G6 — Declarações e Disposições Especiais",
 };
 
 interface Clause {
@@ -210,12 +210,13 @@ export function ClausesPageClient({ clauses }: ClausesPageClientProps) {
 
       {clauses.length === 0 && (
         <div className="text-center py-12 text-muted-foreground">
-          <p>Nenhuma clausula encontrada.</p>
-          <p className="text-sm mt-1">Crie uma nova clausula ou execute o seed.</p>
+          <p>Nenhuma cláusula encontrada.</p>
+          <p className="text-sm mt-1">Crie uma nova cláusula ou execute o seed.</p>
         </div>
       )}
 
       <ClauseEditor
+        key={editingClause?.id ?? "new"}
         open={editorOpen}
         onClose={() => setEditorOpen(false)}
         mode={editorMode}
