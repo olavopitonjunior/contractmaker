@@ -30,7 +30,7 @@ export default async function PipelinePage() {
           deals: {
             orderBy: { position: "asc" },
             include: {
-              form: { select: { id: true, status: true } },
+              form: { select: { id: true, status: true, token: true } },
               contracts: {
                 where: { isLatest: true },
                 select: { id: true, version: true },
@@ -64,6 +64,7 @@ export default async function PipelinePage() {
       value: deal.value,
       createdAt: deal.createdAt.toISOString(),
       formStatus: deal.form?.status || null,
+      formToken: deal.form?.token || null,
       hasContract: deal.contracts.length > 0,
     })),
   }));

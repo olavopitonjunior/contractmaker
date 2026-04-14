@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2, ShieldCheck } from "lucide-react";
+import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2, ShieldCheck, Copy } from "lucide-react";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
 import type { Assignment, DocumentKind } from "@/lib/forms/extracted-to-form";
 import { CertidoesTab } from "@/components/pipeline/CertidoesTab";
@@ -100,6 +100,13 @@ export function DealDetail({ deal }: DealDetailProps) {
     }
   }
 
+  function handleCopyFormLink() {
+    if (!deal.form) return;
+    const url = `${window.location.origin}/f/${deal.form.token}`;
+    navigator.clipboard.writeText(url);
+    toast.success("Link do formulário copiado!");
+  }
+
   const formData = deal.form?.dataJson as Record<string, unknown> | null;
   type Parte = {
     nome?: string;
@@ -190,16 +197,27 @@ export function DealDetail({ deal }: DealDetailProps) {
         </div>
         <div className="w-full sm:w-auto sm:ml-auto flex gap-2 flex-wrap">
           {deal.form && (
-            <Button variant="outline" size="sm" asChild>
-              <a
-                href={`/f/${deal.form.token}`}
-                target="_blank"
-                rel="noopener noreferrer"
+            <>
+              <Button variant="outline" size="sm" asChild>
+                <a
+                  href={`/f/${deal.form.token}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <ExternalLink className="h-4 w-4 mr-1" />
+                  Formulário
+                </a>
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleCopyFormLink}
+                title="Copiar link do formulário para compartilhar"
               >
-                <ExternalLink className="h-4 w-4 mr-1" />
-                Formulário
-              </a>
-            </Button>
+                <Copy className="h-4 w-4 mr-1" />
+                Copiar link
+              </Button>
+            </>
           )}
           <Button
             size="sm"

@@ -4,7 +4,8 @@ import { useDraggable } from "@dnd-kit/core";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { FileText, Clock, Home } from "lucide-react";
+import { FileText, Clock, Home, Link2 } from "lucide-react";
+import { toast } from "sonner";
 import Link from "next/link";
 
 export interface DealCard {
@@ -13,6 +14,7 @@ export interface DealCard {
   value: number | null;
   createdAt: string;
   formStatus: string | null;
+  formToken: string | null;
   hasContract: boolean;
 }
 
@@ -30,6 +32,15 @@ export function KanbanCard({ deal, isOverlay }: KanbanCardProps) {
   const hoursAgo = Math.floor(msAgo / 3600000);
   const daysAgo = Math.floor(msAgo / 86400000);
   const timeLabel = daysAgo > 0 ? `${daysAgo}d` : hoursAgo > 0 ? `${hoursAgo}h` : "agora";
+
+  function handleCopyFormLink(e: React.MouseEvent) {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!deal.formToken) return;
+    const url = `${window.location.origin}/f/${deal.formToken}`;
+    navigator.clipboard.writeText(url);
+    toast.success("Link do formulário copiado!");
+  }
 
   return (
     <div
@@ -53,9 +64,23 @@ export function KanbanCard({ deal, isOverlay }: KanbanCardProps) {
                 <Home className="h-3.5 w-3.5 text-muted-foreground" />
                 <span className="text-[11px] text-muted-foreground font-medium">Imóvel</span>
               </div>
-              <div className="flex items-center gap-1 text-muted-foreground">
-                <Clock className="h-3 w-3" />
-                <span className="text-[11px]">{timeLabel}</span>
+              <div className="flex items-center gap-2 text-muted-foreground">
+                {deal.formToken && (
+                  <button
+                    type="button"
+                    onClick={handleCopyFormLink}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    className="rounded p-0.5 hover:bg-muted hover:text-foreground transition-colors"
+                    title="Copiar link do formulário"
+                    aria-label="Copiar link do formulário"
+                  >
+                    <Link2 className="h-3 w-3" />
+                  </button>
+                )}
+                <div className="flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  <span className="text-[11px]">{timeLabel}</span>
+                </div>
               </div>
             </div>
 

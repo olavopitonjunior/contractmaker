@@ -52,42 +52,52 @@ export function FormsActions({ formId, token, status, hasDeal, dealId, title }: 
   }
 
   return (
-    <div className="flex gap-2 flex-wrap">
-      <Button variant="outline" size="sm" asChild>
-        <Link href={`/f/${token}`} target="_blank">
-          <ExternalLink className="mr-1 h-3 w-3" />
-          Abrir
-        </Link>
-      </Button>
-      <Button
-        variant="outline"
-        size="sm"
+    <div className="space-y-2">
+      <button
+        type="button"
         onClick={handleCopy}
+        className="w-full truncate rounded border border-dashed bg-muted/40 px-2 py-1 text-left text-[11px] font-mono text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+        title="Clique para copiar o link"
       >
-        {copied ? (
-          <Check className="mr-1 h-3 w-3" />
-        ) : (
-          <Copy className="mr-1 h-3 w-3" />
-        )}
-        {copied ? "Copiado!" : "Copiar"}
-      </Button>
-      {hasDeal && dealId && (
-        <Button size="sm" variant="outline" asChild>
-          <Link href={`/deals/${dealId}`}>
-            Ver Negócio
+        /f/{token}
+      </button>
+      <div className="flex gap-2 flex-wrap">
+        <Button variant="outline" size="sm" asChild>
+          <Link href={`/f/${token}`} target="_blank">
+            <ExternalLink className="mr-1 h-3 w-3" />
+            Abrir
           </Link>
         </Button>
-      )}
-      {status === "completo" && !hasDeal && (
         <Button
+          variant="outline"
           size="sm"
-          onClick={handleCreateDeal}
-          disabled={creating}
+          onClick={handleCopy}
         >
-          <Plus className="mr-1 h-3 w-3" />
-          {creating ? "Criando..." : "Criar Negócio"}
+          {copied ? (
+            <Check className="mr-1 h-3 w-3" />
+          ) : (
+            <Copy className="mr-1 h-3 w-3" />
+          )}
+          {copied ? "Copiado!" : "Copiar link"}
         </Button>
-      )}
+        {hasDeal && dealId && (
+          <Button size="sm" variant="outline" asChild>
+            <Link href={`/deals/${dealId}`}>
+              Ver Negócio
+            </Link>
+          </Button>
+        )}
+        {status === "completo" && !hasDeal && (
+          <Button
+            size="sm"
+            onClick={handleCreateDeal}
+            disabled={creating}
+          >
+            <Plus className="mr-1 h-3 w-3" />
+            {creating ? "Criando..." : "Criar Negócio"}
+          </Button>
+        )}
+      </div>
     </div>
   );
 }
