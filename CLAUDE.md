@@ -14,6 +14,7 @@ Plataforma de gestao de vendas e contratos imobiliarios. Esteira completa: Formu
 - **Template:** Handlebars com helpers brasileiros (moeda, cpf, cnpj, cep, dataExtenso, extenso, numero, numeroExtenso, percentual)
 - **RAG:** pgvector (Neon) + Voyage-law-2 embeddings (1024 dim, HNSW cosine) para base de conhecimento juridica
 - **Passive Analysis:** Claude Haiku 4.5 debouncado no editor (analise automatica on-open + on-edit)
+- **Certidoes:** Infosimples REST API v2 (CND Federal/PGFN, CNDT, TRF Civel unificado, CEAT trabalhista regional, TJSP/TJRJ/TJRS, CENPROT SP, IPTU SP/RJ) — ~R$ 0,04-0,06 por chamada
 - **PDF:** puppeteer-core + @sparticuz/chromium (Vercel-compatible)
 - **DOCX:** html-to-docx
 - **Storage:** @vercel/blob (primario) + S3 (fallback)
@@ -55,6 +56,8 @@ apps/web/                    # Next.js app principal
       db/                    # Prisma client
       ai/                    # agent, tools (18), tool-handlers, prompts, validators, ocr,
                              # quickChecks, embeddings (Voyage), chunking, knowledge, memory
+      certidoes/             # infosimples client, planner, executor, normalizers,
+                             # endpoints catalog, comarcas-rj, report builder, fixtures, tests
       render/                # Handlebars (helpers moeda/extenso/percentual/...), PDF, DOCX, exporter
       storage/               # Vercel Blob, S3
       forms/                 # Zod schemas, validation, extracted-to-form mapping
@@ -65,6 +68,7 @@ templates/                   # Handlebars .hbs files
   contrato_compra_venda.hbs  # Template legado v1 (deprecated)
   ccv_a_vista_v2.hbs         # Template padronizado: pagamento a vista (15 clausulas)
   ccv_financiamento_v2.hbs   # Template padronizado: financiamento (17 clausulas)
+  relatorio_certidoes.hbs    # Template do relatorio de due diligence (PDF)
 examples/                    # Dados de exemplo
 ```
 
@@ -260,6 +264,45 @@ O formulario publico (`/f/[token]`) agora comeca pela **Etapa 0 - Documentos** (
 
 **Sumario (TOC):** `TableOfContents.tsx` le `editor.state.doc` coletando headings (h1/h2/h3) e gera lista clicavel. Acessivel via botao no header do editor.
 
+## Certidoes via Infosimples (Phase 4)
+Extracao automatizada de certidoes juridicas para due diligence imobiliaria, disparada manualmente do Deal detail → aba "Certidoes".
+
+**Escopo MVP (sem login GOV.BR)**:
+- **Federais** (PF ou PJ): `receita-federal/pgfn` (CND Federal + Divida Ativa — PF usa `birthdate`), `tribunal/tst/cndt` (CNDT nacional), `tribunal/trf/cert-unificada` (Civel JF, dispara 6 TRFs de uma vez)
+- **Trabalhistas por UF**: `tribunal/trt2/ceat` + `tribunal/trt2/ceat-digital` + `tribunal/trt15/ceat` (SP capital + SP interior), `tribunal/trt1/ceat` (RJ), `tribunal/trt4/ceat` (RS)
+- **Civeis estaduais**: `tribunal/tjsp/pedido-civel` → `tribunal/tjsp/obter-civel` (2 etapas, ~5-15min), `tribunal/tjrj/pedido-cert` → `tribunal/tjrj/obter-certidao` (2 etapas, ate 8 dias uteis), `tribunal/tjrs/primeiro-grau` (5 chamadas por parte RS cobrindo tipo_certidao 3/4/7/8/9 — civel, familia, falencia, execucoes patrimoniais, execucoes fiscais)
+- **Protestos**: `cenprot-sp/protestos` (apenas SP, sem login). CENPROT nacional fica fora do MVP (requer GOV.BR)
+- **Municipais**: `pref/sp/sao-paulo/iptu` (exige SQL), `pref/rj/rio-janeiro/cert-trib` + `pref/rj/rio-janeiro/cnd` (exige inscricao municipal). IPTU POA sem cobertura Infosimples — skipped com aviso.
+
+**Schema Prisma**:
+- `CertidaoJob { id, dealId, batchId, endpoint, label, targetKind, targetIndex, requestPayload, status, resultCode, resultData, attachmentId, errorMessage, latencyMs, costCents, expectedReadyAt, retryCount }` — status: `pending | fetching | awaiting_portal | success | failed | skipped`
+- `DealAttachment` estendido com `extractedData Json?` + `source String @default("manual")` (valores: `manual | form_copy | infosimples`)
+
+**Pipeline**:
+1. **Client** (CertidoesTab.tsx) gera `batchId = crypto.randomUUID()` e chama `POST /api/deals/:id/certidoes { batchId }` sem aguardar
+2. **Route handler** (`apps/web/src/app/api/deals/[dealId]/certidoes/route.ts`) valida budget mensal via `getMonthlySpend()`, chama `planCertidoesForDeal(dealData)` para gerar lista de `PlannedJob[]` + `SkippedJob[]`, cria todos os `CertidaoJob` rows em uma `prisma.$transaction`, retorna 202 em < 500ms e dispara `void runBatch(batchId)` fire-and-forget
+3. **Executor** (`lib/certidoes/executor.ts`) roda `pLimit(5)` paralelo com `Promise.allSettled`. Cada job chama `callInfosimples(endpoint, args)`, normaliza via `normalize(endpoint, resp)`, baixa o PDF de `site_receipts[0]` via `downloadReceipt()` + `uploadBufferToStorage()`, cria `DealAttachment { source: "infosimples" }` e atualiza o `CertidaoJob`
+4. **Two-step portals** (TJSP/TJRJ): apos `pedido-*` retornar 200, job vai para `status: awaiting_portal` + `expectedReadyAt = now + 1h (TJSP) ou +24h (TJRJ)`, guarda `numero_pedido` em `resultData`
+5. **Cron diario** (`apps/web/src/app/api/cron/certidoes/poll-portal/route.ts`, declarado em `vercel.json` para `0 9 * * *`) sweeps jobs `awaiting_portal` com `expectedReadyAt < now` e chama `obter-*`. Se ainda nao pronto, reagenda `+12h`. Apos `MAX_AGE = 14 dias`, marca como `failed: "Timeout portal"`.
+6. **Client polla** `GET /api/deals/:id/certidoes?batchId=...` a cada 2s ate todos jobs estarem em estado terminal (hook `useCertidoesBatch.ts`)
+
+**Planner** (`lib/certidoes/planner.ts`): percorre `vendedores[] + compradores[] + imoveis[]` e gera `PlannedJob` por regra de UF/PF/PJ. Campos faltantes geram `SkippedJob { reason, missingField }` — ex: PF sem `data_nascimento` bloqueia PGFN, imovel SP sem `sql` bloqueia IPTU SP, imovel RJ sem `inscricao_municipal` bloqueia ambos IPTU RJ. Comarca TJRJ derivada de `cidade` via tabela em `comarcas-rj.ts` (fallback "Capital").
+
+**Normalizers** (`lib/certidoes/normalizers.ts`): 1 extractor por endpoint que converte o `data[0]` cru em `{situacao, validade, emissao, detalhes, consta_debito}`. Fallback chains para nomes de campos — ex: `cndtExtractor` tenta `normalizado_validade → validade → data_validade` porque o smoke test revelou que a API real usa `validade` (nao `data_validade` como a doc sugeria). Codes 6xx viram `situacao: "nao_emitida"` (nao e erro — e resultado valido). Fallback generico para endpoint desconhecido. Testes vitest em `__tests__/normalizers.test.ts` + `planner.test.ts` (34 casos) com fixtures reais sanitizados em `__fixtures__/`.
+
+**Budget guard**: env `INFOSIMPLES_MONTHLY_BUDGET_CENTS` (default 5000 = R$ 50,00). `getMonthlySpend()` soma `CertidaoJob.costCents` do mes corrente. POST retorna 402 se `spent + planCost > budget`.
+
+**Dados do formulario**: schema em `lib/forms/validation.ts` tem `data_nascimento` (PF, obrigatorio p/ PGFN, autofilled via OCR do RG), `sql` (imovel, opcional), `inscricao_municipal` (imovel, opcional). `FIELD_MAP_PERSON` em `extracted-to-form.ts` mapeia `data_nascimento` do OCR → form.
+
+**UI**:
+- **CertidoesTab.tsx**: lista agrupada por parte/imovel, color coding por `situacao` (verde negativa, amarelo positiva, vermelho failed, cinza skipped), botoes de retry individual e "Gerar relatorio"
+- **ExtractCertidoesDialog.tsx**: preview do plano com lista de jobs + skipped com razao + custo estimado + aviso se budget excedido
+- **`/settings/certidoes`**: dashboard de qualidade com gasto/budget, taxa de sucesso, p50/p95 latencia por endpoint, erros recentes (top 10)
+
+**Relatorio de due diligence**: `POST /api/deals/:id/certidoes/report` renderiza `templates/relatorio_certidoes.hbs` via Handlebars + Puppeteer, salva como `DealAttachment { category: "relatorio_certidoes", source: "infosimples" }`. Tabela por parte com situacao/validade/detalhes, secao "Pendencias" listando positivas + falhas + skipped.
+
+**Env vars**: `INFOSIMPLES_TOKEN` (obrigatorio, sem ele POST retorna 500), `INFOSIMPLES_MONTHLY_BUDGET_CENTS` (opcional, default 5000), `CRON_SECRET` (opcional — se setado, cron exige `Authorization: Bearer $CRON_SECRET`).
+
 ## Revisao pre-aprovacao
 `POST /api/contracts/[id]/approve` roda: `validateContractData` + conta `ContractSuggestion` pendentes + `ContractComment` nao-resolvidos (e severity error). Se houver issues, retorna `{requiresReview: true, canForce, issues, errorCount, warningCount, pendingSuggestions, unresolvedComments}`. Frontend abre `ApprovalReviewDialog` com botoes "Revisar" e "Aprovar mesmo assim" (este ultimo oculto quando `canForce=false`, ou seja, quando ha errors). Segunda chamada com `{force: true}` pula validacoes e aprova.
 
@@ -277,8 +320,9 @@ O formulario publico (`/f/[token]`) agora comeca pela **Etapa 0 - Documentos** (
    - Sugestoes da IA entram como track changes (aceitar/rejeitar individual ou em lote)
    - **Analise automatica**: ao abrir, Sonnet 4.5 analisa o contrato e popula comentarios IA com findings (matematica, qualificacao, referencias, prazos). Durante edicao, Haiku 4.5 re-analisa apos 30s de idle (debounced). Badge no botao "Comentarios" mostra contagem e severity.
    - **Chat IA com RAG**: perguntas informativas ("quais clausulas existem?") geram resposta em markdown descritivo sem tools de edicao (regra 10.1). Comandos ("altere multa para 8%") usam tools de edicao com resposta estruturada "## Alteracoes / ## Justificativa / ## Verificacao".
-6. Ao clicar "Aprovar": revisao pre-aprovacao roda validate + conta issues. Se houver pendencias, abre `ApprovalReviewDialog`. Usuario pode forcar aprovacao (se nao houver errors). Apos aprovacao, `createContractMemory` roda em background (fire-and-forget) e o contrato vira memoria de longo prazo do agente.
-7. Contratos aprovados sao imutaveis: chat/edicao/comentarios/versionamento bloqueados. Pode exportar PDF/DOCX (com `DocumentStyle` default aplicado: fontes, margens, header/footer, numeracao de paginas).
+6. **Extracao de certidoes (opcional, manual)**: na aba "Certidoes" do Deal detail, corretor clica "Extrair certidoes". `ExtractCertidoesDialog` mostra preview do plano (jobs a extrair + skipped por dados faltantes + custo estimado). Confirmacao dispara batch fire-and-forget. Client polla status a cada 2s. Jobs success baixam PDFs para a aba Documentos com `source: "infosimples"`. Jobs `awaiting_portal` (TJSP/TJRJ) aguardam cron diario. Botao "Gerar relatorio" produz PDF de due diligence agrupando por parte/imovel com pendencias destacadas.
+7. Ao clicar "Aprovar": revisao pre-aprovacao roda validate + conta issues. Se houver pendencias, abre `ApprovalReviewDialog`. Usuario pode forcar aprovacao (se nao houver errors). Apos aprovacao, `createContractMemory` roda em background (fire-and-forget) e o contrato vira memoria de longo prazo do agente.
+8. Contratos aprovados sao imutaveis: chat/edicao/comentarios/versionamento bloqueados. Pode exportar PDF/DOCX (com `DocumentStyle` default aplicado: fontes, margens, header/footer, numeracao de paginas).
 
 ## Rotas Publicas (sem auth)
 - `/f/[token]` - formulario de vendas (inclui Etapa 0 de upload de documentos)
@@ -303,3 +347,10 @@ O formulario publico (`/f/[token]`) agora comeca pela **Etapa 0 - Documentos** (
 - `VOYAGE_API_KEY` opcional: se ausente, `query_knowledge_base` e `find_similar_contracts` fazem fallback para keyword search / fingerprint similarity.
 - Analise passiva (`useAutoAnalyze`) envia o `htmlContent` atual do editor no body da request — servidor usa `params.htmlOverride` em vez do DB para ver o estado vivo durante edicao.
 - Upload de imagens em `/api/contracts/[id]/images` limita 5MB e valida `ALLOWED_TYPES = [image/jpeg, image/png, image/webp]`. Requer `BLOB_READ_WRITE_TOKEN` no env.
+- Certidoes Infosimples sao **operacoes pagas**: cada chamada cobra ~R$ 0,04-0,06 na conta da org. Smoke test revelou que a API retorna `code: 603` com "A conta esta sem saldo" quando o saldo acaba — nosso normalizer mapeia isso para `nao_emitida` (nao e erro, e um resultado valido). Ativar o feature em prod requer `INFOSIMPLES_TOKEN` setado e saldo ativo.
+- Budget mensal de certidoes (`INFOSIMPLES_MONTHLY_BUDGET_CENTS`, default 5000) e hard gate: POST `/api/deals/:id/certidoes` retorna 402 se o batch fosse estourar o budget. Contar pelo somatorio de `CertidaoJob.costCents` do mes.
+- TJSP (5-15min) e TJRJ (ate 8 dias uteis) sao processos de 2 etapas: pedido → obter. Jobs ficam `awaiting_portal` entre as etapas. Cron diario em `vercel.json` (`0 9 * * *`) sweeps os jobs com `expectedReadyAt < now` e chama o `obter-*` correspondente. **Sem Vercel Pro**, o cron nao roda e os jobs ficam eternamente em `awaiting_portal` — requer chamada manual ao endpoint ou upgrade de plano.
+- Normalizers de certidoes sao **frageis** contra mudancas no schema da Infosimples. Usam fallback chains de nomes de campos (ex: `cndtExtractor` tenta `normalizado_validade → validade → data_validade`). Fixtures em `__fixtures__/` sao copias sanitizadas de payloads reais — servem como regressao. Apos a primeira extracao real em prod, **salvar o `resultData` real como fixture novo** e adicionar teste vitest correspondente.
+- Certidoes sao disparadas SEMPRE manualmente (botao no Deal detail) — nao ha auto-extract no finalizar do form. Decisao deliberada para o corretor ter controle total do gasto e visibilidade antes de confirmar.
+- Infosimples NAO cobre CND de IPTU em Porto Alegre (RS). Planner gera `SkippedJob` com `reason: "sem cobertura, extrair manualmente"`. Relatorio de due diligence lista essas pendencias na secao final.
+- Prisma migrations sao rodadas automaticamente via `prisma migrate deploy` no build script (ver `apps/web/package.json:build`). Nova migration e aplicada no proximo deploy do Vercel sem intervencao manual.
