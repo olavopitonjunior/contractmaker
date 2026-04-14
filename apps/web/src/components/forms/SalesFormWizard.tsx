@@ -12,6 +12,7 @@ import {
 } from "@/lib/forms/validation";
 import { toast } from "sonner";
 import { useAutoSave } from "@/hooks/use-auto-save";
+import { DocumentosStep } from "@/components/forms/steps/DocumentosStep";
 import { VendedorStep } from "@/components/forms/steps/VendedorStep";
 import { CompradorStep } from "@/components/forms/steps/CompradorStep";
 import { ImovelStep } from "@/components/forms/steps/ImovelStep";
@@ -216,7 +217,7 @@ const defaultFormValues: Partial<DadosContratoForm> = {
   ocupacao: "desocupado",
   entrega_posse: {
     momento: "assinatura",
-    momento_texto: "assinatura do contrato",
+    momento_texto: "na data da assinatura do presente instrumento",
   },
   titulo_definitivo: {
     prazo_dias: 60,
@@ -319,7 +320,7 @@ export function SalesFormWizard({ token, initialData }: SalesFormWizardProps) {
         if (data.dealId) setGeneratedDealId(data.dealId);
         setIsComplete(true);
       } else {
-        console.error("Erro ao finalizar formulario");
+        console.error("Erro ao finalizar formulário");
       }
     } catch (err) {
       console.error("Erro ao finalizar:", err);
@@ -372,6 +373,7 @@ export function SalesFormWizard({ token, initialData }: SalesFormWizardProps) {
   }
 
   const stepComponents = [
+    <DocumentosStep key="step-0" form={form} token={token} />,
     <VendedorStep key="step-1" form={form} />,
     <CompradorStep key="step-2" form={form} />,
     <ImovelStep key="step-3" form={form} />,

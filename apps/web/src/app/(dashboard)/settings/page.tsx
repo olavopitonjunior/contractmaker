@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { AgentSettings } from "@/components/settings/AgentSettings";
-import { BookOpen } from "lucide-react";
+import { BookOpen, Palette, Lightbulb } from "lucide-react";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -21,12 +21,26 @@ export default async function SettingsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-2xl font-semibold">Configurações</h1>
-        <Button variant="outline" size="sm" asChild>
-          <Link href="/settings/knowledge-base">
-            <BookOpen className="h-4 w-4 mr-1" />
-            Base de Conhecimento
-          </Link>
-        </Button>
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/settings/knowledge-base">
+              <BookOpen className="h-4 w-4 mr-1" />
+              Base de Conhecimento
+            </Link>
+          </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/settings/document-styles">
+              <Palette className="h-4 w-4 mr-1" />
+              Estilos de Documento
+            </Link>
+          </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/clauses/proposals">
+              <Lightbulb className="h-4 w-4 mr-1" />
+              Propostas de Cláusulas
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <Tabs defaultValue="perfil">

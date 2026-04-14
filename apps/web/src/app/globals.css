@@ -87,6 +87,14 @@
   min-height: 1123px;
 }
 
+/* Radix Popper (dropdowns, popovers, tooltips) must float above sticky
+ * toolbars (z-20/z-30) that use backdrop-filter. Radix wraps its content
+ * in a separate wrapper div that doesn't receive the z-index from the
+ * content itself, so we bump it here defensively. */
+[data-radix-popper-content-wrapper] {
+  z-index: 100 !important;
+}
+
 /* Manual page break — shown as dashed separator in the editor, respected on print/PDF */
 .ProseMirror .page-break {
   display: block;

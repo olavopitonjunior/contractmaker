@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { AGENT_TOOLS, getToolNames } from "../tools";
 
 describe("AGENT_TOOLS", () => {
-  it("has exactly 13 tools", () => {
-    expect(AGENT_TOOLS).toHaveLength(13);
+  it("has exactly 18 tools", () => {
+    expect(AGENT_TOOLS).toHaveLength(18);
   });
 
   it("each tool has name, description, and input_schema", () => {
@@ -36,6 +36,11 @@ describe("AGENT_TOOLS", () => {
       "add_comment",
       "analyze_contradictions",
       "query_knowledge_base",
+      "find_similar_contracts",
+      "propose_new_clause",
+      "propose_template_change",
+      "apply_style_preset",
+      "insert_image",
     ];
     for (const name of expected) {
       expect(names).toContain(name);
@@ -44,13 +49,18 @@ describe("AGENT_TOOLS", () => {
 });
 
 describe("getToolNames", () => {
-  it("returns array of 13 tool names", () => {
+  it("returns array of 18 tool names", () => {
     const names = getToolNames();
-    expect(names).toHaveLength(13);
+    expect(names).toHaveLength(18);
     expect(names).toContain("query_clauses");
     expect(names).toContain("validate_contract");
     expect(names).toContain("add_comment");
     expect(names).toContain("analyze_contradictions");
     expect(names).toContain("query_knowledge_base");
+    expect(names).toContain("find_similar_contracts");
+    expect(names).toContain("propose_new_clause");
+    expect(names).toContain("propose_template_change");
+    expect(names).toContain("apply_style_preset");
+    expect(names).toContain("insert_image");
   });
 });

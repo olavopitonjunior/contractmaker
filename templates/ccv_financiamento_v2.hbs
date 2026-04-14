@@ -294,7 +294,7 @@ Descrição: {{this.descricao}}
 
 <h2>CLÁUSULA DÉCIMA QUARTA - DA COMISSÃO</h2>
 
-<p><strong>14.1.</strong> Pela intermediação e assessoria prestadas, será devida a comissão de corretagem no valor total de {{moeda comissao.valor}} ({{extenso comissao.valor}}), a ser paga pela {{comissao.quem_paga_texto}} à imobiliária intermediadora {{comissao.imobiliaria_nome}}, inscrita no CNPJ nº {{cnpj comissao.imobiliaria_cnpj}}{{#if (existe comissao.creci)}}, CRECI nº {{comissao.creci}}{{/if}}.</p>
+<p><strong>14.1.</strong> Pela intermediação e assessoria prestadas, será devida a comissão de corretagem no valor total de {{moeda comissao.valor}} ({{extenso comissao.valor}}), equivalente a {{percentual comissao.valor pagamento.valor_total}} do valor total da transação, a ser paga pela {{comissao.quem_paga_texto}} à imobiliária intermediadora {{comissao.imobiliaria_nome}}, inscrita no CNPJ nº {{cnpj comissao.imobiliaria_cnpj}}{{#if (existe comissao.creci)}}, CRECI nº {{comissao.creci}}{{/if}}.</p>
 
 <p><strong>14.2.</strong> {{#if (existe comissao.quando_paga_texto)}}O pagamento da comissão será efetuado {{comissao.quando_paga_texto}}, no prazo de até 5 (cinco) dias úteis contados do respectivo evento.{{else}}O pagamento da comissão está atrelado à liberação dos recursos previstos na alínea "b" da Cláusula Segunda (financiamento imobiliário), devendo ser efetuado no prazo de até 5 (cinco) dias úteis contados da efetiva liberação dos valores pelo agente financeiro em favor do(s) PROMITENTE(S) VENDEDOR(ES).{{/if}}</p>
 

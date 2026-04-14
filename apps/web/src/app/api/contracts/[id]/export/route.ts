@@ -34,6 +34,26 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const templateSource = contract.templateOverride || contract.template.handlebarsSource;
     const html = contract.htmlContent ?? renderContratoHTML(templateSource, contract.dataJson as Record<string, unknown>);
 
+    // Load the org's default DocumentStyle (if any) to apply page-level props at export time
+    const documentStyle = await prisma.documentStyle.findFirst({
+      where: { orgId: contract.template.orgId, isDefault: true },
+    });
+    const styleExport = documentStyle
+      ? {
+          fontFamily: documentStyle.fontFamily,
+          fontSizeBase: documentStyle.fontSizeBase,
+          lineHeight: documentStyle.lineHeight,
+          marginTopMm: documentStyle.marginTopMm,
+          marginBottomMm: documentStyle.marginBottomMm,
+          marginLeftMm: documentStyle.marginLeftMm,
+          marginRightMm: documentStyle.marginRightMm,
+          colorPrimary: documentStyle.colorPrimary,
+          headerHtml: documentStyle.headerHtml,
+          footerHtml: documentStyle.footerHtml,
+          pageNumbers: documentStyle.pageNumbers,
+        }
+      : null;
+
     const tmpDir = path.join(os.tmpdir(), 'contractmaker-exports');
     fs.mkdirSync(tmpDir, { recursive: true });
 
@@ -46,7 +66,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     if (wantsPdf) {
       try {
-        await exportPdf(html, pdfPath);
+        await exportPdf(html, pdfPath, 'A4', styleExport);
         pdfBuffer = fs.readFileSync(pdfPath);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

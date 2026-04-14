@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { validateContractData } from "@/lib/ai/validators";
+import { createContractMemory } from "@/lib/ai/memory";
 
 export async function POST(
   req: NextRequest,
@@ -104,6 +105,19 @@ export async function POST(
       }
     }
   }
+
+  // Fire-and-forget: snapshot this approved contract into ContractMemory for
+  // the learning loop (find_similar_contracts, propose_*). We don't await it
+  // so the approval response stays fast; errors are logged but don't rollback.
+  void createContractMemory(params.id)
+    .then((result) => {
+      if (!result.ok) {
+        console.error("[approve] createContractMemory failed:", result.error);
+      }
+    })
+    .catch((err) => {
+      console.error("[approve] memory hook crashed:", err);
+    });
 
   return NextResponse.json({ status: "aprovado" });
 }

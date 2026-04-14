@@ -250,6 +250,157 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
       required: ["query"],
     },
   },
+  {
+    name: "find_similar_contracts",
+    description:
+      "Busca contratos aprovados anteriormente pela organização com características semelhantes ao contrato atual. Use ao iniciar uma análise ou edição significativa — a organização pode ter padrões próprios para casos parecidos. Retorna top-3 contratos com resumo, quais sugestões IA foram aceitas/rejeitadas antes, e edições manuais frequentes. A organização 'aprende' com cada contrato aprovado.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        focus: {
+          type: "string",
+          description:
+            "Aspecto do contrato a buscar similaridade (ex: 'financiamento com FGTS', 'vendedor casado em comunhão parcial', 'comissão dividida entre corretores')",
+        },
+        topK: {
+          type: "number",
+          description: "Quantos resultados retornar (default 3, max 10)",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "propose_new_clause",
+    description:
+      "Propõe adicionar uma nova cláusula à biblioteca padronizada do escritório. Use quando detectar (via find_similar_contracts) que um mesmo texto jurídico aparece manualmente em múltiplos contratos aprovados e ainda não existe na biblioteca. Cria uma ClauseProposal em status 'pending' para revisão humana — NÃO insere direto na biblioteca.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        title: { type: "string", description: "Título curto da cláusula" },
+        content: {
+          type: "string",
+          description: "Conteúdo completo da cláusula em Handlebars se aplicável",
+        },
+        groupCode: {
+          type: "string",
+          enum: ["G1", "G2", "G3", "G4", "G5", "G6"],
+          description: "Grupo do banco padronizado a que pertence",
+        },
+        category: {
+          type: "string",
+          description: "Categoria livre (ex: 'preco', 'posse', 'comissao')",
+        },
+        reason: {
+          type: "string",
+          description:
+            "Justificativa detalhada com evidência dos contratos anteriores onde este texto apareceu",
+        },
+        evidence: {
+          type: "array",
+          items: { type: "string" },
+          description: "IDs de contractMemory que motivaram a proposta",
+        },
+        tags: {
+          type: "array",
+          items: { type: "string" },
+        },
+      },
+      required: ["title", "content", "reason"],
+    },
+  },
+  {
+    name: "propose_template_change",
+    description:
+      "Propõe uma mudança no handlebarsSource de um template do escritório. NUNCA aplica direto — cria uma TemplateSuggestion em status 'pending' para revisão humana. Use quando detectar que uma mesma edição manual foi feita em múltiplos contratos gerados a partir do mesmo template (via find_similar_contracts.manualEdits). Só admins aprovam a mudança.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        templateId: { type: "string", description: "ID do ContractTemplate alvo" },
+        title: {
+          type: "string",
+          description: "Resumo em uma frase da mudança proposta",
+        },
+        reason: {
+          type: "string",
+          description: "Justificativa com base nos contratos anteriores",
+        },
+        hunks: {
+          type: "array",
+          description:
+            "Lista de trechos a mudar. Cada hunk tem before/after + contexto antes/depois para localizar.",
+          items: {
+            type: "object",
+            properties: {
+              before: { type: "string", description: "Texto atual do template" },
+              after: { type: "string", description: "Texto proposto" },
+              contextBefore: { type: "string" },
+              contextAfter: { type: "string" },
+            },
+            required: ["before", "after"],
+          },
+        },
+        evidence: {
+          type: "array",
+          items: { type: "string" },
+          description: "contractMemory ids que motivaram a proposta",
+        },
+      },
+      required: ["templateId", "title", "reason", "hunks"],
+    },
+  },
+  {
+    name: "apply_style_preset",
+    description:
+      "Aplica um DocumentStyle preset (fonte, tamanho, line-height, margens, cores) ao contrato atual. Use quando o usuário pedir 'aplique o estilo X' ou quando detectar que o documento está com formatação inconsistente com o padrão do escritório. A tool retorna os metadados do preset — as propriedades de página (margens, header/footer, numeração) são aplicadas no momento da exportação PDF, não no editor.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        presetId: {
+          type: "string",
+          description: "ID do DocumentStyle. Use null/omit para usar o default da org.",
+        },
+        presetName: {
+          type: "string",
+          description: "Alternativa: nome do preset se o ID não for conhecido (ex: 'Contrato Formal')",
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: "insert_image",
+    description:
+      "Insere uma imagem no contrato (logo do escritório, planta do imóvel, mapa de localização, etc.). Use apenas quando o usuário fornecer a URL da imagem, ou quando a imagem já tiver sido feita upload previamente. NUNCA tente gerar URLs aleatórias ou usar data:URLs. A imagem é inserida como bloco centralizado, com alt text para acessibilidade.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        url: {
+          type: "string",
+          description: "URL completa da imagem (https://...). Deve apontar para arquivo real.",
+        },
+        alt: {
+          type: "string",
+          description: "Texto alternativo descritivo (para acessibilidade e leitores de tela)",
+        },
+        width: {
+          type: "number",
+          description: "Largura em pixels (default 400)",
+        },
+        alignment: {
+          type: "string",
+          enum: ["left", "center", "right"],
+          description: "Alinhamento horizontal (default center)",
+        },
+        insertAfter: {
+          type: "string",
+          description:
+            "Trecho EXATO do contrato após o qual inserir a imagem. Se omitido, insere no final do documento.",
+        },
+      },
+      required: ["url", "alt"],
+    },
+  },
 ];
 
 export function getToolNames(): string[] {

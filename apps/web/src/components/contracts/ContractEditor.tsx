@@ -18,7 +18,8 @@ import { FormatPainter } from "@/lib/editor/FormatPainter";
 import { TextStyle } from "@tiptap/extension-text-style";
 import { Color } from "@tiptap/extension-color";
 import { FontFamily } from "@tiptap/extension-font-family";
-import { useEffect, useState, forwardRef, useImperativeHandle } from "react";
+import Image from "@tiptap/extension-image";
+import { useEffect, useState, useRef, forwardRef, useImperativeHandle } from "react";
 import type { Editor } from "@tiptap/react";
 import { FindReplaceBar } from "./FindReplaceBar";
 import { SuggestionsToolbar } from "./SuggestionsToolbar";
@@ -72,10 +73,12 @@ interface ContractEditorProps {
   onAddComment?: (selectedText: string) => void;
   contractId?: string;
   suggestionsVersion?: number;
+  onReady?: (editor: Editor) => void;
 }
 
 export interface ContractEditorHandle {
   applyCommentMark: (commentId: string) => void;
+  applyCommentMarkByText: (commentId: string, selectedText: string) => boolean;
   removeCommentMark: (commentId: string) => void;
   scrollToComment: (commentId: string) => void;
   focus: () => void;
@@ -93,6 +96,7 @@ export const ContractEditor = forwardRef<ContractEditorHandle, ContractEditorPro
       onAddComment,
       contractId,
       suggestionsVersion = 0,
+      onReady,
     },
     ref
   ) {
@@ -132,6 +136,13 @@ export const ContractEditor = forwardRef<ContractEditorHandle, ContractEditorPro
       CommentMark,
       SuggestionMark,
       PageBreakNode,
+      Image.configure({
+        inline: false,
+        allowBase64: false,
+        HTMLAttributes: {
+          class: "editor-image rounded shadow-sm max-w-full h-auto mx-auto my-4",
+        },
+      }),
     ],
     content,
     immediatelyRender: false,
@@ -155,12 +166,47 @@ export const ContractEditor = forwardRef<ContractEditorHandle, ContractEditorPro
     }
   }, [content, editor]);
 
+  // Fire onReady exactly once when the editor instance becomes available
+  const readyFiredRef = useRef(false);
+  useEffect(() => {
+    if (editor && onReady && !readyFiredRef.current) {
+      readyFiredRef.current = true;
+      onReady(editor);
+    }
+  }, [editor, onReady]);
+
   useImperativeHandle(
     ref,
     () => ({
       applyCommentMark: (commentId: string) => {
         if (!editor) return;
         editor.chain().focus().setCommentMark({ commentId }).run();
+      },
+      applyCommentMarkByText: (commentId: string, selectedText: string) => {
+        if (!editor || !selectedText) return false;
+        const needle = selectedText.trim();
+        if (!needle) return false;
+        let from = -1;
+        let to = -1;
+        editor.state.doc.descendants((node, pos) => {
+          if (from >= 0) return false;
+          if (node.isText && node.text) {
+            const idx = node.text.indexOf(needle);
+            if (idx >= 0) {
+              from = pos + idx;
+              to = from + needle.length;
+              return false;
+            }
+          }
+          return true;
+        });
+        if (from < 0 || to < 0) return false;
+        editor
+          .chain()
+          .setTextSelection({ from, to })
+          .setCommentMark({ commentId })
+          .run();
+        return true;
       },
       removeCommentMark: (commentId: string) => {
         if (!editor) return;

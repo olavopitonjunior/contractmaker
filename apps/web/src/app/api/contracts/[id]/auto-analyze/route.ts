@@ -34,12 +34,18 @@ export async function POST(
         }
       : undefined;
 
+  const htmlOverride =
+    typeof body?.htmlContent === "string" && body.htmlContent.length > 0
+      ? body.htmlContent
+      : undefined;
+
   try {
     const result = await runPassiveAnalysis({
       contractId: params.id,
       orgId: org.id,
       trigger,
       scope,
+      htmlOverride,
     });
 
     return NextResponse.json({

@@ -35,7 +35,12 @@ export function useAutoAnalyze(
   const inFlight = useRef<AbortController | null>(null);
   const hasRunInitial = useRef<boolean>(false);
 
-  const { onAnalysisComplete } = options;
+  // Keep latest callback in a ref so the polling effect doesn't restart
+  // every render when the parent passes a new closure.
+  const completeRef = useRef(options.onAnalysisComplete);
+  useEffect(() => {
+    completeRef.current = options.onAnalysisComplete;
+  });
 
   // Track edit timestamps via editor update event
   useEffect(() => {
@@ -64,10 +69,11 @@ export function useAutoAnalyze(
       const controller = new AbortController();
       inFlight.current = controller;
       try {
+        const currentHtml = editor?.getHTML() ?? "";
         const res = await fetch(`/api/contracts/${contractId}/auto-analyze`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ trigger, scope }),
+          body: JSON.stringify({ trigger, scope, htmlContent: currentHtml }),
           signal: controller.signal,
         });
         if (res.ok) {
@@ -76,7 +82,7 @@ export function useAutoAnalyze(
           if (editor) {
             lastAnalyzedHash.current = editor.getHTML();
           }
-          onAnalysisComplete?.({
+          completeRef.current?.({
             commentsCreated: data.commentsCreated || 0,
             modelUsed: data.modelUsed || "unknown",
           });
@@ -112,12 +118,9 @@ export function useAutoAnalyze(
 
       const shouldRun =
         (timeSinceEdit >= IDLE_MS && lastEditAt.current > lastAnalysisAt.current) ||
-        timeSinceAnalysis >= MAX_WAIT_MS;
+        (lastEditAt.current > lastAnalysisAt.current && timeSinceAnalysis >= MAX_WAIT_MS);
 
       if (shouldRun) {
-        // Extract the section that changed — simplest heuristic: find the
-        // first block that differs between current and last analyzed html.
-        // For the MVP, we send the full html and let the server slice.
         runAnalysis("edit");
       }
     }, POLL_INTERVAL_MS);
@@ -128,5 +131,5 @@ export function useAutoAnalyze(
         inFlight.current.abort();
       }
     };
-  }, [editor, contractId, enabled, onAnalysisComplete]);
+  }, [editor, contractId, enabled]);
 }

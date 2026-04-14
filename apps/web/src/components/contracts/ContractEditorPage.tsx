@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Editor } from "@tiptap/react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -87,6 +88,7 @@ export function ContractEditorPage({
   const [reviewData, setReviewData] = useState<ApprovalReviewData | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
   const editorRef = useRef<ContractEditorHandle>(null);
+  const [editorInstance, setEditorInstance] = useState<Editor | null>(null);
   const [aiCommentsCount, setAiCommentsCount] = useState<{
     total: number;
     errors: number;
@@ -97,7 +99,7 @@ export function ContractEditorPage({
 
   const isApprovedOrVoid = status === "aprovado";
 
-  async function refreshAiCommentsCount() {
+  const refreshAiCommentsCount = useCallback(async () => {
     try {
       const res = await fetch(
         `/api/contracts/${contract.id}/comments/count?authorType=ai&unresolved=true`
@@ -109,24 +111,54 @@ export function ContractEditorPage({
     } catch {
       // silent
     }
-  }
+  }, [contract.id]);
 
   useEffect(() => {
     refreshAiCommentsCount();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [contract.id, commentsVersion]);
+  }, [contract.id, commentsVersion, refreshAiCommentsCount]);
+
+  const handleAnalysisComplete = useCallback(() => {
+    setCommentsVersion((v) => v + 1);
+    refreshAiCommentsCount();
+  }, [refreshAiCommentsCount]);
 
   useAutoAnalyze(
-    editorRef.current?.getEditor() ?? null,
+    editorInstance,
     isApprovedOrVoid ? null : contract.id,
     !isApprovedOrVoid,
-    {
-      onAnalysisComplete: () => {
-        setCommentsVersion((v) => v + 1);
-        refreshAiCommentsCount();
-      },
-    }
+    { onAnalysisComplete: handleAnalysisComplete }
   );
+
+  // Apply comment marks for AI-generated comments that don't yet have an anchor
+  // in the editor. Runs whenever comments change or the editor becomes ready.
+  useEffect(() => {
+    if (!editorInstance || isApprovedOrVoid) return;
+    let cancelled = false;
+    async function applyAIMarks() {
+      try {
+        const res = await fetch(
+          `/api/contracts/${contract.id}/comments?authorType=ai&unresolved=true`
+        );
+        if (!res.ok) return;
+        const comments: Array<{ anchorId: string; selectedText: string }> = await res.json();
+        if (cancelled) return;
+        for (const c of comments) {
+          if (!c.anchorId || !c.selectedText) continue;
+          if (typeof document !== "undefined") {
+            const existing = document.querySelector(`[data-comment-id="${c.anchorId}"]`);
+            if (existing) continue;
+          }
+          editorRef.current?.applyCommentMarkByText(c.anchorId, c.selectedText);
+        }
+      } catch {
+        // silent
+      }
+    }
+    applyAIMarks();
+    return () => {
+      cancelled = true;
+    };
+  }, [editorInstance, contract.id, commentsVersion, isApprovedOrVoid]);
 
   function handleAddComment(selectedText: string) {
     setPendingCommentText(selectedText);
@@ -397,6 +429,7 @@ export function ContractEditorPage({
           onAddComment={isApproved ? undefined : handleAddComment}
           contractId={contract.id}
           suggestionsVersion={commentsVersion}
+          onReady={setEditorInstance}
         />
       </div>
 

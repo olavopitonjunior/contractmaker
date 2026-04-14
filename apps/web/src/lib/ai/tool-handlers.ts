@@ -4,6 +4,7 @@ import { validateContractData } from "./validators";
 import { extractDocumentData } from "./ocr";
 import { quickChecks } from "./quickChecks";
 import { embedOne, toPgVector, VoyageError, isEmbeddingsConfigured } from "./embeddings";
+import { findSimilarContracts } from "./memory";
 import type { AgentContext, ValidationIssue, ClauseSuggestion } from "./types";
 
 function deepMerge(
@@ -56,9 +57,339 @@ export async function executeToolHandler(
       return handleAnalyzeContradictions(input, context);
     case "query_knowledge_base":
       return handleQueryKnowledgeBase(input, context);
+    case "find_similar_contracts":
+      return handleFindSimilarContracts(input, context);
+    case "propose_new_clause":
+      return handleProposeNewClause(input, context);
+    case "propose_template_change":
+      return handleProposeTemplateChange(input, context);
+    case "apply_style_preset":
+      return handleApplyStylePreset(input, context);
+    case "insert_image":
+      return handleInsertImage(input, context);
     default:
       return { error: `Tool desconhecida: ${toolName}` };
   }
+}
+
+async function handleApplyStylePreset(
+  input: Record<string, unknown>,
+  context: AgentContext
+): Promise<Record<string, unknown>> {
+  const presetId = typeof input.presetId === "string" ? input.presetId : null;
+  const presetName = typeof input.presetName === "string" ? input.presetName : null;
+
+  let style;
+  if (presetId) {
+    style = await prisma.documentStyle.findFirst({
+      where: { id: presetId, orgId: context.orgId },
+    });
+  } else if (presetName) {
+    style = await prisma.documentStyle.findFirst({
+      where: { orgId: context.orgId, name: { equals: presetName, mode: "insensitive" } },
+    });
+  } else {
+    style = await prisma.documentStyle.findFirst({
+      where: { orgId: context.orgId, isDefault: true },
+    });
+  }
+
+  if (!style) {
+    return {
+      error:
+        "Nenhum preset encontrado. Peça ao usuário para criar um em /settings/document-styles.",
+    };
+  }
+
+  // Wrap the body in a container with inline style — works for both editor preview
+  // and PDF export. Page-level props (margins, header/footer) are applied at export time.
+  const openingTag = `<div class="document-style-preset" data-preset-id="${style.id}" style="font-family: ${style.fontFamily}; font-size: ${style.fontSizeBase}pt; line-height: ${style.lineHeight}; color: ${style.colorPrimary};">`;
+  const closingTag = `</div>`;
+
+  let newHtml = context.htmlContent;
+  const existingPresetMatch = newHtml.match(
+    /<div class="document-style-preset"[^>]*>([\s\S]*)<\/div>\s*$/
+  );
+  if (existingPresetMatch) {
+    newHtml = newHtml.replace(
+      /<div class="document-style-preset"[^>]*>([\s\S]*)<\/div>\s*$/,
+      `${openingTag}$1${closingTag}`
+    );
+  } else {
+    newHtml = `${openingTag}${newHtml}${closingTag}`;
+  }
+
+  context.htmlContent = newHtml;
+
+  return {
+    success: true,
+    presetId: style.id,
+    presetName: style.name,
+    appliedProps: {
+      fontFamily: style.fontFamily,
+      fontSizeBase: style.fontSizeBase,
+      lineHeight: style.lineHeight,
+      colorPrimary: style.colorPrimary,
+      colorAccent: style.colorAccent,
+    },
+    pageProps: {
+      marginTopMm: style.marginTopMm,
+      marginBottomMm: style.marginBottomMm,
+      marginLeftMm: style.marginLeftMm,
+      marginRightMm: style.marginRightMm,
+      pageNumbers: style.pageNumbers,
+      includeToc: style.includeToc,
+    },
+    note:
+      "Preset aplicado no corpo do contrato. Margens e cabeçalho/rodapé entram na próxima exportação PDF.",
+  };
+}
+
+async function handleInsertImage(
+  input: Record<string, unknown>,
+  context: AgentContext
+): Promise<Record<string, unknown>> {
+  const url = typeof input.url === "string" ? input.url : "";
+  const alt = typeof input.alt === "string" ? input.alt : "";
+  const width = typeof input.width === "number" ? input.width : 400;
+  const alignment =
+    typeof input.alignment === "string" &&
+    ["left", "center", "right"].includes(input.alignment)
+      ? (input.alignment as string)
+      : "center";
+  const insertAfter = typeof input.insertAfter === "string" ? input.insertAfter : null;
+
+  if (!url || !alt) {
+    return { error: "url e alt são obrigatórios" };
+  }
+
+  // Basic URL validation: must be http(s) or a relative path our app serves
+  if (!/^(https?:\/\/|\/)/.test(url)) {
+    return { error: "URL deve começar com http://, https:// ou /" };
+  }
+
+  const textAlignStyle =
+    alignment === "center"
+      ? "text-align: center;"
+      : alignment === "right"
+        ? "text-align: right;"
+        : "text-align: left;";
+
+  const imgBlock = `<p style="${textAlignStyle}"><img src="${url}" alt="${alt.replace(/"/g, "&quot;")}" class="editor-image rounded shadow-sm" style="max-width: ${width}px; height: auto;" /></p>`;
+
+  if (insertAfter) {
+    if (!context.htmlContent.includes(insertAfter)) {
+      return {
+        error:
+          "O trecho 'insertAfter' não foi encontrado no contrato. Copie exatamente do texto.",
+      };
+    }
+    context.htmlContent = context.htmlContent.replace(
+      insertAfter,
+      `${insertAfter}\n${imgBlock}`
+    );
+  } else {
+    context.htmlContent = context.htmlContent + `\n${imgBlock}`;
+  }
+
+  return {
+    success: true,
+    url,
+    alt,
+    width,
+    alignment,
+    message: `Imagem inserida ${insertAfter ? "após o trecho selecionado" : "ao final do contrato"}.`,
+  };
+}
+
+async function handleFindSimilarContracts(
+  input: Record<string, unknown>,
+  context: AgentContext
+): Promise<Record<string, unknown>> {
+  const focus = typeof input.focus === "string" ? input.focus : undefined;
+  const topK = Math.min(
+    typeof input.topK === "number" && input.topK > 0 ? Math.floor(input.topK) : 3,
+    10
+  );
+
+  try {
+    const results = await findSimilarContracts(
+      context.orgId,
+      context.dataJson,
+      context.templateModalidade || null,
+      context.templateName || null,
+      focus,
+      topK
+    );
+
+    if (results.length === 0) {
+      return {
+        results: [],
+        note:
+          "Nenhum contrato similar encontrado. A organização ainda não tem memória para casos como este — você pode responder com sua formação geral.",
+      };
+    }
+
+    return {
+      results: results.map((r) => ({
+        id: r.id,
+        contractId: r.contractId,
+        summary: r.summary,
+        fingerprint: r.fingerprint,
+        acceptedSuggestions: r.acceptedSuggestions,
+        rejectedSuggestionsCount: r.rejectedSuggestions.length,
+        manualEditsSnippets: (r.manualEdits as Array<{ after?: string }>)
+          .slice(0, 3)
+          .map((e) => (e?.after || "").slice(0, 200)),
+        similarity: r.similarity,
+      })),
+      total: results.length,
+    };
+  } catch (err) {
+    if (err instanceof VoyageError) {
+      return { error: `Falha na busca semântica: ${err.message}` };
+    }
+    console.error("[find_similar_contracts]", err);
+    return { error: "Falha ao buscar contratos similares" };
+  }
+}
+
+async function handleProposeNewClause(
+  input: Record<string, unknown>,
+  context: AgentContext
+): Promise<Record<string, unknown>> {
+  const title = typeof input.title === "string" ? input.title : "";
+  const content = typeof input.content === "string" ? input.content : "";
+  const reason = typeof input.reason === "string" ? input.reason : "";
+  const groupCode = typeof input.groupCode === "string" ? input.groupCode : null;
+  const category = typeof input.category === "string" ? input.category : null;
+  const evidence = Array.isArray(input.evidence) ? input.evidence : [];
+  const tags = Array.isArray(input.tags) ? (input.tags as string[]) : [];
+
+  if (!title || !content || !reason) {
+    return { error: "title, content e reason são obrigatórios" };
+  }
+
+  // Rate limit: no more than 5 pending proposals per org
+  const pendingCount = await prisma.clauseProposal.count({
+    where: { orgId: context.orgId, status: "pending" },
+  });
+  if (pendingCount >= 5) {
+    return {
+      error:
+        "Já existem 5 propostas de cláusula pendentes. Aguarde revisão antes de propor mais.",
+      pendingCount,
+    };
+  }
+
+  const proposal = await prisma.clauseProposal.create({
+    data: {
+      orgId: context.orgId,
+      authorType: "ai",
+      userId: null,
+      title,
+      content,
+      groupCode,
+      category,
+      reason,
+      evidence: evidence as object,
+      tags,
+    },
+  });
+
+  return {
+    success: true,
+    proposalId: proposal.id,
+    status: "pending",
+    reviewUrl: `/clauses/proposals`,
+    message:
+      "Proposta criada. Um humano precisa revisar antes de entrar na biblioteca — ela NÃO foi adicionada automaticamente.",
+  };
+}
+
+async function handleProposeTemplateChange(
+  input: Record<string, unknown>,
+  context: AgentContext
+): Promise<Record<string, unknown>> {
+  const templateId = typeof input.templateId === "string" ? input.templateId : "";
+  const title = typeof input.title === "string" ? input.title : "";
+  const reason = typeof input.reason === "string" ? input.reason : "";
+  const hunks = Array.isArray(input.hunks) ? input.hunks : [];
+  const evidence = Array.isArray(input.evidence) ? input.evidence : [];
+
+  if (!templateId || !title || !reason || hunks.length === 0) {
+    return { error: "templateId, title, reason e hunks são obrigatórios" };
+  }
+
+  // Verify template belongs to the org
+  const template = await prisma.contractTemplate.findFirst({
+    where: { id: templateId, orgId: context.orgId },
+    select: { id: true, handlebarsSource: true },
+  });
+  if (!template) {
+    return { error: "Template não encontrado ou não pertence à organização" };
+  }
+
+  // Validate that each hunk's `before` actually exists in the template source
+  // so the suggestion is applicable.
+  const source = template.handlebarsSource;
+  const validHunks: Array<{ before: string; after: string; contextBefore?: string; contextAfter?: string }> = [];
+  for (const hunk of hunks) {
+    if (!hunk || typeof hunk !== "object") continue;
+    const h = hunk as Record<string, unknown>;
+    const before = typeof h.before === "string" ? h.before : "";
+    const after = typeof h.after === "string" ? h.after : "";
+    if (!before || !after) continue;
+    if (!source.includes(before)) {
+      return {
+        error: `Hunk inválido: o trecho 'before' não existe no template atual. Trecho: "${before.slice(0, 100)}..."`,
+      };
+    }
+    validHunks.push({
+      before,
+      after,
+      contextBefore: typeof h.contextBefore === "string" ? h.contextBefore : undefined,
+      contextAfter: typeof h.contextAfter === "string" ? h.contextAfter : undefined,
+    });
+  }
+
+  if (validHunks.length === 0) {
+    return { error: "Nenhum hunk válido após validação" };
+  }
+
+  // Rate limit: no more than 5 pending suggestions per template
+  const pendingCount = await prisma.templateSuggestion.count({
+    where: { templateId, status: "pending" },
+  });
+  if (pendingCount >= 5) {
+    return {
+      error:
+        "Já existem 5 sugestões pendentes para este template. Aguarde revisão antes de propor mais.",
+    };
+  }
+
+  const suggestion = await prisma.templateSuggestion.create({
+    data: {
+      templateId,
+      orgId: context.orgId,
+      authorType: "ai",
+      userId: null,
+      title,
+      reason,
+      diffHunks: validHunks as object,
+      evidence: evidence as object,
+    },
+  });
+
+  return {
+    success: true,
+    suggestionId: suggestion.id,
+    status: "pending",
+    reviewUrl: `/templates/${templateId}/suggestions`,
+    hunksCount: validHunks.length,
+    message:
+      "Sugestão criada. O template NÃO foi alterado — um admin precisa revisar e aprovar.",
+  };
 }
 
 async function handleQueryKnowledgeBase(

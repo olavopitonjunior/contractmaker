@@ -15,7 +15,11 @@ export default async function DealPage({
     where: { id: params.dealId },
     include: {
       stage: true,
-      form: true,
+      form: {
+        include: {
+          attachments: { orderBy: { createdAt: "asc" } },
+        },
+      },
       attachments: { orderBy: { createdAt: "desc" } },
       contracts: {
         include: { template: { select: { name: true } } },

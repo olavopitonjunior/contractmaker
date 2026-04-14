@@ -84,13 +84,17 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  members        OrgMembership[]
-  pipelines      Pipeline[]
-  forms          SalesForm[]
-  templates      ContractTemplate[]
-  clauses        Clause[]
-  agentConfig    AgentConfig?
-  knowledgeItems KnowledgeItem[]
+  members              OrgMembership[]
+  pipelines            Pipeline[]
+  forms                SalesForm[]
+  templates            ContractTemplate[]
+  clauses              Clause[]
+  agentConfig          AgentConfig?
+  knowledgeItems       KnowledgeItem[]
+  contractMemories     ContractMemory[]
+  clauseProposals      ClauseProposal[]
+  templateSuggestions  TemplateSuggestion[]
+  documentStyles       DocumentStyle[]
 }
 
 model OrgMembership {
@@ -205,8 +209,9 @@ model ContractTemplate {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  contracts Contract[]
+  org         Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  contracts   Contract[]
+  suggestions TemplateSuggestion[]
 }
 
 // ============================================
@@ -488,4 +493,102 @@ model KnowledgeItem {
 
   @@index([orgId, category])
   @@index([orgId, parentId])
+}
+
+// ============================================
+// LEARNING: CONTRACT MEMORY + PROPOSALS (Propose mode)
+// ============================================
+
+model ContractMemory {
+  id                  String   @id @default(cuid())
+  orgId               String
+  contractId          String?  // null if the contract was deleted
+  templateId          String?
+  dataFingerprint     Json     // reduced snapshot: modality, civil status, value range, etc.
+  summary             String   @db.Text
+  acceptedSuggestions Json     // ids + texts of AI suggestions that were accepted
+  rejectedSuggestions Json     // ids of rejected suggestions (learn what NOT to suggest)
+  manualEdits         Json     // text added manually that didn't come from the clause library
+  createdAt           DateTime @default(now())
+  // embedding vector(1024) - added via raw migration
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, templateId])
+}
+
+model ClauseProposal {
+  id         String    @id @default(cuid())
+  orgId      String
+  authorType String    // "ai" | "user"
+  userId     String?
+  title      String
+  content    String    @db.Text
+  groupCode  String?   // G1-G6 or null
+  category   String?   // partes, objeto, compromisso, preco, posse, titulo, comissao, etc.
+  reason     String    @db.Text
+  evidence   Json?     // contractIds that motivated it
+  tags       String[]
+  status     String    @default("pending") // "pending" | "approved" | "rejected"
+  resolvedAt DateTime?
+  resolvedBy String?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+}
+
+model TemplateSuggestion {
+  id          String    @id @default(cuid())
+  templateId  String
+  orgId       String
+  authorType  String    // "ai" | "user"
+  userId      String?
+  title       String
+  reason      String    @db.Text
+  diffHunks   Json      // [{ before, after, contextBefore, contextAfter }]
+  evidence    Json?     // contractIds that motivated the suggestion
+  status      String    @default("pending") // "pending" | "approved" | "rejected"
+  resolvedAt  DateTime?
+  resolvedBy  String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  template ContractTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  org      Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([templateId, status])
+  @@index([orgId, status])
+}
+
+// ============================================
+// DOCUMENT STYLE (design system per organization)
+// ============================================
+
+model DocumentStyle {
+  id             String   @id @default(cuid())
+  orgId          String
+  name           String
+  isDefault      Boolean  @default(false)
+  fontFamily     String   @default("Times New Roman")
+  fontSizeBase   Int      @default(12)  // pt
+  lineHeight     Float    @default(1.5)
+  marginTopMm    Int      @default(25)
+  marginBottomMm Int      @default(25)
+  marginLeftMm   Int      @default(25)
+  marginRightMm  Int      @default(25)
+  colorPrimary   String   @default("#000000")
+  colorAccent    String   @default("#C97B0A")
+  headerHtml     String?  @db.Text
+  footerHtml     String?  @db.Text
+  pageNumbers    Boolean  @default(true)
+  includeToc     Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
 }

@@ -21,18 +21,8 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { Save, RotateCcw, Bot } from "lucide-react";
-
-const DEFAULT_PROMPT = `Você é um assistente jurídico especializado em contratos imobiliários brasileiros. Você atua como um advogado sênior revisando contratos.
-
-## REGRAS FUNDAMENTAIS
-
-1. RIGOR LINGUÍSTICO: Toda edição deve seguir a norma culta do português brasileiro.
-2. CONSULTA OBRIGATÓRIA: Antes de criar ou alterar cláusulas, SEMPRE consulte a biblioteca.
-3. ANÁLISE CRÍTICA: Verifique contradições, consistência de valores e dados pessoais.
-4. BASE LEGAL: Cite artigos relevantes (Código Civil, Lei 8.245/91, Lei 9.307/96, LGPD).
-5. PROTEÇÃO DAS PARTES: Sugira cláusulas protetivas faltantes.
-6. FORMATO: Use Handlebars para campos variáveis.
-7. BLOQUEIO: Recuse alterações em contratos aprovados.`;
+import { DEFAULT_SYSTEM_PROMPT } from "@/lib/ai/prompts";
+import { AGENT_TOOLS } from "@/lib/ai/tools";
 
 interface AgentSettingsProps {
   initialConfig: {
@@ -49,7 +39,7 @@ export function AgentSettings({ initialConfig }: AgentSettingsProps) {
   const [ocrModel, setOcrModel] = useState(initialConfig?.ocrModel || "claude-haiku-4-5-20251001");
   const [temperature, setTemperature] = useState(initialConfig?.temperature ?? 0.3);
   const [maxTokens, setMaxTokens] = useState(initialConfig?.maxTokens ?? 4096);
-  const [systemPrompt, setSystemPrompt] = useState(initialConfig?.systemPrompt || DEFAULT_PROMPT);
+  const [systemPrompt, setSystemPrompt] = useState(initialConfig?.systemPrompt || DEFAULT_SYSTEM_PROMPT);
   const [saving, setSaving] = useState(false);
 
   async function handleSave() {
@@ -157,7 +147,7 @@ export function AgentSettings({ initialConfig }: AgentSettingsProps) {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => setSystemPrompt(DEFAULT_PROMPT)}
+                onClick={() => setSystemPrompt(DEFAULT_SYSTEM_PROMPT)}
               >
                 <RotateCcw className="h-3 w-3 mr-1" />
                 Restaurar padrão
@@ -172,8 +162,10 @@ export function AgentSettings({ initialConfig }: AgentSettingsProps) {
             />
             <p className="text-xs text-muted-foreground">
               Este prompt define o comportamento do agente na tela de edição de contratos.
-              O agente tem acesso a 10 ferramentas: consulta de cláusulas, edição de texto,
-              validação, sugestões e extração de documentos.
+              O agente tem acesso a {AGENT_TOOLS.length} ferramentas: consulta de cláusulas
+              e templates, edição, validação, sugestões, extração de documentos, análise de
+              contradições, base de conhecimento (RAG), aprendizado com contratos aprovados,
+              modo Propose, aplicação de presets de estilo e inserção de imagens.
             </p>
           </div>
 

@@ -32,7 +32,7 @@ export default function NewFormPage() {
       setCreatedToken(data.token);
       toast.success("Formulário criado!");
     } else {
-      toast.error(data.error || "Erro ao criar formulario");
+      toast.error(data.error || "Erro ao criar formulário");
     }
   }
 
@@ -96,7 +96,7 @@ export default function NewFormPage() {
             <div className="space-y-3">
               <div className="rounded-md border bg-muted/50 p-3">
                 <p className="text-xs text-muted-foreground mb-1">
-                  Link do formulario:
+                  Link do formulário:
                 </p>
                 <p className="text-sm font-mono break-all">{createdUrl}</p>
               </div>

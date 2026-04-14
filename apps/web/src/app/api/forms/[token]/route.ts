@@ -80,6 +80,33 @@ export async function PATCH(
       } catch (error) {
         console.error("Auto-generate contract failed:", error);
       }
+
+      try {
+        const formAttachments = await prisma.formAttachment.findMany({
+          where: { formId: form.id },
+        });
+        if (formAttachments.length > 0) {
+          const existing = await prisma.dealAttachment.findMany({
+            where: { dealId: deal.id },
+            select: { url: true },
+          });
+          const existingUrls = new Set(existing.map((e) => e.url));
+          const newOnes = formAttachments.filter((a) => !existingUrls.has(a.url));
+          if (newOnes.length > 0) {
+            await prisma.dealAttachment.createMany({
+              data: newOnes.map((a) => ({
+                dealId: deal.id,
+                filename: a.filename,
+                mime: a.mime,
+                url: a.url,
+                category: a.category,
+              })),
+            });
+          }
+        }
+      } catch (error) {
+        console.error("Link form attachments to deal failed:", error);
+      }
     }
   }
 

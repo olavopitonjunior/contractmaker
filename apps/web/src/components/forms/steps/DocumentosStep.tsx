@@ -1,0 +1,404 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { UseFormReturn } from "react-hook-form";
+import { Upload, Sparkles } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
+import {
+  mapExtractedToForm,
+  suggestAssignment,
+  type Assignment,
+} from "@/lib/forms/extracted-to-form";
+
+interface DocumentosStepProps {
+  form: UseFormReturn<any>;
+  token: string;
+}
+
+const MAX_FILES = 15;
+const MAX_BYTES = 10 * 1024 * 1024;
+const RESIZE_MAX_SIDE = 2000;
+const IMAGE_MIMES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+const ACCEPTED_MIMES = [...IMAGE_MIMES, "application/pdf"];
+
+async function resizeImage(file: File, maxSide: number): Promise<File> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const { width, height } = bitmap;
+    const longest = Math.max(width, height);
+    if (longest <= maxSide) return file;
+    const ratio = maxSide / longest;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(width * ratio);
+    canvas.height = Math.round(height * ratio);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return file;
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    const blob: Blob | null = await new Promise((resolve) =>
+      canvas.toBlob((b) => resolve(b), "image/jpeg", 0.85)
+    );
+    if (!blob) return file;
+    return new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), {
+      type: "image/jpeg",
+    });
+  } catch {
+    return file;
+  }
+}
+
+function buildAssignmentOptions(snapshot: {
+  vendedores?: any[];
+  compradores?: any[];
+  imoveis?: any[];
+}): Array<{ value: string; label: string }> {
+  const options: Array<{ value: string; label: string }> = [];
+  const vCount = Math.max(1, snapshot.vendedores?.length ?? 1);
+  const cCount = Math.max(1, snapshot.compradores?.length ?? 1);
+  const iCount = Math.max(1, snapshot.imoveis?.length ?? 1);
+  for (let i = 0; i < vCount; i++) options.push({ value: `vendedor:${i}`, label: `Vendedor ${i + 1}` });
+  for (let i = 0; i < cCount; i++) options.push({ value: `comprador:${i}`, label: `Comprador ${i + 1}` });
+  for (let i = 0; i < iCount; i++) options.push({ value: `imovel:${i}`, label: `Imóvel ${i + 1}` });
+  options.push({ value: "outro:0", label: "Outros (sem aplicar)" });
+  return options;
+}
+
+export function DocumentosStep({ form, token }: DocumentosStepProps) {
+  const [docs, setDocs] = useState<DocumentCardData[]>([]);
+  const [dragging, setDragging] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Restore previously uploaded attachments
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/forms/${token}/attachments`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        const snapshot = form.getValues();
+        const restored: DocumentCardData[] = (data.attachments || []).map((a: any) => {
+          const extracted = a.extractedData || {};
+          const fields = extracted.fields || null;
+          const assignment = suggestAssignment(a.category, fields || {}, snapshot);
+          return {
+            id: a.id,
+            filename: a.filename,
+            mime: a.mime,
+            fileUrl: a.fileUrl,
+            status: a.extractedData ? "ready" : "uploading",
+            category: a.category,
+            fields,
+            confidence: typeof extracted.confidence === "number" ? extracted.confidence : null,
+            assignment,
+          };
+        });
+        setDocs(restored);
+      } finally {
+        if (!cancelled) setHydrated(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+
+  }, [token]);
+
+  const updateDoc = useCallback((id: string, patch: Partial<DocumentCardData>) => {
+    setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
+  }, []);
+
+  const runExtract = useCallback(
+    async (doc: DocumentCardData) => {
+      updateDoc(doc.id, { status: "extracting", error: null });
+      try {
+        const res = await fetch(`/api/forms/${token}/attachments/${doc.id}/extract`, {
+          method: "POST",
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          updateDoc(doc.id, {
+            status: "failed",
+            error: data.error || "Falha na extração",
+          });
+          return;
+        }
+        const extracted = data.extractedData || {};
+        const fields = extracted.fields || {};
+        const snapshot = form.getValues();
+        const assignment = suggestAssignment(data.category, fields, snapshot);
+        updateDoc(doc.id, {
+          status: "ready",
+          category: data.category,
+          fields,
+          confidence: typeof extracted.confidence === "number" ? extracted.confidence : null,
+          assignment,
+        });
+      } catch (err) {
+        updateDoc(doc.id, {
+          status: "failed",
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    },
+    [token, form, updateDoc]
+  );
+
+  const handleFiles = useCallback(
+    async (files: FileList | File[]) => {
+      const arr = Array.from(files);
+      if (arr.length === 0) return;
+      if (docs.length + arr.length > MAX_FILES) {
+        toast.error(`Máximo de ${MAX_FILES} documentos por formulário`);
+        return;
+      }
+
+      for (const rawFile of arr) {
+        if (!ACCEPTED_MIMES.includes(rawFile.type)) {
+          toast.error(`Tipo não suportado: ${rawFile.name}`);
+          continue;
+        }
+        if (rawFile.size > MAX_BYTES) {
+          toast.error(`${rawFile.name} excede 10 MB`);
+          continue;
+        }
+
+        const file = IMAGE_MIMES.includes(rawFile.type)
+          ? await resizeImage(rawFile, RESIZE_MAX_SIDE)
+          : rawFile;
+
+        const tempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+        const tempDoc: DocumentCardData = {
+          id: tempId,
+          filename: file.name,
+          mime: file.type,
+          fileUrl: URL.createObjectURL(file),
+          status: "uploading",
+          category: null,
+          fields: null,
+          confidence: null,
+          assignment: { kind: "outro", index: 0 },
+        };
+        setDocs((prev) => [...prev, tempDoc]);
+
+        try {
+          const body = new FormData();
+          body.append("file", file);
+          const uploadRes = await fetch(`/api/forms/${token}/attachments`, {
+            method: "POST",
+            body,
+          });
+          const uploadData = await uploadRes.json();
+          if (!uploadRes.ok) {
+            setDocs((prev) =>
+              prev.map((d) =>
+                d.id === tempId
+                  ? { ...d, status: "failed", error: uploadData.error || "Falha no upload" }
+                  : d
+              )
+            );
+            continue;
+          }
+
+          setDocs((prev) =>
+            prev.map((d) =>
+              d.id === tempId
+                ? {
+                    ...d,
+                    id: uploadData.id,
+                    fileUrl: uploadData.fileUrl,
+                    status: "extracting",
+                  }
+                : d
+            )
+          );
+
+          const persistedDoc: DocumentCardData = {
+            ...tempDoc,
+            id: uploadData.id,
+            fileUrl: uploadData.fileUrl,
+            status: "extracting",
+          };
+
+          await runExtract(persistedDoc);
+        } catch (err) {
+          setDocs((prev) =>
+            prev.map((d) =>
+              d.id === tempId
+                ? {
+                    ...d,
+                    status: "failed",
+                    error: err instanceof Error ? err.message : String(err),
+                  }
+                : d
+            )
+          );
+        }
+      }
+    },
+    [docs.length, token, runExtract, updateDoc]
+  );
+
+  const handleAssignmentChange = useCallback(
+    (id: string, assignment: Assignment) => {
+      updateDoc(id, { assignment, applied: false });
+    },
+    [updateDoc]
+  );
+
+  const handleRemove = useCallback(
+    async (id: string) => {
+      setDocs((prev) => prev.filter((d) => d.id !== id));
+      if (!id.startsWith("tmp-")) {
+        try {
+          await fetch(`/api/forms/${token}/attachments?id=${id}`, { method: "DELETE" });
+        } catch {
+          /* ignore */
+        }
+      }
+    },
+    [token]
+  );
+
+  const handleRetry = useCallback(
+    (id: string) => {
+      const doc = docs.find((d) => d.id === id);
+      if (doc) runExtract(doc);
+    },
+    [docs, runExtract]
+  );
+
+  const handleApply = useCallback(async () => {
+    const readyDocs = docs.filter(
+      (d) => d.status === "ready" && d.fields && d.assignment.kind !== "outro"
+    );
+    if (readyDocs.length === 0) {
+      toast.info("Nenhum documento pronto para aplicar");
+      return;
+    }
+    let totalFields = 0;
+    for (const doc of readyDocs) {
+      const count = mapExtractedToForm(
+        { category: doc.category, fields: doc.fields || {}, confidence: doc.confidence ?? 0 },
+        doc.assignment,
+        form as UseFormReturn<Record<string, unknown>>,
+        { skipIfDirty: true }
+      );
+      totalFields += count;
+      updateDoc(doc.id, { applied: true });
+
+      fetch(`/api/forms/${token}/attachments?id=${doc.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ assignment: doc.assignment }),
+      }).catch(() => {
+        /* non-blocking */
+      });
+    }
+    toast.success(
+      `${readyDocs.length} documento(s) aplicado(s) — ${totalFields} campo(s) preenchido(s)`
+    );
+  }, [docs, form, token, updateDoc]);
+
+  const snapshot = form.getValues();
+  const assignmentOptions = buildAssignmentOptions(snapshot);
+  const readyCount = docs.filter((d) => d.status === "ready").length;
+  const hasPending = docs.some((d) => d.status === "uploading" || d.status === "extracting");
+
+  return (
+    <div className="space-y-4">
+      <Card className="border-dashed">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base font-semibold">
+            <Sparkles className="h-4 w-4 text-primary" />
+            Anexe os documentos (opcional)
+          </CardTitle>
+          <p className="text-xs text-muted-foreground">
+            Envie RG, CPF, comprovante de residência, matrícula, IPTU, escritura ou procuração.
+            O sistema identifica cada documento e preenche automaticamente os campos do formulário.
+          </p>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <div
+            onDragOver={(e) => {
+              e.preventDefault();
+              setDragging(true);
+            }}
+            onDragLeave={() => setDragging(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragging(false);
+              handleFiles(e.dataTransfer.files);
+            }}
+            onClick={() => inputRef.current?.click()}
+            className={`flex cursor-pointer flex-col items-center justify-center gap-2 rounded-md border-2 border-dashed px-4 py-8 transition-colors ${
+              dragging
+                ? "border-primary bg-primary/5"
+                : "border-border hover:border-primary/50 hover:bg-muted/30"
+            }`}
+          >
+            <Upload className="h-6 w-6 text-muted-foreground" />
+            <p className="text-sm font-medium text-foreground">
+              Clique ou arraste arquivos aqui
+            </p>
+            <p className="text-xs text-muted-foreground">
+              JPG, PNG, WebP ou PDF — até 10 MB por arquivo
+            </p>
+            <input
+              ref={inputRef}
+              type="file"
+              multiple
+              accept={ACCEPTED_MIMES.join(",")}
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files) handleFiles(e.target.files);
+                e.target.value = "";
+              }}
+            />
+          </div>
+        </CardContent>
+      </Card>
+
+      {docs.length > 0 && (
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              {docs.length} documento(s) {hasPending && "— processando…"}
+            </p>
+            <Button
+              type="button"
+              onClick={handleApply}
+              disabled={readyCount === 0 || hasPending}
+              size="sm"
+            >
+              Aplicar aos campos ({readyCount})
+            </Button>
+          </div>
+
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+            {docs.map((doc) => (
+              <DocumentCard
+                key={doc.id}
+                doc={doc}
+                assignmentOptions={assignmentOptions}
+                onAssignmentChange={handleAssignmentChange}
+                onRemove={handleRemove}
+                onRetry={handleRetry}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {hydrated && docs.length === 0 && (
+        <p className="rounded-md border border-dashed border-border px-3 py-6 text-center text-xs text-muted-foreground">
+          Sem documentos anexados. Você pode pular esta etapa e preencher manualmente.
+        </p>
+      )}
+    </div>
+  );
+}

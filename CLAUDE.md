@@ -155,13 +155,53 @@ UI:
 
 `ContractEditor` expoe um handle via `forwardRef`: `applyCommentMark`, `removeCommentMark`, `scrollToComment`, `focus`, `getHTML`, `getEditor`. `ContractEditorPage` usa o ref para aplicar marcas apos POST de comentario.
 
+## Etapa 0 - Anexo de Documentos + OCR (formulario de vendas)
+O formulario publico (`/f/[token]`) agora comeca pela **Etapa 0 - Documentos** (antes de Vendedor/Comprador/Imovel). Total passou de 7 para 8 etapas. `STEP_LABELS` e `STEP_REQUIRED_FIELDS` em `lib/forms/validation.ts` refletem isso; a etapa 0 nao tem required fields (e opcional — usuario pode pular clicando "Proximo").
+
+**Componente:** `components/forms/steps/DocumentosStep.tsx`
+- Dropzone nativo (sem lib) aceita imagens JPG/PNG/WebP/GIF e PDFs ate 10 MB, max 15 arquivos por form.
+- Resize client-side via `createImageBitmap` + canvas para max 2000px antes do upload (reduz token de imagem no Claude). PDFs nao sao rasterizados — vao direto pro Claude como `type: "document"`.
+- Pipeline por arquivo: upload → OCR → sugestao de atribuicao (auto ou manual via dropdown).
+- Botao "Aplicar aos campos (N)" itera docs prontos, chama `mapExtractedToForm` e preenche campos do React Hook Form respeitando `skipIfDirty` (nao sobrescreve valores ja digitados).
+- Ao reabrir o form, `GET /api/forms/[token]/attachments` restaura os docs + extractedData.
+
+**Componente visual:** `components/forms/DocumentCard.tsx`
+- Thumbnail 80x80 (clicavel → abre preview), badge de categoria, confidence em %, chips dos campos extraidos, select de atribuicao, botao remover. Modo `readOnly` usado no DealDetail.
+- Estados: `uploading | extracting | ready | failed`. Estado `applied` com borda verde quando os campos foram aplicados no form.
+
+**API routes** (publicas, autorizacao pelo token do form):
+- `GET/POST/PATCH/DELETE /api/forms/[token]/attachments` — lista/cria/atualiza assignment/deleta FormAttachment. POST recebe multipart com campo `file`. PATCH recebe `{assignment: {kind, index}}` e persiste em `extractedData.assignment`.
+- `GET /api/forms/[token]/attachments/[id]/file` — serve o buffer do storage (s3:// ou file://) como resposta HTTP. E o que o browser usa via `fileUrl`.
+- `POST /api/forms/[token]/attachments/[id]/extract` — baixa buffer, chama `classifyAndExtract`, persiste `category` + `extractedData` no FormAttachment. Cache: se ja tem extractedData, retorna sem refazer. `maxDuration = 60`.
+
+**OCR engine:** `lib/ai/ocr.ts`
+- `classifyAndExtract(base64, mimeType): Promise<ExtractionResult>` — **uma unica chamada Haiku** que classifica + extrai em um JSON combinado `{tipo, campos, confidence}`. Corta custo pela metade vs `extractDocumentData` antigo (que fazia 2 chamadas).
+- Suporta **imagens nativas** E **PDFs nativos** via `type: "document"` (sem pdfjs-dist). A funcao helper `buildDocumentBlock(base64, mime)` monta o content block certo.
+- Modelo default: `claude-haiku-4-5-20251001` (override via env `OCR_MODEL`).
+- Categorias validas: `rg | cpf | cnh | matricula | iptu | escritura | procuracao | comprovante_residencia | outro`. O prompt combinado lista os campos esperados por categoria.
+- `classifyDocument` e `extractDocumentData` legacy sao mantidos intocados — ainda usados pelo agent do chat do editor de contrato (tool `extract_document_data`).
+
+**Mapeamento OCR → form:** `lib/forms/extracted-to-form.ts`
+- `mapExtractedToForm(extraction, assignment, form, {skipIfDirty})` — le `FIELD_MAP_PERSON` / `FIELD_MAP_IMOVEL` e chama `form.setValue` para cada campo matcheado. Faz coercao (sanitize cpf para 11 digitos, UF para 2 letras uppercase, parse de `endereco_completo` em rua+numero via regex).
+- `suggestAssignment(category, fields, snapshot)` — heuristica: property docs → imovel[0]; person docs → match por cpf ou nome nos vendedores/compradores ja preenchidos, senao primeira posicao vazia (prioriza vendedores se so ha vendedores, compradores caso contrario).
+- `PERSON_CATEGORIES` inclui `rg, cpf, cnh, procuracao, comprovante_residencia`. `PROPERTY_CATEGORIES` inclui `matricula, iptu, escritura`.
+- `DocumentKind` = `"vendedor" | "comprador" | "imovel" | "outro"`.
+
+**Persistencia no Deal:** ao finalizar o form (status → "completo"), `PATCH /api/forms/[token]/route.ts` chama `generateContractForDeal` e **copia os FormAttachments para DealAttachments** (insert em lote, mesmas URLs — nao recria blobs). Se form for deletado depois, a copia no Deal sobrevive.
+
+**Visualizacao no Deal:** `components/pipeline/DealDetail.tsx` tem aba "Documentos" renderizada por `DocumentsTab` (componente interno no mesmo arquivo). Busca `deal.form.attachments` (com extractedData) agrupando por `extractedData.assignment.kind` — Parte Vendedora / Parte Compradora / Imovel / Outros. Cada card usa `DocumentCard` em `readOnly`.
+
+**Schema Prisma:** sem migrations novas. `FormAttachment { id, formId, filename, mime, url, category, extractedData Json? }` ja existia com os campos necessarios. O `extractedData` guarda `{fields: {...}, confidence: number, assignment?: {kind, index}}`.
+
+**Custo estimado:** Haiku 4.5 ~US$ 1/MT input + US$ 5/MT output. Doc tipico ~1.5K input (img resized) + ~300 output ≈ US$ 0,003/doc. Form com 8 docs ≈ **US$ 0,024/form**.
+
 ## Revisao pre-aprovacao
 `POST /api/contracts/[id]/approve` roda: `validateContractData` + conta `ContractSuggestion` pendentes + `ContractComment` nao-resolvidos (e severity error). Se houver issues, retorna `{requiresReview: true, canForce, issues, errorCount, warningCount, pendingSuggestions, unresolvedComments}`. Frontend abre `ApprovalReviewDialog` com botoes "Revisar" e "Aprovar mesmo assim" (este ultimo oculto quando `canForce=false`, ou seja, quando ha errors). Segunda chamada com `{force: true}` pula validacoes e aprova.
 
 ## Fluxo Principal
 1. Usuario cria formulario -> gera link compartilhavel `/f/{token}` (titulo do form sincroniza com `deal.title` no Kanban)
-2. Qualquer pessoa preenche o formulario (auto-save via PATCH `/api/forms/[token]`)
-3. Usuario cria negocio a partir do formulario -> aparece no Kanban
+2. Qualquer pessoa preenche o formulario (auto-save via PATCH `/api/forms/[token]`). **Etapa 0:** anexa RG, CPF, CNH, matricula, IPTU, comprovante etc. — OCR extrai os campos e autopreenche Vendedor/Comprador/Imovel. Etapa 0 e opcional (pode pular).
+3. Usuario cria negocio a partir do formulario -> aparece no Kanban. Documentos anexados sao copiados para DealAttachments e aparecem na aba "Documentos" do Deal agrupados por parte/imovel.
 4. Usuario clica "Confeccionar Contrato" -> auto-detecta modalidade -> seleciona template v2 -> renderiza com dados
 5. Usuario edita no TipTap ou via chat IA. Opcoes no editor:
    - Selecao + BubbleMenu: bold/italic/underline/link/highlight/comentar/IA
@@ -173,8 +213,11 @@ UI:
 7. Contratos aprovados sao imutaveis: chat/edicao/comentarios/versionamento bloqueados. Pode exportar PDF/DOCX.
 
 ## Rotas Publicas (sem auth)
-- `/f/[token]` - formulario de vendas
+- `/f/[token]` - formulario de vendas (inclui Etapa 0 de upload de documentos)
 - `/api/forms/[token]` - GET dados, PATCH auto-save
+- `/api/forms/[token]/attachments` - GET/POST/PATCH/DELETE anexos do form
+- `/api/forms/[token]/attachments/[id]/file` - serve o binario para o browser
+- `/api/forms/[token]/attachments/[id]/extract` - OCR (roda Haiku, persiste extractedData)
 - `/login`, `/register`
 
 ## Alertas

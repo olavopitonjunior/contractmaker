@@ -8,6 +8,8 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2 } from "lucide-react";
+import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
+import type { Assignment, DocumentKind } from "@/lib/forms/extracted-to-form";
 import { toast } from "sonner";
 import Link from "next/link";
 import {
@@ -28,7 +30,20 @@ interface DealDetailProps {
     value: number | null;
     createdAt: Date;
     stage: { name: string; color: string | null };
-    form: { id: string; token: string; dataJson: unknown; status: string } | null;
+    form: {
+      id: string;
+      token: string;
+      dataJson: unknown;
+      status: string;
+      attachments: {
+        id: string;
+        filename: string;
+        mime: string;
+        category: string | null;
+        extractedData: unknown;
+        createdAt: Date;
+      }[];
+    } | null;
     attachments: { id: string; filename: string; category: string | null; url: string; createdAt: Date }[];
     contracts: { id: string; version: number; status: string; template: { name: string }; createdAt: Date }[];
   };
@@ -212,7 +227,7 @@ export function DealDetail({ deal }: DealDetailProps) {
         <TabsList>
           <TabsTrigger value="dados">Dados</TabsTrigger>
           <TabsTrigger value="anexos">
-            Anexos ({deal.attachments.length})
+            Documentos ({(deal.form?.attachments.length ?? 0) || deal.attachments.length})
           </TabsTrigger>
           <TabsTrigger value="contratos">
             Contratos ({deal.contracts.length} {deal.contracts.length === 1 ? "versão" : "versões"})
@@ -348,38 +363,11 @@ export function DealDetail({ deal }: DealDetailProps) {
         </TabsContent>
 
         <TabsContent value="anexos" className="mt-4">
-          <Card>
-            <CardContent className="py-6">
-              {deal.attachments.length === 0 ? (
-                <p className="text-center text-muted-foreground">
-                  Nenhum anexo. Upload disponivel em breve.
-                </p>
-              ) : (
-                <div className="space-y-2">
-                  {deal.attachments.map((att) => (
-                    <div
-                      key={att.id}
-                      className="flex items-center justify-between p-2 rounded border"
-                    >
-                      <div>
-                        <p className="text-sm font-medium">{att.filename}</p>
-                        {att.category && (
-                          <Badge variant="secondary" className="text-xs mt-1">
-                            {att.category}
-                          </Badge>
-                        )}
-                      </div>
-                      <Button variant="ghost" size="sm" asChild>
-                        <a href={att.url} target="_blank">
-                          <ExternalLink className="h-4 w-4" />
-                        </a>
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <DocumentsTab
+            formAttachments={deal.form?.attachments ?? []}
+            formToken={deal.form?.token ?? null}
+            fallbackAttachments={deal.attachments}
+          />
         </TabsContent>
 
         <TabsContent value="contratos" className="mt-4">
@@ -442,6 +430,149 @@ export function DealDetail({ deal }: DealDetailProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+    </div>
+  );
+}
+
+interface FormAttachmentLite {
+  id: string;
+  filename: string;
+  mime: string;
+  category: string | null;
+  extractedData: unknown;
+  createdAt: Date;
+}
+
+interface FallbackAttachment {
+  id: string;
+  filename: string;
+  category: string | null;
+  url: string;
+  createdAt: Date;
+}
+
+const KIND_LABELS: Record<DocumentKind, string> = {
+  vendedor: "Parte Vendedora",
+  comprador: "Parte Compradora",
+  imovel: "Imóvel",
+  outro: "Outros",
+};
+
+const PERSON_CATS = new Set(["rg", "cpf", "cnh", "procuracao", "comprovante_residencia"]);
+const PROPERTY_CATS = new Set(["matricula", "iptu", "escritura"]);
+
+function resolveKind(
+  category: string | null,
+  extracted: Record<string, unknown> | null
+): DocumentKind {
+  const assignment = extracted?.assignment as Assignment | undefined;
+  if (assignment?.kind) return assignment.kind;
+  if (category && PROPERTY_CATS.has(category)) return "imovel";
+  if (category && PERSON_CATS.has(category)) return "vendedor";
+  return "outro";
+}
+
+function DocumentsTab({
+  formAttachments,
+  formToken,
+  fallbackAttachments,
+}: {
+  formAttachments: FormAttachmentLite[];
+  formToken: string | null;
+  fallbackAttachments: FallbackAttachment[];
+}) {
+  const hasFormAttachments = formAttachments.length > 0 && formToken;
+
+  if (!hasFormAttachments && fallbackAttachments.length === 0) {
+    return (
+      <Card>
+        <CardContent className="py-10 text-center text-muted-foreground text-sm">
+          Nenhum documento anexado. Os documentos enviados durante o preenchimento do
+          formulário aparecem aqui organizados.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  if (!hasFormAttachments) {
+    return (
+      <Card>
+        <CardContent className="py-4 space-y-2">
+          {fallbackAttachments.map((att) => (
+            <div
+              key={att.id}
+              className="flex items-center justify-between rounded border p-2"
+            >
+              <div>
+                <p className="text-sm font-medium">{att.filename}</p>
+                {att.category && (
+                  <Badge variant="secondary" className="mt-1 text-xs">
+                    {att.category}
+                  </Badge>
+                )}
+              </div>
+            </div>
+          ))}
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const groups: Record<DocumentKind, DocumentCardData[]> = {
+    vendedor: [],
+    comprador: [],
+    imovel: [],
+    outro: [],
+  };
+
+  for (const att of formAttachments) {
+    const extracted = (att.extractedData as Record<string, unknown> | null) || null;
+    const fields = (extracted?.fields as Record<string, unknown> | null) ?? null;
+    const confidence =
+      typeof extracted?.confidence === "number" ? (extracted.confidence as number) : null;
+    const assignment = (extracted?.assignment as Assignment | undefined) ?? {
+      kind: resolveKind(att.category, extracted),
+      index: 0,
+    };
+    const card: DocumentCardData = {
+      id: att.id,
+      filename: att.filename,
+      mime: att.mime,
+      fileUrl: `/api/forms/${formToken}/attachments/${att.id}/file`,
+      status: "ready",
+      category: att.category,
+      fields,
+      confidence,
+      assignment,
+    };
+    groups[assignment.kind].push(card);
+  }
+
+  const kinds: DocumentKind[] = ["vendedor", "comprador", "imovel", "outro"];
+
+  return (
+    <div className="space-y-5">
+      {kinds.map((kind) => {
+        const items = groups[kind];
+        if (items.length === 0) return null;
+        return (
+          <Card key={kind}>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm">
+                {KIND_LABELS[kind]}{" "}
+                <span className="text-muted-foreground font-normal">
+                  ({items.length})
+                </span>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              {items.map((doc) => (
+                <DocumentCard key={doc.id} doc={doc} assignmentOptions={[]} readOnly />
+              ))}
+            </CardContent>
+          </Card>
+        );
+      })}
     </div>
   );
 }

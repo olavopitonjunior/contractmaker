@@ -121,6 +121,21 @@ export function registerHandlebarsHelpers(): void {
     return new Intl.NumberFormat('pt-BR', opts).format(Number(valor));
   });
 
+  // Percentual de `valor` sobre `total` no padrao brasileiro (virgula decimal).
+  // Ex: 75000 / 1250000 -> "6,00%"
+  Handlebars.registerHelper('percentual', (valor: number, total: number) => {
+    const v = Number(valor);
+    const t = Number(total);
+    if (!t || !Number.isFinite(v) || !Number.isFinite(t)) return '0,00%';
+    const pct = (v / t) * 100;
+    return (
+      new Intl.NumberFormat('pt-BR', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      }).format(pct) + '%'
+    );
+  });
+
   Handlebars.registerHelper('cpf', (cpf: string) => {
     if (!cpf) return '';
     const digits = cpf.replace(/\D/g, '');

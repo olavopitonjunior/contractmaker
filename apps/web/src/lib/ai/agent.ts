@@ -4,7 +4,7 @@ import { renderContratoHTML } from "@/lib/render/handlebars";
 import { AGENT_TOOLS } from "./tools";
 import { executeToolHandler } from "./tool-handlers";
 import { DEFAULT_SYSTEM_PROMPT, buildContextMessage } from "./prompts";
-import { quickChecks, shouldSkipLLM, dedupeKeyFor, type QuickFinding } from "./quickChecks";
+import { quickChecks, dedupeKeyFor, type QuickFinding } from "./quickChecks";
 import type { AgentContext, AgentResult, ChangeLogEntry } from "./types";
 
 function getAnthropicClient() {
@@ -98,6 +98,11 @@ function mapToolToAction(toolName: string): string {
     add_comment: "ai_query",
     analyze_contradictions: "validation",
     query_knowledge_base: "ai_query",
+    find_similar_contracts: "ai_query",
+    propose_new_clause: "ai_query",
+    propose_template_change: "ai_query",
+    apply_style_preset: "ai_edit",
+    insert_image: "ai_edit",
   };
   return map[toolName] || "ai_edit";
 }
@@ -308,6 +313,12 @@ export interface PassiveAnalysisParams {
     to?: number;
     changedText?: string;
   };
+  /**
+   * Optional override for the contract HTML. When the editor has unsaved edits,
+   * the client passes the current HTML so the analyzer sees the live state
+   * instead of the stale DB version.
+   */
+  htmlOverride?: string;
 }
 
 export interface PassiveFinding {
@@ -348,6 +359,7 @@ export async function runPassiveAnalysis(
   }
 
   const htmlContent =
+    params.htmlOverride ||
     contract.htmlContent ||
     renderContratoHTML(
       contract.templateOverride || contract.template.handlebarsSource,
@@ -360,16 +372,15 @@ export async function runPassiveAnalysis(
 
   // 2. Decide whether to call LLM
   // - On 'open' (first load): always call LLM for deep analysis with Sonnet
-  // - On 'edit' (passive): only call LLM if quickChecks is clean (otherwise the
-  //   errors are already actionable without LLM overhead)
+  // - On 'edit' (passive): always call LLM with Haiku. quickChecks only covers
+  //   data-bound checks (dataJson) but manual HTML edits require LLM to catch
+  //   inconsistencies that don't show up in the structured data.
   // - On 'approve': validators run elsewhere, we skip here
   let llmFindings: PassiveFinding[] = [];
   let modelUsed = "quickChecks-only";
 
   if (params.trigger === "approve") {
     // Nothing to do — /approve route handles validation
-  } else if (params.trigger === "edit" && shouldSkipLLM(quick)) {
-    // Skip — we already have hard errors to show
   } else {
     const passiveModel =
       params.trigger === "open"

@@ -36,7 +36,7 @@ export default async function FormsPage() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <p className="text-muted-foreground mb-4">
-              Nenhum formulario criado ainda.
+              Nenhum formulário criado ainda.
             </p>
             <Button asChild>
               <Link href="/forms/new">Criar Primeiro Formulário</Link>
