@@ -1,0 +1,17 @@
+{
+  "code": 200,
+  "code_message": "Sucesso",
+  "data": [
+    {
+      "tipo_certidao": "Negativa",
+      "codigo_controle": "AB12.CD34.5678.9012",
+      "cnpj_cpf": "52998224725",
+      "nome": "MARIA APARECIDA DE SOUZA",
+      "situacao": "Regular",
+      "data_emissao": "14/04/2026",
+      "hora_emissao": "15:32:40",
+      "data_validade": "14/10/2026"
+    }
+  ],
+  "site_receipts": ["https://example.com/receipt_pgfn_neg.pdf"]
+}

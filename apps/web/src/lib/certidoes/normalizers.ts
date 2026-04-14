@@ -71,8 +71,16 @@ function cndtExtractor(resp: InfosimplesResponse): NormalizedResult {
       : "negativa";
   return {
     situacao,
-    validade: asString(d.data_validade) ?? null,
-    emissao: asString(d.data_emissao) ?? null,
+    validade:
+      asString(d.normalizado_validade) ??
+      asString(d.validade) ??
+      asString(d.data_validade) ??
+      null,
+    emissao:
+      asString(d.emissao_data) ??
+      asString(d.expedicao) ??
+      asString(d.data_emissao) ??
+      null,
     detalhes: asString(d.mensagem) ?? null,
     consta_debito: consta === true,
     raw: d,

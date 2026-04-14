@@ -1,0 +1,13 @@
+{
+  "code": 200,
+  "code_message": "Sucesso",
+  "data": [
+    {
+      "cpf_cnpj": "52998224725",
+      "nome": "MARIA APARECIDA DE SOUZA",
+      "data_consulta": "14/04/2026",
+      "protestos": []
+    }
+  ],
+  "site_receipts": ["https://example.com/receipt_cenprot.pdf"]
+}

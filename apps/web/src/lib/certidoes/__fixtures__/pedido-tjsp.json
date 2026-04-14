@@ -1,0 +1,12 @@
+{
+  "code": 200,
+  "code_message": "Pedido criado com sucesso",
+  "data": [
+    {
+      "numero_pedido": "20260414-001234",
+      "status": "em_processamento",
+      "protocolo": "TJSP-CERT-2026-001234"
+    }
+  ],
+  "site_receipts": []
+}

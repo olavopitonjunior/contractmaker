@@ -1,0 +1,14 @@
+{
+  "code": 200,
+  "code_message": "Sucesso",
+  "data": [
+    {
+      "tipo_certidao": "Positiva com Efeitos de Negativa",
+      "cnpj_cpf": "52998224725",
+      "nome": "MARIA APARECIDA DE SOUZA",
+      "data_emissao": "14/04/2026",
+      "data_validade": "14/10/2026"
+    }
+  ],
+  "site_receipts": ["https://example.com/receipt_pgfn_pos.pdf"]
+}

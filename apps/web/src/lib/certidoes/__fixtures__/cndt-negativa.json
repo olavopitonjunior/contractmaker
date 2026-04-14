@@ -1,0 +1,28 @@
+{
+  "code": 200,
+  "code_message": "A requisição foi processada com sucesso.",
+  "data": [
+    {
+      "certidao": "39264592/2026",
+      "certidao_codigo": "39264592/2026",
+      "cnpj": "",
+      "conseguiu_emitir_certidao_negativa": true,
+      "consta": false,
+      "cpf": "529.982.247-25",
+      "emissao_data": "14/04/2026",
+      "expedicao": "14/04/2026, às 16:42:30",
+      "mensagem": "CERTIDÃO NEGATIVA DE DÉBITOS TRABALHISTAS",
+      "nome": "",
+      "normalizado_cnpj": "",
+      "normalizado_cpf": "52998224725",
+      "normalizado_expedicao": "14/04/2026 16:42:30",
+      "normalizado_validade": "11/10/2026",
+      "processos_encontrados": [],
+      "total_de_processos": "",
+      "validade": "11/10/2026",
+      "validade_data": "11/10/2026",
+      "site_receipt": "https://example.com/receipt_cndt.pdf"
+    }
+  ],
+  "site_receipts": ["https://example.com/receipt_cndt.pdf"]
+}

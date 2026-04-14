@@ -1,0 +1,17 @@
+{
+  "code": 200,
+  "code_message": "Sucesso",
+  "data": [
+    {
+      "trf1": { "conseguiu_emitir_certidao_negativa": true, "mensagem": "Negativa" },
+      "trf2": { "conseguiu_emitir_certidao_negativa": true, "mensagem": "Negativa" },
+      "trf3": { "conseguiu_emitir_certidao_negativa": true, "mensagem": "Negativa" },
+      "trf4": { "conseguiu_emitir_certidao_negativa": true, "mensagem": "Negativa" },
+      "trf5": { "conseguiu_emitir_certidao_negativa": true, "mensagem": "Negativa" },
+      "trf6": { "conseguiu_emitir_certidao_negativa": true, "mensagem": "Negativa" },
+      "data_emissao": "14/04/2026",
+      "data_validade": "14/10/2026"
+    }
+  ],
+  "site_receipts": ["https://example.com/receipt_trf.pdf"]
+}

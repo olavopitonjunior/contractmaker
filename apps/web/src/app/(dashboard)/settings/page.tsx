@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { AgentSettings } from "@/components/settings/AgentSettings";
-import { BookOpen, Palette, Lightbulb } from "lucide-react";
+import { BookOpen, Palette, Lightbulb, ShieldCheck } from "lucide-react";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -38,6 +38,12 @@ export default async function SettingsPage() {
             <Link href="/clauses/proposals">
               <Lightbulb className="h-4 w-4 mr-1" />
               Propostas de Cláusulas
+            </Link>
+          </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/settings/certidoes">
+              <ShieldCheck className="h-4 w-4 mr-1" />
+              Certidões
             </Link>
           </Button>
         </div>

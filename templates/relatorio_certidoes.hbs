@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Relatório de Due Diligence — {{deal.title}}</title>
+<style>
+  @page { margin: 20mm 18mm; }
+  body { font-family: 'Helvetica', Arial, sans-serif; font-size: 11pt; color: #111; line-height: 1.4; }
+  h1 { font-size: 18pt; margin: 0 0 4pt; border-bottom: 2px solid #333; padding-bottom: 4pt; }
+  h2 { font-size: 13pt; margin: 18pt 0 6pt; color: #222; }
+  h3 { font-size: 11pt; margin: 12pt 0 4pt; color: #444; }
+  .meta { color: #666; font-size: 9pt; margin-bottom: 16pt; }
+  table { width: 100%; border-collapse: collapse; margin: 6pt 0 12pt; font-size: 9.5pt; }
+  th, td { border: 1px solid #ccc; padding: 4pt 6pt; text-align: left; vertical-align: top; }
+  th { background: #f3f3f3; font-weight: 600; }
+  .status-negativa { color: #0a7a2f; font-weight: 600; }
+  .status-positiva { color: #b42318; font-weight: 600; }
+  .status-nao_emitida { color: #a46200; font-weight: 600; }
+  .status-failed { color: #b42318; font-weight: 600; }
+  .status-skipped { color: #666; font-style: italic; }
+  .summary { background: #f7f8fa; padding: 10pt 12pt; border-left: 3px solid #333; margin: 6pt 0 18pt; }
+  .footer { margin-top: 32pt; padding-top: 12pt; border-top: 1px solid #ccc; font-size: 9pt; color: #666; }
+  .pendencias { background: #fff6e5; padding: 8pt 12pt; border-left: 3px solid #ea8a00; margin: 6pt 0 12pt; }
+</style>
+</head>
+<body>
+
+<h1>Relatório de Due Diligence</h1>
+<div class="meta">
+  <strong>Negócio:</strong> {{deal.title}}<br>
+  <strong>Data de emissão:</strong> {{dataEmissao}}<br>
+  <strong>Responsável:</strong> {{responsavel}}
+</div>
+
+<div class="summary">
+  <strong>Resumo do lote:</strong><br>
+  Total de certidões: {{total}} ·
+  Negativas: {{sucessoNegativa}} ·
+  Com débito/pendência: {{positivas}} ·
+  Falhas: {{falhas}} ·
+  Puladas: {{puladas}}<br>
+  <strong>Custo:</strong> R$ {{custoReais}} &middot; <strong>Latência média:</strong> {{latenciaSegundos}}s
+</div>
+
+{{#if partes.length}}
+<h2>Partes</h2>
+{{#each partes}}
+<h3>{{this.label}}</h3>
+<table>
+  <thead>
+    <tr><th style="width:34%">Certidão</th><th style="width:20%">Situação</th><th style="width:18%">Validade</th><th>Detalhes</th></tr>
+  </thead>
+  <tbody>
+  {{#each this.jobs}}
+    <tr>
+      <td>{{this.label}}</td>
+      <td class="status-{{this.statusKey}}">{{this.statusTexto}}</td>
+      <td>{{this.validade}}</td>
+      <td>{{this.detalhes}}</td>
+    </tr>
+  {{/each}}
+  </tbody>
+</table>
+{{/each}}
+{{/if}}
+
+{{#if imoveis.length}}
+<h2>Imóveis</h2>
+{{#each imoveis}}
+<h3>{{this.label}}</h3>
+<table>
+  <thead>
+    <tr><th style="width:34%">Certidão</th><th style="width:20%">Situação</th><th style="width:18%">Validade</th><th>Detalhes</th></tr>
+  </thead>
+  <tbody>
+  {{#each this.jobs}}
+    <tr>
+      <td>{{this.label}}</td>
+      <td class="status-{{this.statusKey}}">{{this.statusTexto}}</td>
+      <td>{{this.validade}}</td>
+      <td>{{this.detalhes}}</td>
+    </tr>
+  {{/each}}
+  </tbody>
+</table>
+{{/each}}
+{{/if}}
+
+{{#if pendencias.length}}
+<div class="pendencias">
+  <strong>Pendências que requerem atenção:</strong>
+  <ul>
+    {{#each pendencias}}
+    <li>{{this}}</li>
+    {{/each}}
+  </ul>
+</div>
+{{/if}}
+
+<div class="footer">
+  Relatório gerado automaticamente pelo Contractmaker a partir de chamadas à API Infosimples.
+  Este documento não substitui as certidões originais (PDFs anexados ao negócio).
+</div>
+
+</body>
+</html>

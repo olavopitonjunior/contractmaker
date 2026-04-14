@@ -1,0 +1,15 @@
+{
+  "code": 200,
+  "code_message": "Sucesso",
+  "data": [
+    {
+      "sql": "123.456.0789-0",
+      "situacao": "Negativa",
+      "tipo_certidao": "Negativa",
+      "consta_debito": false,
+      "data_emissao": "14/04/2026",
+      "data_validade": "14/06/2026"
+    }
+  ],
+  "site_receipts": ["https://example.com/receipt_iptu_sp.pdf"]
+}
