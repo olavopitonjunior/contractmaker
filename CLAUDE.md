@@ -10,7 +10,7 @@ Plataforma de gestao de vendas e contratos imobiliarios. Esteira completa: Formu
 - **DB:** PostgreSQL + Prisma ORM
 - **Editor:** TipTap (ProseMirror) para edicao de contratos
 - **Kanban:** @dnd-kit/core + @dnd-kit/sortable
-- **AI:** Anthropic SDK (Claude) - analise, chat, geracao de clausulas
+- **AI:** Anthropic SDK (Claude) - agent do chat, analise, geracao de clausulas | Google GenAI SDK (Gemini 2.5 Flash) - OCR do upload de documentos
 - **Template:** Handlebars com helpers brasileiros (moeda, cpf, cnpj, cep, dataExtenso, extenso)
 - **PDF:** puppeteer-core + @sparticuz/chromium (Vercel-compatible)
 - **DOCX:** html-to-docx
@@ -175,11 +175,12 @@ O formulario publico (`/f/[token]`) agora comeca pela **Etapa 0 - Documentos** (
 - `POST /api/forms/[token]/attachments/[id]/extract` — baixa buffer, chama `classifyAndExtract`, persiste `category` + `extractedData` no FormAttachment. Cache: se ja tem extractedData, retorna sem refazer. `maxDuration = 60`.
 
 **OCR engine:** `lib/ai/ocr.ts`
-- `classifyAndExtract(base64, mimeType): Promise<ExtractionResult>` — **uma unica chamada Haiku** que classifica + extrai em um JSON combinado `{tipo, campos, confidence}`. Corta custo pela metade vs `extractDocumentData` antigo (que fazia 2 chamadas).
-- Suporta **imagens nativas** E **PDFs nativos** via `type: "document"` (sem pdfjs-dist). A funcao helper `buildDocumentBlock(base64, mime)` monta o content block certo.
-- Modelo default: `claude-haiku-4-5-20251001` (override via env `OCR_MODEL`).
-- Categorias validas: `rg | cpf | cnh | matricula | iptu | escritura | procuracao | comprovante_residencia | outro`. O prompt combinado lista os campos esperados por categoria.
-- `classifyDocument` e `extractDocumentData` legacy sao mantidos intocados — ainda usados pelo agent do chat do editor de contrato (tool `extract_document_data`).
+- `classifyAndExtract(base64, mimeType): Promise<ExtractionResult>` — **uma unica chamada Gemini 2.5 Flash** via SDK `@google/genai`. Classifica + extrai em JSON combinado `{tipo, campos, confidence}`. Input/output via `inlineData: {mimeType, data}` — mesmo padrao para imagens e PDFs (sem branching por tipo).
+- Suporta **imagens** (`image/jpeg|png|webp|gif`) E **PDFs nativos** (`application/pdf`) sem necessidade de rasterizacao client-side.
+- Modelo default: `gemini-2.5-flash` (override via env `GEMINI_OCR_MODEL` — alternativas: `gemini-2.5-flash-lite`, `gemini-2.0-flash`).
+- Credencial: `GEMINI_API_KEY` (obter em https://aistudio.google.com/apikey). Lazy client via `getGenAI()` — lanca erro se key ausente.
+- Categorias validas: `rg | cpf | cnh | matricula | iptu | escritura | procuracao | comprovante_residencia | outro`. O `COMBINED_PROMPT` lista os campos esperados por categoria.
+- `classifyDocument` e `extractDocumentData` legacy continuam no arquivo usando Anthropic Claude — sao acionadas pelo tool `extract_document_data` do agent do chat do editor de contrato. O switch para Gemini e **isolado ao fluxo de upload do formulario**.
 
 **Mapeamento OCR → form:** `lib/forms/extracted-to-form.ts`
 - `mapExtractedToForm(extraction, assignment, form, {skipIfDirty})` — le `FIELD_MAP_PERSON` / `FIELD_MAP_IMOVEL` e chama `form.setValue` para cada campo matcheado. Faz coercao (sanitize cpf para 11 digitos, UF para 2 letras uppercase, parse de `endereco_completo` em rua+numero via regex).
@@ -193,7 +194,7 @@ O formulario publico (`/f/[token]`) agora comeca pela **Etapa 0 - Documentos** (
 
 **Schema Prisma:** sem migrations novas. `FormAttachment { id, formId, filename, mime, url, category, extractedData Json? }` ja existia com os campos necessarios. O `extractedData` guarda `{fields: {...}, confidence: number, assignment?: {kind, index}}`.
 
-**Custo estimado:** Haiku 4.5 ~US$ 1/MT input + US$ 5/MT output. Doc tipico ~1.5K input (img resized) + ~300 output ≈ US$ 0,003/doc. Form com 8 docs ≈ **US$ 0,024/form**.
+**Custo estimado:** Gemini 2.5 Flash ~US$ 0,30/MT input + US$ 2,50/MT output. Doc tipico ~1.3K input (img resized) + ~300 output ≈ US$ 0,0013/doc. Form com 8 docs ≈ **US$ 0,01/form** (58% mais barato que Haiku 4.5).
 
 ## Revisao pre-aprovacao
 `POST /api/contracts/[id]/approve` roda: `validateContractData` + conta `ContractSuggestion` pendentes + `ContractComment` nao-resolvidos (e severity error). Se houver issues, retorna `{requiresReview: true, canForce, issues, errorCount, warningCount, pendingSuggestions, unresolvedComments}`. Frontend abre `ApprovalReviewDialog` com botoes "Revisar" e "Aprovar mesmo assim" (este ultimo oculto quando `canForce=false`, ou seja, quando ha errors). Segunda chamada com `{force: true}` pula validacoes e aprova.
@@ -217,7 +218,7 @@ O formulario publico (`/f/[token]`) agora comeca pela **Etapa 0 - Documentos** (
 - `/api/forms/[token]` - GET dados, PATCH auto-save
 - `/api/forms/[token]/attachments` - GET/POST/PATCH/DELETE anexos do form
 - `/api/forms/[token]/attachments/[id]/file` - serve o binario para o browser
-- `/api/forms/[token]/attachments/[id]/extract` - OCR (roda Haiku, persiste extractedData)
+- `/api/forms/[token]/attachments/[id]/extract` - OCR via Gemini 2.5 Flash, persiste extractedData
 - `/login`, `/register`
 
 ## Alertas

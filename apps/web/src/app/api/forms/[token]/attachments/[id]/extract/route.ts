@@ -41,9 +41,9 @@ export async function POST(
     });
   }
 
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env.GEMINI_API_KEY) {
     return NextResponse.json(
-      { error: "OCR indisponivel: ANTHROPIC_API_KEY nao configurada" },
+      { error: "OCR indisponivel: GEMINI_API_KEY nao configurada" },
       { status: 503 }
     );
   }

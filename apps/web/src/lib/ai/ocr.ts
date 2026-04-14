@@ -1,7 +1,20 @@
 import { Anthropic } from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
 import type { ExtractionResult } from "./types";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+let genaiClient: GoogleGenAI | null = null;
+function getGenAI(): GoogleGenAI {
+  if (!genaiClient) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("GEMINI_API_KEY nao configurada");
+    }
+    genaiClient = new GoogleGenAI({ apiKey });
+  }
+  return genaiClient;
+}
 
 const EXTRACTION_PROMPTS: Record<string, string> = {
   rg: `Extraia os seguintes dados desta imagem de RG (Registro Geral) brasileiro:
@@ -136,65 +149,32 @@ const VALID_CATEGORIES = [
   "outro",
 ];
 
-const IMAGE_MIMES = new Set(["image/jpeg", "image/png", "image/webp", "image/gif"]);
-
-type ContentBlock =
-  | {
-      type: "image";
-      source: {
-        type: "base64";
-        media_type: "image/jpeg" | "image/png" | "image/webp" | "image/gif";
-        data: string;
-      };
-    }
-  | {
-      type: "document";
-      source: { type: "base64"; media_type: "application/pdf"; data: string };
-    }
-  | { type: "text"; text: string };
-
-function buildDocumentBlock(base64: string, mimeType: string): ContentBlock {
-  if (mimeType === "application/pdf") {
-    return {
-      type: "document",
-      source: {
-        type: "base64",
-        media_type: "application/pdf",
-        data: base64,
-      },
-    };
-  }
-  if (IMAGE_MIMES.has(mimeType)) {
-    return {
-      type: "image",
-      source: {
-        type: "base64",
-        media_type: mimeType as "image/jpeg" | "image/png" | "image/webp" | "image/gif",
-        data: base64,
-      },
-    };
-  }
-  throw new Error(`Mime type nao suportado para OCR: ${mimeType}`);
-}
+const SUPPORTED_OCR_MIMES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "application/pdf",
+]);
 
 export async function classifyAndExtract(
   base64Data: string,
   mimeType: string
 ): Promise<ExtractionResult> {
-  const docBlock = buildDocumentBlock(base64Data, mimeType);
+  if (!SUPPORTED_OCR_MIMES.has(mimeType)) {
+    throw new Error(`Mime type nao suportado para OCR: ${mimeType}`);
+  }
 
-  const response = await anthropic.messages.create({
-    model: process.env.OCR_MODEL || "claude-haiku-4-5-20251001",
-    max_tokens: 1024,
-    messages: [
-      {
-        role: "user",
-        content: [docBlock, { type: "text", text: COMBINED_PROMPT }] as never,
-      },
+  const ai = getGenAI();
+  const response = await ai.models.generateContent({
+    model: process.env.GEMINI_OCR_MODEL || "gemini-2.5-flash",
+    contents: [
+      { text: COMBINED_PROMPT },
+      { inlineData: { mimeType, data: base64Data } },
     ],
   });
 
-  const text = response.content[0].type === "text" ? response.content[0].text : "{}";
+  const text = response.text ?? "{}";
 
   let tipo = "outro";
   let fields: Record<string, unknown> = {};
