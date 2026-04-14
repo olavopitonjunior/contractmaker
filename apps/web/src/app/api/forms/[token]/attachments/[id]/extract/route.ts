@@ -3,6 +3,18 @@ import { prisma } from "@/lib/db/prisma";
 import { downloadBufferFromUrl } from "@/lib/storage/s3";
 import { classifyAndExtract } from "@/lib/ai/ocr";
 
+async function fetchBuffer(url: string): Promise<Buffer> {
+  if (url.startsWith("https://") || url.startsWith("http://")) {
+    const res = await fetch(url);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status} ao baixar blob: ${url}`);
+    }
+    const arr = await res.arrayBuffer();
+    return Buffer.from(arr);
+  }
+  return downloadBufferFromUrl(url);
+}
+
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
@@ -56,7 +68,7 @@ export async function POST(
   }
 
   try {
-    const buffer = await downloadBufferFromUrl(attachment.url);
+    const buffer = await fetchBuffer(attachment.url);
     const base64 = buffer.toString("base64");
     const result = await classifyAndExtract(base64, attachment.mime);
 

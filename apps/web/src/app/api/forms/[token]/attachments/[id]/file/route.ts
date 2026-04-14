@@ -24,6 +24,10 @@ export async function GET(
     return NextResponse.json({ error: "Attachment not found" }, { status: 404 });
   }
 
+  if (attachment.url.startsWith("https://")) {
+    return NextResponse.redirect(attachment.url, 302);
+  }
+
   try {
     const buffer = await downloadBufferFromUrl(attachment.url);
     return new NextResponse(buffer as unknown as BodyInit, {

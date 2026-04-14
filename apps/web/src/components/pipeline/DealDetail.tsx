@@ -7,9 +7,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2 } from "lucide-react";
+import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2, ShieldCheck } from "lucide-react";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
 import type { Assignment, DocumentKind } from "@/lib/forms/extracted-to-form";
+import { CertidoesTab } from "@/components/pipeline/CertidoesTab";
 import { toast } from "sonner";
 import Link from "next/link";
 import {
@@ -229,6 +230,10 @@ export function DealDetail({ deal }: DealDetailProps) {
           <TabsTrigger value="anexos">
             Documentos ({(deal.form?.attachments.length ?? 0) || deal.attachments.length})
           </TabsTrigger>
+          <TabsTrigger value="certidoes">
+            <ShieldCheck className="h-3.5 w-3.5 mr-1" />
+            Certidões
+          </TabsTrigger>
           <TabsTrigger value="contratos">
             Contratos ({deal.contracts.length} {deal.contracts.length === 1 ? "versão" : "versões"})
           </TabsTrigger>
@@ -367,6 +372,15 @@ export function DealDetail({ deal }: DealDetailProps) {
             formAttachments={deal.form?.attachments ?? []}
             formToken={deal.form?.token ?? null}
             fallbackAttachments={deal.attachments}
+          />
+        </TabsContent>
+
+        <TabsContent value="certidoes" className="mt-4">
+          <CertidoesTab
+            dealId={deal.id}
+            vendedores={vendedores}
+            compradores={compradores}
+            imoveis={imoveis}
           />
         </TabsContent>
 

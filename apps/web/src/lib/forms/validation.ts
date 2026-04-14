@@ -10,6 +10,7 @@ const pessoaFisicaSchema = z.object({
   profissao: z.string().optional().default(""),
   rg: z.string().optional().default(""),
   cpf: z.string().optional().default(""),
+  data_nascimento: z.string().optional().default(""),
   email: z.string().email("Email invalido").optional().or(z.literal("")),
   endereco: z.string().optional().default(""),
   numero: z.string().optional().default(""),
@@ -84,6 +85,8 @@ export const step3Schema = z.object({
     matricula: z.string().optional().default(""),
     cartorio: z.string().optional().default(""),
     inscricao_iptu: z.string().optional().default(""),
+    sql: z.string().optional().default(""),
+    inscricao_municipal: z.string().optional().default(""),
     descricao: z.string().min(10, "Descreva o imóvel com ao menos 10 caracteres"),
   })).min(1, "Minimo 1 imovel"),
 });

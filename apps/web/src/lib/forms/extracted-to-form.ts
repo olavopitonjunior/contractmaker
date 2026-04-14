@@ -27,8 +27,8 @@ const FIELD_MAP_PERSON: Record<string, string> = {
   titular_nome: "nome",
   rg_numero: "rg",
   cpf_numero: "cpf",
-  naturalidade: "naturalidade",
   data_nascimento: "data_nascimento",
+  naturalidade: "naturalidade",
   filiacao_mae: "filiacao_mae",
   filiacao_pai: "filiacao_pai",
   bairro: "bairro",
@@ -46,6 +46,8 @@ const FIELD_MAP_IMOVEL: Record<string, string> = {
   cep: "cep",
   descricao_imovel: "descricao",
   inscricao_iptu: "inscricao_iptu",
+  sql: "sql",
+  inscricao_municipal: "inscricao_municipal",
   area_total: "area_total",
 };
 

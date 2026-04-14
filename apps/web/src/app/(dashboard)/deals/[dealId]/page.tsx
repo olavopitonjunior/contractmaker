@@ -25,6 +25,7 @@ export default async function DealPage({
         include: { template: { select: { name: true } } },
         orderBy: { version: "desc" },
       },
+      certidaoJobs: { orderBy: { createdAt: "desc" }, take: 1 },
     },
   });
 

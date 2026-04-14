@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { put, del } from "@vercel/blob";
 import { prisma } from "@/lib/db/prisma";
-import { uploadBufferToStorage } from "@/lib/storage/s3";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -76,36 +76,50 @@ export async function POST(
     );
   }
 
-  const buffer = Buffer.from(await file.arrayBuffer());
+  const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
+  if (!blobToken) {
+    return NextResponse.json(
+      { error: "BLOB_READ_WRITE_TOKEN nao configurado — upload indisponivel" },
+      { status: 503 }
+    );
+  }
+
   const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const key = `form-attachments/${form.id}/${Date.now()}-${safeName}`;
+  const pathname = `form-attachments/${form.id}/${Date.now()}-${safeName}`;
 
-  const bucket = process.env.S3_BUCKET;
-  const storageUrl = await uploadBufferToStorage({
-    bucket,
-    key,
-    body: buffer,
-    contentType: file.type,
-  });
+  try {
+    const blob = await put(pathname, file, {
+      access: "public",
+      contentType: file.type,
+      token: blobToken,
+    });
 
-  const attachment = await prisma.formAttachment.create({
-    data: {
-      formId: form.id,
-      filename: file.name,
-      mime: file.type,
-      url: storageUrl,
-      category: null,
-      extractedData: undefined,
-    },
-  });
+    const attachment = await prisma.formAttachment.create({
+      data: {
+        formId: form.id,
+        filename: file.name,
+        mime: file.type,
+        url: blob.url,
+        category: null,
+        extractedData: undefined,
+      },
+    });
 
-  return NextResponse.json({
-    id: attachment.id,
-    filename: attachment.filename,
-    mime: attachment.mime,
-    fileUrl: `/api/forms/${params.token}/attachments/${attachment.id}/file`,
-    createdAt: attachment.createdAt,
-  });
+    return NextResponse.json({
+      id: attachment.id,
+      filename: attachment.filename,
+      mime: attachment.mime,
+      fileUrl: `/api/forms/${params.token}/attachments/${attachment.id}/file`,
+      createdAt: attachment.createdAt,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[form attachment upload]", msg);
+    return NextResponse.json(
+      { error: `Falha no upload: ${msg}` },
+      { status: 500 }
+    );
+  }
 }
 
 export async function PATCH(
@@ -174,6 +188,15 @@ export async function DELETE(
   });
   if (!attachment || attachment.formId !== form.id) {
     return NextResponse.json({ error: "Attachment not found" }, { status: 404 });
+  }
+
+  const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
+  if (blobToken && attachment.url.startsWith("https://")) {
+    try {
+      await del(attachment.url, { token: blobToken });
+    } catch (err) {
+      console.warn("[form attachment delete blob]", err);
+    }
   }
 
   await prisma.formAttachment.delete({ where: { id } });

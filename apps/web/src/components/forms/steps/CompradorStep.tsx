@@ -99,6 +99,14 @@ function PessoaFisicaFields({
           <Input {...form.register(`${prefix}.cpf`)} placeholder="000.000.000-00" />
         </FormField>
 
+        <FormField label="Data de Nascimento">
+          <Input
+            {...form.register(`${prefix}.data_nascimento`)}
+            type="date"
+            placeholder="YYYY-MM-DD"
+          />
+        </FormField>
+
         <FormField label="Email" className="md:col-span-2">
           <Input
             {...form.register(`${prefix}.email`)}

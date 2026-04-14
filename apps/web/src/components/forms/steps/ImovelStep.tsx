@@ -52,6 +52,8 @@ export function ImovelStep({ form }: ImovelStepProps) {
       matricula: "",
       cartorio: "",
       inscricao_iptu: "",
+      sql: "",
+      inscricao_municipal: "",
       descricao: "",
     });
   };
@@ -161,6 +163,20 @@ export function ImovelStep({ form }: ImovelStepProps) {
                   <Input
                     {...form.register(`${prefix}.inscricao_iptu`)}
                     placeholder="Número da inscrição IPTU"
+                  />
+                </FormField>
+
+                <FormField label="SQL (Setor-Quadra-Lote)">
+                  <Input
+                    {...form.register(`${prefix}.sql`)}
+                    placeholder="Necessário para CND IPTU SP"
+                  />
+                </FormField>
+
+                <FormField label="Inscrição Municipal">
+                  <Input
+                    {...form.register(`${prefix}.inscricao_municipal`)}
+                    placeholder="Necessário para CND IPTU RJ"
                   />
                 </FormField>
               </div>

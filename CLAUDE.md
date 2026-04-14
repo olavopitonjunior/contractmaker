@@ -11,7 +11,9 @@ Plataforma de gestao de vendas e contratos imobiliarios. Esteira completa: Formu
 - **Editor:** TipTap (ProseMirror) para edicao de contratos
 - **Kanban:** @dnd-kit/core + @dnd-kit/sortable
 - **AI:** Anthropic SDK (Claude) - agent do chat, analise, geracao de clausulas | Google GenAI SDK (Gemini 2.5 Flash) - OCR do upload de documentos
-- **Template:** Handlebars com helpers brasileiros (moeda, cpf, cnpj, cep, dataExtenso, extenso)
+- **Template:** Handlebars com helpers brasileiros (moeda, cpf, cnpj, cep, dataExtenso, extenso, numero, numeroExtenso, percentual)
+- **RAG:** pgvector (Neon) + Voyage-law-2 embeddings (1024 dim, HNSW cosine) para base de conhecimento juridica
+- **Passive Analysis:** Claude Haiku 4.5 debouncado no editor (analise automatica on-open + on-edit)
 - **PDF:** puppeteer-core + @sparticuz/chromium (Vercel-compatible)
 - **DOCX:** html-to-docx
 - **Storage:** @vercel/blob (primario) + S3 (fallback)
@@ -47,16 +49,18 @@ apps/web/                    # Next.js app principal
                              # ChangeLogPanel, VersionTimeline
       chat/                  # ChatPanel, ChatMessage
       export/                # ExportDialog
-    hooks/                   # useAutoSave, useDebounce
+    hooks/                   # useAutoSave, useDebounce, useAutoAnalyze
     lib/
       auth/                  # NextAuth config
       db/                    # Prisma client
-      ai/                    # Anthropic integration (agent, tools, prompts, validators, ocr)
-      render/                # Handlebars, PDF, DOCX
+      ai/                    # agent, tools (18), tool-handlers, prompts, validators, ocr,
+                             # quickChecks, embeddings (Voyage), chunking, knowledge, memory
+      render/                # Handlebars (helpers moeda/extenso/percentual/...), PDF, DOCX, exporter
       storage/               # Vercel Blob, S3
-      forms/                 # Zod schemas, validation
+      forms/                 # Zod schemas, validation, extracted-to-form mapping
       editor/                # TipTap custom extensions (CommentMark, SuggestionMark,
-                             # PageBreakNode, SearchReplace)
+                             # PageBreakNode, SearchReplace, FontSize, LineHeight,
+                             # TextTransform, FormatPainter)
 templates/                   # Handlebars .hbs files
   contrato_compra_venda.hbs  # Template legado v1 (deprecated)
   ccv_a_vista_v2.hbs         # Template padronizado: pagamento a vista (15 clausulas)
@@ -101,28 +105,45 @@ Templates usam `<!-- CLAUSE_SLOT:Gx -->` como pontos de insercao para clausulas 
 
 Cada clausula tem `agentNotes` (orientacao juridica interna para a IA) e `groupCode` (G1-G6).
 
-## Agente IA (11 tools)
-O agente roda em `src/lib/ai/agent.ts` com loop de tool-use (max 5 iteracoes):
-- **Consulta:** query_clauses (com groupCode/isVariable), query_templates, explain_clause
-- **Edicao:** edit_contract_section, update_contract_data, insert_clause, remove_clause
-- **Analise:** validate_contract, suggest_improvements (detecta G4 obrigatorio, FGTS, socio PJ)
-- **OCR:** extract_document_data
-- **Comentarios:** add_comment (cria comentario lateral ancorado em trecho, severity info/warning/error)
+## Agente IA (18 tools)
+O agente roda em `src/lib/ai/agent.ts` com loop de tool-use (max 5 iteracoes). Todas as tools estao definidas em `src/lib/ai/tools.ts` e handlers em `src/lib/ai/tool-handlers.ts`:
+
+- **Consulta:** `query_clauses` (com groupCode/isVariable), `query_templates`, `explain_clause`
+- **Edicao:** `edit_contract_section`, `update_contract_data`, `insert_clause`, `remove_clause`
+- **Analise:** `validate_contract`, `suggest_improvements`, `analyze_contradictions` (5 checks: matematica, qualificacao, referencia, prazos, clausulas mutuamente exclusivas)
+- **OCR:** `extract_document_data`
+- **Comentarios:** `add_comment` (cria comentario lateral ancorado em trecho, severity info/warning/error)
+- **Base de Conhecimento (RAG):** `query_knowledge_base` (Voyage-law-2 embeddings + pgvector cosine, fallback para keyword search se VOYAGE_API_KEY ausente)
+- **Aprendizado:** `find_similar_contracts` (busca em `ContractMemory` por embedding ou fingerprint)
+- **Modo Propose:** `propose_new_clause` (cria `ClauseProposal` pendente), `propose_template_change` (cria `TemplateSuggestion` pendente — JAMAIS edita `handlebarsSource` direto)
+- **Design System:** `apply_style_preset`, `insert_image` (upload via Vercel Blob, 5MB max)
 
 O `insert_clause` usa CLAUSE_SLOT:Gx para posicionar clausulas semanticamente no template.
 O `suggest_improvements` verifica clausulas obrigatorias por modalidade e dados do contrato.
 O `add_comment` valida que o `selectedText` existe no `htmlContent` antes de ancorar (evita alucinacao).
+`propose_template_change` e `propose_new_clause` tem rate limit (max 5 pendentes/org, 1/dia/template).
 
-System prompt tem 13 regras fundamentais em `src/lib/ai/prompts.ts`. Regra 10 obriga resposta em markdown com secoes `## Alteracoes Realizadas`, `## Justificativa`, `## Verificacao`. Regra 11 prefere modo sugestao (track changes) a edicao direta. Regra 13 obriga placeholders `[preencher X]` quando dados ausentes + `add_comment` warning listando pendencias.
+System prompt tem **18 regras fundamentais** + regra 10.1 (perguntas informativas) em `src/lib/ai/prompts.ts`. Regra 10 obriga resposta em markdown com secoes `## Alteracoes Realizadas`, `## Justificativa`, `## Verificacao`. Regra 10.1 proibe tools de edicao em perguntas informativas (quem/qual/como/...) e exige lista markdown descritiva. Regra 11 prefere modo sugestao (track changes) a edicao direta. Regra 13 obriga placeholders `[preencher X]` quando dados ausentes. Regras 14-18 cobrem prioridade de findings, RAG, aprendizado, modo propose e design system.
 
-## Editor de Contratos (TipTap avancado)
+## Analise Automatica (Phase 3a — autonomia do agente)
+O agente roda passivamente no editor via `useAutoAnalyze.ts` (`apps/web/src/hooks/`):
+- **On-open:** ao carregar um contrato, dispara `POST /api/contracts/[id]/auto-analyze { trigger: 'open' }` usando Sonnet 4.5 para analise profunda
+- **On-edit (debounced):** escuta `editor.on('update')`; apos 30s de idle OU 60s maximo, dispara com `trigger: 'edit'` usando Haiku 4.5 (variavel `ANTHROPIC_PASSIVE_MODEL`)
+- **Quick checks client-safe:** `src/lib/ai/quickChecks.ts` tem 4 checks deterministicos (soma de parcelas, CPF/CNPJ checksum, referencias internas, duplicacao de qualificacao) — rodam primeiro, sem custo de LLM
+- **Dedupe:** `ContractComment.dedupeKey` (hash FNV-1a de authorType+selectedText+text) com `@@unique([contractId, dedupeKey])` previne duplicatas em re-analises
+- **Badge proativo:** `ContractEditorPage` mostra contagem de comments IA nao-resolvidos no botao "Comentarios" com cor/pulsacao baseadas no `maxSeverity`
+- O cliente envia o `htmlContent` atual (editor live state) no body do request para que o servidor nao analise DB stale
+
+## Editor de Contratos (TipTap avancado, Google-Docs-like)
 O editor em `src/components/contracts/ContractEditor.tsx` usa TipTap v3 com:
 - **StarterKit v3** (ja inclui Underline, Link, Strike nativamente)
 - **Table** (resizable) + TableRow/Cell/Header
-- **Highlight** multicolor (amarelo user, verde sugestao IA, vermelho problema)
+- **Highlight** multicolor
 - **TextAlign** (heading + paragraph, inclui justify)
 - **CharacterCount** (rodape mostra "X palavras · Y caracteres")
 - **Typography** (aspas curvas, travessao automatico)
+- **TextStyle + Color + FontFamily** (oficiais) para cor do texto e familia da fonte
+- **Image** (`@tiptap/extension-image`) — upload via `POST /api/contracts/[id]/images` (Vercel Blob, 5MB max)
 - **BubbleMenu** (floating toolbar ao selecionar texto)
 
 Extensoes customizadas em `src/lib/editor/`:
@@ -130,10 +151,20 @@ Extensoes customizadas em `src/lib/editor/`:
 - `CommentMark.ts` — Mark `<span data-comment-id>` com classe `comment-anchor`. Comandos `setCommentMark({commentId})`, `unsetCommentMark(id)`.
 - `SuggestionMark.ts` — Mark `<ins>`/`<del>` para track changes com attrs `{suggestionId, type, authorType}`. Comandos `setInsertionMark`, `setDeletionMark`, `acceptSuggestion(id)`, `rejectSuggestion(id)`.
 - `PageBreakNode.ts` — Node de bloco com CSS `page-break-after: always`. Atalho `Ctrl+Enter`.
+- `FontSize.ts` — TextStyle mark com atributo `fontSize` (valores 8-72pt). Comandos `setFontSize`, `unsetFontSize`, `increaseFontSize`, `decreaseFontSize` (atalhos `Ctrl+Shift+.` / `Ctrl+Shift+,`).
+- `LineHeight.ts` — Extension que adiciona atributo `lineHeight` a nos `paragraph`/`heading`. Valores `[1.0, 1.15, 1.5, 2.0, 2.5, 3.0]`.
+- `TextTransform.ts` — Comando `transformCase('upper'|'lower'|'title'|'sentence')` que substitui destrutivamente o texto da selecao (Ctrl+Z reverte).
+- `FormatPainter.ts` — Storage `{copiedMarks, hasClipboard}`. Atalhos `Ctrl+Alt+C` copia marks da selecao, `Ctrl+Alt+V` aplica no destino.
 
-Toolbar em 6 grupos: Texto (Bold/Italic/Underline/Strike), Headings, Listas (+Indent/Outdent), Alinhamento (+Justify), Inserir (Link/Tabela/HR/PageBreak), Acoes (Undo/Redo/Search). Todos os botoes tem `TooltipProvider` com atalho visivel.
+Toolbar em 7 grupos: **Texto** (Bold/Italic/Underline/Strike), **Fonte** (FontFamily/FontSize/ColorPicker text+highlight), **Headings**, **Listas** (+Indent/Outdent), **Alinhamento** (+Justify/LineHeight/TextTransform/FormatPainter), **Inserir** (Link/Tabela/HR/PageBreak/Image), **Acoes** (Undo/Redo/Search). Todos os botoes tem `TooltipProvider` com atalho visivel. Dropdowns usam Radix com portal — `globals.css` tem regra defensiva `[data-radix-popper-content-wrapper] { z-index: 100 !important }` para flutuar acima da toolbar sticky com backdrop-filter.
 
 BubbleMenu ([EditorBubbleMenu.tsx]) aparece ao selecionar texto: Bold, Italic, Underline, Strike, Link (popover), Highlight, Comentar (balao), botao "IA" laranja. O botao IA chama `onAskAI(text)` que abre o `ChatPanel` pre-populando o input com o trecho como blockquote.
+
+Zoom: controle no rodape (`ZoomControl.tsx`) com steps `[50, 75, 90, 100, 125, 150, 200]%`. Aplicado via `transform: scale()` APENAS no wrapper `.a4-page` (interno), mantendo a toolbar fora do stacking context.
+
+Spellcheck nativo PT-BR: `spellcheck="true" lang="pt-BR"` no elemento contenteditable.
+
+`ContractEditor` expoe prop `onReady(editor)` — chamada uma unica vez quando o TipTap editor fica disponivel. `ContractEditorPage` usa isso para manter o editor em `useState<Editor | null>` (em vez de ler `editorRef.current?.getEditor()` no JSX, que era instavel). O handle via `forwardRef` tambem expoe `applyCommentMarkByText(anchorId, selectedText)` que busca o texto via `doc.descendants` e aplica `CommentMark` — usado para ancorar visualmente comentarios IA criados no servidor sem selecao ativa.
 
 Wrapper visual A4: editor envolvido em `.a4-page` com `width: 794px` (210mm @ 96dpi), `min-height: 1123px`. CSS em `src/app/globals.css`.
 
@@ -196,6 +227,39 @@ O formulario publico (`/f/[token]`) agora comeca pela **Etapa 0 - Documentos** (
 
 **Custo estimado:** Gemini 2.5 Flash ~US$ 0,30/MT input + US$ 2,50/MT output. Doc tipico ~1.3K input (img resized) + ~300 output ≈ US$ 0,0013/doc. Form com 8 docs ≈ **US$ 0,01/form** (58% mais barato que Haiku 4.5).
 
+## Base de Conhecimento RAG (Phase 3c)
+**Schema:** `KnowledgeItem { id, orgId, category, title, content, chunkIndex, chunkTotal, parentId, tags, source, embedding vector(1024) }` — coluna `embedding` criada via migration SQL raw (pgvector nao e nativo no Prisma). Indice HNSW com `vector_cosine_ops`. Categorias: `legislation | model | rule | glossary`.
+
+**Wrapper:** `src/lib/ai/embeddings.ts` — `embed(texts[], inputType)` e `embedOne(text, inputType)` chamam a API Voyage (`voyage-law-2` default). `inputType` aceita `"document"` para indexacao e `"query"` para busca. `isEmbeddingsConfigured()` retorna false se `VOYAGE_API_KEY` ausente.
+
+**Chunking:** `src/lib/ai/chunking.ts` divide documentos grandes em chunks ~800 tokens com overlap 100 (parent/child relationship via `parentId`).
+
+**Tool `query_knowledge_base`:** usa pgvector via `$queryRawUnsafe` com operador `<=>`. Se embeddings nao configurados, faz fallback keyword search via Prisma ILIKE. Retorna `{results, mode: "semantic"|"keyword"}`.
+
+**UI:** `/settings/knowledge-base` com 5 tabs (Todas + 4 categorias), filtro, botao "Testar RAG" que mostra similarity score. Forms de criacao/edicao via Sheet. Upload de PDF/DOCX roda OCR (Gemini Flash) + chunking + embedding em background.
+
+## Aprendizado e Modo Propose (Phase 3d)
+**Memoria de contratos aprovados:** hook fire-and-forget em `POST /api/contracts/[id]/approve` chama `createContractMemory(contractId)` apos aprovacao. Salva em `ContractMemory { id, orgId, contractId, templateId, dataFingerprint Json, summary, acceptedSuggestions Json, rejectedSuggestions Json, manualEdits Json, embedding vector(1024) }`. Summary gerado por Haiku 4.5. Fingerprint inclui modalidade, estado civil, faixa de valor, etc. Incrementa `usageCount` nas clausulas utilizadas.
+
+**Tool `find_similar_contracts`:** busca por embedding (semantico) se Voyage disponivel, senao fallback por similaridade de `dataFingerprint`. Retorna top-3 com summary, acceptedSuggestions, rejectedSuggestions, manualEditsSnippets — o agente cita nos dialogos "Na sua organizacao, em 3 contratos similares, voce costuma usar X".
+
+**Modo Propose (NUNCA edita templates/biblioteca direto):**
+- `ClauseProposal { id, orgId, title, content, reason, groupCode, category, tags, status }` — sugestao de nova clausula para a biblioteca. UI em `/clauses/proposals` com tabs Pendentes/Resolvidas. Aprovar cria `Clause` com `source: "ai_proposal"`.
+- `TemplateSuggestion { id, templateId, orgId, authorType, reason, diffHunks Json, evidence Json, status }` — mudanca proposta no `handlebarsSource` de um template. UI em `/templates/[id]/suggestions` com diff viewer verde/vermelho. Aprovar aplica os hunks ao `handlebarsSource` e incrementa `templateVersion`.
+- Rate limit: max 5 pendentes por org/template, 1 nova/dia/template.
+- Hunks sao validados contra o source atual antes de aceitar — hunk invalido (`before` nao existe mais) e marcado como stale.
+
+## Design System (Phase 3e)
+**Schema:** `DocumentStyle { id, orgId, name, isDefault, fontFamily, fontSizeBase, lineHeight, marginTopMm/Bottom/Left/Right, colorPrimary, colorAccent, headerHtml, footerHtml, pageNumbers, includeToc }`.
+
+**UI:** `/settings/document-styles` com CRUD e preview ao vivo (`StylePreview` component mostra amostra do estilo em tempo real). Um preset por org pode ser `isDefault=true`.
+
+**Aplicacao em export:** `apps/web/src/app/api/contracts/[id]/export/route.ts` carrega o `DocumentStyle` default da org e passa para `exportPdf(html, path, 'A4', styleExport)` em `lib/render/exporter.ts`. O Puppeteer aplica `margin`, `headerTemplate`, `footerTemplate`, `displayHeaderFooter` e wrapa o HTML com `<style>` contendo fontFamily, fontSizeBase, lineHeight, colorPrimary. Numeros de pagina via `<span class="pageNumber"></span> / <span class="totalPages"></span>` no footer default.
+
+**Tool `apply_style_preset`:** aplica o preset ao contrato inteiro ou secao via wrapper `<div class="document-style-preset">`. Tool `insert_image` recebe url + alt + width + alignment e insere bloco `<p><img>` no editor.
+
+**Sumario (TOC):** `TableOfContents.tsx` le `editor.state.doc` coletando headings (h1/h2/h3) e gera lista clicavel. Acessivel via botao no header do editor.
+
 ## Revisao pre-aprovacao
 `POST /api/contracts/[id]/approve` roda: `validateContractData` + conta `ContractSuggestion` pendentes + `ContractComment` nao-resolvidos (e severity error). Se houver issues, retorna `{requiresReview: true, canForce, issues, errorCount, warningCount, pendingSuggestions, unresolvedComments}`. Frontend abre `ApprovalReviewDialog` com botoes "Revisar" e "Aprovar mesmo assim" (este ultimo oculto quando `canForce=false`, ou seja, quando ha errors). Segunda chamada com `{force: true}` pula validacoes e aprova.
 
@@ -206,12 +270,15 @@ O formulario publico (`/f/[token]`) agora comeca pela **Etapa 0 - Documentos** (
 4. Usuario clica "Confeccionar Contrato" -> auto-detecta modalidade -> seleciona template v2 -> renderiza com dados
 5. Usuario edita no TipTap ou via chat IA. Opcoes no editor:
    - Selecao + BubbleMenu: bold/italic/underline/link/highlight/comentar/IA
+   - Toolbar: font family, font size, cor do texto, cor de destaque, line height, transformar caixa, format painter, zoom
    - `Ctrl+F`: Find & Replace
    - `Ctrl+Enter`: quebra de pagina manual
    - Comentarios laterais com anchor no texto (usuario ou IA via `add_comment`)
    - Sugestoes da IA entram como track changes (aceitar/rejeitar individual ou em lote)
-6. Ao clicar "Aprovar": revisao pre-aprovacao roda validate + conta issues. Se houver pendencias, abre `ApprovalReviewDialog`. Usuario pode forcar aprovacao (se nao houver errors).
-7. Contratos aprovados sao imutaveis: chat/edicao/comentarios/versionamento bloqueados. Pode exportar PDF/DOCX.
+   - **Analise automatica**: ao abrir, Sonnet 4.5 analisa o contrato e popula comentarios IA com findings (matematica, qualificacao, referencias, prazos). Durante edicao, Haiku 4.5 re-analisa apos 30s de idle (debounced). Badge no botao "Comentarios" mostra contagem e severity.
+   - **Chat IA com RAG**: perguntas informativas ("quais clausulas existem?") geram resposta em markdown descritivo sem tools de edicao (regra 10.1). Comandos ("altere multa para 8%") usam tools de edicao com resposta estruturada "## Alteracoes / ## Justificativa / ## Verificacao".
+6. Ao clicar "Aprovar": revisao pre-aprovacao roda validate + conta issues. Se houver pendencias, abre `ApprovalReviewDialog`. Usuario pode forcar aprovacao (se nao houver errors). Apos aprovacao, `createContractMemory` roda em background (fire-and-forget) e o contrato vira memoria de longo prazo do agente.
+7. Contratos aprovados sao imutaveis: chat/edicao/comentarios/versionamento bloqueados. Pode exportar PDF/DOCX (com `DocumentStyle` default aplicado: fontes, margens, header/footer, numeracao de paginas).
 
 ## Rotas Publicas (sem auth)
 - `/f/[token]` - formulario de vendas (inclui Etapa 0 de upload de documentos)
@@ -223,11 +290,16 @@ O formulario publico (`/f/[token]`) agora comeca pela **Etapa 0 - Documentos** (
 
 ## Alertas
 - Puppeteer requer Vercel Pro (timeout 60s). CSS `@media print` em `globals.css` garante que page breaks manuais aparecem no PDF.
-- Handlebars helpers em `src/lib/render/handlebars.ts` NAO devem ser alterados
+- Handlebars helpers em `src/lib/render/handlebars.ts` sao aditivos — novos helpers podem ser adicionados, mas helpers existentes NAO devem ser alterados (quebra contratos antigos).
 - TipTap edita HTML direto; re-render do Handlebars sobrescreve edicoes manuais (incluindo comment anchors e suggestion marks)
 - Marks customizadas (`CommentMark`, `SuggestionMark`) persistem como HTML (`<span data-comment-id>`, `<ins>/<del>`). Preservam entre reloads desde que o editor nao regenere a partir do template.
 - Forms publicos NAO requerem auth - qualquer um com o link pode editar
 - Template legado v1 (`contrato_compra_venda.hbs`) esta deprecated mas mantido para contratos existentes
 - Contratos aprovados sao imutaveis: chat bloqueado, versionamento bloqueado, comentarios/sugestoes bloqueados. API retorna 403 em POST.
 - `@tiptap/extension-search-and-replace` NAO existe no registro oficial — a extensao custom em `lib/editor/SearchReplace.ts` substitui essa dependencia.
-- Ao modificar `ContractEditor.tsx`, preservar o `forwardRef<ContractEditorHandle>` — `ContractEditorPage` depende do handle para aplicar marks apos POST.
+- Ao modificar `ContractEditor.tsx`, preservar o `forwardRef<ContractEditorHandle>` (expoe `applyCommentMark`, `applyCommentMarkByText`, `removeCommentMark`, `scrollToComment`, `focus`, `getHTML`, `getEditor`) e a prop `onReady(editor)` — `ContractEditorPage` depende do handle e do state do editor para `useAutoAnalyze` e aplicacao de comment marks IA.
+- Mudancas em templates (`handlebarsSource`) e biblioteca de clausulas JAMAIS devem ser aplicadas direto pelo agente — SEMPRE via `propose_template_change` / `propose_new_clause` (modo Propose com revisao humana).
+- pgvector (coluna `embedding vector(1024)`) exige Neon plan Standard+ e migration SQL raw. Prisma NAO tem tipo nativo `vector` — inserts/updates usam `$executeRawUnsafe`, queries usam `$queryRawUnsafe` com operador `<=>`.
+- `VOYAGE_API_KEY` opcional: se ausente, `query_knowledge_base` e `find_similar_contracts` fazem fallback para keyword search / fingerprint similarity.
+- Analise passiva (`useAutoAnalyze`) envia o `htmlContent` atual do editor no body da request — servidor usa `params.htmlOverride` em vez do DB para ver o estado vivo durante edicao.
+- Upload de imagens em `/api/contracts/[id]/images` limita 5MB e valida `ALLOWED_TYPES = [image/jpeg, image/png, image/webp]`. Requer `BLOB_READ_WRITE_TOKEN` no env.
