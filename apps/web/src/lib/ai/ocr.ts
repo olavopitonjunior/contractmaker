@@ -165,7 +165,7 @@ export async function classifyDocument(
 const COMBINED_PROMPT = `Voce e um especialista em documentos brasileiros. Analise o documento anexo e retorne APENAS um JSON valido no formato:
 {"tipo": "<categoria>", "campos": { ... }, "confidence": <0-1>}
 
-Categorias validas: "rg", "cpf", "cnh", "matricula", "iptu", "escritura", "procuracao", "comprovante_residencia", "outro".
+Categorias validas: "rg", "cpf", "cnh", "matricula", "iptu", "escritura", "procuracao", "comprovante_residencia", "certidao_casamento", "outro".
 
 Campos esperados por categoria:
 - rg: nome_completo, rg_numero, orgao_expedidor, data_nascimento (YYYY-MM-DD), naturalidade, filiacao_mae, filiacao_pai
@@ -176,6 +176,7 @@ Campos esperados por categoria:
 - escritura: vendedor_nome, comprador_nome, valor_transacao, data_lavratura, cartorio, endereco_imovel, matricula_referenciada
 - procuracao: outorgante_nome, outorgante_cpf, outorgado_nome, outorgado_cpf, poderes_resumo, data_lavratura, prazo_validade
 - comprovante_residencia: titular_nome, endereco_completo, bairro, cidade, uf, cep, emissor (ex: concessionaria de energia, agua, telefone)
+- certidao_casamento: conjuge1_nome, conjuge1_cpf, conjuge2_nome, conjuge2_cpf, data_casamento, regime_bens (literal, ex: "Comunhao parcial de bens"), cartorio, data_lavratura
 - outro: inclua todos os dados relevantes encontrados (nomes, cpf, cnpj, enderecos, valores, datas)
 
 Regras:
@@ -194,6 +195,7 @@ const VALID_CATEGORIES = [
   "escritura",
   "procuracao",
   "comprovante_residencia",
+  "certidao_casamento",
   "outro",
 ];
 

@@ -11,6 +11,7 @@ import {
   mapExtractedToForm,
   suggestAssignment,
   type Assignment,
+  type ProcessedDocHint,
 } from "@/lib/forms/extracted-to-form";
 
 interface DocumentosStepProps {
@@ -71,7 +72,10 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
   const [hydrated, setHydrated] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Restore previously uploaded attachments
+  // Restore previously uploaded attachments. Documents without extractedData
+  // are marked as "failed" (instead of the misleading "uploading") so the user
+  // can retry or remove them — they have been uploaded but never extracted,
+  // which almost always means the last extraction attempt hit a 500/timeout.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -85,16 +89,20 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
           const extracted = a.extractedData || {};
           const fields = extracted.fields || null;
           const assignment = suggestAssignment(a.category, fields || {}, snapshot);
+          const hasExtraction = !!a.extractedData && !!extracted.fields;
           return {
             id: a.id,
             filename: a.filename,
             mime: a.mime,
             fileUrl: a.fileUrl,
-            status: a.extractedData ? "ready" : "uploading",
+            status: hasExtraction ? "ready" : "failed",
             category: a.category,
             fields,
             confidence: typeof extracted.confidence === "number" ? extracted.confidence : null,
             assignment,
+            error: hasExtraction
+              ? null
+              : "Extração pendente — clique em Tentar novamente ou remova o documento",
           };
         });
         setDocs(restored);
@@ -130,7 +138,23 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
         const extracted = data.extractedData || {};
         const fields = extracted.fields || {};
         const snapshot = form.getValues();
-        const assignment = suggestAssignment(data.category, fields, snapshot);
+        // Pass the already-processed sibling docs so suggestAssignment can
+        // distinguish "same person" (same CPF → same slot) from "different
+        // person" (different CPF → next slot). This is what prevents two
+        // different RGs from both ending up on vendedor[0].
+        const siblings: ProcessedDocHint[] = docs
+          .filter((d) => d.id !== doc.id && d.status === "ready" && d.fields)
+          .map((d) => ({
+            category: d.category,
+            fields: d.fields,
+            assignment: d.assignment,
+          }));
+        const assignment = suggestAssignment(
+          data.category,
+          fields,
+          snapshot,
+          siblings
+        );
         updateDoc(doc.id, {
           status: "ready",
           category: data.category,
@@ -145,7 +169,7 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
         });
       }
     },
-    [token, form, updateDoc]
+    [token, form, updateDoc, docs]
   );
 
   const handleFiles = useCallback(
@@ -307,6 +331,10 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
   const snapshot = form.getValues();
   const assignmentOptions = buildAssignmentOptions(snapshot);
   const readyCount = docs.filter((d) => d.status === "ready").length;
+  // Only block "Aplicar aos campos" while files are still UPLOADING. Extractions
+  // can take up to 60s per file (Gemini) and one failed extraction should not
+  // block applying the successful ones.
+  const hasUploading = docs.some((d) => d.status === "uploading");
   const hasPending = docs.some((d) => d.status === "uploading" || d.status === "extracting");
 
   return (
@@ -372,7 +400,7 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
             <Button
               type="button"
               onClick={handleApply}
-              disabled={readyCount === 0 || hasPending}
+              disabled={readyCount === 0 || hasUploading}
               size="sm"
             >
               Aplicar aos campos ({readyCount})

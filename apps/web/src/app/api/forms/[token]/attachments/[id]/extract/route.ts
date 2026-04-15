@@ -93,8 +93,45 @@ export async function POST(
       extractedData: payload,
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[form extract] failed:", msg);
-    return NextResponse.json({ error: `Falha na extracao: ${msg}` }, { status: 500 });
+    const raw = err instanceof Error ? err.message : String(err);
+    console.error("[form extract] failed:", raw);
+    return NextResponse.json(
+      { error: humanizeExtractError(raw) },
+      { status: 500 }
+    );
   }
+}
+
+/**
+ * Converts a raw Gemini/network error into a short user-friendly message.
+ * The raw message often contains a nested JSON like
+ *   "{"error":{"code":500,"message":"An internal error has occurred..."}}"
+ * which is noise to the end user. This function picks a short diagnostic.
+ */
+function humanizeExtractError(raw: string): string {
+  const lower = raw.toLowerCase();
+  if (lower.includes("safety") || lower.includes("blocked")) {
+    return "O documento foi bloqueado pelo filtro de segurança do OCR. Tente um arquivo diferente.";
+  }
+  if (
+    lower.includes("invalid image") ||
+    lower.includes("unsupported") ||
+    lower.includes("decode")
+  ) {
+    return "Não foi possível ler o arquivo. Verifique se é uma imagem nítida ou um PDF de texto.";
+  }
+  if (lower.includes("timeout") || lower.includes("deadline")) {
+    return "A extração demorou demais. Tente um arquivo menor ou clique em Tentar novamente.";
+  }
+  if (lower.includes("quota") || lower.includes("rate")) {
+    return "Limite de uso da IA atingido temporariamente. Aguarde um minuto e tente novamente.";
+  }
+  if (lower.includes("500") || lower.includes("internal")) {
+    return "O serviço de OCR retornou um erro interno para este arquivo. Tente outro formato ou outro documento.";
+  }
+  // Last-resort fallback — strip anything that looks like JSON
+  const clean = raw.replace(/\{[^}]*\}/g, "").replace(/\s+/g, " ").trim();
+  return clean.length > 0 && clean.length < 200
+    ? `Falha na extração: ${clean}`
+    : "Falha na extração. Tente novamente ou use outro arquivo.";
 }
