@@ -190,14 +190,49 @@ export const step7Schema = z.object({
   }).optional(),
 });
 
-// Full form schema
+// Full form schema — the superRefine enforces that when a physical-person party
+// is married ("Casado(a)" or "União Estável"), both nome and cpf of the conjuge
+// are mandatory. This mirrors the server-side validator in lib/ai/validators.ts
+// so the error surfaces during the form flow (on submit) instead of only at
+// contract approval time, where the user would have lost context.
+const requiresConjuge = (estadoCivil?: string) =>
+  estadoCivil === "Casado(a)" || estadoCivil === "União Estável";
+
 export const dadosContratoSchema = step1Schema
   .merge(step2Schema)
   .merge(step3Schema)
   .merge(step4Schema)
   .merge(step5Schema)
   .merge(step6Schema)
-  .merge(step7Schema);
+  .merge(step7Schema)
+  .superRefine((data, ctx) => {
+    const checkParte = (
+      list: "vendedores" | "compradores",
+      idx: number,
+      parte: z.infer<typeof parteSchema>
+    ) => {
+      if (parte.tipo_pessoa !== "fisica") return;
+      if (!requiresConjuge(parte.estado_civil)) return;
+      const nome = parte.conjuge?.nome?.trim() ?? "";
+      const cpf = parte.conjuge?.cpf?.trim() ?? "";
+      if (nome.length < 2) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Nome do cônjuge obrigatório quando casado(a)",
+          path: [list, idx, "conjuge", "nome"],
+        });
+      }
+      if (cpf.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "CPF do cônjuge obrigatório quando casado(a)",
+          path: [list, idx, "conjuge", "cpf"],
+        });
+      }
+    };
+    data.vendedores.forEach((p, i) => checkParte("vendedores", i, p));
+    data.compradores.forEach((p, i) => checkParte("compradores", i, p));
+  });
 
 export type DadosContratoForm = z.infer<typeof dadosContratoSchema>;
 

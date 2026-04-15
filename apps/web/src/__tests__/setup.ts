@@ -44,6 +44,14 @@ vi.mock("@/lib/db/prisma", () => ({
     dealAttachment: {
       findUnique: vi.fn(),
     },
+    contractSuggestion: {
+      findFirst: vi.fn(),
+      create: vi.fn(),
+    },
+    contractComment: {
+      findFirst: vi.fn(),
+      create: vi.fn(),
+    },
   },
 }));
 

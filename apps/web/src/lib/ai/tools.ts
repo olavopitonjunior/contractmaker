@@ -92,7 +92,7 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
   {
     name: "update_contract_data",
     description:
-      "Atualiza campos estruturados do JSON de dados do contrato (nomes, valores, datas, endereços). Após atualizar, o contrato será re-renderizado com os novos dados.",
+      "Atualiza campos estruturados do JSON de dados do contrato (nomes, valores, datas, endereços). Após atualizar, o contrato é re-renderizado com os novos dados. ATENÇÃO: templates v2 (CCV À Vista e CCV Financiamento) têm MUITOS valores hardcoded no HTML (percentuais como '2%', prazos como '30 dias', multas). Se você quer alterar o TEXTO VISÍVEL do contrato (ex: '2%' → '3%'), use `edit_contract_section` — NÃO use esta tool, porque alterar config.multa_penal_moratoria via patch não reflete no HTML quando o template não tem {{config.multa_penal_moratoria}}. Use esta tool apenas para campos que o template referencia via {{variavel}}: nomes/CPFs de vendedores/compradores, valores totais, datas de assinatura, endereço do imóvel.",
     input_schema: {
       type: "object" as const,
       properties: {
@@ -103,6 +103,38 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
         },
       },
       required: ["patch"],
+    },
+  },
+  {
+    name: "propose_suggestion",
+    description:
+      "Cria uma sugestão de alteração no contrato em modo track changes (insertion/deletion/replacement) para o usuário aceitar ou rejeitar. Use esta tool quando o pedido do usuário for uma PROPOSTA ('sugira', 'melhore', 'deixe mais formal', 'proponha uma redação alternativa', 'considere reescrever X como Y') e não uma EDIÇÃO imediata. A sugestão aparece no editor como `<del>original</del><ins>novo</ins>` com barra âmbar de revisão. Diferente de edit_contract_section (que altera direto), propose_suggestion preserva o texto original até o usuário decidir. NÃO use para alterações que o usuário pediu aplicação direta ('aplique', 'faça', 'altere direto') — nesses casos use edit_contract_section.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        target: {
+          type: "string",
+          description:
+            "Trecho EXATO do HTML atual do contrato que será proposta alteração. Copie literalmente, incluindo pontuação. Deve ser único no documento.",
+        },
+        replacement: {
+          type: "string",
+          description:
+            "Nova redação sugerida. Deve seguir norma culta do português com acentuação correta. Pode ser HTML simples (tags <strong>, <em> permitidas).",
+        },
+        reason: {
+          type: "string",
+          description:
+            "Justificativa jurídica curta (1-2 frases) explicando por que a nova redação é melhor. Ex: 'Texto atual é ambíguo sobre responsabilidade pelos juros — proposta deixa explícito que corre por conta do vendedor'.",
+        },
+        type: {
+          type: "string",
+          enum: ["replacement", "insertion", "deletion"],
+          description:
+            "Tipo da sugestão. 'replacement' (default) troca target por replacement. 'insertion' adiciona replacement após target. 'deletion' remove target (replacement pode ser vazio).",
+        },
+      },
+      required: ["target", "replacement", "reason"],
     },
   },
   {

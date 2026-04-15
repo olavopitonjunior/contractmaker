@@ -329,6 +329,137 @@ describe("handleUpdateData", () => {
 });
 
 // ==========================================
+// handleProposeSuggestion (BUG-003)
+// ==========================================
+describe("handleProposeSuggestion", () => {
+  beforeEach(() => {
+    mockPrisma.contractSuggestion.findFirst.mockResolvedValue(null);
+    mockPrisma.contractSuggestion.create.mockImplementation(async (args: any) => ({
+      id: "suggestion-row-1",
+      ...args.data,
+      createdAt: new Date(),
+      resolvedAt: null,
+      resolvedBy: null,
+    }));
+  });
+
+  it("creates a ContractSuggestion row and injects <del><ins> markup", async () => {
+    const ctx = createTestContext({
+      htmlContent:
+        "<p>Multa moratória de 2% (dois por cento) sobre o valor da obrigação inadimplida.</p>",
+    });
+
+    const result = await executeToolHandler(
+      "propose_suggestion",
+      {
+        target: "Multa moratória de 2% (dois por cento)",
+        replacement: "Multa moratória de 3% (três por cento)",
+        reason: "Alinhar com política interna do escritório (regra A-42)",
+      },
+      ctx
+    );
+
+    expect(result.success).toBe(true);
+    expect(mockPrisma.contractSuggestion.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          contractId: "contract-1",
+          authorType: "ai",
+          type: "replacement",
+          status: "pending",
+          originalText: "Multa moratória de 2% (dois por cento)",
+          newText: "Multa moratória de 3% (três por cento)",
+        }),
+      })
+    );
+    expect(ctx.htmlContent).toContain("<del ");
+    expect(ctx.htmlContent).toContain("<ins ");
+    expect(ctx.htmlContent).toContain("data-suggestion-id=");
+    expect(ctx.htmlContent).toContain("data-author=\"ai\"");
+    // Markup wraps BOTH old and new text
+    expect(ctx.htmlContent).toContain("Multa moratória de 2% (dois por cento)");
+    expect(ctx.htmlContent).toContain("Multa moratória de 3% (três por cento)");
+  });
+
+  it("returns error when target text not found in contract", async () => {
+    const ctx = createTestContext({
+      htmlContent: "<p>Simple contract content.</p>",
+    });
+
+    const result = await executeToolHandler(
+      "propose_suggestion",
+      {
+        target: "Nonexistent phrase in contract",
+        replacement: "New text",
+        reason: "Test",
+      },
+      ctx
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("não encontrado");
+    expect(mockPrisma.contractSuggestion.create).not.toHaveBeenCalled();
+  });
+
+  it("dedupes: returns existing pending suggestion with same target", async () => {
+    mockPrisma.contractSuggestion.findFirst.mockResolvedValue({
+      id: "existing-suggestion-id",
+      contractId: "contract-1",
+      status: "pending",
+      originalText: "Multa moratória de 2%",
+    } as any);
+    const ctx = createTestContext({
+      htmlContent: "<p>Multa moratória de 2% ao dia.</p>",
+    });
+
+    const result = await executeToolHandler(
+      "propose_suggestion",
+      {
+        target: "Multa moratória de 2%",
+        replacement: "Multa moratória de 3%",
+        reason: "duplicate test",
+      },
+      ctx
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.duplicate).toBe(true);
+    expect(result.suggestionId).toBe("existing-suggestion-id");
+    expect(mockPrisma.contractSuggestion.create).not.toHaveBeenCalled();
+  });
+
+  it("rejects when reason is missing", async () => {
+    const ctx = createTestContext({ htmlContent: "<p>x</p>" });
+    const result = await executeToolHandler(
+      "propose_suggestion",
+      { target: "x", replacement: "y" },
+      ctx
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("reason");
+  });
+
+  it("supports type=deletion with empty replacement", async () => {
+    const ctx = createTestContext({
+      htmlContent: "<p>Cláusula X será removida aqui.</p>",
+    });
+    const result = await executeToolHandler(
+      "propose_suggestion",
+      {
+        target: "Cláusula X será removida aqui.",
+        replacement: "",
+        reason: "Cláusula obsoleta",
+        type: "deletion",
+      },
+      ctx
+    );
+    expect(result.success).toBe(true);
+    expect(ctx.htmlContent).toContain("<del ");
+    expect(ctx.htmlContent).not.toContain("<ins ");
+  });
+});
+
+// ==========================================
 // handleInsertClause
 // ==========================================
 describe("handleInsertClause", () => {

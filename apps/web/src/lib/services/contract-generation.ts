@@ -84,13 +84,20 @@ export async function generateContractForDeal(
     ? (deal.form.dataJson as Record<string, unknown>)
     : (deal.dataJson as Record<string, unknown>) || {};
 
-  // Detect modalidade
+  // Detect modalidade. Heuristic wins over dataJson.modalidade because Zod's
+  // .default("a_vista") always populates the field, even when the user never
+  // touched the UI — so relying on dataJson.modalidade alone would pin every
+  // contract as "a_vista". Any concrete payment flag signaling non-cash money
+  // (financiamento bancario, FGTS, cessao de consorcio) overrides the default.
   const pagamento = dataJson.pagamento as Record<string, unknown> | undefined;
-  const modalidade =
-    (dataJson.modalidade as string) ||
-    (pagamento && Number(pagamento.alienacao_fiduciaria || 0) > 0
-      ? "financiamento"
-      : "a_vista");
+  const hasFinanciamento =
+    !!pagamento &&
+    (Number(pagamento.alienacao_fiduciaria || 0) > 0 ||
+      Number(pagamento.fgts || 0) > 0 ||
+      Number(pagamento.cessao_consorcio || 0) > 0);
+  const modalidade: "financiamento" | "a_vista" = hasFinanciamento
+    ? "financiamento"
+    : (dataJson.modalidade as "financiamento" | "a_vista") || "a_vista";
 
   // Find template
   const template =

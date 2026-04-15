@@ -155,18 +155,29 @@ function PessoaFisicaFields({
       {showConjuge && (
         <>
           <Separator />
-          <p className="text-sm font-semibold text-foreground">Dados do Cônjuge</p>
+          <p className="text-sm font-semibold text-foreground">
+            Dados do Cônjuge <span className="text-destructive">*</span>
+          </p>
+          <p className="text-xs text-muted-foreground -mt-3">
+            Obrigatórios quando o estado civil é Casado(a) ou União Estável. A aprovação do contrato é bloqueada se faltarem.
+          </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="Nome do Cônjuge" className="md:col-span-2">
+            <FormField label="Nome do Cônjuge *" className="md:col-span-2">
               <Input
                 {...form.register(`${prefix}.conjuge.nome`)}
                 placeholder="Nome completo do conjuge"
               />
+              <FieldError
+                error={(form.formState.errors?.vendedores as any)?.[index]?.conjuge?.nome}
+              />
             </FormField>
-            <FormField label="CPF do Cônjuge">
+            <FormField label="CPF do Cônjuge *">
               <Input
                 {...form.register(`${prefix}.conjuge.cpf`)}
                 placeholder="000.000.000-00"
+              />
+              <FieldError
+                error={(form.formState.errors?.vendedores as any)?.[index]?.conjuge?.cpf}
               />
             </FormField>
             <FormField label="RG do Cônjuge">

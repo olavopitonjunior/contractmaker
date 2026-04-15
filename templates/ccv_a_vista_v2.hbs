@@ -1,5 +1,24 @@
 <div class="contrato">
 
+<section class="cover-page">
+  {{#if (existe comissao.imobiliaria_nome)}}
+  <div class="cover-brand">{{comissao.imobiliaria_nome}}</div>
+  {{/if}}
+  <div class="cover-title">Instrumento Particular<br>de Compromisso de<br>Venda e Compra</div>
+  <div class="cover-subtitle">Modalidade: Pagamento À Vista</div>
+  <div class="cover-ornament"></div>
+  <div class="cover-parties">
+    <span class="cover-label">Entre</span>
+    {{#each vendedores}}<strong>{{#if (eq this.tipo_pessoa "juridica")}}{{this.razao_social}}{{else}}{{this.nome}}{{/if}}</strong>{{/each}}
+    <span class="cover-label">e</span>
+    {{#each compradores}}<strong>{{#if (eq this.tipo_pessoa "juridica")}}{{this.razao_social}}{{else}}{{this.nome}}{{/if}}</strong>{{/each}}
+  </div>
+  {{#each imoveis}}
+  <div class="cover-property">{{this.rua}}, nº {{this.numero}}{{#if this.bairro}} — {{this.bairro}}{{/if}} — {{this.cidade}}/{{this.uf}}</div>
+  {{/each}}
+  <div class="cover-footer">{{#if (existe config.municipio_imovel)}}{{config.municipio_imovel}}{{/if}}{{#if (existe config.data_assinatura)}} · {{dataExtenso config.data_assinatura}}{{/if}}</div>
+</section>
+
 <h1>INSTRUMENTO PARTICULAR DE COMPROMISSO DE VENDA E COMPRA</h1>
 <h2>Modalidade: Pagamento À Vista</h2>
 
@@ -127,7 +146,7 @@ CRECI: {{comissao.creci}}
 
 <hr>
 
-<p>São partes integrantes neste instrumento as pessoas acima qualificadas, doravante denominadas simplesmente <strong>PROMITENTES VENDEDORES</strong> e <strong>PROMISSÁRIOS COMPRADORES</strong>, que, por estarem justos e contratados, celebram o presente <strong>INSTRUMENTO PARTICULAR DE COMPROMISSO DE VENDA E COMPRA</strong>, mediante as cláusulas e condições seguintes:</p>
+<p class="doc-intro">São partes integrantes neste instrumento as pessoas acima qualificadas, doravante denominadas simplesmente <strong>PROMITENTES VENDEDORES</strong> e <strong>PROMISSÁRIOS COMPRADORES</strong>, que, por estarem justos e contratados, celebram o presente <strong>INSTRUMENTO PARTICULAR DE COMPROMISSO DE VENDA E COMPRA</strong>, mediante as cláusulas e condições seguintes:</p>
 
 <hr>
 
@@ -323,7 +342,18 @@ Descrição: {{this.descricao}}
 
 <h2>CLÁUSULA DÉCIMA QUINTA - DO FORO</h2>
 
+{{#if (eq foro "arbitragem")}}
+<p><strong>15.1.</strong> Para dirimir eventuais disputas e controvérsias envolvendo o presente instrumento, as partes expressamente elegem, por convenção de arbitragem e exclusão de qualquer outro foro, nos termos do artigo 5º e do §1º do artigo 4º da Lei nº 9.307/1996, os seguintes foros privados:</p>
+
+<ul>
+  <li>TASP (Centro de Mediação e Arbitragem de São Paulo) — https://www.arbitragem.com.br/</li>
+  <li>ACORDIA — https://acordia.com.br/</li>
+</ul>
+
+<p><strong>15.2.</strong> Fica acordado que a parte interessada em submeter a controvérsia à arbitragem poderá escolher livremente entre as câmaras arbitrais elencadas acima, respeitando-se o regulamento interno da câmara escolhida, cujos custos serão suportados pela parte requerente, salvo disposição diversa no laudo arbitral.</p>
+{{else}}
 <p><strong>15.1.</strong> Para dirimir quaisquer dúvidas ou controvérsias oriundas do presente contrato, as partes elegem o foro da situação do imóvel, com exclusão de qualquer outro, por mais privilegiado que seja.</p>
+{{/if}}
 
 <hr>
 

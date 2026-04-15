@@ -41,6 +41,8 @@ export async function executeToolHandler(
       return handleEditSection(input, context);
     case "update_contract_data":
       return handleUpdateData(input, context);
+    case "propose_suggestion":
+      return handleProposeSuggestion(input, context);
     case "insert_clause":
       return handleInsertClause(input, context);
     case "remove_clause":
@@ -437,7 +439,11 @@ async function handleQueryKnowledgeBase(
   }
 
   try {
-    const queryVec = await embedOne(query, "query");
+    const queryVec = await embedOne(query, "query", {
+      orgId: context.orgId,
+      contractId: context.contractId,
+      operation: "embed_query",
+    });
     const vecLiteral = toPgVector(queryVec);
 
     // Raw SQL with pgvector cosine similarity; filter by org and optional category
@@ -719,6 +725,99 @@ async function handleUpdateData(
     success: true,
     updatedFields,
     message: `Dados atualizados: ${updatedFields.join(", ")}. Contrato re-renderizado.`,
+  };
+}
+
+/**
+ * Creates a ContractSuggestion row and inserts <ins>/<del> markup into the
+ * contract HTML so the SuggestionMark extension picks it up and the
+ * SuggestionsToolbar shows the pending count. The mark's suggestionId
+ * attribute ties the DOM node back to the DB row for accept/reject flow.
+ */
+async function handleProposeSuggestion(
+  input: Record<string, unknown>,
+  context: AgentContext
+): Promise<Record<string, unknown>> {
+  const target = typeof input.target === "string" ? input.target : "";
+  const replacement = typeof input.replacement === "string" ? input.replacement : "";
+  const reason = typeof input.reason === "string" ? input.reason : "";
+  const typeIn =
+    typeof input.type === "string" && ["replacement", "insertion", "deletion"].includes(input.type)
+      ? (input.type as "replacement" | "insertion" | "deletion")
+      : "replacement";
+
+  if (!target || !target.trim()) {
+    return { success: false, error: "target obrigatório" };
+  }
+  if (typeIn !== "deletion" && (!replacement || !replacement.trim())) {
+    return { success: false, error: "replacement obrigatório para insertion/replacement" };
+  }
+  if (!reason || !reason.trim()) {
+    return { success: false, error: "reason obrigatório" };
+  }
+
+  if (!context.htmlContent.includes(target)) {
+    return {
+      success: false,
+      error:
+        "Trecho 'target' não encontrado no contrato. Copie o texto exato do HTML atual.",
+    };
+  }
+
+  // Dedupe guard: skip if there's already a pending suggestion with the same
+  // originalText on this contract (avoids creating multiple identical proposals
+  // when the user retries or asks twice).
+  const existing = await prisma.contractSuggestion.findFirst({
+    where: {
+      contractId: context.contractId,
+      originalText: target,
+      status: "pending",
+    },
+    select: { id: true },
+  });
+  if (existing) {
+    return {
+      success: true,
+      suggestionId: existing.id,
+      message: "Já existe uma sugestão pendente idêntica — reutilizando.",
+      duplicate: true,
+    };
+  }
+
+  const suggestion = await prisma.contractSuggestion.create({
+    data: {
+      contractId: context.contractId,
+      userId: null,
+      authorType: "ai",
+      type: typeIn,
+      suggestionId: `sug-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      originalText: target,
+      newText: replacement,
+      reason,
+      status: "pending",
+    },
+  });
+
+  // Build the track-change markup. SuggestionMark in the editor reads
+  // data-suggestion-id to key accept/reject actions back to this row.
+  const attrs = `data-suggestion-id="${suggestion.suggestionId}" data-type="${typeIn}" data-author="ai"`;
+  let markup: string;
+  if (typeIn === "deletion") {
+    markup = `<del ${attrs}>${target}</del>`;
+  } else if (typeIn === "insertion") {
+    markup = `${target}<ins ${attrs}>${replacement}</ins>`;
+  } else {
+    markup = `<del ${attrs}>${target}</del><ins ${attrs}>${replacement}</ins>`;
+  }
+
+  context.htmlContent = context.htmlContent.replace(target, markup);
+
+  return {
+    success: true,
+    suggestionId: suggestion.id,
+    suggestionAnchorId: suggestion.suggestionId,
+    type: typeIn,
+    message: `Sugestão criada em modo track changes. Usuário pode aceitar ou rejeitar na barra de revisão do editor.`,
   };
 }
 
