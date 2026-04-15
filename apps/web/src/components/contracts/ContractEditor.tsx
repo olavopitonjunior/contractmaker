@@ -29,6 +29,7 @@ import { ColorPicker } from "./ColorPicker";
 import { LineHeightDropdown } from "./LineHeightDropdown";
 import { TextTransformMenu } from "./TextTransformMenu";
 import { ZoomControl } from "./ZoomControl";
+import { DocumentFontControl, getPresetById } from "./DocumentFontControl";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -74,6 +75,12 @@ interface ContractEditorProps {
   contractId?: string;
   suggestionsVersion?: number;
   onReady?: (editor: Editor) => void;
+  /**
+   * Contract status — used to render a subtle "MINUTA" watermark on the A4
+   * page wrapper when the contract isn't yet approved. Value comes straight
+   * from the DB (`Contract.status`).
+   */
+  status?: string;
 }
 
 export interface ContractEditorHandle {
@@ -97,11 +104,14 @@ export const ContractEditor = forwardRef<ContractEditorHandle, ContractEditorPro
       contractId,
       suggestionsVersion = 0,
       onReady,
+      status,
     },
     ref
   ) {
     const [findOpen, setFindOpen] = useState(false);
     const [zoom, setZoom] = useState(100);
+    const [docFontPresetId, setDocFontPresetId] = useState<string>("formal-serif");
+    const docFontPreset = getPresetById(docFontPresetId);
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -532,10 +542,14 @@ export const ContractEditor = forwardRef<ContractEditorHandle, ContractEditorPro
         <div className="bg-muted/40 py-8 px-4 overflow-auto">
           <div
             className="a4-page mx-auto bg-card rounded-sm shadow-md border transition-transform"
+            data-status={status === "aprovado" ? "aprovado" : "rascunho"}
             style={{
               transform: zoom === 100 ? undefined : `scale(${zoom / 100})`,
               transformOrigin: "top center",
               marginBottom: zoom > 100 ? `${(zoom - 100) * 11}px` : undefined,
+              ["--doc-font-family" as string]: docFontPreset.fontFamily,
+              ["--doc-font-size" as string]: docFontPreset.fontSize,
+              ["--doc-line-height" as string]: String(docFontPreset.lineHeight),
             }}
           >
             <EditorContent editor={editor} />
@@ -543,12 +557,18 @@ export const ContractEditor = forwardRef<ContractEditorHandle, ContractEditorPro
         </div>
 
         {/* Status bar */}
-        <div className="flex items-center justify-between gap-3 px-4 py-2 border-t bg-card text-xs text-muted-foreground">
+        <div className="flex items-center justify-between gap-3 px-4 py-2 border-t bg-card text-xs text-muted-foreground flex-wrap">
           <span>
             {wordCount} {wordCount === 1 ? "palavra" : "palavras"} · {charCount}{" "}
             {charCount === 1 ? "caractere" : "caracteres"}
           </span>
-          <ZoomControl zoom={zoom} onChange={setZoom} />
+          <div className="flex items-center gap-2">
+            <DocumentFontControl
+              presetId={docFontPresetId}
+              onChange={setDocFontPresetId}
+            />
+            <ZoomControl zoom={zoom} onChange={setZoom} />
+          </div>
         </div>
       </div>
     </TooltipProvider>

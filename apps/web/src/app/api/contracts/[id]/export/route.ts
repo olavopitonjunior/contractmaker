@@ -80,7 +80,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     if (wantsDocx) {
       try {
-        await exportDocx(html, docxPath);
+        await exportDocx(html, docxPath, styleExport);
         docxBuffer = fs.readFileSync(docxPath);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -93,18 +93,47 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
 
     const bucket = process.env.S3_BUCKET;
+    const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
+    const isServerless = !!(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
     let pdfUrl: string | null = null;
     let docxUrl: string | null = null;
 
     try {
-      if (bucket) {
+      // Priority 1: Vercel Blob (works on Vercel serverless without any
+      // additional AWS config — uses BLOB_READ_WRITE_TOKEN).
+      if (blobToken) {
+        const { put } = await import('@vercel/blob');
+        if (pdfBuffer) {
+          const res = await put(`exports/${contract.id}/${base}.pdf`, pdfBuffer, {
+            access: 'public',
+            contentType: 'application/pdf',
+            token: blobToken,
+            addRandomSuffix: false,
+            allowOverwrite: true,
+          });
+          pdfUrl = res.url;
+        }
+        if (docxBuffer) {
+          const res = await put(`exports/${contract.id}/${base}.docx`, docxBuffer, {
+            access: 'public',
+            contentType:
+              'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            token: blobToken,
+            addRandomSuffix: false,
+            allowOverwrite: true,
+          });
+          docxUrl = res.url;
+        }
+      }
+      // Priority 2: S3 bucket
+      else if (bucket) {
         if (pdfBuffer) {
           const pdfKey = `exports/${contract.userId}/${contract.id}/${base}.pdf`;
           pdfUrl = await uploadBufferToStorage({
             bucket,
             key: pdfKey,
             body: pdfBuffer,
-            contentType: 'application/pdf'
+            contentType: 'application/pdf',
           });
         }
         if (docxBuffer) {
@@ -113,10 +142,18 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
             bucket,
             key: docxKey,
             body: docxBuffer,
-            contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+            contentType:
+              'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
           });
         }
-      } else {
+      }
+      // Priority 3: local filesystem — only safe on dev (not Vercel).
+      else {
+        if (isServerless) {
+          throw new Error(
+            'Nenhum storage configurado. Defina BLOB_READ_WRITE_TOKEN (Vercel Blob) ou S3_BUCKET (AWS S3) nas variáveis de ambiente do deploy.'
+          );
+        }
         const publicDir = path.join(process.cwd(), 'public', 'exports', contract.id);
         fs.mkdirSync(publicDir, { recursive: true });
         if (pdfBuffer) {

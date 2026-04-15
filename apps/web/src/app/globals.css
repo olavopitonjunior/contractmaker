@@ -83,8 +83,314 @@
 
 /* A4 page visual wrapper for the contract editor (210mm x 297mm @ 96dpi) */
 .a4-page {
+  position: relative;
   width: min(100%, 794px);
   min-height: 1123px;
+  /* Document typography defaults — can be overridden per-contract via inline
+   * style or by a DocumentStyle preset. These CSS variables cascade to the
+   * ProseMirror content inside. */
+  --doc-font-family: var(--font-tinos), "Times New Roman", Georgia, serif;
+  --doc-font-size: 12pt;
+  --doc-line-height: 1.65;
+  --doc-color: #1a1a1a;
+  --doc-accent: hsl(var(--primary));
+  --doc-muted: #555;
+}
+
+/* Draft watermark — shown on contracts that aren't yet approved. Uses
+ * data-status="rascunho" on the .a4-page wrapper. */
+.a4-page[data-status="rascunho"]::before {
+  content: "MINUTA";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-28deg);
+  font-family: var(--font-tinos), "Times New Roman", serif;
+  font-size: 140pt;
+  font-weight: 900;
+  color: hsl(var(--primary));
+  opacity: 0.06;
+  pointer-events: none;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  z-index: 0;
+}
+
+.a4-page > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Contract typography — applied to the ProseMirror editor inside .a4-page.
+ * Designed to match the look of a formal printed contract: justified body,
+ * centered hierarchical headings, elegant dividers and signature blocks. */
+.a4-page .ProseMirror {
+  font-family: var(--doc-font-family);
+  font-size: var(--doc-font-size);
+  line-height: var(--doc-line-height);
+  color: var(--doc-color);
+  hyphens: auto;
+  -webkit-hyphens: auto;
+  /* Enable common + discretionary ligatures and kerning for refined text
+   * rendering. Fonts that don't ship these features simply ignore them. */
+  font-feature-settings: "liga" 1, "dlig" 1, "kern" 1, "onum" 1;
+  font-variant-ligatures: common-ligatures discretionary-ligatures;
+  font-kerning: normal;
+  text-rendering: optimizeLegibility;
+}
+
+.a4-page .ProseMirror p {
+  text-align: justify;
+  text-justify: inter-word;
+  text-align-last: left;
+  margin: 0.75em 0;
+  orphans: 3;
+  widows: 3;
+}
+
+.a4-page .ProseMirror h1 {
+  text-align: center;
+  text-transform: uppercase;
+  font-size: 1.5em;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin: 1.8em 0 1em;
+  color: var(--doc-color);
+  page-break-after: avoid;
+  break-after: avoid;
+}
+
+.a4-page .ProseMirror h2 {
+  text-align: center;
+  text-transform: uppercase;
+  font-size: 1.15em;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  margin: 1.6em 0 0.9em;
+  color: var(--doc-accent);
+  page-break-after: avoid;
+  break-after: avoid;
+}
+
+/* Decorative ornament under every <h2> — thin horizontal rule with a
+ * diamond in the middle, drawn as inline SVG so it scales with zoom. */
+.a4-page .ProseMirror .contrato > h2::after,
+.a4-page .ProseMirror > h2::after {
+  content: "";
+  display: block;
+  width: 96px;
+  height: 10px;
+  margin: 0.35em auto 0;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='96' height='10' viewBox='0 0 96 10'><line x1='4' y1='5' x2='40' y2='5' stroke='%23C97B0A' stroke-width='0.75'/><path d='M48 1 L52 5 L48 9 L44 5 Z' fill='%23C97B0A'/><line x1='56' y1='5' x2='92' y2='5' stroke='%23C97B0A' stroke-width='0.75'/></svg>");
+  background-repeat: no-repeat;
+  background-position: center;
+  opacity: 0.75;
+}
+
+.a4-page .ProseMirror h3 {
+  text-align: center;
+  font-size: 1em;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin: 1.2em 0 0.6em;
+  color: var(--doc-color);
+  page-break-after: avoid;
+  break-after: avoid;
+}
+
+.a4-page .ProseMirror hr {
+  border: none;
+  border-top: 1px solid var(--doc-muted);
+  margin: 1.5em 25%;
+  opacity: 0.5;
+}
+
+.a4-page .ProseMirror strong {
+  font-weight: 700;
+  color: var(--doc-color);
+}
+
+.a4-page .ProseMirror em {
+  font-style: italic;
+}
+
+.a4-page .ProseMirror ul,
+.a4-page .ProseMirror ol {
+  padding-left: 2.25em;
+  margin: 0.8em 0;
+}
+
+.a4-page .ProseMirror li {
+  margin: 0.25em 0;
+  text-align: justify;
+}
+
+.a4-page .ProseMirror blockquote {
+  border-left: 3px solid var(--doc-accent);
+  padding: 0.5em 1em;
+  margin: 1em 0;
+  color: var(--doc-muted);
+  font-style: italic;
+  background: hsl(40 33% 97%);
+}
+
+.a4-page .ProseMirror table {
+  border-collapse: collapse;
+  margin: 1em 0;
+  width: 100%;
+}
+
+.a4-page .ProseMirror th,
+.a4-page .ProseMirror td {
+  border: 1px solid var(--doc-muted);
+  padding: 0.4em 0.6em;
+  text-align: left;
+  font-size: 0.95em;
+}
+
+.a4-page .ProseMirror th {
+  background: hsl(40 33% 94%);
+  font-weight: 700;
+}
+
+/* Signature block (templates wrap these in .assinaturas) — centered lines
+ * with tighter spacing and no justify. */
+.a4-page .ProseMirror .assinaturas {
+  margin-top: 2.5em;
+}
+
+.a4-page .ProseMirror .assinaturas p {
+  text-align: center;
+  margin: 1.2em 0 0.3em;
+  hyphens: none;
+}
+
+.a4-page .ProseMirror .assinaturas h3 {
+  margin-top: 1.8em;
+  font-size: 0.95em;
+}
+
+/* Contract outer wrapper used by templates (<div class="contrato">) — keeps
+ * content padded and creates a little breathing room before the first heading. */
+.a4-page .ProseMirror .contrato > h1:first-child {
+  margin-top: 0.5em;
+}
+
+/* Drop cap on the introductory paragraph ("São partes integrantes ..."),
+ * flagged with class="doc-intro" in the templates. */
+.a4-page .ProseMirror p.doc-intro {
+  text-indent: 0;
+  margin-top: 1.5em;
+}
+
+.a4-page .ProseMirror p.doc-intro::first-letter {
+  float: left;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 3.4em;
+  line-height: 0.85;
+  padding: 0.05em 0.1em 0 0;
+  margin-right: 0.05em;
+  font-weight: 700;
+  color: var(--doc-accent);
+}
+
+/* Cover page — rendered as the first section inside .contrato. Fills the
+ * first A4 page with brand, title, parties, property and date, then forces
+ * a page break so the body starts on page 2 in print/PDF. */
+.a4-page .ProseMirror .cover-page {
+  position: relative;
+  min-height: 1020px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4em 3em 3em;
+  text-align: center;
+  page-break-after: always;
+  break-after: page;
+}
+
+.a4-page .ProseMirror .cover-page .cover-brand {
+  font-size: 0.95em;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--doc-muted);
+  padding-bottom: 0.6em;
+  border-bottom: 1px solid var(--doc-muted);
+  min-width: 240px;
+}
+
+.a4-page .ProseMirror .cover-page .cover-title {
+  font-size: 2.1em;
+  font-weight: 700;
+  line-height: 1.15;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 3.5em 0 0.8em;
+  text-align: center;
+  max-width: 80%;
+}
+
+.a4-page .ProseMirror .cover-page .cover-subtitle {
+  font-size: 1.05em;
+  font-style: italic;
+  color: var(--doc-accent);
+  margin-top: 0.2em;
+}
+
+.a4-page .ProseMirror .cover-page .cover-ornament {
+  width: 140px;
+  height: 14px;
+  margin: 2em auto;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='140' height='14' viewBox='0 0 140 14'><line x1='0' y1='7' x2='56' y2='7' stroke='%23C97B0A' stroke-width='1'/><path d='M70 1 L76 7 L70 13 L64 7 Z' fill='%23C97B0A'/><line x1='84' y1='7' x2='140' y2='7' stroke='%23C97B0A' stroke-width='1'/></svg>");
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.a4-page .ProseMirror .cover-page .cover-parties {
+  font-size: 1.05em;
+  line-height: 1.9;
+  margin-top: 1em;
+  text-align: center;
+}
+
+.a4-page .ProseMirror .cover-page .cover-parties .cover-label {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.75em;
+  color: var(--doc-muted);
+  display: block;
+  margin-top: 1em;
+}
+
+.a4-page .ProseMirror .cover-page .cover-parties strong {
+  display: block;
+  font-size: 1.1em;
+  margin-bottom: 0.3em;
+}
+
+.a4-page .ProseMirror .cover-page .cover-property {
+  margin-top: 2.5em;
+  padding: 1em 2em;
+  border-top: 1px solid var(--doc-muted);
+  border-bottom: 1px solid var(--doc-muted);
+  max-width: 85%;
+  font-style: italic;
+}
+
+.a4-page .ProseMirror .cover-page .cover-footer {
+  font-size: 0.9em;
+  color: var(--doc-muted);
+  margin-top: auto;
+  padding-top: 3em;
+  letter-spacing: 0.05em;
+}
+
+/* Reset global typography rules inside cover so they don't inherit justify */
+.a4-page .ProseMirror .cover-page p,
+.a4-page .ProseMirror .cover-page div {
+  text-align: center;
+  text-align-last: center;
+  hyphens: none;
 }
 
 /* Radix Popper (dropdowns, popovers, tooltips) must float above sticky

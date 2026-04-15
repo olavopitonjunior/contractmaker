@@ -66,7 +66,11 @@ export async function createKnowledgeItem(
     });
 
     if (isEmbeddingsConfigured()) {
-      const [vec] = await embed([`${input.title}\n\n${chunks[0].text}`], "document");
+      const [vec] = await embed(
+        [`${input.title}\n\n${chunks[0].text}`],
+        "document",
+        { orgId: input.orgId, userId: input.createdBy, operation: "embed_kb" }
+      );
       await prisma.$executeRawUnsafe(
         `UPDATE "KnowledgeItem" SET embedding = $1::vector WHERE id = $2`,
         toPgVector(vec),
@@ -114,7 +118,11 @@ export async function createKnowledgeItem(
 
   if (isEmbeddingsConfigured()) {
     const texts = chunks.map((c) => `${input.title}\n\n${c.text}`);
-    const vectors = await embed(texts, "document");
+    const vectors = await embed(texts, "document", {
+      orgId: input.orgId,
+      userId: input.createdBy,
+      operation: "embed_kb",
+    });
     for (let i = 0; i < chunkRows.length; i++) {
       await prisma.$executeRawUnsafe(
         `UPDATE "KnowledgeItem" SET embedding = $1::vector WHERE id = $2`,
@@ -157,7 +165,8 @@ export async function updateKnowledgeItem(
   if (contentChanged && isEmbeddingsConfigured() && current.chunkTotal === 1) {
     const [vec] = await embed(
       [`${patch.title ?? current.title}\n\n${patch.content}`],
-      "document"
+      "document",
+      { orgId, operation: "embed_kb" }
     );
     await prisma.$executeRawUnsafe(
       `UPDATE "KnowledgeItem" SET embedding = $1::vector WHERE id = $2`,

@@ -8,9 +8,22 @@
  * @see https://docs.voyageai.com/docs/embeddings
  */
 
+import { recordAIUsage, type AIOperation } from "./usage";
+
 const VOYAGE_API_URL = "https://api.voyageai.com/v1/embeddings";
 const DEFAULT_MODEL = "voyage-law-2";
 export const EMBEDDING_DIMENSION = 1024;
+
+/**
+ * Optional observability context threaded through embed calls. When provided,
+ * the call is recorded in AIUsage with the given orgId + operation.
+ */
+export interface EmbedUsageContext {
+  orgId: string;
+  userId?: string | null;
+  contractId?: string | null;
+  operation: AIOperation; // "embed_kb" | "embed_memory" | "embed_query"
+}
 
 export type EmbeddingInputType = "document" | "query";
 
@@ -51,7 +64,8 @@ interface VoyageResponse {
  */
 export async function embed(
   texts: string[],
-  inputType: EmbeddingInputType = "document"
+  inputType: EmbeddingInputType = "document",
+  ctx?: EmbedUsageContext
 ): Promise<number[][]> {
   const apiKey = process.env.VOYAGE_API_KEY;
   if (!apiKey) {
@@ -65,6 +79,7 @@ export async function embed(
   if (texts.length === 0) return [];
 
   const model = process.env.VOYAGE_EMBED_MODEL || DEFAULT_MODEL;
+  const t0 = Date.now();
 
   let res: Response;
   try {
@@ -81,6 +96,20 @@ export async function embed(
       }),
     });
   } catch (err) {
+    if (ctx) {
+      recordAIUsage({
+        orgId: ctx.orgId,
+        userId: ctx.userId,
+        contractId: ctx.contractId,
+        provider: "voyage",
+        model,
+        operation: ctx.operation,
+        promptTokens: 0,
+        latencyMs: Date.now() - t0,
+        success: false,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+    }
     throw new VoyageError({
       code: "network_error",
       message: "Falha ao conectar com a API da Voyage",
@@ -90,6 +119,20 @@ export async function embed(
 
   if (!res.ok) {
     const text = await res.text().catch(() => "");
+    if (ctx) {
+      recordAIUsage({
+        orgId: ctx.orgId,
+        userId: ctx.userId,
+        contractId: ctx.contractId,
+        provider: "voyage",
+        model,
+        operation: ctx.operation,
+        promptTokens: 0,
+        latencyMs: Date.now() - t0,
+        success: false,
+        errorMessage: `HTTP ${res.status}: ${text.slice(0, 200)}`,
+      });
+    }
     throw new VoyageError({
       code: "api_error",
       message: `Voyage API retornou ${res.status}: ${text.slice(0, 300)}`,
@@ -114,6 +157,21 @@ export async function embed(
     });
   }
 
+  if (ctx) {
+    recordAIUsage({
+      orgId: ctx.orgId,
+      userId: ctx.userId,
+      contractId: ctx.contractId,
+      provider: "voyage",
+      model,
+      operation: ctx.operation,
+      promptTokens: data.usage?.total_tokens ?? 0,
+      completionTokens: 0,
+      latencyMs: Date.now() - t0,
+      success: true,
+    });
+  }
+
   // Sort by index to ensure order matches input
   const sorted = [...data.data].sort((a, b) => a.index - b.index);
   return sorted.map((d) => d.embedding);
@@ -121,9 +179,10 @@ export async function embed(
 
 export async function embedOne(
   text: string,
-  inputType: EmbeddingInputType = "document"
+  inputType: EmbeddingInputType = "document",
+  ctx?: EmbedUsageContext
 ): Promise<number[]> {
-  const [vec] = await embed([text], inputType);
+  const [vec] = await embed([text], inputType, ctx);
   if (!vec) throw new VoyageError({ code: "invalid_response", message: "Empty result" });
   return vec;
 }

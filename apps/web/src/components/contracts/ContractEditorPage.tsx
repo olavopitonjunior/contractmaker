@@ -430,6 +430,7 @@ export function ContractEditorPage({
           contractId={contract.id}
           suggestionsVersion={commentsVersion}
           onReady={setEditorInstance}
+          status={status}
         />
       </div>
 

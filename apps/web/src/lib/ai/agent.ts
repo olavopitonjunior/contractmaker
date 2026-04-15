@@ -5,6 +5,7 @@ import { AGENT_TOOLS } from "./tools";
 import { executeToolHandler } from "./tool-handlers";
 import { DEFAULT_SYSTEM_PROMPT, buildContextMessage } from "./prompts";
 import { quickChecks, dedupeKeyFor, type QuickFinding } from "./quickChecks";
+import { recordAIUsage } from "./usage";
 import type { AgentContext, AgentResult, ChangeLogEntry } from "./types";
 
 function getAnthropicClient() {
@@ -169,15 +170,45 @@ export async function runContractAgent(params: AgentParams): Promise<AgentResult
     },
   ];
 
-  // 5. Call Anthropic with tools
-  let response = await anthropic.messages.create({
-    model: config.model,
-    max_tokens: config.maxTokens,
-    temperature: config.temperature,
-    system: config.systemPrompt,
-    tools: AGENT_TOOLS,
-    messages,
-  });
+  // 5. Call Anthropic with tools — tracking aggregate usage across the loop
+  const usageAgg = {
+    promptTokens: 0,
+    completionTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+  };
+  const toolsUsedSet = new Set<string>();
+  const t0 = Date.now();
+
+  let response;
+  try {
+    response = await anthropic.messages.create({
+      model: config.model,
+      max_tokens: config.maxTokens,
+      temperature: config.temperature,
+      system: config.systemPrompt,
+      tools: AGENT_TOOLS,
+      messages,
+    });
+    usageAgg.promptTokens += response.usage?.input_tokens ?? 0;
+    usageAgg.completionTokens += response.usage?.output_tokens ?? 0;
+    usageAgg.cacheReadTokens += (response.usage as { cache_read_input_tokens?: number })?.cache_read_input_tokens ?? 0;
+    usageAgg.cacheWriteTokens += (response.usage as { cache_creation_input_tokens?: number })?.cache_creation_input_tokens ?? 0;
+  } catch (err) {
+    recordAIUsage({
+      orgId: params.orgId,
+      userId: params.userId,
+      contractId: params.contractId,
+      provider: "anthropic",
+      model: config.model,
+      operation: "chat",
+      promptTokens: 0,
+      latencyMs: Date.now() - t0,
+      success: false,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
 
   const changeLogs: ChangeLogEntry[] = [];
   let iterations = 0;
@@ -190,6 +221,7 @@ export async function runContractAgent(params: AgentParams): Promise<AgentResult
 
     for (const block of response.content) {
       if (block.type === "tool_use") {
+        toolsUsedSet.add(block.name);
         const result = await executeToolHandler(
           block.name,
           block.input as Record<string, unknown>,
@@ -228,7 +260,29 @@ export async function runContractAgent(params: AgentParams): Promise<AgentResult
       tools: AGENT_TOOLS,
       messages,
     });
+    usageAgg.promptTokens += response.usage?.input_tokens ?? 0;
+    usageAgg.completionTokens += response.usage?.output_tokens ?? 0;
+    usageAgg.cacheReadTokens += (response.usage as { cache_read_input_tokens?: number })?.cache_read_input_tokens ?? 0;
+    usageAgg.cacheWriteTokens += (response.usage as { cache_creation_input_tokens?: number })?.cache_creation_input_tokens ?? 0;
   }
+
+  // Record aggregated usage for the whole turn (initial + N tool-use iterations)
+  recordAIUsage({
+    orgId: params.orgId,
+    userId: params.userId,
+    contractId: params.contractId,
+    provider: "anthropic",
+    model: config.model,
+    operation: "chat",
+    promptTokens: usageAgg.promptTokens,
+    completionTokens: usageAgg.completionTokens,
+    cacheReadTokens: usageAgg.cacheReadTokens,
+    cacheWriteTokens: usageAgg.cacheWriteTokens,
+    latencyMs: Date.now() - t0,
+    toolsUsed: Array.from(toolsUsedSet),
+    iterations: iterations + 1,
+    success: true,
+  });
 
   // 7. Extract final text
   let finalMessage = "";
@@ -399,6 +453,7 @@ export async function runPassiveAnalysis(
       analysisInput = htmlContent.slice(0, 15000);
     }
 
+    const t0 = Date.now();
     try {
       const response = await anthropic.messages.create({
         model: passiveModel,
@@ -411,6 +466,21 @@ export async function runPassiveAnalysis(
             content: `DADOS DO CONTRATO (JSON):\n${JSON.stringify(contract.dataJson, null, 2)}\n\n---\n\nHTML DO CONTRATO:\n${analysisInput}`,
           },
         ],
+      });
+
+      recordAIUsage({
+        orgId: params.orgId,
+        userId: null,
+        contractId: params.contractId,
+        provider: "anthropic",
+        model: passiveModel,
+        operation: params.trigger === "open" ? "passive_open" : "passive_edit",
+        promptTokens: response.usage?.input_tokens ?? 0,
+        completionTokens: response.usage?.output_tokens ?? 0,
+        cacheReadTokens: (response.usage as { cache_read_input_tokens?: number })?.cache_read_input_tokens ?? 0,
+        cacheWriteTokens: (response.usage as { cache_creation_input_tokens?: number })?.cache_creation_input_tokens ?? 0,
+        latencyMs: Date.now() - t0,
+        success: true,
       });
 
       const textBlock = response.content.find((b) => b.type === "text");
@@ -431,7 +501,18 @@ export async function runPassiveAnalysis(
         }
       }
     } catch (err) {
-      // LLM call failed — don't break the whole analysis, just return quickChecks
+      recordAIUsage({
+        orgId: params.orgId,
+        userId: null,
+        contractId: params.contractId,
+        provider: "anthropic",
+        model: passiveModel,
+        operation: params.trigger === "open" ? "passive_open" : "passive_edit",
+        promptTokens: 0,
+        latencyMs: Date.now() - t0,
+        success: false,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
       console.error("[runPassiveAnalysis] LLM call failed:", err);
     }
   }

@@ -35,6 +35,7 @@ model User {
   changeLogs          ContractChangeLog[]  @relation("userChangeLogs")
   contractComments    ContractComment[]    @relation("commentAuthor")
   contractSuggestions ContractSuggestion[] @relation("suggestionAuthor")
+  aiUsage             AIUsage[]
 }
 
 model Account {
@@ -95,6 +96,7 @@ model Organization {
   clauseProposals     ClauseProposal[]
   templateSuggestions TemplateSuggestion[]
   documentStyles      DocumentStyle[]
+  aiUsage             AIUsage[]
 }
 
 model OrgMembership {
@@ -308,6 +310,7 @@ model Contract {
   changeLogs    ContractChangeLog[]
   comments      ContractComment[]
   suggestions   ContractSuggestion[]
+  aiUsage       AIUsage[]
 }
 
 model ContractClause {
@@ -627,4 +630,41 @@ model DocumentStyle {
   org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId])
+}
+
+// ============================================
+// AI OBSERVABILITY — tracks every AI call (Anthropic, Gemini, Voyage)
+// with tokens, latency, cost and context. Fire-and-forget writes from the
+// helper in src/lib/ai/usage.ts; never blocks the AI flow.
+// ============================================
+
+model AIUsage {
+  id                String   @id @default(cuid())
+  orgId             String
+  userId            String?
+  contractId        String?
+  provider          String // "anthropic" | "gemini" | "voyage"
+  model             String
+  operation         String // "chat" | "passive_open" | "passive_edit" | "ocr_form" | "ocr_tool" | "embed_kb" | "embed_memory" | "summarize_memory" | "clause_generate" | "doc_analysis"
+  promptTokens      Int      @default(0)
+  completionTokens  Int      @default(0)
+  cacheReadTokens   Int      @default(0)
+  cacheWriteTokens  Int      @default(0)
+  totalTokens       Int      @default(0)
+  estimatedCostUsd  Decimal  @default(0) @db.Decimal(12, 6)
+  latencyMs         Int      @default(0)
+  toolsUsed         String[] @default([])
+  iterations        Int      @default(1)
+  success           Boolean  @default(true)
+  errorMessage      String?  @db.Text
+  createdAt         DateTime @default(now())
+
+  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user     User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  contract Contract?    @relation(fields: [contractId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, createdAt])
+  @@index([orgId, provider, createdAt])
+  @@index([orgId, operation, createdAt])
+  @@index([contractId, createdAt])
 }

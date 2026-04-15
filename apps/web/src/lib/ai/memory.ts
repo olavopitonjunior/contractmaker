@@ -17,6 +17,7 @@ import { Anthropic } from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/db/prisma";
 import { renderContratoHTML } from "@/lib/render/handlebars";
 import { embedOne, toPgVector, isEmbeddingsConfigured } from "./embeddings";
+import { recordAIUsage } from "./usage";
 
 interface PersonSnapshot {
   nome?: string;
@@ -107,7 +108,11 @@ function toNumber(v: unknown): number {
  * - payment structure (cash / financing / FGTS / installments)
  * - any unusual clauses or points of attention
  */
-async function summarizeContract(htmlContent: string, fingerprint: ContractFingerprint): Promise<string> {
+async function summarizeContract(
+  htmlContent: string,
+  fingerprint: ContractFingerprint,
+  ctx?: { orgId: string; contractId?: string }
+): Promise<string> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return `Contrato ${fingerprint.modality || ""} — ${fingerprint.valueTotalBucket || "valor indefinido"} — ${fingerprint.cityUf || "local indefinido"}`;
@@ -115,6 +120,7 @@ async function summarizeContract(htmlContent: string, fingerprint: ContractFinge
 
   const model = process.env.ANTHROPIC_PASSIVE_MODEL || "claude-haiku-4-5-20251001";
   const client = new Anthropic({ apiKey });
+  const t0 = Date.now();
 
   try {
     const response = await client.messages.create({
@@ -130,9 +136,39 @@ async function summarizeContract(htmlContent: string, fingerprint: ContractFinge
         },
       ],
     });
+
+    if (ctx) {
+      recordAIUsage({
+        orgId: ctx.orgId,
+        userId: null,
+        contractId: ctx.contractId,
+        provider: "anthropic",
+        model,
+        operation: "summarize_memory",
+        promptTokens: response.usage?.input_tokens ?? 0,
+        completionTokens: response.usage?.output_tokens ?? 0,
+        latencyMs: Date.now() - t0,
+        success: true,
+      });
+    }
+
     const text = response.content.find((b) => b.type === "text");
     if (text && text.type === "text") return text.text.trim();
   } catch (err) {
+    if (ctx) {
+      recordAIUsage({
+        orgId: ctx.orgId,
+        userId: null,
+        contractId: ctx.contractId,
+        provider: "anthropic",
+        model,
+        operation: "summarize_memory",
+        promptTokens: 0,
+        latencyMs: Date.now() - t0,
+        success: false,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+    }
     console.error("[summarizeContract] Haiku failed:", err);
   }
   return `Contrato ${fingerprint.modality || ""} — ${fingerprint.cityUf || ""}`;
@@ -209,7 +245,10 @@ export async function createContractMemory(contractId: string): Promise<{
         contract.templateOverride || contract.template.handlebarsSource,
         contract.dataJson as Record<string, unknown>
       );
-    const summary = await summarizeContract(htmlContent, fingerprint);
+    const summary = await summarizeContract(htmlContent, fingerprint, {
+      orgId,
+      contractId: contract.id,
+    });
 
     // 3. Accepted / rejected suggestions
     const accepted = contract.suggestions
@@ -256,7 +295,11 @@ export async function createContractMemory(contractId: string): Promise<{
     if (isEmbeddingsConfigured()) {
       try {
         const embeddingText = `${summary}\n\nFingerprint: ${JSON.stringify(fingerprint)}`;
-        const vec = await embedOne(embeddingText, "document");
+        const vec = await embedOne(embeddingText, "document", {
+          orgId,
+          contractId: contract.id,
+          operation: "embed_memory",
+        });
         await prisma.$executeRawUnsafe(
           `UPDATE "ContractMemory" SET embedding = $1::vector WHERE id = $2`,
           toPgVector(vec),
@@ -351,7 +394,10 @@ export async function findSimilarContracts(
 
   // Semantic path: embed the query "fingerprint + focus" and search by cosine
   const queryText = `${focus || "contrato similar"}\n\nFingerprint: ${JSON.stringify(currentFingerprint)}`;
-  const queryVec = await embedOne(queryText, "query");
+  const queryVec = await embedOne(queryText, "query", {
+    orgId,
+    operation: "embed_query",
+  });
 
   const rows = await prisma.$queryRawUnsafe<
     Array<{

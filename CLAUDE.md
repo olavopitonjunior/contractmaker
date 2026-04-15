@@ -55,11 +55,13 @@ apps/web/                    # Next.js app principal
       auth/                  # NextAuth config
       db/                    # Prisma client
       ai/                    # agent, tools (18), tool-handlers, prompts, validators, ocr,
-                             # quickChecks, embeddings (Voyage), chunking, knowledge, memory
+                             # quickChecks, embeddings (Voyage), chunking, knowledge, memory,
+                             # usage (observability: AIUsage + pricing + recordAIUsage)
       certidoes/             # infosimples client, planner, executor, normalizers,
                              # endpoints catalog, comarcas-rj, report builder, fixtures, tests
-      render/                # Handlebars (helpers moeda/extenso/percentual/...), PDF, DOCX, exporter
-      storage/               # Vercel Blob, S3
+      render/                # Handlebars (helpers moeda/extenso/percentual/...), PDF/DOCX
+                             # exporter.ts com htmlForDocx preprocessor + serverless chromium launcher
+      storage/               # S3 (legacy) — exports/attachments hoje usam @vercel/blob direto
       forms/                 # Zod schemas, validation, extracted-to-form mapping
       editor/                # TipTap custom extensions (CommentMark, SuggestionMark,
                              # PageBreakNode, SearchReplace, FontSize, LineHeight,
@@ -303,6 +305,35 @@ Extracao automatizada de certidoes juridicas para due diligence imobiliaria, dis
 
 **Env vars**: `INFOSIMPLES_TOKEN` (obrigatorio, sem ele POST retorna 500), `INFOSIMPLES_MONTHLY_BUDGET_CENTS` (opcional, default 5000), `CRON_SECRET` (opcional — se setado, cron exige `Authorization: Bearer $CRON_SECRET`).
 
+## Observabilidade de IA (AIUsage)
+Tabela `AIUsage` em `schema.prisma` registra **cada** chamada a IA com tokens, custo estimado em USD, latencia, provider (anthropic/gemini/voyage), model, operation (`chat` | `passive_open` | `passive_edit` | `ocr_form` | `ocr_tool` | `embed_kb` | `embed_memory` | `embed_query` | `summarize_memory` | `clause_generate`), `toolsUsed[]`, `iterations`, sucesso/erro. Relations em `Organization`, `User` e `Contract`. Indices por `(orgId, createdAt)`, `(orgId, provider, createdAt)`, `(orgId, operation, createdAt)` e `(contractId, createdAt)`.
+
+**Helper:** `src/lib/ai/usage.ts` exporta:
+- `PRICING` — tabela hardcoded com preco USD/MT (input + output + cacheRead + cacheWrite) de 8 modelos (Claude Opus/Sonnet/Haiku, Gemini 2.5 Flash/Lite/2.0, Voyage law-2/v3). Ultima revisao: 2026-04-14. **Atualizar manualmente quando precos mudarem** em anthropic.com/pricing, ai.google.dev/pricing, voyageai.com/pricing.
+- `calcCostUsd(model, promptTokens, completionTokens, cacheRead, cacheWrite)` — converte tokens em USD. Modelo desconhecido retorna 0 silenciosamente.
+- `recordAIUsage(params)` — **fire-and-forget**. Nunca joga excecao (erros so logam em `console.error`). Mensagens de erro sao truncadas em 500 chars para evitar vazamento de PII.
+
+**Instrumentacao (7 call sites):**
+- `agent.ts:runContractAgent` — **agregado** por turno: loop de tool-use soma tokens de todas as iteracoes em um unico record com `iterations=N` e `toolsUsed` deduplicado via Set.
+- `agent.ts:runPassiveAnalysis` — `passive_open` (Sonnet) ou `passive_edit` (Haiku) conforme trigger.
+- `ocr.ts:classifyAndExtract` — Gemini, `operation="ocr_form"`. Le `response.usageMetadata.promptTokenCount/candidatesTokenCount` (nem sempre presente — se ausente, registra com 0 tokens mas ainda loga a chamada).
+- `ocr.ts:classifyDocument` + `extractDocumentData` — legacy Haiku via `ocr_tool`. Aceitam `ctx?: OcrUsageContext` opcional.
+- `embeddings.ts:embed` e `embedOne` — Voyage. Aceitam `EmbedUsageContext { orgId, operation }` opcional. Sem ctx, chamada roda normalmente mas nao loga.
+- `memory.ts:summarizeContract` — Haiku, `summarize_memory` pos-aprovacao.
+- `api/clauses/ai-generate/route.ts` — Sonnet, `clause_generate`.
+
+**Callers passam ctx:**
+- `knowledge.ts` passa `{orgId, operation: "embed_kb"}` pro embed de KB.
+- `memory.ts` passa `{orgId, contractId, operation: "embed_memory"}` pro embed pos-aprovacao e `{orgId, operation: "embed_query"}` pro `find_similar_contracts`.
+- `tool-handlers.ts` em `query_knowledge_base` passa `{orgId, contractId, operation: "embed_query"}`.
+- `api/forms/[token]/attachments/[id]/extract/route.ts` passa `{orgId}` da SalesForm para `classifyAndExtract`.
+
+**API de agregacao:** `GET /api/ai-usage?from=YYYY-MM-DD&to=YYYY-MM-DD` retorna `{totals, byDay, byModel, byOperation, byProvider, byUser, byContract, recentErrors}`. Escopado por `orgId` da sessao. Default: ultimos 30 dias. Usa `prisma.aIUsage.groupBy` para agregacoes SQL-nativas + fetches adicionais para nomes de usuarios e titulos de contratos (top 10 cada).
+
+**Dashboard:** `/settings/ai-usage` (`apps/web/src/app/(dashboard)/settings/ai-usage/page.tsx`) + client component `AIUsageClient.tsx`. 4 KPI cards (custo, tokens, latencia media, taxa de erro colorida verde/ambar/vermelho), line chart SVG inline de custo por dia (sem recharts — zero nova dep), bar rows CSS por modelo/operacao, cards por provedor, top usuarios e contratos linkaveis, lista de erros recentes. Filtros: ultimos 7d / 30d / mes atual / mes anterior.
+
+**Migration:** `apps/web/prisma/migrations/20260414180000_add_ai_usage/migration.sql` criou a tabela + 4 indices + 3 FKs. Aplicada em prod via `prisma migrate deploy`.
+
 ## Revisao pre-aprovacao
 `POST /api/contracts/[id]/approve` roda: `validateContractData` + conta `ContractSuggestion` pendentes + `ContractComment` nao-resolvidos (e severity error). Se houver issues, retorna `{requiresReview: true, canForce, issues, errorCount, warningCount, pendingSuggestions, unresolvedComments}`. Frontend abre `ApprovalReviewDialog` com botoes "Revisar" e "Aprovar mesmo assim" (este ultimo oculto quando `canForce=false`, ou seja, quando ha errors). Segunda chamada com `{force: true}` pula validacoes e aprova.
 
@@ -332,8 +363,26 @@ Extracao automatizada de certidoes juridicas para due diligence imobiliaria, dis
 - `/api/forms/[token]/attachments/[id]/extract` - OCR via Gemini 2.5 Flash, persiste extractedData
 - `/login`, `/register`
 
-## Alertas
+## Export (PDF/DOCX) — storage e launcher
+- **Puppeteer/Chromium em serverless**: `src/lib/render/exporter.ts::launchBrowser()` detecta env via `VERCEL` / `AWS_LAMBDA_FUNCTION_NAME` e usa `@sparticuz/chromium` + `puppeteer-core`. Em dev local, procura Chrome do sistema via paths comuns (Windows/macOS/Linux). **Sem fallback para `puppeteer` full** — o pacote completo tenta baixar Chrome em runtime para `/tmp/.cache/puppeteer` e quebra em serverless read-only. Se `@sparticuz/chromium` nao carregar, erro explicito em PT-BR.
+- **`next.config.js::serverComponentsExternalPackages`** inclui `@sparticuz/chromium` e `puppeteer-core` — Next.js deixa esses pacotes como `require` runtime em vez de tentar bundlar os binarios (quebra fatal se bundlado).
+- **PDF margins**: `wrapWithStyle()` em `exporter.ts` NAO injeta `@page { margin: 0 }` (costumava, e brigava com `page.pdf({ margin })` do Puppeteer resultando em texto no limite da pagina). Puppeteer e a unica fonte de verdade: defaults classicos 30/25/35/25 mm (top/bottom/left/right — esquerda maior para encadernacao) quando nao ha `DocumentStyle` preset configurado.
+- **DOCX preprocessing**: `html-to-docx` ignora CSS em classes (todo `globals.css` e perdido na conversao). `exporter.ts::htmlForDocx(html, style)` preprocessa o HTML injetando estilos inline nos tags principais antes de passar pro `html-to-docx`:
+  - `<section class="cover-page">` achatada em paragrafos centralizados inline (font-size 24pt bold uppercase pro titulo, 13pt italico laranja pro subtitulo, borda top/bottom pro imovel) + `<p style="page-break-before: always">` forcando quebra pra pagina 2.
+  - `<div class="assinaturas">` vira paragrafos centralizados com spacing apertado.
+  - `<h1>`, `<h2>`, `<h3>` ganham `style=` inline via regex negative-lookahead `(?![^>]*\sstyle=)` — evita duplicar em tags ja transformadas no cover.
+  - `<p>` ganha `text-align: justify; margin: 6pt 0`.
+  - `<hr>` vira `<p>— — —</p>` centralizado (html-to-docx nao renderiza `<hr>` consistentemente).
+  - Wrapper global `<div style="font-family: ...; font-size: ...pt">`.
+  - Margens passadas como options em twips (1 mm ≈ 56.69 twips); `font`, `fontSize` (half-points: 12pt = 24), `pageNumber: true`, `footer: true`.
+  - **Limitacoes conscientes**: drop cap (`::first-letter`), ornamentos SVG (`::after`), marca d'agua "MINUTA" e ligaturas tipograficas NAO sao traduzidos para OOXML — perdidos na conversao. PDF preserva tudo; DOCX fica mais proximo mas nao identico.
+- **Storage dos exports** (`src/app/api/contracts/[id]/export/route.ts`): prioridade em 3 niveis:
+  1. **`BLOB_READ_WRITE_TOKEN` set** (padrao em prod): `@vercel/blob put()` com `access: "public"`, `addRandomSuffix: false`, `allowOverwrite: true`. Retorna URL publica direta (`https://<store>.public.blob.vercel-storage.com/exports/<contract-id>/contract-<id>.pdf`). Re-exports sobrescrevem o mesmo path.
+  2. **`S3_BUCKET` set**: usa `uploadBufferToStorage` (AWS S3).
+  3. **Nenhum dos dois**: em dev local, escreve em `process.cwd()/public/exports/<id>/` (funciona porque Next serve `public/` automaticamente). Em serverless (VERCEL=1), falha com erro explicito em PT-BR dizendo para configurar `BLOB_READ_WRITE_TOKEN` ou `S3_BUCKET`.
 - Puppeteer requer Vercel Pro (timeout 60s). CSS `@media print` em `globals.css` garante que page breaks manuais aparecem no PDF.
+
+## Alertas
 - Handlebars helpers em `src/lib/render/handlebars.ts` sao aditivos — novos helpers podem ser adicionados, mas helpers existentes NAO devem ser alterados (quebra contratos antigos).
 - TipTap edita HTML direto; re-render do Handlebars sobrescreve edicoes manuais (incluindo comment anchors e suggestion marks)
 - Marks customizadas (`CommentMark`, `SuggestionMark`) persistem como HTML (`<span data-comment-id>`, `<ins>/<del>`). Preservam entre reloads desde que o editor nao regenere a partir do template.

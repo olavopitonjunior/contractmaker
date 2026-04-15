@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { Anthropic } from "@anthropic-ai/sdk";
+import { recordAIUsage } from "@/lib/ai/usage";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -17,23 +18,53 @@ export async function POST(req: NextRequest) {
   }
 
   const { context, category, description } = await req.json();
+  const model = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-20250514";
+  const t0 = Date.now();
 
-  const response = await anthropic.messages.create({
-    model: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-20250514",
-    max_tokens: 1024,
-    system: `Voce e um especialista juridico em contratos imobiliarios brasileiros.
+  let response;
+  try {
+    response = await anthropic.messages.create({
+      model,
+      max_tokens: 1024,
+      system: `Voce e um especialista juridico em contratos imobiliarios brasileiros.
 Gere clausulas contratuais claras e juridicamente validas.
 Retorne APENAS um JSON com: { "title": "...", "content": "...", "tags": [...], "subcategory": "..." }
 O content deve usar sintaxe Handlebars quando houver campos variaveis (ex: {{moeda valor}}, {{this.nome}}).`,
-    messages: [
-      {
-        role: "user",
-        content: `Gere uma clausula contratual para a seguinte situacao:
+      messages: [
+        {
+          role: "user",
+          content: `Gere uma clausula contratual para a seguinte situacao:
 Categoria: ${category || "customizada"}
 Descrição: ${description}
 ${context ? `Contexto adicional: ${context}` : ""}`,
-      },
-    ],
+        },
+      ],
+    });
+  } catch (err) {
+    recordAIUsage({
+      orgId: org.id,
+      userId: session.user.id,
+      provider: "anthropic",
+      model,
+      operation: "clause_generate",
+      promptTokens: 0,
+      latencyMs: Date.now() - t0,
+      success: false,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
+
+  recordAIUsage({
+    orgId: org.id,
+    userId: session.user.id,
+    provider: "anthropic",
+    model,
+    operation: "clause_generate",
+    promptTokens: response.usage?.input_tokens ?? 0,
+    completionTokens: response.usage?.output_tokens ?? 0,
+    latencyMs: Date.now() - t0,
+    success: true,
   });
 
   const text =

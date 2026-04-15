@@ -1,8 +1,19 @@
 import { Anthropic } from "@anthropic-ai/sdk";
 import { GoogleGenAI } from "@google/genai";
 import type { ExtractionResult } from "./types";
+import { recordAIUsage } from "./usage";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+
+/**
+ * Optional observability context threaded through OCR calls. When provided,
+ * the call is recorded in AIUsage; when absent, the call runs without logging.
+ */
+export interface OcrUsageContext {
+  orgId: string;
+  userId?: string | null;
+  contractId?: string | null;
+}
 
 let genaiClient: GoogleGenAI | null = null;
 function getGenAI(): GoogleGenAI {
@@ -83,31 +94,68 @@ Retorne APENAS um JSON valido.`,
 
 export async function classifyDocument(
   imageBase64: string,
-  mimeType: string
+  mimeType: string,
+  ctx?: OcrUsageContext
 ): Promise<string> {
-  const response = await anthropic.messages.create({
-    model: process.env.OCR_MODEL || "claude-haiku-4-5-20251001",
-    max_tokens: 100,
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: mimeType as "image/jpeg" | "image/png" | "image/webp" | "image/gif",
-              data: imageBase64,
+  const model = process.env.OCR_MODEL || "claude-haiku-4-5-20251001";
+  const t0 = Date.now();
+  let response;
+  try {
+    response = await anthropic.messages.create({
+      model,
+      max_tokens: 100,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: mimeType as "image/jpeg" | "image/png" | "image/webp" | "image/gif",
+                data: imageBase64,
+              },
             },
-          },
-          {
-            type: "text",
-            text: 'Classifique este documento brasileiro. Retorne APENAS uma palavra: "rg", "cpf", "matricula", "iptu", "escritura", "procuracao" ou "outro".',
-          },
-        ],
-      },
-    ],
-  });
+            {
+              type: "text",
+              text: 'Classifique este documento brasileiro. Retorne APENAS uma palavra: "rg", "cpf", "matricula", "iptu", "escritura", "procuracao" ou "outro".',
+            },
+          ],
+        },
+      ],
+    });
+  } catch (err) {
+    if (ctx) {
+      recordAIUsage({
+        orgId: ctx.orgId,
+        userId: ctx.userId,
+        contractId: ctx.contractId,
+        provider: "anthropic",
+        model,
+        operation: "ocr_tool",
+        promptTokens: 0,
+        latencyMs: Date.now() - t0,
+        success: false,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+    }
+    throw err;
+  }
+
+  if (ctx) {
+    recordAIUsage({
+      orgId: ctx.orgId,
+      userId: ctx.userId,
+      contractId: ctx.contractId,
+      provider: "anthropic",
+      model,
+      operation: "ocr_tool",
+      promptTokens: response.usage?.input_tokens ?? 0,
+      completionTokens: response.usage?.output_tokens ?? 0,
+      latencyMs: Date.now() - t0,
+      success: true,
+    });
+  }
 
   const text = response.content[0].type === "text" ? response.content[0].text.trim().toLowerCase() : "outro";
   const valid = ["rg", "cpf", "matricula", "iptu", "escritura", "procuracao", "outro"];
@@ -159,20 +207,58 @@ const SUPPORTED_OCR_MIMES = new Set([
 
 export async function classifyAndExtract(
   base64Data: string,
-  mimeType: string
+  mimeType: string,
+  ctx?: OcrUsageContext
 ): Promise<ExtractionResult> {
   if (!SUPPORTED_OCR_MIMES.has(mimeType)) {
     throw new Error(`Mime type nao suportado para OCR: ${mimeType}`);
   }
 
+  const model = process.env.GEMINI_OCR_MODEL || "gemini-2.5-flash";
   const ai = getGenAI();
-  const response = await ai.models.generateContent({
-    model: process.env.GEMINI_OCR_MODEL || "gemini-2.5-flash",
-    contents: [
-      { text: COMBINED_PROMPT },
-      { inlineData: { mimeType, data: base64Data } },
-    ],
-  });
+  const t0 = Date.now();
+  let response;
+  try {
+    response = await ai.models.generateContent({
+      model,
+      contents: [
+        { text: COMBINED_PROMPT },
+        { inlineData: { mimeType, data: base64Data } },
+      ],
+    });
+  } catch (err) {
+    if (ctx) {
+      recordAIUsage({
+        orgId: ctx.orgId,
+        userId: ctx.userId,
+        contractId: ctx.contractId,
+        provider: "gemini",
+        model,
+        operation: "ocr_form",
+        promptTokens: 0,
+        latencyMs: Date.now() - t0,
+        success: false,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+    }
+    throw err;
+  }
+
+  if (ctx) {
+    const usage = (response as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }).usageMetadata;
+    recordAIUsage({
+      orgId: ctx.orgId,
+      userId: ctx.userId,
+      contractId: ctx.contractId,
+      provider: "gemini",
+      model,
+      operation: "ocr_form",
+      promptTokens: usage?.promptTokenCount ?? 0,
+      completionTokens: usage?.candidatesTokenCount ?? 0,
+      latencyMs: Date.now() - t0,
+      success: true,
+    });
+  }
 
   const text = response.text ?? "{}";
 
@@ -210,34 +296,70 @@ export async function classifyAndExtract(
 export async function extractDocumentData(
   imageBase64: string,
   mimeType: string,
-  category?: string
+  category?: string,
+  ctx?: OcrUsageContext
 ): Promise<ExtractionResult> {
   // Step 1: Classify if not provided
-  const docType = category || await classifyDocument(imageBase64, mimeType);
+  const docType = category || await classifyDocument(imageBase64, mimeType, ctx);
 
   // Step 2: Extract with specific prompt
   const prompt = EXTRACTION_PROMPTS[docType] || EXTRACTION_PROMPTS.outro;
-
-  const response = await anthropic.messages.create({
-    model: process.env.OCR_MODEL || "claude-haiku-4-5-20251001",
-    max_tokens: 1024,
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: mimeType as "image/jpeg" | "image/png" | "image/webp" | "image/gif",
-              data: imageBase64,
+  const model = process.env.OCR_MODEL || "claude-haiku-4-5-20251001";
+  const t0 = Date.now();
+  let response;
+  try {
+    response = await anthropic.messages.create({
+      model,
+      max_tokens: 1024,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: {
+                type: "base64",
+                media_type: mimeType as "image/jpeg" | "image/png" | "image/webp" | "image/gif",
+                data: imageBase64,
+              },
             },
-          },
-          { type: "text", text: prompt },
-        ],
-      },
-    ],
-  });
+            { type: "text", text: prompt },
+          ],
+        },
+      ],
+    });
+  } catch (err) {
+    if (ctx) {
+      recordAIUsage({
+        orgId: ctx.orgId,
+        userId: ctx.userId,
+        contractId: ctx.contractId,
+        provider: "anthropic",
+        model,
+        operation: "ocr_tool",
+        promptTokens: 0,
+        latencyMs: Date.now() - t0,
+        success: false,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+    }
+    throw err;
+  }
+
+  if (ctx) {
+    recordAIUsage({
+      orgId: ctx.orgId,
+      userId: ctx.userId,
+      contractId: ctx.contractId,
+      provider: "anthropic",
+      model,
+      operation: "ocr_tool",
+      promptTokens: response.usage?.input_tokens ?? 0,
+      completionTokens: response.usage?.output_tokens ?? 0,
+      latencyMs: Date.now() - t0,
+      success: true,
+    });
+  }
 
   const text = response.content[0].type === "text" ? response.content[0].text : "{}";
 

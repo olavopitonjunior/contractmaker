@@ -32,7 +32,7 @@ export async function POST(
 ) {
   const form = await prisma.salesForm.findUnique({
     where: { token: params.token },
-    select: { id: true },
+    select: { id: true, orgId: true },
   });
   if (!form) {
     return NextResponse.json({ error: "Form not found" }, { status: 404 });
@@ -70,7 +70,9 @@ export async function POST(
   try {
     const buffer = await fetchBuffer(attachment.url);
     const base64 = buffer.toString("base64");
-    const result = await classifyAndExtract(base64, attachment.mime);
+    const result = await classifyAndExtract(base64, attachment.mime, {
+      orgId: form.orgId,
+    });
 
     const payload = {
       fields: result.fields,
