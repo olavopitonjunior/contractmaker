@@ -7,10 +7,11 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
+import type { SelectGroup } from "@/components/forms/NativeSelect";
 import {
   mapExtractedToForm,
   suggestAssignment,
-  type Assignment,
+  type DocumentKind,
   type ProcessedDocHint,
 } from "@/lib/forms/extracted-to-form";
 
@@ -24,6 +25,41 @@ const MAX_BYTES = 10 * 1024 * 1024;
 const RESIZE_MAX_SIDE = 2000;
 const IMAGE_MIMES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const ACCEPTED_MIMES = [...IMAGE_MIMES, "application/pdf"];
+const UPLOAD_CONCURRENCY = 4;
+
+/**
+ * Tiny inline pLimit — runs at most `concurrency` async tasks at the same time.
+ * Used to parallelize multi-file upload + OCR without overwhelming Gemini or
+ * exhausting the browser's per-origin fetch budget.
+ */
+function pLimit(concurrency: number) {
+  const queue: Array<() => void> = [];
+  let active = 0;
+  const next = () => {
+    active--;
+    if (queue.length > 0) {
+      const fn = queue.shift();
+      fn?.();
+    }
+  };
+  return <T,>(fn: () => Promise<T>): Promise<T> =>
+    new Promise<T>((resolve, reject) => {
+      const run = () => {
+        active++;
+        fn()
+          .then((v) => {
+            resolve(v);
+            next();
+          })
+          .catch((e) => {
+            reject(e);
+            next();
+          });
+      };
+      if (active < concurrency) run();
+      else queue.push(run);
+    });
+}
 
 async function resizeImage(file: File, maxSide: number): Promise<File> {
   try {
@@ -50,20 +86,121 @@ async function resizeImage(file: File, maxSide: number): Promise<File> {
   }
 }
 
-function buildAssignmentOptions(snapshot: {
+interface FormSlotData {
   vendedores?: any[];
   compradores?: any[];
   imoveis?: any[];
-}): Array<{ value: string; label: string }> {
-  const options: Array<{ value: string; label: string }> = [];
-  const vCount = Math.max(1, snapshot.vendedores?.length ?? 1);
-  const cCount = Math.max(1, snapshot.compradores?.length ?? 1);
-  const iCount = Math.max(1, snapshot.imoveis?.length ?? 1);
-  for (let i = 0; i < vCount; i++) options.push({ value: `vendedor:${i}`, label: `Vendedor ${i + 1}` });
-  for (let i = 0; i < cCount; i++) options.push({ value: `comprador:${i}`, label: `Comprador ${i + 1}` });
-  for (let i = 0; i < iCount; i++) options.push({ value: `imovel:${i}`, label: `Imóvel ${i + 1}` });
-  options.push({ value: "outro:0", label: "Outros (sem aplicar)" });
-  return options;
+}
+
+function slotName(
+  kind: DocumentKind,
+  index: number,
+  snapshot: FormSlotData,
+  docs: DocumentCardData[]
+): string | null {
+  // 1. Form-typed name takes precedence
+  const list =
+    kind === "vendedor"
+      ? snapshot.vendedores
+      : kind === "comprador"
+      ? snapshot.compradores
+      : kind === "imovel"
+      ? snapshot.imoveis
+      : null;
+  const slot = list?.[index];
+  if (slot) {
+    if (kind === "imovel") {
+      const rua = slot.rua as string | undefined;
+      const numero = slot.numero as string | undefined;
+      if (rua) return numero ? `${rua}, ${numero}` : rua;
+    } else {
+      const nome = (slot.nome || slot.razao_social) as string | undefined;
+      if (nome && nome.trim()) return nome.trim();
+    }
+  }
+  // 2. Fall back to a doc already assigned to this slot with extracted name
+  const docInSlot = docs.find(
+    (d) =>
+      d.assignment.kind === kind &&
+      d.assignment.index === index &&
+      d.fields &&
+      d.status === "ready"
+  );
+  if (docInSlot?.fields) {
+    if (kind === "imovel") {
+      const rua = docInSlot.fields.endereco_completo || docInSlot.fields.endereco;
+      if (typeof rua === "string" && rua.trim()) return rua.trim().slice(0, 40);
+    } else {
+      const nome = docInSlot.fields.nome_completo || docInSlot.fields.titular_nome;
+      if (typeof nome === "string" && nome.trim()) return nome.trim();
+    }
+  }
+  return null;
+}
+
+function buildAssignmentOptions(
+  snapshot: FormSlotData,
+  docs: DocumentCardData[]
+): SelectGroup[] {
+  // Compute the visible count for each kind: max of (form snapshot length,
+  // highest index any doc is assigned to + 1, default 1)
+  const maxAssigned = (kind: DocumentKind) =>
+    docs.reduce(
+      (m, d) => (d.assignment.kind === kind ? Math.max(m, d.assignment.index) : m),
+      -1
+    );
+  const vCount = Math.max(
+    1,
+    snapshot.vendedores?.length ?? 1,
+    maxAssigned("vendedor") + 1
+  );
+  const cCount = Math.max(
+    1,
+    snapshot.compradores?.length ?? 1,
+    maxAssigned("comprador") + 1
+  );
+  const iCount = Math.max(
+    1,
+    snapshot.imoveis?.length ?? 1,
+    maxAssigned("imovel") + 1
+  );
+
+  const buildKindOptions = (
+    kind: DocumentKind,
+    count: number,
+    singularLabel: string
+  ) => {
+    const opts: Array<{ value: string; label: string }> = [];
+    for (let i = 0; i < count; i++) {
+      const name = slotName(kind, i, snapshot, docs);
+      const ord = `${singularLabel} ${i + 1}`;
+      opts.push({
+        value: `${kind}:${i}`,
+        label: name ? `${ord} — ${name}` : ord,
+      });
+    }
+    opts.push({ value: `${kind}:new`, label: `+ Novo ${singularLabel.toLowerCase()}` });
+    return opts;
+  };
+
+  return [
+    {
+      label: "Vendedores",
+      options: buildKindOptions("vendedor", vCount, "Vendedor"),
+    },
+    {
+      label: "Compradores",
+      options: buildKindOptions("comprador", cCount, "Comprador"),
+    },
+    {
+      label: "Imóveis",
+      options: buildKindOptions("imovel", iCount, "Imóvel"),
+    },
+    {
+      label: "Outros",
+      options: [{ value: "outro:0", label: "Outros (sem aplicar)" }],
+    },
+  ];
 }
 
 export function DocumentosStep({ form, token }: DocumentosStepProps) {
@@ -120,6 +257,25 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
     setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
   }, []);
 
+  // Ensure the form's vendedores/compradores/imoveis array has at least
+  // `index + 1` entries. Used by both auto-grow (suggestAssignment putting a
+  // doc on a slot that doesn't exist yet) and the manual "+ Novo" action.
+  const ensureSlot = useCallback(
+    (kind: DocumentKind, index: number) => {
+      if (kind === "outro") return;
+      const fieldKey =
+        kind === "imovel" ? "imoveis" : kind === "vendedor" ? "vendedores" : "compradores";
+      const current = (form.getValues(fieldKey) as any[] | undefined) ?? [];
+      if (current.length > index) return;
+      const next = [...current];
+      while (next.length <= index) {
+        next.push({ tipo_pessoa: "fisica" });
+      }
+      form.setValue(fieldKey, next as never, { shouldDirty: true });
+    },
+    [form]
+  );
+
   const runExtract = useCallback(
     async (doc: DocumentCardData) => {
       updateDoc(doc.id, { status: "extracting", error: null });
@@ -137,30 +293,42 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
         }
         const extracted = data.extractedData || {};
         const fields = extracted.fields || {};
-        const snapshot = form.getValues();
-        // Pass the already-processed sibling docs so suggestAssignment can
-        // distinguish "same person" (same CPF → same slot) from "different
-        // person" (different CPF → next slot). This is what prevents two
-        // different RGs from both ending up on vendedor[0].
-        const siblings: ProcessedDocHint[] = docs
-          .filter((d) => d.id !== doc.id && d.status === "ready" && d.fields)
-          .map((d) => ({
-            category: d.category,
-            fields: d.fields,
-            assignment: d.assignment,
-          }));
-        const assignment = suggestAssignment(
-          data.category,
-          fields,
-          snapshot,
-          siblings
-        );
-        updateDoc(doc.id, {
-          status: "ready",
-          category: data.category,
-          fields,
-          confidence: typeof extracted.confidence === "number" ? extracted.confidence : null,
-          assignment,
+        // Compute assignment via setDocs callback so we always read the LATEST
+        // docs state (parallel runs would otherwise see stale state from the
+        // closure when this callback was created). The callback also writes
+        // the updated doc atomically. ensureSlot grows the form arrays if the
+        // suggested assignment.index is beyond current length.
+        setDocs((prev) => {
+          const snapshot = form.getValues();
+          const siblings: ProcessedDocHint[] = prev
+            .filter((d) => d.id !== doc.id && d.status === "ready" && d.fields)
+            .map((d) => ({
+              category: d.category,
+              fields: d.fields,
+              assignment: d.assignment,
+            }));
+          const assignment = suggestAssignment(
+            data.category,
+            fields,
+            snapshot,
+            siblings
+          );
+          ensureSlot(assignment.kind, assignment.index);
+          return prev.map((d) =>
+            d.id === doc.id
+              ? {
+                  ...d,
+                  status: "ready",
+                  category: data.category,
+                  fields,
+                  confidence:
+                    typeof extracted.confidence === "number"
+                      ? extracted.confidence
+                      : null,
+                  assignment,
+                }
+              : d
+          );
         });
       } catch (err) {
         updateDoc(doc.id, {
@@ -169,7 +337,7 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
         });
       }
     },
-    [token, form, updateDoc, docs]
+    [token, form, updateDoc, ensureSlot]
   );
 
   const handleFiles = useCallback(
@@ -181,6 +349,11 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
         return;
       }
 
+      // Filter + dedupe + size validation up-front. Each accepted file gets
+      // a temporary card and runs its full pipeline (resize → upload → extract)
+      // through the pLimit throttle so multiple files run in parallel without
+      // blowing up Gemini concurrency or the browser's per-origin fetch limit.
+      const validFiles: Array<{ rawFile: File; tempId: string }> = [];
       for (const rawFile of arr) {
         if (!ACCEPTED_MIMES.includes(rawFile.type)) {
           toast.error(`Tipo não suportado: ${rawFile.name}`);
@@ -190,17 +363,12 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
           toast.error(`${rawFile.name} excede 10 MB`);
           continue;
         }
-
-        const file = IMAGE_MIMES.includes(rawFile.type)
-          ? await resizeImage(rawFile, RESIZE_MAX_SIDE)
-          : rawFile;
-
         const tempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
         const tempDoc: DocumentCardData = {
           id: tempId,
-          filename: file.name,
-          mime: file.type,
-          fileUrl: URL.createObjectURL(file),
+          filename: rawFile.name,
+          mime: rawFile.type,
+          fileUrl: URL.createObjectURL(rawFile),
           status: "uploading",
           category: null,
           fields: null,
@@ -208,70 +376,117 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
           assignment: { kind: "outro", index: 0 },
         };
         setDocs((prev) => [...prev, tempDoc]);
+        validFiles.push({ rawFile, tempId });
+      }
 
-        try {
-          const body = new FormData();
-          body.append("file", file);
-          const uploadRes = await fetch(`/api/forms/${token}/attachments`, {
-            method: "POST",
-            body,
-          });
-          const uploadData = await uploadRes.json();
-          if (!uploadRes.ok) {
+      if (validFiles.length === 0) return;
+      if (validFiles.length > 1) {
+        toast.info(`Processando ${validFiles.length} documentos em paralelo…`);
+      }
+
+      const limit = pLimit(UPLOAD_CONCURRENCY);
+      const tasks = validFiles.map(({ rawFile, tempId }) =>
+        limit(async () => {
+          try {
+            const file = IMAGE_MIMES.includes(rawFile.type)
+              ? await resizeImage(rawFile, RESIZE_MAX_SIDE)
+              : rawFile;
+
+            const body = new FormData();
+            body.append("file", file);
+            const uploadRes = await fetch(`/api/forms/${token}/attachments`, {
+              method: "POST",
+              body,
+            });
+            const uploadData = await uploadRes.json();
+            if (!uploadRes.ok) {
+              setDocs((prev) =>
+                prev.map((d) =>
+                  d.id === tempId
+                    ? { ...d, status: "failed", error: uploadData.error || "Falha no upload" }
+                    : d
+                )
+              );
+              return;
+            }
+
+            // Promote temp card to persisted id + extracting state
             setDocs((prev) =>
               prev.map((d) =>
                 d.id === tempId
-                  ? { ...d, status: "failed", error: uploadData.error || "Falha no upload" }
+                  ? {
+                      ...d,
+                      id: uploadData.id,
+                      fileUrl: uploadData.fileUrl,
+                      status: "extracting",
+                    }
                   : d
               )
             );
-            continue;
+
+            const persistedDoc: DocumentCardData = {
+              id: uploadData.id,
+              filename: rawFile.name,
+              mime: rawFile.type,
+              fileUrl: uploadData.fileUrl,
+              status: "extracting",
+              category: null,
+              fields: null,
+              confidence: null,
+              assignment: { kind: "outro", index: 0 },
+            };
+
+            await runExtract(persistedDoc);
+          } catch (err) {
+            setDocs((prev) =>
+              prev.map((d) =>
+                d.id === tempId
+                  ? {
+                      ...d,
+                      status: "failed",
+                      error: err instanceof Error ? err.message : String(err),
+                    }
+                  : d
+              )
+            );
           }
+        })
+      );
 
-          setDocs((prev) =>
-            prev.map((d) =>
-              d.id === tempId
-                ? {
-                    ...d,
-                    id: uploadData.id,
-                    fileUrl: uploadData.fileUrl,
-                    status: "extracting",
-                  }
-                : d
-            )
-          );
-
-          const persistedDoc: DocumentCardData = {
-            ...tempDoc,
-            id: uploadData.id,
-            fileUrl: uploadData.fileUrl,
-            status: "extracting",
-          };
-
-          await runExtract(persistedDoc);
-        } catch (err) {
-          setDocs((prev) =>
-            prev.map((d) =>
-              d.id === tempId
-                ? {
-                    ...d,
-                    status: "failed",
-                    error: err instanceof Error ? err.message : String(err),
-                  }
-                : d
-            )
-          );
-        }
-      }
+      await Promise.allSettled(tasks);
     },
-    [docs.length, token, runExtract, updateDoc]
+    [docs.length, token, runExtract]
   );
 
   const handleAssignmentChange = useCallback(
-    (id: string, assignment: Assignment) => {
-      updateDoc(id, { assignment, applied: false });
+    (id: string, assignmentValue: string) => {
+      const [rawKind, rawIdx] = assignmentValue.split(":");
+      const kind = rawKind as DocumentKind;
+      let index: number;
+      if (rawIdx === "new") {
+        // "+ Novo X" — append a fresh slot to the form array and assign here
+        const fieldKey =
+          kind === "imovel"
+            ? "imoveis"
+            : kind === "vendedor"
+            ? "vendedores"
+            : kind === "comprador"
+            ? "compradores"
+            : null;
+        if (!fieldKey) return;
+        const current = (form.getValues(fieldKey) as any[] | undefined) ?? [];
+        index = current.length;
+        ensureSlot(kind, index);
+        toast.success(
+          `${kind === "imovel" ? "Imóvel" : kind === "vendedor" ? "Vendedor" : "Comprador"} ${index + 1} criado`
+        );
+      } else {
+        index = Number(rawIdx) || 0;
+        ensureSlot(kind, index);
+      }
+      updateDoc(id, { assignment: { kind, index }, applied: false });
     },
-    [updateDoc]
+    [updateDoc, form, ensureSlot]
   );
 
   const handleRemove = useCallback(
@@ -329,7 +544,7 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
   }, [docs, form, token, updateDoc]);
 
   const snapshot = form.getValues();
-  const assignmentOptions = buildAssignmentOptions(snapshot);
+  const assignmentOptions = buildAssignmentOptions(snapshot, docs);
   const readyCount = docs.filter((d) => d.status === "ready").length;
   // Only block "Aplicar aos campos" while files are still UPLOADING. Extractions
   // can take up to 60s per file (Gemini) and one failed extraction should not

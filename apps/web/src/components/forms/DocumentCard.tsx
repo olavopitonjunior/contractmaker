@@ -1,11 +1,15 @@
 "use client";
 
-import { FileText, Loader2, AlertCircle, X, CheckCircle2 } from "lucide-react";
+import { FileText, Loader2, AlertCircle, X, CheckCircle2, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { NativeSelect } from "@/components/forms/NativeSelect";
+import {
+  NativeSelect,
+  type SelectOption,
+  type SelectGroup,
+} from "@/components/forms/NativeSelect";
 import { cn } from "@/lib/utils";
-import type { Assignment, DocumentKind } from "@/lib/forms/extracted-to-form";
+import type { Assignment } from "@/lib/forms/extracted-to-form";
 import { categoryLabel } from "@/lib/forms/extracted-to-form";
 
 export type DocumentCardStatus = "uploading" | "extracting" | "ready" | "failed";
@@ -26,8 +30,8 @@ export interface DocumentCardData {
 
 interface DocumentCardProps {
   doc: DocumentCardData;
-  assignmentOptions: Array<{ value: string; label: string }>;
-  onAssignmentChange?: (id: string, assignment: Assignment) => void;
+  assignmentOptions: SelectOption[] | SelectGroup[];
+  onAssignmentChange?: (id: string, assignmentValue: string) => void;
   onRemove?: (id: string) => void;
   onRetry?: (id: string) => void;
   readOnly?: boolean;
@@ -55,11 +59,6 @@ function formatValue(v: unknown): string {
 
 function encodeAssignment(a: Assignment): string {
   return `${a.kind}:${a.index}`;
-}
-
-function decodeAssignment(s: string): Assignment {
-  const [kind, idx] = s.split(":");
-  return { kind: kind as DocumentKind, index: Number(idx) || 0 };
 }
 
 export function DocumentCard({
@@ -148,18 +147,39 @@ export function DocumentCard({
           )}
         </div>
 
-        {doc.status === "failed" && doc.error && (
-          <div className="flex items-center justify-between gap-2 rounded bg-destructive/10 px-2 py-1 text-[11px] text-destructive">
-            <span className="truncate">{doc.error}</span>
-            {onRetry && (
-              <button
-                type="button"
-                onClick={() => onRetry(doc.id)}
-                className="shrink-0 font-medium underline"
-              >
-                Tentar novamente
-              </button>
-            )}
+        {doc.status === "failed" && (doc.error || true) && (
+          <div className="flex flex-col gap-1.5 rounded bg-destructive/10 px-2 py-2 text-[11px] text-destructive">
+            <div className="flex items-start gap-1.5">
+              <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+              <span className="break-words">
+                {doc.error || "Falha na extração"}
+              </span>
+            </div>
+            <div className="flex gap-1.5">
+              {onRetry && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-6 px-2 text-[11px] border-destructive/40 text-destructive hover:bg-destructive/10"
+                  onClick={() => onRetry(doc.id)}
+                >
+                  <RefreshCw className="h-3 w-3 mr-1" />
+                  Tentar novamente
+                </Button>
+              )}
+              {onRemove && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-6 px-2 text-[11px] text-muted-foreground"
+                  onClick={() => onRemove(doc.id)}
+                >
+                  Remover
+                </Button>
+              )}
+            </div>
           </div>
         )}
 
@@ -180,7 +200,7 @@ export function DocumentCard({
           <div className="mt-1">
             <NativeSelect
               value={encodeAssignment(doc.assignment)}
-              onChange={(val) => onAssignmentChange(doc.id, decodeAssignment(val))}
+              onChange={(val) => onAssignmentChange(doc.id, val)}
               options={assignmentOptions}
               className="h-8 text-xs"
             />

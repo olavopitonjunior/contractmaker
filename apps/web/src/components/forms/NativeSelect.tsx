@@ -3,18 +3,29 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-interface Option {
+export interface SelectOption {
   value: string;
   label: string;
+}
+
+export interface SelectGroup {
+  label: string;
+  options: SelectOption[];
 }
 
 interface NativeSelectProps {
   value?: string;
   onChange: (value: string) => void;
-  options: Option[];
+  options: SelectOption[] | SelectGroup[];
   placeholder?: string;
   className?: string;
   id?: string;
+}
+
+function isGrouped(
+  options: SelectOption[] | SelectGroup[]
+): options is SelectGroup[] {
+  return options.length > 0 && "options" in (options[0] as SelectGroup);
 }
 
 export function NativeSelect({
@@ -25,6 +36,7 @@ export function NativeSelect({
   className,
   id,
 }: NativeSelectProps) {
+  const grouped = isGrouped(options);
   return (
     <select
       id={id}
@@ -42,11 +54,21 @@ export function NativeSelect({
           {placeholder}
         </option>
       )}
-      {options.map((opt) => (
-        <option key={opt.value} value={opt.value}>
-          {opt.label}
-        </option>
-      ))}
+      {grouped
+        ? (options as SelectGroup[]).map((group) => (
+            <optgroup key={group.label} label={group.label}>
+              {group.options.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </optgroup>
+          ))
+        : (options as SelectOption[]).map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
     </select>
   );
 }

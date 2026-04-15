@@ -292,13 +292,22 @@ function suggestPersonAssignment(
     }
   }
 
-  // 3. Figure out which slots are already occupied by siblings
+  // 3. Figure out which slots are already occupied by siblings (track highest
+  // index per kind so we can grow correctly when both vendedor[0] and
+  // comprador[0] are taken by different identities).
   const occupiedSlots = new Set<string>();
+  let maxVendedorIdx = -1;
+  let maxCompradorIdx = -1;
   const personSiblings = siblings.filter(
     (s) => s.category && PERSON_CATEGORIES.has(s.category) && s.fields
   );
   for (const sib of personSiblings) {
     occupiedSlots.add(`${sib.assignment.kind}:${sib.assignment.index}`);
+    if (sib.assignment.kind === "vendedor") {
+      maxVendedorIdx = Math.max(maxVendedorIdx, sib.assignment.index);
+    } else if (sib.assignment.kind === "comprador") {
+      maxCompradorIdx = Math.max(maxCompradorIdx, sib.assignment.index);
+    }
   }
 
   // Default: if vendedor[0] is free, go there. Otherwise go to comprador[0]
@@ -309,8 +318,16 @@ function suggestPersonAssignment(
   if (!occupiedSlots.has("comprador:0")) {
     return { kind: "comprador", index: firstEmptyIndex(snapshot.compradores) };
   }
-  // Both taken — fall back to vendedor's next empty slot
-  return { kind: "vendedor", index: firstEmptyIndex(snapshot.vendedores) };
+  // Both vendedor[0] and comprador[0] are taken AND this doc has a unique
+  // identity (no sibling match in step 2). Auto-grow the smaller-occupancy
+  // side so couples on both sides are handled (2 vendedores vs 1 comprador
+  // → next person fills vendedor[2]; if equal, prefer growing vendedor list).
+  const nextVendedorIdx = maxVendedorIdx + 1;
+  const nextCompradorIdx = maxCompradorIdx + 1;
+  if (nextVendedorIdx <= nextCompradorIdx) {
+    return { kind: "vendedor", index: nextVendedorIdx };
+  }
+  return { kind: "comprador", index: nextCompradorIdx };
 }
 
 export function suggestAssignment(
