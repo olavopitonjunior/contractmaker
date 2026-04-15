@@ -36,6 +36,7 @@ model User {
   contractComments    ContractComment[]    @relation("commentAuthor")
   contractSuggestions ContractSuggestion[] @relation("suggestionAuthor")
   aiUsage             AIUsage[]
+  certidaoJobs        CertidaoJob[]        @relation("certidaoJobUser")
 }
 
 model Account {
@@ -157,8 +158,9 @@ model Deal {
   user        User             @relation(fields: [userId], references: [id])
   form        SalesForm?       @relation(fields: [formId], references: [id])
   contracts    Contract[]
-  attachments  DealAttachment[]
-  certidaoJobs CertidaoJob[]
+  attachments   DealAttachment[]
+  certidaoJobs  CertidaoJob[]
+  certidoesShareLinks CertidoesShareLink[]
 }
 
 model DealAttachment {
@@ -179,6 +181,7 @@ model DealAttachment {
 model CertidaoJob {
   id              String    @id @default(cuid())
   dealId          String
+  userId          String?
   batchId         String
   provider        String    @default("infosimples")
   endpoint        String
@@ -201,11 +204,29 @@ model CertidaoJob {
   createdAt       DateTime  @default(now())
 
   deal       Deal            @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  user       User?           @relation("certidaoJobUser", fields: [userId], references: [id], onDelete: SetNull)
   attachment DealAttachment? @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
 
   @@index([dealId, batchId])
   @@index([status])
   @@index([status, expectedReadyAt])
+  @@index([userId, createdAt])
+}
+
+model CertidoesShareLink {
+  id        String    @id @default(cuid())
+  dealId    String
+  token     String    @unique @default(cuid())
+  createdBy String
+  createdAt DateTime  @default(now())
+  expiresAt DateTime
+  revokedAt DateTime?
+  viewCount Int       @default(0)
+
+  deal Deal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([token])
+  @@index([dealId, revokedAt])
 }
 
 // ============================================

@@ -1,7 +1,11 @@
 import type { InfosimplesResponse } from "./types";
 
 const BASE_URL = "https://api.infosimples.com/api/v2/consultas";
-const DEFAULT_TIMEOUT_MS = 60_000;
+// IMPORTANTE: este timeout DEVE ser maior que o parametro `timeout` enviado no
+// body da request (600s = 10min). Se for menor, nosso AbortController mata o
+// fetch antes da Infosimples responder, mas a chamada ja foi cobrada e o job
+// fica orfao em "fetching" ate o dead-man sweeper encontrar.
+const DEFAULT_TIMEOUT_MS = 630_000; // 10min30s
 
 export class InfosimplesError extends Error {
   constructor(

@@ -8,7 +8,9 @@ import { sanitizePayload } from "@/lib/certidoes/infosimples";
 import { z } from "zod";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+// maxDuration deve ser > DEFAULT_TIMEOUT_MS (630s) do callInfosimples para que
+// o Vercel nao recicle o container antes do fetch timeout.
+export const maxDuration = 660;
 
 async function authorizeDeal(dealId: string) {
   const session = await auth();
@@ -81,7 +83,7 @@ export async function POST(
   if ("error" in authResult) {
     return NextResponse.json({ error: authResult.error }, { status: authResult.status });
   }
-  const { deal } = authResult;
+  const { deal, org, userId } = authResult;
 
   const body = await req.json().catch(() => ({}));
   const parsed = extractSchema.safeParse(body);
@@ -90,8 +92,29 @@ export async function POST(
   }
   const { batchId } = parsed.data;
 
-  // Budget guard
-  const spend = await getMonthlySpend();
+  // Idempotency guard: reject if there's already an active batch for this deal
+  // in the last 30 minutes. Prevents double-click double-charge.
+  const activeBatch = await prisma.certidaoJob.findFirst({
+    where: {
+      dealId: params.dealId,
+      status: { in: ["pending", "fetching"] },
+      createdAt: { gte: new Date(Date.now() - 30 * 60_000) },
+    },
+    select: { batchId: true },
+  });
+  if (activeBatch) {
+    return NextResponse.json(
+      {
+        error:
+          "Ja existe uma extracao em andamento para este negocio. Aguarde a conclusao ou use o botao de recuperar travadas.",
+        activeBatchId: activeBatch.batchId,
+      },
+      { status: 409 }
+    );
+  }
+
+  // Budget guard (per-org)
+  const spend = await getMonthlySpend(org.id);
   if (spend.exceeded) {
     return NextResponse.json(
       {
@@ -129,13 +152,15 @@ export async function POST(
     );
   }
 
-  // Create all job rows atomically
-  await prisma.$transaction(
-    plan.jobs.map((p) => {
+  // Create all job rows atomically, including persisted skipped jobs so the
+  // UI can render them with a "Complementar dados" action (FIX-O).
+  await prisma.$transaction([
+    ...plan.jobs.map((p) => {
       const info = endpointInfo(p.endpoint);
       return prisma.certidaoJob.create({
         data: {
           dealId: params.dealId,
+          userId,
           batchId,
           endpoint: p.endpoint,
           label: p.label,
@@ -146,8 +171,28 @@ export async function POST(
           costCents: null,
         },
       });
-    })
-  );
+    }),
+    ...plan.skipped.map((s) =>
+      prisma.certidaoJob.create({
+        data: {
+          dealId: params.dealId,
+          userId,
+          batchId,
+          endpoint: s.endpoint,
+          label: s.label,
+          targetKind: s.targetKind,
+          targetIndex: s.targetIndex,
+          requestPayload: {
+            missingField: s.missingField,
+            missingFields: s.missingFields,
+          } as object,
+          status: "skipped",
+          errorMessage: s.reason,
+          costCents: 0,
+        },
+      })
+    ),
+  ]);
 
   // Fire-and-forget: execute batch while the response is returned to the client.
   // In Next 14 on Vercel, the function lives until maxDuration (300s) as long

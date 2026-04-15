@@ -107,8 +107,22 @@ export async function runSingleJob(jobId: string, dealId: string): Promise<void>
     let attachmentId: string | null = null;
     const receipt = resp.site_receipts?.[0];
     if (receipt && resp.code === 200) {
-      attachmentId = await downloadAndAttach(dealId, job.endpoint, job.label, receipt);
+      attachmentId = await downloadAndAttach(
+        dealId,
+        job.endpoint,
+        job.label,
+        receipt,
+        job.targetKind,
+        job.targetIndex
+      );
     }
+
+    // Persist the raw receipt URL alongside normalized data so retry's
+    // "re_attach" branch can re-download without a new API call.
+    const enrichedResultData: Record<string, unknown> = {
+      ...(normalized as unknown as Record<string, unknown>),
+    };
+    if (receipt) enrichedResultData._rawReceipt = receipt;
 
     await prisma.certidaoJob.update({
       where: { id: jobId },
@@ -118,7 +132,7 @@ export async function runSingleJob(jobId: string, dealId: string): Promise<void>
         latencyMs,
         resultCode: resp.code,
         resultMessage: resp.code_message,
-        resultData: normalized as unknown as object,
+        resultData: enrichedResultData as object,
         attachmentId,
         costCents: info.costCents,
       },
@@ -214,9 +228,16 @@ export async function pollPortalJob(jobId: string): Promise<void> {
         job.dealId,
         obterEndpoint,
         job.label,
-        receipt
+        receipt,
+        job.targetKind,
+        job.targetIndex
       );
     }
+
+    const enrichedObterData: Record<string, unknown> = {
+      ...(normalized as unknown as Record<string, unknown>),
+    };
+    if (receipt) enrichedObterData._rawReceipt = receipt;
 
     await prisma.certidaoJob.update({
       where: { id: jobId },
@@ -226,7 +247,7 @@ export async function pollPortalJob(jobId: string): Promise<void> {
         latencyMs,
         resultCode: resp.code,
         resultMessage: resp.code_message,
-        resultData: normalized as unknown as object,
+        resultData: enrichedObterData as object,
         attachmentId,
         costCents: (job.costCents ?? 0) + obterInfo.costCents,
       },
@@ -248,7 +269,9 @@ async function downloadAndAttach(
   dealId: string,
   endpoint: string,
   label: string,
-  receiptUrl: string
+  receiptUrl: string,
+  targetKind: string,
+  targetIndex: number
 ): Promise<string | null> {
   try {
     const { buffer, contentType } = await downloadReceipt(receiptUrl);
@@ -261,6 +284,11 @@ async function downloadAndAttach(
       body: buffer,
       contentType,
     });
+    // Persist assignment so DocumentsTab groups certidao attachments by part/imovel
+    const assignmentKind =
+      targetKind === "vendedor" || targetKind === "comprador" || targetKind === "imovel"
+        ? targetKind
+        : "outro";
     const attachment = await prisma.dealAttachment.create({
       data: {
         dealId,
@@ -271,6 +299,7 @@ async function downloadAndAttach(
         source: "infosimples",
         extractedData: {
           certidao: { endpoint, label },
+          assignment: { kind: assignmentKind, index: targetIndex },
         },
       },
     });
@@ -282,9 +311,55 @@ async function downloadAndAttach(
 }
 
 /**
- * Budget guard — returns current month spent and whether we are over budget.
+ * Dead-man sweeper — marks jobs stuck in non-terminal states as failed when
+ * their container has clearly died (started more than `staleAfterMs` ago).
+ *
+ * Runs hourly via cron. Also exposed via /api/deals/:id/certidoes/sweep for
+ * per-deal manual sweeps.
+ *
+ * Returns the number of jobs marked as failed.
  */
-export async function getMonthlySpend(): Promise<{
+export async function sweepStaleJobs(options: {
+  dealId?: string;
+  staleAfterMs?: number;
+} = {}): Promise<number> {
+  const staleAfter = options.staleAfterMs ?? 15 * 60_000; // 15 min default
+  const cutoff = new Date(Date.now() - staleAfter);
+
+  const stale = await prisma.certidaoJob.findMany({
+    where: {
+      ...(options.dealId ? { dealId: options.dealId } : {}),
+      status: { in: ["fetching", "pending"] },
+      OR: [
+        { startedAt: { lt: cutoff } },
+        { AND: [{ startedAt: null }, { createdAt: { lt: cutoff } }] },
+      ],
+    },
+    select: { id: true },
+  });
+
+  if (stale.length === 0) return 0;
+
+  const now = new Date();
+  await prisma.certidaoJob.updateMany({
+    where: { id: { in: stale.map((j) => j.id) } },
+    data: {
+      status: "failed",
+      finishedAt: now,
+      errorMessage:
+        "Timeout — container reciclado antes de concluir a consulta. Clique em tentar novamente.",
+    },
+  });
+
+  return stale.length;
+}
+
+/**
+ * Budget guard — returns current month spent for the given org and whether we
+ * are over budget. Budget is per-org to isolate tenants — one org's spend does
+ * not consume another org's quota.
+ */
+export async function getMonthlySpend(orgId: string): Promise<{
   spentCents: number;
   budgetCents: number;
   exceeded: boolean;
@@ -293,7 +368,10 @@ export async function getMonthlySpend(): Promise<{
   const now = new Date();
   const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const agg = await prisma.certidaoJob.aggregate({
-    where: { createdAt: { gte: firstOfMonth } },
+    where: {
+      createdAt: { gte: firstOfMonth },
+      deal: { form: { orgId } },
+    },
     _sum: { costCents: true },
   });
   const spentCents = agg._sum.costCents ?? 0;

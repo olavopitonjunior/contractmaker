@@ -2,6 +2,7 @@ import { endpointInfo, TJRS_TIPOS } from "./endpoints";
 import { comarcaForCidade } from "./comarcas-rj";
 import type {
   ExtractionPlan,
+  MissingField,
   PlannedJob,
   SkippedJob,
   TargetKind,
@@ -418,6 +419,13 @@ function buildSkip(
   reason: string
 ): SkippedJob {
   const info = endpointInfo(endpoint);
+  const basePath =
+    kind === "imovel" ? `imoveis.${index}` : `${kind}es.${index}`;
+  const missingFields: MissingField[] = buildMissingFieldsForSkip(
+    missingField,
+    basePath,
+    partyLabel
+  );
   return {
     endpoint,
     label: `${info.label} - ${partyLabel}`,
@@ -425,5 +433,73 @@ function buildSkip(
     targetIndex: index,
     reason,
     missingField,
+    missingFields,
   };
+}
+
+/**
+ * Maps the shorthand `missingField` string used inside the planner into
+ * one or more `MissingField` structured entries for the complement-data UI.
+ * Falls back to a single generic text field if no specific mapping exists.
+ */
+function buildMissingFieldsForSkip(
+  missingField: string,
+  basePath: string,
+  partyLabel: string
+): MissingField[] {
+  switch (missingField) {
+    case "data_nascimento":
+      return [
+        {
+          path: `${basePath}.data_nascimento`,
+          label: `Data de nascimento — ${partyLabel}`,
+          type: "date",
+          placeholder: "AAAA-MM-DD",
+        },
+      ];
+    case "sql":
+      return [
+        {
+          path: `${basePath}.sql`,
+          label: `SQL (Setor-Quadra-Lote) — ${partyLabel}`,
+          type: "text",
+          placeholder: "000.000.0000-0",
+        },
+      ];
+    case "inscricao_municipal":
+      return [
+        {
+          path: `${basePath}.inscricao_municipal`,
+          label: `Inscrição Municipal — ${partyLabel}`,
+          type: "text",
+          placeholder: "00000000",
+        },
+      ];
+    case "matricula":
+      return [
+        {
+          path: `${basePath}.matricula`,
+          label: `Matrícula — ${partyLabel}`,
+          type: "text",
+          placeholder: "000000",
+        },
+      ];
+    case "cidade":
+      return [
+        {
+          path: `${basePath}.cidade`,
+          label: `Cidade — ${partyLabel}`,
+          type: "text",
+          placeholder: "Nome da cidade",
+        },
+      ];
+    default:
+      return [
+        {
+          path: `${basePath}.${missingField}`,
+          label: `${missingField} — ${partyLabel}`,
+          type: "text",
+        },
+      ];
+  }
 }

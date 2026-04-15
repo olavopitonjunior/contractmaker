@@ -75,11 +75,17 @@ export function ContractEditorPage({
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInitialInput, setChatInitialInput] = useState<string>("");
   const [status, setStatus] = useState(contract.status);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<
+    "idle" | "saving" | "saved" | "error"
+  >("idle");
+  const savedContentRef = useRef(contract.htmlContent);
 
   // Sincroniza o conteudo e status quando navega entre versoes (mesma tela, prop muda)
   useEffect(() => {
     setHtmlContent(contract.htmlContent);
     setStatus(contract.status);
+    savedContentRef.current = contract.htmlContent;
+    setAutoSaveStatus("idle");
   }, [contract.id, contract.htmlContent, contract.status]);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [addCommentOpen, setAddCommentOpen] = useState(false);
@@ -98,6 +104,29 @@ export function ContractEditorPage({
   }>({ total: 0, errors: 0, warnings: 0, infos: 0, maxSeverity: null });
 
   const isApprovedOrVoid = status === "aprovado";
+
+  // Auto-save: debounced PATCH when htmlContent changes (non-approved contracts only)
+  useEffect(() => {
+    if (isApprovedOrVoid) return;
+    if (htmlContent === savedContentRef.current) return;
+    const timer = setTimeout(async () => {
+      setAutoSaveStatus("saving");
+      try {
+        const res = await fetch(`/api/contracts/${contract.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ htmlContent }),
+        });
+        if (!res.ok) throw new Error("save failed");
+        savedContentRef.current = htmlContent;
+        setAutoSaveStatus("saved");
+        setTimeout(() => setAutoSaveStatus("idle"), 1500);
+      } catch {
+        setAutoSaveStatus("error");
+      }
+    }, 1500);
+    return () => clearTimeout(timer);
+  }, [htmlContent, contract.id, isApprovedOrVoid]);
 
   const refreshAiCommentsCount = useCallback(async () => {
     try {
@@ -390,6 +419,22 @@ export function ContractEditorPage({
 
           {!isApproved && (
             <>
+              {autoSaveStatus !== "idle" && (
+                <span
+                  className={`text-xs hidden sm:inline ${
+                    autoSaveStatus === "error"
+                      ? "text-red-600"
+                      : autoSaveStatus === "saved"
+                      ? "text-green-600"
+                      : "text-muted-foreground"
+                  }`}
+                  title="Auto-save"
+                >
+                  {autoSaveStatus === "saving" && "Salvando…"}
+                  {autoSaveStatus === "saved" && "✓ Salvo"}
+                  {autoSaveStatus === "error" && "Erro ao salvar"}
+                </span>
+              )}
               <Button
                 size="sm"
                 variant="outline"

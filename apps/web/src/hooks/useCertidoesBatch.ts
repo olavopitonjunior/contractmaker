@@ -16,7 +16,9 @@ export interface CertidaoJobRow {
     | "awaiting_portal"
     | "success"
     | "failed"
-    | "skipped";
+    | "skipped"
+    | "replaced";
+  requestPayload: unknown;
   resultCode: number | null;
   resultMessage: string | null;
   resultData: unknown;
@@ -30,7 +32,13 @@ export interface CertidaoJobRow {
   createdAt: string;
 }
 
-const TERMINAL = new Set(["success", "failed", "skipped", "awaiting_portal"]);
+const TERMINAL = new Set([
+  "success",
+  "failed",
+  "skipped",
+  "awaiting_portal",
+  "replaced",
+]);
 
 /**
  * Polls /api/deals/:dealId/certidoes every 2s while any job is still in a
@@ -120,19 +128,81 @@ export function useCertidoesBatch(dealId: string) {
   }, [dealId, fetchJobs, startPolling]);
 
   const retry = useCallback(
-    async (jobId: string) => {
-      await fetch(`/api/deals/${dealId}/certidoes/${jobId}/retry`, {
-        method: "POST",
-      });
+    async (jobId: string): Promise<{ ok: boolean; error?: string }> => {
+      const res = await fetch(
+        `/api/deals/${dealId}/certidoes/${jobId}/retry`,
+        { method: "POST" }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { ok: false, error: data.error || "Falha ao tentar novamente" };
+      }
       await fetchJobs();
-      // Resume polling briefly to catch the retry result
       const current = jobs.find((j) => j.id === jobId);
       if (current) {
         startPolling(current.batchId);
       }
+      return { ok: true };
     },
     [dealId, fetchJobs, startPolling, jobs]
   );
 
-  return { jobs, loading, error, extract, retry, refresh: fetchJobs };
+  const deleteJob = useCallback(
+    async (jobId: string): Promise<boolean> => {
+      const res = await fetch(`/api/deals/${dealId}/certidoes/${jobId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) return false;
+      await fetchJobs();
+      return true;
+    },
+    [dealId, fetchJobs]
+  );
+
+  const sweepStale = useCallback(async (): Promise<number> => {
+    const res = await fetch(`/api/deals/${dealId}/certidoes/sweep`, {
+      method: "POST",
+    });
+    if (!res.ok) return 0;
+    const data = await res.json();
+    await fetchJobs();
+    return data.swept ?? 0;
+  }, [dealId, fetchJobs]);
+
+  const completeSkipped = useCallback(
+    async (
+      jobId: string,
+      fields: Record<string, string | number | null>
+    ): Promise<{ ok: boolean; error?: string }> => {
+      const res = await fetch(
+        `/api/deals/${dealId}/certidoes/${jobId}/complete`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fields }),
+        }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        return { ok: false, error: data.error || "Falha ao complementar" };
+      }
+      await fetchJobs();
+      const current = jobs.find((j) => j.id === jobId);
+      if (current) startPolling(current.batchId);
+      return { ok: true };
+    },
+    [dealId, fetchJobs, startPolling, jobs]
+  );
+
+  return {
+    jobs,
+    loading,
+    error,
+    extract,
+    retry,
+    deleteJob,
+    sweepStale,
+    completeSkipped,
+    refresh: fetchJobs,
+  };
 }

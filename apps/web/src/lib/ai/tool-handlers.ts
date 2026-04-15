@@ -741,7 +741,7 @@ async function handleProposeSuggestion(
   const target = typeof input.target === "string" ? input.target : "";
   const replacement = typeof input.replacement === "string" ? input.replacement : "";
   const reason = typeof input.reason === "string" ? input.reason : "";
-  const typeIn =
+  let typeIn =
     typeof input.type === "string" && ["replacement", "insertion", "deletion"].includes(input.type)
       ? (input.type as "replacement" | "insertion" | "deletion")
       : "replacement";
@@ -754,6 +754,20 @@ async function handleProposeSuggestion(
   }
   if (!reason || !reason.trim()) {
     return { success: false, error: "reason obrigatório" };
+  }
+
+  // Agents occasionally pick type="insertion" when they mean to REPLACE a piece
+  // of text with new wording. Insertion semantically keeps `target` and appends
+  // `replacement` after it, resulting in duplicated content. If target and
+  // replacement are both present, differ, and the user clearly wants a
+  // substitution, override to "replacement" so we emit a <del>/<ins> pair.
+  if (
+    typeIn === "insertion" &&
+    target.trim() &&
+    replacement.trim() &&
+    target.trim() !== replacement.trim()
+  ) {
+    typeIn = "replacement";
   }
 
   if (!context.htmlContent.includes(target)) {

@@ -1,11 +1,28 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import { runSingleJob } from "@/lib/certidoes/executor";
+import { runSingleJob, pollPortalJob } from "@/lib/certidoes/executor";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
 
+const MAX_RETRIES = 3;
+const STALE_AFTER_MS = 5 * 60_000; // 5 min
+
+/**
+ * POST /api/deals/:dealId/certidoes/:jobId/retry
+ *
+ * Handles retry of a single CertidaoJob. Behavior depends on current state:
+ *
+ *   - failed: resets to pending and calls runSingleJob (NEW API call, will cost)
+ *   - fetching/pending (stuck >5 min): same as failed (container died)
+ *   - awaiting_portal (expectedReadyAt passed or forced): calls pollPortalJob
+ *     which uses the persisted numero_pedido — NO new pedido call, may or
+ *     may not incur an obter-* call cost depending on endpoint pricing
+ *   - success without attachment: re-downloads the receipt — ZERO cost
+ *
+ * Retries are capped at MAX_RETRIES via retryCount.
+ */
 export async function POST(
   _req: NextRequest,
   { params }: { params: { dealId: string; jobId: string } }
@@ -29,13 +46,70 @@ export async function POST(
   if (job.deal.form && job.deal.form.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  if (job.status !== "failed") {
+
+  if (job.retryCount >= MAX_RETRIES) {
     return NextResponse.json(
-      { error: "Apenas jobs falhos podem ser retentados" },
+      {
+        error: `Limite de ${MAX_RETRIES} tentativas atingido. Delete o job ou resolva manualmente.`,
+        retryCount: job.retryCount,
+      },
+      { status: 429 }
+    );
+  }
+
+  // Classify the retry action
+  const now = Date.now();
+  const startedMs = job.startedAt?.getTime() ?? job.createdAt.getTime();
+  const isStuckFetching =
+    (job.status === "fetching" || job.status === "pending") &&
+    now - startedMs > STALE_AFTER_MS;
+
+  const canReExecute = job.status === "failed" || isStuckFetching;
+  const canPollPortal = job.status === "awaiting_portal";
+  const canReAttach = job.status === "success" && !job.attachmentId;
+
+  if (!canReExecute && !canPollPortal && !canReAttach) {
+    return NextResponse.json(
+      {
+        error: `Job em estado ${job.status} nao pode ser retentado agora. Aguarde ou use o sweeper.`,
+      },
       { status: 400 }
     );
   }
 
+  // Branch: portal poll (reuses numero_pedido, no new pedido call)
+  if (canPollPortal) {
+    await prisma.certidaoJob.update({
+      where: { id: params.jobId },
+      data: { retryCount: { increment: 1 } },
+    });
+    void pollPortalJob(params.jobId).catch((err) => {
+      console.error("[certidoes] portal retry failed", err);
+    });
+    return NextResponse.json({ ok: true, action: "poll_portal" }, { status: 202 });
+  }
+
+  // Branch: re-attach (re-download receipt of a successful job that failed to
+  // persist its attachment). NO new API call.
+  if (canReAttach) {
+    const resultData = (job.resultData as Record<string, unknown>) ?? {};
+    const receipt =
+      (resultData._rawReceipt as string | undefined) ??
+      (resultData.site_receipt as string | undefined);
+    if (!receipt) {
+      return NextResponse.json(
+        { error: "Nao ha receipt salvo para re-baixar — re-execute o job" },
+        { status: 400 }
+      );
+    }
+    // Fire-and-forget wrapper: keeps existing success status but re-runs download
+    void runSingleJob(params.jobId, params.dealId).catch((err) => {
+      console.error("[certidoes] re-attach failed", err);
+    });
+    return NextResponse.json({ ok: true, action: "re_attach" }, { status: 202 });
+  }
+
+  // Branch: re-execute from scratch (failed or stuck). Will cost a new call.
   await prisma.certidaoJob.update({
     where: { id: params.jobId },
     data: {
@@ -51,5 +125,5 @@ export async function POST(
     console.error("[certidoes] retry failed", err);
   });
 
-  return NextResponse.json({ ok: true }, { status: 202 });
+  return NextResponse.json({ ok: true, action: "re_execute" }, { status: 202 });
 }

@@ -45,7 +45,16 @@ interface DealDetailProps {
         createdAt: Date;
       }[];
     } | null;
-    attachments: { id: string; filename: string; category: string | null; url: string; createdAt: Date }[];
+    attachments: {
+      id: string;
+      filename: string;
+      mime: string;
+      category: string | null;
+      url: string;
+      extractedData: unknown;
+      source: string;
+      createdAt: Date;
+    }[];
     contracts: { id: string; version: number; status: string; template: { name: string }; createdAt: Date }[];
   };
 }
@@ -387,6 +396,7 @@ export function DealDetail({ deal }: DealDetailProps) {
 
         <TabsContent value="anexos" className="mt-4">
           <DocumentsTab
+            dealId={deal.id}
             formAttachments={deal.form?.attachments ?? []}
             formToken={deal.form?.token ?? null}
             fallbackAttachments={deal.attachments}
@@ -478,8 +488,11 @@ interface FormAttachmentLite {
 interface FallbackAttachment {
   id: string;
   filename: string;
+  mime: string;
   category: string | null;
   url: string;
+  extractedData: unknown;
+  source: string;
   createdAt: Date;
 }
 
@@ -505,46 +518,37 @@ function resolveKind(
 }
 
 function DocumentsTab({
+  dealId,
   formAttachments,
   formToken,
   fallbackAttachments,
 }: {
+  dealId: string;
   formAttachments: FormAttachmentLite[];
   formToken: string | null;
   fallbackAttachments: FallbackAttachment[];
 }) {
   const hasFormAttachments = formAttachments.length > 0 && formToken;
+  // Infosimples attachments always come in via fallbackAttachments (DealAttachment
+  // rows). They must be shown even when there are no form attachments.
+  const infosimplesAttachments = fallbackAttachments.filter(
+    (att) => att.source === "infosimples"
+  );
+  const manualFallback = fallbackAttachments.filter(
+    (att) => att.source !== "infosimples" && !formAttachments.some((f) => f.id === att.id)
+  );
 
-  if (!hasFormAttachments && fallbackAttachments.length === 0) {
+  const hasAnyContent =
+    hasFormAttachments ||
+    infosimplesAttachments.length > 0 ||
+    manualFallback.length > 0;
+
+  if (!hasAnyContent) {
     return (
       <Card>
         <CardContent className="py-10 text-center text-muted-foreground text-sm">
           Nenhum documento anexado. Os documentos enviados durante o preenchimento do
-          formulário aparecem aqui organizados.
-        </CardContent>
-      </Card>
-    );
-  }
-
-  if (!hasFormAttachments) {
-    return (
-      <Card>
-        <CardContent className="py-4 space-y-2">
-          {fallbackAttachments.map((att) => (
-            <div
-              key={att.id}
-              className="flex items-center justify-between rounded border p-2"
-            >
-              <div>
-                <p className="text-sm font-medium">{att.filename}</p>
-                {att.category && (
-                  <Badge variant="secondary" className="mt-1 text-xs">
-                    {att.category}
-                  </Badge>
-                )}
-              </div>
-            </div>
-          ))}
+          formulário e as certidões extraídas aparecem aqui organizados.
         </CardContent>
       </Card>
     );
@@ -557,27 +561,69 @@ function DocumentsTab({
     outro: [],
   };
 
-  for (const att of formAttachments) {
+  // Form-uploaded documents (OCR autofill)
+  if (hasFormAttachments) {
+    for (const att of formAttachments) {
+      const extracted = (att.extractedData as Record<string, unknown> | null) || null;
+      const fields = (extracted?.fields as Record<string, unknown> | null) ?? null;
+      const confidence =
+        typeof extracted?.confidence === "number"
+          ? (extracted.confidence as number)
+          : null;
+      const assignment = (extracted?.assignment as Assignment | undefined) ?? {
+        kind: resolveKind(att.category, extracted),
+        index: 0,
+      };
+      const card: DocumentCardData = {
+        id: att.id,
+        filename: att.filename,
+        mime: att.mime,
+        fileUrl: `/api/forms/${formToken}/attachments/${att.id}/file`,
+        status: "ready",
+        category: att.category,
+        fields,
+        confidence,
+        assignment,
+      };
+      groups[assignment.kind].push(card);
+    }
+  }
+
+  // Infosimples certidões — grouped via extractedData.assignment persisted by the executor
+  for (const att of infosimplesAttachments) {
     const extracted = (att.extractedData as Record<string, unknown> | null) || null;
-    const fields = (extracted?.fields as Record<string, unknown> | null) ?? null;
-    const confidence =
-      typeof extracted?.confidence === "number" ? (extracted.confidence as number) : null;
     const assignment = (extracted?.assignment as Assignment | undefined) ?? {
-      kind: resolveKind(att.category, extracted),
+      kind: "outro" as DocumentKind,
       index: 0,
     };
     const card: DocumentCardData = {
       id: att.id,
       filename: att.filename,
       mime: att.mime,
-      fileUrl: `/api/forms/${formToken}/attachments/${att.id}/file`,
+      fileUrl: `/api/deals/${dealId}/attachments/${att.id}/file`,
       status: "ready",
       category: att.category,
-      fields,
-      confidence,
+      fields: null,
+      confidence: null,
       assignment,
     };
     groups[assignment.kind].push(card);
+  }
+
+  // Legacy manual attachments (no assignment, go to 'outro')
+  for (const att of manualFallback) {
+    const card: DocumentCardData = {
+      id: att.id,
+      filename: att.filename,
+      mime: att.mime,
+      fileUrl: `/api/deals/${dealId}/attachments/${att.id}/file`,
+      status: "ready",
+      category: att.category,
+      fields: null,
+      confidence: null,
+      assignment: { kind: "outro", index: 0 },
+    };
+    groups.outro.push(card);
   }
 
   const kinds: DocumentKind[] = ["vendedor", "comprador", "imovel", "outro"];

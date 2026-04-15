@@ -6,7 +6,8 @@ export type JobStatus =
   | "awaiting_portal"
   | "success"
   | "failed"
-  | "skipped";
+  | "skipped"
+  | "replaced";
 
 export type Situacao =
   | "negativa"
@@ -34,6 +35,21 @@ export interface PlannedJob {
   linkedLabel?: string; // For two-step flows (pedido -> obter), reference the sibling
 }
 
+/**
+ * Structured description of a single field that must be filled to unblock a
+ * skipped job. Used by the complement-data flow on the UI.
+ */
+export interface MissingField {
+  /** dot-path into dealData, e.g. "vendedores.0.data_nascimento" */
+  path: string;
+  /** Human-readable label, e.g. "Data de nascimento de Maria Souza" */
+  label: string;
+  /** Input type hint for the form */
+  type: "date" | "text" | "number";
+  /** Placeholder / example */
+  placeholder?: string;
+}
+
 export interface SkippedJob {
   endpoint: string;
   label: string;
@@ -41,6 +57,8 @@ export interface SkippedJob {
   targetIndex: number;
   reason: string;
   missingField: string;
+  /** Structured fields that the user must fill to unblock this job */
+  missingFields: MissingField[];
 }
 
 export interface ExtractionPlan {

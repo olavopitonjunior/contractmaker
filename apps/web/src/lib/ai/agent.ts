@@ -162,11 +162,22 @@ export async function runContractAgent(params: AgentParams): Promise<AgentResult
     templateName: context.templateName,
   });
 
+  // Classify intent: if the message looks like an edit command, force tool use
+  // on the first iteration so the agent cannot respond conversationally without
+  // actually mutating the contract. Regex picks up common PT-BR verbs.
+  const EDIT_INTENT =
+    /\b(altere|mude|troque|substitua|atualize|corrija|modifique|remova|insira|adicione|coloque|ponha|apague|delete|reescreva|reescreva|inclua|retire|exclua)\b/i;
+  const isEditCommand = EDIT_INTENT.test(params.message);
+
+  const editReminderTemplate = isEditCommand
+    ? `\n\n---\nLEMBRETE DE FORMATO OBRIGATORIO: este pedido e um comando de edicao. Voce DEVE:\n1. Chamar pelo menos uma tool de edicao (edit_contract_section, update_contract_data, insert_clause, remove_clause, propose_suggestion).\n2. Apos executar as tools, responder EXATAMENTE nesta estrutura em markdown (copie os 3 headings literais, sem emoji, sem alterar capitalizacao):\n\n## Alteracoes Realizadas\n(lista do que foi alterado no contrato)\n\n## Justificativa\n(razao juridica da alteracao)\n\n## Verificacao\n(como o usuario pode verificar que a alteracao foi aplicada)\n`
+    : "";
+
   const messages: Anthropic.MessageParam[] = [
     ...history.map((m) => ({ role: m.role, content: m.content })),
     {
       role: "user" as const,
-      content: `${contextMsg}\n\n---\nMENSAGEM DO USUÁRIO:\n${params.message}`,
+      content: `${contextMsg}${editReminderTemplate}\n\n---\nMENSAGEM DO USUÁRIO:\n${params.message}`,
     },
   ];
 
@@ -188,6 +199,10 @@ export async function runContractAgent(params: AgentParams): Promise<AgentResult
       temperature: config.temperature,
       system: config.systemPrompt,
       tools: AGENT_TOOLS,
+      // Force the model into tool-use mode when the intent is clearly an edit.
+      // Without this, Sonnet sometimes replies conversationally on the first
+      // iteration ("Alteracao concluida") WITHOUT calling any edit tool.
+      ...(isEditCommand ? { tool_choice: { type: "any" as const } } : {}),
       messages,
     });
     usageAgg.promptTokens += response.usage?.input_tokens ?? 0;

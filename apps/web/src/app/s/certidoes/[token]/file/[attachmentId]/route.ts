@@ -1,32 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { downloadBufferFromUrl } from "@/lib/storage/s3";
 
 export const runtime = "nodejs";
 
+/**
+ * GET /s/certidoes/:token/file/:attachmentId
+ *
+ * Public endpoint — serves a certidão PDF by share token. No auth required.
+ * Security: validates that (1) the token is not revoked and not expired,
+ * (2) the attachment belongs to the same deal as the token.
+ *
+ * Rate limiting is left to the infrastructure (Vercel) for now. If abuse is
+ * detected, add a simple in-memory counter keyed by token.
+ */
 export async function GET(
   req: NextRequest,
-  { params }: { params: { dealId: string; attachmentId: string } }
+  { params }: { params: { token: string; attachmentId: string } }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const org = await getUserOrg(session.user.id);
-  if (!org) {
-    return NextResponse.json({ error: "No organization" }, { status: 400 });
+  const link = await prisma.certidoesShareLink.findUnique({
+    where: { token: params.token },
+  });
+  if (!link || link.revokedAt || link.expiresAt < new Date()) {
+    return NextResponse.json({ error: "Link invalido ou expirado" }, { status: 404 });
   }
 
   const attachment = await prisma.dealAttachment.findUnique({
     where: { id: params.attachmentId },
-    include: { deal: { include: { form: { select: { orgId: true } } } } },
+    select: { id: true, dealId: true, filename: true, mime: true, url: true },
   });
-  if (!attachment || attachment.dealId !== params.dealId) {
+  if (!attachment || attachment.dealId !== link.dealId) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
-  }
-  if (attachment.deal.form && attachment.deal.form.orgId !== org.id) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   try {
@@ -40,8 +44,7 @@ export async function GET(
         "Content-Disposition": `${disposition}; filename="${attachment.filename}"`,
       },
     });
-  } catch (err) {
-    console.error("[attachments] download failed", err);
+  } catch {
     return NextResponse.json({ error: "Falha ao servir arquivo" }, { status: 500 });
   }
 }
