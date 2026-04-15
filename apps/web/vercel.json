@@ -1,8 +1,0 @@
-{
-  "crons": [
-    {
-      "path": "/api/cron/certidoes/poll-portal",
-      "schedule": "0 9 * * *"
-    }
-  ]
-}

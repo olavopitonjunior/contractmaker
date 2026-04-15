@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "commonjs",
+  "workspaces": [
+    "apps/web"
+  ],
   "main": "dist/index.js",
   "bin": {
     "contractmaker": "dist/cli.js"

@@ -1,6 +1,14 @@
 {
-  "buildCommand": "cd apps/web && npm run build",
-  "installCommand": "cd apps/web && npm install",
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
-  "outputDirectory": "apps/web/.next"
+  "installCommand": "npm install",
+  "buildCommand": "npm run build -w apps/web",
+  "outputDirectory": "apps/web/.next",
+  "crons": [
+    {
+      "path": "/api/cron/certidoes/poll-portal",
+      "schedule": "0 9 * * *"
+    }
+  ]
 }
+
