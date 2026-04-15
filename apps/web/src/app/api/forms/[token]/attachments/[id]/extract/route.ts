@@ -16,7 +16,61 @@ async function fetchBuffer(url: string): Promise<Buffer> {
 }
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// Must accommodate up to 3 retry attempts with backoff (5s + 10s + 20s = 35s)
+// plus the actual Gemini call (~15-30s each) in the worst case.
+export const maxDuration = 120;
+
+const MAX_RETRIES = 3;
+
+function isRateLimitError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("quota") ||
+    lower.includes("rate limit") ||
+    lower.includes("rate_limit") ||
+    lower.includes("too many requests") ||
+    lower.includes(" 429") ||
+    lower.includes("resource_exhausted")
+  );
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Calls classifyAndExtract with exponential backoff on rate-limit errors.
+ * Waits 5s, 10s, 20s between attempts. Non-rate-limit errors fail fast.
+ * Total worst case: ~35s of backoff on top of the actual Gemini latency.
+ */
+async function classifyWithRetry(
+  base64: string,
+  mimeType: string,
+  ctx: { orgId: string }
+): Promise<Awaited<ReturnType<typeof classifyAndExtract>>> {
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+    try {
+      return await classifyAndExtract(base64, mimeType, ctx);
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!isRateLimitError(msg) || attempt === MAX_RETRIES - 1) {
+        throw err;
+      }
+      // Backoff: 5s, 10s, 20s — with a small jitter so parallel requests
+      // don't synchronize and hit the API at the same instant.
+      const base = 5000 * Math.pow(2, attempt);
+      const jitter = Math.floor(Math.random() * 2000);
+      const waitMs = base + jitter;
+      console.warn(
+        `[form extract] rate limit — retry ${attempt + 1}/${MAX_RETRIES} in ${waitMs}ms`
+      );
+      await sleep(waitMs);
+    }
+  }
+  throw lastErr;
+}
 
 const SUPPORTED_OCR_MIMES = [
   "image/jpeg",
@@ -70,7 +124,7 @@ export async function POST(
   try {
     const buffer = await fetchBuffer(attachment.url);
     const base64 = buffer.toString("base64");
-    const result = await classifyAndExtract(base64, attachment.mime, {
+    const result = await classifyWithRetry(base64, attachment.mime, {
       orgId: form.orgId,
     });
 

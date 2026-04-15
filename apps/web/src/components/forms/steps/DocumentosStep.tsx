@@ -25,7 +25,15 @@ const MAX_BYTES = 10 * 1024 * 1024;
 const RESIZE_MAX_SIDE = 2000;
 const IMAGE_MIMES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const ACCEPTED_MIMES = [...IMAGE_MIMES, "application/pdf"];
+// Upload has a wide pool (4 concurrent fetches) — it's just HTTP to our own
+// Blob/S3 storage and doesn't hit Gemini. OCR has a much tighter pool (2)
+// because Gemini 2.5 Flash free tier is 15 RPM and Tier 1 is 1000 RPM — going
+// above 2 concurrent OCR calls reliably triggers 429 rate limits on bursts.
+// The server has its own exponential-backoff retry for rate limits as a
+// safety net, but keeping the client pool small reduces the number of retries
+// needed and keeps latency predictable.
 const UPLOAD_CONCURRENCY = 4;
+const OCR_CONCURRENCY = 2;
 
 /**
  * Tiny inline pLimit — runs at most `concurrency` async tasks at the same time.
@@ -384,72 +392,92 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
         toast.info(`Processando ${validFiles.length} documentos em paralelo…`);
       }
 
-      const limit = pLimit(UPLOAD_CONCURRENCY);
-      const tasks = validFiles.map(({ rawFile, tempId }) =>
-        limit(async () => {
-          try {
-            const file = IMAGE_MIMES.includes(rawFile.type)
-              ? await resizeImage(rawFile, RESIZE_MAX_SIDE)
-              : rawFile;
+      // Two-pool strategy: uploads run with wide concurrency (4) because they
+      // only hit our own Blob/S3 storage, not Gemini. OCR runs with a tighter
+      // pool (2) to respect the Gemini RPM limit. Upload and OCR are separate
+      // pLimit instances chained via .then() — the upload slot releases as
+      // soon as the upload completes (so the next file can start uploading),
+      // and the OCR phase picks up the result in its own pool.
+      const uploadLimit = pLimit(UPLOAD_CONCURRENCY);
+      const ocrLimit = pLimit(OCR_CONCURRENCY);
 
-            const body = new FormData();
-            body.append("file", file);
-            const uploadRes = await fetch(`/api/forms/${token}/attachments`, {
-              method: "POST",
-              body,
-            });
-            const uploadData = await uploadRes.json();
-            if (!uploadRes.ok) {
-              setDocs((prev) =>
-                prev.map((d) =>
-                  d.id === tempId
-                    ? { ...d, status: "failed", error: uploadData.error || "Falha no upload" }
-                    : d
-                )
-              );
-              return;
-            }
+      const doUpload = async (
+        rawFile: File,
+        tempId: string
+      ): Promise<DocumentCardData | null> => {
+        try {
+          const file = IMAGE_MIMES.includes(rawFile.type)
+            ? await resizeImage(rawFile, RESIZE_MAX_SIDE)
+            : rawFile;
 
-            // Promote temp card to persisted id + extracting state
+          const body = new FormData();
+          body.append("file", file);
+          const uploadRes = await fetch(`/api/forms/${token}/attachments`, {
+            method: "POST",
+            body,
+          });
+          const uploadData = await uploadRes.json();
+          if (!uploadRes.ok) {
             setDocs((prev) =>
               prev.map((d) =>
                 d.id === tempId
-                  ? {
-                      ...d,
-                      id: uploadData.id,
-                      fileUrl: uploadData.fileUrl,
-                      status: "extracting",
-                    }
+                  ? { ...d, status: "failed", error: uploadData.error || "Falha no upload" }
                   : d
               )
             );
-
-            const persistedDoc: DocumentCardData = {
-              id: uploadData.id,
-              filename: rawFile.name,
-              mime: rawFile.type,
-              fileUrl: uploadData.fileUrl,
-              status: "extracting",
-              category: null,
-              fields: null,
-              confidence: null,
-              assignment: { kind: "outro", index: 0 },
-            };
-
-            await runExtract(persistedDoc);
-          } catch (err) {
-            setDocs((prev) =>
-              prev.map((d) =>
-                d.id === tempId
-                  ? {
-                      ...d,
-                      status: "failed",
-                      error: err instanceof Error ? err.message : String(err),
-                    }
-                  : d
-              )
-            );
+            return null;
           }
+
+          // Promote temp card to persisted id. Status stays "extracting"
+          // visually but the actual OCR call may be waiting in the ocrLimit
+          // queue — for the user, both look like "Analisando…".
+          setDocs((prev) =>
+            prev.map((d) =>
+              d.id === tempId
+                ? {
+                    ...d,
+                    id: uploadData.id,
+                    fileUrl: uploadData.fileUrl,
+                    status: "extracting",
+                  }
+                : d
+            )
+          );
+
+          return {
+            id: uploadData.id,
+            filename: rawFile.name,
+            mime: rawFile.type,
+            fileUrl: uploadData.fileUrl,
+            status: "extracting",
+            category: null,
+            fields: null,
+            confidence: null,
+            assignment: { kind: "outro", index: 0 },
+          };
+        } catch (err) {
+          setDocs((prev) =>
+            prev.map((d) =>
+              d.id === tempId
+                ? {
+                    ...d,
+                    status: "failed",
+                    error: err instanceof Error ? err.message : String(err),
+                  }
+                : d
+            )
+          );
+          return null;
+        }
+      };
+
+      const tasks = validFiles.map(({ rawFile, tempId }) =>
+        uploadLimit(() => doUpload(rawFile, tempId)).then((persistedDoc) => {
+          if (!persistedDoc) return;
+          // OCR runs in its own pool — the upload slot is already released by
+          // the time we get here, so the next queued file can start uploading
+          // while this one waits for an OCR slot.
+          return ocrLimit(() => runExtract(persistedDoc));
         })
       );
 
