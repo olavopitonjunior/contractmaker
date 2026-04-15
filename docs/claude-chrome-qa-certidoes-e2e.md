@@ -23,11 +23,41 @@ Idioma da UI: português brasileiro.
 
 - Faça **hard reload (Ctrl+Shift+R)** antes de cada bloco para pegar o bundle novo. NÃO abra aba anônima.
 - **Não aprove contratos reais.** Use apenas deals marcados como `[QA E2E]` no título.
-- **Orçamento de teste**: cada deal consome ~R$ 0,50 em créditos Infosimples. Não rode mais que 2-3 deals completos.
+- **Orçamento de teste**: cada deal consome ~R$ 0,70 em créditos Infosimples. Não rode mais que 2 deals completos.
 - **Limpe dados de teste ao final** — deals, formulários, contratos, anexos, jobs de certidões.
 - Abra **DevTools Console + Network** desde o início. Reporte qualquer erro vermelho.
-- Para cada passo, reporte **PASS / FAIL / BLOCKED** com descrição curta + screenshot quando relevante.
+- Para cada passo, reporte **PASS / FAIL / BLOCKED** com descrição curta.
 - Anote tempos (segundos) de operações longas: OCR, extração de certidão, geração de contrato, export PDF.
+
+## Disciplina de screenshots (CRÍTICO — não ignore)
+
+A API do Claude tem limite de **2000px em cada dimensão** para requests com múltiplas imagens. Screenshots de viewport alto-DPI/retina quebram o turn inteiro com:
+
+```
+messages.N.content.M.image.source.base64.data: At least one of the image dimensions
+exceed max allowed size for many-image requests: 2000 pixels
+```
+
+Para **não** cair nessa armadilha, siga estas regras:
+
+1. **Defina viewport 1280×800 no início do teste**, antes de qualquer captura:
+   - Chame `resize_window(1280, 800)` (ou o equivalente da sua ferramenta) uma vez
+   - NÃO use modo retina, NÃO use HiDPI, NÃO redimensione para > 1600px de largura
+2. **Prefira evidência textual em vez de screenshot.** Para cada passo, a primeira opção é sempre texto:
+   - **Conteúdo da página**: `get_page_text` (ou `document.body.innerText`)
+   - **Valor específico de um elemento**: `evaluate_js` com `querySelector('...').textContent`
+   - **Contagem/presença de elementos**: `querySelectorAll('...').length`
+   - **Response JSON do Network tab**: copie o payload como texto
+   - **Erros do console**: copie o texto literal do log
+   - **Contagem de palavras específicas no contrato**: ex. `document.querySelector('.ProseMirror').textContent.match(/2%/g)?.length`
+3. **Screenshot só quando a evidência é essencialmente visual e o texto não serve** — layout quebrado, cor errada, spinner preso, badge colorido, elemento clipado. Mesmo nesse caso:
+   - Tire **no máximo 1 screenshot por bloco**, e apenas da viewport (nunca full page)
+   - Antes do screenshot, confirme que `window.innerWidth <= 1280` e `window.innerHeight <= 800`
+4. **Limite global**: máximo **15 screenshots no relatório inteiro**. Se você chegar em 15, pare de capturar e passe a usar só texto — a evidência textual é aceita como prova válida de PASS/FAIL.
+5. **Full-page screenshots são proibidos.** Nunca use `fullPage: true` ou equivalente — eles produzem imagens muito mais altas que 2000px. Se precisar ver um contrato inteiro, use `document.querySelector('.ProseMirror').innerText.slice(0, 5000)` pra pegar o texto.
+6. **Para validar cores/estilo** (ex: "badge verde de sucesso"), use `getComputedStyle(element).backgroundColor` em vez de screenshot.
+
+**Se mesmo assim você receber o erro de 2000px**: pare imediatamente, execute `resize_window(1280, 800)` novamente, descarte as screenshots anteriores da turn, e retome com evidência textual. Não tente fazer o mesmo screenshot de novo.
 
 ## Persona de teste
 
@@ -436,8 +466,10 @@ Comportamento observado:
 Comportamento esperado:
 <o que deveria>
 
-Evidência:
-<screenshot / response JSON / console log>
+Evidência (PREFERIR TEXTO):
+<response JSON do Network / console log literal / innerText do elemento /
+resultado de querySelector().textContent / contagem via querySelectorAll().length.
+Screenshot só em último caso para evidência puramente visual, viewport ≤1280×800.>
 
 Hipótese (opcional):
 <o que parece estar errado>
@@ -468,4 +500,28 @@ Se não conseguir deletar (ex: contratos aprovados ficam imutáveis), liste os I
 
 ---
 
+## Contexto desta rodada (regressão pós-fix dos 7 bugs)
+
+Esta é a **segunda rodada** do roteiro. A primeira rodada revelou 7 bugs que foram corrigidos nos commits `b9738276` (chore batch com exporter refactor), `b73faa05` (qa-e2e fixes) e `59bfbe61` (workspace fix). Todos em master, deploy ativo em `web-zeta-three-4lyvmj9ut6.vercel.app`. Variáveis de ambiente (`INFOSIMPLES_TOKEN`, `INFOSIMPLES_MONTHLY_BUDGET_CENTS`, `CRON_SECRET`) confirmadas presentes em Production.
+
+Validações específicas desta rodada — dê atenção especial a:
+
+| Bloco | Fix a validar |
+|---|---|
+| 3.1 | BUG-001: modalidade `financiamento` deve escolher `ccv_financiamento_v2` (17 cláusulas + Cláusula 9.5 rescisão por não obtenção de financiamento). Check via `document.querySelector('h1, h2')?.textContent` ou similar. |
+| 3.2c | BUG-006: cláusula de foro deve refletir escolha "arbitragem" do form — procurar por "TASP" ou "ACORDIA" no texto do contrato via `textContent.includes('TASP')`. |
+| 6.1 | BUG-002: após chat IA rodar "altere multa de 2% para 3%", o texto do editor deve mostrar "3%" literalmente. Valide com `document.querySelector('.ProseMirror').textContent.match(/3%/g)?.length > 0` e `.../2%/g)?.length === 0` (ou contagem reduzida). |
+| 6.1 | BUG-002b: resposta do chat IA deve conter literalmente os headings `## Alterações Realizadas`, `## Justificativa`, `## Verificação`. Valide com `document.querySelector('.chat-message')?.innerText.includes('## Alterações Realizadas')`. |
+| 7.1 | BUG-003: sugestão IA deve criar `<del>`/`<ins>` no HTML do contrato e barra âmbar aparecer. Valide com `document.querySelectorAll('ins[data-suggestion-id]').length > 0`. |
+| 10.1 | BUG-004 resolvido: jobs de certidão devem realmente ser executados, não falhar com "INFOSIMPLES_TOKEN nao configurado". Success rate > 0. |
+| 12.1 | BUG-005: relatório PDF de due diligence deve gerar sem erro de Puppeteer/Chrome. |
+| 14.4 | BUG-005: export PDF do contrato deve funcionar. |
+| 1.4 + 14.1 | BUG-007: forms com estado civil "Casado(a)" e cônjuge vazio devem bloquear no wizard, não na aprovação. Asteriscos vermelhos visíveis nos labels. |
+
+**Reporte explicitamente no relatório final**: para cada um dos 7 bugs acima, FIXED / STILL BROKEN / NEW REGRESSION.
+
+---
+
 **Comece pelo Bloco 1.** Antes de cada bloco, avise brevemente: "Iniciando Bloco X". Não peça permissão a cada passo. Se algo bloquear, marque BLOCKED com motivo e siga para o próximo bloco. Se um bloco depender do anterior e ele falhou, marque todos os dependentes como BLOCKED com referência.
+
+**Lembrete final**: leia a seção "Disciplina de screenshots" no topo do documento antes de começar. Viewport 1280×800, evidência textual em primeiro lugar, máx 15 screenshots no total. Full-page screenshots proibidos.
