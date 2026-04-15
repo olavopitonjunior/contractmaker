@@ -50,7 +50,8 @@ export async function GET(req: NextRequest) {
   }
 
   // Task 2: dead-man sweeper — stale jobs from crashed containers
-  const sweptCount = await sweepStaleJobs();
+  // Promotes zombies-with-valid-data to success, marks zombies-without-data as failed
+  const sweepResult = await sweepStaleJobs();
 
   return NextResponse.json({
     portal: {
@@ -58,6 +59,6 @@ export async function GET(req: NextRequest) {
       success: portalSuccess,
       failed: portalFailed,
     },
-    sweep: { swept: sweptCount },
+    sweep: sweepResult,
   });
 }

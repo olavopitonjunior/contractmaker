@@ -36,15 +36,40 @@ interface CertidoesTabProps {
   dealId: string;
   vendedores: Array<{ nome?: string; razao_social?: string }>;
   compradores: Array<{ nome?: string; razao_social?: string }>;
-  imoveis: Array<{ rua?: string; cidade?: string }>;
+  imoveis: Array<{
+    rua?: string;
+    numero?: string;
+    cidade?: string;
+  }>;
+}
+
+function imovelLabel(im: {
+  rua?: string;
+  numero?: string;
+  cidade?: string;
+}, index: number): string {
+  const parts: string[] = [];
+  if (im.rua) parts.push(im.rua);
+  if (im.numero && im.numero.trim() !== "" && im.numero.trim() !== "nº") {
+    parts.push(`nº ${im.numero}`);
+  }
+  if (im.cidade) parts.push(im.cidade);
+  const label = parts.join(", ");
+  return label || `Imóvel #${index + 1}`;
 }
 
 const STALE_AFTER_MS = 5 * 60_000;
 
-function statusIcon(status: CertidaoJobRow["status"]) {
+function statusIcon(row: CertidaoJobRow) {
+  const status = effectiveStatus(row);
   switch (status) {
-    case "success":
+    case "success": {
+      const r = row.resultData as { situacao?: string } | null;
+      if (r?.situacao === "aguardando_pdf") {
+        return <Clock className="h-4 w-4 text-blue-600" />;
+      }
       return <CheckCircle2 className="h-4 w-4 text-green-600" />;
+    }
     case "failed":
       return <XCircle className="h-4 w-4 text-red-600" />;
     case "fetching":
@@ -70,15 +95,44 @@ function formatDateBR(iso: string | null | undefined): string | null {
   }
 }
 
+// A row has "valid data" when the backend has persisted a recognized
+// `situacao` — even if the job's status field still says "fetching" (race
+// with the container dying right after the Prisma update). The UI trusts
+// resultData over status whenever both exist.
+function hasValidResult(row: CertidaoJobRow): boolean {
+  const r = row.resultData as { situacao?: string } | null;
+  if (!r || typeof r.situacao !== "string") return false;
+  return (
+    row.resultCode === 200 &&
+    ["negativa", "positiva", "positiva_com_efeitos", "nao_emitida", "aguardando_pdf"].includes(
+      r.situacao
+    )
+  );
+}
+
+function effectiveStatus(row: CertidaoJobRow): CertidaoJobRow["status"] {
+  // Protect against "ghost fetching": when the backend has valid data but the
+  // job row's status is still non-terminal (container died before finishing
+  // the update, or polling caught a stale row), trust the data.
+  if (
+    (row.status === "fetching" || row.status === "pending") &&
+    hasValidResult(row)
+  ) {
+    return "success";
+  }
+  return row.status;
+}
+
 function statusLabel(row: CertidaoJobRow): string {
   const r = row.resultData as { situacao?: string; detalhes?: string } | null;
-  if (row.status === "failed") return row.errorMessage || "Erro";
-  if (row.status === "pending") return "Na fila…";
-  if (row.status === "fetching") return "Consultando…";
-  if (row.status === "awaiting_portal") return "Aguardando portal";
-  if (row.status === "skipped") return row.errorMessage || "Pulado — dados faltantes";
-  if (row.status === "replaced") return "Substituído";
-  if (row.status === "success") {
+  const status = effectiveStatus(row);
+  if (status === "failed") return row.errorMessage || "Erro";
+  if (status === "pending") return "Na fila…";
+  if (status === "fetching") return "Consultando…";
+  if (status === "awaiting_portal") return "Aguardando portal";
+  if (status === "skipped") return row.errorMessage || "Pulado — dados faltantes";
+  if (status === "replaced") return "Substituído";
+  if (status === "success") {
     switch (r?.situacao) {
       case "negativa":
         return "Negativa · nada consta";
@@ -88,6 +142,8 @@ function statusLabel(row: CertidaoJobRow): string {
         return "Positiva com efeitos de negativa";
       case "nao_emitida":
         return "Não emitida pelo portal";
+      case "aguardando_pdf":
+        return "Negativa · aguardando PDF";
       default:
         return r?.detalhes || "Concluído";
     }
@@ -97,14 +153,16 @@ function statusLabel(row: CertidaoJobRow): string {
 
 function statusVariant(row: CertidaoJobRow): string {
   const r = row.resultData as { situacao?: string } | null;
-  if (row.status === "failed") return "border-red-300 bg-red-50";
-  if (row.status === "awaiting_portal") return "border-amber-300 bg-amber-50";
-  if (row.status === "fetching" || row.status === "pending")
+  const status = effectiveStatus(row);
+  if (status === "failed") return "border-red-300 bg-red-50";
+  if (status === "awaiting_portal") return "border-amber-300 bg-amber-50";
+  if (status === "fetching" || status === "pending")
     return "border-blue-300 bg-blue-50/30";
-  if (row.status === "skipped") return "border-muted bg-muted/20";
-  if (row.status === "replaced") return "border-muted bg-muted/10 opacity-60";
-  if (row.status === "success") {
+  if (status === "skipped") return "border-muted bg-muted/20";
+  if (status === "replaced") return "border-muted bg-muted/10 opacity-60";
+  if (status === "success") {
     if (r?.situacao === "negativa") return "border-green-300 bg-green-50/30";
+    if (r?.situacao === "aguardando_pdf") return "border-blue-300 bg-blue-50/30";
     if (r?.situacao === "positiva" || r?.situacao === "positiva_com_efeitos")
       return "border-amber-300 bg-amber-50";
     return "border-muted bg-background";
@@ -117,9 +175,30 @@ function groupKey(row: CertidaoJobRow): string {
 }
 
 function isStuck(row: CertidaoJobRow): boolean {
-  if (row.status !== "fetching" && row.status !== "pending") return false;
+  const status = effectiveStatus(row);
+  if (status !== "fetching" && status !== "pending") return false;
   const started = new Date(row.createdAt).getTime();
   return Date.now() - started > STALE_AFTER_MS;
+}
+
+// Median + outlier filter for latency display. Filters out nulls and values
+// that are >3x the median (e.g. CENPROT SP 1071s when most are ~20s).
+function medianLatency(jobs: CertidaoJobRow[]): number {
+  const values = jobs
+    .map((j) => j.latencyMs)
+    .filter((n): n is number => typeof n === "number" && n > 0)
+    .sort((a, b) => a - b);
+  if (values.length === 0) return 0;
+  const mid = Math.floor(values.length / 2);
+  const median =
+    values.length % 2 === 0
+      ? (values[mid - 1] + values[mid]) / 2
+      : values[mid];
+  // Filter out outliers (>3x median) and recompute
+  const filtered = values.filter((v) => v <= median * 3);
+  if (filtered.length === 0) return Math.round(median / 1000);
+  const avg = filtered.reduce((a, b) => a + b, 0) / filtered.length;
+  return Math.round(avg / 1000);
 }
 
 export function CertidoesTab({
@@ -168,7 +247,7 @@ export function CertidoesTab({
     );
     imoveis.forEach((im, i) =>
       map.set(`imovel-${i}`, {
-        label: `Imóvel: ${im.rua || im.cidade || `#${i + 1}`}`,
+        label: `Imóvel: ${imovelLabel(im, i)}`,
         rows: [],
       })
     );
@@ -187,24 +266,34 @@ export function CertidoesTab({
 
   const stats = useMemo(() => {
     const total = visibleJobs.length;
-    const success = visibleJobs.filter((j) => j.status === "success").length;
-    const failed = visibleJobs.filter((j) => j.status === "failed").length;
-    const awaiting = visibleJobs.filter((j) => j.status === "awaiting_portal").length;
-    const fetching = visibleJobs.filter(
-      (j) => j.status === "fetching" || j.status === "pending"
+    // Count by EFFECTIVE status (trusts resultData over job.status)
+    const success = visibleJobs.filter(
+      (j) => effectiveStatus(j) === "success"
     ).length;
-    const skipped = visibleJobs.filter((j) => j.status === "skipped").length;
+    const failed = visibleJobs.filter(
+      (j) => effectiveStatus(j) === "failed"
+    ).length;
+    const awaiting = visibleJobs.filter(
+      (j) => effectiveStatus(j) === "awaiting_portal"
+    ).length;
+    const fetching = visibleJobs.filter((j) => {
+      const s = effectiveStatus(j);
+      return s === "fetching" || s === "pending";
+    }).length;
+    const skipped = visibleJobs.filter(
+      (j) => effectiveStatus(j) === "skipped"
+    ).length;
     const stuck = visibleJobs.filter(isStuck).length;
+    // Count ghost-data jobs: raw status says fetching/pending but data is valid.
+    // These would be auto-promoted by sweeper or the UI already reads them as
+    // success. Used to drive the "Recuperar travadas" UX.
+    const ghostPromotable = visibleJobs.filter(
+      (j) =>
+        (j.status === "fetching" || j.status === "pending") &&
+        hasValidResult(j)
+    ).length;
     const cost = visibleJobs.reduce((a, j) => a + (j.costCents ?? 0), 0);
-    const latencies = visibleJobs
-      .map((j) => j.latencyMs)
-      .filter((n): n is number => typeof n === "number");
-    const avgLatency =
-      latencies.length > 0
-        ? Math.round(
-            latencies.reduce((a, b) => a + b, 0) / latencies.length / 1000
-          )
-        : 0;
+    const avgLatency = medianLatency(visibleJobs);
     return {
       total,
       success,
@@ -213,6 +302,7 @@ export function CertidoesTab({
       fetching,
       skipped,
       stuck,
+      ghostPromotable,
       cost,
       avgLatency,
     };
@@ -268,9 +358,19 @@ export function CertidoesTab({
   };
 
   const handleSweep = async () => {
-    const count = await sweepStale();
-    if (count > 0) {
-      toast.success(`${count} certidão(ões) travada(s) destravada(s)`);
+    const result = await sweepStale();
+    if (result.promoted > 0 && result.failed > 0) {
+      toast.success(
+        `${result.promoted} já resolvida(s) promovida(s) para sucesso; ${result.failed} realmente falha(s) marcada(s)`
+      );
+    } else if (result.promoted > 0) {
+      toast.success(
+        `${result.promoted} certidão(ões) tinha(m) resultado válido no banco — visualização atualizada sem novas chamadas`
+      );
+    } else if (result.failed > 0) {
+      toast.success(
+        `${result.failed} certidão(ões) travada(s) marcada(s) como falha. Clique em tentar novamente em cada card.`
+      );
     } else {
       toast.info("Nenhuma certidão travada encontrada");
     }
@@ -305,14 +405,19 @@ export function CertidoesTab({
             Atualizar
           </Button>
         )}
-        {stats.stuck > 0 && (
+        {(stats.stuck > 0 || stats.ghostPromotable > 0) && (
           <Button
             variant="outline"
             onClick={handleSweep}
             className="border-amber-300 text-amber-700 hover:bg-amber-50"
+            title={
+              stats.ghostPromotable > 0
+                ? `${stats.ghostPromotable} já têm resultado válido e serão promovidas sem custo`
+                : "Marca como falha e libera botão de retry"
+            }
           >
             <LifeBuoy className="h-4 w-4 mr-1" />
-            Recuperar travadas ({stats.stuck})
+            Recuperar travadas ({Math.max(stats.stuck, stats.ghostPromotable)})
           </Button>
         )}
         {stats.success > 0 && (
@@ -445,7 +550,7 @@ export function CertidoesTab({
                         setDetailJob(row);
                       }}
                     >
-                      <div className="shrink-0 mt-0.5">{statusIcon(row.status)}</div>
+                      <div className="shrink-0 mt-0.5">{statusIcon(row)}</div>
                       <div className="flex-1 min-w-0">
                         <div className="font-medium truncate">{row.label}</div>
                         <div className="text-xs text-muted-foreground">
@@ -454,24 +559,29 @@ export function CertidoesTab({
                             <span className="ml-1 text-amber-700">(travada)</span>
                           )}
                         </div>
-                        <div className="text-[10px] text-muted-foreground mt-0.5 flex gap-2 flex-wrap">
-                          {row.costCents != null && (
-                            <span>
-                              R$ {(row.costCents / 100).toFixed(2).replace(".", ",")}
-                            </span>
-                          )}
-                          {row.latencyMs != null && (
-                            <span>{Math.round(row.latencyMs / 1000)}s</span>
-                          )}
-                          {validade && (
-                            <span className="text-green-700">
-                              Válida até {validade}
-                            </span>
-                          )}
-                          {row.retryCount > 0 && (
-                            <span>Retries: {row.retryCount}</span>
-                          )}
-                        </div>
+                        {(row.costCents != null ||
+                          row.latencyMs != null ||
+                          validade ||
+                          row.retryCount > 0) && (
+                          <div className="text-[10px] text-muted-foreground mt-0.5 flex gap-2 flex-wrap">
+                            {row.costCents != null && row.costCents > 0 && (
+                              <span>
+                                R$ {(row.costCents / 100).toFixed(2).replace(".", ",")}
+                              </span>
+                            )}
+                            {row.latencyMs != null && row.latencyMs > 0 && (
+                              <span>{Math.round(row.latencyMs / 1000)}s</span>
+                            )}
+                            {validade && (
+                              <span className="text-green-700">
+                                Válida até {validade}
+                              </span>
+                            )}
+                            {row.retryCount > 0 && (
+                              <span>Retries: {row.retryCount}</span>
+                            )}
+                          </div>
+                        )}
                       </div>
                       <div className="flex gap-1 shrink-0">
                         <Button

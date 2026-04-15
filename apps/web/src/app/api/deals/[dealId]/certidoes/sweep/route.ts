@@ -35,10 +35,14 @@ export async function POST(
   }
 
   // Shorter threshold for manual sweep — 5 minutes — so user gets faster relief
-  const swept = await sweepStaleJobs({
+  const result = await sweepStaleJobs({
     dealId: params.dealId,
     staleAfterMs: 5 * 60_000,
   });
 
-  return NextResponse.json({ swept });
+  return NextResponse.json({
+    promoted: result.promoted,
+    failed: result.failed,
+    swept: result.promoted + result.failed,
+  });
 }

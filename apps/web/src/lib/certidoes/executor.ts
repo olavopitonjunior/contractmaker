@@ -311,18 +311,26 @@ async function downloadAndAttach(
 }
 
 /**
- * Dead-man sweeper — marks jobs stuck in non-terminal states as failed when
- * their container has clearly died (started more than `staleAfterMs` ago).
+ * Dead-man sweeper — resolves jobs stuck in non-terminal states when their
+ * container has clearly died (started more than `staleAfterMs` ago).
+ *
+ * CRITICAL: this function never overwrites a valid result. If the sweeper
+ * finds a zombie job that has already persisted valid result data (resultCode
+ * 200 + resultData.situacao in a terminal state), it PROMOTES the job to
+ * status="success" instead of marking as failed. This protects against the
+ * race where the container finished the Prisma update for resultData but died
+ * before returning HTTP to the polling client — the data is in the DB, the
+ * job row just looks stuck.
  *
  * Runs hourly via cron. Also exposed via /api/deals/:id/certidoes/sweep for
  * per-deal manual sweeps.
  *
- * Returns the number of jobs marked as failed.
+ * Returns `{ promoted, failed }` counts.
  */
 export async function sweepStaleJobs(options: {
   dealId?: string;
   staleAfterMs?: number;
-} = {}): Promise<number> {
+} = {}): Promise<{ promoted: number; failed: number }> {
   const staleAfter = options.staleAfterMs ?? 15 * 60_000; // 15 min default
   const cutoff = new Date(Date.now() - staleAfter);
 
@@ -335,23 +343,66 @@ export async function sweepStaleJobs(options: {
         { AND: [{ startedAt: null }, { createdAt: { lt: cutoff } }] },
       ],
     },
-    select: { id: true },
-  });
-
-  if (stale.length === 0) return 0;
-
-  const now = new Date();
-  await prisma.certidaoJob.updateMany({
-    where: { id: { in: stale.map((j) => j.id) } },
-    data: {
-      status: "failed",
-      finishedAt: now,
-      errorMessage:
-        "Timeout — container reciclado antes de concluir a consulta. Clique em tentar novamente.",
+    select: {
+      id: true,
+      resultCode: true,
+      resultData: true,
+      attachmentId: true,
     },
   });
 
-  return stale.length;
+  if (stale.length === 0) return { promoted: 0, failed: 0 };
+
+  const TERMINAL_SITUACOES = new Set([
+    "negativa",
+    "positiva",
+    "positiva_com_efeitos",
+    "nao_emitida",
+    "aguardando_pdf",
+  ]);
+
+  const toPromote: string[] = [];
+  const toFail: string[] = [];
+
+  for (const job of stale) {
+    const data = job.resultData as { situacao?: string } | null;
+    const hasValidResult =
+      job.resultCode === 200 &&
+      data != null &&
+      typeof data.situacao === "string" &&
+      TERMINAL_SITUACOES.has(data.situacao);
+    if (hasValidResult) {
+      toPromote.push(job.id);
+    } else {
+      toFail.push(job.id);
+    }
+  }
+
+  const now = new Date();
+
+  if (toPromote.length > 0) {
+    await prisma.certidaoJob.updateMany({
+      where: { id: { in: toPromote } },
+      data: {
+        status: "success",
+        finishedAt: now,
+      },
+    });
+  }
+
+  if (toFail.length > 0) {
+    await prisma.certidaoJob.updateMany({
+      where: { id: { in: toFail } },
+      data: {
+        status: "failed",
+        finishedAt: now,
+        errorMessage:
+          "Timeout — container reciclado antes de concluir a consulta. Clique em tentar novamente.",
+      },
+    });
+  }
+
+  return { promoted: toPromote.length, failed: toFail.length };
 }
 
 /**

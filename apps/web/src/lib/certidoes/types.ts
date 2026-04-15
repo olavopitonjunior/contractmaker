@@ -14,6 +14,7 @@ export type Situacao =
   | "positiva"
   | "positiva_com_efeitos"
   | "nao_emitida"
+  | "aguardando_pdf"
   | "indeterminado";
 
 export interface NormalizedResult {

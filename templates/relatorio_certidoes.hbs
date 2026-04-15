@@ -35,11 +35,11 @@
 <div class="summary">
   <strong>Resumo do lote:</strong><br>
   Total de certidões: {{total}} ·
-  Negativas: {{sucessoNegativa}} ·
+  Negativas: {{sucessoNegativa}}{{#if aguardandoPdf}} (das quais {{aguardandoPdf}} aguardando PDF){{/if}} ·
   Com débito/pendência: {{positivas}} ·
   Falhas: {{falhas}} ·
   Puladas: {{puladas}}<br>
-  <strong>Custo:</strong> R$ {{custoReais}} &middot; <strong>Latência média:</strong> {{latenciaSegundos}}s
+  <strong>Custo:</strong> R$ {{custoReais}} &middot; <strong>Latência mediana:</strong> {{latenciaSegundos}}s
 </div>
 
 {{#if partes.length}}
@@ -95,6 +95,54 @@
     {{/each}}
   </ul>
 </div>
+{{/if}}
+
+{{#if falhasDetalhadas.length}}
+<h2>Certidões não obtidas (falhas)</h2>
+<table>
+  <thead>
+    <tr>
+      <th style="width:50%">Certidão</th>
+      <th style="width:40%">Motivo</th>
+      <th style="width:10%">Tentativas</th>
+    </tr>
+  </thead>
+  <tbody>
+  {{#each falhasDetalhadas}}
+    <tr>
+      <td>{{this.label}}</td>
+      <td>{{this.motivo}}</td>
+      <td>{{this.retryCount}}</td>
+    </tr>
+  {{/each}}
+  </tbody>
+</table>
+<p style="font-size: 9pt; color: #666; margin-top: 6pt;">
+  As certidões listadas acima devem ser extraídas manualmente ou retentadas no sistema antes do fechamento do negócio.
+</p>
+{{/if}}
+
+{{#if puladasDetalhadas.length}}
+<h2>Certidões puladas (dados insuficientes)</h2>
+<table>
+  <thead>
+    <tr>
+      <th style="width:50%">Certidão</th>
+      <th style="width:50%">Dados faltantes</th>
+    </tr>
+  </thead>
+  <tbody>
+  {{#each puladasDetalhadas}}
+    <tr>
+      <td>{{this.label}}</td>
+      <td>{{this.motivo}}</td>
+    </tr>
+  {{/each}}
+  </tbody>
+</table>
+<p style="font-size: 9pt; color: #666; margin-top: 6pt;">
+  Complete os dados faltantes no formulário ou na própria certidão e extraia novamente.
+</p>
 {{/if}}
 
 <div class="footer">

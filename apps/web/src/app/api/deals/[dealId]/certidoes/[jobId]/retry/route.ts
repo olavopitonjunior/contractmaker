@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { runSingleJob, pollPortalJob } from "@/lib/certidoes/executor";
@@ -110,6 +111,10 @@ export async function POST(
   }
 
   // Branch: re-execute from scratch (failed or stuck). Will cost a new call.
+  // IMPORTANT: clear stale resultData/resultCode/attachmentId so the card never
+  // shows ghost data from a previous attempt while the new run is in progress.
+  // This prevents the bug where status="fetching" + old resultData makes the
+  // card display "Consultando" while the modal shows the stale "Negativa".
   await prisma.certidaoJob.update({
     where: { id: params.jobId },
     data: {
@@ -118,6 +123,12 @@ export async function POST(
       retryCount: { increment: 1 },
       startedAt: null,
       finishedAt: null,
+      resultCode: null,
+      resultMessage: null,
+      resultData: Prisma.DbNull,
+      latencyMs: null,
+      // attachmentId intentionally kept — the old PDF (if any) is still valid
+      // and deleting the DealAttachment row separately is out of scope here.
     },
   });
 

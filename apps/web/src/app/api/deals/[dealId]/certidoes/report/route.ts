@@ -61,10 +61,19 @@ export async function POST(
       label: `Comprador: ${c.nome || c.razao_social || `Parte ${i + 1}`}`,
     })),
   ];
-  const imoveisList = imoveis.map((im: any, i: number) => ({
-    key: `imovel-${i}`,
-    label: `Imóvel: ${im.rua || `#${i + 1}`}`,
-  }));
+  const imoveisList = imoveis.map((im: any, i: number) => {
+    const parts: string[] = [];
+    if (im.rua) parts.push(im.rua);
+    if (im.numero && String(im.numero).trim() !== "" && String(im.numero).trim() !== "nº") {
+      parts.push(`nº ${im.numero}`);
+    }
+    if (im.cidade) parts.push(im.cidade);
+    const addr = parts.join(", ");
+    return {
+      key: `imovel-${i}`,
+      label: `Imóvel: ${addr || `#${i + 1}`}`,
+    };
+  });
 
   const reportData = buildReportData({
     dealTitle: deal.title,
@@ -78,7 +87,10 @@ export async function POST(
       targetKind: j.targetKind,
       targetIndex: j.targetIndex,
       status: j.status,
+      resultCode: j.resultCode,
       resultData: j.resultData,
+      errorMessage: j.errorMessage,
+      retryCount: j.retryCount,
       latencyMs: j.latencyMs,
       costCents: j.costCents,
     })),

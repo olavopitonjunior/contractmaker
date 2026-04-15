@@ -95,15 +95,28 @@ function trfUnificadaExtractor(resp: InfosimplesResponse): NormalizedResult {
     return {
       trf: key,
       conseguiu: asBool(t.conseguiu_emitir_certidao_negativa),
+      emitiuPdf: asBool(t.emitiu_pdf),
       mensagem: asString(t.mensagem) ?? null,
     };
   });
   const allOk = perTrf.every((t) => t.conseguiu === true);
   const anyFail = perTrf.some((t) => t.conseguiu === false);
-  const situacao: Situacao = allOk
+  const allNull = perTrf.every((t) => t.conseguiu == null);
+  // "Aguardando PDF": at least one TRF returned conseguiu=true but emitiu_pdf=false.
+  // This is a temporary state where Infosimples confirmed the negativa but the
+  // portal is still preparing the PDF. Surface as a dedicated state instead of
+  // "indeterminado" so the UI knows it's safe to trust the result.
+  const awaitingPdf =
+    allOk &&
+    perTrf.some((t) => t.conseguiu === true && t.emitiuPdf === false);
+  const situacao: Situacao = awaitingPdf
+    ? "aguardando_pdf"
+    : allOk
     ? "negativa"
     : anyFail
     ? "nao_emitida"
+    : allNull
+    ? "indeterminado"
     : "indeterminado";
   return {
     situacao,

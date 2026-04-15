@@ -159,14 +159,20 @@ export function useCertidoesBatch(dealId: string) {
     [dealId, fetchJobs]
   );
 
-  const sweepStale = useCallback(async (): Promise<number> => {
+  const sweepStale = useCallback(async (): Promise<{
+    promoted: number;
+    failed: number;
+  }> => {
     const res = await fetch(`/api/deals/${dealId}/certidoes/sweep`, {
       method: "POST",
     });
-    if (!res.ok) return 0;
+    if (!res.ok) return { promoted: 0, failed: 0 };
     const data = await res.json();
     await fetchJobs();
-    return data.swept ?? 0;
+    return {
+      promoted: data.promoted ?? 0,
+      failed: data.failed ?? 0,
+    };
   }, [dealId, fetchJobs]);
 
   const completeSkipped = useCallback(
