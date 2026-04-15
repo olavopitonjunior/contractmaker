@@ -68,9 +68,28 @@ Para **não** cair nessa armadilha, siga estas regras:
 - **Modalidade:** financiamento
 - **Comissão:** 6% → R$ 58.800, paga pela Parte Compradora
 
-## Documentos de teste (opcionais para a Etapa 0)
+## Documentos de teste (OBRIGATÓRIO nesta rodada)
 
-Opcional — se tiver samples brasileiros JPG/PDF (RG, CPF, matrícula) para testar o OCR. Senão, pule a Etapa 0.
+Esta rodada **exige** testar o upload + OCR da Etapa 0 com ao menos 1 imagem. Use um dos samples públicos abaixo (ambos são imagens reais e públicas, testadas em rodadas anteriores):
+
+- **RG sample (recomendado)**: `https://upload.wikimedia.org/wikipedia/commons/thumb/2/2c/Carteira_de_Identidade_do_Brasil_2022.jpg/800px-Carteira_de_Identidade_do_Brasil_2022.jpg`
+- **PDF sample alternativo**: `https://www.africau.edu/images/default/sample.pdf` (genérico; Gemini devolve `tipo: "outro"` mas o pipeline de upload + extract precisa funcionar)
+
+Como baixar o sample na sessão do browser (escolha um método):
+
+```js
+// Método A — download via fetch + injetar no input do dropzone
+const url = 'https://upload.wikimedia.org/wikipedia/commons/thumb/2/2c/Carteira_de_Identidade_do_Brasil_2022.jpg/800px-Carteira_de_Identidade_do_Brasil_2022.jpg';
+const blob = await fetch(url).then(r => r.blob());
+const file = new File([blob], 'rg-sample.jpg', { type: 'image/jpeg' });
+const dt = new DataTransfer();
+dt.items.add(file);
+const input = document.querySelector('input[type="file"]');
+input.files = dt.files;
+input.dispatchEvent(new Event('change', { bubbles: true }));
+```
+
+Ou use o método nativo de upload da sua ferramenta de browser para arrastar um arquivo local.
 
 ---
 
@@ -86,12 +105,53 @@ Opcional — se tiver samples brasileiros JPG/PDF (RG, CPF, matrícula) para tes
 - **VALIDAR:** Etapa 0 "Documentos" renderiza por padrão.
 - **VALIDAR:** StepIndicator mostra "Etapa 1 de 8".
 
-**1.3** Pule a Etapa 0 (ou anexe 1 JPG se tiver) → próximo.
+**1.3** Etapa 0 — Upload + OCR (OBRIGATÓRIO nesta rodada).
+- Faça upload do RG sample via um dos métodos documentados na seção "Documentos de teste".
+- **VALIDAR:** um card aparece no dropzone com status **"Enviando…"** → **"Analisando…"** → **"Pronto"**. Anote o tempo total (esperado 5-15s via Gemini 2.5 Flash).
+- **VALIDAR (CRÍTICO):** o card final mostra:
+  - Badge de categoria (para o sample do Wikipedia, esperado **"RG"** ou **"outro"** — ambos aceitáveis)
+  - Confidence em % (> 0)
+  - Lista de campos extraídos (nome_completo, rg_numero, data_nascimento, naturalidade, etc — pelo menos 3 campos não-nulos)
+  - Dropdown de atribuição já com valor default ("Vendedor 1")
+- **VALIDAR NETWORK**:
+  - `POST /api/forms/<token>/attachments` → 200
+  - `POST /api/forms/<token>/attachments/<id>/extract` → 200 com body `{category, extractedData: {fields, confidence}}`
+- Anote via texto (sem screenshot): os nomes dos campos extraídos e a confidence. Exemplo de como extrair:
+  ```js
+  // Dentro do iframe/page da Etapa 0:
+  const card = document.querySelector('[data-testid="document-card"]') || document.querySelector('.document-card');
+  ({
+    category: card?.querySelector('.badge')?.textContent,
+    fieldCount: card?.querySelectorAll('[data-field]')?.length,
+    status: card?.querySelector('[data-status]')?.textContent
+  })
+  ```
+  Se os seletores acima não baterem, use `document.body.innerText` e busque por "Pronto" + nomes de campos.
 
-**1.4** Etapa 1 — Vendedor(es):
-- Preencha Maria Aparecida com todos os campos da persona
-- **VALIDAR (CRÍTICO):** existe o campo **"Data de Nascimento"** (input `type="date"`) logo abaixo do CPF
-- Preencha: `1980-05-14`
+**1.3b** Aplicar OCR aos campos (autofill para perfil do Vendedor 1).
+- Clique o botão **"Aplicar aos campos (1)"** no topo da grade de cards.
+- **VALIDAR:** toast de sucesso "1 documento(s) aplicado(s) — N campo(s) preenchido(s)" (N deve ser > 0).
+- **VALIDAR:** o card do documento fica com borda verde + badge **"Aplicado"**.
+- Navegue para **Etapa 1 — Vendedor(es)**.
+- **VALIDAR (CRÍTICO)**: pelo menos 3 campos do Vendedor 1 foram preenchidos automaticamente via OCR. Valide com:
+  ```js
+  const inputs = document.querySelectorAll('input[name^="vendedores.0."]');
+  const filled = [...inputs].filter(i => i.value && i.value.trim()).map(i => ({ name: i.name, value: i.value }));
+  filled
+  ```
+  Esperado: 3+ entries com campos como `vendedores.0.nome`, `vendedores.0.rg`, `vendedores.0.data_nascimento`, `vendedores.0.nacionalidade`, etc. Reporte no relatório exatamente QUANTOS campos foram preenchidos e QUAIS.
+- **Este é o teste crítico do autofill OCR → perfil do cliente.** Se NENHUM campo tiver sido preenchido, é FAIL (mesmo que o OCR tenha extraído).
+
+**1.4** Etapa 1 — Vendedor(es), sobrescrever com a persona Maria Aparecida.
+- Os campos extraídos do RG sample NÃO correspondem à persona do roteiro. Sobrescreva manualmente com os dados da persona (nome, CPF, RG, data de nascimento, endereço, estado civil, etc.).
+- **VALIDAR (CRÍTICO):** existe o campo **"Data de Nascimento"** (input `type="date"`) logo abaixo do CPF.
+- Preencha data_nascimento: `1980-05-14`.
+- **VALIDAR (BUG-007):** existe asterisco vermelho `*` nos labels "Nome do Cônjuge" e "CPF do Cônjuge" quando estado civil = "Casada". Valide com:
+  ```js
+  const labels = [...document.querySelectorAll('label')].filter(l => l.textContent.includes('Cônjuge'));
+  labels.map(l => ({ text: l.textContent, hasAsterisk: l.textContent.includes('*') }))
+  ```
+- Preencha cônjuge fake: Nome "João Souza", CPF "111.111.111-11". (Não precisa validar CPF real aqui — só o form-level check do BUG-007.)
 
 **1.5** Etapa 2 — Comprador(es):
 - Rafael Oliveira com CPF válido + data nascimento `1985-11-03`
@@ -233,28 +293,60 @@ Opcional — se tiver samples brasileiros JPG/PDF (RG, CPF, matrícula) para tes
 
 ---
 
-### BLOCO 8 — Versionamento
+### BLOCO 8 — Versionamento (CHECKLIST CRÍTICO DE REGRESSÃO)
 
-**8.1** Edite manualmente o contrato (clique no editor, digite qualquer coisa).
-- Aguarde 1-2s e **VALIDAR**: Network mostra PATCH `/api/contracts/:id` (auto-save) → 200.
+Este bloco valida que o sistema mantém múltiplas versões de contrato para o mesmo deal, com histórico preservado e navegação entre versões funcionando.
+
+**8.1** Ainda na V1 do contrato, edite manualmente: clique no editor e digite uma frase extra em qualquer lugar (ex: "Esta é uma edição manual de teste V1.").
+- Aguarde 1-2s e **VALIDAR** via Network tab: `PATCH /api/contracts/<id>` → 200 (auto-save disparou).
+- Capture o ID da V1: `window.location.pathname` deve ser tipo `/contracts/cmxxxxxx`. Anote esse ID como **`CONTRACT_V1_ID`**.
 
 **8.2** Volte ao `/pipeline` e abra o mesmo deal novamente.
-- **VALIDAR:** aba "Contratos" mostra **Versão 1** do contrato.
+- **VALIDAR** com `document.body.innerText.match(/Contratos.*?\(\d+.*?versão/i)`: aba "Contratos" mostra "Versão 1" ou "(1 versão)".
 
 **8.3** Clique "Confeccionar Contrato" novamente.
-- **VALIDAR:** modal `AlertDialog` aparece com "Criar nova versão?" avisando que edições manuais não serão transferidas.
+- **VALIDAR:** modal `AlertDialog` aparece com título "Criar nova versão do contrato?" avisando que edições manuais não serão transferidas. Valide com:
+  ```js
+  document.querySelector('[role="alertdialog"]')?.textContent?.includes('Criar nova versão')
+  ```
 - Confirme "Criar Nova Versão".
-- **VALIDAR:** redireciona para o novo contrato com o template base renderizado do zero.
-- **VALIDAR:** Network `POST .../generate-contract` → 201.
+- **VALIDAR:** redireciona para `/contracts/<novo-id>` — capture o novo ID como **`CONTRACT_V2_ID`**.
+- **VALIDAR Network:** `POST /api/pipeline/deals/:id/generate-contract` → 201 com body contendo `contractId: <CONTRACT_V2_ID>` e `version: 2`.
+- **VALIDAR:** `CONTRACT_V1_ID !== CONTRACT_V2_ID` (ids diferentes).
 
 **8.4** Volte à aba "Contratos" do deal.
-- **VALIDAR (CRÍTICO):** agora existem **2 versões** listadas (V1 e V2) com datas diferentes.
-- **VALIDAR:** V1 ainda tem a mudança de "3%" aplicada no Bloco 6 (o histórico foi preservado).
-- **VALIDAR:** V2 é a versão nova limpa (voltou ao "2%" do template).
+- **VALIDAR (CRÍTICO):** agora existem **2 versões** listadas. Valide programaticamente:
+  ```js
+  const contracts = [...document.querySelectorAll('[data-contract-version], .contract-version-row')];
+  contracts.length  // deve ser 2 (ou use outro seletor equivalente via innerText)
+  document.body.innerText.match(/(V|Versão)\s*[12]/g)  // deve ter ao menos V1 e V2
+  ```
+- **VALIDAR (CRÍTICO):** V1 ainda tem a frase "Esta é uma edição manual de teste V1." (edição do 8.1) E as ocorrências de "3%" do Bloco 6 (histórico preservado). Clique para abrir V1 e validar:
+  ```js
+  const t = document.querySelector('.ProseMirror').textContent;
+  ({
+    hasV1Edit: t.includes('edição manual de teste V1'),
+    threePctCount: t.match(/3%/g)?.length || 0
+  })
+  ```
+  Esperado: hasV1Edit=true E threePctCount > 0.
+- **VALIDAR:** V2 é a versão nova limpa. Abra V2 e valide:
+  ```js
+  const t = document.querySelector('.ProseMirror').textContent;
+  ({
+    hasV1Edit: t.includes('edição manual de teste V1'),
+    threePctCount: t.match(/3%/g)?.length || 0,
+    twoPctCount: t.match(/2%/g)?.length || 0
+  })
+  ```
+  Esperado: hasV1Edit=false (NÃO deve herdar edição manual), threePctCount=0 e twoPctCount > 0 (voltou ao template).
 
-**8.5** Clique na V1 para abrir.
-- **VALIDAR:** abre a versão antiga com conteúdo preservado.
-- **VALIDAR:** Network `GET /api/contracts/v1-id` → 200 com htmlContent correto.
+**8.5** Navegue entre V1 e V2 usando a aba "Contratos":
+- Click V1 → `window.location.pathname.includes(CONTRACT_V1_ID)` e o texto mostra a edição manual.
+- Click V2 → `window.location.pathname.includes(CONTRACT_V2_ID)` e o texto mostra template limpo.
+- **VALIDAR Network:** `GET /api/contracts/<V1_ID>` → 200 e `GET /api/contracts/<V2_ID>` → 200 com htmlContent distintos.
+
+**CRITÉRIO DE PASS**: V1 e V2 coexistem, ids distintos, histórico preservado, navegação funciona nos dois sentidos. Qualquer divergência (ex: V1 sumiu, V2 herdou edição manual, ids iguais) é FAIL.
 
 ---
 
@@ -394,13 +486,35 @@ Opcional — se tiver samples brasileiros JPG/PDF (RG, CPF, matrícula) para tes
 - **VALIDAR (CRÍTICO):** editor fica read-only OU toast de erro "Contrato aprovado, edição bloqueada".
 - **VALIDAR:** chat IA também fica desabilitado.
 
-**14.4** Exporte PDF/DOCX:
-- Clique botão de Export → escolha PDF.
-- **VALIDAR:** Network `POST /api/contracts/:id/export` → 200.
-- **VALIDAR:** PDF é baixado com o DocumentStyle padrão aplicado (fonte, margens, page numbers no footer).
+**14.4** Export PDF — CRÍTICO (regressão BUG-005).
+- Clique botão de Export → escolha **PDF**.
+- **VALIDAR Network (CRÍTICO):** `POST /api/contracts/:id/export` → **200**.
+  - Se 500/503 com mensagem "Could not find Chrome", é **STILL BROKEN — BUG-005 regrediu** e é BLOCKER. Reporte imediatamente.
+  - Se 200 mas retorna HTML em vez de PDF, é FAIL.
+- **VALIDAR:** arquivo baixa efetivamente. Quando o download inicia, anote o nome do arquivo e tamanho aproximado. Valide que começa com `%PDF` (magic bytes válidos). Se estiver usando ferramenta de browser que salva, cheque o header:
+  ```js
+  // se o download abrir inline em uma iframe ou nova aba:
+  const resp = await fetch('/api/contracts/<ID>/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ format: 'pdf' }) });
+  const buf = await resp.arrayBuffer();
+  const first4 = new TextDecoder().decode(new Uint8Array(buf).slice(0, 4));
+  ({ status: resp.status, sizeBytes: buf.byteLength, magic: first4, isValidPdf: first4 === '%PDF' })
+  ```
+  Esperado: `status: 200`, `sizeBytes > 10000` (um contrato tem pelo menos ~20KB de PDF renderizado), `isValidPdf: true`.
+- **VALIDAR:** o PDF baixado contém o DocumentStyle padrão (fonte Helvetica/serif, margens consistentes, numeração de página no footer tipo "1 / N"). Abra o PDF e confira visualmente OU extraia texto via ferramenta de PDF-parse se disponível.
+- **Este é o passo onde BUG-005 era o blocker**. Validação extra: o mesmo endpoint `/export` é usado pelo relatório de due diligence do Bloco 12 — se aquele passou, este deve passar também. Se 12 passou e 14.4 falhar, há uma regressão **nova**, específica do path de contrato.
 
-**14.5** Idem para DOCX.
-- **VALIDAR:** `.docx` baixa e abre no Word/LibreOffice sem corrupção.
+**14.5** Export DOCX.
+- Clique botão de Export → escolha **DOCX**.
+- **VALIDAR Network:** `POST /api/contracts/:id/export` → 200 (ou endpoint dedicado `/docx`).
+- **VALIDAR:** arquivo `.docx` baixa. Magic bytes de `.docx` (zip): começa com `PK\x03\x04`. Valide com:
+  ```js
+  const resp = await fetch('/api/contracts/<ID>/export', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ format: 'docx' }) });
+  const buf = await resp.arrayBuffer();
+  const first4 = new Uint8Array(buf).slice(0, 4);
+  ({ status: resp.status, sizeBytes: buf.byteLength, firstBytes: [...first4], isZip: first4[0] === 0x50 && first4[1] === 0x4B })
+  ```
+  Esperado: `isZip: true`, `sizeBytes > 5000`.
+- Se possível, abra em Word/LibreOffice e confirme que não corrompe.
 
 ---
 
@@ -423,7 +537,9 @@ Opcional — se tiver samples brasileiros JPG/PDF (RG, CPF, matrícula) para tes
 
 | # | Cenário | Resultado | Observações |
 |---|---|---|---|
-| 1.4 | Campo data_nascimento em Vendedor | PASS/FAIL | aparece? autofill? |
+| 1.3 | OCR upload Etapa 0 (RG sample) — card vai pra "Pronto" | PASS/FAIL | categoria, confidence, fields extraídos, tempo Xs |
+| 1.3b | **Autofill OCR → perfil do Vendedor 1** (≥3 campos preenchidos) | PASS/FAIL | quais campos foram preenchidos? |
+| 1.4 | Campo data_nascimento em Vendedor + asterisco cônjuge (BUG-007) | PASS/FAIL | aparece? |
 | 1.6 | Campos SQL + inscrição municipal em Imóvel | ... | ... |
 | 1.11 | Finalizar formulário 8 etapas | ... | tempo total X min |
 | 3.1 | Confecção do contrato (generate-contract) | ... | tempo Xs, template v2 |
@@ -435,7 +551,9 @@ Opcional — se tiver samples brasileiros JPG/PDF (RG, CPF, matrícula) para tes
 | 6.1 | Chat IA alteração estruturada | ... | "2%" → "3%" em N lugares |
 | 6.2 | Persistência das edições IA após reload | ... | ... |
 | 7.1 | Sugestões IA como track changes | ... | ... |
-| 8.4 | Versionamento V1 + V2 coexistem | ... | histórico preservado |
+| 8.3 | Modal "Criar nova versão" + POST generate-contract → 201 | ... | V2_ID ≠ V1_ID |
+| 8.4 | **Versionamento V1 + V2 coexistem, histórico preservado** | PASS/FAIL | V1 mantém edição manual + "3%"; V2 é fresh "2%" |
+| 8.5 | Navegação entre V1 e V2 (clique nas abas Contratos) | PASS/FAIL | Network GET ambos 200 |
 | 9.3 | Plano de extração correto (~12 jobs) | ... | lista + custo R$ 0,XX |
 | 10.1 | POST certidoes 202 + polling 2s | ... | ... |
 | 10.2 | Transições de status em tempo real | ... | TJSP vai para awaiting_portal |
@@ -447,7 +565,8 @@ Opcional — se tiver samples brasileiros JPG/PDF (RG, CPF, matrícula) para tes
 | 13.3 | Tabela por endpoint com p50/p95 | ... | ... |
 | 14.1 | Aprovação do contrato | ... | ApprovalReviewDialog |
 | 14.3 | Imutabilidade pós-aprovação | ... | editor bloqueado? |
-| 14.4 | Export PDF aprovado | ... | DocumentStyle aplicado |
+| 14.4 | **Export PDF** (magic bytes `%PDF`, >10KB, DocumentStyle) | PASS/FAIL | regressão BUG-005 |
+| 14.5 | Export DOCX (magic bytes `PK`, >5KB) | PASS/FAIL | — |
 | 15.2 | Mobile 375px utilizável | ... | ... |
 
 ### Bugs encontrados
