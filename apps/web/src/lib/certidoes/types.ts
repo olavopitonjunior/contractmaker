@@ -1,4 +1,4 @@
-export type TargetKind = "vendedor" | "comprador" | "imovel";
+export type TargetKind = "vendedor" | "comprador" | "imovel" | "diligenciado";
 
 export type JobStatus =
   | "pending"

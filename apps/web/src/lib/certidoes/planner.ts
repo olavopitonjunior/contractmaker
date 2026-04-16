@@ -76,9 +76,38 @@ function uf(p: Parte | Imovel | undefined): string {
 
 // -------------------------------------------------------------------
 
+/**
+ * F3: shape of a DiligentedPerson row as passed into the planner. Matches the
+ * Prisma model but intentionally loose so tests can build fixtures without
+ * loading Prisma. The route handler that reads from DB maps the fields.
+ */
+export interface DiligentedPersonInput {
+  id?: string;
+  tipoPessoa: "fisica" | "juridica";
+  nome: string;
+  cpf?: string | null;
+  cnpj?: string | null;
+  dataNascimento?: string | null;
+  uf?: string | null;
+  cidade?: string | null;
+}
+
+function diligenciadoToParte(d: DiligentedPersonInput): Parte {
+  return {
+    tipo_pessoa: d.tipoPessoa,
+    nome: d.nome,
+    cpf: d.cpf ?? undefined,
+    cnpj: d.cnpj ?? undefined,
+    data_nascimento: d.dataNascimento ?? undefined,
+    uf: d.uf ?? undefined,
+    cidade: d.cidade ?? undefined,
+  };
+}
+
 export function planCertidoesForDeal(
   dealData: DealDataLike | null | undefined,
-  dealEmail?: string
+  dealEmail?: string,
+  diligenciados?: DiligentedPersonInput[] | null
 ): ExtractionPlan {
   const data = dealData ?? {};
   const jobs: PlannedJob[] = [];
@@ -91,6 +120,10 @@ export function planCertidoesForDeal(
   );
   (data.compradores ?? []).forEach((p, i) =>
     pessoas.push({ kind: "comprador", index: i, parte: p })
+  );
+  // F3: diligenciados are treated like partes for personal certidões
+  (diligenciados ?? []).forEach((d, i) =>
+    pessoas.push({ kind: "diligenciado", index: i, parte: diligenciadoToParte(d) })
   );
 
   for (const { kind, index, parte } of pessoas) {
@@ -420,7 +453,11 @@ function buildSkip(
 ): SkippedJob {
   const info = endpointInfo(endpoint);
   const basePath =
-    kind === "imovel" ? `imoveis.${index}` : `${kind}es.${index}`;
+    kind === "imovel"
+      ? `imoveis.${index}`
+      : kind === "diligenciado"
+      ? `diligenciados.${index}`
+      : `${kind}es.${index}`;
   const missingFields: MissingField[] = buildMissingFieldsForSkip(
     missingField,
     basePath,

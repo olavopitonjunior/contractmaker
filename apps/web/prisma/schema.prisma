@@ -161,6 +161,7 @@ model Deal {
   attachments   DealAttachment[]
   certidaoJobs  CertidaoJob[]
   certidoesShareLinks CertidoesShareLink[]
+  diligentedPersons DiligentedPerson[]
 }
 
 model DealAttachment {
@@ -227,6 +228,49 @@ model CertidoesShareLink {
 
   @@index([token])
   @@index([dealId, revokedAt])
+}
+
+// F3 — Pessoas diligenciadas (externas ao contrato, tipicamente socios de PJ)
+// Stored separately from vendedores/compradores so they don't pollute the
+// contract data but can still have certidões extracted.
+model DiligentedPerson {
+  id              String   @id @default(cuid())
+  dealId          String
+  tipoPessoa      String   // "fisica" | "juridica"
+  nome            String
+  cpf             String?
+  cnpj            String?
+  dataNascimento  String?
+  uf              String?
+  cidade          String?
+  relacao         String?  // "socio" | "avalista" | "procurador" | "outro"
+  notes           String?
+  createdBy       String?
+  createdAt       DateTime @default(now())
+
+  deal Deal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([dealId])
+}
+
+// F4 — In-app notifications. Minimal viable: bell icon + unread badge + list.
+// Emitted by pollPortalJob / sweepStaleJobs / runBatch when certidão batches
+// transition to terminal state. Aggregated by batchId to avoid spam.
+model Notification {
+  id        String    @id @default(cuid())
+  orgId     String
+  userId    String?
+  type      String    // "certidao_batch_complete" | "certidao_ready" | "certidao_failed"
+  title     String
+  body      String
+  linkUrl   String?
+  metadata  Json?     // { dealId, jobId, batchId }
+  read      Boolean   @default(false)
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([orgId, read, createdAt])
+  @@index([userId, read, createdAt])
 }
 
 // ============================================
