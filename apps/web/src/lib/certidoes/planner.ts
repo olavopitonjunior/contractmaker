@@ -104,15 +104,29 @@ function diligenciadoToParte(d: DiligentedPersonInput): Parte {
   };
 }
 
+/**
+ * F1/F2: options for the planner.
+ *   - `expandAll`: when true, generate jobs for endpoints in ALL UFs (not just
+ *     the party/imovel's own UF). Used by the POST /certidoes route so the
+ *     user can select "extras" from the picker — e.g. a SP vendedor can opt
+ *     into TJRJ civel if wanted. The default plan (expandAll=false) preserves
+ *     the R5 behavior: only matched-UF endpoints are auto-suggested.
+ */
+export interface PlannerOptions {
+  expandAll?: boolean;
+}
+
 export function planCertidoesForDeal(
   dealData: DealDataLike | null | undefined,
   dealEmail?: string,
-  diligenciados?: DiligentedPersonInput[] | null
+  diligenciados?: DiligentedPersonInput[] | null,
+  options?: PlannerOptions
 ): ExtractionPlan {
   const data = dealData ?? {};
   const jobs: PlannedJob[] = [];
   const skipped: SkippedJob[] = [];
   const email = dealEmail || DEFAULT_EMAIL;
+  const expandAll = options?.expandAll === true;
 
   const pessoas: Array<{ kind: TargetKind; index: number; parte: Parte }> = [];
   (data.vendedores ?? []).forEach((p, i) =>
@@ -204,8 +218,11 @@ export function planCertidoesForDeal(
     }
 
     // ---- CEAT (Trabalhista regional) ----
-    // baseado em UF da parte: SP -> TRT2 + TRT15; RJ -> TRT1; RS -> TRT4
-    if (partyUf === "SP" || partyUf === "") {
+    // Default: match by UF da parte. With expandAll, generate all UFs.
+    const shouldSP = expandAll || partyUf === "SP" || partyUf === "";
+    const shouldRJ = expandAll || partyUf === "RJ";
+    const shouldRS = expandAll || partyUf === "RS";
+    if (shouldSP) {
       // TRT2 fisico
       {
         const ep = "tribunal/trt2/ceat";
@@ -247,7 +264,8 @@ export function planCertidoesForDeal(
           })
         );
       }
-    } else if (partyUf === "RJ") {
+    }
+    if (shouldRJ) {
       const ep = "tribunal/trt1/ceat";
       if (isPJ && !cnpj) {
         skipped.push(buildSkip(ep, kind, index, label, "cnpj", "CNPJ invalido"));
@@ -256,7 +274,8 @@ export function planCertidoesForDeal(
       } else {
         jobs.push(buildJob(ep, kind, index, label, isPJ ? { cnpj } : { cpf }));
       }
-    } else if (partyUf === "RS") {
+    }
+    if (shouldRS) {
       const ep = "tribunal/trt4/ceat";
       if (isPJ && !cnpj) {
         skipped.push(buildSkip(ep, kind, index, label, "cnpj", "CNPJ invalido"));
@@ -280,9 +299,11 @@ export function planCertidoesForDeal(
     const imLabel = im.rua ? `${im.rua}${im.cidade ? `, ${im.cidade}` : ""}` : `Imovel ${i + 1}`;
     const imUf = uf(im);
 
-    // For estadual TJ: use the FIRST vendedor/comprador's CPF/CNPJ (standard practice is per-parte).
-    // Generate one TJ job per parte at this imovel's UF.
-    if (imUf === "SP") {
+    const imShouldSP = expandAll || imUf === "SP";
+    const imShouldRJ = expandAll || imUf === "RJ";
+    const imShouldRS = expandAll || imUf === "RS";
+
+    if (imShouldSP) {
       // CENPROT SP
       const primeiroResponsavel = [...(data.vendedores ?? []), ...(data.compradores ?? [])][0];
       if (primeiroResponsavel) {
@@ -316,7 +337,8 @@ export function planCertidoesForDeal(
       } else {
         jobs.push(buildJob("pref/sp/sao-paulo/iptu", "imovel", i, imLabel, { sql: im.sql }));
       }
-    } else if (imUf === "RJ") {
+    }
+    if (imShouldRJ) {
       if (!im.inscricao_municipal) {
         skipped.push(
           buildSkip(
@@ -341,7 +363,8 @@ export function planCertidoesForDeal(
           })
         );
       }
-    } else if (imUf === "RS") {
+    }
+    if (imShouldRS && !expandAll) {
       skipped.push(
         buildSkip(
           "pref/rs/porto-alegre/iptu",
@@ -355,7 +378,7 @@ export function planCertidoesForDeal(
     }
   }
 
-  // ---- TJ estadual por parte (segue UF da parte) ----
+  // ---- TJ estadual por parte (segue UF da parte, ou todas com expandAll) ----
   for (const { kind, index, parte } of pessoas) {
     const partyUf = uf(parte);
     const label = personLabel(parte);
@@ -363,7 +386,11 @@ export function planCertidoesForDeal(
     const cpf = normalizeCpf(parte.cpf);
     const cnpj = normalizeCnpj(parte.cnpj);
 
-    if (partyUf === "SP") {
+    const tjShouldSP = expandAll || partyUf === "SP";
+    const tjShouldRJ = expandAll || partyUf === "RJ";
+    const tjShouldRS = expandAll || partyUf === "RS";
+
+    if (tjShouldSP) {
       const ep = "tribunal/tjsp/pedido-civel";
       if ((!isPJ && !cpf) || (isPJ && !cnpj)) {
         skipped.push(
@@ -380,7 +407,8 @@ export function planCertidoesForDeal(
         };
         jobs.push(buildJob(ep, kind, index, label, base));
       }
-    } else if (partyUf === "RJ") {
+    }
+    if (tjShouldRJ) {
       const ep = "tribunal/tjrj/pedido-cert";
       if ((!isPJ && !cpf) || (isPJ && !cnpj)) {
         skipped.push(
@@ -399,7 +427,8 @@ export function planCertidoesForDeal(
           })
         );
       }
-    } else if (partyUf === "RS") {
+    }
+    if (tjShouldRS) {
       const ep = "tribunal/tjrs/primeiro-grau";
       if ((!isPJ && !cpf) || (isPJ && !cnpj)) {
         skipped.push(
