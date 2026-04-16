@@ -4,6 +4,168 @@ import { callInfosimples, downloadReceipt, InfosimplesError } from "./infosimple
 import { normalize } from "./normalizers";
 import { endpointInfo } from "./endpoints";
 import type { JobStatus } from "./types";
+import { emitNotification } from "@/lib/notifications/emit";
+
+// F4 — terminal states for a job. `awaiting_portal` is NOT terminal for
+// notification purposes (user will get notified when it completes in the
+// portal poller). Replaced jobs are ignored entirely.
+const TERMINAL_FOR_NOTIFICATION = new Set<string>([
+  "success",
+  "failed",
+  "skipped",
+]);
+
+/**
+ * F4 — Adaptive retry delay for awaiting_portal jobs.
+ *
+ *   - TJSP: normally ready in 5-15min, so poll aggressively in the first 2h
+ *     (every 30min), then back off to every 2h after that.
+ *   - TJRJ: can take up to 8 business days, so poll every 6h in the first
+ *     48h, then every 24h.
+ *
+ * Returns the milliseconds delta to add to `expectedReadyAt`.
+ */
+function computeAdaptiveRetryDelta(
+  endpoint: string,
+  createdAt: Date
+): number {
+  const ageMs = Date.now() - createdAt.getTime();
+  const twoHoursMs = 2 * 60 * 60_000;
+  const fortyEightHoursMs = 48 * 60 * 60_000;
+  if (endpoint.includes("/tjsp/")) {
+    return ageMs < twoHoursMs ? 30 * 60_000 : 2 * 60 * 60_000;
+  }
+  if (endpoint.includes("/tjrj/")) {
+    return ageMs < fortyEightHoursMs ? 6 * 60 * 60_000 : 24 * 60 * 60_000;
+  }
+  // Unknown portal type — fall back to the old fixed 12h
+  return 12 * 60 * 60_000;
+}
+
+/**
+ * F4 — Computes the initial `expectedReadyAt` for a freshly-submitted
+ * two-step portal job. TJSP is polled first at 30min, TJRJ at 6h.
+ */
+function computeInitialExpectedReadyAt(endpoint: string): Date {
+  const expected = new Date();
+  if (endpoint.includes("/tjsp/")) {
+    expected.setTime(expected.getTime() + 30 * 60_000); // 30 min
+  } else if (endpoint.includes("/tjrj/")) {
+    expected.setTime(expected.getTime() + 6 * 60 * 60_000); // 6h
+  } else {
+    expected.setTime(expected.getTime() + 60 * 60_000); // 1h default
+  }
+  return expected;
+}
+
+/**
+ * F4 — Emits a `certidao_batch_complete` notification when ALL non-replaced
+ * jobs in a batch reach a terminal state. Uses `metadata.batchId` for
+ * idempotency — if a notification was already emitted for this batch, this
+ * is a no-op. Fire-and-forget: never throws.
+ *
+ * For single-job batches (retries, complementar, cherry-picks), emits a
+ * more specific `certidao_ready` title instead of the aggregated one.
+ */
+async function checkBatchCompletion(batchId: string): Promise<void> {
+  try {
+    // Idempotency: skip if already notified
+    const existing = await prisma.notification.findFirst({
+      where: {
+        type: "certidao_batch_complete",
+        metadata: { path: ["batchId"], equals: batchId },
+      },
+      select: { id: true },
+    });
+    if (existing) return;
+
+    const jobs = await prisma.certidaoJob.findMany({
+      where: { batchId, status: { not: "replaced" } },
+      include: {
+        deal: {
+          select: {
+            id: true,
+            title: true,
+            form: { select: { orgId: true } },
+          },
+        },
+      },
+    });
+    if (jobs.length === 0) return;
+
+    // If ANY job is still non-terminal, bail — we'll try again later.
+    const pendingCount = jobs.filter(
+      (j) => !TERMINAL_FOR_NOTIFICATION.has(j.status)
+    ).length;
+    if (pendingCount > 0) return;
+
+    // All terminal — emit the notification
+    const first = jobs[0];
+    if (!first.deal.form?.orgId) return; // needs org to scope notifications
+
+    const success = jobs.filter((j) => j.status === "success").length;
+    const failed = jobs.filter((j) => j.status === "failed").length;
+    const skipped = jobs.filter((j) => j.status === "skipped").length;
+    const positivas = jobs.filter((j) => {
+      if (j.status !== "success") return false;
+      const r = j.resultData as { situacao?: string } | null;
+      return r?.situacao === "positiva" || r?.situacao === "positiva_com_efeitos";
+    }).length;
+
+    const dealTitle = first.deal.title;
+    const userId = first.userId;
+
+    // Single-job batches: more specific notification
+    if (jobs.length === 1) {
+      const job = first;
+      const situacao = (job.resultData as { situacao?: string } | null)?.situacao;
+      const title =
+        job.status === "success"
+          ? `Certidão pronta: ${job.label}`
+          : job.status === "failed"
+          ? `Certidão falhou: ${job.label}`
+          : `Certidão pulada: ${job.label}`;
+      const body = situacao
+        ? `${situacao} — ${dealTitle}`
+        : job.errorMessage
+        ? `${job.errorMessage.slice(0, 100)} — ${dealTitle}`
+        : dealTitle;
+      await emitNotification({
+        orgId: first.deal.form.orgId,
+        userId,
+        type: "certidao_batch_complete", // still use batch type for idempotency
+        title,
+        body,
+        linkUrl: `/deals/${first.deal.id}`,
+        metadata: { batchId, dealId: first.deal.id, jobId: job.id },
+      });
+      return;
+    }
+
+    // Multi-job batch: aggregated title + breakdown body
+    const parts: string[] = [];
+    if (success > 0) parts.push(`${success} ✓`);
+    if (positivas > 0) parts.push(`${positivas} positiva(s)`);
+    if (failed > 0) parts.push(`${failed} falha(s)`);
+    if (skipped > 0) parts.push(`${skipped} pulada(s)`);
+    const breakdown = parts.join(" · ");
+
+    await emitNotification({
+      orgId: first.deal.form.orgId,
+      userId,
+      type: "certidao_batch_complete",
+      title: `Batch de ${jobs.length} certidões concluído`,
+      body: `${breakdown} — ${dealTitle}`,
+      linkUrl: `/deals/${first.deal.id}`,
+      metadata: { batchId, dealId: first.deal.id },
+    });
+  } catch (err) {
+    console.error(
+      "[checkBatchCompletion] failed:",
+      err instanceof Error ? err.message : String(err)
+    );
+  }
+}
 
 const CONCURRENCY = 5;
 
@@ -43,6 +205,12 @@ function pLimit(concurrency: number) {
 /**
  * Execute all jobs in a batch. Updates each CertidaoJob row as it progresses.
  * Designed to be called in fire-and-forget fashion from the route handler.
+ *
+ * F4: after all jobs in the batch reach a terminal state (for fast federal
+ * endpoints that complete synchronously), emits a notification via
+ * `checkBatchCompletion`. For batches with two-step portals, the final
+ * completion check happens later in `pollPortalJob` when the last portal
+ * job transitions to success/failed.
  */
 export async function runBatch(batchId: string, dealId: string): Promise<void> {
   const jobs = await prisma.certidaoJob.findMany({
@@ -52,6 +220,9 @@ export async function runBatch(batchId: string, dealId: string): Promise<void> {
 
   const limit = pLimit(CONCURRENCY);
   await Promise.allSettled(jobs.map((j) => limit(() => runSingleJob(j.id, dealId))));
+
+  // F4: check if the batch is fully done and emit notification
+  await checkBatchCompletion(batchId);
 }
 
 /**
@@ -81,12 +252,9 @@ export async function runSingleJob(jobId: string, dealId: string): Promise<void>
       const d = (resp.data?.[0] as Record<string, unknown>) ?? {};
       const numeroPedido =
         (d.numero_pedido as string) ?? (d.numero_requerimento as string) ?? null;
-      const expected = new Date();
-      // TJSP usually 5-15min; TJRJ up to 8 business days. Start polling after 1h for TJSP, 24h for TJRJ.
-      expected.setTime(
-        expected.getTime() +
-          (job.endpoint.startsWith("tribunal/tjrj") ? 24 * 60 * 60_000 : 60 * 60_000)
-      );
+      // F4: adaptive initial delay — TJSP 30min (normally ready in 5-15min),
+      // TJRJ 6h (up to 8 business days). Previously fixed 1h / 24h.
+      const expected = computeInitialExpectedReadyAt(job.endpoint);
       await prisma.certidaoJob.update({
         where: { id: jobId },
         data: {
@@ -137,6 +305,10 @@ export async function runSingleJob(jobId: string, dealId: string): Promise<void>
         costCents: info.costCents,
       },
     });
+    // F4: single-job path (retry/complementar) — check batch. For multi-job
+    // batches from runBatch this is also called but is idempotent via batchId
+    // metadata lookup.
+    await checkBatchCompletion(job.batchId);
   } catch (err) {
     const latencyMs = Date.now() - startedAt.getTime();
     const message =
@@ -155,6 +327,7 @@ export async function runSingleJob(jobId: string, dealId: string): Promise<void>
         costCents: info.costCents,
       },
     });
+    await checkBatchCompletion(job.batchId);
   }
 }
 
@@ -197,9 +370,11 @@ export async function pollPortalJob(jobId: string): Promise<void> {
     const latencyMs = Date.now() - startedAt.getTime();
 
     // If not ready yet (business code indicating pending), push expectedReadyAt forward.
+    // F4: adaptive delay based on portal type + age — TJSP polls every 30min
+    // in the first 2h, TJRJ every 6h in the first 48h. Previously fixed 12h.
     if (resp.code !== 200 && resp.code >= 600 && resp.code < 700) {
       const next = new Date();
-      next.setTime(next.getTime() + 12 * 60 * 60_000);
+      next.setTime(next.getTime() + computeAdaptiveRetryDelta(job.endpoint, job.createdAt));
       const MAX_AGE = 14 * 24 * 60 * 60_000;
       const tooOld = startedAt.getTime() - job.createdAt.getTime() > MAX_AGE;
       await prisma.certidaoJob.update({
@@ -217,6 +392,10 @@ export async function pollPortalJob(jobId: string): Promise<void> {
               costCents: (job.costCents ?? 0) + obterInfo.costCents,
             },
       });
+      // F4: if tooOld, the job just went terminal — check batch completion
+      if (tooOld) {
+        await checkBatchCompletion(job.batchId);
+      }
       return;
     }
 
@@ -252,6 +431,8 @@ export async function pollPortalJob(jobId: string): Promise<void> {
         costCents: (job.costCents ?? 0) + obterInfo.costCents,
       },
     });
+    // F4: portal job just became terminal — check if the whole batch is done
+    await checkBatchCompletion(job.batchId);
   } catch (err) {
     const message = err instanceof Error ? err.message : "erro desconhecido";
     await prisma.certidaoJob.update({
@@ -262,6 +443,8 @@ export async function pollPortalJob(jobId: string): Promise<void> {
         errorMessage: message.slice(0, 500),
       },
     });
+    // F4: failure is also a terminal state — check batch
+    await checkBatchCompletion(job.batchId);
   }
 }
 
@@ -345,6 +528,7 @@ export async function sweepStaleJobs(options: {
     },
     select: {
       id: true,
+      batchId: true,
       resultCode: true,
       resultData: true,
       attachmentId: true,
@@ -400,6 +584,12 @@ export async function sweepStaleJobs(options: {
           "Timeout — container reciclado antes de concluir a consulta. Clique em tentar novamente.",
       },
     });
+  }
+
+  // F4: check batch completion for every unique batch touched by the sweep
+  const touchedBatchIds = Array.from(new Set(stale.map((j) => j.batchId)));
+  for (const batchId of touchedBatchIds) {
+    await checkBatchCompletion(batchId);
   }
 
   return { promoted: toPromote.length, failed: toFail.length };

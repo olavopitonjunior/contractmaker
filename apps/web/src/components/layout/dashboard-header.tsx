@@ -4,8 +4,8 @@ import { usePathname } from "next/navigation";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Search, Bell } from "lucide-react";
+import { Search } from "lucide-react";
+import { NotificationsBell } from "@/components/layout/NotificationsBell";
 
 const BREADCRUMB_MAP: Record<string, string> = {
   "/pipeline": "Pipeline de Vendas",
@@ -43,9 +43,7 @@ export function DashboardHeader() {
             className="pl-9 w-[200px] lg:w-[260px] h-9 text-sm"
           />
         </div>
-        <Button variant="ghost" size="icon" className="relative h-9 w-9">
-          <Bell className="h-4 w-4" />
-        </Button>
+        <NotificationsBell />
       </div>
     </header>
   );
