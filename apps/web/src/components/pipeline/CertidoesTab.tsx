@@ -25,10 +25,11 @@ import {
   LifeBuoy,
 } from "lucide-react";
 import { useCertidoesBatch, type CertidaoJobRow } from "@/hooks/useCertidoesBatch";
-import { ExtractCertidoesDialog } from "./ExtractCertidoesDialog";
+import { ExtractCertidoesDialog, type JobSelection } from "./ExtractCertidoesDialog";
 import { CertidaoDetailDialog } from "./CertidaoDetailDialog";
 import { ComplementDadosForm } from "./ComplementDadosForm";
 import { ShareCertidoesDialog } from "./ShareCertidoesDialog";
+import { DiligentedPersonsSection } from "./DiligentedPersonsSection";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -308,11 +309,11 @@ export function CertidoesTab({
     };
   }, [visibleJobs]);
 
-  const handleExtract = async () => {
+  const handleExtract = async (jobs?: JobSelection[]) => {
     if (extracting) return;
     setExtracting(true);
     try {
-      const result = await extract();
+      const result = await extract(jobs);
       if (result) {
         toast.success(`Iniciando ${result.jobCount} certidões…`);
       }
@@ -394,6 +395,9 @@ export function CertidoesTab({
 
   return (
     <div className="space-y-4">
+      {/* F3: diligenciados section at the top */}
+      <DiligentedPersonsSection dealId={dealId} onChange={() => refresh()} />
+
       <div className="flex flex-wrap items-center gap-2">
         <Button onClick={() => setDialogOpen(true)} disabled={extracting}>
           <Sparkles className="h-4 w-4 mr-1" />

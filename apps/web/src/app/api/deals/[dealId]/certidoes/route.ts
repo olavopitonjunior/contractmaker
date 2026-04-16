@@ -67,12 +67,32 @@ export async function GET(
 
 const extractSchema = z.object({
   batchId: z.string().min(8),
+  // F2: explicit job selection. If provided, only these jobs are extracted.
+  // If omitted, the full default plan runs (backwards-compat with R5 callers).
+  jobs: z
+    .array(
+      z.object({
+        endpoint: z.string(),
+        targetKind: z.enum(["vendedor", "comprador", "imovel", "diligenciado"]),
+        targetIndex: z.number().int().min(0),
+      })
+    )
+    .optional(),
+  // Legacy field, no longer used — kept for backwards-compat parse safety
   jobEndpoints: z.array(z.string()).optional(),
 });
 
 /**
  * POST /api/deals/:dealId/certidoes
- * Body: { batchId, jobEndpoints? } — creates jobs from the planner and fires the executor.
+ * Body: { batchId, jobs? } — creates jobs from the planner and fires the executor.
+ *
+ * Two modes:
+ *   1. Default plan (no `jobs` field): runs planCertidoesForDeal and extracts
+ *      everything it suggests. R5-compatible behavior.
+ *   2. Explicit selection (F2): runs planner with `expandAll=true` to generate
+ *      the full possible job list (including other UFs), then filters by the
+ *      user's selection. Allows granular opt-in/out + "extras" picker support.
+ *
  * The client generates batchId upfront and starts polling GET immediately.
  */
 export async function POST(
@@ -90,7 +110,7 @@ export async function POST(
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.message }, { status: 400 });
   }
-  const { batchId } = parsed.data;
+  const { batchId, jobs: selectedJobs } = parsed.data;
 
   // Idempotency guard: reject if there's already an active batch for this deal
   // in the last 30 minutes. Prevents double-click double-charge.
@@ -128,9 +148,71 @@ export async function POST(
   const dealData =
     (deal.form?.dataJson as Record<string, unknown> | null) ||
     (deal.dataJson as Record<string, unknown> | null);
-  const plan = planCertidoesForDeal(dealData as any);
 
-  if (plan.jobs.length === 0) {
+  // F3: load diligenciados so the planner can include them as targets
+  const diligenciadosRaw = await prisma.diligentedPerson.findMany({
+    where: { dealId: params.dealId },
+    orderBy: { createdAt: "asc" },
+  });
+  const diligenciados = diligenciadosRaw.map((d) => ({
+    id: d.id,
+    tipoPessoa: d.tipoPessoa as "fisica" | "juridica",
+    nome: d.nome,
+    cpf: d.cpf,
+    cnpj: d.cnpj,
+    dataNascimento: d.dataNascimento,
+    uf: d.uf,
+    cidade: d.cidade,
+  }));
+
+  // F2: if explicit selection provided, run planner with expandAll so we can
+  // match any (endpoint, target) combo the user asked for — including
+  // cross-UF picks. Otherwise use the default auto-plan.
+  const plan = planCertidoesForDeal(
+    dealData as any,
+    undefined,
+    diligenciados,
+    selectedJobs ? { expandAll: true } : undefined
+  );
+
+  // F2: filter to user's selection (if provided). Build a lookup key for
+  // (endpoint, kind, index) triples and intersect.
+  let effectiveJobs = plan.jobs;
+  let effectiveSkipped = plan.skipped;
+  if (selectedJobs) {
+    const requestedKeys = new Set(
+      selectedJobs.map((s) => `${s.endpoint}|${s.targetKind}|${s.targetIndex}`)
+    );
+    effectiveJobs = plan.jobs.filter((j) =>
+      requestedKeys.has(`${j.endpoint}|${j.targetKind}|${j.targetIndex}`)
+    );
+    effectiveSkipped = plan.skipped.filter((s) =>
+      requestedKeys.has(`${s.endpoint}|${s.targetKind}|${s.targetIndex}`)
+    );
+
+    // Detect selections that matched neither a job nor a skipped — the user
+    // asked for something the planner cannot build (e.g. wrong target kind
+    // for the endpoint, or a PJ-only endpoint applied to a PF). Return 400
+    // with the specific unmatched tuples so the UI can surface per-row errors.
+    const matchedKeys = new Set([
+      ...effectiveJobs.map((j) => `${j.endpoint}|${j.targetKind}|${j.targetIndex}`),
+      ...effectiveSkipped.map((s) => `${s.endpoint}|${s.targetKind}|${s.targetIndex}`),
+    ]);
+    const unmatched = selectedJobs.filter(
+      (s) => !matchedKeys.has(`${s.endpoint}|${s.targetKind}|${s.targetIndex}`)
+    );
+    if (unmatched.length > 0) {
+      return NextResponse.json(
+        {
+          error: `${unmatched.length} seleção(ões) não podem ser extraídas (endpoint ou target inválido).`,
+          unmatched,
+        },
+        { status: 400 }
+      );
+    }
+  }
+
+  if (effectiveJobs.length === 0 && effectiveSkipped.length === 0) {
     return NextResponse.json(
       {
         error: "Nenhuma certidao disponivel para extrair",
@@ -140,13 +222,14 @@ export async function POST(
     );
   }
 
-  // Check if budget would be exceeded
-  if (spend.spentCents + plan.totalCostCents > spend.budgetCents) {
+  // Check if budget would be exceeded (sum only the non-skipped jobs)
+  const totalCostCents = effectiveJobs.reduce((acc, j) => acc + j.costCents, 0);
+  if (spend.spentCents + totalCostCents > spend.budgetCents) {
     return NextResponse.json(
       {
         error: "Este lote estouraria o budget mensal de certidoes",
         spend,
-        plan,
+        plan: { ...plan, jobs: effectiveJobs, skipped: effectiveSkipped, totalCostCents },
       },
       { status: 402 }
     );
@@ -155,7 +238,7 @@ export async function POST(
   // Create all job rows atomically, including persisted skipped jobs so the
   // UI can render them with a "Complementar dados" action (FIX-O).
   await prisma.$transaction([
-    ...plan.jobs.map((p) => {
+    ...effectiveJobs.map((p) => {
       const info = endpointInfo(p.endpoint);
       return prisma.certidaoJob.create({
         data: {
@@ -172,7 +255,7 @@ export async function POST(
         },
       });
     }),
-    ...plan.skipped.map((s) =>
+    ...effectiveSkipped.map((s) =>
       prisma.certidaoJob.create({
         data: {
           dealId: params.dealId,
@@ -207,9 +290,9 @@ export async function POST(
   return NextResponse.json(
     {
       batchId,
-      jobCount: plan.jobs.length,
-      skipped: plan.skipped,
-      totalCostCents: plan.totalCostCents,
+      jobCount: effectiveJobs.length,
+      skipped: effectiveSkipped,
+      totalCostCents,
     },
     { status: 202 }
   );

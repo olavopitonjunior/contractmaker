@@ -101,31 +101,40 @@ export function useCertidoesBatch(dealId: string) {
     return () => stopPolling();
   }, [fetchJobs, stopPolling]);
 
-  const extract = useCallback(async () => {
-    const batchId = crypto.randomUUID();
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/deals/${dealId}/certidoes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ batchId }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        setError(data.error || "Falha ao iniciar extração");
+  const extract = useCallback(
+    async (
+      jobs?: Array<{
+        endpoint: string;
+        targetKind: "vendedor" | "comprador" | "imovel" | "diligenciado";
+        targetIndex: number;
+      }>
+    ) => {
+      const batchId = crypto.randomUUID();
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/deals/${dealId}/certidoes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(jobs ? { batchId, jobs } : { batchId }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setError(data.error || "Falha ao iniciar extração");
+          setLoading(false);
+          return null;
+        }
+        await fetchJobs(batchId);
+        startPolling(batchId);
+        return data;
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "erro");
         setLoading(false);
         return null;
       }
-      await fetchJobs(batchId);
-      startPolling(batchId);
-      return data;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "erro");
-      setLoading(false);
-      return null;
-    }
-  }, [dealId, fetchJobs, startPolling]);
+    },
+    [dealId, fetchJobs, startPolling]
+  );
 
   const retry = useCallback(
     async (jobId: string): Promise<{ ok: boolean; error?: string }> => {
