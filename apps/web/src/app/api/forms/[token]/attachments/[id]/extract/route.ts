@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { downloadBufferFromUrl } from "@/lib/storage/s3";
 import { classifyAndExtract } from "@/lib/ai/ocr";
+import { extractFirstPages } from "@/lib/ai/pdf-utils";
 
 async function fetchBuffer(url: string): Promise<Buffer> {
   if (url.startsWith("https://") || url.startsWith("http://")) {
@@ -40,18 +42,23 @@ async function sleep(ms: number): Promise<void> {
 
 /**
  * Calls classifyAndExtract with exponential backoff on rate-limit errors.
- * Waits 5s, 10s, 20s between attempts. Non-rate-limit errors fail fast.
+ * Waits 5s, 10s, 20s between attempts. Non-rate-limit errors fail fast but
+ * benefit from classifyAndExtract's built-in fallback model path.
  * Total worst case: ~35s of backoff on top of the actual Gemini latency.
  */
 async function classifyWithRetry(
   base64: string,
   mimeType: string,
+  buffer: Buffer,
   ctx: { orgId: string }
 ): Promise<Awaited<ReturnType<typeof classifyAndExtract>>> {
   let lastErr: unknown = null;
   for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
     try {
-      return await classifyAndExtract(base64, mimeType, ctx);
+      return await classifyAndExtract(base64, mimeType, ctx, {
+        buffer,
+        // fallback to flash-lite is automatic on non-rate-limit errors
+      });
     } catch (err) {
       lastErr = err;
       const msg = err instanceof Error ? err.message : String(err);
@@ -107,6 +114,37 @@ export async function POST(
     });
   }
 
+  // Content hash cache: if another attachment in the same org already has
+  // OCR results for the same file content (same SHA-256), reuse those results
+  // instead of calling Gemini. Cross-form cache — scoped by orgId for privacy.
+  if (attachment.contentHash) {
+    const cached = await prisma.formAttachment.findFirst({
+      where: {
+        id: { not: attachment.id },
+        contentHash: attachment.contentHash,
+        extractedData: { not: Prisma.JsonNull },
+        form: { orgId: form.orgId },
+      },
+      select: { category: true, extractedData: true },
+      orderBy: { createdAt: "desc" },
+    });
+    if (cached && cached.extractedData) {
+      await prisma.formAttachment.update({
+        where: { id: attachment.id },
+        data: {
+          category: cached.category,
+          extractedData: cached.extractedData as object,
+        },
+      });
+      return NextResponse.json({
+        cached: true,
+        cacheSource: "content_hash",
+        category: cached.category,
+        extractedData: cached.extractedData,
+      });
+    }
+  }
+
   if (!process.env.GEMINI_API_KEY) {
     return NextResponse.json(
       { error: "OCR indisponivel: GEMINI_API_KEY nao configurada" },
@@ -122,9 +160,23 @@ export async function POST(
   }
 
   try {
-    const buffer = await fetchBuffer(attachment.url);
+    let buffer = await fetchBuffer(attachment.url);
+
+    // PDF first-page trim: send only first 2 pages to Gemini to save tokens
+    // on multi-page documents (procurações, escrituras). Transparent fallback
+    // if pdf-lib fails.
+    if (attachment.mime === "application/pdf") {
+      const trimmed = await extractFirstPages(buffer, 2);
+      if (trimmed.trimmed) {
+        console.log(
+          `[form extract] trimmed PDF ${attachment.id}: ${trimmed.totalPages} → ${trimmed.pagesKept} páginas`
+        );
+        buffer = trimmed.buffer;
+      }
+    }
+
     const base64 = buffer.toString("base64");
-    const result = await classifyWithRetry(base64, attachment.mime, {
+    const result = await classifyWithRetry(base64, attachment.mime, buffer, {
       orgId: form.orgId,
     });
 

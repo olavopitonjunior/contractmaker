@@ -488,9 +488,12 @@ model FormAttachment {
   url           String
   category      String?
   extractedData Json?
+  contentHash   String?
   createdAt     DateTime @default(now())
 
   form SalesForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+
+  @@index([contentHash])
 }
 
 // ============================================

@@ -207,27 +207,325 @@ const SUPPORTED_OCR_MIMES = new Set([
   "application/pdf",
 ]);
 
+/**
+ * Pre-validation — catch obvious bad inputs before spending a Gemini call.
+ * Returns null if the file looks OK, or a human-friendly error message if
+ * it should be rejected.
+ */
+export function prevalidateForOcr(
+  buffer: Buffer,
+  mimeType: string
+): string | null {
+  if (buffer.length === 0) {
+    return "Arquivo vazio. Faça o upload novamente.";
+  }
+  if (buffer.length < 100) {
+    return "Arquivo corrompido ou muito pequeno para OCR.";
+  }
+  if (mimeType === "application/pdf") {
+    // PDF files must start with the `%PDF-1.` header (bytes 0x25 0x50 0x44 0x46 0x2D 0x31 0x2E)
+    const header = buffer.subarray(0, 7).toString("ascii");
+    if (!header.startsWith("%PDF-1.")) {
+      return "PDF inválido ou corrompido — header ausente.";
+    }
+  }
+  if (mimeType.startsWith("image/")) {
+    // Sanity on size — server-side we can't check dimensions without decoding,
+    // but we can reject obviously tiny files which are almost always bad scans.
+    if (buffer.length < 2_000) {
+      return "Imagem muito pequena para OCR. Use um scan de pelo menos 300 DPI.";
+    }
+  }
+  return null;
+}
+
+/**
+ * Extracts a human-readable heuristic to decide if a rate-limit/5xx error
+ * should trigger a fallback model retry. Rate limits are handled by the
+ * server-side classifyWithRetry; this only detects non-rate-limit errors
+ * that benefit from a different model.
+ */
+function shouldTryFallbackModel(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const msg = err.message.toLowerCase();
+  // Don't fallback on rate limits (those need backoff, not a different model)
+  if (
+    msg.includes("quota") ||
+    msg.includes("rate limit") ||
+    msg.includes("rate_limit") ||
+    msg.includes("429") ||
+    msg.includes("resource_exhausted")
+  ) {
+    return false;
+  }
+  // Fallback on 500s, safety blocks, "content blocked", parse failures
+  return (
+    msg.includes("500") ||
+    msg.includes("internal") ||
+    msg.includes("safety") ||
+    msg.includes("blocked") ||
+    msg.includes("invalid image") ||
+    msg.includes("decode")
+  );
+}
+
+async function callGemini(
+  model: string,
+  base64Data: string,
+  mimeType: string
+): Promise<{ text: string; usage: { promptTokenCount?: number; candidatesTokenCount?: number } | undefined }> {
+  const ai = getGenAI();
+  const response = await ai.models.generateContent({
+    model,
+    contents: [
+      { text: COMBINED_PROMPT },
+      { inlineData: { mimeType, data: base64Data } },
+    ],
+  });
+  return {
+    text: response.text ?? "{}",
+    usage: (response as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }).usageMetadata,
+  };
+}
+
+function parseGeminiJson(text: string): {
+  tipo: string;
+  fields: Record<string, unknown>;
+  confidence: number;
+} {
+  let tipo = "outro";
+  let fields: Record<string, unknown> = {};
+  let confidence = 0;
+  try {
+    const jsonMatch = text.match(/\{[\s\S]*\}/);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[0]);
+      const rawTipo = typeof parsed.tipo === "string" ? parsed.tipo.trim().toLowerCase() : "outro";
+      tipo = VALID_CATEGORIES.includes(rawTipo) ? rawTipo : "outro";
+      fields = parsed.campos && typeof parsed.campos === "object" ? parsed.campos : {};
+      if (typeof parsed.confidence === "number") {
+        confidence = Math.max(0, Math.min(1, parsed.confidence));
+      } else {
+        const totalFields = Object.keys(fields).length;
+        const filled = Object.values(fields).filter((v) => v !== null && v !== "").length;
+        confidence = totalFields > 0 ? filled / totalFields : 0;
+      }
+    }
+  } catch {
+    fields = { raw_text: text };
+  }
+  return { tipo, fields, confidence };
+}
+
+export interface ClassifyOptions {
+  /** If the primary model fails with a non-rate-limit error, try this one */
+  fallbackModel?: string;
+  /** Skip pre-validation (useful when caller already validated) */
+  skipPrevalidation?: boolean;
+  /** Raw buffer — required if skipPrevalidation is false */
+  buffer?: Buffer;
+}
+
 export async function classifyAndExtract(
   base64Data: string,
   mimeType: string,
-  ctx?: OcrUsageContext
+  ctx?: OcrUsageContext,
+  options: ClassifyOptions = {}
 ): Promise<ExtractionResult> {
   if (!SUPPORTED_OCR_MIMES.has(mimeType)) {
     throw new Error(`Mime type nao suportado para OCR: ${mimeType}`);
   }
 
+  // Pre-validation — reject obviously bad inputs before spending quota
+  if (!options.skipPrevalidation && options.buffer) {
+    const prevalidationError = prevalidateForOcr(options.buffer, mimeType);
+    if (prevalidationError) {
+      throw new Error(prevalidationError);
+    }
+  }
+
+  const primaryModel = process.env.GEMINI_OCR_MODEL || "gemini-2.5-flash";
+  const fallbackModel = options.fallbackModel ?? "gemini-2.5-flash-lite";
+  const t0 = Date.now();
+
+  let text: string;
+  let usage: { promptTokenCount?: number; candidatesTokenCount?: number } | undefined;
+  let modelUsed = primaryModel;
+
+  try {
+    const result = await callGemini(primaryModel, base64Data, mimeType);
+    text = result.text;
+    usage = result.usage;
+  } catch (primaryErr) {
+    // Fallback: try a different model on 5xx / safety / decode errors
+    if (fallbackModel && fallbackModel !== primaryModel && shouldTryFallbackModel(primaryErr)) {
+      console.warn(
+        `[ocr] primary model ${primaryModel} failed (${primaryErr instanceof Error ? primaryErr.message.slice(0, 80) : "?"}), trying fallback ${fallbackModel}`
+      );
+      try {
+        const result = await callGemini(fallbackModel, base64Data, mimeType);
+        text = result.text;
+        usage = result.usage;
+        modelUsed = fallbackModel;
+      } catch (fallbackErr) {
+        // Both failed — report the original error
+        if (ctx) {
+          recordAIUsage({
+            orgId: ctx.orgId,
+            userId: ctx.userId,
+            contractId: ctx.contractId,
+            provider: "gemini",
+            model: primaryModel,
+            operation: "ocr_form",
+            promptTokens: 0,
+            latencyMs: Date.now() - t0,
+            success: false,
+            errorMessage: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr),
+          });
+        }
+        throw primaryErr;
+      }
+    } else {
+      if (ctx) {
+        recordAIUsage({
+          orgId: ctx.orgId,
+          userId: ctx.userId,
+          contractId: ctx.contractId,
+          provider: "gemini",
+          model: primaryModel,
+          operation: "ocr_form",
+          promptTokens: 0,
+          latencyMs: Date.now() - t0,
+          success: false,
+          errorMessage: primaryErr instanceof Error ? primaryErr.message : String(primaryErr),
+        });
+      }
+      throw primaryErr;
+    }
+  }
+
+  if (ctx) {
+    recordAIUsage({
+      orgId: ctx.orgId,
+      userId: ctx.userId,
+      contractId: ctx.contractId,
+      provider: "gemini",
+      model: modelUsed,
+      operation: "ocr_form",
+      promptTokens: usage?.promptTokenCount ?? 0,
+      completionTokens: usage?.candidatesTokenCount ?? 0,
+      latencyMs: Date.now() - t0,
+      success: true,
+    });
+  }
+
+  const parsed = parseGeminiJson(text);
+
+  return {
+    documentType: parsed.tipo,
+    fields: parsed.fields as Record<string, string>,
+    confidence: parsed.confidence,
+    rawText: text,
+  };
+}
+
+/**
+ * Batch OCR — sends up to N documents in a single Gemini call and returns
+ * an array of results in the same order. Used by the /batch-extract endpoint
+ * to amortize per-request overhead and reduce RPM pressure.
+ *
+ * Strategy:
+ *   - Concatenates all files as separate inlineData parts
+ *   - Prompts the model to return a JSON array indexed by position
+ *   - On parse failure (or response size mismatch), the caller is expected
+ *     to fall back to individual calls via classifyAndExtract
+ *
+ * Cap: 4 docs per batch (token budget safety margin for 2.5 Flash's 1M context).
+ */
+export interface BatchItem {
+  base64Data: string;
+  mimeType: string;
+}
+
+export interface BatchResult {
+  index: number;
+  documentType: string;
+  fields: Record<string, string>;
+  confidence: number;
+  rawText: string;
+}
+
+const BATCH_PROMPT = `Voce e um especialista em documentos brasileiros. Analise os DOCUMENTOS abaixo (multiplos arquivos, na ordem em que foram enviados) e retorne APENAS um array JSON valido. Um objeto por documento, preservando a ordem:
+
+[
+  {"indice": 0, "tipo": "<categoria>", "campos": { ... }, "confidence": <0-1>},
+  {"indice": 1, "tipo": "<categoria>", "campos": { ... }, "confidence": <0-1>},
+  ...
+]
+
+Categorias validas: "rg", "cpf", "cnh", "matricula", "iptu", "escritura", "procuracao", "comprovante_residencia", "certidao_casamento", "outro".
+
+Use as mesmas regras e campos do prompt single-doc:
+- rg: nome_completo, rg_numero, orgao_expedidor, data_nascimento (YYYY-MM-DD), naturalidade, filiacao_mae, filiacao_pai
+- cpf: nome_completo, cpf_numero (11 digitos), data_nascimento, situacao_cadastral
+- cnh: nome_completo, cpf_numero, rg_numero, data_nascimento, naturalidade, filiacao_mae, filiacao_pai, categoria, data_emissao, data_validade, registro_cnh
+- matricula: matricula_numero, cartorio, endereco_completo, bairro, cidade, uf, cep, proprietario_nome, area_total, onus_existentes, descricao_imovel
+- iptu: inscricao_iptu, endereco, bairro, cidade, uf, valor_venal, ano_referencia, debitos_pendentes
+- escritura: vendedor_nome, comprador_nome, valor_transacao, data_lavratura, cartorio, endereco_imovel, matricula_referenciada
+- procuracao: outorgante_nome, outorgante_cpf, outorgado_nome, outorgado_cpf, poderes_resumo, data_lavratura, prazo_validade
+- comprovante_residencia: titular_nome, endereco_completo, bairro, cidade, uf, cep, emissor
+- certidao_casamento: conjuge1_nome, conjuge1_cpf, conjuge2_nome, conjuge2_cpf, data_casamento, regime_bens, cartorio, data_lavratura
+- outro: inclua todos os dados relevantes
+
+Regras:
+- Campos nao legiveis = null
+- CPF = 11 digitos sem pontuacao
+- Datas = ISO YYYY-MM-DD
+- O ARRAY DEVE TER EXATAMENTE O NUMERO DE OBJETOS QUE O NUMERO DE DOCUMENTOS ENVIADOS
+- NAO inclua explicacoes, apenas o JSON array.`;
+
+export async function classifyAndExtractBatch(
+  items: BatchItem[],
+  ctx?: OcrUsageContext
+): Promise<BatchResult[]> {
+  if (items.length === 0) return [];
+  if (items.length === 1) {
+    // Single-item "batch" falls back to the single-call path for simplicity
+    const r = await classifyAndExtract(items[0].base64Data, items[0].mimeType, ctx);
+    return [
+      {
+        index: 0,
+        documentType: r.documentType,
+        fields: r.fields,
+        confidence: r.confidence,
+        rawText: r.rawText ?? "",
+      },
+    ];
+  }
+  if (items.length > 4) {
+    throw new Error(
+      `Batch máximo é 4 documentos por chamada (recebido ${items.length})`
+    );
+  }
+
   const model = process.env.GEMINI_OCR_MODEL || "gemini-2.5-flash";
   const ai = getGenAI();
   const t0 = Date.now();
+
+  // Build the contents array: prompt + each item as inlineData
+  const contents: Array<
+    | { text: string }
+    | { inlineData: { mimeType: string; data: string } }
+  > = [{ text: BATCH_PROMPT }];
+  for (const item of items) {
+    contents.push({
+      inlineData: { mimeType: item.mimeType, data: item.base64Data },
+    });
+  }
+
   let response;
   try {
-    response = await ai.models.generateContent({
-      model,
-      contents: [
-        { text: COMBINED_PROMPT },
-        { inlineData: { mimeType, data: base64Data } },
-      ],
-    });
+    response = await ai.models.generateContent({ model, contents });
   } catch (err) {
     if (ctx) {
       recordAIUsage({
@@ -262,37 +560,50 @@ export async function classifyAndExtract(
     });
   }
 
-  const text = response.text ?? "{}";
+  const text = response.text ?? "[]";
 
-  let tipo = "outro";
-  let fields: Record<string, unknown> = {};
-  let confidence = 0;
-
-  try {
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0]);
-      const rawTipo = typeof parsed.tipo === "string" ? parsed.tipo.trim().toLowerCase() : "outro";
-      tipo = VALID_CATEGORIES.includes(rawTipo) ? rawTipo : "outro";
-      fields = parsed.campos && typeof parsed.campos === "object" ? parsed.campos : {};
-      if (typeof parsed.confidence === "number") {
-        confidence = Math.max(0, Math.min(1, parsed.confidence));
-      } else {
-        const totalFields = Object.keys(fields).length;
-        const filled = Object.values(fields).filter((v) => v !== null && v !== "").length;
-        confidence = totalFields > 0 ? filled / totalFields : 0;
-      }
-    }
-  } catch {
-    fields = { raw_text: text };
+  // Extract the JSON array from the response (may be wrapped in text/markdown)
+  const arrayMatch = text.match(/\[[\s\S]*\]/);
+  if (!arrayMatch) {
+    throw new Error("Batch OCR: resposta não contém array JSON");
   }
 
-  return {
-    documentType: tipo,
-    fields: fields as Record<string, string>,
-    confidence,
-    rawText: text,
-  };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(arrayMatch[0]);
+  } catch (err) {
+    throw new Error(
+      `Batch OCR: falha ao parsear JSON array (${err instanceof Error ? err.message : "unknown"})`
+    );
+  }
+
+  if (!Array.isArray(parsed) || parsed.length !== items.length) {
+    throw new Error(
+      `Batch OCR: array retornado tem ${Array.isArray(parsed) ? parsed.length : "não-array"} items, esperado ${items.length}`
+    );
+  }
+
+  return parsed.map((obj, i) => {
+    const o = obj as Record<string, unknown>;
+    const rawTipo = typeof o.tipo === "string" ? o.tipo.trim().toLowerCase() : "outro";
+    const tipo = VALID_CATEGORIES.includes(rawTipo) ? rawTipo : "outro";
+    const fields = (o.campos && typeof o.campos === "object" ? o.campos : {}) as Record<string, unknown>;
+    let confidence = 0;
+    if (typeof o.confidence === "number") {
+      confidence = Math.max(0, Math.min(1, o.confidence));
+    } else {
+      const totalFields = Object.keys(fields).length;
+      const filled = Object.values(fields).filter((v) => v !== null && v !== "").length;
+      confidence = totalFields > 0 ? filled / totalFields : 0;
+    }
+    return {
+      index: i,
+      documentType: tipo,
+      fields: fields as Record<string, string>,
+      confidence,
+      rawText: JSON.stringify(obj),
+    };
+  });
 }
 
 export async function extractDocumentData(

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "crypto";
 import { put, del } from "@vercel/blob";
 import { prisma } from "@/lib/db/prisma";
 
@@ -88,7 +89,12 @@ export async function POST(
   const pathname = `form-attachments/${form.id}/${Date.now()}-${safeName}`;
 
   try {
-    const blob = await put(pathname, file, {
+    // Compute SHA-256 before upload so the extract route can skip Gemini when
+    // the same content has already been OCRed in this org (see F5.3 cache).
+    const buffer = Buffer.from(await file.arrayBuffer());
+    const contentHash = createHash("sha256").update(buffer).digest("hex");
+
+    const blob = await put(pathname, buffer, {
       access: "public",
       contentType: file.type,
       token: blobToken,
@@ -102,6 +108,7 @@ export async function POST(
         url: blob.url,
         category: null,
         extractedData: undefined,
+        contentHash,
       },
     });
 
