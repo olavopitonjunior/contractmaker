@@ -563,12 +563,25 @@ model FormAttachment {
   // concurrent POSTs for the same attachment don't both call Gemini. Cleared
   // back to null on failure so the user can retry.
   extractingStartedAt DateTime?
+  // Phase F.I-α — OCR status machine para fila assíncrona. Valores:
+  //   "queued"     — arquivo subiu, aguardando worker pegar
+  //   "extracting" — worker chamando Gemini
+  //   "ready"      — extractedData populado, success
+  //   "failed"     — OCR falhou permanentemente (ver extractError)
+  // Default "queued" permite que client retorne 202 ack instantâneo e
+  // worker (fire-and-forget + cron backup) processe em background. Tab
+  // pode fechar — estado vive no DB.
+  status              String    @default("queued")
+  // Mensagem humanizada de erro quando status="failed" (já passou por
+  // humanizeOcrError). Exposta no GET /attachments para QA/debug.
+  extractError        String?
   createdAt           DateTime  @default(now())
 
   form SalesForm @relation(fields: [formId], references: [id], onDelete: Cascade)
 
   @@index([contentHash])
   @@index([extractingStartedAt])
+  @@index([status, createdAt])
 }
 
 // ============================================

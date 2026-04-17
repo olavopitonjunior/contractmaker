@@ -3,6 +3,7 @@ import { createHash } from "crypto";
 import { Prisma } from "@prisma/client";
 import { put, del } from "@vercel/blob";
 import { prisma } from "@/lib/db/prisma";
+import { processOcrQueue } from "@/lib/ai/ocr-worker";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -40,6 +41,11 @@ export async function GET(
       mime: a.mime,
       category: a.category,
       extractedData: a.extractedData,
+      // Phase F.I-α/F.IV — expor estado OCR no GET (antes o cliente scrapava DOM)
+      status: a.status,
+      extractError: a.extractError,
+      extractingStartedAt: a.extractingStartedAt,
+      contentHash: a.contentHash,
       fileUrl: `/api/forms/${params.token}/attachments/${a.id}/file`,
       createdAt: a.createdAt,
     })),
@@ -117,6 +123,11 @@ export async function POST(
       token: blobToken,
     });
 
+    // Phase F.I-α — status inicial:
+    //   "ready" se content-hash bateu (cache pre-warm resolveu imediato)
+    //   "queued" caso contrário — worker vai pegar
+    const initialStatus = cached ? "ready" : "queued";
+
     const attachment = await prisma.formAttachment.create({
       data: {
         formId: form.id,
@@ -126,21 +137,33 @@ export async function POST(
         category: cached?.category ?? null,
         extractedData: (cached?.extractedData as Prisma.InputJsonValue) ?? undefined,
         contentHash,
+        status: initialStatus,
       },
     });
 
-    return NextResponse.json({
-      id: attachment.id,
-      filename: attachment.filename,
-      mime: attachment.mime,
-      fileUrl: `/api/forms/${params.token}/attachments/${attachment.id}/file`,
-      createdAt: attachment.createdAt,
-      // Signal to client that OCR can be skipped — extract call will still
-      // return the cached result but this lets the UI show "ready" sooner.
-      cached: cached !== null,
-      category: cached?.category ?? null,
-      extractedData: cached?.extractedData ?? null,
-    });
+    // Phase F.I-α — dispara worker fire-and-forget se não foi cache hit.
+    // Worker processa em background, client polla GET /attachments.
+    // Se a função serverless morrer antes de terminar, o cron pega.
+    if (!cached) {
+      void processOcrQueue({ formId: form.id }).catch((err) => {
+        console.error("[attachments POST] worker dispatch failed:", err);
+      });
+    }
+
+    return NextResponse.json(
+      {
+        id: attachment.id,
+        filename: attachment.filename,
+        mime: attachment.mime,
+        status: attachment.status,
+        fileUrl: `/api/forms/${params.token}/attachments/${attachment.id}/file`,
+        createdAt: attachment.createdAt,
+        cached: cached !== null,
+        category: cached?.category ?? null,
+        extractedData: cached?.extractedData ?? null,
+      },
+      { status: 202 }
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error("[form attachment upload]", msg);

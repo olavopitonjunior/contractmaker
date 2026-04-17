@@ -238,20 +238,28 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
           const extracted = a.extractedData || {};
           const fields = extracted.fields || null;
           const assignment = suggestAssignment(a.category, fields || {}, snapshot);
-          const hasExtraction = !!a.extractedData && !!extracted.fields;
+          // Phase F.I-α — mapeia o novo status enum do server para o status
+          // do card. Server retorna: "queued" | "extracting" | "ready" | "failed"
+          let cardStatus: DocumentCardData["status"];
+          if (a.status === "ready") cardStatus = "ready";
+          else if (a.status === "failed") cardStatus = "failed";
+          else if (a.status === "extracting" || a.status === "queued") cardStatus = "extracting";
+          else if (fields) cardStatus = "ready";
+          else cardStatus = "failed";
           return {
             id: a.id,
             filename: a.filename,
             mime: a.mime,
             fileUrl: a.fileUrl,
-            status: hasExtraction ? "ready" : "failed",
+            status: cardStatus,
             category: a.category,
             fields,
             confidence: typeof extracted.confidence === "number" ? extracted.confidence : null,
             assignment,
-            error: hasExtraction
-              ? null
-              : "Extração pendente — clique em Tentar novamente ou remova o documento",
+            error:
+              cardStatus === "failed"
+                ? a.extractError ?? "Extração falhou — remova ou tente novamente"
+                : null,
           };
         });
         setDocs(restored);
@@ -264,6 +272,58 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
     };
 
   }, [token]);
+
+  // Phase F.I-α — polling do status assíncrono. Enquanto houver cards em
+  // "extracting" (que cobre queued + extracting do server), buscar /attachments
+  // a cada 3s e atualizar status + fields. Para ao não ter mais nada pendente.
+  useEffect(() => {
+    const hasPending = docs.some((d) => d.status === "extracting" || d.status === "uploading");
+    if (!hasPending) return;
+    let cancelled = false;
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/forms/${token}/attachments`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const byId = new Map<string, any>(
+          (data.attachments || []).map((a: any) => [a.id, a])
+        );
+        setDocs((prev) =>
+          prev.map((d) => {
+            const a = byId.get(d.id);
+            if (!a) return d;
+            const extracted = a.extractedData || {};
+            const fields = extracted.fields || null;
+            if (a.status === "ready" && fields) {
+              return {
+                ...d,
+                status: "ready",
+                category: a.category,
+                fields,
+                confidence:
+                  typeof extracted.confidence === "number" ? extracted.confidence : null,
+                error: null,
+              };
+            }
+            if (a.status === "failed") {
+              return {
+                ...d,
+                status: "failed",
+                error: a.extractError ?? "Extração falhou",
+              };
+            }
+            return d; // ainda queued/extracting — mantém spinner
+          })
+        );
+      } catch {
+        /* retry no próximo tick */
+      }
+    }, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [docs, token]);
 
   const updateDoc = useCallback((id: string, patch: Partial<DocumentCardData>) => {
     setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));

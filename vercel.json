@@ -8,6 +8,10 @@
     {
       "path": "/api/cron/certidoes/poll-portal",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/ocr-queue",
+      "schedule": "*/1 * * * *"
     }
   ]
 }

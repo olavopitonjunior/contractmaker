@@ -29,6 +29,7 @@ Thumbs.db
 # storage
 .storage/
 public/exports/
+apps/web/public/exports/
 
 # IDE
 .vscode/
