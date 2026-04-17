@@ -52,6 +52,60 @@ function stateDebtEndpointForUf(partyUf: string): string {
   return "sefaz/certidao-debitos";
 }
 
+/**
+ * Phase F.II-γ — UF → TRF individual (cível + criminal). Cobre 1ª e 2ª
+ * instâncias da Justiça Federal regional. Usado em adição à `trf/cert-unificada`
+ * (que só cobre cível 1ª instância dos 6 TRFs).
+ */
+const TRF_UF_MAP: Partial<Record<string, string>> = {
+  AC: "tribunal/trf1/certidao",
+  AM: "tribunal/trf1/certidao",
+  AP: "tribunal/trf1/certidao",
+  BA: "tribunal/trf1/certidao",
+  DF: "tribunal/trf1/certidao",
+  GO: "tribunal/trf1/certidao",
+  MA: "tribunal/trf1/certidao",
+  MT: "tribunal/trf1/certidao",
+  PA: "tribunal/trf1/certidao",
+  PI: "tribunal/trf1/certidao",
+  RO: "tribunal/trf1/certidao",
+  RR: "tribunal/trf1/certidao",
+  TO: "tribunal/trf1/certidao",
+  RJ: "tribunal/trf2/certidao",
+  ES: "tribunal/trf2/certidao",
+  SP: "tribunal/trf3/certidao",
+  MS: "tribunal/trf3/certidao",
+  RS: "tribunal/trf4/certidao",
+  SC: "tribunal/trf4/certidao",
+  PR: "tribunal/trf4/certidao",
+  AL: "tribunal/trf5/certidao",
+  CE: "tribunal/trf5/certidao",
+  PB: "tribunal/trf5/certidao",
+  PE: "tribunal/trf5/certidao",
+  RN: "tribunal/trf5/certidao",
+  SE: "tribunal/trf5/certidao",
+  MG: "tribunal/trf6/certidao",
+};
+
+/**
+ * Phase F.II-γ — múltiplos `tipo_certidao` do TJSP e TJRJ que cobrem os
+ * distribuidores exigidos em transação imobiliária (cível, família, falência,
+ * execução fiscal). Cada um é uma chamada separada.
+ */
+const TJSP_TIPOS: Array<{ tipo_certidao: string; label: string }> = [
+  { tipo_certidao: "civel", label: "Cível" },
+  { tipo_certidao: "familia-sucessoes", label: "Família e Sucessões" },
+  { tipo_certidao: "falencia", label: "Falência / Concordata / Rec. Judicial" },
+  { tipo_certidao: "execucao-fiscal", label: "Execução Fiscal" },
+];
+
+const TJRJ_TIPOS: Array<{ tipo_certidao: string; label: string }> = [
+  { tipo_certidao: "civel", label: "Cível" },
+  { tipo_certidao: "familia", label: "Família e Sucessões" },
+  { tipo_certidao: "falencia", label: "Falência / Concordata / Rec. Judicial" },
+  { tipo_certidao: "execucao-fiscal", label: "Execução Fiscal" },
+];
+
 // ---- deal shape helpers (mirror of DadosContrato) -----------------
 
 interface Parte {
@@ -158,6 +212,13 @@ function diligenciadoToParte(d: DiligentedPersonInput): Parte {
  */
 export interface PlannerOptions {
   expandAll?: boolean;
+  /**
+   * Phase F.II-γ — resultado do pre-flight GOV.BR (checkGovBrAuth).
+   * Se `true`, endpoints com `requiresGovBrAuth` disparam normalmente.
+   * Se `false` ou `undefined`, esses endpoints viram SkippedJob com
+   * razão clara para o usuário renovar auth em Settings.
+   */
+  govBrActive?: boolean;
 }
 
 export function planCertidoesForDeal(
@@ -171,6 +232,7 @@ export function planCertidoesForDeal(
   const skipped: SkippedJob[] = [];
   const email = dealEmail || DEFAULT_EMAIL;
   const expandAll = options?.expandAll === true;
+  const govBrActive = options?.govBrActive === true;
 
   const pessoas: Array<{ kind: TargetKind; index: number; parte: Parte }> = [];
   (data.vendedores ?? []).forEach((p, i) =>
@@ -254,6 +316,25 @@ export function planCertidoesForDeal(
         jobs.push(
           buildJob(ep, kind, index, label, {
             tipo: 1,
+            email,
+            ...(isPJ ? { cnpj } : { cpf }),
+          })
+        );
+      }
+    }
+
+    // ---- TRF Individual (Phase F.II-γ) — cível + criminal por UF ----
+    // A unificada só cobre cível 1ª instância dos 6 TRFs. O endpoint
+    // individual cobre cível + criminal (e potencialmente 2ª instância).
+    if (partyUf && TRF_UF_MAP[partyUf]) {
+      const ep = TRF_UF_MAP[partyUf]!;
+      if (isPJ && !cnpj) {
+        skipped.push(buildSkip(ep, kind, index, label, "cnpj", "CNPJ invalido"));
+      } else if (!isPJ && !cpf) {
+        skipped.push(buildSkip(ep, kind, index, label, "cpf", "CPF invalido"));
+      } else {
+        jobs.push(
+          buildJob(ep, kind, index, label, {
             email,
             ...(isPJ ? { cnpj } : { cpf }),
           })
@@ -358,7 +439,7 @@ export function planCertidoesForDeal(
 
     // ---- CENPROT SP (Phase F.II-α) — remapeado de imóvel para pessoa ----
     // Consulta por CPF/CNPJ da própria parte. Só dispara quando UF=SP (única
-    // cobertura Infosimples sem GOV.BR). Nacional fica para F.II-γ.
+    // cobertura Infosimples sem GOV.BR).
     const cenprotShould = expandAll || partyUf === "SP";
     if (cenprotShould && (cpf || cnpj)) {
       jobs.push(
@@ -370,6 +451,31 @@ export function planCertidoesForDeal(
           cnpj ? { cnpj } : { cpf: cpf! }
         )
       );
+    }
+
+    // ---- CENPROT Nacional (Phase F.II-γ) — exige GOV.BR ativo ----
+    // Cobre todos os estados exceto detalhes SP (supre item A da lista oficial
+    // para partes fora de SP). Se auth GOV.BR da conta Infosimples não estiver
+    // ativa, registra SkippedJob com instrução clara ao admin.
+    const nacionalNeeded = expandAll || (partyUf && partyUf !== "SP");
+    if (nacionalNeeded && (cpf || cnpj)) {
+      const ep = "ieptb/protestos";
+      if (govBrActive) {
+        jobs.push(
+          buildJob(ep, kind, index, label, cnpj ? { cnpj } : { cpf: cpf! })
+        );
+      } else {
+        skipped.push(
+          buildSkip(
+            ep,
+            kind,
+            index,
+            label,
+            "govbr",
+            "CENPROT Nacional requer autenticação GOV.BR ativa na conta Infosimples. Configure em Settings → Certidões → GOV.BR."
+          )
+        );
+      }
     }
   }
 
@@ -398,15 +504,35 @@ export function planCertidoesForDeal(
           buildSkip(ep, kind, index, label, isPJ ? "cnpj" : "cpf", "documento invalido")
         );
       } else {
-        const base = {
-          email,
-          finalidade: DEFAULT_FINALIDADE,
-          instancia: 1,
-          ...(isPJ
-            ? { cnpj: cnpj!, razao_social: label, pais: "Brasil" }
-            : { cpf: cpf!, nome: label }),
-        };
-        jobs.push(buildJob(ep, kind, index, label, base));
+        // Phase F.II-γ — multi-tipo: uma chamada por tipo_certidao (cível,
+        // família, falência, execução fiscal) para cobrir os 4 distribuidores
+        // exigidos em transação imobiliária (Comunicado SPI nº 37 - 10 anos).
+        for (const t of TJSP_TIPOS) {
+          const base = {
+            email,
+            finalidade: DEFAULT_FINALIDADE,
+            instancia: 1,
+            tipo_certidao: t.tipo_certidao,
+            ...(isPJ
+              ? { cnpj: cnpj!, razao_social: label, pais: "Brasil" }
+              : { cpf: cpf!, nome: label }),
+          };
+          jobs.push(buildJob(ep, kind, index, `${label} - ${t.label}`, base));
+        }
+
+        // E-Proc SP 1ª e 2ª instâncias — Infosimples não emite. SkippedJob
+        // com link externo para portal oficial (Phase F.II-γ).
+        skipped.push({
+          ...buildSkip(
+            "tribunal/tjsp/eproc",
+            kind,
+            index,
+            label,
+            "cobertura",
+            "E-Proc SP (1ª e 2ª instâncias) sem cobertura Infosimples — extrair no portal oficial com login GOV.BR"
+          ),
+          externalLink: "https://certidoes.tjsp.jus.br",
+        });
       }
     }
     if (tjShouldRJ) {
@@ -416,17 +542,21 @@ export function planCertidoesForDeal(
           buildSkip(ep, kind, index, label, isPJ ? "cnpj" : "cpf", "documento invalido")
         );
       } else {
+        // Phase F.II-γ — multi-tipo TJRJ: cível, família, falência, execução fiscal
         const cidade = (parte.cidade || "").trim();
-        jobs.push(
-          buildJob(ep, kind, index, label, {
-            nome: label,
-            email,
-            tipo_certidao: "civel",
-            comarca: comarcaForCidade(cidade),
-            finalidade: DEFAULT_FINALIDADE,
-            ...(isPJ ? { cnpj: cnpj! } : { cpf: cpf! }),
-          })
-        );
+        const comarca = comarcaForCidade(cidade);
+        for (const t of TJRJ_TIPOS) {
+          jobs.push(
+            buildJob(ep, kind, index, `${label} - ${t.label}`, {
+              nome: label,
+              email,
+              tipo_certidao: t.tipo_certidao,
+              comarca,
+              finalidade: DEFAULT_FINALIDADE,
+              ...(isPJ ? { cnpj: cnpj! } : { cpf: cpf! }),
+            })
+          );
+        }
       }
     }
     if (tjShouldRS) {

@@ -5,6 +5,7 @@ import { planCertidoesForDeal } from "@/lib/certidoes/planner";
 import { runBatch, getMonthlySpend } from "@/lib/certidoes/executor";
 import { endpointInfo } from "@/lib/certidoes/endpoints";
 import { sanitizePayload } from "@/lib/certidoes/infosimples";
+import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -73,6 +74,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Phase F.II-γ — pre-flight GOV.BR
+  const govbr = await checkGovBrAuth();
+
   // Usa o planner existente como diligenciado — trata o target ad-hoc como
   // uma pessoa diligenciada, que o planner já sabe processar.
   const plan = planCertidoesForDeal(
@@ -89,7 +93,7 @@ export async function POST(req: NextRequest) {
         cidade: target.cidade,
       },
     ],
-    { expandAll: true }
+    { expandAll: true, govBrActive: govbr.active }
   );
 
   // Filtra pelos endpoints pedidos pelo usuário.

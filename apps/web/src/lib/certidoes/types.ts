@@ -73,6 +73,12 @@ export interface SkippedJob {
   missingField: string;
   /** Structured fields that the user must fill to unblock this job */
   missingFields: MissingField[];
+  /**
+   * Phase F.II-γ — link externo para portal oficial quando não há cobertura
+   * Infosimples (E-Proc SP 1ª/2ª, IPTU POA, etc). UI renderiza botão
+   * "Abrir portal oficial" que abre em nova aba.
+   */
+  externalLink?: string;
 }
 
 export interface ExtractionPlan {

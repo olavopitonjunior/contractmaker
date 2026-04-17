@@ -316,6 +316,14 @@ const EXTRACTORS: Record<string, Extractor> = {
   "caixa/regularidade": crfFgtsExtractor,
   "sefaz/certidao-debitos": sefazUnificadaExtractor,
   "pge-sp/cndt": sefazUnificadaExtractor,
+  // Phase F.II-γ — TRF individuais + CENPROT nacional
+  "tribunal/trf1/certidao": tjExtractor,
+  "tribunal/trf2/certidao": tjExtractor,
+  "tribunal/trf3/certidao": tjExtractor,
+  "tribunal/trf4/certidao": tjExtractor,
+  "tribunal/trf5/certidao": tjExtractor,
+  "tribunal/trf6/certidao": tjExtractor,
+  "ieptb/protestos": cenprotSpExtractor,  // mesma estrutura de resposta
 };
 
 export function normalize(

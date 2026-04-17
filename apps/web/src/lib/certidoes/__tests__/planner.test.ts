@@ -79,20 +79,29 @@ describe("planCertidoesForDeal — dados completos (PF SP + PF RJ + imovel SP)",
     expect(trt2).toHaveLength(0);
   });
 
-  it("vendedora SP recebe TJSP pedido-civel", () => {
+  it("vendedora SP recebe TJSP pedido-civel multi-tipo (4 chamadas Phase F.II-γ)", () => {
     const tjsp = plan.jobs.filter(
       (j) => j.targetKind === "vendedor" && j.endpoint === "tribunal/tjsp/pedido-civel"
     );
-    expect(tjsp).toHaveLength(1);
+    // Phase F.II-γ: 4 tipos (cível, família, falência, execução fiscal)
+    expect(tjsp).toHaveLength(4);
+    const tipos = new Set(tjsp.map((j) => j.requestPayload.tipo_certidao));
+    expect(tipos).toEqual(
+      new Set(["civel", "familia-sucessoes", "falencia", "execucao-fiscal"])
+    );
   });
 
-  it("comprador RJ recebe TJRJ pedido-cert com comarca derivada", () => {
-    const tjrj = plan.jobs.find(
+  it("comprador RJ recebe TJRJ pedido-cert multi-tipo (4 chamadas) com comarca derivada", () => {
+    const tjrj = plan.jobs.filter(
       (j) => j.targetKind === "comprador" && j.endpoint === "tribunal/tjrj/pedido-cert"
     );
-    expect(tjrj).toBeDefined();
-    expect(tjrj?.requestPayload.comarca).toBe("Capital");
-    expect(tjrj?.requestPayload.tipo_certidao).toBe("civel");
+    expect(tjrj).toHaveLength(4);
+    // Todos devem ter comarca "Capital" (Rio de Janeiro)
+    tjrj.forEach((j) => expect(j.requestPayload.comarca).toBe("Capital"));
+    const tipos = new Set(tjrj.map((j) => j.requestPayload.tipo_certidao));
+    expect(tipos).toEqual(
+      new Set(["civel", "familia", "falencia", "execucao-fiscal"])
+    );
   });
 
   // Phase F.II-α — imóvel removido do planner. CENPROT agora dispara por
@@ -110,8 +119,13 @@ describe("planCertidoesForDeal — dados completos (PF SP + PF RJ + imovel SP)",
     expect(iptu).toBeUndefined();
   });
 
-  it("nao gera nada no skipped", () => {
-    expect(plan.skipped).toHaveLength(0);
+  it("gera SkippedJob de E-Proc SP para vendedor SP (Phase F.II-γ)", () => {
+    const eproc = plan.skipped.filter(
+      (s) => s.endpoint === "tribunal/tjsp/eproc"
+    );
+    // 1 skip por parte SP (vendedor SP). Comprador RJ não dispara E-Proc SP.
+    expect(eproc.length).toBeGreaterThanOrEqual(1);
+    expect(eproc[0].externalLink).toBe("https://certidoes.tjsp.jus.br");
   });
 
   it("custo total bate com a soma dos jobs", () => {
@@ -318,6 +332,70 @@ describe("Phase B — PJ sempre dispara CNPJ + CRF", () => {
     });
     expect(plan.jobs.find((j) => j.endpoint === "receita-federal/cnpj")).toBeUndefined();
     expect(plan.jobs.find((j) => j.endpoint === "caixa/regularidade")).toBeUndefined();
+  });
+});
+
+// Phase F.II-γ — expansão oficial (TRF individuais + GOV.BR + multi-tipo)
+describe("Phase F.II-γ — TRF individual (cível + criminal) por UF", () => {
+  it("parte SP dispara TRF3 (individual) além da unificada", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [VENDEDOR_PF_SP],
+      compradores: [],
+      imoveis: [],
+    });
+    const trfUnificada = plan.jobs.find(
+      (j) => j.endpoint === "tribunal/trf/cert-unificada"
+    );
+    const trf3 = plan.jobs.find((j) => j.endpoint === "tribunal/trf3/certidao");
+    expect(trfUnificada).toBeDefined();
+    expect(trf3).toBeDefined();
+    expect(trf3?.requestPayload.cpf).toBe("52998224725");
+  });
+
+  it("parte BA dispara TRF1 (não TRF2/TRF3)", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [{ ...VENDEDOR_PF_SP, uf: "BA", cidade: "Salvador" }],
+      compradores: [],
+      imoveis: [],
+    });
+    expect(plan.jobs.find((j) => j.endpoint === "tribunal/trf1/certidao")).toBeDefined();
+    expect(plan.jobs.find((j) => j.endpoint === "tribunal/trf3/certidao")).toBeUndefined();
+  });
+});
+
+describe("Phase F.II-γ — CENPROT Nacional com pre-flight GOV.BR", () => {
+  it("govBrActive=false + parte fora de SP gera SkippedJob com reason GOV.BR", () => {
+    const plan = planCertidoesForDeal(
+      { vendedores: [{ ...VENDEDOR_PF_SP, uf: "BA", cidade: "Salvador" }], compradores: [], imoveis: [] },
+      undefined,
+      undefined,
+      { govBrActive: false }
+    );
+    const nacional = plan.skipped.find((s) => s.endpoint === "ieptb/protestos");
+    expect(nacional).toBeDefined();
+    expect(nacional?.missingField).toBe("govbr");
+  });
+
+  it("govBrActive=true + parte fora de SP gera JOB normal", () => {
+    const plan = planCertidoesForDeal(
+      { vendedores: [{ ...VENDEDOR_PF_SP, uf: "BA", cidade: "Salvador" }], compradores: [], imoveis: [] },
+      undefined,
+      undefined,
+      { govBrActive: true }
+    );
+    const nacional = plan.jobs.find((j) => j.endpoint === "ieptb/protestos");
+    expect(nacional).toBeDefined();
+  });
+
+  it("parte SP NÃO dispara nacional (já tem cenprot-sp local)", () => {
+    const plan = planCertidoesForDeal(
+      { vendedores: [VENDEDOR_PF_SP], compradores: [], imoveis: [] },
+      undefined,
+      undefined,
+      { govBrActive: true }
+    );
+    expect(plan.jobs.find((j) => j.endpoint === "ieptb/protestos")).toBeUndefined();
+    expect(plan.jobs.find((j) => j.endpoint === "cenprot-sp/protestos")).toBeDefined();
   });
 });
 

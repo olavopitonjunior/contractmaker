@@ -645,11 +645,10 @@ export async function getMonthlySpend(orgId: string): Promise<{
   budgetCents: number;
   exceeded: boolean;
 }> {
-  // Phase B (2026-04): raised default from 5000 (R$ 50) to 10000 (R$ 100) to
-  // accommodate expanded endpoint coverage — PJ parties now always fire
-  // receita-federal/cnpj + caixa/regularidade, and all UFs now get a state
-  // CND. Worst-case per Deal grew ~2-3x. Override per-org via env var.
-  const budgetCents = Number(process.env.INFOSIMPLES_MONTHLY_BUDGET_CENTS ?? "10000");
+  // Phase F.II-γ (2026-04-16): raised default from 10000 (R$ 100) to 20000
+  // (R$ 200) to accommodate Phase F.II-γ expansion — TJSP/TJRJ multi-tipo
+  // (4x chamadas por parte), TRF individual adicional, CENPROT nacional.
+  const budgetCents = Number(process.env.INFOSIMPLES_MONTHLY_BUDGET_CENTS ?? "20000");
   const now = new Date();
   const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const agg = await prisma.certidaoJob.aggregate({

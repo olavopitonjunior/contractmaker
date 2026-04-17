@@ -5,6 +5,7 @@ import { planCertidoesForDeal } from "@/lib/certidoes/planner";
 import { runBatch, getMonthlySpend } from "@/lib/certidoes/executor";
 import { endpointInfo } from "@/lib/certidoes/endpoints";
 import { sanitizePayload } from "@/lib/certidoes/infosimples";
+import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -165,6 +166,10 @@ export async function POST(
     cidade: d.cidade,
   }));
 
+  // Phase F.II-γ — pre-flight GOV.BR (cached 5min) para decidir se endpoints
+  // `requiresGovBrAuth` (CENPROT nacional) disparam ou viram SkippedJob.
+  const govbr = await checkGovBrAuth();
+
   // F2: if explicit selection provided, run planner with expandAll so we can
   // match any (endpoint, target) combo the user asked for — including
   // cross-UF picks. Otherwise use the default auto-plan.
@@ -172,7 +177,10 @@ export async function POST(
     dealData as any,
     undefined,
     diligenciados,
-    selectedJobs ? { expandAll: true } : undefined
+    {
+      expandAll: !!selectedJobs,
+      govBrActive: govbr.active,
+    }
   );
 
   // F2: filter to user's selection (if provided). Build a lookup key for

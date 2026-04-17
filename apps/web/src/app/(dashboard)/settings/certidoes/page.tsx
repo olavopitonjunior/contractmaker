@@ -62,7 +62,7 @@ export default async function CertidoesSettingsPage() {
   const monthJobs = recent.filter((j) => j.createdAt >= firstOfMonth);
   const monthSpend = monthJobs.reduce((a, j) => a + (j.costCents ?? 0), 0);
   const budgetCents = Number(
-    process.env.INFOSIMPLES_MONTHLY_BUDGET_CENTS ?? "10000"
+    process.env.INFOSIMPLES_MONTHLY_BUDGET_CENTS ?? "20000"
   );
   const budgetPct =
     budgetCents > 0 ? Math.min(100, Math.round((monthSpend / budgetCents) * 100)) : 0;

@@ -35,6 +35,8 @@ export interface EndpointInfo {
   category: EndpointCategory;
   /** F1: tooltip shown in the picker */
   description?: string;
+  /** F.II-γ: endpoint só dispara se checkGovBrAuth() retornar active=true */
+  requiresGovBrAuth?: boolean;
 }
 
 export const ENDPOINTS: Record<string, EndpointInfo> = {
@@ -404,6 +406,78 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa"],
     category: "fiscal",
     description: "Certidao Negativa da Divida Ativa do Estado de Sao Paulo (PGE-SP)",
+  },
+
+  // ============================================================
+  // Phase F.II-γ — Cobertura oficial expandida (abril/2026)
+  // ============================================================
+
+  // --- TRF individuais (cível + criminal, cobrem 1ª e 2ª instância) ---
+  "tribunal/trf1/certidao": {
+    id: "tribunal/trf1/certidao",
+    label: "Certidao Civel+Criminal TRF1",
+    costCents: 4,
+    scope: "federal",
+    appliesTo: ["pessoa"],
+    category: "federal",
+    description: "Certidao Negativa Civel e Criminal do TRF1 (AC/AM/AP/BA/DF/GO/MA/MT/PA/PI/RO/RR/TO)",
+  },
+  "tribunal/trf2/certidao": {
+    id: "tribunal/trf2/certidao",
+    label: "Certidao Civel+Criminal TRF2",
+    costCents: 4,
+    scope: "federal",
+    appliesTo: ["pessoa"],
+    category: "federal",
+    description: "Certidao Negativa Civel e Criminal do TRF2 (RJ/ES)",
+  },
+  "tribunal/trf3/certidao": {
+    id: "tribunal/trf3/certidao",
+    label: "Certidao Civel+Criminal TRF3",
+    costCents: 4,
+    scope: "federal",
+    appliesTo: ["pessoa"],
+    category: "federal",
+    description: "Certidao Negativa Civel e Criminal do TRF3 (SP/MS)",
+  },
+  "tribunal/trf4/certidao": {
+    id: "tribunal/trf4/certidao",
+    label: "Certidao Civel+Criminal TRF4",
+    costCents: 4,
+    scope: "federal",
+    appliesTo: ["pessoa"],
+    category: "federal",
+    description: "Certidao Negativa Civel e Criminal do TRF4 (RS/SC/PR)",
+  },
+  "tribunal/trf5/certidao": {
+    id: "tribunal/trf5/certidao",
+    label: "Certidao Civel+Criminal TRF5",
+    costCents: 4,
+    scope: "federal",
+    appliesTo: ["pessoa"],
+    category: "federal",
+    description: "Certidao Negativa Civel e Criminal do TRF5 (AL/CE/PB/PE/RN/SE)",
+  },
+  "tribunal/trf6/certidao": {
+    id: "tribunal/trf6/certidao",
+    label: "Certidao Civel+Criminal TRF6",
+    costCents: 4,
+    scope: "federal",
+    appliesTo: ["pessoa"],
+    category: "federal",
+    description: "Certidao Negativa Civel e Criminal do TRF6 (MG)",
+  },
+
+  // --- CENPROT Nacional (exige login GOV.BR configurado na conta Infosimples) ---
+  "ieptb/protestos": {
+    id: "ieptb/protestos",
+    label: "CENPROT Nacional (Protestos)",
+    costCents: 6,
+    scope: "federal",
+    appliesTo: ["pessoa"],
+    category: "protesto",
+    requiresGovBrAuth: true,
+    description: "Consulta nacional de protestos (exceto detalhes SP). Requer autenticacao GOV.BR ativa na conta Infosimples.",
   },
 };
 
