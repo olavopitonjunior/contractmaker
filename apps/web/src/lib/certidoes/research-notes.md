@@ -1,5 +1,40 @@
 # Infosimples — Notas de Pesquisa de Cobertura
 
+## Spike F.II-ε — Providers alternativos para E-Proc SP (2026-04-16)
+
+**Problema**: Infosimples não emite certidões do E-Proc SP (1ª nem 2ª instância).
+O portal oficial `certidoes.tjsp.jus.br` exige login GOV.BR **do próprio
+diligenciado** (pessoa física sendo consultada, não da nossa conta) — inviável
+automatizar sem ter a credencial/certificado A1 dele.
+
+**Providers investigados**:
+
+| Provider | URL | Cobre E-Proc SP certidão? | Autenticação | Pricing | Notas |
+|----------|-----|---------------------------|--------------|---------|-------|
+| **CNJ DataJud** (oficial) | api-publica.datajud.cnj.jus.br | ❌ Não emite certidão — só metadata de processos | Public key CNJ | Grátis | Útil como pre-flight (checar se há processos antes de gastar) |
+| **Jusbrasil Insight** | insight.jusbrasil.com.br | ❓ Não confirmado — requer contato comercial | API key própria | Não divulgado publicamente | Principal player B2B. Foco em consulta processual |
+| **Docket** | docket.com.br | ❓ Foco em docs (matrícula), não confirmado E-Proc | API key | Contato comercial | "Processa 50+ tipos de documento" — mais OCR/IA que certidão |
+| **Codilo** | codilo.com.br | ❓ Não investigado a fundo | API key | n/d | Player menor, nicho jurídico |
+| **Judit.io** | judit.io | ❓ "Consulta processual mais rápida" | API key | n/d | Marketing forte, requer teste |
+
+**Conclusão do spike**: Nenhum provider público confirmou cobertura de
+**emissão** de certidão E-Proc SP. Todos oferecem **consulta processual**
+(metadata, movimentações) mas a certidão de "nada consta" do E-Proc continua
+precisando de login GOV.BR do usuário no portal oficial.
+
+**Decisão 2026-04-16**: NÃO integrar provider novo nesta iteração. Manter
+`SkippedJob` com `externalLink: https://certidoes.tjsp.jus.br` (Phase F.II-γ
+já implementado). Corretor acompanha o usuário final no portal oficial quando
+necessário.
+
+**Ação futura sugerida** (fora do escopo F):
+- Contatar comercial Jusbrasil para RFP (email já existe)
+- Avaliar Docket para matrícula + IA (caso de uso diferente — complementa OCR)
+- Considerar "deep-link guiado": abrir portal oficial em nova aba com CPF pré-preenchido, usuário final faz login dele, upload do PDF manual vira DealAttachment
+- Explorar DataJud como pre-flight baratíssimo antes de batch caro
+
+---
+
 ## Status de implementação
 
 - **Phase E (OCR Robustness)** ✓ 2026-04-16 — retry batch + Map por attachmentId + lock atomic + content-hash pre-warm
