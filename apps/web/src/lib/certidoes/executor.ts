@@ -338,6 +338,19 @@ export async function runSingleJob(
         : err instanceof Error
         ? err.message
         : "erro desconhecido";
+    // Phase F.II-α: classify this failure. InfosimplesError → provider-side
+    // (likely network/timeout); AbortError → provider_timeout; anything else
+    // (SyntaxError, TypeError, validation) → our side = integration_error.
+    let failureCategory: string;
+    if (err instanceof InfosimplesError) {
+      failureCategory = message.toLowerCase().includes("timeout")
+        ? "provider_timeout"
+        : "portal_unavailable";
+    } else if (err instanceof Error && err.name === "AbortError") {
+      failureCategory = "provider_timeout";
+    } else {
+      failureCategory = "integration_error";
+    }
     await prisma.certidaoJob.update({
       where: { id: jobId },
       data: {
@@ -346,6 +359,7 @@ export async function runSingleJob(
         latencyMs,
         errorMessage: message.slice(0, 500),
         costCents: info.costCents,
+        resultData: { failureCategory, errorMessage: message.slice(0, 500) },
       },
     });
     await checkBatchCompletion(job.batchId);

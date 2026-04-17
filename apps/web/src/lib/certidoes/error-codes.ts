@@ -19,9 +19,38 @@ export type FailureCategory =
   | "inconsistent_input"
   | "portal_unavailable"
   | "rate_limited"
+  | "provider_timeout"     // F.II-α: nosso timeout expirou antes de resposta do provider
   | "account_issue"
+  | "integration_error"    // F.II-α: HTTP 5xx nosso, JSON parse fail, normalizer crash, executor exception
   | "genuine_no_data"
   | "unknown";
+
+/**
+ * Phase F.II-α — 3-way UX grouping. Each FailureCategory belongs to one of
+ * three semantic groups that drive different UI affordances:
+ *   - GRUPO_DADO: usuário corrige dados da parte/imóvel (editar parte dialog)
+ *   - GRUPO_PROVEDOR: Infosimples ou portal oficial — nós esperamos/retry automático
+ *   - GRUPO_INTEGRACAO: bug nosso — botão "Reportar" + link suporte
+ */
+export type FailureGroup = "dado" | "provedor" | "integracao";
+
+export const FAILURE_GROUP: Record<FailureCategory, FailureGroup> = {
+  missing_input: "dado",
+  inconsistent_input: "dado",
+  portal_unavailable: "provedor",
+  rate_limited: "provedor",
+  provider_timeout: "provedor",
+  account_issue: "provedor",
+  integration_error: "integracao",
+  genuine_no_data: "provedor", // tecnicamente sucesso, mas UX trata como informativa
+  unknown: "integracao",
+};
+
+export const GROUP_LABEL: Record<FailureGroup, string> = {
+  dado: "Dados da parte",
+  provedor: "Portal / Provedor",
+  integracao: "Sistema (nosso)",
+};
 
 /**
  * Known code → category mapping. Only lists codes we've observed in practice
@@ -114,7 +143,9 @@ export const CATEGORY_LABEL: Record<FailureCategory, string> = {
   inconsistent_input: "Dados divergentes",
   portal_unavailable: "Portal indisponível",
   rate_limited: "Limite atingido",
+  provider_timeout: "Tempo esgotado",
   account_issue: "Problema de conta",
+  integration_error: "Erro interno do sistema",
   genuine_no_data: "Nada consta",
   unknown: "Resultado incerto",
 };
@@ -131,8 +162,12 @@ export const CATEGORY_DESCRIPTION: Record<FailureCategory, string> = {
     "O portal oficial está fora do ar ou com timeout. Tente novamente em alguns minutos.",
   rate_limited:
     "Atingimos o limite diário de consultas neste portal. Aguarde e tente novamente.",
+  provider_timeout:
+    "A consulta demorou mais que o esperado. O provedor pode estar sobrecarregado. Tente novamente.",
   account_issue:
     "Há um problema com a conta Infosimples (saldo/token). Verifique com o administrador.",
+  integration_error:
+    "Erro interno do sistema durante a consulta. Nossa equipe foi notificada. Tente novamente ou reporte o bug.",
   genuine_no_data:
     "O portal respondeu mas não há certidão a emitir para este documento.",
   unknown: "Resultado inconclusivo. Tente novamente ou contate o suporte.",

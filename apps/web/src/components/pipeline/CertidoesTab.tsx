@@ -130,13 +130,24 @@ function effectiveStatus(row: CertidaoJobRow): CertidaoJobRow["status"] {
   return row.status;
 }
 
+/**
+ * Phase F.II-α — estado "Pendente" unificado: pending, fetching e
+ * awaiting_portal todos viram "Pendente" na UI, com subtítulo específico.
+ * Evita que o usuário interprete "aguardando_portal" como erro.
+ */
 function statusLabel(row: CertidaoJobRow): string {
   const r = row.resultData as { situacao?: string; detalhes?: string } | null;
   const status = effectiveStatus(row);
   if (status === "failed") return row.errorMessage || "Erro";
-  if (status === "pending") return "Na fila…";
-  if (status === "fetching") return "Consultando…";
-  if (status === "awaiting_portal") return "Aguardando portal";
+  if (status === "pending") return "Pendente · na fila";
+  if (status === "fetching") return "Pendente · consultando";
+  if (status === "awaiting_portal") {
+    // Subtítulo específico por endpoint — TJSP ~15min, TJRJ ~8d, TJMS ~2d
+    const ep = row.endpoint.toLowerCase();
+    if (ep.includes("tjrj")) return "Pendente · aguardando portal (até 8 dias úteis)";
+    if (ep.includes("tjms")) return "Pendente · aguardando portal (até 48h)";
+    return "Pendente · aguardando portal (até 15 min)";
+  }
   if (status === "skipped") return row.errorMessage || "Pulado — dados faltantes";
   if (status === "replaced") return "Substituído";
   if (status === "success") {
@@ -151,6 +162,8 @@ function statusLabel(row: CertidaoJobRow): string {
         return "Não emitida pelo portal";
       case "aguardando_pdf":
         return "Negativa · aguardando PDF";
+      case "informativa":
+        return "Consulta informativa";
       default:
         return r?.detalhes || "Concluído";
     }
@@ -284,6 +297,10 @@ export function CertidoesTab({
   );
 
   const groups = useMemo(() => {
+    // Phase F.II-α: agrupamento fixo em 3 categorias — Vendedor, Comprador,
+    // Diligência Avulsa. Imóvel removido (não há mais certidões de imóvel).
+    // Jobs com targetKind="imovel" (legacy antes da mudança do planner) caem
+    // no grupo "Outras" defensivo.
     const map = new Map<string, { label: string; rows: CertidaoJobRow[] }>();
     vendedores.forEach((v, i) =>
       map.set(`vendedor-${i}`, {
@@ -297,24 +314,22 @@ export function CertidoesTab({
         rows: [],
       })
     );
-    imoveis.forEach((im, i) =>
-      map.set(`imovel-${i}`, {
-        label: `Imóvel: ${imovelLabel(im, i)}`,
-        rows: [],
-      })
-    );
     for (const job of visibleJobs) {
+      // F.II-α: drop jobs de imóvel legacy (não aparecem mais na UI)
+      if (job.targetKind === "imovel") continue;
       const key = groupKey(job);
       if (!map.has(key)) {
-        map.set(key, {
-          label: `${job.targetKind} ${job.targetIndex + 1}`,
-          rows: [],
-        });
+        // Diligenciados têm groupKey "diligenciado-N" — label amigável
+        const label =
+          job.targetKind === "diligenciado"
+            ? `Diligência avulsa #${job.targetIndex + 1}`
+            : `${job.targetKind} ${job.targetIndex + 1}`;
+        map.set(key, { label, rows: [] });
       }
       map.get(key)!.rows.push(job);
     }
     return Array.from(map.entries()).filter(([, g]) => g.rows.length > 0);
-  }, [visibleJobs, vendedores, compradores, imoveis]);
+  }, [visibleJobs, vendedores, compradores]);
 
   const stats = useMemo(() => {
     const total = visibleJobs.length;

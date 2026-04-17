@@ -95,12 +95,19 @@ describe("planCertidoesForDeal — dados completos (PF SP + PF RJ + imovel SP)",
     expect(tjrj?.requestPayload.tipo_certidao).toBe("civel");
   });
 
-  it("imovel SP gera CENPROT SP + IPTU SP (com SQL)", () => {
-    const cenprot = plan.jobs.find((j) => j.endpoint === "cenprot-sp/protestos");
-    const iptu = plan.jobs.find((j) => j.endpoint === "pref/sp/sao-paulo/iptu");
+  // Phase F.II-α — imóvel removido do planner. CENPROT agora dispara por
+  // parte PF/PJ (não mais por imóvel). IPTU/CND municipal não disparam mais.
+  it("CENPROT SP dispara para vendedor PF em SP (remapeado de imóvel para pessoa)", () => {
+    const cenprot = plan.jobs.find(
+      (j) => j.endpoint === "cenprot-sp/protestos" && j.targetKind === "vendedor"
+    );
     expect(cenprot).toBeDefined();
-    expect(iptu).toBeDefined();
-    expect(iptu?.requestPayload.sql).toBe("123.456.0789-0");
+    expect(cenprot?.requestPayload.cpf).toBe("52998224725");
+  });
+
+  it("NÃO gera IPTU SP mesmo com SQL preenchido (Phase F.II-α)", () => {
+    const iptu = plan.jobs.find((j) => j.endpoint === "pref/sp/sao-paulo/iptu");
+    expect(iptu).toBeUndefined();
   });
 
   it("nao gera nada no skipped", () => {
@@ -141,46 +148,21 @@ describe("planCertidoesForDeal — dados faltando", () => {
     expect(skippedEndpoints.has("tribunal/trf/cert-unificada")).toBe(true);
   });
 
-  it("imovel SP sem SQL -> IPTU SP skipped", () => {
+  // Phase F.II-α — testes de imóvel removidos pois IPTU SP/RJ e CND
+  // Municipal RJ foram retirados do planner (2026-04-16). Os endpoints
+  // permanecem no catálogo mas o loop de imóveis foi removido. CENPROT
+  // agora é testado em outro bloco (por parte PF/PJ).
+  it("imóvel presente no form NÃO gera jobs de IPTU nem CND municipal", () => {
     const plan = planCertidoesForDeal({
       vendedores: [VENDEDOR_PF_SP],
       compradores: [],
       imoveis: [
-        { rua: "Rua X", cidade: "Sao Paulo", uf: "SP", sql: "" },
+        { rua: "Rua X", cidade: "Sao Paulo", uf: "SP", sql: "123.456.0789-0" },
+        { rua: "Rua Y", cidade: "Rio de Janeiro", uf: "RJ", inscricao_municipal: "99999" },
       ],
     });
-    const skipped = plan.skipped.find(
-      (s) => s.endpoint === "pref/sp/sao-paulo/iptu"
-    );
-    expect(skipped).toBeDefined();
-    expect(skipped?.missingField).toBe("sql");
-  });
-
-  it("imovel RJ sem inscricao_municipal -> IPTU RJ skipped", () => {
-    const plan = planCertidoesForDeal({
-      vendedores: [VENDEDOR_PF_SP],
-      compradores: [],
-      imoveis: [
-        { rua: "Rua Y", cidade: "Rio de Janeiro", uf: "RJ", inscricao_municipal: "" },
-      ],
-    });
-    const skipped = plan.skipped.find(
-      (s) => s.endpoint === "pref/rj/rio-janeiro/cert-trib"
-    );
-    expect(skipped).toBeDefined();
-  });
-
-  it("imovel RS gera skipped de IPTU por falta de cobertura", () => {
-    const plan = planCertidoesForDeal({
-      vendedores: [VENDEDOR_PF_SP],
-      compradores: [],
-      imoveis: [{ rua: "Rua Z", cidade: "Porto Alegre", uf: "RS" }],
-    });
-    const skipped = plan.skipped.find((s) =>
-      s.endpoint.includes("porto-alegre")
-    );
-    expect(skipped).toBeDefined();
-    expect(skipped?.missingField).toBe("cobertura");
+    expect(plan.jobs.find((j) => j.endpoint.startsWith("pref/"))).toBeUndefined();
+    expect(plan.skipped.find((s) => s.endpoint.startsWith("pref/"))).toBeUndefined();
   });
 });
 

@@ -355,93 +355,29 @@ export function planCertidoesForDeal(
       jobs.push(buildJob("receita-federal/cnpj", kind, index, label, { cnpj }));
       jobs.push(buildJob("caixa/regularidade", kind, index, label, { cnpj }));
     }
-  }
 
-  // ---- Imoveis: cenprot + TJ + IPTU ----
-  const imoveis = data.imoveis ?? [];
-  for (let i = 0; i < imoveis.length; i++) {
-    const im = imoveis[i];
-    const imLabel = im.rua ? `${im.rua}${im.cidade ? `, ${im.cidade}` : ""}` : `Imovel ${i + 1}`;
-    const imUf = uf(im);
-
-    const imShouldSP = expandAll || imUf === "SP";
-    const imShouldRJ = expandAll || imUf === "RJ";
-    const imShouldRS = expandAll || imUf === "RS";
-
-    if (imShouldSP) {
-      // CENPROT SP
-      const primeiroResponsavel = [...(data.vendedores ?? []), ...(data.compradores ?? [])][0];
-      if (primeiroResponsavel) {
-        const cpfImm = normalizeCpf(primeiroResponsavel.cpf);
-        const cnpjImm = normalizeCnpj(primeiroResponsavel.cnpj);
-        if (cpfImm || cnpjImm) {
-          jobs.push(
-            buildJob(
-              "cenprot-sp/protestos",
-              "imovel",
-              i,
-              `${imLabel} (responsavel: ${personLabel(primeiroResponsavel)})`,
-              cnpjImm ? { cnpj: cnpjImm } : { cpf: cpfImm! }
-            )
-          );
-        }
-      }
-
-      // IPTU SP
-      if (!im.sql) {
-        skipped.push(
-          buildSkip(
-            "pref/sp/sao-paulo/iptu",
-            "imovel",
-            i,
-            imLabel,
-            "sql",
-            "IPTU SP exige SQL (Setor-Quadra-Lote) do imovel"
-          )
-        );
-      } else {
-        jobs.push(buildJob("pref/sp/sao-paulo/iptu", "imovel", i, imLabel, { sql: im.sql }));
-      }
-    }
-    if (imShouldRJ) {
-      if (!im.inscricao_municipal) {
-        skipped.push(
-          buildSkip(
-            "pref/rj/rio-janeiro/cert-trib",
-            "imovel",
-            i,
-            imLabel,
-            "inscricao_municipal",
-            "IPTU RJ exige Inscricao Municipal"
-          )
-        );
-      } else {
-        jobs.push(
-          buildJob("pref/rj/rio-janeiro/cert-trib", "imovel", i, imLabel, {
-            inscricao: im.inscricao_municipal,
-          })
-        );
-        jobs.push(
-          buildJob("pref/rj/rio-janeiro/cnd", "imovel", i, imLabel, {
-            inscricao_municipal: im.inscricao_municipal,
-            email,
-          })
-        );
-      }
-    }
-    if (imShouldRS && !expandAll) {
-      skipped.push(
-        buildSkip(
-          "pref/rs/porto-alegre/iptu",
-          "imovel",
-          i,
-          imLabel,
-          "cobertura",
-          "IPTU POA sem cobertura Infosimples - extrair manualmente"
+    // ---- CENPROT SP (Phase F.II-α) — remapeado de imóvel para pessoa ----
+    // Consulta por CPF/CNPJ da própria parte. Só dispara quando UF=SP (única
+    // cobertura Infosimples sem GOV.BR). Nacional fica para F.II-γ.
+    const cenprotShould = expandAll || partyUf === "SP";
+    if (cenprotShould && (cpf || cnpj)) {
+      jobs.push(
+        buildJob(
+          "cenprot-sp/protestos",
+          kind,
+          index,
+          label,
+          cnpj ? { cnpj } : { cpf: cpf! }
         )
       );
     }
   }
+
+  // ---- Imóveis: REMOVIDOS em Phase F.II-α ----
+  // Decisão 2026-04-16: não há certidões de imóvel neste momento (IPTU SP/RJ,
+  // CND Municipal RJ removidos). CENPROT foi remapeado para pessoa (acima).
+  // Endpoints permanecem no catálogo para futura re-ativação — planner só não
+  // dispara mais. Users com imóvel no form não verão skips de IPTU.
 
   // ---- TJ estadual por parte (segue UF da parte, ou todas com expandAll) ----
   for (const { kind, index, parte } of pessoas) {
