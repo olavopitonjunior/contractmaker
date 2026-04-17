@@ -212,12 +212,31 @@ model CertidaoJob {
   organization Organization?   @relation("certidaoJobOrg", fields: [orgId], references: [id], onDelete: Cascade)
   user         User?           @relation("certidaoJobUser", fields: [userId], references: [id], onDelete: SetNull)
   attachment   DealAttachment? @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
+  auditLogs    CertidaoJobAuditLog[]
 
   @@index([dealId, batchId])
   @@index([orgId, batchId])
   @@index([status])
   @@index([status, expectedReadyAt])
   @@index([userId, createdAt])
+}
+
+// Phase F.II-β — audit log de transições de status do CertidaoJob. Cada
+// update relevante (pending → fetching → success/failed/awaiting_portal)
+// registra uma row aqui para debug e observabilidade. Retention policy:
+// deletar rows > 90 dias via cron futuro.
+model CertidaoJobAuditLog {
+  id         String   @id @default(cuid())
+  jobId      String
+  fromStatus String?
+  toStatus   String
+  reason     String?  // texto livre: "initial dispatch", "retry by user", "cron sweep", etc.
+  metadata   Json?    // payload livre: costCents, latencyMs, endpoint, resultCode
+  createdAt  DateTime @default(now())
+
+  job CertidaoJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  @@index([jobId, createdAt])
 }
 
 model CertidoesShareLink {
