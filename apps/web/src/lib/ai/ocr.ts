@@ -337,6 +337,58 @@ async function callGemini(
   };
 }
 
+/**
+ * Phase F.I-β — Fallback de último recurso: Claude Haiku 4.5 vision.
+ *
+ * Chamado quando Gemini primário E fallback falham (5xx persistente, safety
+ * block, quota esgotada mesmo após retries). ~10x mais caro que Flash
+ * ($0.003/doc) mas tem uptime independente + limites de rate-limit diferentes.
+ *
+ * Só suporta imagens (Anthropic vision). PDFs passam como documento.
+ */
+async function callClaudeHaikuOcr(
+  base64Data: string,
+  mimeType: string
+): Promise<{ text: string; usage: { promptTokenCount?: number; candidatesTokenCount?: number } | undefined }> {
+  const model = process.env.OCR_FALLBACK_CLAUDE_MODEL || "claude-haiku-4-5-20251001";
+  // PDFs não são suportados pelo fallback Claude (SDK estável só aceita images).
+  // Deixa o erro Gemini propagar para PDF — user pode retentar mais tarde.
+  if (mimeType === "application/pdf") {
+    throw new Error(
+      "Claude fallback não suporta PDFs nesta versão do SDK — retente em alguns minutos"
+    );
+  }
+  const response = await anthropic.messages.create({
+    model,
+    max_tokens: 2048,
+    messages: [
+      {
+        role: "user",
+        content: [
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: mimeType as "image/jpeg" | "image/png" | "image/webp" | "image/gif",
+              data: base64Data,
+            },
+          },
+          { type: "text", text: COMBINED_PROMPT },
+        ],
+      },
+    ],
+  });
+  const text =
+    response.content[0]?.type === "text" ? response.content[0].text : "{}";
+  return {
+    text,
+    usage: {
+      promptTokenCount: response.usage.input_tokens,
+      candidatesTokenCount: response.usage.output_tokens,
+    },
+  };
+}
+
 function parseGeminiJson(text: string): {
   tipo: string;
   fields: Record<string, unknown>;
@@ -417,22 +469,64 @@ export async function classifyAndExtract(
         usage = result.usage;
         modelUsed = fallbackModel;
       } catch (fallbackErr) {
-        // Both failed — report the original error
-        if (ctx) {
-          recordAIUsage({
-            orgId: ctx.orgId,
-            userId: ctx.userId,
-            contractId: ctx.contractId,
-            provider: "gemini",
-            model: primaryModel,
-            operation: "ocr_form",
-            promptTokens: 0,
-            latencyMs: Date.now() - t0,
-            success: false,
-            errorMessage: fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr),
-          });
+        // Phase F.I-β — último recurso: Claude Haiku 4.5 vision.
+        // Só vale a pena se erro não é rate-limit (Anthropic tem quota
+        // independente de Gemini) E não é safety block específico do
+        // conteúdo (filtros geralmente coincidem entre providers).
+        const useClaudeFallback = process.env.OCR_CLAUDE_FALLBACK_ENABLED !== "false";
+        const fallbackMsg =
+          fallbackErr instanceof Error ? fallbackErr.message : String(fallbackErr);
+        const shouldTryClaude =
+          useClaudeFallback &&
+          !isRateLimitError(fallbackMsg) &&
+          !fallbackMsg.toLowerCase().includes("safety") &&
+          !fallbackMsg.toLowerCase().includes("blocked");
+        if (shouldTryClaude) {
+          console.warn(
+            `[ocr] fallback Gemini ${fallbackModel} also failed — trying Claude Haiku as last resort`
+          );
+          try {
+            const result = await callClaudeHaikuOcr(base64Data, mimeType);
+            text = result.text;
+            usage = result.usage;
+            modelUsed = process.env.OCR_FALLBACK_CLAUDE_MODEL || "claude-haiku-4-5-20251001";
+            // Importante: modelUsed = claude, provider mudou. recordAIUsage
+            // é feito no success path abaixo, mas agora provider é anthropic.
+          } catch (claudeErr) {
+            if (ctx) {
+              recordAIUsage({
+                orgId: ctx.orgId,
+                userId: ctx.userId,
+                contractId: ctx.contractId,
+                provider: "anthropic",
+                model: process.env.OCR_FALLBACK_CLAUDE_MODEL || "claude-haiku-4-5-20251001",
+                operation: "ocr_form",
+                promptTokens: 0,
+                latencyMs: Date.now() - t0,
+                success: false,
+                errorMessage: claudeErr instanceof Error ? claudeErr.message : String(claudeErr),
+              });
+            }
+            throw primaryErr; // Propaga o original (mais informativo)
+          }
+        } else {
+          // Both Gemini failed — report the original error
+          if (ctx) {
+            recordAIUsage({
+              orgId: ctx.orgId,
+              userId: ctx.userId,
+              contractId: ctx.contractId,
+              provider: "gemini",
+              model: primaryModel,
+              operation: "ocr_form",
+              promptTokens: 0,
+              latencyMs: Date.now() - t0,
+              success: false,
+              errorMessage: fallbackMsg,
+            });
+          }
+          throw primaryErr;
         }
-        throw primaryErr;
       }
     } else {
       if (ctx) {
@@ -454,11 +548,14 @@ export async function classifyAndExtract(
   }
 
   if (ctx) {
+    // Phase F.I-β — provider correto conforme modelo usado (pode ter
+    // caído na cascata Gemini → Claude Haiku).
+    const providerUsed = modelUsed.startsWith("claude") ? "anthropic" : "gemini";
     recordAIUsage({
       orgId: ctx.orgId,
       userId: ctx.userId,
       contractId: ctx.contractId,
-      provider: "gemini",
+      provider: providerUsed,
       model: modelUsed,
       operation: "ocr_form",
       promptTokens: usage?.promptTokenCount ?? 0,
