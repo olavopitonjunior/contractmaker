@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { downloadBufferFromUrl } from "@/lib/storage/s3";
-import { classifyAndExtract, isRateLimitError } from "@/lib/ai/ocr";
+import { classifyAndExtract, isRateLimitError, humanizeOcrError } from "@/lib/ai/ocr";
 import { extractFirstPages } from "@/lib/ai/pdf-utils";
 
 async function fetchBuffer(url: string): Promise<Buffer> {
@@ -263,36 +263,6 @@ export async function POST(
   }
 }
 
-/**
- * Converts a raw Gemini/network error into a short user-friendly message.
- * The raw message often contains a nested JSON like
- *   "{"error":{"code":500,"message":"An internal error has occurred..."}}"
- * which is noise to the end user. This function picks a short diagnostic.
- */
-function humanizeExtractError(raw: string): string {
-  const lower = raw.toLowerCase();
-  if (lower.includes("safety") || lower.includes("blocked")) {
-    return "O documento foi bloqueado pelo filtro de segurança do OCR. Tente um arquivo diferente.";
-  }
-  if (
-    lower.includes("invalid image") ||
-    lower.includes("unsupported") ||
-    lower.includes("decode")
-  ) {
-    return "Não foi possível ler o arquivo. Verifique se é uma imagem nítida ou um PDF de texto.";
-  }
-  if (lower.includes("timeout") || lower.includes("deadline")) {
-    return "A extração demorou demais. Tente um arquivo menor ou clique em Tentar novamente.";
-  }
-  if (lower.includes("quota") || lower.includes("rate")) {
-    return "Limite de uso da IA atingido temporariamente. Aguarde um minuto e tente novamente.";
-  }
-  if (lower.includes("500") || lower.includes("internal")) {
-    return "O serviço de OCR retornou um erro interno para este arquivo. Tente outro formato ou outro documento.";
-  }
-  // Last-resort fallback — strip anything that looks like JSON
-  const clean = raw.replace(/\{[^}]*\}/g, "").replace(/\s+/g, " ").trim();
-  return clean.length > 0 && clean.length < 200
-    ? `Falha na extração: ${clean}`
-    : "Falha na extração. Tente novamente ou use outro arquivo.";
-}
+// Phase F.IV — humanizeExtractError movido para lib/ai/ocr.ts (humanizeOcrError)
+// para evitar duplicação entre single e batch extract routes. Uso direto daqui.
+const humanizeExtractError = humanizeOcrError;

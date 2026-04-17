@@ -7,6 +7,7 @@ import {
   classifyAndExtract,
   classifyAndExtractBatch,
   prevalidateForOcr,
+  humanizeOcrError,
   type BatchItem,
 } from "@/lib/ai/ocr";
 import { extractFirstPages } from "@/lib/ai/pdf-utils";
@@ -44,28 +45,8 @@ async function fetchBuffer(url: string): Promise<Buffer> {
   return downloadBufferFromUrl(url);
 }
 
-function humanizeExtractError(raw: string): string {
-  const lower = raw.toLowerCase();
-  if (lower.includes("safety") || lower.includes("blocked")) {
-    return "O documento foi bloqueado pelo filtro de segurança do OCR. Tente um arquivo diferente.";
-  }
-  if (lower.includes("invalid image") || lower.includes("unsupported") || lower.includes("decode")) {
-    return "Não foi possível ler o arquivo. Verifique se é uma imagem nítida ou um PDF de texto.";
-  }
-  if (lower.includes("timeout") || lower.includes("deadline")) {
-    return "A extração demorou demais. Tente um arquivo menor ou clique em Tentar novamente.";
-  }
-  if (lower.includes("quota") || lower.includes("rate")) {
-    return "Limite de uso da IA atingido temporariamente. Aguarde um minuto e tente novamente.";
-  }
-  if (lower.includes("500") || lower.includes("internal")) {
-    return "O serviço de OCR retornou um erro interno para este arquivo. Tente outro formato ou outro documento.";
-  }
-  const clean = raw.replace(/\{[^}]*\}/g, "").replace(/\s+/g, " ").trim();
-  return clean.length > 0 && clean.length < 200
-    ? `Falha na extração: ${clean}`
-    : "Falha na extração. Tente novamente ou use outro arquivo.";
-}
+// Phase F.IV — humanizeOcrError shared helper (lib/ai/ocr.ts) com dedup de prefixo.
+const humanizeExtractError = humanizeOcrError;
 
 /**
  * POST /api/forms/:token/attachments/batch-extract

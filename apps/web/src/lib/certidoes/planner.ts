@@ -165,6 +165,11 @@ function normalizeDate(d: string | undefined | null): string | null {
 }
 
 function personLabel(p: Parte): string {
+  // Phase F.IV — prioriza razao_social quando tipo_pessoa=juridica para
+  // evitar que o nome residual do OCR de RG (PF) vaze para label de PJ
+  if (p.tipo_pessoa === "juridica") {
+    return p.razao_social || p.nome || "PJ sem razão social";
+  }
   return p.nome || p.razao_social || "Sem nome";
 }
 

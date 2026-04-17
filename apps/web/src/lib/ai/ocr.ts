@@ -27,6 +27,37 @@ function getGenAI(): GoogleGenAI {
   return genaiClient;
 }
 
+/**
+ * Phase F.IV — humaniza erro do pipeline OCR sem duplicar prefixo.
+ * Shared entre single e batch extract routes. Evita "Falha na extração:
+ * Falha na extração: }" bug identificado no QA.
+ */
+export function humanizeOcrError(raw: string): string {
+  const lower = raw.toLowerCase();
+  if (lower.includes("safety") || lower.includes("blocked")) {
+    return "O documento foi bloqueado pelo filtro de segurança do OCR. Tente um arquivo diferente.";
+  }
+  if (lower.includes("invalid image") || lower.includes("unsupported") || lower.includes("decode")) {
+    return "Não foi possível ler o arquivo. Verifique se é uma imagem nítida ou um PDF de texto.";
+  }
+  if (lower.includes("timeout") || lower.includes("deadline")) {
+    return "A extração demorou demais. Tente um arquivo menor ou clique em Tentar novamente.";
+  }
+  if (lower.includes("quota") || lower.includes("rate")) {
+    return "Limite de uso da IA atingido temporariamente. Aguarde um minuto e tente novamente.";
+  }
+  if (lower.includes("500") || lower.includes("internal")) {
+    return "O serviço de OCR retornou um erro interno para este arquivo. Tente outro formato ou outro documento.";
+  }
+  const clean = raw.replace(/\{[^}]*\}/g, "").replace(/\s+/g, " ").trim();
+  if (!clean || clean.length >= 200) {
+    return "Falha na extração. Tente novamente ou use outro arquivo.";
+  }
+  // Fix duplicação: se raw já começa com "Falha na extra", não prefixar de novo
+  if (/^Falha na extra/i.test(clean)) return clean;
+  return `Falha na extração: ${clean}`;
+}
+
 export function isRateLimitError(message: string): boolean {
   const lower = message.toLowerCase();
   return (
