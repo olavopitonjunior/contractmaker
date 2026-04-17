@@ -42,3 +42,7 @@ public/exports/
 # TypeScript
 *.tsbuildinfo
 next-env.d.ts
+
+# Claude Code / QA tooling
+.claude/
+.playwright-mcp/

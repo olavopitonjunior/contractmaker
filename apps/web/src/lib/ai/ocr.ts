@@ -27,6 +27,24 @@ function getGenAI(): GoogleGenAI {
   return genaiClient;
 }
 
+export function isRateLimitError(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("quota") ||
+    lower.includes("rate limit") ||
+    lower.includes("rate_limit") ||
+    lower.includes("too many requests") ||
+    lower.includes(" 429") ||
+    lower.includes("resource_exhausted")
+  );
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const BATCH_MAX_RETRIES = 3;
+
 const EXTRACTION_PROMPTS: Record<string, string> = {
   rg: `Extraia os seguintes dados desta imagem de RG (Registro Geral) brasileiro:
 - nome_completo
@@ -523,25 +541,50 @@ export async function classifyAndExtractBatch(
     });
   }
 
-  let response;
-  try {
-    response = await ai.models.generateContent({ model, contents });
-  } catch (err) {
-    if (ctx) {
-      recordAIUsage({
-        orgId: ctx.orgId,
-        userId: ctx.userId,
-        contractId: ctx.contractId,
-        provider: "gemini",
-        model,
-        operation: "ocr_form",
-        promptTokens: 0,
-        latencyMs: Date.now() - t0,
-        success: false,
-        errorMessage: err instanceof Error ? err.message : String(err),
-      });
+  // Retry with exponential backoff on rate-limit errors (429 / quota /
+  // resource_exhausted). Non-rate-limit errors fail fast. Matches the retry
+  // policy already used by classifyWithRetry() in the single-doc extract route.
+  // 3 attempts: 0s, 5s(+jitter), 10s(+jitter) → total worst-case ~15s of wait
+  // on top of the actual Gemini latency.
+  let response: Awaited<ReturnType<typeof ai.models.generateContent>> | null = null;
+  let lastErr: unknown = null;
+  let attempt = 0;
+  for (attempt = 0; attempt < BATCH_MAX_RETRIES; attempt++) {
+    try {
+      response = await ai.models.generateContent({ model, contents });
+      break;
+    } catch (err) {
+      lastErr = err;
+      const msg = err instanceof Error ? err.message : String(err);
+      if (!isRateLimitError(msg) || attempt === BATCH_MAX_RETRIES - 1) {
+        if (ctx) {
+          recordAIUsage({
+            orgId: ctx.orgId,
+            userId: ctx.userId,
+            contractId: ctx.contractId,
+            provider: "gemini",
+            model,
+            operation: "ocr_form",
+            promptTokens: 0,
+            latencyMs: Date.now() - t0,
+            success: false,
+            errorMessage: msg,
+          });
+        }
+        throw err;
+      }
+      const base = 5000 * Math.pow(2, attempt);
+      const jitter = Math.floor(Math.random() * 2000);
+      const waitMs = base + jitter;
+      console.warn(
+        `[batch OCR] rate limit — retry ${attempt + 1}/${BATCH_MAX_RETRIES} in ${waitMs}ms`
+      );
+      await sleep(waitMs);
     }
-    throw err;
+  }
+  if (!response) {
+    // Unreachable: loop either breaks with a response or throws. Defensive.
+    throw lastErr ?? new Error("Batch OCR: no response after retries");
   }
 
   if (ctx) {

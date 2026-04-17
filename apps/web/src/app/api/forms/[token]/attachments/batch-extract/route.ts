@@ -225,22 +225,63 @@ export async function POST(
     }
   }
 
-  // Call batch OCR for items that need it
-  const itemsToOcr = prepared
-    .map((p, idx) => ({ p, idx }))
-    .filter(({ p }) => p.item !== null);
+  // Atomically claim each item that still needs OCR. If another request is
+  // already running Gemini for the same attachment id, skip it here so we
+  // don't double-bill. The client can re-poll via single-extract to pick up
+  // the result from the parallel worker. Stale locks (>2min) are taken over.
+  const LOCK_STALE_MS = 2 * 60 * 1000;
+  const staleBefore = new Date(Date.now() - LOCK_STALE_MS);
+  for (const p of prepared) {
+    if (p.item === null) continue; // cached or errored — no OCR needed
+    const claim = await prisma.formAttachment.updateMany({
+      where: {
+        id: p.attachment.id,
+        extractedData: { equals: Prisma.DbNull },
+        OR: [
+          { extractingStartedAt: null },
+          { extractingStartedAt: { lt: staleBefore } },
+        ],
+      },
+      data: { extractingStartedAt: new Date() },
+    });
+    if (claim.count === 0) {
+      p.item = null;
+      p.error =
+        "Extração concorrente em andamento — aguarde alguns segundos e recarregue.";
+    }
+  }
 
-  let batchResults: Array<{
+  // Call batch OCR for items that need it. Key results by attachmentId so the
+  // final loop doesn't rely on positional cursor alignment (which previously
+  // drifted when an individual fallback item errored — the error was set on
+  // p.error AND a placeholder pushed into batchResults, causing the next real
+  // result to be picked up by the wrong attachment).
+  const itemsToOcr = prepared.filter((p) => p.item !== null);
+
+  type OcrResult = {
     documentType: string;
     fields: Record<string, string>;
     confidence: number;
-  }> | null = null;
+  };
+  const resultByAttachmentId = new Map<string, OcrResult>();
 
   if (itemsToOcr.length > 0) {
     try {
-      const batchItems: BatchItem[] = itemsToOcr.map(({ p }) => p.item!);
-      batchResults = await classifyAndExtractBatch(batchItems, {
+      const batchItems: BatchItem[] = itemsToOcr.map((p) => p.item!);
+      const batchResults = await classifyAndExtractBatch(batchItems, {
         orgId: form.orgId,
+      });
+      // classifyAndExtractBatch guarantees batchResults.length === batchItems.length
+      // and preserves input order (see ocr.ts asserts).
+      itemsToOcr.forEach((p, i) => {
+        const r = batchResults[i];
+        if (r) {
+          resultByAttachmentId.set(p.attachment.id, {
+            documentType: r.documentType,
+            fields: r.fields,
+            confidence: r.confidence,
+          });
+        }
       });
     } catch (batchErr) {
       // Batch failed — fallback to individual calls. This protects against
@@ -248,8 +289,7 @@ export async function POST(
       console.warn(
         `[batch-extract] batch failed (${batchErr instanceof Error ? batchErr.message.slice(0, 100) : "?"}), falling back to individual calls`
       );
-      batchResults = [];
-      for (const { p } of itemsToOcr) {
+      for (const p of itemsToOcr) {
         try {
           const result = await classifyAndExtract(
             p.item!.base64Data,
@@ -257,23 +297,33 @@ export async function POST(
             { orgId: form.orgId },
             { skipPrevalidation: true }
           );
-          batchResults.push({
+          resultByAttachmentId.set(p.attachment.id, {
             documentType: result.documentType,
             fields: result.fields,
             confidence: result.confidence,
           });
         } catch (err) {
-          // Mark this specific item as errored and insert a null result
-          p.error = humanizeExtractError(err instanceof Error ? err.message : String(err));
-          batchResults.push({
-            documentType: "outro",
-            fields: {},
-            confidence: 0,
-          });
+          // Attach error to the prepared row; no entry added to the map so
+          // the final loop emits the error response for this specific item
+          // and the other items' results remain correctly associated.
+          p.error = err instanceof Error ? err.message : String(err);
+          // Release the OCR lock so the user can retry via single-extract.
+          await prisma.formAttachment
+            .update({
+              where: { id: p.attachment.id },
+              data: { extractingStartedAt: null },
+            })
+            .catch(() => {});
         }
       }
     }
   }
+
+  // If the batch as a whole threw (not the fallback path — meaning batchErr
+  // wasn't caught per-item), all claimed items also need their locks released.
+  // But since we fall through to the fallback loop above, that's already
+  // handled per-item. The only remaining case: full batch succeeded, individual
+  // items may have results in the map. Those items' locks stay (harmless).
 
   // Persist results and build response
   const response: Array<{
@@ -286,7 +336,6 @@ export async function POST(
     error: string | null;
   }> = [];
 
-  let resultCursor = 0;
   for (const p of prepared) {
     if (p.cachedResult) {
       response.push({
@@ -311,8 +360,7 @@ export async function POST(
       });
       continue;
     }
-    // This item was OCRed in the batch
-    const result = batchResults?.[resultCursor++];
+    const result = resultByAttachmentId.get(p.attachment.id);
     if (!result) {
       response.push({
         attachmentId: p.attachment.id,

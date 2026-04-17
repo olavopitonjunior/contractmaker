@@ -1,4 +1,5 @@
 import type { InfosimplesResponse, NormalizedResult, Situacao } from "./types";
+import { mapInfosimplesCodeToCategory } from "./error-codes";
 
 /**
  * Generic normalizer. Each endpoint has its own data shape, but most return
@@ -194,6 +195,91 @@ function iptuExtractor(resp: InfosimplesResponse): NormalizedResult {
   };
 }
 
+/**
+ * Phase B — Cartão CNPJ: consulta de dados cadastrais, não tem "negativa/
+ * positiva". Sempre emite um dump de atributos (razão social, CNAE, QSA,
+ * endereço, situação). Usamos `situacao: "informativa"` para que a UI saiba
+ * que não é uma certidão de regularidade — é um documento de consulta.
+ */
+function cnpjCartaoExtractor(resp: InfosimplesResponse): NormalizedResult {
+  const d = getFirst<Record<string, unknown>>(resp) ?? {};
+  const situacao_cadastral = asString(d.situacao_cadastral);
+  const razao = asString(d.razao_social) ?? asString(d.nome);
+  const parts: string[] = [];
+  if (razao) parts.push(razao);
+  if (situacao_cadastral) parts.push(`Situação: ${situacao_cadastral}`);
+  return {
+    situacao: "informativa",
+    validade: null,
+    emissao: asString(d.data_emissao) ?? asString(d.data_consulta) ?? null,
+    detalhes: parts.join(" — ") || "Consulta cadastral emitida",
+    consta_debito: false,
+    raw: d,
+  };
+}
+
+/**
+ * Phase B — CRF FGTS: certificado de regularidade. Resposta da Infosimples
+ * para `caixa/regularidade` tem `situacao` ("Regular" / "Irregular") e
+ * datas de validade do certificado.
+ */
+function crfFgtsExtractor(resp: InfosimplesResponse): NormalizedResult {
+  const d = getFirst<Record<string, unknown>>(resp) ?? {};
+  const situacaoRaw = asString(d.situacao);
+  const regular = situacaoRaw
+    ? situacaoRaw.toLowerCase().includes("regular") &&
+      !situacaoRaw.toLowerCase().includes("irregular")
+    : undefined;
+  const situacao: Situacao =
+    regular === true ? "negativa" : regular === false ? "positiva" : "indeterminado";
+  return {
+    situacao,
+    validade:
+      asString(d.validade_fim_data) ??
+      asString(d.data_validade) ??
+      null,
+    emissao:
+      asString(d.validade_inicio_data) ??
+      asString(d.data_emissao) ??
+      null,
+    detalhes: situacaoRaw ?? asString(d.mensagem) ?? null,
+    consta_debito: regular === false,
+    raw: d,
+  };
+}
+
+/**
+ * Phase B — Sefaz/PGE CNDT unificada. Resposta padronizada:
+ *   { conseguiu_emitir_certidao_negativa, emissao_data, validade_data,
+ *     certidao_codigo, mensagem }
+ * Também usado por pge-sp/cndt.
+ */
+function sefazUnificadaExtractor(resp: InfosimplesResponse): NormalizedResult {
+  const d = getFirst<Record<string, unknown>>(resp) ?? {};
+  const conseguiu = asBool(d.conseguiu_emitir_certidao_negativa);
+  const consta = asBool(d.consta_debito);
+  let situacao: Situacao;
+  if (conseguiu === true && consta === false) situacao = "negativa";
+  else if (consta === true) situacao = "positiva";
+  else if (conseguiu === false) situacao = "nao_emitida";
+  else situacao = "indeterminado";
+  return {
+    situacao,
+    validade:
+      asString(d.validade_data) ??
+      asString(d.data_validade) ??
+      asString(d.validade) ??
+      null,
+    emissao:
+      asString(d.emissao_data) ??
+      asString(d.data_emissao) ??
+      null,
+    detalhes: asString(d.mensagem) ?? asString(d.certidao_codigo) ?? null,
+    consta_debito: consta === true,
+    raw: d,
+  };
+}
+
 const EXTRACTORS: Record<string, Extractor> = {
   "receita-federal/pgfn": pgfnExtractor,
   "tribunal/tst/cndt": cndtExtractor,
@@ -212,6 +298,24 @@ const EXTRACTORS: Record<string, Extractor> = {
   "pref/sp/sao-paulo/iptu": iptuExtractor,
   "pref/rj/rio-janeiro/cert-trib": iptuExtractor,
   "pref/rj/rio-janeiro/cnd": iptuExtractor,
+  // Phase B additions — share extractors where response shapes match.
+  "tribunal/tjba/primeiro-grau": tjExtractor,
+  "tribunal/tjgo/nada-consta": tjExtractor,
+  "tribunal/tjdf/nada-consta": tjExtractor,
+  "tribunal/tjsc/pedido-certidao": tjExtractor,
+  "tribunal/tjms/pedido-cert": tjExtractor,
+  "tribunal/tjms/obter-certidao": tjExtractor,
+  "tribunal/tjmt/primeiro-grau-pf": tjExtractor,
+  "tribunal/trt3/ceat": ceatExtractor,
+  "tribunal/trt5/ceat": ceatExtractor,
+  "tribunal/trt9/ceat": ceatExtractor,
+  "tribunal/trt10/ceat": ceatExtractor,
+  "tribunal/trt10/ceat-digital": ceatExtractor,
+  "tribunal/trt12/ceat": ceatExtractor,
+  "receita-federal/cnpj": cnpjCartaoExtractor,
+  "caixa/regularidade": crfFgtsExtractor,
+  "sefaz/certidao-debitos": sefazUnificadaExtractor,
+  "pge-sp/cndt": sefazUnificadaExtractor,
 };
 
 export function normalize(
@@ -219,12 +323,23 @@ export function normalize(
   resp: InfosimplesResponse
 ): NormalizedResult {
   if (resp.code !== 200) {
+    const category = mapInfosimplesCodeToCategory(resp.code, resp.code_message);
+    // Map category → situacao for the coarse-grained state. Success-like
+    // categories (genuine_no_data) become "negativa" because the portal
+    // confirmed nothing is registered. User-fixable / systemic ones become
+    // "nao_emitida" so the UI surfaces the action needed. Unknown stays
+    // "indeterminado" — it's the "we don't know" state.
+    let situacao: Situacao;
+    if (category === "genuine_no_data") situacao = "negativa";
+    else if (category === "unknown") situacao = "indeterminado";
+    else situacao = "nao_emitida";
     return {
-      situacao: resp.code >= 600 && resp.code < 700 ? "nao_emitida" : "indeterminado",
+      situacao,
       validade: null,
       emissao: null,
       detalhes: resp.code_message || null,
       consta_debito: false,
+      failureCategory: category,
       raw: resp,
     };
   }

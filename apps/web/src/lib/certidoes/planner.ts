@@ -8,6 +8,50 @@ import type {
   TargetKind,
 } from "./types";
 
+/**
+ * Phase B — declarative routing table: UF → civil endpoint on the TJ.
+ * When a UF has multiple endpoints (TJSP 2-step, TJMS 2-step, TJRS 5 types),
+ * the handler branch in the main loop handles those special cases; this
+ * table only covers "simple" 1-etapa endpoints for the other TJs.
+ *
+ * UFs absent from this table fall back to "no TJ coverage" — planner emits
+ * a SkippedJob so the due-diligence report lists it as manual pending.
+ */
+const CIVIL_ENDPOINT_BY_UF: Partial<Record<string, string>> = {
+  BA: "tribunal/tjba/primeiro-grau",
+  GO: "tribunal/tjgo/nada-consta",
+  DF: "tribunal/tjdf/nada-consta",
+  SC: "tribunal/tjsc/pedido-certidao",
+  MT: "tribunal/tjmt/primeiro-grau-pf", // PF only — handler checks
+};
+
+/**
+ * Phase B — UF → TRT regional for CEAT (Certidão Eletrônica de Ações
+ * Trabalhistas). Each TRT covers 1-4 UFs. Only UFs where Infosimples has a
+ * CEAT endpoint are listed.
+ */
+const CEAT_ENDPOINT_BY_UF: Partial<Record<string, string[]>> = {
+  SP: ["tribunal/trt2/ceat", "tribunal/trt2/ceat-digital", "tribunal/trt15/ceat"],
+  RJ: ["tribunal/trt1/ceat"],
+  RS: ["tribunal/trt4/ceat"],
+  MG: ["tribunal/trt3/ceat"],
+  BA: ["tribunal/trt5/ceat"],
+  PR: ["tribunal/trt9/ceat"],
+  DF: ["tribunal/trt10/ceat", "tribunal/trt10/ceat-digital"],
+  TO: ["tribunal/trt10/ceat", "tribunal/trt10/ceat-digital"],
+  SC: ["tribunal/trt12/ceat"],
+};
+
+/**
+ * Phase B — State debt (CND Estadual / Dívida Ativa PGE). Default to the
+ * unified Sefaz endpoint that covers all 27 UFs, swapping to SP-specific
+ * when available (cheaper + richer response).
+ */
+function stateDebtEndpointForUf(partyUf: string): string {
+  if (partyUf === "SP") return "pge-sp/cndt";
+  return "sefaz/certidao-debitos";
+}
+
 // ---- deal shape helpers (mirror of DadosContrato) -----------------
 
 interface Parte {
@@ -217,15 +261,37 @@ export function planCertidoesForDeal(
       }
     }
 
-    // ---- CEAT (Trabalhista regional) ----
-    // Default: match by UF da parte. With expandAll, generate all UFs.
-    const shouldSP = expandAll || partyUf === "SP" || partyUf === "";
-    const shouldRJ = expandAll || partyUf === "RJ";
-    const shouldRS = expandAll || partyUf === "RS";
-    if (shouldSP) {
-      // TRT2 fisico
-      {
-        const ep = "tribunal/trt2/ceat";
+    // ---- CEAT (Trabalhista regional, Phase B) ----
+    // Rota declarativa por UF. Em expandAll, dispara todas as UFs cobertas.
+    // UF vazia no match natural cai em SP como default histórico (era o
+    // comportamento anterior para partes sem UF declarada).
+    const ceatUfsToDispatch: string[] = expandAll
+      ? Object.keys(CEAT_ENDPOINT_BY_UF)
+      : partyUf && CEAT_ENDPOINT_BY_UF[partyUf]
+      ? [partyUf]
+      : !partyUf
+      ? ["SP"]
+      : [];
+
+    for (const targetUf of ceatUfsToDispatch) {
+      const endpointsList = CEAT_ENDPOINT_BY_UF[targetUf] ?? [];
+      for (const ep of endpointsList) {
+        // TRT2 digital é o único que aceita cnpj_raiz (truncado 8 dígitos).
+        if (ep === "tribunal/trt2/ceat-digital") {
+          if (isPJ) {
+            if (!cnpj) {
+              skipped.push(buildSkip(ep, kind, index, label, "cnpj", "CNPJ invalido"));
+            } else {
+              jobs.push(buildJob(ep, kind, index, label, { cnpj_raiz: cnpj.slice(0, 8) }));
+            }
+          } else if (!cpf) {
+            skipped.push(buildSkip(ep, kind, index, label, "cpf", "CPF invalido"));
+          } else {
+            jobs.push(buildJob(ep, kind, index, label, { cpf }));
+          }
+          continue;
+        }
+        // Todos os demais CEATs usam { nome?, cpf | cnpj }.
         if (isPJ && !cnpj) {
           skipped.push(buildSkip(ep, kind, index, label, "cnpj", "CNPJ invalido"));
         } else if (!isPJ && !cpf) {
@@ -239,56 +305,55 @@ export function planCertidoesForDeal(
           );
         }
       }
-      // TRT2 digital (usa cnpj_raiz)
-      {
-        const ep = "tribunal/trt2/ceat-digital";
-        if (isPJ) {
-          if (!cnpj) {
-            skipped.push(buildSkip(ep, kind, index, label, "cnpj", "CNPJ invalido"));
-          } else {
-            jobs.push(buildJob(ep, kind, index, label, { cnpj_raiz: cnpj.slice(0, 8) }));
-          }
-        } else if (!cpf) {
-          skipped.push(buildSkip(ep, kind, index, label, "cpf", "CPF invalido"));
-        } else {
-          jobs.push(buildJob(ep, kind, index, label, { cpf }));
-        }
-      }
-      // TRT15 (interior)
-      {
-        const ep = "tribunal/trt15/ceat";
-        jobs.push(
-          buildJob(ep, kind, index, label, {
-            nome: label,
-            ...(isPJ ? { cnpj } : cpf ? { cpf } : {}),
-          })
-        );
-      }
     }
-    if (shouldRJ) {
-      const ep = "tribunal/trt1/ceat";
-      if (isPJ && !cnpj) {
-        skipped.push(buildSkip(ep, kind, index, label, "cnpj", "CNPJ invalido"));
-      } else if (!isPJ && !cpf) {
-        skipped.push(buildSkip(ep, kind, index, label, "cpf", "CPF invalido"));
-      } else {
-        jobs.push(buildJob(ep, kind, index, label, isPJ ? { cnpj } : { cpf }));
-      }
+
+    // Se a UF da parte não tem cobertura CEAT na Infosimples, registrar skip
+    // explicativo (relatório de due diligence lista como pendência manual).
+    if (!expandAll && partyUf && !CEAT_ENDPOINT_BY_UF[partyUf]) {
+      skipped.push(
+        buildSkip(
+          "tribunal/trt-manual",
+          kind,
+          index,
+          label,
+          "cobertura",
+          `TRT da UF ${partyUf} sem cobertura Infosimples — extrair manualmente no portal do TRT da região`
+        )
+      );
     }
-    if (shouldRS) {
-      const ep = "tribunal/trt4/ceat";
+
+    // ---- CND Estadual / Dívida Ativa PGE (Phase B) ----
+    // Unificado via sefaz/certidao-debitos; SP usa endpoint dedicado.
+    if (partyUf) {
+      const stateEp = stateDebtEndpointForUf(partyUf);
       if (isPJ && !cnpj) {
-        skipped.push(buildSkip(ep, kind, index, label, "cnpj", "CNPJ invalido"));
+        skipped.push(buildSkip(stateEp, kind, index, label, "cnpj", "CNPJ invalido"));
       } else if (!isPJ && !cpf) {
-        skipped.push(buildSkip(ep, kind, index, label, "cpf", "CPF invalido"));
+        skipped.push(buildSkip(stateEp, kind, index, label, "cpf", "CPF invalido"));
       } else {
-        jobs.push(
-          buildJob(ep, kind, index, label, {
-            nome: label,
-            ...(isPJ ? { cnpj } : { cpf }),
-          })
-        );
+        const args: Record<string, unknown> = isPJ ? { cnpj } : { cpf };
+        // SEFAZ unificada exige UF; SP-específico não precisa.
+        if (stateEp === "sefaz/certidao-debitos") args.uf = partyUf;
+        jobs.push(buildJob(stateEp, kind, index, label, args));
       }
+    } else if (!expandAll) {
+      skipped.push(
+        buildSkip(
+          "sefaz/certidao-debitos",
+          kind,
+          index,
+          label,
+          "uf",
+          "CND Estadual exige UF da parte"
+        )
+      );
+    }
+
+    // ---- PJ-only: Cartão CNPJ + CRF FGTS (Phase B) ----
+    // Sempre disparar para PJ (sem custo-benefício em skip).
+    if (isPJ && cnpj) {
+      jobs.push(buildJob("receita-federal/cnpj", kind, index, label, { cnpj }));
+      jobs.push(buildJob("caixa/regularidade", kind, index, label, { cnpj }));
     }
   }
 
@@ -445,6 +510,73 @@ export function planCertidoesForDeal(
           );
         }
       }
+    }
+
+    // Phase B — Cíveis adicionais (BA, GO, DF, SC, MS, MT). Usa tabela
+    // declarativa CIVIL_ENDPOINT_BY_UF. Só dispara se a UF da parte está
+    // coberta E não é SP/RJ/RS (tratados separadamente acima). Em expandAll,
+    // dispara todas as UFs da tabela.
+    const additionalUfsToTry: string[] = expandAll
+      ? Object.keys(CIVIL_ENDPOINT_BY_UF)
+      : partyUf && partyUf in CIVIL_ENDPOINT_BY_UF
+      ? [partyUf]
+      : [];
+
+    for (const tjUf of additionalUfsToTry) {
+      const ep = CIVIL_ENDPOINT_BY_UF[tjUf];
+      if (!ep) continue;
+      // TJMT aceita apenas PF.
+      if (ep === "tribunal/tjmt/primeiro-grau-pf" && isPJ) {
+        skipped.push(
+          buildSkip(
+            ep,
+            kind,
+            index,
+            label,
+            "tipo_pessoa",
+            "TJMT não emite certidão para pessoa jurídica via Infosimples — extrair manualmente"
+          )
+        );
+        continue;
+      }
+      if ((!isPJ && !cpf) || (isPJ && !cnpj)) {
+        skipped.push(
+          buildSkip(ep, kind, index, label, isPJ ? "cnpj" : "cpf", "documento invalido")
+        );
+        continue;
+      }
+      // TJMS é two-step (só dispara o pedido; obter roda via cron). Outros
+      // TJs são single-step.
+      const args: Record<string, unknown> = {
+        email,
+        nome_razao_social: label,
+        nome: label,
+        finalidade: DEFAULT_FINALIDADE,
+        ...(isPJ ? { cnpj: cnpj! } : { cpf: cpf! }),
+      };
+      if (parte.data_nascimento && !isPJ) {
+        args.birthdate = normalizeDate(parte.data_nascimento);
+      }
+      jobs.push(buildJob(ep, kind, index, label, args));
+    }
+
+    // Phase B — UFs sem cobertura cível Infosimples: MG, PR, ES + demais.
+    // Registrar skip informativo somente se expandAll=false E UF não está em
+    // nenhuma das trilhas cobertas (SP/RJ/RS/BA/GO/DF/SC/MS/MT).
+    const hasCivilCoverage =
+      ["SP", "RJ", "RS"].includes(partyUf) ||
+      partyUf in CIVIL_ENDPOINT_BY_UF;
+    if (!expandAll && partyUf && !hasCivilCoverage) {
+      skipped.push(
+        buildSkip(
+          "tribunal/tj-manual",
+          kind,
+          index,
+          label,
+          "cobertura",
+          `TJ da UF ${partyUf} sem cobertura Infosimples — extrair manualmente no portal TJ${partyUf}`
+        )
+      );
     }
   }
 

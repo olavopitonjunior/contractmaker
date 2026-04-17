@@ -15,7 +15,14 @@ export type Situacao =
   | "positiva_com_efeitos"
   | "nao_emitida"
   | "aguardando_pdf"
+  | "informativa"          // Cartão CNPJ, Cartão CPF — consulta de dados, sem negativa/positiva
   | "indeterminado";
+
+// Re-exported from ./error-codes so callers that type-import from types.ts
+// get it too (most legacy code imports from here).
+export type {
+  FailureCategory,
+} from "./error-codes";
 
 export interface NormalizedResult {
   situacao: Situacao;
@@ -23,6 +30,12 @@ export interface NormalizedResult {
   emissao?: string | null;
   detalhes?: string | null;
   consta_debito?: boolean;
+  /**
+   * When `situacao === "nao_emitida"` or `"indeterminado"`, categorizes the
+   * underlying reason so the UI can render differentiated UX (edit party,
+   * retry, contact admin, etc). Unset when situacao is success-like.
+   */
+  failureCategory?: import("./error-codes").FailureCategory;
   raw?: unknown;
 }
 

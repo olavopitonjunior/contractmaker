@@ -521,10 +521,12 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
           }
         });
 
+      type UploadOutcome = { doc: DocumentCardData; cached: boolean } | null;
+
       const doUpload = async (
         rawFile: File,
         tempId: string
-      ): Promise<DocumentCardData | null> => {
+      ): Promise<UploadOutcome> => {
         try {
           const file = IMAGE_MIMES.includes(rawFile.type)
             ? await resizeImage(rawFile, RESIZE_MAX_SIDE)
@@ -548,6 +550,52 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
             return null;
           }
 
+          // Upload route pre-warms the content-hash cache: if the same file
+          // content has already been OCRed in this org, the server copies the
+          // cached result onto the new attachment and returns { cached: true,
+          // category, extractedData }. We can skip the OCR call entirely and
+          // apply the result straight to the card.
+          if (uploadData.cached && uploadData.extractedData) {
+            const fields =
+              (uploadData.extractedData.fields as Record<string, unknown>) || {};
+            const confidence =
+              typeof uploadData.extractedData.confidence === "number"
+                ? uploadData.extractedData.confidence
+                : null;
+            // Swap temp id for persisted id first so applyExtractResult finds it.
+            setDocs((prev) =>
+              prev.map((d) =>
+                d.id === tempId
+                  ? {
+                      ...d,
+                      id: uploadData.id,
+                      fileUrl: uploadData.fileUrl,
+                    }
+                  : d
+              )
+            );
+            applyExtractResult(
+              uploadData.id,
+              uploadData.category ?? null,
+              fields,
+              confidence
+            );
+            return {
+              doc: {
+                id: uploadData.id,
+                filename: rawFile.name,
+                mime: rawFile.type,
+                fileUrl: uploadData.fileUrl,
+                status: "ready",
+                category: uploadData.category ?? null,
+                fields,
+                confidence,
+                assignment: { kind: "outro", index: 0 },
+              },
+              cached: true,
+            };
+          }
+
           // Promote temp card to persisted id. Status stays "extracting"
           // visually but the actual OCR call may be waiting in the ocrLimit
           // queue — for the user, both look like "Analisando…".
@@ -565,15 +613,18 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
           );
 
           return {
-            id: uploadData.id,
-            filename: rawFile.name,
-            mime: rawFile.type,
-            fileUrl: uploadData.fileUrl,
-            status: "extracting",
-            category: null,
-            fields: null,
-            confidence: null,
-            assignment: { kind: "outro", index: 0 },
+            doc: {
+              id: uploadData.id,
+              filename: rawFile.name,
+              mime: rawFile.type,
+              fileUrl: uploadData.fileUrl,
+              status: "extracting",
+              category: null,
+              fields: null,
+              confidence: null,
+              assignment: { kind: "outro", index: 0 },
+            },
+            cached: false,
           };
         } catch (err) {
           setDocs((prev) =>
@@ -592,12 +643,14 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
       };
 
       const tasks = validFiles.map(({ rawFile, tempId }) =>
-        uploadLimit(() => doUpload(rawFile, tempId)).then((persistedDoc) => {
-          if (!persistedDoc) return;
+        uploadLimit(() => doUpload(rawFile, tempId)).then((outcome) => {
+          if (!outcome) return;
+          // Cached uploads are already fully resolved — skip the OCR scheduler.
+          if (outcome.cached) return;
           // Upload slot is released; doc is enqueued in the OCR batch scheduler
           // which will flush it within BATCH_WINDOW_MS (1500ms) or sooner if
           // BATCH_MAX_SIZE (3) other docs arrive in the meantime.
-          return enqueueForOcr(persistedDoc);
+          return enqueueForOcr(outcome.doc);
         })
       );
 

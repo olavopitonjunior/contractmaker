@@ -1,0 +1,6 @@
+{
+  "code": 668,
+  "code_message": "Limite diario de consultas do portal atingido",
+  "data": [],
+  "errors": ["Quota exceeded"]
+}

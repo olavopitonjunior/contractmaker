@@ -55,23 +55,39 @@ export async function POST(
       },
     },
   });
-  if (!job || job.dealId !== params.dealId) {
+  if (!job || job.dealId !== params.dealId || !job.deal) {
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
   }
-  if (job.deal.form && job.deal.form.orgId !== org.id) {
+  // TypeScript-friendly alias — after the null check above, TS still widens
+  // job.deal to nullable on deep access. Capture once as non-null.
+  const jobDeal = job.deal;
+  if (jobDeal.form && jobDeal.form.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
-  if (job.status !== "skipped") {
+  // Accept: (a) skipped jobs (missing data), (b) success/failed jobs whose
+  // normalized result carries a user-fixable failureCategory (Phase A). Both
+  // flows share the merge + re-plan + re-run logic below.
+  const jobResult = job.resultData as { failureCategory?: string } | null;
+  const isUserFixable =
+    jobResult?.failureCategory === "missing_input" ||
+    jobResult?.failureCategory === "inconsistent_input";
+  const acceptable =
+    job.status === "skipped" ||
+    ((job.status === "success" || job.status === "failed") && isUserFixable);
+  if (!acceptable) {
     return NextResponse.json(
-      { error: "Este job nao esta pulado" },
+      {
+        error:
+          "Este job nao aceita complemento/edicao — ja esta em estado terminal valido",
+      },
       { status: 400 }
     );
   }
 
   // Merge new fields into deal.dataJson (and form.dataJson if linked)
   const dealData =
-    (job.deal.form?.dataJson as Record<string, unknown> | null) ||
-    (job.deal.dataJson as Record<string, unknown> | null) ||
+    (jobDeal.form?.dataJson as Record<string, unknown> | null) ||
+    (jobDeal.dataJson as Record<string, unknown> | null) ||
     {};
   const merged = setByPath(structuredClone(dealData), parsed.data.fields);
 
@@ -81,9 +97,9 @@ export async function POST(
       where: { id: params.dealId },
       data: { dataJson: merged as object },
     });
-    if (job.deal.form?.id) {
+    if (jobDeal.form?.id) {
       await tx.salesForm.update({
-        where: { id: job.deal.form.id },
+        where: { id: jobDeal.form.id },
         data: { dataJson: merged as object },
       });
     }

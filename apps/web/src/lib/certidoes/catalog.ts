@@ -168,4 +168,6 @@ export const CATEGORY_LABELS: Record<EndpointCategory, string> = {
   fiscal: "Fiscal",
   protesto: "Protesto",
   municipal: "Municipal",
+  cadastro: "Cadastro",
+  fgts: "FGTS",
 };

@@ -14,7 +14,9 @@ export type EndpointCategory =
   | "fiscal"
   | "protesto"
   | "municipal"
-  | "federal";
+  | "federal"
+  | "cadastro"    // Phase B: Cartão CNPJ, CPF situation — informational dumps
+  | "fgts";        // Phase B: CRF FGTS (Caixa) — labor-adjacent regulatory
 export type EndpointAppliesTo = "pessoa" | "imovel";
 
 export interface EndpointInfo {
@@ -219,6 +221,189 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["imovel"],
     category: "municipal",
     description: "Certidao Negativa de Debitos Municipais do Rio de Janeiro (exige inscricao municipal)",
+  },
+
+  // ============================================================
+  // Phase B — Expansão Regional (abril/2026)
+  // Fontes: research-notes.md + infosimples.com/consultas/precos/
+  // ============================================================
+
+  // --- Cíveis estaduais adicionais (1 etapa, exceto TJMS) ---
+  "tribunal/tjba/primeiro-grau": {
+    id: "tribunal/tjba/primeiro-grau",
+    label: "Certidao Civel TJBA",
+    costCents: 4,
+    scope: "estadual",
+    uf: "BA",
+    appliesTo: ["pessoa", "imovel"],
+    category: "civel",
+    description: "Certidao de 1o Grau do TJBA (Bahia) — 1 etapa",
+  },
+  "tribunal/tjgo/nada-consta": {
+    id: "tribunal/tjgo/nada-consta",
+    label: "Nada Consta TJGO",
+    costCents: 4,
+    scope: "estadual",
+    uf: "GO",
+    appliesTo: ["pessoa", "imovel"],
+    category: "civel",
+    description: "Certidao Nada Consta do TJGO (Goias) — 1o e 2o grau",
+  },
+  "tribunal/tjdf/nada-consta": {
+    id: "tribunal/tjdf/nada-consta",
+    label: "Nada Consta TJDF",
+    costCents: 4,
+    scope: "estadual",
+    uf: "DF",
+    appliesTo: ["pessoa", "imovel"],
+    category: "civel",
+    description: "Certidao Nada Consta do TJDF (Distrito Federal)",
+  },
+  "tribunal/tjsc/pedido-certidao": {
+    id: "tribunal/tjsc/pedido-certidao",
+    label: "Certidao TJSC (pedido)",
+    costCents: 6,
+    scope: "estadual",
+    uf: "SC",
+    appliesTo: ["pessoa", "imovel"],
+    category: "civel",
+    description: "Certidao do TJSC (Santa Catarina) — prazo ate 5 dias uteis",
+  },
+  "tribunal/tjms/pedido-cert": {
+    id: "tribunal/tjms/pedido-cert",
+    label: "Certidao TJMS (pedido)",
+    costCents: 6,
+    twoStep: true,
+    scope: "estadual",
+    uf: "MS",
+    appliesTo: ["pessoa", "imovel"],
+    category: "civel",
+    description: "Pedido de Certidao do TJMS (Mato Grosso do Sul) — 1o passo",
+  },
+  "tribunal/tjms/obter-certidao": {
+    id: "tribunal/tjms/obter-certidao",
+    label: "Certidao TJMS (obter)",
+    costCents: 4,
+    initialStatus: "awaiting_portal",
+    scope: "estadual",
+    uf: "MS",
+    appliesTo: ["pessoa", "imovel"],
+    category: "civel",
+    description: "Obtencao da Certidao do TJMS — 2o passo (automatico via cron)",
+  },
+  "tribunal/tjmt/primeiro-grau-pf": {
+    id: "tribunal/tjmt/primeiro-grau-pf",
+    label: "Certidao Civel TJMT (PF)",
+    costCents: 4,
+    scope: "estadual",
+    uf: "MT",
+    appliesTo: ["pessoa"],
+    category: "civel",
+    description: "Certidao de 1o Grau do TJMT (Mato Grosso) — pessoa fisica apenas",
+  },
+
+  // --- Trabalhistas (CEAT regional, R$ 0,04 cada) ---
+  "tribunal/trt3/ceat": {
+    id: "tribunal/trt3/ceat",
+    label: "CEAT TRT3 (MG)",
+    costCents: 4,
+    scope: "estadual",
+    uf: "MG",
+    appliesTo: ["pessoa"],
+    category: "trabalhista",
+    description: "Certidao Eletronica de Acoes Trabalhistas do TRT3 (Minas Gerais)",
+  },
+  "tribunal/trt5/ceat": {
+    id: "tribunal/trt5/ceat",
+    label: "CEAT TRT5 (BA)",
+    costCents: 4,
+    scope: "estadual",
+    uf: "BA",
+    appliesTo: ["pessoa"],
+    category: "trabalhista",
+    description: "Certidao Eletronica de Acoes Trabalhistas do TRT5 (Bahia)",
+  },
+  "tribunal/trt9/ceat": {
+    id: "tribunal/trt9/ceat",
+    label: "CEAT TRT9 (PR)",
+    costCents: 4,
+    scope: "estadual",
+    uf: "PR",
+    appliesTo: ["pessoa"],
+    category: "trabalhista",
+    description: "Certidao Eletronica de Acoes Trabalhistas do TRT9 (Parana)",
+  },
+  "tribunal/trt10/ceat": {
+    id: "tribunal/trt10/ceat",
+    label: "CEAT TRT10 (DF/TO)",
+    costCents: 4,
+    scope: "estadual",
+    uf: "DF",
+    appliesTo: ["pessoa"],
+    category: "trabalhista",
+    description: "Certidao Eletronica de Acoes Trabalhistas do TRT10 (DF + Tocantins) — autos fisicos",
+  },
+  "tribunal/trt10/ceat-digital": {
+    id: "tribunal/trt10/ceat-digital",
+    label: "CEAT TRT10 digital",
+    costCents: 4,
+    scope: "estadual",
+    uf: "DF",
+    appliesTo: ["pessoa"],
+    category: "trabalhista",
+    description: "Certidao Eletronica de Acoes Trabalhistas do TRT10 — autos digitais",
+  },
+  "tribunal/trt12/ceat": {
+    id: "tribunal/trt12/ceat",
+    label: "CEAT TRT12 (SC)",
+    costCents: 4,
+    scope: "estadual",
+    uf: "SC",
+    appliesTo: ["pessoa"],
+    category: "trabalhista",
+    description: "Certidao Eletronica de Acoes Trabalhistas do TRT12 (Santa Catarina)",
+  },
+
+  // --- PJ federal: cartao CNPJ + CRF FGTS ---
+  "receita-federal/cnpj": {
+    id: "receita-federal/cnpj",
+    label: "Cartao CNPJ",
+    costCents: 4,
+    scope: "federal",
+    appliesTo: ["pessoa"],
+    category: "cadastro",
+    description: "Consulta cadastral da Receita Federal — situacao, CNAE, QSA, endereco (PJ)",
+  },
+  "caixa/regularidade": {
+    id: "caixa/regularidade",
+    label: "CRF FGTS",
+    costCents: 6,
+    scope: "federal",
+    appliesTo: ["pessoa"],
+    category: "fgts",
+    description: "Certificado de Regularidade do FGTS emitido pela Caixa (PJ)",
+  },
+
+  // --- Divida Ativa estadual unificada (27 UFs) ---
+  "sefaz/certidao-debitos": {
+    id: "sefaz/certidao-debitos",
+    label: "CND Estadual Sefaz",
+    // Variavel por UF (4-10 centavos tipicamente). 6 e o valor medio.
+    costCents: 6,
+    scope: "estadual",
+    appliesTo: ["pessoa"],
+    category: "fiscal",
+    description: "Certidao Negativa de Debitos Estaduais unificada (todas as 27 UFs) — exige UF no request",
+  },
+  "pge-sp/cndt": {
+    id: "pge-sp/cndt",
+    label: "CND PGE-SP",
+    costCents: 4,
+    scope: "estadual",
+    uf: "SP",
+    appliesTo: ["pessoa"],
+    category: "fiscal",
+    description: "Certidao Negativa da Divida Ativa do Estado de Sao Paulo (PGE-SP)",
   },
 };
 

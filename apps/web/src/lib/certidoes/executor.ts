@@ -99,9 +99,12 @@ async function checkBatchCompletion(batchId: string): Promise<void> {
     ).length;
     if (pendingCount > 0) return;
 
-    // All terminal — emit the notification
+    // All terminal — emit the notification.
+    // Phase C: jobs podem ser deal-scoped (first.deal não-null) ou ad-hoc
+    // (first.orgId). Priorizar deal quando existe para manter UX atual.
     const first = jobs[0];
-    if (!first.deal.form?.orgId) return; // needs org to scope notifications
+    const orgId = first.deal?.form?.orgId ?? first.orgId;
+    if (!orgId) return; // needs org to scope notifications
 
     const success = jobs.filter((j) => j.status === "success").length;
     const failed = jobs.filter((j) => j.status === "failed").length;
@@ -112,8 +115,14 @@ async function checkBatchCompletion(batchId: string): Promise<void> {
       return r?.situacao === "positiva" || r?.situacao === "positiva_com_efeitos";
     }).length;
 
-    const dealTitle = first.deal.title;
+    const dealTitle = first.deal?.title ?? "Diligência avulsa";
     const userId = first.userId;
+    const linkUrl = first.deal
+      ? `/deals/${first.deal.id}`
+      : `/certidoes/adhoc?batch=${batchId}`;
+    const scopeMetadata: Record<string, unknown> = { batchId };
+    if (first.deal) scopeMetadata.dealId = first.deal.id;
+    else scopeMetadata.orgId = orgId;
 
     // Single-job batches: more specific notification
     if (jobs.length === 1) {
@@ -131,13 +140,13 @@ async function checkBatchCompletion(batchId: string): Promise<void> {
         ? `${job.errorMessage.slice(0, 100)} — ${dealTitle}`
         : dealTitle;
       await emitNotification({
-        orgId: first.deal.form.orgId,
+        orgId,
         userId,
-        type: "certidao_batch_complete", // still use batch type for idempotency
+        type: "certidao_batch_complete",
         title,
         body,
-        linkUrl: `/deals/${first.deal.id}`,
-        metadata: { batchId, dealId: first.deal.id, jobId: job.id },
+        linkUrl,
+        metadata: { ...scopeMetadata, jobId: job.id },
       });
       return;
     }
@@ -151,13 +160,13 @@ async function checkBatchCompletion(batchId: string): Promise<void> {
     const breakdown = parts.join(" · ");
 
     await emitNotification({
-      orgId: first.deal.form.orgId,
+      orgId,
       userId,
       type: "certidao_batch_complete",
       title: `Batch de ${jobs.length} certidões concluído`,
       body: `${breakdown} — ${dealTitle}`,
-      linkUrl: `/deals/${first.deal.id}`,
-      metadata: { batchId, dealId: first.deal.id },
+      linkUrl,
+      metadata: scopeMetadata,
     });
   } catch (err) {
     console.error(
@@ -212,9 +221,18 @@ function pLimit(concurrency: number) {
  * completion check happens later in `pollPortalJob` when the last portal
  * job transitions to success/failed.
  */
-export async function runBatch(batchId: string, dealId: string): Promise<void> {
+export async function runBatch(
+  batchId: string,
+  dealId: string | null
+): Promise<void> {
+  // Phase C: dealId nullable → ad-hoc batches scoped só pelo batchId.
+  // Filtro SQL ajustado para não exigir dealId quando null.
   const jobs = await prisma.certidaoJob.findMany({
-    where: { batchId, dealId, status: "pending" },
+    where: {
+      batchId,
+      ...(dealId ? { dealId } : {}),
+      status: "pending",
+    },
   });
   if (jobs.length === 0) return;
 
@@ -229,7 +247,10 @@ export async function runBatch(batchId: string, dealId: string): Promise<void> {
  * Run a single job: call Infosimples, normalize, download receipt, link to attachment.
  * Handles two-step portals (TJSP/TJRJ) by transitioning to awaiting_portal.
  */
-export async function runSingleJob(jobId: string, dealId: string): Promise<void> {
+export async function runSingleJob(
+  jobId: string,
+  dealId: string | null
+): Promise<void> {
   const job = await prisma.certidaoJob.findUnique({ where: { id: jobId } });
   if (!job) return;
 
@@ -449,13 +470,18 @@ export async function pollPortalJob(jobId: string): Promise<void> {
 }
 
 async function downloadAndAttach(
-  dealId: string,
+  dealId: string | null,
   endpoint: string,
   label: string,
   receiptUrl: string,
   targetKind: string,
   targetIndex: number
 ): Promise<string | null> {
+  // Phase C: ad-hoc jobs have no dealId — skip DealAttachment creation and
+  // let the UI consume site_receipts[] directly from the Infosimples result.
+  // This avoids a broader schema change (DealAttachment.dealId nullable)
+  // while still letting ad-hoc users download the PDFs via the original URL.
+  if (!dealId) return null;
   try {
     const { buffer, contentType } = await downloadReceipt(receiptUrl);
     const safeName = `${endpoint.replace(/[^a-z0-9]/gi, "_")}_${Date.now()}.pdf`;
@@ -605,7 +631,11 @@ export async function getMonthlySpend(orgId: string): Promise<{
   budgetCents: number;
   exceeded: boolean;
 }> {
-  const budgetCents = Number(process.env.INFOSIMPLES_MONTHLY_BUDGET_CENTS ?? "5000");
+  // Phase B (2026-04): raised default from 5000 (R$ 50) to 10000 (R$ 100) to
+  // accommodate expanded endpoint coverage — PJ parties now always fire
+  // receita-federal/cnpj + caixa/regularidade, and all UFs now get a state
+  // CND. Worst-case per Deal grew ~2-3x. Override per-org via env var.
+  const budgetCents = Number(process.env.INFOSIMPLES_MONTHLY_BUDGET_CENTS ?? "10000");
   const now = new Date();
   const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const agg = await prisma.certidaoJob.aggregate({

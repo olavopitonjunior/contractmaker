@@ -98,6 +98,7 @@ model Organization {
   templateSuggestions TemplateSuggestion[]
   documentStyles      DocumentStyle[]
   aiUsage             AIUsage[]
+  adhocCertidaoJobs   CertidaoJob[]        @relation("certidaoJobOrg")
 }
 
 model OrgMembership {
@@ -181,7 +182,10 @@ model DealAttachment {
 
 model CertidaoJob {
   id              String    @id @default(cuid())
-  dealId          String
+  // Phase C — dealId nullable para suportar consultas ad-hoc (diligência
+  // de CPF/CNPJ não arrolado em Deal). Ad-hoc jobs têm orgId obrigatório.
+  dealId          String?
+  orgId           String?
   userId          String?
   batchId         String
   provider        String    @default("infosimples")
@@ -204,11 +208,13 @@ model CertidaoJob {
   retryCount      Int       @default(0)
   createdAt       DateTime  @default(now())
 
-  deal       Deal            @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  user       User?           @relation("certidaoJobUser", fields: [userId], references: [id], onDelete: SetNull)
-  attachment DealAttachment? @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
+  deal         Deal?           @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  organization Organization?   @relation("certidaoJobOrg", fields: [orgId], references: [id], onDelete: Cascade)
+  user         User?           @relation("certidaoJobUser", fields: [userId], references: [id], onDelete: SetNull)
+  attachment   DealAttachment? @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
 
   @@index([dealId, batchId])
+  @@index([orgId, batchId])
   @@index([status])
   @@index([status, expectedReadyAt])
   @@index([userId, createdAt])
@@ -525,19 +531,25 @@ model ContractChangeLog {
 // ============================================
 
 model FormAttachment {
-  id            String   @id @default(cuid())
-  formId        String
-  filename      String
-  mime          String
-  url           String
-  category      String?
-  extractedData Json?
-  contentHash   String?
-  createdAt     DateTime @default(now())
+  id                  String    @id @default(cuid())
+  formId              String
+  filename            String
+  mime                String
+  url                 String
+  category            String?
+  extractedData       Json?
+  contentHash         String?
+  // Idempotent OCR lock. Set by the extract routes via an atomic
+  // `updateMany({ where: { id, extractingStartedAt: null } })` claim so two
+  // concurrent POSTs for the same attachment don't both call Gemini. Cleared
+  // back to null on failure so the user can retry.
+  extractingStartedAt DateTime?
+  createdAt           DateTime  @default(now())
 
   form SalesForm @relation(fields: [formId], references: [id], onDelete: Cascade)
 
   @@index([contentHash])
+  @@index([extractingStartedAt])
 }
 
 // ============================================

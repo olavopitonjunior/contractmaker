@@ -243,3 +243,123 @@ describe("planCertidoesForDeal — deal vazio", () => {
     expect(plan.jobs).toHaveLength(0);
   });
 });
+
+// Phase B — expansão regional: UFs novas + endpoints PJ
+describe("Phase B — cobertura UF adicional (BA/GO/DF/SC/MT)", () => {
+  it("parte PF em BA gera TJBA cível + TRT5 + sefaz unificada", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [{ ...VENDEDOR_PF_SP, uf: "BA", cidade: "Salvador" }],
+      compradores: [],
+      imoveis: [],
+    });
+    const tjba = plan.jobs.find((j) => j.endpoint === "tribunal/tjba/primeiro-grau");
+    const trt5 = plan.jobs.find((j) => j.endpoint === "tribunal/trt5/ceat");
+    const sefaz = plan.jobs.find((j) => j.endpoint === "sefaz/certidao-debitos");
+    expect(tjba).toBeDefined();
+    expect(trt5).toBeDefined();
+    expect(sefaz).toBeDefined();
+    expect(sefaz?.requestPayload.uf).toBe("BA");
+  });
+
+  it("parte PF em DF gera TJDF + 2 TRT10 (fisico+digital)", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [{ ...VENDEDOR_PF_SP, uf: "DF", cidade: "Brasilia" }],
+      compradores: [],
+      imoveis: [],
+    });
+    const tjdf = plan.jobs.find((j) => j.endpoint === "tribunal/tjdf/nada-consta");
+    const trt10Fisico = plan.jobs.find((j) => j.endpoint === "tribunal/trt10/ceat");
+    const trt10Digital = plan.jobs.find((j) => j.endpoint === "tribunal/trt10/ceat-digital");
+    expect(tjdf).toBeDefined();
+    expect(trt10Fisico).toBeDefined();
+    expect(trt10Digital).toBeDefined();
+  });
+
+  it("parte PF em MG (sem cobertura TJ) gera skip manual + TRT3", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [{ ...VENDEDOR_PF_SP, uf: "MG", cidade: "Belo Horizonte" }],
+      compradores: [],
+      imoveis: [],
+    });
+    const trt3 = plan.jobs.find((j) => j.endpoint === "tribunal/trt3/ceat");
+    const skipTj = plan.skipped.find((s) => s.endpoint === "tribunal/tj-manual");
+    expect(trt3).toBeDefined();
+    expect(skipTj).toBeDefined();
+    expect(skipTj?.reason).toContain("MG");
+  });
+
+  it("parte PF em estado sem CEAT gera skip trabalhista manual", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [{ ...VENDEDOR_PF_SP, uf: "PE", cidade: "Recife" }],
+      compradores: [],
+      imoveis: [],
+    });
+    const skipTrt = plan.skipped.find((s) => s.endpoint === "tribunal/trt-manual");
+    expect(skipTrt).toBeDefined();
+    expect(skipTrt?.reason).toContain("PE");
+  });
+
+  it("TJMT rejeita PJ com skip explicativo", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [{ ...PESSOA_JURIDICA, uf: "MT", cidade: "Cuiaba" }],
+      compradores: [],
+      imoveis: [],
+    });
+    const tjmtSkip = plan.skipped.find(
+      (s) => s.endpoint === "tribunal/tjmt/primeiro-grau-pf"
+    );
+    expect(tjmtSkip).toBeDefined();
+    expect(tjmtSkip?.reason).toContain("pessoa jur");
+  });
+});
+
+describe("Phase B — PJ sempre dispara CNPJ + CRF", () => {
+  it("parte PJ em SP gera receita-federal/cnpj + caixa/regularidade", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [PESSOA_JURIDICA],
+      compradores: [],
+      imoveis: [],
+    });
+    const cnpj = plan.jobs.find((j) => j.endpoint === "receita-federal/cnpj");
+    const crf = plan.jobs.find((j) => j.endpoint === "caixa/regularidade");
+    expect(cnpj).toBeDefined();
+    expect(cnpj?.requestPayload.cnpj).toBe("11222333000181");
+    expect(crf).toBeDefined();
+    expect(crf?.requestPayload.cnpj).toBe("11222333000181");
+  });
+
+  it("parte PF NAO dispara CNPJ/CRF", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [VENDEDOR_PF_SP],
+      compradores: [],
+      imoveis: [],
+    });
+    expect(plan.jobs.find((j) => j.endpoint === "receita-federal/cnpj")).toBeUndefined();
+    expect(plan.jobs.find((j) => j.endpoint === "caixa/regularidade")).toBeUndefined();
+  });
+});
+
+describe("Phase B — CND Estadual roteamento", () => {
+  it("SP usa pge-sp/cndt (específico)", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [VENDEDOR_PF_SP],
+      compradores: [],
+      imoveis: [],
+    });
+    const spEp = plan.jobs.find((j) => j.endpoint === "pge-sp/cndt");
+    expect(spEp).toBeDefined();
+    expect(
+      plan.jobs.find((j) => j.endpoint === "sefaz/certidao-debitos")
+    ).toBeUndefined();
+  });
+
+  it("demais UFs usam sefaz/certidao-debitos unificada com UF no payload", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [{ ...VENDEDOR_PF_SP, uf: "BA", cidade: "Salvador" }],
+      compradores: [],
+      imoveis: [],
+    });
+    const sefaz = plan.jobs.find((j) => j.endpoint === "sefaz/certidao-debitos");
+    expect(sefaz?.requestPayload.uf).toBe("BA");
+  });
+});

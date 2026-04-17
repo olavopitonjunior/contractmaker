@@ -1,0 +1,19 @@
+{
+  "code": 200,
+  "code_message": "OK",
+  "data": [
+    {
+      "crf": "2026041600123456",
+      "cnpj": "00000000000191",
+      "razao_social": "EMPRESA EXEMPLO LTDA",
+      "inscricao": "00000000000191",
+      "situacao": "Regular",
+      "validade_inicio_data": "2026-04-16",
+      "validade_fim_data": "2026-06-15",
+      "endereco": "RUA EXEMPLO, 100 - CENTRO - SAO PAULO/SP",
+      "historico_cabecalho": ["Data", "Situacao"],
+      "historico_lista": []
+    }
+  ],
+  "site_receipts": ["https://consulta-crf.caixa.gov.br/.../crf.pdf"]
+}

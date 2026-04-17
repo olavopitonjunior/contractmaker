@@ -30,6 +30,12 @@ import { CertidaoDetailDialog } from "./CertidaoDetailDialog";
 import { ComplementDadosForm } from "./ComplementDadosForm";
 import { ShareCertidoesDialog } from "./ShareCertidoesDialog";
 import { DiligentedPersonsSection } from "./DiligentedPersonsSection";
+import { EditPartyDialog } from "./EditPartyDialog";
+import {
+  CATEGORY_LABEL,
+  isUserFixable,
+  type FailureCategory,
+} from "@/lib/certidoes/error-codes";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
@@ -152,8 +158,34 @@ function statusLabel(row: CertidaoJobRow): string {
   return "—";
 }
 
+/**
+ * When a job succeeded at the transport layer but the portal didn't emit
+ * (situacao "nao_emitida" / "indeterminado"), the normalizer attaches a
+ * `failureCategory` explaining why. This tint colors the card accordingly so
+ * the user can see "needs data" vs "portal down" vs "limit reached" at a
+ * glance without opening the detail dialog.
+ */
+function variantForFailureCategory(cat: FailureCategory | undefined): string | null {
+  switch (cat) {
+    case "missing_input":
+    case "inconsistent_input":
+      return "border-amber-300 bg-amber-50/40";
+    case "portal_unavailable":
+    case "rate_limited":
+      return "border-blue-300 bg-blue-50/30";
+    case "account_issue":
+      return "border-red-300 bg-red-50";
+    case "genuine_no_data":
+      return "border-green-300 bg-green-50/30";
+    case "unknown":
+    case undefined:
+    default:
+      return null;
+  }
+}
+
 function statusVariant(row: CertidaoJobRow): string {
-  const r = row.resultData as { situacao?: string } | null;
+  const r = row.resultData as { situacao?: string; failureCategory?: FailureCategory } | null;
   const status = effectiveStatus(row);
   if (status === "failed") return "border-red-300 bg-red-50";
   if (status === "awaiting_portal") return "border-amber-300 bg-amber-50";
@@ -164,11 +196,25 @@ function statusVariant(row: CertidaoJobRow): string {
   if (status === "success") {
     if (r?.situacao === "negativa") return "border-green-300 bg-green-50/30";
     if (r?.situacao === "aguardando_pdf") return "border-blue-300 bg-blue-50/30";
+    if (r?.situacao === "informativa") return "border-blue-300 bg-blue-50/20";
     if (r?.situacao === "positiva" || r?.situacao === "positiva_com_efeitos")
       return "border-amber-300 bg-amber-50";
+    // "nao_emitida" / "indeterminado" — use category-specific tint when available
+    const catVariant = variantForFailureCategory(r?.failureCategory);
+    if (catVariant) return catVariant;
     return "border-muted bg-background";
   }
   return "border-muted bg-muted/20";
+}
+
+/**
+ * Returns the failureCategory when a job needs category-specific UX. Only set
+ * on success responses where the situacao is a failure-like state — for
+ * status === "failed" (transport error) the category is left undefined.
+ */
+function getFailureCategory(row: CertidaoJobRow): FailureCategory | undefined {
+  const r = row.resultData as { failureCategory?: FailureCategory } | null;
+  return r?.failureCategory;
 }
 
 function groupKey(row: CertidaoJobRow): string {
@@ -226,6 +272,11 @@ export function CertidoesTab({
   const [detailJob, setDetailJob] = useState<CertidaoJobRow | null>(null);
   const [complementJobId, setComplementJobId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  // Phase A: editing party inline from the certidão card when the portal
+  // returned "inconsistent_input" (nome/data nascimento divergente). Opens
+  // EditPartyDialog pre-filled with the current party snapshot; on save,
+  // PATCHes the deal and retries the job.
+  const [editingPartyJob, setEditingPartyJob] = useState<CertidaoJobRow | null>(null);
 
   const visibleJobs = useMemo(
     () => jobs.filter((j) => j.status !== "replaced"),
@@ -557,11 +608,20 @@ export function CertidoesTab({
                       <div className="shrink-0 mt-0.5">{statusIcon(row)}</div>
                       <div className="flex-1 min-w-0">
                         <div className="font-medium truncate">{row.label}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {statusLabel(row)}
+                        <div className="text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
+                          <span>{statusLabel(row)}</span>
                           {stuck && (
-                            <span className="ml-1 text-amber-700">(travada)</span>
+                            <span className="text-amber-700">(travada)</span>
                           )}
+                          {(() => {
+                            const cat = getFailureCategory(row);
+                            if (!cat || cat === "genuine_no_data") return null;
+                            return (
+                              <Badge variant="outline" className="h-4 text-[10px] px-1 font-normal">
+                                {CATEGORY_LABEL[cat]}
+                              </Badge>
+                            );
+                          })()}
                         </div>
                         {(row.costCents != null ||
                           row.latencyMs != null ||
@@ -642,6 +702,22 @@ export function CertidoesTab({
                             <FileText className="h-3 w-3" />
                           </Button>
                         )}
+                        {(() => {
+                          const cat = getFailureCategory(row);
+                          if (!cat || !isUserFixable(cat)) return null;
+                          if (row.targetKind === "imovel" || row.targetKind === "diligenciado") return null;
+                          return (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setEditingPartyJob(row)}
+                              className="h-7 px-2"
+                              title="Editar dados da parte e reenviar"
+                            >
+                              <AlertTriangle className="h-3 w-3" />
+                            </Button>
+                          );
+                        })()}
                         {canRetry && (
                           <Button
                             size="sm"
@@ -715,6 +791,25 @@ export function CertidoesTab({
           onOpenChange={(open) => !open && setDetailJob(null)}
           onRetry={() => handleRetry(detailJob)}
           onDelete={() => handleDelete(detailJob)}
+        />
+      )}
+
+      {editingPartyJob && (
+        <EditPartyDialog
+          job={editingPartyJob}
+          dealId={dealId}
+          open={!!editingPartyJob}
+          onOpenChange={(open) => !open && setEditingPartyJob(null)}
+          onSaved={async () => {
+            // After the party data is updated, retry the failing job so it
+            // consumes the fresh snapshot from the re-planner.
+            const job = editingPartyJob;
+            setEditingPartyJob(null);
+            if (job) {
+              await handleRetry(job);
+              toast.success("Dados atualizados — consultando novamente…");
+            }
+          }}
         />
       )}
 

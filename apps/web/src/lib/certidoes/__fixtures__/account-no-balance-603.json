@@ -1,0 +1,6 @@
+{
+  "code": 603,
+  "code_message": "A conta esta sem saldo",
+  "data": [],
+  "errors": ["Sem saldo"]
+}

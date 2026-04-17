@@ -1,0 +1,6 @@
+{
+  "code": 612,
+  "code_message": "CPF invalido ou nao encontrado",
+  "data": [],
+  "errors": ["CPF invalido"]
+}

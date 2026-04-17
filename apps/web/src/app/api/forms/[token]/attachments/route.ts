@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
+import { Prisma } from "@prisma/client";
 import { put, del } from "@vercel/blob";
 import { prisma } from "@/lib/db/prisma";
 
@@ -51,7 +52,7 @@ export async function POST(
 ) {
   const form = await prisma.salesForm.findUnique({
     where: { token: params.token },
-    select: { id: true },
+    select: { id: true, orgId: true },
   });
   if (!form) {
     return NextResponse.json({ error: "Form not found" }, { status: 404 });
@@ -94,6 +95,22 @@ export async function POST(
     const buffer = Buffer.from(await file.arrayBuffer());
     const contentHash = createHash("sha256").update(buffer).digest("hex");
 
+    // Pre-warm cache: if any other attachment in this org already has OCR
+    // results for the same content (SHA-256), copy them over NOW. This means
+    // the subsequent extract/batch-extract call will hit the `extractedData`
+    // fast-path and skip Gemini entirely — saving cost + latency for duplicate
+    // uploads (e.g. the user re-submits the same RG). The blob still gets
+    // uploaded so the file is visible to the user in the UI.
+    const cached = await prisma.formAttachment.findFirst({
+      where: {
+        contentHash,
+        extractedData: { not: Prisma.JsonNull },
+        form: { orgId: form.orgId },
+      },
+      select: { category: true, extractedData: true },
+      orderBy: { createdAt: "desc" },
+    });
+
     const blob = await put(pathname, buffer, {
       access: "public",
       contentType: file.type,
@@ -106,8 +123,8 @@ export async function POST(
         filename: file.name,
         mime: file.type,
         url: blob.url,
-        category: null,
-        extractedData: undefined,
+        category: cached?.category ?? null,
+        extractedData: (cached?.extractedData as Prisma.InputJsonValue) ?? undefined,
         contentHash,
       },
     });
@@ -118,6 +135,11 @@ export async function POST(
       mime: attachment.mime,
       fileUrl: `/api/forms/${params.token}/attachments/${attachment.id}/file`,
       createdAt: attachment.createdAt,
+      // Signal to client that OCR can be skipped — extract call will still
+      // return the cached result but this lets the UI show "ready" sooner.
+      cached: cached !== null,
+      category: cached?.category ?? null,
+      extractedData: cached?.extractedData ?? null,
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

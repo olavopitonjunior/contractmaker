@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { downloadBufferFromUrl } from "@/lib/storage/s3";
-import { classifyAndExtract } from "@/lib/ai/ocr";
+import { classifyAndExtract, isRateLimitError } from "@/lib/ai/ocr";
 import { extractFirstPages } from "@/lib/ai/pdf-utils";
 
 async function fetchBuffer(url: string): Promise<Buffer> {
@@ -23,18 +23,6 @@ export const runtime = "nodejs";
 export const maxDuration = 120;
 
 const MAX_RETRIES = 3;
-
-function isRateLimitError(message: string): boolean {
-  const lower = message.toLowerCase();
-  return (
-    lower.includes("quota") ||
-    lower.includes("rate limit") ||
-    lower.includes("rate_limit") ||
-    lower.includes("too many requests") ||
-    lower.includes(" 429") ||
-    lower.includes("resource_exhausted")
-  );
-}
 
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -159,6 +147,59 @@ export async function POST(
     );
   }
 
+  // Atomically claim this attachment for OCR. If another request is already
+  // running Gemini for the same id, `updateMany` returns count=0 and we poll
+  // for the result instead of issuing a duplicate Gemini call.
+  // Stale-lock recovery: a lock older than LOCK_STALE_MS is considered dead
+  // (worker crashed / timed out) and can be taken over.
+  const LOCK_STALE_MS = 2 * 60 * 1000; // 2 minutes
+  const staleBefore = new Date(Date.now() - LOCK_STALE_MS);
+  const claim = await prisma.formAttachment.updateMany({
+    where: {
+      id: attachment.id,
+      extractedData: { equals: Prisma.DbNull },
+      OR: [
+        { extractingStartedAt: null },
+        { extractingStartedAt: { lt: staleBefore } },
+      ],
+    },
+    data: { extractingStartedAt: new Date() },
+  });
+
+  if (claim.count === 0) {
+    // Another worker owns the lock — poll for up to 60s for it to finish.
+    const POLL_INTERVAL_MS = 1500;
+    const POLL_MAX_MS = 60 * 1000;
+    const deadline = Date.now() + POLL_MAX_MS;
+    while (Date.now() < deadline) {
+      await sleep(POLL_INTERVAL_MS);
+      const fresh = await prisma.formAttachment.findUnique({
+        where: { id: attachment.id },
+        select: { category: true, extractedData: true, extractingStartedAt: true },
+      });
+      if (fresh?.extractedData) {
+        return NextResponse.json({
+          cached: true,
+          cacheSource: "concurrent_extract",
+          category: fresh.category,
+          extractedData: fresh.extractedData,
+        });
+      }
+      if (!fresh?.extractingStartedAt) {
+        // Lock released without a result — the other worker failed. Break
+        // out and attempt a fresh claim ourselves on the next iteration.
+        break;
+      }
+    }
+    return NextResponse.json(
+      {
+        error:
+          "Extração concorrente em andamento — aguarde alguns segundos e tente novamente.",
+      },
+      { status: 409 }
+    );
+  }
+
   try {
     let buffer = await fetchBuffer(attachment.url);
 
@@ -190,6 +231,8 @@ export async function POST(
       data: {
         category: result.documentType,
         extractedData: payload as object,
+        // Leave extractingStartedAt set — it's a no-op now that extractedData
+        // is non-null (the claim guard requires extractedData: null).
       },
     });
 
@@ -199,6 +242,18 @@ export async function POST(
       extractedData: payload,
     });
   } catch (err) {
+    // Release the lock so the user (or a retry) can claim it again.
+    await prisma.formAttachment
+      .update({
+        where: { id: attachment.id },
+        data: { extractingStartedAt: null },
+      })
+      .catch((releaseErr) => {
+        console.warn(
+          "[form extract] failed to release lock:",
+          releaseErr instanceof Error ? releaseErr.message : String(releaseErr)
+        );
+      });
     const raw = err instanceof Error ? err.message : String(err);
     console.error("[form extract] failed:", raw);
     return NextResponse.json(

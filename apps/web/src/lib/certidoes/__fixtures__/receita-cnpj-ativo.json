@@ -1,0 +1,32 @@
+{
+  "code": 200,
+  "code_message": "OK",
+  "data": [
+    {
+      "cnpj": "00000000000191",
+      "razao_social": "EMPRESA EXEMPLO LTDA",
+      "nome_fantasia": "Empresa Exemplo",
+      "data_abertura": "2010-05-10",
+      "situacao_cadastral": "Ativa",
+      "situacao_cadastral_data": "2010-05-10",
+      "natureza_juridica": "206-2 - Sociedade Empresaria Limitada",
+      "atividade_economica_primaria": {
+        "codigo": "4751201",
+        "descricao": "Comercio varejista especializado"
+      },
+      "capital_social": "100000.00",
+      "endereco_logradouro": "RUA EXEMPLO",
+      "endereco_numero": "100",
+      "endereco_complemento": "SALA 1",
+      "endereco_bairro": "CENTRO",
+      "endereco_cep": "01000000",
+      "endereco_municipio": "SAO PAULO",
+      "endereco_uf": "SP",
+      "data_consulta": "2026-04-16",
+      "qsa": [
+        { "nome": "JOAO SILVA", "qualificacao": "Administrador" }
+      ]
+    }
+  ],
+  "site_receipts": []
+}

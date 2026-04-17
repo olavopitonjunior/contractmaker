@@ -1,0 +1,6 @@
+{
+  "code": 614,
+  "code_message": "Data de nascimento nao confere com o registro no CPF",
+  "data": [],
+  "errors": ["Data de nascimento divergente"]
+}

@@ -41,7 +41,7 @@ export async function POST(
     where: { id: params.jobId },
     include: { deal: { include: { form: { select: { orgId: true } } } } },
   });
-  if (!job || job.dealId !== params.dealId) {
+  if (!job || job.dealId !== params.dealId || !job.deal) {
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
   }
   if (job.deal.form && job.deal.form.orgId !== org.id) {

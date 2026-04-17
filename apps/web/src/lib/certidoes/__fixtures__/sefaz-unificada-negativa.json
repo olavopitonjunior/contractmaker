@@ -1,0 +1,17 @@
+{
+  "code": 200,
+  "code_message": "OK",
+  "data": [
+    {
+      "cpf": "12345678900",
+      "uf": "BA",
+      "certidao_codigo": "CND-BA-2026-98765",
+      "conseguiu_emitir_certidao_negativa": true,
+      "consta_debito": false,
+      "emissao_data": "2026-04-16",
+      "validade_data": "2026-10-13",
+      "mensagem": "Certidao Negativa de Debitos Estaduais emitida com sucesso"
+    }
+  ],
+  "site_receipts": ["https://sefaz.ba.gov.br/certidoes/.../cnd.pdf"]
+}
