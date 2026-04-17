@@ -107,6 +107,55 @@ export async function PATCH(
       } catch (error) {
         console.error("Link form attachments to deal failed:", error);
       }
+
+      // Phase F.II-δ — automação "sou sócio de PJ X":
+      // Varre vendedores[] e compradores[] procurando campo `socio_pj` (adicionado
+      // pelo front-end quando PF marca checkbox) e cria DiligentedPerson PJ
+      // vinculado ao deal. Planner passa a incluir esta PJ no próximo batch de
+      // certidões, cobrindo a "lista H" (itens B-G + falência PJ) automaticamente.
+      try {
+        const dataLocal = mergedData as {
+          vendedores?: Array<{
+            socio_pj?: { cnpj?: string; razao_social?: string; uf?: string; cidade?: string };
+          }>;
+          compradores?: Array<{
+            socio_pj?: { cnpj?: string; razao_social?: string; uf?: string; cidade?: string };
+          }>;
+        };
+        const partesComSocio = [
+          ...(dataLocal.vendedores ?? []),
+          ...(dataLocal.compradores ?? []),
+        ]
+          .map((p) => p.socio_pj)
+          .filter((s): s is NonNullable<typeof s> => !!s?.cnpj?.trim());
+
+        if (partesComSocio.length > 0) {
+          const existingDiligenciados = await prisma.diligentedPerson.findMany({
+            where: { dealId: deal.id },
+            select: { cnpj: true },
+          });
+          const existingCnpjs = new Set(
+            existingDiligenciados.map((d) => d.cnpj?.replace(/\D/g, "")).filter(Boolean)
+          );
+          const newSocios = partesComSocio.filter(
+            (s) => !existingCnpjs.has(s.cnpj!.replace(/\D/g, ""))
+          );
+          if (newSocios.length > 0) {
+            await prisma.diligentedPerson.createMany({
+              data: newSocios.map((s) => ({
+                dealId: deal.id,
+                tipoPessoa: "juridica",
+                nome: s.razao_social ?? "PJ sem razão social",
+                cnpj: s.cnpj!.replace(/\D/g, ""),
+                uf: s.uf ?? null,
+                cidade: s.cidade ?? null,
+              })),
+            });
+          }
+        }
+      } catch (error) {
+        console.error("Auto-create DiligentedPerson from socio_pj failed:", error);
+      }
     }
   }
 
