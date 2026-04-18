@@ -55,6 +55,7 @@ function PessoaFisicaFields({
 }) {
   const estadoCivil = form.watch(`${prefix}.estado_civil`);
   const temProcurador = form.watch(`${prefix}.tem_procurador`);
+  const temSocioPj = form.watch(`${prefix}.tem_socio_pj`);
   const showConjuge =
     estadoCivil === "Casado(a)" || estadoCivil === "União Estável";
 
@@ -253,6 +254,56 @@ function PessoaFisicaFields({
               <UFSelect
                 value={form.watch(`${prefix}.procurador.uf`)}
                 onChange={(v) => form.setValue(`${prefix}.procurador.uf`, v, { shouldDirty: true })}
+              />
+            </FormField>
+          </div>
+        </>
+      )}
+
+      {/* Phase F.II-δ — "Sou sócio de PJ" — gera DiligentedPerson auto no finalize */}
+      <div className="flex items-center gap-2">
+        <input
+          type="checkbox"
+          id={`${prefix}-tem-socio-pj`}
+          className="h-4 w-4 rounded border-input accent-primary"
+          {...form.register(`${prefix}.tem_socio_pj`)}
+        />
+        <Label htmlFor={`${prefix}-tem-socio-pj`} className="cursor-pointer">
+          Também represento uma pessoa jurídica (será diligenciada automaticamente)
+        </Label>
+      </div>
+
+      {temSocioPj && (
+        <>
+          <Separator />
+          <p className="text-sm font-semibold text-foreground">Dados da PJ (sócio)</p>
+          <p className="text-xs text-muted-foreground -mt-3">
+            Certidões da PJ (Cartão CNPJ, CRF FGTS, cível, trabalhista, federal, etc)
+            serão extraídas automaticamente quando o formulário for finalizado.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <FormField label="CNPJ *">
+              <Input
+                {...form.register(`${prefix}.socio_pj.cnpj`)}
+                placeholder="00.000.000/0000-00"
+              />
+            </FormField>
+            <FormField label="Razão Social *">
+              <Input
+                {...form.register(`${prefix}.socio_pj.razao_social`)}
+                placeholder="Empresa X LTDA"
+              />
+            </FormField>
+            <FormField label="UF">
+              <UFSelect
+                value={form.watch(`${prefix}.socio_pj.uf`)}
+                onChange={(v) => form.setValue(`${prefix}.socio_pj.uf`, v, { shouldDirty: true })}
+              />
+            </FormField>
+            <FormField label="Cidade">
+              <Input
+                {...form.register(`${prefix}.socio_pj.cidade`)}
+                placeholder="Cidade"
               />
             </FormField>
           </div>

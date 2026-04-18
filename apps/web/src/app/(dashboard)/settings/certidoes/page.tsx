@@ -4,8 +4,9 @@ import { prisma } from "@/lib/db/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Wallet, CheckCircle2, XCircle, Clock, AlertTriangle } from "lucide-react";
+import { ArrowLeft, Wallet, CheckCircle2, XCircle, Clock, AlertTriangle, ShieldCheck, ShieldAlert, ExternalLink } from "lucide-react";
 import { endpointInfo } from "@/lib/certidoes/endpoints";
+import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -112,6 +113,10 @@ export default async function CertidoesSettingsPage() {
     .filter((j) => j.status === "failed" && j.errorMessage)
     .slice(0, 10);
 
+  // Phase F.II-γ — status da autenticação GOV.BR na conta Infosimples.
+  // Afeta quais endpoints ficam disponíveis (CENPROT nacional etc).
+  const govbr = await checkGovBrAuth();
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
@@ -123,6 +128,61 @@ export default async function CertidoesSettingsPage() {
         </Button>
         <h1 className="text-2xl font-semibold">Certidões — Qualidade & Custos</h1>
       </div>
+
+      {/* Phase F.II-γ — status da autenticação GOV.BR (conta Infosimples) */}
+      <Card className={govbr.active ? "border-green-300" : "border-amber-300 bg-amber-50/30"}>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center gap-2">
+            {govbr.active ? (
+              <>
+                <ShieldCheck className="h-4 w-4 text-green-600" />
+                Autenticação GOV.BR ativa
+              </>
+            ) : (
+              <>
+                <ShieldAlert className="h-4 w-4 text-amber-600" />
+                Autenticação GOV.BR inativa
+              </>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm space-y-1">
+          {govbr.active && govbr.session ? (
+            <>
+              <p>
+                <span className="text-muted-foreground">Tipo:</span>{" "}
+                <span className="font-medium">{govbr.session.type}</span> ·{" "}
+                <span className="text-muted-foreground">Identificador:</span>{" "}
+                <span className="font-mono">{govbr.session.identifier}</span>
+              </p>
+              <p className="text-muted-foreground">
+                Expira em: <span className="font-medium">{govbr.session.expires_at}</span>
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Endpoints habilitados por esta autenticação: CENPROT Nacional (IEPTB).
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-amber-900">
+                {govbr.error ?? "Nenhuma sessão GOV.BR encontrada."}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Sem GOV.BR ativo, endpoints que exigem autenticação (CENPROT Nacional)
+                serão pulados. Renove a autenticação em duas etapas no portal Infosimples.
+              </p>
+              <a
+                href="https://portal.infosimples.com/autenticacao-govbr"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-blue-700 hover:underline mt-1"
+              >
+                Abrir portal Infosimples <ExternalLink className="h-3 w-3" />
+              </a>
+            </>
+          )}
+        </CardContent>
+      </Card>
 
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
