@@ -6,6 +6,7 @@
  * should never propagate to the user's workflow. Swallowed errors are logged
  * to console for observability.
  */
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 
 export interface EmitNotificationParams {
@@ -16,15 +17,22 @@ export interface EmitNotificationParams {
   body: string;
   linkUrl?: string;
   metadata?: Record<string, unknown>;
+  /**
+   * I.5 (Phase I, 2026-04-18) — quando presente, DB unique constraint
+   * (type, batchId) garante dedupe atômico. Duplicatas viram no-op.
+   */
+  batchId?: string | null;
 }
 
 /**
  * Creates a Notification row. Safe to call without awaiting — the promise
  * never rejects. If the DB call fails, the error is logged but swallowed.
  *
- * IMPORTANT: idempotency must be handled by the caller before calling this.
- * See `checkBatchCompletion` in executor.ts for the batch-aggregated pattern
- * that checks for existing notifications by metadata.batchId before emitting.
+ * Idempotency:
+ * - When `batchId` is set, duplicate inserts (same type + batchId) raise
+ *   Prisma P2002 and are silently swallowed — resolves the "5 notifs for
+ *   same batchId" bug from the 2026-04-18 QA.
+ * - Otherwise, caller is responsible (e.g. checking by other criteria).
  */
 export async function emitNotification(
   params: EmitNotificationParams
@@ -39,9 +47,18 @@ export async function emitNotification(
         body: params.body.slice(0, 500),
         linkUrl: params.linkUrl,
         metadata: (params.metadata as object) ?? undefined,
+        batchId: params.batchId ?? null,
       },
     });
   } catch (err) {
+    // P2002 = unique constraint violation (type + batchId duplicado).
+    // É exatamente o comportamento desejado — outro worker já emitiu.
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2002"
+    ) {
+      return;
+    }
     console.error(
       "[notifications.emit] failed:",
       err instanceof Error ? err.message : String(err),

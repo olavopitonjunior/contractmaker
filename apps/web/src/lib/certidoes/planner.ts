@@ -48,7 +48,11 @@ const CEAT_ENDPOINT_BY_UF: Partial<Record<string, string[]>> = {
  * when available (cheaper + richer response).
  */
 function stateDebtEndpointForUf(partyUf: string): string {
-  if (partyUf === "SP") return "pge-sp/cndt";
+  // I.3 (Phase I, 2026-04-18) — `pge-sp/cndt` retornou code 602
+  // ("serviço inválido") em 100% dos casos no QA 2026-04-18. Endpoint
+  // depreciado pela Infosimples. Fallback para sefaz unificado que cobre
+  // SP também. Quando provider confirmar nova URL, reativar.
+  void partyUf;
   return "sefaz/certidao-debitos";
 }
 
@@ -92,9 +96,13 @@ const TRF_UF_MAP: Partial<Record<string, string>> = {
  * distribuidores exigidos em transação imobiliária (cível, família, falência,
  * execução fiscal). Cada um é uma chamada separada.
  */
+// I.1 (Phase I, 2026-04-18) — Infosimples TJSP pedido-civel rejeitava
+// "familia-sucessoes" retornando code 606 em 16/16 jobs no QA 2026-04-18.
+// Docs oficiais mostram os valores canônicos: civel, familia, falencia,
+// execucao-fiscal (familia sem hífen composto).
 const TJSP_TIPOS: Array<{ tipo_certidao: string; label: string }> = [
   { tipo_certidao: "civel", label: "Cível" },
-  { tipo_certidao: "familia-sucessoes", label: "Família e Sucessões" },
+  { tipo_certidao: "familia", label: "Família e Sucessões" },
   { tipo_certidao: "falencia", label: "Falência / Concordata / Rec. Judicial" },
   { tipo_certidao: "execucao-fiscal", label: "Execução Fiscal" },
 ];
@@ -314,28 +322,16 @@ export function planCertidoesForDeal(
       }
     }
 
-    // ---- TRF Cert Unificada (Civel = tipo 1) ----
-    {
-      const ep = "tribunal/trf/cert-unificada";
-      if (isPJ && !cnpj) {
-        skipped.push(buildSkip(ep, kind, index, label, "cnpj", "CNPJ invalido"));
-      } else if (!isPJ && !cpf) {
-        skipped.push(buildSkip(ep, kind, index, label, "cpf", "CPF invalido"));
-      } else {
-        jobs.push(
-          buildJob(ep, kind, index, label, {
-            tipo: 1,
-            email,
-            ...(isPJ ? { cnpj } : { cpf }),
-          })
-        );
-      }
-    }
-
-    // ---- TRF Individual (Phase F.II-γ) — cível + criminal por UF ----
-    // A unificada só cobre cível 1ª instância dos 6 TRFs. O endpoint
-    // individual cobre cível + criminal (e potencialmente 2ª instância).
-    if (partyUf && TRF_UF_MAP[partyUf]) {
+    // ---- TRF Cert Unificada + TRF Individual ----
+    // I.4 (Phase I, 2026-04-18) — ambos retornaram 100% fail no QA:
+    //   - `tribunal/trf/cert-unificada`: 4/4 (600/602/615). Além disso,
+    //     não emite PDF (só retorna JSON com status por TRF), inconsistente
+    //     com CATEGORIES_REQUIRING_PDF.
+    //   - `tribunal/trf3/certidao`: 4/4 (602 "URL inválida") = depreciado.
+    // Ação: em expandAll (picker manual), ainda oferecer os individuais
+    // para o usuário tentar. No plano default, marcar como skipped com
+    // aviso de depreciação para não gerar billing em vão.
+    if (expandAll && partyUf && TRF_UF_MAP[partyUf]) {
       const ep = TRF_UF_MAP[partyUf]!;
       if (isPJ && !cnpj) {
         skipped.push(buildSkip(ep, kind, index, label, "cnpj", "CNPJ invalido"));
@@ -349,6 +345,28 @@ export function planCertidoesForDeal(
           })
         );
       }
+    } else {
+      // Plano default: gera skipped informativo para o usuário saber que
+      // a Justiça Federal está descoberta (precisa acessar portal do TRF
+      // regional manualmente até provider confirmar novo endpoint).
+      skipped.push({
+        ...buildSkip(
+          "tribunal/trf/cert-unificada",
+          kind,
+          index,
+          label,
+          "cobertura",
+          "Justiça Federal: endpoint Infosimples depreciado — extrair manualmente no portal do TRF regional"
+        ),
+        externalLink:
+          partyUf === "SP" || partyUf === "MS"
+            ? "https://web.trf3.jus.br/certidao"
+            : partyUf === "RJ" || partyUf === "ES"
+            ? "https://www10.trf2.jus.br/portal/certidao-eletronica/"
+            : partyUf === "RS" || partyUf === "SC" || partyUf === "PR"
+            ? "https://www2.trf4.jus.br/trf4/controlador.php?acao=certidao_inicial"
+            : "https://www.trf1.jus.br/Servicos/Certidao/",
+      });
     }
 
     // ---- CEAT (Trabalhista regional, Phase B) ----

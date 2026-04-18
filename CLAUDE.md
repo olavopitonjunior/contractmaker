@@ -404,6 +404,16 @@ QA E2E real (deal `cmo3orktd000513ssiufbzqzo`, 52 jobs SP) revelou 2 P0 de falso
 - **Corretora PF/PJ (P2-8)**: `comissao.corretora_tipo_pessoa` radio ("fisica" | "juridica"). Labels e placeholders trocam conforme seleção.
 - **Remoção destrutiva (P2-9)**: remove button em Vendedor/Comprador pede confirmação se slot tem dados.
 
+## Phase I — Correções pós-QA E2E rodado em 2026-04-18
+
+Segundo E2E rodou contra deploy `5191da0b` (Phase H). Phase H validada sem regressões em P0-A, P0-B, P1-5, P1-6, P2-1, P2-7, P2-8 e H.18 billing. **Cinco bugs novos encontrados** + corrigidos:
+
+- **I.1 — TJSP 16/16 fail com code 606 (BLOCKER)**: planner enviava `tipo_certidao: "familia-sucessoes"` (valor com hífen composto). Infosimples aceita apenas `familia` simples. Corrigido em `TJSP_TIPOS` [planner.ts:99](apps/web/src/lib/certidoes/planner.ts#L99). Payload agora passa `data_nascimento` + `nome_mae` (H.3) com valores canônicos de `tipo_certidao`. Esperado destravar ~30% do valor da feature em SP.
+- **I.2 — `/certidoes/download-all` retorna 503 (critical)**: QA tentava URL `/download-all` que não existia (UI chamava `/zip`). Criado alias em [download-all/route.ts](apps/web/src/app/api/deals/[dealId]/certidoes/download-all/route.ts) que re-exporta o handler do `/zip`. Ambas URLs funcionam.
+- **I.3 — PGE-SP depreciado 4/4 code 602 (major)**: endpoint `pge-sp/cndt` foi removido do `stateDebtEndpointForUf` [planner.ts:50](apps/web/src/lib/certidoes/planner.ts#L50) — SP agora cai em `sefaz/certidao-debitos` unificado como outras UFs. Quando Infosimples confirmar novo endpoint, reativar.
+- **I.4 — TRF cert-unificada + TRF individual 100% fail (major)**: ambos os endpoints (`tribunal/trf/cert-unificada` + `tribunal/trf{1-6}/certidao`) estão inoperantes. Removidos do plano default — agora só disparam com `expandAll: true` (picker manual). Plano default gera `SkippedJob` informativo com `externalLink` para portal oficial do TRF regional (trf1.jus.br / trf2 / trf3 / trf4).
+- **I.5 — Notificações de batch duplicadas 5× (minor)**: `checkBatchCompletion` é chamado por cada job ao terminar; idempotência por query JSONB em `metadata.batchId` sofria race condition. Solução: adicionada coluna dedicada `batchId String?` em `Notification` + `@@unique([type, batchId])` via migration `20260418120000_add_notification_batchId_unique`. `emitNotification` agora silently swallow P2002 (duplicate) — o primeiro worker ganha, outros são no-op.
+
 ## Alertas
 - Handlebars helpers em `src/lib/render/handlebars.ts` sao aditivos — novos helpers podem ser adicionados, mas helpers existentes NAO devem ser alterados (quebra contratos antigos).
 - TipTap edita HTML direto; re-render do Handlebars sobrescreve edicoes manuais (incluindo comment anchors e suggestion marks)

@@ -290,10 +290,15 @@ model Notification {
   body      String
   linkUrl   String?
   metadata  Json?     // { dealId, jobId, batchId }
+  // I.5 (Phase I, 2026-04-18) — batchId dedicado para dedupe atômico.
+  // Query em metadata JSONB era frágil e race condition gerava 5× a mesma
+  // notif no QA. Unique (type, batchId) garante dedupe no DB level.
+  batchId   String?
   read      Boolean   @default(false)
   readAt    DateTime?
   createdAt DateTime  @default(now())
 
+  @@unique([type, batchId])
   @@index([orgId, read, createdAt])
   @@index([userId, read, createdAt])
 }

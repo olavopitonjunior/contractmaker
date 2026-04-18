@@ -179,6 +179,7 @@ async function checkBatchCompletion(batchId: string): Promise<void> {
         body,
         linkUrl,
         metadata: { ...scopeMetadata, jobId: job.id },
+        batchId,
       });
       return;
     }
@@ -199,6 +200,7 @@ async function checkBatchCompletion(batchId: string): Promise<void> {
       body: `${breakdown} — ${dealTitle}`,
       linkUrl,
       metadata: scopeMetadata,
+      batchId,
     });
   } catch (err) {
     console.error(

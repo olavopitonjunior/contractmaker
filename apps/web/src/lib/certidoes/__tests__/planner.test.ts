@@ -42,13 +42,19 @@ describe("planCertidoesForDeal — dados completos (PF SP + PF RJ + imovel SP)",
     ],
   });
 
-  it("gera jobs para os 3 endpoints federais por pessoa", () => {
+  it("gera jobs para os 2 endpoints federais (PGFN + CNDT) por pessoa", () => {
+    // I.4 (Phase I, 2026-04-18) — TRF cert-unificada saiu do plano default:
+    // retornava 100% fail no QA 2026-04-18 (code 600/602/615). Agora é
+    // skipped com externalLink para o portal regional.
     const pgfn = plan.jobs.filter((j) => j.endpoint === "receita-federal/pgfn");
     const cndt = plan.jobs.filter((j) => j.endpoint === "tribunal/tst/cndt");
-    const trf = plan.jobs.filter((j) => j.endpoint === "tribunal/trf/cert-unificada");
+    const trfSkipped = plan.skipped.filter(
+      (s) => s.endpoint === "tribunal/trf/cert-unificada"
+    );
     expect(pgfn).toHaveLength(2);
     expect(cndt).toHaveLength(2);
-    expect(trf).toHaveLength(2);
+    expect(trfSkipped).toHaveLength(2);
+    expect(trfSkipped[0].externalLink).toBeDefined();
   });
 
   it("PGFN PF inclui birthdate", () => {
@@ -84,10 +90,12 @@ describe("planCertidoesForDeal — dados completos (PF SP + PF RJ + imovel SP)",
       (j) => j.targetKind === "vendedor" && j.endpoint === "tribunal/tjsp/pedido-civel"
     );
     // Phase F.II-γ: 4 tipos (cível, família, falência, execução fiscal)
+    // I.1 (Phase I, 2026-04-18): "familia-sucessoes" → "familia" (Infosimples
+    // rejeitava valor com hífen composto com code 606).
     expect(tjsp).toHaveLength(4);
     const tipos = new Set(tjsp.map((j) => j.requestPayload.tipo_certidao));
     expect(tipos).toEqual(
-      new Set(["civel", "familia-sucessoes", "falencia", "execucao-fiscal"])
+      new Set(["civel", "familia", "falencia", "execucao-fiscal"])
     );
   });
 
@@ -336,28 +344,43 @@ describe("Phase B — PJ sempre dispara CNPJ + CRF", () => {
 });
 
 // Phase F.II-γ — expansão oficial (TRF individuais + GOV.BR + multi-tipo)
-describe("Phase F.II-γ — TRF individual (cível + criminal) por UF", () => {
-  it("parte SP dispara TRF3 (individual) além da unificada", () => {
+// I.4 (Phase I, 2026-04-18): TRF individuais e unificada saíram do plano default
+// por causa de 100% fail. Agora só disparam em expandAll (picker manual).
+describe("Phase I — TRF plano default + expandAll", () => {
+  it("plano default: parte SP NÃO dispara TRF3 nem unificada; gera skipped com externalLink", () => {
     const plan = planCertidoesForDeal({
       vendedores: [VENDEDOR_PF_SP],
       compradores: [],
       imoveis: [],
     });
-    const trfUnificada = plan.jobs.find(
-      (j) => j.endpoint === "tribunal/trf/cert-unificada"
+    expect(plan.jobs.find((j) => j.endpoint === "tribunal/trf/cert-unificada")).toBeUndefined();
+    expect(plan.jobs.find((j) => j.endpoint === "tribunal/trf3/certidao")).toBeUndefined();
+    const skipped = plan.skipped.find(
+      (s) => s.endpoint === "tribunal/trf/cert-unificada"
+    );
+    expect(skipped).toBeDefined();
+    expect(skipped?.externalLink).toContain("trf3");
+  });
+
+  it("expandAll=true: parte SP dispara TRF3 individual", () => {
+    const plan = planCertidoesForDeal(
+      { vendedores: [VENDEDOR_PF_SP], compradores: [], imoveis: [] },
+      undefined,
+      undefined,
+      { expandAll: true }
     );
     const trf3 = plan.jobs.find((j) => j.endpoint === "tribunal/trf3/certidao");
-    expect(trfUnificada).toBeDefined();
     expect(trf3).toBeDefined();
     expect(trf3?.requestPayload.cpf).toBe("52998224725");
   });
 
-  it("parte BA dispara TRF1 (não TRF2/TRF3)", () => {
-    const plan = planCertidoesForDeal({
-      vendedores: [{ ...VENDEDOR_PF_SP, uf: "BA", cidade: "Salvador" }],
-      compradores: [],
-      imoveis: [],
-    });
+  it("expandAll=true: parte BA dispara TRF1 (não TRF2/TRF3)", () => {
+    const plan = planCertidoesForDeal(
+      { vendedores: [{ ...VENDEDOR_PF_SP, uf: "BA", cidade: "Salvador" }], compradores: [], imoveis: [] },
+      undefined,
+      undefined,
+      { expandAll: true }
+    );
     expect(plan.jobs.find((j) => j.endpoint === "tribunal/trf1/certidao")).toBeDefined();
     expect(plan.jobs.find((j) => j.endpoint === "tribunal/trf3/certidao")).toBeUndefined();
   });
@@ -400,17 +423,18 @@ describe("Phase F.II-γ — CENPROT Nacional com pre-flight GOV.BR", () => {
 });
 
 describe("Phase B — CND Estadual roteamento", () => {
-  it("SP usa pge-sp/cndt (específico)", () => {
+  it("SP usa sefaz/certidao-debitos unificado (pge-sp/cndt depreciado — I.3)", () => {
+    // I.3 (Phase I, 2026-04-18): pge-sp/cndt retornou 602 em 100% no QA
+    // 2026-04-18. Depreciado, fallback para sefaz unificado.
     const plan = planCertidoesForDeal({
       vendedores: [VENDEDOR_PF_SP],
       compradores: [],
       imoveis: [],
     });
-    const spEp = plan.jobs.find((j) => j.endpoint === "pge-sp/cndt");
-    expect(spEp).toBeDefined();
-    expect(
-      plan.jobs.find((j) => j.endpoint === "sefaz/certidao-debitos")
-    ).toBeUndefined();
+    expect(plan.jobs.find((j) => j.endpoint === "pge-sp/cndt")).toBeUndefined();
+    const sefaz = plan.jobs.find((j) => j.endpoint === "sefaz/certidao-debitos");
+    expect(sefaz).toBeDefined();
+    expect(sefaz?.requestPayload.uf).toBe("SP");
   });
 
   it("demais UFs usam sefaz/certidao-debitos unificada com UF no payload", () => {
