@@ -24,6 +24,40 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
+type Parte = {
+  nome?: string;
+  razao_social?: string;
+  tipo_pessoa?: string;
+  cpf?: string;
+  cnpj?: string;
+  rg?: string;
+  nacionalidade?: string;
+  estado_civil?: string;
+  profissao?: string;
+  email?: string;
+  endereco?: string;
+  numero?: string;
+  complemento?: string;
+  bairro?: string;
+  cidade?: string;
+  uf?: string;
+  cep?: string;
+};
+
+type Imovel = {
+  rua?: string;
+  numero?: string;
+  complemento?: string;
+  bairro?: string;
+  cidade?: string;
+  uf?: string;
+  cep?: string;
+  matricula?: string;
+  cartorio?: string;
+  inscricao_iptu?: string;
+  descricao?: string;
+};
+
 interface DealDetailProps {
   deal: {
     id: string;
@@ -117,38 +151,6 @@ export function DealDetail({ deal }: DealDetailProps) {
   }
 
   const formData = deal.form?.dataJson as Record<string, unknown> | null;
-  type Parte = {
-    nome?: string;
-    razao_social?: string;
-    tipo_pessoa?: string;
-    cpf?: string;
-    cnpj?: string;
-    rg?: string;
-    nacionalidade?: string;
-    estado_civil?: string;
-    profissao?: string;
-    email?: string;
-    endereco?: string;
-    numero?: string;
-    complemento?: string;
-    bairro?: string;
-    cidade?: string;
-    uf?: string;
-    cep?: string;
-  };
-  type Imovel = {
-    rua?: string;
-    numero?: string;
-    complemento?: string;
-    bairro?: string;
-    cidade?: string;
-    uf?: string;
-    cep?: string;
-    matricula?: string;
-    cartorio?: string;
-    inscricao_iptu?: string;
-    descricao?: string;
-  };
   const vendedores = (formData?.vendedores as Parte[]) || [];
   const compradores = (formData?.compradores as Parte[]) || [];
   const imoveis = (formData?.imoveis as Imovel[]) || [];
@@ -400,6 +402,8 @@ export function DealDetail({ deal }: DealDetailProps) {
             formAttachments={deal.form?.attachments ?? []}
             formToken={deal.form?.token ?? null}
             fallbackAttachments={deal.attachments}
+            vendedores={vendedores}
+            compradores={compradores}
           />
         </TabsContent>
 
@@ -517,16 +521,59 @@ function resolveKind(
   return "outro";
 }
 
+/**
+ * H.6 (Phase H, 2026-04-18) — rematch contra partes FINAIS do deal.
+ * Se o CPF/nome extraído do doc bate com uma parte no dataJson atual
+ * (possivelmente corrigida nas etapas 1-2 após o upload), sobrescreve
+ * o assignment stored. Garante que correção manual de partes propaga
+ * para a aba Documentos sem rework.
+ */
+function rematchAssignment(
+  stored: Assignment | undefined,
+  fields: Record<string, unknown> | null,
+  vendedores: Parte[],
+  compradores: Parte[]
+): Assignment | undefined {
+  if (!fields) return stored;
+  const cpfDigits = typeof fields.cpf_numero === "string"
+    ? fields.cpf_numero.replace(/\D/g, "")
+    : null;
+  const nome = typeof fields.nome_completo === "string"
+    ? fields.nome_completo.trim().toLowerCase()
+    : typeof fields.titular_nome === "string"
+    ? fields.titular_nome.trim().toLowerCase()
+    : null;
+  const matchIn = (arr: Parte[]): number | null => {
+    for (let i = 0; i < arr.length; i++) {
+      const p = arr[i];
+      const pCpf = typeof p.cpf === "string" ? p.cpf.replace(/\D/g, "") : null;
+      if (cpfDigits && pCpf && cpfDigits.length === 11 && cpfDigits === pCpf) return i;
+      const pNome = typeof p.nome === "string" ? p.nome.trim().toLowerCase() : null;
+      if (nome && pNome && nome === pNome) return i;
+    }
+    return null;
+  };
+  const vMatch = matchIn(vendedores);
+  if (vMatch !== null) return { kind: "vendedor", index: vMatch };
+  const cMatch = matchIn(compradores);
+  if (cMatch !== null) return { kind: "comprador", index: cMatch };
+  return stored;
+}
+
 function DocumentsTab({
   dealId,
   formAttachments,
   formToken,
   fallbackAttachments,
+  vendedores,
+  compradores,
 }: {
   dealId: string;
   formAttachments: FormAttachmentLite[];
   formToken: string | null;
   fallbackAttachments: FallbackAttachment[];
+  vendedores: Parte[];
+  compradores: Parte[];
 }) {
   const hasFormAttachments = formAttachments.length > 0 && formToken;
   // Infosimples attachments always come in via fallbackAttachments (DealAttachment
@@ -570,7 +617,10 @@ function DocumentsTab({
         typeof extracted?.confidence === "number"
           ? (extracted.confidence as number)
           : null;
-      const assignment = (extracted?.assignment as Assignment | undefined) ?? {
+      const storedAssignment = extracted?.assignment as Assignment | undefined;
+      // H.6 — rematch against final parties (handles user correction in steps 1-2)
+      const rematched = rematchAssignment(storedAssignment, fields, vendedores, compradores);
+      const assignment = rematched ?? {
         kind: resolveKind(att.category, extracted),
         index: 0,
       };

@@ -1176,3 +1176,133 @@ Listar SEPARADAMENTE dos bugs gerais — apenas bugs do módulo de certidões. P
 5. Se algo parece bug mas você não tem certeza, **REPORTE** — melhor falso positivo que falso negativo.
 
 Este é o teste **definitivo**. Execute com cuidado.
+
+---
+
+## 16. REGRESSÃO PHASE H (2026-04-18) — BUGS CRÍTICOS CORRIGIDOS
+
+Durante o E2E de 2026-04-17 foram encontrados 2 P0 + 6 P1 + 8 P2. As correções
+foram deployadas como Phase H. Esta seção verifica que NENHUM retornou.
+
+### 16.1 — P0-A: TRF3/PGE-SP falso-negativo
+
+**Regressão a testar**: abrir um deal com certidões extraídas. Na aba Certidões,
+para cada card TRF3 ou PGE-SP:
+- [ ] Se retornou "Negativa" ícone verde → VALIDAR que tem PDF anexado (botão
+      download visível, `attachmentId` não-null no JSON de `/api/deals/:id/certidoes`)
+- [ ] Abrir JSON raw (`GET /api/deals/:id/certidoes`, inspecionar `resultData.raw`):
+      - `raw.code === 200` + `raw.data_count >= 1` + `raw.header.billable === true`
+      - Se `raw.code !== 200` → card DEVE mostrar ícone vermelho (XCircle),
+        não verde, e `status: "failed"` no DB
+
+**Falha** (regressão P0-A): qualquer card TRF3/PGE-SP com ícone verde +
+`raw.code === 602` + `attachmentId === null`. **BLOQUEIA produção.**
+
+### 16.2 — P0-B: PGFN indeterminado
+
+**Regressão a testar**: para cada card `receita-federal/pgfn`:
+- [ ] Status textual não pode ser "Indeterminado" quando `raw.debitos_rfb === false`
+      e `raw.debitos_pgfn === false`
+- [ ] Esperado: "Negativa · nada consta" com ícone verde, PDF baixado
+
+### 16.3 — P1-1: TJSP pedido-cível 100% fail
+
+**Regressão**: deal com PF SP + data_nascimento preenchida + (opcionalmente)
+nome_mae preenchido.
+- [ ] Disparar extração. Dos 4 jobs TJSP pedido-cível por parte:
+      - ≥ 2/4 devem ir para `pending_portal` (em vez de 100% falharem com code 606)
+      - Depois do cron (ou manual sweep), devem virar `success` com PDF
+- [ ] Parte PF SEM `data_nascimento`: TJSP deve aparecer como `skipped` com
+      `missingField: "data_nascimento"` (não disparar e falhar)
+
+### 16.4 — P1-2: CENPROT SP payload com UF
+
+**Regressão**: payload enviado deve incluir `uf: "SP"`. Inspecionar no
+`CertidaoJob.requestPayload` via banco ou GET `/api/deals/:id/certidoes`:
+- [ ] `requestPayload.uf === "SP"` em todo job cenprot-sp/protestos
+
+### 16.5 — P1-3: OCR auto-atribuição não troca lados
+
+**Regressão**: upload 4 docs (2 RGs de compradores + 2 RGs de vendedores) em
+sequência, SEM preencher etapas 1-2 antes.
+- [ ] Nenhum card deve auto-atribuir a "Vendedor 1" / "Comprador 1" — todos
+      devem aparecer como "Outros / Sem atribuição"
+- [ ] Botão "Aplicar aos campos" deve estar DESABILITADO (com tooltip
+      explicando que há docs sem atribuição)
+- [ ] Após escolher manualmente no dropdown, botão habilita
+
+### 16.6 — P1-4: Deal docs herdam atribuição correta
+
+**Regressão**: criar form, fazer upload e atribuir Doc-A a "Vendedor 1". Nas
+etapas 1-2, corrigir as partes para que o CPF do Doc-A seja agora "Comprador 1".
+Finalizar form. Abrir deal:
+- [ ] Aba Documentos deve mostrar Doc-A em "Parte Compradora" (rematch por CPF),
+      não "Parte Vendedora"
+
+### 16.7 — P1-5: Sweep com dry-run
+
+**Regressão**: ter ≥1 job travado em `fetching`. Clicar "Recuperar travadas":
+- [ ] Deve aparecer `window.confirm` explicando quantos jobs vão ser promovidos
+      ou marcados como falha. Sem confirm → sem ação.
+
+### 16.8 — P1-6: EditPartyDialog pré-preenchido
+
+**Regressão**: em um job failed com `failureCategory: "inconsistent_input"`,
+clicar no ícone de edição:
+- [ ] Dialog abre com Nome/CPF/Data/UF/Cidade **preenchidos** com os dados
+      atuais da parte. Não pode abrir vazio.
+
+### 16.9 — P2-1: Health endpoint
+
+```
+GET /api/admin/certidoes/health
+```
+- [ ] `infosimples.ok === true` (com CNPJ real válido)
+- [ ] `govbr.active` reflete estado atual
+
+### 16.10 — P2-2: Relatório PDF contadores corretos
+
+**Regressão**: em um deal com ≥5 jobs failed e ≥2 skipped, gerar relatório
+de DD:
+- [ ] PDF mostra "Falhas: N" onde N = nº real (não 0)
+- [ ] Mostra "Puladas: M" onde M = nº real (não 0)
+
+### 16.11 — P2-4: Ícone de "nao_emitida"
+
+**Regressão**: card com `situacao: "nao_emitida"` deve ter ícone vermelho
+(XCircle), nunca verde (CheckCircle2).
+
+### 16.12 — P2-6: E-Proc SP com botão portal
+
+**Regressão**: deal com PF SP → após extração, deve haver card do skipped
+`tribunal/tjsp/eproc` com:
+- [ ] Ícone SkipForward cinza
+- [ ] Botão azul "Abrir portal oficial" linkando para
+      `https://certidoes.tjsp.jus.br`
+
+### 16.13 — P2-7: Imóvel UF-condicional
+
+**Regressão**: no form, etapa Imóvel:
+- [ ] Imóvel com UF = SP → mostra "Inscrição IPTU" + "SQL", NÃO mostra
+      "Inscrição Municipal"
+- [ ] Imóvel com UF = RJ → mostra "Inscrição IPTU" + "Inscrição Municipal",
+      NÃO mostra "SQL"
+- [ ] UF vazio ou outras → só "Inscrição IPTU"
+
+### 16.14 — P2-8: Corretora PF
+
+**Regressão**: etapa Comissão/Corretora:
+- [ ] Radio "Corretor autônomo (PF)" / "Imobiliária (PJ)"
+- [ ] PF: labels trocam para "Nome do Corretor" + "CPF do Corretor"
+- [ ] CRECI placeholder muda para "Ex: 199.905" (PF) vs "Ex: J-12345" (PJ)
+
+### 16.15 — P2-9: Confirm ao remover parte
+
+**Regressão**: em vendedor/comprador com dados preenchidos, clicar "Remover":
+- [ ] Abre `window.confirm` avisando que há dados OCR-extraídos
+
+### 16.16 — Billing honesto (H.18)
+
+**Regressão**: para deal com ≥1 job com code 6xx (TJSP 606 sem data_nascimento):
+- [ ] `CertidaoJob.costCents === 0` (não cobra falha)
+- [ ] Total mensal no `/settings/certidoes` não inclui esses valores

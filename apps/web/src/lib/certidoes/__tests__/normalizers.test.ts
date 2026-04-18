@@ -22,6 +22,9 @@ import noData600 from "../__fixtures__/genuine-no-data-600.json";
 import receitaCnpj from "../__fixtures__/receita-cnpj-ativo.json";
 import caixaCrf from "../__fixtures__/caixa-crf-regular.json";
 import sefazUnif from "../__fixtures__/sefaz-unificada-negativa.json";
+import trf3Code602 from "../__fixtures__/trf3-code602.json";
+import pgeSpCode602 from "../__fixtures__/pge-sp-code602.json";
+import pgfnDebitosFlags from "../__fixtures__/pgfn-debitos-flags.json";
 
 describe("normalize — PGFN", () => {
   it("marca Negativa", () => {
@@ -38,6 +41,57 @@ describe("normalize — PGFN", () => {
     );
     expect(r.situacao).toBe("positiva_com_efeitos");
     expect(r.consta_debito).toBe(true);
+  });
+
+  // H.2 — Phase H: cascade resolution
+  it("cascade: debitos_rfb=false + debitos_pgfn=false → negativa (mesmo com situacao=null)", () => {
+    const r = normalize(
+      "receita-federal/pgfn",
+      pgfnDebitosFlags as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).toBe("negativa");
+    expect(r.consta_debito).toBe(false);
+    expect(r.validade).toBe("14/10/2026");
+  });
+
+  it("cascade: debitos_rfb=true → positiva", () => {
+    const resp = {
+      code: 200,
+      code_message: "OK",
+      data: [
+        {
+          cpf: "12345678900",
+          certidao: "CERTIDÃO POSITIVA DE DÉBITOS",
+          debitos_rfb: true,
+          debitos_pgfn: false,
+          tipo_certidao: null,
+        },
+      ],
+    };
+    const r = normalize(
+      "receita-federal/pgfn",
+      resp as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).toBe("positiva");
+    expect(r.consta_debito).toBe(true);
+  });
+
+  it("cascade: sem flags, certidao contém 'NEGATIVA' → negativa", () => {
+    const resp = {
+      code: 200,
+      code_message: "OK",
+      data: [
+        {
+          cpf: "12345678900",
+          certidao: "CERTIDÃO NEGATIVA DE DÉBITOS",
+        },
+      ],
+    };
+    const r = normalize(
+      "receita-federal/pgfn",
+      resp as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).toBe("negativa");
   });
 });
 
@@ -231,6 +285,61 @@ describe("Phase A — failureCategory via normalize()", () => {
     expect(mapInfosimplesCodeToCategory(610)).toBe("inconsistent_input");
     expect(mapInfosimplesCodeToCategory(672)).toBe("portal_unavailable");
     expect(mapInfosimplesCodeToCategory(999)).toBe("unknown");
+  });
+
+  // H.1 — Phase H (2026-04-18)
+  describe("Phase H — code 602 TRF3/PGE-SP falso-negativo fix", () => {
+    it("code 602 → integration_error (não genuine_no_data)", () => {
+      expect(mapInfosimplesCodeToCategory(602)).toBe("integration_error");
+    });
+
+    it("TRF3 code 602 → situacao=nao_emitida (não negativa!)", () => {
+      const r = normalize(
+        "tribunal/trf3/certidao",
+        trf3Code602 as unknown as InfosimplesResponse
+      );
+      expect(r.situacao).toBe("nao_emitida");
+      expect(r.situacao).not.toBe("negativa"); // proteção explícita
+      expect(r.failureCategory).toBe("integration_error");
+      expect(r.consta_debito).toBe(false);
+    });
+
+    it("PGE-SP code 602 → situacao=nao_emitida", () => {
+      const r = normalize(
+        "pge-sp/cndt",
+        pgeSpCode602 as unknown as InfosimplesResponse
+      );
+      expect(r.situacao).toBe("nao_emitida");
+      expect(r.failureCategory).toBe("integration_error");
+    });
+
+    it("code 605 (timeout portal) → portal_unavailable", () => {
+      // Phase H: 605 era genuine_no_data, agora portal_unavailable
+      expect(mapInfosimplesCodeToCategory(605)).toBe("portal_unavailable");
+    });
+
+    it("code 615 (site indisponível) → portal_unavailable", () => {
+      // Phase H (revisão): 615 era inconsistent_input ("name mismatch"),
+      // mas Infosimples docs/prática dizem "site indisponível"
+      expect(mapInfosimplesCodeToCategory(615)).toBe("portal_unavailable");
+    });
+  });
+});
+
+// H.4 complementar — categoria que emite PDF sem attachment
+describe("Phase H — code 615 remapeado + categoria PDF", () => {
+  it("code 615 com resposta → situacao=nao_emitida (categoria portal_unavailable)", () => {
+    const resp = {
+      code: 615,
+      code_message: "O site está indisponível no momento. Tente novamente mais tarde.",
+      data: [],
+    };
+    const r = normalize(
+      "tribunal/trf/cert-unificada",
+      resp as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).toBe("nao_emitida");
+    expect(r.failureCategory).toBe("portal_unavailable");
   });
 });
 

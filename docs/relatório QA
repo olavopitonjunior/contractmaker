@@ -1,0 +1,234 @@
+# 📋 Relatório final — QA E2E Leonardo × Tiago
+
+## Tabela de resumo
+
+| Etapa | OK? | Observações |
+|---|---|---|
+| Upload em massa sem travar | ⚠️ parcial | 11 arquivos subiram, mas 2 caíram em "Falha — Extração concorrente em andamento". 1 recuperou após retry, 1 ficou travado. Contador mostra 11 mas só 10 cards renderizados. |
+| OCR classificou corretamente | ✅ | 10/10 classificações corretas. Confidence médio 97,8% (85% mínimo em IPTU débitos; 100% em 7 cards). |
+| Campos autofilled sem erro | ⚠️ | 47 campos preenchidos automaticamente, mas houve problemas de atribuição de parte (ver P0 abaixo). Nome e datas extraídos corretamente em todos os PF. |
+| Vendedor divorciado preservado | ❌ | Bug PF→PJ reverso apareceu: OCR da certidão antiga tentou classificar Tiago como "Casado" (Vendedor 2 default = Casado). Precisei corrigir para Divorciado manualmente. |
+| Deal criado com docs copiados | ✅ | 10 docs copiados, agrupados em Vendedora (3)/Compradora (3)/Imóvel (3) + 1 sem grupo. Porém **atribuições erradas herdadas** — ver P1. |
+| Myrielle diligenciada | ✅ | Adicionada com sucesso (CPF 398.106.648-00, SP Caçapava, 27/07/1991, Relação "Outro", justificativa R.8/52.447). |
+| Plano de certidões preview | ✅ | 52 jobs, 4 skipped (E-Proc SP), custo R$ 2,48, budget R$ 2,50/R$ 50,00. |
+| Extração rodou fim-a-fim | ✅ | ~165s total. 51 terminais + 1 ainda consultando ao final. |
+| TJSP multi-tipo × 4 disparou | ⚠️ | Disparou 16 jobs (4 tipos × 4 partes), mas **TODOS retornaram "Não emitida · Dados insuficientes"** em 2-4s em vez de `pending_portal` de 15min. Ver P1. |
+| TRF3 individual disparou | ✅ | 4 sucessos em ~2s cada, Negativa. |
+| CENPROT nacional (IEPTB) comportamento | ❓ | Não apareceu no plano — só CENPROT SP. Não identifiquei disparo de IEPTB/GOV.BR. |
+| E-Proc SP com externalLink | ❌ | 4 jobs E-Proc SP foram marcados como skipped no preview com mensagem correta, mas **não viraram cards visíveis** na UI pós-extração — não consegui testar o botão "Abrir portal". |
+| Failed com FailureCategory correto | ⚠️ | Categorias vistas: `missing_input` (TJSP × 16, CENPROT × 4 — rotulados "Dados insuficientes"), `inconsistent_input` (Cert Cível JF Tiago — "Dados divergentes"), `provider_timeout` (CENPROT Tiago — antes do retry automático). Nenhum `rate_limited`, `account_issue`, `genuine_no_data`. |
+| Badge Pendente unificado | ⚠️ | Alguns cards "Não emitida" têm ícone verde (✓) mas badge âmbar de "Dados insuficientes" — UX ambígua. Usuário pode confundir com sucesso real. |
+| Retry em massa funcional | ❌ | Botão "Recuperar travadas (1)" não mostrou dry-run/count antes de confirmar — apenas silenciosamente marcou e nada aconteceu visivelmente. |
+| Edit parte dialog funcional | ⚠️ | Abre corretamente no card com ⚠️, mas **todos os campos vêm vazios** em vez de pré-preenchidos com dados da parte. |
+| Relatório PDF gerado | ✅ | 5 páginas, bem formatado, com seções por parte. Resumo diz "Falhas: 0 · Puladas: 0" — incorreto, ver P2. |
+| Cron pegou jobs awaiting_portal | ❌ | Não observável — nenhum job ficou em `pending_portal/awaiting_portal`, todos os TJSP falharam imediatamente. |
+
+## Bugs encontrados
+
+### P0 (block)
+**Nenhum** — o fluxo completou fim-a-fim. Mas o comportamento abaixo é borderline P0/P1.
+
+### P1 (degrade)
+
+**P1-1. TJSP pedido-cível falha em TODOS os 16 jobs com "Parâmetros obrigatórios não foram enviados"**
+- Repro: criar deal com PF SP, adicionar 4 partes (1 vendedor + 2 compradores + 1 diligenciado), disparar extração.
+- Atual: todos os 16 jobs `tribunal/tjsp/pedido-civel` retornam Código 606 "Parâmetros obrigatórios não foram enviados. Por favor, verifique a documentação de uso do serviço." em 2-4s. Badge "Dados insuficientes".
+- Esperado: `pending_portal` com subtítulo "até 15 min" e cron assíncrono atualizando para success depois.
+- Hipótese: o wrapper Infosimples está montando o payload sem campos obrigatórios (provavelmente nome da mãe ou data de nascimento completa). A parte tem todos esses dados preenchidos no form.
+- Impacto: **~30% do valor core da feature** (4 tipos × 4 partes = 16 de 52 jobs não retornam dado útil). Deal: cmo3orktd000513ssiufbzqzo.
+
+**P1-2. CENPROT SP falha em 3 de 4 partes com "Dados insuficientes"**
+- Repro: mesmo setup.
+- Atual: CENPROT SP (Protestos) retornou "Não emitida · Dados insuficientes" para Tiago, Leonardo, Luciana e Myrielle (4/4 falharam). Tiago inclusive passou por timeout antes (352s/246s nas durações).
+- Esperado: negativa/positiva de protestos.
+- Impacto: nenhum protesto é verificado.
+
+**P1-3. Auto-atribuição de partes na Etapa 0 (OCR) faz troca PF↔lado**
+- Repro: fazer upload de 10 docs com 2 compradores + 1 vendedor.
+- Atual:
+  - RG Luciana (co-compradora) → auto-atribuído como "Vendedor 1"
+  - Certidão casamento Leo×Lu → "Outros (sem aplicar)"
+  - Certidão casamento Tiago×Myrielle → "Vendedor 2" (deveria ficar sem atribuição ou em Diligenciado)
+  - RG Leonardo → "Comprador 2 — Leonardo" (duplicou Comprador 1)
+  - Comp. Residência Tiago → "Comprador 3 — Tiago" (Tiago é vendedor!)
+- Esperado: uso do titular/nome do doc para mapear na lista certa (RG da Luciana → Comprador 2, não Vendedor 1).
+- Impacto: precisei remover e recriar partes manualmente, com perda de dados OCR-extraídos no processo (ex: data nascimento do Leonardo sumiu ao remover Comprador 2 duplicado).
+
+**P1-4. Documentos do deal herdam atribuições erradas do OCR**
+- Repro: Etapas 1-3 do deal corrigem as partes, mas a aba "Documentos" do deal mantém a atribuição antiga do OCR.
+- Atual: No deal, "Parte Vendedora (3)" contém RG da Luciana (que agora é compradora); "Parte Compradora (3)" contém comp. residência do Tiago (que agora é vendedor).
+- Esperado: reagrupar documentos com base nas partes finais do formulário.
+
+**P1-5. "Retry em massa / Recuperar travadas" não mostra dry-run**
+- Atual: o botão "Recuperar travadas (1)" é clicado e nada visível acontece — sem modal de confirmação, sem contador.
+- Esperado: dry-run com "Você está prestes a reenviar N jobs. Custo estimado: R$ X."
+
+**P1-6. EditPartyDialog abre com campos vazios**
+- Repro: clicar no ícone ⚠️ em CENPROT SP Tiago failed.
+- Atual: abre "Editar dados da parte" com Nome/CPF/Data/Cidade totalmente vazios.
+- Esperado: pré-preencher com os dados atuais da parte para o usuário só corrigir o que errou.
+
+### P2 (cosmético)
+
+**P2-1. Health admin reporta Infosimples "ok: false" quando na prática está funcionando**
+- `/api/admin/certidoes/health` → `{"infosimples":{"ok":false, "errorMessage":"Parâmetro(s) inválido(s).: cnpj."}}`
+- Provável: probe de health usa CNPJ inválido/vazio. Mas 52 jobs por CPF rodaram OK.
+
+**P2-2. Relatório DD mostra "Falhas: 0 · Puladas: 0" incorretamente**
+- Atual: resumo do lote "Total de certidões: 52 · Negativas: 24 · Com débito/pendência: 0 · Falhas: 0 · Puladas: 0".
+- Esperado: Falhas: ~20 (16 TJSP + 4 CENPROT), Puladas: 4 (E-Proc SP).
+
+**P2-3. Contador "11 documentos" na etapa 0 mas só 10 cards renderizados**
+- Inconsistência cosmética entre header e lista.
+
+**P2-4. Jobs failed aparecem com ícone verde (✓) + badge âmbar "Dados insuficientes"**
+- UX ambíguo: aparenta sucesso mas está falhado.
+
+**P2-5. Detalhe modal "O serviço informado na URL não é válido" em jobs bem-sucedidos**
+- Cards TRF3/PGE-SP retornaram negativa OK, mas o modal de detalhe mostra esse texto confuso.
+
+**P2-6. 4 skipped E-Proc SP do preview não viraram cards visíveis**
+- Esperado: card cinza com botão "Abrir portal oficial" linkando pra certidoes.tjsp.jus.br.
+
+**P2-7. Campo "Inscrição Municipal" e "Inscrição IPTU" são duplicados na etapa Imóvel**
+- Schema tem "Inscrição IPTU" (placeholder "CND IPTU SP" via SQL) e "Inscrição Municipal" (placeholder "CND IPTU RJ"). Pro Leonardo/Tiago em SP, os dois receberam o mesmo valor.
+
+**P2-8. Formulário de dados da corretora não suporta corretora PF**
+- Só tem campos "Imobiliária: Razão Social / CNPJ / CRECI J-xxxx". Para a Daniela (CRECI 199.905 PF) tive que jogar tudo no nome e nenhum lugar pro CPF.
+
+**P2-9. Ao remover dupla Leonardo em compradores, dados extraídos do OCR (RG, data nasc) foram perdidos**
+- Não houve consolidação entre os dois slots.
+
+## Performance
+
+- **OCR batch (10 docs)**: ~30-45 s do upload até todos em "pronto". 2 caíram em race condition "Extração concorrente em andamento", mas retry resolveu 1 e o outro foi removido.
+- **Certidões**:
+  - T+0: clique em "Extrair"
+  - T+3s: primeiro sucesso (1/52)
+  - T+13s: 5/52 (~10%)
+  - T+23s: 9/52 (~17%)
+  - T+65s: 22/52 (~42%)
+  - **T+~75s: 26/52 → 50% atingido**
+  - T+105s: 40/52 (~77%)
+  - T+125s: 49/52 (~94%)
+  - T+165s: 51/52 (**100% dos não-awaiting terminais** — o 52º é algum corner case sem retry automático)
+- **Latência média por job**: 6-12s (estável em 7s no final)
+- **Chamadas Infosimples**: 52 jobs disparados (41 successful negativas + 20 failures missing_input + 1 timeout). Total gasto R$ 2,42 — abaixo do preview de R$ 2,48 porque 4 skipped não cobram.
+- **Rate-limit Gemini**: 0 detectado no OCR.
+
+## Quality
+
+- **OCR confidence < 0.7**: nenhum campo. Mínimo foi 85% (IPTU débitos) e 95% (matrícula). Campos individuais extraídos batem com os documentos reais.
+- **Jobs com `integration_error`**: 0 — não vi nenhum classificado assim (bug nosso de wrapper).
+- **Jobs com `genuine_no_data` mapeados errado**: N/A — todos os TJSP/CENPROT que falharam foram rotulados `missing_input/inconsistent_input` (correto pela mensagem); porém a causa raiz pode ser nosso wrapper, não o portal real. **Se o wrapper for quem está omitindo parâmetros, a categoria deveria ser `integration_error` e não `missing_input`**.
+- **GOV.BR**: ativo até 22/05/2027.
+
+## Conclusão
+
+**Ajustar antes de produção.** O fluxo end-to-end completa e o custo-por-job está dentro do budget, mas três bugs P1 minam o valor: (1) TJSP pedido-cível falha em 100% dos 16 jobs por parâmetros obrigatórios faltando no wrapper, (2) CENPROT SP falha em 100% dos 4 jobs, e (3) auto-atribuição de partes no OCR troca comprador↔vendedor e exige rework manual que ainda propaga atribuição errada para a aba Documentos do deal. Corrigir esses três destrava ~60% do valor da extração que hoje aparece como "Não emitida · Dados insuficientes".
+# Relatório complementar — Análise de conteúdo dos JSON das certidões
+
+Abri o endpoint `/api/deals/cmo3orktd000513ssiufbzqzo/certidoes` e inspecionei os 52 jobs (campo `resultData` + `raw` Infosimples). A UI resume muita coisa, mas o JSON revelou **achados que não apareciam no relatório original** — inclusive dois bugs P0 que eu tinha classificado como P1.
+
+## 1. Panorama por endpoint (4 partes = Leonardo, Luciana, Tiago, Myrielle)
+
+| Endpoint | N | HTTP Infosimples | `situacao` mapeada | Attachment PDF | Conclusão real |
+|---|---|---|---|---|---|
+| receita-federal/pgfn | 4 | 200 (OK) × 4 | **"indeterminado"** × 4 ❌ | 4/4 | Raw diz "CERTIDÃO NEGATIVA DE DÉBITOS" + `debitos_rfb:false` + `debitos_pgfn:false` → deveria ser "negativa" |
+| tribunal/tst/cndt | 4 | 200 × 4 | "negativa" × 4 ✅ | 4/4 | OK — CNDT negativa com validade 14/10/2026 |
+| tribunal/trt2/ceat | 4 | 200 × 4 | "negativa" × 4 ✅ | 4/4 | OK — nada consta |
+| tribunal/trt2/ceat-digital | 4 | 200 × 4 | "negativa" × 4 ✅ | 4/4 | OK — PJe TRT2 sem ações |
+| tribunal/trt15/ceat | 4 | 200 × 4 | "negativa" × 4 ✅ | 4/4 | OK — TRT15 sem ações |
+| tribunal/trf/cert-unificada | 4 | 200 × 3 + **615** × 1 | "indeterminado" × 3 + "nao_emitida" × 1 | 3/4 | 3 OK ("negativa nos 6 TRFs") — 1 falha em Tiago (site indisponível) |
+| **tribunal/trf3/certidao** | 4 | **602 × 4** ("URL inválida") | **"negativa" × 4** ❌ | **0/4** | **NENHUMA certidão foi emitida** — backend forjou "negativa" |
+| **pge-sp/cndt** | 4 | **602 × 4** ("URL inválida") | **"negativa" × 4** ❌ | **0/4** | **NENHUMA certidão foi emitida** — backend forjou "negativa" |
+| **tribunal/tjsp/pedido-civel** | 16 | **606 × 16** ("parâmetros faltando") | "nao_emitida" × 16 | 0/16 | 100% fail — confirmado |
+| cenprot-sp/protestos | 4 | 612 × 3 + 605 × 1 | "nao_emitida" × 3 + "negativa" × 1 | 0/4 | 75% fail — confirmado; 1 sucesso (Tiago) sem PDF baixado |
+
+## 2. 🔴 BUGS NOVOS P0 descobertos pelo JSON (não visíveis na UI)
+
+### P0-A — TRF3 e PGE-SP: falso-negativo silencioso (billing + due diligence em risco)
+
+**Evidência**: para os 8 jobs TRF3+PGE-SP, o raw do Infosimples retornou:
+```
+code: 602
+code_message: "O serviço informado na URL não é válido."
+header.billable: false
+data: []  (zero resultados)
+site_receipts: []
+```
+
+Mas o backend mapeou **todos** para `situacao:"negativa"`, `consta_debito:false`, `detalhes:"O serviço informado na URL não é válido."`. A UI então exibe **ícone verde + "Negativa · nada consta"** para uma certidão que **nunca foi emitida**. Não há `attachmentId` (nenhum PDF baixado) e nenhum `site_receipt`, mas isso não é visível no card.
+
+**Impacto**: o Relatório de Due Diligence exibe 8 certidões como "negativas" sem lastro. Um comprador/advogado pode assinar CCV acreditando que TRF3 e PGE-SP foram checadas. Isso é falha crítica de DD — e o sistema ainda **cobrou R$0,32** por estes 8 "sucessos" (R$0,04 × 8).
+
+**Causa provável**: o endpoint TRF3 mudou de URL (ou foi descontinuado na v2.2.36 do Infosimples) e o mapper default cai em `"negativa"` quando não consegue parsear.
+
+**Fix sugerido**: mapper deve interpretar `raw.code !== 200` + `data_count === 0` + `billable === false` como `status = failed` (não `success`), com `failureCategory = "integration_error"` ou `"provider_deprecated"`.
+
+### P0-B — PGFN: "indeterminado" quando raw claramente diz "NEGATIVA"
+
+**Evidência** (Luciana, CPF 276.770.398-98):
+```
+raw.certidao: "CERTIDÃO NEGATIVA DE DÉBITOS RELATIVOS AOS TRIBUTOS FEDERAIS E À DÍVIDA ATIVA DA UNIÃO"
+raw.mensagem: (igual)
+raw.debitos_rfb: false
+raw.debitos_pgfn: false
+raw.emissao_data: "17/04/2026"
+raw.validade: "14/10/2026"
+raw.situacao: null      ← o mapper usa este campo
+```
+
+O backend lê `raw.situacao` (null) e mapeia para `"indeterminado"`, ignorando `raw.certidao` + `debitos_rfb/pgfn`. Os 4 jobs PGFN ficaram assim. PDF está anexado corretamente, mas o **status textual na UI** diz "Concluído" (não "Negativa"), e o relatório de DD pode exibir essas certidões como inconclusivas, forçando revisão manual desnecessária.
+
+**Fix**: se `raw.certidao` contém "NEGATIVA" ou `raw.debitos_rfb === false && raw.debitos_pgfn === false`, mapear para `"negativa"` + `consta_debito:false`.
+
+## 3. Achados P1 confirmados/refinados
+
+**P1-1 (TJSP pedido-cível, 16/16 fail)** — Payload enviado: `{cpf, nome, email, instancia, finalidade, tipo_certidao}`. O Infosimples devolve rc=606. Faltam parâmetros — provavelmente `data_nascimento` (que outras APIs usam) ou `genero`. Sugestão de teste: enviar também `data_nascimento` (já temos no form) e `nome_mae` para o CPF.
+
+**P1-2 (CENPROT SP, 3/4 fail)** — Payload é só `{cpf}`. Uma requisição deu `rc=605` (timeout), outras `rc=612` ("não retornou dados no site"). Pode ser legítimo (CENPROT SP está instável) ou faltar UF. O único "sucesso" (Tiago) também não baixou PDF — `attCount=0` em 4/4 do grupo. Ou seja, **nenhuma CENPROT produziu PDF**, mesmo a "negativa" de Tiago.
+
+**P1-3 (TRF cert-unificada, Tiago)** — Único `rc=615` ("site indisponível") num endpoint que funcionou para os outros 3. Vale retry.
+
+## 4. Achados positivos (JSON confirma qualidade dos sucessos legítimos)
+
+- **CNDT, TRT2 físico, TRT2 digital, TRT15** — todos 100% com rc=200, `situacao:"negativa"`, PDFs anexados (16/16 jobs). Emissão 17/04/2026, validade 14/10/2026 coerentes.
+- **TRF cert-unificada (3/4)** — detalhes `"Certidao negativa nos 6 TRFs"` (confirmando cobertura nacional).
+- **Validade uniforme 14/10/2026** em todos os jobs que trouxeram essa informação — cron pode usar essa data para renovação automática.
+- **CPFs enviados corretos** (só dígitos, sem formatação): Leonardo 18384929840, Luciana 27677039898, Tiago 34044417881, Myrielle 39810664800 ✅.
+- **Data de nascimento correta**: Tiago 1985-04-10, Leonardo 1973-08-25, Luciana 1977-08-02, Myrielle 1991-07-27 ✅.
+- **Myrielle (diligenciada)** — disparou os mesmos 13 tipos que as partes PF, o que confirma que o sistema trata DILIGENCIADO com paridade (bom design).
+
+## 5. Cobrança vs Infosimples `billable`
+
+Curiosidade do campo `raw.header.billable`:
+
+| Endpoint | Jobs | Billable=true (Infosimples) | Cobrado no sistema |
+|---|---|---|---|
+| receita-federal/pgfn | 4 | 0 | 4 × R$0,04 |
+| tribunal/trt2/ceat | 4 | 0 | 4 × R$0,04 |
+| tribunal/tst/cndt | 4 | 0 | 4 × R$0,04 |
+| tribunal/trf3/certidao (602) | 4 | 0 | 4 × R$0,04 |
+| pge-sp/cndt (602) | 4 | 0 | 4 × R$0,04 |
+| tribunal/tjsp/pedido-civel (606) | 16 | 16 | 16 × R$0,06 |
+| cenprot-sp/protestos | 4 | 3 | 4 × R$0,06 |
+
+**Observação P2**: o sistema cobra mesmo quando `Infosimples.billable=false`, inclusive nos 8 jobs TRF3+PGE-SP que **nunca foram emitidos** (code 602). Em contraste, **TJSP marca billable=true mesmo com rc=606**, o que explica a pressão de custo nos 16 TJSP failing (**R$0,96 "desperdiçados" em um único deal**).
+
+Se o billing do Contractmaker espelhar `header.billable`, você economiza R$0,32 por deal (TRF3+PGE-SP). Se espelhar `code===200`, os TJSP (rc=606) também deixam de ser cobrados.
+
+## 6. Revisão da conclusão do relatório original
+
+A conclusão anterior dizia "ajustar antes de produção" por causa de TJSP + CENPROT + auto-atribuição. Com os JSON analisados, a gravidade aumenta:
+
+**NÃO ir para produção até corrigir, em ordem:**
+
+1. **P0-A (TRF3/PGE-SP falso-negativo)** — bloqueador absoluto. Qualquer deal produz relatório de DD com 8 certidões forjadas como "negativa". Fix: mapper deve marcar `code 602` como `failed`.
+2. **P0-B (PGFN indeterminado)** — melhoria crítica de UX, não é risco legal (PDF existe), mas faz usuários retrabalharem.
+3. **P1-1 (TJSP 100% fail)** — destrava ~30% do valor da feature + para de cobrar R$0,96/deal em vão.
+4. **P1-2 (CENPROT sem PDF mesmo na success)** — é confiável só quando PDF chega; hoje nunca chega.
+
+Só depois dos itens 1-2 o produto pode ir a produção com a aba Certidões visível; TJSP (item 3) pode ficar como "beta — em desenvolvimento" provisoriamente, já que o Infosimples aceita pagamento de jobs que retornam erro.
+
+**Custo real da feature neste deal**: R$2,42 cobrado, dos quais **R$1,28 (53%) foram em jobs que não produziram certidão útil** (TRF3 4×R$0,04 + PGE-SP 4×R$0,04 + TJSP 16×R$0,06 + CENPROT 3×R$0,06). Antes dos fixes, a feature opera com ~47% de valor efetivo.

@@ -48,14 +48,33 @@ function detectSituacao(text: string | undefined): Situacao {
 
 function pgfnExtractor(resp: InfosimplesResponse): NormalizedResult {
   const d = getFirst<Record<string, unknown>>(resp) ?? {};
+  // H.2 (Phase H, 2026-04-18) — cascade resolution:
+  // Payload real da Infosimples traz `raw.certidao` como string descritiva
+  // ("CERTIDÃO NEGATIVA DE DÉBITOS...") + flags booleanas `debitos_rfb` e
+  // `debitos_pgfn`. O campo `tipo_certidao`/`tipo` vem null em respostas
+  // recentes. Antes, extractor só lia tipo_certidao → virava "indeterminado".
+  const debitosRfb = asBool(d.debitos_rfb);
+  const debitosPgfn = asBool(d.debitos_pgfn);
   const tipo = asString(d.tipo_certidao) || asString(d.tipo);
-  const situacao = detectSituacao(tipo);
+  const certidaoTxt = asString(d.certidao) || asString(d.mensagem);
+
+  let situacao: Situacao;
+  if (debitosRfb === false && debitosPgfn === false) {
+    situacao = "negativa";
+  } else if (debitosRfb === true || debitosPgfn === true) {
+    situacao = "positiva";
+  } else if (certidaoTxt) {
+    situacao = detectSituacao(certidaoTxt);
+  } else {
+    situacao = detectSituacao(tipo);
+  }
   return {
     situacao,
     validade: asString(d.data_validade ?? d.validade) ?? null,
     emissao: asString(d.data_emissao ?? d.emissao) ?? null,
-    detalhes: tipo ?? null,
-    consta_debito: situacao === "positiva" || situacao === "positiva_com_efeitos",
+    detalhes: tipo ?? certidaoTxt ?? null,
+    consta_debito:
+      situacao === "positiva" || situacao === "positiva_com_efeitos",
     raw: d,
   };
 }
@@ -332,11 +351,11 @@ export function normalize(
 ): NormalizedResult {
   if (resp.code !== 200) {
     const category = mapInfosimplesCodeToCategory(resp.code, resp.code_message);
-    // Map category → situacao for the coarse-grained state. Success-like
-    // categories (genuine_no_data) become "negativa" because the portal
-    // confirmed nothing is registered. User-fixable / systemic ones become
-    // "nao_emitida" so the UI surfaces the action needed. Unknown stays
-    // "indeterminado" — it's the "we don't know" state.
+    // H.1 (Phase H, 2026-04-18): code 602 ("URL inválida") foi remapeado
+    // de genuine_no_data → integration_error em error-codes.ts para evitar
+    // falso-negativo em TRF3/PGE-SP (endpoint depreciado retornava "negativa"
+    // sem PDF). Mantém semântica: genuine_no_data=portal confirmou ausência,
+    // integration_error=bug nosso, portal_unavailable=tente de novo.
     let situacao: Situacao;
     if (category === "genuine_no_data") situacao = "negativa";
     else if (category === "unknown") situacao = "indeterminado";

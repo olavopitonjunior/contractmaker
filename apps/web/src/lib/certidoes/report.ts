@@ -144,6 +144,19 @@ export function buildReportData(input: BuildInput): Record<string, unknown> {
     } else if (r?.situacao === "positiva" || r?.situacao === "positiva_com_efeitos") {
       positivas++;
       pendencias.push(`${job.label}: ${r.detalhes ?? "consta débito"}`);
+    } else if (r?.situacao === "nao_emitida") {
+      // H.10 (Phase H, 2026-04-18) — antes: jobs com code 6xx ficavam com
+      // status="success" no DB + situacao="nao_emitida", não caíam em
+      // nenhuma branch de contagem → relatório exibia "Falhas: 0" para 20+
+      // jobs reais falhos. Agora conta como falha legítima no resumo.
+      falhas++;
+      const motivo = job.errorMessage || r.detalhes || "certidão não emitida";
+      pendencias.push(`${job.label}: ${motivo}`);
+      falhasDetalhadas.push({
+        label: job.label,
+        motivo,
+        retryCount: job.retryCount,
+      });
     }
 
     if (job.latencyMs != null && job.latencyMs > 0) {

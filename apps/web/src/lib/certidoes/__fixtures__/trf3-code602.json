@@ -1,0 +1,10 @@
+{
+  "code": 602,
+  "code_message": "O serviço informado na URL não é válido.",
+  "header": {
+    "billable": false
+  },
+  "data_count": 0,
+  "data": [],
+  "site_receipts": []
+}

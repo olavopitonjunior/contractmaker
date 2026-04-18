@@ -841,6 +841,22 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
   // block applying the successful ones.
   const hasUploading = docs.some((d) => d.status === "uploading");
   const hasPending = docs.some((d) => d.status === "uploading" || d.status === "extracting");
+  // H.5 (Phase H, 2026-04-18) — bloquear "Aplicar" se houver doc de pessoa
+  // ainda sem atribuição explícita (kind === "outro"). Força o usuário a
+  // escolher vendedor/comprador/diligenciado no dropdown antes de aplicar,
+  // evitando troca comprador↔vendedor do fallback antigo.
+  const unassignedPersonDocs = docs.filter(
+    (d) =>
+      d.status === "ready" &&
+      d.fields &&
+      d.category &&
+      d.category !== "outro" &&
+      d.category !== "matricula" &&
+      d.category !== "iptu" &&
+      d.category !== "escritura" &&
+      d.assignment.kind === "outro"
+  );
+  const needsExplicitAssignment = unassignedPersonDocs.length > 0;
 
   return (
     <div className="space-y-4">
@@ -900,13 +916,24 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <p className="text-sm text-muted-foreground">
-              {docs.length} documento(s) {hasPending && "— processando…"}
+              {/* H.11 (Phase H, 2026-04-18) — antes só "11 documentos" com
+                  possível drift vs cards renderizados. Agora breakdown
+                  explícito: prontos / processando / falhados de total. */}
+              {readyCount} de {docs.length} prontos
+              {hasPending && ` · ${docs.filter((d) => d.status === "uploading" || d.status === "extracting").length} processando`}
+              {docs.some((d) => d.status === "failed") &&
+                ` · ${docs.filter((d) => d.status === "failed").length} com falha`}
             </p>
             <Button
               type="button"
               onClick={handleApply}
-              disabled={readyCount === 0 || hasUploading}
+              disabled={readyCount === 0 || hasUploading || needsExplicitAssignment}
               size="sm"
+              title={
+                needsExplicitAssignment
+                  ? `${unassignedPersonDocs.length} documento(s) sem atribuição — escolha vendedor/comprador no dropdown antes de aplicar`
+                  : undefined
+              }
             >
               Aplicar aos campos ({readyCount})
             </Button>

@@ -11,6 +11,8 @@ const pessoaFisicaSchema = z.object({
   rg: z.string().optional().default(""),
   cpf: z.string().optional().default(""),
   data_nascimento: z.string().optional().default(""),
+  // H.3 (Phase H, 2026-04-18) — exigido pelo TJSP pedido-cível (code 606 sem)
+  nome_mae: z.string().optional().default(""),
   email: z.string().email("Email invalido").optional().or(z.literal("")),
   endereco: z.string().optional().default(""),
   numero: z.string().optional().default(""),
@@ -159,6 +161,11 @@ export const step7Schema = z.object({
     quem_paga_texto: z.string().optional().default("Parte Compradora"),
     quando_paga: z.string().optional().default("assinatura"),
     quando_paga_texto: z.string().optional().default("no ato da assinatura"),
+    // H.16 (Phase H, 2026-04-18) — suporta corretor PF ou imobiliária PJ
+    corretora_tipo_pessoa: z
+      .enum(["fisica", "juridica"])
+      .optional()
+      .default("juridica"),
     imobiliaria_nome: z.string().optional().default(""),
     imobiliaria_cnpj: z.string().optional().default(""),
     creci: z.string().optional().default(""),

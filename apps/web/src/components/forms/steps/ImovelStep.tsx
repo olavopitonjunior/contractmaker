@@ -166,19 +166,27 @@ export function ImovelStep({ form }: ImovelStepProps) {
                   />
                 </FormField>
 
-                <FormField label="SQL (Setor-Quadra-Lote)">
-                  <Input
-                    {...form.register(`${prefix}.sql`)}
-                    placeholder="Necessário para CND IPTU SP"
-                  />
-                </FormField>
+                {/* H.15 (Phase H, 2026-04-18) — campos condicionais por UF.
+                    Antes renderizava SQL (SP) + Inscrição Municipal (RJ)
+                    simultaneamente para qualquer estado, confundindo usuários
+                    SP que preenchiam os dois com o mesmo valor. */}
+                {form.watch(`${prefix}.uf`) === "SP" && (
+                  <FormField label="SQL (Setor-Quadra-Lote)">
+                    <Input
+                      {...form.register(`${prefix}.sql`)}
+                      placeholder="Necessário para CND IPTU SP"
+                    />
+                  </FormField>
+                )}
 
-                <FormField label="Inscrição Municipal">
-                  <Input
-                    {...form.register(`${prefix}.inscricao_municipal`)}
-                    placeholder="Necessário para CND IPTU RJ"
-                  />
-                </FormField>
+                {form.watch(`${prefix}.uf`) === "RJ" && (
+                  <FormField label="Inscrição Municipal">
+                    <Input
+                      {...form.register(`${prefix}.inscricao_municipal`)}
+                      placeholder="Necessário para CND IPTU RJ"
+                    />
+                  </FormField>
+                )}
               </div>
 
               <FormField label="Descrição do Imóvel *">

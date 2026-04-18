@@ -108,6 +108,13 @@ function PessoaFisicaFields({
           />
         </FormField>
 
+        <FormField label="Nome da Mãe" className="md:col-span-2">
+          <Input
+            {...form.register(`${prefix}.nome_mae`)}
+            placeholder="Nome completo da mãe (exigido pela certidão cível TJSP)"
+          />
+        </FormField>
+
         <FormField label="Email" className="md:col-span-2">
           <Input
             {...form.register(`${prefix}.email`)}
@@ -481,7 +488,28 @@ export function VendedorStep({ form }: VendedorStepProps) {
                       type="button"
                       variant="outline"
                       size="sm"
-                      onClick={() => remove(index)}
+                      onClick={() => {
+                        // H.17 (Phase H, 2026-04-18) — ver CompradorStep.
+                        const current = form.getValues(
+                          `vendedores.${index}` as never
+                        ) as Record<string, unknown> | undefined;
+                        const hasData = !!(
+                          current &&
+                          (current.nome ||
+                            current.cpf ||
+                            current.cnpj ||
+                            current.data_nascimento)
+                        );
+                        if (
+                          hasData &&
+                          !window.confirm(
+                            "Este vendedor tem dados preenchidos (possivelmente extraídos por OCR). Remover?"
+                          )
+                        ) {
+                          return;
+                        }
+                        remove(index);
+                      }}
                       className="text-destructive border-destructive/30 hover:bg-destructive/10"
                     >
                       Remover

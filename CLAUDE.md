@@ -382,6 +382,28 @@ Tabela `AIUsage` em `schema.prisma` registra **cada** chamada a IA com tokens, c
   3. **Nenhum dos dois**: em dev local, escreve em `process.cwd()/public/exports/<id>/` (funciona porque Next serve `public/` automaticamente). Em serverless (VERCEL=1), falha com erro explicito em PT-BR dizendo para configurar `BLOB_READ_WRITE_TOKEN` ou `S3_BUCKET`.
 - Puppeteer requer Vercel Pro (timeout 60s). CSS `@media print` em `globals.css` garante que page breaks manuais aparecem no PDF.
 
+## Phase H — Correções pós-QA E2E (2026-04-18)
+
+QA E2E real (deal `cmo3orktd000513ssiufbzqzo`, 52 jobs SP) revelou 2 P0 de falso-negativo legal + 6 P1 + 8 P2. Correções deployadas:
+
+- **Falso-negativo TRF3/PGE-SP (P0-A)**: Infosimples retornou `code 602 "URL inválida"` (endpoint depreciado) + data vazio + billable=false. Mapper antigo: `602 → genuine_no_data → situacao="negativa"` → UI verde sem PDF. Corrigido em [apps/web/src/lib/certidoes/error-codes.ts:67](apps/web/src/lib/certidoes/error-codes.ts) — `602` agora é `integration_error` → `nao_emitida`. Também `605 → portal_unavailable` (era genuine_no_data).
+- **Billing honesto (H.18)**: `executor.ts` agora respeita `resp.header.billable === false` (não cobra) e força `status: "failed"` quando `situacao === "nao_emitida"` sem anexo. Evita cobrança fantasma (R$ 0,32/deal no QA).
+- **PGFN cascade (P0-B)**: `pgfnExtractor` lê `debitos_rfb`/`debitos_pgfn` (booleanas) + fallback em `raw.certidao` (string descritiva). Antes lia só `tipo_certidao` que vem null nas respostas recentes → "indeterminado".
+- **TJSP payload (P1-1)**: `planner.ts` agora inclui `data_nascimento` + `nome_mae` (opcional) para PF. Sem `data_nascimento`, skipped em vez de disparar e falhar com code 606 (era 100% fail no QA). Campo `nome_mae` adicionado no schema + step Vendedor/Comprador + mapeamento OCR (`mae` → `nome_mae`).
+- **CENPROT SP (P1-2)**: payload agora inclui `uf: "SP"` — portal exige location hint, sem ele 612 em ~75% dos casos. Complementar: executor flaga `status: "failed"` quando endpoint de categoria `civel|trabalhista|fiscal|protesto|municipal|federal` retorna sem `site_receipts[0]` mesmo com code=200 + situacao=negativa (evita "negativa sem prova documental"). Usa `CATEGORIES_REQUIRING_PDF` exportado de `endpoints.ts`.
+- **Code 615 remapeado**: era `inconsistent_input` ("name mismatch"), corrigido para `portal_unavailable` ("site indisponível") conforme docs Infosimples — TRF cert-unificada intermitente agora classifica corretamente e cai em retry automático.
+- **OCR auto-atribuição (P1-3)**: fallback de "primeira pessoa = vendedor[0]" removido. Agora docs sem match explícito de CPF/nome ficam em `kind: "outro"`. Botão "Aplicar aos campos" desabilita até todas as atribuições serem explícitas (dropdown).
+- **Deal docs herdam atribuição (P1-4)**: finalize copia `extractedData` inteiro (com `assignment`) do FormAttachment → DealAttachment. `DocumentsTab` tem `rematchAssignment()` que compara CPF/nome do doc contra vendedores/compradores finais do deal e sobrescreve se necessário.
+- **Sweep com dry-run (P1-5)**: `handleSweep` mostra `window.confirm` com count antes de executar.
+- **EditPartyDialog vazio (P1-6)**: fallback agora é `deal.form?.dataJson ?? deal.dataJson` — antes só lia `deal.dataJson` que é sempre null no fluxo atual.
+- **Health probe inválido (P2-1)**: CNPJ de probe trocado de `"00000000000000"` (DV inválido) para CNPJ real da Infosimples (13.347.016/0001-17). Aceita code 200 ou 600 como OK.
+- **Relatório "Falhas: 0" (P2-2)**: `buildReportData` adiciona branch para `situacao === "nao_emitida"` (antes ficava fora de todas as contagens).
+- **Ícone verde em "nao_emitida" (P2-4)**: `statusIcon` no CertidoesTab agora renderiza `XCircle` vermelho quando `situacao === "nao_emitida"`, mesmo com `status === "success"`.
+- **E-Proc SP skipped invisível (P2-6)**: endpoint `tribunal/tjsp/eproc` adicionado ao catálogo como placeholder (costCents=0). SkippedJob com `externalLink` agora renderiza card com botão "Abrir portal oficial".
+- **Campos duplicados imóvel (P2-7)**: SQL (SP) e Inscrição Municipal (RJ) agora condicionais por UF do imóvel.
+- **Corretora PF/PJ (P2-8)**: `comissao.corretora_tipo_pessoa` radio ("fisica" | "juridica"). Labels e placeholders trocam conforme seleção.
+- **Remoção destrutiva (P2-9)**: remove button em Vendedor/Comprador pede confirmação se slot tem dados.
+
 ## Alertas
 - Handlebars helpers em `src/lib/render/handlebars.ts` sao aditivos — novos helpers podem ser adicionados, mas helpers existentes NAO devem ser alterados (quebra contratos antigos).
 - TipTap edita HTML direto; re-render do Handlebars sobrescreve edicoes manuais (incluindo comment anchors e suggestion marks)
@@ -400,6 +422,7 @@ Tabela `AIUsage` em `schema.prisma` registra **cada** chamada a IA com tokens, c
 - Budget mensal de certidoes (`INFOSIMPLES_MONTHLY_BUDGET_CENTS`, default 5000) e hard gate: POST `/api/deals/:id/certidoes` retorna 402 se o batch fosse estourar o budget. Contar pelo somatorio de `CertidaoJob.costCents` do mes.
 - TJSP (5-15min) e TJRJ (ate 8 dias uteis) sao processos de 2 etapas: pedido → obter. Jobs ficam `awaiting_portal` entre as etapas. Cron diario em `vercel.json` (`0 9 * * *`) sweeps os jobs com `expectedReadyAt < now` e chama o `obter-*` correspondente. **Sem Vercel Pro**, o cron nao roda e os jobs ficam eternamente em `awaiting_portal` — requer chamada manual ao endpoint ou upgrade de plano.
 - Normalizers de certidoes sao **frageis** contra mudancas no schema da Infosimples. Usam fallback chains de nomes de campos (ex: `cndtExtractor` tenta `normalizado_validade → validade → data_validade`). Fixtures em `__fixtures__/` sao copias sanitizadas de payloads reais — servem como regressao. Apos a primeira extracao real em prod, **salvar o `resultData` real como fixture novo** e adicionar teste vitest correspondente.
+- **Regra anti-falso-negativo** (Phase H, 2026-04-18): qualquer resposta Infosimples em endpoint da categoria `civel|trabalhista|fiscal|protesto|municipal|federal` que não tenha `site_receipts[0]` (PDF anexado) é marcada como `status: "failed"` pelo executor, **independentemente** do `resp.code`, `raw.header.billable` ou situacao retornada. Endpoint informativo (`cadastro`, `fgts`) é exceção. Garante que nenhum card com ícone verde em produção seja uma "certidão sem lastro documental" — regressão verificada via `CATEGORIES_REQUIRING_PDF` em `endpoints.ts`.
 - Certidoes sao disparadas SEMPRE manualmente (botao no Deal detail) — nao ha auto-extract no finalizar do form. Decisao deliberada para o corretor ter controle total do gasto e visibilidade antes de confirmar.
 - Infosimples NAO cobre CND de IPTU em Porto Alegre (RS). Planner gera `SkippedJob` com `reason: "sem cobertura, extrair manualmente"`. Relatorio de due diligence lista essas pendencias na secao final.
 - Prisma migrations sao rodadas automaticamente via `prisma migrate deploy` no build script (ver `apps/web/package.json:build`). Nova migration e aplicada no proximo deploy do Vercel sem intervencao manual.

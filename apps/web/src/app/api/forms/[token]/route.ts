@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { generateContractForDeal } from "@/lib/services/contract-generation";
 
@@ -100,6 +101,13 @@ export async function PATCH(
                 mime: a.mime,
                 url: a.url,
                 category: a.category,
+                // H.6 (Phase H, 2026-04-18) — copia extractedData inteiro
+                // (incluindo {assignment, fields, confidence}) para que a
+                // aba Documentos do deal consiga agrupar docs pelo lado
+                // explicitamente escolhido pelo usuário no form, em vez
+                // do fallback heurístico cego de resolveKind(category).
+                extractedData:
+                  (a.extractedData as Prisma.InputJsonValue) ?? undefined,
               })),
             });
           }

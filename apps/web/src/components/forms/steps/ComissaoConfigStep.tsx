@@ -144,25 +144,60 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
           <Separator />
 
           <p className="text-sm font-semibold text-foreground">
-            Dados da Imobiliária
+            Dados do Corretor / Imobiliária
           </p>
+          {/* H.16 (Phase H, 2026-04-18) — antes só PJ; agora radio
+              diferencia corretor PF (CPF + CRECI individual) de imobiliária PJ. */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="Nome da Imobiliária" className="md:col-span-2">
+            <FormField label="Tipo de Cadastro" className="md:col-span-2">
+              <select
+                {...form.register("comissao.corretora_tipo_pessoa")}
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+              >
+                <option value="juridica">Imobiliária (PJ)</option>
+                <option value="fisica">Corretor autônomo (PF)</option>
+              </select>
+            </FormField>
+            <FormField
+              label={
+                form.watch("comissao.corretora_tipo_pessoa") === "fisica"
+                  ? "Nome do Corretor"
+                  : "Nome da Imobiliária"
+              }
+              className="md:col-span-2"
+            >
               <Input
                 {...form.register("comissao.imobiliaria_nome")}
-                placeholder="Razão Social ou Nome Fantasia"
+                placeholder={
+                  form.watch("comissao.corretora_tipo_pessoa") === "fisica"
+                    ? "Nome completo"
+                    : "Razão Social ou Nome Fantasia"
+                }
               />
             </FormField>
-            <FormField label="CNPJ da Imobiliária">
-              <Input
-                {...form.register("comissao.imobiliaria_cnpj")}
-                placeholder="00.000.000/0000-00"
-              />
-            </FormField>
-            <FormField label="CRECI da Imobiliária">
+            {form.watch("comissao.corretora_tipo_pessoa") === "fisica" ? (
+              <FormField label="CPF do Corretor">
+                <Input
+                  {...form.register("comissao.imobiliaria_cnpj")}
+                  placeholder="000.000.000-00"
+                />
+              </FormField>
+            ) : (
+              <FormField label="CNPJ da Imobiliária">
+                <Input
+                  {...form.register("comissao.imobiliaria_cnpj")}
+                  placeholder="00.000.000/0000-00"
+                />
+              </FormField>
+            )}
+            <FormField label="CRECI">
               <Input
                 {...form.register("comissao.creci")}
-                placeholder="Ex: J-12345"
+                placeholder={
+                  form.watch("comissao.corretora_tipo_pessoa") === "fisica"
+                    ? "Ex: 199.905"
+                    : "Ex: J-12345"
+                }
               />
             </FormField>
           </div>

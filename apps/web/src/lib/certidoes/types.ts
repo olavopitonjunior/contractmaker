@@ -91,7 +91,11 @@ export interface InfosimplesResponse {
   code: number;
   code_message: string;
   data: Array<Record<string, unknown>>;
+  data_count?: number;
   site_receipts?: string[];
   errors?: string[];
-  header?: Record<string, unknown>;
+  header?: {
+    billable?: boolean;
+    [key: string]: unknown;
+  };
 }

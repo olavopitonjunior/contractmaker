@@ -39,6 +39,22 @@ export interface EndpointInfo {
   requiresGovBrAuth?: boolean;
 }
 
+/**
+ * H.1 + H.4 (Phase H, 2026-04-18) — categorias que normalmente emitem PDF.
+ * Usado pelo executor para marcar jobs como failed quando code=200 +
+ * situacao="negativa"/"positiva" mas sem site_receipts[0] (CENPROT SP 200
+ * sem PDF foi o caso). Categorias `cadastro` e `fgts` são informativas
+ * (dump de cadastro), não emitem certidão anexada.
+ */
+export const CATEGORIES_REQUIRING_PDF: ReadonlySet<EndpointCategory> = new Set([
+  "civel",
+  "trabalhista",
+  "fiscal",
+  "protesto",
+  "municipal",
+  "federal",
+]);
+
 export const ENDPOINTS: Record<string, EndpointInfo> = {
   // --- Federal ---
   "receita-federal/pgfn": {
@@ -121,6 +137,19 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa", "imovel"],
     category: "civel",
     description: "Obtencao da Certidao Civel do TJSP — 2o passo (automatico via cron)",
+  },
+  // H.14 (Phase H, 2026-04-18) — placeholder para E-Proc SP 1ª/2ª instâncias.
+  // Infosimples não emite; SkippedJob + externalLink abre portal oficial.
+  // Entry no catálogo é necessária para CertidoesTab renderizar o card.
+  "tribunal/tjsp/eproc": {
+    id: "tribunal/tjsp/eproc",
+    label: "E-Proc SP (manual)",
+    costCents: 0,
+    scope: "estadual",
+    uf: "SP",
+    appliesTo: ["pessoa"],
+    category: "civel",
+    description: "E-Proc SP (1ª e 2ª instâncias) — sem cobertura Infosimples; extrair manualmente em certidoes.tjsp.jus.br com login GOV.BR",
   },
 
   // --- Estadual RJ ---

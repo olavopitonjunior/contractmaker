@@ -55,15 +55,18 @@ export async function GET() {
     errorMessage?: string;
   } = { ok: false, latencyMs: 0 };
   try {
-    // CNPJ Neon (fake mas válido DV-wise) — sem custo real, só valida auth
+    // H.9 (Phase H, 2026-04-18) — antes usava cnpj:"00000000000000" (DV
+    // inválido), que Infosimples rejeitava com "Parâmetro(s) inválido(s)"
+    // mesmo com a API saudável. CNPJ da própria Infosimples (13.347.016/0001-17)
+    // é válido e público — probe custa R$ 0,04 mas confirma serviço real.
     const resp = await callInfosimples("receita-federal/cnpj", {
-      cnpj: "00000000000000",
+      cnpj: "13347016000117",
     });
     infosimplesStatus = {
-      ok: resp.code < 500,
+      ok: resp.code === 200 || resp.code === 600, // 600 = sem registro é OK
       latencyMs: Date.now() - infoT0,
     };
-    if (resp.code >= 500) {
+    if (resp.code !== 200 && resp.code !== 600) {
       infosimplesStatus.errorMessage = resp.code_message;
     }
   } catch (err) {

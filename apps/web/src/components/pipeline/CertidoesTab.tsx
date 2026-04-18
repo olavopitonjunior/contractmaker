@@ -83,6 +83,12 @@ function statusIcon(row: CertidaoJobRow) {
       if (r?.situacao === "aguardando_pdf") {
         return <Clock className="h-4 w-4 text-blue-600" />;
       }
+      // H.12 (Phase H, 2026-04-18) — nao_emitida não pode exibir ✓ verde:
+      // significa que o portal NÃO emitiu a certidão (normalmente 6xx
+      // mapeado para missing_input/portal_unavailable). Evita UX ambíguo.
+      if (r?.situacao === "nao_emitida") {
+        return <XCircle className="h-4 w-4 text-red-600" />;
+      }
       return <CheckCircle2 className="h-4 w-4 text-green-600" />;
     }
     case "failed":
@@ -495,6 +501,17 @@ export function CertidoesTab({
   };
 
   const handleSweep = async () => {
+    // H.7 (Phase H, 2026-04-18) — dry-run via stats antes de executar; evita
+    // ação silenciosa do QA anterior (botão clicado sem feedback visível).
+    const stuck = stats.stuck;
+    const promotable = stats.ghostPromotable;
+    const willFail = Math.max(0, stuck - promotable);
+    const confirmMsg =
+      `Analisar ${Math.max(stuck, promotable)} job(s) travado(s):\n\n` +
+      `• ${promotable} serão promovidos para sucesso (sem custo)\n` +
+      `• ${willFail} serão marcados como falha e liberados para retry\n\n` +
+      `Confirma?`;
+    if (!window.confirm(confirmMsg)) return;
     const result = await sweepStale();
     if (result.promoted > 0 && result.failed > 0) {
       toast.success(

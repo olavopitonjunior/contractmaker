@@ -77,10 +77,13 @@ export function EditPartyDialog({
         const data = await res.json();
         if (cancelled) return;
         const deal = data.deal ?? data; // tolerate both wrapper shapes
-        const dealData = (deal?.dataJson ?? deal?.data ?? {}) as Record<
-          string,
-          unknown
-        >;
+        // H.8 (Phase H, 2026-04-18) — no fluxo atual, Deal.dataJson vem null
+        // (nunca populado); os dados das partes estão em deal.form.dataJson.
+        // Antes lia só deal.dataJson → dialog abria com campos vazios.
+        const dealData = (deal?.form?.dataJson ??
+          deal?.dataJson ??
+          deal?.data ??
+          {}) as Record<string, unknown>;
         const arrKey =
           job.targetKind === "vendedor" ? "vendedores" : "compradores";
         const arr = (dealData[arrKey] as PartySnapshot[] | undefined) ?? [];

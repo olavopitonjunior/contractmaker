@@ -54,6 +54,10 @@ const FIELD_MAP_PERSON: Record<string, string> = {
   naturalidade: "naturalidade",
   filiacao_mae: "filiacao_mae",
   filiacao_pai: "filiacao_pai",
+  // H.3 (Phase H, 2026-04-18) — RG/CNH traz filiação; mapear também para
+  // nome_mae para alimentar TJSP pedido-cível (evita code 606).
+  mae: "nome_mae",
+  nome_mae: "nome_mae",
   bairro: "bairro",
   cidade: "cidade",
   uf: "uf",
@@ -310,24 +314,16 @@ function suggestPersonAssignment(
     }
   }
 
-  // Default: if vendedor[0] is free, go there. Otherwise go to comprador[0]
-  // (distinct CPF scenario — user uploaded docs for both seller and buyer).
-  if (!occupiedSlots.has("vendedor:0")) {
-    return { kind: "vendedor", index: firstEmptyIndex(snapshot.vendedores) };
-  }
-  if (!occupiedSlots.has("comprador:0")) {
-    return { kind: "comprador", index: firstEmptyIndex(snapshot.compradores) };
-  }
-  // Both vendedor[0] and comprador[0] are taken AND this doc has a unique
-  // identity (no sibling match in step 2). Auto-grow the smaller-occupancy
-  // side so couples on both sides are handled (2 vendedores vs 1 comprador
-  // → next person fills vendedor[2]; if equal, prefer growing vendedor list).
-  const nextVendedorIdx = maxVendedorIdx + 1;
-  const nextCompradorIdx = maxCompradorIdx + 1;
-  if (nextVendedorIdx <= nextCompradorIdx) {
-    return { kind: "vendedor", index: nextVendedorIdx };
-  }
-  return { kind: "comprador", index: nextCompradorIdx };
+  // H.5 (Phase H, 2026-04-18) — heurística "primeira pessoa = vendedor"
+  // gerava troca comprador↔vendedor em ~30% dos uploads (QA deal
+  // cmo3orktd...). Novo comportamento: sem match explícito (CPF ou nome em
+  // parte já preenchida, ou irmão com mesma identidade), sair como "outro"
+  // forçando o usuário a escolher no dropdown antes de clicar "Aplicar".
+  // Isso evita rework manual + reclassificação errada propagada pro deal.
+  void maxVendedorIdx;
+  void maxCompradorIdx;
+  void occupiedSlots;
+  return { kind: "outro", index: 0 };
 }
 
 export function suggestAssignment(

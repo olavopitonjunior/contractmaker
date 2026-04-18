@@ -64,10 +64,10 @@ const CODE_MAP: Record<number, FailureCategory> = {
   // 6xx — business errors
   600: "genuine_no_data",          // no record found for the query
   601: "genuine_no_data",
-  602: "genuine_no_data",
-  603: "account_issue",            // Infosimples balance exhausted
-  604: "account_issue",            // invalid token
-  605: "genuine_no_data",
+  602: "integration_error",        // "serviço informado na URL não é válido" — endpoint deprecado/mudou
+  603: "account_issue",             // Infosimples balance exhausted
+  604: "account_issue",             // invalid token
+  605: "portal_unavailable",        // portal offline / timeout
   606: "missing_input",            // required field missing
   607: "missing_input",
   608: "missing_input",
@@ -77,7 +77,7 @@ const CODE_MAP: Record<number, FailureCategory> = {
   612: "missing_input",            // CPF invalid
   613: "missing_input",            // CNPJ invalid
   614: "inconsistent_input",       // birthdate mismatch
-  615: "inconsistent_input",       // name mismatch
+  615: "portal_unavailable",       // portal retornou erro / site indisponível (Infosimples docs)
   616: "inconsistent_input",
 
   // 66x — portal state

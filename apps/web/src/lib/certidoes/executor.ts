@@ -2,8 +2,8 @@ import { prisma } from "@/lib/db/prisma";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { callInfosimples, downloadReceipt, InfosimplesError } from "./infosimples";
 import { normalize } from "./normalizers";
-import { endpointInfo } from "./endpoints";
-import type { JobStatus } from "./types";
+import { endpointInfo, CATEGORIES_REQUIRING_PDF } from "./endpoints";
+import type { JobStatus, Situacao } from "./types";
 import { emitNotification } from "@/lib/notifications/emit";
 
 /**
@@ -356,25 +356,59 @@ export async function runSingleJob(
     };
     if (receipt) enrichedResultData._rawReceipt = receipt;
 
+    // H.1 + H.18 (Phase H, 2026-04-18): treat as failed when Infosimples
+    // returned non-200 OR normalize() yielded nao_emitida without PDF —
+    // prevents false-negative "negativa" cards with no evidence. Also
+    // zero cost when provider flag billable=false OR call produced no
+    // useful output, so budget reflects real value.
+    //
+    // H.4 complementar (revisão 2026-04-18): também flaga falso-success
+    // quando endpoint é de categoria que normalmente emite PDF mas a
+    // resposta veio sem `site_receipts[0]` (caso CENPROT SP: rc=200 +
+    // situacao=negativa sem anexo = sem prova documental).
+    const billable = resp.header?.billable;
+    const situacaoNorm = (normalized as { situacao?: Situacao }).situacao;
+    const requiresPdf = CATEGORIES_REQUIRING_PDF.has(info.category);
+    const missingRequiredPdf =
+      requiresPdf &&
+      attachmentId === null &&
+      (situacaoNorm === "negativa" ||
+        situacaoNorm === "positiva" ||
+        situacaoNorm === "positiva_com_efeitos" ||
+        situacaoNorm === "nao_emitida");
+    const isFail = resp.code !== 200 || missingRequiredPdf;
+    const shouldCharge =
+      billable === false ? false : !isFail || resp.code === 200;
+    const finalCost = shouldCharge ? info.costCents : 0;
+    const finalStatus = isFail ? "failed" : "success";
+    const finalError = isFail
+      ? missingRequiredPdf && resp.code === 200
+        ? "Portal não anexou PDF — sem evidência documental (retry pode resolver)"
+        : resp.code_message ||
+          "Sem evidência de certidão (nenhum PDF anexado)"
+      : null;
+
     await prisma.certidaoJob.update({
       where: { id: jobId },
       data: {
-        status: "success",
+        status: finalStatus,
         finishedAt: new Date(),
         latencyMs,
         resultCode: resp.code,
         resultMessage: resp.code_message,
         resultData: enrichedResultData as object,
         attachmentId,
-        costCents: info.costCents,
+        costCents: finalCost,
+        errorMessage: finalError,
       },
     });
-    logTransition(jobId, "fetching", "success", "infosimples OK", {
+    logTransition(jobId, "fetching", finalStatus, finalError ?? "infosimples OK", {
       endpoint: job.endpoint,
       resultCode: resp.code,
-      situacao: (normalized as { situacao?: string }).situacao,
+      situacao: situacaoNorm,
       latencyMs,
-      costCents: info.costCents,
+      costCents: finalCost,
+      billable: billable ?? null,
       hasAttachment: attachmentId !== null,
     });
     // F4: single-job path (retry/complementar) — check batch. For multi-job

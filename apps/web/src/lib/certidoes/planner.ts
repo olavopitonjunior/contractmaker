@@ -115,6 +115,10 @@ interface Parte {
   cpf?: string;
   cnpj?: string;
   data_nascimento?: string;
+  // H.3 (Phase H, 2026-04-18) — nome da mãe é requerido pelo TJSP pedido-cível
+  // para alguns tipos (código 606 "parâmetros obrigatórios" em 100% dos jobs PF
+  // sem esse campo). OCR do RG traz `filiacao`/`mae` quando disponível.
+  nome_mae?: string;
   email?: string;
   uf?: string;
   cidade?: string;
@@ -445,6 +449,8 @@ export function planCertidoesForDeal(
     // ---- CENPROT SP (Phase F.II-α) — remapeado de imóvel para pessoa ----
     // Consulta por CPF/CNPJ da própria parte. Só dispara quando UF=SP (única
     // cobertura Infosimples sem GOV.BR).
+    // H.4 (Phase H, 2026-04-18): adicionado `uf: "SP"` no payload — portal
+    // CENPROT exige location hint; sem ele, code 612/605 em ~75% dos casos.
     const cenprotShould = expandAll || partyUf === "SP";
     if (cenprotShould && (cpf || cnpj)) {
       jobs.push(
@@ -453,7 +459,7 @@ export function planCertidoesForDeal(
           kind,
           index,
           label,
-          cnpj ? { cnpj } : { cpf: cpf! }
+          { uf: "SP", ...(cnpj ? { cnpj } : { cpf: cpf! }) }
         )
       );
     }
@@ -508,12 +514,25 @@ export function planCertidoesForDeal(
         skipped.push(
           buildSkip(ep, kind, index, label, isPJ ? "cnpj" : "cpf", "documento invalido")
         );
+      } else if (!isPJ && !parte.data_nascimento) {
+        // H.3 — TJSP exige data_nascimento para PF (code 606). Sem ela,
+        // skip explícito ao invés de disparar e falhar em 100% dos jobs.
+        skipped.push(
+          buildSkip(
+            ep,
+            kind,
+            index,
+            label,
+            "data_nascimento",
+            "TJSP exige data de nascimento — complete os dados da parte"
+          )
+        );
       } else {
         // Phase F.II-γ — multi-tipo: uma chamada por tipo_certidao (cível,
         // família, falência, execução fiscal) para cobrir os 4 distribuidores
         // exigidos em transação imobiliária (Comunicado SPI nº 37 - 10 anos).
         for (const t of TJSP_TIPOS) {
-          const base = {
+          const base: Record<string, unknown> = {
             email,
             finalidade: DEFAULT_FINALIDADE,
             instancia: 1,
@@ -522,6 +541,12 @@ export function planCertidoesForDeal(
               ? { cnpj: cnpj!, razao_social: label, pais: "Brasil" }
               : { cpf: cpf!, nome: label }),
           };
+          // H.3 — adicionar campos de identificação quando disponíveis
+          if (!isPJ) {
+            const dob = normalizeDate(parte.data_nascimento);
+            if (dob) base.data_nascimento = dob;
+            if (parte.nome_mae) base.nome_mae = parte.nome_mae;
+          }
           jobs.push(buildJob(ep, kind, index, `${label} - ${t.label}`, base));
         }
 
@@ -551,16 +576,21 @@ export function planCertidoesForDeal(
         const cidade = (parte.cidade || "").trim();
         const comarca = comarcaForCidade(cidade);
         for (const t of TJRJ_TIPOS) {
-          jobs.push(
-            buildJob(ep, kind, index, `${label} - ${t.label}`, {
-              nome: label,
-              email,
-              tipo_certidao: t.tipo_certidao,
-              comarca,
-              finalidade: DEFAULT_FINALIDADE,
-              ...(isPJ ? { cnpj: cnpj! } : { cpf: cpf! }),
-            })
-          );
+          const base: Record<string, unknown> = {
+            nome: label,
+            email,
+            tipo_certidao: t.tipo_certidao,
+            comarca,
+            finalidade: DEFAULT_FINALIDADE,
+            ...(isPJ ? { cnpj: cnpj! } : { cpf: cpf! }),
+          };
+          // H.3 — mesma política de TJSP: anexar data_nascimento/nome_mae para PF
+          if (!isPJ) {
+            const dob = normalizeDate(parte.data_nascimento);
+            if (dob) base.data_nascimento = dob;
+            if (parte.nome_mae) base.nome_mae = parte.nome_mae;
+          }
+          jobs.push(buildJob(ep, kind, index, `${label} - ${t.label}`, base));
         }
       }
     }
