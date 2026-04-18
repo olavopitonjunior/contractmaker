@@ -430,3 +430,77 @@ describe("Phase B — CND Estadual roteamento", () => {
     expect(sefaz?.requestPayload.uf).toBe("BA");
   });
 });
+
+// Phase K (2026-04-18) — CPF situação + Antecedentes PF em financiamento
+describe("Phase K — receita-federal/cpf dispara sempre para PF", () => {
+  it("vendedor PF gera job CPF situação", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [VENDEDOR_PF_SP],
+      compradores: [],
+      imoveis: [],
+    });
+    const cpfJob = plan.jobs.find((j) => j.endpoint === "receita-federal/cpf");
+    expect(cpfJob).toBeDefined();
+    expect(cpfJob?.requestPayload.cpf).toBe("52998224725");
+    expect(cpfJob?.requestPayload.birthdate).toBe("1980-05-14");
+  });
+
+  it("PJ NÃO gera job CPF situação", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [PESSOA_JURIDICA],
+      compradores: [],
+      imoveis: [],
+    });
+    expect(
+      plan.jobs.find((j) => j.endpoint === "receita-federal/cpf")
+    ).toBeUndefined();
+  });
+});
+
+describe("Phase K — antecedentes-criminais-pf em financiamento", () => {
+  it("NÃO dispara quando modalidade não é financiamento", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [VENDEDOR_PF_SP],
+      compradores: [],
+      imoveis: [],
+      modalidade: "a_vista",
+    });
+    expect(
+      plan.jobs.find((j) => j.endpoint === "antecedentes-criminais-pf/emit")
+    ).toBeUndefined();
+  });
+
+  it("dispara quando modalidade='financiamento' e PF tem data_nascimento + nome_mae", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [
+        { ...VENDEDOR_PF_SP, nome_mae: "Ana Aparecida Souza" },
+      ],
+      compradores: [],
+      imoveis: [],
+      modalidade: "financiamento",
+    });
+    const ac = plan.jobs.find(
+      (j) => j.endpoint === "antecedentes-criminais-pf/emit"
+    );
+    expect(ac).toBeDefined();
+    expect(ac?.requestPayload.nome_mae).toBe("Ana Aparecida Souza");
+    expect(ac?.requestPayload.data_nascimento).toBe("1980-05-14");
+  });
+
+  it("skipped com missing_fields quando financiamento mas falta nome_mae", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [VENDEDOR_PF_SP], // sem nome_mae
+      compradores: [],
+      imoveis: [],
+      modalidade: "financiamento",
+    });
+    expect(
+      plan.jobs.find((j) => j.endpoint === "antecedentes-criminais-pf/emit")
+    ).toBeUndefined();
+    const skip = plan.skipped.find(
+      (s) => s.endpoint === "antecedentes-criminais-pf/emit"
+    );
+    expect(skip).toBeDefined();
+    expect(skip?.reason).toContain("nome_mae");
+  });
+});

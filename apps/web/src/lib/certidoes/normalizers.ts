@@ -299,6 +299,133 @@ function sefazUnificadaExtractor(resp: InfosimplesResponse): NormalizedResult {
   };
 }
 
+/**
+ * Phase K (2026-04-18) — CPF situação cadastral (Receita Federal).
+ * Endpoint informativo: retorna status do CPF. Situação ≠ "Regular" bloqueia
+ * minuta (Mapeamento 2.1.5).
+ */
+function receitaCpfExtractor(resp: InfosimplesResponse): NormalizedResult {
+  const d = getFirst<Record<string, unknown>>(resp) ?? {};
+  const situacaoRaw = asString(d.situacao);
+  const lower = situacaoRaw?.toLowerCase() ?? "";
+  // Regular → informativa (OK). Qualquer outra → positiva (bloqueia).
+  const regular = lower === "regular";
+  const situacao: Situacao = regular ? "informativa" : situacaoRaw ? "positiva" : "indeterminado";
+  const nome = asString(d.nome);
+  const detalhesParts: string[] = [];
+  if (nome) detalhesParts.push(nome);
+  if (situacaoRaw) detalhesParts.push(`Situação: ${situacaoRaw}`);
+  return {
+    situacao,
+    validade: null, // CPF não tem validade formal
+    emissao: asString(d.comprovante_emissao) ?? asString(d.data_emissao) ?? null,
+    detalhes: detalhesParts.join(" · ") || null,
+    consta_debito: !regular && situacao === "positiva",
+    raw: d,
+  };
+}
+
+/**
+ * Phase K — Antecedentes Criminais da Polícia Federal.
+ * Resposta típica: { nada_consta: bool, resultado: "NADA CONSTA" | "CONSTA",
+ * data_emissao, validade_ate, numero_controle }
+ */
+function antecedentesPfExtractor(resp: InfosimplesResponse): NormalizedResult {
+  const d = getFirst<Record<string, unknown>>(resp) ?? {};
+  const nadaConsta = asBool(d.nada_consta);
+  const resultado = asString(d.resultado);
+  const situacao: Situacao =
+    nadaConsta === true
+      ? "negativa"
+      : nadaConsta === false
+      ? "positiva"
+      : resultado?.toLowerCase().includes("nada consta")
+      ? "negativa"
+      : resultado?.toLowerCase().includes("consta")
+      ? "positiva"
+      : "indeterminado";
+  return {
+    situacao,
+    validade: asString(d.validade_ate) ?? asString(d.data_validade) ?? null,
+    emissao: asString(d.data_emissao) ?? null,
+    detalhes: resultado ?? asString(d.numero_controle) ?? null,
+    consta_debito: situacao === "positiva",
+    raw: d,
+  };
+}
+
+/**
+ * Phase K — CCIR (INCRA) para imóveis rurais. Status: Regular / Em atraso /
+ * Cancelado. Resposta típica: { situacao, exercicio, nirf, area_total_ha }.
+ */
+function ccirExtractor(resp: InfosimplesResponse): NormalizedResult {
+  const d = getFirst<Record<string, unknown>>(resp) ?? {};
+  const situacaoRaw = asString(d.situacao)?.toLowerCase() ?? "";
+  const situacao: Situacao = situacaoRaw.includes("regular")
+    ? "negativa"
+    : situacaoRaw.includes("atraso") || situacaoRaw.includes("cancel")
+    ? "positiva"
+    : "indeterminado";
+  const nirf = asString(d.nirf);
+  const municipio = asString(d.municipio);
+  const areaHa = d.area_total_ha;
+  const parts: string[] = [];
+  if (nirf) parts.push(`NIRF ${nirf}`);
+  if (municipio) parts.push(municipio);
+  if (typeof areaHa === "number") parts.push(`${areaHa} ha`);
+  return {
+    situacao,
+    validade: null, // CCIR não tem validade formal (exigível anualmente)
+    emissao: asString(d.exercicio) ?? null,
+    detalhes: parts.join(" · ") || asString(d.situacao) || null,
+    consta_debito: situacao === "positiva",
+    raw: d,
+  };
+}
+
+/**
+ * Phase K — Matrícula ONR (Certidão de Inteiro Teor). Resposta típica:
+ * { numero_matricula, cartorio, tem_onus, ha_indisponibilidade, ha_penhora,
+ *   ha_alienacao_fiduciaria, tipo_certidao, validade_ate }.
+ */
+function matriculaOnrExtractor(resp: InfosimplesResponse): NormalizedResult {
+  const d = getFirst<Record<string, unknown>>(resp) ?? {};
+  const temOnus = asBool(d.tem_onus);
+  const indisp = asBool(d.ha_indisponibilidade);
+  const penhora = asBool(d.ha_penhora);
+  const alienacao = asBool(d.ha_alienacao_fiduciaria);
+  const temQualquerOnus =
+    temOnus === true ||
+    indisp === true ||
+    penhora === true ||
+    alienacao === true;
+  const semOnus =
+    temOnus === false &&
+    (indisp === false || indisp === undefined) &&
+    (penhora === false || penhora === undefined) &&
+    (alienacao === false || alienacao === undefined);
+  const situacao: Situacao = temQualquerOnus
+    ? "positiva"
+    : semOnus
+    ? "negativa"
+    : "indeterminado";
+  const matricula = asString(d.numero_matricula);
+  const cartorio = asString(d.cartorio);
+  const tipo = asString(d.tipo_certidao);
+  const parts: string[] = [];
+  if (matricula) parts.push(`Matrícula ${matricula}`);
+  if (cartorio) parts.push(cartorio);
+  if (tipo) parts.push(tipo);
+  return {
+    situacao,
+    validade: asString(d.validade_ate) ?? null,
+    emissao: asString(d.data_emissao) ?? null,
+    detalhes: parts.join(" · ") || null,
+    consta_debito: temQualquerOnus,
+    raw: d,
+  };
+}
+
 const EXTRACTORS: Record<string, Extractor> = {
   "receita-federal/pgfn": pgfnExtractor,
   "tribunal/tst/cndt": cndtExtractor,
@@ -333,6 +460,13 @@ const EXTRACTORS: Record<string, Extractor> = {
   "tribunal/trt12/ceat": ceatExtractor,
   "receita-federal/cnpj": cnpjCartaoExtractor,
   "caixa/regularidade": crfFgtsExtractor,
+  // Phase K (2026-04-18) — gaps do Mapeamento_Certidoes.md
+  "receita-federal/cpf": receitaCpfExtractor,
+  "antecedentes-criminais-pf/emit": antecedentesPfExtractor,
+  "antecedentes-criminais-pf/validar": antecedentesPfExtractor,
+  "sncr/ccir": ccirExtractor,
+  "registradores/matric-pedido": matriculaOnrExtractor,
+  "registradores/matric-obter": matriculaOnrExtractor,
   "sefaz/certidao-debitos": sefazUnificadaExtractor,
   "pge-sp/cndt": sefazUnificadaExtractor,
   // Phase F.II-γ — TRF individuais + CENPROT nacional

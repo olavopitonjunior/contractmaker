@@ -443,3 +443,114 @@ describe("Phase B — novos TJs reusam tjExtractor", () => {
     expect(r.consta_debito).toBe(false);
   });
 });
+
+// Phase K (2026-04-18) — gaps do Mapeamento_Certidoes.md
+describe("Phase K — receita-federal/cpf (situação cadastral)", () => {
+  it("Regular → informativa (não bloqueia)", async () => {
+    const fixture = await import("../__fixtures__/receita-cpf-regular.json");
+    const r = normalize(
+      "receita-federal/cpf",
+      fixture.default as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).toBe("informativa");
+    expect(r.consta_debito).toBe(false);
+    expect(r.detalhes).toContain("LEONARDO CORREIA QUIRINO");
+  });
+
+  it("Suspensa → positiva (bloqueia minuta)", async () => {
+    const fixture = await import("../__fixtures__/receita-cpf-suspensa.json");
+    const r = normalize(
+      "receita-federal/cpf",
+      fixture.default as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).toBe("positiva");
+    expect(r.consta_debito).toBe(true);
+    expect(r.detalhes).toContain("Suspensa");
+  });
+});
+
+describe("Phase K — antecedentes-criminais-pf/emit", () => {
+  it("Nada consta → negativa + validade", async () => {
+    const fixture = await import(
+      "../__fixtures__/antecedentes-pf-nada-consta.json"
+    );
+    const r = normalize(
+      "antecedentes-criminais-pf/emit",
+      fixture.default as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).toBe("negativa");
+    expect(r.validade).toBe("16/07/2026");
+    expect(r.consta_debito).toBe(false);
+  });
+
+  it("resultado 'CONSTA' sem flag bool → positiva", () => {
+    const resp = {
+      code: 200,
+      code_message: "OK",
+      data: [{ resultado: "CONSTA — Apuração em andamento" }],
+    };
+    const r = normalize(
+      "antecedentes-criminais-pf/emit",
+      resp as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).toBe("positiva");
+    expect(r.consta_debito).toBe(true);
+  });
+});
+
+describe("Phase K — sncr/ccir", () => {
+  it("Regular → negativa com metadata do imóvel", async () => {
+    const fixture = await import("../__fixtures__/ccir-regular.json");
+    const r = normalize(
+      "sncr/ccir",
+      fixture.default as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).toBe("negativa");
+    expect(r.detalhes).toContain("NIRF 1234567-8");
+    expect(r.detalhes).toContain("Caçapava do Sul");
+  });
+
+  it("Em atraso → positiva", () => {
+    const resp = {
+      code: 200,
+      code_message: "OK",
+      data: [{ nirf: "999-9", situacao: "Em atraso", exercicio: "2026" }],
+    };
+    const r = normalize("sncr/ccir", resp as unknown as InfosimplesResponse);
+    expect(r.situacao).toBe("positiva");
+    expect(r.consta_debito).toBe(true);
+  });
+});
+
+describe("Phase K — registradores/matric (ONR)", () => {
+  it("Sem ônus → negativa", async () => {
+    const fixture = await import("../__fixtures__/matricula-onr-negativa.json");
+    const r = normalize(
+      "registradores/matric-obter",
+      fixture.default as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).toBe("negativa");
+    expect(r.detalhes).toContain("Matrícula 52447");
+    expect(r.validade).toBe("17/05/2026");
+  });
+
+  it("Com indisponibilidade → positiva", () => {
+    const resp = {
+      code: 200,
+      code_message: "OK",
+      data: [
+        {
+          numero_matricula: "999",
+          tem_onus: false,
+          ha_indisponibilidade: true,
+        },
+      ],
+    };
+    const r = normalize(
+      "registradores/matric-obter",
+      resp as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).toBe("positiva");
+    expect(r.consta_debito).toBe(true);
+  });
+});

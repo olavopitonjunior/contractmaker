@@ -1,0 +1,14 @@
+{
+  "code": 200,
+  "code_message": "OK",
+  "header": { "billable": true },
+  "data_count": 1,
+  "data": [
+    {
+      "cpf": "00000000000",
+      "nome": "FULANO DE TAL",
+      "situacao": "Suspensa",
+      "comprovante_emissao": "17/04/2026"
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "code": 200,
+  "code_message": "OK",
+  "header": { "billable": true },
+  "data_count": 1,
+  "data": [
+    {
+      "cpf": "18384929840",
+      "nome": "LEONARDO CORREIA QUIRINO",
+      "nascimento": "25/08/1973",
+      "situacao": "Regular",
+      "data_inscricao": "15/03/1990",
+      "digito_verificador": "40",
+      "comprovante_emissao": "17/04/2026"
+    }
+  ]
+}

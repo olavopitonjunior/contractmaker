@@ -1437,3 +1437,83 @@ de DD:
 **Regressão**: para deal com ≥1 job com code 6xx (TJSP 606 sem data_nascimento):
 - [ ] `CertidaoJob.costCents === 0` (não cobra falha)
 - [ ] Total mensal no `/settings/certidoes` não inclui esses valores
+
+---
+
+## 17. REGRESSÃO PHASE I + J (2026-04-18) — estados ricos + retry automático
+
+Checks específicos dos bugs corrigidos em Phase I (QA E2E 2026-04-18) e Phase J
+(reforma do fluxo: nunca skip, retry por categoria, portalUrl).
+
+### 17.1 — TJSP pedido-cível destravado (I.1)
+
+**Regressão**: criar deal com ≥1 parte PF SP, disparar certidões.
+- [ ] No JSON de `/api/deals/{id}/certidoes`, jobs TJSP têm
+      `requestPayload.tipo_certidao` em `["civel","familia","falencia","execucao-fiscal"]`
+      (não mais `"familia-sucessoes"`).
+- [ ] Jobs TJSP vão para `awaiting_portal` ou `success` — não caem em 606
+      imediato.
+
+### 17.2 — Download ZIP (I.2)
+
+```
+GET /api/deals/{DEAL_ID}/certidoes/download-all
+GET /api/deals/{DEAL_ID}/certidoes/zip
+```
+- [ ] Ambos retornam 200 + `Content-Type: application/zip` + magic bytes `PK`.
+
+### 17.3 — PGE-SP depreciado out (I.3)
+
+- [ ] Parte SP NÃO gera job `pge-sp/cndt`.
+- [ ] Parte SP gera job `sefaz/certidao-debitos` com `requestPayload.uf === "SP"`.
+
+### 17.4 — TRF unificada dispara (I.4 revertido em J.1)
+
+- [ ] Toda parte PF gera job `tribunal/trf/cert-unificada` no plano default
+      (não é mais skipped).
+- [ ] Parte UF=SP também gera `tribunal/trf3/certidao` (individual).
+- [ ] Se um TRF retornar code 615 (portal down), status vira `portal_unavailable`
+      com `nextRetryAt` agendado, NÃO `skipped`.
+
+### 17.5 — Notifs unique (I.5)
+
+- [ ] `GET /api/notifications?limit=20` retorna EXATAMENTE 1 notif
+      `certidao_batch_complete` por batchId. Nunca 2+.
+
+### 17.6 — Estados ricos visíveis (J.3 + J.6)
+
+Em um deal com vários jobs em estados diferentes, confirmar UI:
+- [ ] `api_error` → ícone `RefreshCw` azul com spin lento + label "Instabilidade — tentando novamente em ~30s"
+- [ ] `portal_unavailable` → ícone similar + "Portal fora do ar — nova tentativa em ~10 min"
+- [ ] `rate_limited` → ícone similar + "Limite do portal atingido — retry em ~30 min"
+- [ ] `data_missing` → ícone `AlertTriangle` âmbar + "Faltam dados · data_nascimento" (listando campos específicos)
+- [ ] `data_invalid` → ícone âmbar + "Dados divergentes · ..."
+- [ ] `informativo` → ícone `Info` azul-céu + "Consulta informativa (não é certidão)"
+- [ ] `failed_permanent` → ícone `AlertTriangle` vermelho + botão `ExternalLink` "Abrir portal oficial"
+
+### 17.7 — Retry automático pelo cron (J.4)
+
+Simular: forçar um job em `api_error` com `nextRetryAt` no passado (via SQL
+ou aguardar natural). Cron `/api/cron/certidoes/poll-portal` roda a cada 5min.
+- [ ] Em < 5min após `nextRetryAt < now`, job transita para `pending` → `fetching`
+      → estado terminal (success / outro retry / failed_permanent).
+- [ ] `CertidaoJob.retryCount` incrementado.
+- [ ] Depois de atingir `maxRetries` (3), vira `failed_permanent`.
+
+### 17.8 — portalUrl como último recurso (J.5)
+
+- [ ] Job com `status: "failed_permanent"` mostra botão "Abrir portal oficial".
+- [ ] `href` corresponde ao `portalUrl` do endpoint (veja `endpoints.ts`):
+      - TJSP → `https://esaj.tjsp.jus.br/...`
+      - PGFN → `https://servicos.receitafederal.gov.br/servico/certidoes`
+      - TRT2 → `https://ww2.trt2.jus.br/servicos/certidoes`
+      - CNDT → `https://cndt-certidao.tst.jus.br/`
+- [ ] Mesmo em `data_missing`/`data_invalid`, botão "Abrir portal" aparece
+      lado a lado com "Complementar dado".
+
+### 17.9 — Imóvel ainda fora do planner default
+
+Phase J não reativou a aba imóvel. Validar:
+- [ ] Deal com imóvel preenchido NÃO gera jobs de IPTU/Matrícula automaticamente.
+- [ ] Picker "Adicionar outras" (seção 6.5) mostra `CCIR` e `Matrícula ONR`
+      (adicionados em Phase K) como opções manuais.

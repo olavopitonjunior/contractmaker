@@ -146,6 +146,9 @@ interface DealDataLike {
   vendedores?: Parte[];
   compradores?: Parte[];
   imoveis?: Imovel[];
+  // Phase K — modalidade da transação influencia quais certidões extras
+  // disparam (ex: antecedentes criminais obrigatórios em financiamento).
+  modalidade?: "a_vista" | "financiamento" | string;
 }
 
 // -------------------------------------------------------------------
@@ -263,12 +266,77 @@ export function planCertidoesForDeal(
     pessoas.push({ kind: "diligenciado", index: i, parte: diligenciadoToParte(d) })
   );
 
+  // Phase K (2026-04-18) — flag para ativar certidões extras quando a
+  // transação é financiamento bancário (Mapeamento 2.1.4: antecedentes PF
+  // obrigatório em financiamento, facultativo em particular).
+  const isFinanciamento = data.modalidade === "financiamento";
+
   for (const { kind, index, parte } of pessoas) {
     const isPJ = parte.tipo_pessoa === "juridica";
     const label = personLabel(parte);
     const cpf = normalizeCpf(parte.cpf);
     const cnpj = normalizeCnpj(parte.cnpj);
     const partyUf = uf(parte);
+
+    // ---- CPF situação cadastral (Phase K, Mapeamento 2.1.5) ----
+    // Filtro inicial obrigatório para toda PF. CPF irregular bloqueia
+    // minuta inteira. Endpoint informativo (retorna JSON, não PDF).
+    if (!isPJ) {
+      const ep = "receita-federal/cpf";
+      if (!cpf) {
+        skipped.push(
+          buildSkip(ep, kind, index, label, "cpf", "CPF inválido ou vazio")
+        );
+      } else {
+        const birthdate = normalizeDate(parte.data_nascimento);
+        const payload: Record<string, unknown> = { cpf };
+        if (birthdate) payload.birthdate = birthdate;
+        jobs.push(buildJob(ep, kind, index, label, payload));
+      }
+    }
+
+    // ---- Antecedentes Criminais PF (Phase K, Mapeamento 2.1.4) ----
+    // Opcional em transação entre particulares; obrigatório em financiamento.
+    // Dispara apenas para PF quando `deal.modalidade === "financiamento"`.
+    if (!isPJ && isFinanciamento) {
+      const ep = "antecedentes-criminais-pf/emit";
+      if (!cpf) {
+        skipped.push(
+          buildSkip(ep, kind, index, label, "cpf", "CPF inválido")
+        );
+      } else {
+        const birthdate = normalizeDate(parte.data_nascimento);
+        const nomeMae =
+          typeof parte.nome_mae === "string" && parte.nome_mae.trim()
+            ? parte.nome_mae.trim()
+            : null;
+        if (!birthdate || !nomeMae) {
+          // PF antecedentes costuma exigir data_nascimento + nome_mae
+          const missing: string[] = [];
+          if (!birthdate) missing.push("data_nascimento");
+          if (!nomeMae) missing.push("nome_mae");
+          skipped.push(
+            buildSkip(
+              ep,
+              kind,
+              index,
+              label,
+              missing[0] ?? "nome_mae",
+              `Antecedentes PF exige ${missing.join(" + ")} — complete os dados da parte`
+            )
+          );
+        } else {
+          jobs.push(
+            buildJob(ep, kind, index, label, {
+              cpf,
+              nome: label,
+              data_nascimento: birthdate,
+              nome_mae: nomeMae,
+            })
+          );
+        }
+      }
+    }
 
     // ---- PGFN CND Federal ----
     {

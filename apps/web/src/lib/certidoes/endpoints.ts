@@ -450,6 +450,83 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa"],
     category: "fgts",
     description: "Certificado de Regularidade do FGTS emitido pela Caixa (PJ)",
+    portalUrl: "https://consulta-crf.caixa.gov.br/consultacrf/pages/consultaEmpregador.jsf",
+  },
+
+  // --- Phase K (2026-04-18) — Gaps do Mapeamento_Certidoes.md ---
+  // K.2 (Phase K): endpoints Infosimples que cobrem itens obrigatórios do
+  // Mapeamento ainda não implementados.
+  "receita-federal/cpf": {
+    id: "receita-federal/cpf",
+    label: "Situação CPF (Receita Federal)",
+    costCents: 2,
+    scope: "federal",
+    appliesTo: ["pessoa"],
+    category: "cadastro",
+    description:
+      "Consulta cadastral do CPF na Receita Federal (regular/suspensa/pendente/cancelada/nula). Filtro inicial obrigatório — CPF irregular invalida a operação.",
+    emitsPdf: false, // informativo — retorna status textual
+    portalUrl: "https://servicos.receitafederal.gov.br/servico/cpf",
+  },
+  "antecedentes-criminais-pf/emit": {
+    id: "antecedentes-criminais-pf/emit",
+    label: "Antecedentes Criminais (PF)",
+    costCents: 6,
+    twoStep: true,
+    scope: "federal",
+    appliesTo: ["pessoa"],
+    category: "civel",
+    description:
+      "Certidão de Antecedentes Criminais emitida pela Polícia Federal. Facultativa em transações particulares; obrigatória em financiamento bancário.",
+    expectedWaitMinutes: 5, // instantâneo na maioria dos casos
+    portalUrl: "https://www.gov.br/pf/pt-br/assuntos/antecedentes-criminais",
+  },
+  "antecedentes-criminais-pf/validar": {
+    id: "antecedentes-criminais-pf/validar",
+    label: "Antecedentes Criminais (PF) — Validar",
+    costCents: 2,
+    initialStatus: "awaiting_portal",
+    scope: "federal",
+    appliesTo: ["pessoa"],
+    category: "civel",
+    description: "Validação do código emitido pelo 1º passo (PF antecedentes).",
+    portalUrl: "https://www.gov.br/pf/pt-br/assuntos/antecedentes-criminais",
+  },
+  "sncr/ccir": {
+    id: "sncr/ccir",
+    label: "CCIR (Imóvel Rural)",
+    costCents: 4,
+    scope: "federal",
+    appliesTo: ["imovel"],
+    category: "federal",
+    description:
+      "Certificado de Cadastro de Imóvel Rural — INCRA/SNCR. Obrigatório apenas para imóveis rurais.",
+    portalUrl: "https://sncr.serpro.gov.br/sncr-web/public/buscaPublica.jsf",
+  },
+  "registradores/matric-pedido": {
+    id: "registradores/matric-pedido",
+    label: "Matrícula ONR (pedido)",
+    costCents: 10,
+    twoStep: true,
+    scope: "federal",
+    appliesTo: ["imovel"],
+    category: "civel",
+    description:
+      "Pedido de Certidão de Inteiro Teor da Matrícula via ONR (Operador Nacional de Registro) — 1º passo (até 5 dias úteis).",
+    expectedWaitMinutes: 5 * 24 * 60, // 5 dias úteis
+    portalUrl: "https://www.registradores.org.br/",
+  },
+  "registradores/matric-obter": {
+    id: "registradores/matric-obter",
+    label: "Matrícula ONR (obter)",
+    costCents: 4,
+    initialStatus: "awaiting_portal",
+    scope: "federal",
+    appliesTo: ["imovel"],
+    category: "civel",
+    description:
+      "Obtenção da Certidão de Matrícula emitida pelo ONR — 2º passo (automático via cron).",
+    portalUrl: "https://www.registradores.org.br/",
   },
 
   // --- Divida Ativa estadual unificada (27 UFs) ---

@@ -442,6 +442,27 @@ Diretriz do usuário: **nunca pular uma certidão solicitada**. Toda falha preci
 - **CTA "Abrir portal oficial"**: botão `ExternalLink` aparece para qualquer status terminal não-sucesso quando `portalUrl` existe. Substitui o `externalLink` legado (continua funcionando por compat).
 - **CTA "Completar {campos}"**: em `data_missing`, botão âmbar com tooltip listando os campos específicos (ex: "Complementar: data_nascimento, nome_mae"). Abre o fluxo de complementação já existente (`setComplementJobId`).
 
+## Phase K — Gaps do Mapeamento_Certidoes.md (2026-04-18)
+
+Auditoria do Mapeamento (1936 linhas) revelou 4 certidões com cobertura Infosimples não implementadas. Adicionadas ao catálogo + normalizers + 2 disparam no plano default:
+
+- **`receita-federal/cpf`** (Mapeamento 2.1.5) — situação cadastral do CPF. Filtro obrigatório inicial — dispara sempre para toda parte PF no planner. `emitsPdf: false` (informativo). Regular = `situacao: "informativa"` (OK); qualquer outra → `positiva` (bloqueia minuta).
+- **`antecedentes-criminais-pf/emit` + `/validar`** (Mapeamento 2.1.4) — Polícia Federal antecedentes. 2-step. Dispara apenas quando `deal.modalidade === "financiamento"` (facultativo em particulares). PF sem `data_nascimento` + `nome_mae` vira skipped com `missingField` explícito.
+- **`sncr/ccir`** (Mapeamento 2.3.2) — CCIR INCRA para imóveis rurais. NO CATÁLOGO + EXTRACTOR pronto. NÃO dispara no plano default (aba imóvel está fora do planner desde F.II-α — decisão adiada para pós-QA Phase J). Disponível via picker "Adicionar outras".
+- **`registradores/matric-pedido` + `matric-obter`** (Mapeamento 2.3.1) — Matrícula ONR (Certidão de Inteiro Teor, 2-step até 5 dias úteis). Idem CCIR: catálogo + extractor + testes, mas planner só dispara via picker. `expectedWaitMinutes: 7200` (5 dias úteis ≈ 5×24×60).
+
+Todos os 4 endpoints têm `portalUrl` para fallback manual (receita CPF, dpf.gov.br antecedentes, sncr.serpro.gov.br, registradores.org.br).
+
+**Documentação criada**: [docs/certidoes-architecture.md](docs/certidoes-architecture.md) — documento arquitetural único descrevendo os 12 estados semânticos, backoffs, fluxo do classifier, e step-by-step para adicionar novo endpoint.
+
+**Gaps remanescentes** (Phase L, só após QA Phase J validar):
+- CNIB (indisponibilidade) — sem cobertura Infosimples, só portalUrl
+- ITR — idem
+- TJMG/TJPR/TJES cível — idem
+- Imóvel volta ao planner (Matrícula ONR + CCIR)
+
+**Seção 12 do Mapeamento** (estrangeiro, espólio, menor, divórcio, falência): escopo futuro (Phase M+) — demanda redesign do form com flags condicionais.
+
 ## Alertas
 - Handlebars helpers em `src/lib/render/handlebars.ts` sao aditivos — novos helpers podem ser adicionados, mas helpers existentes NAO devem ser alterados (quebra contratos antigos).
 - TipTap edita HTML direto; re-render do Handlebars sobrescreve edicoes manuais (incluindo comment anchors e suggestion marks)

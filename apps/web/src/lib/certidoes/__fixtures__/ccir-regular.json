@@ -1,0 +1,21 @@
+{
+  "code": 200,
+  "code_message": "OK",
+  "header": { "billable": true },
+  "data_count": 1,
+  "data": [
+    {
+      "nirf": "1234567-8",
+      "nome_imovel": "Fazenda Exemplo",
+      "municipio": "Caçapava do Sul",
+      "uf": "RS",
+      "area_total_ha": 120.5,
+      "modulo_fiscal": 16,
+      "situacao": "Regular",
+      "exercicio": "2026",
+      "titular": "João da Silva",
+      "cpf_cnpj_titular": "12345678900"
+    }
+  ],
+  "site_receipts": ["https://sncr.serpro.gov.br/receipt.pdf"]
+}

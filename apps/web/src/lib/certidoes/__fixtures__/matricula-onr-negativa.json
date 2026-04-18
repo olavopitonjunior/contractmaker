@@ -1,0 +1,22 @@
+{
+  "code": 200,
+  "code_message": "OK",
+  "header": { "billable": true },
+  "data_count": 1,
+  "data": [
+    {
+      "numero_matricula": "52447",
+      "cartorio": "Registro de Imóveis de Caraguatatuba/SP",
+      "cnm": "120592.2.0052447-61",
+      "tipo_certidao": "Inteiro Teor com Negativa de Ônus",
+      "tem_onus": false,
+      "ha_indisponibilidade": false,
+      "ha_penhora": false,
+      "ha_alienacao_fiduciaria": false,
+      "data_emissao": "17/04/2026",
+      "validade_ate": "17/05/2026",
+      "inteiro_teor_url": "https://registradores.org.br/cert/xyz.pdf"
+    }
+  ],
+  "site_receipts": ["https://registradores.org.br/cert/xyz.pdf"]
+}
