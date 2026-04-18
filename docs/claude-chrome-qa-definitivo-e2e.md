@@ -49,9 +49,135 @@ Todos os **dados de pessoas físicas/jurídicas, dados do imóvel, matrícula, I
 - **Foro**: **escolha "arbitragem"** — testa FIX-006 (template tem `{{#if}}` arbitragem vs justiça pública)
 - **Modalidade**: deve auto-detectar como "financiamento" se você preencher `alienacao_fiduciaria > 0` (FIX-001)
 
-**Quando travar**: capture o erro exato (HTTP code, JSON body, console error), tire 1 screenshot da tela travada, **TENTE WORKAROUND** se possível (refresh, retry button, navegação alternativa), e SIGA. Marque como `BLOCKED` apenas quando esgotar todas opções. Reporte SEMPRE no relatório final.
+**REGRA MAIOR — NUNCA PARE**: você NÃO pausa o E2E quando bate num erro. Para cada falha, siga o **PROTOCOLO DE INVESTIGAÇÃO SEM PAUSA** (abaixo), capture evidência JSON + screenshot, anote no relatório, e prossiga pro próximo bloco. O relatório consolida tudo no final.
 
 **Cobertura de UF para certidões**: o sistema tem integração Infosimples real para **SP / RJ / RS**. Se seus documentos apontarem para outra UF (MG, PR, etc.), o sistema só vai gerar certidões federais (PGFN, CNDT, TRF Cível) e você terá menos certidões para testar. **Idealmente use documentos de SP** (mais cobertura: TJSP + TRT2 + TRT15 + CENPROT + IPTU SP). Se for RJ, terá TJRJ + TRT1 + IPTU RJ. Se RS, TJRS + TRT4. Se outro UF, **use o picker "+ Adicionar outras"** para forçar testes de extras (Bloco 6.4).
+
+---
+
+## 0.1 PROTOCOLO DE INVESTIGAÇÃO SEM PAUSA
+
+Quando algo falhar, **NÃO pause** — investigue via JSON/DB direto e siga. Use estas rotinas:
+
+### 0.1.1 — Doc OCR falhou / travou > 90s em "extracting"
+
+1. Anote o `attachment.id` do card falhado (hover ou read_page)
+2. No console do browser (aba do form `/f/{TOKEN}`), rode:
+   ```js
+   fetch('/api/forms/' + TOKEN + '/attachments')
+     .then(r => r.json())
+     .then(d => console.log(JSON.stringify(d.attachments.find(a => a.id === ATT_ID), null, 2)))
+   ```
+3. Inspecione: `status` (queued/extracting/ready/failed), `extractError`,
+   `extractingStartedAt`, `extractedData` (deve ter `fields` + `confidence`)
+4. Clique "Reenviar para fila" no card. Se > 2 tentativas não resolver, marque
+   FAILED no relatório com o JSON capturado e **siga** preenchendo o campo
+   manualmente com os dados de fallback (Seção 0.2).
+
+### 0.1.2 — Certidão falhou ou ficou "Não emitida"
+
+1. Anote `job.id` do card (ou abra o modal de detalhes)
+2. No console do dashboard, rode:
+   ```js
+   fetch('/api/deals/' + DEAL_ID + '/certidoes')
+     .then(r => r.json())
+     .then(d => console.log(JSON.stringify(d.jobs.find(j => j.id === JOB_ID), null, 2)))
+   ```
+3. Analise no JSON:
+   - `resultCode` (200, 602, 605, 606, 612, 615…)
+   - `resultMessage` / `errorMessage` / `failureCategory`
+   - `resultData.raw.header.billable` (true/false/ausente)
+   - `resultData.raw.data_count` / `resultData.raw.site_receipts.length`
+   - `attachmentId` (null = sem PDF baixado)
+4. Classifique no relatório:
+   - `resultCode === 200 && attachmentId === null` → **REGRESSÃO P0-A** Phase H
+     (sucesso verde sem lastro — deveria ser failed). Anote imediatamente, segue.
+   - `resultCode === 606` → verifique `requestPayload` tem `data_nascimento` e
+     `nome_mae`. Se não, é regressão H.3.
+   - `resultCode === 602` → verifique `failureCategory === "integration_error"`.
+     Se for `"genuine_no_data"` → regressão H.1.
+   - `resultCode === 612/605/615` → portal/instabilidade, NÃO é bug nosso.
+     Anote como "portal indisponível" e segue.
+
+### 0.1.3 — Deal sumiu do Kanban
+
+1. Consulte `fetch('/api/deals/' + DEAL_ID).then(r => r.status).then(console.log)`
+2. Se `200` → bug só visual (Kanban não renderizou). Anote, acesse via URL direta.
+3. Se `404` → delete inesperado. Anote como P0 e recrie.
+
+### 0.1.4 — Relatório PDF vem com contadores errados
+
+1. Baixe o PDF
+2. No console, count: `fetch('/api/deals/' + DEAL_ID + '/certidoes').then(r=>r.json()).then(d => ({ total: d.jobs.length, failed: d.jobs.filter(j=>j.status==='failed').length, skipped: d.jobs.filter(j=>j.status==='skipped').length, success: d.jobs.filter(j=>j.status==='success').length }))`
+3. Compare com os "Falhas / Puladas / Negativas" do PDF. Divergência > 0 = bug
+   em `report.ts` (regressão H.10).
+
+### 0.1.5 — EditPartyDialog abre vazio
+
+Se clicou no ícone âmbar ⚠️ e o dialog abriu sem preencher:
+- `fetch('/api/deals/' + DEAL_ID).then(r=>r.json()).then(d => d.deal.form?.dataJson)`
+- Se retornar os dados → bug no dialog (regressão H.8). Se null → problema real.
+
+---
+
+## 0.2 DADOS DE FALLBACK DO CENÁRIO DE TESTE
+
+**USE APENAS QUANDO O OCR FALHAR OU DEIXAR CAMPO VAZIO.** O objetivo principal é testar o OCR — só recorra a esta seção se precisar desbloquear. Anote no relatório quais campos vieram deste fallback (indicador de qualidade do OCR).
+
+### Comprador 1 — Leonardo Correia Quirino
+- CPF: `183.849.298-40` · RG: `18.384.929-840` IIRGD-SP (emitido 07/01/2026, val 07/01/2036)
+- Data nasc: `25/08/1973` · Naturalidade: Guaratinguetá/SP · Nacionalidade: brasileiro
+- Nome da mãe: `Ana Maria Correia Rodrigues`
+- Nome do pai: `Sebastião Quirino Rodrigues da Silva`
+- Estado civil: casado sob comunhão parcial de bens · Profissão: técnico em eletrônica
+- Endereço: Rua Sena Madureira, 57, Parque Industrial, São José dos Campos/SP, CEP `12237-020`
+- Contato: (12) 98232-5061 · leonardo.c.q@terra.com.br
+
+### Comprador 2 (cônjuge) — Luciana Ferraz da Silva Quirino
+- CPF: `276.770.398-98` · RG: `27.677.039-898` IIRGD-SP (emitido 03/10/2025, val 02/10/2035)
+- Data nasc: `02/08/1977` · Naturalidade: São José dos Campos/SP · Nacionalidade: brasileira
+- Nome da mãe: `Serrate Aparecida da Silva`
+- Nome do pai: `Antonio Ferraz da Silva`
+- Estado civil: casada sob comunhão parcial de bens · Profissão: recepcionista
+- Endereço: mesmo do Leonardo
+- Contato: (12) 99602-0877 · lucianabr.lu@gmail.com
+- Casamento: 11/12/1998, Livro B-61 fls 98 nº 10302, Registro Civil de Cruzeiro/SP
+
+### Vendedor 1 — Tiago Alegretti Zucarelli
+- CPF: `340.444.178-81` · RG: `43.617.626` SSP-SP
+- CNH: `02924481653` categoria AB, val 18/08/2033, emitida 18/08/2023
+- Data nasc: `10/04/1985` · Naturalidade: Caçapava/SP · Nacionalidade: brasileiro
+- Nome da mãe: `Valéria Alegretti Zucarelli`
+- Nome do pai: `Luciano Valentini Zucarelli`
+- Estado civil: **divorciado** (averbação 13/09/2024) · Profissão: engenheiro de vendas
+- Endereço: Av Brasil, 800 apto 72, Vila Antonio Augusto Luiz, Caçapava/SP, CEP `12287-020`
+
+### Diligenciada (NÃO é parte do contrato novo) — Myrielle Rodrigues Moreira
+- CPF: `398.106.648-00` · RG: `47.577.023` SSP-SP
+- Data nasc: `27/07/1991` · Naturalidade: Caçapava/SP · Nacionalidade: brasileira
+- Nome da mãe: `Marcia Aparecida Felix Moreira`
+- Nome do pai: `Douglas Rodrigues Moreira`
+- Profissão: assistente financeira
+- **Contexto**: ex-cônjuge do Tiago, coproprietária na cadeia dominial R.8/52.447 (antes do divórcio). Adicione como Diligenciada na aba Diligenciados do Deal, justificativa "coproprietária na cadeia dominial R.8/52.447".
+
+### Imóvel 1
+- Descrição: Unidade nº 10, pavimento térreo, Condomínio Horizontal Porto do Sol
+- Endereço: Av Horácio Rodrigues, 1.237 ap 10, Martim de Sá, Caraguatatuba/SP, CEP `11662-400`
+- Matrícula: `52.447` · CNM: `120592.2.0052447-61` · Cartório: Registro de Imóveis de Caraguatatuba/SP
+- Inscrição municipal (IPTU): `04.180.032`
+- SQL: **N/A** (Caraguatatuba não usa SQL — somente inscrição. Se campo SQL aparecer no form, deixe vazio)
+- Áreas: privativa 33,84 m² · comum 6,19 m² · total 40,03 m² · Fração ideal 6,975% · 1 vaga indeterminada
+
+### Negócio
+- Valor: `R$ 215.000,00` · Entrada/sinal: `R$ 43.000,00` (20%) · Saldo: financiamento CEF
+- Modalidade: **financiamento** (preencher `alienacao_fiduciaria > 0` para auto-detectar)
+- Comissão: 6% · Multa desistência: 5%
+
+### Corretora (PF — testa H.16)
+- Tipo: **Pessoa Física** (use o radio novo)
+- Nome: `Daniela Bosso Fujiki Almeida`
+- CPF: `218.661.618-14`
+- CRECI/SP: `199.905`
 
 ---
 
@@ -1197,6 +1323,11 @@ para cada card TRF3 ou PGE-SP:
 
 **Falha** (regressão P0-A): qualquer card TRF3/PGE-SP com ícone verde +
 `raw.code === 602` + `attachmentId === null`. **BLOQUEIA produção.**
+
+> ⚠️ Se encontrar esta regressão, **NÃO pause o E2E** — anote `job.id` + JSON raw
+> imediatamente no relatório como "REGRESSÃO P0-A DETECTADA" (ver Protocolo 0.1.2)
+> e **continue** com os outros blocos. A equipe precisa do relatório completo
+> para priorizar next steps.
 
 ### 16.2 — P0-B: PGFN indeterminado
 
