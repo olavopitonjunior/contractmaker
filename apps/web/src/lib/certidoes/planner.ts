@@ -323,15 +323,33 @@ export function planCertidoesForDeal(
     }
 
     // ---- TRF Cert Unificada + TRF Individual ----
-    // I.4 (Phase I, 2026-04-18) — ambos retornaram 100% fail no QA:
-    //   - `tribunal/trf/cert-unificada`: 4/4 (600/602/615). Além disso,
-    //     não emite PDF (só retorna JSON com status por TRF), inconsistente
-    //     com CATEGORIES_REQUIRING_PDF.
-    //   - `tribunal/trf3/certidao`: 4/4 (602 "URL inválida") = depreciado.
-    // Ação: em expandAll (picker manual), ainda oferecer os individuais
-    // para o usuário tentar. No plano default, marcar como skipped com
-    // aviso de depreciação para não gerar billing em vão.
-    if (expandAll && partyUf && TRF_UF_MAP[partyUf]) {
+    // J.1 (Phase J, 2026-04-18) — reverte I.4 skip default. Princípio:
+    // TODA certidão solicitada é tentada. Falhas transitórias (600/615) são
+    // retry automático pelo cron. Falha permanente (602 deprecated) vira
+    // `failed_permanent` com `portalUrl` para extração manual.
+    // `trf/cert-unificada` não emite PDF (retorna JSON agregado dos 6 TRFs)
+    // — sai de CATEGORIES_REQUIRING_PDF (ver endpoints.ts).
+    {
+      const ep = "tribunal/trf/cert-unificada";
+      if (isPJ && !cnpj) {
+        skipped.push(buildSkip(ep, kind, index, label, "cnpj", "CNPJ invalido"));
+      } else if (!isPJ && !cpf) {
+        skipped.push(buildSkip(ep, kind, index, label, "cpf", "CPF invalido"));
+      } else {
+        jobs.push(
+          buildJob(ep, kind, index, label, {
+            tipo: 1,
+            email,
+            ...(isPJ ? { cnpj } : { cpf }),
+          })
+        );
+      }
+    }
+
+    // TRF regional individual (trf{1-6}/certidao) — retorna PDF.
+    // Code 602 (deprecated) do QA será capturado pelo executor como
+    // `failed_permanent` com `portalUrl` pro portal oficial do TRF.
+    if (partyUf && TRF_UF_MAP[partyUf]) {
       const ep = TRF_UF_MAP[partyUf]!;
       if (isPJ && !cnpj) {
         skipped.push(buildSkip(ep, kind, index, label, "cnpj", "CNPJ invalido"));
@@ -345,28 +363,6 @@ export function planCertidoesForDeal(
           })
         );
       }
-    } else {
-      // Plano default: gera skipped informativo para o usuário saber que
-      // a Justiça Federal está descoberta (precisa acessar portal do TRF
-      // regional manualmente até provider confirmar novo endpoint).
-      skipped.push({
-        ...buildSkip(
-          "tribunal/trf/cert-unificada",
-          kind,
-          index,
-          label,
-          "cobertura",
-          "Justiça Federal: endpoint Infosimples depreciado — extrair manualmente no portal do TRF regional"
-        ),
-        externalLink:
-          partyUf === "SP" || partyUf === "MS"
-            ? "https://web.trf3.jus.br/certidao"
-            : partyUf === "RJ" || partyUf === "ES"
-            ? "https://www10.trf2.jus.br/portal/certidao-eletronica/"
-            : partyUf === "RS" || partyUf === "SC" || partyUf === "PR"
-            ? "https://www2.trf4.jus.br/trf4/controlador.php?acao=certidao_inicial"
-            : "https://www.trf1.jus.br/Servicos/Certidao/",
-      });
     }
 
     // ---- CEAT (Trabalhista regional, Phase B) ----

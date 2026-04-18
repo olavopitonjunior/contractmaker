@@ -121,7 +121,16 @@ export function buildReportData(input: BuildInput): Record<string, unknown> {
     };
     if (bucket) bucket.jobs.push(row);
 
-    if (effStatus === "failed") {
+    // J.6 (Phase J, 2026-04-18) — estados ricos: failed_permanent,
+    // data_missing, data_invalid contam como falha. api_error,
+    // portal_unavailable, rate_limited são transitórios (retry pelo cron);
+    // aparecem no relatório como "em processamento".
+    const jFailed =
+      effStatus === "failed" ||
+      effStatus === "failed_permanent" ||
+      effStatus === "data_missing" ||
+      effStatus === "data_invalid";
+    if (jFailed) {
       falhas++;
       const motivo = job.errorMessage || "falha na chamada — retentar";
       pendencias.push(`${job.label}: ${motivo}`);

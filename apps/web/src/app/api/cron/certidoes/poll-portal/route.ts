@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
-import { pollPortalJob, sweepStaleJobs } from "@/lib/certidoes/executor";
+import { pollPortalJob, runSingleJob, sweepStaleJobs } from "@/lib/certidoes/executor";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -53,11 +53,55 @@ export async function GET(req: NextRequest) {
   // Promotes zombies-with-valid-data to success, marks zombies-without-data as failed
   const sweepResult = await sweepStaleJobs();
 
+  // Task 3 (J.4): retry automático de jobs em estado transitório.
+  // `classifyOutcome` (J.3) agendou nextRetryAt baseado em categoria:
+  //   - api_error: 30s, 2min, 10min
+  //   - portal_unavailable: 10min, 30min, 2h
+  //   - rate_limited: 30min, 1h
+  // Esgotadas as tentativas, vira failed_permanent (transição feita pelo
+  // próprio classifier no próximo runSingleJob).
+  const retryJobs = await prisma.certidaoJob.findMany({
+    where: {
+      status: { in: ["api_error", "portal_unavailable", "rate_limited"] },
+      nextRetryAt: { lte: now },
+    },
+    orderBy: { nextRetryAt: "asc" },
+    take: 30,
+    select: { id: true, dealId: true, retryCount: true },
+  });
+  let retrySuccess = 0;
+  let retryFailed = 0;
+  for (const job of retryJobs) {
+    try {
+      // Incrementa retryCount + reenfileira como pending para runSingleJob
+      // começar do zero (inclui re-check de extracting lock).
+      await prisma.certidaoJob.update({
+        where: { id: job.id },
+        data: {
+          status: "pending",
+          retryCount: { increment: 1 },
+          nextRetryAt: null,
+          startedAt: null,
+        },
+      });
+      await runSingleJob(job.id, job.dealId);
+      retrySuccess++;
+    } catch (err) {
+      retryFailed++;
+      console.error("[cron] retry failed", job.id, err);
+    }
+  }
+
   return NextResponse.json({
     portal: {
       polled: portalJobs.length,
       success: portalSuccess,
       failed: portalFailed,
+    },
+    retry: {
+      scheduled: retryJobs.length,
+      success: retrySuccess,
+      failed: retryFailed,
     },
     sweep: sweepResult,
   });

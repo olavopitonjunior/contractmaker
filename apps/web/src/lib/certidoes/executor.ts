@@ -2,7 +2,8 @@ import { prisma } from "@/lib/db/prisma";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { callInfosimples, downloadReceipt, InfosimplesError } from "./infosimples";
 import { normalize } from "./normalizers";
-import { endpointInfo, CATEGORIES_REQUIRING_PDF } from "./endpoints";
+import { endpointInfo } from "./endpoints";
+import { classifyOutcome } from "./outcome-classifier";
 import type { JobStatus, Situacao } from "./types";
 import { emitNotification } from "@/lib/notifications/emit";
 
@@ -358,60 +359,53 @@ export async function runSingleJob(
     };
     if (receipt) enrichedResultData._rawReceipt = receipt;
 
-    // H.1 + H.18 (Phase H, 2026-04-18): treat as failed when Infosimples
-    // returned non-200 OR normalize() yielded nao_emitida without PDF —
-    // prevents false-negative "negativa" cards with no evidence. Also
-    // zero cost when provider flag billable=false OR call produced no
-    // useful output, so budget reflects real value.
-    //
-    // H.4 complementar (revisão 2026-04-18): também flaga falso-success
-    // quando endpoint é de categoria que normalmente emite PDF mas a
-    // resposta veio sem `site_receipts[0]` (caso CENPROT SP: rc=200 +
-    // situacao=negativa sem anexo = sem prova documental).
-    const billable = resp.header?.billable;
+    // J.3 (Phase J, 2026-04-18) — classifyOutcome() centraliza a decisão
+    // de status rico (success, informativo, api_error, portal_unavailable,
+    // data_missing, failed_permanent, …) e agenda retry automático
+    // quando apropriado. Substitui a lógica H.1+H.4+H.18 inline; todos os
+    // principios (no false-negative, billing honesto, requiresPdf) continuam
+    // aplicados internamente pelo classificador.
     const situacaoNorm = (normalized as { situacao?: Situacao }).situacao;
-    const requiresPdf = CATEGORIES_REQUIRING_PDF.has(info.category);
-    const missingRequiredPdf =
-      requiresPdf &&
-      attachmentId === null &&
-      (situacaoNorm === "negativa" ||
-        situacaoNorm === "positiva" ||
-        situacaoNorm === "positiva_com_efeitos" ||
-        situacaoNorm === "nao_emitida");
-    const isFail = resp.code !== 200 || missingRequiredPdf;
-    const shouldCharge =
-      billable === false ? false : !isFail || resp.code === 200;
-    const finalCost = shouldCharge ? info.costCents : 0;
-    const finalStatus = isFail ? "failed" : "success";
-    const finalError = isFail
-      ? missingRequiredPdf && resp.code === 200
-        ? "Portal não anexou PDF — sem evidência documental (retry pode resolver)"
-        : resp.code_message ||
-          "Sem evidência de certidão (nenhum PDF anexado)"
-      : null;
+    const billable = resp.header?.billable;
+    const outcome = classifyOutcome(resp, normalized, info, {
+      attachmentId,
+      retryAttempts: job.retryCount ?? 0,
+      maxRetries: job.maxRetries ?? 3,
+    });
 
     await prisma.certidaoJob.update({
       where: { id: jobId },
       data: {
-        status: finalStatus,
-        finishedAt: new Date(),
+        status: outcome.status,
+        finishedAt:
+          outcome.status === "api_error" ||
+          outcome.status === "portal_unavailable" ||
+          outcome.status === "rate_limited"
+            ? null // job ainda vivo, cron vai retentar
+            : new Date(),
         latencyMs,
         resultCode: resp.code,
         resultMessage: resp.code_message,
         resultData: enrichedResultData as object,
         attachmentId,
-        costCents: finalCost,
-        errorMessage: finalError,
+        costCents: outcome.costCents,
+        errorMessage: outcome.errorMessage,
+        nextRetryAt: outcome.nextRetryAt,
+        missingFields: outcome.missingFields,
+        portalUrl: outcome.portalUrl,
       },
     });
-    logTransition(jobId, "fetching", finalStatus, finalError ?? "infosimples OK", {
+    logTransition(jobId, "fetching", outcome.status, outcome.errorMessage ?? "infosimples OK", {
       endpoint: job.endpoint,
       resultCode: resp.code,
       situacao: situacaoNorm,
       latencyMs,
-      costCents: finalCost,
+      costCents: outcome.costCents,
       billable: billable ?? null,
       hasAttachment: attachmentId !== null,
+      failureCategory: outcome.failureCategory,
+      nextRetryAt: outcome.nextRetryAt?.toISOString() ?? null,
+      missingFieldsCount: outcome.missingFields.length,
     });
     // F4: single-job path (retry/complementar) — check batch. For multi-job
     // batches from runBatch this is also called but is idempotent via batchId

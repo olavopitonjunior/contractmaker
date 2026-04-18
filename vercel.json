@@ -7,7 +7,7 @@
   "crons": [
     {
       "path": "/api/cron/certidoes/poll-portal",
-      "schedule": "0 * * * *"
+      "schedule": "*/5 * * * *"
     },
     {
       "path": "/api/cron/ocr-queue",

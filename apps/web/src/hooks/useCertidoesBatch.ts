@@ -16,6 +16,14 @@ export interface CertidaoJobRow {
     | "awaiting_portal"
     | "success"
     | "failed"
+    // J.3 (Phase J, 2026-04-18) — estados semânticos ricos
+    | "api_error"
+    | "portal_unavailable"
+    | "rate_limited"
+    | "data_missing"
+    | "data_invalid"
+    | "informativo"
+    | "failed_permanent"
     | "skipped"
     | "replaced";
   requestPayload: unknown;
@@ -28,6 +36,11 @@ export interface CertidaoJobRow {
   latencyMs: number | null;
   costCents: number | null;
   expectedReadyAt: string | null;
+  // J.2 (Phase J)
+  nextRetryAt: string | null;
+  maxRetries: number;
+  missingFields: string[];
+  portalUrl: string | null;
   retryCount: number;
   createdAt: string;
 }
@@ -35,9 +48,16 @@ export interface CertidaoJobRow {
 const TERMINAL = new Set([
   "success",
   "failed",
+  "failed_permanent",
   "skipped",
   "awaiting_portal",
   "replaced",
+  "informativo",
+  // J: data_missing / data_invalid são terminais (precisam user action),
+  // não retry auto. api_error / portal_unavailable / rate_limited NÃO
+  // são terminais — cron vai retentar.
+  "data_missing",
+  "data_invalid",
 ]);
 
 /**

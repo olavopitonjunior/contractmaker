@@ -260,11 +260,22 @@ export async function POST(
           requestPayload: sanitizePayload(p.requestPayload) as object,
           status: info.initialStatus ?? "pending",
           costCents: null,
+          // J.5 (Phase J) — cache portalUrl pra UI renderizar CTA quando
+          // job falhar permanentemente, sem precisar re-consultar catálogo.
+          portalUrl: info.portalUrl ?? null,
         },
       });
     }),
-    ...effectiveSkipped.map((s) =>
-      prisma.certidaoJob.create({
+    ...effectiveSkipped.map((s) => {
+      // J.5 — portalUrl do catálogo tem precedência sobre externalLink do
+      // planner; UI usa portalUrl como fonte única de verdade.
+      let portalUrl: string | null = s.externalLink ?? null;
+      try {
+        portalUrl = endpointInfo(s.endpoint).portalUrl ?? portalUrl;
+      } catch {
+        /* endpoint placeholder sem catálogo — mantém externalLink */
+      }
+      return prisma.certidaoJob.create({
         data: {
           dealId: params.dealId,
           userId,
@@ -276,15 +287,20 @@ export async function POST(
           requestPayload: {
             missingField: s.missingField,
             missingFields: s.missingFields,
-            // G.3 — preserva externalLink para UI renderizar botão "Abrir portal"
             ...(s.externalLink ? { externalLink: s.externalLink } : {}),
           } as object,
           status: "skipped",
           errorMessage: s.reason,
           costCents: 0,
+          missingFields: s.missingFields?.length
+            ? s.missingFields.map((mf) => mf.path)
+            : s.missingField
+            ? [s.missingField]
+            : [],
+          portalUrl,
         },
-      })
-    ),
+      });
+    }),
   ]);
 
   // Fire-and-forget: execute batch while the response is returned to the client.

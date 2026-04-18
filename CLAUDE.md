@@ -414,6 +414,34 @@ Segundo E2E rodou contra deploy `5191da0b` (Phase H). Phase H validada sem regre
 - **I.4 — TRF cert-unificada + TRF individual 100% fail (major)**: ambos os endpoints (`tribunal/trf/cert-unificada` + `tribunal/trf{1-6}/certidao`) estão inoperantes. Removidos do plano default — agora só disparam com `expandAll: true` (picker manual). Plano default gera `SkippedJob` informativo com `externalLink` para portal oficial do TRF regional (trf1.jus.br / trf2 / trf3 / trf4).
 - **I.5 — Notificações de batch duplicadas 5× (minor)**: `checkBatchCompletion` é chamado por cada job ao terminar; idempotência por query JSONB em `metadata.batchId` sofria race condition. Solução: adicionada coluna dedicada `batchId String?` em `Notification` + `@@unique([type, batchId])` via migration `20260418120000_add_notification_batchId_unique`. `emitNotification` agora silently swallow P2002 (duplicate) — o primeiro worker ganha, outros são no-op.
 
+## Phase J — Estados ricos de certidão + retry automático (2026-04-18)
+
+Diretriz do usuário: **nunca pular uma certidão solicitada**. Toda falha precisa ter seu fluxo de resolução próprio (API down → retry auto, dados faltando → destacar campo, provedor depreciado → link para portal oficial). A I.4 skip-default foi revertida.
+
+### Estados semânticos novos (em `status` do CertidaoJob)
+
+- `api_error` — 5xx/timeout Infosimples → retry auto em **30s / 2min / 10min**
+- `portal_unavailable` — code 615/665/666 → retry auto em **10min / 30min / 2h**
+- `rate_limited` — code 668 → retry auto em **30min / 1h**
+- `data_missing` — code 606/612/613 → **não retry**, destacar campo via `missingFields[]`
+- `data_invalid` — code 614 → **não retry**, EditPartyDialog
+- `informativo` — `category: cadastro | fgts` com code 200 → label "Consulta informativa (não é certidão)"
+- `failed_permanent` — retries esgotados OU code 602 depreciado → CTA "Abrir portal oficial" via `portalUrl`
+
+### Infra
+
+- **`outcome-classifier.ts`** (`lib/certidoes/`) — função pura `classifyOutcome()` produz `{status, costCents, nextRetryAt, missingFields, portalUrl, errorMessage}`. Executor delega decisão centralizada. 12 casos em teste.
+- **Backoff por categoria**: tabela `BACKOFF_MS` no classifier. Cron `/api/cron/certidoes/poll-portal` sweeps jobs com `nextRetryAt <= now` e status `api_error | portal_unavailable | rate_limited`, re-executa via `runSingleJob`. Schedule subiu de 1h → **5min** para pegar retry curto.
+- **Schema** (migration `20260418130000_add_certidao_job_retry_fields`): `nextRetryAt DateTime?`, `maxRetries Int @default(3)`, `missingFields String[]`, `portalUrl String?`. Index parcial `(status, nextRetryAt) WHERE nextRetryAt IS NOT NULL` para o cron.
+- **Catálogo** (`endpoints.ts`): novos campos `emitsPdf?: boolean` (override de `CATEGORIES_REQUIRING_PDF`) e `portalUrl?: string`. Endpoints principais ganharam `portalUrl` + `expectedWaitMinutes` (TJSP 15min, TJRJ ~8d úteis). `trf/cert-unificada` com `emitsPdf: false` (retorna JSON agregado, não PDF).
+
+### UX
+
+- **Ícones** por status: `RefreshCw` azul spinning lento em retry agendado; `AlertTriangle` âmbar em data_missing/invalid; `AlertTriangle` vermelho em failed_permanent; `Info` azul-céu em informativo.
+- **Labels contextuais** (`statusLabel`): "Portal fora do ar — nova tentativa em ~10 min" (relativo a `nextRetryAt`), "Faltam dados · {missingFields}", "Consulta informativa (não é certidão)".
+- **CTA "Abrir portal oficial"**: botão `ExternalLink` aparece para qualquer status terminal não-sucesso quando `portalUrl` existe. Substitui o `externalLink` legado (continua funcionando por compat).
+- **CTA "Completar {campos}"**: em `data_missing`, botão âmbar com tooltip listando os campos específicos (ex: "Complementar: data_nascimento, nome_mae"). Abre o fluxo de complementação já existente (`setComplementJobId`).
+
 ## Alertas
 - Handlebars helpers em `src/lib/render/handlebars.ts` sao aditivos — novos helpers podem ser adicionados, mas helpers existentes NAO devem ser alterados (quebra contratos antigos).
 - TipTap edita HTML direto; re-render do Handlebars sobrescreve edicoes manuais (incluindo comment anchors e suggestion marks)

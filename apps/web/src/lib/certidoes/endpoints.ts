@@ -37,6 +37,27 @@ export interface EndpointInfo {
   description?: string;
   /** F.II-γ: endpoint só dispara se checkGovBrAuth() retornar active=true */
   requiresGovBrAuth?: boolean;
+  /**
+   * J.1 (Phase J, 2026-04-18) — override de `CATEGORIES_REQUIRING_PDF`:
+   * quando `false`, endpoint é tratado como informativo (resposta é JSON,
+   * não emite PDF). Default: herdado da category (true para civel/trabalhista/
+   * fiscal/protesto/municipal/federal). Exemplos: `trf/cert-unificada`
+   * retorna status agregado dos 6 TRFs em JSON, sem PDF — emitsPdf: false.
+   */
+  emitsPdf?: boolean;
+  /**
+   * J.5 (Phase J, 2026-04-18) — URL oficial do portal para extração manual
+   * como último recurso quando o endpoint Infosimples falha permanentemente
+   * (code 602 deprecated ou retries esgotados). UI renderiza como CTA
+   * "Abrir portal oficial".
+   */
+  portalUrl?: string;
+  /**
+   * J.4 (Phase J, 2026-04-18) — tempo esperado em `awaiting_portal` antes
+   * do 2º step (obter-certidao) ficar pronto. Usado pra exibir ETA no card
+   * ("Pronto em ~15 min" / "Pronto em até 5 dias úteis").
+   */
+  expectedWaitMinutes?: number;
 }
 
 /**
@@ -65,6 +86,7 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa"],
     category: "federal",
     description: "Certidao conjunta de debitos federais e divida ativa da Uniao (Receita Federal + PGFN)",
+    portalUrl: "https://servicos.receitafederal.gov.br/servico/certidoes",
   },
   "tribunal/tst/cndt": {
     id: "tribunal/tst/cndt",
@@ -74,6 +96,7 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa"],
     category: "trabalhista",
     description: "Certidao Negativa de Debitos Trabalhistas (TST, nacional)",
+    portalUrl: "https://cndt-certidao.tst.jus.br/",
   },
   "tribunal/trf/cert-unificada": {
     id: "tribunal/trf/cert-unificada",
@@ -83,6 +106,9 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa"],
     category: "civel",
     description: "Certidao Unificada dos 6 TRFs (Justica Federal)",
+    // J.1 (Phase J): não emite PDF — retorna JSON agregado por TRF.
+    emitsPdf: false,
+    portalUrl: "https://www.trf3.jus.br/certidao/", // fallback para SP/MS
   },
 
   // --- Estadual SP ---
@@ -95,6 +121,7 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa"],
     category: "trabalhista",
     description: "Certidao de Execucoes Trabalhistas do TRT2 (capital SP - autos fisicos)",
+    portalUrl: "https://ww2.trt2.jus.br/servicos/certidoes",
   },
   "tribunal/trt2/ceat-digital": {
     id: "tribunal/trt2/ceat-digital",
@@ -105,6 +132,7 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa"],
     category: "trabalhista",
     description: "Certidao de Execucoes Trabalhistas do TRT2 (capital SP - autos digitais)",
+    portalUrl: "https://ww2.trt2.jus.br/servicos/certidoes",
   },
   "tribunal/trt15/ceat": {
     id: "tribunal/trt15/ceat",
@@ -115,6 +143,7 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa"],
     category: "trabalhista",
     description: "Certidao de Execucoes Trabalhistas do TRT15 (interior de SP)",
+    portalUrl: "https://trt15.jus.br/servicos/certidoes",
   },
   "tribunal/tjsp/pedido-civel": {
     id: "tribunal/tjsp/pedido-civel",
@@ -126,6 +155,8 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa", "imovel"],
     category: "civel",
     description: "Pedido de Certidao Civel do TJSP — 1o passo (5-15 min ate ficar pronta)",
+    expectedWaitMinutes: 15,
+    portalUrl: "https://esaj.tjsp.jus.br/esaj?servico=810000",
   },
   "tribunal/tjsp/obter-civel": {
     id: "tribunal/tjsp/obter-civel",
@@ -162,6 +193,7 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa"],
     category: "trabalhista",
     description: "Certidao de Execucoes Trabalhistas do TRT1 (Rio de Janeiro)",
+    portalUrl: "https://www.trt1.jus.br/certidoes",
   },
   "tribunal/tjrj/pedido-cert": {
     id: "tribunal/tjrj/pedido-cert",
@@ -173,6 +205,8 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa", "imovel"],
     category: "civel",
     description: "Pedido de Certidao Civel do TJRJ — 1o passo (ate 8 dias uteis)",
+    expectedWaitMinutes: 8 * 24 * 60, // 8 dias úteis aproximado
+    portalUrl: "https://www3.tjrj.jus.br/certidaoeletronica/",
   },
   "tribunal/tjrj/obter-certidao": {
     id: "tribunal/tjrj/obter-certidao",
@@ -196,6 +230,7 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa"],
     category: "trabalhista",
     description: "Certidao de Execucoes Trabalhistas do TRT4 (Rio Grande do Sul)",
+    portalUrl: "https://www.trt4.jus.br/portais/trt4/certidoes",
   },
   "tribunal/tjrs/primeiro-grau": {
     id: "tribunal/tjrs/primeiro-grau",
@@ -206,6 +241,7 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa", "imovel"],
     category: "civel",
     description: "Certidao Civel do TJRS — 1o grau (5 tipos: civel, familia, falencia, execucoes patrimoniais, execucoes fiscais)",
+    portalUrl: "https://www.tjrs.jus.br/novo/servicos/certidoes/",
   },
 
   // --- Protesto SP ---
@@ -218,6 +254,7 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa", "imovel"],
     category: "protesto",
     description: "Consulta de protestos no CENPROT SP",
+    portalUrl: "https://www.pesquisaprotestosp.com.br",
   },
 
   // --- Municipal SP ---
@@ -425,6 +462,7 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa"],
     category: "fiscal",
     description: "Certidao Negativa de Debitos Estaduais unificada (todas as 27 UFs) — exige UF no request",
+    portalUrl: "https://www4.fazenda.sp.gov.br/CertidaoNegativaDebitos",
   },
   "pge-sp/cndt": {
     id: "pge-sp/cndt",
@@ -435,6 +473,7 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa"],
     category: "fiscal",
     description: "Certidao Negativa da Divida Ativa do Estado de Sao Paulo (PGE-SP)",
+    portalUrl: "https://www.dividaativa.pge.sp.gov.br/sc/pages/certidao/consultar.jsf",
   },
 
   // ============================================================
@@ -450,6 +489,7 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa"],
     category: "federal",
     description: "Certidao Negativa Civel e Criminal do TRF1 (AC/AM/AP/BA/DF/GO/MA/MT/PA/PI/RO/RR/TO)",
+    portalUrl: "https://www.trf1.jus.br/Servicos/Certidao/",
   },
   "tribunal/trf2/certidao": {
     id: "tribunal/trf2/certidao",
@@ -459,6 +499,7 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa"],
     category: "federal",
     description: "Certidao Negativa Civel e Criminal do TRF2 (RJ/ES)",
+    portalUrl: "https://www10.trf2.jus.br/portal/certidao-eletronica/",
   },
   "tribunal/trf3/certidao": {
     id: "tribunal/trf3/certidao",
@@ -468,6 +509,7 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa"],
     category: "federal",
     description: "Certidao Negativa Civel e Criminal do TRF3 (SP/MS)",
+    portalUrl: "https://www.trf3.jus.br/certidao/",
   },
   "tribunal/trf4/certidao": {
     id: "tribunal/trf4/certidao",
@@ -477,6 +519,7 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa"],
     category: "federal",
     description: "Certidao Negativa Civel e Criminal do TRF4 (RS/SC/PR)",
+    portalUrl: "https://www2.trf4.jus.br/trf4/controlador.php?acao=certidao_inicial",
   },
   "tribunal/trf5/certidao": {
     id: "tribunal/trf5/certidao",
@@ -486,6 +529,7 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa"],
     category: "federal",
     description: "Certidao Negativa Civel e Criminal do TRF5 (AL/CE/PB/PE/RN/SE)",
+    portalUrl: "https://www.trf5.jus.br/certidao",
   },
   "tribunal/trf6/certidao": {
     id: "tribunal/trf6/certidao",
@@ -495,6 +539,7 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa"],
     category: "federal",
     description: "Certidao Negativa Civel e Criminal do TRF6 (MG)",
+    portalUrl: "https://portal.trf6.jus.br/certidoes",
   },
 
   // --- CENPROT Nacional (exige login GOV.BR configurado na conta Infosimples) ---

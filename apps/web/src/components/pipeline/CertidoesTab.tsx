@@ -23,6 +23,7 @@ import {
   Archive,
   Eye,
   LifeBuoy,
+  Info,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -83,14 +84,25 @@ function statusIcon(row: CertidaoJobRow) {
       if (r?.situacao === "aguardando_pdf") {
         return <Clock className="h-4 w-4 text-blue-600" />;
       }
-      // H.12 (Phase H, 2026-04-18) — nao_emitida não pode exibir ✓ verde:
-      // significa que o portal NÃO emitiu a certidão (normalmente 6xx
-      // mapeado para missing_input/portal_unavailable). Evita UX ambíguo.
       if (r?.situacao === "nao_emitida") {
         return <XCircle className="h-4 w-4 text-red-600" />;
       }
       return <CheckCircle2 className="h-4 w-4 text-green-600" />;
     }
+    // J.6 (Phase J, 2026-04-18) — estados ricos. Informativo = info azul
+    // (Receita CNPJ, CRF FGTS), não "certidão". Falha permanente = vermelho
+    // com CTA portal. Retry pendente = relógio azul com countdown.
+    case "informativo":
+      return <Info className="h-4 w-4 text-sky-600" />;
+    case "failed_permanent":
+      return <AlertTriangle className="h-4 w-4 text-red-600" />;
+    case "data_missing":
+    case "data_invalid":
+      return <AlertTriangle className="h-4 w-4 text-amber-500" />;
+    case "api_error":
+    case "portal_unavailable":
+    case "rate_limited":
+      return <RefreshCw className="h-4 w-4 text-blue-500 animate-spin [animation-duration:2s]" />;
     case "failed":
       return <XCircle className="h-4 w-4 text-red-600" />;
     case "fetching":
@@ -103,6 +115,22 @@ function statusIcon(row: CertidaoJobRow) {
     case "replaced":
       return <Archive className="h-4 w-4 text-muted-foreground" />;
   }
+}
+
+/**
+ * J.6 — formata "em ~X min" / "em ~N dias" baseado em nextRetryAt.
+ */
+function formatRelativeTo(iso: string | null | undefined): string | null {
+  if (!iso) return null;
+  const target = new Date(iso).getTime();
+  const now = Date.now();
+  const diffMin = Math.round((target - now) / 60_000);
+  if (diffMin <= 0) return "agora";
+  if (diffMin < 60) return `em ~${diffMin} min`;
+  const diffH = Math.round(diffMin / 60);
+  if (diffH < 24) return `em ~${diffH}h`;
+  const diffD = Math.round(diffH / 24);
+  return `em ~${diffD}d`;
 }
 
 function formatDateBR(iso: string | null | undefined): string | null {
@@ -161,6 +189,43 @@ function statusLabel(row: CertidaoJobRow): string {
     if (ep.includes("tjrj")) return "Pendente · aguardando portal (até 8 dias úteis)";
     if (ep.includes("tjms")) return "Pendente · aguardando portal (até 48h)";
     return "Pendente · aguardando portal (até 15 min)";
+  }
+  // J.6 (Phase J, 2026-04-18) — estados ricos
+  if (status === "api_error") {
+    const retry = formatRelativeTo(row.nextRetryAt);
+    return retry
+      ? `Instabilidade — tentando novamente ${retry}`
+      : "Instabilidade na API — tentando novamente";
+  }
+  if (status === "portal_unavailable") {
+    const retry = formatRelativeTo(row.nextRetryAt);
+    return retry
+      ? `Portal fora do ar — nova tentativa ${retry}`
+      : "Portal fora do ar — nova tentativa agendada";
+  }
+  if (status === "rate_limited") {
+    const retry = formatRelativeTo(row.nextRetryAt);
+    return retry
+      ? `Limite do portal atingido — retry ${retry}`
+      : "Limite do portal atingido — retry agendado";
+  }
+  if (status === "data_missing") {
+    return row.errorMessage
+      ? `Faltam dados · ${row.errorMessage}`
+      : "Faltam dados da parte — complete para emitir";
+  }
+  if (status === "data_invalid") {
+    return row.errorMessage
+      ? `Dados divergentes · ${row.errorMessage}`
+      : "Dados divergentes — portal não reconheceu";
+  }
+  if (status === "informativo") {
+    return "Consulta informativa (não é certidão)";
+  }
+  if (status === "failed_permanent") {
+    return row.portalUrl
+      ? "Indisponível automaticamente — use o portal oficial"
+      : row.errorMessage || "Falha permanente";
   }
   if (status === "skipped") return row.errorMessage || "Pulado — dados faltantes";
   if (status === "replaced") return "Substituído";
@@ -881,37 +946,57 @@ export function CertidoesTab({
                             </Button>
                           </>
                         )}
-                        {row.status === "skipped" && missingFields.length > 0 && (
+                        {(row.status === "skipped" && missingFields.length > 0) ||
+                        (row.status === "data_missing" &&
+                          row.missingFields.length > 0) ? (
                           <Button
                             size="sm"
                             variant="ghost"
                             onClick={() =>
                               setComplementJobId(isComplementing ? null : row.id)
                             }
-                            className="h-7 px-2"
-                            title="Complementar dados"
+                            className="h-7 px-2 text-amber-600 hover:text-amber-700 hover:bg-amber-50"
+                            title={
+                              row.status === "data_missing"
+                                ? `Complementar: ${row.missingFields.join(", ")}`
+                                : "Complementar dados"
+                            }
                           >
                             <FileText className="h-3 w-3" />
                           </Button>
-                        )}
-                        {/* G.3 — botão "Abrir portal" para skipped com externalLink */}
-                        {row.status === "skipped" && externalLink && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            asChild
-                            className="h-7 px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                            title={`Abrir portal oficial: ${externalLink}`}
-                          >
-                            <a
-                              href={externalLink}
-                              target="_blank"
-                              rel="noopener noreferrer"
+                        ) : null}
+                        {/* J.6 (Phase J) — "Abrir portal oficial" unificado:
+                            aparece para skipped com externalLink legado OU
+                            para qualquer status terminal não-sucesso quando o
+                            job tem `portalUrl` (último recurso do catálogo). */}
+                        {(() => {
+                          const href = row.portalUrl ?? externalLink ?? null;
+                          if (!href) return null;
+                          const showForTerminalFailure =
+                            row.status === "failed" ||
+                            row.status === "failed_permanent" ||
+                            row.status === "data_missing" ||
+                            row.status === "data_invalid" ||
+                            row.status === "skipped";
+                          if (!showForTerminalFailure) return null;
+                          return (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              asChild
+                              className="h-7 px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                              title={`Abrir portal oficial: ${href}`}
                             >
-                              <ExternalLink className="h-3 w-3" />
-                            </a>
-                          </Button>
-                        )}
+                              <a
+                                href={href}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                              >
+                                <ExternalLink className="h-3 w-3" />
+                              </a>
+                            </Button>
+                          );
+                        })()}
                         {(() => {
                           const cat = getFailureCategory(row);
                           if (!cat || !isUserFixable(cat)) return null;

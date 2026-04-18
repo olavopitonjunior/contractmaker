@@ -206,6 +206,18 @@ model CertidaoJob {
   finishedAt      DateTime?
   expectedReadyAt DateTime?
   retryCount      Int       @default(0)
+  // J.2 (Phase J, 2026-04-18) — retry automático inteligente por categoria.
+  // nextRetryAt setado pelo classifyOutcome() com backoff específico
+  // (api_error 30s/2min/10min, portal_unavailable 10min/30min/2h, etc).
+  // Cron /api/cron/certidoes/poll-portal sweeps jobs com nextRetryAt < now.
+  nextRetryAt     DateTime?
+  maxRetries      Int       @default(3)
+  // missingFields popula quando status=data_missing para UX direcionar o
+  // usuário ao campo específico que precisa preencher.
+  missingFields   String[]
+  // Copia do portalUrl do endpoint no instante do job — cached para UI
+  // renderizar CTA "Abrir portal oficial" sem re-consultar catálogo.
+  portalUrl       String?
   createdAt       DateTime  @default(now())
 
   deal         Deal?           @relation(fields: [dealId], references: [id], onDelete: Cascade)
