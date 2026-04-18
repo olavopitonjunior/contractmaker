@@ -276,6 +276,8 @@ export async function POST(
           requestPayload: {
             missingField: s.missingField,
             missingFields: s.missingFields,
+            // G.3 — preserva externalLink para UI renderizar botão "Abrir portal"
+            ...(s.externalLink ? { externalLink: s.externalLink } : {}),
           } as object,
           status: "skipped",
           errorMessage: s.reason,

@@ -23,13 +23,20 @@ function sleep(ms: number): Promise<void> {
  *   1. Imediatamente após upload (fire-and-forget) — baixa latência p50
  *   2. Cron `/api/cron/ocr-queue` a cada 1min — backup pra órfãos
  *
- * Concorrência configurável via env:
- *   - OCR_WORKER_CONCURRENCY=3 (default free tier, 15 RPM Gemini)
- *   - Com paid tier pode subir para 10+
+ * Concorrência configurável via env. Matriz recomendada:
+ *
+ *   | Tier Gemini       | RPM   | CONCURRENCY | PACE_MS |
+ *   |-------------------|-------|-------------|---------|
+ *   | Free (default)    | 15    | 1           | 4000    |
+ *   | Tier 1 ($5 gasto) | 1000  | 5           | 0       |
+ *   | Tier 2 ($250)     | 10000 | 10          | 0       |
+ *
+ * Para 20 docs/form rotineiro (nosso cenário), Tier 1 + CONCURRENCY=5 +
+ * PACE_MS=0 entrega em ~30-60s. Setar Vercel env vars do projeto.
  */
 
 // Free tier Gemini: 15 RPM. Concurrency 1 + 4s spacing ≈ 15 req/min segura.
-// Paid tier (>$5 gasto → Tier 1 1000 RPM): setar OCR_WORKER_CONCURRENCY=10.
+// Paid tier (>$5 gasto → Tier 1 1000 RPM): OCR_WORKER_CONCURRENCY=5 + PACE_MS=0
 const DEFAULT_CONCURRENCY = Number(process.env.OCR_WORKER_CONCURRENCY ?? "1");
 const MAX_BATCH_PER_RUN = Number(process.env.OCR_WORKER_MAX_PER_RUN ?? "30");
 // Pace entre chamadas quando em concurrency=1 (4s ≈ 15 RPM free tier).

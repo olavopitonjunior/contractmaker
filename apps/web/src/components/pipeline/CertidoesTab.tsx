@@ -24,6 +24,14 @@ import {
   Eye,
   LifeBuoy,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 import { useCertidoesBatch, type CertidaoJobRow } from "@/hooks/useCertidoesBatch";
 import { ExtractCertidoesDialog, type JobSelection } from "./ExtractCertidoesDialog";
 import { CertidaoDetailDialog } from "./CertidaoDetailDialog";
@@ -424,6 +432,68 @@ export function CertidoesTab({
     toast.success("Tentativa iniciada");
   };
 
+  /**
+   * Phase G.2 — bulk retry por categoria de falha ou por status.
+   * Chama POST /api/deals/:id/certidoes/bulk-retry primeiro em dry-run
+   * (para confirmar com usuário) e depois dispara em modo real.
+   */
+  const handleBulkRetry = async (
+    filter: { category?: string; status?: "failed" | "skipped" },
+    label: string
+  ) => {
+    try {
+      const dryRes = await fetch(
+        `/api/deals/${dealId}/certidoes/bulk-retry`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...filter, dryRun: true }),
+        }
+      );
+      const dryData = await dryRes.json();
+      if (!dryRes.ok) {
+        toast.error(dryData.error || "Erro no dry-run");
+        return;
+      }
+      const retriable = dryData.retriable ?? 0;
+      const skipped = dryData.skippedByRetry ?? 0;
+      if (retriable === 0) {
+        toast.info(
+          `Nenhum job elegível para retry em "${label}"${
+            skipped > 0 ? ` (${skipped} já atingiram MAX_RETRIES)` : ""
+          }`
+        );
+        return;
+      }
+      if (
+        !window.confirm(
+          `Retry em massa: ${label}\n\n${retriable} job(s) serão re-executados.${
+            skipped > 0 ? ` ${skipped} skipped por MAX_RETRIES.` : ""
+          }\n\nConfirma? (custo adicional ≈ R$ ${(retriable * 0.05).toFixed(2).replace(".", ",")})`
+        )
+      ) {
+        return;
+      }
+      const res = await fetch(
+        `/api/deals/${dealId}/certidoes/bulk-retry`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filter),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Erro no bulk retry");
+        return;
+      }
+      toast.success(`${data.dispatched} job(s) disparados`);
+      refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro inesperado");
+    }
+  };
+
   const handleSweep = async () => {
     const result = await sweepStale();
     if (result.promoted > 0 && result.failed > 0) {
@@ -489,6 +559,84 @@ export function CertidoesTab({
             <LifeBuoy className="h-4 w-4 mr-1" />
             Recuperar travadas ({Math.max(stats.stuck, stats.ghostPromotable)})
           </Button>
+        )}
+        {/* G.2 — bulk retry por categoria quando houver failed ou skipped */}
+        {(stats.failed > 0 || stats.skipped > 0) && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline">
+                <RefreshCw className="h-4 w-4 mr-1" />
+                Retry em massa
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-64">
+              <DropdownMenuLabel className="text-xs">
+                Por categoria de falha
+              </DropdownMenuLabel>
+              <DropdownMenuItem
+                onSelect={() =>
+                  handleBulkRetry(
+                    { category: "portal_unavailable" },
+                    "Portal indisponível"
+                  )
+                }
+              >
+                Portal indisponível
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() =>
+                  handleBulkRetry(
+                    { category: "provider_timeout" },
+                    "Timeout do provedor"
+                  )
+                }
+              >
+                Timeout do provedor
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() =>
+                  handleBulkRetry(
+                    { category: "rate_limited" },
+                    "Limite atingido"
+                  )
+                }
+              >
+                Limite atingido
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onSelect={() =>
+                  handleBulkRetry(
+                    { category: "integration_error" },
+                    "Erro do sistema"
+                  )
+                }
+              >
+                Erro do sistema (nosso)
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuLabel className="text-xs">
+                Por status
+              </DropdownMenuLabel>
+              {stats.failed > 0 && (
+                <DropdownMenuItem
+                  onSelect={() =>
+                    handleBulkRetry({ status: "failed" }, `Todos failed (${stats.failed})`)
+                  }
+                >
+                  Todos failed ({stats.failed})
+                </DropdownMenuItem>
+              )}
+              {stats.skipped > 0 && (
+                <DropdownMenuItem
+                  onSelect={() =>
+                    handleBulkRetry({ status: "skipped" }, `Todos skipped (${stats.skipped})`)
+                  }
+                >
+                  Todos skipped ({stats.skipped})
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
         {stats.success > 0 && (
           <>
@@ -599,12 +747,24 @@ export function CertidoesTab({
                   row.status === "success" ||
                   row.status === "skipped";
                 const isComplementing = complementJobId === row.id;
-                const missingFields =
+                const skippedPayload =
                   row.status === "skipped"
-                    ? ((row.requestPayload as
-                        | { missingFields?: Array<{ path: string; label: string; type: string; placeholder?: string }> }
-                        | null)?.missingFields ?? [])
-                    : [];
+                    ? (row.requestPayload as
+                        | {
+                            missingFields?: Array<{
+                              path: string;
+                              label: string;
+                              type: string;
+                              placeholder?: string;
+                            }>;
+                            externalLink?: string;
+                          }
+                        | null)
+                    : null;
+                const missingFields = skippedPayload?.missingFields ?? [];
+                // G.3 — externalLink para portais que não têm cobertura Infosimples
+                // (E-Proc SP, IPTU POA, etc). Renderiza botão abrindo nova aba.
+                const externalLink = skippedPayload?.externalLink ?? null;
                 return (
                   <div key={row.id} className="space-y-2">
                     <div
@@ -704,7 +864,7 @@ export function CertidoesTab({
                             </Button>
                           </>
                         )}
-                        {row.status === "skipped" && (
+                        {row.status === "skipped" && missingFields.length > 0 && (
                           <Button
                             size="sm"
                             variant="ghost"
@@ -715,6 +875,24 @@ export function CertidoesTab({
                             title="Complementar dados"
                           >
                             <FileText className="h-3 w-3" />
+                          </Button>
+                        )}
+                        {/* G.3 — botão "Abrir portal" para skipped com externalLink */}
+                        {row.status === "skipped" && externalLink && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            asChild
+                            className="h-7 px-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                            title={`Abrir portal oficial: ${externalLink}`}
+                          >
+                            <a
+                              href={externalLink}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              <ExternalLink className="h-3 w-3" />
+                            </a>
                           </Button>
                         )}
                         {(() => {

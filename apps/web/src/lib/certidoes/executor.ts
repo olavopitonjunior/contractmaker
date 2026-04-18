@@ -6,6 +6,38 @@ import { endpointInfo } from "./endpoints";
 import type { JobStatus } from "./types";
 import { emitNotification } from "@/lib/notifications/emit";
 
+/**
+ * Phase G.1 — audit log helper (fire-and-forget). Registra transições de
+ * status no CertidaoJobAuditLog para observabilidade + debug.
+ *
+ * Nunca lança erro — falha silenciosa via console.error. Não bloqueia a
+ * transição principal do job.
+ */
+function logTransition(
+  jobId: string,
+  fromStatus: string | null,
+  toStatus: string,
+  reason?: string,
+  metadata?: Record<string, unknown>
+): void {
+  void prisma.certidaoJobAuditLog
+    .create({
+      data: {
+        jobId,
+        fromStatus,
+        toStatus,
+        reason: reason ?? null,
+        metadata: metadata ? (metadata as object) : undefined,
+      },
+    })
+    .catch((err) => {
+      console.error(
+        "[audit-log] failed to record transition:",
+        err instanceof Error ? err.message : String(err)
+      );
+    });
+}
+
 // F4 — terminal states for a job. `awaiting_portal` is NOT terminal for
 // notification purposes (user will get notified when it completes in the
 // portal poller). Replaced jobs are ignored entirely.
@@ -259,6 +291,9 @@ export async function runSingleJob(
     where: { id: jobId },
     data: { status: "fetching", startedAt, retryCount: { increment: 0 } },
   });
+  logTransition(jobId, job.status, "fetching", "runSingleJob dispatch", {
+    endpoint: job.endpoint,
+  });
 
   const info = endpointInfo(job.endpoint);
 
@@ -287,6 +322,14 @@ export async function runSingleJob(
           expectedReadyAt: expected,
           costCents: info.costCents,
         },
+      });
+      logTransition(jobId, "fetching", "awaiting_portal", "two-step pedido accepted", {
+        endpoint: job.endpoint,
+        resultCode: resp.code,
+        numero_pedido: numeroPedido,
+        expectedReadyAt: expected,
+        latencyMs,
+        costCents: info.costCents,
       });
       return;
     }
@@ -326,6 +369,14 @@ export async function runSingleJob(
         costCents: info.costCents,
       },
     });
+    logTransition(jobId, "fetching", "success", "infosimples OK", {
+      endpoint: job.endpoint,
+      resultCode: resp.code,
+      situacao: (normalized as { situacao?: string }).situacao,
+      latencyMs,
+      costCents: info.costCents,
+      hasAttachment: attachmentId !== null,
+    });
     // F4: single-job path (retry/complementar) — check batch. For multi-job
     // batches from runBatch this is also called but is idempotent via batchId
     // metadata lookup.
@@ -361,6 +412,12 @@ export async function runSingleJob(
         costCents: info.costCents,
         resultData: { failureCategory, errorMessage: message.slice(0, 500) },
       },
+    });
+    logTransition(jobId, "fetching", "failed", failureCategory, {
+      endpoint: job.endpoint,
+      errorMessage: message.slice(0, 200),
+      latencyMs,
+      costCents: info.costCents,
     });
     await checkBatchCompletion(job.batchId);
   }
@@ -427,9 +484,20 @@ export async function pollPortalJob(jobId: string): Promise<void> {
               costCents: (job.costCents ?? 0) + obterInfo.costCents,
             },
       });
-      // F4: if tooOld, the job just went terminal — check batch completion
       if (tooOld) {
+        logTransition(jobId, "awaiting_portal", "failed", "portal timeout (14d)", {
+          endpoint: obterEndpoint,
+          resultCode: resp.code,
+          ageMs: startedAt.getTime() - job.createdAt.getTime(),
+        });
         await checkBatchCompletion(job.batchId);
+      } else {
+        // Reagendamento — log simples sem mudar status (continua awaiting_portal)
+        logTransition(jobId, "awaiting_portal", "awaiting_portal", "portal still processing — rescheduled", {
+          endpoint: obterEndpoint,
+          resultCode: resp.code,
+          nextCheck: next,
+        });
       }
       return;
     }
@@ -466,6 +534,13 @@ export async function pollPortalJob(jobId: string): Promise<void> {
         costCents: (job.costCents ?? 0) + obterInfo.costCents,
       },
     });
+    logTransition(jobId, "awaiting_portal", "success", "portal delivered", {
+      endpoint: obterEndpoint,
+      resultCode: resp.code,
+      situacao: (normalized as { situacao?: string }).situacao,
+      latencyMs,
+      hasAttachment: attachmentId !== null,
+    });
     // F4: portal job just became terminal — check if the whole batch is done
     await checkBatchCompletion(job.batchId);
   } catch (err) {
@@ -477,6 +552,10 @@ export async function pollPortalJob(jobId: string): Promise<void> {
         finishedAt: new Date(),
         errorMessage: message.slice(0, 500),
       },
+    });
+    logTransition(jobId, "awaiting_portal", "failed", "poll exception", {
+      endpoint: obterEndpoint,
+      errorMessage: message.slice(0, 200),
     });
     // F4: failure is also a terminal state — check batch
     await checkBatchCompletion(job.batchId);
