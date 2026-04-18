@@ -26,6 +26,8 @@ export interface DocumentCardData {
   error?: string | null;
   assignment: Assignment;
   applied?: boolean;
+  /** Epoch ms quando entrou em extracting; UI mostra aviso se > 60s */
+  extractingSince?: number | null;
 }
 
 interface DocumentCardProps {
@@ -182,6 +184,35 @@ export function DocumentCard({
             </div>
           </div>
         )}
+
+        {/* Aviso "está demorando" quando extracting > 60s — rate limit? travado? */}
+        {doc.status === "extracting" &&
+          doc.extractingSince &&
+          Date.now() - doc.extractingSince > 60_000 && (
+            <div className="flex flex-col gap-1.5 rounded bg-amber-50 border border-amber-200 px-2 py-2 text-[11px] text-amber-900">
+              <div className="flex items-start gap-1.5">
+                <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+                <span className="break-words">
+                  Extração demorando mais que o esperado. Pode ser limite de uso
+                  do Gemini — aguarde ou reenvie.
+                </span>
+              </div>
+              {onRetry && (
+                <div className="flex gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-[11px] border-amber-400 text-amber-900 hover:bg-amber-100"
+                    onClick={() => onRetry(doc.id)}
+                  >
+                    <RefreshCw className="h-3 w-3 mr-1" />
+                    Reenviar para fila
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
 
         {fieldEntries.length > 0 && (
           <div className="grid grid-cols-1 gap-x-3 gap-y-0.5 sm:grid-cols-2">

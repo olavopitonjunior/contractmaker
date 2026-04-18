@@ -246,6 +246,14 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
           else if (a.status === "extracting" || a.status === "queued") cardStatus = "extracting";
           else if (fields) cardStatus = "ready";
           else cardStatus = "failed";
+          // Phase F.I-α+fix — timestamp de quando entrou em extracting
+          // (usado pelo DocumentCard para mostrar aviso > 60s)
+          const extractingSince =
+            cardStatus === "extracting" && a.extractingStartedAt
+              ? new Date(a.extractingStartedAt).getTime()
+              : cardStatus === "extracting"
+              ? new Date(a.createdAt).getTime()
+              : null;
           return {
             id: a.id,
             filename: a.filename,
@@ -256,6 +264,7 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
             fields,
             confidence: typeof extracted.confidence === "number" ? extracted.confidence : null,
             assignment,
+            extractingSince,
             error:
               cardStatus === "failed"
                 ? a.extractError ?? "Extração falhou — remova ou tente novamente"
@@ -310,9 +319,15 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
                 ...d,
                 status: "failed",
                 error: a.extractError ?? "Extração falhou",
+                extractingSince: null,
               };
             }
-            return d; // ainda queued/extracting — mantém spinner
+            // Ainda queued/extracting — atualiza extractingSince caso server
+            // tenha feito claim novo (stale recovery) para reset do timer
+            const sinceMs = a.extractingStartedAt
+              ? new Date(a.extractingStartedAt).getTime()
+              : d.extractingSince ?? new Date(a.createdAt).getTime();
+            return { ...d, extractingSince: sinceMs };
           })
         );
       } catch {
@@ -391,27 +406,37 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
     [form, ensureSlot]
   );
 
-  // Single-doc OCR via /extract — used by the manual retry button.
+  // Single-doc retry — usa novo endpoint /retry que libera lock e reenfileira.
+  // O polling pega o resultado depois (via useEffect acima).
   const runExtract = useCallback(
     async (doc: DocumentCardData) => {
-      updateDoc(doc.id, { status: "extracting", error: null });
+      updateDoc(doc.id, {
+        status: "extracting",
+        error: null,
+        extractingSince: Date.now(),
+      });
       try {
-        const res = await fetch(`/api/forms/${token}/attachments/${doc.id}/extract`, {
+        const res = await fetch(`/api/forms/${token}/attachments/${doc.id}/retry`, {
           method: "POST",
         });
         const data = await res.json();
         if (!res.ok) {
           updateDoc(doc.id, {
             status: "failed",
-            error: data.error || "Falha na extração",
+            error: data.error || "Falha ao reenviar para fila",
           });
           return;
         }
+        // Worker vai processar em background. Polling do useEffect pega o
+        // resultado quando ficar ready ou failed. Legado: se o endpoint
+        // responder com extractedData direto (cached), aplica imediato.
         const extracted = data.extractedData || {};
         const fields = extracted.fields || {};
         const confidence =
           typeof extracted.confidence === "number" ? extracted.confidence : null;
-        applyExtractResult(doc.id, data.category, fields, confidence);
+        if (fields && Object.keys(fields).length > 0) {
+          applyExtractResult(doc.id, data.category, fields, confidence);
+        }
       } catch (err) {
         updateDoc(doc.id, {
           status: "failed",

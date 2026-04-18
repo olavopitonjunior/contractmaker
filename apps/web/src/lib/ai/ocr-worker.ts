@@ -5,8 +5,13 @@ import {
   humanizeOcrError,
   prevalidateForOcr,
 } from "@/lib/ai/ocr";
+import { isRateLimitError } from "@/lib/ai/ocr";
 import { extractFirstPages } from "@/lib/ai/pdf-utils";
 import { downloadBufferFromUrl } from "@/lib/storage/s3";
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 /**
  * Phase F.I-α — Worker de OCR assíncrono.
@@ -23,8 +28,16 @@ import { downloadBufferFromUrl } from "@/lib/storage/s3";
  *   - Com paid tier pode subir para 10+
  */
 
-const DEFAULT_CONCURRENCY = Number(process.env.OCR_WORKER_CONCURRENCY ?? "3");
+// Free tier Gemini: 15 RPM. Concurrency 1 + 4s spacing ≈ 15 req/min segura.
+// Paid tier (>$5 gasto → Tier 1 1000 RPM): setar OCR_WORKER_CONCURRENCY=10.
+const DEFAULT_CONCURRENCY = Number(process.env.OCR_WORKER_CONCURRENCY ?? "1");
 const MAX_BATCH_PER_RUN = Number(process.env.OCR_WORKER_MAX_PER_RUN ?? "30");
+// Pace entre chamadas quando em concurrency=1 (4s ≈ 15 RPM free tier).
+// Com concurrency > 1, ignorado (assume paid tier com limits altos).
+const PACE_MS = Number(process.env.OCR_WORKER_PACE_MS ?? "4000");
+// Pausa geral do worker quando qualquer call hits rate-limit (Gemini reseta
+// quota a cada ~60s). Evita retries acumulados estourando de novo.
+const RATE_LIMIT_COOLDOWN_MS = Number(process.env.OCR_WORKER_RATE_COOLDOWN_MS ?? "65000");
 
 function pLimit(concurrency: number) {
   const queue: Array<() => void> = [];
@@ -80,7 +93,10 @@ export async function processOcrQueue(
   options: { formId?: string; orgId?: string } = {}
 ): Promise<WorkerResult> {
   const t0 = Date.now();
-  const staleBefore = new Date(Date.now() - 3 * 60_000);
+  // Stale recovery mais agressivo: 90s é tempo suficiente para Gemini
+  // responder. Passou disso, assume crash do worker e reclaima.
+  const STALE_MS = Number(process.env.OCR_STALE_MS ?? "90000");
+  const staleBefore = new Date(Date.now() - STALE_MS);
 
   // Claim lote via updateMany atomic + returning (duas queries — Prisma não
   // suporta RETURNING direto em updateMany no Postgres sem raw SQL).
@@ -148,100 +164,180 @@ export async function processOcrQueue(
   let succeeded = 0;
   let failed = 0;
   let cachedHits = 0;
+  let lastCallAt = 0;
+  // Quando um call bate rate-limit, o worker inteiro pausa por 65s (quota
+  // reseta a cada 60s). Após 2 rate-limits consecutivos, aborta o loop e
+  // deixa os restantes como "queued" pro próximo run do cron.
+  let rateLimitHits = 0;
+  let aborted = false;
 
-  await Promise.allSettled(
-    toProcess.map((att) =>
-      limit(async () => {
-        const orgId = att.form?.orgId ?? "";
-        try {
-          // Content-hash cache check (cross-org: disabled for privacy; within
-          // same org: habilitado)
-          if (att.contentHash) {
-            const cached = await prisma.formAttachment.findFirst({
-              where: {
-                id: { not: att.id },
-                contentHash: att.contentHash,
-                extractedData: { not: Prisma.JsonNull },
-                status: "ready",
-                form: { orgId },
-              },
-              select: { category: true, extractedData: true },
-            });
-            if (cached?.extractedData) {
-              await prisma.formAttachment.update({
-                where: { id: att.id },
-                data: {
-                  status: "ready",
-                  category: cached.category,
-                  extractedData: cached.extractedData as object,
-                  extractingStartedAt: null,
-                  extractError: null,
-                },
-              });
-              cachedHits++;
-              return;
-            }
-          }
+  // Em concurrency=1 com pace, reprocessa sequencialmente com espaçamento
+  // entre calls. Com concurrency > 1 (paid tier), usa allSettled normal.
+  const useSequentialPace = DEFAULT_CONCURRENCY === 1;
 
-          // Fetch buffer + validate + trim PDF
-          let buffer = await fetchBuffer(att.url);
-          const prevalidationError = prevalidateForOcr(buffer, att.mime);
-          if (prevalidationError) {
-            await prisma.formAttachment.update({
-              where: { id: att.id },
-              data: {
-                status: "failed",
-                extractError: prevalidationError,
-                extractingStartedAt: null,
-              },
-            });
-            failed++;
-            return;
-          }
-          if (att.mime === "application/pdf") {
-            const trimmed = await extractFirstPages(buffer, 2);
-            if (trimmed.trimmed) buffer = trimmed.buffer;
-          }
+  const processOne = async (att: (typeof toProcess)[number]): Promise<void> => {
+    if (aborted) {
+      // Não processa mais — libera lock para próximo run pegar
+      await prisma.formAttachment
+        .update({
+          where: { id: att.id },
+          data: { status: "queued", extractingStartedAt: null },
+        })
+        .catch(() => {});
+      return;
+    }
 
-          // Call Gemini
-          const result = await classifyAndExtract(
-            buffer.toString("base64"),
-            att.mime,
-            { orgId },
-            { buffer, skipPrevalidation: true }
-          );
-
+    const orgId = att.form?.orgId ?? "";
+    try {
+      // Content-hash cache check (intra-org)
+      if (att.contentHash) {
+        const cached = await prisma.formAttachment.findFirst({
+          where: {
+            id: { not: att.id },
+            contentHash: att.contentHash,
+            extractedData: { not: Prisma.JsonNull },
+            status: "ready",
+            form: { orgId },
+          },
+          select: { category: true, extractedData: true },
+        });
+        if (cached?.extractedData) {
           await prisma.formAttachment.update({
             where: { id: att.id },
             data: {
               status: "ready",
-              category: result.documentType,
-              extractedData: {
-                fields: result.fields,
-                confidence: result.confidence,
-              } as object,
+              category: cached.category,
+              extractedData: cached.extractedData as object,
               extractingStartedAt: null,
               extractError: null,
             },
           });
-          succeeded++;
-        } catch (err) {
-          const raw = err instanceof Error ? err.message : String(err);
-          const friendly = humanizeOcrError(raw);
-          await prisma.formAttachment.update({
-            where: { id: att.id },
-            data: {
-              status: "failed",
-              extractError: friendly,
-              extractingStartedAt: null,
-            },
-          });
-          failed++;
-          console.error(`[ocr-worker] job ${att.id} failed:`, raw);
+          cachedHits++;
+          return;
         }
-      })
-    )
-  );
+      }
+
+      // Pace — garante espaçamento mínimo entre chamadas Gemini quando
+      // em concurrency=1 (free tier). Sem custo se já passou o intervalo.
+      if (useSequentialPace && lastCallAt > 0) {
+        const elapsed = Date.now() - lastCallAt;
+        if (elapsed < PACE_MS) {
+          await sleep(PACE_MS - elapsed);
+        }
+      }
+
+      // Fetch buffer + validate + trim PDF
+      let buffer = await fetchBuffer(att.url);
+      const prevalidationError = prevalidateForOcr(buffer, att.mime);
+      if (prevalidationError) {
+        await prisma.formAttachment.update({
+          where: { id: att.id },
+          data: {
+            status: "failed",
+            extractError: prevalidationError,
+            extractingStartedAt: null,
+          },
+        });
+        failed++;
+        return;
+      }
+      if (att.mime === "application/pdf") {
+        const trimmed = await extractFirstPages(buffer, 2);
+        if (trimmed.trimmed) buffer = trimmed.buffer;
+      }
+
+      lastCallAt = Date.now();
+      const result = await classifyAndExtract(
+        buffer.toString("base64"),
+        att.mime,
+        { orgId },
+        { buffer, skipPrevalidation: true }
+      );
+
+      await prisma.formAttachment.update({
+        where: { id: att.id },
+        data: {
+          status: "ready",
+          category: result.documentType,
+          extractedData: {
+            fields: result.fields,
+            confidence: result.confidence,
+          } as object,
+          extractingStartedAt: null,
+          extractError: null,
+        },
+      });
+      succeeded++;
+      rateLimitHits = 0; // reset — sinal que quota voltou
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : String(err);
+
+      if (isRateLimitError(raw)) {
+        rateLimitHits++;
+        console.warn(
+          `[ocr-worker] rate limit hit (${rateLimitHits}), cooling down ${RATE_LIMIT_COOLDOWN_MS}ms`
+        );
+        // Libera o lock — job volta pra queued pro próximo run
+        await prisma.formAttachment
+          .update({
+            where: { id: att.id },
+            data: { status: "queued", extractingStartedAt: null },
+          })
+          .catch(() => {});
+
+        if (rateLimitHits >= 2) {
+          // Duas batidas = quota insuficiente. Aborta para cron pegar depois.
+          aborted = true;
+          console.warn(
+            "[ocr-worker] 2 rate limits consecutivos — abortando run, cron pega em 1 min"
+          );
+          return;
+        }
+
+        // Cooldown global antes de próximo call
+        await sleep(RATE_LIMIT_COOLDOWN_MS);
+        lastCallAt = 0; // força pace reset
+        return;
+      }
+
+      // Erro não-rate-limit: marca failed com mensagem humanizada
+      const friendly = humanizeOcrError(raw);
+      await prisma.formAttachment.update({
+        where: { id: att.id },
+        data: {
+          status: "failed",
+          extractError: friendly,
+          extractingStartedAt: null,
+        },
+      });
+      failed++;
+      console.error(`[ocr-worker] job ${att.id} failed:`, raw);
+    }
+  };
+
+  if (useSequentialPace) {
+    // Loop sequencial — respeita pace + cooldown. Mais lento mas seguro.
+    for (const att of toProcess) {
+      await processOne(att);
+      if (aborted) break;
+    }
+    // Rows restantes (se aborted) volta pra queued — condicional em
+    // status="extracting" garante que só afeta os ainda não processados
+    if (aborted) {
+      await prisma.formAttachment
+        .updateMany({
+          where: {
+            id: { in: toProcess.map((a) => a.id) },
+            status: "extracting",
+          },
+          data: { status: "queued", extractingStartedAt: null },
+        })
+        .catch(() => {});
+    }
+  } else {
+    // Concurrency > 1 (paid tier): paralelo clássico
+    await Promise.allSettled(toProcess.map((att) => limit(() => processOne(att))));
+  }
 
   const durationMs = Date.now() - t0;
   console.info(
