@@ -45,11 +45,17 @@ function getMasterApiKey(): string {
 }
 
 function assertEnvConsistency(apiKey: string, env: AsaasEnv) {
-  // Sandbox keys start with $aact_YT (not guaranteed but empírico)
-  const isSandboxKey = apiKey.startsWith("$aact_YT");
+  // Sandbox keys historicamente começam com $aact_YT (v2) ou $aact_hmlg (v3).
+  const isSandboxKey =
+    apiKey.startsWith("$aact_YT") || apiKey.startsWith("$aact_hmlg");
   if (env === "production" && isSandboxKey) {
     throw new Error(
-      "Inconsistência: ASAAS_ENV=production mas API key parece sandbox ($aact_YT...)"
+      "Inconsistência: ASAAS_ENV=production mas API key parece sandbox ($aact_YT ou $aact_hmlg)"
+    );
+  }
+  if (env === "sandbox" && apiKey.startsWith("$aact_prod")) {
+    throw new Error(
+      "Inconsistência: ASAAS_ENV=sandbox mas API key parece produção ($aact_prod...)"
     );
   }
 }

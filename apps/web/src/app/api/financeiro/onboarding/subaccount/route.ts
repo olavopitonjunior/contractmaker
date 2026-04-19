@@ -90,6 +90,9 @@ export async function POST(req: NextRequest) {
   const baseUrl = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
   const webhookUrl = `${baseUrl}/api/webhooks/asaas`;
   const webhookToken = process.env.ASAAS_WEBHOOK_TOKEN;
+  // Asaas não aceita URLs localhost nem HTTP em prod. Só cadastra webhook
+  // se URL for HTTPS (produção ou tunnel público tipo cloudflared/ngrok).
+  const webhookConfigurable = webhookUrl.startsWith("https://");
 
   try {
     const subaccount = await createSubaccount({
@@ -107,29 +110,29 @@ export async function POST(req: NextRequest) {
       postalCode: data.postalCode,
       birthDate: data.birthDate,
       companyType: data.companyType,
-      webhooks: webhookToken
-        ? [
-            {
-              name: "Contractmaker default",
-              url: webhookUrl,
-              email: data.email,
-              enabled: true,
-              interrupted: false,
-              authToken: webhookToken,
-              apiVersion: 3,
-              events: [
-                "PAYMENT_CREATED",
-                "PAYMENT_UPDATED",
-                "PAYMENT_CONFIRMED",
-                "PAYMENT_RECEIVED",
-                "PAYMENT_OVERDUE",
-                "PAYMENT_DELETED",
-                "PAYMENT_REFUNDED",
-                "ACCOUNT_STATUS_UPDATED",
-              ],
-            },
-          ]
-        : undefined,
+      webhooks:
+        webhookToken && webhookConfigurable
+          ? [
+              {
+                name: "Contractmaker default",
+                url: webhookUrl,
+                email: data.email,
+                enabled: true,
+                interrupted: false,
+                authToken: webhookToken,
+                apiVersion: 3,
+                events: [
+                  "PAYMENT_CREATED",
+                  "PAYMENT_UPDATED",
+                  "PAYMENT_CONFIRMED",
+                  "PAYMENT_RECEIVED",
+                  "PAYMENT_OVERDUE",
+                  "PAYMENT_DELETED",
+                  "PAYMENT_REFUNDED",
+                ],
+              },
+            ]
+          : undefined,
     });
 
     // Encrypt apiKey antes de persistir

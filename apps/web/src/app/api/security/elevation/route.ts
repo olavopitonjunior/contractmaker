@@ -43,11 +43,11 @@ export async function POST(req: NextRequest) {
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
 
-  // Rate limit de tentativas falhas
-  const rl = await RateLimits.elevationFailuresPerUser(ctx.userId);
-  if (!rl.success) {
+  // Rate limit attempts (hard cap — evita flood)
+  const rlAttempts = await RateLimits.elevationAttemptsPerUser(ctx.userId);
+  if (!rlAttempts.success) {
     return NextResponse.json(
-      { error: "Muitas tentativas. Tente em alguns minutos.", retryAfter: rl.reset },
+      { error: "Muitas tentativas. Tente em alguns minutos.", retryAfter: rlAttempts.reset },
       { status: 429 }
     );
   }
@@ -77,6 +77,8 @@ export async function POST(req: NextRequest) {
         metadata: { reason: "wrong_password", scopes },
       }
     );
+    // Incrementa counter de falhas (não bloqueia já — apenas audit)
+    await RateLimits.elevationFailuresPerUser(ctx.userId);
     return NextResponse.json({ error: "Credenciais inválidas" }, { status: 401 });
   }
 

@@ -132,8 +132,19 @@ export async function rateLimit(cfg: RateLimitConfig): Promise<RateLimitResult> 
 export const RateLimits = {
   challengesPerUser: (userId: string) =>
     rateLimit({ identifier: `challenge:${userId}`, limit: 5, window: "1 m" }),
+  /**
+   * Rate limit de FALHAS de elevation. Chamar só após tentativa mal-sucedida
+   * (senha errada ou TOTP errado). Limite 5 falhas em 15min → lockout temporário.
+   */
   elevationFailuresPerUser: (userId: string) =>
-    rateLimit({ identifier: `elev-fail:${userId}`, limit: 3, window: "1 h" }),
+    rateLimit({ identifier: `elev-fail:${userId}`, limit: 5, window: "15 m" }),
+
+  /**
+   * Rate limit de TENTATIVAS de elevation (sucesso ou falha). Hard cap p/
+   * evitar flood — 30 tentativas/hora.
+   */
+  elevationAttemptsPerUser: (userId: string) =>
+    rateLimit({ identifier: `elev-attempts:${userId}`, limit: 30, window: "1 h" }),
   chargesPerOrg: (orgId: string) =>
     rateLimit({ identifier: `charge:${orgId}`, limit: 20, window: "1 h" }),
   transfersPerUser: (userId: string) =>
