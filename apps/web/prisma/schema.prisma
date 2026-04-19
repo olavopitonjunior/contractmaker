@@ -114,6 +114,13 @@ model Organization {
   auditLogs      AuditLog[]
   trustedDevices TrustedDevice[]
   dualApprovals  DualApproval[]
+
+  // Pagadoria — Fase 1b (Asaas + KYC + cobrança)
+  asaasAccount       AsaasAccount?
+  asaasCustomers     AsaasCustomer[]
+  commissionCharges  CommissionCharge[]
+  asaasWebhookEvents AsaasWebhookEvent[]
+  financialSettings  OrgFinancialSettings?
 }
 
 model OrgMembership {
@@ -185,6 +192,7 @@ model Deal {
   certidaoJobs        CertidaoJob[]
   certidoesShareLinks CertidoesShareLink[]
   diligentedPersons   DiligentedPerson[]
+  commissionCharges   CommissionCharge[]
 }
 
 model DealAttachment {
@@ -428,18 +436,19 @@ model Contract {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  deal          Deal                 @relation(fields: [dealId], references: [id])
-  template      ContractTemplate     @relation(fields: [templateId], references: [id])
-  user          User                 @relation(fields: [userId], references: [id])
-  parentVersion Contract?            @relation("ContractVersions", fields: [parentVersionId], references: [id])
-  childVersions Contract[]           @relation("ContractVersions")
-  chatSessions  ChatSession[]
-  exports       Export[]
-  clauses       ContractClause[]
-  changeLogs    ContractChangeLog[]
-  comments      ContractComment[]
-  suggestions   ContractSuggestion[]
-  aiUsage       AIUsage[]
+  deal              Deal                 @relation(fields: [dealId], references: [id])
+  template          ContractTemplate     @relation(fields: [templateId], references: [id])
+  user              User                 @relation(fields: [userId], references: [id])
+  parentVersion     Contract?            @relation("ContractVersions", fields: [parentVersionId], references: [id])
+  childVersions     Contract[]           @relation("ContractVersions")
+  chatSessions      ChatSession[]
+  exports           Export[]
+  clauses           ContractClause[]
+  changeLogs        ContractChangeLog[]
+  comments          ContractComment[]
+  suggestions       ContractSuggestion[]
+  aiUsage           AIUsage[]
+  commissionCharges CommissionCharge[]
 }
 
 model ContractClause {
@@ -961,4 +970,205 @@ model DualApproval {
   approver  User?        @relation("DualApprovalAck", fields: [approverId], references: [id])
 
   @@index([orgId, status])
+}
+
+// ============================================
+// PAGADORIA — ASAAS + KYC + COBRANÇA (Fase 1b)
+// ============================================
+
+// Subconta Asaas white-label da Organization (criada via POST /v3/accounts).
+// Armazena walletId + apiKey encrypted + status KYC.
+model AsaasAccount {
+  id                    String    @id @default(cuid())
+  orgId                 String    @unique
+  asaasId               String    @unique
+  walletId              String    @unique
+  accountNumber         String?
+  apiKeyEncrypted       String    @db.Text
+  apiKeyIvBase64        String
+  apiKeyTagBase64       String
+  personType            String // PHYSICAL | LEGAL
+  kyc                   Json // snapshot do payload submetido (sem secrets)
+  status                String    @default("PENDING") // PENDING | AWAITING_DOCS | AWAITING_APPROVAL | APPROVED | REJECTED | BLOCKED
+  rejectionReason       String?   @db.Text
+  generalStatus         String?
+  documentationStatus   String?
+  commercialInfoStatus  String?
+  bankAccountInfoStatus String?
+  lastStatusCheckAt     DateTime?
+  approvedAt            DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  org       Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  documents AsaasAccountDocument[]
+}
+
+// Documentos KYC pendentes/enviados — mirror do GET /v3/myAccount/documents.
+model AsaasAccountDocument {
+  id              String    @id @default(cuid())
+  accountId       String
+  asaasDocumentId String
+  type            String // IDENTIFICATION | ADDRESS_PROOF | SOCIAL_CONTRACT | SELFIE | CUSTOM
+  title           String
+  description     String?
+  status          String    @default("NOT_SENT") // NOT_SENT | PENDING | APPROVED | REJECTED
+  rejectionReason String?
+  fileName        String?
+  fileUrl         String?
+  fileMime        String?
+  fileSizeBytes   Int?
+  uploadedAt      DateTime?
+  reviewedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  account AsaasAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, type])
+  @@index([accountId, status])
+}
+
+// Cliente Asaas (pagador) — unificado por org. Dedupe por CPF/CNPJ.
+model AsaasCustomer {
+  id                String    @id @default(cuid())
+  orgId             String
+  asaasId           String
+  name              String
+  cpfCnpj           String
+  email             String?
+  mobilePhone       String?
+  addressJson       Json?
+  origin            String    @default("manual") // manual | deal_sync | webhook_sync
+  sourceDealId      String?
+  externalReference String?
+  lastSyncedAt      DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  org     Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  charges CommissionCharge[]
+
+  @@unique([orgId, asaasId])
+  @@unique([orgId, cpfCnpj])
+  @@index([orgId, name])
+}
+
+// Cobrança de comissão — pode estar vinculada a Deal ou ser avulsa.
+model CommissionCharge {
+  id                  String    @id @default(cuid())
+  orgId               String
+  dealId              String?
+  contractId          String?
+  asaasCustomerId     String
+  asaasPaymentId      String    @unique
+  asaasInstallmentId  String?
+  kind                String    @default("commission") // commission | avulsa | aluguel | outros
+  billingType         String // PIX | BOLETO
+  value               Float
+  netValue            Float?
+  originalDueDate     DateTime
+  currentDueDate      DateTime
+  status              String    @default("PENDING") // ver mapa canônico no plano
+  asaasStatus         String
+  description         String?
+  invoiceUrl          String?
+  bankSlipUrl         String?
+  identificationField String?
+  pixQrCodePayload    String?   @db.Text
+  pixQrCodeImage      String?   @db.Text
+  splitJson           Json?
+  payerSnapshot       Json?
+  beneficiarySnapshot Json?
+  cancelledAt         DateTime?
+  refundedAt          DateTime?
+  paidAt              DateTime?
+  lastEventAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  org      Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  deal     Deal?               @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  contract Contract?           @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  customer AsaasCustomer       @relation(fields: [asaasCustomerId], references: [id])
+  events   AsaasWebhookEvent[]
+
+  @@index([orgId, status])
+  @@index([orgId, currentDueDate])
+  @@index([dealId])
+  @@index([contractId])
+  @@index([asaasCustomerId])
+}
+
+// Log imutável de webhooks Asaas — idempotência via asaasEventId.
+model AsaasWebhookEvent {
+  id              String    @id @default(cuid())
+  orgId           String
+  asaasEventId    String    @unique
+  event           String
+  asaasPaymentId  String?
+  chargeId        String?
+  payloadJson     Json
+  receivedAt      DateTime  @default(now())
+  processedAt     DateTime?
+  processingError String?
+
+  org    Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  charge CommissionCharge? @relation(fields: [chargeId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, event])
+  @@index([asaasPaymentId])
+}
+
+// Configurações financeiras da org — taxas, overprice, descontos, branding.
+model OrgFinancialSettings {
+  id                   String   @id @default(cuid())
+  orgId                String   @unique
+  // Platform fee (Fase 3)
+  platformFeePercent   Float    @default(0)
+  platformFeeWalletId  String?
+  // Overprice
+  overpricePolicy      String   @default("none") // none | absorb | asaas_fee | custom
+  overpriceType        String?
+  overpriceValue       Float?
+  overpriceRoundTo     String?  @default("cents")
+  // Descontos (presets em JSON array)
+  discountPresets      Json     @default("[]")
+  // Multa / juros (limites legais: fine ≤ 2%, juros ≤ 1%/mês)
+  finePercent          Float    @default(2.0)
+  finePolicy           String   @default("percentage")
+  interestPercentMonth Float    @default(1.0)
+  // Taxas Asaas cacheadas (display)
+  asaasFeePixCents     Int      @default(199)
+  asaasFeeBoletoCents  Int      @default(349)
+  asaasFeeCardPercent  Float    @default(2.99)
+  asaasFeeCardCents    Int      @default(49)
+  // Dual control (valores em centavos; Int suporta até ~R$ 21M)
+  dualApprovalCapCents Int      @default(5000000)
+  hardCapCents         Int      @default(10000000)
+  // Branding (página pública)
+  brandLogoUrl         String?
+  brandPrimaryColor    String?  @default("#0f172a")
+  brandDisplayName     String?
+  brandSupportEmail    String?
+  brandSupportPhone    String?
+  // Defaults de notificação (NotificationDisabled do Asaas)
+  notifyEmail          Boolean  @default(true)
+  notifySms            Boolean  @default(false)
+  defaultDueDays       Int      @default(7)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// Link público de pagamento — URL /pay/[token] com branding.
+model ChargePublicLink {
+  id            String    @id @default(cuid())
+  chargeId      String    @unique
+  publicToken   String    @unique
+  brandSnapshot Json
+  lastViewedAt  DateTime?
+  viewCount     Int       @default(0)
+  createdAt     DateTime  @default(now())
 }
