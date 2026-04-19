@@ -13,6 +13,7 @@ import { audit } from "@/lib/security/audit";
 import { resolveDualApproval } from "@/lib/security/rbac/dualApproval";
 import { sendEmail } from "@/lib/email/client";
 import { DualApprovalResolvedEmail } from "@/lib/email/templates/dual-approval-resolved";
+import { emitDualApprovalResolvedNotif } from "@/lib/financeiro/notifications";
 
 const bodySchema = z.object({
   note: z.string().max(500).optional(),
@@ -124,6 +125,16 @@ export async function POST(
       note: parsed.data.note,
     }) as any,
   }).catch((e) => console.error("[dual-approval] email falhou:", e));
+
+  emitDualApprovalResolvedNotif({
+    approvalId: id,
+    orgId: ctx.orgId,
+    initiatorUserId: existing.initiatedBy,
+    approverName: ctx.userName,
+    kind: existing.kind,
+    resolution: "APPROVED",
+    note: parsed.data.note,
+  }).catch((e) => console.error("[dual-approval] notif falhou:", e));
 
   return NextResponse.json({ approval: result.approval });
 }

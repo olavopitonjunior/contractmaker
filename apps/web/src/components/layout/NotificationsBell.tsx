@@ -2,7 +2,14 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, CheckCircle2, XCircle, FileCheck2 } from "lucide-react";
+import {
+  Bell,
+  CheckCircle2,
+  XCircle,
+  FileCheck2,
+  AlertTriangle,
+  Wallet,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -21,6 +28,16 @@ function iconForType(type: string) {
     case "certidao_ready":
       return <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />;
     case "certidao_failed":
+      return <XCircle className="h-4 w-4 text-red-600 shrink-0" />;
+    case "dual_approval_pending":
+      return <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />;
+    case "dual_approval_resolved":
+      return <CheckCircle2 className="h-4 w-4 text-blue-600 shrink-0" />;
+    case "charge_overdue":
+      return <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />;
+    case "transfer_done":
+      return <Wallet className="h-4 w-4 text-green-600 shrink-0" />;
+    case "transfer_failed":
       return <XCircle className="h-4 w-4 text-red-600 shrink-0" />;
     default:
       return <Bell className="h-4 w-4 text-muted-foreground shrink-0" />;

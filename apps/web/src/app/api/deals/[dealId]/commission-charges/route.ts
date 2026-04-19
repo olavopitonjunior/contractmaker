@@ -161,7 +161,14 @@ export async function POST(
     );
   }
 
-  // 7. Build payload
+  // 7. Build payload — Fase 4: platform fee carregado de OrgFinancialSettings
+  const feesSettings = await prisma.orgFinancialSettings.findUnique({
+    where: { orgId: ctx.orgId },
+  });
+  const platformFeePercent = feesSettings?.platformFeePercent ?? 0;
+  const platformWalletId =
+    feesSettings?.platformFeeWalletId ?? process.env.PLATFORM_WALLET_ID ?? undefined;
+
   let payer;
   let value;
   let payload;
@@ -180,7 +187,10 @@ export async function POST(
         `Comissão — ${deal.title} (${payer.papel === "comprador" ? "Comprador" : "Vendedor"})`,
       externalReference: `contract:${contract.id}`,
       orgWalletId: account.walletId,
-      // Fase 3: incluir platformFeePercent + platformWalletId
+      // Platform fee (fase 4): só ativa se org configurou e master walletId disponível
+      platformFeePercent: platformFeePercent > 0 ? platformFeePercent : undefined,
+      platformWalletId:
+        platformFeePercent > 0 && platformWalletId ? platformWalletId : undefined,
     });
   } catch (err) {
     if (err instanceof CommissionBuildError) {

@@ -22,6 +22,7 @@ import {
 } from "@/lib/security/rbac/dualApproval";
 import { sendEmail } from "@/lib/email/client";
 import { DualApprovalRequestEmail } from "@/lib/email/templates/dual-approval-request";
+import { emitDualApprovalNotifs } from "@/lib/financeiro/notifications";
 
 const bodySchema = z.object({
   type: z.enum(["PIX", "TED"]),
@@ -199,6 +200,16 @@ export async function POST(req: NextRequest) {
         )
       )
     );
+
+    // In-app notifications para os admins (aparecem no sino)
+    emitDualApprovalNotifs({
+      approvalId: approval.id,
+      orgId: ctx.orgId,
+      initiatorUserId: ctx.userId,
+      kind: "TRANSFER",
+      amount: parsed.data.value,
+      initiatorName: ctx.userName,
+    }).catch((err) => console.error("[transfers] notif dispatch falhou:", err));
 
     await audit(
       { orgId: ctx.orgId, userId: ctx.userId, ipAddress: ctx.ipAddress, userAgent: ctx.userAgent },

@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { TwoFactorSetup } from "./TwoFactorSetup";
+import { DevicesSection } from "./DevicesSection";
 import { use2FA } from "@/hooks/use2FA";
 import { useElevation } from "@/hooks/useElevation";
 import {
@@ -145,6 +146,9 @@ export function SecurityPageClient() {
           )}
         </CardContent>
       </Card>
+
+      {/* Trusted devices */}
+      <DevicesSection />
 
       {/* Setup dialog */}
       <Dialog open={setupOpen} onOpenChange={setSetupOpen}>
