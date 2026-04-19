@@ -5,7 +5,15 @@ import { prisma } from "@/lib/db/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Wallet, TrendingUp, AlertCircle } from "lucide-react";
+import {
+  Wallet,
+  TrendingUp,
+  AlertCircle,
+  FileText,
+  Users,
+  ArrowUpRight,
+  Receipt,
+} from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -103,15 +111,39 @@ export default async function FinanceiroPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold flex items-center gap-2">
-          <Wallet className="h-6 w-6" />
-          Financeiro
-        </h1>
-        <p className="text-sm text-muted-foreground">
-          Conta Asaas aprovada — walletId{" "}
-          <code className="text-xs">{account.walletId.slice(0, 8)}…</code>
-        </p>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold flex items-center gap-2">
+            <Wallet className="h-6 w-6" />
+            Financeiro
+          </h1>
+          <p className="text-sm text-muted-foreground">
+            Conta Asaas aprovada — walletId{" "}
+            <code className="text-xs">{account.walletId.slice(0, 8)}…</code>
+          </p>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/financeiro/cobrancas">
+              <Receipt className="h-4 w-4 mr-1" /> Cobranças
+            </Link>
+          </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/financeiro/clientes">
+              <Users className="h-4 w-4 mr-1" /> Clientes
+            </Link>
+          </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/financeiro/extrato">
+              <FileText className="h-4 w-4 mr-1" /> Extrato
+            </Link>
+          </Button>
+          <Button size="sm" asChild>
+            <Link href="/financeiro/cobrancas/nova">
+              <ArrowUpRight className="h-4 w-4 mr-1" /> Nova cobrança
+            </Link>
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

@@ -1087,11 +1087,12 @@ model CommissionCharge {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  org      Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  deal     Deal?               @relation(fields: [dealId], references: [id], onDelete: SetNull)
-  contract Contract?           @relation(fields: [contractId], references: [id], onDelete: SetNull)
-  customer AsaasCustomer       @relation(fields: [asaasCustomerId], references: [id])
-  events   AsaasWebhookEvent[]
+  org        Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  deal       Deal?               @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  contract   Contract?           @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  customer   AsaasCustomer       @relation(fields: [asaasCustomerId], references: [id])
+  events     AsaasWebhookEvent[]
+  publicLink ChargePublicLink?
 
   @@index([orgId, status])
   @@index([orgId, currentDueDate])
@@ -1171,4 +1172,6 @@ model ChargePublicLink {
   lastViewedAt  DateTime?
   viewCount     Int       @default(0)
   createdAt     DateTime  @default(now())
+
+  charge CommissionCharge @relation(fields: [chargeId], references: [id], onDelete: Cascade)
 }
