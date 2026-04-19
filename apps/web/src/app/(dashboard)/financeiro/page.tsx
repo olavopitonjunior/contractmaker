@@ -13,6 +13,9 @@ import {
   Users,
   ArrowUpRight,
   Receipt,
+  Send,
+  GitMerge,
+  BarChart3,
 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -136,6 +139,21 @@ export default async function FinanceiroPage() {
           <Button variant="outline" size="sm" asChild>
             <Link href="/financeiro/extrato">
               <FileText className="h-4 w-4 mr-1" /> Extrato
+            </Link>
+          </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/financeiro/transferencias">
+              <Send className="h-4 w-4 mr-1" /> Transferir
+            </Link>
+          </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/financeiro/conciliacao">
+              <GitMerge className="h-4 w-4 mr-1" /> Conciliação
+            </Link>
+          </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/financeiro/relatorios">
+              <BarChart3 className="h-4 w-4 mr-1" /> Relatórios
             </Link>
           </Button>
           <Button size="sm" asChild>

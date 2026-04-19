@@ -46,6 +46,10 @@ model User {
   auditLogs           AuditLog[]
   dualApprovalsInit   DualApproval[]       @relation("DualApprovalInit")
   dualApprovalsAck    DualApproval[]       @relation("DualApprovalAck")
+
+  // Pagadoria — Fase 3 (transferências)
+  asaasTransfers        AsaasTransfer[]
+  reconciliationMatches BankReconciliation[]
 }
 
 model Account {
@@ -121,6 +125,10 @@ model Organization {
   commissionCharges  CommissionCharge[]
   asaasWebhookEvents AsaasWebhookEvent[]
   financialSettings  OrgFinancialSettings?
+
+  // Pagadoria — Fase 3 (transferências + conciliação)
+  asaasTransfers      AsaasTransfer[]
+  bankReconciliations BankReconciliation[]
 }
 
 model OrgMembership {
@@ -1174,4 +1182,65 @@ model ChargePublicLink {
   createdAt     DateTime  @default(now())
 
   charge CommissionCharge @relation(fields: [chargeId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// PAGADORIA — TRANSFERÊNCIAS + CONCILIAÇÃO (Fase 3)
+// ============================================
+
+// Transferências (saque) da subconta Asaas → conta bancária da org.
+model AsaasTransfer {
+  id              String    @id @default(cuid())
+  orgId           String
+  asaasTransferId String    @unique // tra_xxx
+  value           Float
+  netValue        Float?
+  transferFee     Float?
+  type            String // PIX | TED
+  status          String // PENDING | DONE | FAILED | CANCELLED
+  pixAddressKey   String?
+  pixKeyType      String? // CPF | CNPJ | EMAIL | PHONE | RANDOM
+  ownerName       String? // nome do destinatário (validado via pix validation)
+  ownerCpfCnpj    String?
+  bankAccountJson Json?
+  requestedBy     String
+  scheduledDate   DateTime?
+  effectiveDate   DateTime?
+  description     String?
+  failureReason   String?   @db.Text
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [requestedBy], references: [id])
+
+  @@index([orgId, status])
+  @@index([orgId, createdAt])
+}
+
+// Conciliação — match entre lançamentos do extrato Asaas e cobranças locais.
+model BankReconciliation {
+  id                     String    @id @default(cuid())
+  orgId                  String
+  financialTransactionId String // id do extrato Asaas (pode ser hash se sem id)
+  type                   String // PAYMENT_RECEIVED | PAYMENT_FEE | TRANSFER | REFUND | CHARGEBACK | OTHER
+  value                  Float
+  date                   DateTime
+  description            String?   @db.Text
+  asaasPaymentId         String? // se type=PAYMENT_RECEIVED
+  matchedChargeId        String?
+  status                 String    @default("pending") // pending | matched | ignored | manual
+  notes                  String?   @db.Text
+  matchedAt              DateTime?
+  matchedBy              String? // userId
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User?        @relation(fields: [matchedBy], references: [id], onDelete: SetNull)
+
+  @@unique([orgId, financialTransactionId])
+  @@index([orgId, status])
+  @@index([orgId, date])
+  @@index([matchedChargeId])
 }
