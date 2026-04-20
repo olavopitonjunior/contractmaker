@@ -55,6 +55,12 @@ Ir em `https://vercel.com/<team>/<project>/settings/environment-variables`. Em *
 
 ## C. Asaas sandbox setup (10 min)
 
+> ⚡ **Atalho via MCP Asaas:** se o Claude Code tiver o MCP `asaas` instalado
+> (`claude mcp list` deve mostrar `asaas - ✓ Connected`) e o token configurado
+> em `~/.claude.json` como header, você pode pedir ao Claude para fazer os
+> passos 3-4 desta seção via MCP em vez do dashboard manual. Os passos manuais
+> abaixo continuam sendo o fallback definitivo.
+
 1. [ ] Acessar `https://sandbox.asaas.com` com a conta pessoal
 2. [ ] Menu → **Integrações** → **API** → confirmar que a master key exibida é **a mesma** do env var `ASAAS_API_KEY`
 3. [ ] Menu → **Integrações** → **Webhooks** → **Novo webhook**:
@@ -68,6 +74,11 @@ Ir em `https://vercel.com/<team>/<project>/settings/environment-variables`. Em *
 ---
 
 ## D. Primeiro login + KYC real (10 min)
+
+> ⚡ **Atalho via MCP Asaas:** o passo 6 (aprovar subconta no dashboard sandbox)
+> pode ser feito via MCP se o sandbox Asaas expuser endpoint de aprovação
+> programática — o Claude pode chamar direto. Passos 1-5 (login + KYC +
+> upload docs) devem ser feitos na UI do Contractmaker para testar o fluxo real.
 
 1. [ ] Acessar URL de produção, login como `admin@contractmaker.com` / `E2EtestPwd!2026`
 2. [ ] Se 2FA ainda não configurado: ir em `/settings/seguranca` → clicar **Configurar 2FA**:
