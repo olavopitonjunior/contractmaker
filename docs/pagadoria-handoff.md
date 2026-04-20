@@ -1,6 +1,6 @@
-# Handoff — Módulo Pagadoria (2026-04-20)
+# Handoff — Módulo Pagadoria (atualizado 2026-04-20 — sessão tarde)
 
-Status: **bloqueado em setup de 2FA do admin em produção**. Próxima sessão precisa investigar por que `/api/security/2fa/setup` retorna 500 mesmo após copiar env vars de Preview → Production e fazer redeploy.
+Status: **pronto para QA Round 2**. Ambiente de produção funcionando, 2FA do admin configurado, subconta sandbox aprovada, webhook cadastrado, Fase 5 (split multi-recipient) implementada e pushada.
 
 Este doc consolida todo o trabalho feito, o estado atual, e o checklist para retomar. Manter atualizado conforme novas sessões avançam.
 
@@ -21,20 +21,23 @@ Este doc consolida todo o trabalho feito, o estado atual, e o checklist para ret
 | Fixes P0+P1 pós-QA 1 | ✅ | e6998da4 |
 | Infra QA Round 2 (seed → preflight) | ✅ | 24de21ef, 13eb2481 |
 | Helpers MCP Asaas + script setup automatizado | ✅ | 3083b48b, 3de7f143 |
-| **QA UX Round 2 (produção)** | 🔴 **BLOQUEADO em setup 2FA** | — |
+| Fix env vars corrompidas (`\n` em Production) + 2FA destravado | ✅ | — (só Vercel dashboard) |
+| Fix script orgMemberships + approve subconta sandbox | ✅ | 93c6acd6 |
+| **Fase 5 — Split multi-recipient por cobrança** | ✅ | e1ed755a |
+| **QA UX Round 2 (produção)** | 🟢 **DESBLOQUEADO — pronto pra rodar** | — |
 
 ### 1.2 Branch + PR
 
 - Branch: `feat/pagadoria-fase-1a-security`
 - PR: #1 (github.com/olavopitonjunior/contractmaker/pull/1)
-- **Merge status**: não mergeado — user mergeou ou deployou direto da branch para produção?
-- Último commit: `3de7f143 feat(pagadoria): automatiza setup de QA via endpoints sandbox Asaas`
+- **Merge status**: não mergeado — mas deploys de `master` (production) usam os mesmos commits via push direto? Verificar se próximo deploy aplica as migrations novas (Fase 5 precisa da migration `20260420150000_add_split_recipient`).
+- Último commit: `e1ed755a feat(pagadoria): split de pagamento multi-recipient (Fase 5)`
 
 ### 1.3 Deploys Vercel atuais
 
-- **Production ativo agora**: `https://web-ol0dt8zcy-olavopiton-4477s-projects.vercel.app` (redeploy pós env fix)
-- Production anterior: `web-7dcj1gra4-...` (antes do fix de env vars)
-- Preview mais recente da branch: `web-98zp70fzm-...`
+- **Production aliases estáveis**: `https://web-olavopiton-4477s-projects.vercel.app` (canonical), `web-git-master-...`, `web-zeta-three-4lyvmj9ut6.vercel.app`
+- **Production deploy atual**: `web-qynrozzlo-...` (redeploy pós fix de env vars). Próximo deploy vai ser automático ao merge do `e1ed755a` em `master`.
+- Preview da branch: deploy preview automático a cada push
 
 ### 1.4 Estado do 1º QA (Claude Chrome contra preview)
 
@@ -94,9 +97,9 @@ Endpoints descobertos durante a sessão:
 
 ---
 
-## 2. Bug atual (bloqueante para QA Round 2)
+## 2. Fix do 2FA 500 (resolvido)
 
-### 2.1 Sintoma
+### 2.1 Sintoma original
 
 No deploy de produção, após login como `admin@contractmaker.com`:
 - `/settings/seguranca` renderiza OK
@@ -104,49 +107,60 @@ No deploy de produção, após login como `admin@contractmaker.com`:
 - Clicar **Começar** dentro do dialog → QR **NÃO aparece**
 - DevTools → Network: `POST /api/security/2fa/setup` retorna **500 com body vazio**
 
-### 2.2 O que foi investigado nesta sessão
+### 2.2 Root cause (identificado 2026-04-20 tarde)
 
-- ✅ DB de prod foi consultado, confirmado que o endpoint **não chegou a criar** o `TwoFactorSecret` row → erro é antes do Prisma
-- ✅ `TwoFactorSecret` antigo do admin foi deletado no DB prod (estava migrado do QA preview com `enabled=true`)
-- ✅ **Causa encontrada (primeira hipótese):** apenas `AUTH_SECRET` e `NEXTAUTH_URL` estavam setadas em Production Vercel. Env vars críticas (`MASTER_ENCRYPTION_KEY`, `CHALLENGE_TOKEN_SECRET`, `SUDO_TOKEN_SECRET`, `TRUSTED_DEVICE_SECRET`, `RESEND_API_KEY`, `EMAIL_FROM`, `ASAAS_*`, `UPSTASH_*`, `BLOB_READ_WRITE_TOKEN`) faltavam → `encryptTotpSecret` joga `Error("MASTER_ENCRYPTION_KEY ausente")`.
-- ✅ Todas as **13 env vars foram copiadas de Preview → Production** via `vercel env add ... production --force`
-- ✅ **Redeploy disparado**: `web-ol0dt8zcy-olavopiton-4477s-projects.vercel.app`
-- 🔴 **User testou após redeploy → continua 500 body vazio**
+7 env vars de Production foram salvas com `\n` literal escapado entre aspas (`"value\n"`). No runtime `process.env.X`, o `\n` vira newline real, corrompendo:
 
-### 2.3 Hipóteses não investigadas
+- `DATABASE_URL\n` / `DIRECT_URL\n` — Prisma connection problems silenciosos
+- `AUTH_SECRET\n` — NextAuth assinando JWT com secret diferente
+- `NEXTAUTH_URL\n` — URL inválida + apontava para alias antigo (`web-zeta-three-...`)
+- `ALLOW_SELF_REGISTER="true\n"` — código comparava `=== "true"` → virava `false`
+- `OCR_ENABLED="false\n"`, `ANTHROPIC_MODEL="...\n"` — idem
 
-**Ordem de prioridade (próxima sessão atacar nesta ordem):**
+### 2.3 Fix aplicado
 
-1. **Deploy ainda não terminou**: verificar status do `web-ol0dt8zcy-...` em `vercel.com/olavopiton-4477s-projects/web/deployments` (Ready/Error/Building). Se está Building, aguardar.
+1. `vercel env rm` das 7 vars em Production
+2. Re-add via `vercel env add ... production < /tmp/envval_X.txt` (arquivo **sem** trailing newline — gravado via Node `fs.writeFileSync` que não adiciona `\n`)
+3. `NEXTAUTH_URL` atualizada pra alias canônico estável: `https://web-olavopiton-4477s-projects.vercel.app`
+4. Redeploy → `web-qynrozzlo-olavopiton-4477s-projects.vercel.app` (Ready)
+5. User logou na UI, configurou 2FA, KYC, subconta sandbox aprovada via script (após fix do bug `orgMemberships` → commit `93c6acd6`)
 
-2. **Browser cache**: mesmo após redeploy, Vercel production URL pode servir bundle antigo para sessão cache-persistente. Pedir ao user: Ctrl+Shift+R ou aba anônima.
+### 2.4 Hipótese de origem do bug
 
-3. **Migration pendente**: o build de prod roda `prisma migrate deploy` mas pode ter falhado silenciosamente. Verificar `_prisma_migrations` em prod: precisa ter todas as migrations do `apps/web/prisma/migrations/`. Especialmente as da fase 1a que criaram `TwoFactorSecret`, `SessionElevation`, etc.
+Provavelmente ao copiar vars de Preview→Production numa sessão anterior, um `echo "$value" | vercel env add` adicionou `\n` no final de cada valor. `vercel env pull` depois escapa newlines reais como `\n` escapado no .env output, mascarando o problema até o runtime.
 
-4. **Outro erro no endpoint pós env vars setadas**: puxar logs do **deploy novo** (`web-ol0dt8zcy-...`) especificamente:
-   ```
-   vercel logs web-ol0dt8zcy-olavopiton-4477s-projects.vercel.app
-   ```
-   Filtrar por `2fa/setup` e ver o stack trace real.
+### 2.5 Lição aprendida
 
-5. **Admin user ausente em prod**: na sessão anterior confirmei que existe (`cmnt1lcsm000011bwjcenbzs4`). Mas worth re-confirmar via preflight.
+- Ao sincronizar env vars programaticamente: usar `printf "%s"` (não `echo`) ou gravar via Node `fs.writeFileSync` para evitar trailing newlines
+- Script [apps/web/scripts/setup-pagadoria-qa.ts](../apps/web/scripts/setup-pagadoria-qa.ts) usa fallback ASaaS key starting with `$` — **não** exportar via `source < file` em bash (expansão quebra). Gravar variables via Node antes de spawnar o child process.
 
-6. **requireAuth failing**: `ctx.userEmail` pode vir undefined se session callback não estiver injetando corretamente. Ver [lib/auth/context.ts](../apps/web/src/lib/auth/context.ts).
+---
 
-7. **@next/env escape do `$`**: lembrar que `ASAAS_API_KEY` começa com `$aact_hmlg...`. Em dev isso precisa de escape no .env. **Em Vercel env vars NÃO precisa de escape** (não passa por dotenv-expand). Confirmado — mas worth double check que o valor sincronizado NÃO tem `\$` literal.
+## 2B. Fase 5 — Split multi-recipient (commit e1ed755a)
 
-### 2.4 Ação recomendada primeira na próxima sessão
+Entregue nesta sessão como parte de "Verifique como está o cadastro para split de pagamento". Corrigiu dois gaps identificados na auditoria:
 
-**Rodar o preflight pela UI autenticada.** Ele faz 30+ checks e aponta exatamente o que está errado. É o próprio endpoint que criamos nesta sessão.
+**Gap 1 — platformFeeWalletId órfão**: o campo existia em `OrgFinancialSettings` desde Fase 4 mas **nunca podia ser setado via UI** (omitido do `patchSchema` Zod em `/api/financeiro/settings`). Resultado: `platformFeePercent > 0` nunca gerava split real. Fechado: campo adicionado ao Zod schema + input na UI `/settings/pagamentos/taxas`.
 
-Via DevTools Console logado em prod:
-```javascript
-fetch('/api/admin/preflight-qa', { credentials: 'include' })
-  .then(r => r.json())
-  .then(r => console.log(JSON.stringify(r, null, 2)))
-```
+**Gap 2 — Sem split multi-recipient**: único split possível era "taxa da plataforma pra master wallet". Sem suporte para corretora/vendedor/etc.
 
-Deve retornar um objeto com `blockersCount`, `warningsCount`, e array `checks` com severidade por categoria.
+**Entregue:**
+
+- Novo model Prisma `SplitRecipient` com `label, walletId, cpfCnpj, description, active`
+- Migration `20260420150000_add_split_recipient` (aplica via `prisma migrate deploy` no próximo deploy)
+- Nova página `/settings/pagamentos/split-recipients` (CRUD com Sheet form)
+- Novas rotas API `GET/POST /api/financeiro/split-recipients` + `PATCH/DELETE /api/financeiro/split-recipients/[id]` (soft delete via `active=false`, guards `SPLIT_VIEW`/`SPLIT_CONFIGURE`)
+- Componente reutilizável `components/financeiro/SplitEditor.tsx`
+- Integração no form `/financeiro/cobrancas/nova` (switch "Aplicar split de pagamento" + preview em tempo real de rateio em R$)
+- Função pública `composeSplits()` em [lib/asaas/commission.ts](../apps/web/src/lib/asaas/commission.ts) centraliza validação: max 10 entries, sem duplicatas de walletId, sem wallet da própria org, soma `percentualValue ≤ 100`, `percentualValue OR fixedValue > 0`
+- 13 unit tests passando (`commission-splits.test.ts`)
+- 3 AuditActions novos: `SPLIT_RECIPIENT_CREATED | UPDATED | DELETED`
+
+**Gaps remanescentes (fora de escopo Fase 5)**:
+
+- Validação de walletIds contra Asaas (hoje aceita qualquer string — se walletId inválido, Asaas rejeita no create-payment)
+- Split em cobranças vindas de Deal (`/api/deals/[dealId]/commission-charges`) ainda não aceita `customSplits` — só a avulsa
+- `walletId` é imutável após criado (precisa criar novo recipient pra trocar)
 
 ---
 
@@ -159,59 +173,39 @@ Deve retornar um objeto com `blockersCount`, `warningsCount`, e array `checks` c
 - [ ] Se quiser instalar MCP Neon para acesso direto ao DB: `claude mcp add neon npx "@neondatabase/mcp-server-neon" start --scope user`. Precisa `NEON_API_KEY` configurada
 - [ ] (Opcional) Adicionar token Asaas como header no config: ver [seção 6](#6-referências-de-configuração)
 
-### 3.2 Diagnosticar o bug 500 no `/api/security/2fa/setup`
+### 3.2 Confirmar que Fase 5 chegou em prod
 
-Em ordem:
+Após o push do commit `e1ed755a`, Vercel vai buildar e aplicar a migration `20260420150000_add_split_recipient` automaticamente.
 
-1. [ ] Verificar status do deploy `web-ol0dt8zcy-...` via `vercel ls web --prod`
-2. [ ] Se Ready → `vercel logs web-ol0dt8zcy-olavopiton-4477s-projects.vercel.app 2>&1 | grep -A 20 '2fa/setup'` — achar stack trace
-3. [ ] Em browser, em aba anônima nova, logar como admin → DevTools → Network → rodar preflight:
-   ```javascript
-   fetch('/api/admin/preflight-qa', { credentials: 'include' }).then(r=>r.json()).then(r=>console.log(JSON.stringify(r,null,2)))
-   ```
-4. [ ] Se preflight retorna blockers: resolver cada um + redeploy
-5. [ ] Se preflight OK mas 2FA ainda falha: checar migrations prod via Prisma CLI:
-   ```bash
-   cd apps/web
-   vercel env pull .env.prod.tmp --environment=production
-   DATABASE_URL=... npx prisma migrate status
-   ```
-6. [ ] Validar que `TwoFactorSecret` existe como tabela em prod
+1. [ ] Ir em `vercel.com/olavopiton-4477s-projects/web/deployments` e aguardar o deploy de master ficar **Ready**
+2. [ ] Abrir `/settings/pagamentos/split-recipients` e confirmar que a página carrega (não 404/500)
+3. [ ] Preflight de novo: `fetch('/api/admin/preflight-qa',{credentials:'include'}).then(r=>r.json()).then(r=>console.log(JSON.stringify(r,null,2)))` → `{ok: true}`
 
-### 3.3 Após destravar 2FA do admin
+### 3.3 Rodar QA Round 2 via Claude Chrome
 
-1. [ ] Setup 2FA completo em `/settings/seguranca` (QR → app autenticador → recovery codes → salvar num gerenciador de senhas)
-2. [ ] `/financeiro/onboarding` → preencher dados + upload docs → status `AWAITING_APPROVAL`
+1. [ ] Abrir o arquivo **local** `docs/qa-round-2-prompt.md` (gitignored, tem URL já substituída)
+2. [ ] Copiar o conteúdo completo (676 linhas)
+3. [ ] Colar no Claude Chrome ativo em prod
+4. [ ] Deixar rodar os 17 blocos autônomos. Ficar de plantão para:
+   - Confirmar pagamentos sandbox via `POST /v3/sandbox/payment/{id}/confirm` (Blocos 7/11)
+   - Forçar OVERDUE via `POST /v3/sandbox/payment/{id}/overdue` (Bloco 11)
+   - Debug em tempo real via `vercel logs` se travar
 
-### 3.4 Rodar setup automatizado (seção E do checklist)
+### 3.4 Testar split de pagamento (Fase 5 nova)
 
-```bash
-cd apps/web
-vercel env pull .env.production.local --environment=production
+Fluxo E2E no sandbox:
 
-DOTENV_CONFIG_PATH=.env.production.local \
-npx tsx -r dotenv/config scripts/setup-pagadoria-qa.ts \
-  --app-url https://web-ol0dt8zcy-olavopiton-4477s-projects.vercel.app \
-  --email admin@contractmaker.com
-```
+1. [ ] `/settings/pagamentos/split-recipients` → cadastrar 2 recipients (ex: `[QA] Corretora` + `[QA] Vendedor`) com walletIds reais de outras subcontas sandbox
+2. [ ] (Opcional) `/settings/pagamentos/taxas` → setar `platformFeePercent=5%` + `platformFeeWalletId` da master wallet
+3. [ ] `/financeiro/cobrancas/nova` → criar cobrança PIX ativando split (ex: 60% Corretora, 30% Vendedor, 5% plataforma auto, 5% remanescente na subconta)
+4. [ ] Conferir `CommissionCharge.splitJson` persistido no DB
+5. [ ] `confirmSandboxPayment(paymentId)` → conferir aba "Splits" no dashboard Asaas
 
-Esperado:
-- Cadastra webhook no Asaas sandbox
-- Aprova subconta sandbox via `POST /v3/sandbox/myAccount/approve`
-- Atualiza AsaasAccount.status → APPROVED
-- Health check via `GET /v3/myAccount/status`
-
-### 3.5 Preflight final + QA
-
-1. [ ] `fetch('/api/admin/preflight-qa')` → confirmar `{ok: true, blockersCount: 0}`
-2. [ ] Copiar URL de prod e `publicLinkToken` / `dualApprovalId` necessários
-3. [ ] Colar [docs/claude-chrome-qa-pagadoria-uxui.md](claude-chrome-qa-pagadoria-uxui.md) no Claude Chrome, substituir `{PROD_URL}`
-4. [ ] Rodar os 17 blocos, consolidar bugs no relatório
-
-### 3.6 Cleanup (pós-QA)
+### 3.5 Cleanup (pós-QA)
 
 - Cancelar cobranças `[QA UX]` via UI
 - Rejeitar dual approval pendente
+- Desativar SplitRecipients de teste (`[QA] ...`) via UI
 - Reverter branding se alterado
 - **NÃO** mexer na subconta Asaas nem no admin user (ficam prontos para próximos QAs)
 
@@ -220,9 +214,10 @@ Esperado:
 ## 4. Credenciais e URLs (reference card)
 
 ### Produção
-- URL atual: `https://web-ol0dt8zcy-olavopiton-4477s-projects.vercel.app`
+- URL canonical estável: `https://web-olavopiton-4477s-projects.vercel.app`
+- Deploy atual (pós-fix env): `https://web-qynrozzlo-olavopiton-4477s-projects.vercel.app`
 - Admin login: `admin@contractmaker.com` / `E2EtestPwd!2026`
-- 2FA: **resetado, precisa configurar de novo**
+- 2FA: **configurado nesta sessão (2026-04-20)** — user deve ter salvo TOTP secret + 10 recovery codes em gerenciador de senhas
 
 ### Vercel
 - Team: `olavopiton-4477s-projects`
@@ -258,7 +253,7 @@ rm .env.prod.tmp  # sempre limpar depois
 
 ### Ver logs do deploy atual
 ```bash
-vercel logs web-ol0dt8zcy-olavopiton-4477s-projects.vercel.app 2>&1 | grep -iE "2fa|error|500" | head -30
+vercel logs web-qynrozzlo-olavopiton-4477s-projects.vercel.app 2>&1 | grep -iE "error|500" | head -30
 ```
 
 ### Listar deployments
@@ -352,9 +347,9 @@ Consultar [C:\Users\User\.claude\plans\memoized-herding-panda.md](../../../C:/Us
 
 ---
 
-## 8. Arquivos criados/modificados nesta sessão
+## 8. Arquivos criados/modificados por sessão
 
-### Código
+### Sessões anteriores (infra QA + setup)
 - `apps/web/src/lib/asaas/sandbox.ts` (novo)
 - `apps/web/src/lib/asaas/webhooks.ts` (novo)
 - `apps/web/scripts/setup-pagadoria-qa.ts` (novo)
@@ -364,17 +359,38 @@ Consultar [C:\Users\User\.claude\plans\memoized-herding-panda.md](../../../C:/Us
 - `apps/web/.env.example` (removido `SEED_ADMIN_TOKEN`)
 - Deletados: `apps/web/src/app/api/admin/seed-pagadoria-qa/`, `apps/web/src/lib/dev/seedPagadoriaQa.ts`
 
-### Docs
-- `docs/pre-qa-checklist.md` (atualizado — setup 35min → 15min)
-- `docs/claude-chrome-qa-pagadoria-uxui.md` (atualizado — removida seção seed, added preflight)
-- `docs/relatório QA` (sanitizado — TOTP secret + recovery codes removidos)
-- `docs/pagadoria-handoff.md` (este arquivo)
+### Sessão 2026-04-20 tarde (fix env + Fase 5)
+
+**Código — Fase 5 split multi-recipient (commit `e1ed755a`):**
+- `apps/web/prisma/migrations/20260420150000_add_split_recipient/migration.sql` (novo)
+- `apps/web/prisma/schema.prisma` (+ model `SplitRecipient` + relation em `Organization`)
+- `apps/web/src/app/api/financeiro/split-recipients/route.ts` (GET/POST novo)
+- `apps/web/src/app/api/financeiro/split-recipients/[id]/route.ts` (PATCH/DELETE novo)
+- `apps/web/src/app/(dashboard)/settings/pagamentos/split-recipients/page.tsx` + `SplitRecipientsClient.tsx` (novos)
+- `apps/web/src/components/financeiro/SplitEditor.tsx` (novo, reutilizável)
+- `apps/web/src/lib/asaas/commission.ts` (nova função pública `composeSplits` + validações)
+- `apps/web/src/lib/asaas/__tests__/commission-splits.test.ts` (novo, 13 tests)
+- `apps/web/src/app/api/financeiro/charges/nova/route.ts` (aceita `customSplits[]`)
+- `apps/web/src/app/api/financeiro/settings/route.ts` (fecha gap — `platformFeeWalletId` no Zod)
+- `apps/web/src/lib/financeiro/fees.ts` (+ `platformFeeWalletId` no type)
+- `apps/web/src/app/(dashboard)/settings/pagamentos/taxas/page.tsx` (input de walletId)
+- `apps/web/src/app/(dashboard)/financeiro/cobrancas/nova/page.tsx` (switch + SplitEditor integrado)
+- `apps/web/src/app/(dashboard)/settings/page.tsx` (botão "Destinatários de split")
+- `apps/web/src/lib/security/audit.ts` (+ 3 AuditActions)
+
+**Fix script Prisma (commit `93c6acd6`):**
+- `apps/web/scripts/setup-pagadoria-qa.ts` (`memberships` → `orgMemberships`)
+
+**Docs:**
+- `docs/pagadoria-handoff.md` (atualizado para refletir estado pós-fix + Fase 5)
+- `docs/qa-round-2-prompt.md` (gerado, gitignored — PROD_URL substituído)
+- `.gitignore` (+ `docs/qa-round-*-prompt.md`)
 
 ### Config externa (não versionada)
 - `~/.claude.json` — MCP Asaas adicionado em escopo user
-- Vercel Production env vars — 13 vars copiadas de Preview
-- DB de prod — `TwoFactorSecret` do admin deletado (reset 2FA)
+- Vercel Production env vars — 7 vars recriadas sem trailing newline; `NEXTAUTH_URL` apontando pra alias canônico estável
+- DB de prod — `TwoFactorSecret` do admin deletado → reconfigurado pelo user via UI
 
 ---
 
-**Última atualização:** 2026-04-20, sessão Claude Code com auto-memory. Próximo agent: comece rodando o preflight ou olhando logs do deploy atual.
+**Última atualização:** 2026-04-20 (sessão tarde). Próximo agent: rodar preflight em prod, confirmar deploy de `e1ed755a` aplicou migration `SplitRecipient`, depois colar `docs/qa-round-2-prompt.md` no Claude Chrome pra QA Round 2.
