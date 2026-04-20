@@ -37,6 +37,19 @@ model User {
   contractSuggestions ContractSuggestion[] @relation("suggestionAuthor")
   aiUsage             AIUsage[]
   certidaoJobs        CertidaoJob[]        @relation("certidaoJobUser")
+
+  // Pagadoria — Fase 1a (segurança)
+  twoFactorSecret     TwoFactorSecret?
+  operationChallenges OperationChallenge[]
+  sessionElevations   SessionElevation[]
+  trustedDevices      TrustedDevice[]
+  auditLogs           AuditLog[]
+  dualApprovalsInit   DualApproval[]       @relation("DualApprovalInit")
+  dualApprovalsAck    DualApproval[]       @relation("DualApprovalAck")
+
+  // Pagadoria — Fase 3 (transferências)
+  asaasTransfers        AsaasTransfer[]
+  reconciliationMatches BankReconciliation[]
 }
 
 model Account {
@@ -99,18 +112,42 @@ model Organization {
   documentStyles      DocumentStyle[]
   aiUsage             AIUsage[]
   adhocCertidaoJobs   CertidaoJob[]        @relation("certidaoJobOrg")
+
+  // Pagadoria — Fase 1a (segurança)
+  customRoles    CustomRole[]
+  auditLogs      AuditLog[]
+  trustedDevices TrustedDevice[]
+  dualApprovals  DualApproval[]
+
+  // Pagadoria — Fase 1b (Asaas + KYC + cobrança)
+  asaasAccount       AsaasAccount?
+  asaasCustomers     AsaasCustomer[]
+  commissionCharges  CommissionCharge[]
+  asaasWebhookEvents AsaasWebhookEvent[]
+  financialSettings  OrgFinancialSettings?
+
+  // Pagadoria — Fase 3 (transferências + conciliação)
+  asaasTransfers      AsaasTransfer[]
+  bankReconciliations BankReconciliation[]
 }
 
 model OrgMembership {
-  id     String @id @default(cuid())
-  userId String
-  orgId  String
-  role   String @default("member")
+  id                String    @id @default(cuid())
+  userId            String
+  orgId             String
+  role              String    @default("member") // owner | admin | finance | sales | viewer | custom
+  customRoleId      String?
+  scopeRestrictions Json?
+  invitedAt         DateTime  @default(now())
+  invitedBy         String?
+  lastActiveAt      DateTime?
 
-  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user       User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  customRole CustomRole?  @relation(fields: [customRoleId], references: [id])
 
   @@unique([userId, orgId])
+  @@index([orgId, role])
 }
 
 // ============================================
@@ -154,15 +191,16 @@ model Deal {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  pipeline    Pipeline         @relation(fields: [pipelineId], references: [id])
-  stage       PipelineStage    @relation(fields: [stageId], references: [id])
-  user        User             @relation(fields: [userId], references: [id])
-  form        SalesForm?       @relation(fields: [formId], references: [id])
-  contracts    Contract[]
-  attachments   DealAttachment[]
-  certidaoJobs  CertidaoJob[]
+  pipeline            Pipeline             @relation(fields: [pipelineId], references: [id])
+  stage               PipelineStage        @relation(fields: [stageId], references: [id])
+  user                User                 @relation(fields: [userId], references: [id])
+  form                SalesForm?           @relation(fields: [formId], references: [id])
+  contracts           Contract[]
+  attachments         DealAttachment[]
+  certidaoJobs        CertidaoJob[]
   certidoesShareLinks CertidoesShareLink[]
-  diligentedPersons DiligentedPerson[]
+  diligentedPersons   DiligentedPerson[]
+  commissionCharges   CommissionCharge[]
 }
 
 model DealAttachment {
@@ -220,10 +258,10 @@ model CertidaoJob {
   portalUrl       String?
   createdAt       DateTime  @default(now())
 
-  deal         Deal?           @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  organization Organization?   @relation("certidaoJobOrg", fields: [orgId], references: [id], onDelete: Cascade)
-  user         User?           @relation("certidaoJobUser", fields: [userId], references: [id], onDelete: SetNull)
-  attachment   DealAttachment? @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
+  deal         Deal?                 @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  organization Organization?         @relation("certidaoJobOrg", fields: [orgId], references: [id], onDelete: Cascade)
+  user         User?                 @relation("certidaoJobUser", fields: [userId], references: [id], onDelete: SetNull)
+  attachment   DealAttachment?       @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
   auditLogs    CertidaoJobAuditLog[]
 
   @@index([dealId, batchId])
@@ -242,8 +280,8 @@ model CertidaoJobAuditLog {
   jobId      String
   fromStatus String?
   toStatus   String
-  reason     String?  // texto livre: "initial dispatch", "retry by user", "cron sweep", etc.
-  metadata   Json?    // payload livre: costCents, latencyMs, endpoint, resultCode
+  reason     String? // texto livre: "initial dispatch", "retry by user", "cron sweep", etc.
+  metadata   Json? // payload livre: costCents, latencyMs, endpoint, resultCode
   createdAt  DateTime @default(now())
 
   job CertidaoJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
@@ -271,19 +309,19 @@ model CertidoesShareLink {
 // Stored separately from vendedores/compradores so they don't pollute the
 // contract data but can still have certidões extracted.
 model DiligentedPerson {
-  id              String   @id @default(cuid())
-  dealId          String
-  tipoPessoa      String   // "fisica" | "juridica"
-  nome            String
-  cpf             String?
-  cnpj            String?
-  dataNascimento  String?
-  uf              String?
-  cidade          String?
-  relacao         String?  // "socio" | "avalista" | "procurador" | "outro"
-  notes           String?
-  createdBy       String?
-  createdAt       DateTime @default(now())
+  id             String   @id @default(cuid())
+  dealId         String
+  tipoPessoa     String // "fisica" | "juridica"
+  nome           String
+  cpf            String?
+  cnpj           String?
+  dataNascimento String?
+  uf             String?
+  cidade         String?
+  relacao        String? // "socio" | "avalista" | "procurador" | "outro"
+  notes          String?
+  createdBy      String?
+  createdAt      DateTime @default(now())
 
   deal Deal @relation(fields: [dealId], references: [id], onDelete: Cascade)
 
@@ -297,11 +335,11 @@ model Notification {
   id        String    @id @default(cuid())
   orgId     String
   userId    String?
-  type      String    // "certidao_batch_complete" | "certidao_ready" | "certidao_failed"
+  type      String // "certidao_batch_complete" | "certidao_ready" | "certidao_failed"
   title     String
   body      String
   linkUrl   String?
-  metadata  Json?     // { dealId, jobId, batchId }
+  metadata  Json? // { dealId, jobId, batchId }
   // I.5 (Phase I, 2026-04-18) — batchId dedicado para dedupe atômico.
   // Query em metadata JSONB era frágil e race condition gerava 5× a mesma
   // notif no QA. Unique (type, batchId) garante dedupe no DB level.
@@ -406,18 +444,19 @@ model Contract {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  deal          Deal                 @relation(fields: [dealId], references: [id])
-  template      ContractTemplate     @relation(fields: [templateId], references: [id])
-  user          User                 @relation(fields: [userId], references: [id])
-  parentVersion Contract?            @relation("ContractVersions", fields: [parentVersionId], references: [id])
-  childVersions Contract[]           @relation("ContractVersions")
-  chatSessions  ChatSession[]
-  exports       Export[]
-  clauses       ContractClause[]
-  changeLogs    ContractChangeLog[]
-  comments      ContractComment[]
-  suggestions   ContractSuggestion[]
-  aiUsage       AIUsage[]
+  deal              Deal                 @relation(fields: [dealId], references: [id])
+  template          ContractTemplate     @relation(fields: [templateId], references: [id])
+  user              User                 @relation(fields: [userId], references: [id])
+  parentVersion     Contract?            @relation("ContractVersions", fields: [parentVersionId], references: [id])
+  childVersions     Contract[]           @relation("ContractVersions")
+  chatSessions      ChatSession[]
+  exports           Export[]
+  clauses           ContractClause[]
+  changeLogs        ContractChangeLog[]
+  comments          ContractComment[]
+  suggestions       ContractSuggestion[]
+  aiUsage           AIUsage[]
+  commissionCharges CommissionCharge[]
 }
 
 model ContractClause {
@@ -768,25 +807,25 @@ model DocumentStyle {
 // ============================================
 
 model AIUsage {
-  id                String   @id @default(cuid())
-  orgId             String
-  userId            String?
-  contractId        String?
-  provider          String // "anthropic" | "gemini" | "voyage"
-  model             String
-  operation         String // "chat" | "passive_open" | "passive_edit" | "ocr_form" | "ocr_tool" | "embed_kb" | "embed_memory" | "summarize_memory" | "clause_generate" | "doc_analysis"
-  promptTokens      Int      @default(0)
-  completionTokens  Int      @default(0)
-  cacheReadTokens   Int      @default(0)
-  cacheWriteTokens  Int      @default(0)
-  totalTokens       Int      @default(0)
-  estimatedCostUsd  Decimal  @default(0) @db.Decimal(12, 6)
-  latencyMs         Int      @default(0)
-  toolsUsed         String[] @default([])
-  iterations        Int      @default(1)
-  success           Boolean  @default(true)
-  errorMessage      String?  @db.Text
-  createdAt         DateTime @default(now())
+  id               String   @id @default(cuid())
+  orgId            String
+  userId           String?
+  contractId       String?
+  provider         String // "anthropic" | "gemini" | "voyage"
+  model            String
+  operation        String // "chat" | "passive_open" | "passive_edit" | "ocr_form" | "ocr_tool" | "embed_kb" | "embed_memory" | "summarize_memory" | "clause_generate" | "doc_analysis"
+  promptTokens     Int      @default(0)
+  completionTokens Int      @default(0)
+  cacheReadTokens  Int      @default(0)
+  cacheWriteTokens Int      @default(0)
+  totalTokens      Int      @default(0)
+  estimatedCostUsd Decimal  @default(0) @db.Decimal(12, 6)
+  latencyMs        Int      @default(0)
+  toolsUsed        String[] @default([])
+  iterations       Int      @default(1)
+  success          Boolean  @default(true)
+  errorMessage     String?  @db.Text
+  createdAt        DateTime @default(now())
 
   org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   user     User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -796,4 +835,412 @@ model AIUsage {
   @@index([orgId, provider, createdAt])
   @@index([orgId, operation, createdAt])
   @@index([contractId, createdAt])
+}
+
+// ============================================
+// PAGADORIA — SEGURANÇA BASELINE (Fase 1a)
+// ============================================
+
+// TOTP secret por usuário (Google Authenticator / 1Password / Authy).
+// Obrigatório para acesso ao módulo Financeiro.
+model TwoFactorSecret {
+  id               String    @id @default(cuid())
+  userId           String    @unique
+  secretEncrypted  String    @db.Text
+  secretIvBase64   String
+  secretTagBase64  String
+  recoveryCodesEnc String    @db.Text
+  enabled          Boolean   @default(false)
+  enrolledAt       DateTime?
+  lastUsedAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Sudo mode — janela de 15min para operações sensíveis após reautenticação.
+model SessionElevation {
+  id         String    @id @default(cuid())
+  userId     String
+  scope      String // TRANSFER | KYC_EDIT | BANK_ACCOUNT | API_KEY_ROTATE | MEMBER_MANAGE | FEES_CONFIG
+  expiresAt  DateTime
+  consumedAt DateTime?
+  ipAddress  String?
+  userAgent  String?   @db.Text
+  createdAt  DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, scope, expiresAt])
+}
+
+// OTP por operação — single-use, 5min TTL, bound a payloadHash.
+model OperationChallenge {
+  id          String    @id @default(cuid())
+  userId      String
+  orgId       String
+  kind        String // TRANSFER | BANK_ACCOUNT_CHANGE | SUBACCOUNT_DELETE | DUAL_APPROVE
+  payloadHash String
+  channel     String    @default("EMAIL")
+  codeHash    String
+  attempts    Int       @default(0)
+  maxAttempts Int       @default(3)
+  expiresAt   DateTime
+  consumedAt  DateTime?
+  cancelledAt DateTime?
+  ipAddress   String?
+  userAgent   String?   @db.Text
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, kind, expiresAt])
+}
+
+// Audit log imutável — append-only.
+model AuditLog {
+  id           String   @id @default(cuid())
+  orgId        String
+  userId       String?
+  action       String
+  resource     String?
+  resourceType String?
+  result       String // SUCCESS | FAILURE | DENIED
+  metadata     Json?
+  ipAddress    String?
+  userAgent    String?  @db.Text
+  createdAt    DateTime @default(now())
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, action, createdAt])
+  @@index([userId, createdAt])
+}
+
+// Dispositivos confiáveis — fingerprint + cookie assinado.
+model TrustedDevice {
+  id            String    @id @default(cuid())
+  userId        String
+  orgId         String
+  fingerprint   String
+  label         String?
+  lastIpAddress String?
+  lastSeenAt    DateTime  @default(now())
+  revokedAt     DateTime?
+  createdAt     DateTime  @default(now())
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, fingerprint])
+}
+
+// Roles customizados por org — permissions em JSON.
+model CustomRole {
+  id          String   @id @default(cuid())
+  orgId       String
+  name        String
+  description String?
+  permissions Json
+  createdBy   String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org     Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  members OrgMembership[]
+
+  @@unique([orgId, name])
+}
+
+// Aprovação dupla (dual control) — operações de alto valor.
+model DualApproval {
+  id           String    @id @default(cuid())
+  orgId        String
+  initiatedBy  String
+  kind         String // TRANSFER | REFUND_LARGE | SPLIT_CHANGE | FEES_CHANGE
+  payloadJson  Json
+  payloadHash  String
+  amount       Float?
+  reason       String?   @db.Text
+  status       String    @default("PENDING") // PENDING | APPROVED | REJECTED | EXPIRED | CANCELLED
+  approverId   String?
+  approvalNote String?   @db.Text
+  expiresAt    DateTime
+  resolvedAt   DateTime?
+  executedAt   DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  org       Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  initiator User         @relation("DualApprovalInit", fields: [initiatedBy], references: [id])
+  approver  User?        @relation("DualApprovalAck", fields: [approverId], references: [id])
+
+  @@index([orgId, status])
+}
+
+// ============================================
+// PAGADORIA — ASAAS + KYC + COBRANÇA (Fase 1b)
+// ============================================
+
+// Subconta Asaas white-label da Organization (criada via POST /v3/accounts).
+// Armazena walletId + apiKey encrypted + status KYC.
+model AsaasAccount {
+  id                    String    @id @default(cuid())
+  orgId                 String    @unique
+  asaasId               String    @unique
+  walletId              String    @unique
+  accountNumber         String?
+  apiKeyEncrypted       String    @db.Text
+  apiKeyIvBase64        String
+  apiKeyTagBase64       String
+  personType            String // PHYSICAL | LEGAL
+  kyc                   Json // snapshot do payload submetido (sem secrets)
+  status                String    @default("PENDING") // PENDING | AWAITING_DOCS | AWAITING_APPROVAL | APPROVED | REJECTED | BLOCKED
+  rejectionReason       String?   @db.Text
+  generalStatus         String?
+  documentationStatus   String?
+  commercialInfoStatus  String?
+  bankAccountInfoStatus String?
+  lastStatusCheckAt     DateTime?
+  approvedAt            DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  org       Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  documents AsaasAccountDocument[]
+}
+
+// Documentos KYC pendentes/enviados — mirror do GET /v3/myAccount/documents.
+model AsaasAccountDocument {
+  id              String    @id @default(cuid())
+  accountId       String
+  asaasDocumentId String
+  type            String // IDENTIFICATION | ADDRESS_PROOF | SOCIAL_CONTRACT | SELFIE | CUSTOM
+  title           String
+  description     String?
+  status          String    @default("NOT_SENT") // NOT_SENT | PENDING | APPROVED | REJECTED
+  rejectionReason String?
+  fileName        String?
+  fileUrl         String?
+  fileMime        String?
+  fileSizeBytes   Int?
+  uploadedAt      DateTime?
+  reviewedAt      DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  account AsaasAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@unique([accountId, type])
+  @@index([accountId, status])
+}
+
+// Cliente Asaas (pagador) — unificado por org. Dedupe por CPF/CNPJ.
+model AsaasCustomer {
+  id                String    @id @default(cuid())
+  orgId             String
+  asaasId           String
+  name              String
+  cpfCnpj           String
+  email             String?
+  mobilePhone       String?
+  addressJson       Json?
+  origin            String    @default("manual") // manual | deal_sync | webhook_sync
+  sourceDealId      String?
+  externalReference String?
+  lastSyncedAt      DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  org     Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  charges CommissionCharge[]
+
+  @@unique([orgId, asaasId])
+  @@unique([orgId, cpfCnpj])
+  @@index([orgId, name])
+}
+
+// Cobrança de comissão — pode estar vinculada a Deal ou ser avulsa.
+model CommissionCharge {
+  id                  String    @id @default(cuid())
+  orgId               String
+  dealId              String?
+  contractId          String?
+  asaasCustomerId     String
+  asaasPaymentId      String    @unique
+  asaasInstallmentId  String?
+  kind                String    @default("commission") // commission | avulsa | aluguel | outros
+  billingType         String // PIX | BOLETO
+  value               Float
+  netValue            Float?
+  originalDueDate     DateTime
+  currentDueDate      DateTime
+  status              String    @default("PENDING") // ver mapa canônico no plano
+  asaasStatus         String
+  description         String?
+  invoiceUrl          String?
+  bankSlipUrl         String?
+  identificationField String?
+  pixQrCodePayload    String?   @db.Text
+  pixQrCodeImage      String?   @db.Text
+  splitJson           Json?
+  payerSnapshot       Json?
+  beneficiarySnapshot Json?
+  cancelledAt         DateTime?
+  refundedAt          DateTime?
+  paidAt              DateTime?
+  lastEventAt         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  org        Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  deal       Deal?               @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  contract   Contract?           @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  customer   AsaasCustomer       @relation(fields: [asaasCustomerId], references: [id])
+  events     AsaasWebhookEvent[]
+  publicLink ChargePublicLink?
+
+  @@index([orgId, status])
+  @@index([orgId, currentDueDate])
+  @@index([dealId])
+  @@index([contractId])
+  @@index([asaasCustomerId])
+}
+
+// Log imutável de webhooks Asaas — idempotência via asaasEventId.
+model AsaasWebhookEvent {
+  id              String    @id @default(cuid())
+  orgId           String
+  asaasEventId    String    @unique
+  event           String
+  asaasPaymentId  String?
+  chargeId        String?
+  payloadJson     Json
+  receivedAt      DateTime  @default(now())
+  processedAt     DateTime?
+  processingError String?
+
+  org    Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  charge CommissionCharge? @relation(fields: [chargeId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, event])
+  @@index([asaasPaymentId])
+}
+
+// Configurações financeiras da org — taxas, overprice, descontos, branding.
+model OrgFinancialSettings {
+  id                   String   @id @default(cuid())
+  orgId                String   @unique
+  // Platform fee (Fase 3)
+  platformFeePercent   Float    @default(0)
+  platformFeeWalletId  String?
+  // Overprice
+  overpricePolicy      String   @default("none") // none | absorb | asaas_fee | custom
+  overpriceType        String?
+  overpriceValue       Float?
+  overpriceRoundTo     String?  @default("cents")
+  // Descontos (presets em JSON array)
+  discountPresets      Json     @default("[]")
+  // Multa / juros (limites legais: fine ≤ 2%, juros ≤ 1%/mês)
+  finePercent          Float    @default(2.0)
+  finePolicy           String   @default("percentage")
+  interestPercentMonth Float    @default(1.0)
+  // Taxas Asaas cacheadas (display)
+  asaasFeePixCents     Int      @default(199)
+  asaasFeeBoletoCents  Int      @default(349)
+  asaasFeeCardPercent  Float    @default(2.99)
+  asaasFeeCardCents    Int      @default(49)
+  // Dual control (valores em centavos; Int suporta até ~R$ 21M)
+  dualApprovalCapCents Int      @default(5000000)
+  hardCapCents         Int      @default(10000000)
+  // Branding (página pública)
+  brandLogoUrl         String?
+  brandPrimaryColor    String?  @default("#0f172a")
+  brandDisplayName     String?
+  brandSupportEmail    String?
+  brandSupportPhone    String?
+  // Defaults de notificação (NotificationDisabled do Asaas)
+  notifyEmail          Boolean  @default(true)
+  notifySms            Boolean  @default(false)
+  defaultDueDays       Int      @default(7)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// Link público de pagamento — URL /pay/[token] com branding.
+model ChargePublicLink {
+  id            String    @id @default(cuid())
+  chargeId      String    @unique
+  publicToken   String    @unique
+  brandSnapshot Json
+  lastViewedAt  DateTime?
+  viewCount     Int       @default(0)
+  createdAt     DateTime  @default(now())
+
+  charge CommissionCharge @relation(fields: [chargeId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// PAGADORIA — TRANSFERÊNCIAS + CONCILIAÇÃO (Fase 3)
+// ============================================
+
+// Transferências (saque) da subconta Asaas → conta bancária da org.
+model AsaasTransfer {
+  id              String    @id @default(cuid())
+  orgId           String
+  asaasTransferId String    @unique // tra_xxx
+  value           Float
+  netValue        Float?
+  transferFee     Float?
+  type            String // PIX | TED
+  status          String // PENDING | DONE | FAILED | CANCELLED
+  pixAddressKey   String?
+  pixKeyType      String? // CPF | CNPJ | EMAIL | PHONE | RANDOM
+  ownerName       String? // nome do destinatário (validado via pix validation)
+  ownerCpfCnpj    String?
+  bankAccountJson Json?
+  requestedBy     String
+  scheduledDate   DateTime?
+  effectiveDate   DateTime?
+  description     String?
+  failureReason   String?   @db.Text
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [requestedBy], references: [id])
+
+  @@index([orgId, status])
+  @@index([orgId, createdAt])
+}
+
+// Conciliação — match entre lançamentos do extrato Asaas e cobranças locais.
+model BankReconciliation {
+  id                     String    @id @default(cuid())
+  orgId                  String
+  financialTransactionId String // id do extrato Asaas (pode ser hash se sem id)
+  type                   String // PAYMENT_RECEIVED | PAYMENT_FEE | TRANSFER | REFUND | CHARGEBACK | OTHER
+  value                  Float
+  date                   DateTime
+  description            String?   @db.Text
+  asaasPaymentId         String? // se type=PAYMENT_RECEIVED
+  matchedChargeId        String?
+  status                 String    @default("pending") // pending | matched | ignored | manual
+  notes                  String?   @db.Text
+  matchedAt              DateTime?
+  matchedBy              String? // userId
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User?        @relation(fields: [matchedBy], references: [id], onDelete: SetNull)
+
+  @@unique([orgId, financialTransactionId])
+  @@index([orgId, status])
+  @@index([orgId, date])
+  @@index([matchedChargeId])
 }

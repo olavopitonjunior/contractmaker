@@ -7,10 +7,12 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2, ShieldCheck, Copy } from "lucide-react";
+import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2, ShieldCheck, Copy, Wallet } from "lucide-react";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
 import type { Assignment, DocumentKind } from "@/lib/forms/extracted-to-form";
 import { CertidoesTab } from "@/components/pipeline/CertidoesTab";
+import { CommissionChargeDialog } from "@/components/pipeline/CommissionChargeDialog";
+import { CommissionChargeList } from "@/components/pipeline/CommissionChargeList";
 import { toast } from "sonner";
 import Link from "next/link";
 import {
@@ -98,6 +100,8 @@ export function DealDetail({ deal }: DealDetailProps) {
   const [generating, setGenerating] = useState(false);
   const [signing, setSigning] = useState(false);
   const [confirmDuplicateOpen, setConfirmDuplicateOpen] = useState(false);
+  const [chargeDialogOpen, setChargeDialogOpen] = useState(false);
+  const [chargeRefreshKey, setChargeRefreshKey] = useState(0);
 
   async function doGenerateContract() {
     setGenerating(true);
@@ -265,6 +269,10 @@ export function DealDetail({ deal }: DealDetailProps) {
           </TabsTrigger>
           <TabsTrigger value="contratos">
             Contratos ({deal.contracts.length} {deal.contracts.length === 1 ? "versão" : "versões"})
+          </TabsTrigger>
+          <TabsTrigger value="pagamentos">
+            <Wallet className="h-3.5 w-3.5 mr-1" />
+            Pagamentos
           </TabsTrigger>
         </TabsList>
 
@@ -451,7 +459,40 @@ export function DealDetail({ deal }: DealDetailProps) {
             )}
           </div>
         </TabsContent>
+
+        <TabsContent value="pagamentos" className="mt-4">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div>
+                <h3 className="text-lg font-semibold">Cobranças</h3>
+                <p className="text-sm text-muted-foreground">
+                  Gere cobranças de comissão a partir do contrato aprovado.
+                </p>
+              </div>
+              <Button
+                onClick={() => setChargeDialogOpen(true)}
+                disabled={!deal.contracts.some((c) => c.status === "aprovado")}
+              >
+                <Wallet className="h-4 w-4 mr-1" />
+                Gerar cobrança
+              </Button>
+            </div>
+            {!deal.contracts.some((c) => c.status === "aprovado") && (
+              <div className="p-3 border rounded-md bg-amber-50 text-sm text-amber-900">
+                Nenhum contrato aprovado ainda. Aprove um contrato antes de gerar cobrança.
+              </div>
+            )}
+            <CommissionChargeList key={chargeRefreshKey} dealId={deal.id} />
+          </div>
+        </TabsContent>
       </Tabs>
+
+      <CommissionChargeDialog
+        dealId={deal.id}
+        open={chargeDialogOpen}
+        onOpenChange={setChargeDialogOpen}
+        onCreated={() => setChargeRefreshKey((k) => k + 1)}
+      />
 
       <AlertDialog open={confirmDuplicateOpen} onOpenChange={setConfirmDuplicateOpen}>
         <AlertDialogContent>

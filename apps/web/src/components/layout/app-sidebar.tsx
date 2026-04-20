@@ -29,6 +29,7 @@ import {
   Settings,
   LogOut,
   ChevronUp,
+  Wallet,
 } from "lucide-react";
 
 const navItems = [
@@ -46,6 +47,11 @@ const navItems = [
     title: "Templates",
     url: "/templates",
     icon: FileStack,
+  },
+  {
+    title: "Financeiro",
+    url: "/financeiro",
+    icon: Wallet,
   },
   {
     title: "Configurações",

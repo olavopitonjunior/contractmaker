@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { AgentSettings } from "@/components/settings/AgentSettings";
-import { BookOpen, Palette, Lightbulb, ShieldCheck, Sparkles } from "lucide-react";
+import { BookOpen, Palette, Lightbulb, ShieldCheck, Sparkles, KeyRound, Users } from "lucide-react";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -50,6 +50,18 @@ export default async function SettingsPage() {
             <Link href="/settings/ai-usage">
               <Sparkles className="h-4 w-4 mr-1" />
               Uso de IA
+            </Link>
+          </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/settings/seguranca">
+              <KeyRound className="h-4 w-4 mr-1" />
+              Segurança
+            </Link>
+          </Button>
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/settings/membros">
+              <Users className="h-4 w-4 mr-1" />
+              Membros
             </Link>
           </Button>
         </div>

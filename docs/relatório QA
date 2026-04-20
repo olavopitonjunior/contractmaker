@@ -1,248 +1,192 @@
-# RELATÓRIO DE QA DEFINITIVO — 18/04/2026
-## [QA DEFINITIVO 18/04] Venda Caraguatatuba
+# 📋 RELATÓRIO FINAL — QA Módulo Pagadoria Contractmaker
+**Commit:** 4ca02230 | **Branch:** feat/pagadoria-fase-1a-security | **Data:** 19/04/2026 | **Executor:** Claude (QA Sênior automatizado)
 
 ---
 
-## 0. NOTA METODOLÓGICA CRÍTICA
+## Tabela Executiva
 
-**O upload de documentos locais foi bloqueado pelo ambiente** (`file_upload` retorna `Not allowed` em qualquer path). Por isso, **o Bloco 2 (Upload Massivo + OCR Batch F5) não pôde ser testado ao vivo**. Contudo, ao navegar para o deal criado, **constatei que 11 documentos já existiam no banco** (RG, CNH, Certidão de Casamento, IPTU, Matrícula, Comprovante de Residência) com OCR completo em 100% de confiança — confirmando que o pipeline OCR já rodou com sucesso em sessões anteriores. Os dados do formulário foram preenchidos via fallback da Seção 0.2. **FIX-B (agrupamento de docs por parte na aba Documentos) validado indiretamente pelos cards pré-existentes.**
-
-Todos os demais blocos foram executados normalmente.
-
----
-
-## 1. TABELA EXECUTIVA
-
-| # | Bloco / Passo | Status | Evidência |
+| # | Bloco | Resultado | Observações |
 |---|---|---|---|
-| 1.1 | Criar formulário `/forms/new` | PASS | FORM_TOKEN=`cmo4frdxm00038snbjsy40mar` |
-| 1.2 | Dropzone visual + step indicator | PASS | 8 etapas visíveis, botão "Aplicar aos campos (0)" disabled |
-| 2.x | Upload + OCR Batch (F5) | BLOCKED | `file_upload` retorna "Not allowed" no ambiente de teste |
-| 3.1 | Etapa 2 — Vendedor | PASS | Preenchido com Tiago Zucarelli (fallback); estado civil "Divorciado" |
-| 3.2 | Etapa 3 — Comprador + FIX-007 cônjuge | **PASS** | Seção "Dados do Cônjuge *" com asterisco vermelho em Nome+CPF do Cônjuge |
-| 3.3 | Etapa 4 — Imóvel + SQL condicional (P2-7) | **PASS** | UF=SP mostra "Inscrição IPTU" + "SQL (Setor-Quadra-Lote)", não mostra "Inscrição Municipal" |
-| 3.5 | Etapa 6 — Pagamento + BUG-NEW-001 | **PASS** | Banner verde "Soma das parcelas: R$ 215.000,00 / Valor total: R$ 215.000,00" — BUG-NEW-001 NÃO reproduz |
-| 3.6 | Etapa 8 — Foro Arbitragem + Corretora PF (H.16) | **PASS** | Arbitragem selecionado; PF mostra "Nome do Corretor"/"CPF do Corretor"/CRECI "Ex: 199.905" |
-| 3.7 | Finalizar + DEAL_ID | PASS | DEAL_ID=`cmo4frdyg00058snbfvbdxs9o`, CONTRACT_V1_ID=`cmo4g09fv0001botk6odxggo5` |
-| 4.1 | Pipeline Kanban | PASS | Deal em "Confecção de Contrato", R$ 215.000 |
-| 4.2 | 4 abas do deal | PASS | Dados / Documentos (11) / Certidões / Contratos (1 versão) |
-| 4.3 | Aba Documentos agrupada (FIX-B) | PASS | Parte Vendedora (4), Parte Compradora (2), Imóvel (3), Outros (13); badges OCR 85-100% confiança |
-| 5.3 | Adicionar diligenciado PF (Myrielle) | PASS | POST /diligenciados 201; badge "1"; card mostra nome+Outro+PF+CPF+SP+Caçapava+nasc+obs |
-| 5.4 | Adicionar diligenciado PJ (Empresa Avalista) | PASS | Dialog troca campo CPF→CNPJ; campo data_nascimento some; badge "2" |
-| 5.5 | Delete-aware (FIX-F3.5) | **PASS** | DELETE retorna 409 com msg "Esta pessoa já tem certidões extraídas. Não pode ser removida — os jobs ficariam órfãos." |
-| 6.1 | GET /plan?full=1 | PASS | 54 jobs, 4 skipped, 2 diligenciados, catalog 39, ufs [BA,DF,GO,MG,MS,MT,PR,RJ,RS,SC,SP], totalCost 258 |
-| 6.2 | Grupos no dialog | PASS | Vendedor 1, Comprador 1, Diligenciado 1 (PF), Diligenciado 2 (PJ) |
-| 6.3 | Skipped jobs | PASS | 4x tribunal/tjsp/eproc — "E-Proc SP sem cobertura Infosimples — extrair no portal oficial com login GOV.BR" |
-| 6.4 | Botões Plano padrão/Marcar/Desmarcar | PASS | "54 de 54 marcadas" contador atualiza |
-| 6.5 | Picker extras (F1) | **PASS** | Filtros UF (BA/DF/GO/MG/MS/MT/PR/RJ/RS/SC/SP) + categoria (federal/civel/trabalhista/fiscal/protesto/municipal) + busca; seções FEDERAL/ESTADUAL/MUNICIPAL; itens já selecionados com badge "já selecionada" |
-| 6.8 | POST /certidoes + 202 | PASS | 202 Accepted; batchId `0eed09fb-4589-4bce-a328-b5fc928ddb78`; 54 jobs criados |
-| 6.9 | Idempotência (FIX-K) | **PASS** | 2ª POST simultâneo retorna 409 Conflict |
-| 7.1 | Polling 2s + transições | PASS | pending→fetching→success/failed observadas |
-| 7.2 | Stats card | PASS | "14/54 sucesso · 36 falhas · 4 em andamento · R$ 0,86 · Latência mediana 27s" |
-| 7.3 | 5 ícones por card (FIX-NEW-006) | PASS | Ver detalhes / Tentar novamente / Abrir PDF / Baixar PDF / Remover — todos presentes; Edit (âmbar) em cards inconsistent_input |
-| 7.4 | Modal detalhes (FIX-R) | **PASS** | Header com ícone status; badges "Negativa (nada consta)" + "Código 200"; grid Endpoint/Criado em/Latência/Custo; seção "Detalhes" + seção "Documento" com iframe PDF embebido |
-| 7.5 | Validade em verde | PASS | Cards success com Emissão/Validade renderizados |
-| 8.1 | Sweeper Recuperar travadas (P1-5) | **PASS** | Confirm dialog exibe: "Analisar 34 job(s) travado(s): • 0 serão promovidos para sucesso (sem custo) • 34 serão marcados como falha e liberados para retry. Confirma?"; POST /sweep retorna OK |
-| 8.2 | Retry disponível em cards failed | PASS | Ícone RefreshCw visível |
-| 9.1 | Aba Documentos — certidões integradas | PASS | URL Vercel Blob `givqfaqs42qdazcu.public.blob.vercel-storage.com/deal-certidoes/...` |
-| 9.2 | Gerar relatório PDF | PASS | POST /report 200, toast "Relatório gerado" |
-| 9.3 | Baixar todas (ZIP) | **FAIL** | GET /download-all retorna 503 Service Unavailable (POST também) |
-| 9.4 | Compartilhar — Gerar link + revogar | PASS | POST /share 200; URL `/s/certidoes/cmo4gmoqx0003k0mxqefgekkq`; expira 25/04/2026; botões Copiar/Revogar; GET /s/certidoes/{token} retorna 200 |
-| 10.1 | Bell no header + contagem | PASS | Sheet abre com lista; badge numérico correto |
-| 10.2 | Notificação agregada (F4) | **PARTIAL** | Título "Batch de 54 certidões concluído" + body "12 ✓ · 42 falha(s)" — porém múltiplas notifs duplicadas para o MESMO batch (5 de "1min atrás") |
-| 11.2 | Template Financiamento (FIX-001) | **PASS** | Header "CCV - Financiamento Imobiliário"; "MODALIDADE: FINANCIAMENTO IMOBILIÁRIO" — auto-detectado por alienacao_fiduciaria > 0 |
-| 11.3 | Foro arbitragem (FIX-006) | **PASS** | Contrato contém "arbitragem", "TASP", "ACORDIA", "Lei 9.307"; NÃO contém "foro da comarca"/"foro da situação" |
-| 11.4 | Auto-save (FIX-C) | PASS | Indicator "Salvando..." → "Salvo" no header após edição |
-| 11.7 | Chat IA leitura | N/A | Tempo |
-| 11.8 | Chat IA edição (FIX-002+002b+D) | **PASS** | "Altere a multa moratória de 2% para 3%" → HTML atualiza (has3pct:true, has2pct:false); resposta com EXATAMENTE 3 headings: `## Alterações Realizadas`, `## Justificativa`, `## Verificação` |
-| 11.9 | Chat IA sugestão (FIX-003+E) | N/A | Tempo (não testado neste run) |
-| 13.2 | Export PDF (FIX-005+A) | **PASS** | URL `https://givqfaqs42qdazcu.public.blob.vercel-storage.com/exports/...contract.pdf` — Vercel Blob |
-| 13.3 | Export DOCX | PASS | 2x POST /export 200 (network logs) |
-| 13.4 | Aprovação — ApprovalReviewDialog | PASS | Dialog "Revisão necessária antes de aprovar" com "56 comentários abertos" + "Há erros que impedem a aprovação" |
-| 14.1 | Console sem erros | PASS | read_console_messages com filtro error → 0 mensagens |
-| 14.2 | Páginas /settings/* sem 500 | PASS | /pipeline, /deals/{id}, /contracts/{id}, /clauses, /templates, /settings, /settings/certidoes, /settings/ai-usage, /settings/document-styles, /settings/knowledge-base, /forms, /clauses/proposals — todos 200 |
-| 16.1 | P0-A: TRF3/PGE-SP falso-negativo | **PASS (sem regressão)** | Todos TRF3/PGE-SP failed têm `header.billable=false`, `attachmentId=null`, `costCents=0`; nenhum verde com billable=false |
-| 16.2 | P0-B: PGFN "Indeterminado" | **PASS (sem regressão)** | 3 PGFN success com `debitos_rfb=false`/`debitos_pgfn=false` → situacao "negativa" + attachmentId presente |
-| 16.3 | P1-1: TJSP pedido-cível | **FAIL — REGRESSÃO DETECTADA** | 16/16 jobs TJSP pedido-cível falharam com resultCode 606 "Parâmetros obrigatórios não foram enviados" APESAR do payload incluir cpf, data_nascimento, nome, nome_mae, instancia, tipo_certidao, finalidade. Evidência no `requestPayload` inspecionado. |
-| 16.5 | P1-5: Sweep dry-run | **PASS** | Confirm com resumo detalhado como especificado |
-| 16.9 | Health endpoint (P2-1) | **PASS** | infosimples.ok=true, latencyMs=2443; govbr.active=true, expiresAt "22/05/2027 16:26" |
-| 16.14 | Corretora PF (P2-8) | **PASS** | Radio "Imobiliária (PJ) / Corretor autônomo (PF)"; labels trocam; CRECI placeholder "Ex: 199.905" |
-| 16.16 | Billing honesto (H.18) | **PASS** | Todos jobs failed (resultCode 602/606/615) têm costCents=0 |
+| 1 | Smoke inicial | ⚠ PARCIAL | Login OK, zero erros console, mas **sidebar sem item "Financeiro"** |
+| 2 | Segurança (2FA + audit) | ✅ PASS | 2FA setup OK, elevation OK, audit log OK, trusted devices OK |
+| 3 | RBAC Membros (admin 2) | ✅ PASS com BUG | Convite enviado, membro criado. Bug no menu de remoção (loop elevation) |
+| 4 | KYC Onboarding | ❌ FAIL | Upload de doc retorna ELEVATION_REQUIRED sem abrir dialog; ASAAS_ERROR genérico |
+| 5 | Dashboard financeiro | ⚠ BLOCKED | KYC AWAITING_DOCS → dashboard mostra gate, não KPIs |
+| 6 | Cobrança from Deal | ⚠ BLOCKED | Nenhum deal com "contrato aprovado" encontrado nos deals disponíveis |
+| 7 | Cobrança avulsa | ❌ FAIL | Criação de cliente bloqueada: "Conta Asaas não aprovada" |
+| 8 | Clientes CRUD | ⚠ BLOCKED | Dependente de KYC APPROVED |
+| 9 | Extrato | ⚠ BLOCKED | Dependente de KYC APPROVED |
+| 10 | Transfer comum (R$ 500) | ⚠ BLOCKED | Dependente de KYC APPROVED e saldo |
+| 11 | Dual approval (R$ 60k) | ⚠ BLOCKED | Dependente de KYC + admin 2 com sessão funcional |
+| 12 | Conciliação | ⚠ BLOCKED | Dependente de KYC APPROVED |
+| 13 | Relatórios (4 tabs) | ⚠ BLOCKED | Dependente de KYC APPROVED |
+| 14 | Taxas + branding | ✅ PASS com BUG | Preview reativo ✅, contraste WCAG ✅, mas validação de multa retorna mensagem genérica |
+| 15 | Página pública /pay | ⚠ BLOCKED | Sem cobranças criadas, sem token |
+| 16 | Notifs + devices | ✅ PASS | Sheet de notif OK, marcar como lidas OK, trusted devices OK |
+| 17 | Sanity outras páginas | ✅ PASS com OBS | Zero erros console, features OK. **Mobile não responsivo (sidebar não colapsa)** |
 
 ---
 
-## 2. BUGS ENCONTRADOS
-
-### BUG-NEW-E2E-001 — Download ZIP retorna 503
-- **Severidade**: **critical** (quebra entrega final ao cliente)
-- **Bloco**: 9.3
-- **URL**: `POST /api/deals/{id}/certidoes/download-all`
-- **Observado**: HTTP 503 Service Unavailable em GET e POST
-- **Esperado**: 200 + Content-Type application/zip, magic bytes PK
-- **Impacto**: Usuário não consegue baixar o pacote completo de certidões para entregar ao banco/cliente
-
-### BUG-NEW-E2E-002 — TJSP pedido-cível retorna 606 em 100% dos casos (regressão P1-1)
-- **Severidade**: **blocker**
-- **Bloco**: 16.3 / 7.x
-- **URL**: `POST /api/deals/{id}/certidoes` (todos 16 jobs TJSP)
-- **Observado**: Infosimples retorna 606 "Parâmetros obrigatórios não foram enviados" apesar do `requestPayload` já conter todos os campos obrigatórios (cpf, data_nascimento, nome, nome_mae, instancia, tipo_certidao, finalidade, email)
-- **Evidência**:
-  ```json
-  {"endpoint":"tribunal/tjsp/pedido-civel","resultCode":606,
-   "requestPayload":{"cpf":"34044417881","data_nascimento":"1985-04-10",
-    "nome":"Tiago Alegretti Zucarelli","nome_mae":"Valéria Alegretti Zucarelli",
-    "tipo_certidao":"familia-sucessoes","instancia":1,
-    "finalidade":"Instrucao de compra e venda de imovel"}}
-  ```
-- **Impacto**: Due diligence cível em SP completamente inoperante — 16 jobs falham, corretor precisa ir ao portal manualmente para todos
-- **Hipótese**: Payload pode ter mudança recente de campo obrigatório no lado Infosimples (talvez requer `rg`, ou `endereco`, ou `cpf_solicitante` distinto do `cpf`) que precisa ser mapeado
-
-### BUG-NEW-E2E-003 — Notificações agregadas duplicadas (F4 semi-regressão)
-- **Severidade**: **minor**
-- **Bloco**: 10.2
-- **Observado**: 5 notificações "Batch de 54 certidões concluído — 12 ✓ · 42 falha(s)" criadas para o mesmo batchId, todas em "1min atrás"
-- **Esperado**: 1 notificação agregada por batch (isso era o ponto de F4)
-- **Evidência**: `/api/notifications?limit=20` retorna múltiplas entradas com mesmo `metadata.batchId`
-- **Impacto**: Spam no sino; badge infla contador; corretor recebe 5 notifs por ação
-
-### BUG-NEW-E2E-004 — CND PGE-SP sempre 602
-- **Severidade**: **major** 
-- **Bloco**: 7.x
-- **Observado**: 4/4 jobs `pge-sp/cndt` falharam com resultCode 602 "O serviço informado na URL não é válido. Erro interno do sistema"
-- **Esperado**: Sucesso pelo menos em alguns targets (é uma certidão estadual pessoal comum)
-- **Impacto**: Cobertura PGE-SP zerada; inconsistência: fragmento "pge-sp" sugere endpoint diferente do CNDT — pode ser route mismatch no roteador Infosimples
-
-### BUG-NEW-E2E-005 — TRF Cível Justiça Federal 100% falha
-- **Severidade**: **major**
-- **Bloco**: 7.x
-- **Observado**: `tribunal/trf/cert-unificada` = 4/4 failed; TRF3 = 4/4 failed (resultCode 600/602/615)
-- **Impacto**: Zero cobertura federal cível; contudo o billing é honesto (custo 0)
+## Bugs Encontrados
 
 ---
 
-## 3. REGRESSÃO DOS FIXES
+### BUG 1 — Item "Financeiro" ausente da sidebar principal
 
-| Fix | Status | Notas |
-|---|---|---|
-| FIX-001 (modalidade financiamento) | ✅ | "CCV - Financiamento Imobiliário" auto-detectado |
-| FIX-002 (chat altera HTML) | ✅ | HTML passa a conter 3%, some 2% |
-| FIX-002b (3 headings literais) | ✅ | `## Alterações Realizadas` / `## Justificativa` / `## Verificação` |
-| FIX-003 (<del>/<ins> pareado) | ⏸ | Não testado nesta sessão |
-| FIX-005 (export PDF+DOCX) | ✅ | PDF baixou com URL Vercel Blob |
-| FIX-006 (foro arbitragem) | ✅ | TASP, ACORDIA, Lei 9.307 presentes; "foro da comarca" ausente |
-| FIX-007 (cônjuge com asterisco) | ✅ | "Nome do Cônjuge *" e "CPF do Cônjuge *" |
-| FIX-A (Vercel Blob storage) | ✅ | URLs `givqfaqs42qdazcu.public.blob.vercel-storage.com/...` |
-| FIX-B (DocumentsTab certidões) | ✅ | Agrupamento Parte Vendedora/Compradora/Imóvel/Outros visível |
-| FIX-C (auto-save editor) | ✅ | Indicador "Salvo" após edição |
-| FIX-D (chat tool-forcing) | ✅ | Observado pela mudança de HTML |
-| FIX-K (idempotência POST) | ✅ | 409 Conflict no 2º POST |
-| FIX-NEW-006 (5 ícones por card) | ✅ | Eye/Open/Download/Retry/Trash presentes |
-| FIX-R (modal detalhes) | ✅ | Iframe PDF + grid metadados + seção detalhes |
-| F1 (picker UF + categoria) | ✅ | Filtros funcionais, "já selecionada" para dup |
-| F2 (dialog interativa jobs[]) | ✅ | Grupos por target, 54 jobs via POST explícito |
-| F3 (diligenciados CRUD) | ✅ | PF+PJ + proteção 409 no delete com certidões |
-| F4 (sino + notif agregada) | ⚠️ PARTIAL | Notif agregada existe mas foi duplicada 5× |
-| F5 (OCR batch + cache) | ⏸ BLOCKED | Ambiente não permite upload |
-| FIX P1-5 (sweep dry-run) | ✅ | Confirm dialog com contagem detalhada |
-| FIX P2-1 (health endpoint) | ✅ | Retorna infosimples.ok + govbr.active |
-| FIX P2-7 (imóvel UF-condicional) | ✅ | SP mostra SQL, não Inscrição Municipal |
-| FIX P2-8 (corretora PF) | ✅ | Radio + labels dinâmicos + placeholder "Ex: 199.905" |
-| FIX H.18 (billing honesto) | ✅ | Todos failed têm costCents=0 |
+**Severidade:** major  
+**Bloco:** 1.3  
+**URL:** `/pipeline`  
+**Comportamento observado:** A sidebar de navegação contém apenas Pipeline, Cláusulas, Templates, Configurações. Não há item "Financeiro" (ícone Wallet) como especificado no bloco 1.3 do QA plan. A rota `/financeiro` só é acessível via URL direta.  
+**Comportamento esperado:** Sidebar deve ter item visível "Financeiro" com ícone Wallet que navega para `/financeiro`.  
+**Evidência:** Screenshot ss_58444dug9 mostra sidebar sem item Financeiro. Leitura do DOM confirma: `list > [Pipeline, Cláusulas, Templates, Configurações]`.  
+**Hipótese:** O item de menu do módulo Pagadoria não foi adicionado ao componente de navegação lateral, ou está condicional ao KYC status e oculto quando AWAITING_DOCS.
 
 ---
 
-## 4. MÉTRICAS DE PERFORMANCE
+### BUG 2 — KYC Upload: ELEVATION_REQUIRED sem dialog de elevation
 
-- **Upload→OCR 6 docs**: não mensurado (upload bloqueado), mas os 11 docs pré-existentes tinham todos 85-100% de confiança
-- **Batch de 54 certidões**: ~180s até plateau estável
-- **Latência mediana (API)**: 27s, consistente com TRFs e CEATs
-- **Tempo total** (form criado → última validação): ~18min
-- **Custo total**: R$ 0,86 (14 success × média R$ 0,055 + alguns zerados de retries sem cobrança)
-
----
-
-## 5. ANÁLISE CRÍTICA DO FLUXO DE CERTIDÕES
-
-### 5.1 Inventário de cobertura
-
-| Target | Endpoint | Gerado? | Status final | Latência | Custo | Observações |
-|---|---|---|---|---|---|---|
-| Vendedor 1 | receita-federal/pgfn | sim | success | ~15s | R$ 0,04 | Negativa, PDF ok |
-| Vendedor 1 | tst/cndt | sim | success | ~12s | R$ 0,04 | Negativa |
-| Vendedor 1 | trf/cert-unificada | sim | failed | 42s | R$ 0,00 | resultCode 600 |
-| Vendedor 1 | trf3/certidao | sim | failed | ~40s | R$ 0,00 | resultCode 602 |
-| Vendedor 1 | trt2/ceat (físico) | sim | success | ~40s | R$ 0,04 | Negativa |
-| Vendedor 1 | trt2/ceat-digital | sim | success | 36s | R$ 0,04 | Negativa (inspecionado no modal) |
-| Vendedor 1 | trt15/ceat | sim | success | ~30s | R$ 0,04 | Negativa |
-| Vendedor 1 | pge-sp/cndt | sim | failed | 4s | R$ 0,00 | resultCode 602 serviço inválido |
-| Vendedor 1 | cenprot-sp/protestos | sim | failed | 504s | R$ 0,00 | Dados divergentes / timeout |
-| Vendedor 1 | tjsp/pedido-civel × 4 | sim | failed | ~0s | R$ 0,00 | **REGRESSÃO P1-1** |
-| Vendedor 1 | tjsp/eproc | skipped | — | — | — | Correto; sem cobertura Infosimples |
-| Comprador 1 | *(mesmo conjunto)* | sim | mixed | — | — | Análogo |
-| Diligenciada Myrielle | *(mesmo conjunto PF)* | sim | mixed | — | — | PGFN success, restante variado |
-| Diligenciada Empresa LTDA | *(conjunto PJ)* | sim | mixed | — | — | PGFN deu "positiva" → status failed (comportamento correto) |
-
-### 5.2 Análise por endpoint
-
-- **PGFN**: 3/4 success (~15s, R$ 0,04). Comportamento esperado. 1 PJ com débito → virou positiva (status=failed, billing=0) — OK.
-- **CNDT (TST)**: 2/4 success (~12s). Uma falha em PJ CNPJ inválido. OK.
-- **TRF Cível Unificada**: 0/4 success. **Preocupante** — todos os 4 falharam com códigos 600/602/615. 2 ainda em fetching no momento da captura. Portal pode estar instável.
-- **TRF3**: 0/4 success (resultCode 602 — billable false). Situação idêntica.
-- **CEAT TRT2 físico/digital**: 5/8 success. Bom desempenho.
-- **CEAT TRT15**: 2/4 success. Ok.
-- **PGE-SP**: **0/4 success — falha sistemática com resultCode 602** "serviço inválido". Suspeita de rota errada no cliente Infosimples.
-- **TJSP pedido-cível**: **0/16 success — regressão P1-1 confirmada**. Payload parece completo mas retorna 606.
-- **CENPROT SP**: 0/4 success; latências gigantes (504s) + "Dados divergentes". Portal instável ou bot detection.
-- **CND IPTU SP**: NÃO foi gerado — porque SQL estava vazio (Caraguatatuba não usa SQL). Comportamento correto da ausência.
-
-### 5.3 UX da tab Certidões — pontuações (1-5)
-
-- Clareza de status: **4** — cores verdes/vermelhas nítidas; badges "Dados divergentes"/"Erro interno do sistema" úteis
-- Ações por card: **5** — 5 ícones presentes, tooltips informativos
-- Modal de detalhes: **5** — iframe PDF embebido, badges de situação+código, grid de metadados — excelente
-- Polling: **4** — feedback contínuo; stats atualizam; não trava UI
-- Erros: **4** — mensagens humanas (não JSON); retry visível
-- Responsividade (54 cards): **3** — scroll longo, seria útil filtro por status/grupo
-
-### 5.4 Robustez
-
-- **Idempotência (FIX-K)**: ✓ 409
-- **Recovery (FIX-T / P1-5)**: ✓ sweeper com dry-run
-- **Stale data (FIX-S)**: não disparado, mas Button RefreshCw presente
-- **Cache OCR (F5)**: não testado (upload bloqueado)
-- **Notificação agregada (F4)**: ⚠️ existe mas duplicada
-- **Billing honesto (H.18)**: ✓ todos 6xx com costCents=0
-
-### 5.5 Issues específicas do módulo
-
-1. **BLOCKER — TJSP pedido-cível 16/16 falhas** (BUG-NEW-E2E-002)
-2. **CRITICAL — ZIP 503** (BUG-NEW-E2E-001)
-3. **MAJOR — PGE-SP 4/4 falhas** (BUG-NEW-E2E-004)
-4. **MAJOR — TRF Cível Unificada 4/4 falhas** (BUG-NEW-E2E-005)
-5. **MINOR — Notifs agregadas duplicadas** (BUG-NEW-E2E-003)
-
-### 5.6 Veredicto
-
-O módulo **funciona bem nos happy-paths federais (PGFN, CNDT, CEATs TRT2/TRT15)**, com UX de cards+modal+PDF iframe realmente excelente. Cobertura de due diligence entrega valor em ~30-40% dos endpoints SP. **Contudo, NÃO está pronto para uso real por corretor** enquanto TJSP pedido-cível estiver 100% quebrado — isso inviabiliza o produto no mercado mais importante (São Paulo, onde cível civil é obrigatório para compra-venda). **Prioridade 1 de fix**: BUG-002 (TJSP) + BUG-001 (ZIP). Depois, investigar PGE-SP e TRF.
+**Severidade:** critical  
+**Bloco:** 4.4  
+**URL:** `/financeiro/onboarding`  
+**Comportamento observado:** Ao clicar "Enviar" no slot de documentos, a API retorna ELEVATION_REQUIRED mas nenhum dialog de elevation é aberto para o usuário. O toast de erro aparece e o upload falha silenciosamente. Não há como elevar a sessão para KYC_EDIT a partir deste fluxo.  
+**Comportamento esperado:** Ao detectar ELEVATION_REQUIRED, deve abrir automaticamente o dialog de confirmação de identidade (senha + TOTP) e, após confirmar, tentar o upload novamente.  
+**Evidência:** Screenshot ss_2858buen4 mostra botão Enviar + toast "ELEVATION_REQUIRED" sem dialog. Confirmado via API call manual: `POST /api/security/elevation {scopes: ['KYC_EDIT']}` = 200 OK funciona via fetch direto.  
+**Hipótese:** O handler de upload não tem middleware de elevation integrado — faz o check de elevation mas não inicia o fluxo de UI para o usuário corrigir.
 
 ---
 
-## 6. IDs GERADOS (para cleanup)
+### BUG 3 — KYC Upload: Erro genérico "ASAAS_ERROR" sem detalhes
 
-- **FORM_TOKEN**: `cmo4frdxm00038snbjsy40mar`
-- **DEAL_ID**: `cmo4frdyg00058snbfvbdxs9o`
-- **CONTRACT_V1_ID**: `cmo4g09fv0001botk6odxggo5`
-- **BATCH_ID**: `0eed09fb-4589-4bce-a328-b5fc928ddb78`
-- **SHARE_TOKEN**: `cmo4gmoqx0003k0mxqefgekkq`
-- **Diligenciado 1** (Myrielle): `cmo4g3r7j0001yysmdkeikzvr`
-- **Diligenciado 2** (Empresa LTDA): `cmo4g577c0003yysmf192u08r`
-- **Attachments exemplares** (Vercel Blob): `/deal-certidoes/cmo4ga...`
+**Severidade:** major  
+**Bloco:** 4.4  
+**URL:** `/financeiro/onboarding`  
+**Comportamento observado:** Quando o upload chega à API Asaas, o erro retornado ao usuário é apenas "ASAAS_ERROR" sem mensagem descritiva do que rejeitou.  
+**Comportamento esperado:** Mensagem de erro com detalhe: ex. "Documento inválido — o Asaas requer [tipo de documento]" ou o texto original do erro Asaas traduzido.  
+**Evidência:** Toast "ASAAS_ERROR" em screenshot ss_3953rywtp.
 
 ---
 
-## 7. LIMITAÇÕES DESTE E2E
+### BUG 4 — KYC Gate inconsistente: sub-rotas acessíveis sem APPROVED
 
-1. **Upload bloqueado** no ambiente de teste — F5 (OCR batch + cache contentHash) não foi validado neste run; porém validado indiretamente pela presença de 11 docs OCR'd com 85-100% confidence no deal.
-2. **Tempo de polling** limitou validação de `awaiting_portal` (TJSP virou 606 antes de chegar a esse estado) e `aguardando_pdf`.
-3. **Chat IA sugestão (FIX-003)** não testado por restrição de tempo — apenas chat edição (FIX-002) foi executado.
-4. **Mobile resize** não foi executado por foco em cobertura funcional.
+**Severidade:** major (potencial security issue)  
+**Bloco:** 4.1 / 5.1  
+**URL:** `/financeiro/clientes`, `/financeiro/cobrancas`  
+**Comportamento observado:** Com KYC em status AWAITING_DOCS, a rota `/financeiro` mostra corretamente o KYC gate. Porém `/financeiro/clientes` e `/financeiro/cobrancas` são acessíveis e carregam normalmente.  
+**Comportamento esperado:** Todas as sub-rotas de `/financeiro/*` deveriam redirecionar para o KYC gate quando status ≠ APPROVED.  
+**Evidência:** Screenshots ss_58844bae2 (cobranças) e ss_78654cf9j (clientes) mostram páginas carregadas. As operações são bloqueadas a nível de API mas a UI não redireciona.  
+**Hipótese:** O middleware de KYC gate está aplicado apenas na rota `/financeiro` (index), não no layout compartilhado das sub-rotas.
+
+---
+
+### BUG 5 — Validação de multa > 2%: mensagem de erro genérica ao salvar
+
+**Severidade:** minor  
+**Bloco:** 14.3  
+**URL:** `/settings/pagamentos/taxas`  
+**Comportamento observado:** Ao definir multa por atraso = 5% e clicar Salvar, o servidor retorna toast vermelho "Body inválido" sem especificar qual campo violou qual regra.  
+**Comportamento esperado:** Mensagem clara: "Multa por atraso: máximo legal CDC é 2%. Valor informado: 5%." Idealmente com validação client-side bloqueando o input acima de 2 antes mesmo do submit.  
+**Evidência:** Screenshot ss_4847lm85l mostra toast "Body inválido" sem detalhes. O campo de input não mostra erro visual.  
+**Hipótese:** A API retorna HTTP 422 mas o frontend apenas mostra o texto genérico do campo `error` do body sem tratar o `details` da validação Zod.
+
+---
+
+### BUG 6 — Menu de ações de membro (⋮) abre elevation em loop infinito
+
+**Severidade:** major  
+**Bloco:** 3.8 / Limpeza  
+**URL:** `/settings/membros`  
+**Comportamento observado:** Ao clicar no botão "⋮" (ações) de um membro, o dialog de elevation "Confirme sua identidade" é aberto. Após confirmar com TOTP ou recovery code (toast "Identidade confirmada"), clicar novamente em "⋮" abre o dialog de elevation novamente. O menu dropdown com "Remover" nunca aparece.  
+**Comportamento esperado:** Após elevation confirmada (dentro dos 15 min de validade), clicar em "⋮" deve mostrar um dropdown com opções ("Alterar role", "Remover"). Não deve exigir nova elevation repetidamente.  
+**Evidência:** Screenshots ss_9935t9edy, ss_2962rod2r, ss_189586k3e mostram o loop. Workaround: remoção via `DELETE /api/org/members/{id}` funcionou com 200 OK.  
+**Hipótese:** O botão "⋮" está acionando o check de elevation a cada clique ao invés de verificar se já há sessão elevada válida. Pode ser um problema de encadeamento entre a elevação e o open do dropdown menu.
+
+---
+
+### BUG 7 — Layout não responsivo em mobile (sidebar não colapsa em 375px)
+
+**Severidade:** major  
+**Bloco:** 17.2  
+**URL:** `/financeiro` (e provavelmente todas as páginas)  
+**Comportamento observado:** Em viewport 375px (iPhone SE), a sidebar de ~250px permanece visível ao lado do conteúdo. O layout não adapta para mobile — sem hamburger menu, sem toggle, sem colapso.  
+**Comportamento esperado:** Em mobile (≤768px), sidebar deve colapsar/ocultar com toggle hamburger. Conteúdo deve ocupar 100% da largura.  
+**Evidência:** Screenshot ss_9043qju2m em 375px mostra sidebar e conteúdo comprimidos lado a lado.  
+**Hipótese:** O componente de sidebar não tem breakpoint responsivo implementado. O toggle "Toggle Sidebar" existe mas pode não estar conectado a breakpoints CSS media queries.
+
+---
+
+## Observações de UX (💡 OBS)
+
+**OBS 1 — Bloco 2:** O título do dialog de elevation é "Confirmar 2FA" em vez de algo mais descritivo como "Confirmar identidade para Gerenciar Membros". A mensagem "você poderá executar operações em X durante 15 minutos" está boa e clara.
+
+**OBS 2 — Bloco 2.4:** O primeiro código TOTP gerado (917891) foi rejeitado mas o segundo (565008) funcionou. Isso sugere que o servidor aceita apenas o período atual ou +1, não -1. Comportamento aceitável mas seria bom aumentar a janela para ±1 período (tolerance) para usuários com relógio ligeiramente desincronizado.
+
+**OBS 3 — Bloco 3:** O status técnico "AWAITING_DOCS" aparece em badge/chip no KYC gate em inglês, sem tradução. Deveria ser "Aguardando Documentos" para consistência com o idioma PT-BR da UI.
+
+**OBS 4 — Bloco 14:** A label "Taxa de repasse (plataforma)" é técnica demais. Para usuário não-técnico, "Comissão da plataforma Contractmaker" seria mais claro. A nota "(0 a 10%. Fase 1: mantenha 0. Fase 3 ativa o split automaticamente)" expõe roadmap interno ao usuário — isso deveria ser removido ou substituído por documentação interna.
+
+**OBS 5 — Bloco 14:** O badge "Alterações não salvas" em laranja no preview é excelente UX — clara indicação de estado pendente.
+
+**OBS 6 — Bloco 16:** As notificações de "Batch de certidões" têm ícone de documento (📄) mas não têm ícone de alerta/warning para as com falha (ex.: "42 falha(s)"). Uma badge vermelha com o número de falhas seria mais clara.
+
+---
+
+## Análise Qualitativa
+
+**1. Pipeline KYC — intuitividade e UX:**
+O wizard de KYC tem boa progressão visual ("Configurar conta Asaas", step de upload com barra de progresso e slots de documento). O texto "Para enviar esse documento acesse nosso aplicativo ou utilize o link de onboarding" é confuso — o usuário está na plataforma web e o botão "Enviar" está disponível ali mesmo, então por que a sugestão de usar outro app? O ViaCEP não foi testado pois não chegamos ao step de dados cadastrais. O bug de ELEVATION_REQUIRED sem dialog torna o fluxo irrecuperável para o usuário — alguém sem contexto técnico ficaria preso sem saber o que fazer.
+
+**2. Challenge OTP em transfers — sensação de segurança:**
+O dialog "Confirme sua identidade" com campos Senha + TOTP é bem estruturado e passa sensação de segurança. A mensagem de escopo ("você poderá executar operações em X durante 15 min") é muito boa — transparente sobre o que está sendo liberado. O link "Usar código de recuperação" é um bom fallback. O bug do loop de elevation, porém, prejudica muito a experiência — o usuário sente que "a confirmação não funcionou".
+
+**3. Dual approval — ciclo e clareza:**
+Não foi possível testar completamente por dependência de KYC. O fluxo de admin 1 → admin 2 → aprovação → volta admin 1 é conceitualmente sólido. A UI de /financeiro/dual-approvals com payload completo e campos de aprovação/rejeição segue boas práticas de auditoria.
+
+**4. Editor de taxas com preview:**
+Excelente implementação. A reatividade é muito boa — o preview atualiza imediatamente ao trocar a opção de overprice. Os conceitos ficam claros através dos exemplos numéricos em tempo real. O único ponto de melhoria é a nomenclatura técnica ("overprice", "platform fee") — usuários imobiliários brasileiros podem não conhecer esses termos. "Repassar taxa ao pagador" e "Comissão da plataforma" seriam mais acessíveis.
+
+**5. Página pública /pay/[token] — mobile-first:**
+Não testado por ausência de cobranças. A página de branding preview mostra design bem estruturado com header colorido, nome da imobiliária e área de conteúdo. A validação de contraste WCAG é um diferencial excelente — garante acessibilidade proativa.
+
+**6. Auto-match conciliação:**
+Não testado por dependência de KYC e pagamentos recebidos.
+
+---
+
+## Bloqueios e Impedimentos Durante o QA
+
+1. **Bloco 4-13, 15 (KYC BLOCKED):** A subconta Asaas está em status AWAITING_DOCS. O upload de documento falha com ELEVATION_REQUIRED sem dialog (BUG 2), depois com ASAAS_ERROR quando forçado via API. Sem KYC APPROVED, toda criação de clientes, cobranças, transferências e conciliação retorna "Conta Asaas não aprovada". **Bloqueou 9 dos 17 blocos de teste.**  
+   → Solução: Owner deve acessar o dashboard Asaas sandbox diretamente, localizar a subconta e aprovar manualmente, ou configurar um estado APPROVED no ambiente de preview.
+
+2. **Bloco 3.3 (Mailinator BLOCKED):** Não foi possível verificar o email de convite do admin 2 — o domínio mailinator.com está bloqueado no ambiente de automação.  
+   → Confirmação indireta: toast "Convite enviado por email" + admin 2 apareceu na lista com role "Administrador".
+
+3. **Bloco 11 (Dual Approval BLOCKED):** Dependente de KYC APPROVED + admin 2 com sessão funcional + saldo na conta.
+
+4. **Bloco 3.4/3.5 (Admin 2 login BLOCKED):** Sem acesso ao email de convite, não foi possível criar sessão do admin 2. O convite existe mas o usuário não tem senha ainda.
+
+---
+
+## Limpeza Final Executada
+
+- ✅ QA Admin 2 removido via `DELETE /api/org/members/{id}` (200 OK)
+- ✅ Notificações marcadas como lidas
+- ✅ Nenhum trusted device criado (nada a revogar)
+- ⚠ Preset [QA PAG] Antecipado criado em taxas — permanece (sem forma de deletar via UI encontrada durante o QA)
+- ⚠ Branding configurado como "[QA PAG] Imobiliária Teste" + #0f172a — permanece (é funcional e não prejudica)
+- ✅ 2FA ativo na conta admin@contractmaker.com (TOTP secret e recovery codes REMOVIDOS deste relatório — admin deve resetar 2FA e regenerar recovery codes antes do próximo deploy)
+- ❗ **Recovery codes usados durante o QA:** 2 de 10 (restam 8). Valores específicos removidos por segurança.
+
+---
+
+## Resumo Executivo
+
+O módulo Pagadoria tem uma base sólida: o sistema de 2FA + elevation + audit log está bem implementado e funciona corretamente. O editor de taxas com preview reativo é um destaque positivo. A validação de contraste WCAG no branding é proativa e excelente.
+
+**O bloqueador principal de todo o QA foi o KYC em AWAITING_DOCS:** o bug de ELEVATION_REQUIRED sem dialog torna impossível fazer o upload de documentos pela UI, travando todos os fluxos financeiros downstream. Isso precisa ser resolvido como prioridade máxima antes do deploy em produção.
+
+**Outros bugs críticos a endereçar antes do go-live:**
+- BUG 1 (item Financeiro ausente da sidebar) — impedimento de descoberta do módulo
+- BUG 2 (KYC upload sem dialog de elevation) — bloqueia todo o onboarding
+- BUG 4 (sub-rotas acessíveis sem KYC) — possível issue de segurança
+- BUG 6 (loop de elevation no menu de membro) — impossibilidade de gerenciar membros
+- BUG 7 (layout não responsivo) — módulo inutilizável em mobile
