@@ -47,7 +47,12 @@ export function MembersPageClient() {
   const [loading, setLoading] = useState(true);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [elevOpen, setElevOpen] = useState(false);
-  const [pendingAction, setPendingAction] = useState<"invite" | null>(null);
+  type PendingAction =
+    | { type: "invite" }
+    | { type: "change-role"; membershipId: string; newRole: string }
+    | { type: "remove"; membershipId: string; userName: string }
+    | null;
+  const [pendingAction, setPendingAction] = useState<PendingAction>(null);
 
   const [inviteData, setInviteData] = useState({
     email: "",
@@ -75,7 +80,7 @@ export function MembersPageClient() {
 
   function handleStartInvite() {
     if (!elevation.hasScope("MEMBER_MANAGE")) {
-      setPendingAction("invite");
+      setPendingAction({ type: "invite" });
       setElevOpen(true);
       return;
     }
@@ -107,6 +112,7 @@ export function MembersPageClient() {
 
   async function handleChangeRole(membershipId: string, newRole: string) {
     if (!elevation.hasScope("MEMBER_MANAGE")) {
+      setPendingAction({ type: "change-role", membershipId, newRole });
       setElevOpen(true);
       return;
     }
@@ -127,6 +133,7 @@ export function MembersPageClient() {
 
   async function handleRemove(membershipId: string, userName: string) {
     if (!elevation.hasScope("MEMBER_MANAGE")) {
+      setPendingAction({ type: "remove", membershipId, userName });
       setElevOpen(true);
       return;
     }
@@ -329,10 +336,16 @@ export function MembersPageClient() {
         onOpenChange={setElevOpen}
         scopes={["MEMBER_MANAGE"]}
         onSuccess={() => {
-          if (pendingAction === "invite") {
-            setInviteOpen(true);
-          }
+          const action = pendingAction;
           setPendingAction(null);
+          if (!action) return;
+          if (action.type === "invite") {
+            setInviteOpen(true);
+          } else if (action.type === "change-role") {
+            void handleChangeRole(action.membershipId, action.newRole);
+          } else if (action.type === "remove") {
+            void handleRemove(action.membershipId, action.userName);
+          }
         }}
       />
     </div>

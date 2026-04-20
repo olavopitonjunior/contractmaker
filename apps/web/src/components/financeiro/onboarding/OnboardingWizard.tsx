@@ -73,7 +73,12 @@ export function OnboardingWizard() {
   const [state, setState] = useState<OnboardingState | null>(null);
   const [loading, setLoading] = useState(true);
   const [elevOpen, setElevOpen] = useState(false);
-  const [pendingAction, setPendingAction] = useState<"start" | "submit" | null>(null);
+  const [pendingAction, setPendingAction] = useState<"start" | "submit" | "upload" | null>(null);
+
+  function handleUploadElevationRequired() {
+    setPendingAction("upload");
+    setElevOpen(true);
+  }
 
   async function load() {
     setLoading(true);
@@ -197,26 +202,41 @@ export function OnboardingWizard() {
   // REJECTED — motivo + re-enviar
   if (state.status === "REJECTED") {
     return (
-      <Card>
-        <CardContent className="pt-6 space-y-3">
-          <div className="text-center space-y-2">
-            <AlertTriangle className="h-10 w-10 mx-auto text-red-500" />
-            <h2 className="text-xl font-semibold">Documentos recusados</h2>
-          </div>
-          {state.rejectionReason && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded text-sm">
-              <strong>Motivo:</strong> {state.rejectionReason}
+      <>
+        <Card>
+          <CardContent className="pt-6 space-y-3">
+            <div className="text-center space-y-2">
+              <AlertTriangle className="h-10 w-10 mx-auto text-red-500" />
+              <h2 className="text-xl font-semibold">Documentos recusados</h2>
             </div>
-          )}
-          <p className="text-sm text-muted-foreground">
-            Revise os documentos abaixo e reenvie os marcados como rejeitados.
-          </p>
-          <DocumentsGrid documents={state.documents} onAfterUpload={load} />
-          <Button variant="outline" onClick={refresh} className="w-full">
-            <RefreshCw className="h-4 w-4 mr-1" /> Atualizar status
-          </Button>
-        </CardContent>
-      </Card>
+            {state.rejectionReason && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded text-sm">
+                <strong>Motivo:</strong> {state.rejectionReason}
+              </div>
+            )}
+            <p className="text-sm text-muted-foreground">
+              Revise os documentos abaixo e reenvie os marcados como rejeitados.
+            </p>
+            <DocumentsGrid
+              documents={state.documents}
+              onAfterUpload={load}
+              onElevationRequired={handleUploadElevationRequired}
+            />
+            <Button variant="outline" onClick={refresh} className="w-full">
+              <RefreshCw className="h-4 w-4 mr-1" /> Atualizar status
+            </Button>
+          </CardContent>
+        </Card>
+        <ElevationDialog
+          open={elevOpen}
+          onOpenChange={setElevOpen}
+          scopes={["KYC_EDIT"]}
+          onSuccess={() => {
+            setPendingAction(null);
+            toast.success("Identidade confirmada — tente enviar o documento novamente");
+          }}
+        />
+      </>
     );
   }
 
@@ -237,27 +257,42 @@ export function OnboardingWizard() {
 
   // PENDING / AWAITING_DOCS — upload de documentos
   return (
-    <Card>
-      <CardContent className="pt-6 space-y-4">
-        <div className="space-y-2">
-          <h2 className="text-xl font-semibold">Envio de documentos</h2>
-          <p className="text-sm text-muted-foreground">
-            Envie os documentos pendentes para a Asaas aprovar sua subconta.
-          </p>
-          <div className="text-sm">
-            Progresso:{" "}
-            <strong>
-              {state.documents.filter((d) => d.status === "PENDING" || d.status === "APPROVED").length}
-            </strong>{" "}
-            de {state.documents.length} enviados
+    <>
+      <Card>
+        <CardContent className="pt-6 space-y-4">
+          <div className="space-y-2">
+            <h2 className="text-xl font-semibold">Envio de documentos</h2>
+            <p className="text-sm text-muted-foreground">
+              Envie os documentos pendentes para a Asaas aprovar sua subconta.
+            </p>
+            <div className="text-sm">
+              Progresso:{" "}
+              <strong>
+                {state.documents.filter((d) => d.status === "PENDING" || d.status === "APPROVED").length}
+              </strong>{" "}
+              de {state.documents.length} enviados
+            </div>
           </div>
-        </div>
-        <DocumentsGrid documents={state.documents} onAfterUpload={load} />
-        <Button variant="outline" onClick={refresh} className="w-full">
-          <RefreshCw className="h-4 w-4 mr-1" /> Atualizar status
-        </Button>
-      </CardContent>
-    </Card>
+          <DocumentsGrid
+            documents={state.documents}
+            onAfterUpload={load}
+            onElevationRequired={handleUploadElevationRequired}
+          />
+          <Button variant="outline" onClick={refresh} className="w-full">
+            <RefreshCw className="h-4 w-4 mr-1" /> Atualizar status
+          </Button>
+        </CardContent>
+      </Card>
+      <ElevationDialog
+        open={elevOpen}
+        onOpenChange={setElevOpen}
+        scopes={["KYC_EDIT"]}
+        onSuccess={() => {
+          setPendingAction(null);
+          toast.success("Identidade confirmada — tente enviar o documento novamente");
+        }}
+      />
+    </>
   );
 }
 
@@ -620,14 +655,21 @@ function DataStep({ onSuccess }: { onSuccess: () => void }) {
 function DocumentsGrid({
   documents,
   onAfterUpload,
+  onElevationRequired,
 }: {
   documents: DocumentSlot[];
   onAfterUpload: () => void;
+  onElevationRequired: () => void;
 }) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
       {documents.map((d) => (
-        <DocumentCard key={d.id} doc={d} onAfterUpload={onAfterUpload} />
+        <DocumentCard
+          key={d.id}
+          doc={d}
+          onAfterUpload={onAfterUpload}
+          onElevationRequired={onElevationRequired}
+        />
       ))}
     </div>
   );
@@ -636,9 +678,11 @@ function DocumentsGrid({
 function DocumentCard({
   doc,
   onAfterUpload,
+  onElevationRequired,
 }: {
   doc: DocumentSlot;
   onAfterUpload: () => void;
+  onElevationRequired: () => void;
 }) {
   const [uploading, setUploading] = useState(false);
 
@@ -659,6 +703,10 @@ function DocumentCard({
       );
       const data = await res.json();
       if (!res.ok) {
+        if (data.error === "ELEVATION_REQUIRED") {
+          onElevationRequired();
+          return;
+        }
         toast.error(data.error ?? "Falha no upload");
         return;
       }
