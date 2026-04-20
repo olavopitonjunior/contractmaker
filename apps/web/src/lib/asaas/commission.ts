@@ -165,6 +165,15 @@ export interface BuildCommissionPayloadInput {
   platformFeePercent?: number;
   /** Opcional: walletId master do Contractmaker (Fase 3+). */
   platformWalletId?: string;
+  /**
+   * Splits custom por cobrança (Fase 5). Cada entry redireciona X% ou valor
+   * fixo para uma wallet cadastrada em `SplitRecipient`. O remanescente fica
+   * na subconta da org (comportamento default do Asaas).
+   *
+   * Se `platformWalletId + platformFeePercent` existir, a taxa de plataforma
+   * é anexada automaticamente em cima desses custom splits.
+   */
+  customSplits?: AsaasSplit[];
 }
 
 export interface BuiltCommissionPayload {
@@ -176,28 +185,95 @@ export interface BuiltCommissionPayload {
  * Monta customer + payment inputs para Asaas. Caller faz upsertCustomer →
  * createPayment em sequência.
  */
+/**
+ * Compõe e valida o array de splits a enviar para o Asaas.
+ *
+ * Regras aplicadas:
+ *  1. Máximo 10 entries (limite Asaas)
+ *  2. Sem duplicatas de walletId (Asaas rejeita)
+ *  3. walletId próprio da org não permitido (Asaas rejeita; remanescente já cai lá)
+ *  4. Soma de percentualValue ≤ 100
+ *
+ * Usado por `buildCommissionPayload` (flow Deal → commission-charges) e
+ * também pelo flow de cobrança avulsa (`/api/financeiro/charges/nova`).
+ *
+ * Retorna `undefined` se nenhum split foi configurado — importante para
+ * não enviar split vazio ao Asaas (que pode rejeitar).
+ */
+export function composeSplits(params: {
+  customSplits?: AsaasSplit[];
+  platformFeePercent?: number;
+  platformWalletId?: string | null;
+  orgWalletId: string;
+}): AsaasSplit[] | undefined {
+  const parts: AsaasSplit[] = [];
+
+  if (params.customSplits?.length) {
+    parts.push(...params.customSplits);
+  }
+
+  const platformPct = params.platformFeePercent ?? 0;
+  if (platformPct > 0 && params.platformWalletId) {
+    parts.push({
+      walletId: params.platformWalletId,
+      percentualValue: platformPct,
+    });
+  }
+
+  if (parts.length === 0) return undefined;
+
+  if (parts.length > 10) {
+    throw new CommissionBuildError(
+      "SPLIT_TOO_MANY",
+      `Split excede limite de 10 destinatários (recebeu ${parts.length})`
+    );
+  }
+  const seen = new Set<string>();
+  for (const p of parts) {
+    if (seen.has(p.walletId)) {
+      throw new CommissionBuildError(
+        "SPLIT_DUPLICATE_WALLET",
+        `Wallet ID ${p.walletId} aparece mais de uma vez no split`
+      );
+    }
+    seen.add(p.walletId);
+    if (p.walletId === params.orgWalletId) {
+      throw new CommissionBuildError(
+        "SPLIT_SELF_WALLET",
+        "Split não pode incluir o wallet ID da própria org — o remanescente já cai lá automaticamente"
+      );
+    }
+    const pct = p.percentualValue ?? 0;
+    const fx = p.fixedValue ?? 0;
+    if (pct <= 0 && fx <= 0) {
+      throw new CommissionBuildError(
+        "SPLIT_EMPTY_VALUE",
+        `Entry de split para ${p.walletId} precisa ter percentualValue > 0 ou fixedValue > 0`
+      );
+    }
+  }
+  const totalPct = parts.reduce((s, p) => s + (p.percentualValue ?? 0), 0);
+  if (totalPct > 100) {
+    throw new CommissionBuildError(
+      "SPLIT_PERCENT_OVERFLOW",
+      `Soma dos percentuais do split é ${totalPct}% (máximo 100%)`
+    );
+  }
+
+  return parts;
+}
+
 export function buildCommissionPayload(
   input: BuildCommissionPayloadInput
 ): BuiltCommissionPayload {
   const { payer, value, billingType, dueDate, description, externalReference, orgWalletId } = input;
 
-  const platformPct = input.platformFeePercent ?? 0;
-  let split: AsaasSplit[] | undefined;
-
-  // Fase 1b: chamamos a API com a apiKey da subconta da org, então o payment
-  // já cai na org sem precisar de split. Split só é necessário em Fase 3,
-  // quando introduzirmos platform fee (subconta envia X% para master).
-  if (platformPct > 0 && input.platformWalletId) {
-    split = [
-      {
-        walletId: input.platformWalletId,
-        percentualValue: platformPct,
-      },
-    ];
-  }
-  // Se platformPct === 0, split fica undefined — payment não tem split.
-  // Observação crítica: NÃO incluir walletId da própria conta — Asaas rejeita.
-  void orgWalletId; // suprime warning (mantido para futuro uso e logging)
+  const split = composeSplits({
+    customSplits: input.customSplits,
+    platformFeePercent: input.platformFeePercent,
+    platformWalletId: input.platformWalletId,
+    orgWalletId,
+  });
 
   const customerInput: CreateCustomerInput = {
     name: payer.nome,

@@ -141,7 +141,24 @@ export default function TaxasPage() {
                   <span className="text-sm text-muted-foreground">%</span>
                 </div>
                 <p className="text-xs text-muted-foreground mt-1">
-                  0 a 10%. Fase 1: mantenha 0. Fase 3 ativa o split automaticamente.
+                  0 a 10%. Split só é gerado se wallet ID abaixo também estiver configurado.
+                </p>
+              </div>
+              <div>
+                <Label htmlFor="pfw">Wallet ID de destino (plataforma)</Label>
+                <Input
+                  id="pfw"
+                  type="text"
+                  placeholder="Ex: 80cd2f34-7a1b-4c85-9d12-abc1234def56"
+                  value={settings.platformFeeWalletId ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value.trim();
+                    update("platformFeeWalletId", v === "" ? null : v);
+                  }}
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  walletId da conta master Asaas que vai receber o repasse. Obrigatório
+                  para o split automático acontecer.
                 </p>
               </div>
             </CardContent>

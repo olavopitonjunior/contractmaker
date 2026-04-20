@@ -28,6 +28,7 @@ export interface DiscountPreset {
 
 export interface FeesSettings {
   platformFeePercent: number;
+  platformFeeWalletId: string | null;
   overpricePolicy: OverpricePolicy;
   overpriceType?: "percentage" | "fixed" | null;
   overpriceValue?: number | null;
@@ -43,6 +44,7 @@ export interface FeesSettings {
 
 export const DEFAULT_FEES_SETTINGS: FeesSettings = {
   platformFeePercent: 0,
+  platformFeeWalletId: null,
   overpricePolicy: "none",
   overpriceType: null,
   overpriceValue: null,

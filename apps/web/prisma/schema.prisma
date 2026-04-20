@@ -129,6 +129,9 @@ model Organization {
   // Pagadoria — Fase 3 (transferências + conciliação)
   asaasTransfers      AsaasTransfer[]
   bankReconciliations BankReconciliation[]
+
+  // Pagadoria — Fase 5 (split multi-recipient)
+  splitRecipients SplitRecipient[]
 }
 
 model OrgMembership {
@@ -1169,6 +1172,26 @@ model OrgFinancialSettings {
   updatedAt            DateTime @updatedAt
 
   org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// Cadastro de destinatários de split de pagamento (Fase 5).
+// Cada recipient representa uma wallet Asaas que pode receber repasse em
+// cobranças da org. Usados pelo SplitEditor no form de nova cobrança.
+model SplitRecipient {
+  id          String   @id @default(cuid())
+  orgId       String
+  label       String
+  walletId    String
+  cpfCnpj     String?
+  description String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, walletId])
+  @@index([orgId, active])
 }
 
 // Link público de pagamento — URL /pay/[token] com branding.

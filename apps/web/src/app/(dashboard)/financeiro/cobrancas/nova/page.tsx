@@ -17,6 +17,10 @@ import {
 } from "@/components/ui/select";
 import { ArrowLeft, ArrowRight, CheckCircle2, Plus, Search } from "lucide-react";
 import { maskCpfCnpj } from "@/lib/security/pii";
+import SplitEditor, {
+  type SplitEntry,
+  toApiSplit,
+} from "@/components/financeiro/SplitEditor";
 
 interface Customer {
   id: string;
@@ -57,7 +61,27 @@ export default function NovaCobrancaPage() {
   const [description, setDescription] = useState("");
   const [kind, setKind] = useState<"avulsa" | "aluguel" | "outros">("avulsa");
 
+  // Split state
+  const [splitEnabled, setSplitEnabled] = useState(false);
+  const [splits, setSplits] = useState<SplitEntry[]>([]);
+  const [platformFeePercent, setPlatformFeePercent] = useState(0);
+
   const [submitting, setSubmitting] = useState(false);
+
+  // Carrega platform fee uma vez pra mostrar no SplitEditor
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch("/api/financeiro/settings", {
+          credentials: "include",
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setPlatformFeePercent(data.settings?.platformFeePercent ?? 0);
+        }
+      } catch {}
+    })();
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -99,6 +123,7 @@ export default function NovaCobrancaPage() {
     if (!selectedCustomer) return;
     setSubmitting(true);
     try {
+      const apiSplits = splitEnabled ? toApiSplit(splits) : [];
       const res = await fetch("/api/financeiro/charges/nova", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -110,11 +135,17 @@ export default function NovaCobrancaPage() {
           dueDate,
           description: description || undefined,
           kind,
+          customSplits: apiSplits.length > 0 ? apiSplits : undefined,
         }),
       });
       const data = await res.json();
       if (!res.ok) {
-        toast.error(data.details?.[0]?.description ?? data.error ?? "Falha");
+        const msg =
+          data.message ??
+          data.details?.[0]?.description ??
+          data.error ??
+          "Falha";
+        toast.error(msg);
         return;
       }
       toast.success("Cobrança gerada");
@@ -370,6 +401,48 @@ export default function NovaCobrancaPage() {
                 maxLength={500}
               />
             </div>
+
+            <div className="border-t pt-3 space-y-2">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={splitEnabled}
+                  onChange={(e) => {
+                    setSplitEnabled(e.target.checked);
+                    if (!e.target.checked) setSplits([]);
+                  }}
+                />
+                <span className="text-sm font-medium">
+                  Aplicar split de pagamento
+                </span>
+                {platformFeePercent > 0 && (
+                  <Badge variant="outline" className="text-xs">
+                    +{platformFeePercent}% plataforma auto
+                  </Badge>
+                )}
+              </label>
+              <p className="text-xs text-muted-foreground">
+                Divida este recebimento entre múltiplas wallets Asaas (corretora,
+                vendedor, etc.). Cadastre destinatários em{" "}
+                <Link
+                  href="/settings/pagamentos/split-recipients"
+                  className="underline"
+                  target="_blank"
+                >
+                  Configurações → Destinatários de split
+                </Link>
+                .
+              </p>
+              {splitEnabled && (
+                <SplitEditor
+                  value={splits}
+                  onChange={setSplits}
+                  platformFeePercent={platformFeePercent}
+                  chargeValue={parseFloat(value || "0")}
+                />
+              )}
+            </div>
+
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setStep("payer")}>
                 <ArrowLeft className="h-4 w-4 mr-1" /> Voltar
@@ -420,6 +493,43 @@ export default function NovaCobrancaPage() {
                 </div>
               )}
             </div>
+
+            {splitEnabled && splits.length > 0 && (
+              <div className="border-t pt-3 space-y-1">
+                <div className="text-xs font-medium text-muted-foreground uppercase">
+                  Split de pagamento
+                </div>
+                {splits
+                  .filter(
+                    (s) => s.walletId.trim() !== "" && s.percentualValue > 0
+                  )
+                  .map((s) => (
+                    <div
+                      key={s.key}
+                      className="flex items-center justify-between text-sm"
+                    >
+                      <span>{s.label || s.walletId}</span>
+                      <Badge variant="outline">
+                        {s.percentualValue}% ·{" "}
+                        {fmtBRL(
+                          (parseFloat(value || "0") * s.percentualValue) / 100
+                        )}
+                      </Badge>
+                    </div>
+                  ))}
+                {platformFeePercent > 0 && (
+                  <div className="flex items-center justify-between text-sm text-amber-900">
+                    <span>Plataforma (automático)</span>
+                    <Badge variant="outline">
+                      {platformFeePercent}% ·{" "}
+                      {fmtBRL(
+                        (parseFloat(value || "0") * platformFeePercent) / 100
+                      )}
+                    </Badge>
+                  </div>
+                )}
+              </div>
+            )}
 
             <div className="flex gap-2">
               <Button variant="outline" onClick={() => setStep("charge")}>

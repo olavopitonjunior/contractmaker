@@ -52,6 +52,10 @@ export type AuditAction =
   // Taxas / config
   | "FEES_UPDATED"
   | "BRANDING_UPDATED"
+  // Split de pagamento (recipients)
+  | "SPLIT_RECIPIENT_CREATED"
+  | "SPLIT_RECIPIENT_UPDATED"
+  | "SPLIT_RECIPIENT_DELETED"
   // Segurança geral
   | "SUSPICIOUS_ACTIVITY"
   | "RATE_LIMIT_HIT";
