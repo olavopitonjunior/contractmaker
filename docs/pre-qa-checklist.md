@@ -53,32 +53,28 @@ Ir em `https://vercel.com/<team>/<project>/settings/environment-variables`. Em *
 
 ---
 
-## C. Asaas sandbox setup (10 min)
+## C. Asaas sandbox setup (2 min)
 
-> ⚡ **Atalho via MCP Asaas:** se o Claude Code tiver o MCP `asaas` instalado
-> (`claude mcp list` deve mostrar `asaas - ✓ Connected`) e o token configurado
-> em `~/.claude.json` como header, você pode pedir ao Claude para fazer os
-> passos 3-4 desta seção via MCP em vez do dashboard manual. Os passos manuais
-> abaixo continuam sendo o fallback definitivo.
+> ⚡ **Automatizado via script:** os passos 3-4 agora rodam em 1 comando
+> (`setup-pagadoria-qa.ts`). Execução manual no dashboard só como fallback.
 
 1. [ ] Acessar `https://sandbox.asaas.com` com a conta pessoal
 2. [ ] Menu → **Integrações** → **API** → confirmar que a master key exibida é **a mesma** do env var `ASAAS_API_KEY`
-3. [ ] Menu → **Integrações** → **Webhooks** → **Novo webhook**:
-   - **URL:** `https://<seu-domínio>/api/webhooks/asaas`
-   - **Token:** mesmo valor de `ASAAS_WEBHOOK_TOKEN`
-   - **Eventos:** marcar **todos** os `PAYMENT_*` e `TRANSFER_*`
-   - **Status:** Ativo
-   - Salvar
-4. [ ] Testar webhook: Asaas oferece "Enviar teste" — clicar. No Contractmaker, `/api/webhooks/asaas` deve receber 200 OK (ver Vercel Logs)
+
+**O cadastro do webhook (antes passo 3) agora acontece automaticamente no
+passo E via `scripts/setup-pagadoria-qa.ts` usando `upsertWebhookByUrl`
+(idempotente — re-rodar substitui, não duplica).**
+
+**Fallback manual** (só se o script falhar):
+- Menu → **Integrações** → **Webhooks** → **Novo webhook** com URL `https://<domínio>/api/webhooks/asaas`, token `=$ASAAS_WEBHOOK_TOKEN`, eventos `PAYMENT_*` + `TRANSFER_*`, Ativo.
 
 ---
 
-## D. Primeiro login + KYC real (10 min)
+## D. Primeiro login + KYC real (5 min)
 
-> ⚡ **Atalho via MCP Asaas:** o passo 6 (aprovar subconta no dashboard sandbox)
-> pode ser feito via MCP se o sandbox Asaas expuser endpoint de aprovação
-> programática — o Claude pode chamar direto. Passos 1-5 (login + KYC +
-> upload docs) devem ser feitos na UI do Contractmaker para testar o fluxo real.
+> ⚡ **Aprovação automatizada:** o passo 6 (aprovar subconta) passa a ser feito
+> pelo script `setup-pagadoria-qa.ts` via `POST /v3/sandbox/myAccount/approve`
+> — sem visitar o painel. Passos 1-5 continuam manuais (testam o fluxo real).
 
 1. [ ] Acessar URL de produção, login como `admin@contractmaker.com` / `E2EtestPwd!2026`
 2. [ ] Se 2FA ainda não configurado: ir em `/settings/seguranca` → clicar **Configurar 2FA**:
@@ -90,15 +86,60 @@ Ir em `https://vercel.com/<team>/<project>/settings/environment-variables`. Em *
    - Preencher dados (CPF/CNPJ pessoal ou da empresa-teste)
    - Submit com elevation (senha + TOTP)
 4. [ ] Upload dos 4-5 documentos pedidos (fotos ou PDFs de qualquer doc de teste — sandbox aceita quase tudo)
-5. [ ] Status vira `AWAITING_APPROVAL`
-6. [ ] Voltar ao dashboard Asaas sandbox → **Minha Conta** (ou **Contas** se houver subcontas) → aprovar manualmente a subconta criada
-7. [ ] No Contractmaker, voltar em `/financeiro/onboarding` → clicar **Atualizar status** → deve virar `APPROVED` → redireciona para `/financeiro`
+5. [ ] Status vira `AWAITING_APPROVAL` no Contractmaker
+
+**Os passos 6-7 (aprovar no painel + atualizar status) agora acontecem
+automaticamente no passo E.** Siga direto para a seção E.
 
 **Dica para cobertura do Bloco 5b (cobrança from Deal):** ter pelo menos **1 deal com contrato aprovado** no DB. Se ainda não tem, criar um via `/forms/new` → formulário → aprovar contrato gerado.
 
 ---
 
-## E. Preflight (30s)
+## E. Setup automatizado + Preflight (2 min)
+
+### E.1 — Rodar `setup-pagadoria-qa.ts` (localmente ou via Vercel CLI)
+
+Este script faz 3 coisas:
+1. Cadastra o webhook do Contractmaker no Asaas sandbox (idempotente)
+2. Aprova a subconta sandbox (substitui o passo D6 manual)
+3. Sync o DB local (AsaasAccount.status = APPROVED)
+
+**Execução:**
+
+```bash
+cd apps/web
+
+# Carregar env de production do Vercel
+vercel env pull .env.production.local
+
+# Rodar o script apontando para o domínio de produção
+DOTENV_CONFIG_PATH=.env.production.local \
+npx tsx -r dotenv/config scripts/setup-pagadoria-qa.ts \
+  --app-url https://<seu-domínio-prod> \
+  --email admin@contractmaker.com
+```
+
+Saída esperada:
+```
+🔧 Setup Pagadoria QA
+   ✓ Org: <nome>
+✓ AsaasAccount.status atual: AWAITING_APPROVAL
+📡 Webhook
+   ✓ Criado — id hook_xxx
+🏦 Aprovação sandbox da subconta
+   ✓ Aprovado — general=APPROVED docs=APPROVED ...
+   ✓ DB local atualizado (AsaasAccount.status = APPROVED)
+🩺 Health check
+   ✓ Status: general=APPROVED docs=APPROVED ...
+✅ Setup concluído
+```
+
+**Flags úteis:**
+- `--dry-run` — mostra o que faria sem executar
+- `--skip-webhook` — só aprova conta
+- `--skip-approve` — só cadastra webhook
+
+### E.2 — Preflight (30s)
 
 Ainda logado como admin, abrir DevTools (F12) → **Console** → colar:
 
@@ -158,11 +199,24 @@ fetch('/api/admin/preflight-qa', { credentials: 'include' })
 
 ---
 
+## Atalhos adicionais durante o QA
+
+Se o QA precisar testar pagamento/inadimplência sem esperar transação real,
+use os endpoints sandbox via MCP Asaas ou helper `lib/asaas/sandbox.ts`:
+
+- **Simular pagamento recebido** (Bloco 7/11 — popular extrato/conciliação):
+  `POST /v3/sandbox/payment/{id}/confirm` — dispara webhooks `PAYMENT_CONFIRMED` → `PAYMENT_RECEIVED`
+- **Forçar cobrança vencida** (Bloco 11 — testar inadimplência):
+  `POST /v3/sandbox/payment/{id}/overdue` — dispara webhook `PAYMENT_OVERDUE`
+
+Ambos aceitam o `asaasPaymentId` (`pay_xxx`) da cobrança criada no Bloco 5
+e usam a `apiKey` da subconta.
+
 ## Dicas gerais
 
 - Se o preflight retornar erro em **algum passo mesmo após B/C/D completos**: conferir que o deploy current está com o código que contém o endpoint (commit da branch mergeado em master). Pode ser necessário redeploy.
 - Se 2FA do admin foi perdido: há script de emergência em `apps/web/scripts/` ou consulte o owner — nunca deixar o admin sem 2FA em produção.
-- Para QAs futuros, pular A-D (já prontos) e começar direto em E (preflight) + F (QA).
+- Para QAs futuros, pular A-D (já prontos) e começar direto em E (setup + preflight) + F (QA). O script `setup-pagadoria-qa.ts` é idempotente — pode ser rodado várias vezes.
 
 ---
 
