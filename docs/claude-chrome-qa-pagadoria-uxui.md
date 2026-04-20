@@ -5,8 +5,8 @@
 > **qualidade percebida**: fluência de navegação, estados visuais, responsividade,
 > acessibilidade e microinterações.
 >
-> **URL do preview:** (substituir pelo URL do deploy Vercel mais recente após
-> merge dos fixes P0+P1 — ver seção 0.1)
+> **URL de produção:** `{PROD_URL}` (fornecida pelo owner — é o deploy de produção
+> do Contractmaker pré-launch, usando Asaas sandbox para KYC real)
 > **Credenciais admin:** `admin@contractmaker.com` / `E2EtestPwd!2026`
 > **Idioma UI:** português brasileiro
 >
@@ -18,66 +18,47 @@
 
 ## 0. DISCIPLINA DE EXECUÇÃO
 
-### 0.1 Preview URL + Deployment Protection
+### 0.1 Ambiente
 
-Se ao abrir a URL aparecer **"Authentication Required"** do Vercel, peça ao
-owner para desabilitar em `Vercel → Settings → Deployment Protection`. Se não
-conseguir acesso em 2min, marque **BLOCKED**.
+A aplicação roda em **production Vercel** (pré-launch, sem usuários reais) com:
+- `ASAAS_ENV=sandbox` → cobranças são reais, mas em sandbox Asaas (sem dinheiro real)
+- Admin já fez **KYC real** no sandbox e subconta está `APPROVED`
+- Webhook Asaas já cadastrado no dashboard
 
-### 0.2 Pré-requisito — Seed de dados QA
+Se a URL voltar 404/500 consistente, marque **BLOCKED** e peça ao owner para
+verificar o último deploy.
 
-**ANTES de começar qualquer bloco**, disparar o seed para bypassar KYC e
-popular dados fake:
+### 0.2 Preflight obrigatório (30s, antes de qualquer bloco)
 
-```
-POST {PREVIEW_URL}/api/admin/seed-pagadoria-qa
-Authorization: Bearer {SEED_ADMIN_TOKEN}
-Content-Type: application/json
+Logar como admin e, no DevTools Console, rodar:
 
-{}
-```
-
-Pode chamar via Claude Chrome (usando `evaluate_javascript` com fetch) ou via
-curl/Postman. Se vier 401: token inválido — peça o `SEED_ADMIN_TOKEN` ao owner.
-Se vier 403: endpoint bloqueado (ambiente é production — deve ser preview).
-
-**Resposta esperada (200):**
-```json
-{
-  "ok": true,
-  "orgId": "...",
-  "accountId": "...",
-  "customerIds": ["...", "...", "..."],
-  "chargeIds": ["..."],
-  "publicLinkToken": "XxYyZz123abc",
-  "dualApprovalId": "...",
-  "summary": {
-    "account": "APPROVED (fake — sandbox bypass)",
-    "customers": 3,
-    "charges": 12,
-    "publicPayUrl": "/pay/XxYyZz123abc",
-    "dualApproval": "/financeiro/dual-approvals/...",
-    "reconciliations": 3
-  }
-}
+```javascript
+fetch('/api/admin/preflight-qa', { credentials: 'include' })
+  .then(r => r.json()).then(r => { console.log(JSON.stringify(r, null, 2)); return r; })
 ```
 
-**Guarde** o `publicLinkToken` e o `dualApprovalId` — serão usados nos blocos 13 e 10.
+**Esperado:** `{ok: true, blockersCount: 0, warningsCount: ..., checks: [...]}`.
 
-### 0.3 Caveat — features que dependem de Asaas real
+- Se `ok: false` (há `blockers`) → **PARAR** e reportar ao owner. Não começar o QA.
+- Se `ok: true` com warnings → anotar warnings no relatório final e seguir.
 
-O seed força `AsaasAccount.status=APPROVED` no DB mas **não cria subconta real
-no Asaas**. As 4 features abaixo vão **falhar com 422/500** quando submetidas:
+**Guardar** o JSON completo como evidência (cole no relatório final).
 
-| Feature | Comportamento esperado | Como avaliar UX |
-|---|---|---|
-| Nova cobrança (avulsa + from Deal) | HTTP 500 ao submeter | Toast claro? Loading termina? Wizard fica travado? |
-| Cliente CREATE (POST) | HTTP 500 ao submeter | Mensagem explica problema? Form permite reenviar? |
-| Extrato — Sincronizar | HTTP 500 | Loading spinner volta ao idle? Alert apropriado? |
-| Transferência POST | HTTP 500 | Dialog fecha? Usuário entende que não foi enviado? |
+### 0.3 Caveat — dados iniciais podem estar vazios
 
-**Nessas 4, foque no lado da UX da falha** — a falha em si é esperada. Reporte
-se a UX da falha for ruim (ex: loading infinito, toast genérico, tela travada).
+Sem seed artificial, o sistema começa com **zero cobranças, zero customers,
+zero dual approvals, zero conciliação**. Isso é o estado real de uma org recém-
+onboarded. Alguns blocos exigem criar dados antes:
+
+| Bloco | Pré-requisito |
+|---|---|
+| 4 (detalhe) | Criar 1+ cobrança no Bloco 5 primeiro |
+| 10 (dual approvals) | Criar transfer > R$ 50k no Bloco 12 (vira dual approval pendente) |
+| 11 (conciliação) | Estado vazio é esperado — avaliar UX do empty state |
+| 13 (/pay público) | Usar `publicToken` da cobrança criada no Bloco 5 |
+
+Features que fazem chamadas Asaas reais (cobrança, cliente, transfer) **devem
+funcionar** com KYC aprovado. Se retornarem 500, é bug (reportar).
 
 ### 0.4 Screenshots
 
@@ -95,8 +76,8 @@ Para cada step reporte um dos:
 
 ### 0.6 Dados de teste — prefixo `[QA UX]`
 
-Todos os dados do seed têm prefixo `[QA UX]` no nome/descrição. Se você criar
-algo durante o QA, use também esse prefixo para facilitar cleanup.
+Ao criar dados (cobranças, clientes, descrições) **use sempre o prefixo
+`[QA UX]` no nome/descrição** para facilitar cleanup pós-QA via UI.
 
 ---
 
@@ -196,7 +177,9 @@ algo durante o QA, use também esse prefixo para facilitar cleanup.
 
 ## BLOCO 4 — Detalhe de cobrança `/financeiro/cobrancas/[id]`
 
-Abrir qualquer cobrança PENDING da listagem (prefixo `[QA UX]`).
+**Pré-requisito:** ter executado o Bloco 5 primeiro (para ter cobrança PENDING
+criada). Se a listagem estiver vazia, volte ao Bloco 5 e crie pelo menos 2
+cobranças com prefixo `[QA UX]`.
 
 ### 4.1 Layout split
 - Lado esquerdo: dados (cliente, valor, vencimento, descrição, split, vínculos)
@@ -227,13 +210,14 @@ Abrir qualquer cobrança PENDING da listagem (prefixo `[QA UX]`).
 
 ## BLOCO 5 — Wizard de cobrança avulsa `/financeiro/cobrancas/nova`
 
-**Caveat:** submit final vai falhar (asaas-required) — foco na UX do wizard.
+**Objetivo:** criar 2-3 cobranças reais no sandbox Asaas (com prefixo `[QA UX]`
+na descrição) para alimentar os blocos subsequentes (4, 13).
 
 ### 5.1 Step 1 — Pagador
-- Combobox de busca funcional? (digite "Maria" do seed)
+- Combobox de busca funcional? (inicialmente vazio — testar "Cadastrar novo")
 - Typeahead debounced? Resultados aparecem <500ms?
 - "Cadastrar novo cliente" inline ou redirect?
-- Se cliente existe → auto-preenche?
+- Criar um cliente novo com nome `[QA UX] Maria Aparecida de Souza` + CPF válido + email
 
 ### 5.2 Step 2 — Cobrança
 - Radio PIX/Boleto com ícones?
@@ -247,12 +231,18 @@ Abrir qualquer cobrança PENDING da listagem (prefixo `[QA UX]`).
 - Botão "Gerar cobrança" primary destacado?
 - Botão "Editar" volta para o step anterior preservando dados?
 
-### 5.4 Submit com Asaas fake
-- Clicar "Gerar cobrança" → **esperado 500**
-- Toast de erro aparece? Texto é claro (não "undefined" ou "Error")?
-- Loading button volta ao estado normal?
-- Usuário consegue tentar de novo? Ou wizard trava?
-- **Reportar UX:** o erro explica o que aconteceu ou soa técnico?
+### 5.4 Submit real (Asaas sandbox)
+- Clicar "Gerar cobrança" → **esperado 200** (KYC está APPROVED)
+- Loading button fica disabled durante request?
+- Redirect para detalhe `/financeiro/cobrancas/[id]`?
+- Toast de sucesso aparece?
+- QR code PIX aparece populado (se billingType=PIX)?
+
+**Guardar o ID** da cobrança criada para usar no Bloco 13 (página pública).
+
+**Criar 2 cobranças adicionais:** 1 via Boleto + 1 via PIX com valores/descrições
+diferentes (ex: `[QA UX] Aluguel Jan`, `[QA UX] Comissão Venda Jardins`). Isso
+garante dados suficientes para Blocos 4, 11 e 13.
 
 ---
 
@@ -260,7 +250,7 @@ Abrir qualquer cobrança PENDING da listagem (prefixo `[QA UX]`).
 
 ### 6.1 Listagem
 - Cards ou tabela? Qual é mais escaneável?
-- Seed criou 3 clientes com prefixo `[QA UX]` — todos visíveis?
+- Cliente criado no Bloco 5.1 aparece na lista?
 - Busca por nome/CPF funciona client-side ou faz round-trip?
 
 ### 6.2 Detalhe (click em um cliente)
@@ -271,14 +261,17 @@ Abrir qualquer cobrança PENDING da listagem (prefixo `[QA UX]`).
 ### 6.3 Criar cliente novo
 - Dialog ou página separada?
 - Validação de CPF/CNPJ (checksum) em tempo real?
-- **Submit esperado 500** (asaas-required) — mesmo tratamento do bloco 5.4
+- **Submit esperado 200** (KYC aprovado — cliente persiste no Asaas sandbox)
+- Cadastrar `[QA UX] João Silva` + CNPJ válido para testar PJ
 
 ---
 
 ## BLOCO 7 — Extrato `/financeiro/extrato`
 
-**Caveat:** dados vêm do Asaas real — com bypass, saldo será 0 e lista vazia
-OU o endpoint falhará. **Avaliar UX do estado vazio/erro.**
+**Nota:** com KYC aprovado e cobranças recém-criadas, saldo provavelmente ainda
+será 0 (cobranças não foram pagas). Para testar dados no extrato, simule
+pagamento de uma cobrança no dashboard Asaas sandbox primeiro (Cobranças →
+selecione uma `[QA UX]` PIX → clique "Simular pagamento").
 
 ### 7.1 Saldo em destaque
 - Cards de "Saldo disponível" + "Saldo bloqueado" + "Saldo pendente" no topo?
@@ -292,9 +285,9 @@ OU o endpoint falhará. **Avaliar UX do estado vazio/erro.**
 
 ### 7.3 Botão "Sincronizar"
 - Tooltip explica o que faz?
-- **Clicar → esperado 500** (asaas-required)
+- **Clicar → esperado 200** (puxa extrato real do Asaas sandbox)
 - Loading state durante a chamada?
-- Em caso de erro: mensagem clara ou toast genérico?
+- Se erro inesperado: mensagem clara ou toast genérico?
 
 ### 7.4 Export CSV
 - Formato do CSV inclui data, tipo, valor, descrição?
@@ -352,15 +345,18 @@ OU o endpoint falhará. **Avaliar UX do estado vazio/erro.**
 
 ## BLOCO 10 — Dual Approvals `/financeiro/dual-approvals`
 
-**Usar o `dualApprovalId` capturado no seed (seção 0.2).**
+**Pré-requisito:** ter criado uma transferência > R$ 50k no Bloco 12.3 — isso
+trigga criação de DualApproval pendente automaticamente. Se Bloco 12 ainda não
+foi executado, este bloco pode ser adiado (ou testado com lista vazia para
+avaliar empty state).
 
 ### 10.1 Listagem
-- Badge "1 pendente" visível na sidebar/header se houver pendências? (notif)
-- Card de dual approval mostra: tipo, valor, iniciador, data, "aguardando aprovação"?
+- Badge "1 pendente" visível na sidebar/header após criar o dual approval? (notif)
+- Card mostra: tipo, valor, iniciador, data, "aguardando aprovação"?
 - CTA "Revisar" claro?
 
 ### 10.2 Detalhe `/financeiro/dual-approvals/[id]`
-- Acessar via URL direto (`/financeiro/dual-approvals/<ID do seed>`)
+- Click em "Revisar" navega para detalhe?
 - Payload da transferência visível (destinatário, valor, tipo)?
 - **Avaliar:** admin 1 (iniciador) vê botões "Aprovar/Rejeitar" desabilitados
   (porque é o próprio iniciador)?
@@ -375,8 +371,9 @@ OU o endpoint falhará. **Avaliar UX do estado vazio/erro.**
 ## BLOCO 11 — Conciliação `/financeiro/conciliacao`
 
 ### 11.1 Chips de contagem
-- Matched / Pending / Ignored com counts vindos do seed (1/1/1)
-- Clicar chip filtra?
+- Matched / Pending / Ignored — counts inicialmente 0/0/0 (esperado — sem pagamentos simulados ainda)
+- **Avaliar empty state:** mensagem acolhedora explicando quando lançamentos vão aparecer?
+- Clicar chip filtra (mesmo com 0)?
 
 ### 11.2 Lista de lançamentos
 - Cada row mostra: data, tipo, valor, descrição, status
@@ -385,8 +382,9 @@ OU o endpoint falhará. **Avaliar UX do estado vazio/erro.**
 - Ignored row tem CTA "Reverter"?
 
 ### 11.3 Sincronizar extrato
-- Botão "Sincronizar" → **esperado 500** (asaas-required)
-- Loading + tratamento de erro apropriado?
+- Botão "Sincronizar" → **esperado 200** (puxa financialTransactions do Asaas)
+- Loading + feedback apropriado?
+- Após sync, se houver pagamentos simulados, aparecem lançamentos matched?
 
 ### 11.4 Auto-match
 - Botão "Auto-match" (se disponível) processa pending rows?
@@ -426,19 +424,22 @@ OU o endpoint falhará. **Avaliar UX do estado vazio/erro.**
 
 ## BLOCO 13 — Página pública `/pay/[token]`
 
-**Usar `publicLinkToken` capturado no seed (seção 0.2).**
+**Pré-requisito:** abrir o detalhe de uma cobrança PENDING criada no Bloco 5,
+copiar o link público (botão "Copiar link de pagamento") ou extrair o token
+direto da URL do QR code/boleto. Se o botão não existe, verificar se há outra
+forma de obter o token público na UI.
 
 ### 13.1 Acesso sem auth
-- Abrir `/pay/<TOKEN_DO_SEED>` em **aba anônima** (sem cookie)
+- Abrir `/pay/<TOKEN>` em **aba anônima** (sem cookie)
 - Deve carregar sem redirect para login
 
 ### 13.2 Branding aplicado
-- Nome da imobiliária (`[QA UX] Zimmermann Imóveis`) visível?
-- Cor primária `#0f172a` aplicada ao CTA principal?
+- Nome da imobiliária (configurado no Bloco 9 ou do default) visível?
+- Cor primária aplicada ao CTA principal?
 - Logo (se upado no bloco 9) aparece?
 
 ### 13.3 PII mascarada
-- Pagador aparece como "Maria A." (primeiro nome + inicial)
+- Pagador aparece como primeiro nome + inicial (ex: "Maria A.")
 - CPF mascarado (ex: `***.***.***-25`)
 - Email NÃO aparece no HTML (inspect)
 
@@ -472,7 +473,7 @@ OU o endpoint falhará. **Avaliar UX do estado vazio/erro.**
 
 ### 14.1 Visibilidade do sino
 - Ícone sino no canto superior direito
-- Badge com contagem (se > 0) — o seed criou 1 dual approval pendente
+- Badge com contagem (aparece após criar dual approval no Bloco 12)
 - Hover mostra tooltip "Notificações"?
 
 ### 14.2 Painel lateral (Sheet)
@@ -650,15 +651,18 @@ Liste 3-5 coisas que ficaram **especialmente boas** em UX. Isso ajuda a preserva
 
 ### Cleanup
 
-Após finalizar o QA, acionar:
+Ao final do QA, via UI:
 
-```
-DELETE {PREVIEW_URL}/api/admin/seed-pagadoria-qa
-Authorization: Bearer {SEED_ADMIN_TOKEN}
-```
+- **Cobranças `[QA UX]` PENDING**: cancelar no detalhe de cada uma
+- **Cobranças `[QA UX]` RECEIVED**: deixar (são histórico — ok permanecer em prod pré-launch)
+- **Clientes `[QA UX]`**: deletar via `/financeiro/clientes` (se houver botão) ou deixar
+- **Transferência > R$ 50k pendente** (do Bloco 12): rejeitar no dual approval
+- **Branding `[QA UX]`**: reverter se foi alterado (ou deixar — é ok para pré-launch)
+- **Subconta Asaas + KYC**: **NÃO reverter** — continua APPROVED para próximos QAs
 
-Isso remove todos os dados com prefixo `[QA UX]` e reverte `AsaasAccount` para
-`AWAITING_DOCS` (estado original antes do QA).
+Não há endpoint admin de cleanup automático — tudo via UI. Se precisar limpar
+em massa, peça ao owner para rodar queries SQL diretamente no Neon (filtrar por
+prefix `[QA UX]` nas descrições).
 
 ### Recomendações finais
 
@@ -667,5 +671,6 @@ Liste 3-7 itens priorizados do mais ao menos crítico. Use formato:
 
 ---
 
-**FIM DO PROMPT. Ao executar, substitua `{PREVIEW_URL}` e `{SEED_ADMIN_TOKEN}`
-pelos valores reais fornecidos pelo owner do projeto.**
+**FIM DO PROMPT. Ao executar, substitua `{PROD_URL}` pelo URL de produção
+fornecido pelo owner do projeto. O preflight em `/api/admin/preflight-qa`
+confirmará que o ambiente está pronto antes de começar.**
