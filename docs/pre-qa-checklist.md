@@ -1,8 +1,12 @@
 # Checklist pré-QA — Módulo Pagadoria
 
+> ⚠ **2026-04-20 — QA Round 2 está BLOQUEADO** em setup de 2FA do admin em produção.
+> `POST /api/security/2fa/setup` retorna 500 mesmo após env vars sincronizadas Preview → Production + redeploy.
+> **Para retomar o trabalho**, leia primeiro [pagadoria-handoff.md](pagadoria-handoff.md) — doc consolidado com histórico + diagnóstico + checklist de próximos passos.
+
 Siga este roteiro **antes de acionar o QA UX/UI via Claude Chrome**. Cobre todos os blockers operacionais identificados para evitar interrupção durante o QA.
 
-**Tempo estimado total:** ~35 min (primeira vez). Próximos QAs pulam A-D e vão direto para E-F.
+**Tempo estimado total:** ~15 min (primeira vez). Próximos QAs pulam A-D e vão direto para E-F.
 
 ---
 

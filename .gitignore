@@ -47,6 +47,7 @@ next-env.d.ts
 # Claude Code / QA tooling
 .claude/
 .playwright-mcp/
+docs/qa-round-*-prompt.md
 
 # Playwright artifacts
 apps/web/playwright-report/

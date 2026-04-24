@@ -81,14 +81,14 @@ async function main() {
   const user = await prisma.user.findUnique({
     where: { email },
     include: {
-      memberships: { include: { org: { include: { asaasAccount: true } } } },
+      orgMemberships: { include: { org: { include: { asaasAccount: true } } } },
     },
   });
   if (!user) {
     console.error(`❌ Usuário ${email} não encontrado`);
     process.exit(1);
   }
-  const membership = user.memberships[0];
+  const membership = user.orgMemberships[0];
   if (!membership) {
     console.error(`❌ Usuário ${email} não tem org`);
     process.exit(1);

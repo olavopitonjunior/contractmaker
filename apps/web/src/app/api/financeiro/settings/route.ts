@@ -20,6 +20,7 @@ const discountPresetSchema = z.object({
 
 const patchSchema = z.object({
   platformFeePercent: z.number().min(0).max(10).optional(),
+  platformFeeWalletId: z.string().trim().min(1).max(200).nullable().optional(),
   overpricePolicy: z.enum(["none", "absorb", "asaas_fee", "custom"]).optional(),
   overpriceType: z.enum(["percentage", "fixed"]).nullable().optional(),
   overpriceValue: z.number().nonnegative().nullable().optional(),

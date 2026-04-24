@@ -17,6 +17,14 @@ import {
   getPixQrCode,
   getBankSlipData,
 } from "@/lib/asaas/payments";
+import { composeSplits, CommissionBuildError } from "@/lib/asaas/commission";
+
+const splitEntrySchema = z.object({
+  walletId: z.string().trim().min(1),
+  percentualValue: z.number().min(0).max(100).optional(),
+  fixedValue: z.number().min(0).optional(),
+  totalFixedValue: z.number().min(0).optional(),
+});
 
 const createSchema = z.object({
   customerId: z.string(), // AsaasCustomer.id local
@@ -25,6 +33,7 @@ const createSchema = z.object({
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   description: z.string().max(500).optional(),
   kind: z.enum(["avulsa", "aluguel", "outros"]).default("avulsa"),
+  customSplits: z.array(splitEntrySchema).max(10).optional(),
 });
 
 /**
@@ -95,6 +104,29 @@ export async function POST(req: NextRequest) {
     tag: account.apiKeyTagBase64,
   });
 
+  // Carrega platform fee da org (Fase 3 continua ativo para avulsas)
+  const feeSettings = await prisma.orgFinancialSettings.findUnique({
+    where: { orgId: ctx.orgId },
+  });
+
+  let split;
+  try {
+    split = composeSplits({
+      customSplits: parsed.data.customSplits,
+      platformFeePercent: feeSettings?.platformFeePercent ?? 0,
+      platformWalletId: feeSettings?.platformFeeWalletId ?? null,
+      orgWalletId: account.walletId,
+    });
+  } catch (err) {
+    if (err instanceof CommissionBuildError) {
+      return NextResponse.json(
+        { error: "SPLIT_INVALID", code: err.code, message: err.message },
+        { status: 400 }
+      );
+    }
+    throw err;
+  }
+
   try {
     const payment = await createPayment({
       input: {
@@ -104,6 +136,7 @@ export async function POST(req: NextRequest) {
         dueDate: parsed.data.dueDate,
         description: parsed.data.description,
         externalReference: `avulsa:${customer.id}:${Date.now()}`,
+        split,
       },
       apiKey,
     });
@@ -138,6 +171,7 @@ export async function POST(req: NextRequest) {
         identificationField: bankSlip?.identificationField ?? null,
         pixQrCodePayload: pixQr?.payload ?? null,
         pixQrCodeImage: pixQr?.encodedImage ?? null,
+        splitJson: split ? (split as any) : null,
       },
     });
 
