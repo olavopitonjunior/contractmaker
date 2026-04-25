@@ -4,6 +4,8 @@ import type { PermissionKey, PermissionMap } from "@/lib/security/rbac/permissio
 
 interface PermissionsState {
   loading: boolean;
+  userId: string | null;
+  orgId: string | null;
   role: string | null;
   customRoleName: string | null;
   permissions: PermissionMap;
@@ -18,15 +20,26 @@ const TTL_MS = 60_000;
 export function usePermissions(): PermissionsState {
   const [state, setState] = useState<{
     loading: boolean;
+    userId: string | null;
+    orgId: string | null;
     role: string | null;
     customRoleName: string | null;
     permissions: PermissionMap;
-  }>({ loading: true, role: null, customRoleName: null, permissions: {} });
+  }>({
+    loading: true,
+    userId: null,
+    orgId: null,
+    role: null,
+    customRoleName: null,
+    permissions: {},
+  });
 
   async function load(force = false) {
     if (!force && cached && Date.now() - cached.ts < TTL_MS) {
       setState({
         loading: false,
+        userId: cached.data.userId,
+        orgId: cached.data.orgId,
         role: cached.data.role,
         customRoleName: cached.data.customRoleName,
         permissions: cached.data.permissions,
@@ -40,13 +53,22 @@ export function usePermissions(): PermissionsState {
       cached = { ts: Date.now(), data };
       setState({
         loading: false,
+        userId: data.userId,
+        orgId: data.orgId,
         role: data.role,
         customRoleName: data.customRoleName,
         permissions: data.permissions,
       });
     } catch (err) {
       console.error("[usePermissions] failed", err);
-      setState({ loading: false, role: null, customRoleName: null, permissions: {} });
+      setState({
+        loading: false,
+        userId: null,
+        orgId: null,
+        role: null,
+        customRoleName: null,
+        permissions: {},
+      });
     }
   }
 

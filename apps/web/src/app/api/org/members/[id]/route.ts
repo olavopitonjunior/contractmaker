@@ -68,6 +68,12 @@ export async function PATCH(
   if (!membership) {
     return NextResponse.json({ error: "Membro não encontrado" }, { status: 404 });
   }
+  if (membership.userId === ctx.userId) {
+    return NextResponse.json(
+      { error: "Você não pode alterar seu próprio papel" },
+      { status: 422 }
+    );
+  }
   if (membership.role === "owner") {
     return NextResponse.json(
       { error: "Use /transfer-ownership para mover o owner" },
@@ -193,6 +199,15 @@ export async function DELETE(
   });
   if (!membership) {
     return NextResponse.json({ error: "Membro não encontrado" }, { status: 404 });
+  }
+  if (membership.userId === ctx.userId) {
+    return NextResponse.json(
+      {
+        error:
+          "Você não pode se remover por aqui — use 'Sair da organização'",
+      },
+      { status: 422 }
+    );
   }
   if (membership.role === "owner") {
     return NextResponse.json(

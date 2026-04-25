@@ -6,7 +6,17 @@ import { Loader2 } from "lucide-react";
 
 export default function LogoutPage() {
   useEffect(() => {
-    signOut({ callbackUrl: "/login" });
+    (async () => {
+      // Limpeza server-side primeiro: revoga elevation (sudo), apaga sessões DB,
+      // registra audit LOGOUT. Idempotente — roda mesmo sem sessão ativa.
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      }).catch(() => {
+        // Falha não bloqueia logout — signOut limpa o cookie de sessão.
+      });
+      await signOut({ callbackUrl: "/login" });
+    })();
   }, []);
 
   return (

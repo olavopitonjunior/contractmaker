@@ -12,17 +12,24 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { requireElevation, ElevationRequiredError } from "@/lib/security/elevation";
 import { audit } from "@/lib/security/audit";
 import { sendEmail } from "@/lib/email/client";
-import { MemberInvitedEmail } from "@/lib/email/templates/member-invited";
+import { WelcomeSetPasswordEmail } from "@/lib/email/templates/password-reset";
 import { generateSecureToken } from "@/lib/security/crypto";
+import { createPasswordResetToken } from "@/lib/auth/password-reset";
+// MemberInvitedEmail é importado dinamicamente abaixo (só no caminho de user existente).
 
-const ROLE_VALUES = ["admin", "finance", "sales", "viewer"] as const;
+const ROLE_VALUES = ["admin", "finance", "sales", "viewer", "custom"] as const;
 
-const inviteSchema = z.object({
-  email: z.string().email(),
-  role: z.enum(ROLE_VALUES),
-  customRoleId: z.string().optional(),
-  name: z.string().optional(),
-});
+const inviteSchema = z
+  .object({
+    email: z.string().email().max(200),
+    role: z.enum(ROLE_VALUES),
+    customRoleId: z.string().optional(),
+    name: z.string().optional(),
+  })
+  .refine((d) => d.role !== "custom" || !!d.customRoleId, {
+    message: "customRoleId obrigatório quando role=custom",
+    path: ["customRoleId"],
+  });
 
 /**
  * GET /api/org/members — lista membros da org.
@@ -90,17 +97,23 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
-  const { email, role, customRoleId, name } = parsed.data;
+  const email = parsed.data.email.toLowerCase().trim();
+  const { role, customRoleId, name } = parsed.data;
 
-  // Cria user se não existir (senha temporária aleatória — user redefine via email)
-  const tempPassword = generateSecureToken(16);
-  const passwordHash = await bcrypt.hash(tempPassword, 10);
+  // Detecta se é user novo para enviar fluxo de welcome (definir senha)
+  // ou apenas notificação de adição (user já tinha conta).
+  const existingUser = await prisma.user.findUnique({ where: { email } });
+  const isNewUser = !existingUser;
 
-  const user = await prisma.user.upsert({
-    where: { email },
-    create: { email, name: name ?? null, passwordHash },
-    update: {},
-  });
+  let user = existingUser;
+  if (!user) {
+    // Cria user com senha aleatória (placeholder — define a real via link welcome).
+    const placeholderPassword = generateSecureToken(32);
+    const passwordHash = await bcrypt.hash(placeholderPassword, 10);
+    user = await prisma.user.create({
+      data: { email, name: name?.trim() || null, passwordHash },
+    });
+  }
 
   // Checa se já é membro
   const existingMembership = await prisma.orgMembership.findUnique({
@@ -147,20 +160,38 @@ export async function POST(req: NextRequest) {
     }
   );
 
-  // Envia email com link para o login (user define senha nova)
+  // Envia email apropriado: welcome (definir senha) p/ user novo,
+  // notificação simples p/ user existente (já tem login).
   const baseUrl = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
-  const acceptUrl = `${baseUrl}/login?email=${encodeURIComponent(email)}`;
 
-  await sendEmail({
-    to: email,
-    subject: `Convite para ${ctx.orgName} no Contractmaker`,
-    react: MemberInvitedEmail({
-      inviterName: ctx.userName,
-      orgName: ctx.orgName,
-      role,
-      acceptUrl,
-    }) as any,
-  });
+  if (isNewUser) {
+    const { token } = await createPasswordResetToken(email, "welcome");
+    const setupUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(token)}`;
+    await sendEmail({
+      to: email,
+      subject: `Bem-vindo a ${ctx.orgName} no Contractmaker`,
+      react: WelcomeSetPasswordEmail({
+        inviterName: ctx.userName,
+        orgName: ctx.orgName,
+        setupUrl,
+      }) as any,
+    });
+  } else {
+    const { MemberInvitedEmail } = await import(
+      "@/lib/email/templates/member-invited"
+    );
+    const acceptUrl = `${baseUrl}/login?email=${encodeURIComponent(email)}`;
+    await sendEmail({
+      to: email,
+      subject: `Você foi adicionado a ${ctx.orgName}`,
+      react: MemberInvitedEmail({
+        inviterName: ctx.userName,
+        orgName: ctx.orgName,
+        role,
+        acceptUrl,
+      }) as any,
+    });
+  }
 
   return NextResponse.json({
     membership: {

@@ -2,12 +2,24 @@ import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
+import crypto from "node:crypto";
 
 const registerSchema = z.object({
-  name: z.string().min(2),
-  email: z.string().email(),
-  password: z.string().min(6),
+  name: z.string().trim().min(2).max(120),
+  email: z.string().email().max(200),
+  password: z.string().min(8).max(200),
 });
+
+async function uniqueOrgSlug(base: string): Promise<string> {
+  const cleanBase = base.replace(/[^a-z0-9-]/g, "-").replace(/-+/g, "-").slice(0, 32) || "workspace";
+  for (let i = 0; i < 5; i++) {
+    const candidate = `${cleanBase}-${crypto.randomBytes(4).toString("hex")}`;
+    const exists = await prisma.organization.findUnique({ where: { slug: candidate } });
+    if (!exists) return candidate;
+  }
+  // Fallback ultra-defensivo
+  return `${cleanBase}-${crypto.randomBytes(8).toString("hex")}`;
+}
 
 export async function POST(request: Request) {
   const body = await request.json();
@@ -15,17 +27,19 @@ export async function POST(request: Request) {
 
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Dados invalidos." },
+      { error: "Dados inválidos. A senha precisa ter ao menos 8 caracteres." },
       { status: 400 }
     );
   }
 
-  const { name, email, password } = parsed.data;
+  const name = parsed.data.name.trim();
+  const email = parsed.data.email.toLowerCase().trim();
+  const { password } = parsed.data;
 
   const existing = await prisma.user.findUnique({ where: { email } });
   if (existing) {
     return NextResponse.json(
-      { error: "Email ja cadastrado." },
+      { error: "Este email já está cadastrado." },
       { status: 409 }
     );
   }
@@ -36,12 +50,13 @@ export async function POST(request: Request) {
     data: { name, email, passwordHash },
   });
 
-  // Auto-create org and membership for new user
-  const slug = email.split("@")[0].replace(/[^a-z0-9-]/gi, "-").toLowerCase();
+  // Auto-create org and membership for new user (slug único com 4 bytes random)
+  const baseSlug = email.split("@")[0].toLowerCase();
+  const slug = await uniqueOrgSlug(baseSlug);
   const org = await prisma.organization.create({
     data: {
-      name: `${name}'s Workspace`,
-      slug: `${slug}-${user.id.slice(0, 6)}`,
+      name: `Workspace de ${name}`,
+      slug,
       members: {
         create: {
           userId: user.id,
