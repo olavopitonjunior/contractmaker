@@ -1104,6 +1104,7 @@ model CommissionCharge {
   customer   AsaasCustomer       @relation(fields: [asaasCustomerId], references: [id])
   events     AsaasWebhookEvent[]
   publicLink ChargePublicLink?
+  transfers  AsaasTransfer[]
 
   @@index([orgId, status])
   @@index([orgId, currentDueDate])
@@ -1168,6 +1169,10 @@ model OrgFinancialSettings {
   notifyEmail          Boolean  @default(true)
   notifySms            Boolean  @default(false)
   defaultDueDays       Int      @default(7)
+  // Política de taxa para splits PIX externos (Fase 6):
+  //   "org_absorbs"           — beneficiário recebe valor cheio, org paga taxa Asaas
+  //   "deduct_from_recipient" — taxa é descontada do split do beneficiário
+  pixSplitFeePolicy    String   @default("org_absorbs")
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -1178,20 +1183,34 @@ model OrgFinancialSettings {
 // Cada recipient representa uma wallet Asaas que pode receber repasse em
 // cobranças da org. Usados pelo SplitEditor no form de nova cobrança.
 model SplitRecipient {
-  id          String   @id @default(cuid())
-  orgId       String
-  label       String
-  walletId    String
-  cpfCnpj     String?
-  description String?
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id            String   @id @default(cuid())
+  orgId         String
+  label         String
+  // Tipo do beneficiário:
+  //   "asaas_wallet" — beneficiário tem conta Asaas (split nativo, gratuito, instantâneo)
+  //   "pix_external" — beneficiário só tem PIX em outro banco (transferência Asaas pós-pagamento)
+  recipientType String   @default("asaas_wallet")
+  // Para asaas_wallet:
+  walletId      String?
+  // Para pix_external:
+  pixAddressKey String?
+  pixKeyType    String? // CPF | CNPJ | EMAIL | PHONE | EVP
+  ownerName     String?
+  ownerCpfCnpj  String?
+  // Comum:
+  cpfCnpj       String?
+  description   String?
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  org       Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  transfers AsaasTransfer[]
 
   @@unique([orgId, walletId])
+  @@unique([orgId, pixAddressKey])
   @@index([orgId, active])
+  @@index([orgId, recipientType])
 }
 
 // Link público de pagamento — URL /pay/[token] com branding.
@@ -1215,30 +1234,39 @@ model ChargePublicLink {
 model AsaasTransfer {
   id              String    @id @default(cuid())
   orgId           String
-  asaasTransferId String    @unique // tra_xxx
+  asaasTransferId String?   @unique // tra_xxx — null antes da chamada Asaas (status=PENDING_DISPATCH)
   value           Float
   netValue        Float?
   transferFee     Float?
   type            String // PIX | TED
-  status          String // PENDING | DONE | FAILED | CANCELLED
+  // Status: PENDING_DISPATCH (novo) | PENDING | DONE | FAILED | CANCELLED
+  status          String
   pixAddressKey   String?
   pixKeyType      String? // CPF | CNPJ | EMAIL | PHONE | RANDOM
   ownerName       String? // nome do destinatário (validado via pix validation)
   ownerCpfCnpj    String?
   bankAccountJson Json?
-  requestedBy     String
+  requestedBy     String?
   scheduledDate   DateTime?
   effectiveDate   DateTime?
   description     String?
   failureReason   String?   @db.Text
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  // Trigger automático (Fase 6): split PIX externo gerado a partir de cobrança paga
+  commissionChargeId String?
+  splitRecipientId   String?
+  origin             String  @default("manual") // manual | split_dispatch
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
-  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  user User         @relation(fields: [requestedBy], references: [id])
+  org              Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user             User?             @relation(fields: [requestedBy], references: [id])
+  commissionCharge CommissionCharge? @relation(fields: [commissionChargeId], references: [id], onDelete: SetNull)
+  splitRecipient   SplitRecipient?   @relation(fields: [splitRecipientId], references: [id], onDelete: SetNull)
 
+  @@unique([commissionChargeId, splitRecipientId])
   @@index([orgId, status])
   @@index([orgId, createdAt])
+  @@index([commissionChargeId])
 }
 
 // Conciliação — match entre lançamentos do extrato Asaas e cobranças locais.

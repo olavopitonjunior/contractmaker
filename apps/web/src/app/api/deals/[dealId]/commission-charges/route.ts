@@ -284,7 +284,10 @@ export async function POST(
         identificationField: bankSlip?.identificationField ?? null,
         pixQrCodePayload: pixQr?.payload ?? null,
         pixQrCodeImage: pixQr?.encodedImage ?? null,
-        splitJson: (payload.paymentInput.split ?? null) as any,
+        splitJson:
+          payload.paymentInput.split || payload.externalSplits.length > 0
+            ? ({ splits: payload.paymentInput.split ?? [], external: payload.externalSplits } as any)
+            : null,
         payerSnapshot: payer as any,
         beneficiarySnapshot: {
           imobiliaria_nome: (contract.dataJson as any)?.comissao?.imobiliaria_nome ?? null,

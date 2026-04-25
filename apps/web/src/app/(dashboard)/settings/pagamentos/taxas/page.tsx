@@ -257,6 +257,46 @@ export default function TaxasPage() {
 
           <Card>
             <CardHeader>
+              <CardTitle className="text-base">Splits PIX externos</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="space-y-2">
+                {(["org_absorbs", "deduct_from_recipient"] as const).map((p) => (
+                  <label
+                    key={p}
+                    className={`flex items-center gap-2 border rounded p-2 cursor-pointer ${
+                      settings.pixSplitFeePolicy === p ? "border-primary bg-primary/5" : ""
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      checked={settings.pixSplitFeePolicy === p}
+                      onChange={() => update("pixSplitFeePolicy", p)}
+                    />
+                    <div className="flex-1">
+                      <div className="text-sm font-medium">
+                        {p === "org_absorbs" && "Org absorve a taxa"}
+                        {p === "deduct_from_recipient" && "Descontar do split do beneficiário"}
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {p === "org_absorbs" &&
+                          "Beneficiário recebe valor cheio. Taxa Asaas (~R$ 1) sai da sua conta a cada transferência PIX externa."}
+                        {p === "deduct_from_recipient" &&
+                          "A taxa é descontada da fatia do beneficiário. Pode causar valores quebrados se o split for muito pequeno."}
+                      </div>
+                    </div>
+                  </label>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Aplica-se a destinatários PIX externos (sem conta Asaas). Splits
+                Asaas-nativos (via walletId) não têm taxa.
+              </p>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
               <CardTitle className="text-base">Multa e juros</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">

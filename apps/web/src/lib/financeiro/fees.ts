@@ -26,6 +26,8 @@ export interface DiscountPreset {
   dueDayOffset: number;
 }
 
+export type PixSplitFeePolicy = "org_absorbs" | "deduct_from_recipient";
+
 export interface FeesSettings {
   platformFeePercent: number;
   platformFeeWalletId: string | null;
@@ -40,6 +42,7 @@ export interface FeesSettings {
   asaasFeeBoletoCents: number;
   asaasFeeCardPercent: number;
   asaasFeeCardCents: number;
+  pixSplitFeePolicy: PixSplitFeePolicy;
 }
 
 export const DEFAULT_FEES_SETTINGS: FeesSettings = {
@@ -56,6 +59,7 @@ export const DEFAULT_FEES_SETTINGS: FeesSettings = {
   asaasFeeBoletoCents: 349,
   asaasFeeCardPercent: 2.99,
   asaasFeeCardCents: 49,
+  pixSplitFeePolicy: "org_absorbs",
 };
 
 function round2(n: number): number {

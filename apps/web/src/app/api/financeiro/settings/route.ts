@@ -35,6 +35,7 @@ const patchSchema = z.object({
   defaultDueDays: z.number().int().min(1).max(90).optional(),
   notifyEmail: z.boolean().optional(),
   notifySms: z.boolean().optional(),
+  pixSplitFeePolicy: z.enum(["org_absorbs", "deduct_from_recipient"]).optional(),
 });
 
 async function getOrCreate(orgId: string) {
