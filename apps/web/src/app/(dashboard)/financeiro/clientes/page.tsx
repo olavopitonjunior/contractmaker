@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { useDebounce } from "@/hooks/useDebounce";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -39,6 +40,7 @@ export default function ClientesPage() {
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 300);
   const [newOpen, setNewOpen] = useState(false);
   const [form, setForm] = useState({ name: "", cpfCnpj: "", email: "", mobilePhone: "" });
   const [busy, setBusy] = useState(false);
@@ -47,7 +49,7 @@ export default function ClientesPage() {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      if (search) params.set("search", search);
+      if (debouncedSearch) params.set("search", debouncedSearch);
       const res = await fetch(`/api/financeiro/customers?${params}`, {
         credentials: "include",
       });
@@ -59,7 +61,7 @@ export default function ClientesPage() {
     } finally {
       setLoading(false);
     }
-  }, [search]);
+  }, [debouncedSearch]);
 
   useEffect(() => {
     load();
@@ -109,7 +111,6 @@ export default function ClientesPage() {
             placeholder="Nome, CPF/CNPJ, email..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && load()}
             className="pl-9"
           />
         </div>

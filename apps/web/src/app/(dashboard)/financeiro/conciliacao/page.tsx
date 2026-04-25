@@ -96,9 +96,13 @@ export default function ConciliacaoPage() {
         toast.error(data.error ?? "Falha ao sincronizar");
         return;
       }
-      toast.success(
-        `Sincronizado: ${data.fetched} lançamentos, ${data.autoMatched} auto-matched`
-      );
+      if (data.fetched === 0) {
+        toast.info("Nenhum lançamento novo desde a última sincronização");
+      } else {
+        toast.success(
+          `Sincronizado: ${data.fetched} lançamento${data.fetched !== 1 ? "s" : ""}, ${data.autoMatched} auto-conciliado${data.autoMatched !== 1 ? "s" : ""}`
+        );
+      }
       await load();
     } finally {
       setSyncing(false);

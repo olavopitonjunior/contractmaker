@@ -15,8 +15,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ArrowLeft, ArrowRight, CheckCircle2, Plus, Search } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, Plus, Search, AlertTriangle } from "lucide-react";
 import { maskCpfCnpj } from "@/lib/security/pii";
+import { checkBusinessDay } from "@/lib/financeiro/businessDay";
 import SplitEditor, {
   type SplitEntry,
   toApiSplit,
@@ -377,6 +378,27 @@ export default function NovaCobrancaPage() {
                 onChange={(e) => setDueDate(e.target.value)}
                 min={new Date().toISOString().slice(0, 10)}
               />
+              {(() => {
+                const check = checkBusinessDay(dueDate);
+                if (check.isBusinessDay) return null;
+                const reasonLabel =
+                  check.reason === "saturday"
+                    ? "sábado"
+                    : check.reason === "sunday"
+                      ? "domingo"
+                      : `feriado (${check.holidayName})`;
+                const adjusted = check.adjustedToISO
+                  ? new Date(check.adjustedToISO + "T00:00:00").toLocaleDateString("pt-BR")
+                  : "próximo dia útil";
+                return (
+                  <p className="text-xs text-amber-700 mt-1 flex items-start gap-1">
+                    <AlertTriangle className="h-3 w-3 mt-0.5 shrink-0" />
+                    <span>
+                      Esta data cai em {reasonLabel}. A Asaas pode ajustar automaticamente para {adjusted}.
+                    </span>
+                  </p>
+                );
+              })()}
             </div>
             <div>
               <Label htmlFor="nv-kind">Tipo</Label>

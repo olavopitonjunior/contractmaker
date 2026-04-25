@@ -45,7 +45,7 @@ const CODE_TRANSLATIONS: Record<string, string> = {
   invalid_postalCode: "CEP inválido",
   invalid_value: "Valor inválido",
   invalid_dueDate: "Data de vencimento inválida",
-  invalid_billingType: "Método de cobrança inválido",
+  invalid_billingType: "Método de cobrança indisponível para esta subconta",
   invalid_customer: "Cliente Asaas inválido",
   invalid_walletId: "walletId inválido ou não encontrado",
   invalid_split: "Configuração de split inválida",
@@ -57,7 +57,47 @@ const CODE_TRANSLATIONS: Record<string, string> = {
   rate_limit_exceeded: "Muitas requisições — aguarde alguns segundos",
 };
 
+/**
+ * Heurísticas baseadas no conteúdo da `description` retornada pela Asaas.
+ * Aplicadas ANTES do match por código, porque alguns erros chegam com
+ * `code` genérico (ex: `invalid_billingType`) mas a causa real está no
+ * texto (ex: "limite de emissão atingido"). Retorna null se nada matcha.
+ */
+function translateByDescription(description: string | undefined): string | null {
+  if (!description) return null;
+  const lc = description.toLowerCase();
+
+  // Limite de emissão atingido (disparado em PIX e boleto quando subconta atinge teto)
+  if (
+    lc.includes("limite") &&
+    (lc.includes("emiss") || lc.includes("cobran") || lc.includes("r$"))
+  ) {
+    return `Limite de emissão atingido. ${description.trim()}`;
+  }
+
+  // Subconta ainda em análise / documentação pendente
+  if (lc.includes("análise") || lc.includes("analise") || lc.includes("pendente")) {
+    if (lc.includes("document") || lc.includes("subconta") || lc.includes("conta")) {
+      return "Sua subconta ainda está em análise ou com documentação pendente. Verifique o status em Configurações → Pagamentos.";
+    }
+  }
+
+  // CPF/CNPJ já cadastrado
+  if (lc.includes("já cadastrado") || lc.includes("ja cadastrado") || lc.includes("já existe")) {
+    return description.trim();
+  }
+
+  // Saldo insuficiente
+  if (lc.includes("saldo") && (lc.includes("insuficiente") || lc.includes("indispon"))) {
+    return "Saldo insuficiente para esta operação.";
+  }
+
+  return null;
+}
+
 export function translateAsaasError(code: string, description: string): string {
+  const byDesc = translateByDescription(description);
+  if (byDesc) return byDesc;
   return CODE_TRANSLATIONS[code] ?? description ?? code;
 }
 

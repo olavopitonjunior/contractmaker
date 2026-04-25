@@ -232,9 +232,10 @@ export default async function FinanceiroPage() {
           ) : (
             <div className="space-y-1">
               {recent.map((c) => (
-                <div
+                <Link
                   key={c.id}
-                  className="flex items-center justify-between py-2 border-b last:border-b-0 text-sm"
+                  href={`/financeiro/cobrancas/${c.id}`}
+                  className="flex items-center justify-between py-2 border-b last:border-b-0 text-sm hover:bg-muted/50 rounded px-2 -mx-2 transition-colors"
                 >
                   <div>
                     <div className="font-medium">{c.customer.name}</div>
@@ -248,7 +249,7 @@ export default async function FinanceiroPage() {
                       {c.status}
                     </Badge>
                   </div>
-                </div>
+                </Link>
               ))}
             </div>
           )}

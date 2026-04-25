@@ -1,16 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { resolvePublicToken } from "@/lib/financeiro/publicPage";
+import { maskPayerName } from "@/lib/financeiro/mask";
 import { RateLimits } from "@/lib/security/ratelimit";
 import { prisma } from "@/lib/db/prisma";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-function maskPayerName(fullName: string): string {
-  const parts = fullName.trim().split(/\s+/);
-  if (parts.length === 0) return "";
-  return parts[0] + (parts.length > 1 ? " " + parts[parts.length - 1][0] + "." : "");
-}
 
 function maskCpfCnpj(doc: string): string {
   const digits = doc.replace(/\D/g, "");
