@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { useDebounce } from "@/hooks/useDebounce";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -71,6 +72,11 @@ export function ChargesList({ hideNewButton, dealId }: ChargesListProps) {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [billingFilter, setBillingFilter] = useState<string>("all");
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 300);
+
+  useEffect(() => {
+    setOffset(0);
+  }, [debouncedSearch, statusFilter, billingFilter]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,7 +86,7 @@ export function ChargesList({ hideNewButton, dealId }: ChargesListProps) {
       params.set("limit", String(limit));
       if (statusFilter !== "all") params.set("status", statusFilter);
       if (billingFilter !== "all") params.set("billingType", billingFilter);
-      if (search) params.set("search", search);
+      if (debouncedSearch) params.set("search", debouncedSearch);
       if (dealId) params.set("dealId", dealId);
 
       const res = await fetch(`/api/financeiro/charges?${params}`, {
@@ -97,7 +103,7 @@ export function ChargesList({ hideNewButton, dealId }: ChargesListProps) {
     } finally {
       setLoading(false);
     }
-  }, [offset, statusFilter, billingFilter, search, dealId]);
+  }, [offset, statusFilter, billingFilter, debouncedSearch, dealId]);
 
   useEffect(() => {
     load();
@@ -113,7 +119,6 @@ export function ChargesList({ hideNewButton, dealId }: ChargesListProps) {
             placeholder="Nome, CPF, descrição..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && load()}
             className="pl-9"
           />
         </div>
@@ -153,25 +158,34 @@ export function ChargesList({ hideNewButton, dealId }: ChargesListProps) {
         )}
       </div>
 
-      {/* Chips de status */}
+      {/* Chips de status — sempre mostra os principais, contagens vindas do server */}
       <div className="flex items-center gap-1 flex-wrap text-xs">
-        {Object.entries(statusCounts).map(([st, count]) => {
-          const label = STATUS_LABEL[st]?.text ?? st;
-          return (
-            <button
-              key={st}
-              onClick={() => {
-                setStatusFilter(statusFilter === st ? "all" : st);
-                setOffset(0);
-              }}
-              className={`px-2 py-1 rounded border ${
-                statusFilter === st ? "bg-primary text-primary-foreground" : ""
-              } ${STATUS_LABEL[st]?.color ?? ""}`}
-            >
-              {label} ({count})
-            </button>
-          );
-        })}
+        <button
+          onClick={() => setStatusFilter("all")}
+          className={`px-2 py-1 rounded border ${
+            statusFilter === "all" ? "bg-primary text-primary-foreground" : ""
+          }`}
+        >
+          Todas ({total})
+        </button>
+        {(["PENDING", "OVERDUE", "CONFIRMED", "RECEIVED", "CANCELLED", "REFUNDED"] as const).map(
+          (st) => {
+            const count = statusCounts[st] ?? 0;
+            const label = STATUS_LABEL[st]?.text ?? st;
+            const active = statusFilter === st;
+            return (
+              <button
+                key={st}
+                onClick={() => setStatusFilter(active ? "all" : st)}
+                className={`px-2 py-1 rounded border transition-colors ${
+                  active ? "bg-primary text-primary-foreground" : STATUS_LABEL[st]?.color ?? ""
+                } ${count === 0 && !active ? "opacity-50" : ""}`}
+              >
+                {label} ({count})
+              </button>
+            );
+          }
+        )}
       </div>
 
       {/* Tabela */}

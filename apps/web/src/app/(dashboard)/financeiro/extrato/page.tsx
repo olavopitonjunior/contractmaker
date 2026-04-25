@@ -6,6 +6,12 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RefreshCw, Download, TrendingUp, TrendingDown } from "lucide-react";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 interface Transaction {
   id?: string;
@@ -194,10 +200,22 @@ export default function ExtratoPage() {
             className="w-[160px]"
           />
         </div>
-        <Button variant="outline" size="icon" onClick={load}>
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-        </Button>
-        <Button variant="outline" onClick={exportCsv}>
+        <TooltipProvider delayDuration={200}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={load}
+                aria-label="Recarregar extrato"
+              >
+                <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Recarregar extrato</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+        <Button variant="outline" onClick={exportCsv} aria-label="Exportar CSV">
           <Download className="h-4 w-4 mr-1" /> CSV
         </Button>
       </div>

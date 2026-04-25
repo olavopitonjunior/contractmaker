@@ -99,6 +99,16 @@ export default function TaxasPage() {
     discountPresetId: settings.discountPresets[0]?.id,
   });
 
+  const fineError =
+    settings.finePercent > 2
+      ? `${settings.finePercent}% excede o limite legal de 2% (CDC art. 52)`
+      : null;
+  const interestError =
+    settings.interestPercentMonth > 1
+      ? `${settings.interestPercentMonth}%/mês excede o limite legal de 1%/mês (CDC art. 52)`
+      : null;
+  const hasValidationErrors = !!(fineError || interestError);
+
   if (loading) return <p className="text-sm text-muted-foreground">Carregando...</p>;
 
   return (
@@ -110,7 +120,11 @@ export default function TaxasPage() {
             Configure platform fee, overprice, descontos, multa e juros.
           </p>
         </div>
-        <Button onClick={save} disabled={saving || !dirty}>
+        <Button
+          onClick={save}
+          disabled={saving || !dirty || hasValidationErrors}
+          title={hasValidationErrors ? "Corrija os erros antes de salvar" : undefined}
+        >
           <Save className="h-4 w-4 mr-1" />
           {saving ? "Salvando..." : "Salvar"}
         </Button>
@@ -259,12 +273,18 @@ export default function TaxasPage() {
                     onChange={(e) =>
                       update("finePercent", parseFloat(e.target.value) || 0)
                     }
+                    aria-invalid={!!fineError}
+                    className={fineError ? "border-red-500 focus-visible:ring-red-500" : ""}
                   />
                   <span className="text-sm text-muted-foreground">%</span>
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Máximo legal CDC: 2%
-                </p>
+                {fineError ? (
+                  <p className="text-xs text-red-600 mt-1">{fineError}</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Máximo legal CDC: 2%
+                  </p>
+                )}
               </div>
               <div>
                 <Label htmlFor="interest">Juros ao mês</Label>
@@ -279,12 +299,18 @@ export default function TaxasPage() {
                     onChange={(e) =>
                       update("interestPercentMonth", parseFloat(e.target.value) || 0)
                     }
+                    aria-invalid={!!interestError}
+                    className={interestError ? "border-red-500 focus-visible:ring-red-500" : ""}
                   />
                   <span className="text-sm text-muted-foreground">%/mês</span>
                 </div>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Máximo legal CDC: 1% ao mês
-                </p>
+                {interestError ? (
+                  <p className="text-xs text-red-600 mt-1">{interestError}</p>
+                ) : (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Máximo legal CDC: 1% ao mês
+                  </p>
+                )}
               </div>
             </CardContent>
           </Card>

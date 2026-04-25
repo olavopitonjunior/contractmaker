@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
@@ -37,7 +38,25 @@ const STATUS_LABEL: Record<string, string> = {
   CHARGEBACK: "Chargeback",
 };
 
+const VALID_TABS = ["receivables", "aging", "cashflow", "defaulters"] as const;
+type ReportTab = (typeof VALID_TABS)[number];
+
 export default function RelatoriosPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const rawTab = searchParams.get("tab");
+  const activeTab: ReportTab = VALID_TABS.includes(rawTab as ReportTab)
+    ? (rawTab as ReportTab)
+    : "receivables";
+
+  function handleTabChange(v: string) {
+    const params = new URLSearchParams(searchParams.toString());
+    if (v === "receivables") params.delete("tab");
+    else params.set("tab", v);
+    const qs = params.toString();
+    router.replace(`/financeiro/relatorios${qs ? `?${qs}` : ""}`, { scroll: false });
+  }
+
   return (
     <div className="space-y-4">
       <div>
@@ -47,7 +66,7 @@ export default function RelatoriosPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="receivables">
+      <Tabs value={activeTab} onValueChange={handleTabChange}>
         <TabsList>
           <TabsTrigger value="receivables">
             <PieIcon className="h-4 w-4 mr-1" /> Recebíveis
