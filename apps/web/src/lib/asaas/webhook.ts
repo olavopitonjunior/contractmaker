@@ -16,6 +16,7 @@ import {
   type AsaasWebhookEventName,
   mapAsaasStatusToInternal,
 } from "./types";
+import { dispatchExternalSplits } from "./splitDispatcher";
 
 export function validateWebhookToken(headerToken: string | null): boolean {
   const expected = process.env.ASAAS_WEBHOOK_TOKEN;
@@ -143,6 +144,18 @@ export async function applyWebhookToCharge(
       data: updateData,
     });
   });
+
+  // Fase 6: dispatch de splits PIX externos pós-pagamento.
+  // Fire-and-forget — qualquer falha individual fica registrada em
+  // AsaasTransfer.failureReason para retry manual via UI.
+  if (eventName === "PAYMENT_RECEIVED" || eventName === "PAYMENT_CONFIRMED") {
+    void dispatchExternalSplits(charge.id).catch((err) => {
+      console.error(
+        `[webhook] dispatchExternalSplits failed for charge ${charge.id}:`,
+        err instanceof Error ? err.message : err
+      );
+    });
+  }
 
   return {
     eventId: payload.id,

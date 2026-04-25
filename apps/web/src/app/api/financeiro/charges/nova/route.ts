@@ -19,12 +19,33 @@ import {
 } from "@/lib/asaas/payments";
 import { composeSplits, CommissionBuildError } from "@/lib/asaas/commission";
 
-const splitEntrySchema = z.object({
+// Fase 6: discriminated union — wallet Asaas (split nativo) OU PIX externo (post-payment dispatch)
+const splitWalletSchema = z.object({
+  recipientType: z.literal("asaas_wallet").default("asaas_wallet"),
+  recipientId: z.string().optional(),
   walletId: z.string().trim().min(1),
+  label: z.string().optional(),
   percentualValue: z.number().min(0).max(100).optional(),
   fixedValue: z.number().min(0).optional(),
   totalFixedValue: z.number().min(0).optional(),
 });
+
+const splitPixSchema = z.object({
+  recipientType: z.literal("pix_external"),
+  recipientId: z.string().min(1),
+  pixAddressKey: z.string().trim().min(1),
+  pixKeyType: z.string().trim().min(1),
+  ownerName: z.string().trim().min(1),
+  ownerCpfCnpj: z.string().trim().min(11),
+  label: z.string().optional(),
+  percentualValue: z.number().min(0).max(100).optional(),
+  fixedValue: z.number().min(0).optional(),
+});
+
+const splitEntrySchema = z.discriminatedUnion("recipientType", [
+  splitWalletSchema,
+  splitPixSchema,
+]);
 
 const createSchema = z.object({
   customerId: z.string(), // AsaasCustomer.id local
@@ -109,14 +130,26 @@ export async function POST(req: NextRequest) {
     where: { orgId: ctx.orgId },
   });
 
-  let split;
+  let asaasSplits;
+  let externalSplits: Array<{
+    recipientId: string;
+    pixAddressKey: string;
+    pixKeyType: string;
+    ownerName: string;
+    ownerCpfCnpj: string;
+    label?: string;
+    percentualValue?: number;
+    fixedValue?: number;
+  }> = [];
   try {
-    split = composeSplits({
+    const composed = composeSplits({
       customSplits: parsed.data.customSplits,
       platformFeePercent: feeSettings?.platformFeePercent ?? 0,
       platformWalletId: feeSettings?.platformFeeWalletId ?? null,
       orgWalletId: account.walletId,
     });
+    asaasSplits = composed.asaasSplits;
+    externalSplits = composed.externalSplits;
   } catch (err) {
     if (err instanceof CommissionBuildError) {
       return NextResponse.json(
@@ -136,7 +169,7 @@ export async function POST(req: NextRequest) {
         dueDate: parsed.data.dueDate,
         description: parsed.data.description,
         externalReference: `avulsa:${customer.id}:${Date.now()}`,
-        split,
+        split: asaasSplits,
       },
       apiKey,
     });
@@ -171,7 +204,10 @@ export async function POST(req: NextRequest) {
         identificationField: bankSlip?.identificationField ?? null,
         pixQrCodePayload: pixQr?.payload ?? null,
         pixQrCodeImage: pixQr?.encodedImage ?? null,
-        splitJson: split ? (split as any) : null,
+        splitJson:
+          asaasSplits || externalSplits.length > 0
+            ? ({ splits: asaasSplits ?? [], external: externalSplits } as any)
+            : null,
       },
     });
 

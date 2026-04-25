@@ -151,6 +151,59 @@ export function resolveCommissionValue(data: DadosContratoLite): number {
   );
 }
 
+/**
+ * Entry de split — pode ser wallet Asaas (split nativo) ou PIX externo
+ * (transferência manual pós-pagamento). Discriminada por `recipientType`.
+ *
+ * Fase 5: só wallet. Fase 6: adicionou PIX externo.
+ */
+export type SplitInputEntry =
+  | {
+      recipientType: "asaas_wallet";
+      /** SplitRecipient.id local (opcional — usado para rastreamento). */
+      recipientId?: string;
+      walletId: string;
+      label?: string;
+      percentualValue?: number;
+      fixedValue?: number;
+      totalFixedValue?: number;
+    }
+  | {
+      recipientType: "pix_external";
+      /** SplitRecipient.id local — obrigatório para idempotência da transferência. */
+      recipientId: string;
+      pixAddressKey: string;
+      pixKeyType: string;
+      ownerName: string;
+      ownerCpfCnpj: string;
+      label?: string;
+      percentualValue?: number;
+      fixedValue?: number;
+    };
+
+/**
+ * Split externo (PIX) — não vai pro payload do Asaas. Persistido em
+ * `CommissionCharge.splitJson.external` e disparado pelo dispatcher no
+ * webhook PAYMENT_RECEIVED.
+ */
+export interface ExternalSplit {
+  recipientId: string;
+  pixAddressKey: string;
+  pixKeyType: string;
+  ownerName: string;
+  ownerCpfCnpj: string;
+  label?: string;
+  percentualValue?: number;
+  fixedValue?: number;
+}
+
+export interface ComposedSplits {
+  /** Vai para `payment.split` na chamada Asaas (gratuito, instantâneo). */
+  asaasSplits: AsaasSplit[] | undefined;
+  /** Persistido em `splitJson.external` — dispatched após PAYMENT_RECEIVED. */
+  externalSplits: ExternalSplit[];
+}
+
 export interface BuildCommissionPayloadInput {
   contractData: DadosContratoLite;
   payer: ResolvedPayer;
@@ -166,14 +219,14 @@ export interface BuildCommissionPayloadInput {
   /** Opcional: walletId master do Contractmaker (Fase 3+). */
   platformWalletId?: string;
   /**
-   * Splits custom por cobrança (Fase 5). Cada entry redireciona X% ou valor
+   * Splits custom por cobrança (Fase 5+6). Cada entry redireciona X% ou valor
    * fixo para uma wallet cadastrada em `SplitRecipient`. O remanescente fica
    * na subconta da org (comportamento default do Asaas).
    *
    * Se `platformWalletId + platformFeePercent` existir, a taxa de plataforma
    * é anexada automaticamente em cima desses custom splits.
    */
-  customSplits?: AsaasSplit[];
+  customSplits?: SplitInputEntry[];
 }
 
 export interface BuiltCommissionPayload {
@@ -186,89 +239,143 @@ export interface BuiltCommissionPayload {
  * createPayment em sequência.
  */
 /**
- * Compõe e valida o array de splits a enviar para o Asaas.
+ * Compõe e valida splits para uma cobrança.
  *
- * Regras aplicadas:
- *  1. Máximo 10 entries (limite Asaas)
+ * Recebe `SplitInputEntry[]` discriminados por `recipientType`. Separa em:
+ *   - `asaasSplits` — entradas asaas_wallet + platform fee, vão para `payment.split`
+ *   - `externalSplits` — entradas pix_external, persistidas e disparadas
+ *     via dispatcher pós-PAYMENT_RECEIVED.
+ *
+ * Regras aplicadas (em conjunto, contando ambos os tipos):
+ *  1. Máximo 10 splits Asaas (limite real do Asaas — externals não contam)
  *  2. Sem duplicatas de walletId (Asaas rejeita)
- *  3. walletId próprio da org não permitido (Asaas rejeita; remanescente já cai lá)
- *  4. Soma de percentualValue ≤ 100
+ *  3. walletId próprio da org não permitido (remanescente já cai lá)
+ *  4. Sem duplicatas de recipientId entre os 2 tipos
+ *  5. Soma de percentualValue (todos os tipos + platform fee) ≤ 100
+ *  6. Cada entry precisa percentualValue > 0 OU fixedValue > 0
+ *  7. PIX externos não podem usar `totalFixedValue` (não é PIX nativo Asaas)
  *
- * Usado por `buildCommissionPayload` (flow Deal → commission-charges) e
- * também pelo flow de cobrança avulsa (`/api/financeiro/charges/nova`).
- *
- * Retorna `undefined` se nenhum split foi configurado — importante para
- * não enviar split vazio ao Asaas (que pode rejeitar).
+ * Retorna `{asaasSplits: undefined}` quando nenhum split Asaas foi definido —
+ * importante para não enviar split vazio ao Asaas (que pode rejeitar).
  */
 export function composeSplits(params: {
-  customSplits?: AsaasSplit[];
+  customSplits?: SplitInputEntry[];
   platformFeePercent?: number;
   platformWalletId?: string | null;
   orgWalletId: string;
-}): AsaasSplit[] | undefined {
-  const parts: AsaasSplit[] = [];
+}): ComposedSplits {
+  const asaasSplits: AsaasSplit[] = [];
+  const externalSplits: ExternalSplit[] = [];
 
-  if (params.customSplits?.length) {
-    parts.push(...params.customSplits);
+  for (const entry of params.customSplits ?? []) {
+    const pct = entry.percentualValue ?? 0;
+    const fx = entry.fixedValue ?? 0;
+    if (pct <= 0 && fx <= 0) {
+      const ref =
+        entry.recipientType === "asaas_wallet"
+          ? entry.walletId
+          : entry.pixAddressKey;
+      throw new CommissionBuildError(
+        "SPLIT_EMPTY_VALUE",
+        `Entry de split para ${ref} precisa ter percentualValue > 0 ou fixedValue > 0`
+      );
+    }
+
+    if (entry.recipientType === "asaas_wallet") {
+      asaasSplits.push({
+        walletId: entry.walletId,
+        percentualValue: entry.percentualValue,
+        fixedValue: entry.fixedValue,
+        totalFixedValue: entry.totalFixedValue,
+      });
+    } else {
+      externalSplits.push({
+        recipientId: entry.recipientId,
+        pixAddressKey: entry.pixAddressKey,
+        pixKeyType: entry.pixKeyType,
+        ownerName: entry.ownerName,
+        ownerCpfCnpj: entry.ownerCpfCnpj,
+        label: entry.label,
+        percentualValue: entry.percentualValue,
+        fixedValue: entry.fixedValue,
+      });
+    }
   }
 
+  // Platform fee é sempre wallet Asaas (master Contractmaker)
   const platformPct = params.platformFeePercent ?? 0;
   if (platformPct > 0 && params.platformWalletId) {
-    parts.push({
+    asaasSplits.push({
       walletId: params.platformWalletId,
       percentualValue: platformPct,
     });
   }
 
-  if (parts.length === 0) return undefined;
-
-  if (parts.length > 10) {
+  // Validações conjuntas
+  if (asaasSplits.length > 10) {
     throw new CommissionBuildError(
       "SPLIT_TOO_MANY",
-      `Split excede limite de 10 destinatários (recebeu ${parts.length})`
+      `Split Asaas excede limite de 10 destinatários (recebeu ${asaasSplits.length}). PIX externos não contam.`
     );
   }
-  const seen = new Set<string>();
-  for (const p of parts) {
-    if (seen.has(p.walletId)) {
+
+  const seenWallet = new Set<string>();
+  for (const s of asaasSplits) {
+    if (seenWallet.has(s.walletId)) {
       throw new CommissionBuildError(
         "SPLIT_DUPLICATE_WALLET",
-        `Wallet ID ${p.walletId} aparece mais de uma vez no split`
+        `Wallet ID ${s.walletId} aparece mais de uma vez no split`
       );
     }
-    seen.add(p.walletId);
-    if (p.walletId === params.orgWalletId) {
+    seenWallet.add(s.walletId);
+    if (s.walletId === params.orgWalletId) {
       throw new CommissionBuildError(
         "SPLIT_SELF_WALLET",
         "Split não pode incluir o wallet ID da própria org — o remanescente já cai lá automaticamente"
       );
     }
-    const pct = p.percentualValue ?? 0;
-    const fx = p.fixedValue ?? 0;
-    if (pct <= 0 && fx <= 0) {
+  }
+
+  const seenRecipient = new Set<string>();
+  for (const entry of params.customSplits ?? []) {
+    const rid = entry.recipientId;
+    if (rid && seenRecipient.has(rid)) {
       throw new CommissionBuildError(
-        "SPLIT_EMPTY_VALUE",
-        `Entry de split para ${p.walletId} precisa ter percentualValue > 0 ou fixedValue > 0`
+        "SPLIT_DUPLICATE_RECIPIENT",
+        `Beneficiário ${rid} aparece mais de uma vez no split`
       );
     }
+    if (rid) seenRecipient.add(rid);
   }
-  const totalPct = parts.reduce((s, p) => s + (p.percentualValue ?? 0), 0);
-  if (totalPct > 100) {
+
+  const totalPct =
+    asaasSplits.reduce((s, p) => s + (p.percentualValue ?? 0), 0) +
+    externalSplits.reduce((s, p) => s + (p.percentualValue ?? 0), 0);
+  if (totalPct > 100.001) {
+    // 0.001 tolerância para float
     throw new CommissionBuildError(
       "SPLIT_PERCENT_OVERFLOW",
-      `Soma dos percentuais do split é ${totalPct}% (máximo 100%)`
+      `Soma dos percentuais do split é ${totalPct.toFixed(2)}% (máximo 100%)`
     );
   }
 
-  return parts;
+  return {
+    asaasSplits: asaasSplits.length > 0 ? asaasSplits : undefined,
+    externalSplits,
+  };
+}
+
+export interface BuiltCommissionPayloadV2 extends BuiltCommissionPayload {
+  /** Splits externos (PIX) — para persistir em splitJson.external e disparar pós-pagamento. */
+  externalSplits: ExternalSplit[];
 }
 
 export function buildCommissionPayload(
   input: BuildCommissionPayloadInput
-): BuiltCommissionPayload {
+): BuiltCommissionPayloadV2 {
   const { payer, value, billingType, dueDate, description, externalReference, orgWalletId } = input;
 
-  const split = composeSplits({
+  const { asaasSplits, externalSplits } = composeSplits({
     customSplits: input.customSplits,
     platformFeePercent: input.platformFeePercent,
     platformWalletId: input.platformWalletId,
@@ -293,8 +400,8 @@ export function buildCommissionPayload(
     dueDate,
     description,
     externalReference,
-    split,
+    split: asaasSplits,
   };
 
-  return { customerInput, paymentInput };
+  return { customerInput, paymentInput, externalSplits };
 }

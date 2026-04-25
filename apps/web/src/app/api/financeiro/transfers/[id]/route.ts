@@ -57,6 +57,13 @@ export async function DELETE(
     tag: account.apiKeyTagBase64,
   });
 
+  if (!transfer.asaasTransferId) {
+    return NextResponse.json(
+      { error: "Transferência ainda não foi enviada ao Asaas — nada a cancelar" },
+      { status: 400 }
+    );
+  }
+
   try {
     await cancelTransfer({ asaasId: transfer.asaasTransferId, apiKey });
     const updated = await prisma.asaasTransfer.update({
