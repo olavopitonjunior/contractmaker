@@ -8,6 +8,16 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -189,10 +199,9 @@ export default function SplitRecipientsClient() {
     }
   }
 
+  const [confirmDeactivate, setConfirmDeactivate] = useState<Recipient | null>(null);
+
   async function remove(r: Recipient) {
-    if (!confirm(`Desativar "${r.label}"? Splits já criados não são afetados.`)) {
-      return;
-    }
     const res = await fetch(`/api/financeiro/split-recipients/${r.id}`, {
       method: "DELETE",
       credentials: "include",
@@ -203,6 +212,7 @@ export default function SplitRecipientsClient() {
       return;
     }
     toast.success("Destinatário desativado");
+    setConfirmDeactivate(null);
     void load();
   }
 
@@ -262,7 +272,7 @@ export default function SplitRecipientsClient() {
                   key={r.id}
                   r={r}
                   onEdit={() => openEdit(r)}
-                  onDeactivate={() => remove(r)}
+                  onDeactivate={() => setConfirmDeactivate(r)}
                 />
               ))}
             </div>
@@ -431,6 +441,33 @@ export default function SplitRecipientsClient() {
           </div>
         </SheetContent>
       </Sheet>
+
+      <AlertDialog
+        open={confirmDeactivate !== null}
+        onOpenChange={(o) => !o && setConfirmDeactivate(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Desativar &ldquo;{confirmDeactivate?.label}&rdquo;?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Cobranças futuras não poderão usar este destinatário. Splits já
+              criados continuam disparando normalmente. Você pode reativar a
+              qualquer momento.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => confirmDeactivate && remove(confirmDeactivate)}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              Desativar
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

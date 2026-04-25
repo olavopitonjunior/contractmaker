@@ -104,16 +104,29 @@ export function translateAsaasError(code: string, description: string): string {
 /**
  * Converte response JSON da Asaas em AsaasError.
  * Se body não tiver `errors[]`, cria erro genérico.
+ *
+ * Importante: lê o body como texto UMA vez (response body é stream
+ * de uso único). Tenta JSON.parse — se falhar, usa o texto cru como
+ * description. Evita "Body is unusable: Body has already been read".
  */
 export async function parseAsaasErrorResponse(
   res: Response,
   endpoint: string
 ): Promise<AsaasError> {
+  const rawText = await res.text().catch(() => "");
   let body: any = {};
-  try {
-    body = await res.json();
-  } catch {
-    body = { errors: [{ code: "unknown", description: await res.text() }] };
+  if (rawText) {
+    try {
+      body = JSON.parse(rawText);
+    } catch {
+      body = {
+        errors: [
+          { code: "unknown", description: rawText.slice(0, 500) || `HTTP ${res.status}` },
+        ],
+      };
+    }
+  } else {
+    body = { errors: [{ code: "unknown", description: `HTTP ${res.status}` }] };
   }
 
   const errors: AsaasErrorDetail[] = Array.isArray(body.errors)
