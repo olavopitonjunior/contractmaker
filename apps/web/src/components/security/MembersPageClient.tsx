@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -25,7 +26,7 @@ import { useElevation } from "@/hooks/useElevation";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { ROLE_LABELS_PT, type RolePreset } from "@/lib/security/rbac/roles";
-import { Shield, UserPlus, MoreVertical } from "lucide-react";
+import { Shield, UserPlus, Trash2, Send, LogOut } from "lucide-react";
 
 interface Member {
   id: string;
@@ -41,12 +42,15 @@ interface Member {
 const ROLE_CHOICES: RolePreset[] = ["admin", "finance", "sales", "viewer"];
 
 export function MembersPageClient() {
+  const router = useRouter();
   const perms = usePermissions();
   const elevation = useElevation();
   const [members, setMembers] = useState<Member[]>([]);
   const [loading, setLoading] = useState(true);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [elevOpen, setElevOpen] = useState(false);
+  const [resendingId, setResendingId] = useState<string | null>(null);
+  const [leaving, setLeaving] = useState(false);
   type PendingAction =
     | { type: "invite" }
     | { type: "change-role"; membershipId: string; newRole: string }
@@ -151,9 +155,59 @@ export function MembersPageClient() {
     await load();
   }
 
+  async function handleResendInvite(membershipId: string, email: string) {
+    if (!elevation.hasScope("MEMBER_MANAGE")) {
+      // Reusa o flow de invite p/ pedir elevation
+      setPendingAction({ type: "invite" });
+      setElevOpen(true);
+      return;
+    }
+    setResendingId(membershipId);
+    try {
+      const res = await fetch(
+        `/api/org/members/${membershipId}/resend-invite`,
+        { method: "POST", credentials: "include" }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error ?? "Falha ao reenviar convite");
+        return;
+      }
+      toast.success(`Convite reenviado para ${email}`);
+    } finally {
+      setResendingId(null);
+    }
+  }
+
+  async function handleLeaveOrg() {
+    const ok = confirm(
+      "Tem certeza que deseja sair desta organização? Você perderá acesso imediato."
+    );
+    if (!ok) return;
+    setLeaving(true);
+    try {
+      const res = await fetch("/api/org/members/leave", {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error ?? "Não foi possível sair");
+        return;
+      }
+      toast.success("Você saiu da organização");
+      router.push("/logout");
+    } finally {
+      setLeaving(false);
+    }
+  }
+
   const canInvite = perms.can(PERMISSION.ORG_MEMBERS_INVITE);
   const canChangeRole = perms.can(PERMISSION.ORG_MEMBERS_CHANGE_ROLE);
   const canRemove = perms.can(PERMISSION.ORG_MEMBERS_REMOVE);
+  const myUserId = perms.userId;
+  const myMembership = members.find((m) => m.userId === myUserId);
+  const canLeave = !!myMembership && myMembership.role !== "owner";
 
   return (
     <div className="space-y-4">
@@ -164,12 +218,24 @@ export function MembersPageClient() {
             Gerencie quem tem acesso à organização e com que permissões.
           </p>
         </div>
-        {canInvite && (
-          <Button onClick={handleStartInvite}>
-            <UserPlus className="h-4 w-4 mr-1" />
-            Convidar membro
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          {canLeave && (
+            <Button
+              variant="outline"
+              onClick={handleLeaveOrg}
+              disabled={leaving}
+            >
+              <LogOut className="h-4 w-4 mr-1" />
+              {leaving ? "Saindo..." : "Sair da organização"}
+            </Button>
+          )}
+          {canInvite && (
+            <Button onClick={handleStartInvite}>
+              <UserPlus className="h-4 w-4 mr-1" />
+              Convidar membro
+            </Button>
+          )}
+        </div>
       </div>
 
       <Card>
@@ -199,70 +265,100 @@ export function MembersPageClient() {
                   </td>
                 </tr>
               )}
-              {members.map((m) => (
-                <tr key={m.id} className="border-t">
-                  <td className="px-3 py-2">
-                    <div className="font-medium">{m.user.name ?? "—"}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {m.user.email}
-                    </div>
-                  </td>
-                  <td className="px-3 py-2">
-                    {m.role === "owner" ? (
-                      <Badge variant="default" className="bg-purple-600">
-                        <Shield className="h-3 w-3 mr-1" />
-                        Proprietário
-                      </Badge>
-                    ) : canChangeRole ? (
-                      <Select
-                        value={m.role}
-                        onValueChange={(v) => handleChangeRole(m.id, v)}
-                      >
-                        <SelectTrigger className="w-[140px] h-8">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {ROLE_CHOICES.map((r) => (
-                            <SelectItem key={r} value={r}>
-                              {ROLE_LABELS_PT[r]}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <Badge variant="outline">
-                        {ROLE_LABELS_PT[m.role as RolePreset] ?? m.role}
-                      </Badge>
-                    )}
-                    {m.customRoleName && (
-                      <div className="text-xs text-muted-foreground">
-                        {m.customRoleName}
+              {members.map((m) => {
+                const isSelf = m.userId === myUserId;
+                const neverLogged = m.lastActiveAt === null;
+                return (
+                  <tr key={m.id} className="border-t">
+                    <td className="px-3 py-2">
+                      <div className="font-medium flex items-center gap-2">
+                        {m.user.name ?? "—"}
+                        {isSelf && (
+                          <Badge variant="secondary" className="text-[10px] h-4">
+                            Você
+                          </Badge>
+                        )}
                       </div>
-                    )}
-                  </td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">
-                    {new Date(m.invitedAt).toLocaleDateString("pt-BR")}
-                  </td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">
-                    {m.lastActiveAt
-                      ? new Date(m.lastActiveAt).toLocaleString("pt-BR")
-                      : "nunca"}
-                  </td>
-                  <td className="px-3 py-2">
-                    {canRemove && m.role !== "owner" && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() =>
-                          handleRemove(m.id, m.user.name ?? m.user.email)
-                        }
-                      >
-                        <MoreVertical className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+                      <div className="text-xs text-muted-foreground">
+                        {m.user.email}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2">
+                      {m.role === "owner" ? (
+                        <Badge variant="default" className="bg-purple-600">
+                          <Shield className="h-3 w-3 mr-1" />
+                          Proprietário
+                        </Badge>
+                      ) : canChangeRole && !isSelf ? (
+                        <Select
+                          value={m.role}
+                          onValueChange={(v) => handleChangeRole(m.id, v)}
+                        >
+                          <SelectTrigger className="w-[140px] h-8">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ROLE_CHOICES.map((r) => (
+                              <SelectItem key={r} value={r}>
+                                {ROLE_LABELS_PT[r]}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Badge variant="outline">
+                          {ROLE_LABELS_PT[m.role as RolePreset] ?? m.role}
+                        </Badge>
+                      )}
+                      {m.customRoleName && (
+                        <div className="text-xs text-muted-foreground">
+                          {m.customRoleName}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      {new Date(m.invitedAt).toLocaleDateString("pt-BR")}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      {m.lastActiveAt
+                        ? new Date(m.lastActiveAt).toLocaleString("pt-BR")
+                        : (
+                          <span className="inline-flex items-center gap-1 text-amber-600">
+                            <span className="h-1.5 w-1.5 rounded-full bg-amber-500" />
+                            convite pendente
+                          </span>
+                        )}
+                    </td>
+                    <td className="px-3 py-2">
+                      <div className="flex items-center gap-1">
+                        {canInvite && neverLogged && !isSelf && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Reenviar convite"
+                            disabled={resendingId === m.id}
+                            onClick={() => handleResendInvite(m.id, m.user.email)}
+                          >
+                            <Send className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {canRemove && m.role !== "owner" && !isSelf && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            title="Remover membro"
+                            onClick={() =>
+                              handleRemove(m.id, m.user.name ?? m.user.email)
+                            }
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </CardContent>

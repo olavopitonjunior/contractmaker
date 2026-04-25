@@ -12,6 +12,6 @@ export default auth((req) => {
 export const config = {
   matcher: [
     // Protect all routes except public ones
-    "/((?!api/auth|api/forms/[^/]+$|api/forms/[^/]+/save|f/|login|register|_next/static|_next/image|favicon.ico).*)",
+    "/((?!api/auth|api/forms/[^/]+$|api/forms/[^/]+/save|f/|login|register|forgot-password|reset-password|_next/static|_next/image|favicon.ico).*)",
   ],
 };
