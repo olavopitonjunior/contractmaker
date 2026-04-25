@@ -111,6 +111,60 @@ function fmtDateTime(iso: string | null) {
   return new Date(iso).toLocaleString("pt-BR");
 }
 
+function maskWallet(w: string) {
+  if (!w) return "—";
+  if (w.length <= 12) return w;
+  return `${w.slice(0, 8)}…${w.slice(-4)}`;
+}
+
+function maskPixKey(key: string, type: string | null) {
+  if (!key) return "—";
+  if (type === "EMAIL" && key.includes("@")) {
+    const [local, domain] = key.split("@");
+    return `${local.slice(0, 2)}***@${domain}`;
+  }
+  if (type === "CPF" || type === "CNPJ") {
+    const digits = key.replace(/\D/g, "");
+    return `***${digits.slice(-4)}`;
+  }
+  if (type === "PHONE") return `***${key.slice(-4)}`;
+  return key.length > 16 ? `${key.slice(0, 8)}…${key.slice(-4)}` : key;
+}
+
+function transferStatusLabel(status: string): string {
+  switch (status) {
+    case "PENDING_DISPATCH":
+      return "Aguardando dispatch";
+    case "PENDING":
+      return "Em processamento";
+    case "BANK_PROCESSING":
+      return "Banco processando";
+    case "DONE":
+      return "Concluído";
+    case "FAILED":
+      return "Falha";
+    case "CANCELLED":
+      return "Cancelado";
+    default:
+      return status;
+  }
+}
+
+function transferStatusColor(status: string): string {
+  switch (status) {
+    case "DONE":
+      return "bg-green-100 text-green-900 border-green-300";
+    case "PENDING":
+    case "PENDING_DISPATCH":
+    case "BANK_PROCESSING":
+      return "bg-amber-100 text-amber-900 border-amber-300";
+    case "FAILED":
+      return "bg-red-100 text-red-900 border-red-300";
+    default:
+      return "bg-gray-100 text-gray-800 border-gray-300";
+  }
+}
+
 function CopyBtn({ value, label }: { value: string; label: string }) {
   const [copied, setCopied] = useState(false);
   return (
@@ -130,6 +184,39 @@ function CopyBtn({ value, label }: { value: string; label: string }) {
   );
 }
 
+interface ExternalSplitRow {
+  recipientId: string;
+  pixAddressKey: string;
+  pixKeyType: string;
+  ownerName: string;
+  ownerCpfCnpj: string;
+  label?: string;
+  percentualValue?: number;
+  fixedValue?: number;
+}
+
+interface SplitTransferRow {
+  id: string;
+  splitRecipientId: string | null;
+  asaasTransferId: string | null;
+  status: string;
+  value: number;
+  netValue: number | null;
+  transferFee: number | null;
+  pixAddressKey: string | null;
+  pixKeyType: string | null;
+  ownerName: string | null;
+  effectiveDate: string | null;
+  failureReason: string | null;
+  createdAt: string;
+}
+
+interface SplitsState {
+  asaasSplits: Array<{ walletId: string; percentualValue?: number; fixedValue?: number }>;
+  externalSplits: ExternalSplitRow[];
+  transfers: SplitTransferRow[];
+}
+
 export function ChargeDetail({ chargeId }: { chargeId: string }) {
   const router = useRouter();
   const [charge, setCharge] = useState<ChargeDetailData | null>(null);
@@ -142,6 +229,8 @@ export function ChargeDetail({ chargeId }: { chargeId: string }) {
     new Date().toISOString().slice(0, 10)
   );
   const [busy, setBusy] = useState(false);
+  const [splits, setSplits] = useState<SplitsState | null>(null);
+  const [retryingId, setRetryingId] = useState<string | null>(null);
 
   async function load() {
     setLoading(true);
@@ -162,9 +251,45 @@ export function ChargeDetail({ chargeId }: { chargeId: string }) {
     }
   }
 
+  async function loadSplits() {
+    try {
+      const res = await fetch(`/api/financeiro/charges/${chargeId}/splits`, {
+        credentials: "include",
+      });
+      if (!res.ok) return;
+      const data = await res.json();
+      setSplits(data);
+    } catch {
+      /* silencioso — painel é só informativo */
+    }
+  }
+
+  async function retrySplitTransfer(transferId: string) {
+    setRetryingId(transferId);
+    try {
+      const res = await fetch(`/api/financeiro/transfers/${transferId}/retry`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.reason ?? data.error ?? "Falha ao reprocessar");
+      } else {
+        toast.success("Transferência reprocessada com sucesso");
+      }
+      await loadSplits();
+    } finally {
+      setRetryingId(null);
+    }
+  }
+
   useEffect(() => {
     load();
-    const t = setInterval(load, 20000);
+    loadSplits();
+    const t = setInterval(() => {
+      load();
+      loadSplits();
+    }, 20000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chargeId]);
@@ -443,6 +568,120 @@ export function ChargeDetail({ chargeId }: { chargeId: string }) {
               </CardContent>
             </Card>
           )}
+
+          {/* Splits — Fase 6: Asaas-nativo + PIX externo + dispatch status */}
+          {splits &&
+            (splits.asaasSplits.length > 0 || splits.externalSplits.length > 0) && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">Splits de pagamento</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {splits.asaasSplits.length > 0 && (
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">
+                        Splits Asaas-nativos (instantâneos)
+                      </div>
+                      <ul className="space-y-1">
+                        {splits.asaasSplits.map((s, i) => (
+                          <li
+                            key={i}
+                            className="flex items-center justify-between text-sm border rounded px-2 py-1"
+                          >
+                            <span className="font-mono text-xs">
+                              {maskWallet(s.walletId)}
+                            </span>
+                            <Badge variant="outline" className="text-xs">
+                              {s.percentualValue
+                                ? `${s.percentualValue}%`
+                                : fmtBRL(s.fixedValue ?? 0)}
+                            </Badge>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {splits.externalSplits.length > 0 && (
+                    <div>
+                      <div className="text-xs text-muted-foreground mb-1">
+                        PIX externos (dispatch automático após pagamento)
+                      </div>
+                      <ul className="space-y-2">
+                        {splits.externalSplits.map((es) => {
+                          const transfer = splits.transfers.find(
+                            (t) => t.splitRecipientId === es.recipientId
+                          );
+                          return (
+                            <li
+                              key={es.recipientId}
+                              className="border rounded p-2 space-y-1"
+                            >
+                              <div className="flex items-center justify-between">
+                                <div>
+                                  <div className="font-medium text-sm">
+                                    {es.label ?? es.ownerName}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground font-mono">
+                                    {es.pixKeyType} ·{" "}
+                                    {maskPixKey(es.pixAddressKey, es.pixKeyType)}
+                                  </div>
+                                </div>
+                                <Badge variant="outline" className="text-xs">
+                                  {es.percentualValue
+                                    ? `${es.percentualValue}%`
+                                    : fmtBRL(es.fixedValue ?? 0)}
+                                </Badge>
+                              </div>
+                              {transfer ? (
+                                <div className="flex items-center justify-between gap-2">
+                                  <div className="flex items-center gap-2 flex-1 min-w-0">
+                                    <Badge
+                                      className={`text-xs ${transferStatusColor(transfer.status)}`}
+                                    >
+                                      {transferStatusLabel(transfer.status)}
+                                    </Badge>
+                                    <span className="text-xs text-muted-foreground truncate">
+                                      {transfer.status === "FAILED"
+                                        ? transfer.failureReason ?? "Falha"
+                                        : `${fmtBRL(transfer.value)} · ${transfer.asaasTransferId ?? "—"}`}
+                                    </span>
+                                  </div>
+                                  {transfer.status === "FAILED" && (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      onClick={() =>
+                                        retrySplitTransfer(transfer.id)
+                                      }
+                                      disabled={retryingId === transfer.id}
+                                    >
+                                      <RefreshCw
+                                        className={`h-3 w-3 mr-1 ${
+                                          retryingId === transfer.id
+                                            ? "animate-spin"
+                                            : ""
+                                        }`}
+                                      />
+                                      Tentar novamente
+                                    </Button>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="text-xs text-muted-foreground italic">
+                                  Aguardando confirmação do pagamento para
+                                  disparar transferência.
+                                </div>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
           {/* Timeline de eventos */}
           <Card>
