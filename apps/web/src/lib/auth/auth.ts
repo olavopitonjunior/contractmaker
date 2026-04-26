@@ -33,6 +33,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
 
         if (!user || !user.passwordHash) return null;
 
+        // LGPD: bloqueia login se conta está em janela de exclusão pendente.
+        // Usuário precisa cancelar a exclusão antes via DELETE /api/me/data-delete
+        // (mas se já está bloqueado, vai precisar de admin override).
+        if (user.deletedAt) return null;
+
         const valid = await bcrypt.compare(
           parsed.data.password,
           user.passwordHash

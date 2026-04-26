@@ -20,6 +20,7 @@ import { StatusDebitosStep } from "@/components/forms/steps/StatusDebitosStep";
 import { PagamentoStep } from "@/components/forms/steps/PagamentoStep";
 import { PosseTituloStep } from "@/components/forms/steps/PosseTituloStep";
 import { ComissaoConfigStep } from "@/components/forms/steps/ComissaoConfigStep";
+import { PrivacyConsent } from "@/components/legal/PrivacyConsent";
 
 interface SalesFormWizardProps {
   token: string;
@@ -270,6 +271,7 @@ export function SalesFormWizard({ token, initialData }: SalesFormWizardProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
+  const [privacyAccepted, setPrivacyAccepted] = useState(false);
   const [generatedContractId, setGeneratedContractId] = useState<string | null>(null);
   const [generatedDealId, setGeneratedDealId] = useState<string | null>(null);
 
@@ -415,6 +417,17 @@ export function SalesFormWizard({ token, initialData }: SalesFormWizardProps) {
       {/* Step Content */}
       <div>{stepComponents[currentStep]}</div>
 
+      {/* LGPD consent — exibido só na última etapa */}
+      {isLastStep && (
+        <div className="mt-6">
+          <PrivacyConsent
+            checked={privacyAccepted}
+            onChange={setPrivacyAccepted}
+            context="Para finalizar este formulário,"
+          />
+        </div>
+      )}
+
       {/* Navigation */}
       <div className="mt-8">
         <Separator className="mb-4" />
@@ -451,8 +464,13 @@ export function SalesFormWizard({ token, initialData }: SalesFormWizardProps) {
             <Button
               type="button"
               onClick={handleFinalize}
-              disabled={isSubmitting}
+              disabled={isSubmitting || !privacyAccepted}
               className="min-w-[120px]"
+              title={
+                !privacyAccepted
+                  ? "Aceite a Política de Privacidade abaixo para finalizar"
+                  : undefined
+              }
             >
               {isSubmitting ? "Finalizando..." : "Finalizar"}
             </Button>
