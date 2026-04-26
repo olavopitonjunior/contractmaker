@@ -36,6 +36,18 @@ function fmtBRL(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+/**
+ * Formata data ISO (YYYY-MM-DD) como dd/mm/yyyy sem deslocamento de timezone.
+ * `new Date("2026-04-25").toLocaleDateString("pt-BR")` retorna "24/04/2026"
+ * em America/Sao_Paulo (UTC-3) porque o Date interpreta como meia-noite UTC.
+ */
+function fmtDueDate(iso: string): string {
+  if (!iso) return "—";
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!m) return iso;
+  return `${m[3]}/${m[2]}/${m[1]}`;
+}
+
 export default function NovaCobrancaPage() {
   const router = useRouter();
   const [step, setStep] = useState<Step>("payer");
@@ -503,7 +515,7 @@ export default function NovaCobrancaPage() {
               </div>
               <div>
                 <span className="text-muted-foreground">Vencimento:</span>{" "}
-                {new Date(dueDate).toLocaleDateString("pt-BR")}
+                {fmtDueDate(dueDate)}
               </div>
               <div>
                 <span className="text-muted-foreground">Tipo:</span> {kind}
@@ -516,29 +528,43 @@ export default function NovaCobrancaPage() {
               )}
             </div>
 
-            {splitEnabled && splits.length > 0 && (
-              <div className="border-t pt-3 space-y-1">
-                <div className="text-xs font-medium text-muted-foreground uppercase">
-                  Split de pagamento
-                </div>
-                {splits
-                  .filter(
-                    (s) => s.walletId.trim() !== "" && s.percentualValue > 0
-                  )
-                  .map((s) => (
-                    <div
-                      key={s.key}
-                      className="flex items-center justify-between text-sm"
-                    >
-                      <span>{s.label || s.walletId}</span>
-                      <Badge variant="outline">
-                        {s.percentualValue}% ·{" "}
-                        {fmtBRL(
-                          (parseFloat(value || "0") * s.percentualValue) / 100
-                        )}
-                      </Badge>
-                    </div>
-                  ))}
+            {splitEnabled &&
+              splits.filter(
+                (s) =>
+                  s.percentualValue > 0 &&
+                  (s.recipientType === "asaas_wallet"
+                    ? s.walletId.trim() !== ""
+                    : s.pixAddressKey.trim() !== "" && s.recipientId !== null)
+              ).length > 0 && (
+                <div className="border-t pt-3 space-y-1">
+                  <div className="text-xs font-medium text-muted-foreground uppercase">
+                    Split de pagamento
+                  </div>
+                  {splits
+                    .filter(
+                      (s) =>
+                        s.percentualValue > 0 &&
+                        (s.recipientType === "asaas_wallet"
+                          ? s.walletId.trim() !== ""
+                          : s.pixAddressKey.trim() !== "" && s.recipientId !== null)
+                    )
+                    .map((s) => (
+                      <div
+                        key={s.key}
+                        className="flex items-center justify-between text-sm"
+                      >
+                        <span>
+                          {s.recipientType === "pix_external" ? "🔑 " : "💼 "}
+                          {s.label || s.ownerName || s.walletId || s.pixAddressKey}
+                        </span>
+                        <Badge variant="outline">
+                          {s.percentualValue}% ·{" "}
+                          {fmtBRL(
+                            (parseFloat(value || "0") * s.percentualValue) / 100
+                          )}
+                        </Badge>
+                      </div>
+                    ))}
                 {platformFeePercent > 0 && (
                   <div className="flex items-center justify-between text-sm text-amber-900">
                     <span>Plataforma (automático)</span>
