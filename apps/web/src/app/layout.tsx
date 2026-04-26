@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, Merriweather, Tinos } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { CookieBanner } from "@/components/legal/CookieBanner";
 import "./globals.css";
 
 // Inter: default UI font and one of the contract presets (modern sans).
@@ -46,6 +47,7 @@ export default function RootLayout({
       <body>
         <TooltipProvider>
           {children}
+          <CookieBanner />
           <Toaster richColors position="bottom-right" />
         </TooltipProvider>
       </body>

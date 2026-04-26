@@ -20,6 +20,9 @@ model User {
   image         String?
   passwordHash  String?
   role          String    @default("user")
+  // LGPD — soft delete com janela de reversal de 30 dias
+  deletedAt          DateTime?
+  deletionScheduledAt DateTime?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 
