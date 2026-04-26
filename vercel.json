@@ -12,6 +12,10 @@
     {
       "path": "/api/cron/ocr-queue",
       "schedule": "*/1 * * * *"
+    },
+    {
+      "path": "/api/cron/webhooks/retry-orphaned",
+      "schedule": "0 3 * * *"
     }
   ]
 }

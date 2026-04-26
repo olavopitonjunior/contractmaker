@@ -47,33 +47,97 @@ export interface ApplyWebhookResult {
 
 /**
  * Aplica evento ao CommissionCharge correspondente.
- * Idempotente: se asaasEventId já persistido, retorna sem reprocessar.
+ *
+ * Idempotente: se asaasEventId já persistido E processedAt populado, retorna
+ * sem reprocessar. Quando `force=true` (chamado pelo cron de retry de
+ * webhooks órfãos), reprocessa mesmo se evento existir mas com
+ * `processingError` — útil para recuperação de falhas transitórias.
  */
+export interface ApplyWebhookOptions {
+  /** Quando true, ignora dedupe e re-aplica em eventos com processingError. */
+  force?: boolean;
+  /** Origin do call para auditoria/debug ("webhook" | "cron-retry"). */
+  origin?: "webhook" | "cron-retry";
+}
+
 export async function applyWebhookToCharge(
   payload: AsaasWebhookPayload,
-  rawHeaders?: Record<string, string>
+  options: ApplyWebhookOptions = {}
 ): Promise<ApplyWebhookResult> {
+  const { force = false } = options;
+
   // 1. Dedupe via @unique asaasEventId
+  //    - Sem force: skip se já existe (qualquer estado).
+  //    - Com force: skip apenas se já está processedAt && sem error (sucesso confirmado).
   const existing = await prisma.asaasWebhookEvent.findUnique({
     where: { asaasEventId: payload.id },
   });
   if (existing) {
-    return {
-      eventId: payload.id,
-      processed: false,
-      reason: "duplicate (already processed)",
-    };
+    const isSuccessfullyProcessed =
+      existing.processedAt !== null && !existing.processingError;
+    if (!force || isSuccessfullyProcessed) {
+      return {
+        eventId: payload.id,
+        processed: false,
+        reason: force
+          ? "already successfully processed (force skipped)"
+          : "duplicate (already processed)",
+      };
+    }
+    // force=true e (processedAt null OU processingError não-null) → reprocessar.
   }
 
-  // 2. Se não é evento de payment, persiste log mas não atualiza charge
+  // 2. Eventos não-PAYMENT — persiste log + processedAt para evitar acúmulo.
+  //    Útil para TRANSFER_*, ACCOUNT_STATUS_UPDATED, etc. Não atualiza charge
+  //    porque não há paymentId; mas evita ficar "órfão" pro cron.
   if (!payload.payment?.id) {
-    // Precisamos do orgId — sem payment, não conseguimos inferir.
-    // Em Fase 1b só lidamos com PAYMENT_* eventos. Outros (TRANSFER_*, ACCOUNT_*)
-    // são logados em fase futura.
+    // Inferir orgId: para TRANSFER_*, payload pode trazer transfer.id que
+    // já temos local em AsaasTransfer.asaasTransferId. Caso contrário,
+    // logamos sem orgId (campo é obrigatório no schema atual; usamos null
+    // se não houver — quando schema permitir — ou skip).
+    const eventName = payload.event as string;
+    let inferredOrgId: string | null = null;
+
+    // Tenta inferir orgId via transfer
+    if ((payload as any).transfer?.id) {
+      const transfer = await prisma.asaasTransfer.findUnique({
+        where: { asaasTransferId: (payload as any).transfer.id },
+        select: { orgId: true },
+      });
+      if (transfer) inferredOrgId = transfer.orgId;
+    }
+
+    if (!inferredOrgId) {
+      // Sem orgId, não conseguimos persistir (FK obrigatório).
+      // Retorna processed: false com razão clara — cron de retry vai
+      // ignorar entries que nunca foram inseridas.
+      return {
+        eventId: payload.id,
+        processed: false,
+        reason: `non-payment event ${eventName} without inferable orgId — skipped`,
+      };
+    }
+
+    // Upsert para evitar P2002 em retry
+    await prisma.asaasWebhookEvent.upsert({
+      where: { asaasEventId: payload.id },
+      create: {
+        orgId: inferredOrgId,
+        asaasEventId: payload.id,
+        event: eventName,
+        payloadJson: payload as any,
+        processedAt: new Date(),
+      },
+      update: {
+        processedAt: new Date(),
+        processingError: null,
+      },
+    });
+
     return {
       eventId: payload.id,
-      processed: false,
-      reason: "no payment payload — non-payment events logged only in Fase 3+",
+      processed: true,
+      reason: `non-payment event ${eventName} logged`,
     };
   }
 
@@ -98,10 +162,12 @@ export async function applyWebhookToCharge(
   const internalStatus = mapAsaasStatusToInternal(payload.payment.status);
   const eventName = payload.event as AsaasWebhookEventName;
 
-  // 4. Update charge (transactional com insert do event)
+  // 4. Update charge (transactional com upsert do event — `upsert` para tolerar
+  //    re-tentativa em modo force, mantendo idempotência)
   await prisma.$transaction(async (tx) => {
-    await tx.asaasWebhookEvent.create({
-      data: {
+    await tx.asaasWebhookEvent.upsert({
+      where: { asaasEventId: payload.id },
+      create: {
         orgId: charge.orgId,
         asaasEventId: payload.id,
         event: eventName,
@@ -109,6 +175,10 @@ export async function applyWebhookToCharge(
         chargeId: charge.id,
         payloadJson: payload as any,
         processedAt: new Date(),
+      },
+      update: {
+        processedAt: new Date(),
+        processingError: null,
       },
     });
 
