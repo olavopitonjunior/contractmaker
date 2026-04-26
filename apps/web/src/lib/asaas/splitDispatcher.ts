@@ -87,10 +87,12 @@ export async function dispatchExternalSplits(
 
   const base = charge.netValue ?? charge.value;
   const feePolicy = settings?.pixSplitFeePolicy ?? "org_absorbs";
-  // Taxa estimada Asaas para PIX externo: ~R$ 1,00. Ajuste se Asaas mudar.
-  const ESTIMATED_PIX_FEE = 1.0;
+  // Taxa estimada lida do último valor observado (em centavos), atualizada
+  // automaticamente após cada transferência DONE com transferFee retornado.
+  // Default 100 centavos (R$ 1,00) na criação da OrgFinancialSettings.
+  const observedFeeCents = settings?.lastObservedPixFeeCents ?? 100;
   const feeAdjustment =
-    feePolicy === "deduct_from_recipient" ? ESTIMATED_PIX_FEE : 0;
+    feePolicy === "deduct_from_recipient" ? observedFeeCents / 100 : 0;
 
   for (const entry of externals) {
     result.attempted++;
@@ -165,6 +167,21 @@ export async function dispatchExternalSplits(
           scheduledDate: asaas.scheduledDate ? new Date(asaas.scheduledDate) : null,
         },
       });
+
+      // Atualiza estimativa para próximas cobranças (apenas quando taxa
+      // foi efetivamente cobrada). transferFee em reais → centavos.
+      if (typeof asaas.transferFee === "number" && asaas.transferFee > 0) {
+        const cents = Math.round(asaas.transferFee * 100);
+        await prisma.orgFinancialSettings
+          .update({
+            where: { orgId: charge.orgId },
+            data: { lastObservedPixFeeCents: cents },
+          })
+          .catch(() => {
+            /* settings pode não existir — ignora silenciosamente */
+          });
+      }
+
       result.succeeded++;
     } catch (err) {
       const reason =

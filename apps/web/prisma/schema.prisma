@@ -1173,6 +1173,10 @@ model OrgFinancialSettings {
   //   "org_absorbs"           — beneficiário recebe valor cheio, org paga taxa Asaas
   //   "deduct_from_recipient" — taxa é descontada do split do beneficiário
   pixSplitFeePolicy    String   @default("org_absorbs")
+  // Última taxa de PIX externo observada (em centavos). Atualizada
+  // automaticamente a cada AsaasTransfer DONE com transferFee retornado.
+  // Usada como estimativa em deduct_from_recipient antes do dispatch real.
+  lastObservedPixFeeCents Int      @default(100)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 

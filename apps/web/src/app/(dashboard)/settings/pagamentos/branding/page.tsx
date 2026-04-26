@@ -1,11 +1,11 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Save } from "lucide-react";
+import { Save, Upload, Loader2 } from "lucide-react";
 
 interface Branding {
   brandLogoUrl: string | null;
@@ -25,6 +25,31 @@ export default function BrandingPage() {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  async function uploadLogo(file: File) {
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const res = await fetch("/api/financeiro/branding/logo", {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+      const result = await res.json();
+      if (!res.ok) {
+        toast.error(result.error ?? "Falha no upload");
+        return;
+      }
+      setData((prev) => ({ ...prev, brandLogoUrl: result.url }));
+      toast.success("Logo enviada");
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
 
   useEffect(() => {
     (async () => {
@@ -81,17 +106,55 @@ export default function BrandingPage() {
           </CardHeader>
           <CardContent className="space-y-3">
             <div>
-              <Label htmlFor="logo">URL do logotipo</Label>
+              <Label htmlFor="logo">Logotipo</Label>
+              <div className="flex items-center gap-2 mt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                >
+                  {uploading ? (
+                    <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+                  ) : (
+                    <Upload className="h-4 w-4 mr-1" />
+                  )}
+                  {uploading ? "Enviando..." : "Enviar arquivo"}
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) uploadLogo(file);
+                  }}
+                />
+                {data.brandLogoUrl && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setData({ ...data, brandLogoUrl: null })}
+                    className="text-red-600"
+                  >
+                    Remover
+                  </Button>
+                )}
+              </div>
               <Input
-                id="logo"
-                placeholder="https://..."
+                placeholder="ou cole uma URL externa: https://..."
                 value={data.brandLogoUrl ?? ""}
                 onChange={(e) =>
                   setData({ ...data, brandLogoUrl: e.target.value || null })
                 }
+                className="mt-2"
               />
               <p className="text-xs text-muted-foreground mt-1">
-                Hospede sua logo em CDN (ex: Vercel Blob). Recomendado: PNG ou SVG 200×60.
+                Upload direto (PNG/JPG/SVG/WEBP, max 2MB) ou cole URL externa.
+                Recomendado: PNG ou SVG 200×60 px.
               </p>
             </div>
 
