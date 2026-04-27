@@ -14,12 +14,6 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   LayoutDashboard,
@@ -27,7 +21,6 @@ import {
   FileStack,
   Settings,
   LogOut,
-  ChevronUp,
   Wallet,
 } from "lucide-react";
 
@@ -115,37 +108,29 @@ export function AppSidebar({ user }: AppSidebarProps) {
       </SidebarContent>
 
       <SidebarFooter className="border-t">
+        <div className="flex items-center gap-2 px-2 py-2">
+          <Avatar className="h-7 w-7 shrink-0">
+            <AvatarFallback className="text-xs">{initials}</AvatarFallback>
+          </Avatar>
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-sm font-medium">
+              {user.name || user.email}
+            </p>
+            {user.name && (
+              <p className="truncate text-xs text-muted-foreground">
+                {user.email}
+              </p>
+            )}
+          </div>
+        </div>
         <SidebarMenu>
           <SidebarMenuItem>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <SidebarMenuButton className="w-full">
-                  <Avatar className="h-6 w-6">
-                    <AvatarFallback className="text-xs">
-                      {initials}
-                    </AvatarFallback>
-                  </Avatar>
-                  <span className="truncate text-sm">
-                    {user.name || user.email}
-                  </span>
-                  <ChevronUp className="ml-auto h-4 w-4" />
-                </SidebarMenuButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" className="w-56">
-                <DropdownMenuItem asChild>
-                  <Link href="/settings">
-                    <Settings className="mr-2 h-4 w-4" />
-                    Configurações
-                  </Link>
-                </DropdownMenuItem>
-                <DropdownMenuItem asChild>
-                  <Link href="/logout" className="cursor-pointer">
-                    <LogOut className="mr-2 h-4 w-4" />
-                    Sair
-                  </Link>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <SidebarMenuButton asChild>
+              <Link href="/logout" aria-label="Sair">
+                <LogOut className="h-4 w-4" />
+                <span>Sair</span>
+              </Link>
+            </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarFooter>
