@@ -10,7 +10,7 @@ import {
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { decryptSecret } from "@/lib/security/crypto";
 import { listFinancialTransactions } from "@/lib/asaas/finance";
-import { AsaasError } from "@/lib/asaas/errors";
+import { AsaasError, AsaasConfigError } from "@/lib/asaas/errors";
 
 const querySchema = z.object({
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
@@ -98,6 +98,17 @@ export async function GET(req: NextRequest) {
       return NextResponse.json(
         { error: "ASAAS_ERROR", details: err.errors, data: [] },
         { status: 422 }
+      );
+    }
+    if (err instanceof AsaasConfigError) {
+      return NextResponse.json(
+        {
+          error: "ASAAS_CONFIG_ERROR",
+          code: err.code,
+          message: err.message,
+          data: [],
+        },
+        { status: 500 }
       );
     }
     console.error("[statement]", err);

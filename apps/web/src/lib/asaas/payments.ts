@@ -127,15 +127,32 @@ export async function markAsReceivedInCash(params: {
   );
 }
 
+/**
+ * Atualiza campos editáveis de uma cobrança Asaas (PENDING/OVERDUE).
+ * Asaas aceita POST no endpoint do payment com qualquer subset.
+ * Caller deve garantir que pelo menos um campo foi passado.
+ */
+export async function updatePayment(params: {
+  asaasId: string;
+  fields: { value?: number; dueDate?: string; description?: string };
+  apiKey: string;
+}): Promise<AsaasPayment> {
+  return await asaasFetch<AsaasPayment>(`/payments/${params.asaasId}`, {
+    method: "POST",
+    body: params.fields,
+    apiKey: params.apiKey,
+  });
+}
+
+/** @deprecated use updatePayment com { dueDate } */
 export async function updateDueDate(params: {
   asaasId: string;
   newDueDate: string; // YYYY-MM-DD
   apiKey: string;
 }): Promise<AsaasPayment> {
-  // Asaas update é POST no endpoint do payment
-  return await asaasFetch<AsaasPayment>(`/payments/${params.asaasId}`, {
-    method: "POST",
-    body: { dueDate: params.newDueDate },
+  return updatePayment({
+    asaasId: params.asaasId,
+    fields: { dueDate: params.newDueDate },
     apiKey: params.apiKey,
   });
 }

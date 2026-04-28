@@ -11,7 +11,7 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
 import { decryptSecret } from "@/lib/security/crypto";
 import { AsaasError } from "@/lib/asaas/errors";
-import { cancelPayment, updateDueDate } from "@/lib/asaas/payments";
+import { cancelPayment, updatePayment } from "@/lib/asaas/payments";
 
 async function loadCharge(chargeId: string, orgId: string, userId: string) {
   const charge = await prisma.commissionCharge.findFirst({
@@ -95,10 +95,20 @@ export async function GET(
   });
 }
 
-const patchSchema = z.object({
-  dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
-  description: z.string().max(500).optional(),
-});
+const patchSchema = z
+  .object({
+    value: z.number().positive().optional(),
+    dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+    description: z.string().max(500).optional(),
+  })
+  .refine(
+    (d) => d.value !== undefined || d.dueDate !== undefined || d.description !== undefined,
+    { message: "Informe ao menos um campo (value, dueDate, description)" }
+  );
+
+// Asaas mínimo: R$ 5,00 em produção, R$ 1,00 em sandbox
+const ASAAS_MIN_VALUE =
+  (process.env.ASAAS_ENV ?? "sandbox") === "production" ? 5 : 1;
 
 /**
  * PATCH /api/financeiro/charges/[id] — altera dueDate ou description.
@@ -137,7 +147,20 @@ export async function PATCH(
   const raw = await req.json().catch(() => ({}));
   const parsed = patchSchema.safeParse(raw);
   if (!parsed.success) {
-    return NextResponse.json({ error: "Body inválido" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Body inválido", details: parsed.error.format() },
+      { status: 400 }
+    );
+  }
+
+  if (parsed.data.value !== undefined && parsed.data.value < ASAAS_MIN_VALUE) {
+    return NextResponse.json(
+      {
+        error: "VALUE_BELOW_MIN",
+        message: `Valor mínimo da cobrança é R$ ${ASAAS_MIN_VALUE.toFixed(2).replace(".", ",")}.`,
+      },
+      { status: 400 }
+    );
   }
 
   const account = charge.org.asaasAccount;
@@ -151,17 +174,20 @@ export async function PATCH(
   });
 
   try {
-    if (parsed.data.dueDate) {
-      await updateDueDate({
-        asaasId: charge.asaasPaymentId,
-        newDueDate: parsed.data.dueDate,
-        apiKey,
-      });
-    }
+    await updatePayment({
+      asaasId: charge.asaasPaymentId,
+      fields: {
+        value: parsed.data.value,
+        dueDate: parsed.data.dueDate,
+        description: parsed.data.description,
+      },
+      apiKey,
+    });
 
     const updated = await prisma.commissionCharge.update({
       where: { id: charge.id },
       data: {
+        value: parsed.data.value ?? undefined,
         currentDueDate: parsed.data.dueDate
           ? new Date(parsed.data.dueDate)
           : undefined,

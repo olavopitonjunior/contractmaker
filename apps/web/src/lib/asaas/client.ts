@@ -8,7 +8,7 @@
  */
 
 import { ASAAS_BASE_URLS, type AsaasEnv } from "./types";
-import { parseAsaasErrorResponse, AsaasError } from "./errors";
+import { parseAsaasErrorResponse, AsaasError, AsaasConfigError } from "./errors";
 
 interface AsaasFetchOptions {
   method?: "GET" | "POST" | "PUT" | "DELETE" | "PATCH";
@@ -37,7 +37,8 @@ function getEnv(): AsaasEnv {
 function getMasterApiKey(): string {
   const key = process.env.ASAAS_API_KEY;
   if (!key) {
-    throw new Error(
+    throw new AsaasConfigError(
+      "API_KEY_MISSING",
       "ASAAS_API_KEY ausente. Configure no .env (dev) ou Vercel env (prod)."
     );
   }
@@ -49,13 +50,15 @@ function assertEnvConsistency(apiKey: string, env: AsaasEnv) {
   const isSandboxKey =
     apiKey.startsWith("$aact_YT") || apiKey.startsWith("$aact_hmlg");
   if (env === "production" && isSandboxKey) {
-    throw new Error(
-      "Inconsistência: ASAAS_ENV=production mas API key parece sandbox ($aact_YT ou $aact_hmlg)"
+    throw new AsaasConfigError(
+      "ENV_MISMATCH",
+      "ASAAS_ENV=production mas a API key da org parece sandbox. Rotacione a apiKey da AsaasAccount com a chave de produção ($aact_prod...)."
     );
   }
   if (env === "sandbox" && apiKey.startsWith("$aact_prod")) {
-    throw new Error(
-      "Inconsistência: ASAAS_ENV=sandbox mas API key parece produção ($aact_prod...)"
+    throw new AsaasConfigError(
+      "ENV_MISMATCH",
+      "ASAAS_ENV=sandbox mas a API key da org parece produção. Rotacione a apiKey da AsaasAccount com a chave de sandbox ($aact_YT... ou $aact_hmlg...)."
     );
   }
 }

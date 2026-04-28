@@ -216,15 +216,19 @@ export async function applyWebhookToCharge(
   });
 
   // Fase 6: dispatch de splits PIX externos pós-pagamento.
-  // Fire-and-forget — qualquer falha individual fica registrada em
+  // Aguardar inline antes de retornar — em serverless (Vercel/Lambda),
+  // promises fire-and-forget após response.send() são abortadas e
+  // os splits ficam órfãos. Falhas individuais ficam em
   // AsaasTransfer.failureReason para retry manual via UI.
   if (eventName === "PAYMENT_RECEIVED" || eventName === "PAYMENT_CONFIRMED") {
-    void dispatchExternalSplits(charge.id).catch((err) => {
+    try {
+      await dispatchExternalSplits(charge.id);
+    } catch (err) {
       console.error(
         `[webhook] dispatchExternalSplits failed for charge ${charge.id}:`,
         err instanceof Error ? err.message : err
       );
-    });
+    }
   }
 
   return {

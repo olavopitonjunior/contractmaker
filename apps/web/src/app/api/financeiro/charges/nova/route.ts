@@ -11,7 +11,7 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
 import { decryptSecret } from "@/lib/security/crypto";
 import { RateLimits } from "@/lib/security/ratelimit";
-import { AsaasError } from "@/lib/asaas/errors";
+import { AsaasError, AsaasConfigError } from "@/lib/asaas/errors";
 import {
   createPayment,
   getPixQrCode,
@@ -240,6 +240,19 @@ export async function POST(req: NextRequest) {
         { status: 422 }
       );
     }
-    throw err;
+    if (err instanceof AsaasConfigError) {
+      return NextResponse.json(
+        { error: "ASAAS_CONFIG_ERROR", code: err.code, message: err.message },
+        { status: 500 }
+      );
+    }
+    console.error("[charges/nova] uncaught", err);
+    return NextResponse.json(
+      {
+        error: "INTERNAL_ERROR",
+        message: err instanceof Error ? err.message : "Erro desconhecido",
+      },
+      { status: 500 }
+    );
   }
 }

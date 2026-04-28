@@ -38,6 +38,22 @@ export class AsaasError extends Error {
   }
 }
 
+/**
+ * Erros de configuração — não vêm da API Asaas; vêm de checagens locais
+ * (env inconsistente, master key ausente, apiKey criptografada inválida).
+ * Separados de AsaasError pra rotas conseguirem retornar 500 estruturado
+ * em vez de "throw err" → 500 mudo.
+ */
+export class AsaasConfigError extends Error {
+  code: "ENV_MISMATCH" | "API_KEY_MISSING" | "API_KEY_INVALID";
+
+  constructor(code: AsaasConfigError["code"], message: string) {
+    super(message);
+    this.name = "AsaasConfigError";
+    this.code = code;
+  }
+}
+
 const CODE_TRANSLATIONS: Record<string, string> = {
   invalid_cpfCnpj: "CPF/CNPJ inválido",
   invalid_email: "Email inválido",

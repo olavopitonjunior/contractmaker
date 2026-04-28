@@ -97,15 +97,28 @@ export async function dispatchExternalSplits(
   for (const entry of externals) {
     result.attempted++;
 
+    // entry.recipientId pode ser:
+    //   (a) cuid de um SplitRecipient cadastrado, OU
+    //   (b) string arbitrária pra pix_external one-shot (sem cadastro prévio).
+    // No caso (b), splitRecipientId tem que ir como NULL (FK viola senão).
+    let splitRecipientFk: string | null = null;
+    if (entry.recipientId) {
+      const exists = await prisma.splitRecipient.findUnique({
+        where: { id: entry.recipientId },
+        select: { id: true },
+      });
+      if (exists) splitRecipientFk = exists.id;
+    }
+
     // Idempotência: tenta criar registro local com unique key.
-    // Se já existe (P2002), pulamos.
+    // Se já existe (P2002), pulamos. Outros erros logamos.
     let localTransfer;
     try {
       localTransfer = await prisma.asaasTransfer.create({
         data: {
           orgId: charge.orgId,
           commissionChargeId: charge.id,
-          splitRecipientId: entry.recipientId,
+          splitRecipientId: splitRecipientFk,
           asaasTransferId: null,
           value: computeAmount(base, entry, feeAdjustment),
           type: "PIX",
@@ -118,9 +131,21 @@ export async function dispatchExternalSplits(
           description: `Split de ${charge.id} — ${entry.label ?? entry.ownerName}`,
         },
       });
-    } catch {
-      // Já existe (P2002) — skip
-      result.skipped++;
+    } catch (err) {
+      const code = (err as { code?: string }).code;
+      if (code === "P2002") {
+        result.skipped++;
+        continue;
+      }
+      console.error(
+        `[splitDispatcher] failed to create local AsaasTransfer for charge ${charge.id} recipient ${entry.recipientId}:`,
+        err instanceof Error ? err.message : err
+      );
+      result.failed++;
+      result.errors.push({
+        recipientId: entry.recipientId,
+        reason: err instanceof Error ? err.message : "Erro ao criar transfer local",
+      });
       continue;
     }
 

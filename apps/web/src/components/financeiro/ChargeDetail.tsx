@@ -14,6 +14,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -21,6 +22,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -222,8 +233,11 @@ export function ChargeDetail({ chargeId }: { chargeId: string }) {
   const [charge, setCharge] = useState<ChargeDetailData | null>(null);
   const [events, setEvents] = useState<EventEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [dueDateOpen, setDueDateOpen] = useState(false);
-  const [newDueDate, setNewDueDate] = useState("");
+  const [editOpen, setEditOpen] = useState(false);
+  const [editValue, setEditValue] = useState("");
+  const [editDueDate, setEditDueDate] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [cancelOpen, setCancelOpen] = useState(false);
   const [cashOpen, setCashOpen] = useState(false);
   const [cashDate, setCashDate] = useState(
     new Date().toISOString().slice(0, 10)
@@ -245,7 +259,7 @@ export function ChargeDetail({ chargeId }: { chargeId: string }) {
       }
       setCharge(data.charge);
       setEvents(data.events);
-      setNewDueDate(data.charge.currentDueDate?.slice(0, 10) ?? "");
+      // edit form é preenchido só ao abrir o dialog (openEditDialog)
     } finally {
       setLoading(false);
     }
@@ -295,7 +309,6 @@ export function ChargeDetail({ chargeId }: { chargeId: string }) {
   }, [chargeId]);
 
   async function cancel() {
-    if (!confirm("Cancelar esta cobrança? A ação não pode ser desfeita.")) return;
     setBusy(true);
     try {
       const res = await fetch(`/api/financeiro/charges/${chargeId}`, {
@@ -304,14 +317,23 @@ export function ChargeDetail({ chargeId }: { chargeId: string }) {
       });
       const data = await res.json();
       if (!res.ok) {
-        toast.error(data.error ?? "Falha");
+        toast.error(data.details?.[0]?.description ?? data.error ?? "Falha");
         return;
       }
       toast.success("Cobrança cancelada");
+      setCancelOpen(false);
       await load();
     } finally {
       setBusy(false);
     }
+  }
+
+  function openEditDialog() {
+    if (!charge) return;
+    setEditValue(charge.value.toString());
+    setEditDueDate(charge.currentDueDate.slice(0, 10));
+    setEditDescription(charge.description ?? "");
+    setEditOpen(true);
   }
 
   async function refund() {
@@ -359,22 +381,37 @@ export function ChargeDetail({ chargeId }: { chargeId: string }) {
     }
   }
 
-  async function saveDueDate() {
+  async function saveEdit() {
+    if (!charge) return;
+    const body: { value?: number; dueDate?: string; description?: string } = {};
+    const valueNum = parseFloat(editValue);
+    if (!Number.isNaN(valueNum) && valueNum !== charge.value) body.value = valueNum;
+    if (editDueDate && editDueDate !== charge.currentDueDate.slice(0, 10)) {
+      body.dueDate = editDueDate;
+    }
+    if (editDescription !== (charge.description ?? "")) {
+      body.description = editDescription;
+    }
+    if (Object.keys(body).length === 0) {
+      toast.info("Nada foi alterado");
+      setEditOpen(false);
+      return;
+    }
     setBusy(true);
     try {
       const res = await fetch(`/api/financeiro/charges/${chargeId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({ dueDate: newDueDate }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) {
-        toast.error(data.details?.[0]?.description ?? data.error ?? "Falha");
+        toast.error(data.message ?? data.details?.[0]?.description ?? data.error ?? "Falha");
         return;
       }
-      toast.success("Vencimento atualizado");
-      setDueDateOpen(false);
+      toast.success("Cobrança atualizada");
+      setEditOpen(false);
       await load();
     } finally {
       setBusy(false);
@@ -456,8 +493,8 @@ export function ChargeDetail({ chargeId }: { chargeId: string }) {
                   <DropdownMenuContent align="end">
                     {isActive && (
                       <>
-                        <DropdownMenuItem onSelect={() => setDueDateOpen(true)}>
-                          <Calendar className="h-4 w-4 mr-2" /> Alterar vencimento
+                        <DropdownMenuItem onSelect={openEditDialog}>
+                          <Calendar className="h-4 w-4 mr-2" /> Editar cobrança
                         </DropdownMenuItem>
                         <DropdownMenuItem onSelect={resendNotif}>
                           <Mail className="h-4 w-4 mr-2" /> Reenviar notificação
@@ -467,7 +504,7 @@ export function ChargeDetail({ chargeId }: { chargeId: string }) {
                         </DropdownMenuItem>
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
-                          onSelect={cancel}
+                          onSelect={() => setCancelOpen(true)}
                           className="text-red-600"
                         >
                           <Ban className="h-4 w-4 mr-2" /> Cancelar cobrança
@@ -803,32 +840,82 @@ export function ChargeDetail({ chargeId }: { chargeId: string }) {
         </div>
       </div>
 
-      {/* Dialog alterar vencimento */}
-      <Dialog open={dueDateOpen} onOpenChange={setDueDateOpen}>
+      {/* Dialog editar cobrança */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Alterar vencimento</DialogTitle>
+            <DialogTitle>Editar cobrança</DialogTitle>
           </DialogHeader>
-          <div className="space-y-2">
-            <Label htmlFor="new-due">Nova data</Label>
-            <Input
-              id="new-due"
-              type="date"
-              value={newDueDate}
-              onChange={(e) => setNewDueDate(e.target.value)}
-              min={new Date().toISOString().slice(0, 10)}
-            />
+          <div className="space-y-3">
+            <div>
+              <Label htmlFor="edit-value">Valor (R$)</Label>
+              <Input
+                id="edit-value"
+                type="number"
+                step="0.01"
+                min="0.01"
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="edit-due">Vencimento</Label>
+              <Input
+                id="edit-due"
+                type="date"
+                value={editDueDate}
+                onChange={(e) => setEditDueDate(e.target.value)}
+                min={new Date().toISOString().slice(0, 10)}
+              />
+            </div>
+            <div>
+              <Label htmlFor="edit-desc">Descrição</Label>
+              <Textarea
+                id="edit-desc"
+                rows={3}
+                value={editDescription}
+                onChange={(e) => setEditDescription(e.target.value)}
+                maxLength={500}
+                placeholder="Ex: Aluguel abril/2026"
+              />
+            </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDueDateOpen(false)}>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>
               Cancelar
             </Button>
-            <Button onClick={saveDueDate} disabled={busy || !newDueDate}>
+            <Button onClick={saveEdit} disabled={busy}>
               Salvar
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* AlertDialog cancelar cobrança */}
+      <AlertDialog open={cancelOpen} onOpenChange={setCancelOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancelar cobrança?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Esta ação cancela a cobrança no Asaas e marca como CANCELLED no
+              sistema. Não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Voltar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                cancel();
+              }}
+              disabled={busy}
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+            >
+              Cancelar cobrança
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Dialog baixa manual */}
       <Dialog open={cashOpen} onOpenChange={setCashOpen}>
