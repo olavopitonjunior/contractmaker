@@ -32,9 +32,11 @@ const STATUS_LABELS: Record<Invitation["status"], string> = {
 export function InvitationsTab({
   isApprover,
   refreshKey,
+  onApproved,
 }: {
   isApprover: boolean;
   refreshKey?: number;
+  onApproved?: () => void;
 }) {
   const [invitations, setInvitations] = useState<Invitation[]>([]);
   const [loading, setLoading] = useState(true);
@@ -71,6 +73,7 @@ export function InvitationsTab({
       }
       toast.success(`Convite aprovado — ${email} foi notificado`);
       await load();
+      onApproved?.();
     } finally {
       setActingId(null);
     }

@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -67,7 +67,9 @@ export function MembersPageClient() {
   });
   const [inviteLoading, setInviteLoading] = useState(false);
   const [invitationsRefresh, setInvitationsRefresh] = useState(0);
-  const [activeTab, setActiveTab] = useState<"membros" | "convites">("membros");
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get("tab") === "convites" ? "convites" : "membros";
+  const [activeTab, setActiveTab] = useState<"membros" | "convites">(initialTab);
 
   async function load() {
     setLoading(true);
@@ -379,6 +381,10 @@ export function MembersPageClient() {
           <InvitationsTab
             isApprover={perms.isInvitationApprover}
             refreshKey={invitationsRefresh}
+            onApproved={() => {
+              void load();
+              setActiveTab("membros");
+            }}
           />
         </TabsContent>
       </Tabs>

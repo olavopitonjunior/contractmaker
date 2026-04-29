@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { MembersPageClient } from "@/components/security/MembersPageClient";
 
 export const metadata = {
@@ -5,5 +6,9 @@ export const metadata = {
 };
 
 export default function MembersPage() {
-  return <MembersPageClient />;
+  return (
+    <Suspense fallback={null}>
+      <MembersPageClient />
+    </Suspense>
+  );
 }

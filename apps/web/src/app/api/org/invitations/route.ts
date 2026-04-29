@@ -156,7 +156,7 @@ export async function POST(req: NextRequest) {
 
   // Notificações: approvers recebem CTA; notify-only só ciência.
   const baseUrl = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
-  const reviewUrl = `${baseUrl}/settings/seguranca/membros?tab=convites`;
+  const reviewUrl = `${baseUrl}/settings/membros?tab=convites`;
   const approverEmails = getApproverEmails();
   const notifyEmails = getNotifyEmails().filter(
     (e) => !approverEmails.includes(e)
