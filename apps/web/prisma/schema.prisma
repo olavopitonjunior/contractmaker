@@ -13,22 +13,24 @@ datasource db {
 // ============================================
 
 model User {
-  id            String    @id @default(cuid())
-  name          String?
-  email         String    @unique
-  emailVerified DateTime?
-  image         String?
-  passwordHash  String?
-  role          String    @default("user")
+  id                  String    @id @default(cuid())
+  name                String?
+  email               String    @unique
+  emailVerified       DateTime?
+  image               String?
+  passwordHash        String?
+  role                String    @default("user")
   // LGPD — soft delete com janela de reversal de 30 dias
-  deletedAt          DateTime?
+  deletedAt           DateTime?
   deletionScheduledAt DateTime?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   accounts            Account[]
   sessions            Session[]
   orgMemberships      OrgMembership[]
+  invitationsCreated  OrgInvitation[]      @relation("invitationCreator")
+  invitationsApproved OrgInvitation[]      @relation("invitationApprover")
   deals               Deal[]
   contracts           Contract[]
   chatSessions        ChatSession[]
@@ -103,6 +105,7 @@ model Organization {
   updatedAt DateTime @updatedAt
 
   members             OrgMembership[]
+  invitations         OrgInvitation[]
   pipelines           Pipeline[]
   forms               SalesForm[]
   templates           ContractTemplate[]
@@ -154,6 +157,38 @@ model OrgMembership {
 
   @@unique([userId, orgId])
   @@index([orgId, role])
+}
+
+// Invitation queue: owner cria, approver aprova, sistema cria User+Membership
+// e dispara magic link de signin. Sem aprovação, nenhum User existe.
+//
+// status: "pending" | "approved" | "rejected" | "revoked" | "expired"
+//
+// Unicidade de pending por (orgId, email) é validada em código (Prisma não
+// suporta partial unique indexes nativamente).
+model OrgInvitation {
+  id              String    @id @default(cuid())
+  orgId           String
+  email           String
+  name            String?
+  role            String    @default("member") // role a aplicar na approval
+  status          String    @default("pending")
+  invitedById     String
+  approvedById    String?
+  approvedAt      DateTime?
+  rejectedAt      DateTime?
+  rejectionReason String?
+  expiresAt       DateTime
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  invitedBy  User         @relation("invitationCreator", fields: [invitedById], references: [id])
+  approvedBy User?        @relation("invitationApprover", fields: [approvedById], references: [id])
+
+  @@index([orgId, status])
+  @@index([email])
+  @@index([status, createdAt])
 }
 
 // ============================================
@@ -1138,50 +1173,50 @@ model AsaasWebhookEvent {
 
 // Configurações financeiras da org — taxas, overprice, descontos, branding.
 model OrgFinancialSettings {
-  id                   String   @id @default(cuid())
-  orgId                String   @unique
+  id                      String   @id @default(cuid())
+  orgId                   String   @unique
   // Platform fee (Fase 3)
-  platformFeePercent   Float    @default(0)
-  platformFeeWalletId  String?
+  platformFeePercent      Float    @default(0)
+  platformFeeWalletId     String?
   // Overprice
-  overpricePolicy      String   @default("none") // none | absorb | asaas_fee | custom
-  overpriceType        String?
-  overpriceValue       Float?
-  overpriceRoundTo     String?  @default("cents")
+  overpricePolicy         String   @default("none") // none | absorb | asaas_fee | custom
+  overpriceType           String?
+  overpriceValue          Float?
+  overpriceRoundTo        String?  @default("cents")
   // Descontos (presets em JSON array)
-  discountPresets      Json     @default("[]")
+  discountPresets         Json     @default("[]")
   // Multa / juros (limites legais: fine ≤ 2%, juros ≤ 1%/mês)
-  finePercent          Float    @default(2.0)
-  finePolicy           String   @default("percentage")
-  interestPercentMonth Float    @default(1.0)
+  finePercent             Float    @default(2.0)
+  finePolicy              String   @default("percentage")
+  interestPercentMonth    Float    @default(1.0)
   // Taxas Asaas cacheadas (display)
-  asaasFeePixCents     Int      @default(199)
-  asaasFeeBoletoCents  Int      @default(349)
-  asaasFeeCardPercent  Float    @default(2.99)
-  asaasFeeCardCents    Int      @default(49)
+  asaasFeePixCents        Int      @default(199)
+  asaasFeeBoletoCents     Int      @default(349)
+  asaasFeeCardPercent     Float    @default(2.99)
+  asaasFeeCardCents       Int      @default(49)
   // Dual control (valores em centavos; Int suporta até ~R$ 21M)
-  dualApprovalCapCents Int      @default(5000000)
-  hardCapCents         Int      @default(10000000)
+  dualApprovalCapCents    Int      @default(5000000)
+  hardCapCents            Int      @default(10000000)
   // Branding (página pública)
-  brandLogoUrl         String?
-  brandPrimaryColor    String?  @default("#0f172a")
-  brandDisplayName     String?
-  brandSupportEmail    String?
-  brandSupportPhone    String?
+  brandLogoUrl            String?
+  brandPrimaryColor       String?  @default("#0f172a")
+  brandDisplayName        String?
+  brandSupportEmail       String?
+  brandSupportPhone       String?
   // Defaults de notificação (NotificationDisabled do Asaas)
-  notifyEmail          Boolean  @default(true)
-  notifySms            Boolean  @default(false)
-  defaultDueDays       Int      @default(7)
+  notifyEmail             Boolean  @default(true)
+  notifySms               Boolean  @default(false)
+  defaultDueDays          Int      @default(7)
   // Política de taxa para splits PIX externos (Fase 6):
   //   "org_absorbs"           — beneficiário recebe valor cheio, org paga taxa Asaas
   //   "deduct_from_recipient" — taxa é descontada do split do beneficiário
-  pixSplitFeePolicy    String   @default("org_absorbs")
+  pixSplitFeePolicy       String   @default("org_absorbs")
   // Última taxa de PIX externo observada (em centavos). Atualizada
   // automaticamente a cada AsaasTransfer DONE com transferFee retornado.
   // Usada como estimativa em deduct_from_recipient antes do dispatch real.
   lastObservedPixFeeCents Int      @default(100)
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  createdAt               DateTime @default(now())
+  updatedAt               DateTime @updatedAt
 
   org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 }
@@ -1239,29 +1274,29 @@ model ChargePublicLink {
 
 // Transferências (saque) da subconta Asaas → conta bancária da org.
 model AsaasTransfer {
-  id              String    @id @default(cuid())
-  orgId           String
-  asaasTransferId String?   @unique // tra_xxx — null antes da chamada Asaas (status=PENDING_DISPATCH)
-  value           Float
-  netValue        Float?
-  transferFee     Float?
-  type            String // PIX | TED
+  id                 String    @id @default(cuid())
+  orgId              String
+  asaasTransferId    String?   @unique // tra_xxx — null antes da chamada Asaas (status=PENDING_DISPATCH)
+  value              Float
+  netValue           Float?
+  transferFee        Float?
+  type               String // PIX | TED
   // Status: PENDING_DISPATCH (novo) | PENDING | DONE | FAILED | CANCELLED
-  status          String
-  pixAddressKey   String?
-  pixKeyType      String? // CPF | CNPJ | EMAIL | PHONE | RANDOM
-  ownerName       String? // nome do destinatário (validado via pix validation)
-  ownerCpfCnpj    String?
-  bankAccountJson Json?
-  requestedBy     String?
-  scheduledDate   DateTime?
-  effectiveDate   DateTime?
-  description     String?
-  failureReason   String?   @db.Text
+  status             String
+  pixAddressKey      String?
+  pixKeyType         String? // CPF | CNPJ | EMAIL | PHONE | RANDOM
+  ownerName          String? // nome do destinatário (validado via pix validation)
+  ownerCpfCnpj       String?
+  bankAccountJson    Json?
+  requestedBy        String?
+  scheduledDate      DateTime?
+  effectiveDate      DateTime?
+  description        String?
+  failureReason      String?   @db.Text
   // Trigger automático (Fase 6): split PIX externo gerado a partir de cobrança paga
   commissionChargeId String?
   splitRecipientId   String?
-  origin             String  @default("manual") // manual | split_dispatch
+  origin             String    @default("manual") // manual | split_dispatch
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 

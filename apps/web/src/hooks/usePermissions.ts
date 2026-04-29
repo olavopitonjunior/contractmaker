@@ -9,6 +9,7 @@ interface PermissionsState {
   role: string | null;
   customRoleName: string | null;
   permissions: PermissionMap;
+  isInvitationApprover: boolean;
   can: (permission: PermissionKey) => boolean;
   refresh: () => Promise<void>;
 }
@@ -25,6 +26,7 @@ export function usePermissions(): PermissionsState {
     role: string | null;
     customRoleName: string | null;
     permissions: PermissionMap;
+    isInvitationApprover: boolean;
   }>({
     loading: true,
     userId: null,
@@ -32,6 +34,7 @@ export function usePermissions(): PermissionsState {
     role: null,
     customRoleName: null,
     permissions: {},
+    isInvitationApprover: false,
   });
 
   async function load(force = false) {
@@ -43,6 +46,7 @@ export function usePermissions(): PermissionsState {
         role: cached.data.role,
         customRoleName: cached.data.customRoleName,
         permissions: cached.data.permissions,
+        isInvitationApprover: cached.data.isInvitationApprover ?? false,
       });
       return;
     }
@@ -58,6 +62,7 @@ export function usePermissions(): PermissionsState {
         role: data.role,
         customRoleName: data.customRoleName,
         permissions: data.permissions,
+        isInvitationApprover: data.isInvitationApprover ?? false,
       });
     } catch (err) {
       console.error("[usePermissions] failed", err);
@@ -68,6 +73,7 @@ export function usePermissions(): PermissionsState {
         role: null,
         customRoleName: null,
         permissions: {},
+        isInvitationApprover: false,
       });
     }
   }

@@ -1,20 +1,29 @@
 import NextAuth from "next-auth";
 import Credentials from "next-auth/providers/credentials";
+import Resend from "next-auth/providers/resend";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 import { prisma } from "@/lib/db/prisma";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
+import { sendEmail } from "@/lib/email/client";
+import { MagicLinkEmail } from "@/lib/email/templates/magic-link";
 
 const loginSchema = z.object({
   email: z.string().email(),
   password: z.string().min(6),
 });
 
+const MAGIC_LINK_EXPIRY_MINUTES = 15;
+
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: PrismaAdapter(prisma),
+  // Mantém JWT para credentials. Resend provider exige database session
+  // só pra finalizar a verificação (NextAuth cria a session no DB e depois
+  // emite o JWT no cookie). Em v5 beta o provider Resend já lida com isso.
   session: { strategy: "jwt" },
   pages: {
     signIn: "/login",
+    verifyRequest: "/login?check-email=1",
   },
   providers: [
     Credentials({
@@ -34,8 +43,6 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         if (!user || !user.passwordHash) return null;
 
         // LGPD: bloqueia login se conta está em janela de exclusão pendente.
-        // Usuário precisa cancelar a exclusão antes via DELETE /api/me/data-delete
-        // (mas se já está bloqueado, vai precisar de admin override).
         if (user.deletedAt) return null;
 
         const valid = await bcrypt.compare(
@@ -52,8 +59,52 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         };
       },
     }),
+    // Magic link passwordless. Convidado aprovado entra só via email.
+    // Olavo/admin podem usar este OU credentials.
+    Resend({
+      apiKey: process.env.RESEND_API_KEY,
+      from: process.env.EMAIL_FROM ?? "no-reply@contractmaker.local",
+      maxAge: MAGIC_LINK_EXPIRY_MINUTES * 60,
+      async sendVerificationRequest({ identifier, url }) {
+        await sendEmail({
+          to: identifier,
+          subject: "Seu link de acesso ao Contractmaker",
+          react: MagicLinkEmail({
+            signInUrl: url,
+            expiresInMinutes: MAGIC_LINK_EXPIRY_MINUTES,
+          }) as React.ReactElement,
+        });
+      },
+    }),
   ],
   callbacks: {
+    /**
+     * Bloqueia magic link para usuários sem OrgMembership ativa OU em
+     * janela de exclusão LGPD. Credentials já fazem essa verificação no
+     * authorize(); aqui é a defesa extra para magic link, que de outra
+     * forma logaria qualquer email registrado no User table.
+     */
+    async signIn({ user, account }) {
+      if (!user?.email) return false;
+
+      const dbUser = await prisma.user.findUnique({
+        where: { email: user.email },
+        select: {
+          id: true,
+          deletedAt: true,
+          orgMemberships: { select: { id: true }, take: 1 },
+        },
+      });
+
+      // Magic link cria User automaticamente (PrismaAdapter); se acabou de
+      // ser criado e não tem membership, bloqueia.
+      if (!dbUser) return false;
+      if (dbUser.deletedAt) return false;
+      if (account?.provider === "resend" && dbUser.orgMemberships.length === 0) {
+        return false;
+      }
+      return true;
+    },
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;

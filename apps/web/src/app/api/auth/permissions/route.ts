@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/context";
 import { getEffectivePermissions } from "@/lib/security/rbac/check";
+import { isApprover } from "@/lib/auth/invitations";
 
 /**
  * GET /api/auth/permissions
@@ -25,5 +26,6 @@ export async function GET(req: NextRequest) {
     role: effective.role,
     customRoleName: effective.customRoleName,
     permissions: effective.permissions,
+    isInvitationApprover: isApprover(ctx.userEmail),
   });
 }

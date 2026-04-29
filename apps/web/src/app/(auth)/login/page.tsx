@@ -1,13 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { signIn } from "next-auth/react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import {
   FileText,
   LayoutDashboard,
@@ -15,14 +14,24 @@ import {
   Mail,
   Lock,
   ArrowRight,
+  CheckCircle2,
 } from "lucide-react";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [magicSent, setMagicSent] = useState(false);
+  const [magicLoading, setMagicLoading] = useState(false);
+  const checkEmail = searchParams.get("check-email") === "1";
+  const prefill = searchParams.get("email");
+
+  useEffect(() => {
+    if (prefill) setEmail(prefill);
+  }, [prefill]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -44,6 +53,28 @@ export default function LoginPage() {
 
     router.push("/pipeline");
     router.refresh();
+  }
+
+  async function handleMagicLink(e: React.FormEvent) {
+    e.preventDefault();
+    setError("");
+    setMagicLoading(true);
+    try {
+      const result = await signIn("resend", {
+        email,
+        redirect: false,
+        callbackUrl: "/pipeline",
+      });
+      if (result?.error) {
+        setError(
+          "Não foi possível enviar o link. Verifique se você foi convidado e aprovado."
+        );
+        return;
+      }
+      setMagicSent(true);
+    } finally {
+      setMagicLoading(false);
+    }
   }
 
   return (
@@ -103,9 +134,19 @@ export default function LoginPage() {
           </div>
 
           <h2 className="text-2xl font-bold mb-1">Bem-vindo de volta</h2>
-          <p className="text-muted-foreground mb-8">
+          <p className="text-muted-foreground mb-6">
             Entre na sua conta para continuar
           </p>
+
+          {(checkEmail || magicSent) && (
+            <div className="rounded-lg bg-emerald-50 border border-emerald-200 p-3 text-sm text-emerald-900 mb-6 flex items-start gap-2">
+              <CheckCircle2 className="h-4 w-4 mt-0.5 shrink-0" />
+              <div>
+                <strong>Verifique seu email.</strong> Enviamos um link de acesso.
+                Clique nele para entrar — válido por 15 minutos.
+              </div>
+            </div>
+          )}
 
           {error && (
             <div className="rounded-lg bg-destructive/10 border border-destructive/20 p-3 text-sm text-destructive mb-6">
@@ -113,69 +154,89 @@ export default function LoginPage() {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="email"
-                  type="email"
-                  placeholder="seu@email.com"
-                  className="pl-10"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </div>
-            </div>
+          <Tabs defaultValue="magic" className="w-full">
+            <TabsList className="grid grid-cols-2 mb-6">
+              <TabsTrigger value="magic">Link no email</TabsTrigger>
+              <TabsTrigger value="senha">Email + senha</TabsTrigger>
+            </TabsList>
 
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <Label htmlFor="password">Senha</Label>
-                <Link
-                  href="/forgot-password"
-                  className="text-xs text-primary hover:underline"
+            <TabsContent value="magic">
+              <form onSubmit={handleMagicLink} className="space-y-5">
+                <div className="space-y-2">
+                  <Label htmlFor="magic-email">Email</Label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="magic-email"
+                      type="email"
+                      placeholder="seu@email.com"
+                      className="pl-10"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Receba um link único no seu email — sem senha. Válido por 15
+                    minutos.
+                  </p>
+                </div>
+                <Button
+                  type="submit"
+                  className="w-full h-11"
+                  disabled={magicLoading || !email}
                 >
-                  Esqueceu a senha?
-                </Link>
-              </div>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="password"
-                  type="password"
-                  placeholder="Minimo 6 caracteres"
-                  className="pl-10"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                  minLength={6}
-                />
-              </div>
-            </div>
+                  {magicLoading ? "Enviando..." : "Enviar link"}
+                  {!magicLoading && <ArrowRight className="ml-2 h-4 w-4" />}
+                </Button>
+              </form>
+            </TabsContent>
 
-            <Button type="submit" className="w-full h-11" disabled={loading}>
-              {loading ? "Entrando..." : "Entrar"}
-              {!loading && <ArrowRight className="ml-2 h-4 w-4" />}
-            </Button>
-          </form>
+            <TabsContent value="senha">
+              <form onSubmit={handleSubmit} className="space-y-5">
+                <div className="space-y-2">
+                  <Label htmlFor="email">Email</Label>
+                  <div className="relative">
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="email"
+                      type="email"
+                      placeholder="seu@email.com"
+                      className="pl-10"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                    />
+                  </div>
+                </div>
 
-          <div className="my-6 flex items-center gap-4">
-            <Separator className="flex-1" />
-            <span className="text-xs text-muted-foreground">ou</span>
-            <Separator className="flex-1" />
-          </div>
+                <div className="space-y-2">
+                  <Label htmlFor="password">Senha</Label>
+                  <div className="relative">
+                    <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                    <Input
+                      id="password"
+                      type="password"
+                      placeholder="Sua senha"
+                      className="pl-10"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                      minLength={6}
+                    />
+                  </div>
+                </div>
 
-          <Button variant="outline" className="w-full h-11" disabled>
-            Entrar com Google (em breve)
-          </Button>
+                <Button type="submit" className="w-full h-11" disabled={loading}>
+                  {loading ? "Entrando..." : "Entrar"}
+                  {!loading && <ArrowRight className="ml-2 h-4 w-4" />}
+                </Button>
+              </form>
+            </TabsContent>
+          </Tabs>
 
-          <p className="text-center text-sm text-muted-foreground mt-8">
-            Nao tem conta?{" "}
-            <Link href="/register" className="text-primary font-medium hover:underline">
-              Cadastre-se gratuitamente
-            </Link>
+          <p className="text-center text-xs text-muted-foreground mt-8">
+            O acesso à plataforma é apenas por convite de um administrador.
           </p>
         </div>
       </div>

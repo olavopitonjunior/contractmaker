@@ -21,7 +21,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ElevationDialog } from "./ElevationDialog";
+import { InvitationsTab } from "./InvitationsTab";
 import { useElevation } from "@/hooks/useElevation";
 import { usePermissions } from "@/hooks/usePermissions";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
@@ -64,6 +66,8 @@ export function MembersPageClient() {
     role: "finance" as RolePreset,
   });
   const [inviteLoading, setInviteLoading] = useState(false);
+  const [invitationsRefresh, setInvitationsRefresh] = useState(0);
+  const [activeTab, setActiveTab] = useState<"membros" | "convites">("membros");
 
   async function load() {
     setLoading(true);
@@ -94,7 +98,7 @@ export function MembersPageClient() {
   async function handleInvite() {
     setInviteLoading(true);
     try {
-      const res = await fetch("/api/org/members", {
+      const res = await fetch("/api/org/invitations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -105,10 +109,11 @@ export function MembersPageClient() {
         toast.error(data.error ?? "Falha ao convidar");
         return;
       }
-      toast.success("Convite enviado por email");
+      toast.success("Convite criado — aprovador foi notificado");
       setInviteOpen(false);
       setInviteData({ email: "", name: "", role: "finance" });
-      await load();
+      setInvitationsRefresh((n) => n + 1);
+      setActiveTab("convites");
     } finally {
       setInviteLoading(false);
     }
@@ -238,6 +243,13 @@ export function MembersPageClient() {
         </div>
       </div>
 
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "membros" | "convites")}>
+        <TabsList>
+          <TabsTrigger value="membros">Membros ativos</TabsTrigger>
+          <TabsTrigger value="convites">Convites</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="membros" className="mt-4">
       <Card>
         <CardContent className="p-0">
           <table className="w-full text-sm">
@@ -363,6 +375,15 @@ export function MembersPageClient() {
           </table>
         </CardContent>
       </Card>
+        </TabsContent>
+
+        <TabsContent value="convites" className="mt-4">
+          <InvitationsTab
+            isApprover={perms.isInvitationApprover}
+            refreshKey={invitationsRefresh}
+          />
+        </TabsContent>
+      </Tabs>
 
       {/* Invite dialog */}
       <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
