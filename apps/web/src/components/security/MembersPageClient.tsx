@@ -54,9 +54,9 @@ export function MembersPageClient() {
   const [resendingId, setResendingId] = useState<string | null>(null);
   const [leaving, setLeaving] = useState(false);
   type PendingAction =
-    | { type: "invite" }
     | { type: "change-role"; membershipId: string; newRole: string }
     | { type: "remove"; membershipId: string; userName: string }
+    | { type: "resend-invite"; membershipId: string; email: string }
     | null;
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
 
@@ -87,11 +87,10 @@ export function MembersPageClient() {
   }, []);
 
   function handleStartInvite() {
-    if (!elevation.hasScope("MEMBER_MANAGE")) {
-      setPendingAction({ type: "invite" });
-      setElevOpen(true);
-      return;
-    }
+    // Convite NÃO exige elevation: o backend /api/org/invitations cria
+    // status=pending sem criar User. A aprovação posterior (que efetivamente
+    // cria User+Membership) é gated pelo email do approver, suficiente como
+    // segurança para essa operação reversível.
     setInviteOpen(true);
   }
 
@@ -162,8 +161,7 @@ export function MembersPageClient() {
 
   async function handleResendInvite(membershipId: string, email: string) {
     if (!elevation.hasScope("MEMBER_MANAGE")) {
-      // Reusa o flow de invite p/ pedir elevation
-      setPendingAction({ type: "invite" });
+      setPendingAction({ type: "resend-invite", membershipId, email });
       setElevOpen(true);
       return;
     }
@@ -456,12 +454,12 @@ export function MembersPageClient() {
           const action = pendingAction;
           setPendingAction(null);
           if (!action) return;
-          if (action.type === "invite") {
-            setInviteOpen(true);
-          } else if (action.type === "change-role") {
+          if (action.type === "change-role") {
             void handleChangeRole(action.membershipId, action.newRole);
           } else if (action.type === "remove") {
             void handleRemove(action.membershipId, action.userName);
+          } else if (action.type === "resend-invite") {
+            void handleResendInvite(action.membershipId, action.email);
           }
         }}
       />
