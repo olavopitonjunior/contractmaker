@@ -1,3 +1,16 @@
+// ⚠️ DEPRECATED (Phase F.II, 2026-04-28)
+//
+// Esta rota disparava OCR síncrono em paralelo com o worker fire-and-forget
+// de POST /attachments — ambos disputando o lock atômico extractingStartedAt.
+// O perdedor da corrida retornava "Extração concorrente em andamento", o que
+// flipava o card client-side para "failed" mesmo quando o worker eventualmente
+// completava com sucesso. Sintoma observado: 1ª tentativa de upload falhava,
+// retry funcionava.
+//
+// O cliente em DocumentosStep.tsx não chama mais este endpoint; depende
+// exclusivamente do worker (src/lib/ai/ocr-worker.ts) + polling de GET
+// /attachments. Esta rota fica como back-compat para clientes em cache de
+// browser; pode ser removida com segurança após uma rodada de deploy.
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";

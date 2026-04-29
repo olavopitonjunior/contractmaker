@@ -22,22 +22,15 @@ interface DocumentosStepProps {
 
 const MAX_FILES = 15;
 const MAX_BYTES = 10 * 1024 * 1024;
-const RESIZE_MAX_SIDE = 1500; // F5: was 2000 — reduce payload ~40%
-const IMAGE_JPEG_QUALITY = 0.8; // F5: was 0.85
+const RESIZE_MAX_SIDE = 1500;
+const IMAGE_JPEG_QUALITY = 0.8;
 const IMAGE_MIMES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const ACCEPTED_MIMES = [...IMAGE_MIMES, "application/pdf"];
-// Upload has a wide pool (4 concurrent fetches) — it's just HTTP to our own
-// Blob/S3 storage and doesn't hit Gemini.
+// Upload pool: 4 concurrent HTTP uploads to Blob/S3. Não toca Gemini.
+// O OCR roda no servidor via worker fire-and-forget (ocr-worker.ts) que
+// é disparado pelo POST /attachments. Cliente apenas faz polling no GET
+// /attachments para receber o resultado quando ready.
 const UPLOAD_CONCURRENCY = 4;
-// OCR batch window: once the first doc is queued for OCR, wait up to
-// BATCH_WINDOW_MS for more docs to arrive, then flush the batch (up to
-// BATCH_MAX_SIZE per request). Amortizes Gemini latency by sending multiple
-// docs in 1 call. Server enforces max 4 per batch.
-const BATCH_WINDOW_MS = 1500;
-const BATCH_MAX_SIZE = 3;
-// How many parallel batch requests can fly at once. Each carries up to 3 docs
-// so effective OCR concurrency is ~6 — but as 2 batches (not 6 individual RPM).
-const BATCH_CONCURRENCY = 2;
 
 /**
  * Tiny inline pLimit — runs at most `concurrency` async tasks at the same time.
@@ -282,13 +275,25 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
 
   }, [token]);
 
-  // Phase F.I-α — polling do status assíncrono. Enquanto houver cards em
-  // "extracting" (que cobre queued + extracting do server), buscar /attachments
-  // a cada 3s e atualizar status + fields. Para ao não ter mais nada pendente.
+  // Phase F.I-α + F.II polling — enquanto houver cards em status não-final
+  // (uploading/extracting/failed), busca GET /attachments a cada 3s e
+  // sincroniza com o estado do servidor.
+  //
+  // F.II: cards em "failed" também são monitorados. Se o servidor reportar
+  // status="ready" + extractedData (ex: worker completou após o cliente já
+  // ter flipado para failed por outro motivo), o card volta para ready.
+  // Defesa em profundidade contra race residual.
   useEffect(() => {
-    const hasPending = docs.some((d) => d.status === "extracting" || d.status === "uploading");
-    if (!hasPending) return;
+    const hasPending = docs.some(
+      (d) => d.status === "extracting" || d.status === "uploading"
+    );
+    const hasFailedToVerify = docs.some(
+      (d) => d.status === "failed" && !d.id.startsWith("tmp-")
+    );
+    if (!hasPending && !hasFailedToVerify) return;
     let cancelled = false;
+    // Pace: pending = 3s; failed-only = 8s (menos pressão no servidor).
+    const intervalMs = hasPending ? 3000 : 8000;
     const interval = setInterval(async () => {
       try {
         const res = await fetch(`/api/forms/${token}/attachments`);
@@ -297,13 +302,32 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
         const byId = new Map<string, any>(
           (data.attachments || []).map((a: any) => [a.id, a])
         );
-        setDocs((prev) =>
-          prev.map((d) => {
+        setDocs((prev) => {
+          const snapshot = form.getValues();
+          return prev.map((d) => {
             const a = byId.get(d.id);
             if (!a) return d;
             const extracted = a.extractedData || {};
             const fields = extracted.fields || null;
+            // Server reporta ready com fields → promove sempre, mesmo se card
+            // estava em failed (worker pode ter completado depois).
             if (a.status === "ready" && fields) {
+              const siblings: ProcessedDocHint[] = prev
+                .filter(
+                  (other) =>
+                    other.id !== d.id &&
+                    other.status === "ready" &&
+                    other.fields
+                )
+                .map((other) => ({
+                  category: other.category,
+                  fields: other.fields,
+                  assignment: other.assignment,
+                }));
+              const assignment =
+                d.status === "failed"
+                  ? suggestAssignment(a.category, fields, snapshot, siblings)
+                  : d.assignment;
               return {
                 ...d,
                 status: "ready",
@@ -312,6 +336,8 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
                 confidence:
                   typeof extracted.confidence === "number" ? extracted.confidence : null,
                 error: null,
+                assignment,
+                extractingSince: null,
               };
             }
             if (a.status === "failed") {
@@ -322,23 +348,21 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
                 extractingSince: null,
               };
             }
-            // Ainda queued/extracting — atualiza extractingSince caso server
-            // tenha feito claim novo (stale recovery) para reset do timer
             const sinceMs = a.extractingStartedAt
               ? new Date(a.extractingStartedAt).getTime()
               : d.extractingSince ?? new Date(a.createdAt).getTime();
             return { ...d, extractingSince: sinceMs };
-          })
-        );
+          });
+        });
       } catch {
         /* retry no próximo tick */
       }
-    }, 3000);
+    }, intervalMs);
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [docs, token]);
+  }, [docs, token, form]);
 
   const updateDoc = useCallback((id: string, patch: Partial<DocumentCardData>) => {
     setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
@@ -447,67 +471,6 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
     [token, updateDoc, applyExtractResult]
   );
 
-  // Multi-doc OCR via /batch-extract — sends up to 3 docs in a single Gemini
-  // call. Used by handleFiles during burst uploads. Updates all docs in the
-  // batch atomically when results come back.
-  const runBatchExtract = useCallback(
-    async (attachmentIds: string[]) => {
-      attachmentIds.forEach((id) =>
-        updateDoc(id, { status: "extracting", error: null })
-      );
-      try {
-        const res = await fetch(
-          `/api/forms/${token}/attachments/batch-extract`,
-          {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ attachmentIds }),
-          }
-        );
-        const data = await res.json();
-        if (!res.ok) {
-          attachmentIds.forEach((id) =>
-            updateDoc(id, {
-              status: "failed",
-              error: data.error || "Falha na extração em lote",
-            })
-          );
-          return;
-        }
-        const results = (data.results ?? []) as Array<{
-          attachmentId: string;
-          ok: boolean;
-          category: string | null;
-          extractedData: { fields?: Record<string, unknown>; confidence?: number } | null;
-          error: string | null;
-        }>;
-        for (const r of results) {
-          if (!r.ok || !r.extractedData) {
-            updateDoc(r.attachmentId, {
-              status: "failed",
-              error: r.error || "Falha na extração",
-            });
-            continue;
-          }
-          const fields = r.extractedData.fields || {};
-          const confidence =
-            typeof r.extractedData.confidence === "number"
-              ? r.extractedData.confidence
-              : null;
-          applyExtractResult(r.attachmentId, r.category, fields, confidence);
-        }
-      } catch (err) {
-        attachmentIds.forEach((id) =>
-          updateDoc(id, {
-            status: "failed",
-            error: err instanceof Error ? err.message : String(err),
-          })
-        );
-      }
-    },
-    [token, updateDoc, applyExtractResult]
-  );
-
   const handleFiles = useCallback(
     async (files: FileList | File[]) => {
       const arr = Array.from(files);
@@ -549,62 +512,19 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
 
       if (validFiles.length === 0) return;
       if (validFiles.length > 1) {
-        toast.info(`Processando ${validFiles.length} documentos em paralelo…`);
+        toast.info(`Enviando ${validFiles.length} documentos…`);
       }
 
-      // F5 strategy:
-      //   - Upload pool: 4 parallel fetches to Blob storage (fast, not Gemini)
-      //   - OCR batch scheduler: docs queue up as uploads complete; scheduler
-      //     flushes every BATCH_WINDOW_MS (1.5s) or when BATCH_MAX_SIZE (3)
-      //     docs are queued, whichever first. Each flush sends 1 batch request
-      //     that OCRs up to 3 docs in a single Gemini call.
-      //   - Batch request pool: BATCH_CONCURRENCY (2) parallel batches → at
-      //     most ~6 docs being OCR'd at once, but only 2 concurrent requests
-      //     vs Gemini (respects RPM).
+      // Pipeline simplificado (Phase F.II):
+      //   1. Upload paralelo (até 4 simultâneos) para Blob storage.
+      //   2. Servidor cria FormAttachment com status="queued" e dispara
+      //      processOcrQueue fire-and-forget no background.
+      //   3. Cliente NÃO chama mais /batch-extract — a chamada gerava race
+      //      com o worker (ambos disputando o lock extractingStartedAt) e
+      //      causava "Extração concorrente em andamento" na 1ª tentativa.
+      //   4. O useEffect de polling (acima) pega o resultado do GET quando
+      //      o worker completar (status "ready" ou "failed").
       const uploadLimit = pLimit(UPLOAD_CONCURRENCY);
-      const batchRequestLimit = pLimit(BATCH_CONCURRENCY);
-
-      // Batch scheduler state (closure-scoped, lives for this handleFiles call)
-      type PendingDoc = { id: string; resolve: () => void };
-      const pending: PendingDoc[] = [];
-      let flushTimer: ReturnType<typeof setTimeout> | null = null;
-      const inflightBatches: Promise<void>[] = [];
-
-      const flushBatch = () => {
-        if (flushTimer) {
-          clearTimeout(flushTimer);
-          flushTimer = null;
-        }
-        if (pending.length === 0) return;
-        const slice = pending.splice(0, BATCH_MAX_SIZE);
-        const ids = slice.map((p) => p.id);
-        inflightBatches.push(
-          batchRequestLimit(async () => {
-            try {
-              await runBatchExtract(ids);
-            } finally {
-              slice.forEach((p) => p.resolve());
-            }
-          })
-        );
-        // If more docs remain, schedule the next flush so the queue drains
-        if (pending.length > 0) scheduleFlush();
-      };
-
-      const scheduleFlush = () => {
-        if (flushTimer) return; // already scheduled
-        flushTimer = setTimeout(flushBatch, BATCH_WINDOW_MS);
-      };
-
-      const enqueueForOcr = (doc: DocumentCardData): Promise<void> =>
-        new Promise<void>((resolve) => {
-          pending.push({ id: doc.id, resolve });
-          if (pending.length >= BATCH_MAX_SIZE) {
-            flushBatch();
-          } else {
-            scheduleFlush();
-          }
-        });
 
       type UploadOutcome = { doc: DocumentCardData; cached: boolean } | null;
 
@@ -727,25 +647,16 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
         }
       };
 
+      // Apenas dispara os uploads em paralelo. O servidor (POST /attachments)
+      // já enfileira o OCR no worker; o useEffect de polling pega o resultado
+      // assim que ficar ready/failed no DB.
       const tasks = validFiles.map(({ rawFile, tempId }) =>
-        uploadLimit(() => doUpload(rawFile, tempId)).then((outcome) => {
-          if (!outcome) return;
-          // Cached uploads are already fully resolved — skip the OCR scheduler.
-          if (outcome.cached) return;
-          // Upload slot is released; doc is enqueued in the OCR batch scheduler
-          // which will flush it within BATCH_WINDOW_MS (1500ms) or sooner if
-          // BATCH_MAX_SIZE (3) other docs arrive in the meantime.
-          return enqueueForOcr(outcome.doc);
-        })
+        uploadLimit(() => doUpload(rawFile, tempId))
       );
 
       await Promise.allSettled(tasks);
-      // Force a final flush — if fewer than BATCH_MAX_SIZE docs are still
-      // pending at this point, they'd otherwise wait for the timer.
-      flushBatch();
-      await Promise.allSettled(inflightBatches);
     },
-    [docs.length, token, runBatchExtract]
+    [docs.length, token]
   );
 
   const handleAssignmentChange = useCallback(
