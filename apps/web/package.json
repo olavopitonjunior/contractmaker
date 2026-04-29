@@ -29,6 +29,7 @@
     "@hookform/resolvers": "^5.2.2",
     "@prisma/client": "^5.18.0",
     "@prisma/debug": "^5.18.0",
+    "@react-email/render": "^2.0.8",
     "@sparticuz/chromium": "^143.0.4",
     "@tiptap/extension-bubble-menu": "^3.22.3",
     "@tiptap/extension-character-count": "^3.22.3",
