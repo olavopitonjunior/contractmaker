@@ -1,16 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2, ShieldCheck, Copy, Wallet } from "lucide-react";
+import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2, ShieldCheck, Copy, Wallet, FileSignature } from "lucide-react";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
 import type { Assignment, DocumentKind } from "@/lib/forms/extracted-to-form";
 import { CertidoesTab } from "@/components/pipeline/CertidoesTab";
+import { SignaturesTab } from "@/components/pipeline/SignaturesTab";
 import { CommissionChargeDialog } from "@/components/pipeline/CommissionChargeDialog";
 import { CommissionChargeList } from "@/components/pipeline/CommissionChargeList";
 import { toast } from "sonner";
@@ -95,8 +96,20 @@ interface DealDetailProps {
   };
 }
 
+const VALID_TABS = new Set([
+  "dados",
+  "anexos",
+  "certidoes",
+  "contratos",
+  "assinaturas",
+  "pagamentos",
+]);
+
 export function DealDetail({ deal }: DealDetailProps) {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const initialTab = tabParam && VALID_TABS.has(tabParam) ? tabParam : "dados";
   const [generating, setGenerating] = useState(false);
   const [signing, setSigning] = useState(false);
   const [confirmDuplicateOpen, setConfirmDuplicateOpen] = useState(false);
@@ -257,7 +270,7 @@ export function DealDetail({ deal }: DealDetailProps) {
         </div>
       </div>
 
-      <Tabs defaultValue="dados">
+      <Tabs defaultValue={initialTab}>
         <TabsList>
           <TabsTrigger value="dados">Dados</TabsTrigger>
           <TabsTrigger value="anexos">
@@ -269,6 +282,10 @@ export function DealDetail({ deal }: DealDetailProps) {
           </TabsTrigger>
           <TabsTrigger value="contratos">
             Contratos ({deal.contracts.length} {deal.contracts.length === 1 ? "versão" : "versões"})
+          </TabsTrigger>
+          <TabsTrigger value="assinaturas">
+            <FileSignature className="h-3.5 w-3.5 mr-1" />
+            Assinaturas
           </TabsTrigger>
           <TabsTrigger value="pagamentos">
             <Wallet className="h-3.5 w-3.5 mr-1" />
@@ -458,6 +475,19 @@ export function DealDetail({ deal }: DealDetailProps) {
               ))
             )}
           </div>
+        </TabsContent>
+
+        <TabsContent value="assinaturas" className="mt-4">
+          <SignaturesTab
+            contracts={deal.contracts.map((c) => ({
+              id: c.id,
+              version: c.version,
+              status: c.status,
+              templateName: c.template.name,
+            }))}
+            vendedores={vendedores}
+            compradores={compradores}
+          />
         </TabsContent>
 
         <TabsContent value="pagamentos" className="mt-4">

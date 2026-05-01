@@ -1,0 +1,198 @@
+import { clicksignRequest } from "./client";
+import type { ClicksignResponse, AuthMethod } from "./types";
+
+interface CreateEnvelopeInput {
+  name: string;
+  deadlineAt?: Date | null;
+  autoClose?: boolean;
+  locale?: "pt-BR" | "en-US";
+}
+
+export async function createEnvelope(input: CreateEnvelopeInput) {
+  const attributes: Record<string, unknown> = {
+    name: input.name,
+    locale: input.locale || "pt-BR",
+    auto_close: input.autoClose ?? true,
+  };
+  if (input.deadlineAt) {
+    attributes.deadline_at = input.deadlineAt.toISOString();
+  }
+  return clicksignRequest<ClicksignResponse>({
+    method: "POST",
+    path: "/api/v3/envelopes",
+    body: { data: { type: "envelopes", attributes } },
+  });
+}
+
+interface AddDocumentInput {
+  envelopeId: string;
+  filename: string;
+  contentBase64: string;
+}
+
+// Recebe o conteúdo do PDF como data URL: data:application/pdf;base64,...
+export async function addDocument(input: AddDocumentInput) {
+  const dataUrl = `data:application/pdf;base64,${input.contentBase64}`;
+  return clicksignRequest<ClicksignResponse>({
+    method: "POST",
+    path: `/api/v3/envelopes/${input.envelopeId}/documents`,
+    body: {
+      data: {
+        type: "documents",
+        attributes: {
+          filename: input.filename,
+          content_base64: dataUrl,
+        },
+      },
+    },
+  });
+}
+
+interface AddSignerInput {
+  envelopeId: string;
+  name: string;
+  email: string;
+  documentation?: string;
+  phoneNumber?: string;
+  hasDocumentation?: boolean;
+  birthday?: string; // YYYY-MM-DD
+  refusable?: boolean;
+  communicateBy?: "email" | "sms" | "whatsapp";
+}
+
+export async function addSigner(input: AddSignerInput) {
+  const attributes: Record<string, unknown> = {
+    name: input.name,
+    email: input.email,
+    has_documentation: input.hasDocumentation ?? Boolean(input.documentation),
+    refusable: input.refusable ?? true,
+    communicate_by: input.communicateBy || "email",
+  };
+  if (input.documentation) attributes.documentation = input.documentation;
+  if (input.phoneNumber) attributes.phone_number = input.phoneNumber;
+  if (input.birthday) attributes.birthday = input.birthday;
+
+  return clicksignRequest<ClicksignResponse>({
+    method: "POST",
+    path: `/api/v3/envelopes/${input.envelopeId}/signers`,
+    body: { data: { type: "signers", attributes } },
+  });
+}
+
+export async function removeSigner(envelopeId: string, signerId: string) {
+  return clicksignRequest<void>({
+    method: "DELETE",
+    path: `/api/v3/envelopes/${envelopeId}/signers/${signerId}`,
+  });
+}
+
+interface AddRequirementInput {
+  envelopeId: string;
+  documentClicksignId: string;
+  signerClicksignId: string;
+  // Tipo do requisito: "agreement" (aceitar), "provide_evidence" (autenticação),
+  // "qualification" (qualificação como Assinante/Testemunha).
+  action: "agree" | "provide_evidence" | "qualify";
+  // Para action=provide_evidence: o auth method usado.
+  auth?: AuthMethod;
+  // Para action=qualify: o papel.
+  role?: "sign" | "witness" | "intervening";
+}
+
+export async function addRequirement(input: AddRequirementInput) {
+  const attributes: Record<string, unknown> = { action: input.action };
+  if (input.auth) attributes.auth = input.auth;
+  if (input.role) attributes.role = input.role;
+
+  return clicksignRequest<ClicksignResponse>({
+    method: "POST",
+    path: `/api/v3/envelopes/${input.envelopeId}/requirements`,
+    body: {
+      data: {
+        type: "requirements",
+        attributes,
+        relationships: {
+          document: { data: { type: "documents", id: input.documentClicksignId } },
+          signer: { data: { type: "signers", id: input.signerClicksignId } },
+        },
+      },
+    },
+  });
+}
+
+export async function activateEnvelope(envelopeId: string) {
+  return clicksignRequest<ClicksignResponse>({
+    method: "PATCH",
+    path: `/api/v3/envelopes/${envelopeId}`,
+    body: {
+      data: {
+        id: envelopeId,
+        type: "envelopes",
+        attributes: { status: "running" },
+      },
+    },
+  });
+}
+
+export async function cancelEnvelope(envelopeId: string) {
+  return clicksignRequest<ClicksignResponse>({
+    method: "PATCH",
+    path: `/api/v3/envelopes/${envelopeId}`,
+    body: {
+      data: {
+        id: envelopeId,
+        type: "envelopes",
+        attributes: { status: "canceled" },
+      },
+    },
+  });
+}
+
+export async function deleteDraftEnvelope(envelopeId: string) {
+  return clicksignRequest<void>({
+    method: "DELETE",
+    path: `/api/v3/envelopes/${envelopeId}`,
+  });
+}
+
+export async function getEnvelope(envelopeId: string) {
+  return clicksignRequest<ClicksignResponse>({
+    method: "GET",
+    path: `/api/v3/envelopes/${envelopeId}`,
+  });
+}
+
+interface UpdateEnvelopeInput {
+  envelopeId: string;
+  name?: string;
+  deadlineAt?: Date | null;
+}
+
+export async function updateEnvelope(input: UpdateEnvelopeInput) {
+  const attributes: Record<string, unknown> = {};
+  if (input.name !== undefined) attributes.name = input.name;
+  if (input.deadlineAt !== undefined) {
+    attributes.deadline_at = input.deadlineAt
+      ? input.deadlineAt.toISOString()
+      : null;
+  }
+  return clicksignRequest<ClicksignResponse>({
+    method: "PATCH",
+    path: `/api/v3/envelopes/${input.envelopeId}`,
+    body: {
+      data: {
+        id: input.envelopeId,
+        type: "envelopes",
+        attributes,
+      },
+    },
+  });
+}
+
+export async function notifySigner(envelopeId: string, signerId: string) {
+  return clicksignRequest<ClicksignResponse>({
+    method: "POST",
+    path: `/api/v3/envelopes/${envelopeId}/signers/${signerId}/notifications`,
+    body: { data: { type: "notifications", attributes: {} } },
+  });
+}

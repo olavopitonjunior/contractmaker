@@ -14,6 +14,7 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { ContractEditor, type ContractEditorHandle } from "./ContractEditor";
+import { GoogleDocsEditor } from "./GoogleDocsEditor";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { VersionTimeline } from "./VersionTimeline";
 import { ChangeLogPanel } from "./ChangeLogPanel";
@@ -49,6 +50,8 @@ interface ContractData {
   dataJson: Record<string, unknown>;
   messages: { id: string; role: string; content: string }[];
   exports: { id: string; format: string; url: string; createdAt: string }[];
+  googleDocId?: string | null;
+  googleDocUrl?: string | null;
 }
 
 interface Version {
@@ -104,10 +107,15 @@ export function ContractEditorPage({
   }>({ total: 0, errors: 0, warnings: 0, infos: 0, maxSeverity: null });
 
   const isApprovedOrVoid = status === "aprovado";
+  const isGoogleDocsBacked = !!contract.googleDocId;
 
-  // Auto-save: debounced PATCH when htmlContent changes (non-approved contracts only)
+  // Auto-save: debounced PATCH when htmlContent changes (TipTap-only).
+  // Quando o contrato é Google Doc, o doc é a fonte de verdade do texto —
+  // PATCHar htmlContent não tem efeito visível e ainda atropela o snapshot
+  // que o accept/reject de suggestions persiste. Skip o auto-save inteiro.
   useEffect(() => {
     if (isApprovedOrVoid) return;
+    if (isGoogleDocsBacked) return;
     if (htmlContent === savedContentRef.current) return;
     const timer = setTimeout(async () => {
       setAutoSaveStatus("saving");
@@ -126,7 +134,7 @@ export function ContractEditorPage({
       }
     }, 1500);
     return () => clearTimeout(timer);
-  }, [htmlContent, contract.id, isApprovedOrVoid]);
+  }, [htmlContent, contract.id, isApprovedOrVoid, isGoogleDocsBacked]);
 
   const refreshAiCommentsCount = useCallback(async () => {
     try {
@@ -292,16 +300,23 @@ export function ContractEditorPage({
     <div className="space-y-4">
       {/* Approved banner */}
       {isApproved && (
-        <div className="flex items-center gap-3 rounded-lg border border-green-200 bg-green-50 p-4 text-green-800">
-          <Lock className="h-5 w-5 shrink-0" />
-          <div>
-            <p className="font-medium text-sm">
-              Contrato aprovado - edição bloqueada
-            </p>
-            <p className="text-xs text-green-600">
-              Este contrato não pode mais ser alterado. Exporte para PDF/DOCX.
-            </p>
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-green-200 bg-green-50 p-4 text-green-800">
+          <div className="flex items-center gap-3">
+            <Lock className="h-5 w-5 shrink-0" />
+            <div>
+              <p className="font-medium text-sm">
+                Contrato aprovado - edição bloqueada
+              </p>
+              <p className="text-xs text-green-600">
+                Pronto para envio à assinatura ou export PDF/DOCX.
+              </p>
+            </div>
           </div>
+          <Button asChild size="sm" variant="outline">
+            <Link href={`/deals/${contract.dealId}?tab=assinaturas`}>
+              Enviar para assinatura
+            </Link>
+          </Button>
         </div>
       )}
 
@@ -463,20 +478,29 @@ export function ContractEditorPage({
         </div>
       </div>
 
-      {/* Editor */}
+      {/* Editor — Google Docs iframe quando contrato tem googleDocId, senão TipTap */}
       <div className="rounded-lg border bg-card overflow-hidden">
-        <ContractEditor
-          ref={editorRef}
-          content={htmlContent}
-          onChange={isApproved ? () => {} : setHtmlContent}
-          readOnly={isApproved}
-          onAskAI={isApproved ? undefined : handleAskAI}
-          onAddComment={isApproved ? undefined : handleAddComment}
-          contractId={contract.id}
-          suggestionsVersion={commentsVersion}
-          onReady={setEditorInstance}
-          status={status}
-        />
+        {contract.googleDocId ? (
+          <GoogleDocsEditor
+            googleDocId={contract.googleDocId}
+            googleDocUrl={contract.googleDocUrl}
+            readOnly={isApproved}
+            status={status}
+          />
+        ) : (
+          <ContractEditor
+            ref={editorRef}
+            content={htmlContent}
+            onChange={isApproved ? () => {} : setHtmlContent}
+            readOnly={isApproved}
+            onAskAI={isApproved ? undefined : handleAskAI}
+            onAddComment={isApproved ? undefined : handleAddComment}
+            contractId={contract.id}
+            suggestionsVersion={commentsVersion}
+            onReady={setEditorInstance}
+            status={status}
+          />
+        )}
       </div>
 
       {/* Comments Panel */}

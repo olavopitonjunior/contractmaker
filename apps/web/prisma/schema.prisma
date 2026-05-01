@@ -138,6 +138,9 @@ model Organization {
 
   // Pagadoria — Fase 5 (split multi-recipient)
   splitRecipients SplitRecipient[]
+
+  // Clicksign — assinatura eletrônica
+  envelopes Envelope[]
 }
 
 model OrgMembership {
@@ -242,6 +245,7 @@ model Deal {
   certidoesShareLinks CertidoesShareLink[]
   diligentedPersons   DiligentedPerson[]
   commissionCharges   CommissionCharge[]
+  envelopes           Envelope[]
 }
 
 model DealAttachment {
@@ -426,10 +430,14 @@ model ContractTemplate {
   version          String   @default("1.0.0")
   schemaType       String   @default("compra_venda_v1")
   handlebarsSource String   @db.Text
-  engine           String   @default("handlebars")
+  engine           String   @default("handlebars") // "handlebars" | "google_docs"
   status           String   @default("active")
   isDefault        Boolean  @default(false)
   modalidade       String?  @default("a_vista")
+  // Google Docs migration: quando engine="google_docs", aponta para o doc-modelo
+  // armazenado no Drive da service account. Os contratos são criados via
+  // files.copy seguido de batchUpdate(replaceAllText).
+  googleTemplateDocId String?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -482,6 +490,16 @@ model Contract {
   status           String   @default("rascunho")
   isLatest         Boolean  @default(true)
   parentVersionId  String?
+  // Google Docs migration (Phase 0+): when set, the contract content lives in
+  // a Google Doc owned by the Contractmaker service account; htmlContent stays
+  // as a snapshot for legacy export/diff fallback.
+  googleDocId         String?
+  googleDocUrl        String?
+  googleDocStatus     String? // "draft" | "approved_readonly" | "archived"
+  // Drive watch metadata para webhook de mudança (Item 7).
+  googleWatchChannel  String?
+  googleWatchResource String?
+  googleWatchExpires  DateTime?
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
@@ -498,6 +516,7 @@ model Contract {
   suggestions       ContractSuggestion[]
   aiUsage           AIUsage[]
   commissionCharges CommissionCharge[]
+  envelopes         Envelope[]
 }
 
 model ContractClause {
@@ -557,6 +576,8 @@ model ContractComment {
   resolved     Boolean  @default(false)
   parentId     String?
   dedupeKey    String? // hash determinístico usado pela IA para evitar duplicatas em re-análises
+  // Google Docs migration: id do comment espelhado no Drive Comments API.
+  googleCommentId String?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
@@ -581,6 +602,8 @@ model ContractSuggestion {
   newText      String?   @db.Text
   reason       String?   @db.Text
   status       String    @default("pending") // "pending" | "accepted" | "rejected"
+  // Google Docs migration: id da suggestion espelhada no documento (formato kix.*).
+  googleSuggestionId String?
   resolvedAt   DateTime?
   resolvedBy   String?
   createdAt    DateTime  @default(now())
@@ -1336,4 +1359,100 @@ model BankReconciliation {
   @@index([orgId, status])
   @@index([orgId, date])
   @@index([matchedChargeId])
+}
+
+// ============================================
+// CLICKSIGN — assinatura eletrônica de contratos
+// ============================================
+
+// Envelope = uma transação de assinatura na Clicksign API v3.
+// Um Contract aprovado pode gerar 1+ envelopes (cancelamento permite reenvio).
+model Envelope {
+  id                  String    @id @default(cuid())
+  contractId          String
+  dealId              String
+  orgId               String
+  // ID retornado pela Clicksign (data.id no payload JSON:API). Nulo enquanto
+  // a row local existe mas a chamada à API ainda não completou.
+  clicksignId         String?   @unique
+  name                String
+  // status: draft | running | closed | canceled | failed
+  status              String    @default("draft")
+  // authMethod default aplicado a todos os signers (email | whatsapp | selfie | icp_brasil)
+  authMethod          String    @default("email")
+  documentClicksignId String?
+  // Snapshot do PDF enviado (s3:// ou file://). Imutável após envio.
+  documentUrl         String?
+  // PDF assinado, baixado da Clicksign no evento close/auto_close.
+  signedDocumentUrl   String?
+  costCents           Int       @default(0)
+  deadlineAt          DateTime?
+  sentAt              DateTime?
+  closedAt            DateTime?
+  canceledAt          DateTime?
+  lastError           String?   @db.Text
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  contract Contract         @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  deal     Deal             @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  org      Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  signers  EnvelopeSigner[]
+  events   EnvelopeEvent[]
+
+  @@index([contractId])
+  @@index([dealId])
+  @@index([orgId, status])
+  @@index([status, updatedAt])
+}
+
+model EnvelopeSigner {
+  id             String    @id @default(cuid())
+  envelopeId     String
+  clicksignId    String?
+  // IDs dos requirements (auth + sign) criados via POST /requirements.
+  // Guardamos pra poder remover/alterar depois sem refazer GET.
+  requirementIds String[]
+  // sourceKind: vendedor | comprador. sourceIndex aponta o array em dataJson.
+  sourceKind     String
+  sourceIndex    Int
+  name           String
+  email          String
+  // CPF limpo (11 dígitos) ou CNPJ (14 dígitos) sem máscara.
+  documentation  String?
+  // Reservado para auth via SMS/WhatsApp (não usado no MVP email).
+  phone          String?
+  authMethod     String    @default("email")
+  // status: pending | notified | viewed | signed | refused | removed
+  status         String    @default("pending")
+  notifiedAt     DateTime?
+  viewedAt       DateTime?
+  signedAt       DateTime?
+  refusedAt      DateTime?
+  resendCount    Int       @default(0)
+  lastResendAt   DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  envelope Envelope @relation(fields: [envelopeId], references: [id], onDelete: Cascade)
+
+  @@index([envelopeId])
+  @@index([status])
+}
+
+// Trilha de auditoria de eventos (webhook + cron). Idempotência: o mesmo
+// evento Clicksign reentregue não é processado duas vezes mas é registrado
+// aqui para diagnóstico.
+model EnvelopeEvent {
+  id         String   @id @default(cuid())
+  envelopeId String
+  eventName  String
+  payload    Json
+  // source: webhook | cron | manual
+  source     String   @default("webhook")
+  receivedAt DateTime @default(now())
+
+  envelope Envelope @relation(fields: [envelopeId], references: [id], onDelete: Cascade)
+
+  @@index([envelopeId, receivedAt])
 }
