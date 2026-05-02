@@ -74,21 +74,46 @@ export async function POST(
   });
 
   // Quando o contrato é Google Doc:
-  //  1. Remove o token [[WATERMARK_MINUTA]] do doc (deixa de mostrar a marca)
+  //  1. Deleta o parágrafo do watermark inteiro (não só o texto — replaceAllText
+  //     deixava o parágrafo vazio ocupando espaço gigante por causa do fontSize
+  //     96pt do template)
   //  2. Revoga permissões de escrita no Drive (doc fica readonly)
   // Espelha a regra "contratos aprovados são imutáveis". Falhas aqui não
   // desfazem aprovação — só logam.
   if (contract.googleDocId) {
     try {
-      const { batchUpdateDoc, makeDocReadOnly } = await import("@/lib/google/docs");
-      await batchUpdateDoc(contract.googleDocId, [
-        {
-          replaceAllText: {
-            containsText: { text: "[[WATERMARK_MINUTA]]", matchCase: true },
-            replaceText: "",
+      const { batchUpdateDoc, getDocStructure, makeDocReadOnly } = await import(
+        "@/lib/google/docs"
+      );
+
+      const doc = await getDocStructure(contract.googleDocId);
+      const blocks = doc.body?.content || [];
+      const watermarkBlock = blocks.find((b) => {
+        const para = b.paragraph;
+        if (!para) return false;
+        const text = (para.elements || [])
+          .map((el) => el.textRun?.content || "")
+          .join("");
+        return text.includes("[[WATERMARK_MINUTA]]");
+      });
+
+      if (
+        watermarkBlock &&
+        watermarkBlock.startIndex !== undefined &&
+        watermarkBlock.endIndex !== undefined
+      ) {
+        await batchUpdateDoc(contract.googleDocId, [
+          {
+            deleteContentRange: {
+              range: {
+                startIndex: watermarkBlock.startIndex,
+                endIndex: watermarkBlock.endIndex,
+              },
+            },
           },
-        },
-      ]);
+        ]);
+      }
+
       await makeDocReadOnly(contract.googleDocId);
     } catch (err) {
       console.error("[approve] Falha ao remover watermark / tornar readonly:", err);
