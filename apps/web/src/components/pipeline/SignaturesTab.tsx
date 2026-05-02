@@ -19,6 +19,7 @@ import {
   AlertTriangle,
   Eye,
   UserMinus,
+  Pencil,
 } from "lucide-react";
 import {
   useEnvelopePolling,
@@ -26,6 +27,8 @@ import {
   type EnvelopeSignerRow,
 } from "@/hooks/useEnvelopePolling";
 import { SendEnvelopeDialog } from "./SendEnvelopeDialog";
+import { EditEnvelopeDialog } from "./EditEnvelopeDialog";
+import { EditSignerDialog } from "./EditSignerDialog";
 import { cn } from "@/lib/utils";
 
 interface PartyLite {
@@ -220,6 +223,9 @@ function EnvelopeCard({
   onChange: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+
+  const canEdit = envelope.status === "draft" || envelope.status === "running";
 
   const handleCancel = async () => {
     if (!confirm("Cancelar este envelope? Os signatários não conseguirão mais assinar."))
@@ -310,7 +316,19 @@ function EnvelopeCard({
             </a>
           </Button>
         )}
-        {(envelope.status === "draft" || envelope.status === "running") && (
+        {canEdit && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs"
+            onClick={() => setEditOpen(true)}
+            disabled={busy}
+          >
+            <Pencil className="h-3 w-3 mr-1" />
+            Editar
+          </Button>
+        )}
+        {canEdit && (
           <Button
             size="sm"
             variant="ghost"
@@ -323,6 +341,14 @@ function EnvelopeCard({
           </Button>
         )}
       </div>
+
+      <EditEnvelopeDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        contractId={contractId}
+        envelope={envelope}
+        onSaved={onChange}
+      />
     </div>
   );
 }
@@ -339,6 +365,7 @@ function SignerRow({
   onChange: () => void;
 }) {
   const [busy, setBusy] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
 
   const handleResend = async () => {
     setBusy(true);
@@ -387,6 +414,10 @@ function SignerRow({
     envelope.status === "running" &&
     signer.status !== "signed" &&
     signer.status !== "refused";
+  const canEdit =
+    (envelope.status === "draft" || envelope.status === "running") &&
+    signer.status !== "signed" &&
+    signer.status !== "removed";
   const canRemove =
     (envelope.status === "draft" || envelope.status === "running") &&
     signer.status !== "signed";
@@ -417,6 +448,18 @@ function SignerRow({
         >
           {SIGNER_STATUS_LABEL[signer.status]}
         </span>
+        {canEdit && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs"
+            onClick={() => setEditOpen(true)}
+            disabled={busy}
+            title="Editar signatário"
+          >
+            <Pencil className="h-3 w-3" />
+          </Button>
+        )}
         {canResend && (
           <Button
             size="sm"
@@ -442,6 +485,15 @@ function SignerRow({
           </Button>
         )}
       </div>
+
+      <EditSignerDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        contractId={contractId}
+        envelopeId={envelope.id}
+        signer={signer}
+        onSaved={onChange}
+      />
     </div>
   );
 }

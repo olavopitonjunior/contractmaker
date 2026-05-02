@@ -196,3 +196,37 @@ export async function notifySigner(envelopeId: string, signerId: string) {
     body: { data: { type: "notifications", attributes: {} } },
   });
 }
+
+interface UpdateSignerInput {
+  envelopeId: string;
+  signerId: string;
+  name?: string;
+  email?: string;
+  documentation?: string;
+  phoneNumber?: string;
+  birthday?: string;
+}
+
+export async function updateSigner(input: UpdateSignerInput) {
+  const attributes: Record<string, unknown> = {};
+  if (input.name !== undefined) attributes.name = input.name;
+  if (input.email !== undefined) attributes.email = input.email;
+  if (input.documentation !== undefined) {
+    attributes.documentation = input.documentation;
+    attributes.has_documentation = Boolean(input.documentation);
+  }
+  if (input.phoneNumber !== undefined) attributes.phone_number = input.phoneNumber;
+  if (input.birthday !== undefined) attributes.birthday = input.birthday;
+
+  return clicksignRequest<ClicksignResponse>({
+    method: "PATCH",
+    path: `/api/v3/envelopes/${input.envelopeId}/signers/${input.signerId}`,
+    body: {
+      data: {
+        id: input.signerId,
+        type: "signers",
+        attributes,
+      },
+    },
+  });
+}

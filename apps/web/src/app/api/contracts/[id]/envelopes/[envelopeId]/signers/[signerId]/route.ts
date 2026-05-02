@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
-import { notifySigner, removeSigner } from "@/lib/clicksign/envelopes";
+import {
+  notifySigner,
+  removeSigner,
+  updateSigner,
+} from "@/lib/clicksign/envelopes";
 import { ClicksignError } from "@/lib/clicksign/client";
 
 export const runtime = "nodejs";
@@ -25,9 +29,22 @@ async function loadSigner(
   return signer;
 }
 
-const patchSchema = z.object({
-  action: z.enum(["resend"]),
-});
+const patchSchema = z.discriminatedUnion("action", [
+  z.object({ action: z.literal("resend") }),
+  z.object({
+    action: z.literal("update"),
+    name: z.string().min(2).max(120).optional(),
+    email: z.string().email().optional(),
+    documentation: z
+      .string()
+      .transform((v) => v.replace(/\D/g, ""))
+      .refine((v) => v === "" || v.length === 11 || v.length === 14, {
+        message: "CPF deve ter 11 dígitos ou CNPJ 14",
+      })
+      .optional(),
+    phone: z.string().max(20).optional(),
+  }),
+]);
 
 export async function PATCH(
   req: NextRequest,
@@ -57,36 +74,100 @@ export async function PATCH(
       { status: 404 }
     );
   }
+
+  if (parsed.data.action === "resend") {
+    if (signer.status === "signed" || signer.status === "removed") {
+      return NextResponse.json(
+        { error: "Signatário não pode ser reenviado neste estado" },
+        { status: 400 }
+      );
+    }
+    if (signer.resendCount >= MAX_RESENDS) {
+      return NextResponse.json(
+        { error: `Limite de ${MAX_RESENDS} reenvios atingido` },
+        { status: 429 }
+      );
+    }
+    if (
+      signer.lastResendAt &&
+      Date.now() - signer.lastResendAt.getTime() < RESEND_COOLDOWN_MS
+    ) {
+      const wait = Math.ceil(
+        (RESEND_COOLDOWN_MS -
+          (Date.now() - signer.lastResendAt.getTime())) /
+          60000
+      );
+      return NextResponse.json(
+        { error: `Aguarde ${wait} min antes de reenviar` },
+        { status: 429 }
+      );
+    }
+
+    if (signer.envelope.clicksignId && signer.clicksignId) {
+      try {
+        await notifySigner(signer.envelope.clicksignId, signer.clicksignId);
+      } catch (err) {
+        if (err instanceof ClicksignError) {
+          return NextResponse.json(
+            { error: `Clicksign: ${err.message}` },
+            { status: 502 }
+          );
+        }
+        throw err;
+      }
+    }
+
+    const updated = await prisma.envelopeSigner.update({
+      where: { id: signer.id },
+      data: {
+        resendCount: { increment: 1 },
+        lastResendAt: new Date(),
+        ...(signer.status === "pending"
+          ? { status: "notified", notifiedAt: new Date() }
+          : {}),
+      },
+    });
+    return NextResponse.json({ signer: updated });
+  }
+
+  // action === "update"
   if (signer.status === "signed" || signer.status === "removed") {
     return NextResponse.json(
-      { error: "Signatário não pode ser reenviado neste estado" },
+      { error: "Signatário não pode ser editado neste estado" },
       { status: 400 }
     );
   }
-  if (signer.resendCount >= MAX_RESENDS) {
+  const envStatus = signer.envelope.status;
+  if (envStatus !== "draft" && envStatus !== "running") {
     return NextResponse.json(
-      { error: `Limite de ${MAX_RESENDS} reenvios atingido` },
-      { status: 429 }
+      { error: "Envelope não permite edição neste estado" },
+      { status: 400 }
     );
   }
+
+  const updates = parsed.data;
   if (
-    signer.lastResendAt &&
-    Date.now() - signer.lastResendAt.getTime() < RESEND_COOLDOWN_MS
+    updates.name === undefined &&
+    updates.email === undefined &&
+    updates.documentation === undefined &&
+    updates.phone === undefined
   ) {
-    const wait = Math.ceil(
-      (RESEND_COOLDOWN_MS -
-        (Date.now() - signer.lastResendAt.getTime())) /
-        60000
-    );
     return NextResponse.json(
-      { error: `Aguarde ${wait} min antes de reenviar` },
-      { status: 429 }
+      { error: "Nenhum campo informado" },
+      { status: 400 }
     );
   }
 
   if (signer.envelope.clicksignId && signer.clicksignId) {
     try {
-      await notifySigner(signer.envelope.clicksignId, signer.clicksignId);
+      await updateSigner({
+        envelopeId: signer.envelope.clicksignId,
+        signerId: signer.clicksignId,
+        name: updates.name,
+        email: updates.email,
+        documentation: updates.documentation,
+        phoneNumber: updates.phone,
+      });
     } catch (err) {
       if (err instanceof ClicksignError) {
         return NextResponse.json(
@@ -101,11 +182,12 @@ export async function PATCH(
   const updated = await prisma.envelopeSigner.update({
     where: { id: signer.id },
     data: {
-      resendCount: { increment: 1 },
-      lastResendAt: new Date(),
-      ...(signer.status === "pending"
-        ? { status: "notified", notifiedAt: new Date() }
+      ...(updates.name !== undefined ? { name: updates.name } : {}),
+      ...(updates.email !== undefined ? { email: updates.email } : {}),
+      ...(updates.documentation !== undefined
+        ? { documentation: updates.documentation || null }
         : {}),
+      ...(updates.phone !== undefined ? { phone: updates.phone || null } : {}),
     },
   });
   return NextResponse.json({ signer: updated });
