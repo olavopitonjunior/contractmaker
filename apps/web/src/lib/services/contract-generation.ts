@@ -1,9 +1,14 @@
 import { prisma } from "@/lib/db/prisma";
 import { renderContratoHTML } from "@/lib/render/handlebars";
+import { isGoogleDocsFeatureEnabled } from "@/lib/google/client";
+import { createDocFromTemplate } from "@/lib/google/docs";
+import { flattenForGoogleDoc } from "@/lib/google/placeholders";
+import { watchFile } from "@/lib/google/watch";
 
 interface GenerateResult {
   contractId: string;
   version: number;
+  googleDocUrl?: string;
 }
 
 /**
@@ -144,6 +149,72 @@ export async function generateContractForDeal(
     },
   });
 
+  // Phase 1 da migração Google Docs: se a feature flag estiver ativa e o
+  // template tiver doc-modelo nativo no Drive, cria uma cópia, substitui
+  // placeholders e persiste o id no contrato. Falha aqui não impede a criação
+  // (degrada para TipTap até validação completa).
+  let googleDocUrl: string | undefined;
+  if (isGoogleDocsFeatureEnabled() && template.googleTemplateDocId) {
+    try {
+      // Adiciona campo `contrato.numero` para placeholder no header (Item C).
+      const dataWithContractMeta = {
+        ...enrichedData,
+        contrato: {
+          ...((enrichedData as Record<string, unknown>).contrato as Record<string, unknown> | undefined ?? {}),
+          numero: `${contract.id.slice(-8).toUpperCase()}-v${contract.version}`,
+          id: contract.id,
+          versao: contract.version,
+        },
+      };
+      const replacements = flattenForGoogleDoc(dataWithContractMeta);
+      const created = await createDocFromTemplate({
+        templateDocId: template.googleTemplateDocId,
+        name: `Contrato ${contract.id} — v${contract.version}`,
+        replacements,
+        dataForLoops: dataWithContractMeta,
+      });
+
+      // Registra watch do Drive para popular ContractChangeLog quando o doc
+      // for editado dentro do iframe (item 7). Falha aqui não impede a criação.
+      let watchData: {
+        googleWatchChannel?: string;
+        googleWatchResource?: string;
+        googleWatchExpires?: Date;
+      } = {};
+      const webhookBase = process.env.NEXTAUTH_URL || process.env.PUBLIC_APP_URL;
+      const watchToken = process.env.GOOGLE_WATCH_TOKEN;
+      if (webhookBase && watchToken) {
+        try {
+          const watch = await watchFile({
+            fileId: created.docId,
+            webhookUrl: `${webhookBase.replace(/\/$/, "")}/api/webhooks/google-drive`,
+            token: watchToken,
+          });
+          watchData = {
+            googleWatchChannel: watch.channelId,
+            googleWatchResource: watch.resourceId,
+            googleWatchExpires: new Date(watch.expiration),
+          };
+        } catch (err) {
+          console.error("[contract-generation] Falha ao registrar watch Drive:", err);
+        }
+      }
+
+      await prisma.contract.update({
+        where: { id: contract.id },
+        data: {
+          googleDocId: created.docId,
+          googleDocUrl: created.webViewLink,
+          googleDocStatus: "draft",
+          ...watchData,
+        },
+      });
+      googleDocUrl = created.webViewLink;
+    } catch (err) {
+      console.error("[contract-generation] Falha ao criar Google Doc:", err);
+    }
+  }
+
   // Derive deal title and value from form data
   const compradorNome = (dataJson.compradores as Array<{ nome?: string }>)?.[0]?.nome;
   const vendedorNome = (dataJson.vendedores as Array<{ nome?: string }>)?.[0]?.nome;
@@ -200,5 +271,5 @@ export async function generateContractForDeal(
     }
   }
 
-  return { contractId: contract.id, version: contract.version };
+  return { contractId: contract.id, version: contract.version, googleDocUrl };
 }

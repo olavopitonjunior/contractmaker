@@ -54,6 +54,22 @@ export async function POST(
     return NextResponse.json({ error: "Contrato aprovado não pode receber comentários" }, { status: 403 });
   }
 
+  // Quando o contrato é um Google Doc, espelha o comment no Drive Comments API.
+  let googleCommentId: string | null = null;
+  if (contract.googleDocId) {
+    try {
+      const { createAnchoredComment } = await import("@/lib/google/comments");
+      const res = await createAnchoredComment({
+        docId: contract.googleDocId,
+        selectedText: body.selectedText,
+        content: body.text,
+      });
+      googleCommentId = res.id;
+    } catch (err) {
+      console.error("[comments POST] Falha ao criar Drive comment:", err);
+    }
+  }
+
   const comment = await prisma.contractComment.create({
     data: {
       contractId: params.id,
@@ -64,6 +80,7 @@ export async function POST(
       anchorId: randomUUID(),
       selectedText: body.selectedText,
       severity: body.severity || "info",
+      googleCommentId,
     },
   });
 

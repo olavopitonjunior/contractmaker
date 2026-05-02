@@ -16,6 +16,26 @@ export async function PATCH(
   if (typeof body.resolved === "boolean") data.resolved = body.resolved;
   if (typeof body.text === "string") data.text = body.text;
 
+  const existing = await prisma.contractComment.findUnique({
+    where: { id: params.commentId },
+    include: { contract: { select: { googleDocId: true } } },
+  });
+
+  // Espelha resolve no Drive Comments quando o doc é Google Docs.
+  if (
+    existing?.googleCommentId &&
+    existing.contract?.googleDocId &&
+    typeof body.resolved === "boolean" &&
+    body.resolved === true
+  ) {
+    try {
+      const { resolveComment } = await import("@/lib/google/comments");
+      await resolveComment(existing.contract.googleDocId, existing.googleCommentId);
+    } catch (err) {
+      console.error("[comments PATCH] Falha ao resolver Drive comment:", err);
+    }
+  }
+
   const comment = await prisma.contractComment.update({
     where: { id: params.commentId },
     data,
@@ -31,6 +51,19 @@ export async function DELETE(
   const session = await auth();
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const existing = await prisma.contractComment.findUnique({
+    where: { id: params.commentId },
+    include: { contract: { select: { googleDocId: true } } },
+  });
+  if (existing?.googleCommentId && existing.contract?.googleDocId) {
+    try {
+      const { deleteComment } = await import("@/lib/google/comments");
+      await deleteComment(existing.contract.googleDocId, existing.googleCommentId);
+    } catch (err) {
+      console.error("[comments DELETE] Falha ao remover Drive comment:", err);
+    }
   }
 
   await prisma.contractComment.delete({ where: { id: params.commentId } });

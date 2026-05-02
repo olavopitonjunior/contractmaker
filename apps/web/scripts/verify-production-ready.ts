@@ -16,7 +16,32 @@
  * NÃO modifica state. Pode rodar em produção com segurança.
  */
 
-import "dotenv/config";
+import { readFileSync, existsSync } from "node:fs";
+import { resolve } from "node:path";
+
+// Carrega .env.production.local (gerado por `vercel env pull`) sem dotenv.
+// Usa `vercel env pull --environment=production` antes de rodar este script.
+{
+  const envFile = resolve(process.cwd(), ".env.production.local");
+  if (existsSync(envFile)) {
+    const content = readFileSync(envFile, "utf-8");
+    for (const line of content.split(/\r?\n/)) {
+      if (!line || line.startsWith("#")) continue;
+      const eq = line.indexOf("=");
+      if (eq < 0) continue;
+      const key = line.slice(0, eq).trim();
+      let value = line.slice(eq + 1).trim();
+      // Remove surrounding quotes (Vercel env pull wraps values with ")
+      if (
+        (value.startsWith('"') && value.endsWith('"')) ||
+        (value.startsWith("'") && value.endsWith("'"))
+      ) {
+        value = value.slice(1, -1);
+      }
+      if (!process.env[key]) process.env[key] = value;
+    }
+  }
+}
 
 interface CheckResult {
   category: string;

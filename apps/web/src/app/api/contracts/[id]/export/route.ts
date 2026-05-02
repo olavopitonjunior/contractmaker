@@ -7,6 +7,7 @@ import { exportSchema } from '@/lib/validation/schemas';
 import { renderContratoHTML } from '@/lib/render/handlebars';
 import { exportDocx, exportPdf } from '@/lib/render/exporter';
 import { uploadBufferToStorage } from '@/lib/storage/s3';
+import { exportDocAsPdf, exportDocAsDocx } from '@/lib/google/docs';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -64,31 +65,48 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     let pdfBuffer: Buffer | null = null;
     let docxBuffer: Buffer | null = null;
 
-    if (wantsPdf) {
+    // Quando o contrato vive em um Google Doc, usa o export nativo do Drive
+    // (`files.export`) — preserva drop cap, ornamentos, watermark e ligaturas
+    // que o `html-to-docx` perdia. Esse era o motivador original da migração.
+    if (contract.googleDocId) {
       try {
-        await exportPdf(html, pdfPath, 'A4', styleExport);
-        pdfBuffer = fs.readFileSync(pdfPath);
+        if (wantsPdf) pdfBuffer = await exportDocAsPdf(contract.googleDocId);
+        if (wantsDocx) docxBuffer = await exportDocAsDocx(contract.googleDocId);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        console.error('[export] exportPdf failed:', msg);
+        console.error('[export] Google Drive export failed:', msg);
         return NextResponse.json(
-          { error: `Falha ao gerar PDF: ${msg}` },
+          { error: `Falha ao exportar via Google Docs: ${msg}` },
           { status: 500 }
         );
       }
-    }
+    } else {
+      if (wantsPdf) {
+        try {
+          await exportPdf(html, pdfPath, 'A4', styleExport);
+          pdfBuffer = fs.readFileSync(pdfPath);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error('[export] exportPdf failed:', msg);
+          return NextResponse.json(
+            { error: `Falha ao gerar PDF: ${msg}` },
+            { status: 500 }
+          );
+        }
+      }
 
-    if (wantsDocx) {
-      try {
-        await exportDocx(html, docxPath, styleExport);
-        docxBuffer = fs.readFileSync(docxPath);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        console.error('[export] exportDocx failed:', msg);
-        return NextResponse.json(
-          { error: `Falha ao gerar DOCX: ${msg}` },
-          { status: 500 }
-        );
+      if (wantsDocx) {
+        try {
+          await exportDocx(html, docxPath, styleExport);
+          docxBuffer = fs.readFileSync(docxPath);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error('[export] exportDocx failed:', msg);
+          return NextResponse.json(
+            { error: `Falha ao gerar DOCX: ${msg}` },
+            { status: 500 }
+          );
+        }
       }
     }
 

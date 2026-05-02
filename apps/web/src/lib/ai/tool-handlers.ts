@@ -5,6 +5,15 @@ import { extractDocumentData } from "./ocr";
 import { quickChecks } from "./quickChecks";
 import { embedOne, toPgVector, VoyageError, isEmbeddingsConfigured } from "./embeddings";
 import { findSimilarContracts } from "./memory";
+import {
+  googleEditSection,
+  googleInsertClause,
+  googleRemoveClause,
+  googleAddComment,
+  googleProposeSuggestion,
+  googleApplyStylePreset,
+  googleInsertImage,
+} from "./google-tool-handlers";
 import type { AgentContext, ValidationIssue, ClauseSuggestion } from "./types";
 
 function deepMerge(
@@ -103,6 +112,25 @@ async function handleApplyStylePreset(
     };
   }
 
+  // Google Docs path: aplica via updateTextStyle/updateParagraphStyle/updateDocumentStyle
+  if (context.googleDocId) {
+    const result = await googleApplyStylePreset(context.googleDocId, {
+      fontFamily: style.fontFamily,
+      fontSizeBase: style.fontSizeBase,
+      lineHeight: style.lineHeight,
+      colorPrimary: style.colorPrimary,
+      marginTopMm: style.marginTopMm,
+      marginBottomMm: style.marginBottomMm,
+      marginLeftMm: style.marginLeftMm,
+      marginRightMm: style.marginRightMm,
+    });
+    return {
+      ...result,
+      presetId: style.id,
+      presetName: style.name,
+    };
+  }
+
   // Wrap the body in a container with inline style — works for both editor preview
   // and PDF export. Page-level props (margins, header/footer) are applied at export time.
   const openingTag = `<div class="document-style-preset" data-preset-id="${style.id}" style="font-family: ${style.fontFamily}; font-size: ${style.fontSizeBase}pt; line-height: ${style.lineHeight}; color: ${style.colorPrimary};">`;
@@ -168,6 +196,20 @@ async function handleInsertImage(
   // Basic URL validation: must be http(s) or a relative path our app serves
   if (!/^(https?:\/\/|\/)/.test(url)) {
     return { error: "URL deve começar com http://, https:// ou /" };
+  }
+
+  // Google Docs path: insertInlineImage exige URL absoluta http(s).
+  if (context.googleDocId) {
+    if (!/^https?:\/\//.test(url)) {
+      return {
+        error: "Para Google Doc a imagem precisa ter URL absoluta — relative paths não são aceitos pela Docs API.",
+      };
+    }
+    const widthPt = width * 0.75; // px → pt aproximado
+    return googleInsertImage(context.googleDocId, url, {
+      afterText: insertAfter || undefined,
+      widthPt,
+    });
   }
 
   const textAlignStyle =
@@ -580,6 +622,36 @@ async function handleAddComment(
     return { error: "selectedText e text são obrigatórios" };
   }
 
+  const { randomUUID } = await import("node:crypto");
+  const anchorId = randomUUID();
+
+  // Google Docs path: cria comment via Drive Comments API e espelha localmente.
+  // Anti-alucinação fica em createAnchoredComment (varre o doc por substring).
+  if (context.googleDocId) {
+    const result = await googleAddComment(context.googleDocId, selectedText, text);
+    if (result.error) return { error: result.error };
+    await prisma.contractComment.create({
+      data: {
+        contractId: context.contractId,
+        userId: null,
+        authorName: "Assistente IA",
+        authorType: "ai",
+        text,
+        anchorId,
+        selectedText,
+        severity,
+        googleCommentId: typeof result.commentId === "string" ? result.commentId : null,
+      },
+    });
+    return {
+      success: true,
+      anchorId,
+      severity,
+      googleCommentId: result.commentId,
+      message: `Comentário (${severity}) criado no Google Doc.`,
+    };
+  }
+
   // Verify the selected text exists in the current HTML to avoid hallucinated anchors
   if (!context.htmlContent.includes(selectedText)) {
     return {
@@ -587,9 +659,6 @@ async function handleAddComment(
         "O trecho selecionado não foi encontrado no contrato. Copie exatamente do texto atual.",
     };
   }
-
-  const { randomUUID } = await import("node:crypto");
-  const anchorId = randomUUID();
 
   await prisma.contractComment.create({
     data: {
@@ -690,6 +759,10 @@ async function handleEditSection(
   const target = input.target as string;
   const replacement = input.replacement as string;
 
+  if (context.googleDocId) {
+    return googleEditSection(context.googleDocId, target, replacement);
+  }
+
   if (!context.htmlContent.includes(target)) {
     return {
       success: false,
@@ -716,6 +789,19 @@ async function handleUpdateData(
   }
 
   context.dataJson = deepMerge(context.dataJson, patch);
+
+  if (context.googleDocId) {
+    // Em modo Google Docs o doc é a fonte de verdade do texto — re-renderizar
+    // o template sobrescreveria edições humanas. dataJson é atualizada para
+    // export futuro e quick checks; o agente deve usar `edit_contract_section`
+    // para aplicar a mudança no texto visível.
+    return {
+      success: true,
+      updatedFields: Object.keys(patch),
+      message: `Dados atualizados em dataJson. Use edit_contract_section para refletir no Google Doc.`,
+      requiresExplicitEdit: true,
+    };
+  }
 
   // Re-render HTML with updated data
   context.htmlContent = renderContratoHTML(context.templateSource, context.dataJson);
@@ -798,6 +884,20 @@ async function handleProposeSuggestion(
     };
   }
 
+  // Google Docs path: cria comment ancorado no Drive como suggestion.
+  // Aceitar/rejeitar via PATCH /suggestions/[id] aplica `replaceAllText` etc.
+  let googleCommentId: string | null = null;
+  if (context.googleDocId) {
+    const result = await googleProposeSuggestion(context.googleDocId, {
+      type: typeIn,
+      selectedText: target,
+      newText: replacement,
+      reason,
+    });
+    if (result.error) return result;
+    googleCommentId = typeof result.googleCommentId === "string" ? result.googleCommentId : null;
+  }
+
   const suggestion = await prisma.contractSuggestion.create({
     data: {
       contractId: context.contractId,
@@ -809,29 +909,34 @@ async function handleProposeSuggestion(
       newText: replacement,
       reason,
       status: "pending",
+      googleSuggestionId: googleCommentId,
     },
   });
 
-  // Build the track-change markup. SuggestionMark in the editor reads
-  // data-suggestion-id to key accept/reject actions back to this row.
-  const attrs = `data-suggestion-id="${suggestion.suggestionId}" data-type="${typeIn}" data-author="ai"`;
-  let markup: string;
-  if (typeIn === "deletion") {
-    markup = `<del ${attrs}>${target}</del>`;
-  } else if (typeIn === "insertion") {
-    markup = `${target}<ins ${attrs}>${replacement}</ins>`;
-  } else {
-    markup = `<del ${attrs}>${target}</del><ins ${attrs}>${replacement}</ins>`;
+  if (!context.googleDocId) {
+    // Build the track-change markup. SuggestionMark in the editor reads
+    // data-suggestion-id to key accept/reject actions back to this row.
+    const attrs = `data-suggestion-id="${suggestion.suggestionId}" data-type="${typeIn}" data-author="ai"`;
+    let markup: string;
+    if (typeIn === "deletion") {
+      markup = `<del ${attrs}>${target}</del>`;
+    } else if (typeIn === "insertion") {
+      markup = `${target}<ins ${attrs}>${replacement}</ins>`;
+    } else {
+      markup = `<del ${attrs}>${target}</del><ins ${attrs}>${replacement}</ins>`;
+    }
+    context.htmlContent = context.htmlContent.replace(target, markup);
   }
-
-  context.htmlContent = context.htmlContent.replace(target, markup);
 
   return {
     success: true,
     suggestionId: suggestion.id,
     suggestionAnchorId: suggestion.suggestionId,
     type: typeIn,
-    message: `Sugestão criada em modo track changes. Usuário pode aceitar ou rejeitar na barra de revisão do editor.`,
+    googleCommentId,
+    message: context.googleDocId
+      ? `Sugestão criada como comment no Google Doc.`
+      : `Sugestão criada em modo track changes. Usuário pode aceitar ou rejeitar na barra de revisão do editor.`,
   };
 }
 
@@ -872,6 +977,33 @@ async function handleInsertClause(
   // Render clause content with contract data
   const renderedClause = renderContratoHTML(clause.content, context.dataJson);
   const clauseHtml = `\n<div class="clausula-inserida" data-clause-id="${clause.id}" data-group="${clause.groupCode || ""}">\n${renderedClause}\n</div>\n`;
+
+  // Google Docs path: insere via Docs API. Slots HTML não existem no doc nativo;
+  // usa `afterSection` se fornecido, senão append no fim.
+  if (context.googleDocId) {
+    const afterText = typeof input.afterSection === "string" ? input.afterSection : undefined;
+    const result = await googleInsertClause(context.googleDocId, renderedClause, {
+      afterText,
+      atEnd: !afterText,
+    });
+    if (!result.error) {
+      context.activeClauses.push({
+        id: "",
+        clauseId: clause.id,
+        title: clause.title,
+        category: clause.category,
+        position: maxPos + 1,
+        isActive: true,
+      });
+      return {
+        success: true,
+        clauseTitle: clause.title,
+        category: clause.category,
+        message: `Cláusula "${clause.title}" inserida no Google Doc`,
+      };
+    }
+    return result;
+  }
 
   // Try to find a CLAUSE_SLOT matching the clause's groupCode
   let inserted = false;
@@ -944,6 +1076,24 @@ async function handleRemoveClause(
 
   if (!link) {
     return { success: false, error: "Cláusula não está vinculada a este contrato" };
+  }
+
+  // Google Docs path: remove o trecho da cláusula do doc também.
+  if (context.googleDocId) {
+    const clauseFull = await prisma.clause.findUnique({ where: { id: clauseId } });
+    if (clauseFull) {
+      const renderedClause = renderContratoHTML(clauseFull.content, context.dataJson);
+      // Apenas a primeira linha não-vazia como âncora — texto completo seria
+      // frágil pra indexOf por ter sido reformatado pelo Google Docs.
+      const anchor = renderedClause
+        .replace(/<[^>]+>/g, "")
+        .split("\n")
+        .map((s) => s.trim())
+        .find((s) => s.length >= 30);
+      if (anchor) {
+        await googleRemoveClause(context.googleDocId, anchor);
+      }
+    }
   }
 
   await prisma.contractClause.delete({ where: { id: link.id } });

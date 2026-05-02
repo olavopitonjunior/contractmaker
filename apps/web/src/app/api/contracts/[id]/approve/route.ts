@@ -67,8 +67,33 @@ export async function POST(
   // Approve
   await prisma.contract.update({
     where: { id: params.id },
-    data: { status: "aprovado" },
+    data: {
+      status: "aprovado",
+      ...(contract.googleDocId ? { googleDocStatus: "approved_readonly" } : {}),
+    },
   });
+
+  // Quando o contrato é Google Doc:
+  //  1. Remove o token [[WATERMARK_MINUTA]] do doc (deixa de mostrar a marca)
+  //  2. Revoga permissões de escrita no Drive (doc fica readonly)
+  // Espelha a regra "contratos aprovados são imutáveis". Falhas aqui não
+  // desfazem aprovação — só logam.
+  if (contract.googleDocId) {
+    try {
+      const { batchUpdateDoc, makeDocReadOnly } = await import("@/lib/google/docs");
+      await batchUpdateDoc(contract.googleDocId, [
+        {
+          replaceAllText: {
+            containsText: { text: "[[WATERMARK_MINUTA]]", matchCase: true },
+            replaceText: "",
+          },
+        },
+      ]);
+      await makeDocReadOnly(contract.googleDocId);
+    } catch (err) {
+      console.error("[approve] Falha ao remover watermark / tornar readonly:", err);
+    }
+  }
 
   // Log approval
   await prisma.contractChangeLog.create({

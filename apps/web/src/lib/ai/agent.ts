@@ -47,14 +47,28 @@ async function loadContext(contractId: string, orgId: string): Promise<AgentCont
     },
   });
 
+  // Quando o contrato é Google Doc, o doc é a fonte de verdade do texto.
+  // Buscamos texto plano via Drive export — read-only tools (validate,
+  // analyze_contradictions, suggest_improvements) que dependiam de
+  // `htmlContent` agora veem o estado live do doc.
+  let htmlContent: string;
+  if (contract.googleDocId) {
+    const { getDocPlainText } = await import("@/lib/google/docs");
+    htmlContent = await getDocPlainText(contract.googleDocId);
+  } else {
+    htmlContent =
+      contract.htmlContent ||
+      renderContratoHTML(
+        contract.templateOverride || contract.template.handlebarsSource,
+        contract.dataJson as Record<string, unknown>
+      );
+  }
+
   return {
     contractId,
     userId: contract.userId,
     orgId,
-    htmlContent: contract.htmlContent || renderContratoHTML(
-      contract.templateOverride || contract.template.handlebarsSource,
-      contract.dataJson as Record<string, unknown>
-    ),
+    htmlContent,
     dataJson: contract.dataJson as Record<string, unknown>,
     templateSource: contract.templateOverride || contract.template.handlebarsSource,
     templateModalidade: contract.template.modalidade || "a_vista",
@@ -67,6 +81,7 @@ async function loadContext(contractId: string, orgId: string): Promise<AgentCont
       position: cc.position,
       isActive: cc.isActive,
     })),
+    googleDocId: contract.googleDocId,
   };
 }
 
@@ -427,13 +442,22 @@ export async function runPassiveAnalysis(
     return { findings: [], commentsCreated: 0, modelUsed: "none" };
   }
 
-  const htmlContent =
-    params.htmlOverride ||
-    contract.htmlContent ||
-    renderContratoHTML(
-      contract.templateOverride || contract.template.handlebarsSource,
-      contract.dataJson as Record<string, unknown>
-    );
+  // Quando o contrato vive em um Google Doc, busca o texto plano via Drive
+  // export — substitui o HTML do TipTap como fonte de verdade. Quick checks
+  // que dependiam de regex em HTML são tolerantes a texto plano.
+  let htmlContent: string;
+  if (contract.googleDocId) {
+    const { getDocPlainText } = await import("@/lib/google/docs");
+    htmlContent = await getDocPlainText(contract.googleDocId);
+  } else {
+    htmlContent =
+      params.htmlOverride ||
+      contract.htmlContent ||
+      renderContratoHTML(
+        contract.templateOverride || contract.template.handlebarsSource,
+        contract.dataJson as Record<string, unknown>
+      );
+  }
 
   // 1. Client-safe deterministic checks first
   const quick: QuickFinding[] = quickChecks(contract.dataJson, htmlContent);

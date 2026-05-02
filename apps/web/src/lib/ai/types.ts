@@ -8,6 +8,9 @@ export interface AgentContext {
   templateModalidade?: string;
   templateName?: string;
   activeClauses: { id: string; clauseId: string; title: string; category: string; position: number; isActive: boolean }[];
+  /** Quando setado, o conteúdo do contrato vive em um Google Doc; tools de
+   *  edição roteiam via Docs API em vez de mutar `htmlContent`. */
+  googleDocId?: string | null;
 }
 
 export interface AgentResult {
