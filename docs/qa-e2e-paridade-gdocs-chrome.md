@@ -1,6 +1,16 @@
-# QA E2E — Prompt para `/chrome` (paridade Google Docs · commit 5108961d)
+# QA E2E — Prompt para `/chrome` (paridade Google Docs)
 
 Cole este prompt inteiro numa sessão Claude Code que tenha o MCP `claude-in-chrome` ligado e um Chrome logado em produção (`imobpro.ia.br`).
+
+## Execuções recentes
+
+| Data | Commit testado | P0-1 banner | P0-2 auto-analyze | P0-3 toolbar | P0-4 comment manual | Notas |
+|---|---|---|---|---|---|---|
+| 2026-05-02 #1 | `5773dbcd` (sem deploy) | SKIP | FAIL | FAIL | FAIL | QA rodado contra prod ANTES do push do `5108961d` — UI antiga |
+| 2026-05-02 #2 | `5108961d` deployado | SKIP | PASS | PASS (com F5) | PASS | Bugs: refresh sem F5 da toolbar + cascata 503 do auto-analyze |
+| 2026-05-02 #3 | `7acede85`+`c054bcda` | aguardando fixture | aguardando re-run | aguardando re-run | aguardando re-run | Bugs #1/#3 corrigidos + watermark removido do contrato fixture |
+
+Antes de rodar este prompt outra vez, confirme `git log origin/master..HEAD` está vazio (commit em prod) e que abriu janela anônima/hard-reload no Chrome pra invalidar bundle JS antigo.
 
 ---
 

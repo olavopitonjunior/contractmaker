@@ -2,7 +2,7 @@
 
 ## Visão geral
 
-Plataforma de gestão de vendas e contratos imobiliários. Esteira: formulário público de vendas → Kanban de negócios → geração de contrato com IA → editor TipTap rico → export PDF/DOCX. Módulo financeiro (Pagadoria) integrado com Asaas. Due diligence automática via Infosimples.
+Plataforma de gestão de vendas e contratos imobiliários. Esteira: formulário público de vendas → Kanban de negócios → geração de contrato com IA → editor Google Docs embedado (TipTap como fallback) → export PDF/DOCX nativo do Drive → assinatura ClickSign. Módulo financeiro (Pagadoria) integrado com Asaas. Due diligence automática via Infosimples.
 
 **Produção:** [https://imobpro.ia.br](https://imobpro.ia.br) (custom domain registrado em registro.br, deploy Vercel `prj_tkIfHl9chuVwZkNtHLAl5QXY2YOB`).
 
@@ -14,7 +14,7 @@ Plataforma de gestão de vendas e contratos imobiliários. Esteira: formulário 
 - **UI:** Tailwind v4 · Shadcn (new-york) · lucide-react · sonner
 - **Auth:** NextAuth v5 + Prisma Adapter + Credentials (JWT session). 2FA TOTP (otplib v12), SessionElevation (sudo 15min), TrustedDevice (30d), AuditLog imutável.
 - **DB:** PostgreSQL (Neon) + Prisma ORM. pgvector vector(1024) HNSW cosine pra RAG.
-- **Editor:** TipTap v3 (ProseMirror)
+- **Editor:** Google Docs embedado (iframe + Drive/Docs API) com fallback TipTap v3 (ProseMirror) per-contract via `Contract.googleDocId`
 - **Kanban:** @dnd-kit/core + @dnd-kit/sortable
 - **AI:** Anthropic SDK (chat agent + análise + clausula generate) | Google GenAI (Gemini 2.5 Flash — OCR docs do form) | Voyage `law-2` 1024 dim — embeddings RAG
 - **Pagamentos:** Asaas v3 (subconta white-label, KYC, splits multi-recipient, transferências PIX)
@@ -79,16 +79,31 @@ System prompt (`src/lib/ai/prompts.ts`) tem 18 regras. Destaques: regra 10 obrig
 
 ## Análise automática (passive)
 
-`useAutoAnalyze.ts` no editor:
+`useAutoAnalyze.ts` no editor — aceita prop `mode: "tiptap" | "google_docs"`:
+- **TipTap (legacy):** depende de `editor.getHTML()` + eventos `update`. Idle 30s, max-wait 60s.
+- **Google Docs (atual):** sem editor JS — server lê `getDocPlainText` direto do Drive. On-mount dispara `trigger=open`; depois polling fixo de 90s (`GDOCS_REFRESH_MS`) re-dispara `trigger=edit`.
 - **On-open:** `POST /api/contracts/[id]/auto-analyze { trigger: 'open' }` com Sonnet 4.5 (deep)
-- **On-edit (debounced):** após 30s idle ou 60s max, dispara com Haiku 4.5 (env `ANTHROPIC_PASSIVE_MODEL`)
+- **On-edit (debounced):** Haiku 4.5 (env `ANTHROPIC_PASSIVE_MODEL`)
 - **Quick checks (zero LLM):** `src/lib/ai/quickChecks.ts` faz 4 checks deterministicos (soma de parcelas, CPF/CNPJ checksum, refs internas, duplicação de qualificação) antes do LLM.
 - **Dedupe:** `ContractComment.dedupeKey` = hash FNV-1a de `authorType+selectedText+text`, com `@@unique([contractId, dedupeKey])`.
-- O cliente envia o `htmlContent` atual no body — server usa `params.htmlOverride` em vez do DB pra ver o estado live.
+- **Backoff:** `lastAttemptAt` é setado ANTES da request (success ou erro). Sem isso, 503 do LLM em cascata fazia o gate de 90s nunca aplicar (retry a cada 5s).
+- TipTap envia `htmlContent` atual no body; GDocs envia null e o server usa `params.htmlOverride` ou `getDocPlainText` quando `googleDocId` setado.
 
-## Editor TipTap
+## Editor — Google Docs (padrão atual) e TipTap (legacy)
 
-`src/components/contracts/ContractEditor.tsx` com StarterKit v3 + Table resizable + Highlight + TextAlign + CharacterCount + Typography + TextStyle/Color/FontFamily + Image. BubbleMenu flutuante na seleção (Bold, Italic, Link, Highlight, Comentar, IA).
+`ContractEditorPage.tsx` é o orquestrador: olha `contract.googleDocId` e renderiza `GoogleDocsEditor.tsx` (iframe Drive) OU `ContractEditor.tsx` (TipTap legacy). Header, banners, painéis (Comments/Suggestions/Versions/ChangeLog), Chat IA e ExportDialog são compartilhados — funcionam em ambos os modos.
+
+**GDocs mode** (commit `5108961d`+):
+- Iframe `https://docs.google.com/document/d/{id}/edit?embedded=true&rm=embedded`. Read-only via `/preview` quando `status=aprovado`.
+- Sem BubbleMenu / SearchReplace / FormatPainter — usuário usa as features nativas do Google Docs.
+- Auto-save desligado (doc é fonte de verdade).
+- Watch Drive em `/api/webhooks/google-drive` popula `ContractChangeLog` quando o usuário edita no iframe.
+- `SuggestionsToolbar` monta acima do iframe quando há `ContractSuggestion` pending; aceitar/rejeitar via `PATCH /suggestions/[id]` aplica `replaceAllText`/`deleteContentRange`/`insertText` no doc.
+- `CommentsPanel` mostra botão "+ Novo comentário" no header em GDocs; abre `AddCommentDialog` com prop `requireSelectedTextInput=true` (usuário cola/digita o trecho-âncora). POST `/comments` valida via `createAnchoredComment` no Drive — retorna 422 se trecho não existir (anti-fantasma).
+- Banner amarelo `CloudOff` aparece quando `googleDocStatus.startsWith("error:")` — mostra causa truncada (240 chars) e indica fallback offline.
+- Refresh da `SuggestionsToolbar` após chat IA: `ChatPanel.onChatTurnComplete` bumpa `commentsVersion` (key da toolbar). Antes precisava F5.
+
+**TipTap (legacy):** `src/components/contracts/ContractEditor.tsx` com StarterKit v3 + Table resizable + Highlight + TextAlign + CharacterCount + Typography + TextStyle/Color/FontFamily + Image. BubbleMenu flutuante na seleção (Bold, Italic, Link, Highlight, Comentar, IA). Só monta em contratos sem `googleDocId` (criação anterior à migração ou falha em `createDocFromTemplate`).
 
 Extensões customizadas em `src/lib/editor/`:
 - `SearchReplace.ts` — Find/Replace via ProseMirror Decorations (Ctrl+F)
@@ -112,7 +127,9 @@ Models: `ContractComment { authorType, severity: info|warning|error, anchorId, s
 
 Endpoints: `GET/POST /api/contracts/[id]/comments`, `PATCH/DELETE/POST [...]/[commentId]`, `GET/POST /api/contracts/[id]/suggestions`, `PATCH/DELETE [...]/[suggestionId]`.
 
-UI: `CommentsPanel.tsx` (Sheet lateral), `AddCommentDialog.tsx`, `SuggestionsToolbar.tsx` (barra âmbar com aceitar/rejeitar tudo).
+UI: `CommentsPanel.tsx` (Sheet lateral; CTA "+ Novo comentário" só em GDocs), `AddCommentDialog.tsx` (textarea de trecho editável quando `requireSelectedTextInput`), `SuggestionsToolbar.tsx` (barra âmbar com aceitar/rejeitar tudo + lista expansível com diff `originalText`/`newText`; aceita `mode="google_docs"` que faz accept via API sem editor).
+
+Em GDocs, `add_comment` e `propose_suggestion` espelham no Drive Comments API via `googleAddComment` / `googleProposeSuggestion`. PATCH `/suggestions/[id]` em GDocs aplica a mudança no doc real (replaceAllText/insertText/deleteContentRange) e chama `resolveComment` pra fechar o thread espelhado. `googleProposeSuggestion` envolve `createAnchoredComment` em try/catch e retorna `{error}` em vez de throw — sem isso o agente derrubava o /chat com 500 quando o trecho-âncora não existia (commit `f8755984`).
 
 ## Etapa 0 — Upload + OCR de documentos
 
@@ -277,7 +294,8 @@ Puppeteer requer Vercel Pro (timeout 60s). CSS `@media print` em `globals.css` g
 - **Radix DropdownMenu + asChild:** `<DropdownMenuTrigger asChild>` envolvendo function component sem forwardRef formal pode falhar em recalcular position (popper fica em `translate(0, -200%)` offscreen). Dropdowns com side="top" no SidebarMenuButton têm esse bug — usar links diretos no footer.
 - **Handlebars helpers em `src/lib/render/handlebars.ts`** são aditivos. Não alterar helpers existentes (quebra contratos antigos).
 - **Marks customizadas (`CommentMark`, `SuggestionMark`)** persistem como HTML. Re-render do Handlebars sobrescreve — não regenerar editor a partir do template depois de edições.
-- **`ContractEditor.tsx`**: preservar `forwardRef<ContractEditorHandle>` e prop `onReady(editor)`. `ContractEditorPage` depende disso pra `useAutoAnalyze` e ancoragem de comments IA.
+- **`ContractEditor.tsx`**: preservar `forwardRef<ContractEditorHandle>` e prop `onReady(editor)`. `ContractEditorPage` depende disso pra `useAutoAnalyze` e ancoragem de comments IA — só em modo TipTap (sem `googleDocId`).
+- **Watermark `[[WATERMARK_MINUTA]]`** vivia no topo dos templates GDocs com fontSize 96pt italic centro. `approve/route.ts` agora deleta o paragraph block inteiro via `deleteContentRange` (antes só fazia `replaceAllText` deixando o paragraph vazio com fontSize 96 — espaço gigante no topo do contrato aprovado). Para limpar contratos antigos: `apps/web/scripts/strip-watermark.ts --docId=<id>` (heurística: paragraph nos primeiros 3 blocks com fontSize≥48 + texto whitespace; aceita qualquer alignment). Templates atuais já estão limpos.
 - **Contratos aprovados são imutáveis.** API retorna 403 em POSTs.
 - **Templates e biblioteca de cláusulas:** agente NUNCA edita direto. Sempre via `propose_template_change` / `propose_new_clause` (revisão humana).
 - **pgvector** exige Neon Standard+. Prisma não tem tipo `vector` — inserts/updates via `$executeRawUnsafe`, queries via `$queryRawUnsafe` com operador `<=>`.
