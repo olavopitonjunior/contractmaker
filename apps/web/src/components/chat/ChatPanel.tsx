@@ -19,10 +19,21 @@ interface ChatPanelProps {
   contractId: string;
   messages: Message[];
   onContentUpdate?: (html: string) => void;
+  /** Disparado a cada turn que retornar 200 OK, independente de ter
+   *  htmlContent. Em modo Google Docs o texto vive no Drive e o htmlContent
+   *  não volta — mesmo assim a IA pode ter criado ContractSuggestion ou
+   *  ContractComment, então callers usam isso pra recarregar painéis. */
+  onChatTurnComplete?: () => void;
   initialInput?: string;
 }
 
-export function ChatPanel({ contractId, messages: initialMessages, onContentUpdate, initialInput }: ChatPanelProps) {
+export function ChatPanel({
+  contractId,
+  messages: initialMessages,
+  onContentUpdate,
+  onChatTurnComplete,
+  initialInput,
+}: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState(initialInput ?? "");
   const [loading, setLoading] = useState(false);
@@ -93,6 +104,7 @@ export function ChatPanel({ contractId, messages: initialMessages, onContentUpda
       if (data.htmlContent && onContentUpdate) {
         onContentUpdate(data.htmlContent);
       }
+      onChatTurnComplete?.();
     } catch (err: any) {
       const isAbort = err?.name === "AbortError";
       setMessages((prev) => [

@@ -47,7 +47,12 @@ export function useAutoAnalyze(
 ) {
   const mode: AutoAnalyzeMode = options.mode ?? "tiptap";
   const lastEditAt = useRef<number>(0);
+  // Última análise BEM-SUCEDIDA — governa o hash de comparação no modo TipTap.
   const lastAnalysisAt = useRef<number>(0);
+  // Última TENTATIVA (success OU error). Governa o gate de tempo no polling
+  // pra evitar que respostas 503 do LLM transformem o intervalo de 90s em
+  // ~5s (lastAnalysisAt fica em 0 e o gate dispara a cada poll).
+  const lastAttemptAt = useRef<number>(0);
   const lastAnalyzedHash = useRef<string>("");
   const inFlight = useRef<AbortController | null>(null);
   const hasRunInitial = useRef<boolean>(false);
@@ -85,6 +90,9 @@ export function useAutoAnalyze(
       if (inFlight.current) {
         inFlight.current.abort();
       }
+      // Marca a tentativa ANTES da request — assim o gate de tempo respeita
+      // o intervalo mesmo se o servidor responder 503 ou levar 60s.
+      lastAttemptAt.current = Date.now();
       const controller = new AbortController();
       inFlight.current = controller;
       try {
@@ -134,11 +142,13 @@ export function useAutoAnalyze(
     // Polling loop
     const interval = setInterval(() => {
       const now = Date.now();
-      const timeSinceAnalysis = now - lastAnalysisAt.current;
+      // Para o gate de tempo, usa lastAttemptAt — qualquer terminação (success
+      // ou error) conta. Isso evita rajadas de retry quando o LLM responde 503.
+      const timeSinceAttempt = now - lastAttemptAt.current;
 
       if (mode === "google_docs") {
         // Sem evento de edit no iframe — re-analisa em cadência fixa.
-        if (timeSinceAnalysis >= GDOCS_REFRESH_MS) {
+        if (timeSinceAttempt >= GDOCS_REFRESH_MS) {
           runAnalysis("edit");
         }
         return;
@@ -151,9 +161,15 @@ export function useAutoAnalyze(
 
       if (!hasNewChanges) return;
 
+      // No TipTap, lastAnalysisAt (sucesso) ainda é válido pra "houve nova
+      // edição depois da última análise OK?" — mas o disparo só acontece se
+      // a tentativa anterior já passou do limite (idle/max-wait).
       const shouldRun =
-        (timeSinceEdit >= IDLE_MS && lastEditAt.current > lastAnalysisAt.current) ||
-        (lastEditAt.current > lastAnalysisAt.current && timeSinceAnalysis >= MAX_WAIT_MS);
+        (timeSinceEdit >= IDLE_MS &&
+          lastEditAt.current > lastAnalysisAt.current &&
+          timeSinceAttempt >= IDLE_MS) ||
+        (lastEditAt.current > lastAnalysisAt.current &&
+          timeSinceAttempt >= MAX_WAIT_MS);
 
       if (shouldRun) {
         runAnalysis("edit");

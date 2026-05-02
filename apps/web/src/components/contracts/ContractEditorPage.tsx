@@ -604,6 +604,7 @@ export function ContractEditorPage({
               contractId={contract.id}
               messages={contract.messages}
               onContentUpdate={handleAIUpdate}
+              onChatTurnComplete={() => setCommentsVersion((v) => v + 1)}
               initialInput={chatInitialInput}
             />
           </SheetContent>
