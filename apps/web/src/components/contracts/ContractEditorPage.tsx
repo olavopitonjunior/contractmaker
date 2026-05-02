@@ -108,6 +108,7 @@ export function ContractEditorPage({
     infos: number;
     maxSeverity: "error" | "warning" | "info" | null;
   }>({ total: 0, errors: 0, warnings: 0, infos: 0, maxSeverity: null });
+  const [budget, setBudget] = useState<{ pct: number; spent: number; budget: number } | null>(null);
 
   const isApprovedOrVoid = status === "aprovado";
   const isGoogleDocsBacked = !!contract.googleDocId;
@@ -160,6 +161,22 @@ export function ContractEditorPage({
   useEffect(() => {
     refreshAiCommentsCount();
   }, [contract.id, commentsVersion, refreshAiCommentsCount]);
+
+  // Budget IA (tokens): refresca em mudanças de comments (que vão junto com
+  // chamadas IA) ou abertura. Não polla — eventos discretos bastam.
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/contracts/${contract.id}/budget`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (cancelled || !data) return;
+        setBudget({ pct: data.pct, spent: data.spent, budget: data.budget });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [contract.id, commentsVersion]);
 
   const handleAnalysisComplete = useCallback(() => {
     setCommentsVersion((v) => v + 1);
@@ -376,6 +393,21 @@ export function ContractEditorPage({
               {isApproved && <ShieldCheck className="h-3 w-3 mr-1" />}
               {status}
             </Badge>
+            {budget && !isApproved && (
+              <Badge
+                variant="outline"
+                className={
+                  budget.pct >= 1
+                    ? "border-red-300 text-red-700 bg-red-50"
+                    : budget.pct >= 0.8
+                      ? "border-amber-300 text-amber-700 bg-amber-50"
+                      : "border-muted text-muted-foreground"
+                }
+                title={`${budget.spent.toLocaleString("pt-BR")} / ${budget.budget.toLocaleString("pt-BR")} tokens IA usados neste contrato`}
+              >
+                IA: {Math.round(budget.pct * 100)}%
+              </Badge>
+            )}
           </div>
         </div>
 

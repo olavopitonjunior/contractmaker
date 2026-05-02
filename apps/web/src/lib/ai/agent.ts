@@ -6,6 +6,8 @@ import { executeToolHandler } from "./tool-handlers";
 import { DEFAULT_SYSTEM_PROMPT, buildContextMessage } from "./prompts";
 import { quickChecks, dedupeKeyFor, type QuickFinding } from "./quickChecks";
 import { recordAIUsage } from "./usage";
+import { assertContractBudget, ContractBudgetExceededError } from "./budget";
+import { loadExpertContext } from "./expert-context";
 import type { AgentContext, AgentResult, ChangeLogEntry } from "./types";
 
 function getAnthropicClient() {
@@ -161,11 +163,38 @@ export async function runContractAgent(params: AgentParams): Promise<AgentResult
     };
   }
 
+  // 1.5. Budget guard — bloqueia se o contrato esgotou o teto de tokens IA.
+  // Mensagem amigável + sem chamar Anthropic.
+  try {
+    await assertContractBudget(params.contractId);
+  } catch (err) {
+    if (err instanceof ContractBudgetExceededError) {
+      return {
+        message: `⚠️ ${err.message}\n\nApós aprovar este contrato (ou ajustar a env \`CONTRACT_AI_TOKEN_BUDGET\`) o assistente volta a responder.`,
+        htmlContent: null,
+        dataJson: null,
+        changeLogs: [],
+      };
+    }
+    throw err;
+  }
+
   // 2. Load agent config
   const config = await getAgentConfig(params.orgId);
 
   // 3. Load contract context
   const context = await loadContext(params.contractId, params.orgId);
+
+  // 3.5. Pre-load expert context (top contratos similares, cláusulas mais
+  //      usadas, templates ativos). Injetado antes da pergunta do usuário pra
+  //      o agente abrir já com o conhecimento do escritório, em vez de gastar
+  //      iterações de tool-use chamando query_clauses / find_similar_contracts.
+  let expertContext = "";
+  try {
+    expertContext = await loadExpertContext(context);
+  } catch (err) {
+    console.error("[runContractAgent] loadExpertContext falhou (segue sem):", err);
+  }
 
   // 4. Build messages with history
   const history = await loadChatHistory(params.contractId);
@@ -188,11 +217,12 @@ export async function runContractAgent(params: AgentParams): Promise<AgentResult
     ? `\n\n---\nLEMBRETE DE FORMATO OBRIGATORIO: este pedido e um comando de edicao. Voce DEVE:\n1. Chamar pelo menos uma tool de edicao (edit_contract_section, update_contract_data, insert_clause, remove_clause, propose_suggestion).\n2. Apos executar as tools, responder EXATAMENTE nesta estrutura em markdown (copie os 3 headings literais, sem emoji, sem alterar capitalizacao):\n\n## Alteracoes Realizadas\n(lista do que foi alterado no contrato)\n\n## Justificativa\n(razao juridica da alteracao)\n\n## Verificacao\n(como o usuario pode verificar que a alteracao foi aplicada)\n`
     : "";
 
+  const expertBlock = expertContext ? `${expertContext}\n\n---\n` : "";
   const messages: Anthropic.MessageParam[] = [
     ...history.map((m) => ({ role: m.role, content: m.content })),
     {
       role: "user" as const,
-      content: `${contextMsg}${editReminderTemplate}\n\n---\nMENSAGEM DO USUÁRIO:\n${params.message}`,
+      content: `${expertBlock}${contextMsg}${editReminderTemplate}\n\n---\nMENSAGEM DO USUÁRIO:\n${params.message}`,
     },
   ];
 
@@ -466,6 +496,21 @@ export async function runPassiveAnalysis(
       commentsCreated: 0,
       modelUsed: `cap-reached:${existingUnresolved}`,
     };
+  }
+
+  // Budget guard — passive analysis também respeita o teto. Sem isso, polling
+  // de 90s em GDocs poderia continuar gastando até estourar o budget total.
+  try {
+    await assertContractBudget(params.contractId);
+  } catch (err) {
+    if (err instanceof ContractBudgetExceededError) {
+      return {
+        findings: [],
+        commentsCreated: 0,
+        modelUsed: "budget-exceeded",
+      };
+    }
+    throw err;
   }
 
   // Skip-no-change: se a última run de validação foi APÓS a última edição

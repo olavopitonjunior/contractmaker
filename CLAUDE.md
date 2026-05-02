@@ -63,7 +63,11 @@ Cada cláusula tem `agentNotes` (orientação jurídica interna pra IA) e `group
 
 ## Agente IA (18 tools)
 
-`src/lib/ai/agent.ts` roda loop de tool-use (max 5 iterações). Tools em `tools.ts`, handlers em `tool-handlers.ts`:
+`src/lib/ai/agent.ts` roda loop de tool-use (max 5 iterações). Tools em `tools.ts`, handlers em `tool-handlers.ts`.
+
+**Pré-carregamento de contexto especialista** — antes do 1º turn LLM, `loadExpertContext` (`src/lib/ai/expert-context.ts`) busca top 3 contratos similares aprovados (`findSimilarContracts`), top 8 cláusulas mais usadas (filtra G4 fora de financiamento), templates ativos. Injeta como bloco markdown no prompt do user. Custo ~1.5k tokens upfront economiza 4-6k em iterações de tool-use porque o agente já abre conhecendo o padrão da org. Regra 0 do system prompt obriga uso desse contexto antes de editar.
+
+**Budget per-contrato** — `src/lib/ai/budget.ts::assertContractBudget` é chamado antes de cada `messages.create` (chat e passive). Soma `AIUsage.totalTokens` filtrados por contractId; bloqueia se ≥ `CONTRACT_AI_TOKEN_BUDGET` (default 200_000). Chat retorna mensagem amigável; passive retorna `modelUsed: budget-exceeded` sem chamar Anthropic. Endpoint `GET /api/contracts/[id]/budget` retorna `{ spent, budget, pct, remaining, ok }` pra UI. Badge IA no header do contrato indica % consumida (cinza < 80%, âmbar 80-100%, vermelho ≥ 100%).
 
 - **Consulta:** `query_clauses` (com groupCode/isVariable), `query_templates`, `explain_clause`
 - **Edição:** `edit_contract_section`, `update_contract_data`, `insert_clause` (usa CLAUSE_SLOT:Gx), `remove_clause`
