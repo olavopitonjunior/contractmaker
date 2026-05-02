@@ -74,6 +74,9 @@ function collectParagraphs(doc: docs_v1.Schema$Document): ParagraphRange[] {
   return out;
 }
 
+// Apenas blocos com paragraph e startIndex/endIndex válidos. block[0] do body
+// frequentemente é uma sectionBreak (sem paragraph) — ignorada pelo collect.
+
 async function main() {
   const docId = arg("docId");
   if (!docId) {
@@ -102,19 +105,17 @@ async function main() {
   }
 
   // Caso 2 — token já foi removido pelo approve mas o parágrafo gigante vazio
-  // sobrou no topo do doc (≥48pt + center + texto só whitespace)
+  // sobrou no topo do doc (≥48pt + texto só whitespace).
+  // Não exige CENTER porque o `replaceAllText` antigo às vezes deixava o
+  // alignment alterado (visto na fixture: alignment=END, range=1, fontSize=96).
   // Considera apenas os 3 primeiros parágrafos (topo do doc).
   const topParas = paras.slice(0, 3);
   const ghost = topParas.find(
-    (p) =>
-      p.hasLargeFont &&
-      p.isCentered &&
-      p.text.trim().length === 0 &&
-      p.endIndex - p.startIndex > 1
+    (p) => p.hasLargeFont && p.text.trim().length === 0 && p.endIndex > p.startIndex
   );
   if (ghost) {
     console.log(
-      `Achado parágrafo fantasma no topo (vazio, fontSize≥48, center) em [${ghost.startIndex}, ${ghost.endIndex}). Deletando…`
+      `Achado parágrafo fantasma no topo (vazio, fontSize≥48) em [${ghost.startIndex}, ${ghost.endIndex}). Deletando…`
     );
     await batchUpdateDoc(docId, [
       {
