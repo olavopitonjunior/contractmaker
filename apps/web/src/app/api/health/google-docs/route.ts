@@ -71,6 +71,13 @@ export async function GET() {
     googleTemplateDocId: string | null;
   }> = [];
 
+  let recentContracts: Array<{
+    id: string;
+    createdAt: Date;
+    googleDocId: string | null;
+    googleDocStatus: string | null;
+  }> = [];
+
   try {
     templates = await prisma.contractTemplate.findMany({
       where: { status: "active" },
@@ -82,6 +89,17 @@ export async function GET() {
         googleTemplateDocId: true,
       },
       orderBy: { name: "asc" },
+    });
+
+    recentContracts = await prisma.contract.findMany({
+      orderBy: { createdAt: "desc" },
+      take: 5,
+      select: {
+        id: true,
+        createdAt: true,
+        googleDocId: true,
+        googleDocStatus: true,
+      },
     });
   } catch (err) {
     return NextResponse.json(
@@ -114,5 +132,11 @@ export async function GET() {
     driveFolderId: driveFolderId || null,
     ready,
     templates,
+    recentContracts: recentContracts.map((c) => ({
+      id: c.id,
+      createdAt: c.createdAt.toISOString(),
+      hasGoogleDocId: !!c.googleDocId,
+      googleDocStatus: c.googleDocStatus,
+    })),
   });
 }

@@ -211,7 +211,18 @@ export async function generateContractForDeal(
       });
       googleDocUrl = created.webViewLink;
     } catch (err) {
+      // Persiste a causa exata da falha no contrato pra diagnóstico — sem
+      // isso, o try/catch silencioso esconde o erro real (visto no QA E2E).
+      const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
       console.error("[contract-generation] Falha ao criar Google Doc:", err);
+      try {
+        await prisma.contract.update({
+          where: { id: contract.id },
+          data: { googleDocStatus: `error: ${msg.slice(0, 500)}` },
+        });
+      } catch {
+        // ignora — diagnóstico best-effort
+      }
     }
   }
 
