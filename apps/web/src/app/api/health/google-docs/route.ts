@@ -5,6 +5,7 @@ import {
   isGoogleDocsFeatureEnabled,
   isOwnerOAuthConfigured,
   getDriveFolderId,
+  getServiceAccountEmail,
 } from "@/lib/google/client";
 
 export const runtime = "nodejs";
@@ -25,6 +26,42 @@ export async function GET() {
   const saConfigured = isGoogleDocsConfigured();
   const ownerOauthConfigured = isOwnerOAuthConfigured();
   const driveFolderId = getDriveFolderId();
+
+  // Validações deeper: tenta parsear o JSON da SA, calcula tamanhos.
+  // Não vaza segredos — só emite shape (length, has-newlines, parseable).
+  const rawSa = process.env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim();
+  let saJsonShape: {
+    length: number;
+    parseable: boolean;
+    parseError?: string;
+    hasClientEmail: boolean;
+    hasPrivateKey: boolean;
+    privateKeyLooksValid: boolean;
+  } = {
+    length: rawSa?.length || 0,
+    parseable: false,
+    hasClientEmail: false,
+    hasPrivateKey: false,
+    privateKeyLooksValid: false,
+  };
+  if (rawSa) {
+    try {
+      const parsed = JSON.parse(rawSa);
+      saJsonShape = {
+        length: rawSa.length,
+        parseable: true,
+        hasClientEmail: !!parsed.client_email,
+        hasPrivateKey: !!parsed.private_key,
+        privateKeyLooksValid:
+          typeof parsed.private_key === "string" &&
+          parsed.private_key.includes("BEGIN PRIVATE KEY") &&
+          parsed.private_key.includes("END PRIVATE KEY"),
+      };
+    } catch (err) {
+      saJsonShape.parseError = err instanceof Error ? err.message.slice(0, 200) : String(err);
+    }
+  }
+  const saEmail = getServiceAccountEmail();
 
   let templates: Array<{
     id: string;
@@ -60,6 +97,8 @@ export async function GET() {
   const ready =
     enabled &&
     saConfigured &&
+    saJsonShape.parseable &&
+    saJsonShape.privateKeyLooksValid &&
     ownerOauthConfigured &&
     !!driveFolderId &&
     templates.some((t) => t.engine === "google_docs" && !!t.googleTemplateDocId);
@@ -69,12 +108,11 @@ export async function GET() {
     flag: "USE_GOOGLE_DOCS_EDITOR",
     enabled,
     saConfigured,
+    saJsonShape,
+    saEmail,
     ownerOauthConfigured,
     driveFolderId: driveFolderId || null,
     ready,
     templates,
-    note: ready
-      ? "Feature pronta. Contratos NOVOS gerados a partir desses templates serão Google Docs. Legacy continua em TipTap por design."
-      : "Algum requisito ainda não foi configurado. Veja flags acima.",
   });
 }
