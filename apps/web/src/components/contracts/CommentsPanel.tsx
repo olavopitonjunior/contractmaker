@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
-import { Check, MessageSquare, Trash2, Send, Bot, User as UserIcon, AlertTriangle } from "lucide-react";
+import { Check, MessageSquare, Trash2, Send, Bot, User as UserIcon, AlertTriangle, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 interface Comment {
@@ -25,6 +25,9 @@ interface CommentsPanelProps {
   contractId: string;
   onCommentClick?: (anchorId: string) => void;
   onCommentResolved?: (anchorId: string) => void;
+  /** Quando definido, mostra botão "Novo comentário" no header. Em GDocs o
+   *  parent abre AddCommentDialog com `requireSelectedTextInput`. */
+  onAddComment?: () => void;
 }
 
 function formatRelative(iso: string): string {
@@ -41,6 +44,7 @@ export function CommentsPanel({
   contractId,
   onCommentClick,
   onCommentResolved,
+  onAddComment,
 }: CommentsPanelProps) {
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
@@ -109,20 +113,36 @@ export function CommentsPanel({
     return <p className="text-sm text-muted-foreground p-4">Carregando…</p>;
   }
 
+  const headerCta = onAddComment ? (
+    <div className="px-4 pt-2 pb-1">
+      <Button size="sm" variant="outline" className="w-full" onClick={onAddComment}>
+        <Plus className="h-4 w-4 mr-1" />
+        Novo comentário
+      </Button>
+    </div>
+  ) : null;
+
   if (comments.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center text-center p-8 text-muted-foreground">
-        <MessageSquare className="h-10 w-10 mb-3 opacity-50" />
-        <p className="text-sm">Nenhum comentário ainda</p>
-        <p className="text-xs mt-1">
-          Selecione um trecho no editor e clique em Comentar
-        </p>
-      </div>
+      <>
+        {headerCta}
+        <div className="flex flex-col items-center justify-center text-center p-8 text-muted-foreground">
+          <MessageSquare className="h-10 w-10 mb-3 opacity-50" />
+          <p className="text-sm">Nenhum comentário ainda</p>
+          <p className="text-xs mt-1">
+            {onAddComment
+              ? "Clique em Novo comentário acima para criar o primeiro"
+              : "Selecione um trecho no editor e clique em Comentar"}
+          </p>
+        </div>
+      </>
     );
   }
 
   return (
-    <ScrollArea className="h-[calc(100vh-8rem)]">
+    <>
+      {headerCta}
+      <ScrollArea className="h-[calc(100vh-10rem)]">
       <div className="space-y-3 p-4">
         {comments.map((c) => (
           <div
@@ -233,6 +253,7 @@ export function CommentsPanel({
           </div>
         ))}
       </div>
-    </ScrollArea>
+      </ScrollArea>
+    </>
   );
 }

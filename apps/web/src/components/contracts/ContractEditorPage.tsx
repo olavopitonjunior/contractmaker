@@ -20,6 +20,7 @@ import { VersionTimeline } from "./VersionTimeline";
 import { ChangeLogPanel } from "./ChangeLogPanel";
 import { CommentsPanel } from "./CommentsPanel";
 import { AddCommentDialog } from "./AddCommentDialog";
+import { SuggestionsToolbar } from "./SuggestionsToolbar";
 import { ApprovalReviewDialog, type ApprovalReviewData } from "./ApprovalReviewDialog";
 import { ExportDialog } from "@/components/export/ExportDialog";
 import { useAutoAnalyze } from "@/hooks/useAutoAnalyze";
@@ -35,6 +36,7 @@ import {
   AlertTriangle,
   AlertCircle,
   Info,
+  CloudOff,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -52,6 +54,7 @@ interface ContractData {
   exports: { id: string; format: string; url: string; createdAt: string }[];
   googleDocId?: string | null;
   googleDocUrl?: string | null;
+  googleDocStatus?: string | null;
 }
 
 interface Version {
@@ -108,6 +111,10 @@ export function ContractEditorPage({
 
   const isApprovedOrVoid = status === "aprovado";
   const isGoogleDocsBacked = !!contract.googleDocId;
+  const googleDocFailureReason =
+    contract.googleDocStatus && contract.googleDocStatus.startsWith("error:")
+      ? contract.googleDocStatus.slice("error:".length).trim()
+      : null;
 
   // Auto-save: debounced PATCH when htmlContent changes (TipTap-only).
   // Quando o contrato é Google Doc, o doc é a fonte de verdade do texto —
@@ -163,7 +170,10 @@ export function ContractEditorPage({
     editorInstance,
     isApprovedOrVoid ? null : contract.id,
     !isApprovedOrVoid,
-    { onAnalysisComplete: handleAnalysisComplete }
+    {
+      onAnalysisComplete: handleAnalysisComplete,
+      mode: isGoogleDocsBacked ? "google_docs" : "tiptap",
+    }
   );
 
   // Apply comment marks for AI-generated comments that don't yet have an anchor
@@ -202,20 +212,26 @@ export function ContractEditorPage({
     setAddCommentOpen(true);
   }
 
-  async function submitComment(text: string) {
+  async function submitComment(text: string, overrideSelectedText?: string) {
+    const selectedText = overrideSelectedText ?? pendingCommentText;
     const res = await fetch(`/api/contracts/${contract.id}/comments`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text, selectedText: pendingCommentText }),
+      body: JSON.stringify({ text, selectedText }),
     });
     if (res.ok) {
       const created = await res.json();
       editorRef.current?.applyCommentMark(created.anchorId);
       setCommentsVersion((v) => v + 1);
       setCommentsOpen(true);
-      toast.success("Comentário adicionado");
+      toast.success(
+        isGoogleDocsBacked
+          ? "Comentário adicionado · veja no painel lateral do Google Doc"
+          : "Comentário adicionado"
+      );
     } else {
-      toast.error("Erro ao criar comentário");
+      const data = await res.json().catch(() => null);
+      toast.error(data?.error || "Erro ao criar comentário");
     }
   }
 
@@ -317,6 +333,23 @@ export function ContractEditorPage({
               Enviar para assinatura
             </Link>
           </Button>
+        </div>
+      )}
+
+      {/* Banner: falha ao criar Google Doc — usuário caiu no fallback TipTap */}
+      {googleDocFailureReason && !isGoogleDocsBacked && !isApproved && (
+        <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900">
+          <CloudOff className="h-5 w-5 shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <p className="font-medium">Editor Google Docs indisponível</p>
+            <p className="text-xs mt-1 text-amber-800">
+              Causa: {googleDocFailureReason.slice(0, 240)}
+              {googleDocFailureReason.length > 240 ? "…" : ""}
+            </p>
+            <p className="text-xs mt-1 text-amber-700">
+              Você está no editor offline. Tente recriar o contrato pelo deal para usar o Google Docs novamente.
+            </p>
+          </div>
         </div>
       )}
 
@@ -478,6 +511,18 @@ export function ContractEditorPage({
         </div>
       </div>
 
+      {/* SuggestionsToolbar precisa montar fora do iframe quando o contrato é
+          Google Doc — o ContractEditor TipTap já monta a própria toolbar. */}
+      {isGoogleDocsBacked && !isApproved && (
+        <SuggestionsToolbar
+          contractId={contract.id}
+          editor={null}
+          version={commentsVersion}
+          onContentChange={() => {}}
+          mode="google_docs"
+        />
+      )}
+
       {/* Editor — Google Docs iframe quando contrato tem googleDocId, senão TipTap */}
       <div className="rounded-lg border bg-card overflow-hidden">
         {contract.googleDocId ? (
@@ -514,6 +559,14 @@ export function ContractEditorPage({
             contractId={contract.id}
             onCommentClick={handleCommentClick}
             onCommentResolved={handleCommentResolved}
+            onAddComment={
+              isGoogleDocsBacked && !isApproved
+                ? () => {
+                    setPendingCommentText("");
+                    setAddCommentOpen(true);
+                  }
+                : undefined
+            }
           />
         </SheetContent>
       </Sheet>
@@ -524,6 +577,7 @@ export function ContractEditorPage({
         selectedText={pendingCommentText}
         onClose={() => setAddCommentOpen(false)}
         onSubmit={submitComment}
+        requireSelectedTextInput={isGoogleDocsBacked && !pendingCommentText}
       />
 
       {/* Approval Review Dialog */}

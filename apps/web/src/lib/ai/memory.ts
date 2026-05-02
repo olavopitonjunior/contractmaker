@@ -175,29 +175,58 @@ async function summarizeContract(
 }
 
 /**
- * Diff manual edits: compare the template-rendered HTML with the final htmlContent
- * to isolate paragraphs the user manually edited (approximation — block-level).
+ * Diff manual edits: compare the template-rendered baseline with the final
+ * contract content to isolate blocks the user manually edited (approximation —
+ * block-level).
+ *
+ * Em modo Google Docs o `htmlContent` armazenado é só o snapshot inicial — o
+ * texto vivo está no Drive. Para captar edições reais, puxamos o texto plano
+ * do doc e comparamos com a renderização do template (também reduzida a texto
+ * plano), separando por linhas em branco.
  */
 async function diffManualEdits(
   contractId: string,
   htmlContent: string,
   templateSource: string,
-  dataJson: unknown
+  dataJson: unknown,
+  googleDocId: string | null
 ): Promise<Array<{ before: string; after: string }>> {
   try {
     const rendered = renderContratoHTML(templateSource, dataJson as Record<string, unknown>);
-    // Simple block-level diff: split by </p> / </li> and find blocks only present in final
-    const blockify = (html: string) =>
-      html
-        .split(/<\/(?:p|li|h[1-6])>/i)
-        .map((b) => b.replace(/<[^>]+>/g, "").trim())
-        .filter((b) => b.length > 20);
+    const stripHtml = (s: string) =>
+      s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 
-    const templateBlocks = new Set(blockify(rendered));
-    const finalBlocks = blockify(htmlContent);
+    let templateBlocks: Set<string>;
+    let finalBlocks: string[];
+
+    if (googleDocId) {
+      const { getDocPlainText } = await import("@/lib/google/docs");
+      const docText = await getDocPlainText(googleDocId);
+      // Template ainda é HTML — vira texto plano com mesmo blockify pra comparar
+      // contra o texto plano do doc, separado por linha em branco.
+      const blockifyHtml = (html: string) =>
+        html
+          .split(/<\/(?:p|li|h[1-6])>/i)
+          .map(stripHtml)
+          .filter((b) => b.length > 20);
+      const blockifyPlain = (txt: string) =>
+        txt
+          .split(/\n{2,}/)
+          .map((b) => b.replace(/\s+/g, " ").trim())
+          .filter((b) => b.length > 20);
+      templateBlocks = new Set(blockifyHtml(rendered));
+      finalBlocks = blockifyPlain(docText);
+    } else {
+      const blockify = (html: string) =>
+        html
+          .split(/<\/(?:p|li|h[1-6])>/i)
+          .map(stripHtml)
+          .filter((b) => b.length > 20);
+      templateBlocks = new Set(blockify(rendered));
+      finalBlocks = blockify(htmlContent);
+    }
+
     const onlyInFinal = finalBlocks.filter((b) => !templateBlocks.has(b));
-
-    // Keep top 10 manual edits to limit memory size
     return onlyInFinal.slice(0, 10).map((b) => ({ before: "", after: b }));
   } catch (err) {
     console.error("[diffManualEdits] failed for", contractId, err);
@@ -274,7 +303,8 @@ export async function createContractMemory(contractId: string): Promise<{
       contract.id,
       htmlContent,
       contract.templateOverride || contract.template.handlebarsSource,
-      contract.dataJson
+      contract.dataJson,
+      contract.googleDocId
     );
 
     // 5. Insert memory row

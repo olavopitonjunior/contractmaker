@@ -57,6 +57,7 @@ export default async function ContractPage({
         })),
         googleDocId: contract.googleDocId,
         googleDocUrl: contract.googleDocUrl,
+        googleDocStatus: contract.googleDocStatus,
       }}
       versions={versions.map((v) => ({
         id: v.id,

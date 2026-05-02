@@ -55,6 +55,8 @@ export async function POST(
   }
 
   // Quando o contrato é um Google Doc, espelha o comment no Drive Comments API.
+  // Se o trecho não for encontrado no doc, falha 422 — sem isso o usuário cria
+  // um comentário "fantasma" (existe no app mas sem âncora no doc visível).
   let googleCommentId: string | null = null;
   if (contract.googleDocId) {
     try {
@@ -66,7 +68,18 @@ export async function POST(
       });
       googleCommentId = res.id;
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
       console.error("[comments POST] Falha ao criar Drive comment:", err);
+      if (msg.includes("Texto-âncora não encontrado")) {
+        return NextResponse.json(
+          { error: "Trecho de referência não encontrado no contrato. Copie o texto exato do Google Doc." },
+          { status: 422 }
+        );
+      }
+      return NextResponse.json(
+        { error: `Falha ao criar comentário no Google Doc: ${msg.slice(0, 200)}` },
+        { status: 502 }
+      );
     }
   }
 
