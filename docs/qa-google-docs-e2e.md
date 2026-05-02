@@ -37,13 +37,22 @@ const r = await fetch('/login', { credentials: 'include' });
 console.log('status:', r.status); // esperado: 200
 ```
 
-**0.2** Confirme via fetch que a feature flag está ativa:
+**0.2** Confirme via fetch o estado da feature Google Docs:
 ```js
-const r = await fetch('/api/contracts/health-google-docs', { credentials: 'include' });
-// se 404, busca um endpoint que reflita o flag — pode ser via inspecionar uma
-// página com Server Component
+const r = await fetch('/api/health/google-docs', { credentials: 'include' });
+const h = await r.json();
+console.log(JSON.stringify(h, null, 2));
 ```
-Se não existir endpoint, vá para `/settings` e veja se há indicador da feature.
+
+VALIDAR todos os campos:
+- `h.enabled === true` (flag `USE_GOOGLE_DOCS_EDITOR` ativa)
+- `h.saConfigured === true` (Service Account JSON setado)
+- `h.ownerOauthConfigured === true` (refresh token do owner OAuth setado)
+- `h.driveFolderId` populado (string com id da pasta Drive)
+- `h.templates.length >= 1` com pelo menos 1 entrada onde `engine === "google_docs"` e `googleTemplateDocId !== null`
+- `h.ready === true` (todos os requisitos satisfeitos)
+
+Se `h.ready === false`: reporte como BUG P0 listando quais flags ficaram `false` — cancela o resto do QA.
 
 **0.3** Tire screenshot da home/dashboard pra registrar baseline.
 
@@ -57,8 +66,19 @@ Se não existir endpoint, vá para `/settings` e veja se há indicador da featur
 **Objetivo:** validar que `Confeccionar Contrato` cria um Google Doc novo,
 substitui placeholders, expande loops REPEAT e abre o iframe.
 
-**1.1** Crie um deal de teste (ou use um existente).
-Se criar: vá em `/forms/new` e preencha o formulário público com:
+**1.1** ⚠️ **VOCÊ DEVE CRIAR UM DEAL NOVO.** Não reuse contratos existentes.
+
+**Por quê:** a migração é per-contract via campo `Contract.googleDocId`.
+Contratos criados ANTES do deploy da migração têm `googleDocId = null` e
+continuam renderizando TipTap por design — isso é intencional pra rollout
+sem quebrar dados legacy. Apenas contratos gerados APÓS o deploy (e a partir
+de templates com `googleTemplateDocId` setado, validado no 0.2) viram Google
+Doc nativo.
+
+Se você inspecionar um contrato antigo e ver TipTap, isso é o **comportamento
+correto**, não um bug.
+
+Para criar o deal novo: vá em `/forms/new` e preencha o formulário público com:
 - 2 vendedores (casal): "[QA-GDOCS] João da Silva" + "[QA-GDOCS] Ana Maria da Silva"
 - 2 compradores (casal): "[QA-GDOCS] Carlos Mendes" + "[QA-GDOCS] Beatriz Mendes"
 - 1 imóvel: rua "[QA-GDOCS] Rua Teste, 100"

@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
   const resourceState = req.headers.get("x-goog-resource-state");
   const resourceId = req.headers.get("x-goog-resource-id");
 
-  const expectedToken = process.env.GOOGLE_WATCH_TOKEN;
+  const expectedToken = process.env.GOOGLE_WATCH_TOKEN?.trim();
   if (expectedToken && channelToken !== expectedToken) {
     return NextResponse.json({ error: "invalid token" }, { status: 401 });
   }

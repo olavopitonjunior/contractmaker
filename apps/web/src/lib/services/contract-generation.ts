@@ -182,7 +182,7 @@ export async function generateContractForDeal(
         googleWatchExpires?: Date;
       } = {};
       const webhookBase = process.env.NEXTAUTH_URL || process.env.PUBLIC_APP_URL;
-      const watchToken = process.env.GOOGLE_WATCH_TOKEN;
+      const watchToken = process.env.GOOGLE_WATCH_TOKEN?.trim();
       if (webhookBase && watchToken) {
         try {
           const watch = await watchFile({

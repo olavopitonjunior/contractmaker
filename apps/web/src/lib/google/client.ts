@@ -9,8 +9,17 @@ const SCOPES = [
 let cachedAuth: JWT | null = null;
 let cachedOwnerAuth: OAuth2Client | null = null;
 
+/** Lê env var aplicando trim — defesa contra `echo` que injeta \n
+ *  (gotcha já documentado no CLAUDE.md). */
+function envTrim(name: string): string | undefined {
+  const v = process.env[name];
+  if (!v) return undefined;
+  const trimmed = v.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
 function loadServiceAccountCredentials() {
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  const raw = envTrim("GOOGLE_SERVICE_ACCOUNT_JSON");
   if (!raw) {
     throw new Error(
       "GOOGLE_SERVICE_ACCOUNT_JSON não configurado. Configure a credencial JSON da service account."
@@ -28,7 +37,7 @@ function loadServiceAccountCredentials() {
 export function getGoogleAuth(): JWT {
   if (cachedAuth) return cachedAuth;
   const creds = loadServiceAccountCredentials();
-  const subject = process.env.GOOGLE_IMPERSONATE_EMAIL || undefined;
+  const subject = envTrim("GOOGLE_IMPERSONATE_EMAIL");
   cachedAuth = new google.auth.JWT({
     email: creds.client_email,
     key: creds.private_key,
@@ -47,15 +56,15 @@ export function getDriveClient(): drive_v3.Drive {
 }
 
 export function isGoogleDocsConfigured(): boolean {
-  return Boolean(process.env.GOOGLE_SERVICE_ACCOUNT_JSON);
+  return Boolean(envTrim("GOOGLE_SERVICE_ACCOUNT_JSON"));
 }
 
 export function getDriveFolderId(): string | undefined {
-  return process.env.GOOGLE_DRIVE_FOLDER_ID || undefined;
+  return envTrim("GOOGLE_DRIVE_FOLDER_ID");
 }
 
 export function isGoogleDocsFeatureEnabled(): boolean {
-  return process.env.USE_GOOGLE_DOCS_EDITOR === "true" && isGoogleDocsConfigured();
+  return envTrim("USE_GOOGLE_DOCS_EDITOR") === "true" && isGoogleDocsConfigured();
 }
 
 /**
@@ -67,9 +76,9 @@ export function isGoogleDocsFeatureEnabled(): boolean {
  */
 export function getOwnerOAuthClient(): OAuth2Client {
   if (cachedOwnerAuth) return cachedOwnerAuth;
-  const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
-  const refreshToken = process.env.GOOGLE_OWNER_REFRESH_TOKEN;
+  const clientId = envTrim("GOOGLE_OAUTH_CLIENT_ID");
+  const clientSecret = envTrim("GOOGLE_OAUTH_CLIENT_SECRET");
+  const refreshToken = envTrim("GOOGLE_OWNER_REFRESH_TOKEN");
   if (!clientId || !clientSecret || !refreshToken) {
     throw new Error(
       "Owner OAuth não configurado. Setar GOOGLE_OAUTH_CLIENT_ID, GOOGLE_OAUTH_CLIENT_SECRET e GOOGLE_OWNER_REFRESH_TOKEN."
@@ -88,7 +97,7 @@ export function getOwnerDriveClient(): drive_v3.Drive {
 }
 
 export function getServiceAccountEmail(): string | null {
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  const raw = envTrim("GOOGLE_SERVICE_ACCOUNT_JSON");
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
@@ -100,8 +109,8 @@ export function getServiceAccountEmail(): string | null {
 
 export function isOwnerOAuthConfigured(): boolean {
   return Boolean(
-    process.env.GOOGLE_OAUTH_CLIENT_ID &&
-      process.env.GOOGLE_OAUTH_CLIENT_SECRET &&
-      process.env.GOOGLE_OWNER_REFRESH_TOKEN
+    envTrim("GOOGLE_OAUTH_CLIENT_ID") &&
+      envTrim("GOOGLE_OAUTH_CLIENT_SECRET") &&
+      envTrim("GOOGLE_OWNER_REFRESH_TOKEN")
   );
 }

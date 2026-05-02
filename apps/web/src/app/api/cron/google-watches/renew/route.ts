@@ -20,8 +20,8 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  const watchToken = process.env.GOOGLE_WATCH_TOKEN;
-  const webhookBase = process.env.NEXTAUTH_URL || process.env.PUBLIC_APP_URL;
+  const watchToken = process.env.GOOGLE_WATCH_TOKEN?.trim();
+  const webhookBase = (process.env.NEXTAUTH_URL || process.env.PUBLIC_APP_URL)?.trim();
   if (!watchToken || !webhookBase) {
     return NextResponse.json({ error: "missing GOOGLE_WATCH_TOKEN or NEXTAUTH_URL" }, { status: 500 });
   }
