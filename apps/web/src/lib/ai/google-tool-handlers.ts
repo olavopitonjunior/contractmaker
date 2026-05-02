@@ -128,18 +128,30 @@ export async function googleProposeSuggestion(
     (reason ? `Motivo: ${reason}\n` : "") +
     `\n— Aceite via "Aceitar sugestões" no painel do app.`;
 
-  const result = await createAnchoredComment({
-    docId,
-    selectedText,
-    content: body,
-  });
-
-  return {
-    success: true,
-    googleCommentId: result.id,
-    type,
-    note: "Suggestion criada como comment ancorado no Google Doc; aplicar via accept no painel.",
-  };
+  // createAnchoredComment lança quando o trecho não está visível no doc
+  // (ex.: usuário editou o doc após o agente carregar o htmlContent). Sem
+  // try/catch a exception derruba o request /chat com 500 — converter em
+  // tool result `error` deixa o agente fazer fallback gracioso na próxima
+  // iteração do loop.
+  try {
+    const result = await createAnchoredComment({
+      docId,
+      selectedText,
+      content: body,
+    });
+    return {
+      success: true,
+      googleCommentId: result.id,
+      type,
+      note: "Suggestion criada como comment ancorado no Google Doc; aplicar via accept no painel.",
+    };
+  } catch (err) {
+    return {
+      error: err instanceof Error ? err.message : String(err),
+      note:
+        "Trecho de referência não foi localizado no doc atual. Confirme com o usuário o texto exato ou use add_comment com um trecho que já apareça visivelmente.",
+    };
+  }
 }
 
 interface Range {
