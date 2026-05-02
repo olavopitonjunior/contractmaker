@@ -225,13 +225,20 @@ export function shouldSkipLLM(findings: QuickFinding[]): boolean {
 /**
  * Build a deterministic dedupe key for a finding so re-analyses don't spam duplicates.
  * Uses content hash; safe in both Node and browser environments.
+ *
+ * IMPORTANTE: a chave NÃO inclui o `text` (mensagem da LLM) porque a frase varia
+ * entre chamadas mesmo descrevendo o mesmo problema. Em produção um único finding
+ * "Cláusula 9.1 vs 8.1.1" foi gerado 188× com phrasings diferentes ($1.50 desperdiçado
+ * por contrato). A chave usa `authorType + category + selectedText` — mesmo trecho
+ * + mesma categoria = mesma finding, regardless de como a IA escreveu a mensagem.
  */
 export function dedupeKeyFor(
   authorType: string,
-  selectedText: string,
-  text: string
+  category: string,
+  selectedText: string
 ): string {
-  const source = `${authorType}::${selectedText.trim().toLowerCase()}::${text.trim().toLowerCase()}`;
+  const trecho = selectedText.trim().toLowerCase().slice(0, 200);
+  const source = `${authorType}::${category}::${trecho}`;
   // Simple FNV-1a 32-bit hash — collision-resistant enough for per-contract dedupe
   let hash = 0x811c9dc5;
   for (let i = 0; i < source.length; i++) {

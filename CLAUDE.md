@@ -301,6 +301,7 @@ Puppeteer requer Vercel Pro (timeout 60s). CSS `@media print` em `globals.css` g
 - **pgvector** exige Neon Standard+. Prisma não tem tipo `vector` — inserts/updates via `$executeRawUnsafe`, queries via `$queryRawUnsafe` com operador `<=>`.
 - **`VOYAGE_API_KEY` opcional:** sem ele, `query_knowledge_base` e `find_similar_contracts` caem em fallback keyword/fingerprint. Não é erro.
 - **Análise passiva** envia `htmlContent` atual no body — server usa `params.htmlOverride` em vez do DB pra ver estado live.
+- **Custo do passive analysis controlado** (incidente cmons9hbh: 942 comments / $10 USD num só doc): `dedupeKey = authorType + category + selectedText` (não inclui phrasing da LLM); cap de 50 unresolved AI comments por contrato em `runPassiveAnalysis`; skip-no-change baseado em `ContractChangeLog` (se última validation foi após última edição → pula LLM); `max_tokens` 1024 + analysisInput 8000 chars; prompt limita 3 findings/run. Cleanup de duplicatas históricas: `apps/web/scripts/cleanup-stale-ai-comments.ts --apply --contractId=<id>`.
 - **Upload de imagens** em `/api/contracts/[id]/images`: 5MB max, `ALLOWED_TYPES = [image/jpeg, image/png, image/webp]`. Requer `BLOB_READ_WRITE_TOKEN`.
 - **Certidões Infosimples são pagas:** ~R$ 0,04-0,06 por chamada. `code 603` "saldo insuficiente" vira `nao_emitida` (resultado válido). Sempre disparadas manualmente — sem auto-extract no finalize do form.
 - **Cron certidões:** Vercel Pro obrigatório. Sem ele, jobs `awaiting_portal` ficam eternos. Schedule `*/5min` em `vercel.json` cobre retry curto + portal poll.

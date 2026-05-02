@@ -423,7 +423,15 @@ REGRAS:
 4. selectedText DEVE ser copiado LITERALMENTE do contrato — qualquer divergência invalida o finding.
 5. Seja específico: "valor X não bate com soma Y" é útil; "pode haver inconsistência" não.
 6. Ignore questões de estilo, gramática e formatação. Foque em conteúdo jurídico.
-7. No máximo 5 findings por chamada — priorize os mais críticos.`;
+7. No máximo 3 findings por chamada — priorize os mais críticos. Cada finding deve apontar UM problema único e distinto; não fragmente o mesmo problema em múltiplos findings.
+8. message: máximo 2 frases curtas. Vá direto ao ponto, sem prólogo.
+9. Se você já viu este trecho com este tipo de problema antes, NÃO repita — a deduplicação é por (categoria + trecho), não por phrasing.`;
+
+// Cap absoluto de comentários AI não-resolvidos por contrato. Quando atingido,
+// runPassiveAnalysis retorna sem chamar LLM. Limite calibrado: 50 é suficiente
+// pra cobrir os principais problemas de um contrato; acima disso o sinal vira
+// ruído e custo (incidente cmons9hbh: 942 comments / $10 USD num único doc).
+const MAX_AI_UNRESOLVED_COMMENTS = 50;
 
 /**
  * Runs passive analysis on a contract. Uses Haiku for cheap on-edit passes
@@ -440,6 +448,53 @@ export async function runPassiveAnalysis(
 
   if (contract.status === "aprovado") {
     return { findings: [], commentsCreated: 0, modelUsed: "none" };
+  }
+
+  // Cap: se já há muitos comments AI não-resolvidos, não dispara LLM. O usuário
+  // precisa resolver/limpar antes de a IA gerar mais. Evita o cenário do contrato
+  // cmons9hbh (942 comments / $10 USD em uma sessão de teste).
+  const existingUnresolved = await prisma.contractComment.count({
+    where: {
+      contractId: params.contractId,
+      authorType: "ai",
+      resolved: false,
+    },
+  });
+  if (existingUnresolved >= MAX_AI_UNRESOLVED_COMMENTS) {
+    return {
+      findings: [],
+      commentsCreated: 0,
+      modelUsed: `cap-reached:${existingUnresolved}`,
+    };
+  }
+
+  // Skip-no-change: se a última run de validação foi APÓS a última edição
+  // detectável (ChangeLog não-validation), não há mudança nova — pula LLM.
+  // Isso elimina re-runs caros quando o usuário só abre o doc e nada muda.
+  // Não aplica a trigger="open" porque o usuário pode estar abrindo após reload.
+  if (params.trigger === "edit") {
+    const lastValidation = await prisma.contractChangeLog.findFirst({
+      where: { contractId: params.contractId, action: "validation" },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    });
+    if (lastValidation) {
+      const newerEdit = await prisma.contractChangeLog.findFirst({
+        where: {
+          contractId: params.contractId,
+          action: { not: "validation" },
+          createdAt: { gt: lastValidation.createdAt },
+        },
+        select: { id: true },
+      });
+      if (!newerEdit) {
+        return {
+          findings: [],
+          commentsCreated: 0,
+          modelUsed: "skipped-no-change",
+        };
+      }
+    }
   }
 
   // Quando o contrato vive em um Google Doc, busca o texto plano via Drive
@@ -489,14 +544,18 @@ export async function runPassiveAnalysis(
       const after = idx >= 0 ? htmlContent.slice(idx + params.scope.changedText.length, idx + params.scope.changedText.length + 500) : "";
       analysisInput = `CONTEXTO ANTES:\n${before}\n\n--- TRECHO EDITADO ---\n${params.scope.changedText}\n--- FIM ---\n\nCONTEXTO DEPOIS:\n${after}`;
     } else {
-      analysisInput = htmlContent.slice(0, 15000);
+      // Reduzido de 15000 → 8000 chars: contratos típicos cabem com folga; cap
+      // reduz custo proporcional em ~47% no input. Os findings críticos
+      // (cláusulas 1-9) ficam completos.
+      analysisInput = htmlContent.slice(0, 8000);
     }
 
     const t0 = Date.now();
     try {
       const response = await anthropic.messages.create({
         model: passiveModel,
-        max_tokens: 2048,
+        // Reduzido de 2048 → 1024: 3 findings × ~250 tokens cabem confortável.
+        max_tokens: 1024,
         temperature: 0.1,
         system: PASSIVE_SYSTEM_PROMPT,
         messages: [
@@ -558,10 +617,13 @@ export async function runPassiveAnalysis(
 
   const allFindings = [...quickFindings, ...llmFindings];
 
-  // 3. Persist findings as ContractComment with dedupeKey (upsert pattern)
+  // 3. Persist findings as ContractComment with dedupeKey (upsert pattern).
+  // dedupeKey é (authorType + category + selectedText) — não inclui a mensagem
+  // da LLM porque ela varia entre runs com o mesmo problema (188× duplicação
+  // observada no contrato fixture cmons9hbh).
   let commentsCreated = 0;
   for (const finding of allFindings) {
-    const dedupeKey = dedupeKeyFor("ai", finding.selectedText, finding.message);
+    const dedupeKey = dedupeKeyFor("ai", finding.category, finding.selectedText);
     try {
       await prisma.contractComment.upsert({
         where: {
