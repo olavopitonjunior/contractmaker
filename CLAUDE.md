@@ -99,6 +99,9 @@ System prompt (`src/lib/ai/prompts.ts`) tem 18 regras. Destaques: regra 10 obrig
 
 **GDocs mode** (commit `5108961d`+):
 - Iframe `https://docs.google.com/document/d/{id}/edit?embedded=true&rm=embedded`. Read-only via `/preview` quando `status=aprovado`.
+- Botão "Compartilhar" no header monta `ShareDialog.tsx` que consome `GET/POST/DELETE /api/contracts/[id]/share` (Drive permissions API via owner OAuth). Adicionar email/role (writer/commenter/reader)/mensagem; lista pessoas com acesso; remoção individual. Funções em `lib/google/docs.ts`: `listDocPermissions` (filtra SA + GOOGLE_OWNER_EMAIL), `addDocPermission`, `removeDocPermission`. Bloqueia POST em contrato aprovado (só leitura existente sobrevive).
+- Tools de edição em `lib/ai/google-tool-handlers.ts` (googleEditSection/InsertClause/RemoveClause/ApplyStylePreset/InsertImage/AddComment/ProposeSuggestion) usam helper `safeGoogleCall` — exceções da Drive/Docs API viram `{error, googleApiError:true}` em vez de derrubar o /chat com 500.
+- Em GDocs, `propose_suggestion` é o DEFAULT do agente IA mesmo para verbos imperativos ("altere", "mude"). Pra forçar edição direta o usuário precisa dizer "aplique direto" / "faça já" / "sem revisão" (regex `FORCE_DIRECT_EDIT` em `agent.ts`). Razão: iframe Drive não permite undo do que a SA fez via API.
 - Sem BubbleMenu / SearchReplace / FormatPainter — usuário usa as features nativas do Google Docs.
 - Auto-save desligado (doc é fonte de verdade).
 - Watch Drive em `/api/webhooks/google-drive` popula `ContractChangeLog` quando o usuário edita no iframe.
