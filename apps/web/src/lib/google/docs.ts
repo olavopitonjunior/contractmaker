@@ -1,4 +1,5 @@
 import {
+  envTrim,
   getDocsClient,
   getDriveClient,
   getDriveFolderId,
@@ -147,6 +148,86 @@ export async function createDocFromTemplate(
   const embedLink = `https://docs.google.com/document/d/${docId}/edit?embedded=true&rm=embedded`;
 
   return { docId, webViewLink, embedLink };
+}
+
+export interface DocPermission {
+  id: string;
+  email: string | null;
+  role: "owner" | "writer" | "commenter" | "reader" | "fileOrganizer";
+  displayName: string | null;
+  type: "user" | "group" | "domain" | "anyone";
+}
+
+/**
+ * Lista as permissões atuais do doc — usado pelo dialog de compartilhamento.
+ * Filtra a SA (não interessa pro usuário) e o owner OAuth (gerenciado pelo app).
+ */
+export async function listDocPermissions(docId: string): Promise<DocPermission[]> {
+  const drive = getDriveClient();
+  const res = await drive.permissions.list({
+    fileId: docId,
+    fields: "permissions(id, role, type, emailAddress, displayName)",
+    supportsAllDrives: true,
+  });
+  const saEmail = getServiceAccountEmail();
+  const ownerEmail = envTrim("GOOGLE_OWNER_EMAIL");
+  return (res.data.permissions || [])
+    .filter((p) => {
+      const e = (p.emailAddress || "").toLowerCase();
+      if (saEmail && e === saEmail.toLowerCase()) return false;
+      if (ownerEmail && e === ownerEmail.toLowerCase()) return false;
+      return true;
+    })
+    .map((p) => ({
+      id: p.id!,
+      email: p.emailAddress || null,
+      role: (p.role as DocPermission["role"]) || "reader",
+      displayName: p.displayName || null,
+      type: (p.type as DocPermission["type"]) || "user",
+    }));
+}
+
+/**
+ * Compartilha o doc com um email externo. Usa owner OAuth (não SA) porque a
+ * SA não pode "share from" sem Workspace.
+ */
+export async function addDocPermission(
+  docId: string,
+  email: string,
+  role: "writer" | "commenter" | "reader",
+  options: { sendNotification?: boolean; message?: string } = {}
+): Promise<DocPermission> {
+  if (!isOwnerOAuthConfigured()) {
+    throw new Error(
+      "Owner OAuth não configurado — compartilhamento por email exige GOOGLE_OWNER_REFRESH_TOKEN."
+    );
+  }
+  const ownerDrive = getOwnerDriveClient();
+  const res = await ownerDrive.permissions.create({
+    fileId: docId,
+    requestBody: { type: "user", role, emailAddress: email },
+    sendNotificationEmail: options.sendNotification ?? true,
+    emailMessage: options.message,
+    fields: "id, role, type, emailAddress, displayName",
+    supportsAllDrives: true,
+  });
+  return {
+    id: res.data.id!,
+    email: res.data.emailAddress || email,
+    role,
+    displayName: res.data.displayName || null,
+    type: "user",
+  };
+}
+
+/** Remove uma permissão pelo permissionId (vindo de listDocPermissions). */
+export async function removeDocPermission(docId: string, permissionId: string): Promise<void> {
+  const drive = getDriveClient();
+  await drive.permissions.delete({
+    fileId: docId,
+    permissionId,
+    supportsAllDrives: true,
+  });
 }
 
 /** Revoga permissões de escrita do doc, deixando apenas owner com write. */

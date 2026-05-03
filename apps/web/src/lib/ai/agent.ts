@@ -213,8 +213,18 @@ export async function runContractAgent(params: AgentParams): Promise<AgentResult
     /\b(altere|mude|troque|substitua|atualize|corrija|modifique|remova|insira|adicione|coloque|ponha|apague|delete|reescreva|reescreva|inclua|retire|exclua)\b/i;
   const isEditCommand = EDIT_INTENT.test(params.message);
 
+  // "Aplique direto" / "faça já" / "sem revisão" — usuário quer edição direta
+  // mesmo em GDocs. Caso contrário, em GDocs preferimos propose_suggestion
+  // (track changes via comment ancorado) porque o iframe Drive não tem o mesmo
+  // controle granular de aceitar/rejeitar inline que o TipTap.
+  const FORCE_DIRECT_EDIT =
+    /\b(aplique\s+direto|aplique\s+já|faça\s+já|faça\s+agora|sem\s+revis[ãa]o|edite\s+direto|altere\s+agora|aplica\s+direto|sem\s+sugest[ãa]o)\b/i;
+  const wantsDirectEdit = FORCE_DIRECT_EDIT.test(params.message);
+  const isGoogleDocs = !!context.googleDocId;
+  const preferProposeInGDocs = isGoogleDocs && !wantsDirectEdit;
+
   const editReminderTemplate = isEditCommand
-    ? `\n\n---\nLEMBRETE DE FORMATO OBRIGATORIO: este pedido e um comando de edicao. Voce DEVE:\n1. Chamar pelo menos uma tool de edicao (edit_contract_section, update_contract_data, insert_clause, remove_clause, propose_suggestion).\n2. Apos executar as tools, responder EXATAMENTE nesta estrutura em markdown (copie os 3 headings literais, sem emoji, sem alterar capitalizacao):\n\n## Alteracoes Realizadas\n(lista do que foi alterado no contrato)\n\n## Justificativa\n(razao juridica da alteracao)\n\n## Verificacao\n(como o usuario pode verificar que a alteracao foi aplicada)\n`
+    ? `\n\n---\nLEMBRETE DE FORMATO OBRIGATORIO: este pedido e um comando de edicao. Voce DEVE:\n1. Chamar pelo menos uma tool de edicao (${preferProposeInGDocs ? "PREFIRA propose_suggestion — o contrato esta em modo Google Docs e o usuario quer revisar antes de aplicar; só use edit_contract_section se a mensagem do usuario disser explicitamente 'aplique direto' / 'faça já' / 'sem revisao'" : "edit_contract_section, update_contract_data, insert_clause, remove_clause, propose_suggestion"}).\n2. Apos executar as tools, responder EXATAMENTE nesta estrutura em markdown (copie os 3 headings literais, sem emoji, sem alterar capitalizacao):\n\n## Alteracoes Realizadas\n(lista do que foi alterado no contrato)\n\n## Justificativa\n(razao juridica da alteracao)\n\n## Verificacao\n(como o usuario pode verificar que a alteracao foi aplicada)\n`
     : "";
 
   const expertBlock = expertContext ? `${expertContext}\n\n---\n` : "";

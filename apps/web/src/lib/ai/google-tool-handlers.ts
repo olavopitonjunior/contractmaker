@@ -9,29 +9,55 @@ import type { docs_v1 } from "googleapis";
  * delegam para cá quando `context.googleDocId` está setado.
  */
 
+/**
+ * Helper interno: envolve handlers Google em try/catch padronizado.
+ * Drive/Docs API podem lançar (rate limit, doc deletado, perm revogada,
+ * trecho não encontrado quando re-buscamos índices). Sem isso, a exception
+ * sobe pelo executeToolHandler → loop do agent → /chat 500 (visto no QA #1
+ * com googleProposeSuggestion). Retornar `{ error }` deixa o agente fazer
+ * fallback gracioso na próxima iteração.
+ */
+async function safeGoogleCall(
+  label: string,
+  fn: () => Promise<Record<string, unknown>>
+): Promise<Record<string, unknown>> {
+  try {
+    return await fn();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[google-tool] ${label} falhou:`, msg);
+    return {
+      error: `Falha em ${label}: ${msg.slice(0, 200)}`,
+      googleApiError: true,
+    };
+  }
+}
+
 export async function googleEditSection(
   docId: string,
   selectedText: string,
   newText: string
 ): Promise<Record<string, unknown>> {
-  const text = await getDocPlainText(docId);
-  if (!text.includes(selectedText)) {
-    return {
-      error: `Texto não encontrado no doc: "${selectedText.slice(0, 80)}…". Use add_comment para sinalizar e validar primeiro.`,
-    };
-  }
+  return safeGoogleCall("googleEditSection", async () => {
+    const text = await getDocPlainText(docId);
+    if (!text.includes(selectedText)) {
+      return {
+        error: `Texto não encontrado no doc: "${selectedText.slice(0, 80)}…". Use add_comment para sinalizar e validar primeiro.`,
+      };
+    }
 
-  const requests: docs_v1.Schema$Request[] = [
-    {
-      replaceAllText: {
-        containsText: { text: selectedText, matchCase: true },
-        replaceText: newText,
+    const requests: docs_v1.Schema$Request[] = [
+      {
+        replaceAllText: {
+          containsText: { text: selectedText, matchCase: true },
+          replaceText: newText,
+        },
       },
-    },
-  ];
-  const res = await batchUpdateDoc(docId, requests);
-  const replaced = res.data.replies?.[0]?.replaceAllText?.occurrencesChanged ?? 0;
-  return { success: replaced > 0, occurrencesChanged: replaced };
+    ];
+    const res = await batchUpdateDoc(docId, requests);
+    const replaced = res.data.replies?.[0]?.replaceAllText?.occurrencesChanged ?? 0;
+    return { success: replaced > 0, occurrencesChanged: replaced };
+  });
 }
 
 export async function googleInsertClause(
@@ -39,52 +65,56 @@ export async function googleInsertClause(
   clauseHtml: string,
   options: { afterText?: string; atEnd?: boolean }
 ): Promise<Record<string, unknown>> {
-  const doc = await getDocStructure(docId);
-  const plain = clauseHtmlToPlain(clauseHtml);
-  let insertIndex: number;
+  return safeGoogleCall("googleInsertClause", async () => {
+    const doc = await getDocStructure(docId);
+    const plain = clauseHtmlToPlain(clauseHtml);
+    let insertIndex: number;
 
-  if (options.afterText) {
-    const range = findFirstRange(doc, options.afterText);
-    if (!range) {
-      return { error: `Texto âncora não encontrado: "${options.afterText.slice(0, 80)}…"` };
+    if (options.afterText) {
+      const range = findFirstRange(doc, options.afterText);
+      if (!range) {
+        return { error: `Texto âncora não encontrado: "${options.afterText.slice(0, 80)}…"` };
+      }
+      insertIndex = range.endIndex;
+    } else {
+      const last = doc.body?.content?.[doc.body.content.length - 1];
+      insertIndex = (last?.endIndex || 1) - 1;
     }
-    insertIndex = range.endIndex;
-  } else {
-    const last = doc.body?.content?.[doc.body.content.length - 1];
-    insertIndex = (last?.endIndex || 1) - 1;
-  }
 
-  const requests: docs_v1.Schema$Request[] = [
-    {
-      insertText: {
-        text: `\n${plain}\n`,
-        location: { index: insertIndex },
+    const requests: docs_v1.Schema$Request[] = [
+      {
+        insertText: {
+          text: `\n${plain}\n`,
+          location: { index: insertIndex },
+        },
       },
-    },
-  ];
-  await batchUpdateDoc(docId, requests);
-  return { success: true, insertedAt: insertIndex };
+    ];
+    await batchUpdateDoc(docId, requests);
+    return { success: true, insertedAt: insertIndex };
+  });
 }
 
 export async function googleRemoveClause(
   docId: string,
   clauseText: string
 ): Promise<Record<string, unknown>> {
-  const doc = await getDocStructure(docId);
-  const range = findFirstRange(doc, clauseText);
-  if (!range) {
-    return { error: `Cláusula não encontrada: "${clauseText.slice(0, 80)}…"` };
-  }
+  return safeGoogleCall("googleRemoveClause", async () => {
+    const doc = await getDocStructure(docId);
+    const range = findFirstRange(doc, clauseText);
+    if (!range) {
+      return { error: `Cláusula não encontrada: "${clauseText.slice(0, 80)}…"` };
+    }
 
-  const requests: docs_v1.Schema$Request[] = [
-    {
-      deleteContentRange: {
-        range: { startIndex: range.startIndex, endIndex: range.endIndex },
+    const requests: docs_v1.Schema$Request[] = [
+      {
+        deleteContentRange: {
+          range: { startIndex: range.startIndex, endIndex: range.endIndex },
+        },
       },
-    },
-  ];
-  await batchUpdateDoc(docId, requests);
-  return { success: true, removedRange: range };
+    ];
+    await batchUpdateDoc(docId, requests);
+    return { success: true, removedRange: range };
+  });
 }
 
 export async function googleAddComment(
@@ -199,6 +229,7 @@ export async function googleApplyStylePreset(
     marginRightMm?: number | null;
   }
 ): Promise<Record<string, unknown>> {
+  return safeGoogleCall("googleApplyStylePreset", async () => {
   const doc = await getDocStructure(docId);
   const lastEnd = lastBodyEndIndex(doc);
   if (lastEnd <= 1) {
@@ -276,6 +307,7 @@ export async function googleApplyStylePreset(
     },
     appliedMargins: docFields,
   };
+  });
 }
 
 /**
@@ -292,6 +324,7 @@ export async function googleInsertImage(
     return { error: "URL deve ser absoluta http(s) — Docs API não aceita relative paths" };
   }
 
+  return safeGoogleCall("googleInsertImage", async () => {
   let insertIndex: number;
   if (options.afterText) {
     const doc = await getDocStructure(docId);
@@ -332,6 +365,7 @@ export async function googleInsertImage(
     objectId,
     insertedAt: insertIndex,
   };
+  });
 }
 
 function lastBodyEndIndex(doc: docs_v1.Schema$Document): number {

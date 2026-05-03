@@ -21,6 +21,7 @@ import { ChangeLogPanel } from "./ChangeLogPanel";
 import { CommentsPanel } from "./CommentsPanel";
 import { AddCommentDialog } from "./AddCommentDialog";
 import { SuggestionsToolbar } from "./SuggestionsToolbar";
+import { ShareDialog } from "./ShareDialog";
 import { ApprovalReviewDialog, type ApprovalReviewData } from "./ApprovalReviewDialog";
 import { ExportDialog } from "@/components/export/ExportDialog";
 import { useAutoAnalyze } from "@/hooks/useAutoAnalyze";
@@ -37,6 +38,7 @@ import {
   AlertCircle,
   Info,
   CloudOff,
+  Share2,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -109,6 +111,7 @@ export function ContractEditorPage({
     maxSeverity: "error" | "warning" | "info" | null;
   }>({ total: 0, errors: 0, warnings: 0, infos: 0, maxSeverity: null });
   const [budget, setBudget] = useState<{ pct: number; spent: number; budget: number } | null>(null);
+  const [shareOpen, setShareOpen] = useState(false);
 
   const isApprovedOrVoid = status === "aprovado";
   const isGoogleDocsBacked = !!contract.googleDocId;
@@ -495,6 +498,17 @@ export function ContractEditorPage({
             </SheetContent>
           </Sheet>
 
+          {isGoogleDocsBacked && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShareOpen(true)}
+            >
+              <Share2 className="h-4 w-4 sm:mr-1" />
+              <span className="hidden sm:inline">Compartilhar</span>
+            </Button>
+          )}
+
           <ExportDialog contractId={contract.id} exports={contract.exports} />
 
           {!isApproved && (
@@ -611,6 +625,15 @@ export function ContractEditorPage({
         onSubmit={submitComment}
         requireSelectedTextInput={isGoogleDocsBacked && !pendingCommentText}
       />
+
+      {/* Share Dialog (só em modo Google Docs) */}
+      {isGoogleDocsBacked && (
+        <ShareDialog
+          open={shareOpen}
+          contractId={contract.id}
+          onClose={() => setShareOpen(false)}
+        />
+      )}
 
       {/* Approval Review Dialog */}
       <ApprovalReviewDialog

@@ -11,7 +11,7 @@ let cachedOwnerAuth: OAuth2Client | null = null;
 
 /** Lê env var aplicando trim — defesa contra `echo` que injeta \n
  *  (gotcha já documentado no CLAUDE.md). */
-function envTrim(name: string): string | undefined {
+export function envTrim(name: string): string | undefined {
   const v = process.env[name];
   if (!v) return undefined;
   const trimmed = v.trim();
