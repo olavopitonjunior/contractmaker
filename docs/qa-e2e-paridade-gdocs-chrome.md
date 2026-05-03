@@ -113,6 +113,22 @@ Procurar manualmente: navegue por `/deals/*` abrindo contratos. Para cada um:
 
 Critério: se achou um contrato com erro, banner amarelo é renderizado com causa truncada em 240 chars + CTA explicando fallback offline.
 
+## Cenário 6 — Budget IA + badge "IA: N%" no header
+
+1. Abra `/contracts/{contractId}` (qualquer contrato draft).
+2. `read_page` e procure no header (ao lado do badge "v3" e "rascunho") um terceiro badge no formato `IA: N%` (cinza claro).
+3. Clique no badge ou faça hover — deve aparecer tooltip `X.XXX / 200.000 tokens IA usados neste contrato`.
+4. Faça uma chamada via `GET /api/contracts/{contractId}/budget` (curl ou DevTools Network):
+   ```
+   curl -s -b "next-auth.session-token=<seu-cookie>" \
+     https://imobpro.ia.br/api/contracts/{contractId}/budget
+   ```
+   Esperado: JSON `{ ok: true, spent: <num>, budget: 200000, pct: <0..1>, remaining: <num> }`.
+5. (Stress opcional) Use o Chat IA umas 5-10× pra puxar `spent` pra ≥80% do budget. Recarregue a página. Badge deve ficar **âmbar**. Se passar de 100%, fica **vermelho**.
+6. Em `pct ≥ 100%`, próxima chamada de Chat IA deve retornar mensagem amigável "⚠️ Orçamento de IA do contrato esgotado: …" sem chamar Anthropic. Confirmar via DevTools que `/api/contracts/{id}/chat` responde 200 com texto começando em "⚠️" e que NÃO há request adicional pra Anthropic (latência <500ms).
+
+Critério: badge presente, tooltip funcional, endpoint retorna estrutura esperada, bloqueio ativa em ≥100%.
+
 ## Relatório final
 
 Volte aqui no chat e poste um markdown com:
@@ -129,6 +145,7 @@ Ambiente: imobpro.ia.br
 | 3 — comment manual GDocs | PASS/FAIL | trecho-falso erro: <msg>, trecho-real OK |
 | 4 — refresh on-edit | PASS/FAIL | delta contagem antes/depois |
 | 5 — banner erro googleDoc | PASS/FAIL/SKIP | ... |
+| 6 — budget IA + badge | PASS/FAIL | spent=N, badge cor=cinza/âmbar/vermelho, bloqueio em 100% |
 
 Bugs encontrados: lista numerada com path/comportamento/expected.
 ```
