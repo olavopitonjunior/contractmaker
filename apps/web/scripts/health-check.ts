@@ -273,11 +273,8 @@ async function checkClicksign(): Promise<CheckResult> {
     const baseUrl = process.env.CLICKSIGN_API_BASE_URL || "https://app.clicksign.com";
     const t0 = Date.now();
     const res = await withTimeout(
-      fetch(`${baseUrl}/api/v3/envelopes?per_page=1`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          Accept: "application/vnd.api+json",
-        },
+      fetch(`${baseUrl}/api/v3/envelopes?per_page=1&access_token=${encodeURIComponent(token)}`, {
+        headers: { Accept: "application/vnd.api+json" },
       }),
       TIMEOUT_MS,
       "Clicksign"

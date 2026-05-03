@@ -1,5 +1,6 @@
 // Wrapper HTTP da Clicksign API v3 (JSON:API).
-// Padrão Authorization: Bearer + Content-Type vnd.api+json.
+// Auth via query string ?access_token=TOKEN (Bearer header retorna 401 mesmo
+// com token válido — confirmado em 2026-05-03 contra app.clicksign.com).
 
 const DEFAULT_TIMEOUT_MS = 60_000;
 
@@ -56,9 +57,10 @@ export async function clicksignRequest<T = unknown>({
   body,
   timeoutMs = DEFAULT_TIMEOUT_MS,
 }: RequestOptions): Promise<T> {
-  const url = `${getBaseUrl()}${path.startsWith("/") ? path : `/${path}`}`;
+  const rawPath = path.startsWith("/") ? path : `/${path}`;
+  const sep = rawPath.includes("?") ? "&" : "?";
+  const url = `${getBaseUrl()}${rawPath}${sep}access_token=${encodeURIComponent(getToken())}`;
   const headers: Record<string, string> = {
-    Authorization: `Bearer ${getToken()}`,
     Accept: "application/vnd.api+json",
   };
   let payload: string | undefined;
