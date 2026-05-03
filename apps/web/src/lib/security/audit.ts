@@ -74,7 +74,12 @@ export type AuditAction =
   | "DATA_DELETION_CANCELLED"
   // Segurança geral
   | "SUSPICIOUS_ACTIVITY"
-  | "RATE_LIMIT_HIT";
+  | "RATE_LIMIT_HIT"
+  // Newton — integração com agente externo
+  | "API_TOKEN_CREATED"
+  | "API_TOKEN_REVOKED"
+  | "API_TOKEN_AUTH_FAILED"
+  | "NEWTON_ACTOR_HEADER_REJECTED";
 
 export interface AuditContext {
   orgId: string;

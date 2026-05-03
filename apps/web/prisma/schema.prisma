@@ -20,6 +20,8 @@ model User {
   image               String?
   passwordHash        String?
   role                String    @default("user")
+  // Newton — telefone E.164 para mapeamento WhatsApp → user. Único, opcional.
+  phone               String?   @unique
   // LGPD — soft delete com janela de reversal de 30 dias
   deletedAt           DateTime?
   deletionScheduledAt DateTime?
@@ -55,6 +57,10 @@ model User {
   // Pagadoria — Fase 3 (transferências)
   asaasTransfers        AsaasTransfer[]
   reconciliationMatches BankReconciliation[]
+
+  // Newton — API tokens e idempotência
+  apiTokens       UserApiToken[]
+  idempotencyKeys IdempotencyKey[]
 }
 
 model Account {
@@ -423,23 +429,23 @@ model SalesForm {
 // ============================================
 
 model ContractTemplate {
-  id               String   @id @default(cuid())
-  orgId            String
-  name             String
-  description      String?
-  version          String   @default("1.0.0")
-  schemaType       String   @default("compra_venda_v1")
-  handlebarsSource String   @db.Text
-  engine           String   @default("handlebars") // "handlebars" | "google_docs"
-  status           String   @default("active")
-  isDefault        Boolean  @default(false)
-  modalidade       String?  @default("a_vista")
+  id                  String   @id @default(cuid())
+  orgId               String
+  name                String
+  description         String?
+  version             String   @default("1.0.0")
+  schemaType          String   @default("compra_venda_v1")
+  handlebarsSource    String   @db.Text
+  engine              String   @default("handlebars") // "handlebars" | "google_docs"
+  status              String   @default("active")
+  isDefault           Boolean  @default(false)
+  modalidade          String?  @default("a_vista")
   // Google Docs migration: quando engine="google_docs", aponta para o doc-modelo
   // armazenado no Drive da service account. Os contratos são criados via
   // files.copy seguido de batchUpdate(replaceAllText).
   googleTemplateDocId String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 
   org         Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
   contracts   Contract[]
@@ -479,17 +485,17 @@ model Clause {
 // ============================================
 
 model Contract {
-  id               String   @id @default(cuid())
-  dealId           String
-  templateId       String
-  userId           String
-  version          Int      @default(1)
-  dataJson         Json
-  htmlContent      String?  @db.Text
-  templateOverride String?  @db.Text
-  status           String   @default("rascunho")
-  isLatest         Boolean  @default(true)
-  parentVersionId  String?
+  id                  String    @id @default(cuid())
+  dealId              String
+  templateId          String
+  userId              String
+  version             Int       @default(1)
+  dataJson            Json
+  htmlContent         String?   @db.Text
+  templateOverride    String?   @db.Text
+  status              String    @default("rascunho")
+  isLatest            Boolean   @default(true)
+  parentVersionId     String?
   // Google Docs migration (Phase 0+): when set, the contract content lives in
   // a Google Doc owned by the Contractmaker service account; htmlContent stays
   // as a snapshot for legacy export/diff fallback.
@@ -500,8 +506,8 @@ model Contract {
   googleWatchChannel  String?
   googleWatchResource String?
   googleWatchExpires  DateTime?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   deal              Deal                 @relation(fields: [dealId], references: [id])
   template          ContractTemplate     @relation(fields: [templateId], references: [id])
@@ -564,22 +570,22 @@ model ChatMessage {
 // ============================================
 
 model ContractComment {
-  id           String   @id @default(cuid())
-  contractId   String
-  userId       String?
-  authorName   String
-  authorType   String // "user" | "ai"
-  text         String   @db.Text
-  anchorId     String
-  selectedText String   @db.Text
-  severity     String   @default("info") // "info" | "warning" | "error"
-  resolved     Boolean  @default(false)
-  parentId     String?
-  dedupeKey    String? // hash determinístico usado pela IA para evitar duplicatas em re-análises
+  id              String   @id @default(cuid())
+  contractId      String
+  userId          String?
+  authorName      String
+  authorType      String // "user" | "ai"
+  text            String   @db.Text
+  anchorId        String
+  selectedText    String   @db.Text
+  severity        String   @default("info") // "info" | "warning" | "error"
+  resolved        Boolean  @default(false)
+  parentId        String?
+  dedupeKey       String? // hash determinístico usado pela IA para evitar duplicatas em re-análises
   // Google Docs migration: id do comment espelhado no Drive Comments API.
   googleCommentId String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   contract Contract          @relation(fields: [contractId], references: [id], onDelete: Cascade)
   user     User?             @relation("commentAuthor", fields: [userId], references: [id])
@@ -592,21 +598,21 @@ model ContractComment {
 }
 
 model ContractSuggestion {
-  id           String    @id @default(cuid())
-  contractId   String
-  userId       String?
-  authorType   String // "user" | "ai"
-  type         String // "insertion" | "deletion" | "replacement"
-  suggestionId String // unique anchor id that ties to the mark in the HTML
-  originalText String?   @db.Text
-  newText      String?   @db.Text
-  reason       String?   @db.Text
-  status       String    @default("pending") // "pending" | "accepted" | "rejected"
+  id                 String    @id @default(cuid())
+  contractId         String
+  userId             String?
+  authorType         String // "user" | "ai"
+  type               String // "insertion" | "deletion" | "replacement"
+  suggestionId       String // unique anchor id that ties to the mark in the HTML
+  originalText       String?   @db.Text
+  newText            String?   @db.Text
+  reason             String?   @db.Text
+  status             String    @default("pending") // "pending" | "accepted" | "rejected"
   // Google Docs migration: id da suggestion espelhada no documento (formato kix.*).
   googleSuggestionId String?
-  resolvedAt   DateTime?
-  resolvedBy   String?
-  createdAt    DateTime  @default(now())
+  resolvedAt         DateTime?
+  resolvedBy         String?
+  createdAt          DateTime  @default(now())
 
   contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
   user     User?    @relation("suggestionAuthor", fields: [userId], references: [id])
@@ -1455,4 +1461,51 @@ model EnvelopeEvent {
   envelope Envelope @relation(fields: [envelopeId], references: [id], onDelete: Cascade)
 
   @@index([envelopeId, receivedAt])
+}
+
+// ============================================
+// NEWTON — INTEGRAÇÃO COM AGENTE EXTERNO
+// ============================================
+
+// Token de API por usuário, com escopos. Hash SHA-256 armazenado, valor cru
+// retornado uma única vez no momento da criação. Newton (e qualquer cliente
+// externo no futuro) usa via header `Authorization: Bearer <token>`.
+//
+// Escopos suportados (string livre validada na app):
+//   "deals:rw" | "contracts:rw" | "charges:rw" | "signatures:rw"
+//   | "documents:rw" | "metrics:r"
+model UserApiToken {
+  id          String    @id @default(cuid())
+  userId      String
+  name        String // label humano: "Newton (VPS prod)"
+  hashedToken String    @unique // sha256(rawToken) — lookup direto
+  scopes      String[]  @default([])
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  revokedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, revokedAt])
+}
+
+// Idempotência por chamada externa. Cliente envia `X-Idempotency-Key` em
+// POST/PATCH/DELETE; servidor garante que mesmo (userId, key) retorna a
+// mesma resposta dentro de 24h. Evita duplicação em retry de Newton.
+model IdempotencyKey {
+  id           String   @id @default(cuid())
+  userId       String
+  key          String // valor do header X-Idempotency-Key
+  method       String // POST | PATCH | DELETE
+  path         String // path da rota chamada
+  statusCode   Int
+  responseHash String // sha256 do body de resposta (não armazena resposta inteira)
+  responseBody Json? // resposta cacheada para replay (TTL 24h)
+  createdAt    DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, key])
+  @@index([createdAt]) // para job de cleanup TTL 24h
 }
