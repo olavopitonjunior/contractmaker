@@ -25,7 +25,7 @@ function getToken(): string {
 }
 
 function getBaseUrl(): string {
-  const url = process.env.CLICKSIGN_API_BASE_URL || "https://api.clicksign.com";
+  const url = process.env.CLICKSIGN_API_BASE_URL || "https://app.clicksign.com";
   return url.replace(/\/+$/, "");
 }
 
