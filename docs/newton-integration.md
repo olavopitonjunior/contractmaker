@@ -89,15 +89,100 @@ Implementação em `src/lib/api/idempotency.ts`. Helper `withIdempotency()` envo
 - Response 200: `{ userId, orgId, role, name }` — sem email (privacy).
 - Response 404: usuário não encontrado, soft-deleted (LGPD), ou sem org membership.
 
-### 4.2 Outros endpoints planejados (Track A Fase 2)
+### 4.2 Métricas pessoais — `GET /api/me/metrics`
 
-Ainda não implementados — documentar quando chegarem:
+Auth: Bearer (escopo `metrics:r`) ou session.
 
-- `GET /api/users/me/metrics`
-- `GET /api/users/me/activity`
-- `GET /api/contracts/{id}/summary`
-- `GET /api/orgs/me/infosimples-budget`
-- `GET /api/events?since=ISO&limit=N` (para polling de eventos contractmaker→Newton)
+Query: `?since=ISO8601` (opcional, default últimos 30 dias).
+
+Response:
+```json
+{
+  "since": "...",
+  "until": "...",
+  "deals": { "total": 8, "byStage": { "stage-1": 3, "stage-2": 5 } },
+  "contracts": { "total": 3, "byStatus": { "rascunho": 2, "aprovado": 1 } },
+  "charges": { "total": 4, "byStatus": { "PENDING": 4 } }
+}
+```
+
+Privacy: contagens apenas; sem valores monetários nem dados nominais.
+
+### 4.3 Atividade recente — `GET /api/me/activity`
+
+Auth: Bearer (escopo `metrics:r`) ou session.
+
+Query: `?limit=N` (1-200, default 50), `?since=ISO8601` (opcional).
+
+Response: `{ items: [{ id, action, result, resource, resourceType, metadata, createdAt }], count }`. Lê `AuditLog` filtrado por `userId` autenticado.
+
+### 4.4 Sumário de contrato — `GET /api/contracts/[id]/summary`
+
+Auth: Bearer (escopo `contracts:rw`) ou session. Cross-user guard via Bearer (apenas dono do contrato).
+
+Response:
+```json
+{
+  "contractId": "...",
+  "dealId": "...",
+  "status": "rascunho",
+  "version": 1,
+  "partes": { "vendedores": [{ "nome": "..." }], "compradores": [{ "nome": "..." }] },
+  "valor": 500000,
+  "ultimaAtualizacao": "...",
+  "envelopeAtual": { "id": "...", "status": "running", "signedCount": 1, "totalSigners": 2 } | null,
+  "markdown": "*Status:* Rascunho (versão 1)\n..."
+}
+```
+
+NÃO chama LLM — extrai do `dataJson` + envelope mais recente. Determinístico, rápido, sem custo. Para análise jurídica profunda, usar `/api/contracts/[id]/auto-analyze` em separado.
+
+Privacy: nomes nas partes vão na response (já públicos); CPF/RG NUNCA aparecem.
+
+### 4.5 Saldo Infosimples — `GET /api/org/infosimples-budget`
+
+Auth: Bearer (escopo `metrics:r`) ou session.
+
+Response:
+```json
+{
+  "orgId": "...",
+  "month": "2026-05",
+  "budgetCents": 5000000,
+  "spentCents": 3500,
+  "remainingCents": 4996500,
+  "pct": 0.0007,
+  "ok": true,
+  "warningPct": 0.8,
+  "spentByEndpoint": { "iptu": 2700, "matricula": 800 }
+}
+```
+
+Budget vem de `INFOSIMPLES_MONTHLY_BUDGET_CENTS` env (default R$ 50.000).
+
+### 4.6 Feed de eventos — `GET /api/events?since=ISO`
+
+Para Newton consumir via polling (decisão #19: polling em vez de webhook outbound).
+
+Auth: Bearer (escopo `metrics:r`) ou session.
+
+Query:
+- `since=ISO8601` **obrigatório** — cursor temporal, Newton mantém localmente.
+- `limit` (1-500, default 100).
+- `actions=ACTION1,ACTION2` (opcional) — filtra por subset de actions.
+
+Response:
+```json
+{
+  "events": [{ "id", "action", "result", "resource", "resourceType", "metadata", "createdAt", "userId" }],
+  "count": 2,
+  "nextSince": "2026-05-02T15:30:00.001Z"
+}
+```
+
+`nextSince` = timestamp do último evento + 1ms. Quando não há eventos, `nextSince` = `since` original. Cliente persiste `nextSince` e usa na próxima chamada.
+
+Filtro automático por `orgId` do usuário autenticado. Outras orgs nunca aparecem.
 
 ## 5. Auditoria
 

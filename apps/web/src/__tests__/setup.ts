@@ -8,6 +8,7 @@ vi.mock("@/lib/db/prisma", () => ({
       findUnique: vi.fn(),
       findUniqueOrThrow: vi.fn(),
       update: vi.fn(),
+      groupBy: vi.fn().mockResolvedValue([]),
     },
     clause: {
       findMany: vi.fn(),
@@ -80,6 +81,18 @@ vi.mock("@/lib/db/prisma", () => ({
     },
     auditLog: {
       create: vi.fn().mockResolvedValue({}),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    deal: {
+      groupBy: vi.fn().mockResolvedValue([]),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    commissionCharge: {
+      groupBy: vi.fn().mockResolvedValue([]),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    certidaoJob: {
+      findMany: vi.fn().mockResolvedValue([]),
     },
   },
 }));
