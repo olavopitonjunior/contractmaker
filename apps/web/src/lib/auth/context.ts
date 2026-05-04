@@ -1,6 +1,18 @@
 import { NextResponse } from "next/server";
-import { auth, getUserOrg } from "./auth";
+import { getUserOrg } from "./auth";
+import { authOrBearer, hasScope, type ResolvedAuth } from "./auth-or-bearer";
+import { resolveNewtonActor, isRejection, type NewtonActorContext } from "@/lib/audit/newton";
+import { prisma } from "@/lib/db/prisma";
 
+/**
+ * Contexto unificado de auth para route handlers. Após a integração Newton:
+ *
+ *  - `via` indica session (UI web) ou bearer (Newton/cliente externo).
+ *  - `actor` carrega `via=newton` para enriquecer AuditLog quando bearer.
+ *  - Para bearer, `userEmail`/`userName` vêm de lookup oportunístico em
+ *    `prisma.user` para preservar compatibilidade com callers que renderizam
+ *    nome/email em logs e mensagens.
+ */
 export interface AuthContext {
   userId: string;
   userEmail: string;
@@ -9,11 +21,20 @@ export interface AuthContext {
   orgName: string;
   ipAddress: string | null;
   userAgent: string | null;
+  /** "session" para auth via NextAuth cookie; "bearer" para UserApiToken. */
+  via: ResolvedAuth["via"];
+  /** Actor para audit metadata (.via=newton quando bearer). */
+  actor: NewtonActorContext;
 }
 
 export type AuthResult =
   | { ok: true; ctx: AuthContext }
   | { ok: false; response: NextResponse };
+
+export interface RequireAuthOptions {
+  /** Escopo Bearer obrigatório. Session sempre passa. */
+  scope?: string;
+}
 
 function extractIpAddress(req: Request): string | null {
   return (
@@ -23,16 +44,40 @@ function extractIpAddress(req: Request): string | null {
   );
 }
 
-export async function requireAuth(req: Request): Promise<AuthResult> {
-  const session = await auth();
-  if (!session?.user?.id) {
+export async function requireAuth(
+  req: Request,
+  opts: RequireAuthOptions = {}
+): Promise<AuthResult> {
+  const ident = await authOrBearer(req);
+  if (!ident) {
     return {
       ok: false,
       response: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
     };
   }
 
-  const org = await getUserOrg(session.user.id);
+  if (opts.scope && !hasScope(ident, opts.scope)) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "Forbidden", reason: `missing scope ${opts.scope}` },
+        { status: 403 }
+      ),
+    };
+  }
+
+  const actor = resolveNewtonActor(req, ident);
+  if (isRejection(actor)) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "Forbidden", reason: actor.reason },
+        { status: 403 }
+      ),
+    };
+  }
+
+  const org = await getUserOrg(actor.effectiveUserId);
   if (!org) {
     return {
       ok: false,
@@ -43,16 +88,36 @@ export async function requireAuth(req: Request): Promise<AuthResult> {
     };
   }
 
+  // Email/name: para session vêm direto do ident; para bearer fazemos lookup
+  // leve (1 query) para preservar compatibilidade com callers que usam nome.
+  let userEmail = "";
+  let userName = "Usuário";
+  if (ident.via === "session") {
+    userEmail = ident.email ?? "";
+    userName = userEmail || "Usuário";
+  } else {
+    const u = await prisma.user
+      .findUnique({
+        where: { id: actor.effectiveUserId },
+        select: { email: true, name: true },
+      })
+      .catch(() => null);
+    userEmail = u?.email ?? "";
+    userName = u?.name ?? u?.email ?? `Newton (${actor.effectiveUserId.slice(0, 8)})`;
+  }
+
   return {
     ok: true,
     ctx: {
-      userId: session.user.id,
-      userEmail: session.user.email ?? "",
-      userName: session.user.name ?? session.user.email ?? "Usuário",
+      userId: actor.effectiveUserId,
+      userEmail,
+      userName,
       orgId: org.id,
       orgName: org.name,
       ipAddress: extractIpAddress(req),
       userAgent: req.headers.get("user-agent"),
+      via: ident.via,
+      actor,
     },
   };
 }

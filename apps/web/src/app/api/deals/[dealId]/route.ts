@@ -1,83 +1,90 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import {
+  requireApiAuth,
+  isAuthFailure,
+  authFailureResponse,
+} from "@/lib/api/require-auth";
+import { etagFor } from "@/lib/api/etag";
+import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { mergeAuditMetadata } from "@/lib/audit/newton";
 
 export const runtime = "nodejs";
 
 /**
  * GET /api/deals/:dealId
  *
- * Returns the deal + related form data. Consumed by EditPartyDialog (Phase A)
- * to pre-fill party snapshot.
+ * Retorna deal + dados do form vinculado. Inclui header `ETag` baseado em
+ * `updatedAt` do deal — Newton usa para detecção de concorrência (PRD §6.6).
  */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { dealId: string } }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const org = await getUserOrg(session.user.id);
-  if (!org) {
-    return NextResponse.json({ error: "No organization" }, { status: 400 });
-  }
+  const auth = await requireApiAuth(req, { scope: "deals:rw" });
+  if (isAuthFailure(auth)) return authFailureResponse(auth);
 
   const deal = await prisma.deal.findUnique({
     where: { id: params.dealId },
     include: {
-      form: { select: { orgId: true, dataJson: true, token: true, status: true } },
+      form: {
+        select: { orgId: true, dataJson: true, token: true, status: true },
+      },
       stage: { select: { id: true, name: true } },
     },
   });
   if (!deal) {
     return NextResponse.json({ error: "Deal not found" }, { status: 404 });
   }
-  if (deal.form && deal.form.orgId !== org.id) {
+  if (deal.form && deal.form.orgId !== auth.org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  // Cross-org guard adicional: deal sem form precisa pertencer a pipeline da org
+  if (!deal.form) {
+    const stageOk = await prisma.pipelineStage.findFirst({
+      where: { id: deal.stageId, pipeline: { orgId: auth.org.id } },
+      select: { id: true },
+    });
+    if (!stageOk) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+  }
 
-  return NextResponse.json({ deal });
+  const etag = etagFor({ updatedAt: deal.updatedAt });
+  return NextResponse.json(
+    { deal },
+    { headers: { ETag: etag } }
+  );
 }
 
 /**
  * DELETE /api/deals/:dealId
  *
- * Phase F.II-β — cascade delete completo:
- *   Deal → DealAttachment (via onDelete: Cascade no schema)
- *        → CertidaoJob (via onDelete: Cascade)
- *        → CertidoesShareLink (via onDelete: Cascade)
- *        → Contract (via onDelete: Cascade)
- *
- * O SalesForm vinculado (formId) NÃO é deletado automaticamente — é
- * deletado explicitamente aqui para limpeza completa em testes. Em
- * produção futura, considerar soft-delete (query param ?soft=1).
+ * Hard delete (cascade) ou soft delete (?soft=1, move para stage Arquivado).
+ * Phase F.II-β do contractmaker.
  */
 export async function DELETE(
   req: NextRequest,
   { params }: { params: { dealId: string } }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const org = await getUserOrg(session.user.id);
-  if (!org) {
-    return NextResponse.json({ error: "No organization" }, { status: 400 });
-  }
+  const auth = await requireApiAuth(req, { scope: "deals:rw" });
+  if (isAuthFailure(auth)) return authFailureResponse(auth);
 
   const deal = await prisma.deal.findUnique({
     where: { id: params.dealId },
     select: {
       id: true,
       formId: true,
+      title: true,
       form: { select: { orgId: true } },
+      stage: { select: { pipeline: { select: { orgId: true } } } },
     },
   });
   if (!deal) {
     return NextResponse.json({ error: "Deal not found" }, { status: 404 });
   }
-  if (deal.form && deal.form.orgId !== org.id) {
+  const dealOrgId = deal.form?.orgId ?? deal.stage?.pipeline?.orgId;
+  if (dealOrgId !== auth.org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
@@ -85,9 +92,11 @@ export async function DELETE(
   const soft = searchParams.get("soft") === "1";
 
   if (soft) {
-    // Soft delete: move para stage "Arquivado" se existir, senão erro
     const archived = await prisma.pipelineStage.findFirst({
-      where: { name: { contains: "rquiv", mode: "insensitive" } },
+      where: {
+        pipeline: { orgId: auth.org.id },
+        name: { contains: "rquiv", mode: "insensitive" },
+      },
       select: { id: true },
     });
     if (!archived) {
@@ -103,20 +112,52 @@ export async function DELETE(
       where: { id: params.dealId },
       data: { stageId: archived.id },
     });
+    await audit(
+      extractAuditContextFromRequest(
+        req,
+        auth.org.id,
+        auth.actor.effectiveUserId
+      ),
+      {
+        action: "DEAL_DELETE",
+        result: "SUCCESS",
+        resource: params.dealId,
+        resourceType: "Deal",
+        metadata: mergeAuditMetadata(
+          { mode: "soft", title: deal.title },
+          auth.actor
+        ),
+      }
+    );
     return NextResponse.json({ ok: true, mode: "soft", dealId: params.dealId });
   }
 
-  // Hard delete. Deal cascade remove attachments + certidão jobs + share links
-  // + contratos. Form (SalesForm) precisa ser deletado em segundo lugar pois
-  // o Deal tem FK para ele (não cascade — formId opcional).
   await prisma.$transaction(async (tx) => {
     await tx.deal.delete({ where: { id: params.dealId } });
     if (deal.formId) {
       await tx.salesForm.delete({ where: { id: deal.formId } }).catch(() => {
-        // Form pode estar em uso por outro deal (unlikely pelo @unique, mas defensivo)
+        /* defensive */
       });
     }
   });
+
+  await audit(
+    extractAuditContextFromRequest(
+      req,
+      auth.org.id,
+      auth.actor.effectiveUserId
+    ),
+    {
+      action: "DEAL_DELETE",
+      result: "SUCCESS",
+      resource: params.dealId,
+      resourceType: "Deal",
+      metadata: mergeAuditMetadata(
+        { mode: "hard", title: deal.title },
+        auth.actor
+      ),
+    }
+  );
 
   return NextResponse.json({ ok: true, mode: "hard", dealId: params.dealId });
 }

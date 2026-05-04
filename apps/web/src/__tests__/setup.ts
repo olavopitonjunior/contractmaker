@@ -2,8 +2,11 @@ import "@testing-library/jest-dom/vitest";
 import { vi } from "vitest";
 
 // --- Prisma mock ---
-vi.mock("@/lib/db/prisma", () => ({
-  prisma: {
+vi.mock("@/lib/db/prisma", () => {
+  // Reference que vai ser preenchida abaixo — permite $transaction passar
+  // o próprio mock como tx ao callback.
+  const prismaMock: Record<string, unknown> = {};
+  const mock = {
     contract: {
       findUnique: vi.fn(),
       findUniqueOrThrow: vi.fn(),
@@ -86,7 +89,30 @@ vi.mock("@/lib/db/prisma", () => ({
     deal: {
       groupBy: vi.fn().mockResolvedValue([]),
       findMany: vi.fn().mockResolvedValue([]),
+      findUnique: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn().mockResolvedValue({}),
+      delete: vi.fn().mockResolvedValue({}),
+      count: vi.fn().mockResolvedValue(0),
     },
+    pipeline: {
+      findFirst: vi.fn(),
+    },
+    pipelineStage: {
+      findFirst: vi.fn(),
+    },
+    salesForm: {
+      findUnique: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn(),
+      update: vi.fn().mockResolvedValue({}),
+      delete: vi.fn().mockResolvedValue({}),
+    },
+    $transaction: vi.fn(async (cb: never) =>
+      typeof cb === "function"
+        ? (cb as (tx: unknown) => unknown)(prismaMock)
+        : cb
+    ),
     commissionCharge: {
       groupBy: vi.fn().mockResolvedValue([]),
       findMany: vi.fn().mockResolvedValue([]),
@@ -94,8 +120,10 @@ vi.mock("@/lib/db/prisma", () => ({
     certidaoJob: {
       findMany: vi.fn().mockResolvedValue([]),
     },
-  },
-}));
+  };
+  Object.assign(prismaMock, mock);
+  return { prisma: mock };
+});
 
 // --- Anthropic SDK mock ---
 vi.mock("@anthropic-ai/sdk", () => {

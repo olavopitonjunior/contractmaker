@@ -1,16 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
-import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import {
+  requireApiAuth,
+  isAuthFailure,
+  authFailureResponse,
+} from "@/lib/api/require-auth";
+import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { mergeAuditMetadata } from "@/lib/audit/newton";
 
 export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireApiAuth(req, { scope: "contracts:rw" });
+  if (isAuthFailure(auth)) return authFailureResponse(auth);
 
   const url = new URL(req.url);
   const includeResolved = url.searchParams.get("includeResolved") === "true";
@@ -36,10 +40,8 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireApiAuth(req, { scope: "contracts:rw" });
+  if (isAuthFailure(auth)) return authFailureResponse(auth);
 
   const body = await req.json().catch(() => null);
   if (!body?.text || !body?.selectedText) {
@@ -49,6 +51,13 @@ export async function POST(
   const contract = await prisma.contract.findUnique({ where: { id: params.id } });
   if (!contract) {
     return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
+  }
+  // Cross-user guard via Bearer
+  if (auth.ident.via === "bearer" && contract.userId !== auth.ident.userId) {
+    return NextResponse.json(
+      { error: "Forbidden", reason: "not the contract owner" },
+      { status: 403 }
+    );
   }
   if (contract.status === "aprovado") {
     return NextResponse.json({ error: "Contrato aprovado não pode receber comentários" }, { status: 403 });
@@ -83,11 +92,19 @@ export async function POST(
     }
   }
 
+  // Author display name: para session usa session.user; para bearer usa
+  // userId resolvido (pode ser enriquecido com prisma.user.findUnique se
+  // virar friction).
+  const authorName =
+    auth.ident.via === "session"
+      ? auth.ident.email ?? "Usuário"
+      : `Newton (em nome do user ${auth.ident.userId.slice(0, 8)})`;
+
   const comment = await prisma.contractComment.create({
     data: {
       contractId: params.id,
-      userId: session.user.id,
-      authorName: session.user.name || session.user.email || "Usuário",
+      userId: auth.actor.effectiveUserId,
+      authorName,
       authorType: "user",
       text: body.text,
       anchorId: randomUUID(),
@@ -96,6 +113,24 @@ export async function POST(
       googleCommentId,
     },
   });
+
+  await audit(
+    extractAuditContextFromRequest(
+      req,
+      auth.org.id,
+      auth.actor.effectiveUserId
+    ),
+    {
+      action: "CONTRACT_COMMENT_ADD",
+      result: "SUCCESS",
+      resource: comment.id,
+      resourceType: "ContractComment",
+      metadata: mergeAuditMetadata(
+        { contractId: params.id, severity: comment.severity },
+        auth.actor
+      ),
+    }
+  );
 
   return NextResponse.json(comment, { status: 201 });
 }

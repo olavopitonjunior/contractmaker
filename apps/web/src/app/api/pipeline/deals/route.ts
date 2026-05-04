@@ -1,7 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { z } from "zod";
+import {
+  requireApiAuth,
+  isAuthFailure,
+  authFailureResponse,
+} from "@/lib/api/require-auth";
+import { withIdempotency } from "@/lib/api/idempotency";
+import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { mergeAuditMetadata } from "@/lib/audit/newton";
 
 const createDealSchema = z.object({
   formId: z.string().optional(),
@@ -10,15 +17,8 @@ const createDealSchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const org = await getUserOrg(session.user.id);
-  if (!org) {
-    return NextResponse.json({ error: "No organization" }, { status: 400 });
-  }
+  const auth = await requireApiAuth(req, { scope: "deals:rw" });
+  if (isAuthFailure(auth)) return authFailureResponse(auth);
 
   const body = await req.json();
   const parsed = createDealSchema.safeParse(body);
@@ -26,64 +26,90 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.message }, { status: 400 });
   }
 
-  const pipeline = await prisma.pipeline.findFirst({
-    where: { orgId: org.id },
-    include: { stages: { orderBy: { position: "asc" } } },
-  });
+  const idempotencyKey = req.headers.get("x-idempotency-key");
 
-  if (!pipeline || pipeline.stages.length === 0) {
-    return NextResponse.json({ error: "No pipeline configured" }, { status: 400 });
-  }
-
-  const firstStage = pipeline.stages[0];
-
-  // Get form data if formId provided
-  let dataJson = null;
-  if (parsed.data.formId) {
-    const form = await prisma.salesForm.findUnique({
-      where: { id: parsed.data.formId },
-    });
-    if (form) {
-      dataJson = form.dataJson;
-      // Mark form as linked
-      await prisma.salesForm.update({
-        where: { id: form.id },
-        data: { status: "vinculado" },
+  const result = await withIdempotency({
+    userId: auth.actor.effectiveUserId,
+    key: idempotencyKey,
+    method: "POST",
+    path: "/api/pipeline/deals",
+    handler: async (): Promise<{ status: number; body: unknown }> => {
+      const pipeline = await prisma.pipeline.findFirst({
+        where: { orgId: auth.org.id },
+        include: { stages: { orderBy: { position: "asc" } } },
       });
-    }
-  }
 
-  const dealsInStage = await prisma.deal.count({
-    where: { stageId: firstStage.id },
-  });
+      if (!pipeline || pipeline.stages.length === 0) {
+        return {
+          status: 400,
+          body: { error: "No pipeline configured" },
+        };
+      }
 
-  const deal = await prisma.deal.create({
-    data: {
-      pipelineId: pipeline.id,
-      stageId: firstStage.id,
-      userId: session.user.id,
-      formId: parsed.data.formId || null,
-      title: parsed.data.title,
-      value: parsed.data.value || null,
-      dataJson: dataJson ?? undefined,
-      position: dealsInStage,
+      const firstStage = pipeline.stages[0];
+
+      let dataJson = null;
+      if (parsed.data.formId) {
+        const form = await prisma.salesForm.findUnique({
+          where: { id: parsed.data.formId },
+        });
+        if (form) {
+          dataJson = form.dataJson;
+          await prisma.salesForm.update({
+            where: { id: form.id },
+            data: { status: "vinculado" },
+          });
+        }
+      }
+
+      const dealsInStage = await prisma.deal.count({
+        where: { stageId: firstStage.id },
+      });
+
+      const deal = await prisma.deal.create({
+        data: {
+          pipelineId: pipeline.id,
+          stageId: firstStage.id,
+          userId: auth.actor.effectiveUserId,
+          formId: parsed.data.formId || null,
+          title: parsed.data.title,
+          value: parsed.data.value || null,
+          dataJson: dataJson ?? undefined,
+          position: dealsInStage,
+        },
+      });
+
+      await audit(
+        extractAuditContextFromRequest(
+          req,
+          auth.org.id,
+          auth.actor.effectiveUserId
+        ),
+        {
+          action: "DEAL_CREATE",
+          result: "SUCCESS",
+          resource: deal.id,
+          resourceType: "Deal",
+          metadata: mergeAuditMetadata(
+            { title: deal.title, stageId: firstStage.id },
+            auth.actor
+          ),
+        }
+      );
+
+      return { status: 201, body: deal };
     },
   });
 
-  return NextResponse.json(deal, { status: 201 });
+  return NextResponse.json(result.body, { status: result.status });
 }
 
-export async function GET() {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const org = await getUserOrg(session.user.id);
-  if (!org) return NextResponse.json([]);
+export async function GET(req: NextRequest) {
+  const auth = await requireApiAuth(req, { scope: "deals:rw" });
+  if (isAuthFailure(auth)) return authFailureResponse(auth);
 
   const pipeline = await prisma.pipeline.findFirst({
-    where: { orgId: org.id },
+    where: { orgId: auth.org.id },
   });
   if (!pipeline) return NextResponse.json([]);
 
@@ -93,7 +119,10 @@ export async function GET() {
     include: {
       stage: true,
       form: { select: { id: true, token: true, status: true } },
-      contracts: { where: { isLatest: true }, select: { id: true, version: true, status: true } },
+      contracts: {
+        where: { isLatest: true },
+        select: { id: true, version: true, status: true },
+      },
     },
   });
 

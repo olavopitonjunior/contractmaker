@@ -26,41 +26,43 @@ function createRequest(body: Record<string, unknown>) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: usuário tem org. Tests específicos podem override.
+  mockGetUserOrg.mockResolvedValue(createMockOrg() as never);
 });
 
 describe("POST /api/contracts/[id]/chat", () => {
   it("returns 401 when no session", async () => {
-    mockAuth.mockResolvedValueOnce(null);
+    mockAuth.mockResolvedValue(null);
     const req = createRequest({ message: "test" });
     const res = await POST(req, { params: { id: "test-id" } });
     expect(res.status).toBe(401);
   });
 
   it("returns 400 for invalid payload (no message)", async () => {
-    mockAuth.mockResolvedValueOnce(createMockSession());
+    mockAuth.mockResolvedValue(createMockSession());
     const req = createRequest({});
     const res = await POST(req, { params: { id: "test-id" } });
     expect(res.status).toBe(400);
   });
 
   it("returns 400 for empty message", async () => {
-    mockAuth.mockResolvedValueOnce(createMockSession());
+    mockAuth.mockResolvedValue(createMockSession());
     const req = createRequest({ message: "" });
     const res = await POST(req, { params: { id: "test-id" } });
     expect(res.status).toBe(400);
   });
 
   it("returns 404 when contract not found", async () => {
-    mockAuth.mockResolvedValueOnce(createMockSession());
-    mockPrisma.contract.findUnique.mockResolvedValueOnce(null);
+    mockAuth.mockResolvedValue(createMockSession());
+    mockPrisma.contract.findUnique.mockResolvedValue(null);
     const req = createRequest({ message: "test" });
     const res = await POST(req, { params: { id: "nonexistent" } });
     expect(res.status).toBe(404);
   });
 
   it("returns 403 when contract is approved", async () => {
-    mockAuth.mockResolvedValueOnce(createMockSession());
-    mockPrisma.contract.findUnique.mockResolvedValueOnce({
+    mockAuth.mockResolvedValue(createMockSession());
+    mockPrisma.contract.findUnique.mockResolvedValue({
       id: "test-id",
       status: "aprovado",
     } as any);
@@ -69,26 +71,22 @@ describe("POST /api/contracts/[id]/chat", () => {
     expect(res.status).toBe(403);
   });
 
-  it("returns 400 when user has no org", async () => {
-    mockAuth.mockResolvedValueOnce(createMockSession());
-    mockPrisma.contract.findUnique.mockResolvedValueOnce({
-      id: "test-id",
-      status: "rascunho",
-    } as any);
-    mockGetUserOrg.mockResolvedValueOnce(null);
+  it("returns 403 when user has no org (Newton retrofit: auth wrapper enforces)", async () => {
+    mockAuth.mockResolvedValue(createMockSession());
+    mockGetUserOrg.mockResolvedValue(null);
     const req = createRequest({ message: "test" });
     const res = await POST(req, { params: { id: "test-id" } });
-    expect(res.status).toBe(400);
+    expect(res.status).toBe(403);
   });
 
   it("returns 200 with agent result on success", async () => {
-    mockAuth.mockResolvedValueOnce(createMockSession());
-    mockPrisma.contract.findUnique.mockResolvedValueOnce({
+    mockAuth.mockResolvedValue(createMockSession());
+    mockPrisma.contract.findUnique.mockResolvedValue({
       id: "test-id",
       status: "rascunho",
     } as any);
-    mockGetUserOrg.mockResolvedValueOnce(createMockOrg());
-    mockRunAgent.mockResolvedValueOnce({
+    mockGetUserOrg.mockResolvedValue(createMockOrg());
+    mockRunAgent.mockResolvedValue({
       message: "Contrato analisado.",
       htmlContent: "<p>Updated</p>",
       dataJson: { valor: 500000 },
@@ -106,13 +104,13 @@ describe("POST /api/contracts/[id]/chat", () => {
   });
 
   it("calls runContractAgent with correct params", async () => {
-    mockAuth.mockResolvedValueOnce(createMockSession({ id: "user-42" }));
-    mockPrisma.contract.findUnique.mockResolvedValueOnce({
+    mockAuth.mockResolvedValue(createMockSession({ id: "user-42" }));
+    mockPrisma.contract.findUnique.mockResolvedValue({
       id: "contract-99",
       status: "rascunho",
     } as any);
-    mockGetUserOrg.mockResolvedValueOnce(createMockOrg({ id: "org-7" }));
-    mockRunAgent.mockResolvedValueOnce({
+    mockGetUserOrg.mockResolvedValue(createMockOrg({ id: "org-7" }));
+    mockRunAgent.mockResolvedValue({
       message: "OK",
       htmlContent: null,
       dataJson: null,
@@ -131,12 +129,12 @@ describe("POST /api/contracts/[id]/chat", () => {
   });
 
   it("returns 500 when agent throws", async () => {
-    mockAuth.mockResolvedValueOnce(createMockSession());
-    mockPrisma.contract.findUnique.mockResolvedValueOnce({
+    mockAuth.mockResolvedValue(createMockSession());
+    mockPrisma.contract.findUnique.mockResolvedValue({
       id: "test-id",
       status: "rascunho",
     } as any);
-    mockGetUserOrg.mockResolvedValueOnce(createMockOrg());
+    mockGetUserOrg.mockResolvedValue(createMockOrg());
     mockRunAgent.mockRejectedValueOnce(new Error("API timeout"));
 
     const req = createRequest({ message: "test" });

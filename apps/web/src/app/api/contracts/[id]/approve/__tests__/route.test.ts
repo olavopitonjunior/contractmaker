@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { POST } from "../route";
-import { auth } from "@/lib/auth/auth";
+import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import { createMockSession } from "@/__tests__/helpers";
+import { createMockSession, createMockOrg } from "@/__tests__/helpers";
 
 const mockAuth = vi.mocked(auth);
+const mockGetUserOrg = vi.mocked(getUserOrg);
 const mockPrisma = vi.mocked(prisma);
 
 function createRequest() {
@@ -16,6 +17,8 @@ function createRequest() {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: usuário tem org. Override quando teste exigir o contrário.
+  mockGetUserOrg.mockResolvedValue(createMockOrg() as never);
 });
 
 describe("POST /api/contracts/[id]/approve", () => {

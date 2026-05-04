@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { chatSchema } from "@/lib/validation/schemas";
 import { runContractAgent } from "@/lib/ai/agent";
+import {
+  requireApiAuth,
+  isAuthFailure,
+  authFailureResponse,
+} from "@/lib/api/require-auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -11,10 +15,8 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const auth = await requireApiAuth(req, { scope: "contracts:rw" });
+  if (isAuthFailure(auth)) return authFailureResponse(auth);
 
   const body = await req.json();
   const parsed = chatSchema.safeParse(body);
@@ -29,6 +31,14 @@ export async function POST(
     return NextResponse.json({ error: "Contract not found" }, { status: 404 });
   }
 
+  // Cross-user guard via Bearer: usuário só conversa com seus próprios contratos.
+  if (auth.ident.via === "bearer" && contract.userId !== auth.ident.userId) {
+    return NextResponse.json(
+      { error: "Forbidden", reason: "not the contract owner" },
+      { status: 403 }
+    );
+  }
+
   if (contract.status === "aprovado") {
     return NextResponse.json(
       {
@@ -40,17 +50,12 @@ export async function POST(
     );
   }
 
-  const org = await getUserOrg(session.user.id);
-  if (!org) {
-    return NextResponse.json({ error: "No organization" }, { status: 400 });
-  }
-
   try {
     const result = await runContractAgent({
       message: parsed.data.message,
       contractId: params.id,
-      userId: session.user.id,
-      orgId: org.id,
+      userId: auth.actor.effectiveUserId,
+      orgId: auth.org.id,
     });
 
     return NextResponse.json({
@@ -59,11 +64,10 @@ export async function POST(
       dataJson: result.dataJson,
       toolsUsed: result.changeLogs.map((l) => l.action),
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Agent error:", error);
-    return NextResponse.json(
-      { error: error.message || "Erro ao processar mensagem" },
-      { status: 500 }
-    );
+    const message =
+      error instanceof Error ? error.message : "Erro ao processar mensagem";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

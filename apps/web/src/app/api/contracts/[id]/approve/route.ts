@@ -1,17 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { validateContractData } from "@/lib/ai/validators";
 import { createContractMemory } from "@/lib/ai/memory";
+import {
+  requireApiAuth,
+  isAuthFailure,
+  authFailureResponse,
+} from "@/lib/api/require-auth";
+import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { mergeAuditMetadata } from "@/lib/audit/newton";
 
 export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const apiAuth = await requireApiAuth(req, { scope: "contracts:rw" });
+  if (isAuthFailure(apiAuth)) return authFailureResponse(apiAuth);
 
   const body = await req.json().catch(() => ({}));
   const force = body?.force === true;
@@ -22,6 +26,14 @@ export async function POST(
 
   if (!contract) {
     return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
+  }
+
+  // Cross-user guard via Bearer
+  if (apiAuth.ident.via === "bearer" && contract.userId !== apiAuth.ident.userId) {
+    return NextResponse.json(
+      { error: "Forbidden", reason: "not the contract owner" },
+      { status: 403 }
+    );
   }
 
   if (contract.status === "aprovado") {
@@ -124,9 +136,12 @@ export async function POST(
   await prisma.contractChangeLog.create({
     data: {
       contractId: params.id,
-      userId: session.user.id,
+      userId: apiAuth.actor.effectiveUserId,
       action: "status_change",
-      summary: `Contrato aprovado por ${session.user.name || session.user.email}`,
+      summary:
+        apiAuth.ident.via === "session"
+          ? `Contrato aprovado por ${apiAuth.ident.email ?? apiAuth.ident.userId}`
+          : `Contrato aprovado via Newton (em nome de ${apiAuth.actor.effectiveUserId})`,
       details: {
         previousStatus: contract.status,
         newStatus: "aprovado",
@@ -155,6 +170,29 @@ export async function POST(
       }
     }
   }
+
+  await audit(
+    extractAuditContextFromRequest(
+      req,
+      apiAuth.org.id,
+      apiAuth.actor.effectiveUserId
+    ),
+    {
+      action: "CONTRACT_APPROVE",
+      result: "SUCCESS",
+      resource: params.id,
+      resourceType: "Contract",
+      metadata: mergeAuditMetadata(
+        {
+          forced: force,
+          warningsIgnored: warnings.length,
+          pendingSuggestionsIgnored: pendingSuggestions,
+          unresolvedCommentsIgnored: unresolvedComments,
+        },
+        apiAuth.actor
+      ),
+    }
+  );
 
   // Fire-and-forget: snapshot this approved contract into ContractMemory for
   // the learning loop (find_similar_contracts, propose_*). We don't await it

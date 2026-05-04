@@ -1,77 +1,104 @@
-import { NextResponse } from "next/server";
-import { auth, getUserOrg } from "@/lib/auth/auth";
+import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
+import {
+  requireApiAuth,
+  isAuthFailure,
+  authFailureResponse,
+} from "@/lib/api/require-auth";
+import { withIdempotency } from "@/lib/api/idempotency";
+import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { mergeAuditMetadata } from "@/lib/audit/newton";
 
-export async function POST(request: Request) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const org = await getUserOrg(session.user.id);
-  if (!org) {
-    return NextResponse.json({ error: "No organization" }, { status: 400 });
-  }
+export async function POST(request: NextRequest) {
+  const auth = await requireApiAuth(request, { scope: "documents:rw" });
+  if (isAuthFailure(auth)) return authFailureResponse(auth);
 
   const body = await request.json().catch(() => ({}));
+  const idempotencyKey = request.headers.get("x-idempotency-key");
 
-  const form = await prisma.salesForm.create({
-    data: {
-      orgId: org.id,
-      title: body.title || null,
-      schemaType: "compra_venda_v1",
-      dataJson: {},
-      status: "rascunho",
+  const result = await withIdempotency({
+    userId: auth.actor.effectiveUserId,
+    key: idempotencyKey,
+    method: "POST",
+    path: "/api/forms",
+    handler: async (): Promise<{ status: number; body: unknown }> => {
+      const form = await prisma.salesForm.create({
+        data: {
+          orgId: auth.org.id,
+          title: body.title || null,
+          schemaType: "compra_venda_v1",
+          dataJson: {},
+          status: "rascunho",
+        },
+      });
+
+      let dealId: string | null = null;
+      const pipeline = await prisma.pipeline.findFirst({
+        where: { orgId: auth.org.id },
+        include: { stages: { orderBy: { position: "asc" } } },
+      });
+
+      if (pipeline && pipeline.stages.length > 0) {
+        const formularioStage =
+          pipeline.stages.find((s) => s.name === "Formulário") ??
+          pipeline.stages[0];
+        const dealsInStage = await prisma.deal.count({
+          where: { stageId: formularioStage.id },
+        });
+
+        const deal = await prisma.deal.create({
+          data: {
+            pipelineId: pipeline.id,
+            stageId: formularioStage.id,
+            userId: auth.actor.effectiveUserId,
+            formId: form.id,
+            title:
+              body.title || `Negocio - ${form.token.slice(0, 8)}`,
+            position: dealsInStage,
+          },
+        });
+        dealId = deal.id;
+      }
+
+      await audit(
+        extractAuditContextFromRequest(
+          request,
+          auth.org.id,
+          auth.actor.effectiveUserId
+        ),
+        {
+          action: "FORM_CREATE",
+          result: "SUCCESS",
+          resource: form.id,
+          resourceType: "SalesForm",
+          metadata: mergeAuditMetadata(
+            { token: form.token, dealId },
+            auth.actor
+          ),
+        }
+      );
+
+      return {
+        status: 201,
+        body: {
+          id: form.id,
+          token: form.token,
+          url: `/f/${form.token}`,
+          dealId,
+        },
+      };
     },
   });
 
-  // Auto-create deal in "Formulario" stage
-  let dealId: string | null = null;
-  const pipeline = await prisma.pipeline.findFirst({
-    where: { orgId: org.id },
-    include: { stages: { orderBy: { position: "asc" } } },
-  });
-
-  if (pipeline && pipeline.stages.length > 0) {
-    const formularioStage = pipeline.stages.find((s) => s.name === "Formulário") || pipeline.stages[0];
-    const dealsInStage = await prisma.deal.count({
-      where: { stageId: formularioStage.id },
-    });
-
-    const deal = await prisma.deal.create({
-      data: {
-        pipelineId: pipeline.id,
-        stageId: formularioStage.id,
-        userId: session.user.id,
-        formId: form.id,
-        title: body.title || `Negocio - ${form.token.slice(0, 8)}`,
-        position: dealsInStage,
-      },
-    });
-    dealId = deal.id;
-  }
-
-  return NextResponse.json({
-    id: form.id,
-    token: form.token,
-    url: `/f/${form.token}`,
-    dealId,
-  }, { status: 201 });
+  return NextResponse.json(result.body, { status: result.status });
 }
 
-export async function GET() {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  const org = await getUserOrg(session.user.id);
-  if (!org) {
-    return NextResponse.json({ error: "No organization" }, { status: 400 });
-  }
+export async function GET(request: NextRequest) {
+  const auth = await requireApiAuth(request, { scope: "documents:rw" });
+  if (isAuthFailure(auth)) return authFailureResponse(auth);
 
   const forms = await prisma.salesForm.findMany({
-    where: { orgId: org.id },
+    where: { orgId: auth.org.id },
     orderBy: { createdAt: "desc" },
     include: { deal: { select: { id: true, title: true } } },
   });
