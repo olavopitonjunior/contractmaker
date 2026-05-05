@@ -153,4 +153,28 @@ export const RateLimits = {
     rateLimit({ identifier: `public:${ip}`, limit: 30, window: "1 m" }),
   publicResendByToken: (token: string) =>
     rateLimit({ identifier: `public-resend:${token}`, limit: 1, window: "1 h" }),
+
+  /**
+   * Newton API per-token + per-scope. Limites variam por scope:
+   *  - metrics:r — 600/min (polling-friendly)
+   *  - documents:rw — 30/min (certidões caras)
+   *  - default — 100/min
+   */
+  apiPerToken: (tokenId: string, scope: string) => {
+    const cfg = SCOPE_LIMITS[scope] ?? SCOPE_LIMITS.default;
+    return rateLimit({
+      identifier: `api-token:${tokenId}:${scope}`,
+      limit: cfg.limit,
+      window: cfg.window,
+    });
+  },
+  apiPerSession: (userId: string) =>
+    rateLimit({ identifier: `api-session:${userId}`, limit: 600, window: "1 m" }),
 } as const;
+
+/** Limites por scope (Newton). Default genérico aplicado a scopes não listados. */
+const SCOPE_LIMITS: Record<string, { limit: number; window: Window }> = {
+  "metrics:r": { limit: 600, window: "1 m" },
+  "documents:rw": { limit: 30, window: "1 m" },
+  default: { limit: 100, window: "1 m" },
+};

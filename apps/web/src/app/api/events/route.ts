@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { authOrBearer, hasScope } from "@/lib/auth/auth-or-bearer";
 import { prisma } from "@/lib/db/prisma";
 import { getUserOrg } from "@/lib/auth/auth";
+import { withApi } from "@/lib/api/with-api";
 
 /**
  * GET /api/events?since=ISO&limit=N&actions=CSV
@@ -31,7 +32,7 @@ import { getUserOrg } from "@/lib/auth/auth";
  * aparecem. metadata pode conter IDs mas não PII bruto se quem registrou
  * seguiu a convenção (agents.md §14).
  */
-export async function GET(req: NextRequest) {
+export const GET = withApi("GET /api/events", async (req: NextRequest) => {
   const ident = await authOrBearer(req);
   if (!ident) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -112,4 +113,4 @@ export async function GET(req: NextRequest) {
     count: events.length,
     nextSince,
   });
-}
+});

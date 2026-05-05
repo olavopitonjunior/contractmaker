@@ -3,6 +3,7 @@ import { getUserOrg } from "./auth";
 import { authOrBearer, hasScope, type ResolvedAuth } from "./auth-or-bearer";
 import { resolveNewtonActor, isRejection, type NewtonActorContext } from "@/lib/audit/newton";
 import { prisma } from "@/lib/db/prisma";
+import { RateLimits } from "@/lib/security/ratelimit";
 
 /**
  * Contexto unificado de auth para route handlers. Após a integração Newton:
@@ -62,6 +63,34 @@ export async function requireAuth(
       response: NextResponse.json(
         { error: "Forbidden", reason: `missing scope ${opts.scope}` },
         { status: 403 }
+      ),
+    };
+  }
+
+  // Rate limit per-token (bearer) ou per-session (UI). Sliding window por scope.
+  const rl =
+    ident.via === "bearer"
+      ? await RateLimits.apiPerToken(ident.tokenId, opts.scope ?? "default")
+      : await RateLimits.apiPerSession(ident.userId);
+  if (!rl.success) {
+    const retryAfterMs = Math.max(0, rl.reset - Date.now());
+    return {
+      ok: false,
+      response: new NextResponse(
+        JSON.stringify({
+          error: "RATE_LIMITED",
+          reason: `limite de ${rl.limit} req/min atingido para este token/scope`,
+        }),
+        {
+          status: 429,
+          headers: {
+            "content-type": "application/json",
+            "Retry-After": String(Math.ceil(retryAfterMs / 1000)),
+            "X-RateLimit-Limit": String(rl.limit),
+            "X-RateLimit-Remaining": "0",
+            "X-RateLimit-Reset": String(rl.reset),
+          },
+        }
       ),
     };
   }

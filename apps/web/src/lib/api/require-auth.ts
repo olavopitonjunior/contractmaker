@@ -10,6 +10,7 @@ import {
   audit,
   extractAuditContextFromRequest,
 } from "@/lib/security/audit";
+import { RateLimits } from "@/lib/security/ratelimit";
 
 /**
  * Wrapper unificado para route handlers que precisam autenticar.
@@ -42,9 +43,12 @@ export interface ApiAuthSuccess {
 }
 
 export interface ApiAuthFailure {
-  error: "Unauthorized" | "Forbidden" | "Bad Request";
+  error: "Unauthorized" | "Forbidden" | "Bad Request" | "RATE_LIMITED";
   reason?: string;
-  status: 400 | 401 | 403;
+  status: 400 | 401 | 403 | 429;
+  /** Segundos pra próxima tentativa (RATE_LIMITED). */
+  retryAfter?: number;
+  rateLimit?: { limit: number; remaining: number; reset: number };
 }
 
 export interface RequireAuthOptions {
@@ -57,6 +61,10 @@ export interface RequireAuthOptions {
    * Se true, retorna `Forbidden` quando user não tem org. Default true.
    */
   requireOrg?: boolean;
+  /**
+   * Pular rate-limit. Útil em endpoints de cron ou internal. Default false.
+   */
+  skipRateLimit?: boolean;
 }
 
 export async function requireApiAuth(
@@ -80,6 +88,24 @@ export async function requireApiAuth(
       reason: `missing scope ${opts.scope}`,
       status: 403,
     };
+  }
+
+  // Rate limit per-token (bearer) / per-session (UI). Pula se opts.skipRateLimit.
+  if (!opts.skipRateLimit) {
+    const rl =
+      ident.via === "bearer"
+        ? await RateLimits.apiPerToken(ident.tokenId, opts.scope ?? "default")
+        : await RateLimits.apiPerSession(ident.userId);
+    if (!rl.success) {
+      const retryAfterMs = Math.max(0, rl.reset - Date.now());
+      return {
+        error: "RATE_LIMITED",
+        reason: `limite de ${rl.limit} req/min atingido`,
+        status: 429,
+        retryAfter: Math.ceil(retryAfterMs / 1000),
+        rateLimit: { limit: rl.limit, remaining: 0, reset: rl.reset },
+      } as ApiAuthFailure;
+    }
   }
 
   const actorResult = resolveNewtonActor(req, ident);
@@ -138,6 +164,21 @@ export function isAuthFailure(
 }
 
 export function authFailureResponse(f: ApiAuthFailure): NextResponse {
+  if (f.status === 429 && f.rateLimit && f.retryAfter != null) {
+    return new NextResponse(
+      JSON.stringify({ error: f.error, reason: f.reason }),
+      {
+        status: 429,
+        headers: {
+          "content-type": "application/json",
+          "Retry-After": String(f.retryAfter),
+          "X-RateLimit-Limit": String(f.rateLimit.limit),
+          "X-RateLimit-Remaining": "0",
+          "X-RateLimit-Reset": String(f.rateLimit.reset),
+        },
+      }
+    );
+  }
   return NextResponse.json(
     { error: f.error, reason: f.reason },
     { status: f.status }

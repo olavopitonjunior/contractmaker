@@ -1560,3 +1560,24 @@ model ActionIntent {
   @@index([orgId, status, expiresAt])
   @@index([requestedBy, createdAt])
 }
+
+// ApiUsage — granular telemetry de chamadas Newton API.
+// Capturado por `withApi` wrapper em route handlers — uma linha por request.
+// TTL 90 dias (cleanup cron diário).
+model ApiUsage {
+  id         String   @id @default(cuid())
+  orgId      String
+  userId     String
+  tokenId    String? // null se via=session
+  via        String // "session" | "bearer"
+  method     String // GET | POST | PATCH | DELETE
+  path       String // normalizado: /api/deals/:id (sem id real, evita cardinalidade)
+  statusCode Int
+  latencyMs  Int
+  errorCode  String? // "scope_missing" | "etag_mismatch" | "rate_limited" | etc
+  createdAt  DateTime @default(now())
+
+  @@index([orgId, createdAt])
+  @@index([tokenId, createdAt])
+  @@index([path, createdAt])
+}

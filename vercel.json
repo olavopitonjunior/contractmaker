@@ -28,6 +28,10 @@
     {
       "path": "/api/cron/intents/expire",
       "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/api-usage/cleanup",
+      "schedule": "0 4 * * *"
     }
   ]
 }

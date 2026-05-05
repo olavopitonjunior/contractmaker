@@ -71,6 +71,12 @@ export default async function SettingsPage() {
             </Link>
           </Button>
           <Button variant="outline" size="sm" asChild>
+            <Link href="/settings/api-usage">
+              <Sparkles className="h-4 w-4 mr-1" />
+              Uso da API
+            </Link>
+          </Button>
+          <Button variant="outline" size="sm" asChild>
             <Link href="/settings/membros">
               <Users className="h-4 w-4 mr-1" />
               Membros

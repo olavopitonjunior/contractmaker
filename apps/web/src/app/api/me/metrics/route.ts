@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authOrBearer, hasScope } from "@/lib/auth/auth-or-bearer";
 import { prisma } from "@/lib/db/prisma";
+import { withApi } from "@/lib/api/with-api";
 
 /**
  * GET /api/me/metrics?since=ISO
@@ -23,7 +24,7 @@ import { prisma } from "@/lib/db/prisma";
  *
  * Privacy: NÃO inclui valores monetários nem dados nominais — apenas contagens.
  */
-export async function GET(req: NextRequest) {
+export const GET = withApi("GET /api/me/metrics", async (req: NextRequest) => {
   const ident = await authOrBearer(req);
   if (!ident) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -98,4 +99,4 @@ export async function GET(req: NextRequest) {
       byStatus: chargesByStatus,
     },
   });
-}
+});

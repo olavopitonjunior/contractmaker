@@ -127,6 +127,12 @@ vi.mock("@/lib/db/prisma", () => {
       update: vi.fn(),
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
+    apiUsage: {
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn(),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+      groupBy: vi.fn().mockResolvedValue([]),
+    },
   };
   Object.assign(prismaMock, mock);
   return { prisma: mock };
