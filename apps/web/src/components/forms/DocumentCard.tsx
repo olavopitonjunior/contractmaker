@@ -36,6 +36,14 @@ interface DocumentCardProps {
   onAssignmentChange?: (id: string, assignmentValue: string) => void;
   onRemove?: (id: string) => void;
   onRetry?: (id: string) => void;
+  /**
+   * Nome legível do slot de quem este doc pode ser cônjuge. Quando setado,
+   * o card mostra um badge sugerindo "Possível cônjuge de X" — usado pra
+   * evitar duplicata Isabel-cônjuge + Isabel-comprador[1] (bug demo
+   * 2026-05-05). Server-side `dedupConjuges` cobre o caso, mas a dica
+   * antecipa o problema pro usuário.
+   */
+  linkedConjugeName?: string | null;
   readOnly?: boolean;
 }
 
@@ -69,6 +77,7 @@ export function DocumentCard({
   onAssignmentChange,
   onRemove,
   onRetry,
+  linkedConjugeName,
   readOnly = false,
 }: DocumentCardProps) {
   const isImage = doc.mime.startsWith("image/");
@@ -224,6 +233,16 @@ export function DocumentCard({
                 </span>
               </div>
             ))}
+          </div>
+        )}
+
+        {linkedConjugeName && doc.status === "ready" && (
+          <div className="mt-1 flex items-start gap-1.5 rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-[11px] text-amber-900 dark:border-amber-500/40 dark:bg-amber-500/10 dark:text-amber-100">
+            <AlertCircle className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            <span className="break-words">
+              Esta pessoa já consta como <strong>cônjuge de {linkedConjugeName}</strong>.
+              Selecione "Outros (sem aplicar)" para evitar duplicata — os dados do cônjuge serão consolidados ao finalizar.
+            </span>
           </div>
         )}
 

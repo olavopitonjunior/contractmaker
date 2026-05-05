@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { generateContractForDeal } from "@/lib/services/contract-generation";
+import { dedupConjuges } from "@/lib/forms/dedup-conjuges";
 
 // GET: public - fetch form data by token
 export async function GET(
@@ -43,10 +44,17 @@ export async function PATCH(
   }
 
   const currentData = (form.dataJson as Record<string, unknown>) || {};
-  const mergedData = { ...currentData, ...body.dataJson };
+  const rawMergedData = { ...currentData, ...body.dataJson };
 
   const previousStatus = form.status;
   const newStatus = body.status ?? form.status;
+
+  // No finalize (transição para "completo"), aplica dedup de cônjuges
+  // duplicados como vendedor/comprador autônomo. Bug demo 2026-05-05:
+  // Isabel virou comprador 2 mesmo já sendo cônjuge de Luiz. Em auto-save
+  // intermediário não rodamos dedup — usuário pode estar revendo.
+  const isFinalizing = newStatus === "completo" && previousStatus !== "completo";
+  const mergedData = isFinalizing ? dedupConjuges(rawMergedData) : rawMergedData;
 
   const updated = await prisma.salesForm.update({
     where: { token: params.token },

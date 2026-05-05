@@ -851,16 +851,30 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
           </div>
 
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            {docs.map((doc) => (
-              <DocumentCard
-                key={doc.id}
-                doc={doc}
-                assignmentOptions={assignmentOptions}
-                onAssignmentChange={handleAssignmentChange}
-                onRemove={handleRemove}
-                onRetry={handleRetry}
-              />
-            ))}
+            {docs.map((doc) => {
+              const linked = doc.assignment.linkedConjugeOf;
+              let linkedConjugeName: string | null = null;
+              if (linked) {
+                const list =
+                  linked.kind === "vendedor"
+                    ? (snapshot.vendedores as Array<Record<string, unknown>> | undefined)
+                    : (snapshot.compradores as Array<Record<string, unknown>> | undefined);
+                const slot = list?.[linked.index];
+                const nome = (slot?.nome || slot?.razao_social) as string | undefined;
+                linkedConjugeName = (nome && nome.trim()) || `${linked.kind} ${linked.index + 1}`;
+              }
+              return (
+                <DocumentCard
+                  key={doc.id}
+                  doc={doc}
+                  assignmentOptions={assignmentOptions}
+                  onAssignmentChange={handleAssignmentChange}
+                  onRemove={handleRemove}
+                  onRetry={handleRetry}
+                  linkedConjugeName={linkedConjugeName}
+                />
+              );
+            })}
           </div>
         </div>
       )}

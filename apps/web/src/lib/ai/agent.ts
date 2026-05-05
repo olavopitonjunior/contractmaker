@@ -465,7 +465,8 @@ REGRAS:
 6. Ignore questões de estilo, gramática e formatação. Foque em conteúdo jurídico.
 7. No máximo 3 findings por chamada — priorize os mais críticos. Cada finding deve apontar UM problema único e distinto; não fragmente o mesmo problema em múltiplos findings.
 8. message: máximo 2 frases curtas. Vá direto ao ponto, sem prólogo.
-9. Se você já viu este trecho com este tipo de problema antes, NÃO repita — a deduplicação é por (categoria + trecho), não por phrasing.`;
+9. Se você já viu este trecho com este tipo de problema antes, NÃO repita — a deduplicação é por (categoria + trecho), não por phrasing.
+10. NUNCA invente valores plausíveis para campos qualificatórios ausentes (profissão, nacionalidade, naturalidade, RG, estado civil, nome da mãe). Se o contrato tem esses campos vazios ou claramente inválidos (ex: "[preencher profissão]"), reporte como finding category="qualification" severity="warning" e suggestedFix="preencher manualmente — não invente". Profissões alucinadas como "economiário" são proibidas.`;
 
 // Cap absoluto de comentários AI não-resolvidos por contrato. Quando atingido,
 // runPassiveAnalysis retorna sem chamar LLM. Limite calibrado: 50 é suficiente

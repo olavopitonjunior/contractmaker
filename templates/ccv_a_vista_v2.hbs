@@ -139,9 +139,15 @@ Profissão: {{this.representante.profissao}}
 <h3>INTERMEDIADORA</h3>
 
 <p>
+{{#if (eq comissao.corretora_tipo_pessoa "fisica")}}
+Corretor(a): {{comissao.imobiliaria_nome}}<br>
+CPF: {{cpf comissao.imobiliaria_cnpj}}<br>
+CRECI: {{comissao.creci}}
+{{else}}
 Imobiliária: {{comissao.imobiliaria_nome}}<br>
 CNPJ: nº {{cnpj comissao.imobiliaria_cnpj}}<br>
 CRECI: {{comissao.creci}}
+{{/if}}
 </p>
 
 <hr>
@@ -158,7 +164,7 @@ CRECI: {{comissao.creci}}
 <p>
 Endereço: {{this.rua}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Bairro: {{this.bairro}}, Cidade: {{this.cidade}} - {{this.uf}}, CEP {{cep this.cep}}<br>
 Matrícula: nº {{this.matricula}} do {{this.cartorio}}<br>
-Inscrição IPTU: nº {{this.inscricao_iptu}} junto à Prefeitura Municipal<br>
+Inscrição IPTU: nº {{this.inscricao_iptu}} junto à Prefeitura Municipal{{#if this.inscricao_municipal}}{{#unless (eq this.inscricao_municipal this.inscricao_iptu)}}<br>Inscrição Municipal: nº {{this.inscricao_municipal}}{{/unless}}{{/if}}<br>
 Descrição: {{this.descricao}}
 </p>
 {{/each}}
@@ -181,7 +187,13 @@ Descrição: {{this.descricao}}
 
 <p><strong>a)</strong> A título de sinal e princípio de pagamento (arras confirmatórias), o valor de {{moeda pagamento.sinal_arras}} ({{extenso pagamento.sinal_arras}}), a ser pago em até 1 (um) dia útil contado da assinatura do presente instrumento, mediante transferência bancária (TED/PIX) nas contas indicadas pelos PROMITENTES VENDEDORES.</p>
 
+{{#if pagamento.parcelas.length}}
+{{#each pagamento.parcelas}}
+<p><strong>{{this.letra}})</strong> {{this.tipo_texto}}: {{moeda this.valor}} ({{extenso this.valor}}), em {{numero this.dias}} dia(s) corridos contados da assinatura, mediante transferência bancária (TED/PIX) nas contas indicadas pelos PROMITENTES VENDEDORES.</p>
+{{/each}}
+{{else}}
 <p><strong>b)</strong> O saldo remanescente de {{moeda pagamento.recursos_proprios}} ({{extenso pagamento.recursos_proprios}}), a título de recursos próprios, a ser pago à vista mediante transferência bancária (TED/PIX) nas contas indicadas pelos PROMITENTES VENDEDORES.</p>
+{{/if}}
 
 <p><strong>2.1.1.</strong> Caso o sinal estipulado na alínea "a" não seja efetivamente creditado na conta dos PROMITENTES VENDEDORES no prazo de 1 (um) dia útil contado da assinatura deste instrumento, operar-se-á a rescisão automática do presente contrato, sem qualquer ônus para quaisquer das partes, retornando-se ao <em>status quo ante</em>.</p>
 
@@ -308,7 +320,7 @@ Descrição: {{this.descricao}}
 
 <h2>CLÁUSULA DÉCIMA PRIMEIRA - DA COMISSÃO</h2>
 
-<p><strong>11.1.</strong> A comissão de intermediação imobiliária devida à INTERMEDIADORA{{#if (existe comissao.imobiliaria_nome)}}, {{comissao.imobiliaria_nome}}, inscrita no CNPJ nº {{cnpj comissao.imobiliaria_cnpj}}{{#if (existe comissao.creci)}}, CRECI nº {{comissao.creci}}{{/if}},{{/if}} é de {{moeda comissao.valor}} ({{extenso comissao.valor}}), correspondente a {{percentual comissao.valor pagamento.valor_total}} do valor total da transação, a ser paga na forma e condições ajustadas entre as partes.</p>
+<p><strong>11.1.</strong> A comissão de intermediação imobiliária devida à INTERMEDIADORA{{#if (existe comissao.imobiliaria_nome)}}, {{comissao.imobiliaria_nome}}, {{#if (eq comissao.corretora_tipo_pessoa "fisica")}}inscrito(a) no CPF nº {{cpf comissao.imobiliaria_cnpj}}{{else}}inscrita no CNPJ nº {{cnpj comissao.imobiliaria_cnpj}}{{/if}}{{#if (existe comissao.creci)}}, CRECI nº {{comissao.creci}}{{/if}},{{/if}} é de {{moeda comissao.valor}} ({{extenso comissao.valor}}), correspondente a {{percentual comissao.valor pagamento.valor_total}} do valor total da transação, a ser paga na forma e condições ajustadas entre as partes.</p>
 
 <p><strong>11.2.</strong> Em caso de rescisão contratual, a responsabilidade pelo pagamento da comissão será de quem der causa ao desfazimento do negócio, nos termos do artigo 723 do Código Civil.</p>
 
@@ -411,7 +423,7 @@ CPF: {{cpf this.conjuge.cpf}}<br>
 <p>
 _______________________________<br>
 {{comissao.imobiliaria_nome}}<br>
-CNPJ: {{cnpj comissao.imobiliaria_cnpj}}{{#if (existe comissao.creci)}}<br>
+{{#if (eq comissao.corretora_tipo_pessoa "fisica")}}CPF: {{cpf comissao.imobiliaria_cnpj}}{{else}}CNPJ: {{cnpj comissao.imobiliaria_cnpj}}{{/if}}{{#if (existe comissao.creci)}}<br>
 CRECI: {{comissao.creci}}{{/if}}
 </p>
 

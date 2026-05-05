@@ -305,4 +305,188 @@ describe("Template v2 Rendering", () => {
       expect(html).toContain("150.000");
     });
   });
+
+  describe("Intermediadora — PF vs PJ", () => {
+    it("renders Corretor PF block with CPF (à vista)", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = {
+        ...mockDataAVista,
+        comissao: {
+          ...mockDataAVista.comissao,
+          corretora_tipo_pessoa: "fisica",
+          imobiliaria_nome: "Carlos Henrique Souza",
+          imobiliaria_cnpj: "52998224725", // 11 dígitos = CPF
+          creci: "199.905",
+        },
+      };
+      const html = renderContratoHTML(template, data);
+      expect(html).toContain("Corretor(a): Carlos Henrique Souza");
+      expect(html).toContain("CPF: 529.982.247-25");
+      expect(html).not.toMatch(/Imobili[áa]ria:\s*Carlos/);
+    });
+
+    it("renders Imobiliária PJ block with CNPJ (à vista)", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = {
+        ...mockDataAVista,
+        comissao: {
+          ...mockDataAVista.comissao,
+          corretora_tipo_pessoa: "juridica",
+        },
+      };
+      const html = renderContratoHTML(template, data);
+      expect(html).toContain("Imobiliária: Zimmermann Imóveis Ltda");
+      expect(html).toContain("CNPJ: nº 12.345.678/0001-90");
+      expect(html).not.toContain("Corretor(a):");
+    });
+
+    it("renders Corretor PF with CPF in financiamento clause 14.1", () => {
+      const template = loadTemplate("ccv_financiamento_v2.hbs");
+      const data = {
+        ...mockDataFinanciamento,
+        comissao: {
+          ...mockDataFinanciamento.comissao,
+          corretora_tipo_pessoa: "fisica",
+          imobiliaria_nome: "Lucas Pereira",
+          imobiliaria_cnpj: "52998224725",
+        },
+      };
+      const html = renderContratoHTML(template, data);
+      expect(html).toContain("ao(à) corretor(a) Lucas Pereira");
+      expect(html).toContain("inscrito(a) no CPF nº 529.982.247-25");
+    });
+  });
+
+  describe("Parcelas dinâmicas", () => {
+    it("renders parcelas as alíneas b/c/d in à vista when 3 parcelas", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = {
+        ...mockDataAVista,
+        pagamento: {
+          ...mockDataAVista.pagamento,
+          parcelas: [
+            { tipo_texto: "Parcela 1", dias: 30, valor: 100000, letra: "b", numero: 1 },
+            { tipo_texto: "Parcela 2", dias: 60, valor: 100000, letra: "c", numero: 2 },
+            { tipo_texto: "Parcela 3", dias: 90, valor: 100000, letra: "d", numero: 3 },
+          ],
+        },
+      };
+      const html = renderContratoHTML(template, data);
+      expect(html).toContain("<strong>b)</strong> Parcela 1:");
+      expect(html).toContain("<strong>c)</strong> Parcela 2:");
+      expect(html).toContain("<strong>d)</strong> Parcela 3:");
+      expect(html).toContain("em 30 dia");
+      expect(html).toContain("em 60 dia");
+      expect(html).toContain("em 90 dia");
+      // Sem parcelas, cairia no fallback "O saldo remanescente de {moeda}" — esse
+      // texto específico (com "de " seguido por valor) NÃO deve aparecer.
+      // Outras menções a "saldo remanescente" em cláusulas de rescisão são OK.
+      expect(html).not.toMatch(/saldo remanescente de R\$/);
+    });
+
+    it("renders parcelas as 'Parcela N' in financiamento", () => {
+      const template = loadTemplate("ccv_financiamento_v2.hbs");
+      const data = {
+        ...mockDataFinanciamento,
+        pagamento: {
+          ...mockDataFinanciamento.pagamento,
+          parcelas: [
+            { tipo_texto: "Reforço", dias: 180, valor: 30000, letra: "b", numero: 1 },
+            { tipo_texto: "Reforço final", dias: 360, valor: 30000, letra: "c", numero: 2 },
+          ],
+        },
+      };
+      const html = renderContratoHTML(template, data);
+      expect(html).toContain("<strong>Parcela 1.</strong> Reforço:");
+      expect(html).toContain("<strong>Parcela 2.</strong> Reforço final:");
+    });
+
+    it("falls back to 'saldo remanescente' when parcelas empty", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      // mockDataAVista already has parcelas: []
+      const html = renderContratoHTML(template, mockDataAVista);
+      expect(html).toContain("saldo remanescente");
+    });
+  });
+
+  describe("Múltiplos vendedores casados", () => {
+    it("renders qualificação and assinatura blocks for each vendedor + cônjuge", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = {
+        ...mockDataAVista,
+        vendedores: [
+          {
+            ...mockDataAVista.vendedores[0],
+            nome: "Vendedor Um",
+            cpf: "12345678909",
+            conjuge: { ...mockDataAVista.vendedores[0].conjuge, nome: "Cônjuge Um", cpf: "98765432100" },
+          },
+          {
+            ...mockDataAVista.vendedores[0],
+            nome: "Vendedor Dois",
+            cpf: "11122233344",
+            conjuge: { ...mockDataAVista.vendedores[0].conjuge, nome: "Cônjuge Dois", cpf: "55566677788" },
+          },
+        ],
+      };
+      const html = renderContratoHTML(template, data);
+      expect(html).toContain("Vendedor Um");
+      expect(html).toContain("Vendedor Dois");
+      expect(html).toContain("Cônjuge Um");
+      expect(html).toContain("Cônjuge Dois");
+    });
+
+    it("does NOT render conjuge block for solteiro", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = {
+        ...mockDataAVista,
+        compradores: [
+          {
+            ...mockDataAVista.compradores[0],
+            estado_civil: "Solteiro(a)",
+            // garante que campos do conjuge não vazem
+            conjuge: undefined,
+          },
+        ],
+      };
+      const html = renderContratoHTML(template, data);
+      // Não deve ter (Cônjuge/Companheiro) na seção de comprador
+      const compradorSection = html.split("PARTE COMPRADORA")[1] ?? "";
+      expect(compradorSection).not.toContain("(Cônjuge/Companheiro)");
+    });
+  });
+
+  describe("Inscrição municipal duplicada vs distinta", () => {
+    it("renders inscrição municipal when distinct from inscricao_iptu", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = {
+        ...mockDataAVista,
+        imoveis: [
+          {
+            ...mockDataAVista.imoveis[0],
+            inscricao_iptu: "300.123.0001-0",
+            inscricao_municipal: "MUN-99887",
+          },
+        ],
+      };
+      const html = renderContratoHTML(template, data);
+      expect(html).toContain("Inscrição Municipal: nº MUN-99887");
+    });
+
+    it("omits inscrição municipal when equal to inscricao_iptu", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = {
+        ...mockDataAVista,
+        imoveis: [
+          {
+            ...mockDataAVista.imoveis[0],
+            inscricao_iptu: "300.123.0001-0",
+            inscricao_municipal: "300.123.0001-0",
+          },
+        ],
+      };
+      const html = renderContratoHTML(template, data);
+      expect(html).not.toContain("Inscrição Municipal:");
+    });
+  });
 });

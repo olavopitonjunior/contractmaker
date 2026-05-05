@@ -104,7 +104,7 @@ export function ImovelStep({ form }: ImovelStepProps) {
                 <FormField label="Complemento">
                   <Input
                     {...form.register(`${prefix}.complemento`)}
-                    placeholder="Apto, Casa, Bloco..."
+                    placeholder="Apto, bloco, casa — deixe vazio se não houver"
                   />
                 </FormField>
 

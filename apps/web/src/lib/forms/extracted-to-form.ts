@@ -11,6 +11,13 @@ export interface ExtractedDoc {
 export interface Assignment {
   kind: DocumentKind;
   index: number;
+  /**
+   * Quando o doc é de uma pessoa que JÁ aparece como cônjuge de outra parte
+   * do form, sinalizamos o vínculo aqui. UI usa pra sugerir "Vincular como
+   * cônjuge de X" em vez de criar slot novo (evita duplicata Isabel-cônjuge
+   * + Isabel-comprador[1]).
+   */
+  linkedConjugeOf?: { kind: "vendedor" | "comprador"; index: number };
 }
 
 const PERSON_CATEGORIES = new Set([
@@ -189,6 +196,36 @@ export function mapExtractedToForm(
         }
       }
     }
+
+    // RG/CNH — alguns documentos trazem qualificação "casado(a) com X" ou
+    // averbação. Quando o prompt OCR captura conjuge_nome/conjuge_cpf, preenche
+    // o sub-objeto conjuge (sem mexer em estado_civil — isso já vem do RG/CNH
+    // direto via FIELD_MAP_PERSON quando presente, ou o usuário ajusta).
+    if (category === "rg" || category === "cnh" || category === "comprovante_residencia") {
+      const conjugeNome = fields.conjuge_nome;
+      const conjugeCpf = sanitizeCpf(fields.conjuge_cpf);
+      if (conjugeNome && typeof conjugeNome === "string") {
+        const curr = form.getValues(`${basePath}.conjuge.nome`);
+        if (!curr) {
+          form.setValue(
+            `${basePath}.conjuge.nome`,
+            conjugeNome.trim() as never,
+            { shouldDirty: true, shouldTouch: true }
+          );
+          filled += 1;
+        }
+      }
+      if (conjugeCpf) {
+        const curr = form.getValues(`${basePath}.conjuge.cpf`);
+        if (!curr) {
+          form.setValue(`${basePath}.conjuge.cpf`, conjugeCpf as never, {
+            shouldDirty: true,
+            shouldTouch: true,
+          });
+          filled += 1;
+        }
+      }
+    }
   }
 
   if (isProperty) {
@@ -323,6 +360,42 @@ function suggestPersonAssignment(
   void maxVendedorIdx;
   void maxCompradorIdx;
   void occupiedSlots;
+
+  // Antes de devolver "outro" puro, tenta detectar se essa pessoa já aparece
+  // como cônjuge de uma parte cadastrada. Bug demo 2026-05-05: Isabel virou
+  // comprador 2 mesmo já sendo cônjuge de Luiz Fernando — UI agora sugere
+  // vincular ao slot existente em vez de criar duplicata.
+  const matchAgainstConjuges = (
+    list: Array<Record<string, unknown>> | undefined,
+    kind: "vendedor" | "comprador"
+  ): { kind: "vendedor" | "comprador"; index: number } | null => {
+    if (!list) return null;
+    const extractedCpf = sanitizeCpf(fields.cpf_numero);
+    const extractedNome =
+      typeof fields.nome_completo === "string"
+        ? fields.nome_completo.trim().toLowerCase()
+        : null;
+    for (let i = 0; i < list.length; i++) {
+      const c = (list[i]?.conjuge ?? {}) as Record<string, unknown>;
+      const cCpf = sanitizeCpf(c.cpf);
+      if (extractedCpf && cCpf && extractedCpf === cCpf) return { kind, index: i };
+      if (
+        extractedNome &&
+        typeof c.nome === "string" &&
+        c.nome.trim().toLowerCase() === extractedNome
+      ) {
+        return { kind, index: i };
+      }
+    }
+    return null;
+  };
+  const linked =
+    matchAgainstConjuges(snapshot.vendedores, "vendedor") ||
+    matchAgainstConjuges(snapshot.compradores, "comprador");
+  if (linked) {
+    return { kind: "outro", index: 0, linkedConjugeOf: linked };
+  }
+
   return { kind: "outro", index: 0 };
 }
 

@@ -1,8 +1,7 @@
 import { prisma } from "@/lib/db/prisma";
 import { renderContratoHTML } from "@/lib/render/handlebars";
 import { isGoogleDocsFeatureEnabled } from "@/lib/google/client";
-import { createDocFromTemplate } from "@/lib/google/docs";
-import { flattenForGoogleDoc } from "@/lib/google/placeholders";
+import { uploadHtmlAsGoogleDoc } from "@/lib/google/upload-rendered-html";
 import { watchFile } from "@/lib/google/watch";
 
 interface GenerateResult {
@@ -63,7 +62,27 @@ function enrichContractData(
     entregaPosse.momento = "assinatura";
   }
 
+  // Parcelas: letra do alfabeto a partir de 'b' (sinal sempre 'a').
+  // Handlebars não tem helper de índice→letra, então fazemos no enrich.
+  const pagamentoMut = enriched.pagamento as
+    | { parcelas?: Array<Record<string, unknown>> }
+    | undefined;
+  if (pagamentoMut?.parcelas?.length) {
+    pagamentoMut.parcelas = pagamentoMut.parcelas.map((p, i) => ({
+      ...p,
+      letra: indexToLetter(i + 1), // 0 → 'b', 1 → 'c', ... (template à vista)
+      numero: i + 1, // 1, 2, 3 ... (template financiamento)
+    }));
+  }
+
   return enriched;
+}
+
+function indexToLetter(idx: number): string {
+  if (idx < 0) return "";
+  if (idx < 26) return String.fromCharCode(97 + idx);
+  // overflow improvável em parcelas reais, mas evita "undefined"
+  return `${idx + 1}`;
 }
 
 /**
@@ -149,33 +168,33 @@ export async function generateContractForDeal(
     },
   });
 
-  // Phase 1 da migração Google Docs: se a feature flag estiver ativa e o
-  // template tiver doc-modelo nativo no Drive, cria uma cópia, substitui
-  // placeholders e persiste o id no contrato. Falha aqui não impede a criação
-  // (degrada para TipTap até validação completa).
+  // Google Docs nativo: gera o doc fazendo upload do HTML já renderizado pelo
+  // Handlebars. Antes (até 2026-05-05) usávamos um template-modelo cacheado +
+  // replaceAllText, mas o template era gerado por um migrador que colapsava
+  // loops para 1 iteração e fixava conditionals — ou seja, perdia 2º vendedor,
+  // 2ª testemunha, branch cônjuge, slots de cláusula etc. Agora cada contrato
+  // sobe seu próprio HTML, preservando tudo. Falha aqui não impede a criação
+  // (degrada para TipTap).
   let googleDocUrl: string | undefined;
-  if (isGoogleDocsFeatureEnabled() && template.googleTemplateDocId) {
+  if (isGoogleDocsFeatureEnabled()) {
     try {
-      // Adiciona campo `contrato.numero` para placeholder no header (Item C).
-      const dataWithContractMeta = {
-        ...enrichedData,
-        contrato: {
-          ...((enrichedData as Record<string, unknown>).contrato as Record<string, unknown> | undefined ?? {}),
-          numero: `${contract.id.slice(-8).toUpperCase()}-v${contract.version}`,
-          id: contract.id,
-          versao: contract.version,
-        },
-      };
-      const replacements = flattenForGoogleDoc(dataWithContractMeta);
-      const created = await createDocFromTemplate({
-        templateDocId: template.googleTemplateDocId,
+      const numeroContrato = `${contract.id.slice(-8).toUpperCase()}-v${contract.version}`;
+      // Pré-injeta `{{contrato.numero}}` no HTML caso o template tenha esse
+      // placeholder em algum cabeçalho/rodapé customizado. O htmlContent já
+      // foi renderizado por Handlebars contra `enrichedData`, então só
+      // sobram literais dessa forma se o template os deixou intencionalmente.
+      const htmlForUpload = htmlContent
+        .replace(/\{\{\s*contrato\.numero\s*\}\}/g, numeroContrato)
+        .replace(/\{\{\s*contrato\.id\s*\}\}/g, contract.id)
+        .replace(/\{\{\s*contrato\.versao\s*\}\}/g, String(contract.version));
+
+      const created = await uploadHtmlAsGoogleDoc({
+        htmlContent: htmlForUpload,
         name: `Contrato ${contract.id} — v${contract.version}`,
-        replacements,
-        dataForLoops: dataWithContractMeta,
       });
 
       // Registra watch do Drive para popular ContractChangeLog quando o doc
-      // for editado dentro do iframe (item 7). Falha aqui não impede a criação.
+      // for editado dentro do iframe. Falha aqui não impede a criação.
       let watchData: {
         googleWatchChannel?: string;
         googleWatchResource?: string;

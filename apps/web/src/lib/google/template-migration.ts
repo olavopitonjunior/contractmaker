@@ -6,6 +6,14 @@ import {
 } from "./client";
 
 /**
+ * NOTA (2026-05-05): este módulo é usado APENAS para criar o template-modelo
+ * inicial no Google Drive (fluxo administrativo, uma vez por modalidade). Para
+ * gerar o Google Doc de cada contrato, use `uploadHtmlAsGoogleDoc` em
+ * `upload-rendered-html.ts` — esse caminho envia o HTML já renderizado por
+ * Handlebars (com loops, conditionals e slots resolvidos contra o dataJson
+ * real), evitando a degradação destrutiva do `buildPlaceholderHtml` (loops
+ * colapsando para 1 iteração, branch IF sempre tomada, slots virando texto).
+ *
  * Converte um template Handlebars (`.hbs`) em um Google Doc nativo no Drive
  * da service account. O resultado é um doc visualmente idêntico ao template
  * atual, com placeholders no formato `{{flat.path_helperName}}` (compatível
@@ -187,7 +195,7 @@ function stripHandlebarsLeftovers(s: string): string {
     .replace(/\{\{else\}\}[\s\S]*?(?=\{\{\/(?:if|each|unless))/g, ""); // resíduo de else
 }
 
-function wrapAsCompleteHtml(body: string): string {
+export function wrapAsCompleteHtml(body: string): string {
   return `<!doctype html>
 <html lang="pt-BR">
 <head>

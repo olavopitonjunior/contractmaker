@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
+import { prisma } from "@/lib/db/prisma";
 import { runPassiveAnalysis, type PassiveAnalysisTrigger } from "@/lib/ai/agent";
 
 export const maxDuration = 60;
@@ -16,6 +17,22 @@ export async function POST(
   const org = await getUserOrg(session.user.id);
   if (!org) {
     return NextResponse.json({ error: "No organization" }, { status: 400 });
+  }
+
+  // Contrato aprovado é imutável — análise passiva ainda pode ser disparada
+  // pelo poll stale do editor após approve. Em vez de gastar tokens LLM,
+  // devolvemos resposta vazia 200 e o frontend para de chamar.
+  const contract = await prisma.contract.findUnique({
+    where: { id: params.id },
+    select: { status: true },
+  });
+  if (contract?.status === "aprovado") {
+    return NextResponse.json({
+      findings: [],
+      commentsCreated: 0,
+      modelUsed: "approved",
+      analyzedAt: new Date().toISOString(),
+    });
   }
 
   const body = await req.json().catch(() => ({}));
