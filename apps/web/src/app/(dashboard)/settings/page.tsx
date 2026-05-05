@@ -65,6 +65,12 @@ export default async function SettingsPage() {
             </Link>
           </Button>
           <Button variant="outline" size="sm" asChild>
+            <Link href="/settings/api-tokens">
+              <KeyRound className="h-4 w-4 mr-1" />
+              API Tokens
+            </Link>
+          </Button>
+          <Button variant="outline" size="sm" asChild>
             <Link href="/settings/membros">
               <Users className="h-4 w-4 mr-1" />
               Membros
