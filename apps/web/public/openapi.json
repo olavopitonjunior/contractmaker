@@ -1,0 +1,1426 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Contractmaker API (Newton-compatible)",
+    "version": "1.0.0",
+    "description": "API REST do Contractmaker para integração com agentes de IA externos\n(Newton WhatsApp, Claude Desktop via MCP, ChatGPT GPTs).\n\nAuth: Bearer token gerado em `/settings/api-tokens`. Headers obrigatórios:\n- `Authorization: Bearer cmt_<token>`\n- `X-Idempotency-Key: <uuid-v4>` (para POST/PATCH/DELETE)\n\nAções high-risk (CHARGE_CREATE, ENVELOPE_SEND, CONTRACT_APPROVE, DEAL_DELETE_HARD)\nretornam 202 + intentId quando chamadas via Bearer; humano aprova em\n`/intents/<id>` antes da execução.\n\nDocumentação completa: docs/newton-integration.md"
+  },
+  "servers": [
+    {
+      "url": "https://imobpro.ia.br",
+      "description": "Production"
+    },
+    {
+      "url": "http://localhost:3000",
+      "description": "Local dev"
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "cmt_*",
+        "description": "Token de API gerado em /settings/api-tokens (prefixo cmt_). Hash sha256 armazenado server-side; exibido uma única vez na criação."
+      }
+    },
+    "schemas": {
+      "ApiToken": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "scopes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "lastUsedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "expiresAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "revokedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "scopes",
+          "lastUsedAt",
+          "expiresAt",
+          "revokedAt",
+          "createdAt"
+        ]
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ]
+      },
+      "IntentPendingResponse": {
+        "type": "object",
+        "properties": {
+          "intentId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending"
+            ]
+          },
+          "approvalUrl": {
+            "type": "string"
+          },
+          "expiresAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "preview": {
+            "type": "object",
+            "properties": {
+              "summary": {
+                "type": "string"
+              },
+              "details": {
+                "type": "object",
+                "additionalProperties": {}
+              }
+            },
+            "required": [
+              "summary",
+              "details"
+            ]
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "intentId",
+          "status",
+          "approvalUrl",
+          "expiresAt",
+          "preview",
+          "message"
+        ]
+      }
+    },
+    "parameters": {}
+  },
+  "paths": {
+    "/api/me/api-tokens": {
+      "get": {
+        "description": "Lista tokens de API do usuário autenticado (sem rawToken).",
+        "tags": [
+          "Tokens"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "tokens": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ApiToken"
+                      }
+                    }
+                  },
+                  "required": [
+                    "tokens"
+                  ]
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "description": "Cria novo API token. **Session-only** (não aceita Bearer — token novo precisa de identidade humana). Retorna `rawToken` UMA VEZ.",
+        "tags": [
+          "Tokens"
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "scopes": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "enum": [
+                        "deals:rw",
+                        "contracts:rw",
+                        "charges:rw",
+                        "signatures:rw",
+                        "documents:rw",
+                        "metrics:r"
+                      ]
+                    },
+                    "minItems": 1
+                  },
+                  "expiresInDays": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 365
+                  }
+                },
+                "required": [
+                  "name",
+                  "scopes"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "rawToken": {
+                      "type": "string"
+                    },
+                    "token": {
+                      "$ref": "#/components/schemas/ApiToken"
+                    },
+                    "warning": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "rawToken",
+                    "token",
+                    "warning"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/api-tokens/{id}": {
+      "delete": {
+        "description": "Revoga API token. Idempotente.",
+        "tags": [
+          "Tokens"
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "revoked": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "revoked"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/metrics": {
+      "get": {
+        "description": "Métricas agregadas do usuário (contagens deals/contratos/cobranças). Sem PII nem valores monetários.",
+        "tags": [
+          "Me"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "metrics:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "description": "ISO8601, default: -30 dias"
+            },
+            "required": false,
+            "description": "ISO8601, default: -30 dias",
+            "name": "since",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "since": {
+                      "type": "string"
+                    },
+                    "until": {
+                      "type": "string"
+                    },
+                    "deals": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "byStage": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "number"
+                          }
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "byStage"
+                      ]
+                    },
+                    "contracts": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "byStatus": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "number"
+                          }
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "byStatus"
+                      ]
+                    },
+                    "charges": {
+                      "type": "object",
+                      "properties": {
+                        "total": {
+                          "type": "number"
+                        },
+                        "byStatus": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "number"
+                          }
+                        }
+                      },
+                      "required": [
+                        "total",
+                        "byStatus"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "since",
+                    "until",
+                    "deals",
+                    "contracts",
+                    "charges"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/activity": {
+      "get": {
+        "description": "Atividade recente do usuário lida do AuditLog.",
+        "tags": [
+          "Me"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "metrics:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            },
+            "required": false,
+            "name": "since",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "1-200, default 50"
+            },
+            "required": false,
+            "description": "1-200, default 50",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "action": {
+                            "type": "string"
+                          },
+                          "result": {
+                            "type": "string"
+                          },
+                          "resource": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "resourceType": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "metadata": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "additionalProperties": {}
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "action",
+                          "result",
+                          "resource",
+                          "resourceType",
+                          "metadata",
+                          "createdAt"
+                        ]
+                      }
+                    },
+                    "count": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "count"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/me/intents": {
+      "get": {
+        "description": "Lista ActionIntents do usuário. Filtra por status.",
+        "tags": [
+          "Intents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "approved",
+                "rejected",
+                "executed",
+                "expired",
+                "failed"
+              ]
+            },
+            "required": false,
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "1-100, default 50"
+            },
+            "required": false,
+            "description": "1-100, default 50",
+            "name": "limit",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "action": {
+                            "type": "string"
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "preview": {
+                            "type": "object",
+                            "additionalProperties": {}
+                          },
+                          "approvedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "format": "date-time"
+                          },
+                          "executedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ],
+                            "format": "date-time"
+                          },
+                          "expiresAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "action",
+                          "status",
+                          "preview",
+                          "approvedAt",
+                          "executedAt",
+                          "expiresAt",
+                          "createdAt"
+                        ]
+                      }
+                    },
+                    "count": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "items",
+                    "count"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/intents/{id}": {
+      "get": {
+        "description": "Polling do status de uma ActionIntent. Inclui resultJson após executar.",
+        "tags": [
+          "Intents"
+        ],
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "action": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "preview": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "approvedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    },
+                    "executedAt": {
+                      "type": [
+                        "string",
+                        "null"
+                      ],
+                      "format": "date-time"
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "rejectionReason": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "result": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "additionalProperties": {}
+                    },
+                    "errorMessage": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "action",
+                    "status",
+                    "preview",
+                    "approvedAt",
+                    "executedAt",
+                    "expiresAt",
+                    "rejectionReason",
+                    "result",
+                    "errorMessage",
+                    "createdAt"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/api/users/by-phone": {
+      "get": {
+        "description": "Lookup user por telefone E.164. Sem email (privacy).",
+        "tags": [
+          "Users"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "metrics:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "description": "Formato E.164 (+5511987654321)"
+            },
+            "required": true,
+            "description": "Formato E.164 (+5511987654321)",
+            "name": "phone",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "userId": {
+                      "type": "string"
+                    },
+                    "orgId": {
+                      "type": "string"
+                    },
+                    "role": {
+                      "type": "string"
+                    },
+                    "name": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "userId",
+                    "orgId",
+                    "role",
+                    "name"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found"
+          }
+        }
+      }
+    },
+    "/api/contracts/{id}/summary": {
+      "get": {
+        "description": "Sumário determinístico de contrato (sem LLM). Inclui markdown pronto pra exibir.",
+        "tags": [
+          "Contracts"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "contracts:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "contractId": {
+                      "type": "string"
+                    },
+                    "dealId": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "version": {
+                      "type": "number"
+                    },
+                    "partes": {
+                      "type": "object",
+                      "properties": {
+                        "vendedores": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "nome": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "nome"
+                            ]
+                          }
+                        },
+                        "compradores": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "nome": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "nome"
+                            ]
+                          }
+                        }
+                      },
+                      "required": [
+                        "vendedores",
+                        "compradores"
+                      ]
+                    },
+                    "valor": {
+                      "type": [
+                        "number",
+                        "null"
+                      ]
+                    },
+                    "ultimaAtualizacao": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "envelopeAtual": {
+                      "type": [
+                        "object",
+                        "null"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string"
+                        },
+                        "signedCount": {
+                          "type": "number"
+                        },
+                        "totalSigners": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "status",
+                        "signedCount",
+                        "totalSigners"
+                      ]
+                    },
+                    "markdown": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "contractId",
+                    "dealId",
+                    "status",
+                    "version",
+                    "partes",
+                    "valor",
+                    "ultimaAtualizacao",
+                    "envelopeAtual",
+                    "markdown"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/contracts/{id}/approve": {
+      "post": {
+        "description": "Aprova contrato. Bearer → cria ActionIntent (HITL). Session → executa direto. Force=true ignora warnings (não bypassa erros).",
+        "tags": [
+          "Contracts"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "contracts:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "description": "UUID v4 — uma key por intenção, TTL 24h"
+            },
+            "required": false,
+            "description": "UUID v4 — uma key por intenção, TTL 24h",
+            "name": "X-Idempotency-Key",
+            "in": "header"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "force": {
+                    "type": "boolean",
+                    "default": false
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Aprovado (session) ou requiresReview com issues",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "status": {
+                          "type": "string",
+                          "enum": [
+                            "aprovado"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "status"
+                      ]
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "requiresReview": {
+                          "type": "boolean",
+                          "enum": [
+                            true
+                          ]
+                        },
+                        "canForce": {
+                          "type": "boolean"
+                        },
+                        "issues": {
+                          "type": "array",
+                          "items": {}
+                        },
+                        "errorCount": {
+                          "type": "number"
+                        },
+                        "warningCount": {
+                          "type": "number"
+                        },
+                        "pendingSuggestions": {
+                          "type": "number"
+                        },
+                        "unresolvedComments": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "requiresReview",
+                        "canForce",
+                        "issues",
+                        "errorCount",
+                        "warningCount",
+                        "pendingSuggestions",
+                        "unresolvedComments"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Bearer: intent pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntentPendingResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/commission-charges": {
+      "post": {
+        "description": "Cria cobrança de comissão Asaas. Bearer → ActionIntent (HITL). Session → executa direto.",
+        "tags": [
+          "Charges"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "charges:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "billingType": {
+                    "type": "string",
+                    "enum": [
+                      "PIX",
+                      "BOLETO"
+                    ]
+                  },
+                  "dueDate": {
+                    "type": "string",
+                    "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                  },
+                  "contractId": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "billingType",
+                  "dueDate"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Criado (session)"
+          },
+          "202": {
+            "description": "Bearer: intent pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntentPendingResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/contracts/{id}/envelopes": {
+      "post": {
+        "description": "Envia contrato pra assinatura ClickSign. Bearer → ActionIntent (HITL). Session → executa direto.",
+        "tags": [
+          "Signatures"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "signatures:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "authMethod": {
+                    "type": "string",
+                    "enum": [
+                      "email",
+                      "whatsapp",
+                      "selfie",
+                      "icp_brasil"
+                    ]
+                  },
+                  "envelopeName": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200
+                  },
+                  "deadlineAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Criado (session)"
+          },
+          "202": {
+            "description": "Bearer: intent pending",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntentPendingResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/events": {
+      "get": {
+        "description": "Feed de eventos pra polling (Newton). Lê AuditLog filtrado pela org. Cliente persiste `nextSince` pra próxima chamada.",
+        "tags": [
+          "Events"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "metrics:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string",
+              "format": "date-time",
+              "description": "ISO8601 obrigatório"
+            },
+            "required": true,
+            "description": "ISO8601 obrigatório",
+            "name": "since",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "1-500, default 100"
+            },
+            "required": false,
+            "description": "1-500, default 100",
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "description": "CSV de actions a filtrar"
+            },
+            "required": false,
+            "description": "CSV de actions a filtrar",
+            "name": "actions",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "events": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "action": {
+                            "type": "string"
+                          },
+                          "result": {
+                            "type": "string"
+                          },
+                          "resource": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "resourceType": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
+                          "metadata": {
+                            "type": [
+                              "object",
+                              "null"
+                            ],
+                            "additionalProperties": {}
+                          },
+                          "createdAt": {
+                            "type": "string",
+                            "format": "date-time"
+                          },
+                          "userId": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "action",
+                          "result",
+                          "resource",
+                          "resourceType",
+                          "metadata",
+                          "createdAt",
+                          "userId"
+                        ]
+                      }
+                    },
+                    "count": {
+                      "type": "number"
+                    },
+                    "nextSince": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "events",
+                    "count",
+                    "nextSince"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/org/infosimples-budget": {
+      "get": {
+        "description": "Saldo mensal Infosimples (certidões) da org.",
+        "tags": [
+          "Org"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "metrics:r"
+            ]
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "orgId": {
+                      "type": "string"
+                    },
+                    "month": {
+                      "type": "string"
+                    },
+                    "budgetCents": {
+                      "type": "number"
+                    },
+                    "spentCents": {
+                      "type": "number"
+                    },
+                    "remainingCents": {
+                      "type": "number"
+                    },
+                    "pct": {
+                      "type": "number"
+                    },
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "warningPct": {
+                      "type": "number"
+                    },
+                    "spentByEndpoint": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "required": [
+                    "orgId",
+                    "month",
+                    "budgetCents",
+                    "spentCents",
+                    "remainingCents",
+                    "pct",
+                    "ok",
+                    "warningPct",
+                    "spentByEndpoint"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "webhooks": {}
+}

@@ -4,7 +4,8 @@
   "private": true,
   "type": "commonjs",
   "workspaces": [
-    "apps/web"
+    "apps/web",
+    "apps/mcp-server"
   ],
   "main": "dist/index.js",
   "bin": {
