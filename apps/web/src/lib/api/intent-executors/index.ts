@@ -87,5 +87,28 @@ export function ensureIntentExecutorsRegistered(): void {
     };
   });
 
-  // ENVELOPE_SEND — TODO (mesmo padrão, extract da route envelopes/route.ts)
+  // ENVELOPE_SEND — enviar contrato pra ClickSign após aprovação humana
+  registerIntentExecutor("ENVELOPE_SEND", async (payload) => {
+    const p = payload as {
+      contractId: string;
+      authMethod?: "email" | "whatsapp" | "selfie" | "icp_brasil";
+      envelopeName?: string;
+      deadlineAt?: string | null;
+    };
+    const { sendEnvelopeForContract } = await import(
+      "@/lib/clicksign/executor"
+    );
+    try {
+      const envelope = await sendEnvelopeForContract({
+        contractId: p.contractId,
+        authMethod: p.authMethod,
+        envelopeName: p.envelopeName,
+        deadlineAt: p.deadlineAt ? new Date(p.deadlineAt) : null,
+      });
+      return { status: 201, body: { envelope } };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { status: 500, body: { error: message } };
+    }
+  });
 }
