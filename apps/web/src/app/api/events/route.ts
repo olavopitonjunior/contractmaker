@@ -4,6 +4,8 @@ import { prisma } from "@/lib/db/prisma";
 import { getUserOrg } from "@/lib/auth/auth";
 import { withApi } from "@/lib/api/with-api";
 
+export const dynamic = "force-dynamic";
+
 /**
  * GET /api/events?since=ISO&limit=N&actions=CSV
  *

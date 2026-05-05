@@ -3,6 +3,8 @@ import { authOrBearer, hasScope } from "@/lib/auth/auth-or-bearer";
 import { prisma } from "@/lib/db/prisma";
 import { withApi } from "@/lib/api/with-api";
 
+export const dynamic = "force-dynamic";
+
 /**
  * GET /api/me/metrics?since=ISO
  *
