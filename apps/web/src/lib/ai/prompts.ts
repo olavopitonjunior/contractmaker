@@ -44,6 +44,13 @@ export const DEFAULT_SYSTEM_PROMPT = `Você é um assistente jurídico especiali
 
 8. IDIOMA: Todas as respostas devem ser em português brasileiro.
 
+8.1. NUNCA EXIBA JSON CRU NA RESPOSTA: O contexto que você recebe inclui dados estruturados, mas a resposta ao usuário deve sempre ser texto humano em markdown — listas, tabelas, parágrafos. Mesmo que o usuário pergunte "quais são os dados dos vendedores", você NUNCA responde com \`{"nome": "...", "cpf": "..."}\` ou um bloco \`\`\`json. Traduza para uma lista markdown com bullets ou uma tabela. Se o usuário pedir explicitamente "me mostre o JSON" ou "dump dos dados", aí sim devolva em bloco de código — caso contrário, sempre formate.
+
+8.2. FOCO NO CONTRATO/FORMULÁRIO DESTA SESSÃO: A sessão de chat está vinculada a UM contrato específico. NÃO mencione, compare ou cite outros contratos a menos que:
+   - O usuário peça explicitamente uma comparação ("como nos contratos anteriores", "quais contratos similares").
+   - A tool \`find_similar_contracts\` tenha retornado evidência relevante para uma decisão concreta nesta sessão (ex: "em 3 contratos similares aprovados, vocês mantiveram multa de 2% — mantenho o mesmo padrão aqui"). Nesse caso, cite com nome/número e seja específico.
+   Não faça digressões sobre "padrões da organização" sem ancoragem em evidência específica. O contexto especialista pré-carregado serve para informar suas decisões — não para você listá-lo proativamente em respostas.
+
 9. RENUMERAÇÃO DE SUBCLÁUSULAS (CRÍTICO): Ao inserir uma nova subcláusula via edit_contract_section (por exemplo, adicionar "2.1.2 nova" entre "2.1.1" e "2.1.2" existente), você DEVE renumerar TODAS as subcláusulas subsequentes da mesma cláusula-mãe para manter a sequência correta. Exemplo: se existem 2.1.1, 2.1.2, 2.1.3 e você insere uma nova entre 2.1.1 e 2.1.2, o resultado deve ser: 2.1.1, 2.1.2 (nova), 2.1.3 (era 2.1.2), 2.1.4 (era 2.1.3). Antes de finalizar qualquer edição, leia a cláusula-mãe completa e verifique se todas as subcláusulas têm numeração única e sequencial. NUNCA deixe duas subcláusulas com o mesmo número. Se remover uma subcláusula, também renumere as subsequentes para eliminar lacunas.
 
 10. RESPOSTA DETALHADA (OBRIGATÓRIA): Ao finalizar qualquer operação que envolva edição ou análise, retorne uma resposta em **markdown estruturado**. Os headings devem ser **literais** — copie palavra por palavra, respeitando capitalização e acentuação:
@@ -155,27 +162,131 @@ O banco de cláusulas contém 23 cláusulas padronizadas organizadas em 6 grupos
 - Se **vendedor é sócio de PJ**: inserir G6 declaração de sócio PJ.
 - Sempre consultar query_clauses com groupCode antes de inserir.`;
 
+/**
+ * Formata `dataJson` como markdown legível em vez de JSON cru. Reduz risco do
+ * agente espelhar JSON na resposta (bug observado: usuário pergunta "quais
+ * dados dos vendedores?" e a IA cola o JSON formatado em vez de listar).
+ */
+function dataJsonToMarkdown(data: Record<string, unknown>): string {
+  const out: string[] = [];
+
+  const partyLine = (p: Record<string, unknown>, idx: number, role: string): string => {
+    const label = `${role} ${idx + 1}`;
+    if (p.tipo_pessoa === "juridica") {
+      const r = (p.razao_social as string) || "(sem razão social)";
+      const c = (p.cnpj as string) || "(sem CNPJ)";
+      return `- **${label}** (PJ): ${r} · CNPJ ${c}`;
+    }
+    const nome = (p.nome as string) || "(sem nome)";
+    const cpf = (p.cpf as string) || "(sem CPF)";
+    const ec = (p.estado_civil as string) || "?";
+    const prof = (p.profissao as string) || "?";
+    const conjugeNome =
+      (p.conjuge as Record<string, unknown> | undefined)?.nome as string | undefined;
+    const cj = conjugeNome ? ` · cônjuge: ${conjugeNome}` : "";
+    return `- **${label}**: ${nome} · CPF ${cpf} · ${ec} · ${prof}${cj}`;
+  };
+
+  const vendedores = data.vendedores as Array<Record<string, unknown>> | undefined;
+  if (vendedores?.length) {
+    out.push("### Vendedores");
+    vendedores.forEach((v, i) => out.push(partyLine(v, i, "Vendedor")));
+    out.push("");
+  }
+
+  const compradores = data.compradores as Array<Record<string, unknown>> | undefined;
+  if (compradores?.length) {
+    out.push("### Compradores");
+    compradores.forEach((c, i) => out.push(partyLine(c, i, "Comprador")));
+    out.push("");
+  }
+
+  const imoveis = data.imoveis as Array<Record<string, unknown>> | undefined;
+  if (imoveis?.length) {
+    out.push("### Imóveis");
+    imoveis.forEach((im, i) => {
+      const rua = (im.rua as string) || "?";
+      const num = (im.numero as string) || "s/n";
+      const cidade = (im.cidade as string) || "?";
+      const uf = (im.uf as string) || "?";
+      const mat = (im.matricula as string) || "?";
+      out.push(`- **Imóvel ${i + 1}**: ${rua}, ${num} · ${cidade}/${uf} · matrícula ${mat}`);
+    });
+    out.push("");
+  }
+
+  const pag = data.pagamento as Record<string, unknown> | undefined;
+  if (pag) {
+    out.push("### Pagamento");
+    out.push(`- Modalidade: ${data.modalidade || "?"}`);
+    out.push(`- Valor total: ${pag.valor_total ?? "?"}`);
+    if (pag.sinal_arras) out.push(`- Sinal/arras: ${pag.sinal_arras}`);
+    if (pag.recursos_proprios) out.push(`- Recursos próprios: ${pag.recursos_proprios}`);
+    if (pag.alienacao_fiduciaria) out.push(`- Financiamento: ${pag.alienacao_fiduciaria}`);
+    if (pag.fgts) out.push(`- FGTS: ${pag.fgts}`);
+    const parcelas = pag.parcelas as Array<Record<string, unknown>> | undefined;
+    if (parcelas?.length) {
+      out.push(`- Parcelas adicionais: ${parcelas.length}`);
+    }
+    out.push("");
+  }
+
+  const com = data.comissao as Record<string, unknown> | undefined;
+  if (com) {
+    out.push("### Comissão / intermediação");
+    const tipo = com.corretora_tipo_pessoa === "fisica" ? "PF" : "PJ";
+    const nome = (com.imobiliaria_nome as string) || "(sem nome)";
+    out.push(`- ${tipo}: ${nome} · valor ${com.valor ?? "?"}`);
+    if (com.creci) out.push(`- CRECI: ${com.creci}`);
+    out.push("");
+  }
+
+  const test = data.testemunhas as Array<Record<string, unknown>> | undefined;
+  if (test?.length) {
+    const filled = test.filter((t) => t.nome).length;
+    out.push(`### Testemunhas: ${filled}/${test.length} preenchidas`);
+    out.push("");
+  }
+
+  return out.join("\n").trim() || "(dataJson vazio)";
+}
+
 export function buildContextMessage(context: {
   dataJson: Record<string, unknown>;
   htmlContent: string;
   activeClauses: { title: string; category: string }[];
   templateModalidade?: string;
   templateName?: string;
+  /** Quando true, o `htmlContent` veio de `getDocPlainText` (texto plano do
+   *  Drive) — o label é ajustado pra evitar que o agente assuma que é HTML. */
+  isGoogleDocs?: boolean;
 }): string {
   const clauseList = context.activeClauses
     .map((c) => `- [${c.category}] ${c.title}`)
     .join("\n");
 
   const templateInfo = context.templateModalidade
-    ? `TEMPLATE: ${context.templateName || "N/A"} (modalidade: ${context.templateModalidade})\n\n`
+    ? `**Template**: ${context.templateName || "N/A"} (modalidade: ${context.templateModalidade})\n\n`
     : "";
 
-  return `${templateInfo}DADOS DO CONTRATO (JSON):
-${JSON.stringify(context.dataJson, null, 2)}
+  const dataMd = dataJsonToMarkdown(context.dataJson);
 
-CLÁUSULAS ATIVAS NO CONTRATO:
+  const contentLabel = context.isGoogleDocs
+    ? "TEXTO ATUAL DO CONTRATO (extraído do Google Doc — sem markup HTML)"
+    : "HTML ATUAL DO CONTRATO";
+
+  const truncated = context.htmlContent.length > 8000;
+  const contentSlice = context.htmlContent.substring(0, 8000);
+
+  return `${templateInfo}## DADOS DO CONTRATO
+
+${dataMd}
+
+## CLÁUSULAS ATIVAS NO CONTRATO
+
 ${clauseList || "(nenhuma cláusula vinculada)"}
 
-HTML ATUAL DO CONTRATO:
-${context.htmlContent.substring(0, 8000)}${context.htmlContent.length > 8000 ? "\n...(truncado)" : ""}`;
+## ${contentLabel}
+
+${contentSlice}${truncated ? "\n...(truncado)" : ""}`;
 }

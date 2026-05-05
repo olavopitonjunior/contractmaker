@@ -29,7 +29,14 @@ interface AgentParams {
 async function getAgentConfig(orgId: string) {
   const config = await prisma.agentConfig.findUnique({ where: { orgId } });
   return {
-    model: config?.model || process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514",
+    // Default Haiku 4.5: ~3× mais barato que Sonnet ($1/MT in vs $3, $5/MT out
+    // vs $15) e suficiente para tool-use + edições dirigidas. Orgs que querem
+    // raciocínio jurídico mais profundo configuram em AgentConfig.model ou
+    // via env ANTHROPIC_MODEL=claude-sonnet-4-6.
+    model:
+      config?.model ||
+      process.env.ANTHROPIC_MODEL ||
+      "claude-haiku-4-5-20251001",
     temperature: config?.temperature ?? 0.3,
     maxTokens: config?.maxTokens ?? 4096,
     systemPrompt: config?.systemPrompt || DEFAULT_SYSTEM_PROMPT,
@@ -204,6 +211,7 @@ export async function runContractAgent(params: AgentParams): Promise<AgentResult
     activeClauses: context.activeClauses,
     templateModalidade: context.templateModalidade,
     templateName: context.templateName,
+    isGoogleDocs: !!context.googleDocId,
   });
 
   // Classify intent: if the message looks like an edit command, force tool use
@@ -246,13 +254,27 @@ export async function runContractAgent(params: AgentParams): Promise<AgentResult
   const toolsUsedSet = new Set<string>();
   const t0 = Date.now();
 
+  // System prompt cacheável: ~6k tokens compartilhados entre turns; com
+  // cache_control "ephemeral" (TTL 5min) o segundo turn em diante paga ~10%
+  // do custo de input no system block. Tools ficam fora do cache porque
+  // mudam pouco mas não justificam o overhead de cache hit/miss tracking.
+  // SDK 0.30.x ainda não tipa cache_control no TextBlockParam GA — a API
+  // aceita o campo, então usamos cast localizado.
+  const systemBlocks = [
+    {
+      type: "text" as const,
+      text: config.systemPrompt,
+      cache_control: { type: "ephemeral" as const },
+    },
+  ] as unknown as Anthropic.TextBlockParam[];
+
   let response;
   try {
     response = await anthropic.messages.create({
       model: config.model,
       max_tokens: config.maxTokens,
       temperature: config.temperature,
-      system: config.systemPrompt,
+      system: systemBlocks,
       tools: AGENT_TOOLS,
       // Force the model into tool-use mode when the intent is clearly an edit.
       // Without this, Sonnet sometimes replies conversationally on the first
@@ -326,7 +348,7 @@ export async function runContractAgent(params: AgentParams): Promise<AgentResult
       model: config.model,
       max_tokens: config.maxTokens,
       temperature: config.temperature,
-      system: config.systemPrompt,
+      system: systemBlocks,
       tools: AGENT_TOOLS,
       messages,
     });

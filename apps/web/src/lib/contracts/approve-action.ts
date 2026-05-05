@@ -108,11 +108,30 @@ export async function runContractApproval(
     };
   }
 
-  // Aprovar
+  // Aprovar — em GDocs mode, antes de gravar o status, capturamos o HTML
+  // atual do Drive como snapshot final. Sem isso, `Contract.htmlContent` fica
+  // permanentemente travado na versão inicial (renderizada na geração) e o
+  // `createContractMemory` indexa embedding sobre conteúdo desatualizado,
+  // distorcendo `find_similar_contracts`. Falha do export NÃO bloqueia
+  // aprovação — caímos pro htmlContent existente.
+  let snapshotHtml: string | undefined;
+  if (contract.googleDocId) {
+    try {
+      const { exportDocAsHtml } = await import("@/lib/google/docs");
+      snapshotHtml = await exportDocAsHtml(contract.googleDocId);
+    } catch (err) {
+      console.error(
+        "[approve-action] Falha ao exportar HTML do GDoc (segue com htmlContent atual):",
+        err
+      );
+    }
+  }
+
   await prisma.contract.update({
     where: { id: input.contractId },
     data: {
       status: "aprovado",
+      ...(snapshotHtml ? { htmlContent: snapshotHtml } : {}),
       ...(contract.googleDocId
         ? { googleDocStatus: "approved_readonly" }
         : {}),

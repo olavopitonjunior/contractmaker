@@ -274,10 +274,15 @@ export function ContractEditorPage({
 
   async function handleSaveVersion() {
     setSaving(true);
+    // Em GDocs mode o htmlContent do state é o snapshot inicial e não reflete
+    // edições no doc — backend exporta o HTML atual do Drive. Mandar body vazio
+    // evita corromper a versão nova com texto stale se o export do backend
+    // falhar (caso em que o backend cai para o htmlContent persistido).
+    const body = isGoogleDocsBacked ? {} : { htmlContent };
     const res = await fetch(`/api/contracts/${contract.id}/version`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ htmlContent }),
+      body: JSON.stringify(body),
     });
     setSaving(false);
 
