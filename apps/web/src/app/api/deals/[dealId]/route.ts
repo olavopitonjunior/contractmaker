@@ -8,6 +8,7 @@ import {
 import { etagFor } from "@/lib/api/etag";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
+import { requireApproval, approvalResponse } from "@/lib/api/intents";
 
 export const runtime = "nodejs";
 
@@ -132,32 +133,57 @@ export async function DELETE(
     return NextResponse.json({ ok: true, mode: "soft", dealId: params.dealId });
   }
 
-  await prisma.$transaction(async (tx) => {
-    await tx.deal.delete({ where: { id: params.dealId } });
-    if (deal.formId) {
-      await tx.salesForm.delete({ where: { id: deal.formId } }).catch(() => {
-        /* defensive */
+  // Hard delete: dual-approval pra Bearer, direto pra session.
+  const idempotencyKey = req.headers.get("x-idempotency-key");
+  const result = await requireApproval<unknown>({
+    ctx: {
+      via: auth.ident.via,
+      userId: auth.ident.userId,
+      orgId: auth.org.id,
+      actor: auth.actor,
+    },
+    action: "DEAL_DELETE_HARD",
+    payload: { dealId: params.dealId },
+    preview: {
+      summary: `Excluir deal "${deal.title}" permanentemente (cascata: contratos, certidões, anexos)`,
+      details: { dealId: params.dealId, title: deal.title },
+    },
+    req,
+    idempotencyKey,
+    run: async () => {
+      await prisma.$transaction(async (tx) => {
+        await tx.deal.delete({ where: { id: params.dealId } });
+        if (deal.formId) {
+          await tx.salesForm
+            .delete({ where: { id: deal.formId } })
+            .catch(() => {});
+        }
       });
-    }
+      return {
+        status: 200,
+        body: { ok: true, mode: "hard", dealId: params.dealId },
+      };
+    },
   });
 
-  await audit(
-    extractAuditContextFromRequest(
-      req,
-      auth.org.id,
-      auth.actor.effectiveUserId
-    ),
-    {
-      action: "DEAL_DELETE",
-      result: "SUCCESS",
-      resource: params.dealId,
-      resourceType: "Deal",
-      metadata: mergeAuditMetadata(
-        { mode: "hard", title: deal.title },
-        auth.actor
+  if (result.via === "executed") {
+    await audit(
+      extractAuditContextFromRequest(
+        req,
+        auth.org.id,
+        auth.actor.effectiveUserId
       ),
-    }
-  );
-
-  return NextResponse.json({ ok: true, mode: "hard", dealId: params.dealId });
+      {
+        action: "DEAL_DELETE",
+        result: "SUCCESS",
+        resource: params.dealId,
+        resourceType: "Deal",
+        metadata: mergeAuditMetadata(
+          { mode: "hard", title: deal.title },
+          auth.actor
+        ),
+      }
+    );
+  }
+  return approvalResponse(result);
 }

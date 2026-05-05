@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prisma } from "@/lib/db/prisma";
+
+// Mock o registry pra não importar libs pesadas (Asaas/charges-action) no test
+vi.mock("@/lib/api/intent-executors", () => ({
+  ensureIntentExecutorsRegistered: vi.fn(),
+}));
+
 import {
   canonicalize,
   hashPayload,

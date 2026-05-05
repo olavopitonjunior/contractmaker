@@ -75,8 +75,21 @@ export interface RunResult<T = unknown> {
   body: T;
 }
 
+export interface RequireApprovalCallerCtx {
+  /** "session" → executa direto; "bearer" → cria intent. */
+  via: "session" | "bearer";
+  /** userId que está chamando (effectiveUserId quando bearer). */
+  userId: string;
+  orgId: string;
+  /** tokenId do UserApiToken — opcional. Persistido na intent quando bearer. */
+  tokenId?: string | null;
+  /** Pra mergeAuditMetadata em INTENT_CREATED. */
+  actor: { effectiveUserId: string; via?: "newton" };
+}
+
 export interface RequireApprovalArgs<T = unknown> {
-  ctx: ApiAuthSuccess;
+  /** Aceita o helper `ApiAuthSuccess` direto ou o ctx soltinho. */
+  ctx: ApiAuthSuccess | RequireApprovalCallerCtx;
   action: IntentAction;
   payload: object;
   preview: IntentPreview;
@@ -87,6 +100,21 @@ export interface RequireApprovalArgs<T = unknown> {
    * de criar nova. Vem do header X-Idempotency-Key se presente.
    */
   idempotencyKey?: string | null;
+}
+
+function normalizeCtx(
+  ctx: ApiAuthSuccess | RequireApprovalCallerCtx
+): RequireApprovalCallerCtx {
+  if ("ident" in ctx) {
+    return {
+      via: ctx.ident.via,
+      userId: ctx.ident.userId,
+      orgId: ctx.org.id,
+      tokenId: ctx.ident.via === "bearer" ? ctx.ident.tokenId : null,
+      actor: ctx.actor,
+    };
+  }
+  return ctx;
 }
 
 export interface ApprovalResponse<T = unknown> {
@@ -108,8 +136,10 @@ export interface IntentCreatedBody {
 export async function requireApproval<T>(
   args: RequireApprovalArgs<T>
 ): Promise<ApprovalResponse<T>> {
+  const ctx = normalizeCtx(args.ctx);
+
   // Session humana → executa direto.
-  if (args.ctx.ident.via === "session") {
+  if (ctx.via === "session") {
     const r = await args.run();
     return { status: r.status, body: r.body, via: "executed" };
   }
@@ -117,23 +147,20 @@ export async function requireApproval<T>(
   // Bearer → cria intent pending.
   const idempotencyKey = args.idempotencyKey ?? null;
 
-  // Idempotência: se já existe intent com mesma key, retorna ela
   if (idempotencyKey) {
     const existing = await prisma.actionIntent.findUnique({
       where: {
         requestedBy_idempotencyKey: {
-          requestedBy: args.ctx.ident.userId,
+          requestedBy: ctx.userId,
           idempotencyKey,
         },
       },
     });
     if (existing) {
-      // Se já executou, retorna o resultado original
       if (existing.status === "executed" && existing.resultJson) {
         const result = existing.resultJson as { status: number; body: T };
         return { status: result.status, body: result.body, via: "executed" };
       }
-      // Senão, retorna o body de "pendente"
       return {
         status: 202,
         body: buildPendingBody(existing),
@@ -144,15 +171,13 @@ export async function requireApproval<T>(
 
   const payloadHash = hashPayload(args.payload);
   const expiresAt = new Date(Date.now() + INTENT_TTL_HOURS * 60 * 60 * 1000);
-  const tokenId =
-    args.ctx.ident.via === "bearer" ? args.ctx.ident.tokenId : null;
 
   const intent = await prisma.actionIntent.create({
     data: {
-      orgId: args.ctx.org.id,
-      requestedBy: args.ctx.ident.userId,
-      actorVia: args.ctx.ident.via,
-      tokenId,
+      orgId: ctx.orgId,
+      requestedBy: ctx.userId,
+      actorVia: ctx.via,
+      tokenId: ctx.tokenId ?? null,
       action: args.action,
       payload: args.payload as object,
       payloadHash,
@@ -164,11 +189,7 @@ export async function requireApproval<T>(
   });
 
   await audit(
-    extractAuditContextFromRequest(
-      args.req,
-      args.ctx.org.id,
-      args.ctx.actor.effectiveUserId
-    ),
+    extractAuditContextFromRequest(args.req, ctx.orgId, ctx.actor.effectiveUserId),
     {
       action: "INTENT_CREATED",
       result: "SUCCESS",
@@ -176,7 +197,7 @@ export async function requireApproval<T>(
       resourceType: "ActionIntent",
       metadata: mergeAuditMetadata(
         { intentAction: args.action, summary: args.preview.summary },
-        args.ctx.actor
+        ctx.actor
       ),
     }
   );
