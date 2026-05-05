@@ -499,7 +499,11 @@ export function ContractEditorPage({
               <SheetHeader>
                 <SheetTitle>Histórico de Versões</SheetTitle>
               </SheetHeader>
-              <VersionTimeline versions={versions} currentId={contract.id} />
+              <VersionTimeline
+                versions={versions}
+                currentId={contract.id}
+                dealId={contract.dealId}
+              />
             </SheetContent>
           </Sheet>
 

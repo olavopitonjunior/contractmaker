@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2, ShieldCheck, Copy, Wallet, FileSignature, Trash2 } from "lucide-react";
+import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX } from "lucide-react";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
 import type { Assignment, DocumentKind } from "@/lib/forms/extracted-to-form";
 import { CertidoesTab } from "@/components/pipeline/CertidoesTab";
@@ -118,6 +118,10 @@ export function DealDetail({ deal }: DealDetailProps) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteFormToo, setDeleteFormToo] = useState(false);
+  const [deleteContractsDialogOpen, setDeleteContractsDialogOpen] = useState(false);
+  const [deletingContracts, setDeletingContracts] = useState(false);
+  const [pendingAttachmentId, setPendingAttachmentId] = useState<string | null>(null);
+  const [deletingAttachment, setDeletingAttachment] = useState(false);
 
   async function doGenerateContract() {
     setGenerating(true);
@@ -192,6 +196,54 @@ export function DealDetail({ deal }: DealDetailProps) {
     } finally {
       setDeleting(false);
       setDeleteDialogOpen(false);
+    }
+  }
+
+  async function handleDeleteContracts() {
+    setDeletingContracts(true);
+    try {
+      const res = await fetch(`/api/pipeline/deals/${deal.id}/contracts`, {
+        method: "DELETE",
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok) {
+        const c = data?.deleted;
+        toast.success(
+          `${c?.contracts ?? 0} contrato(s) excluído(s) (${c?.googleDocsTrashed ?? 0} GDocs na lixeira)`
+        );
+        router.refresh();
+      } else if (res.status === 409) {
+        toast.error(data?.error || "Não foi possível excluir contratos");
+      } else {
+        toast.error(data?.error || "Erro ao excluir contratos");
+      }
+    } catch {
+      toast.error("Erro de conexão");
+    } finally {
+      setDeletingContracts(false);
+      setDeleteContractsDialogOpen(false);
+    }
+  }
+
+  async function handleDeleteAttachment(attachmentId: string) {
+    setDeletingAttachment(true);
+    try {
+      const res = await fetch(
+        `/api/deals/${deal.id}/attachments/${attachmentId}`,
+        { method: "DELETE" }
+      );
+      const data = await res.json().catch(() => null);
+      if (res.ok) {
+        toast.success("Documento excluído");
+        router.refresh();
+      } else {
+        toast.error(data?.error || "Erro ao excluir documento");
+      }
+    } catch {
+      toast.error("Erro de conexão");
+    } finally {
+      setDeletingAttachment(false);
+      setPendingAttachmentId(null);
     }
   }
 
@@ -295,6 +347,17 @@ export function DealDetail({ deal }: DealDetailProps) {
               {signing ? "Processando..." : "Marcar como Assinado"}
             </Button>
           )}
+          {deal.contracts.length > 0 && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-destructive border-destructive/40 hover:bg-destructive/10"
+              onClick={() => setDeleteContractsDialogOpen(true)}
+            >
+              <FileX className="h-4 w-4 mr-1" />
+              Excluir contratos
+            </Button>
+          )}
           <Button
             size="sm"
             variant="outline"
@@ -302,10 +365,68 @@ export function DealDetail({ deal }: DealDetailProps) {
             onClick={() => setDeleteDialogOpen(true)}
           >
             <Trash2 className="h-4 w-4 mr-1" />
-            Excluir
+            Excluir negócio
           </Button>
         </div>
       </div>
+
+      <AlertDialog
+        open={deleteContractsDialogOpen}
+        onOpenChange={setDeleteContractsDialogOpen}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              Excluir todos os contratos deste negócio?
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>
+                  Apagar <strong>{deal.contracts.length}</strong> contrato(s) e
+                  todas suas versões. Os Google Docs vão para a lixeira do Drive.
+                </p>
+                <p>O negócio e o formulário continuam intactos.</p>
+                <p className="font-medium">Não pode ser desfeito.</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingContracts}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDeleteContracts}
+              disabled={deletingContracts}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deletingContracts ? "Excluindo..." : "Excluir contratos"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!pendingAttachmentId}
+        onOpenChange={(open) => !open && setPendingAttachmentId(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir este documento?</AlertDialogTitle>
+            <AlertDialogDescription>
+              O arquivo será removido do negócio. Certidões emitidas que apontavam
+              para este documento ficam órfãs (não são apagadas). Não pode ser desfeito.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingAttachment}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => pendingAttachmentId && handleDeleteAttachment(pendingAttachmentId)}
+              disabled={deletingAttachment}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deletingAttachment ? "Excluindo..." : "Excluir"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
@@ -505,6 +626,7 @@ export function DealDetail({ deal }: DealDetailProps) {
             fallbackAttachments={deal.attachments}
             vendedores={vendedores}
             compradores={compradores}
+            onRequestRemoveDealAttachment={(id) => setPendingAttachmentId(id)}
           />
         </TabsContent>
 
@@ -714,6 +836,7 @@ function DocumentsTab({
   fallbackAttachments,
   vendedores,
   compradores,
+  onRequestRemoveDealAttachment,
 }: {
   dealId: string;
   formAttachments: FormAttachmentLite[];
@@ -721,7 +844,14 @@ function DocumentsTab({
   fallbackAttachments: FallbackAttachment[];
   vendedores: Parte[];
   compradores: Parte[];
+  /** Callback chamado quando o usuário clica no X de um DealAttachment
+   *  (Infosimples ou manual). Pai abre AlertDialog de confirmação. */
+  onRequestRemoveDealAttachment?: (attachmentId: string) => void;
 }) {
+  // Set para identificar quais cards são DealAttachment (têm rota DELETE
+  // /api/deals/[dealId]/attachments/[id]). FormAttachments têm sua rota
+  // própria mas não é exposto remoção daqui (só dentro do form público).
+  const dealAttachmentIds = new Set(fallbackAttachments.map((a) => a.id));
   const hasFormAttachments = formAttachments.length > 0 && formToken;
   // Infosimples attachments always come in via fallbackAttachments (DealAttachment
   // rows). They must be shown even when there are no form attachments.
@@ -841,9 +971,24 @@ function DocumentsTab({
               </CardTitle>
             </CardHeader>
             <CardContent className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              {items.map((doc) => (
-                <DocumentCard key={doc.id} doc={doc} assignmentOptions={[]} readOnly />
-              ))}
+              {items.map((doc) => {
+                const isDealAttachment = dealAttachmentIds.has(doc.id);
+                const canRemove =
+                  isDealAttachment && !!onRequestRemoveDealAttachment;
+                return (
+                  <DocumentCard
+                    key={doc.id}
+                    doc={doc}
+                    assignmentOptions={[]}
+                    readOnly={!canRemove}
+                    onRemove={
+                      canRemove
+                        ? (id) => onRequestRemoveDealAttachment(id)
+                        : undefined
+                    }
+                  />
+                );
+              })}
             </CardContent>
           </Card>
         );
