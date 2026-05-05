@@ -278,28 +278,47 @@ export async function googleApplyStylePreset(
     },
   });
 
-  // Headings (HEADING_1, HEADING_2, HEADING_3) sobrescrevem com CENTER —
-  // títulos de cláusulas + título principal ficam centralizados (espelha
-  // padrão da v1 do escritório Zimmermann).
+  // CENTER seletivo (espelha padrão da v1 Zimmermann — só os 3 paragraphs
+  // de "topo" são centralizados, restante fica JUSTIFIED):
+  //   - HEADING_1 sempre (título principal "INSTRUMENTO PARTICULAR...")
+  //   - PRIMEIRO HEADING_2 apenas (linha "Modalidade: Pagamento À Vista")
+  //   - Paragraphs decorativos (símbolos como ❦, ◆, ●) — separadores visuais
+  // Cláusulas usando HEADING_2/3 ("CLÁUSULA PRIMEIRA - DO OBJETO") permanecem
+  // JUSTIFIED, alinhando com layout legal tradicional.
   const blocks = doc.body?.content || [];
+  let firstH2Centered = false;
+  const decorativeOnly = /^[❦◆◇●○•★※\s_*-]+$/;
   for (const block of blocks) {
     const para = block.paragraph;
     if (!para) continue;
     const named = para.paragraphStyle?.namedStyleType || "";
+    const text = (para.elements || [])
+      .map((e) => e.textRun?.content || "")
+      .join("")
+      .trim();
+
+    let shouldCenter = false;
+    if (named === "HEADING_1") {
+      shouldCenter = true;
+    } else if (named === "HEADING_2" && !firstH2Centered) {
+      shouldCenter = true;
+      firstH2Centered = true;
+    } else if (text.length > 0 && text.length < 10 && decorativeOnly.test(text)) {
+      shouldCenter = true;
+    }
+
     if (
-      named === "HEADING_1" ||
-      named === "HEADING_2" ||
-      named === "HEADING_3"
+      shouldCenter &&
+      block.startIndex !== undefined &&
+      block.endIndex !== undefined
     ) {
-      if (block.startIndex !== undefined && block.endIndex !== undefined) {
-        requests.push({
-          updateParagraphStyle: {
-            range: { startIndex: block.startIndex, endIndex: block.endIndex },
-            paragraphStyle: { alignment: "CENTER" },
-            fields: "alignment",
-          },
-        });
-      }
+      requests.push({
+        updateParagraphStyle: {
+          range: { startIndex: block.startIndex, endIndex: block.endIndex },
+          paragraphStyle: { alignment: "CENTER" },
+          fields: "alignment",
+        },
+      });
     }
   }
 
