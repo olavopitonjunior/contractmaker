@@ -61,6 +61,10 @@ model User {
   // Newton — API tokens e idempotência
   apiTokens       UserApiToken[]
   idempotencyKeys IdempotencyKey[]
+
+  // Newton — ActionIntent (dual-approval HITL)
+  intentsRequested ActionIntent[] @relation("IntentRequester")
+  intentsApproved  ActionIntent[] @relation("IntentApprover")
 }
 
 model Account {
@@ -147,6 +151,9 @@ model Organization {
 
   // Clicksign — assinatura eletrônica
   envelopes Envelope[]
+
+  // Newton — ActionIntent (dual-approval HITL)
+  actionIntents ActionIntent[]
 }
 
 model OrgMembership {
@@ -1485,7 +1492,8 @@ model UserApiToken {
   revokedAt   DateTime?
   createdAt   DateTime  @default(now())
 
-  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  actionIntents ActionIntent[]
 
   @@index([userId, revokedAt])
 }
@@ -1508,4 +1516,47 @@ model IdempotencyKey {
 
   @@unique([userId, key])
   @@index([createdAt]) // para job de cleanup TTL 24h
+}
+
+// ActionIntent — human-in-the-loop para ações high-risk vindas via Bearer.
+//
+// Diferente de DualApproval (segregação de funções, initiator≠approver),
+// aqui o dono do token tipicamente também aprova. Semântica: "agente quis
+// fazer X, humano tem que aprovar antes do servidor executar".
+//
+// status: pending | approved | rejected | executed | expired | failed
+// action: CHARGE_CREATE | ENVELOPE_SEND | CONTRACT_APPROVE | DEAL_DELETE_HARD
+//
+// payloadHash = sha256(canonical(payload)) — re-conferido em executeIntent
+// para detectar tampering entre approve e execute.
+model ActionIntent {
+  id              String    @id @default(cuid())
+  orgId           String
+  requestedBy     String // userId que disparou (token owner ou session user)
+  actorVia        String // "session" | "bearer"
+  tokenId         String? // FK UserApiToken — null se session
+  action          String
+  payload         Json // input validado, congelado
+  payloadHash     String // sha256 — anti-tamper
+  preview         Json // snapshot do que vai acontecer (taxas/splits/signers)
+  status          String    @default("pending")
+  approvedBy      String?
+  approvedAt      DateTime?
+  rejectedBy      String?
+  rejectionReason String?   @db.Text
+  executedAt      DateTime?
+  expiresAt       DateTime
+  idempotencyKey  String? // se intent foi criada com X-Idempotency-Key
+  resultJson      Json?
+  errorMessage    String?   @db.Text
+  createdAt       DateTime  @default(now())
+
+  org       Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  requester User          @relation("IntentRequester", fields: [requestedBy], references: [id])
+  approver  User?         @relation("IntentApprover", fields: [approvedBy], references: [id])
+  token     UserApiToken? @relation(fields: [tokenId], references: [id], onDelete: SetNull)
+
+  @@unique([requestedBy, idempotencyKey])
+  @@index([orgId, status, expiresAt])
+  @@index([requestedBy, createdAt])
 }

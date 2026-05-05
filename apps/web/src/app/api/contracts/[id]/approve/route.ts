@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
-import { validateContractData } from "@/lib/ai/validators";
-import { createContractMemory } from "@/lib/ai/memory";
+import { runContractApproval } from "@/lib/contracts/approve-action";
 import {
   requireApiAuth,
   isAuthFailure,
@@ -9,6 +9,9 @@ import {
 } from "@/lib/api/require-auth";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
+import { requireApproval, approvalResponse } from "@/lib/api/intents";
+
+const bodySchema = z.object({ force: z.boolean().optional().default(false) });
 
 export async function POST(
   req: NextRequest,
@@ -17,195 +20,85 @@ export async function POST(
   const apiAuth = await requireApiAuth(req, { scope: "contracts:rw" });
   if (isAuthFailure(apiAuth)) return authFailureResponse(apiAuth);
 
-  const body = await req.json().catch(() => ({}));
-  const force = body?.force === true;
-
-  const contract = await prisma.contract.findUnique({
-    where: { id: params.id },
-  });
-
-  if (!contract) {
-    return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
-  }
-
-  // Cross-user guard via Bearer
-  if (apiAuth.ident.via === "bearer" && contract.userId !== apiAuth.ident.userId) {
+  const rawBody = await req.json().catch(() => ({}));
+  const parsed = bodySchema.safeParse(rawBody);
+  if (!parsed.success) {
     return NextResponse.json(
-      { error: "Forbidden", reason: "not the contract owner" },
-      { status: 403 }
+      { error: "Bad Request", details: parsed.error.flatten() },
+      { status: 400 }
     );
   }
+  const force = parsed.data.force;
 
-  if (contract.status === "aprovado") {
-    return NextResponse.json({ error: "Contrato já está aprovado" }, { status: 400 });
-  }
-
-  // Run validation
-  const issues = validateContractData(contract.dataJson as Record<string, unknown>);
-  const errors = issues.filter((i) => i.severity === "error");
-  const warnings = issues.filter((i) => i.severity === "warning");
-
-  // Count pending suggestions and unresolved error-level comments
-  const [pendingSuggestions, errorComments, unresolvedComments] = await Promise.all([
-    prisma.contractSuggestion.count({
-      where: { contractId: params.id, status: "pending" },
-    }),
-    prisma.contractComment.count({
-      where: { contractId: params.id, resolved: false, severity: "error" },
-    }),
-    prisma.contractComment.count({
-      where: { contractId: params.id, resolved: false },
-    }),
-  ]);
-
-  const hasHardBlockers = errors.length > 0 || errorComments > 0;
-  const hasSoftIssues =
-    warnings.length > 0 || pendingSuggestions > 0 || unresolvedComments > 0;
-
-  // If there are issues and the user has not confirmed, ask for review
-  if (!force && (hasHardBlockers || hasSoftIssues)) {
-    return NextResponse.json({
-      requiresReview: true,
-      canForce: !hasHardBlockers,
-      issues,
-      errorCount: errors.length,
-      warningCount: warnings.length,
-      pendingSuggestions,
-      unresolvedComments,
-      errorComments,
+  // Cross-user check pra Bearer (precisa carregar antes do requireApproval pra
+  // 403 não virar intent)
+  if (apiAuth.ident.via === "bearer") {
+    const contract = await prisma.contract.findUnique({
+      where: { id: params.id },
+      select: { userId: true },
     });
+    if (!contract) {
+      return NextResponse.json(
+        { error: "Contrato não encontrado" },
+        { status: 404 }
+      );
+    }
+    if (contract.userId !== apiAuth.ident.userId) {
+      return NextResponse.json(
+        { error: "Forbidden", reason: "not the contract owner" },
+        { status: 403 }
+      );
+    }
   }
 
-  // Approve
-  await prisma.contract.update({
-    where: { id: params.id },
-    data: {
-      status: "aprovado",
-      ...(contract.googleDocId ? { googleDocStatus: "approved_readonly" } : {}),
+  // Resolve identidade do ator pra labels do ChangeLog
+  const actorLabel =
+    apiAuth.ident.via === "session"
+      ? apiAuth.ident.email ?? apiAuth.ident.userId
+      : `Newton (em nome de ${apiAuth.actor.effectiveUserId})`;
+
+  const idempotencyKey = req.headers.get("x-idempotency-key");
+
+  const result = await requireApproval<unknown>({
+    ctx: apiAuth,
+    action: "CONTRACT_APPROVE",
+    payload: { contractId: params.id, force },
+    preview: {
+      summary: `Aprovar contrato ${params.id}${force ? " (forçado, ignora warnings)" : ""}`,
+      details: { contractId: params.id, force },
     },
-  });
-
-  // Quando o contrato é Google Doc:
-  //  1. Deleta o parágrafo do watermark inteiro (não só o texto — replaceAllText
-  //     deixava o parágrafo vazio ocupando espaço gigante por causa do fontSize
-  //     96pt do template)
-  //  2. Revoga permissões de escrita no Drive (doc fica readonly)
-  // Espelha a regra "contratos aprovados são imutáveis". Falhas aqui não
-  // desfazem aprovação — só logam.
-  if (contract.googleDocId) {
-    try {
-      const { batchUpdateDoc, getDocStructure, makeDocReadOnly } = await import(
-        "@/lib/google/docs"
-      );
-
-      const doc = await getDocStructure(contract.googleDocId);
-      const blocks = doc.body?.content || [];
-      const watermarkBlock = blocks.find((b) => {
-        const para = b.paragraph;
-        if (!para) return false;
-        const text = (para.elements || [])
-          .map((el) => el.textRun?.content || "")
-          .join("");
-        return text.includes("[[WATERMARK_MINUTA]]");
+    req,
+    idempotencyKey,
+    run: async () => {
+      const out = await runContractApproval({
+        contractId: params.id,
+        force,
+        actorUserId: apiAuth.actor.effectiveUserId,
+        actorLabel,
+        enforceOwnerGuard: false, // já checamos acima
       });
 
-      if (
-        watermarkBlock &&
-        watermarkBlock.startIndex !== undefined &&
-        watermarkBlock.endIndex !== undefined
-      ) {
-        await batchUpdateDoc(contract.googleDocId, [
+      // Audit success path apenas (errors/requiresReview não auditam)
+      if (out.status === 200 && "status" in out.body && out.body.status === "aprovado") {
+        await audit(
+          extractAuditContextFromRequest(
+            req,
+            apiAuth.org.id,
+            apiAuth.actor.effectiveUserId
+          ),
           {
-            deleteContentRange: {
-              range: {
-                startIndex: watermarkBlock.startIndex,
-                endIndex: watermarkBlock.endIndex,
-              },
-            },
-          },
-        ]);
+            action: "CONTRACT_APPROVE",
+            result: "SUCCESS",
+            resource: params.id,
+            resourceType: "Contract",
+            metadata: mergeAuditMetadata({ forced: force }, apiAuth.actor),
+          }
+        );
       }
 
-      await makeDocReadOnly(contract.googleDocId);
-    } catch (err) {
-      console.error("[approve] Falha ao remover watermark / tornar readonly:", err);
-    }
-  }
-
-  // Log approval
-  await prisma.contractChangeLog.create({
-    data: {
-      contractId: params.id,
-      userId: apiAuth.actor.effectiveUserId,
-      action: "status_change",
-      summary:
-        apiAuth.ident.via === "session"
-          ? `Contrato aprovado por ${apiAuth.ident.email ?? apiAuth.ident.userId}`
-          : `Contrato aprovado via Newton (em nome de ${apiAuth.actor.effectiveUserId})`,
-      details: {
-        previousStatus: contract.status,
-        newStatus: "aprovado",
-        forced: force,
-        warningsIgnored: warnings.length,
-        pendingSuggestionsIgnored: pendingSuggestions,
-        unresolvedCommentsIgnored: unresolvedComments,
-      },
-      source: "user",
+      return out;
     },
   });
 
-  // Auto-move deal to "Assinatura" stage
-  if (contract.dealId) {
-    const deal = await prisma.deal.findUnique({
-      where: { id: contract.dealId },
-      include: { pipeline: { include: { stages: { orderBy: { position: "asc" } } } } },
-    });
-    if (deal?.pipeline) {
-      const assinaturaStage = deal.pipeline.stages.find((s) => s.name === "Assinatura");
-      if (assinaturaStage) {
-        await prisma.deal.update({
-          where: { id: deal.id },
-          data: { stageId: assinaturaStage.id },
-        });
-      }
-    }
-  }
-
-  await audit(
-    extractAuditContextFromRequest(
-      req,
-      apiAuth.org.id,
-      apiAuth.actor.effectiveUserId
-    ),
-    {
-      action: "CONTRACT_APPROVE",
-      result: "SUCCESS",
-      resource: params.id,
-      resourceType: "Contract",
-      metadata: mergeAuditMetadata(
-        {
-          forced: force,
-          warningsIgnored: warnings.length,
-          pendingSuggestionsIgnored: pendingSuggestions,
-          unresolvedCommentsIgnored: unresolvedComments,
-        },
-        apiAuth.actor
-      ),
-    }
-  );
-
-  // Fire-and-forget: snapshot this approved contract into ContractMemory for
-  // the learning loop (find_similar_contracts, propose_*). We don't await it
-  // so the approval response stays fast; errors are logged but don't rollback.
-  void createContractMemory(params.id)
-    .then((result) => {
-      if (!result.ok) {
-        console.error("[approve] createContractMemory failed:", result.error);
-      }
-    })
-    .catch((err) => {
-      console.error("[approve] memory hook crashed:", err);
-    });
-
-  return NextResponse.json({ status: "aprovado" });
+  return approvalResponse(result);
 }

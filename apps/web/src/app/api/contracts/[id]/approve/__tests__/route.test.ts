@@ -45,7 +45,7 @@ describe("POST /api/contracts/[id]/approve", () => {
     expect(res.status).toBe(400);
   });
 
-  it("returns 422 when validation has errors", async () => {
+  it("retorna 200 com requiresReview quando há issues e force=false", async () => {
     mockAuth.mockResolvedValueOnce(createMockSession());
     mockPrisma.contract.findUnique.mockResolvedValueOnce({
       id: "test-id",
@@ -62,9 +62,11 @@ describe("POST /api/contracts/[id]/approve", () => {
     const res = await POST(createRequest(), { params: { id: "test-id" } });
     const json = await res.json();
 
-    expect(res.status).toBe(422);
+    expect(res.status).toBe(200);
+    expect(json.requiresReview).toBe(true);
     expect(json.issues.length).toBeGreaterThan(0);
-    expect(json.issues[0].severity).toBe("error");
+    expect(json.errorCount).toBeGreaterThan(0);
+    expect(json.canForce).toBe(false);
   });
 
   it("returns 200 and approves when only warnings exist", async () => {

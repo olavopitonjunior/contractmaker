@@ -120,6 +120,13 @@ vi.mock("@/lib/db/prisma", () => {
     certidaoJob: {
       findMany: vi.fn().mockResolvedValue([]),
     },
+    actionIntent: {
+      findUnique: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
   };
   Object.assign(prismaMock, mock);
   return { prisma: mock };

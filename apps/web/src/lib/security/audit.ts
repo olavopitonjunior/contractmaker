@@ -96,7 +96,14 @@ export type AuditAction =
   | "CONTRACT_APPROVE"
   | "CERTIDAO_BATCH_DISPATCH"
   | "ENVELOPE_CREATE"
-  | "ENVELOPE_RESEND";
+  | "ENVELOPE_RESEND"
+  // ActionIntent (HITL para Bearer high-risk)
+  | "INTENT_CREATED"
+  | "INTENT_APPROVED"
+  | "INTENT_REJECTED"
+  | "INTENT_EXECUTED"
+  | "INTENT_EXPIRED"
+  | "INTENT_TAMPERED";
 
 export interface AuditContext {
   orgId: string;
