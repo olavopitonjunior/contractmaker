@@ -132,6 +132,43 @@ export async function POST(
     },
   });
 
+  // Reaplica DocumentStyle default no doc copiado. file.copy preserva o estilo
+  // do doc fonte, mas se o fonte não tinha estilo aplicado (ex: docs criados
+  // antes do fix de DocumentStyle automático), reaplicar garante consistência
+  // visual em toda nova versão. Falha não bloqueia.
+  if (copiedDocId) {
+    try {
+      const deal = await prisma.deal.findUnique({
+        where: { id: current.dealId },
+        select: { pipeline: { select: { orgId: true } } },
+      });
+      const orgId = deal?.pipeline?.orgId;
+      if (orgId) {
+        const defaultStyle = await prisma.documentStyle.findFirst({
+          where: { orgId, isDefault: true },
+        });
+        if (defaultStyle) {
+          const { googleApplyStylePreset } = await import("@/lib/ai/google-tool-handlers");
+          await googleApplyStylePreset(copiedDocId, {
+            fontFamily: defaultStyle.fontFamily,
+            fontSizeBase: defaultStyle.fontSizeBase,
+            lineHeight: defaultStyle.lineHeight,
+            colorPrimary: defaultStyle.colorPrimary,
+            marginTopMm: defaultStyle.marginTopMm,
+            marginBottomMm: defaultStyle.marginBottomMm,
+            marginLeftMm: defaultStyle.marginLeftMm,
+            marginRightMm: defaultStyle.marginRightMm,
+          });
+        }
+      }
+    } catch (styleErr) {
+      console.error(
+        "[version] Falha ao reaplicar DocumentStyle no doc copiado:",
+        styleErr
+      );
+    }
+  }
+
   return NextResponse.json(
     {
       id: newVersion.id,

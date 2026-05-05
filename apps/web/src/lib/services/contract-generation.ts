@@ -229,6 +229,34 @@ export async function generateContractForDeal(
         },
       });
       googleDocUrl = created.webViewLink;
+
+      // Aplica DocumentStyle default da org (fonte, tamanho, line-height,
+      // margens) — Drive descarta CSS de classes ao importar HTML, então
+      // sem isso o doc nasce com Arial 11pt + margens default. Falha não
+      // bloqueia: doc fica funcional, só sem o branding visual.
+      try {
+        const defaultStyle = await prisma.documentStyle.findFirst({
+          where: { orgId, isDefault: true },
+        });
+        if (defaultStyle) {
+          const { googleApplyStylePreset } = await import("@/lib/ai/google-tool-handlers");
+          await googleApplyStylePreset(created.docId, {
+            fontFamily: defaultStyle.fontFamily,
+            fontSizeBase: defaultStyle.fontSizeBase,
+            lineHeight: defaultStyle.lineHeight,
+            colorPrimary: defaultStyle.colorPrimary,
+            marginTopMm: defaultStyle.marginTopMm,
+            marginBottomMm: defaultStyle.marginBottomMm,
+            marginLeftMm: defaultStyle.marginLeftMm,
+            marginRightMm: defaultStyle.marginRightMm,
+          });
+        }
+      } catch (styleErr) {
+        console.error(
+          "[contract-generation] Falha ao aplicar DocumentStyle default:",
+          styleErr
+        );
+      }
     } catch (err) {
       // Persiste a causa exata da falha no contrato pra diagnóstico — sem
       // isso, o try/catch silencioso esconde o erro real (visto no QA E2E).

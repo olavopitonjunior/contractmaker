@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2, ShieldCheck, Copy, Wallet, FileSignature } from "lucide-react";
+import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2, ShieldCheck, Copy, Wallet, FileSignature, Trash2 } from "lucide-react";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
 import type { Assignment, DocumentKind } from "@/lib/forms/extracted-to-form";
 import { CertidoesTab } from "@/components/pipeline/CertidoesTab";
@@ -115,6 +115,9 @@ export function DealDetail({ deal }: DealDetailProps) {
   const [confirmDuplicateOpen, setConfirmDuplicateOpen] = useState(false);
   const [chargeDialogOpen, setChargeDialogOpen] = useState(false);
   const [chargeRefreshKey, setChargeRefreshKey] = useState(0);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteFormToo, setDeleteFormToo] = useState(false);
 
   async function doGenerateContract() {
     setGenerating(true);
@@ -165,6 +168,31 @@ export function DealDetail({ deal }: DealDetailProps) {
     const url = `${window.location.origin}/f/${deal.form.token}`;
     navigator.clipboard.writeText(url);
     toast.success("Link do formulário copiado!");
+  }
+
+  async function handleDelete() {
+    setDeleting(true);
+    try {
+      const url = `/api/pipeline/deals/${deal.id}${deleteFormToo ? "?deleteForm=true" : ""}`;
+      const res = await fetch(url, { method: "DELETE" });
+      const data = await res.json().catch(() => null);
+      if (res.ok) {
+        const c = data?.deleted;
+        toast.success(
+          `Negócio excluído (${c?.contracts ?? 0} contrato(s), ${c?.attachments ?? 0} anexo(s))`
+        );
+        router.push("/pipeline");
+      } else if (res.status === 409) {
+        toast.error(data?.error || "Não foi possível excluir — envelope ClickSign em curso");
+      } else {
+        toast.error(data?.error || "Erro ao excluir negócio");
+      }
+    } catch {
+      toast.error("Erro de conexão");
+    } finally {
+      setDeleting(false);
+      setDeleteDialogOpen(false);
+    }
   }
 
   const formData = deal.form?.dataJson as Record<string, unknown> | null;
@@ -267,8 +295,56 @@ export function DealDetail({ deal }: DealDetailProps) {
               {signing ? "Processando..." : "Marcar como Assinado"}
             </Button>
           )}
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-destructive border-destructive/40 hover:bg-destructive/10"
+            onClick={() => setDeleteDialogOpen(true)}
+          >
+            <Trash2 className="h-4 w-4 mr-1" />
+            Excluir
+          </Button>
         </div>
       </div>
+
+      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir negócio "{deal.title}"?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                <p>Esta ação remove em cascata:</p>
+                <ul className="list-disc pl-5 text-sm">
+                  <li>{deal.contracts.length} contrato(s) e suas versões (Google Docs vão pra lixeira do Drive)</li>
+                  <li>{deal.attachments.length} anexo(s)</li>
+                  <li>Todas as certidões emitidas neste deal</li>
+                  <li>Histórico de alterações, comentários e sugestões</li>
+                </ul>
+                <label className="flex items-center gap-2 mt-3 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={deleteFormToo}
+                    onChange={(e) => setDeleteFormToo(e.target.checked)}
+                    className="h-4 w-4 rounded border-input"
+                  />
+                  Excluir também o formulário de origem (não recuperável)
+                </label>
+                <p className="font-medium pt-2">Não pode ser desfeito.</p>
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleDelete}
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deleting ? "Excluindo..." : "Excluir definitivamente"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <Tabs defaultValue={initialTab}>
         <TabsList>
