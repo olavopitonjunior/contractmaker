@@ -273,6 +273,22 @@ export async function exportDocAsPdf(docId: string): Promise<Buffer> {
   return Buffer.from(res.data as ArrayBuffer);
 }
 
+/**
+ * Exporta o doc como HTML (string). Usado pra capturar snapshot do conteúdo
+ * atual do Google Doc — ex: ao salvar uma nova versão, persistimos o HTML
+ * exportado em `Contract.htmlContent` para histórico/exports/análise passiva
+ * (Drive é o source of truth do conteúdo, mas o DB precisa de uma cópia
+ * legível pra fluxos não-GDocs).
+ */
+export async function exportDocAsHtml(docId: string): Promise<string> {
+  const drive = getDriveClient();
+  const res = await drive.files.export(
+    { fileId: docId, mimeType: "text/html" },
+    { responseType: "text" }
+  );
+  return typeof res.data === "string" ? res.data : String(res.data);
+}
+
 /** Exporta como DOCX — buffer pronto pra storage. */
 export async function exportDocAsDocx(docId: string): Promise<Buffer> {
   const drive = getDriveClient();
