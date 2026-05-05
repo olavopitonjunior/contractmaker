@@ -268,6 +268,41 @@ export async function googleApplyStylePreset(
     },
   });
 
+  // Alinhamento justificado em todos os parágrafos (padrão de contratos
+  // formais brasileiros — corpo do contrato totalmente justificado).
+  requests.push({
+    updateParagraphStyle: {
+      range: { startIndex: 1, endIndex: lastEnd },
+      paragraphStyle: { alignment: "JUSTIFIED" },
+      fields: "alignment",
+    },
+  });
+
+  // Headings (HEADING_1, HEADING_2, HEADING_3) sobrescrevem com CENTER —
+  // títulos de cláusulas + título principal ficam centralizados (espelha
+  // padrão da v1 do escritório Zimmermann).
+  const blocks = doc.body?.content || [];
+  for (const block of blocks) {
+    const para = block.paragraph;
+    if (!para) continue;
+    const named = para.paragraphStyle?.namedStyleType || "";
+    if (
+      named === "HEADING_1" ||
+      named === "HEADING_2" ||
+      named === "HEADING_3"
+    ) {
+      if (block.startIndex !== undefined && block.endIndex !== undefined) {
+        requests.push({
+          updateParagraphStyle: {
+            range: { startIndex: block.startIndex, endIndex: block.endIndex },
+            paragraphStyle: { alignment: "CENTER" },
+            fields: "alignment",
+          },
+        });
+      }
+    }
+  }
+
   // Margens da página (mm → pt). Aplica em DocumentStyle.
   const docStyle: docs_v1.Schema$DocumentStyle = {};
   const docFields: string[] = [];
