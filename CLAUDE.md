@@ -52,9 +52,28 @@ Dois templates ativos em `templates/`:
 
 Slots `<!-- CLAUSE_SLOT:Gx -->` no template marcam pontos de inserção das cláusulas variáveis do banco. HTML comments são descartados pelo Drive ao importar — slots ficam invisíveis no GDoc final (desejado). Cláusulas inseridas via `insert_clause` tool aparecem no doc real.
 
-**Sync DB obrigatório:** mudanças nos `.hbs` SÓ afetam contratos novos depois de rodar `pnpm tsx apps/web/scripts/sync-templates.ts --apply` contra a DB. Geração lê `ContractTemplate.handlebarsSource` (não o filesystem). Esse passo manual já causou bug em prod (templates desatualizados, intermediadora renderizando como PJ mesmo com `corretora_tipo_pessoa: "fisica"`).
+**Sync DB obrigatório:** mudanças nos `.hbs` SÓ afetam contratos novos depois de rodar `pnpm tsx apps/web/scripts/sync-templates.ts --apply` contra a DB. Geração lê `ContractTemplate.handlebarsSource` (não o filesystem). Esse passo manual já causou bug em prod (templates desatualizados, intermediadora renderizando como PJ mesmo com `corretora_tipo_pessoa: "fisica"`). Flags adicionais: `--seed` cria rows que não existam (com nome canônico, isDefault, modalidade) por org; `--update-metadata` atualiza name/description divergentes.
 
 Template legado `contrato_compra_venda.hbs` continua deprecated (mantido pra contratos antigos).
+
+**Default selecionado e propagação (deploy 2026-05-06):**
+- API `POST /api/templates` e `PATCH /api/templates/[id]` garantem invariant **um default por (orgId, modalidade)** — `updateMany { isDefault: false }` antes de gravar, igual `document-styles`. Espelha o que `generateContractForDeal` espera (`findFirst { isDefault: true, modalidade, status: active }`).
+- UI `/templates` mostra selo verde "Padrão atual" no card que é `isDefault`, contador de contratos por template (`_count.contracts`), botão "Tornar padrão", aba "Arquivados" (filtro por `status`). Componente `TemplatesListClient.tsx`.
+- Versionamento mantém `templateId` congelado da versão original — versões herdam o template do momento da criação, não pegam o default novo (correto: layout estável entre v1 e v2 do mesmo contrato).
+- Export PDF/DOCX usa `contract.template.handlebarsSource` (FK congelada) ou `drive.files.export` em GDocs mode. Não consulta `isDefault`.
+
+**Preview embedado dos templates** — `POST /api/templates/[id]/preview` renderiza Handlebars contra `lib/templates/preview-sample-data.ts` (fixtures cobrindo 2 vendedores PF+PJ, cônjuge, procurador, 2 compradores, parcelas, comissão), sobe via `uploadHtmlAsGoogleDoc`, aplica `googleApplyStylePreset`, cacheia `googleTemplateDocId` + `previewSourceHash` na row. Botão "Visualizar preview" no editor abre Sheet com iframe `docs.google.com/document/{id}/preview` + tab à vista/financiamento. Hash é zerado no PATCH quando `handlebarsSource` muda — UI mostra warning "Preview desatualizado" até clique em Atualizar regenerar.
+
+**Importar Google Doc existente como template** — `engine: "google_docs"` (campo já existente no schema, mas semântica clarificada após refactor de 2026-05-05):
+- `engine: "handlebars"` (default): `renderContratoHTML(handlebarsSource, dataJson)` → `uploadHtmlAsGoogleDoc`. Suporta loops, conditionals, slots de cláusula. **Modo dos CCV Zimmermann v2.**
+- `engine: "google_docs"`: `copyContractGoogleDoc(googleTemplateDocId)` + `replacePlaceholdersInDoc` (batchUpdate `replaceAllText` flat). **Não suporta** `{{#each}}` nem `{{#if}}`. Bom só pra contratos simples (1 vendedor, 1 comprador) ou aditivos.
+- UI: `/templates/new` oferece escolha entre "Handlebars" ou "Importar Google Doc existente" (`ImportGoogleDocForm.tsx`). Modo GDoc valida acesso via `POST /api/templates/validate-gdoc` → `drive.files.get` + `getDocPlainText` + `extractPlaceholdersFromText`. Lista placeholders encontrados, avisa se nomes parecem indicar loops.
+- **Atenção histórica:** rows criadas antes do refactor de 2026-05-05 podem ter `engine: "google_docs"` por herança mesmo quando o `handlebarsSource` é uma fonte Handlebars válida. Antes do deploy de 2026-05-06, os 2 v2 ativos em prod estavam nesse estado e o código pré-deploy ignorava o campo. Script one-shot `apps/web/scripts/fix-v2-engine.ts` corrigiu pra `handlebars` antes do código novo subir.
+
+**Scripts de operação de templates:**
+- `apps/web/scripts/audit-templates.ts` (read-only): lista todas rows com sha do source, match com filesystem v2, count de contratos. Usar antes de qualquer migração.
+- `apps/web/scripts/archive-legacy-templates.ts`: arquiva (ou deleta se 0 contratos) rows com `version="1.0.0"` ou `name="Compra e Venda de Imovel"`. Idempotente, dry-run por default.
+- `apps/web/scripts/fix-v2-engine.ts`: one-shot — atualiza `engine="google_docs" + status="active" + version="2.0.0"` pra `engine="handlebars"`. Necessário só uma vez (já rodado em prod 2026-05-06).
 
 ## Banco de cláusulas (23 padronizadas em 6 grupos)
 
