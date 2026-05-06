@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import {
   requireApiAuth,
@@ -56,6 +57,103 @@ export async function GET(
     { deal },
     { headers: { ETag: etag } }
   );
+}
+
+const patchSchema = z.object({
+  stageId: z.string().optional(),
+  title: z.string().optional(),
+});
+
+/**
+ * PATCH /api/deals/:dealId
+ *
+ * Newton-friendly Bearer twin de `/api/pipeline/deals/:dealId` PATCH.
+ * Move stage e/ou renomeia. Reversível, sem HITL — Newton consegue desfazer
+ * mandando outro PATCH com stageId anterior.
+ */
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: { dealId: string } }
+) {
+  const apiAuth = await requireApiAuth(req, { scope: "deals:rw" });
+  if (isAuthFailure(apiAuth)) return authFailureResponse(apiAuth);
+
+  const body = await req.json().catch(() => ({}));
+  const parsed = patchSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Bad Request", details: parsed.error.flatten() },
+      { status: 400 }
+    );
+  }
+  if (!parsed.data.stageId && !parsed.data.title) {
+    return NextResponse.json(
+      { error: "Forneça pelo menos stageId ou title" },
+      { status: 400 }
+    );
+  }
+
+  const deal = await prisma.deal.findUnique({
+    where: { id: params.dealId },
+    include: {
+      form: { select: { orgId: true } },
+      pipeline: { select: { orgId: true } },
+      stage: { select: { id: true, name: true } },
+    },
+  });
+  if (!deal) {
+    return NextResponse.json({ error: "Deal not found" }, { status: 404 });
+  }
+  const dealOrgId = deal.form?.orgId ?? deal.pipeline.orgId;
+  if (dealOrgId !== apiAuth.org.id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // Se for trocar stage, validar que a stage pertence ao mesmo pipeline.
+  if (parsed.data.stageId && parsed.data.stageId !== deal.stageId) {
+    const targetStage = await prisma.pipelineStage.findFirst({
+      where: { id: parsed.data.stageId, pipelineId: deal.pipelineId },
+      select: { id: true, name: true },
+    });
+    if (!targetStage) {
+      return NextResponse.json(
+        { error: "stageId inválido para o pipeline deste deal" },
+        { status: 400 }
+      );
+    }
+  }
+
+  const updated = await prisma.deal.update({
+    where: { id: deal.id },
+    data: parsed.data,
+    include: { stage: { select: { id: true, name: true } } },
+  });
+
+  await audit(
+    extractAuditContextFromRequest(req, apiAuth.org.id, apiAuth.actor.effectiveUserId),
+    {
+      action: "DEAL_UPDATE",
+      result: "SUCCESS",
+      resource: deal.id,
+      resourceType: "Deal",
+      metadata: mergeAuditMetadata(
+        {
+          fromStage: deal.stage.name,
+          toStage: updated.stage.name,
+          changedTitle: parsed.data.title !== undefined,
+        },
+        apiAuth.actor
+      ),
+    }
+  );
+
+  return NextResponse.json({
+    id: updated.id,
+    title: updated.title,
+    stageId: updated.stageId,
+    stage: updated.stage,
+    updatedAt: updated.updatedAt,
+  });
 }
 
 /**

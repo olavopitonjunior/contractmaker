@@ -87,6 +87,20 @@ export function ensureIntentExecutorsRegistered(): void {
     };
   });
 
+  // CERTIDAO_REQUEST — solicitar batch de certidões Infosimples (gasta budget)
+  registerIntentExecutor("CERTIDAO_REQUEST", async (payload, ctx) => {
+    const p = payload as { dealId: string; batchId: string };
+    const { runCertidoesBatchInline } = await import(
+      "@/lib/certidoes/newton-runner"
+    );
+    return runCertidoesBatchInline({
+      dealId: p.dealId,
+      orgId: ctx.orgId,
+      userId: ctx.requestedBy,
+      batchId: p.batchId,
+    });
+  });
+
   // ENVELOPE_SEND — enviar contrato pra ClickSign após aprovação humana
   registerIntentExecutor("ENVELOPE_SEND", async (payload) => {
     const p = payload as {

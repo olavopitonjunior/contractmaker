@@ -32,6 +32,7 @@ export const HIGH_RISK_ACTIONS = [
   "ENVELOPE_SEND",
   "CONTRACT_APPROVE",
   "DEAL_DELETE_HARD",
+  "CERTIDAO_REQUEST",
 ] as const;
 
 export type IntentAction = (typeof HIGH_RISK_ACTIONS)[number];

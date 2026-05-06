@@ -310,6 +310,131 @@ export const tools: Tool[] = [
     },
   },
 
+  // ───────────── Newton mutations ─────────────
+  {
+    name: "move_deal_stage",
+    description:
+      "Move um deal para outro stage do mesmo pipeline. Reversível — outro PATCH com o stageId anterior desfaz. Pode também renomear via title. Use list_deals + get_deal pra descobrir stageIds válidos.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        stageId: { type: "string", description: "Novo stageId (deve pertencer ao mesmo pipeline)." },
+        title: { type: "string", description: "Renomeia o deal." },
+      },
+      required: ["dealId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "PATCH",
+        path: `/api/deals/${args.dealId}`,
+        body: { stageId: args.stageId, title: args.title },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "mark_deal_signed",
+    description:
+      "Marca deal como assinado: move de 'Assinatura' para 'Concluído'. Falha se o deal não estiver no stage 'Assinatura'. Reversível via move_deal_stage.",
+    inputSchema: {
+      type: "object",
+      properties: { dealId: { type: "string" } },
+      required: ["dealId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/deals/${args.dealId}/mark-signed`,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "move_contract_status",
+    description:
+      "Move contrato entre 'rascunho' e 'review'. Para aprovação use approve_contract (HITL). Bloqueia em contratos já aprovados.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        contractId: { type: "string" },
+        status: { type: "string", enum: ["rascunho", "review"] },
+      },
+      required: ["contractId", "status"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "PATCH",
+        path: `/api/contracts/${args.contractId}/status`,
+        body: { status: args.status },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "request_certidao",
+    description:
+      "Solicita batch de certidões Infosimples para um deal. SEMPRE HITL — gera ActionIntent CERTIDAO_REQUEST que humano aprova em /intents/<id> antes de executar (gasta budget mensal). Auto-plan: o servidor decide quais certidões emitir baseado nos dados do deal/diligenciados. Newton gera batchId (UUID v4) upfront pra idempotência.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        batchId: {
+          type: "string",
+          description: "UUID v4 gerado pelo cliente. Mesmo batchId em retry retorna o mesmo resultado.",
+        },
+      },
+      required: ["dealId", "batchId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/deals/${args.dealId}/certidoes-newton`,
+        body: { batchId: args.batchId },
+        idempotencyKey: args.batchId as string,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "upload_attachment",
+    description:
+      "Sobe um documento (PDF, JPG, PNG, WebP, GIF) pra um deal. Body JSON com base64Data — Newton codifica o arquivo. Limite 10MB. SHA-256 pre-warm: se o mesmo conteúdo já foi OCR'd na org, reusa extractedData/category. Sem HITL — reversível via DELETE.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        filename: { type: "string", description: "Nome original do arquivo." },
+        mime: {
+          type: "string",
+          enum: ["image/jpeg", "image/png", "image/webp", "image/gif", "application/pdf"],
+        },
+        base64Data: {
+          type: "string",
+          description: "Conteúdo em base64. Pode incluir ou não o prefixo data:<mime>;base64,",
+        },
+        category: {
+          type: "string",
+          description: "Categoria opcional (ex: 'matricula', 'rg', 'cnh').",
+        },
+      },
+      required: ["dealId", "filename", "mime", "base64Data"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/deals/${args.dealId}/attachments-newton`,
+        body: {
+          filename: args.filename,
+          mime: args.mime,
+          base64Data: args.base64Data,
+          category: args.category,
+        },
+      });
+      return r.body;
+    },
+  },
+
   // ───────────── Deals ─────────────
   {
     name: "list_deals",
