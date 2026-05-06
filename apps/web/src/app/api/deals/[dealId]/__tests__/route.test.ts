@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
-import { GET, DELETE } from "../route";
+import { GET, DELETE, PATCH } from "../route";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { createMockSession, createMockOrg } from "@/__tests__/helpers";
@@ -179,5 +179,83 @@ describe("DELETE /api/deals/[dealId] (retrofit Newton)", () => {
       { params: { dealId: "d1" } }
     );
     expect(res.status).toBe(400);
+  });
+});
+
+describe("PATCH /api/deals/[dealId] (Newton stage move)", () => {
+  function patchReq(body: unknown) {
+    return new NextRequest("http://localhost/api/deals/d1", {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    });
+  }
+
+  const baseDeal = {
+    id: "d1",
+    pipelineId: "p1",
+    stageId: "s1",
+    form: { orgId: "org-1" },
+    pipeline: { orgId: "org-1" },
+    stage: { id: "s1", name: "Lead" },
+  };
+
+  it("401 sem auth", async () => {
+    mockAuth.mockResolvedValue(null);
+    const res = await PATCH(patchReq({ stageId: "s2" }), { params: { dealId: "d1" } });
+    expect(res.status).toBe(401);
+  });
+
+  it("400 body vazio", async () => {
+    mockAuth.mockResolvedValue(createMockSession() as never);
+    const res = await PATCH(patchReq({}), { params: { dealId: "d1" } });
+    expect(res.status).toBe(400);
+  });
+
+  it("404 deal inexistente", async () => {
+    mockAuth.mockResolvedValue(createMockSession() as never);
+    mockPrisma.deal.findUnique.mockResolvedValue(null as never);
+    const res = await PATCH(patchReq({ stageId: "s2" }), { params: { dealId: "d1" } });
+    expect(res.status).toBe(404);
+  });
+
+  it("403 cross-org", async () => {
+    mockAuth.mockResolvedValue(createMockSession() as never);
+    mockPrisma.deal.findUnique.mockResolvedValue({
+      ...baseDeal,
+      form: { orgId: "other-org" },
+      pipeline: { orgId: "other-org" },
+    } as never);
+    const res = await PATCH(patchReq({ stageId: "s2" }), { params: { dealId: "d1" } });
+    expect(res.status).toBe(403);
+  });
+
+  it("400 stageId fora do pipeline", async () => {
+    mockAuth.mockResolvedValue(createMockSession() as never);
+    mockPrisma.deal.findUnique.mockResolvedValue(baseDeal as never);
+    mockPrisma.pipelineStage.findFirst.mockResolvedValue(null as never);
+    const res = await PATCH(patchReq({ stageId: "s2-bad" }), { params: { dealId: "d1" } });
+    expect(res.status).toBe(400);
+  });
+
+  it("200 happy path: stage move", async () => {
+    mockAuth.mockResolvedValue(createMockSession() as never);
+    mockPrisma.deal.findUnique.mockResolvedValue(baseDeal as never);
+    mockPrisma.pipelineStage.findFirst.mockResolvedValue({
+      id: "s2",
+      name: "Negociação",
+    } as never);
+    mockPrisma.deal.update.mockResolvedValue({
+      id: "d1",
+      title: "x",
+      stageId: "s2",
+      stage: { id: "s2", name: "Negociação" },
+      updatedAt: new Date(),
+    } as never);
+
+    const res = await PATCH(patchReq({ stageId: "s2" }), { params: { dealId: "d1" } });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.stageId).toBe("s2");
+    expect(json.stage.name).toBe("Negociação");
   });
 });

@@ -47,6 +47,16 @@ vi.mock("@/lib/db/prisma", () => {
     },
     dealAttachment: {
       findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn(),
+      delete: vi.fn(),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    diligentedPerson: {
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn(),
+      createMany: vi.fn(),
     },
     contractSuggestion: {
       findFirst: vi.fn(),
@@ -119,6 +129,9 @@ vi.mock("@/lib/db/prisma", () => {
     },
     certidaoJob: {
       findMany: vi.fn().mockResolvedValue([]),
+      findFirst: vi.fn(),
+      create: vi.fn(),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     actionIntent: {
       findUnique: vi.fn(),
