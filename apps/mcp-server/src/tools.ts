@@ -1,4 +1,4 @@
-import { callApi } from "./index.js";
+import { callApi, callBridge } from "./index.js";
 
 export type ToolHandler = (args: Record<string, unknown>) => Promise<unknown>;
 
@@ -612,6 +612,42 @@ export const tools: Tool[] = [
           severity: args.severity,
         },
       });
+      return r.body;
+    },
+  },
+
+  // ───────────── WhatsApp ─────────────
+  {
+    name: "whatsapp_send",
+    description:
+      "Envia mensagem WhatsApp via Meta Cloud bridge (whatsapp-bridge.ia.br). Use quando quiser proativamente mandar mensagem fora do fluxo de resposta natural ao webhook (ex: avisar cliente que documento foi recebido, lembrar prazo, comentar em grupo). Phone deve ser E.164 sem '+': '5511987654321'. Body até 4096 chars. Opcional replyToMessageId pra responder uma mensagem específica em contexto. Retorna { messages: [{id}] } com wamid.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        to: {
+          type: "string",
+          description: "Phone E.164 SEM o '+': ex 5511987654321",
+        },
+        body: {
+          type: "string",
+          description: "Texto da mensagem (até 4096 chars).",
+        },
+        replyToMessageId: {
+          type: "string",
+          description: "Opcional. wamid de msg pra responder em contexto.",
+        },
+      },
+      required: ["to", "body"],
+    },
+    handler: async (args) => {
+      const body: Record<string, unknown> = {
+        to: args.to,
+        body: args.body,
+      };
+      if (args.replyToMessageId) {
+        body.context = { message_id: args.replyToMessageId };
+      }
+      const r = await callBridge({ path: "/api/send", body });
       return r.body;
     },
   },

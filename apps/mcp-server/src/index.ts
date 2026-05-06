@@ -34,9 +34,46 @@ const API_URL =
   process.env.CONTRACTMAKER_API_URL ?? "https://imobpro.ia.br";
 const API_TOKEN = process.env.CONTRACTMAKER_API_TOKEN;
 
+// WhatsApp bridge — opcional. Se não configurado, tool whatsapp_send retorna
+// erro claro. Permite Newton rodar sem WhatsApp em ambientes dev/staging.
+const WPP_BRIDGE_URL = process.env.WHATSAPP_BRIDGE_URL;
+const WPP_BRIDGE_TOKEN = process.env.WHATSAPP_BRIDGE_TOKEN;
+
 if (!API_TOKEN) {
   console.error("ERROR: CONTRACTMAKER_API_TOKEN não definido em env");
   process.exit(1);
+}
+
+export async function callBridge(args: {
+  path: string;
+  body?: unknown;
+}): Promise<{ status: number; body: unknown }> {
+  if (!WPP_BRIDGE_URL || !WPP_BRIDGE_TOKEN) {
+    return {
+      status: 503,
+      body: {
+        error:
+          "WhatsApp bridge não configurado (WHATSAPP_BRIDGE_URL + WHATSAPP_BRIDGE_TOKEN ausentes)",
+      },
+    };
+  }
+  const url = new URL(args.path, WPP_BRIDGE_URL);
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${WPP_BRIDGE_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: args.body !== undefined ? JSON.stringify(args.body) : undefined,
+  });
+  const text = await res.text();
+  let body: unknown = text;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    /* keep text */
+  }
+  return { status: res.status, body };
 }
 
 export async function callApi(args: {
