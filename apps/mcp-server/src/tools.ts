@@ -384,6 +384,47 @@ export const tools: Tool[] = [
     },
   },
 
+  {
+    name: "fill_form",
+    description:
+      "Preenche/atualiza dados de um SalesForm pelo token. Body { dataJson?, status?, title? }. dataJson faz deep-merge com o que já existe (não substitui). ATENÇÃO: setar status='completo' dispara auto-geração de contrato no servidor + dedup de cônjuges + linking de attachments + criação de DiligentedPerson pra sócios PJ. Use status='rascunho' para auto-save sem disparar nada. Endpoint público (token-as-tenancy) — qualquer um com o token edita.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        token: {
+          type: "string",
+          description: "Token público do form (vem de create_form ou list_forms).",
+        },
+        dataJson: {
+          type: "object",
+          description: "Patch a aplicar no dataJson (deep-merge, não substitui o todo).",
+        },
+        status: {
+          type: "string",
+          enum: ["rascunho", "completo"],
+          description: "Auto-save use 'rascunho'. Finalizar e gerar contrato use 'completo'.",
+        },
+        title: {
+          type: "string",
+          description: "Renomeia form e deal vinculado.",
+        },
+      },
+      required: ["token"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "PATCH",
+        path: `/api/forms/${args.token}`,
+        body: {
+          dataJson: args.dataJson,
+          status: args.status,
+          title: args.title,
+        },
+      });
+      return r.body;
+    },
+  },
+
   // ───────────── Contract Comments ─────────────
   {
     name: "list_contract_comments",
