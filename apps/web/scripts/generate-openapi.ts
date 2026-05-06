@@ -595,6 +595,222 @@ registry.registerPath({
 });
 
 // ───────────────────────────────────────────────────────────────────────────
+// /api/deals/[dealId]  — PATCH (stage move / rename)
+// ───────────────────────────────────────────────────────────────────────────
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/deals/{dealId}",
+  description:
+    "Atualiza stage e/ou título de um deal. Reversível (sem HITL): outro PATCH com stageId anterior desfaz. stageId precisa pertencer ao mesmo pipeline do deal.",
+  tags: ["Deals"],
+  security: [{ bearerAuth: ["deals:rw"] }],
+  request: {
+    params: z.object({ dealId: z.string() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            stageId: z.string().optional(),
+            title: z.string().optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Atualizado",
+      content: {
+        "application/json": {
+          schema: z.object({
+            id: z.string(),
+            title: z.string(),
+            stageId: z.string(),
+            stage: z.object({ id: z.string(), name: z.string() }),
+            updatedAt: z.string().datetime(),
+          }),
+        },
+      },
+    },
+    400: { description: "Body vazio ou stageId fora do pipeline" },
+    403: { description: "Cross-org ou cross-user (Bearer)" },
+    404: { description: "Deal não encontrado" },
+  },
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// /api/deals/[dealId]/mark-signed
+// ───────────────────────────────────────────────────────────────────────────
+
+registry.registerPath({
+  method: "post",
+  path: "/api/deals/{dealId}/mark-signed",
+  description:
+    "Atalho: move deal de stage 'Assinatura' para 'Concluído'. Falha se não estiver em 'Assinatura'. Reversível via PATCH stageId.",
+  tags: ["Deals"],
+  security: [{ bearerAuth: ["deals:rw"] }],
+  request: { params: z.object({ dealId: z.string() }) },
+  responses: {
+    200: {
+      description: "Concluído",
+      content: {
+        "application/json": {
+          schema: z.object({
+            status: z.literal("concluido"),
+            dealId: z.string(),
+            stageId: z.string(),
+            stageName: z.string(),
+          }),
+        },
+      },
+    },
+    400: { description: "Deal não está em 'Assinatura'" },
+    404: { description: "Deal não encontrado" },
+  },
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// /api/contracts/[id]/status
+// ───────────────────────────────────────────────────────────────────────────
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/contracts/{id}/status",
+  description:
+    "Move contrato entre 'rascunho' e 'review' (reversível, sem HITL). Para 'aprovado' use /approve (HITL). Bloqueia 409 se contrato já está aprovado.",
+  tags: ["Contracts"],
+  security: [{ bearerAuth: ["contracts:rw"] }],
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            status: z.enum(["rascunho", "review"]),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "Atualizado",
+      content: {
+        "application/json": {
+          schema: z.object({
+            id: z.string(),
+            status: z.string(),
+            updatedAt: z.string().datetime(),
+          }),
+        },
+      },
+    },
+    400: { description: "Status inválido" },
+    409: { description: "Contrato aprovado não pode mudar status por aqui" },
+  },
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// /api/deals/[dealId]/certidoes-newton  (HITL)
+// ───────────────────────────────────────────────────────────────────────────
+
+registry.registerPath({
+  method: "post",
+  path: "/api/deals/{dealId}/certidoes-newton",
+  description:
+    "Solicita batch de certidões Infosimples. SEMPRE HITL — Bearer cria ActionIntent CERTIDAO_REQUEST (custo Infosimples; humano aprova em /intents/<id>). Auto-plan: o servidor decide quais certidões emitir baseado nos dados do deal/diligenciados. Cliente gera batchId (UUID v4) upfront pra idempotência.",
+  tags: ["Certidoes"],
+  security: [{ bearerAuth: ["deals:rw"] }],
+  request: {
+    params: z.object({ dealId: z.string() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            batchId: z.string().uuid(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    202: {
+      description: "Bearer: intent pending OU batch dispatched",
+      content: {
+        "application/json": {
+          schema: z.union([
+            IntentPendingResponse,
+            z.object({
+              batchId: z.string(),
+              jobCount: z.number(),
+              skipped: z.array(z.unknown()),
+              totalCostCents: z.number(),
+            }),
+          ]),
+        },
+      },
+    },
+    400: { description: "Sem certidões disponíveis pro deal" },
+    402: { description: "Budget mensal estourado" },
+    409: { description: "Batch ativo recente (< 30min)" },
+  },
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// /api/deals/[dealId]/attachments-newton
+// ───────────────────────────────────────────────────────────────────────────
+
+registry.registerPath({
+  method: "post",
+  path: "/api/deals/{dealId}/attachments-newton",
+  description:
+    "Sobe um documento (PDF/JPG/PNG/WebP/GIF) pra um deal via JSON com base64 (não multipart — Bearer-friendly). Limite 10MB. Sem HITL — reversível via DELETE no attachment.",
+  tags: ["Documents"],
+  security: [{ bearerAuth: ["documents:rw"] }],
+  request: {
+    params: z.object({ dealId: z.string() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            filename: z.string().min(1).max(255),
+            mime: z.enum([
+              "image/jpeg",
+              "image/png",
+              "image/webp",
+              "image/gif",
+              "application/pdf",
+            ]),
+            base64Data: z.string().min(1),
+            category: z.string().optional(),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    201: {
+      description: "Attachment criado",
+      content: {
+        "application/json": {
+          schema: z.object({
+            id: z.string(),
+            filename: z.string(),
+            mime: z.string(),
+            url: z.string(),
+            category: z.string().nullable(),
+            createdAt: z.string().datetime(),
+          }),
+        },
+      },
+    },
+    400: { description: "Mime inválido / base64 vazio / size > 10MB" },
+    503: { description: "BLOB_READ_WRITE_TOKEN não configurado no servidor" },
+  },
+});
+
+// ───────────────────────────────────────────────────────────────────────────
 // Generate
 // ───────────────────────────────────────────────────────────────────────────
 

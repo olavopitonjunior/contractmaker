@@ -1420,6 +1420,458 @@
           }
         }
       }
+    },
+    "/api/deals/{dealId}": {
+      "patch": {
+        "description": "Atualiza stage e/ou título de um deal. Reversível (sem HITL): outro PATCH com stageId anterior desfaz. stageId precisa pertencer ao mesmo pipeline do deal.",
+        "tags": [
+          "Deals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "deals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "stageId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Atualizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "stageId": {
+                      "type": "string"
+                    },
+                    "stage": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ]
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "title",
+                    "stageId",
+                    "stage",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Body vazio ou stageId fora do pipeline"
+          },
+          "403": {
+            "description": "Cross-org ou cross-user (Bearer)"
+          },
+          "404": {
+            "description": "Deal não encontrado"
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/mark-signed": {
+      "post": {
+        "description": "Atalho: move deal de stage 'Assinatura' para 'Concluído'. Falha se não estiver em 'Assinatura'. Reversível via PATCH stageId.",
+        "tags": [
+          "Deals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "deals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Concluído",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "concluido"
+                      ]
+                    },
+                    "dealId": {
+                      "type": "string"
+                    },
+                    "stageId": {
+                      "type": "string"
+                    },
+                    "stageName": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "dealId",
+                    "stageId",
+                    "stageName"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Deal não está em 'Assinatura'"
+          },
+          "404": {
+            "description": "Deal não encontrado"
+          }
+        }
+      }
+    },
+    "/api/contracts/{id}/status": {
+      "patch": {
+        "description": "Move contrato entre 'rascunho' e 'review' (reversível, sem HITL). Para 'aprovado' use /approve (HITL). Bloqueia 409 se contrato já está aprovado.",
+        "tags": [
+          "Contracts"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "contracts:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string",
+                    "enum": [
+                      "rascunho",
+                      "review"
+                    ]
+                  }
+                },
+                "required": [
+                  "status"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Atualizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "status": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "status",
+                    "updatedAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Status inválido"
+          },
+          "409": {
+            "description": "Contrato aprovado não pode mudar status por aqui"
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/certidoes-newton": {
+      "post": {
+        "description": "Solicita batch de certidões Infosimples. SEMPRE HITL — Bearer cria ActionIntent CERTIDAO_REQUEST (custo Infosimples; humano aprova em /intents/<id>). Auto-plan: o servidor decide quais certidões emitir baseado nos dados do deal/diligenciados. Cliente gera batchId (UUID v4) upfront pra idempotência.",
+        "tags": [
+          "Certidoes"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "deals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "batchId": {
+                    "type": "string",
+                    "format": "uuid"
+                  }
+                },
+                "required": [
+                  "batchId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Bearer: intent pending OU batch dispatched",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/IntentPendingResponse"
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "batchId": {
+                          "type": "string"
+                        },
+                        "jobCount": {
+                          "type": "number"
+                        },
+                        "skipped": {
+                          "type": "array",
+                          "items": {}
+                        },
+                        "totalCostCents": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "batchId",
+                        "jobCount",
+                        "skipped",
+                        "totalCostCents"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Sem certidões disponíveis pro deal"
+          },
+          "402": {
+            "description": "Budget mensal estourado"
+          },
+          "409": {
+            "description": "Batch ativo recente (< 30min)"
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/attachments-newton": {
+      "post": {
+        "description": "Sobe um documento (PDF/JPG/PNG/WebP/GIF) pra um deal via JSON com base64 (não multipart — Bearer-friendly). Limite 10MB. Sem HITL — reversível via DELETE no attachment.",
+        "tags": [
+          "Documents"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "documents:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "filename": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 255
+                  },
+                  "mime": {
+                    "type": "string",
+                    "enum": [
+                      "image/jpeg",
+                      "image/png",
+                      "image/webp",
+                      "image/gif",
+                      "application/pdf"
+                    ]
+                  },
+                  "base64Data": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "category": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "filename",
+                  "mime",
+                  "base64Data"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Attachment criado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "filename": {
+                      "type": "string"
+                    },
+                    "mime": {
+                      "type": "string"
+                    },
+                    "url": {
+                      "type": "string"
+                    },
+                    "category": {
+                      "type": [
+                        "string",
+                        "null"
+                      ]
+                    },
+                    "createdAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "filename",
+                    "mime",
+                    "url",
+                    "category",
+                    "createdAt"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Mime inválido / base64 vazio / size > 10MB"
+          },
+          "503": {
+            "description": "BLOB_READ_WRITE_TOKEN não configurado no servidor"
+          }
+        }
+      }
     }
   },
   "webhooks": {}
