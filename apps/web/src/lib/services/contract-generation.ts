@@ -2,6 +2,11 @@ import { prisma } from "@/lib/db/prisma";
 import { renderContratoHTML } from "@/lib/render/handlebars";
 import { isGoogleDocsFeatureEnabled } from "@/lib/google/client";
 import { uploadHtmlAsGoogleDoc } from "@/lib/google/upload-rendered-html";
+import { copyContractGoogleDoc } from "@/lib/google/copy-doc";
+import {
+  flattenForPlaceholders,
+  replacePlaceholdersInDoc,
+} from "@/lib/google/replace-placeholders";
 import { watchFile } from "@/lib/google/watch";
 
 interface GenerateResult {
@@ -15,7 +20,7 @@ interface GenerateResult {
  * aren't captured in the 7-step wizard but are required by the contract
  * template (delivery deadlines, daily penalties, commission percentage, etc).
  */
-function enrichContractData(
+export function enrichContractData(
   data: Record<string, unknown>
 ): Record<string, unknown> {
   const enriched = { ...data };
@@ -139,8 +144,14 @@ export async function generateContractForDeal(
   // Enrich data with template defaults (multas, prazos, percentual comissao)
   const enrichedData = enrichContractData(dataJson);
 
-  // Render HTML
-  const htmlContent = renderContratoHTML(template.handlebarsSource, enrichedData);
+  // Render HTML — apenas pra engine="handlebars". Em engine="google_docs"
+  // o conteúdo nunca passa por Handlebars; o doc fonte é copiado e tem seus
+  // placeholders substituídos via Drive API. Ainda guardamos um snapshot
+  // mínimo em htmlContent pra fallback de export/diff.
+  const isGoogleDocsEngine = template.engine === "google_docs";
+  const htmlContent = isGoogleDocsEngine
+    ? `<p>Contrato gerado a partir de Google Doc (${template.name}).</p>`
+    : renderContratoHTML(template.handlebarsSource, enrichedData);
 
   // Handle versioning
   const existingCount = await prisma.contract.count({
@@ -179,19 +190,56 @@ export async function generateContractForDeal(
   if (isGoogleDocsFeatureEnabled()) {
     try {
       const numeroContrato = `${contract.id.slice(-8).toUpperCase()}-v${contract.version}`;
-      // Pré-injeta `{{contrato.numero}}` no HTML caso o template tenha esse
-      // placeholder em algum cabeçalho/rodapé customizado. O htmlContent já
-      // foi renderizado por Handlebars contra `enrichedData`, então só
-      // sobram literais dessa forma se o template os deixou intencionalmente.
-      const htmlForUpload = htmlContent
-        .replace(/\{\{\s*contrato\.numero\s*\}\}/g, numeroContrato)
-        .replace(/\{\{\s*contrato\.id\s*\}\}/g, contract.id)
-        .replace(/\{\{\s*contrato\.versao\s*\}\}/g, String(contract.version));
+      const docName = `Contrato ${contract.id} — v${contract.version}`;
 
-      const created = await uploadHtmlAsGoogleDoc({
-        htmlContent: htmlForUpload,
-        name: `Contrato ${contract.id} — v${contract.version}`,
-      });
+      let created: { docId: string; webViewLink: string };
+
+      if (isGoogleDocsEngine) {
+        // engine="google_docs": copia o template-modelo e substitui placeholders
+        // simples via batchUpdate(replaceAllText). Não suporta loops nem
+        // conditionals — limitação anunciada na UI de import.
+        if (!template.googleTemplateDocId) {
+          throw new Error(
+            "Template Google Docs sem googleTemplateDocId associado."
+          );
+        }
+        const copy = await copyContractGoogleDoc({
+          sourceDocId: template.googleTemplateDocId,
+          name: docName,
+        });
+        created = { docId: copy.docId, webViewLink: copy.webViewLink };
+
+        const flat = flattenForPlaceholders(enrichedData);
+        flat["contrato_numero"] = numeroContrato;
+        flat["contrato_id"] = contract.id;
+        flat["contrato_versao"] = String(contract.version);
+        try {
+          await replacePlaceholdersInDoc({
+            docId: copy.docId,
+            replacements: flat,
+          });
+        } catch (replaceErr) {
+          console.error(
+            "[contract-generation] Falha em replaceAllText:",
+            replaceErr
+          );
+        }
+      } else {
+        // Pré-injeta `{{contrato.numero}}` no HTML caso o template tenha esse
+        // placeholder em algum cabeçalho/rodapé customizado. O htmlContent já
+        // foi renderizado por Handlebars contra `enrichedData`, então só
+        // sobram literais dessa forma se o template os deixou intencionalmente.
+        const htmlForUpload = htmlContent
+          .replace(/\{\{\s*contrato\.numero\s*\}\}/g, numeroContrato)
+          .replace(/\{\{\s*contrato\.id\s*\}\}/g, contract.id)
+          .replace(/\{\{\s*contrato\.versao\s*\}\}/g, String(contract.version));
+
+        const uploaded = await uploadHtmlAsGoogleDoc({
+          htmlContent: htmlForUpload,
+          name: docName,
+        });
+        created = { docId: uploaded.docId, webViewLink: uploaded.webViewLink };
+      }
 
       // Registra watch do Drive para popular ContractChangeLog quando o doc
       // for editado dentro do iframe. Falha aqui não impede a criação.

@@ -451,6 +451,11 @@ model ContractTemplate {
   // armazenado no Drive da service account. Os contratos são criados via
   // files.copy seguido de batchUpdate(replaceAllText).
   googleTemplateDocId String?
+  // Preview cache: hash do handlebarsSource usado pra gerar o GDoc apontado
+  // por googleTemplateDocId como preview. Zerado quando handlebarsSource muda
+  // (vira "desatualizado" na UI até o próximo POST /preview re-gerar).
+  previewSourceHash   String?
+  previewUpdatedAt    DateTime?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 

@@ -4,8 +4,11 @@
  * on-disk version.
  *
  * Usage:
- *   npx tsx scripts/sync-templates.ts            # dry-run: prints diff, no writes
- *   npx tsx scripts/sync-templates.ts --apply    # persists changes
+ *   npx tsx scripts/sync-templates.ts                            # dry-run
+ *   npx tsx scripts/sync-templates.ts --apply                    # persists handlebarsSource updates
+ *   npx tsx scripts/sync-templates.ts --apply --seed             # also creates rows that don't exist
+ *   npx tsx scripts/sync-templates.ts --apply --update-metadata  # also updates name/description
+ *   npx tsx scripts/sync-templates.ts --apply --seed --update-metadata
  *
  * Env:
  *   DATABASE_URL — Prisma connection (pass prod URL as inline env var to target prod)
@@ -18,15 +21,31 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 const DRY_RUN = !process.argv.includes("--apply");
+const SEED = process.argv.includes("--seed");
+const UPDATE_METADATA = process.argv.includes("--update-metadata");
 
 interface TemplateFile {
   modalidade: "a_vista" | "financiamento";
   filename: string;
+  canonicalName: string;
+  canonicalDescription: string;
 }
 
 const TEMPLATES: TemplateFile[] = [
-  { modalidade: "a_vista", filename: "ccv_a_vista_v2.hbs" },
-  { modalidade: "financiamento", filename: "ccv_financiamento_v2.hbs" },
+  {
+    modalidade: "a_vista",
+    filename: "ccv_a_vista_v2.hbs",
+    canonicalName: "CCV - Pagamento À Vista",
+    canonicalDescription:
+      "Instrumento particular de compromisso de venda e compra - modalidade pagamento à vista",
+  },
+  {
+    modalidade: "financiamento",
+    filename: "ccv_financiamento_v2.hbs",
+    canonicalName: "CCV - Financiamento Imobiliário",
+    canonicalDescription:
+      "Instrumento particular de compromisso de venda e compra - modalidade financiamento imobiliário",
+  },
 ];
 
 function sha(s: string): string {
@@ -48,12 +67,17 @@ function resolveTemplatePath(filename: string): string {
 
 async function main() {
   console.log(`[sync-templates] ${DRY_RUN ? "DRY RUN" : "APPLY MODE"}`);
+  if (SEED) console.log(`[sync-templates] --seed enabled (cria rows ausentes)`);
+  if (UPDATE_METADATA)
+    console.log(`[sync-templates] --update-metadata enabled (atualiza name/description)`);
   console.log(`[sync-templates] DB: ${process.env.DATABASE_URL?.replace(/:[^:@]+@/, ":***@")}`);
   console.log();
 
   let updated = 0;
   let skipped = 0;
   let notFound = 0;
+  let seeded = 0;
+  let renamed = 0;
 
   for (const t of TEMPLATES) {
     const filePath = resolveTemplatePath(t.filename);
@@ -62,56 +86,112 @@ async function main() {
 
     const dbRows = await prisma.contractTemplate.findMany({
       where: { modalidade: t.modalidade, status: "active" },
-      select: { id: true, orgId: true, name: true, handlebarsSource: true },
+      select: {
+        id: true,
+        orgId: true,
+        name: true,
+        description: true,
+        handlebarsSource: true,
+      },
     });
 
     if (dbRows.length === 0) {
       console.log(`⚠  ${t.filename}: nenhum ContractTemplate ativo com modalidade=${t.modalidade}`);
       notFound++;
+
+      if (SEED) {
+        // Sem orgId disponível, não podemos criar — precisa rodar por org.
+        // Buscamos todas as orgs e seedamos uma row por org pra essa modalidade.
+        const orgs = await prisma.organization.findMany({ select: { id: true } });
+        for (const org of orgs) {
+          const exists = await prisma.contractTemplate.findFirst({
+            where: { orgId: org.id, modalidade: t.modalidade, status: "active" },
+            select: { id: true },
+          });
+          if (exists) continue;
+
+          // Desfaz isDefault de outros templates da mesma modalidade pra essa org
+          // antes de criar — invariant "um default por (org, modalidade)".
+          if (!DRY_RUN) {
+            await prisma.contractTemplate.updateMany({
+              where: { orgId: org.id, modalidade: t.modalidade, isDefault: true },
+              data: { isDefault: false },
+            });
+            await prisma.contractTemplate.create({
+              data: {
+                orgId: org.id,
+                name: t.canonicalName,
+                description: t.canonicalDescription,
+                handlebarsSource: source,
+                modalidade: t.modalidade,
+                isDefault: true,
+                status: "active",
+                schemaType: "compra_venda_v2",
+                version: "2.0.0",
+                engine: "handlebars",
+              },
+            });
+            console.log(`  ✓ seeded org=${org.id} → ${t.canonicalName}`);
+          } else {
+            console.log(`  [seed] would create for org=${org.id} → ${t.canonicalName}`);
+          }
+          seeded++;
+        }
+      }
       continue;
     }
 
     for (const row of dbRows) {
       const dbHash = sha(row.handlebarsSource);
-      if (dbHash === fileHash) {
-        console.log(`✓  ${t.filename} [org=${row.orgId}] hash OK (${dbHash}) — skip`);
-        skipped++;
-        continue;
-      }
 
-      const diffLines = [];
-      const fileLines = source.split("\n");
-      const dbLines = row.handlebarsSource.split("\n");
-      const maxLines = Math.max(fileLines.length, dbLines.length);
-      let shown = 0;
-      for (let i = 0; i < maxLines && shown < 5; i++) {
-        if (fileLines[i] !== dbLines[i]) {
-          diffLines.push(`  line ${i + 1}: DB="${(dbLines[i] || "").slice(0, 60)}" -> FILE="${(fileLines[i] || "").slice(0, 60)}"`);
-          shown++;
+      // 1) Atualiza handlebarsSource se hash difere
+      if (dbHash !== fileHash) {
+        const fileLines = source.split("\n");
+        const dbLines = row.handlebarsSource.split("\n");
+        console.log(
+          `⚡ ${t.filename} [org=${row.orgId}] ${dbHash} → ${fileHash} (${Math.abs(fileLines.length - dbLines.length)} lines diff)`
+        );
+        if (!DRY_RUN) {
+          await prisma.contractTemplate.update({
+            where: { id: row.id },
+            data: { handlebarsSource: source },
+          });
+          console.log(`  ✓ source updated`);
         }
+        updated++;
+      } else {
+        console.log(`✓  ${t.filename} [org=${row.orgId}] hash OK (${dbHash})`);
+        skipped++;
       }
 
-      console.log(
-        `⚡ ${t.filename} [org=${row.orgId}] ${dbHash} → ${fileHash} (${Math.abs(fileLines.length - dbLines.length)} lines diff)`
-      );
-      diffLines.forEach((l) => console.log(l));
-
-      if (!DRY_RUN) {
-        await prisma.contractTemplate.update({
-          where: { id: row.id },
-          data: { handlebarsSource: source },
-        });
-        console.log(`  ✓ updated`);
+      // 2) Se --update-metadata: atualiza name/description quando difere
+      if (
+        UPDATE_METADATA &&
+        (row.name !== t.canonicalName || row.description !== t.canonicalDescription)
+      ) {
+        console.log(
+          `  ✏  metadata: "${row.name}" → "${t.canonicalName}"`
+        );
+        if (!DRY_RUN) {
+          await prisma.contractTemplate.update({
+            where: { id: row.id },
+            data: {
+              name: t.canonicalName,
+              description: t.canonicalDescription,
+            },
+          });
+          console.log(`  ✓ metadata updated`);
+        }
+        renamed++;
       }
-      updated++;
     }
   }
 
   console.log();
   console.log(
-    `[sync-templates] ${DRY_RUN ? "would update" : "updated"}: ${updated}, unchanged: ${skipped}, not found: ${notFound}`
+    `[sync-templates] ${DRY_RUN ? "would update" : "updated"}: ${updated}, unchanged: ${skipped}, not found: ${notFound}, seeded: ${seeded}, renamed: ${renamed}`
   );
-  if (DRY_RUN && updated > 0) {
+  if (DRY_RUN && (updated > 0 || seeded > 0 || renamed > 0)) {
     console.log(`[sync-templates] Run with --apply to persist changes.`);
   }
 }

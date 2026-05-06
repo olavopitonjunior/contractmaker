@@ -10,6 +10,8 @@ const createTemplateSchema = z.object({
   modalidade: z.string().optional(),
   isDefault: z.boolean().optional(),
   version: z.string().optional(),
+  engine: z.enum(["handlebars", "google_docs"]).optional(),
+  googleTemplateDocId: z.string().optional(),
 });
 
 export async function GET() {
@@ -48,17 +50,29 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.message }, { status: 400 });
   }
 
+  const modalidade = parsed.data.modalidade || "a_vista";
+  const isDefault = parsed.data.isDefault ?? false;
+
+  if (isDefault) {
+    await prisma.contractTemplate.updateMany({
+      where: { orgId: org.id, modalidade, isDefault: true },
+      data: { isDefault: false },
+    });
+  }
+
   const template = await prisma.contractTemplate.create({
     data: {
       orgId: org.id,
       name: parsed.data.name,
       description: parsed.data.description || "",
       handlebarsSource: parsed.data.handlebarsSource,
-      modalidade: parsed.data.modalidade || "a_vista",
-      isDefault: parsed.data.isDefault ?? false,
+      modalidade,
+      isDefault,
       version: parsed.data.version || "1.0.0",
       schemaType: "compra_venda_v2",
       status: "active",
+      engine: parsed.data.engine ?? "handlebars",
+      googleTemplateDocId: parsed.data.googleTemplateDocId ?? null,
     },
   });
 

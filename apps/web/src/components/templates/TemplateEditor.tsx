@@ -26,8 +26,9 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Save, Trash2, ArrowLeft } from "lucide-react";
+import { Save, Trash2, ArrowLeft, Eye } from "lucide-react";
 import Link from "next/link";
+import { TemplatePreview } from "./TemplatePreview";
 
 interface TemplateEditorProps {
   template?: {
@@ -39,6 +40,9 @@ interface TemplateEditorProps {
     isDefault: boolean;
     version: string;
     status: string;
+    engine?: string;
+    googleTemplateDocId?: string | null;
+    previewStale?: boolean;
   };
   mode: "create" | "edit";
 }
@@ -46,12 +50,21 @@ interface TemplateEditorProps {
 export function TemplateEditor({ template, mode }: TemplateEditorProps) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
   const [name, setName] = useState(template?.name || "");
   const [description, setDescription] = useState(template?.description || "");
   const [handlebarsSource, setHandlebarsSource] = useState(template?.handlebarsSource || "");
   const [modalidade, setModalidade] = useState(template?.modalidade || "a_vista");
   const [isDefault, setIsDefault] = useState(template?.isDefault || false);
   const [version, setVersion] = useState(template?.version || "1.0.0");
+
+  const engine = template?.engine || "handlebars";
+  const canPreview =
+    mode === "edit" &&
+    !!template?.id &&
+    (engine === "google_docs"
+      ? !!template?.googleTemplateDocId
+      : handlebarsSource.length > 0);
 
   async function handleSave() {
     if (!name.trim() || !handlebarsSource.trim()) {
@@ -134,9 +147,15 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
             </SelectContent>
           </Select>
         </div>
-        <div className="flex items-center gap-3 pt-6">
+        <div className="flex items-start gap-3 pt-6">
           <Switch id="isDefault" checked={isDefault} onCheckedChange={setIsDefault} />
-          <Label htmlFor="isDefault">Template padrao</Label>
+          <div className="grid gap-0.5">
+            <Label htmlFor="isDefault">Template padrão</Label>
+            <p className="text-xs text-muted-foreground">
+              Será usado automaticamente em novos contratos da modalidade {modalidade === "financiamento" ? "Financiamento" : "À Vista"}.
+              Marcar aqui desfaz o padrão atual da mesma modalidade.
+            </p>
+          </div>
         </div>
       </div>
 
@@ -162,6 +181,24 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
           {saving ? "Salvando..." : mode === "create" ? "Criar Template" : "Salvar Alterações"}
         </Button>
 
+        {canPreview && (
+          <Button
+            variant="outline"
+            onClick={() => setPreviewOpen(true)}
+            title={
+              template?.previewStale
+                ? "Preview desatualizado — abre o último upload e oferece atualizar"
+                : "Abrir preview embedado no Google Docs"
+            }
+          >
+            <Eye className="h-4 w-4 mr-1" />
+            Visualizar preview
+            {template?.previewStale && (
+              <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
+            )}
+          </Button>
+        )}
+
         {mode === "edit" && (
           <AlertDialog>
             <AlertDialogTrigger asChild>
@@ -185,6 +222,18 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
           </AlertDialog>
         )}
       </div>
+
+      {canPreview && template && (
+        <TemplatePreview
+          templateId={template.id}
+          templateName={name}
+          templateModalidade={modalidade as "a_vista" | "financiamento"}
+          templateEngine={engine as "handlebars" | "google_docs"}
+          previewStale={template.previewStale ?? false}
+          open={previewOpen}
+          onOpenChange={setPreviewOpen}
+        />
+      )}
     </div>
   );
 }

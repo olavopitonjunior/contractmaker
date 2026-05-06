@@ -41,16 +41,45 @@ export async function PATCH(
     return NextResponse.json({ error: "Template not found" }, { status: 404 });
   }
 
+  const nextModalidade = body.modalidade ?? template.modalidade;
+  const nextIsDefault =
+    typeof body.isDefault === "boolean" ? body.isDefault : template.isDefault;
+  const nextSource = body.handlebarsSource ?? template.handlebarsSource;
+  const sourceChanged = nextSource !== template.handlebarsSource;
+
+  if (nextIsDefault) {
+    await prisma.contractTemplate.updateMany({
+      where: {
+        orgId: template.orgId,
+        modalidade: nextModalidade,
+        isDefault: true,
+        id: { not: params.id },
+      },
+      data: { isDefault: false },
+    });
+  }
+
   const updated = await prisma.contractTemplate.update({
     where: { id: params.id },
     data: {
       name: body.name ?? template.name,
       description: body.description ?? template.description,
-      handlebarsSource: body.handlebarsSource ?? template.handlebarsSource,
-      modalidade: body.modalidade ?? template.modalidade,
-      isDefault: body.isDefault ?? template.isDefault,
+      handlebarsSource: nextSource,
+      modalidade: nextModalidade,
+      isDefault: nextIsDefault,
       version: body.version ?? template.version,
       status: body.status ?? template.status,
+      engine: body.engine ?? template.engine,
+      googleTemplateDocId:
+        body.googleTemplateDocId !== undefined
+          ? body.googleTemplateDocId
+          : template.googleTemplateDocId,
+      // Preview fica obsoleto quando o source muda — força regeneração no
+      // próximo "Visualizar". Mantém o doc Drive antigo pra não quebrar
+      // iframes que estejam abertos durante a edição.
+      ...(sourceChanged
+        ? { previewSourceHash: null, previewUpdatedAt: null }
+        : {}),
     },
   });
 
