@@ -309,4 +309,144 @@ export const tools: Tool[] = [
       return r.body;
     },
   },
+
+  // ───────────── Deals ─────────────
+  {
+    name: "list_deals",
+    description:
+      "Lista todos os deals do pipeline da org do usuário autenticado. Inclui stage, form vinculado e contrato mais recente. Ordenado por createdAt desc.",
+    inputSchema: { type: "object", properties: {} },
+    handler: async () => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/pipeline/deals",
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "get_deal",
+    description:
+      "Retorna um deal específico com form vinculado e stage. Response inclui header ETag (updatedAt) — usar pra detecção de concorrência em writes futuros.",
+    inputSchema: {
+      type: "object",
+      properties: { dealId: { type: "string" } },
+      required: ["dealId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/deals/${args.dealId}`,
+      });
+      return r.body;
+    },
+  },
+
+  // ───────────── Forms ─────────────
+  {
+    name: "list_forms",
+    description:
+      "Lista todos os SalesForms da org. Retorna form + deal vinculado (id, title) se houver. Ordenado por createdAt desc.",
+    inputSchema: { type: "object", properties: {} },
+    handler: async () => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/forms",
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "create_form",
+    description:
+      "Cria um novo SalesForm (schema compra_venda_v1) e automaticamente cria um Deal vinculado no primeiro stage do pipeline (Formulário). Retorna { id, token, url, dealId }. Idempotente via idempotencyKey.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: {
+          type: "string",
+          description: "Título do form/deal. Default: 'Negocio - <token-prefix>'.",
+        },
+        idempotencyKey: {
+          type: "string",
+          description: "UUID v4 — uma key por intenção, retry-safe 24h",
+        },
+      },
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: "/api/forms",
+        body: { title: args.title },
+        idempotencyKey: args.idempotencyKey as string | undefined,
+      });
+      return r.body;
+    },
+  },
+
+  // ───────────── Contract Comments ─────────────
+  {
+    name: "list_contract_comments",
+    description:
+      "Lista comments de um contrato (apenas root-level; replies vêm aninhadas). Por default só não-resolvidos; passe includeResolved=true para incluir resolvidos.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        contractId: { type: "string" },
+        includeResolved: {
+          type: "boolean",
+          description: "Incluir comments resolvidos. Default false.",
+        },
+      },
+      required: ["contractId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/contracts/${args.contractId}/comments`,
+        query: args.includeResolved
+          ? { includeResolved: "true" }
+          : undefined,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "add_contract_comment",
+    description:
+      "Adiciona um comment a um contrato. selectedText é o trecho do contrato sendo comentado (precisa existir literal no Google Doc se contrato for GDoc — caso contrário 422). Newton aparece como autor com label 'Newton (em nome do user ...)'. Falha se contrato estiver aprovado.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        contractId: { type: "string" },
+        text: {
+          type: "string",
+          description: "O comment em si.",
+        },
+        selectedText: {
+          type: "string",
+          description:
+            "Trecho exato do contrato sendo comentado (ancora o comment). Em GDocs precisa bater literal.",
+        },
+        severity: {
+          type: "string",
+          enum: ["info", "warning", "blocker"],
+          description: "Default 'info'.",
+        },
+      },
+      required: ["contractId", "text", "selectedText"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/contracts/${args.contractId}/comments`,
+        body: {
+          text: args.text,
+          selectedText: args.selectedText,
+          severity: args.severity,
+        },
+      });
+      return r.body;
+    },
+  },
 ];

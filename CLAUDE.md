@@ -44,7 +44,15 @@ Dois templates ativos em `templates/`:
 - **`ccv_a_vista_v2.hbs`** (15 cláusulas): sinal + saldo próprio · posse após pagamento integral · escritura pública.
 - **`ccv_financiamento_v2.hbs`** (17 cláusulas): sinal + financiamento bancário · posse após registro · 45 dias úteis pra instrumento definitivo · cláusula 9.5 de rescisão por não obtenção do crédito.
 
-Slots `<!-- CLAUSE_SLOT:Gx -->` no template marcam pontos de inserção das cláusulas variáveis do banco.
+**Layout** (alinhado ao padrão histórico do escritório Zimmermann — match exato com v1 da Sandra Yamamoto, validado em 2026-05-05):
+- Começa direto com `<h1>INSTRUMENTO PARTICULAR DE COMPROMISSO DE VENDA E COMPRA</h1>` + `<h2>Modalidade: …</h2>` + separador `❦`. Sem cover-page (foi removida).
+- Bloco intermediadora com branch `{{#if (eq comissao.corretora_tipo_pessoa "fisica")}}` — renderiza "Corretor(a): X / CPF: Y" pra PF e "Imobiliária: X / CNPJ: Y" pra PJ. Aplicado em qualificação, cláusula da comissão e bloco de assinaturas.
+- Parcelas dinâmicas: `{{#if pagamento.parcelas.length}}{{#each pagamento.parcelas}}` — em à vista usa `{{this.letra}})` (b, c, d…); em financiamento usa `Parcela {{this.numero}}.`. `enrichContractData` em `contract-generation.ts` adiciona `letra` e `numero` em cada parcela.
+- Inscrição municipal só renderiza quando ≠ inscrição IPTU (`{{#unless (eq inscricao_municipal inscricao_iptu)}}`).
+
+Slots `<!-- CLAUSE_SLOT:Gx -->` no template marcam pontos de inserção das cláusulas variáveis do banco. HTML comments são descartados pelo Drive ao importar — slots ficam invisíveis no GDoc final (desejado). Cláusulas inseridas via `insert_clause` tool aparecem no doc real.
+
+**Sync DB obrigatório:** mudanças nos `.hbs` SÓ afetam contratos novos depois de rodar `pnpm tsx apps/web/scripts/sync-templates.ts --apply` contra a DB. Geração lê `ContractTemplate.handlebarsSource` (não o filesystem). Esse passo manual já causou bug em prod (templates desatualizados, intermediadora renderizando como PJ mesmo com `corretora_tipo_pessoa: "fisica"`).
 
 Template legado `contrato_compra_venda.hbs` continua deprecated (mantido pra contratos antigos).
 
@@ -96,6 +104,12 @@ System prompt (`src/lib/ai/prompts.ts`) tem 18 regras. Destaques: regra 10 obrig
 ## Editor — Google Docs (padrão atual) e TipTap (legacy)
 
 `ContractEditorPage.tsx` é o orquestrador: olha `contract.googleDocId` e renderiza `GoogleDocsEditor.tsx` (iframe Drive) OU `ContractEditor.tsx` (TipTap legacy). Header, banners, painéis (Comments/Suggestions/Versions/ChangeLog), Chat IA e ExportDialog são compartilhados — funcionam em ambos os modos.
+
+**Pipeline de criação (refatorado 2026-05-05)**: `contract-generation.ts` → `renderContratoHTML(template, dataJson)` produz HTML completo com loops/conditionals/slots resolvidos → `uploadHtmlAsGoogleDoc({htmlContent, name})` em `lib/google/upload-rendered-html.ts` faz upload via owner OAuth como GDoc nativo + share com SA → aplica `DocumentStyle` default da org via `googleApplyStylePreset`. Antes (até commit `b94f505f`) usava `createDocFromTemplate` (file.copy de template estático + `replaceAllText`) que perdia loops com N iterações, conditionals e slots — visto na demo de 2026-05-05 (vendedor 2 sumindo, cônjuge fantasma, [[CLAUSE_SLOT_Gx]] no PDF). `template-migration.ts` segue existindo só para criar template-modelo administrativo, não usar por contrato.
+
+**Versionamento (`/api/contracts/[id]/version`)**: em GDocs mode, faz `exportDocAsHtml` do doc atual (snapshot) + `copyContractGoogleDoc` (file.copy preserva estilo) + reaplica `DocumentStyle` (defesa em profundidade) + registra novo watch. Cria nova `Contract` row com `googleDocId/Url/Status` setados. Antes esse caminho criava `googleDocId=null` e ao reabrir o front caía pro TipTap legacy (bug observado em deal Sandra Yamamoto). Front em `ContractEditorPage.handleSaveVersion` envia body vazio em GDocs mode (htmlContent stale).
+
+**Aprovação (`/approve`)**: em GDocs mode, antes de marcar `status=aprovado`, faz `exportDocAsHtml` e atualiza `Contract.htmlContent` no DB (snapshot final). Sem isso o `createContractMemory` indexava embedding sobre HTML inicial obsoleto, distorcendo `find_similar_contracts`.
 
 **GDocs mode** (commit `5108961d`+):
 - Iframe `https://docs.google.com/document/d/{id}/edit?embedded=true&rm=embedded`. Read-only via `/preview` quando `status=aprovado`.
@@ -178,7 +192,16 @@ Tool `find_similar_contracts` busca top-3 por embedding (Voyage) ou fingerprint 
 
 Schema: `DocumentStyle { fontFamily, fontSizeBase, lineHeight, marginTopMm/Bottom/Left/Right, colorPrimary, colorAccent, headerHtml, footerHtml, pageNumbers, includeToc }`. UI `/settings/document-styles` com preview ao vivo.
 
-Aplicação no export: `apps/web/src/app/api/contracts/[id]/export/route.ts` carrega o preset default da org e passa pra `exportPdf` em `lib/render/exporter.ts`. Puppeteer aplica `margin`, `headerTemplate`, `footerTemplate`, `displayHeaderFooter`. `<span class="pageNumber">/<span class="totalPages">` no footer default.
+**Preset default obrigatório:** orgs precisam de **um** `DocumentStyle isDefault=true` cadastrado, senão GDocs novos nascem com Arial 11pt sem ajuste de margens. Em prod o "Padrão Zimmermann" (id `cmot43tt30001126r97zhcm3z`) tem `fontFamily: "EB Garamond"`, `fontSizeBase: 11`, `lineHeight: 1.5`, margens 30mm.
+
+**Aplicação automática em GDocs (commit `db6d898b`+):**
+- Em `contract-generation.ts` após `uploadHtmlAsGoogleDoc`, busca o preset default e chama `googleApplyStylePreset(docId, preset)` em `lib/ai/google-tool-handlers.ts`. Falha não bloqueia criação.
+- Em `/version` route após `copyContractGoogleDoc`, reaplica o mesmo preset (defesa em profundidade — file.copy preserva mas garante consistência se doc-fonte ainda não tinha estilo).
+- `googleApplyStylePreset` aplica via Docs API: `updateTextStyle` (fontFamily + fontSize + foregroundColor), `updateParagraphStyle` (lineSpacing + alignment), `updateDocumentStyle` (margens em PT).
+
+**CENTER seletivo (alinhamento):** todos os parágrafos do body recebem `alignment: JUSTIFIED`. Em seguida o helper itera blocks e centraliza apenas: HEADING_1 (sempre), o **primeiro** HEADING_2 do doc (linha "Modalidade: …"), e parágrafos contendo apenas símbolos decorativos (regex `/^[❦◆◇●○•★※\s_*-]+$/`, length<10). Cláusulas usando HEADING_2 (CLÁUSULA PRIMEIRA — etc.) NÃO recebem center, ficam justified. Esse padrão dá exatamente 3 centers + body justified, espelhando v1 Zimmermann.
+
+Aplicação no export: `apps/web/src/app/api/contracts/[id]/export/route.ts` carrega o preset default da org e passa pra `exportPdf` em `lib/render/exporter.ts`. Puppeteer aplica `margin`, `headerTemplate`, `footerTemplate`, `displayHeaderFooter`. `<span class="pageNumber">/<span class="totalPages">` no footer default. Em GDocs mode, export ignora isso e usa `drive.files.export` nativo (preserva estilo do doc).
 
 Sumário: `TableOfContents.tsx` lê `editor.state.doc` coletando headings.
 
@@ -259,17 +282,35 @@ Agente agrega tokens das N iterações em 1 record com `iterations=N` e `toolsUs
 
 `POST /api/contracts/[id]/approve` valida + conta `ContractSuggestion` pendentes + `ContractComment` não-resolvidos (severity error). Se issues, retorna `{requiresReview, canForce, errorCount, warningCount, ...}`. Frontend abre `ApprovalReviewDialog` com botões "Revisar" / "Aprovar mesmo assim" (oculto se `canForce=false` por errors). Segunda chamada com `{force: true}` aprova.
 
-Após aprovar, **contrato fica imutável**: chat/edição/comentários/versionamento bloqueados; API retorna 403 em POSTs.
+Em GDocs mode, antes de gravar status, `runContractApproval` em `lib/contracts/approve-action.ts` faz `exportDocAsHtml(googleDocId)` e atualiza `Contract.htmlContent` no DB — snapshot final usado pelo `createContractMemory` pro embedding. Sem isso o embedding ficava preso no HTML inicial e `find_similar_contracts` ficava distorcido.
+
+Após aprovar, **contrato fica imutável**: chat/edição/comentários/versionamento bloqueados; API retorna 403 em POSTs. `/auto-analyze` retorna 200 com `{findings:[], modelUsed:"approved"}` em vez de 403, evitando custo LLM em poll stale do editor.
+
+## Mecanismos de delete
+
+UI permite apagar 4 níveis de granularidade. Todos com auth + cross-org guard via `deal.pipeline.orgId`, audit log, e bloqueio quando há `Envelope` ClickSign em `closed`/`running` (preserva histórico legal). GDocs vão pra lixeira do Drive (best-effort, falha não bloqueia DB).
+
+| Endpoint | UI | O que apaga |
+|---|---|---|
+| `DELETE /api/contracts/[id]` | Lixeira em cada item de `VersionTimeline` (sheet Histórico de Versões do editor) | Versão específica de Contract. Cascata derruba ContractClause/Comment/Suggestion/ChangeLog/ChatSession/Envelope. Se era `isLatest`, promove a próxima versão por `version desc` em transação. Bloqueado pra `status="aprovado"`. |
+| `DELETE /api/pipeline/deals/[dealId]/contracts` | Botão "Excluir contratos" no header de `DealDetail` | Todas as Contract rows do deal (mantém Deal+SalesForm). Sequencial trash dos GDocs com sleep 200ms. Bloqueia se algum aprovado. |
+| `DELETE /api/deals/[dealId]/attachments/[attachmentId]` | Ícone `X` em cada DealAttachment na aba Documentos do `DealDetail` | DealAttachment individual. Best-effort `@vercel/blob.del()` no URL. CertidaoJob.attachmentId vira null via SetNull. |
+| `DELETE /api/pipeline/deals/[dealId]` | Botão "Excluir negócio" no header (com toggle "apagar formulário") | Deal completo. Cascata CertidaoJob → DealAttachment → Contract → Deal. SalesForm condicional via `?deleteForm=true`. |
+
+Audit actions: `CONTRACT_DELETE`, `CONTRACT_DELETE_BULK`, `ATTACHMENT_DELETE`, `DEAL_DELETE`.
+
+Migração de contratos legados TipTap → GDoc: `apps/web/scripts/migrate-tiptap-to-gdocs.ts --dealId <id>`. Itera `Contract` com `googleDocId IS NULL` no escopo, faz upload do htmlContent existente como GDoc nativo, aplica DocumentStyle + watch, atualiza Contract row. Dry-run por default; `--apply` persiste. Skip aprovados (a menos `--includeApproved`).
 
 ## Fluxo principal
 
-1. Form público `/f/{token}` (auto-save). **Etapa 0:** anexa docs (RG/CPF/CNH/matrícula/IPTU/comprovante) → OCR autopreenche.
-2. Cria deal a partir do form → docs copiados pra `DealAttachments` agrupados por parte/imóvel.
-3. "Confeccionar Contrato" → auto-detecta modalidade → renderiza template v2.
-4. Edita no TipTap ou via chat IA. BubbleMenu, Find/Replace (Ctrl+F), Page Break (Ctrl+Enter). Análise passiva on-open + on-edit popula comentários laterais. Sugestões IA entram como track changes.
-5. (Opcional) Aba "Certidões" → `ExtractCertidoesDialog` mostra plano + custo → batch fire-and-forget. "Gerar relatório" produz PDF de due diligence.
-6. "Aprovar" → revisão pré-aprovação. Após aprovado, `createContractMemory` roda em background.
-7. Export PDF/DOCX (com `DocumentStyle` default aplicado).
+1. Form público `/f/{token}` (auto-save). **Etapa 0:** anexa docs (RG/CPF/CNH/matrícula/IPTU/comprovante) → OCR Gemini autopreenche.
+2. Finalize do form (`status=completo`): `dedupConjuges` em `lib/forms/dedup-conjuges.ts` mescla parte duplicada que já consta como cônjuge (ex: Isabel cadastrada como comprador 2 + cônjuge de Luiz com mesmo CPF — vira só comprador 1 com cônjuge Isabel). Roda só na transição rascunho→completo.
+3. `generateContractForDeal` cria deal+contract → render Handlebars do template v2 → `uploadHtmlAsGoogleDoc` faz upload do HTML como GDoc nativo → aplica `DocumentStyle` default → registra watch Drive. Auto-detecta modalidade via `pagamento.alienacao_fiduciaria/fgts/cessao_consorcio > 0`.
+4. Editor (`/contracts/[id]`): iframe Drive ou TipTap legacy. Chat IA (default Haiku 4.5, prompt caching ephemeral, foco no contrato atual, markdown estruturado sem JSON cru). Análise passiva on-open + on-edit popula comentários laterais. Sugestões IA entram como track changes (em GDocs viram comments ancorados no Drive).
+5. "Salvar Versão" (`POST /version`): em GDocs mode, exporta HTML atual + copia o doc no Drive + reaplica DocumentStyle + cria nova Contract row com googleDocId distinto. Layout fica idêntico entre versões.
+6. (Opcional) Aba "Certidões" → `ExtractCertidoesDialog` mostra plano + custo → batch fire-and-forget. "Gerar relatório" produz PDF de due diligence.
+7. "Aprovar" → revisão pré-aprovação. Em GDocs mode, snapshota HTML do doc atual no Contract.htmlContent. Após aprovado, `createContractMemory` roda em background, contrato fica imutável.
+8. Export PDF/DOCX: em GDocs mode usa `drive.files.export` nativo (preserva fonts/spacing/imagens); em TipTap usa Puppeteer + `DocumentStyle` default.
 
 ## Rotas públicas (sem auth)
 
@@ -322,6 +363,12 @@ Puppeteer requer Vercel Pro (timeout 60s). CSS `@media print` em `globals.css` g
 - **`@tiptap/extension-search-and-replace` NÃO existe** no registro oficial. Custom em `lib/editor/SearchReplace.ts`.
 - **Prisma migrations** rodam automaticamente via `prisma migrate deploy` no build script.
 - **Deal NÃO tem `orgId` direto** — escopo via `pipeline.orgId`. `Contract` idem (via `deal.pipeline.orgId`). Cuidado em queries por org de `Deal`/`Contract`.
+- **Sync templates é manual:** mudanças em `templates/*.hbs` SÓ afetam contratos novos depois de `pnpm tsx apps/web/scripts/sync-templates.ts --apply` contra a DB de produção. `ContractTemplate.handlebarsSource` no DB é o source-of-truth do render — filesystem é só pra dev. Quando esquecer disso, contratos novos saem com template antigo (visto em prod 2026-05-05).
+- **`vercel env pull` retorna `\n` literal nas envs:** o arquivo gerado tem `VAR="value\n"` (escape representation, 2 chars `\` + `n`). Em runtime Vercel decodifica OK, mas localmente `source` preserva o `\n` literal e quebra OAuth/JWT. Pra usar em scripts: `perl -pe 's/\\\\n"$/"/' .env.vercel-prod > .env.vercel-prod.clean` antes de fazer `source`. JSONs multi-linha (`GOOGLE_SERVICE_ACCOUNT_JSON`) ficam mais complicados — preferir rodar scripts server-side via rota interna ou Vercel CLI run.
+- **DocumentStyle default obrigatório:** orgs precisam de uma row `DocumentStyle isDefault=true` com `fontFamily/fontSizeBase/lineHeight/margins/colorPrimary` definidos. Sem isso, `googleApplyStylePreset` é skip e GDocs novos nascem com Arial 11pt default. Em prod o "Padrão Zimmermann" tem id `cmot43tt30001126r97zhcm3z`.
+- **Default model do agent é Haiku 4.5** (`claude-haiku-4-5-20251001`) — ~3× mais barato que Sonnet pra tool-use. Override via `AgentConfig.model` (DB) ou env `ANTHROPIC_MODEL`. System prompt usa `cache_control: ephemeral` (TTL 5min) — segundo turn paga ~10% de input desse bloco.
+- **buildContextMessage usa markdown estruturado** (não JSON cru). Regras 8.1 e 8.2 do system prompt proíbem responder JSON ou citar outros contratos sem evidência ancorada.
+- **DELETE bloqueado por aprovação ou envelope ativo:** rotas DELETE (`/contracts/[id]`, `/deals/[id]/contracts`, `/deals/[id]`) retornam 409 quando há `status=aprovado` ou `Envelope status in ["closed","running"]`. Cancelar envelope antes pra liberar o delete.
 
 ## Convenções específicas
 
