@@ -65,6 +65,9 @@ model User {
   // Newton — ActionIntent (dual-approval HITL)
   intentsRequested ActionIntent[] @relation("IntentRequester")
   intentsApproved  ActionIntent[] @relation("IntentApprover")
+
+  // Newton — Leads ownership
+  leads Lead[]
 }
 
 model Account {
@@ -154,6 +157,9 @@ model Organization {
 
   // Newton — ActionIntent (dual-approval HITL)
   actionIntents ActionIntent[]
+
+  // Newton — Lead (pré-Deal: acumula docs/contexto antes de virar negócio formal)
+  leads Lead[]
 }
 
 model OrgMembership {
@@ -259,6 +265,58 @@ model Deal {
   diligentedPersons   DiligentedPerson[]
   commissionCharges   CommissionCharge[]
   envelopes           Envelope[]
+
+  // Lead que originou (se veio de conversão Lead -> Deal)
+  fromLead Lead?
+}
+
+// Lead — pré-Deal. Newton acumula docs/notes/conversa antes de virar negocio
+// formal. Quando matura, vira Deal+SalesForm via convert-to-deal endpoint.
+//
+// Owned por Newton: criação, update, e conversão são tipicamente disparadas
+// por briefing da negociadora via WhatsApp.
+//
+// Lookup principal = phones (multi-phone: comprador + vendedor + interlocutor).
+// Newton chama lookup_lead_by_phone antes de responder qualquer msg WhatsApp
+// pra evitar contextos cruzados.
+model Lead {
+  id        String   @id @default(cuid())
+  orgId     String
+  userId    String   // dono (negociadora ou Newton actor)
+  title     String   // "Yamamoto - Vila Mariana", "Sandra apto Pinheiros", etc
+  status    String   @default("open") // open | qualified | converted | lost | archived
+  phones    String[] @default([]) // E.164 das partes envolvidas (procurar por elemento)
+  notes     String   @default("") // texto livre — Newton appenda timeline de eventos
+  metadata  Json? // parties, imovel, valor estimado, source, etc — schema flexível
+  convertedDealId String? @unique
+  lastActivityAt  DateTime @default(now())
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  org         Organization     @relation(fields: [orgId], references: [id])
+  user        User             @relation(fields: [userId], references: [id])
+  convertedDeal Deal?          @relation(fields: [convertedDealId], references: [id])
+  attachments LeadAttachment[]
+
+  @@index([orgId, status])
+  @@index([orgId, lastActivityAt])
+  @@index([phones], type: Gin)
+}
+
+model LeadAttachment {
+  id          String   @id @default(cuid())
+  leadId      String
+  filename    String
+  mime        String
+  url         String
+  category    String? // "matricula" | "rg" | "cpf" | "comprovante_endereco" | etc
+  contentHash String? // SHA-256 — pra dedupe
+  createdAt   DateTime @default(now())
+
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
+
+  @@index([leadId])
+  @@index([contentHash])
 }
 
 model DealAttachment {

@@ -616,6 +616,113 @@ export const tools: Tool[] = [
     },
   },
 
+  // ───────────── Leads (Newton — pré-Deal) ─────────────
+  {
+    name: "list_leads",
+    description:
+      "Lista leads abertas/qualificadas/etc da org. Lead = caso em desenvolvimento (briefing recebido, docs sendo coletados) que ainda não virou Deal formal. Filtro por status (default 'open'). Use pra ver pipeline de pré-negocios.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          enum: ["open", "qualified", "converted", "lost", "archived"],
+          description: "Default 'open'",
+        },
+        limit: { type: "number", description: "1-200, default 50" },
+      },
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/leads",
+        query: {
+          status: args.status as string | undefined,
+          limit: args.limit ? String(args.limit) : undefined,
+        },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "create_lead",
+    description:
+      "Cria Lead nova (pré-Deal). Use quando negociadora manda briefing por WhatsApp. ⚠️ ANTES de criar, faça lookup_lead_by_phone pra cada phone das partes — se já existir lead com overlap >=70%, NÃO cria, atualiza. Lead vive em paralelo ao pipeline de Deals; vira Deal via convert_lead_to_deal quando matura.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string", description: "Ex: 'Yamamoto - Vila Mariana'" },
+        phones: {
+          type: "array",
+          items: { type: "string" },
+          description: "E.164 com '+': ['+5511987654321', '+5511912345678']",
+        },
+        notes: { type: "string", description: "Briefing inicial em texto livre" },
+        metadata: {
+          type: "object",
+          description:
+            "JSON estruturado: { parties: [{nome, role, phone}], imovel: {...}, valor_estimado, source }",
+        },
+      },
+      required: ["title"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: "/api/leads",
+        body: {
+          title: args.title,
+          phones: args.phones,
+          notes: args.notes,
+          metadata: args.metadata,
+        },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "lookup_lead_by_phone",
+    description:
+      "🔑 CRÍTICO pra multi-deal disambiguation. CHAME ESSA TOOL ANTES DE RESPONDER QUALQUER MENSAGEM DE WHATSAPP. Retorna leads abertas/qualificadas que tem o phone na lista de partes. Match=0: phone novo (cria lead OU pede briefing). Match=1: contexto inferido. Match>1: pergunta qual lead antes de prosseguir. Errar contexto é pior que perguntar.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        phone: {
+          type: "string",
+          description: "E.164 com '+': '+5511987654321'",
+        },
+      },
+      required: ["phone"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/leads/by-phone",
+        query: { phone: args.phone as string },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "convert_lead_to_deal",
+    description:
+      "Converte Lead em SalesForm + Deal no pipeline. Use quando lead amadureceu (preço definido, partes confirmadas, docs essenciais coletados). Cria Deal vazio com title da lead + dataJson herdado do metadata. Lead fica marcada status='converted' apontando pro deal. Negociadora completa form pela UI.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        leadId: { type: "string" },
+      },
+      required: ["leadId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/leads/${args.leadId}/convert-to-deal`,
+      });
+      return r.body;
+    },
+  },
+
   // ───────────── WhatsApp ─────────────
   {
     name: "whatsapp_send",
