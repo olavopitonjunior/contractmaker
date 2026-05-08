@@ -9,9 +9,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
 import type { SelectGroup } from "@/components/forms/NativeSelect";
 import {
+  applyFichaResumo,
   mapExtractedToForm,
   suggestAssignment,
   type DocumentKind,
+  type FichaResumoData,
   type ProcessedDocHint,
 } from "@/lib/forms/extracted-to-form";
 
@@ -96,6 +98,8 @@ interface FormSlotData {
   compradores?: any[];
   imoveis?: any[];
 }
+
+const PARENT_KINDS = new Set<DocumentKind>(["vendedor", "comprador", "imovel"]);
 
 function slotName(
   kind: DocumentKind,
@@ -184,11 +188,61 @@ function buildAssignmentOptions(
         label: name ? `${ord} — ${name}` : ord,
       });
     }
-    opts.push({ value: `${kind}:new`, label: `+ Novo ${singularLabel.toLowerCase()}` });
+    if (PARENT_KINDS.has(kind)) {
+      opts.push({
+        value: `${kind}:new`,
+        label: `+ Novo ${singularLabel.toLowerCase()}`,
+      });
+    }
     return opts;
   };
 
-  return [
+  /**
+   * Cônjuges e representantes derivam do papel da parte pai. Renderizamos só
+   * os slots cuja parte pai é casada (cônjuge) ou PJ (representante).
+   */
+  const buildSubKindOptions = (
+    kind:
+      | "conjuge_vendedor"
+      | "conjuge_comprador"
+      | "representante_vendedor"
+      | "representante_comprador",
+    parentList: any[] | undefined,
+    parentLabel: string,
+    sub: "conjuge" | "representante"
+  ) => {
+    const opts: Array<{ value: string; label: string }> = [];
+    if (!Array.isArray(parentList)) return opts;
+    for (let i = 0; i < parentList.length; i++) {
+      const parent = parentList[i];
+      if (sub === "conjuge") {
+        if (parent?.tipo_pessoa === "juridica") continue;
+        if (
+          parent?.estado_civil !== "Casado(a)" &&
+          parent?.estado_civil !== "União Estável"
+        ) {
+          continue;
+        }
+      } else {
+        if (parent?.tipo_pessoa !== "juridica") continue;
+      }
+      const parentName =
+        sub === "conjuge"
+          ? (parent?.nome as string | undefined)
+          : (parent?.razao_social as string | undefined);
+      const baseLabel =
+        sub === "conjuge"
+          ? `Cônjuge de ${parentLabel} ${i + 1}`
+          : `Representante de ${parentLabel} ${i + 1}`;
+      opts.push({
+        value: `${kind}:${i}`,
+        label: parentName ? `${baseLabel} — ${parentName.trim()}` : baseLabel,
+      });
+    }
+    return opts;
+  };
+
+  const groups: SelectGroup[] = [
     {
       label: "Vendedores",
       options: buildKindOptions("vendedor", vCount, "Vendedor"),
@@ -197,15 +251,34 @@ function buildAssignmentOptions(
       label: "Compradores",
       options: buildKindOptions("comprador", cCount, "Comprador"),
     },
-    {
-      label: "Imóveis",
-      options: buildKindOptions("imovel", iCount, "Imóvel"),
-    },
-    {
-      label: "Outros",
-      options: [{ value: "outro:0", label: "Outros (sem aplicar)" }],
-    },
   ];
+
+  const conjugeOptions = [
+    ...buildSubKindOptions("conjuge_vendedor", snapshot.vendedores, "Vendedor", "conjuge"),
+    ...buildSubKindOptions("conjuge_comprador", snapshot.compradores, "Comprador", "conjuge"),
+  ];
+  if (conjugeOptions.length > 0) {
+    groups.push({ label: "Cônjuges", options: conjugeOptions });
+  }
+
+  const representanteOptions = [
+    ...buildSubKindOptions("representante_vendedor", snapshot.vendedores, "Vendedor", "representante"),
+    ...buildSubKindOptions("representante_comprador", snapshot.compradores, "Comprador", "representante"),
+  ];
+  if (representanteOptions.length > 0) {
+    groups.push({ label: "Representantes legais", options: representanteOptions });
+  }
+
+  groups.push({
+    label: "Imóveis",
+    options: buildKindOptions("imovel", iCount, "Imóvel"),
+  });
+  groups.push({
+    label: "Outros",
+    options: [{ value: "outro:0", label: "Outros (sem aplicar)" }],
+  });
+
+  return groups;
 }
 
 export function DocumentosStep({ form, token }: DocumentosStepProps) {
@@ -213,6 +286,9 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
   const [dragging, setDragging] = useState(false);
   const [hydrated, setHydrated] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Tracking de ficha-resumo já auto-aplicada (Fase E). Evita loop quando
+  // a aplicação altera o snapshot do form e re-dispara o effect.
+  const appliedFichasRef = useRef<Set<string>>(new Set());
 
   // Restore previously uploaded attachments. Documents without extractedData
   // are marked as "failed" (instead of the misleading "uploading") so the user
@@ -364,6 +440,71 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
     };
   }, [docs, token, form]);
 
+  // Fase E — quando uma ficha-resumo fica ready, auto-aplica os dados no form
+  // (cria/preenche slots de vendedores/compradores/cônjuges/representantes/
+  // imóveis) e re-roda suggestAssignment nos siblings que ainda estão como
+  // "outro" — assim docs avulsos pegam o papel correto via match contra a
+  // ficha. Idempotente via appliedFichasRef.
+  useEffect(() => {
+    if (!hydrated) return;
+    const fichaDoc = docs.find(
+      (d) =>
+        d.status === "ready" &&
+        d.category === "ficha_resumo" &&
+        d.fields &&
+        !appliedFichasRef.current.has(d.id)
+    );
+    if (!fichaDoc?.fields) return;
+    appliedFichasRef.current.add(fichaDoc.id);
+    const filled = applyFichaResumo(
+      fichaDoc.fields as FichaResumoData,
+      form as never,
+      { skipIfDirty: true }
+    );
+    if (filled > 0) {
+      toast.success(
+        `Ficha-resumo aplicada — ${filled} campo(s) preenchido(s) automaticamente`
+      );
+    }
+    // Re-roda suggestAssignment pros docs ready ainda em "outro"
+    setDocs((prev) => {
+      const snapshot = form.getValues();
+      const siblings: ProcessedDocHint[] = prev
+        .filter((d) => d.status === "ready" && d.fields)
+        .map((d) => ({
+          category: d.category,
+          fields: d.fields,
+          assignment: d.assignment,
+        }));
+      return prev.map((d) => {
+        if (d.id === fichaDoc.id) {
+          return { ...d, applied: true };
+        }
+        if (
+          d.status === "ready" &&
+          d.fields &&
+          d.category &&
+          d.category !== "outro" &&
+          d.assignment.kind === "outro"
+        ) {
+          const newAssignment = suggestAssignment(
+            d.category,
+            d.fields,
+            snapshot,
+            siblings
+          );
+          if (
+            newAssignment.kind !== d.assignment.kind ||
+            newAssignment.index !== d.assignment.index
+          ) {
+            return { ...d, assignment: newAssignment };
+          }
+        }
+        return d;
+      });
+    });
+  }, [docs, form, hydrated]);
+
   const updateDoc = useCallback((id: string, patch: Partial<DocumentCardData>) => {
     setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
   }, []);
@@ -371,16 +512,29 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
   // Ensure the form's vendedores/compradores/imoveis array has at least
   // `index + 1` entries. Used by both auto-grow (suggestAssignment putting a
   // doc on a slot that doesn't exist yet) and the manual "+ Novo" action.
+  // For conjuge_* and representante_* kinds, only ensures the parent slot
+  // exists — subobjects are created on first setValue by RHF.
   const ensureSlot = useCallback(
     (kind: DocumentKind, index: number) => {
       if (kind === "outro") return;
       const fieldKey =
-        kind === "imovel" ? "imoveis" : kind === "vendedor" ? "vendedores" : "compradores";
+        kind === "imovel"
+          ? "imoveis"
+          : kind === "vendedor" ||
+            kind === "conjuge_vendedor" ||
+            kind === "representante_vendedor"
+          ? "vendedores"
+          : kind === "comprador" ||
+            kind === "conjuge_comprador" ||
+            kind === "representante_comprador"
+          ? "compradores"
+          : null;
+      if (!fieldKey) return;
       const current = (form.getValues(fieldKey) as any[] | undefined) ?? [];
       if (current.length > index) return;
       const next = [...current];
       while (next.length <= index) {
-        next.push({ tipo_pessoa: "fisica" });
+        next.push(fieldKey === "imoveis" ? {} : { tipo_pessoa: "fisica" });
       }
       form.setValue(fieldKey, next as never, { shouldDirty: true });
     },
@@ -665,7 +819,9 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
       const kind = rawKind as DocumentKind;
       let index: number;
       if (rawIdx === "new") {
-        // "+ Novo X" — append a fresh slot to the form array and assign here
+        // "+ Novo X" — append a fresh slot to the form array and assign here.
+        // Apenas titulares (vendedor/comprador/imovel) suportam "novo"; cônjuge
+        // e representante derivam do papel da parte pai.
         const fieldKey =
           kind === "imovel"
             ? "imoveis"
@@ -851,30 +1007,16 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
           </div>
 
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-            {docs.map((doc) => {
-              const linked = doc.assignment.linkedConjugeOf;
-              let linkedConjugeName: string | null = null;
-              if (linked) {
-                const list =
-                  linked.kind === "vendedor"
-                    ? (snapshot.vendedores as Array<Record<string, unknown>> | undefined)
-                    : (snapshot.compradores as Array<Record<string, unknown>> | undefined);
-                const slot = list?.[linked.index];
-                const nome = (slot?.nome || slot?.razao_social) as string | undefined;
-                linkedConjugeName = (nome && nome.trim()) || `${linked.kind} ${linked.index + 1}`;
-              }
-              return (
-                <DocumentCard
-                  key={doc.id}
-                  doc={doc}
-                  assignmentOptions={assignmentOptions}
-                  onAssignmentChange={handleAssignmentChange}
-                  onRemove={handleRemove}
-                  onRetry={handleRetry}
-                  linkedConjugeName={linkedConjugeName}
-                />
-              );
-            })}
+            {docs.map((doc) => (
+              <DocumentCard
+                key={doc.id}
+                doc={doc}
+                assignmentOptions={assignmentOptions}
+                onAssignmentChange={handleAssignmentChange}
+                onRemove={handleRemove}
+                onRetry={handleRetry}
+              />
+            ))}
           </div>
         </div>
       )}

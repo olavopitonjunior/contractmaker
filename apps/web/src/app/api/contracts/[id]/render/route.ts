@@ -20,6 +20,18 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: 'Contract not found' }, { status: 404 });
   }
 
+  // Contratos importados (templateId=null) não podem ser re-renderizados —
+  // não há fonte Handlebars. Esse endpoint só serve o fluxo TipTap legacy.
+  if (!contract.template) {
+    return NextResponse.json(
+      {
+        error:
+          'Contrato sem template Handlebars não pode ser re-renderizado. Edite via Google Docs.',
+      },
+      { status: 400 }
+    );
+  }
+
   const dataJson = parsed.data.dataJson ?? (contract.dataJson as Record<string, unknown>);
   const templateSource = contract.templateOverride || contract.template.handlebarsSource;
   const html = renderContratoHTML(templateSource, dataJson);

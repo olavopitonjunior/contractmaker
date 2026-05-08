@@ -557,7 +557,12 @@ model Clause {
 model Contract {
   id                  String    @id @default(cuid())
   dealId              String
-  templateId          String
+  // templateId é opcional: contratos importados (upload externo) não têm
+  // template Handlebars associado. Quando NULL, o conteúdo vive 100% no
+  // Google Doc (`googleDocId` obrigatório nesse caso) e o export usa
+  // `drive.files.export`. Quando preenchido, o contrato foi gerado a partir
+  // de um ContractTemplate via `generateContractForDeal`.
+  templateId          String?
   userId              String
   version             Int       @default(1)
   dataJson            Json
@@ -580,7 +585,7 @@ model Contract {
   updatedAt           DateTime  @updatedAt
 
   deal              Deal                 @relation(fields: [dealId], references: [id])
-  template          ContractTemplate     @relation(fields: [templateId], references: [id])
+  template          ContractTemplate?    @relation(fields: [templateId], references: [id])
   user              User                 @relation(fields: [userId], references: [id])
   parentVersion     Contract?            @relation("ContractVersions", fields: [parentVersionId], references: [id])
   childVersions     Contract[]           @relation("ContractVersions")

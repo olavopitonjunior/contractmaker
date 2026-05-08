@@ -94,7 +94,10 @@ function dedupList(list: Parte[] | undefined): Parte[] | undefined {
         !conjugeCpf && !bCpf && conjugeNome && bNome && conjugeNome === bNome;
 
       if (cpfMatch || nomeMatch) {
-        // Preenche campos vazios do conjuge de A com dados de B
+        // Preenche campos vazios do conjuge de A com dados de B (titular).
+        // Lista expandida em 2026-05-06 pra cobrir nome_mae, data_nascimento,
+        // naturalidade, email e endereço completo — usados por certidões PF e
+        // pelo helper getEnderecoEfetivo quando o cônjuge tem endereço próprio.
         const merged = { ...(conjuge as Record<string, unknown>) };
         fillEmpty(merged, b as Record<string, unknown>, [
           "nome",
@@ -102,6 +105,17 @@ function dedupList(list: Parte[] | undefined): Parte[] | undefined {
           "rg",
           "profissao",
           "nacionalidade",
+          "data_nascimento",
+          "nome_mae",
+          "naturalidade",
+          "email",
+          "endereco",
+          "numero",
+          "complemento",
+          "bairro",
+          "cidade",
+          "uf",
+          "cep",
         ]);
         a.conjuge = merged as Parte["conjuge"];
         toRemove.add(j);

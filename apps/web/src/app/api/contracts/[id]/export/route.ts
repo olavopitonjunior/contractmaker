@@ -26,18 +26,43 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
 
     const contract = await prisma.contract.findUnique({
       where: { id: params.id },
-      include: { template: true }
+      include: {
+        template: true,
+        deal: { include: { pipeline: { select: { orgId: true } } } },
+      },
     });
     if (!contract) {
       return NextResponse.json({ error: 'Contrato não encontrado' }, { status: 404 });
     }
 
-    const templateSource = contract.templateOverride || contract.template.handlebarsSource;
-    const html = contract.htmlContent ?? renderContratoHTML(templateSource, contract.dataJson as Record<string, unknown>);
+    // Contratos importados (templateId=null) só podem ser exportados via
+    // GDoc nativo — sem template Handlebars não há fonte pra renderizar HTML.
+    if (!contract.googleDocId && !contract.template) {
+      return NextResponse.json(
+        {
+          error:
+            'Contrato importado sem Google Doc associado não pode ser exportado. Verifique o status do GDoc.',
+        },
+        { status: 400 }
+      );
+    }
 
-    // Load the org's default DocumentStyle (if any) to apply page-level props at export time
+    // Só renderiza HTML quando há template (fluxo Handlebars). No fluxo GDoc o
+    // export usa drive.files.export e não toca esse caminho.
+    const templateSource = contract.template
+      ? contract.templateOverride || contract.template.handlebarsSource
+      : null;
+    const html =
+      contract.htmlContent ??
+      (templateSource
+        ? renderContratoHTML(templateSource, contract.dataJson as Record<string, unknown>)
+        : '');
+
+    // OrgId via deal.pipeline (vale tanto pra contratos com template quanto
+    // pra importados — template.orgId era a fonte antiga, mas o deal sempre tem).
+    const orgId = contract.deal.pipeline.orgId;
     const documentStyle = await prisma.documentStyle.findFirst({
-      where: { orgId: contract.template.orgId, isDefault: true },
+      where: { orgId, isDefault: true },
     });
     const styleExport = documentStyle
       ? {

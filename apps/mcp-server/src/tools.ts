@@ -434,6 +434,54 @@ export const tools: Tool[] = [
       return r.body;
     },
   },
+  {
+    name: "extract_document_fields",
+    description:
+      "Extração ESTRUTURADA de documento de um attachment já uploaded. Diferente do OCR opaco do form, retorna campos com SCORE DE CONFIANÇA por campo (regex de validação + presença + partial markers). Use sempre antes de gravar dados de doc no form/deal — Newton recita campos pro humano confirmar (ver OCR.md). Suporta documentType: rg, cpf, cnh, matricula, iptu, escritura, procuracao, comprovante_residencia, certidao_casamento. Se documentType não for passado, classifica automaticamente. Resposta inclui `lowConfidenceFields[]` (perguntar antes de gravar) e `missingRequiredFields[]` (campos obrigatórios ausentes).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        attachmentId: {
+          type: "string",
+          description: "ID do DealAttachment já uploaded (via upload_attachment ou form público).",
+        },
+        documentType: {
+          type: "string",
+          enum: [
+            "rg",
+            "cpf",
+            "cnh",
+            "matricula",
+            "iptu",
+            "escritura",
+            "procuracao",
+            "comprovante_residencia",
+            "certidao_casamento",
+          ],
+          description: "Opcional. Força o schema. Sem isso, o servidor classifica via Gemini.",
+        },
+        idempotencyKey: {
+          type: "string",
+          description: "Opcional. UUID v4. Mesmo retry com mesma key retorna mesmo resultado em 24h.",
+        },
+      },
+      required: ["dealId", "attachmentId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/deals/${args.dealId}/extract-fields`,
+        body: {
+          attachmentId: args.attachmentId,
+          documentType: args.documentType,
+          idempotencyKey: args.idempotencyKey,
+        },
+        idempotencyKey: args.idempotencyKey as string | undefined,
+      });
+      return r.body;
+    },
+  },
 
   // ───────────── Deals ─────────────
   {

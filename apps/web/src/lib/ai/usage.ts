@@ -73,7 +73,8 @@ export type AIOperation =
   | "embed_query"
   | "summarize_memory"
   | "clause_generate"
-  | "doc_analysis";
+  | "doc_analysis"
+  | "extract_ccv_doc";
 
 export interface RecordUsageParams {
   orgId: string;

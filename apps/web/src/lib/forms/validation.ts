@@ -28,6 +28,21 @@ const pessoaFisicaSchema = z.object({
     rg: z.string().optional().default(""),
     nacionalidade: z.string().optional().default(""),
     profissao: z.string().optional().default(""),
+    // Espelha campos pessoais do titular — exigidos por TJSP/PGFN/Antecedentes PF
+    data_nascimento: z.string().optional().default(""),
+    nome_mae: z.string().optional().default(""),
+    naturalidade: z.string().optional().default(""),
+    email: z.string().email("Email invalido").optional().or(z.literal("")),
+    // Endereço próprio do cônjuge — só usado quando endereco_igual_ao_titular === false
+    endereco: z.string().optional().default(""),
+    numero: z.string().optional().default(""),
+    complemento: z.string().optional().default(""),
+    bairro: z.string().optional().default(""),
+    cidade: z.string().optional().default(""),
+    uf: z.string().optional().default(""),
+    cep: z.string().optional().default(""),
+    // Flag default true: helper getEnderecoEfetivo lê endereço do titular
+    endereco_igual_ao_titular: z.boolean().optional().default(true),
   }).optional(),
   procurador: z.object({
     nome: z.string().optional().default(""),
@@ -57,6 +72,13 @@ const pessoaJuridicaSchema = z.object({
     nacionalidade: z.string().optional().default(""),
     estado_civil: z.string().optional().default(""),
     profissao: z.string().optional().default(""),
+    // Espelha titular PF — exigido por PGFN PF e Antecedentes PF do
+    // representante quando há diligência sobre os signatários da PJ.
+    rg: z.string().optional().default(""),
+    data_nascimento: z.string().optional().default(""),
+    nome_mae: z.string().optional().default(""),
+    naturalidade: z.string().optional().default(""),
+    email: z.string().email("Email invalido").optional().or(z.literal("")),
   }).optional(),
 });
 

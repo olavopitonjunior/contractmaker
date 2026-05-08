@@ -21,12 +21,13 @@ export async function POST(
     return NextResponse.json({ error: "No organization" }, { status: 400 });
   }
 
-  // Verify contract belongs to the org and is editable
+  // Verify contract belongs to the org and is editable.
+  // Org check via deal.pipeline — funciona pra contratos com e sem template.
   const contract = await prisma.contract.findFirst({
     where: { id: params.id },
-    include: { template: true },
+    include: { deal: { include: { pipeline: { select: { orgId: true } } } } },
   });
-  if (!contract || contract.template.orgId !== org.id) {
+  if (!contract || contract.deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
   }
   if (contract.status === "aprovado") {

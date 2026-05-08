@@ -1,6 +1,23 @@
 import type { UseFormReturn } from "react-hook-form";
 
-export type DocumentKind = "vendedor" | "comprador" | "imovel" | "outro";
+/**
+ * Granularidade de atribuição de cada documento na Etapa 0:
+ * - vendedor / comprador: titular PF ou PJ
+ * - conjuge_vendedor / conjuge_comprador: cônjuge inline da parte titular
+ * - representante_vendedor / representante_comprador: representante legal de
+ *   parte PJ (subobjeto `representante`)
+ * - imovel: endereço/matrícula
+ * - outro: documento avulso (sem aplicar campos)
+ */
+export type DocumentKind =
+  | "vendedor"
+  | "comprador"
+  | "conjuge_vendedor"
+  | "conjuge_comprador"
+  | "representante_vendedor"
+  | "representante_comprador"
+  | "imovel"
+  | "outro";
 
 export interface ExtractedDoc {
   category: string | null;
@@ -11,13 +28,6 @@ export interface ExtractedDoc {
 export interface Assignment {
   kind: DocumentKind;
   index: number;
-  /**
-   * Quando o doc é de uma pessoa que JÁ aparece como cônjuge de outra parte
-   * do form, sinalizamos o vínculo aqui. UI usa pra sugerir "Vincular como
-   * cônjuge de X" em vez de criar slot novo (evita duplicata Isabel-cônjuge
-   * + Isabel-comprador[1]).
-   */
-  linkedConjugeOf?: { kind: "vendedor" | "comprador"; index: number };
 }
 
 const PERSON_CATEGORIES = new Set([
@@ -30,6 +40,16 @@ const PERSON_CATEGORIES = new Set([
 ]);
 const PROPERTY_CATEGORIES = new Set(["matricula", "iptu", "escritura"]);
 
+const TITULAR_KINDS = new Set<DocumentKind>(["vendedor", "comprador"]);
+const CONJUGE_KINDS = new Set<DocumentKind>([
+  "conjuge_vendedor",
+  "conjuge_comprador",
+]);
+const REPRESENTANTE_KINDS = new Set<DocumentKind>([
+  "representante_vendedor",
+  "representante_comprador",
+]);
+
 // Maps the free-text "regime de bens" string extracted from a marriage
 // certificate to the estado civil dropdown value used by the form. Accepts
 // "Comunhao parcial", "Comunhao universal", "Separacao total", etc.
@@ -39,7 +59,8 @@ function inferEstadoCivilFromRegime(regime: unknown): string | null {
   const lower = regime
     .toLowerCase()
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+    // eslint-disable-next-line no-misleading-character-class
+    .replace(new RegExp("[\\u0300-\\u036f]", "g"), "");
   if (
     lower.includes("comunhao") ||
     lower.includes("separacao de bens") ||
@@ -59,10 +80,9 @@ const FIELD_MAP_PERSON: Record<string, string> = {
   cpf_numero: "cpf",
   data_nascimento: "data_nascimento",
   naturalidade: "naturalidade",
-  filiacao_mae: "filiacao_mae",
-  filiacao_pai: "filiacao_pai",
-  // H.3 (Phase H, 2026-04-18) — RG/CNH traz filiação; mapear também para
-  // nome_mae para alimentar TJSP pedido-cível (evita code 606).
+  // OCR retorna `filiacao_mae` em RG/CNH; schema do form usa `nome_mae`.
+  // Exigido por TJSP pedido-cível (code 606), PGFN PF, Antecedentes PF.
+  filiacao_mae: "nome_mae",
   mae: "nome_mae",
   nome_mae: "nome_mae",
   bairro: "bairro",
@@ -84,6 +104,16 @@ const FIELD_MAP_IMOVEL: Record<string, string> = {
   inscricao_municipal: "inscricao_municipal",
   area_total: "area_total",
 };
+
+const ADDRESS_FIELDS = new Set([
+  "endereco",
+  "numero",
+  "complemento",
+  "bairro",
+  "cidade",
+  "uf",
+  "cep",
+]);
 
 function onlyDigits(s: unknown): string {
   return typeof s === "string" ? s.replace(/\D/g, "") : "";
@@ -117,6 +147,31 @@ function coerce(field: string, value: unknown): unknown {
   return typeof value === "string" ? value.trim() : value;
 }
 
+/**
+ * Resolve o basePath onde aplicar os campos extraídos com base no kind do
+ * doc. Cônjuge e representante apontam pra subobjeto da parte pai.
+ */
+function resolveBasePath(assignment: Assignment): string | null {
+  switch (assignment.kind) {
+    case "vendedor":
+      return `vendedores.${assignment.index}`;
+    case "comprador":
+      return `compradores.${assignment.index}`;
+    case "conjuge_vendedor":
+      return `vendedores.${assignment.index}.conjuge`;
+    case "conjuge_comprador":
+      return `compradores.${assignment.index}.conjuge`;
+    case "representante_vendedor":
+      return `vendedores.${assignment.index}.representante`;
+    case "representante_comprador":
+      return `compradores.${assignment.index}.representante`;
+    case "imovel":
+      return `imoveis.${assignment.index}`;
+    default:
+      return null;
+  }
+}
+
 export function mapExtractedToForm(
   extraction: ExtractedDoc,
   assignment: Assignment,
@@ -127,21 +182,27 @@ export function mapExtractedToForm(
   const { category, fields } = extraction;
   if (!category || !fields) return 0;
 
-  const basePath =
-    assignment.kind === "vendedor"
-      ? `vendedores.${assignment.index}`
-      : assignment.kind === "comprador"
-      ? `compradores.${assignment.index}`
-      : assignment.kind === "imovel"
-      ? `imoveis.${assignment.index}`
-      : null;
+  const basePath = resolveBasePath(assignment);
   if (!basePath) return 0;
 
   const isPerson = PERSON_CATEGORIES.has(category);
   const isProperty = PROPERTY_CATEGORIES.has(category);
+  const isTitular = TITULAR_KINDS.has(assignment.kind);
+  const isConjuge = CONJUGE_KINDS.has(assignment.kind);
   let filled = 0;
 
+  // Quando o doc é do cônjuge e a flag "endereço igual ao do titular" está
+  // ligada (default true), pular campos de endereço pra não sujar o subobjeto
+  // — o helper getEnderecoEfetivo lê do titular automaticamente.
+  let skipAddressForConjuge = false;
+  if (isConjuge) {
+    const flagPath = `${basePath}.endereco_igual_ao_titular`;
+    const flagValue = form.getValues(flagPath);
+    skipAddressForConjuge = flagValue !== false;
+  }
+
   const applyField = (formField: string, raw: unknown) => {
+    if (skipAddressForConjuge && ADDRESS_FIELDS.has(formField)) return;
     const value = coerce(formField, raw);
     if (value === undefined || value === null || value === "") return;
     const fullPath = `${basePath}.${formField}`;
@@ -164,8 +225,11 @@ export function mapExtractedToForm(
       if (parsed.numero) applyField("numero", parsed.numero);
     }
 
-    // Marriage certificate — infer estado civil + conjuge from regime + 2nd spouse
-    if (category === "certidao_casamento") {
+    // Os blocos de qualificação de cônjuge embutida (certidao_casamento,
+    // RG/CNH com averbação "casado(a) com") só fazem sentido quando o doc
+    // é DO TITULAR. Se o usuário atribuiu o doc como kind conjuge_* ou
+    // representante_*, esses ramos não devem rodar.
+    if (isTitular && category === "certidao_casamento") {
       const regime = fields.regime_bens;
       const estadoCivil = inferEstadoCivilFromRegime(regime);
       if (estadoCivil) applyField("estado_civil", estadoCivil);
@@ -197,11 +261,10 @@ export function mapExtractedToForm(
       }
     }
 
-    // RG/CNH — alguns documentos trazem qualificação "casado(a) com X" ou
-    // averbação. Quando o prompt OCR captura conjuge_nome/conjuge_cpf, preenche
-    // o sub-objeto conjuge (sem mexer em estado_civil — isso já vem do RG/CNH
-    // direto via FIELD_MAP_PERSON quando presente, ou o usuário ajusta).
-    if (category === "rg" || category === "cnh" || category === "comprovante_residencia") {
+    if (
+      isTitular &&
+      (category === "rg" || category === "cnh" || category === "comprovante_residencia")
+    ) {
       const conjugeNome = fields.conjuge_nome;
       const conjugeCpf = sanitizeCpf(fields.conjuge_cpf);
       if (conjugeNome && typeof conjugeNome === "string") {
@@ -260,15 +323,6 @@ export interface ProcessedDocHint {
   assignment: Assignment;
 }
 
-function firstEmptyIndex(list: Array<Record<string, unknown>> | undefined): number {
-  if (!list || list.length === 0) return 0;
-  for (let i = 0; i < list.length; i++) {
-    const p = list[i];
-    if (!p?.nome && !p?.cpf && !p?.rg) return i;
-  }
-  return 0;
-}
-
 function matchPersonIndex(
   list: Array<Record<string, unknown>> | undefined,
   fields: Record<string, unknown>
@@ -290,6 +344,59 @@ function matchPersonIndex(
   return null;
 }
 
+/** Match contra parte.conjuge.cpf/nome em vendedores ou compradores. */
+function matchConjugeIndex(
+  list: Array<Record<string, unknown>> | undefined,
+  fields: Record<string, unknown>
+): number | null {
+  if (!list) return null;
+  const extractedCpf = sanitizeCpf(fields.cpf_numero);
+  const extractedNome =
+    typeof fields.nome_completo === "string"
+      ? fields.nome_completo.trim().toLowerCase()
+      : null;
+  for (let i = 0; i < list.length; i++) {
+    const c = (list[i]?.conjuge ?? {}) as Record<string, unknown>;
+    const cCpf = sanitizeCpf(c.cpf);
+    if (extractedCpf && cCpf && extractedCpf === cCpf) return i;
+    if (
+      extractedNome &&
+      typeof c.nome === "string" &&
+      c.nome.trim().toLowerCase() === extractedNome
+    ) {
+      return i;
+    }
+  }
+  return null;
+}
+
+/** Match contra parte.representante.cpf/nome em vendedores/compradores PJ. */
+function matchRepresentanteIndex(
+  list: Array<Record<string, unknown>> | undefined,
+  fields: Record<string, unknown>
+): number | null {
+  if (!list) return null;
+  const extractedCpf = sanitizeCpf(fields.cpf_numero);
+  const extractedNome =
+    typeof fields.nome_completo === "string"
+      ? fields.nome_completo.trim().toLowerCase()
+      : null;
+  for (let i = 0; i < list.length; i++) {
+    if (list[i]?.tipo_pessoa !== "juridica") continue;
+    const r = (list[i]?.representante ?? {}) as Record<string, unknown>;
+    const rCpf = sanitizeCpf(r.cpf);
+    if (extractedCpf && rCpf && extractedCpf === rCpf) return i;
+    if (
+      extractedNome &&
+      typeof r.nome === "string" &&
+      r.nome.trim().toLowerCase() === extractedNome
+    ) {
+      return i;
+    }
+  }
+  return null;
+}
+
 function personKey(fields: Record<string, unknown>): string | null {
   const cpf = sanitizeCpf(fields.cpf_numero);
   if (cpf) return `cpf:${cpf}`;
@@ -301,26 +408,108 @@ function personKey(fields: Record<string, unknown>): string | null {
   return null;
 }
 
+interface FichaResumoParte {
+  papel?: string;
+  indice_referencia?: number;
+  nome?: string;
+  cpf?: string;
+  cnpj?: string;
+}
+
+const FICHA_PAPEIS: ReadonlySet<DocumentKind> = new Set<DocumentKind>([
+  "vendedor",
+  "comprador",
+  "conjuge_vendedor",
+  "conjuge_comprador",
+  "representante_vendedor",
+  "representante_comprador",
+]);
+
+/**
+ * Procura match contra a lista `partes[]` de uma ficha-resumo (Fase E).
+ * Retorna o papel + índice de referência conforme declarado pelo escritório.
+ */
+function matchFichaResumo(
+  fields: Record<string, unknown>,
+  siblings: ProcessedDocHint[]
+): { kind: DocumentKind; index: number } | null {
+  const fichaSibling = siblings.find(
+    (s) => s.category === "ficha_resumo" && s.fields
+  );
+  if (!fichaSibling?.fields) return null;
+  const partes = fichaSibling.fields.partes;
+  if (!Array.isArray(partes)) return null;
+
+  const extractedCpf = sanitizeCpf(fields.cpf_numero);
+  const extractedNome =
+    typeof fields.nome_completo === "string"
+      ? fields.nome_completo.trim().toLowerCase()
+      : null;
+
+  for (const p of partes as FichaResumoParte[]) {
+    if (!p || typeof p !== "object") continue;
+    const pCpf = sanitizeCpf(p.cpf);
+    const pNome =
+      typeof p.nome === "string" ? p.nome.trim().toLowerCase() : null;
+    const cpfMatch = extractedCpf && pCpf && extractedCpf === pCpf;
+    const nomeMatch =
+      !cpfMatch && extractedNome && pNome && extractedNome === pNome;
+    if (!cpfMatch && !nomeMatch) continue;
+    const papel = (p.papel ?? "").toString() as DocumentKind;
+    if (!FICHA_PAPEIS.has(papel)) continue;
+    const idx =
+      typeof p.indice_referencia === "number" && p.indice_referencia >= 0
+        ? p.indice_referencia
+        : 0;
+    return { kind: papel, index: idx };
+  }
+  return null;
+}
+
 /**
  * Picks the assignment for a new person document using:
- *   1. form snapshot matching (if the user already typed a CPF/name)
- *   2. sibling hints — docs already processed in this session. If any
- *      sibling is assigned to vendedor[0] with a DIFFERENT identity,
- *      the new doc goes to comprador[0]. Same identity sticks together.
- *   3. default: vendedor[0] (first person doc wins the vendedor slot).
+ *   1. ficha-resumo hint (Fase E) — papel explícito declarado pelo escritório
+ *   2. form snapshot match titular (CPF/nome em parte já cadastrada)
+ *   3. form snapshot match cônjuge (parte casada)
+ *   4. form snapshot match representante PJ
+ *   5. sibling identity match — mesma pessoa em outro doc desta sessão
+ *   6. fallback "outro" — força usuário a escolher no dropdown
  */
 function suggestPersonAssignment(
   fields: Record<string, unknown>,
   snapshot: FormSnapshot,
   siblings: ProcessedDocHint[]
 ): Assignment {
-  // 1. Match against form-filled data first
+  // 1. Ficha-resumo (prioridade máxima)
+  const fichaMatch = matchFichaResumo(fields, siblings);
+  if (fichaMatch) return fichaMatch;
+
+  // 2. Match contra titular já cadastrado
   const vendedorMatch = matchPersonIndex(snapshot.vendedores, fields);
   if (vendedorMatch !== null) return { kind: "vendedor", index: vendedorMatch };
   const compradorMatch = matchPersonIndex(snapshot.compradores, fields);
   if (compradorMatch !== null) return { kind: "comprador", index: compradorMatch };
 
-  // 2. Sibling identity matching — look for a doc with the same CPF/name
+  // 3. Match contra cônjuge cadastrado (CPF ou nome no subobjeto conjuge)
+  const conjugeVendedorMatch = matchConjugeIndex(snapshot.vendedores, fields);
+  if (conjugeVendedorMatch !== null)
+    return { kind: "conjuge_vendedor", index: conjugeVendedorMatch };
+  const conjugeCompradorMatch = matchConjugeIndex(snapshot.compradores, fields);
+  if (conjugeCompradorMatch !== null)
+    return { kind: "conjuge_comprador", index: conjugeCompradorMatch };
+
+  // 4. Match contra representante de PJ cadastrada
+  const repVendedorMatch = matchRepresentanteIndex(snapshot.vendedores, fields);
+  if (repVendedorMatch !== null)
+    return { kind: "representante_vendedor", index: repVendedorMatch };
+  const repCompradorMatch = matchRepresentanteIndex(
+    snapshot.compradores,
+    fields
+  );
+  if (repCompradorMatch !== null)
+    return { kind: "representante_comprador", index: repCompradorMatch };
+
+  // 5. Sibling identity match — same CPF/nome num doc já processado
   const myKey = personKey(fields);
   if (myKey) {
     for (const sib of siblings) {
@@ -333,69 +522,8 @@ function suggestPersonAssignment(
     }
   }
 
-  // 3. Figure out which slots are already occupied by siblings (track highest
-  // index per kind so we can grow correctly when both vendedor[0] and
-  // comprador[0] are taken by different identities).
-  const occupiedSlots = new Set<string>();
-  let maxVendedorIdx = -1;
-  let maxCompradorIdx = -1;
-  const personSiblings = siblings.filter(
-    (s) => s.category && PERSON_CATEGORIES.has(s.category) && s.fields
-  );
-  for (const sib of personSiblings) {
-    occupiedSlots.add(`${sib.assignment.kind}:${sib.assignment.index}`);
-    if (sib.assignment.kind === "vendedor") {
-      maxVendedorIdx = Math.max(maxVendedorIdx, sib.assignment.index);
-    } else if (sib.assignment.kind === "comprador") {
-      maxCompradorIdx = Math.max(maxCompradorIdx, sib.assignment.index);
-    }
-  }
-
-  // H.5 (Phase H, 2026-04-18) — heurística "primeira pessoa = vendedor"
-  // gerava troca comprador↔vendedor em ~30% dos uploads (QA deal
-  // cmo3orktd...). Novo comportamento: sem match explícito (CPF ou nome em
-  // parte já preenchida, ou irmão com mesma identidade), sair como "outro"
-  // forçando o usuário a escolher no dropdown antes de clicar "Aplicar".
-  // Isso evita rework manual + reclassificação errada propagada pro deal.
-  void maxVendedorIdx;
-  void maxCompradorIdx;
-  void occupiedSlots;
-
-  // Antes de devolver "outro" puro, tenta detectar se essa pessoa já aparece
-  // como cônjuge de uma parte cadastrada. Bug demo 2026-05-05: Isabel virou
-  // comprador 2 mesmo já sendo cônjuge de Luiz Fernando — UI agora sugere
-  // vincular ao slot existente em vez de criar duplicata.
-  const matchAgainstConjuges = (
-    list: Array<Record<string, unknown>> | undefined,
-    kind: "vendedor" | "comprador"
-  ): { kind: "vendedor" | "comprador"; index: number } | null => {
-    if (!list) return null;
-    const extractedCpf = sanitizeCpf(fields.cpf_numero);
-    const extractedNome =
-      typeof fields.nome_completo === "string"
-        ? fields.nome_completo.trim().toLowerCase()
-        : null;
-    for (let i = 0; i < list.length; i++) {
-      const c = (list[i]?.conjuge ?? {}) as Record<string, unknown>;
-      const cCpf = sanitizeCpf(c.cpf);
-      if (extractedCpf && cCpf && extractedCpf === cCpf) return { kind, index: i };
-      if (
-        extractedNome &&
-        typeof c.nome === "string" &&
-        c.nome.trim().toLowerCase() === extractedNome
-      ) {
-        return { kind, index: i };
-      }
-    }
-    return null;
-  };
-  const linked =
-    matchAgainstConjuges(snapshot.vendedores, "vendedor") ||
-    matchAgainstConjuges(snapshot.compradores, "comprador");
-  if (linked) {
-    return { kind: "outro", index: 0, linkedConjugeOf: linked };
-  }
-
+  // 6. Sem match: força escolha manual. UI mostra dropdown com "Cônjuge de
+  // Vendedor 1" / "Representante de Comprador 2 (PJ)" etc.
   return { kind: "outro", index: 0 };
 }
 
@@ -438,9 +566,195 @@ export function categoryLabel(category: string | null): string {
       return "Comp. Residência";
     case "certidao_casamento":
       return "Certidão de Casamento";
+    case "ficha_resumo":
+      return "Ficha Resumo";
     case "outro":
       return "Outro";
     default:
       return "—";
   }
+}
+
+// ============================================================================
+// Fase E — Ficha-resumo (mestra de classificação)
+// ============================================================================
+
+/**
+ * Estrutura esperada de uma ficha-resumo extraída pelo OCR. Cada item de
+ * `partes[]` declara o papel da pessoa no negócio + dados pessoais. O OCR
+ * é instruído a usar exatamente os papéis listados em FICHA_PAPEIS.
+ */
+export interface FichaResumoData {
+  partes?: Array<{
+    papel?: DocumentKind;
+    indice_referencia?: number;
+    nome?: string;
+    cpf?: string;
+    rg?: string;
+    data_nascimento?: string;
+    nome_mae?: string;
+    naturalidade?: string;
+    estado_civil?: string;
+    profissao?: string;
+    nacionalidade?: string;
+    email?: string;
+    endereco?: string;
+    numero?: string;
+    complemento?: string;
+    bairro?: string;
+    cidade?: string;
+    uf?: string;
+    cep?: string;
+    cnpj?: string;
+    razao_social?: string;
+  }>;
+  imoveis?: Array<{
+    rua?: string;
+    numero?: string;
+    bairro?: string;
+    cidade?: string;
+    uf?: string;
+    cep?: string;
+    matricula?: string;
+    cartorio?: string;
+    inscricao_iptu?: string;
+    sql?: string;
+    descricao?: string;
+  }>;
+}
+
+/**
+ * Aplica uma ficha-resumo no form criando/preenchendo slots de
+ * vendedores/compradores/imóveis. Cônjuges e representantes vão pros
+ * subobjetos da parte pai. Diferente de mapExtractedToForm, processa
+ * múltiplas pessoas/imóveis em uma chamada.
+ *
+ * skipIfDirty preserva valores já digitados pelo usuário.
+ */
+export function applyFichaResumo(
+  data: FichaResumoData,
+  form: UseFormReturn<Record<string, unknown>>,
+  options: { skipIfDirty?: boolean } = {}
+): number {
+  const { skipIfDirty = true } = options;
+  let filled = 0;
+
+  const setIfEmpty = (path: string, value: unknown) => {
+    if (value === undefined || value === null || value === "") return;
+    if (skipIfDirty) {
+      const current = form.getValues(path);
+      if (current !== undefined && current !== null && current !== "") return;
+    }
+    form.setValue(path, value as never, { shouldDirty: true, shouldTouch: true });
+    filled += 1;
+  };
+
+  const ensureSlot = (
+    listKey: "vendedores" | "compradores" | "imoveis",
+    index: number,
+    template: Record<string, unknown>
+  ) => {
+    const current = (form.getValues(listKey) as unknown[] | undefined) ?? [];
+    if (current.length > index) return;
+    const next = [...current];
+    while (next.length <= index) next.push({ ...template });
+    form.setValue(listKey, next as never, { shouldDirty: true });
+  };
+
+  if (Array.isArray(data.partes)) {
+    for (const p of data.partes) {
+      if (!p || typeof p !== "object") continue;
+      const papel = p.papel as DocumentKind | undefined;
+      if (!papel) continue;
+      const idx =
+        typeof p.indice_referencia === "number" && p.indice_referencia >= 0
+          ? p.indice_referencia
+          : 0;
+
+      const isTitular = TITULAR_KINDS.has(papel);
+      const isConjuge = CONJUGE_KINDS.has(papel);
+      const isRep = REPRESENTANTE_KINDS.has(papel);
+
+      let listKey: "vendedores" | "compradores" | null = null;
+      if (papel === "vendedor" || papel === "conjuge_vendedor" || papel === "representante_vendedor") {
+        listKey = "vendedores";
+      } else if (papel === "comprador" || papel === "conjuge_comprador" || papel === "representante_comprador") {
+        listKey = "compradores";
+      }
+      if (!listKey) continue;
+
+      const isPj = !!p.cnpj || !!p.razao_social;
+      ensureSlot(listKey, idx, isPj ? { tipo_pessoa: "juridica" } : { tipo_pessoa: "fisica" });
+
+      let prefix = `${listKey}.${idx}`;
+      if (isConjuge) prefix = `${prefix}.conjuge`;
+      else if (isRep) prefix = `${prefix}.representante`;
+
+      // Pessoa titular PJ ou PF
+      if (isTitular) {
+        if (isPj) {
+          setIfEmpty(`${prefix}.tipo_pessoa`, "juridica");
+          setIfEmpty(`${prefix}.razao_social`, p.razao_social);
+          setIfEmpty(`${prefix}.cnpj`, p.cnpj && onlyDigits(p.cnpj));
+        } else {
+          setIfEmpty(`${prefix}.tipo_pessoa`, "fisica");
+        }
+      }
+
+      // Campos pessoais (todos os papéis PF)
+      setIfEmpty(`${prefix}.nome`, p.nome);
+      const cpfClean = sanitizeCpf(p.cpf);
+      if (cpfClean) setIfEmpty(`${prefix}.cpf`, cpfClean);
+      setIfEmpty(`${prefix}.rg`, p.rg);
+      setIfEmpty(`${prefix}.data_nascimento`, p.data_nascimento);
+      setIfEmpty(`${prefix}.nome_mae`, p.nome_mae);
+      setIfEmpty(`${prefix}.naturalidade`, p.naturalidade);
+      setIfEmpty(`${prefix}.profissao`, p.profissao);
+      setIfEmpty(`${prefix}.nacionalidade`, p.nacionalidade);
+      if (isTitular) {
+        setIfEmpty(`${prefix}.estado_civil`, p.estado_civil);
+        setIfEmpty(`${prefix}.email`, p.email);
+      }
+
+      // Endereço — pra cônjuge, só preenche se a flag endereco_igual_ao_titular
+      // estiver explicitamente false (usuário marcou que cônjuge tem endereço
+      // próprio); caso contrário, deixa em branco (helper lê do titular).
+      const skipAddress = isConjuge
+        ? form.getValues(`${prefix}.endereco_igual_ao_titular`) !== false
+        : false;
+      if (!skipAddress) {
+        setIfEmpty(`${prefix}.endereco`, p.endereco);
+        setIfEmpty(`${prefix}.numero`, p.numero);
+        setIfEmpty(`${prefix}.complemento`, p.complemento);
+        setIfEmpty(`${prefix}.bairro`, p.bairro);
+        setIfEmpty(`${prefix}.cidade`, p.cidade);
+        const uf = sanitizeUf(p.uf);
+        if (uf) setIfEmpty(`${prefix}.uf`, uf);
+        setIfEmpty(`${prefix}.cep`, p.cep);
+      }
+    }
+  }
+
+  if (Array.isArray(data.imoveis)) {
+    for (let i = 0; i < data.imoveis.length; i++) {
+      const im = data.imoveis[i];
+      if (!im || typeof im !== "object") continue;
+      ensureSlot("imoveis", i, {});
+      const prefix = `imoveis.${i}`;
+      setIfEmpty(`${prefix}.rua`, im.rua);
+      setIfEmpty(`${prefix}.numero`, im.numero);
+      setIfEmpty(`${prefix}.bairro`, im.bairro);
+      setIfEmpty(`${prefix}.cidade`, im.cidade);
+      const uf = sanitizeUf(im.uf);
+      if (uf) setIfEmpty(`${prefix}.uf`, uf);
+      setIfEmpty(`${prefix}.cep`, im.cep);
+      setIfEmpty(`${prefix}.matricula`, im.matricula);
+      setIfEmpty(`${prefix}.cartorio`, im.cartorio);
+      setIfEmpty(`${prefix}.inscricao_iptu`, im.inscricao_iptu);
+      setIfEmpty(`${prefix}.sql`, im.sql);
+      setIfEmpty(`${prefix}.descricao`, im.descricao);
+    }
+  }
+
+  return filled;
 }

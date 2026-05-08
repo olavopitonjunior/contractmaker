@@ -60,17 +60,24 @@ async function loadContext(contractId: string, orgId: string): Promise<AgentCont
   // Buscamos texto plano via Drive export — read-only tools (validate,
   // analyze_contradictions, suggest_improvements) que dependiam de
   // `htmlContent` agora veem o estado live do doc.
+  // Contratos importados (templateId=null) não têm fonte Handlebars — só
+  // fazem sentido em GDoc mode. Aqui sempre tem `googleDocId` (importContractFromFile
+  // não cria Contract sem docId), mas defensivamente caímos pra htmlContent
+  // se Drive falhar.
   let htmlContent: string;
   if (contract.googleDocId) {
     const { getDocPlainText } = await import("@/lib/google/docs");
     htmlContent = await getDocPlainText(contract.googleDocId);
-  } else {
+  } else if (contract.template) {
     htmlContent =
       contract.htmlContent ||
       renderContratoHTML(
         contract.templateOverride || contract.template.handlebarsSource,
         contract.dataJson as Record<string, unknown>
       );
+  } else {
+    // Contrato importado sem GDoc disponível: usa o snapshot persistido.
+    htmlContent = contract.htmlContent || "";
   }
 
   return {
@@ -79,9 +86,11 @@ async function loadContext(contractId: string, orgId: string): Promise<AgentCont
     orgId,
     htmlContent,
     dataJson: contract.dataJson as Record<string, unknown>,
-    templateSource: contract.templateOverride || contract.template.handlebarsSource,
-    templateModalidade: contract.template.modalidade || "a_vista",
-    templateName: contract.template.name,
+    templateSource: contract.template
+      ? contract.templateOverride || contract.template.handlebarsSource
+      : null,
+    templateModalidade: contract.template?.modalidade || "a_vista",
+    templateName: contract.template?.name ?? "Contrato importado",
     activeClauses: contract.clauses.map((cc) => ({
       id: cc.id,
       clauseId: cc.clause.id,
@@ -582,7 +591,7 @@ export async function runPassiveAnalysis(
   if (contract.googleDocId) {
     const { getDocPlainText } = await import("@/lib/google/docs");
     htmlContent = await getDocPlainText(contract.googleDocId);
-  } else {
+  } else if (contract.template) {
     htmlContent =
       params.htmlOverride ||
       contract.htmlContent ||
@@ -590,6 +599,9 @@ export async function runPassiveAnalysis(
         contract.templateOverride || contract.template.handlebarsSource,
         contract.dataJson as Record<string, unknown>
       );
+  } else {
+    // Contrato importado sem GDoc disponível: só temos o snapshot persistido.
+    htmlContent = params.htmlOverride || contract.htmlContent || "";
   }
 
   // 1. Client-safe deterministic checks first

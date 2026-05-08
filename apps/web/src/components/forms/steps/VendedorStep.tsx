@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { UFSelect } from "@/components/forms/UFSelect";
 import { NativeSelect } from "@/components/forms/NativeSelect";
+import { ConjugeFields } from "@/components/forms/steps/ConjugeFields";
+import { RepresentanteFields } from "@/components/forms/steps/RepresentanteFields";
 
 interface VendedorStepProps {
   form: UseFormReturn<any>;
@@ -161,50 +163,7 @@ function PessoaFisicaFields({
       </div>
 
       {showConjuge && (
-        <>
-          <Separator />
-          <p className="text-sm font-semibold text-foreground">
-            Dados do Cônjuge <span className="text-destructive">*</span>
-          </p>
-          <p className="text-xs text-muted-foreground -mt-3">
-            Obrigatórios quando o estado civil é Casado(a) ou União Estável. A aprovação do contrato é bloqueada se faltarem.
-          </p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="Nome do Cônjuge *" className="md:col-span-2">
-              <Input
-                {...form.register(`${prefix}.conjuge.nome`)}
-                placeholder="Nome completo do conjuge"
-              />
-              <FieldError
-                error={(form.formState.errors?.vendedores as any)?.[index]?.conjuge?.nome}
-              />
-            </FormField>
-            <FormField label="CPF do Cônjuge *">
-              <Input
-                {...form.register(`${prefix}.conjuge.cpf`)}
-                placeholder="000.000.000-00"
-              />
-              <FieldError
-                error={(form.formState.errors?.vendedores as any)?.[index]?.conjuge?.cpf}
-              />
-            </FormField>
-            <FormField label="RG do Cônjuge">
-              <Input {...form.register(`${prefix}.conjuge.rg`)} placeholder="RG" />
-            </FormField>
-            <FormField label="Nacionalidade do Cônjuge">
-              <Input
-                {...form.register(`${prefix}.conjuge.nacionalidade`)}
-                placeholder="Brasileiro(a)"
-              />
-            </FormField>
-            <FormField label="Profissão do Cônjuge">
-              <Input
-                {...form.register(`${prefix}.conjuge.profissao`)}
-                placeholder="Profissão"
-              />
-            </FormField>
-          </div>
-        </>
+        <ConjugeFields form={form} index={index} prefix={prefix} listKey="vendedores" />
       )}
 
       <div className="flex items-center gap-2">
@@ -375,42 +334,7 @@ function PessoaJuridicaFields({
 
       <Separator />
       <p className="text-sm font-semibold text-foreground">Representante Legal</p>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <FormField label="Nome do Representante" className="md:col-span-2">
-          <Input
-            {...form.register(`${prefix}.representante.nome`)}
-            placeholder="Nome completo"
-          />
-        </FormField>
-        <FormField label="CPF do Representante">
-          <Input
-            {...form.register(`${prefix}.representante.cpf`)}
-            placeholder="000.000.000-00"
-          />
-        </FormField>
-        <FormField label="Nacionalidade">
-          <Input
-            {...form.register(`${prefix}.representante.nacionalidade`)}
-            placeholder="Brasileiro(a)"
-          />
-        </FormField>
-        <FormField label="Estado Civil">
-          <NativeSelect
-            value={form.watch(`${prefix}.representante.estado_civil`) || ""}
-            onChange={(v) =>
-              form.setValue(`${prefix}.representante.estado_civil`, v, { shouldDirty: true })
-            }
-            options={ESTADOS_CIVIS.map((ec) => ({ value: ec, label: ec }))}
-            placeholder="Selecione"
-          />
-        </FormField>
-        <FormField label="Profissão">
-          <Input
-            {...form.register(`${prefix}.representante.profissao`)}
-            placeholder="Profissão"
-          />
-        </FormField>
-      </div>
+      <RepresentanteFields form={form} prefix={prefix} />
     </div>
   );
 }

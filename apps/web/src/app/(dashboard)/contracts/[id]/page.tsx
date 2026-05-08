@@ -39,7 +39,7 @@ export default async function ContractPage({
         id: contract.id,
         dealId: contract.dealId,
         dealTitle: contract.deal.title,
-        templateName: contract.template.name,
+        templateName: contract.template?.name ?? "Contrato importado",
         version: contract.version,
         status: contract.status,
         htmlContent: contract.htmlContent || "",
