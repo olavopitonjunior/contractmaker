@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
+import crypto from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
+import { audit } from "@/lib/security/audit";
 import {
   getEnvelopeIdFromPayload,
   getSignedDocumentUrlFromPayload,
@@ -13,9 +15,59 @@ import type { WebhookPayload } from "@/lib/clicksign/types";
 
 export const runtime = "nodejs";
 
+const SHARED_ORG_ID = process.env.SHARED_ORG_ID || "cmnt1ldo4000111bw4yo517k0";
+
+/**
+ * Coleta os headers que importam pra debugar HMAC + identificação. Não
+ * loga `cookie`, `authorization`, etc. — apenas headers ClickSign-specific
+ * + content-type/length.
+ */
+function collectRelevantHeaders(req: NextRequest): Record<string, string> {
+  const out: Record<string, string> = {};
+  const want = [
+    "content-type",
+    "content-length",
+    "user-agent",
+    "content-hmac",
+    "x-clicksign-signature",
+    "x-hub-signature-256",
+    "x-clicksign-event",
+    "x-forwarded-for",
+  ];
+  for (const h of want) {
+    const v = req.headers.get(h);
+    if (v) out[h] = v;
+  }
+  return out;
+}
+
 export async function POST(req: NextRequest) {
   const secret = process.env.CLICKSIGN_WEBHOOK_SECRET;
   const rawBody = await req.text();
+  const headers = collectRelevantHeaders(req);
+  const bodyHash = crypto
+    .createHash("sha256")
+    .update(rawBody)
+    .digest("hex")
+    .slice(0, 16);
+
+  // Log SEMPRE — incluindo quando HMAC falha. Isso permite diagnosticar
+  // se o ClickSign está realmente mandando, com qual header de
+  // assinatura, e se nosso secret bate.
+  await audit(
+    { orgId: SHARED_ORG_ID, userId: null },
+    {
+      action: "CLICKSIGN_WEBHOOK_RECEIVED",
+      result: "SUCCESS",
+      resourceType: "Webhook",
+      metadata: {
+        headers,
+        bodyHash,
+        bodyLength: rawBody.length,
+        bodyExcerpt: rawBody.slice(0, 500),
+      },
+    }
+  ).catch(() => {});
 
   if (secret) {
     const sigHeader =
@@ -24,6 +76,27 @@ export async function POST(req: NextRequest) {
       req.headers.get("x-hub-signature-256");
     const ok = verifyWebhookSignature(rawBody, sigHeader, secret);
     if (!ok) {
+      await audit(
+        { orgId: SHARED_ORG_ID, userId: null },
+        {
+          action: "CLICKSIGN_WEBHOOK_REJECTED",
+          result: "DENIED",
+          resourceType: "Webhook",
+          metadata: {
+            reason: "HMAC mismatch",
+            sigHeaderPresent: Boolean(sigHeader),
+            sigHeaderName: req.headers.get("content-hmac")
+              ? "content-hmac"
+              : req.headers.get("x-clicksign-signature")
+                ? "x-clicksign-signature"
+                : req.headers.get("x-hub-signature-256")
+                  ? "x-hub-signature-256"
+                  : null,
+            sigPreview: sigHeader?.slice(0, 16),
+            bodyHash,
+          },
+        }
+      ).catch(() => {});
       return NextResponse.json(
         { error: "Assinatura inválida" },
         { status: 401 }

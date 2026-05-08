@@ -110,6 +110,8 @@ export type AuditAction =
   | "CERTIDAO_BATCH_DISPATCH"
   | "ENVELOPE_CREATE"
   | "ENVELOPE_RESEND"
+  | "CLICKSIGN_WEBHOOK_RECEIVED"
+  | "CLICKSIGN_WEBHOOK_REJECTED"
   // ActionIntent (HITL para Bearer high-risk)
   | "INTENT_CREATED"
   | "INTENT_APPROVED"
