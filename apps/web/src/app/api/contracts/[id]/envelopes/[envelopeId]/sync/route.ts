@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
-import { getEnvelope, listEnvelopeSigners } from "@/lib/clicksign/envelopes";
+import {
+  getEnvelope,
+  listEnvelopeRequirements,
+  listEnvelopeSigners,
+} from "@/lib/clicksign/envelopes";
 import { ClicksignError } from "@/lib/clicksign/client";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 
@@ -52,49 +56,60 @@ export async function POST(
   }
 
   try {
-    const [envResp, signersResp] = await Promise.all([
+    const [envResp, signersResp, requirementsResp] = await Promise.all([
       getEnvelope(envelope.clicksignId),
       listEnvelopeSigners(envelope.clicksignId),
+      listEnvelopeRequirements(envelope.clicksignId),
     ]);
 
     const remoteStatus = (
       envResp as { data?: { attributes?: { status?: string } } }
     ).data?.attributes?.status;
 
-    const remoteSigners = extractSigners(signersResp);
+    // ClickSign v3: status do signer (signed/viewed/refused) NÃO está
+    // em /signers — está nos requirements. Cada signer tem 2:
+    //   - action="agree"            → fulfilled = signou
+    //   - action="provide_evidence" → fulfilled = autenticou (~viewed)
+    // Indexamos por signerId pra cruzar com nossos signers locais.
+    const reqsBySigner = indexRequirementsBySigner(requirementsResp);
 
     let signersUpdated = 0;
     for (const local of envelope.signers) {
       if (!local.clicksignId) continue;
-      const remote = remoteSigners.find((r) => r.id === local.clicksignId);
-      if (!remote) continue;
+      const reqs = reqsBySigner.get(local.clicksignId) ?? [];
+
+      const agree = reqs.find((r) => r.action === "agree");
+      const evidence = reqs.find((r) => r.action === "provide_evidence");
 
       const updates: Prisma.EnvelopeSignerUpdateInput = {};
 
-      // Mapeia status remoto → local. ClickSign v3 retorna status como
-      // string textual; mantemos defensivo com fallback no estado atual.
-      const remoteStatusVal = remote.attributes.status?.toLowerCase();
-      const newStatus = mapSignerStatus(remoteStatusVal, local.status);
-      if (newStatus !== local.status) updates.status = newStatus;
+      const isSigned = agree?.status === "fulfilled";
+      const isAuthenticated = evidence?.status === "fulfilled";
+      const isRefused =
+        agree?.status === "refused" || evidence?.status === "refused";
 
-      const signedAt = parseDate(remote.attributes.signed_at);
-      if (signedAt && (!local.signedAt || +signedAt !== +local.signedAt)) {
-        updates.signedAt = signedAt;
-      }
-      const viewedAt = parseDate(remote.attributes.viewed_at);
-      if (viewedAt && (!local.viewedAt || +viewedAt !== +local.viewedAt)) {
-        updates.viewedAt = viewedAt;
-      }
-      const refusedAt = parseDate(remote.attributes.refused_at);
-      if (refusedAt && (!local.refusedAt || +refusedAt !== +local.refusedAt)) {
-        updates.refusedAt = refusedAt;
-      }
-      const notifiedAt = parseDate(remote.attributes.notified_at);
-      if (
-        notifiedAt &&
-        (!local.notifiedAt || +notifiedAt !== +local.notifiedAt)
+      if (isRefused && local.status !== "refused") {
+        updates.status = "refused";
+        const refusedAt = parseDate(
+          agree?.refused_at ?? evidence?.refused_at
+        );
+        if (refusedAt) updates.refusedAt = refusedAt;
+      } else if (isSigned) {
+        if (local.status !== "signed") updates.status = "signed";
+        const signedAt = parseDate(agree?.fulfilled_at);
+        if (signedAt && (!local.signedAt || +signedAt !== +local.signedAt)) {
+          updates.signedAt = signedAt;
+        }
+      } else if (
+        isAuthenticated &&
+        local.status !== "signed" &&
+        local.status !== "viewed"
       ) {
-        updates.notifiedAt = notifiedAt;
+        updates.status = "viewed";
+        const viewedAt = parseDate(evidence?.fulfilled_at);
+        if (viewedAt && (!local.viewedAt || +viewedAt !== +local.viewedAt)) {
+          updates.viewedAt = viewedAt;
+        }
       }
 
       if (Object.keys(updates).length > 0) {
@@ -153,6 +168,7 @@ export async function POST(
         debug: {
           envelopeRaw: envResp,
           signersRaw: signersResp,
+          requirementsRaw: requirementsResp,
           localSigners: envelope.signers.map((s) => ({
             clicksignId: s.clicksignId,
             name: s.name,
@@ -178,35 +194,54 @@ export async function POST(
   }
 }
 
-interface RemoteSigner {
+interface RemoteRequirement {
   id: string;
-  attributes: {
-    status?: string;
-    signed_at?: string | null;
-    viewed_at?: string | null;
-    refused_at?: string | null;
-    notified_at?: string | null;
-  };
+  action: string;
+  status: string;
+  fulfilled_at?: string | null;
+  refused_at?: string | null;
+  signerId: string | null;
 }
 
-function extractSigners(resp: unknown): RemoteSigner[] {
+/**
+ * Constrói um índice signerId → requirements[] a partir do payload
+ * JSON:API da ClickSign. O signerId fica em
+ * `relationships.signer.data.id` de cada requirement.
+ */
+function indexRequirementsBySigner(
+  resp: unknown
+): Map<string, RemoteRequirement[]> {
+  const out = new Map<string, RemoteRequirement[]>();
   const data = (resp as { data?: unknown }).data;
-  if (!Array.isArray(data)) return [];
-  return data as RemoteSigner[];
-}
+  if (!Array.isArray(data)) return out;
 
-function mapSignerStatus(
-  remote: string | undefined,
-  fallback: string
-): string {
-  if (!remote) return fallback;
-  // ClickSign v3 pode retornar variantes; normaliza pros estados locais.
-  if (remote === "signed" || remote === "sign") return "signed";
-  if (remote === "refused" || remote === "refusal") return "refused";
-  if (remote === "viewed" || remote === "signature_started") return "viewed";
-  if (remote === "notified" || remote === "pending_action") return "notified";
-  if (remote === "removed" || remote === "deleted") return "removed";
-  return fallback;
+  for (const item of data as Array<{
+    id: string;
+    attributes?: {
+      action?: string;
+      status?: string;
+      fulfilled_at?: string | null;
+      refused_at?: string | null;
+    };
+    relationships?: {
+      signer?: { data?: { id?: string } };
+    };
+  }>) {
+    const signerId = item.relationships?.signer?.data?.id ?? null;
+    if (!signerId) continue;
+    const req: RemoteRequirement = {
+      id: item.id,
+      action: item.attributes?.action ?? "",
+      status: item.attributes?.status ?? "",
+      fulfilled_at: item.attributes?.fulfilled_at ?? null,
+      refused_at: item.attributes?.refused_at ?? null,
+      signerId,
+    };
+    const arr = out.get(signerId) ?? [];
+    arr.push(req);
+    out.set(signerId, arr);
+  }
+  return out;
 }
 
 function parseDate(s: string | null | undefined): Date | null {
