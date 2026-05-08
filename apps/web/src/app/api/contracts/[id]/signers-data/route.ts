@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { auth, getUserOrg } from "@/lib/auth/auth";
+import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
@@ -44,14 +44,12 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const session = await auth();
-  if (!session?.user) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  const org = await getUserOrg(session.user.id);
-  if (!org) {
-    return NextResponse.json({ error: "No organization" }, { status: 400 });
-  }
+  // Aceita session (UI) e Bearer (Newton). Sem HITL: o gate financeiro fica
+  // em ENVELOPE_SEND (POST /envelopes), cujo preview já mostra a lista
+  // completa de signers — incluindo qualquer alteração feita aqui.
+  const authResult = await requireAuth(req, { scope: "signatures:rw" });
+  if (!authResult.ok) return authResult.response;
+  const { ctx } = authResult;
 
   const body = await req.json().catch(() => ({}));
   const parsed = updateSchema.safeParse(body);
@@ -76,7 +74,7 @@ export async function PATCH(
   }
 
   const contract = await prisma.contract.findFirst({
-    where: { id: params.id, deal: { pipeline: { orgId: org.id } } },
+    where: { id: params.id, deal: { pipeline: { orgId: ctx.orgId } } },
     include: {
       deal: {
         include: { form: { select: { id: true, dataJson: true } } },
@@ -124,12 +122,13 @@ export async function PATCH(
     });
   });
 
-  await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
+  await audit(extractAuditContextFromRequest(req, ctx.orgId, ctx.userId), {
     action: "CONTRACT_SIGNERS_DATA_UPDATE",
     result: "SUCCESS",
     resource: contract.id,
     resourceType: "Contract",
     metadata: {
+      via: ctx.via,
       paths: parsed.data.updates.map((u) => u.path),
       contractStatus: contract.status,
     },

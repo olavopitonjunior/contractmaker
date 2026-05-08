@@ -1154,7 +1154,7 @@
     },
     "/api/contracts/{id}/envelopes": {
       "post": {
-        "description": "Envia contrato pra assinatura ClickSign. Bearer → ActionIntent (HITL). Session → executa direto.",
+        "description": "Envia contrato pra assinatura ClickSign. Signatários derivados de `contract.dataJson`: vendedores/compradores entram automático (422 se faltar email); corretora (`comissao.imobiliaria_email`) e testemunhas (`testemunhas[].email`) entram apenas se a flag `incluir_como_signatario === true`. Antes de chamar, considere PATCH `/signers-data` para atualizar emails/flags. Bearer → ActionIntent (HITL) com preview da lista completa de signers. Session → executa direto.",
         "tags": [
           "Signatures"
         ],
@@ -1223,7 +1223,7 @@
     },
     "/api/contracts/{id}/signers-data": {
       "patch": {
-        "description": "Atualiza dados de signatários (emails das partes, bloco corretora, array testemunhas) em deal/form/contract sem afetar o render do contrato. Whitelist restrita; permite escrita mesmo em contrato aprovado pois nenhum dos campos altera HTML/PDF.",
+        "description": "Atualiza dados de signatários (emails das partes, bloco corretora, array testemunhas) em `deal.dataJson` + `salesForm.dataJson` + `contract.dataJson` simultaneamente — sem afetar render do contrato. Whitelist restrita: cada `path` precisa casar com regex de campos não-renderizáveis (emails/CPF/nome de partes, `comissao.*`, array `testemunhas` inteiro). Permite escrita mesmo em contrato aprovado pois nenhum dos campos altera HTML/PDF/GDoc. Sem HITL: o gate financeiro fica em ENVELOPE_SEND, cujo preview já exibe a lista completa de signers (nome+email+role) atualizada. Emite audit action `CONTRACT_SIGNERS_DATA_UPDATE` (consumível via /api/events).",
         "tags": [
           "Signatures"
         ],
