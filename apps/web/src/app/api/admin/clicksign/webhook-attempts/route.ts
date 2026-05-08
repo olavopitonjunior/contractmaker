@@ -63,12 +63,12 @@ export async function GET(req: NextRequest) {
       envelope: { orgId: org.id },
       source: "webhook",
     },
-    orderBy: { createdAt: "desc" },
+    orderBy: { receivedAt: "desc" },
     take: 30,
     select: {
       id: true,
       eventName: true,
-      createdAt: true,
+      receivedAt: true,
       envelopeId: true,
     },
   });

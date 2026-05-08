@@ -37,13 +37,13 @@ export async function GET(
 
   const events = await prisma.envelopeEvent.findMany({
     where: { envelopeId: params.envelopeId },
-    orderBy: { createdAt: "desc" },
+    orderBy: { receivedAt: "desc" },
     take: 30,
     select: {
       id: true,
       eventName: true,
       source: true,
-      createdAt: true,
+      receivedAt: true,
     },
   });
 
