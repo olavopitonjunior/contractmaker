@@ -373,7 +373,7 @@ export function SendEnvelopeDialog({
             onChange={updateRow}
             onRemove={removeTestemunha}
             onAdd={addTestemunha}
-            addLabel="Adicionar testemunha"
+            addLabel="Adicionar Assinante"
           />
 
           {showApprovedWarning && (
@@ -594,17 +594,24 @@ function labelFor(row: EditableRow): string {
 }
 
 /**
- * Constrói lista de updates dot-path comparando o estado atual dos rows com
- * os dados originais vindos das props. Para vendedores/compradores, só
- * empurra mudanças que diferem do snapshot original (evita escritas
- * redundantes). Para testemunhas, sempre substitui o array inteiro (porque
- * pode haver inclusão/remoção de linhas). Corretora recebe os campos
- * relevantes.
+ * Constrói lista de updates dot-path para sincronizar `contract.dataJson`
+ * com o que foi exibido na popup.
+ *
+ * Para vendedores/compradores SEMPRE empurra email/nome/CPF — não diff
+ * contra o snapshot original. Motivo: a popup é construída a partir de
+ * `deal.form.dataJson` (props), mas o executor lê `contract.dataJson` que
+ * pode estar STALE (ex: contrato gerado antes do usuário preencher
+ * emails). Diff-only deixava contract.dataJson desatualizado e o POST
+ * /envelopes retornava "missing emails" mesmo com a popup mostrando tudo
+ * preenchido.
+ *
+ * Testemunhas: sempre substitui o array inteiro (cobre add/remove/edit).
+ * Corretora: sempre empurra todos os campos.
  */
 function buildPatchUpdates(
   rows: EditableRow[],
-  originalVendedores: Parte[],
-  originalCompradores: Parte[]
+  _originalVendedores: Parte[],
+  _originalCompradores: Parte[]
 ): Array<{ path: string; value: unknown }> {
   const updates: Array<{ path: string; value: unknown }> = [];
 
@@ -612,39 +619,27 @@ function buildPatchUpdates(
     if (r.sourceKind === "vendedor" || r.sourceKind === "comprador") {
       const arrName =
         r.sourceKind === "vendedor" ? "vendedores" : "compradores";
-      const original =
-        r.sourceKind === "vendedor"
-          ? originalVendedores[r.sourceIndex]
-          : originalCompradores[r.sourceIndex];
-      if (!original) continue;
 
-      const origEmail = (original.email ?? "").trim();
-      const origName = partyName(original);
-      const origDoc = partyDoc(original);
+      updates.push({
+        path: `${arrName}.${r.sourceIndex}.email`,
+        value: r.email.trim(),
+      });
 
-      if (r.email.trim() !== origEmail) {
-        updates.push({
-          path: `${arrName}.${r.sourceIndex}.email`,
-          value: r.email.trim(),
-        });
-      }
-      if (r.name.trim() !== origName) {
-        const fieldName =
-          original.tipo_pessoa === "juridica" ? "razao_social" : "nome";
-        updates.push({
-          path: `${arrName}.${r.sourceIndex}.${fieldName}`,
-          value: r.name.trim(),
-        });
-      }
-      const newDoc = r.documentation.replace(/\D/g, "");
-      if (newDoc !== origDoc && newDoc.length > 0) {
-        const docField =
-          original.tipo_pessoa === "juridica" || newDoc.length === 14
-            ? "cnpj"
-            : "cpf";
+      // Nome — escolhe campo (nome|razao_social) por inferência do CPF/CNPJ
+      // disponível na popup. Quando vazio em ambos, default `nome`.
+      const docDigits = r.documentation.replace(/\D/g, "");
+      const isPJ = docDigits.length === 14;
+      const nameField = isPJ ? "razao_social" : "nome";
+      updates.push({
+        path: `${arrName}.${r.sourceIndex}.${nameField}`,
+        value: r.name.trim(),
+      });
+
+      if (docDigits.length > 0) {
+        const docField = isPJ ? "cnpj" : "cpf";
         updates.push({
           path: `${arrName}.${r.sourceIndex}.${docField}`,
-          value: newDoc,
+          value: docDigits,
         });
       }
     }
