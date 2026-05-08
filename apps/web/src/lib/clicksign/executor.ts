@@ -226,8 +226,7 @@ async function createEnvelopeFromBuffer(input: {
         envelopeId: clicksignEnvelopeId,
         documentClicksignId,
         signerClicksignId: signerId,
-        action: "sign",
-        role: "signer",
+        action: "agree",
       });
       const reqIds = [
         pickResourceId(authReq),
