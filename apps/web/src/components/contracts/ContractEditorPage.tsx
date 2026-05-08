@@ -1,7 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { Editor } from "@tiptap/react";
+import { useCallback, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -13,7 +12,6 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { ContractEditor, type ContractEditorHandle } from "./ContractEditor";
 import { GoogleDocsEditor } from "./GoogleDocsEditor";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { VersionTimeline } from "./VersionTimeline";
@@ -77,32 +75,17 @@ export function ContractEditorPage({
   versions,
 }: ContractEditorPageProps) {
   const router = useRouter();
-  const [htmlContent, setHtmlContent] = useState(contract.htmlContent);
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInitialInput, setChatInitialInput] = useState<string>("");
   const [status, setStatus] = useState(contract.status);
-  const [autoSaveStatus, setAutoSaveStatus] = useState<
-    "idle" | "saving" | "saved" | "error"
-  >("idle");
-  const savedContentRef = useRef(contract.htmlContent);
-
-  // Sincroniza o conteudo e status quando navega entre versoes (mesma tela, prop muda)
-  useEffect(() => {
-    setHtmlContent(contract.htmlContent);
-    setStatus(contract.status);
-    savedContentRef.current = contract.htmlContent;
-    setAutoSaveStatus("idle");
-  }, [contract.id, contract.htmlContent, contract.status]);
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [addCommentOpen, setAddCommentOpen] = useState(false);
   const [pendingCommentText, setPendingCommentText] = useState("");
   const [commentsVersion, setCommentsVersion] = useState(0);
   const [reviewData, setReviewData] = useState<ApprovalReviewData | null>(null);
   const [reviewOpen, setReviewOpen] = useState(false);
-  const editorRef = useRef<ContractEditorHandle>(null);
-  const [editorInstance, setEditorInstance] = useState<Editor | null>(null);
   const [aiCommentsCount, setAiCommentsCount] = useState<{
     total: number;
     errors: number;
@@ -113,39 +96,16 @@ export function ContractEditorPage({
   const [budget, setBudget] = useState<{ pct: number; spent: number; budget: number } | null>(null);
   const [shareOpen, setShareOpen] = useState(false);
 
-  const isApprovedOrVoid = status === "aprovado";
-  const isGoogleDocsBacked = !!contract.googleDocId;
+  // Sincroniza status quando navega entre versoes (mesma tela, prop muda)
+  useEffect(() => {
+    setStatus(contract.status);
+  }, [contract.id, contract.status]);
+
+  const isApproved = status === "aprovado";
   const googleDocFailureReason =
     contract.googleDocStatus && contract.googleDocStatus.startsWith("error:")
       ? contract.googleDocStatus.slice("error:".length).trim()
       : null;
-
-  // Auto-save: debounced PATCH when htmlContent changes (TipTap-only).
-  // Quando o contrato é Google Doc, o doc é a fonte de verdade do texto —
-  // PATCHar htmlContent não tem efeito visível e ainda atropela o snapshot
-  // que o accept/reject de suggestions persiste. Skip o auto-save inteiro.
-  useEffect(() => {
-    if (isApprovedOrVoid) return;
-    if (isGoogleDocsBacked) return;
-    if (htmlContent === savedContentRef.current) return;
-    const timer = setTimeout(async () => {
-      setAutoSaveStatus("saving");
-      try {
-        const res = await fetch(`/api/contracts/${contract.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ htmlContent }),
-        });
-        if (!res.ok) throw new Error("save failed");
-        savedContentRef.current = htmlContent;
-        setAutoSaveStatus("saved");
-        setTimeout(() => setAutoSaveStatus("idle"), 1500);
-      } catch {
-        setAutoSaveStatus("error");
-      }
-    }, 1500);
-    return () => clearTimeout(timer);
-  }, [htmlContent, contract.id, isApprovedOrVoid, isGoogleDocsBacked]);
 
   const refreshAiCommentsCount = useCallback(async () => {
     try {
@@ -186,51 +146,9 @@ export function ContractEditorPage({
     refreshAiCommentsCount();
   }, [refreshAiCommentsCount]);
 
-  useAutoAnalyze(
-    editorInstance,
-    isApprovedOrVoid ? null : contract.id,
-    !isApprovedOrVoid,
-    {
-      onAnalysisComplete: handleAnalysisComplete,
-      mode: isGoogleDocsBacked ? "google_docs" : "tiptap",
-    }
-  );
-
-  // Apply comment marks for AI-generated comments that don't yet have an anchor
-  // in the editor. Runs whenever comments change or the editor becomes ready.
-  useEffect(() => {
-    if (!editorInstance || isApprovedOrVoid) return;
-    let cancelled = false;
-    async function applyAIMarks() {
-      try {
-        const res = await fetch(
-          `/api/contracts/${contract.id}/comments?authorType=ai&unresolved=true`
-        );
-        if (!res.ok) return;
-        const comments: Array<{ anchorId: string; selectedText: string }> = await res.json();
-        if (cancelled) return;
-        for (const c of comments) {
-          if (!c.anchorId || !c.selectedText) continue;
-          if (typeof document !== "undefined") {
-            const existing = document.querySelector(`[data-comment-id="${c.anchorId}"]`);
-            if (existing) continue;
-          }
-          editorRef.current?.applyCommentMarkByText(c.anchorId, c.selectedText);
-        }
-      } catch {
-        // silent
-      }
-    }
-    applyAIMarks();
-    return () => {
-      cancelled = true;
-    };
-  }, [editorInstance, contract.id, commentsVersion, isApprovedOrVoid]);
-
-  function handleAddComment(selectedText: string) {
-    setPendingCommentText(selectedText);
-    setAddCommentOpen(true);
-  }
+  useAutoAnalyze(isApproved ? null : contract.id, !isApproved, {
+    onAnalysisComplete: handleAnalysisComplete,
+  });
 
   async function submitComment(text: string, overrideSelectedText?: string) {
     const selectedText = overrideSelectedText ?? pendingCommentText;
@@ -240,14 +158,10 @@ export function ContractEditorPage({
       body: JSON.stringify({ text, selectedText }),
     });
     if (res.ok) {
-      const created = await res.json();
-      editorRef.current?.applyCommentMark(created.anchorId);
       setCommentsVersion((v) => v + 1);
       setCommentsOpen(true);
       toast.success(
-        isGoogleDocsBacked
-          ? "Comentário adicionado · veja no painel lateral do Google Doc"
-          : "Comentário adicionado"
+        "Comentário adicionado · veja no painel lateral do Google Doc"
       );
     } else {
       const data = await res.json().catch(() => null);
@@ -255,34 +169,14 @@ export function ContractEditorPage({
     }
   }
 
-  function handleCommentClick(anchorId: string) {
-    editorRef.current?.scrollToComment(anchorId);
-  }
-
-  function handleCommentResolved(anchorId: string) {
-    editorRef.current?.removeCommentMark(anchorId);
-  }
-
-  function handleAskAI(selectedText: string) {
-    const trimmed = selectedText.trim();
-    const preview = trimmed.length > 400 ? `${trimmed.slice(0, 400)}…` : trimmed;
-    setChatInitialInput(`> ${preview.replace(/\n/g, "\n> ")}\n\n`);
-    setChatOpen(true);
-  }
-
-  const isApproved = status === "aprovado";
-
   async function handleSaveVersion() {
     setSaving(true);
-    // Em GDocs mode o htmlContent do state é o snapshot inicial e não reflete
-    // edições no doc — backend exporta o HTML atual do Drive. Mandar body vazio
-    // evita corromper a versão nova com texto stale se o export do backend
-    // falhar (caso em que o backend cai para o htmlContent persistido).
-    const body = isGoogleDocsBacked ? {} : { htmlContent };
+    // GDocs mode: backend exporta o HTML atual do Drive. Body vazio evita
+    // corromper a versão nova com snapshot stale do client.
     const res = await fetch(`/api/contracts/${contract.id}/version`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
+      body: JSON.stringify({}),
     });
     setSaving(false);
 
@@ -333,8 +227,35 @@ export function ContractEditorPage({
     }
   }
 
-  function handleAIUpdate(newHtml: string) {
-    setHtmlContent(newHtml);
+  // Contratos sem googleDocId não são editáveis após o legacy reset 2026-05-03.
+  // Mostra aviso explícito em vez de tela vazia.
+  if (!contract.googleDocId) {
+    return (
+      <div className="space-y-4 max-w-2xl mx-auto py-8">
+        <div className="flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 p-4">
+          <CloudOff className="h-5 w-5 shrink-0 mt-0.5 text-destructive" />
+          <div className="text-sm">
+            <p className="font-medium">Contrato sem Google Doc associado</p>
+            <p className="text-xs mt-1 text-muted-foreground">
+              {googleDocFailureReason ? (
+                <>Causa: {googleDocFailureReason.slice(0, 240)}{googleDocFailureReason.length > 240 ? "…" : ""}</>
+              ) : (
+                "O editor depende do Google Docs e este contrato não tem doc associado."
+              )}
+            </p>
+            <p className="text-xs mt-2 text-muted-foreground">
+              Recrie o contrato pelo deal — o sistema cria o GDoc automaticamente.
+            </p>
+          </div>
+        </div>
+        <Button asChild variant="outline">
+          <Link href={`/deals/${contract.dealId}`}>
+            <ArrowLeft className="h-4 w-4 mr-1" />
+            Voltar ao deal
+          </Link>
+        </Button>
+      </div>
+    );
   }
 
   return (
@@ -361,25 +282,8 @@ export function ContractEditorPage({
         </div>
       )}
 
-      {/* Banner: falha ao criar Google Doc — usuário caiu no fallback TipTap */}
-      {googleDocFailureReason && !isGoogleDocsBacked && !isApproved && (
-        <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-amber-900">
-          <CloudOff className="h-5 w-5 shrink-0 mt-0.5" />
-          <div className="text-sm">
-            <p className="font-medium">Editor Google Docs indisponível</p>
-            <p className="text-xs mt-1 text-amber-800">
-              Causa: {googleDocFailureReason.slice(0, 240)}
-              {googleDocFailureReason.length > 240 ? "…" : ""}
-            </p>
-            <p className="text-xs mt-1 text-amber-700">
-              Você está no editor offline. Tente recriar o contrato pelo deal para usar o Google Docs novamente.
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* Header - sticky to remain visible while scrolling editor */}
-      <div className="sticky top-0 z-30 -mx-4 px-4 py-3 sm:-mx-6 sm:px-6 bg-background/95 backdrop-blur-sm border-b flex items-start sm:items-center gap-3 flex-wrap">
+      <div className="flex items-start sm:items-center justify-between gap-2 sm:gap-3 sticky top-0 z-10 bg-background/95 backdrop-blur py-2 -mx-1 px-1 border-b sm:border-0 flex-wrap">
         <Button variant="ghost" size="sm" asChild>
           <Link href={`/deals/${contract.dealId}`}>
             <ArrowLeft className="h-4 w-4 mr-1" />
@@ -507,37 +411,19 @@ export function ContractEditorPage({
             </SheetContent>
           </Sheet>
 
-          {isGoogleDocsBacked && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShareOpen(true)}
-            >
-              <Share2 className="h-4 w-4 sm:mr-1" />
-              <span className="hidden sm:inline">Compartilhar</span>
-            </Button>
-          )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setShareOpen(true)}
+          >
+            <Share2 className="h-4 w-4 sm:mr-1" />
+            <span className="hidden sm:inline">Compartilhar</span>
+          </Button>
 
           <ExportDialog contractId={contract.id} exports={contract.exports} />
 
           {!isApproved && (
             <>
-              {autoSaveStatus !== "idle" && (
-                <span
-                  className={`text-xs hidden sm:inline ${
-                    autoSaveStatus === "error"
-                      ? "text-red-600"
-                      : autoSaveStatus === "saved"
-                      ? "text-green-600"
-                      : "text-muted-foreground"
-                  }`}
-                  title="Auto-save"
-                >
-                  {autoSaveStatus === "saving" && "Salvando…"}
-                  {autoSaveStatus === "saved" && "✓ Salvo"}
-                  {autoSaveStatus === "error" && "Erro ao salvar"}
-                </span>
-              )}
               <Button
                 size="sm"
                 variant="outline"
@@ -549,12 +435,10 @@ export function ContractEditorPage({
                   {saving ? "Salvando..." : "Salvar Versão"}
                 </span>
               </Button>
-
               <Button
                 size="sm"
                 onClick={() => handleApprove(false)}
                 disabled={approving}
-                className="bg-green-600 hover:bg-green-700"
               >
                 <ShieldCheck className="h-4 w-4 sm:mr-1" />
                 <span className="hidden sm:inline">
@@ -566,9 +450,8 @@ export function ContractEditorPage({
         </div>
       </div>
 
-      {/* SuggestionsToolbar precisa montar fora do iframe quando o contrato é
-          Google Doc — o ContractEditor TipTap já monta a própria toolbar. */}
-      {isGoogleDocsBacked && !isApproved && (
+      {/* SuggestionsToolbar fica acima do iframe Drive — aceitar/rejeitar via API. */}
+      {!isApproved && (
         <SuggestionsToolbar
           contractId={contract.id}
           editor={null}
@@ -578,29 +461,14 @@ export function ContractEditorPage({
         />
       )}
 
-      {/* Editor — Google Docs iframe quando contrato tem googleDocId, senão TipTap */}
+      {/* Editor Google Docs (iframe Drive) */}
       <div className="rounded-lg border bg-card overflow-hidden">
-        {contract.googleDocId ? (
-          <GoogleDocsEditor
-            googleDocId={contract.googleDocId}
-            googleDocUrl={contract.googleDocUrl}
-            readOnly={isApproved}
-            status={status}
-          />
-        ) : (
-          <ContractEditor
-            ref={editorRef}
-            content={htmlContent}
-            onChange={isApproved ? () => {} : setHtmlContent}
-            readOnly={isApproved}
-            onAskAI={isApproved ? undefined : handleAskAI}
-            onAddComment={isApproved ? undefined : handleAddComment}
-            contractId={contract.id}
-            suggestionsVersion={commentsVersion}
-            onReady={setEditorInstance}
-            status={status}
-          />
-        )}
+        <GoogleDocsEditor
+          googleDocId={contract.googleDocId}
+          googleDocUrl={contract.googleDocUrl}
+          readOnly={isApproved}
+          status={status}
+        />
       </div>
 
       {/* Comments Panel */}
@@ -612,10 +480,10 @@ export function ContractEditorPage({
           <CommentsPanel
             key={commentsVersion}
             contractId={contract.id}
-            onCommentClick={handleCommentClick}
-            onCommentResolved={handleCommentResolved}
+            onCommentClick={() => {}}
+            onCommentResolved={() => {}}
             onAddComment={
-              isGoogleDocsBacked && !isApproved
+              !isApproved
                 ? () => {
                     setPendingCommentText("");
                     setAddCommentOpen(true);
@@ -632,17 +500,15 @@ export function ContractEditorPage({
         selectedText={pendingCommentText}
         onClose={() => setAddCommentOpen(false)}
         onSubmit={submitComment}
-        requireSelectedTextInput={isGoogleDocsBacked && !pendingCommentText}
+        requireSelectedTextInput={!pendingCommentText}
       />
 
-      {/* Share Dialog (só em modo Google Docs) */}
-      {isGoogleDocsBacked && (
-        <ShareDialog
-          open={shareOpen}
-          contractId={contract.id}
-          onClose={() => setShareOpen(false)}
-        />
-      )}
+      {/* Share Dialog */}
+      <ShareDialog
+        open={shareOpen}
+        contractId={contract.id}
+        onClose={() => setShareOpen(false)}
+      />
 
       {/* Approval Review Dialog */}
       <ApprovalReviewDialog
@@ -667,13 +533,14 @@ export function ContractEditorPage({
             <ChatPanel
               contractId={contract.id}
               messages={contract.messages}
-              onContentUpdate={handleAIUpdate}
+              onContentUpdate={() => {}}
               onChatTurnComplete={() => setCommentsVersion((v) => v + 1)}
               initialInput={chatInitialInput}
             />
           </SheetContent>
         </Sheet>
       )}
+
     </div>
   );
 }

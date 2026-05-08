@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { Editor } from "@tiptap/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Check, X, Sparkles, ChevronDown, ChevronUp } from "lucide-react";
@@ -19,24 +18,20 @@ interface SuggestionRow {
   createdAt: string;
 }
 
-type ToolbarMode = "tiptap" | "google_docs";
-
 interface SuggestionsToolbarProps {
   contractId: string;
-  /** TipTap editor — obrigatório em mode="tiptap"; ignorado em mode="google_docs". */
-  editor: Editor | null;
+  /** Mantido na assinatura por retrocompat; sempre null hoje (GDocs only). */
+  editor?: unknown;
   version: number;
-  onContentChange: (html: string) => void;
-  /** Default "tiptap". Em "google_docs" o accept/reject é só DB+Drive. */
-  mode?: ToolbarMode;
+  /** Mantido por retrocompat; nunca chamado em GDocs (server aplica direto no doc). */
+  onContentChange?: (html: string) => void;
+  /** Mantido por retrocompat; sempre "google_docs" hoje. */
+  mode?: "google_docs";
 }
 
 export function SuggestionsToolbar({
   contractId,
-  editor,
   version,
-  onContentChange,
-  mode = "tiptap",
 }: SuggestionsToolbarProps) {
   const [pending, setPending] = useState<SuggestionRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -60,39 +55,17 @@ export function SuggestionsToolbar({
   async function resolveAll(action: "accept" | "reject") {
     if (pending.length === 0) return;
 
-    if (mode === "tiptap") {
-      if (!editor) return;
-      for (const row of pending) {
-        if (action === "accept") {
-          editor.chain().focus().acceptSuggestion(row.suggestionId).run();
-        } else {
-          editor.chain().focus().rejectSuggestion(row.suggestionId).run();
-        }
-      }
-      const newHtml = editor.getHTML();
-      onContentChange(newHtml);
-      await Promise.all(
-        pending.map((row) =>
-          fetch(`/api/contracts/${contractId}/suggestions/${row.id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action, htmlContent: newHtml }),
-          })
-        )
-      );
-    } else {
-      // GDocs: server aplica replaceAllText/insertText/deleteContentRange direto
-      // no doc; cliente só informa a ação.
-      await Promise.all(
-        pending.map((row) =>
-          fetch(`/api/contracts/${contractId}/suggestions/${row.id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ action }),
-          })
-        )
-      );
-    }
+    // GDocs: server aplica replaceAllText/insertText/deleteContentRange direto
+    // no doc; cliente só informa a ação.
+    await Promise.all(
+      pending.map((row) =>
+        fetch(`/api/contracts/${contractId}/suggestions/${row.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action }),
+        })
+      )
+    );
 
     toast.success(
       action === "accept"
@@ -105,26 +78,11 @@ export function SuggestionsToolbar({
   async function resolveOne(row: SuggestionRow, action: "accept" | "reject") {
     setResolvingId(row.id);
     try {
-      if (mode === "tiptap" && editor) {
-        if (action === "accept") {
-          editor.chain().focus().acceptSuggestion(row.suggestionId).run();
-        } else {
-          editor.chain().focus().rejectSuggestion(row.suggestionId).run();
-        }
-        const newHtml = editor.getHTML();
-        onContentChange(newHtml);
-        await fetch(`/api/contracts/${contractId}/suggestions/${row.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action, htmlContent: newHtml }),
-        });
-      } else {
-        await fetch(`/api/contracts/${contractId}/suggestions/${row.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action }),
-        });
-      }
+      await fetch(`/api/contracts/${contractId}/suggestions/${row.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
       toast.success(action === "accept" ? "Sugestão aceita" : "Sugestão rejeitada");
       load();
     } finally {
@@ -143,9 +101,7 @@ export function SuggestionsToolbar({
           {pending.length} {pending.length === 1 ? "sugestão pendente" : "sugestões pendentes"}
         </Badge>
         <span className="text-xs text-muted-foreground hidden sm:inline">
-          {mode === "google_docs"
-            ? "Aceitar aplica direto no Google Doc · refresh do iframe pode levar alguns segundos"
-            : "Revise antes de aprovar o contrato"}
+          Aceitar aplica direto no Google Doc · refresh do iframe pode levar alguns segundos
         </span>
         <div className="ml-auto flex gap-1">
           <Button

@@ -254,7 +254,7 @@ describe("handleEditSection", () => {
 // handleUpdateData
 // ==========================================
 describe("handleUpdateData", () => {
-  it("applies patch via deep merge and re-renders", async () => {
+  it("applies patch via deep merge", async () => {
     const ctx = createTestContext();
 
     const result = await executeToolHandler(
@@ -267,7 +267,9 @@ describe("handleUpdateData", () => {
     expect((ctx.dataJson.pagamento as any).valor_total).toBe(600000);
     // Deep merge preserves existing keys
     expect((ctx.dataJson.pagamento as any).sinal_arras).toBe(50000);
-    expect(mockRender).toHaveBeenCalled();
+    // Re-render do HTML não acontece em handleUpdateData — GDoc é fonte de
+    // verdade. dataJson é só persistido; o agente usa edit_contract_section
+    // pra refletir mudanças no texto visível.
   });
 
   it("returns updatedFields list", async () => {

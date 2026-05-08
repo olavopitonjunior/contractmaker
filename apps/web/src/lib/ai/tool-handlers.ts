@@ -803,19 +803,13 @@ async function handleUpdateData(
     };
   }
 
-  // Re-render HTML quando há fonte Handlebars. Em contratos importados
-  // (templateSource=null) o GDoc seria a fonte; já barramos em `context.googleDocId`
-  // acima — chegar aqui sem template indica contrato importado SEM GDoc, o que
-  // só acontece se a importação falhou. Mantém dataJson, sem re-render.
-  if (context.templateSource) {
-    context.htmlContent = renderContratoHTML(context.templateSource, context.dataJson);
-  }
-
+  // Sem GDoc: dataJson é só persistido, sem texto visível pra atualizar.
+  // (Caminho legado/raro — todos contratos novos têm googleDocId.)
   const updatedFields = Object.keys(patch);
   return {
     success: true,
     updatedFields,
-    message: `Dados atualizados: ${updatedFields.join(", ")}. Contrato re-renderizado.`,
+    message: `Dados atualizados: ${updatedFields.join(", ")}. Use edit_contract_section pra refletir no doc.`,
   };
 }
 
