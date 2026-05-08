@@ -17,7 +17,7 @@ extendZodWithOpenApi(z);
  * Cobertura: endpoints expostos a clientes externos (Newton, MCP, GPTs):
  *  - /api/me/{metrics,activity,api-tokens,intents}
  *  - /api/users/by-phone
- *  - /api/contracts/[id]/{summary,approve,comments,suggestions,envelopes}
+ *  - /api/contracts/[id]/{summary,approve,comments,suggestions,envelopes,signers-data}
  *  - /api/deals/[dealId]/{commission-charges,certidoes,route DELETE}
  *  - /api/forms (POST + GET)
  *  - /api/pipeline/deals (POST + GET)
@@ -511,6 +511,55 @@ registry.registerPath({
       description: "Bearer: intent pending",
       content: { "application/json": { schema: IntentPendingResponse } },
     },
+  },
+});
+
+// ───────────────────────────────────────────────────────────────────────────
+// /api/contracts/[id]/signers-data
+// ───────────────────────────────────────────────────────────────────────────
+
+registry.registerPath({
+  method: "patch",
+  path: "/api/contracts/{id}/signers-data",
+  description:
+    "Atualiza dados de signatários (emails das partes, bloco corretora, array testemunhas) em deal/form/contract sem afetar o render do contrato. Whitelist restrita; permite escrita mesmo em contrato aprovado pois nenhum dos campos altera HTML/PDF.",
+  tags: ["Signatures"],
+  security: [{ bearerAuth: ["signatures:rw"] }],
+  request: {
+    params: z.object({ id: z.string() }),
+    body: {
+      content: {
+        "application/json": {
+          schema: z.object({
+            updates: z
+              .array(
+                z.object({
+                  path: z
+                    .string()
+                    .describe(
+                      "dot-path, ex: 'vendedores.0.email' ou 'comissao.imobiliaria_email' ou 'testemunhas'"
+                    ),
+                  value: z.unknown(),
+                })
+              )
+              .min(1)
+              .max(100),
+          }),
+        },
+      },
+    },
+  },
+  responses: {
+    200: {
+      description: "OK",
+      content: {
+        "application/json": {
+          schema: z.object({ ok: z.literal(true) }),
+        },
+      },
+    },
+    400: { description: "Path fora do whitelist ou payload inválido" },
+    404: { description: "Contrato não encontrado" },
   },
 });
 

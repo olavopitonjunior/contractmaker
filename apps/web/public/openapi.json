@@ -1221,6 +1221,92 @@
         }
       }
     },
+    "/api/contracts/{id}/signers-data": {
+      "patch": {
+        "description": "Atualiza dados de signatários (emails das partes, bloco corretora, array testemunhas) em deal/form/contract sem afetar o render do contrato. Whitelist restrita; permite escrita mesmo em contrato aprovado pois nenhum dos campos altera HTML/PDF.",
+        "tags": [
+          "Signatures"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "signatures:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "updates": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "path": {
+                          "type": "string",
+                          "description": "dot-path, ex: 'vendedores.0.email' ou 'comissao.imobiliaria_email' ou 'testemunhas'"
+                        },
+                        "value": {}
+                      },
+                      "required": [
+                        "path"
+                      ]
+                    },
+                    "minItems": 1,
+                    "maxItems": 100
+                  }
+                },
+                "required": [
+                  "updates"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean",
+                      "enum": [
+                        true
+                      ]
+                    }
+                  },
+                  "required": [
+                    "ok"
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Path fora do whitelist ou payload inválido"
+          },
+          "404": {
+            "description": "Contrato não encontrado"
+          }
+        }
+      }
+    },
     "/api/events": {
       "get": {
         "description": "Feed de eventos pra polling (Newton). Lê AuditLog filtrado pela org. Cliente persiste `nextSince` pra próxima chamada.",
