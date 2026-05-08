@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
+import { prisma } from "@/lib/db/prisma";
 import { listWebhooks } from "@/lib/clicksign/envelopes";
 import { ClicksignError } from "@/lib/clicksign/client";
 
@@ -25,6 +26,15 @@ export async function GET(_req: NextRequest) {
       { error: "No organization" },
       { status: 400 }
     );
+  }
+  // Diagnóstico expõe HMAC secret + lista de URLs cadastradas — restrito
+  // a owner/admin pra evitar leak pra members comuns.
+  const membership = await prisma.orgMembership.findUnique({
+    where: { userId_orgId: { userId: session.user.id, orgId: org.id } },
+  });
+  const role = membership?.role ?? "viewer";
+  if (role !== "owner" && role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const expected = "https://imobpro.ia.br/api/webhooks/clicksign";

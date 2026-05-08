@@ -26,6 +26,13 @@ export async function GET(
       { status: 400 }
     );
   }
+  const membership = await prisma.orgMembership.findUnique({
+    where: { userId_orgId: { userId: session.user.id, orgId: org.id } },
+  });
+  const role = membership?.role ?? "viewer";
+  if (role !== "owner" && role !== "admin") {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
 
   const envelope = await prisma.envelope.findFirst({
     where: { id: params.envelopeId, orgId: org.id },

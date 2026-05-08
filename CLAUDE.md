@@ -311,6 +311,18 @@ Envelope vincula a UM de dois: Contract aprovado (`source="contract"`) ou DealAt
 
 Submit faz duas chamadas em sequência: `PATCH /api/contracts/[id]/signers-data` (whitelist regex — emails das partes, `vendedores/compradores.<i>.conjuge.{email,nome,cpf,incluir_como_signatario}`, `comissao.comissionados`, `testemunhas`) → `POST /api/contracts/[id]/envelopes` (executor re-lê `contract.dataJson` agora atualizado). Mapping `dealDataToSigners` (`lib/clicksign/mapping.ts`) itera `comissionados[]` e cônjuges marcados; coleta corretora/testemunha/cônjuge apenas quando `incluir_como_signatario === true && email && nome`. `SourceKind` é `"vendedor" | "comprador" | "testemunha" | "corretora"`. Schema do form ganhou `comissao.comissionados[]` (Zod opcional) + `vendedores[].conjuge.incluir_como_signatario` + `testemunhas[].email` + flags em todos os opt-ins (defaults aditivos não quebram forms antigos).
 
+**ClickSign v3 quirks (caçados em prod 2026-05-08):**
+1. **`communicate_by` foi removido** no signer da v3 — mandar gera 422 "communicate_by não está disponível". Email é automático via `signer.email` + `activateEnvelope`.
+2. **`documentation` (CPF/CNPJ) exige máscara**: `123.456.789-00` ou `12.345.678/0001-90`. Helper `formatCpfCnpj` em `envelopes.ts` aplica antes do POST.
+3. **Requirement de assinatura usa `action="agree"` + `role`** (não `action="sign"`). Roles válidas: `sign | buyer | seller | intervening | realestate | witness | consenting | attorney`. Mapping default em `executor.ts::defaultRoleForSourceKind`.
+4. **Status de assinatura está em `/events`, não em `/signers` nem `/requirements`**: a v3 só retorna definição/perfil nesses dois últimos. `listEnvelopeEvents` retorna o histórico canônico (`name: sign|signature_started|refusal`, `data.signer.{key,email}`, `created`). Sync usa /events.
+5. **Webhook payload v3 NÃO tem `envelope.id`** — apenas `event` + `document.{key,filename,path}`. Lookup local é por `Envelope.documentClicksignId === payload.document.key`. Esse bug ficou meses oculto retornando `{ok:true,ignored:true}` silencioso.
+6. **Match signer no sync /events tem fallback por email** — quando ClickSign edita signer (PATCH), gera `remove_signer + add_signer` com novo `signer.key`; DB local fica com key antigo. Match canônico por key, fallback por email lowercase.
+
+**Sync arquitetura — 3 caminhos:** (a) **Webhook** (`POST /api/webhooks/clicksign`, fast path ~1-3s). (b) **Botão Atualizar** → `POST /api/contracts/[id]/envelopes/[envelopeId]/sync` que pulla /events e reconcilia signer-by-signer. `?debug=1` retorna shapes crus pra inspeção. (c) **Cron diário** (`/api/cron/clicksign/sync-envelopes` 06:00 UTC) compara só envelope-level (running → closed), redundante mas mantido como suspensórios.
+
+**Diagnostics admin:** `GET /api/admin/clicksign/webhooks` lista webhooks cadastrados na conta (compara URL canônica), `GET /api/admin/clicksign/webhook-attempts` lista AuditLog `CLICKSIGN_WEBHOOK_RECEIVED|REJECTED` + count de `EnvelopeEvent` processados por org, `GET /api/admin/clicksign/envelope-events/[envelopeId]` mostra histórico de eventos por envelope (`source: "webhook" | "manual" | "cron"`).
+
 ## Pagadoria (módulo financeiro Asaas)
 
 Documentação consolidada em [docs/pagadoria-handoff.md](docs/pagadoria-handoff.md) — sempre consultar antes de mexer.

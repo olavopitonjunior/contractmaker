@@ -12,6 +12,12 @@ export const dynamic = "force-dynamic";
  * GET /api/cron/clicksign/sync-envelopes
  * Fallback diário pra reconciliar envelopes "running" que não tiveram
  * webhook recente. Marca closed/canceled conforme estado da Clicksign.
+ *
+ * **REDUNDANTE desde 2026-05-08** — webhook agora funciona (lookup por
+ * `documentClicksignId` em vez de `envelope.id`). Botão Atualizar em
+ * `/sync` cobre casos manuais. Mantido como suspensórios caso ClickSign
+ * tenha downtime de webhook prolongado. Considere remover se logs
+ * mostrarem 0 drift por 30+ dias.
  */
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
