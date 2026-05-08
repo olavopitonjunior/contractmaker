@@ -243,6 +243,18 @@ export async function listEnvelopeEvents(envelopeId: string) {
   });
 }
 
+/**
+ * Lista webhooks cadastrados na conta ClickSign. Usado pra diagnosticar
+ * quando webhooks não estão chegando (URL não registrada, eventos
+ * filtrados, etc.).
+ */
+export async function listWebhooks() {
+  return clicksignRequest<ClicksignResponse>({
+    method: "GET",
+    path: `/api/v3/webhooks`,
+  });
+}
+
 interface UpdateEnvelopeInput {
   envelopeId: string;
   name?: string;
