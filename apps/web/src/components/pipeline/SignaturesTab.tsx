@@ -515,9 +515,27 @@ function EnvelopeCard({
         </div>
         <div className="flex items-center gap-3 text-xs text-muted-foreground shrink-0">
           {envelope.sentAt && (
-            <span>
-              Enviado{" "}
-              {new Date(envelope.sentAt).toLocaleDateString("pt-BR")}
+            <span title={new Date(envelope.sentAt).toLocaleString("pt-BR")}>
+              Enviado em{" "}
+              {new Date(envelope.sentAt).toLocaleString("pt-BR", {
+                day: "2-digit",
+                month: "2-digit",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
+            </span>
+          )}
+          {envelope.closedAt && (
+            <span title={new Date(envelope.closedAt).toLocaleString("pt-BR")}>
+              Concluído em{" "}
+              {new Date(envelope.closedAt).toLocaleString("pt-BR", {
+                day: "2-digit",
+                month: "2-digit",
+                year: "numeric",
+                hour: "2-digit",
+                minute: "2-digit",
+              })}
             </span>
           )}
           <span>
@@ -672,6 +690,23 @@ function SignerRow({
     (envelope.status === "draft" || envelope.status === "running") &&
     signer.status !== "signed";
 
+  const fmt = (iso: string | null) =>
+    iso
+      ? new Date(iso).toLocaleString("pt-BR", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : null;
+  const timeline = [
+    signer.notifiedAt ? `Notificado em ${fmt(signer.notifiedAt)}` : null,
+    signer.viewedAt ? `Abriu em ${fmt(signer.viewedAt)}` : null,
+    signer.signedAt ? `Assinou em ${fmt(signer.signedAt)}` : null,
+    signer.refusedAt ? `Recusou em ${fmt(signer.refusedAt)}` : null,
+  ].filter(Boolean);
+
   return (
     <div className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
       <div className="flex items-center gap-2 min-w-0">
@@ -686,6 +721,11 @@ function SignerRow({
           <div className="text-xs text-muted-foreground truncate">
             {signer.email}
           </div>
+          {timeline.length > 0 && (
+            <div className="text-[11px] text-muted-foreground/80 mt-0.5">
+              {timeline.join(" · ")}
+            </div>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-2 shrink-0">
