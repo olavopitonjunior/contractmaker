@@ -90,11 +90,18 @@ export async function POST(
         action: "provide_evidence",
         auth: authMethod,
       });
+      const role =
+        parsed.data.sourceKind === "vendedor"
+          ? "seller"
+          : parsed.data.sourceKind === "comprador"
+            ? "buyer"
+            : "sign";
       const signReq = await addRequirement({
         envelopeId: envelope.clicksignId,
         documentClicksignId: envelope.documentClicksignId,
         signerClicksignId: signerId,
         action: "agree",
+        role,
       });
       const reqIds = [pickId(authReq), pickId(signReq)].filter(Boolean) as string[];
 

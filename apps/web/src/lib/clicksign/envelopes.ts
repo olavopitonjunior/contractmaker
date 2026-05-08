@@ -103,20 +103,43 @@ export async function removeSigner(envelopeId: string, signerId: string) {
   });
 }
 
+/**
+ * Papel do signatário no requirement de qualificação ClickSign v3.
+ * Lista derivada da tabela "Assinar como" (qualifications) da ClickSign.
+ *
+ * Mapeamento UI → API:
+ *   - Assinante     → "sign"
+ *   - Comprador     → "buyer"
+ *   - Vendedor      → "seller"
+ *   - Intermediador → "intervening"
+ *   - Imobiliária   → "realestate"
+ *   - Testemunha    → "witness"
+ *   - Anuente       → "consenting"
+ *   - Representante → "attorney"
+ */
+export type ClicksignRole =
+  | "sign"
+  | "buyer"
+  | "seller"
+  | "intervening"
+  | "realestate"
+  | "witness"
+  | "consenting"
+  | "attorney";
+
 interface AddRequirementInput {
   envelopeId: string;
   documentClicksignId: string;
   signerClicksignId: string;
   // Tipo do requisito (ClickSign v3):
-  //   - "agree"            → rubrica/concordância
+  //   - "agree"            → qualificação/concordância (signer assina como X);
+  //                          REQUER `role`
   //   - "provide_evidence" → autenticação (combinada com `auth`)
-  //   - "sign"             → assinatura propriamente dita (combinada com `role`)
-  action: "agree" | "provide_evidence" | "sign";
+  action: "agree" | "provide_evidence";
   // Para action=provide_evidence: o auth method usado.
   auth?: AuthMethod;
-  // Para action=sign: papel do signer no documento. ClickSign v3 aceita
-  // "signer" (assinante padrão), "witness" (testemunha) e "intervening".
-  role?: "signer" | "witness" | "intervening";
+  // Para action=agree: papel do signer (qualificação).
+  role?: ClicksignRole;
 }
 
 export async function addRequirement(input: AddRequirementInput) {

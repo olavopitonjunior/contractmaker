@@ -9,6 +9,7 @@ import {
   cancelEnvelope,
   createEnvelope,
   deleteDraftEnvelope,
+  type ClicksignRole,
 } from "./envelopes";
 import { ClicksignError } from "./client";
 import { dealDataToSigners } from "./mapping";
@@ -222,11 +223,20 @@ async function createEnvelopeFromBuffer(input: {
         action: "provide_evidence",
         auth: authMethod,
       });
+      // Role default por sourceKind quando o signer não trouxe override
+      // explícito. Mapping conservador (todos como "sign") evita
+      // dependência das roles especializadas (buyer/seller/...) nos primeiros
+      // envelopes — usuário pode customizar no popup quando o seletor for
+      // adicionado.
+      const role: ClicksignRole = defaultRoleForSourceKind(
+        localSigner.sourceKind
+      );
       const signReq = await addRequirement({
         envelopeId: clicksignEnvelopeId,
         documentClicksignId,
         signerClicksignId: signerId,
         action: "agree",
+        role,
       });
       const reqIds = [
         pickResourceId(authReq),
@@ -474,6 +484,21 @@ function pickResourceId(resp: unknown): string | null {
 // + `activateEnvelope`. WhatsApp/SMS são modeladas como Auth requirements
 // (POST /requirements com action="provide_evidence", auth=whatsapp), não
 // como canal de comunicação do signer.
+
+function defaultRoleForSourceKind(sourceKind: string): ClicksignRole {
+  switch (sourceKind) {
+    case "vendedor":
+      return "seller";
+    case "comprador":
+      return "buyer";
+    case "testemunha":
+      return "witness";
+    case "corretora":
+      return "intervening";
+    default:
+      return "sign";
+  }
+}
 
 async function listSigners(envelopeId: string) {
   return prisma.envelopeSigner.findMany({
