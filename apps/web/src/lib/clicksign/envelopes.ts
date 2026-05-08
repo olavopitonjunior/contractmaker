@@ -80,7 +80,12 @@ export async function addSigner(input: AddSignerInput) {
     has_documentation: input.hasDocumentation ?? Boolean(input.documentation),
     refusable: input.refusable ?? true,
   };
-  if (input.documentation) attributes.documentation = input.documentation;
+  if (input.documentation) {
+    // ClickSign v3 exige CPF/CNPJ formatado com máscara
+    // ("XXX.XXX.XXX-XX" ou "XX.XXX.XXX/XXXX-XX"). Mandar só dígitos
+    // retorna 422 "documentation não está em um formato válido".
+    attributes.documentation = formatCpfCnpj(input.documentation);
+  }
   if (input.phoneNumber) attributes.phone_number = input.phoneNumber;
   if (input.birthday) attributes.birthday = input.birthday;
 
@@ -224,7 +229,9 @@ export async function updateSigner(input: UpdateSignerInput) {
   if (input.name !== undefined) attributes.name = input.name;
   if (input.email !== undefined) attributes.email = input.email;
   if (input.documentation !== undefined) {
-    attributes.documentation = input.documentation;
+    attributes.documentation = input.documentation
+      ? formatCpfCnpj(input.documentation)
+      : input.documentation;
     attributes.has_documentation = Boolean(input.documentation);
   }
   if (input.phoneNumber !== undefined) attributes.phone_number = input.phoneNumber;
@@ -241,4 +248,21 @@ export async function updateSigner(input: UpdateSignerInput) {
       },
     },
   });
+}
+
+/**
+ * Formata CPF/CNPJ pra `XXX.XXX.XXX-XX` ou `XX.XXX.XXX/XXXX-XX`. Aceita
+ * input com ou sem máscara — sempre normaliza pelos dígitos. Retorna o
+ * input original se não tiver 11 nem 14 dígitos (caso edge — deixa
+ * ClickSign emitir o erro de validação se for mesmo inválido).
+ */
+export function formatCpfCnpj(raw: string): string {
+  const d = raw.replace(/\D/g, "");
+  if (d.length === 11) {
+    return `${d.slice(0, 3)}.${d.slice(3, 6)}.${d.slice(6, 9)}-${d.slice(9)}`;
+  }
+  if (d.length === 14) {
+    return `${d.slice(0, 2)}.${d.slice(2, 5)}.${d.slice(5, 8)}/${d.slice(8, 12)}-${d.slice(12)}`;
+  }
+  return raw;
 }
