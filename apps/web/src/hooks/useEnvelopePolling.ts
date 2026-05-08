@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export interface EnvelopeSignerRow {
   id: string;
   clicksignId: string | null;
-  sourceKind: "vendedor" | "comprador";
+  sourceKind: "vendedor" | "comprador" | "testemunha" | "corretora";
   sourceIndex: number;
   name: string;
   email: string;
@@ -42,11 +42,19 @@ export interface EnvelopeRow {
 const ACTIVE_STATUSES = new Set(["pending", "notified", "viewed"]);
 const POLL_INTERVAL_MS = 3500;
 
+const hasActive = (es: EnvelopeRow[]) =>
+  es.some(
+    (e) =>
+      e.status === "running" &&
+      e.signers.some((s) => ACTIVE_STATUSES.has(s.status))
+  );
+
 export function useEnvelopePolling(contractId: string) {
   const [envelopes, setEnvelopes] = useState<EnvelopeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelledRef = useRef(false);
 
   const fetchEnvelopes = useCallback(async () => {
     try {
@@ -55,8 +63,17 @@ export function useEnvelopePolling(contractId: string) {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = (await res.json()) as { envelopes: EnvelopeRow[] };
-      setEnvelopes(json.envelopes ?? []);
+      const next = json.envelopes ?? [];
+      setEnvelopes(next);
       setError(null);
+      // Re-arma o polling sempre que tiver envelope ativo, inclusive
+      // após `refetch` externo (ex: após criar envelope na popup). Antes
+      // do fix, polling parava quando carga inicial não tinha ativos e
+      // refetch nunca reagendava.
+      if (!cancelledRef.current && hasActive(next)) {
+        if (timerRef.current) clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(fetchEnvelopes, POLL_INTERVAL_MS);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao buscar envelopes");
     } finally {
@@ -65,29 +82,14 @@ export function useEnvelopePolling(contractId: string) {
   }, [contractId]);
 
   useEffect(() => {
-    let cancelled = false;
-    const tick = async () => {
-      if (cancelled) return;
-      await fetchEnvelopes();
-      if (cancelled) return;
-      const hasActive = (es: EnvelopeRow[]) =>
-        es.some(
-          (e) =>
-            e.status === "running" &&
-            e.signers.some((s) => ACTIVE_STATUSES.has(s.status))
-        );
-      // Re-leia o estado atual
-      setEnvelopes((prev) => {
-        if (hasActive(prev)) {
-          timerRef.current = setTimeout(tick, POLL_INTERVAL_MS);
-        }
-        return prev;
-      });
-    };
-    tick();
+    cancelledRef.current = false;
+    fetchEnvelopes();
     return () => {
-      cancelled = true;
-      if (timerRef.current) clearTimeout(timerRef.current);
+      cancelledRef.current = true;
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
     };
   }, [fetchEnvelopes]);
 

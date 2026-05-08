@@ -21,11 +21,19 @@ export interface DealEnvelopeRow extends BaseEnvelopeRow {
 const ACTIVE_STATUSES = new Set(["pending", "notified", "viewed"]);
 const POLL_INTERVAL_MS = 3500;
 
+const hasActive = (es: DealEnvelopeRow[]) =>
+  es.some(
+    (e) =>
+      e.status === "running" &&
+      e.signers.some((s) => ACTIVE_STATUSES.has(s.status))
+  );
+
 export function useDealEnvelopePolling(dealId: string) {
   const [envelopes, setEnvelopes] = useState<DealEnvelopeRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelledRef = useRef(false);
 
   const fetchEnvelopes = useCallback(async () => {
     try {
@@ -34,8 +42,13 @@ export function useDealEnvelopePolling(dealId: string) {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = (await res.json()) as { envelopes: DealEnvelopeRow[] };
-      setEnvelopes(json.envelopes ?? []);
+      const next = json.envelopes ?? [];
+      setEnvelopes(next);
       setError(null);
+      if (!cancelledRef.current && hasActive(next)) {
+        if (timerRef.current) clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(fetchEnvelopes, POLL_INTERVAL_MS);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao buscar envelopes");
     } finally {
@@ -44,28 +57,14 @@ export function useDealEnvelopePolling(dealId: string) {
   }, [dealId]);
 
   useEffect(() => {
-    let cancelled = false;
-    const tick = async () => {
-      if (cancelled) return;
-      await fetchEnvelopes();
-      if (cancelled) return;
-      const hasActive = (es: DealEnvelopeRow[]) =>
-        es.some(
-          (e) =>
-            e.status === "running" &&
-            e.signers.some((s) => ACTIVE_STATUSES.has(s.status))
-        );
-      setEnvelopes((prev) => {
-        if (hasActive(prev)) {
-          timerRef.current = setTimeout(tick, POLL_INTERVAL_MS);
-        }
-        return prev;
-      });
-    };
-    tick();
+    cancelledRef.current = false;
+    fetchEnvelopes();
     return () => {
-      cancelled = true;
-      if (timerRef.current) clearTimeout(timerRef.current);
+      cancelledRef.current = true;
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
     };
   }, [fetchEnvelopes]);
 
