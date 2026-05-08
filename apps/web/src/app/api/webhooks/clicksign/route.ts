@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
         headers,
         bodyHash,
         bodyLength: rawBody.length,
-        bodyExcerpt: rawBody.slice(0, 500),
+        bodyExcerpt: rawBody.slice(0, 4000),
       },
     }
   ).catch(() => {});
