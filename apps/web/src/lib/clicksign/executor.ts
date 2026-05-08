@@ -211,7 +211,6 @@ async function createEnvelopeFromBuffer(input: {
         documentation: localSigner.documentation ?? undefined,
         phoneNumber: localSigner.phone ?? undefined,
         hasDocumentation: Boolean(localSigner.documentation),
-        communicateBy: communicateByFor(authMethod),
       });
       const signerId = pickResourceId(signerResp);
       if (!signerId) throw new Error("Resposta sem id de signer");
@@ -471,10 +470,11 @@ function pickResourceId(resp: unknown): string | null {
   return (data as { id?: string } | undefined)?.id ?? null;
 }
 
-function communicateByFor(authMethod: AuthMethod): "email" | "sms" | "whatsapp" {
-  if (authMethod === "whatsapp") return "whatsapp";
-  return "email";
-}
+// Removido `communicateByFor` — ClickSign v3 não aceita communicate_by no
+// signer (422 "não está disponível"). Email é automático via `signer.email`
+// + `activateEnvelope`. WhatsApp/SMS são modeladas como Auth requirements
+// (POST /requirements com action="provide_evidence", auth=whatsapp), não
+// como canal de comunicação do signer.
 
 async function listSigners(envelopeId: string) {
   return prisma.envelopeSigner.findMany({

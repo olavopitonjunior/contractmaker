@@ -57,9 +57,22 @@ interface AddSignerInput {
   hasDocumentation?: boolean;
   birthday?: string; // YYYY-MM-DD
   refusable?: boolean;
-  communicateBy?: "email" | "sms" | "whatsapp";
 }
 
+/**
+ * Cria signer no envelope. **Notificação é por email automaticamente** — a
+ * ClickSign v3 envia o link de assinatura para o `email` do signer assim
+ * que `activateEnvelope` muda o status pra "running".
+ *
+ * O atributo `communicate_by` da v1.x foi REMOVIDO na v3 — mandar gera 422
+ * "communicate_by não está disponível". O canal é derivado dos contatos
+ * preenchidos no signer (email obrigatório → email; phone_number → SMS via
+ * Auth requirement separado quando aplicável).
+ *
+ * Para autenticação por SMS/WhatsApp/Selfie/ICP-Brasil, configure o canal
+ * via POST /requirements (action="provide_evidence", auth=...) — não no
+ * signer.
+ */
 export async function addSigner(input: AddSignerInput) {
   const attributes: Record<string, unknown> = {
     name: input.name,
@@ -67,13 +80,6 @@ export async function addSigner(input: AddSignerInput) {
     has_documentation: input.hasDocumentation ?? Boolean(input.documentation),
     refusable: input.refusable ?? true,
   };
-  // `communicate_by` foi rejeitado pela ClickSign v3 em alguns workspaces
-  // ("communicate_by não está disponível"). A API infere o canal a partir
-  // dos contatos preenchidos (email/phone). Só mandamos quando precisamos
-  // forçar WhatsApp/SMS — nunca pra email default.
-  if (input.communicateBy && input.communicateBy !== "email") {
-    attributes.communicate_by = input.communicateBy;
-  }
   if (input.documentation) attributes.documentation = input.documentation;
   if (input.phoneNumber) attributes.phone_number = input.phoneNumber;
   if (input.birthday) attributes.birthday = input.birthday;

@@ -79,7 +79,6 @@ export async function POST(
         documentation,
         phoneNumber: phone,
         hasDocumentation: Boolean(documentation),
-        communicateBy: authMethod === "whatsapp" ? "whatsapp" : "email",
       });
       const signerId = pickId(signerResp);
       if (!signerId) throw new Error("Resposta sem id de signer");
