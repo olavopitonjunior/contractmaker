@@ -205,6 +205,19 @@ export async function getEnvelope(envelopeId: string) {
   });
 }
 
+/**
+ * Lista signers de um envelope diretamente da ClickSign — usado pelo
+ * sync manual quando o webhook não chegou. Retorna array com status
+ * atualizado (`pending`, `notified`, `viewed`, `signed`, `refused`)
+ * e timestamps `signed_at`, `viewed_at`, `notified_at`.
+ */
+export async function listEnvelopeSigners(envelopeId: string) {
+  return clicksignRequest<ClicksignResponse>({
+    method: "GET",
+    path: `/api/v3/envelopes/${envelopeId}/signers`,
+  });
+}
+
 interface UpdateEnvelopeInput {
   envelopeId: string;
   name?: string;

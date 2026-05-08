@@ -387,6 +387,43 @@ function ContractEnvelopesSection({
 }) {
   const { envelopes, loading, refetch } = useEnvelopePolling(contract.id);
   const [sendOpen, setSendOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  // "Atualizar" não faz só refetch local — primeiro pulla cada envelope
+  // ativo direto da ClickSign API, então re-fetch do DB. Resolve casos
+  // em que webhook não chegou (Marcia assinou mas status local stale).
+  const handleSyncAndRefetch = async () => {
+    setSyncing(true);
+    try {
+      const active = envelopes.filter(
+        (e) => e.status === "running" || e.status === "draft"
+      );
+      const results = await Promise.allSettled(
+        active.map((env) =>
+          fetch(
+            `/api/contracts/${contract.id}/envelopes/${env.id}/sync`,
+            { method: "POST" }
+          )
+        )
+      );
+      const failures = results.filter(
+        (r) => r.status === "rejected" || (r.status === "fulfilled" && !r.value.ok)
+      ).length;
+      if (failures > 0 && active.length > 0) {
+        toast.warning(
+          `Sincronização parcial — ${failures}/${active.length} envelope(s) falharam. Mostrando últimos dados locais.`
+        );
+      }
+      await refetch();
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : "Erro ao sincronizar com ClickSign"
+      );
+      await refetch();
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const hasActiveOrClosed = envelopes.some(
     (e) => e.status === "running" || e.status === "closed"
@@ -410,10 +447,16 @@ function ContractEnvelopesSection({
           <Button
             size="sm"
             variant="ghost"
-            onClick={refetch}
-            title="Atualizar"
+            onClick={handleSyncAndRefetch}
+            title="Sincronizar com ClickSign e atualizar"
+            disabled={syncing}
           >
-            <RefreshCw className="h-3.5 w-3.5" />
+            <RefreshCw
+              className={cn(
+                "h-3.5 w-3.5",
+                syncing && "animate-spin"
+              )}
+            />
           </Button>
           <Button
             size="sm"
