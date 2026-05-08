@@ -239,7 +239,9 @@ const defaultFormValues: Partial<DadosContratoForm> = {
     corretora_tipo_pessoa: "juridica" as const,
     imobiliaria_nome: "",
     imobiliaria_cnpj: "",
+    imobiliaria_email: "",
     creci: "",
+    incluir_como_signatario: false,
   },
   desistencia: {
     permite: false,
@@ -252,8 +254,8 @@ const defaultFormValues: Partial<DadosContratoForm> = {
     data: "",
   },
   testemunhas: [
-    { nome: "", cpf: "" },
-    { nome: "", cpf: "" },
+    { nome: "", cpf: "", email: "", incluir_como_signatario: false },
+    { nome: "", cpf: "", email: "", incluir_como_signatario: false },
   ],
   config: {
     multa_penal_moratoria: 2,

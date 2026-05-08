@@ -17,7 +17,11 @@ export type SignerStatus =
 
 export type AuthMethod = "email" | "whatsapp" | "selfie" | "icp_brasil";
 
-export type SourceKind = "vendedor" | "comprador";
+export type SourceKind =
+  | "vendedor"
+  | "comprador"
+  | "testemunha"
+  | "corretora";
 
 export interface SignerInput {
   sourceKind: SourceKind;

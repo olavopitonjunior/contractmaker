@@ -1504,7 +1504,8 @@ model EnvelopeSigner {
   // IDs dos requirements (auth + sign) criados via POST /requirements.
   // Guardamos pra poder remover/alterar depois sem refazer GET.
   requirementIds String[]
-  // sourceKind: vendedor | comprador. sourceIndex aponta o array em dataJson.
+  // sourceKind: vendedor | comprador | testemunha | corretora.
+  // sourceIndex aponta o array em dataJson (sempre 0 para corretora).
   sourceKind     String
   sourceIndex    Int
   name           String

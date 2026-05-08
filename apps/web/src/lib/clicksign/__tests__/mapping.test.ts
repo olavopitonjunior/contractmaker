@@ -60,6 +60,84 @@ describe("dealDataToSigners", () => {
     expect(dealDataToSigners(undefined).signers).toHaveLength(0);
     expect(dealDataToSigners({}).signers).toHaveLength(0);
   });
+
+  it("inclui corretora apenas com flag incluir_como_signatario + email", () => {
+    const base = {
+      vendedores: [
+        {
+          tipo_pessoa: "fisica",
+          nome: "Vendedor",
+          email: "v@x.com",
+        },
+      ],
+      compradores: [],
+      comissao: {
+        imobiliaria_nome: "Imob Plus",
+        imobiliaria_cnpj: "11.222.333/0001-44",
+        imobiliaria_email: "imob@x.com",
+        // sem flag → não inclui
+      },
+    };
+    expect(dealDataToSigners(base).signers).toHaveLength(1);
+
+    const withFlag = {
+      ...base,
+      comissao: { ...base.comissao, incluir_como_signatario: true },
+    };
+    const result = dealDataToSigners(withFlag);
+    expect(result.signers).toHaveLength(2);
+    const corretora = result.signers.find((s) => s.sourceKind === "corretora");
+    expect(corretora).toBeDefined();
+    expect(corretora?.email).toBe("imob@x.com");
+    expect(corretora?.documentation).toBe("11222333000144");
+  });
+
+  it("inclui apenas testemunhas marcadas com flag e dados completos", () => {
+    const data = {
+      vendedores: [{ nome: "V", email: "v@x.com" }],
+      compradores: [],
+      testemunhas: [
+        // sem flag → ignora
+        { nome: "T1", email: "t1@x.com" },
+        // flag + dados completos → inclui
+        {
+          nome: "T2",
+          cpf: "111.222.333-44",
+          email: "t2@x.com",
+          incluir_como_signatario: true,
+        },
+        // flag mas sem email → ignora
+        { nome: "T3", incluir_como_signatario: true },
+      ],
+    };
+    const result = dealDataToSigners(data);
+    expect(result.signers).toHaveLength(2);
+    const testemunhas = result.signers.filter(
+      (s) => s.sourceKind === "testemunha"
+    );
+    expect(testemunhas).toHaveLength(1);
+    expect(testemunhas[0]).toMatchObject({
+      sourceKind: "testemunha",
+      sourceIndex: 1,
+      name: "T2",
+      email: "t2@x.com",
+      documentation: "11122233344",
+    });
+  });
+
+  it("testemunhas e corretora sem email não geram entrada em missing", () => {
+    const result = dealDataToSigners({
+      vendedores: [{ nome: "V", email: "v@x.com" }],
+      compradores: [{ nome: "C", email: "c@x.com" }],
+      testemunhas: [{ nome: "T", incluir_como_signatario: true }],
+      comissao: {
+        imobiliaria_nome: "Imob",
+        incluir_como_signatario: true,
+      },
+    });
+    expect(result.missing).toHaveLength(0);
+    expect(result.signers).toHaveLength(2); // só V + C
+  });
 });
 
 describe("isValidEmail", () => {

@@ -34,9 +34,28 @@ import { EditSignerDialog } from "./EditSignerDialog";
 import { cn } from "@/lib/utils";
 
 interface PartyLite {
+  tipo_pessoa?: string;
   nome?: string;
   razao_social?: string;
+  cpf?: string;
+  cnpj?: string;
   email?: string;
+}
+
+interface TestemunhaLite {
+  nome?: string;
+  cpf?: string;
+  email?: string;
+  incluir_como_signatario?: boolean;
+}
+
+interface CorretoraLite {
+  corretora_tipo_pessoa?: string;
+  imobiliaria_nome?: string;
+  imobiliaria_cnpj?: string;
+  imobiliaria_email?: string;
+  creci?: string;
+  incluir_como_signatario?: boolean;
 }
 
 interface ContractLite {
@@ -57,6 +76,11 @@ interface SignaturesTabProps {
   contracts: ContractLite[];
   vendedores: PartyLite[];
   compradores: PartyLite[];
+  /** Testemunhas vindas do form (mín 2). Se ausente, defaults vazios são
+   *  criados na popup. */
+  testemunhas?: TestemunhaLite[];
+  /** Bloco de comissão. Quando ausente, popup mostra inputs vazios. */
+  comissao?: CorretoraLite | null;
   /** Quando passado, habilita o fluxo de envelope avulso a partir de
    *  documentos da pasta. Pra retrocompat, é opcional. */
   dealId?: string;
@@ -95,6 +119,8 @@ export function SignaturesTab({
   contracts,
   vendedores,
   compradores,
+  testemunhas = [],
+  comissao = null,
   dealId,
   attachments = [],
 }: SignaturesTabProps) {
@@ -133,6 +159,8 @@ export function SignaturesTab({
           contract={c}
           vendedores={vendedores}
           compradores={compradores}
+          testemunhas={testemunhas}
+          comissao={comissao}
         />
       ))}
       {approved.length === 0 && showAttachmentSection && (
@@ -348,32 +376,17 @@ function ContractEnvelopesSection({
   contract,
   vendedores,
   compradores,
+  testemunhas,
+  comissao,
 }: {
   contract: ContractLite;
   vendedores: PartyLite[];
   compradores: PartyLite[];
+  testemunhas: TestemunhaLite[];
+  comissao: CorretoraLite | null;
 }) {
   const { envelopes, loading, refetch } = useEnvelopePolling(contract.id);
   const [sendOpen, setSendOpen] = useState(false);
-
-  const partes = useMemo(() => {
-    return [
-      ...vendedores.map((p, idx) => ({
-        sourceKind: "vendedor" as const,
-        sourceIndex: idx,
-        name: (p.nome || p.razao_social || `Vendedor ${idx + 1}`).trim(),
-        email: p.email?.trim() || null,
-        hasEmail: Boolean(p.email?.trim()),
-      })),
-      ...compradores.map((p, idx) => ({
-        sourceKind: "comprador" as const,
-        sourceIndex: idx,
-        name: (p.nome || p.razao_social || `Comprador ${idx + 1}`).trim(),
-        email: p.email?.trim() || null,
-        hasEmail: Boolean(p.email?.trim()),
-      })),
-    ];
-  }, [vendedores, compradores]);
 
   const hasActiveOrClosed = envelopes.some(
     (e) => e.status === "running" || e.status === "closed"
@@ -439,7 +452,11 @@ function ContractEnvelopesSection({
         onOpenChange={setSendOpen}
         contractId={contract.id}
         contractTitle={`Contrato v${contract.version}`}
-        partes={partes}
+        contractStatus={contract.status}
+        vendedores={vendedores}
+        compradores={compradores}
+        testemunhas={testemunhas}
+        comissao={comissao}
         onSent={refetch}
       />
     </Card>

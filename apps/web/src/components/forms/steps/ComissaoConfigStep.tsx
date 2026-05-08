@@ -1,10 +1,13 @@
 "use client";
 
+import { useEffect } from "react";
 import { useFieldArray, UseFormReturn, Controller } from "react-hook-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { Button } from "@/components/ui/button";
+import { Plus, Trash2 } from "lucide-react";
 import { UFSelect } from "@/components/forms/UFSelect";
 import { MoneyInput } from "@/components/forms/MoneyInput";
 import { NativeSelect } from "@/components/forms/NativeSelect";
@@ -63,14 +66,25 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
   const permiteDesistencia = form.watch("desistencia.permite");
   const foro = form.watch("foro");
 
-  // Testemunhas - use field array for dynamic count but we default to 2
-  const { fields: testemunhaFields } = useFieldArray({
+  const {
+    fields: testemunhaFields,
+    append: appendTestemunha,
+    remove: removeTestemunha,
+  } = useFieldArray({
     control: form.control,
     name: "testemunhas",
   });
 
-  // Ensure 2 testemunhas are always shown
-  const testemunhasCount = Math.max(testemunhaFields.length, 2);
+  // Garante que sempre existem ao menos 2 testemunhas (padrão CCV).
+  // Append em loop separado pra evitar setState durante render.
+  useEffect(() => {
+    if (testemunhaFields.length < 2) {
+      const missing = 2 - testemunhaFields.length;
+      for (let i = 0; i < missing; i++) {
+        appendTestemunha({ nome: "", cpf: "", email: "" });
+      }
+    }
+  }, [testemunhaFields.length, appendTestemunha]);
 
   return (
     <div className="space-y-4">
@@ -200,6 +214,13 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
                 }
               />
             </FormField>
+            <FormField label="E-mail (para assinatura digital)" className="md:col-span-2">
+              <Input
+                type="email"
+                {...form.register("comissao.imobiliaria_email")}
+                placeholder="contato@imobiliaria.com"
+              />
+            </FormField>
           </div>
         </CardContent>
       </Card>
@@ -290,12 +311,26 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
           <CardTitle className="text-base font-semibold">Testemunhas</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          {Array.from({ length: testemunhasCount }).map((_, index) => (
-            <div key={index} className="space-y-3">
+          {testemunhaFields.map((field, index) => (
+            <div key={field.id} className="space-y-3">
               {index > 0 && <Separator />}
-              <p className="text-sm font-medium text-foreground">
-                Testemunha {index + 1}
-              </p>
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-foreground">
+                  Testemunha {index + 1}
+                </p>
+                {index >= 2 && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs text-destructive hover:text-destructive"
+                    onClick={() => removeTestemunha(index)}
+                  >
+                    <Trash2 className="h-3 w-3 mr-1" />
+                    Remover
+                  </Button>
+                )}
+              </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <FormField label="Nome">
                   <Input
@@ -309,9 +344,27 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
                     placeholder="000.000.000-00"
                   />
                 </FormField>
+                <FormField label="E-mail (para assinatura digital)" className="md:col-span-2">
+                  <Input
+                    type="email"
+                    {...form.register(`testemunhas.${index}.email`)}
+                    placeholder="testemunha@email.com"
+                  />
+                </FormField>
               </div>
             </div>
           ))}
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() =>
+              appendTestemunha({ nome: "", cpf: "", email: "" })
+            }
+          >
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
+            Adicionar testemunha
+          </Button>
         </CardContent>
       </Card>
 

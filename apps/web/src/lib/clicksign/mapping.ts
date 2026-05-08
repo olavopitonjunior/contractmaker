@@ -10,9 +10,26 @@ interface Parte {
   telefone?: string;
 }
 
+interface Testemunha {
+  nome?: string;
+  cpf?: string;
+  email?: string;
+  incluir_como_signatario?: boolean;
+}
+
+interface Corretora {
+  corretora_tipo_pessoa?: "fisica" | "juridica";
+  imobiliaria_nome?: string;
+  imobiliaria_cnpj?: string;
+  imobiliaria_email?: string;
+  incluir_como_signatario?: boolean;
+}
+
 interface DealLikeData {
   vendedores?: Parte[];
   compradores?: Parte[];
+  testemunhas?: Testemunha[];
+  comissao?: Corretora;
 }
 
 export interface MappedSigner {
@@ -76,6 +93,41 @@ export function dealDataToSigners(
 
   collect("vendedor", data.vendedores);
   collect("comprador", data.compradores);
+
+  // Testemunhas e corretora são opt-in: só viram signers quando o usuário
+  // marcou explicitamente "Incluir como signatário" (na popup de envio ou
+  // no dataJson). Não geram entrada em `missing` quando faltam dados — é
+  // sinal de que o usuário não os quis no envelope.
+  (data.testemunhas ?? []).forEach((t, idx) => {
+    if (!t.incluir_como_signatario) return;
+    const name = (t.nome ?? "").trim();
+    const email = (t.email ?? "").trim();
+    if (!name || !email) return;
+    signers.push({
+      sourceKind: "testemunha",
+      sourceIndex: idx,
+      name,
+      email,
+      documentation: onlyDigits(t.cpf),
+      authMethod,
+    });
+  });
+
+  const corretora = data.comissao;
+  if (corretora?.incluir_como_signatario) {
+    const name = (corretora.imobiliaria_nome ?? "").trim();
+    const email = (corretora.imobiliaria_email ?? "").trim();
+    if (name && email) {
+      signers.push({
+        sourceKind: "corretora",
+        sourceIndex: 0,
+        name,
+        email,
+        documentation: onlyDigits(corretora.imobiliaria_cnpj),
+        authMethod,
+      });
+    }
+  }
 
   return { signers, missing };
 }

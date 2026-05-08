@@ -284,6 +284,22 @@ export function DealDetail({ deal }: DealDetailProps) {
   const formData = deal.form?.dataJson as Record<string, unknown> | null;
   const vendedores = (formData?.vendedores as Parte[]) || [];
   const compradores = (formData?.compradores as Parte[]) || [];
+  const testemunhas =
+    (formData?.testemunhas as Array<{
+      nome?: string;
+      cpf?: string;
+      email?: string;
+      incluir_como_signatario?: boolean;
+    }>) || [];
+  const comissao =
+    (formData?.comissao as {
+      corretora_tipo_pessoa?: "fisica" | "juridica";
+      imobiliaria_nome?: string;
+      imobiliaria_cnpj?: string;
+      imobiliaria_email?: string;
+      creci?: string;
+      incluir_como_signatario?: boolean;
+    } | null) || null;
   const imoveis = (formData?.imoveis as Imovel[]) || [];
   const pagamento = formData?.pagamento as
     | {
@@ -750,6 +766,8 @@ export function DealDetail({ deal }: DealDetailProps) {
             }))}
             vendedores={vendedores}
             compradores={compradores}
+            testemunhas={testemunhas}
+            comissao={comissao}
             dealId={deal.id}
             attachments={deal.attachments.map((a) => ({
               id: a.id,

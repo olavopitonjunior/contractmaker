@@ -190,8 +190,10 @@ export const step7Schema = z.object({
       .default("juridica"),
     imobiliaria_nome: z.string().optional().default(""),
     imobiliaria_cnpj: z.string().optional().default(""),
+    imobiliaria_email: z.string().email("Email invalido").optional().or(z.literal("")),
     creci: z.string().optional().default(""),
     percentual: z.number().optional(),
+    incluir_como_signatario: z.boolean().optional().default(false),
   }).optional(),
   desistencia: z.object({
     permite: z.boolean().optional().default(false),
@@ -206,7 +208,12 @@ export const step7Schema = z.object({
   testemunhas: z.array(z.object({
     nome: z.string().default(""),
     cpf: z.string().default(""),
-  })).optional().default([{ nome: "", cpf: "" }, { nome: "", cpf: "" }]),
+    email: z.string().email("Email invalido").optional().or(z.literal("")),
+    incluir_como_signatario: z.boolean().optional().default(false),
+  })).optional().default([
+    { nome: "", cpf: "", email: "" },
+    { nome: "", cpf: "", email: "" },
+  ]),
   config: z.object({
     multa_penal_moratoria: z.number().default(2),
     base_calculo_multa: z.string().default("valor da parcela"),
