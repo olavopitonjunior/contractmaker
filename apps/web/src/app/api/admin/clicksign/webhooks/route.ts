@@ -60,6 +60,7 @@ export async function GET(_req: NextRequest) {
       hasWebhookSecret: hasSecret,
       count: webhooks.length,
       webhooks,
+      raw: resp,
       diagnostic:
         webhooks.length === 0
           ? "ERRO: Nenhum webhook cadastrado na conta ClickSign. Cadastrar via dashboard ou POST /api/v3/webhooks."
