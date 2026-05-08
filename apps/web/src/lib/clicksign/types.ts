@@ -73,6 +73,11 @@ export interface WebhookPayload {
     status?: string;
     finished_at?: string | null;
     downloads?: { signed_file_url?: string; original_file_url?: string };
+    // v3 atual também inclui esses campos no payload de webhook
+    path?: string;
+    locale?: string;
+    auto_close?: boolean;
+    deadline_at?: string | null;
   };
   envelope?: {
     id?: string;

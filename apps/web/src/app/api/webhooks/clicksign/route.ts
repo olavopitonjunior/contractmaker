@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db/prisma";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { audit } from "@/lib/security/audit";
 import {
+  getDocumentKeyFromPayload,
   getEnvelopeIdFromPayload,
   getSignedDocumentUrlFromPayload,
   getSignerEmailFromPayload,
@@ -113,13 +114,23 @@ export async function POST(req: NextRequest) {
 
   const eventName = parseWebhookEventName(payload);
   const clicksignEnvelopeId = getEnvelopeIdFromPayload(payload);
-  if (!eventName || !clicksignEnvelopeId) {
+  const documentKey = getDocumentKeyFromPayload(payload);
+  if (!eventName || (!clicksignEnvelopeId && !documentKey)) {
     return NextResponse.json({ ok: true, ignored: true });
   }
 
-  const envelope = await prisma.envelope.findUnique({
-    where: { clicksignId: clicksignEnvelopeId },
-  });
+  // ClickSign v3 webhook NÃO traz envelope.id no payload — apenas
+  // document.key. Tentamos por envelope.id se disponível (legacy v2),
+  // depois caímos pro lookup por documentClicksignId.
+  const envelope = clicksignEnvelopeId
+    ? await prisma.envelope.findUnique({
+        where: { clicksignId: clicksignEnvelopeId },
+      })
+    : documentKey
+      ? await prisma.envelope.findFirst({
+          where: { documentClicksignId: documentKey },
+        })
+      : null;
   if (!envelope) {
     // Pode ser um envelope criado fora do nosso sistema; só logamos.
     return NextResponse.json({ ok: true, unknown_envelope: true });

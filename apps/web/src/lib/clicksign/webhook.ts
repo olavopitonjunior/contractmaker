@@ -60,6 +60,18 @@ export function getEnvelopeIdFromPayload(payload: WebhookPayload): string | null
   return null;
 }
 
+/**
+ * Em ClickSign v3 atual o webhook NÃO inclui o envelope.id no payload —
+ * apenas `document.key` (UUID do documento). Esse helper extrai a key
+ * do documento; o caller deve fazer lookup em
+ * `Envelope.documentClicksignId` pra encontrar o envelope local.
+ */
+export function getDocumentKeyFromPayload(
+  payload: WebhookPayload
+): string | null {
+  return payload.document?.key ?? null;
+}
+
 export function getSignerEmailFromPayload(payload: WebhookPayload): string | null {
   const data = payload.event?.data as
     | { signer?: { email?: string } }
