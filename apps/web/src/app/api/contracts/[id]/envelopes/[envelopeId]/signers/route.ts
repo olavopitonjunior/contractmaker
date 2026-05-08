@@ -94,8 +94,8 @@ export async function POST(
         envelopeId: envelope.clicksignId,
         documentClicksignId: envelope.documentClicksignId,
         signerClicksignId: signerId,
-        action: "qualify",
-        role: "sign",
+        action: "sign",
+        role: "signer",
       });
       const reqIds = [pickId(authReq), pickId(signReq)].filter(Boolean) as string[];
 

@@ -107,13 +107,16 @@ interface AddRequirementInput {
   envelopeId: string;
   documentClicksignId: string;
   signerClicksignId: string;
-  // Tipo do requisito: "agreement" (aceitar), "provide_evidence" (autenticação),
-  // "qualification" (qualificação como Assinante/Testemunha).
-  action: "agree" | "provide_evidence" | "qualify";
+  // Tipo do requisito (ClickSign v3):
+  //   - "agree"            → rubrica/concordância
+  //   - "provide_evidence" → autenticação (combinada com `auth`)
+  //   - "sign"             → assinatura propriamente dita (combinada com `role`)
+  action: "agree" | "provide_evidence" | "sign";
   // Para action=provide_evidence: o auth method usado.
   auth?: AuthMethod;
-  // Para action=qualify: o papel.
-  role?: "sign" | "witness" | "intervening";
+  // Para action=sign: papel do signer no documento. ClickSign v3 aceita
+  // "signer" (assinante padrão), "witness" (testemunha) e "intervening".
+  role?: "signer" | "witness" | "intervening";
 }
 
 export async function addRequirement(input: AddRequirementInput) {
