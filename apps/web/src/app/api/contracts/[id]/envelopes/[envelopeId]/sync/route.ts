@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 import {
   getEnvelope,
+  listEnvelopeEvents,
   listEnvelopeRequirements,
   listEnvelopeSigners,
 } from "@/lib/clicksign/envelopes";
@@ -56,11 +57,13 @@ export async function POST(
   }
 
   try {
-    const [envResp, signersResp, requirementsResp] = await Promise.all([
-      getEnvelope(envelope.clicksignId),
-      listEnvelopeSigners(envelope.clicksignId),
-      listEnvelopeRequirements(envelope.clicksignId),
-    ]);
+    const [envResp, signersResp, requirementsResp, eventsResp] =
+      await Promise.all([
+        getEnvelope(envelope.clicksignId),
+        listEnvelopeSigners(envelope.clicksignId),
+        listEnvelopeRequirements(envelope.clicksignId),
+        listEnvelopeEvents(envelope.clicksignId).catch(() => null),
+      ]);
 
     const remoteStatus = (
       envResp as { data?: { attributes?: { status?: string } } }
@@ -169,6 +172,7 @@ export async function POST(
           envelopeRaw: envResp,
           signersRaw: signersResp,
           requirementsRaw: requirementsResp,
+          eventsRaw: eventsResp,
           localSigners: envelope.signers.map((s) => ({
             clicksignId: s.clicksignId,
             name: s.name,

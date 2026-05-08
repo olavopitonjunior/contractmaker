@@ -218,16 +218,28 @@ export async function listEnvelopeSigners(envelopeId: string) {
 }
 
 /**
- * Lista requirements de um envelope. Cada requirement tem `action`
- * (agree | provide_evidence | sign), `status` (pending|fulfilled|...),
- * `fulfilled_at`, e relationships pro signer correspondente. Esta é
- * a fonte canônica pra saber se um signer assinou (action=agree
- * fulfilled) ou autenticou (action=provide_evidence fulfilled).
+ * Lista requirements de um envelope. Empiricamente: a v3 retorna apenas
+ * a DEFINIÇÃO (action, role, auth, rubric_field, created/modified) —
+ * SEM status nem fulfilled_at nem relationship com signer. Pra saber
+ * se um signer assinou, use `listEnvelopeEvents`.
  */
 export async function listEnvelopeRequirements(envelopeId: string) {
   return clicksignRequest<ClicksignResponse>({
     method: "GET",
     path: `/api/v3/envelopes/${envelopeId}/requirements`,
+  });
+}
+
+/**
+ * Lista eventos do envelope (auth, sign, view, refusal, etc.). É a
+ * fonte canônica pra acompanhar quem assinou e quando — webhook
+ * dispara o mesmo fluxo, mas o endpoint REST permite reconciliação
+ * manual quando o webhook não chega.
+ */
+export async function listEnvelopeEvents(envelopeId: string) {
+  return clicksignRequest<ClicksignResponse>({
+    method: "GET",
+    path: `/api/v3/envelopes/${envelopeId}/events`,
   });
 }
 
