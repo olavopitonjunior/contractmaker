@@ -40,12 +40,29 @@ interface PartyLite {
   cpf?: string;
   cnpj?: string;
   email?: string;
+  conjuge?: {
+    nome?: string;
+    cpf?: string;
+    email?: string;
+    incluir_como_signatario?: boolean;
+  };
 }
 
 interface TestemunhaLite {
   nome?: string;
   cpf?: string;
   email?: string;
+  incluir_como_signatario?: boolean;
+}
+
+interface ComissionadoLite {
+  nome?: string;
+  cpf?: string;
+  cnpj?: string;
+  tipo_pessoa?: string;
+  email?: string;
+  percentual?: number;
+  valor?: number;
   incluir_como_signatario?: boolean;
 }
 
@@ -56,6 +73,7 @@ interface CorretoraLite {
   imobiliaria_email?: string;
   creci?: string;
   incluir_como_signatario?: boolean;
+  comissionados?: ComissionadoLite[];
 }
 
 interface ContractLite {

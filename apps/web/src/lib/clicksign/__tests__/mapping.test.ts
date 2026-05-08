@@ -92,6 +92,130 @@ describe("dealDataToSigners", () => {
     expect(corretora?.documentation).toBe("11222333000144");
   });
 
+  it("inclui múltiplos comissionados marcados (fonte canônica)", () => {
+    const result = dealDataToSigners({
+      vendedores: [{ nome: "V", email: "v@x.com" }],
+      compradores: [{ nome: "C", email: "c@x.com" }],
+      comissao: {
+        // legados ignorados quando comissionados[] tem itens
+        imobiliaria_nome: "Legacy Imob",
+        imobiliaria_email: "legacy@x.com",
+        incluir_como_signatario: true,
+        comissionados: [
+          {
+            nome: "Imob Principal",
+            cnpj: "11.222.333/0001-44",
+            tipo_pessoa: "juridica",
+            email: "principal@x.com",
+            incluir_como_signatario: true,
+          },
+          // sem flag → ignora
+          {
+            nome: "Sub Corretor PF",
+            cpf: "111.222.333-44",
+            email: "sub@x.com",
+          },
+          {
+            nome: "Intermediária",
+            cpf: "555.666.777-88",
+            tipo_pessoa: "fisica",
+            email: "inter@x.com",
+            incluir_como_signatario: true,
+          },
+        ],
+      },
+    });
+    const corretoras = result.signers.filter((s) => s.sourceKind === "corretora");
+    expect(corretoras).toHaveLength(2);
+    expect(corretoras[0]).toMatchObject({
+      sourceIndex: 0,
+      name: "Imob Principal",
+      email: "principal@x.com",
+      documentation: "11222333000144",
+    });
+    expect(corretoras[1]).toMatchObject({
+      sourceIndex: 2,
+      name: "Intermediária",
+      email: "inter@x.com",
+      documentation: "55566677788",
+    });
+  });
+
+  it("comissionados[] vazio cai no fallback legacy imobiliaria_*", () => {
+    const result = dealDataToSigners({
+      vendedores: [{ nome: "V", email: "v@x.com" }],
+      compradores: [{ nome: "C", email: "c@x.com" }],
+      comissao: {
+        imobiliaria_nome: "Imob Plus",
+        imobiliaria_cnpj: "11.222.333/0001-44",
+        imobiliaria_email: "imob@x.com",
+        incluir_como_signatario: true,
+        comissionados: [],
+      },
+    });
+    const corretoras = result.signers.filter((s) => s.sourceKind === "corretora");
+    expect(corretoras).toHaveLength(1);
+    expect(corretoras[0]).toMatchObject({
+      sourceIndex: 0,
+      name: "Imob Plus",
+      email: "imob@x.com",
+      documentation: "11222333000144",
+    });
+  });
+
+  it("inclui cônjuge como signer separado quando flag está marcada", () => {
+    const result = dealDataToSigners({
+      vendedores: [
+        {
+          tipo_pessoa: "fisica",
+          nome: "Odair",
+          cpf: "111.222.333-44",
+          email: "odair@x.com",
+          conjuge: {
+            nome: "Elenira",
+            cpf: "555.666.777-88",
+            email: "elenira@x.com",
+            incluir_como_signatario: true,
+          },
+        },
+      ],
+      compradores: [
+        {
+          tipo_pessoa: "fisica",
+          nome: "Rosângela",
+          cpf: "999.888.777-66",
+          email: "rosangela@x.com",
+          conjuge: {
+            // sem flag → ignora cônjuge
+            nome: "Flávio",
+            email: "flavio@x.com",
+          },
+        },
+      ],
+    });
+    expect(result.signers).toHaveLength(3);
+    const conjugeVendedor = result.signers.find(
+      (s) => s.sourceKind === "vendedor" && s.name === "Elenira"
+    );
+    expect(conjugeVendedor).toBeDefined();
+    expect(conjugeVendedor?.sourceIndex).toBe(1000);
+    expect(conjugeVendedor?.documentation).toBe("55566677788");
+  });
+
+  it("cônjuge sem email/nome não vira signer mesmo com flag", () => {
+    const result = dealDataToSigners({
+      vendedores: [
+        {
+          nome: "V",
+          email: "v@x.com",
+          conjuge: { incluir_como_signatario: true },
+        },
+      ],
+    });
+    expect(result.signers).toHaveLength(1);
+    expect(result.missing).toHaveLength(0);
+  });
+
   it("inclui apenas testemunhas marcadas com flag e dados completos", () => {
     const data = {
       vendedores: [{ nome: "V", email: "v@x.com" }],

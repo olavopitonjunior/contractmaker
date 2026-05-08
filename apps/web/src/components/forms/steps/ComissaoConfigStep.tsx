@@ -86,6 +86,71 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
     }
   }, [testemunhaFields.length, appendTestemunha]);
 
+  // Comissionados — array dinâmico (corretora + intermediária + sub-corretor).
+  // Hidrata 1º item a partir dos campos legados `imobiliaria_*` quando vazio,
+  // pra suavizar formulários antigos. Garante pelo menos 1 entrada.
+  const {
+    fields: comissionadoFields,
+    append: appendComissionado,
+    remove: removeComissionado,
+  } = useFieldArray({
+    control: form.control,
+    name: "comissao.comissionados",
+  });
+
+  useEffect(() => {
+    if (comissionadoFields.length === 0) {
+      const legacyNome = form.getValues("comissao.imobiliaria_nome") || "";
+      const legacyDoc = form.getValues("comissao.imobiliaria_cnpj") || "";
+      const legacyEmail = form.getValues("comissao.imobiliaria_email") || "";
+      const legacyTipo =
+        form.getValues("comissao.corretora_tipo_pessoa") || "juridica";
+      const legacyCreci = form.getValues("comissao.creci") || "";
+      const legacyFlag = !!form.getValues("comissao.incluir_como_signatario");
+      appendComissionado({
+        nome: legacyNome,
+        tipo_pessoa: legacyTipo,
+        cpf: legacyTipo === "fisica" ? legacyDoc : "",
+        cnpj: legacyTipo !== "fisica" ? legacyDoc : "",
+        creci: legacyCreci,
+        email: legacyEmail,
+        incluir_como_signatario: legacyFlag,
+      });
+    }
+  }, [comissionadoFields.length, appendComissionado, form]);
+
+  // Sync `comissionados[0]` → campos legados pra templates Handlebars que
+  // ainda renderizam `comissao.imobiliaria_*` no corpo do contrato.
+  // Watcher: dispara quando o usuário edita o 1º item.
+  useEffect(() => {
+    const subscription = form.watch((value, { name }) => {
+      if (!name?.startsWith("comissao.comissionados.0.")) return;
+      const first = value?.comissao?.comissionados?.[0];
+      if (!first) return;
+      const tipo = first.tipo_pessoa || "juridica";
+      const doc = tipo === "fisica" ? first.cpf || "" : first.cnpj || "";
+      form.setValue("comissao.corretora_tipo_pessoa", tipo, {
+        shouldDirty: false,
+      });
+      form.setValue("comissao.imobiliaria_nome", first.nome || "", {
+        shouldDirty: false,
+      });
+      form.setValue("comissao.imobiliaria_cnpj", doc, { shouldDirty: false });
+      form.setValue("comissao.imobiliaria_email", first.email || "", {
+        shouldDirty: false,
+      });
+      form.setValue("comissao.creci", first.creci || "", {
+        shouldDirty: false,
+      });
+      form.setValue(
+        "comissao.incluir_como_signatario",
+        !!first.incluir_como_signatario,
+        { shouldDirty: false }
+      );
+    });
+    return () => subscription.unsubscribe();
+  }, [form]);
+
   return (
     <div className="space-y-4">
       {/* Comissão */}
@@ -157,71 +222,151 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
 
           <Separator />
 
-          <p className="text-sm font-semibold text-foreground">
-            Dados do Corretor / Imobiliária
-          </p>
-          {/* H.16 (Phase H, 2026-04-18) — antes só PJ; agora radio
-              diferencia corretor PF (CPF + CRECI individual) de imobiliária PJ. */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="Tipo de Cadastro" className="md:col-span-2">
-              <select
-                {...form.register("comissao.corretora_tipo_pessoa")}
-                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
-              >
-                <option value="juridica">Imobiliária (PJ)</option>
-                <option value="fisica">Corretor autônomo (PF)</option>
-              </select>
-            </FormField>
-            <FormField
-              label={
-                form.watch("comissao.corretora_tipo_pessoa") === "fisica"
-                  ? "Nome do Corretor"
-                  : "Nome da Imobiliária"
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-foreground">
+              Comissionados (Corretores e Imobiliárias)
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                appendComissionado({
+                  nome: "",
+                  tipo_pessoa: "juridica",
+                  cpf: "",
+                  cnpj: "",
+                  creci: "",
+                  email: "",
+                  incluir_como_signatario: false,
+                })
               }
-              className="md:col-span-2"
             >
-              <Input
-                {...form.register("comissao.imobiliaria_nome")}
-                placeholder={
-                  form.watch("comissao.corretora_tipo_pessoa") === "fisica"
-                    ? "Nome completo"
-                    : "Razão Social ou Nome Fantasia"
-                }
-              />
-            </FormField>
-            {form.watch("comissao.corretora_tipo_pessoa") === "fisica" ? (
-              <FormField label="CPF do Corretor">
-                <Input
-                  {...form.register("comissao.imobiliaria_cnpj")}
-                  placeholder="000.000.000-00"
-                />
-              </FormField>
-            ) : (
-              <FormField label="CNPJ da Imobiliária">
-                <Input
-                  {...form.register("comissao.imobiliaria_cnpj")}
-                  placeholder="00.000.000/0000-00"
-                />
-              </FormField>
-            )}
-            <FormField label="CRECI">
-              <Input
-                {...form.register("comissao.creci")}
-                placeholder={
-                  form.watch("comissao.corretora_tipo_pessoa") === "fisica"
-                    ? "Ex: 199.905"
-                    : "Ex: J-12345"
-                }
-              />
-            </FormField>
-            <FormField label="E-mail (para assinatura digital)" className="md:col-span-2">
-              <Input
-                type="email"
-                {...form.register("comissao.imobiliaria_email")}
-                placeholder="contato@imobiliaria.com"
-              />
-            </FormField>
+              <Plus className="h-3.5 w-3.5 mr-1.5" />
+              Adicionar Comissionado
+            </Button>
           </div>
+          <p className="text-xs text-muted-foreground -mt-2">
+            Suporta múltiplos corretores e imobiliárias dividindo a comissão.
+            O primeiro entra no corpo do contrato; demais aparecem só como
+            assinantes adicionais no envelope ClickSign.
+          </p>
+
+          {comissionadoFields.map((field, index) => {
+            const tipoPath =
+              `comissao.comissionados.${index}.tipo_pessoa` as const;
+            const tipoPessoa = form.watch(tipoPath) || "juridica";
+            return (
+              <div
+                key={field.id}
+                className="rounded-md border p-4 space-y-3 bg-muted/20"
+              >
+                <div className="flex items-center justify-between">
+                  <p className="text-sm font-medium">
+                    {index === 0
+                      ? "Comissionado principal"
+                      : `Comissionado ${index + 1}`}
+                  </p>
+                  {comissionadoFields.length > 1 && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 text-xs text-destructive hover:text-destructive"
+                      onClick={() => removeComissionado(index)}
+                    >
+                      <Trash2 className="h-3 w-3 mr-1" />
+                      Remover
+                    </Button>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <FormField label="Tipo de Cadastro" className="md:col-span-2">
+                    <select
+                      {...form.register(tipoPath)}
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                    >
+                      <option value="juridica">Imobiliária (PJ)</option>
+                      <option value="fisica">Corretor autônomo (PF)</option>
+                    </select>
+                  </FormField>
+                  <FormField
+                    label={
+                      tipoPessoa === "fisica"
+                        ? "Nome do Corretor"
+                        : "Nome da Imobiliária"
+                    }
+                    className="md:col-span-2"
+                  >
+                    <Input
+                      {...form.register(`comissao.comissionados.${index}.nome`)}
+                      placeholder={
+                        tipoPessoa === "fisica"
+                          ? "Nome completo"
+                          : "Razão Social ou Nome Fantasia"
+                      }
+                    />
+                  </FormField>
+                  {tipoPessoa === "fisica" ? (
+                    <FormField label="CPF do Corretor">
+                      <Input
+                        {...form.register(
+                          `comissao.comissionados.${index}.cpf`
+                        )}
+                        placeholder="000.000.000-00"
+                      />
+                    </FormField>
+                  ) : (
+                    <FormField label="CNPJ da Imobiliária">
+                      <Input
+                        {...form.register(
+                          `comissao.comissionados.${index}.cnpj`
+                        )}
+                        placeholder="00.000.000/0000-00"
+                      />
+                    </FormField>
+                  )}
+                  <FormField label="CRECI">
+                    <Input
+                      {...form.register(
+                        `comissao.comissionados.${index}.creci`
+                      )}
+                      placeholder={
+                        tipoPessoa === "fisica" ? "Ex: 199.905" : "Ex: J-12345"
+                      }
+                    />
+                  </FormField>
+                  <FormField
+                    label="E-mail (para assinatura digital)"
+                    className="md:col-span-2"
+                  >
+                    <Input
+                      type="email"
+                      {...form.register(
+                        `comissao.comissionados.${index}.email`
+                      )}
+                      placeholder="contato@imobiliaria.com"
+                    />
+                  </FormField>
+                  <Controller
+                    control={form.control}
+                    name={`comissao.comissionados.${index}.incluir_como_signatario`}
+                    render={({ field: cf }) => (
+                      <div className="md:col-span-2">
+                        <CheckboxField
+                          id={`incluir-comissionado-${index}`}
+                          label="Incluir como signatário no envelope"
+                          checked={!!cf.value}
+                          onChange={cf.onChange}
+                        />
+                      </div>
+                    )}
+                  />
+                </div>
+              </div>
+            );
+          })}
         </CardContent>
       </Card>
 

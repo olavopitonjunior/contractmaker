@@ -43,6 +43,9 @@ const pessoaFisicaSchema = z.object({
     cep: z.string().optional().default(""),
     // Flag default true: helper getEnderecoEfetivo lê endereço do titular
     endereco_igual_ao_titular: z.boolean().optional().default(true),
+    // Opt-in pra incluir o cônjuge como signatário ClickSign separado.
+    // Marcado pelo popup de envio (ou no form quando email já existir).
+    incluir_como_signatario: z.boolean().optional().default(false),
   }).optional(),
   procurador: z.object({
     nome: z.string().optional().default(""),
@@ -194,6 +197,21 @@ export const step7Schema = z.object({
     creci: z.string().optional().default(""),
     percentual: z.number().optional(),
     incluir_como_signatario: z.boolean().optional().default(false),
+    // Fonte canônica produzida pelo extractor Gemini (CCV import). Permite
+    // múltiplos comissionados (corretora + intermediária + sub-corretor).
+    // Declarado opcional pra não exigir preenchimento no form Handlebars,
+    // mas o Zod precisa conhecê-lo pra não strippar em saves do form.
+    comissionados: z.array(z.object({
+      nome: z.string().optional().default(""),
+      cpf: z.string().optional().default(""),
+      cnpj: z.string().optional().default(""),
+      tipo_pessoa: z.enum(["fisica", "juridica"]).optional(),
+      creci: z.string().optional().default(""),
+      email: z.string().email("Email invalido").optional().or(z.literal("")),
+      percentual: z.number().optional(),
+      valor: z.number().optional(),
+      incluir_como_signatario: z.boolean().optional().default(false),
+    })).optional(),
   }).optional(),
   desistencia: z.object({
     permite: z.boolean().optional().default(false),

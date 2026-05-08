@@ -19,12 +19,13 @@ export const runtime = "nodejs";
  */
 const PATCH_WHITELIST: RegExp[] = [
   /^vendedores\.\d+\.email$/,
-  /^vendedores\.\d+\.conjuge\.email$/,
+  /^vendedores\.\d+\.conjuge\.(email|nome|cpf|incluir_como_signatario)$/,
   /^vendedores\.\d+\.(nome|cpf|cnpj|razao_social)$/,
   /^compradores\.\d+\.email$/,
-  /^compradores\.\d+\.conjuge\.email$/,
+  /^compradores\.\d+\.conjuge\.(email|nome|cpf|incluir_como_signatario)$/,
   /^compradores\.\d+\.(nome|cpf|cnpj|razao_social)$/,
   /^comissao\.(imobiliaria_email|imobiliaria_nome|imobiliaria_cnpj|creci|corretora_tipo_pessoa|incluir_como_signatario)$/,
+  /^comissao\.comissionados$/,
   /^testemunhas$/,
 ];
 

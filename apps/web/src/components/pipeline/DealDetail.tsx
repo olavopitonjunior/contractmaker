@@ -46,6 +46,12 @@ type Parte = {
   cidade?: string;
   uf?: string;
   cep?: string;
+  conjuge?: {
+    nome?: string;
+    cpf?: string;
+    email?: string;
+    incluir_como_signatario?: boolean;
+  };
 };
 
 type Imovel = {
@@ -299,6 +305,16 @@ export function DealDetail({ deal }: DealDetailProps) {
       imobiliaria_email?: string;
       creci?: string;
       incluir_como_signatario?: boolean;
+      comissionados?: Array<{
+        nome?: string;
+        cpf?: string;
+        cnpj?: string;
+        tipo_pessoa?: string;
+        email?: string;
+        percentual?: number;
+        valor?: number;
+        incluir_como_signatario?: boolean;
+      }>;
     } | null) || null;
   const imoveis = (formData?.imoveis as Imovel[]) || [];
   const pagamento = formData?.pagamento as

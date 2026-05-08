@@ -1,5 +1,13 @@
 import type { AuthMethod, SignerInput, SourceKind } from "./types";
 
+interface Conjuge {
+  nome?: string;
+  cpf?: string;
+  email?: string;
+  telefone?: string;
+  incluir_como_signatario?: boolean;
+}
+
 interface Parte {
   tipo_pessoa?: "fisica" | "juridica";
   nome?: string;
@@ -8,11 +16,21 @@ interface Parte {
   cnpj?: string;
   email?: string;
   telefone?: string;
+  conjuge?: Conjuge;
 }
 
 interface Testemunha {
   nome?: string;
   cpf?: string;
+  email?: string;
+  incluir_como_signatario?: boolean;
+}
+
+interface Comissionado {
+  nome?: string;
+  cpf?: string;
+  cnpj?: string;
+  tipo_pessoa?: "fisica" | "juridica";
   email?: string;
   incluir_como_signatario?: boolean;
 }
@@ -23,6 +41,9 @@ interface Corretora {
   imobiliaria_cnpj?: string;
   imobiliaria_email?: string;
   incluir_como_signatario?: boolean;
+  /** Fonte canônica produzida pelo extractor Gemini. Quando presente com
+   *  >=1 item, prevalece sobre os campos legados acima. */
+  comissionados?: Comissionado[];
 }
 
 interface DealLikeData {
@@ -73,19 +94,40 @@ export function dealDataToSigners(
   const collect = (sourceKind: SourceKind, partes: Parte[] | undefined) => {
     (partes ?? []).forEach((p, idx) => {
       const name = partyName(p);
-      if (!name) return;
-      const email = (p.email ?? "").trim();
-      if (!email) {
-        missing.push({ sourceKind, sourceIndex: idx, name });
-        return;
+      if (name) {
+        const email = (p.email ?? "").trim();
+        if (!email) {
+          missing.push({ sourceKind, sourceIndex: idx, name });
+        } else {
+          signers.push({
+            sourceKind,
+            sourceIndex: idx,
+            name,
+            email,
+            documentation: partyDoc(p),
+            phone: onlyDigits(p.telefone),
+            authMethod,
+          });
+        }
       }
+
+      // Cônjuge: opt-in via flag incluir_como_signatario. Não gera entrada
+      // em `missing` quando dados faltam — sinal de que não foi escolhido
+      // pra assinar. SourceIndex deslocado em +1000 pra evitar colisão
+      // com partes titulares dentro do mesmo envelope (nenhum schema usa
+      // unique em (sourceKind, sourceIndex), mas mantém leitura clara).
+      const conjuge = p.conjuge;
+      if (!conjuge?.incluir_como_signatario) return;
+      const conjugeName = (conjuge.nome ?? "").trim();
+      const conjugeEmail = (conjuge.email ?? "").trim();
+      if (!conjugeName || !conjugeEmail) return;
       signers.push({
         sourceKind,
-        sourceIndex: idx,
-        name,
-        email,
-        documentation: partyDoc(p),
-        phone: onlyDigits(p.telefone),
+        sourceIndex: idx + 1000,
+        name: conjugeName,
+        email: conjugeEmail,
+        documentation: onlyDigits(conjuge.cpf),
+        phone: onlyDigits(conjuge.telefone),
         authMethod,
       });
     });
@@ -114,7 +156,27 @@ export function dealDataToSigners(
   });
 
   const corretora = data.comissao;
-  if (corretora?.incluir_como_signatario) {
+  const comissionados = corretora?.comissionados ?? [];
+  if (comissionados.length > 0) {
+    // Fonte canônica: array de comissionados (extractor CCV pode trazer N).
+    comissionados.forEach((c, idx) => {
+      if (!c.incluir_como_signatario) return;
+      const name = (c.nome ?? "").trim();
+      const email = (c.email ?? "").trim();
+      if (!name || !email) return;
+      const documentation =
+        onlyDigits(c.cnpj) ?? onlyDigits(c.cpf);
+      signers.push({
+        sourceKind: "corretora",
+        sourceIndex: idx,
+        name,
+        email,
+        documentation,
+        authMethod,
+      });
+    });
+  } else if (corretora?.incluir_como_signatario) {
+    // Fallback legado: contratos do form Handlebars sem `comissionados[]`.
     const name = (corretora.imobiliaria_nome ?? "").trim();
     const email = (corretora.imobiliaria_email ?? "").trim();
     if (name && email) {
