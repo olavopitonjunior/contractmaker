@@ -191,45 +191,33 @@ async function diffManualEdits(
   dataJson: unknown,
   googleDocId: string | null
 ): Promise<Array<{ before: string; after: string }>> {
-  // Contratos importados não têm template Handlebars — não dá pra diffar
-  // contra uma fonte. Quem aprova um contrato externo está aceitando o doc
-  // como veio; manualEdits=[] é o sinal correto para a memória.
+  // Sem template Handlebars (contrato importado) — não dá pra diffar; manualEdits=[]
+  // é o sinal correto pra memória, indicando "doc aceito como veio".
   if (!templateSource) return [];
+  // Sem GDoc — caso raro/legado; sem texto vivo confiável pra comparar.
+  if (!googleDocId) return [];
 
   try {
     const rendered = renderContratoHTML(templateSource, dataJson as Record<string, unknown>);
     const stripHtml = (s: string) =>
       s.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
 
-    let templateBlocks: Set<string>;
-    let finalBlocks: string[];
-
-    if (googleDocId) {
-      const { getDocPlainText } = await import("@/lib/google/docs");
-      const docText = await getDocPlainText(googleDocId);
-      // Template ainda é HTML — vira texto plano com mesmo blockify pra comparar
-      // contra o texto plano do doc, separado por linha em branco.
-      const blockifyHtml = (html: string) =>
-        html
-          .split(/<\/(?:p|li|h[1-6])>/i)
-          .map(stripHtml)
-          .filter((b) => b.length > 20);
-      const blockifyPlain = (txt: string) =>
-        txt
-          .split(/\n{2,}/)
-          .map((b) => b.replace(/\s+/g, " ").trim())
-          .filter((b) => b.length > 20);
-      templateBlocks = new Set(blockifyHtml(rendered));
-      finalBlocks = blockifyPlain(docText);
-    } else {
-      const blockify = (html: string) =>
-        html
-          .split(/<\/(?:p|li|h[1-6])>/i)
-          .map(stripHtml)
-          .filter((b) => b.length > 20);
-      templateBlocks = new Set(blockify(rendered));
-      finalBlocks = blockify(htmlContent);
-    }
+    const { getDocPlainText } = await import("@/lib/google/docs");
+    const docText = await getDocPlainText(googleDocId);
+    // Template em HTML vira texto plano com mesmo blockify pra comparar contra
+    // o texto plano do doc, separado por linha em branco.
+    const blockifyHtml = (html: string) =>
+      html
+        .split(/<\/(?:p|li|h[1-6])>/i)
+        .map(stripHtml)
+        .filter((b) => b.length > 20);
+    const blockifyPlain = (txt: string) =>
+      txt
+        .split(/\n{2,}/)
+        .map((b) => b.replace(/\s+/g, " ").trim())
+        .filter((b) => b.length > 20);
+    const templateBlocks = new Set(blockifyHtml(rendered));
+    const finalBlocks = blockifyPlain(docText);
 
     const onlyInFinal = finalBlocks.filter((b) => !templateBlocks.has(b));
     return onlyInFinal.slice(0, 10).map((b) => ({ before: "", after: b }));
@@ -274,15 +262,10 @@ export async function createContractMemory(contractId: string): Promise<{
       contract.template?.name ?? "Contrato importado"
     );
 
-    // 2. Summary (LLM)
-    const htmlContent =
-      contract.htmlContent ||
-      (contract.template
-        ? renderContratoHTML(
-            contract.templateOverride || contract.template.handlebarsSource,
-            contract.dataJson as Record<string, unknown>
-          )
-        : "");
+    // 2. Summary (LLM) — usa snapshot persistido (atualizado pelo /approve em
+    // GDocs mode via exportDocAsHtml). Caso raro/legado sem snapshot, summary
+    // cai pra fingerprint sintético.
+    const htmlContent = contract.htmlContent || "";
     const summary = await summarizeContract(htmlContent, fingerprint, {
       orgId,
       contractId: contract.id,

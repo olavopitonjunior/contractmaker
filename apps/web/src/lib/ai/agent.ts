@@ -1,6 +1,5 @@
 import { Anthropic } from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/db/prisma";
-import { renderContratoHTML } from "@/lib/render/handlebars";
 import { AGENT_TOOLS } from "./tools";
 import { executeToolHandler } from "./tool-handlers";
 import { DEFAULT_SYSTEM_PROMPT, buildContextMessage } from "./prompts";
@@ -57,26 +56,15 @@ async function loadContext(contractId: string, orgId: string): Promise<AgentCont
   });
 
   // Quando o contrato é Google Doc, o doc é a fonte de verdade do texto.
-  // Buscamos texto plano via Drive export — read-only tools (validate,
-  // analyze_contradictions, suggest_improvements) que dependiam de
-  // `htmlContent` agora veem o estado live do doc.
-  // Contratos importados (templateId=null) não têm fonte Handlebars — só
-  // fazem sentido em GDoc mode. Aqui sempre tem `googleDocId` (importContractFromFile
-  // não cria Contract sem docId), mas defensivamente caímos pra htmlContent
-  // se Drive falhar.
+  // Texto vivo via Drive export (read-only tools como validate/analyze_contradictions/
+  // suggest_improvements veem o estado atual do doc). Snapshot persistido é
+  // fallback defensivo quando Drive falha ou quando o contrato (legado) ainda
+  // não tem doc associado.
   let htmlContent: string;
   if (contract.googleDocId) {
     const { getDocPlainText } = await import("@/lib/google/docs");
     htmlContent = await getDocPlainText(contract.googleDocId);
-  } else if (contract.template) {
-    htmlContent =
-      contract.htmlContent ||
-      renderContratoHTML(
-        contract.templateOverride || contract.template.handlebarsSource,
-        contract.dataJson as Record<string, unknown>
-      );
   } else {
-    // Contrato importado sem GDoc disponível: usa o snapshot persistido.
     htmlContent = contract.htmlContent || "";
   }
 
@@ -584,23 +572,13 @@ export async function runPassiveAnalysis(
     }
   }
 
-  // Quando o contrato vive em um Google Doc, busca o texto plano via Drive
-  // export — substitui o HTML do TipTap como fonte de verdade. Quick checks
-  // que dependiam de regex em HTML são tolerantes a texto plano.
+  // Texto vivo via Drive export (fonte de verdade). Snapshot persistido é
+  // fallback defensivo. Quick checks são tolerantes a texto plano.
   let htmlContent: string;
   if (contract.googleDocId) {
     const { getDocPlainText } = await import("@/lib/google/docs");
     htmlContent = await getDocPlainText(contract.googleDocId);
-  } else if (contract.template) {
-    htmlContent =
-      params.htmlOverride ||
-      contract.htmlContent ||
-      renderContratoHTML(
-        contract.templateOverride || contract.template.handlebarsSource,
-        contract.dataJson as Record<string, unknown>
-      );
   } else {
-    // Contrato importado sem GDoc disponível: só temos o snapshot persistido.
     htmlContent = params.htmlOverride || contract.htmlContent || "";
   }
 
