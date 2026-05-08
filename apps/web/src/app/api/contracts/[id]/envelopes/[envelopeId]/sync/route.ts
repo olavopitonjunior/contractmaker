@@ -74,12 +74,21 @@ export async function POST(
     // `data.signer.key` (= signer clicksignId) + `created` (ISO).
     // Iteramos eventos e mantemos por signer o mais "forte":
     //   sign       (assinou)  > signature_started (visualizou) > nada
+    //
+    // Match: tentamos primeiro por `signer.key` (clicksignId local). Se
+    // não bate, fallback por EMAIL — cobre o caso em que o signer foi
+    // editado e a ClickSign emitiu remove_signer + add_signer com nova
+    // key, deixando o local desatualizado.
     const stateBySigner = aggregateEventsBySigner(eventsResp);
+    const stateByEmail = aggregateEventsByEmail(eventsResp);
 
     let signersUpdated = 0;
     for (const local of envelope.signers) {
-      if (!local.clicksignId) continue;
-      const remote = stateBySigner.get(local.clicksignId);
+      const byKey = local.clicksignId
+        ? stateBySigner.get(local.clicksignId)
+        : null;
+      const byEmail = stateByEmail.get(local.email.toLowerCase());
+      const remote = byKey ?? byEmail;
       if (!remote) continue;
 
       const updates: Prisma.EnvelopeSignerUpdateInput = {};
@@ -215,6 +224,22 @@ interface SignerEventState {
 function aggregateEventsBySigner(
   resp: unknown
 ): Map<string, SignerEventState> {
+  return aggregateEventsBy(resp, (e) => e.signer?.key);
+}
+
+function aggregateEventsByEmail(
+  resp: unknown
+): Map<string, SignerEventState> {
+  return aggregateEventsBy(resp, (e) => e.signer?.email?.toLowerCase());
+}
+
+function aggregateEventsBy(
+  resp: unknown,
+  pickKey: (data: { signer?: { key?: string; email?: string } }) =>
+    | string
+    | null
+    | undefined
+): Map<string, SignerEventState> {
   const out = new Map<string, SignerEventState>();
   const data = (resp as { data?: unknown } | null)?.data;
   if (!Array.isArray(data)) return out;
@@ -223,23 +248,23 @@ function aggregateEventsBySigner(
     attributes?: {
       name?: string;
       created?: string;
-      data?: { signer?: { key?: string } };
+      data?: { signer?: { key?: string; email?: string } };
     };
   }>) {
     const name = item.attributes?.name;
-    const signerKey = item.attributes?.data?.signer?.key;
+    const eventData = item.attributes?.data;
+    if (!name || !eventData) continue;
+    const key = pickKey(eventData);
     const createdAt = parseDate(item.attributes?.created);
-    if (!name || !signerKey || !createdAt) continue;
+    if (!key || !createdAt) continue;
 
-    const cur = out.get(signerKey) ?? {
+    const cur = out.get(key) ?? {
       signedAt: null,
       viewedAt: null,
       refusedAt: null,
     };
 
     if (name === "sign") {
-      // Mantém o evento mais antigo de assinatura caso existam múltiplos
-      // (evento idempotente — primeiro indica o momento real).
       if (!cur.signedAt || +createdAt < +cur.signedAt) {
         cur.signedAt = createdAt;
       }
@@ -253,7 +278,7 @@ function aggregateEventsBySigner(
       }
     }
 
-    out.set(signerKey, cur);
+    out.set(key, cur);
   }
   return out;
 }
