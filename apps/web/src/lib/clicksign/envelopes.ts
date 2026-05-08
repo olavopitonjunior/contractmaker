@@ -206,15 +206,28 @@ export async function getEnvelope(envelopeId: string) {
 }
 
 /**
- * Lista signers de um envelope diretamente da ClickSign — usado pelo
- * sync manual quando o webhook não chegou. Retorna array com status
- * atualizado (`pending`, `notified`, `viewed`, `signed`, `refused`)
- * e timestamps `signed_at`, `viewed_at`, `notified_at`.
+ * Lista signers de um envelope. ATENÇÃO: retorna só perfil (nome/email/
+ * documento/birthday) — o STATUS de assinatura está nos requirements
+ * (action=agree). Pra reconciliar quem assinou, use `listEnvelopeRequirements`.
  */
 export async function listEnvelopeSigners(envelopeId: string) {
   return clicksignRequest<ClicksignResponse>({
     method: "GET",
     path: `/api/v3/envelopes/${envelopeId}/signers`,
+  });
+}
+
+/**
+ * Lista requirements de um envelope. Cada requirement tem `action`
+ * (agree | provide_evidence | sign), `status` (pending|fulfilled|...),
+ * `fulfilled_at`, e relationships pro signer correspondente. Esta é
+ * a fonte canônica pra saber se um signer assinou (action=agree
+ * fulfilled) ou autenticou (action=provide_evidence fulfilled).
+ */
+export async function listEnvelopeRequirements(envelopeId: string) {
+  return clicksignRequest<ClicksignResponse>({
+    method: "GET",
+    path: `/api/v3/envelopes/${envelopeId}/requirements`,
   });
 }
 

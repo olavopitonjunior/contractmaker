@@ -151,10 +151,8 @@ export async function POST(
       remoteStatus,
       ...(debug && {
         debug: {
-          remoteSigners: remoteSigners.map((r) => ({
-            id: r.id,
-            attributes: r.attributes,
-          })),
+          envelopeRaw: envResp,
+          signersRaw: signersResp,
           localSigners: envelope.signers.map((s) => ({
             clicksignId: s.clicksignId,
             name: s.name,
