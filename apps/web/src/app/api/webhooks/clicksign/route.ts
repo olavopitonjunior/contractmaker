@@ -150,6 +150,43 @@ async function downloadSignedPdf(envelopeId: string, url: string) {
       where: { id: envelopeId },
       data: { signedDocumentUrl: stored },
     });
+
+    // Espelha o PDF assinado na pasta Documentos do deal pra que o usuário
+    // veja e baixe o arquivo final pelo mesmo lugar onde acompanha os outros
+    // anexos da venda. Idempotente: ClickSign pode reentregar `close` —
+    // checamos por url antes de criar.
+    const env = await prisma.envelope.findUnique({
+      where: { id: envelopeId },
+      select: {
+        dealId: true,
+        source: true,
+        name: true,
+        contract: { select: { version: true } },
+      },
+    });
+    if (env?.dealId) {
+      const existing = await prisma.dealAttachment.findFirst({
+        where: { dealId: env.dealId, url: stored },
+        select: { id: true },
+      });
+      if (!existing) {
+        const category =
+          env.source === "attachment" ? "documento_assinado" : "contrato_assinado";
+        const filename = env.contract
+          ? `Contrato assinado v${env.contract.version}.pdf`
+          : `${env.name} (assinado).pdf`;
+        await prisma.dealAttachment.create({
+          data: {
+            dealId: env.dealId,
+            filename,
+            mime: "application/pdf",
+            url: stored,
+            category,
+            source: "clicksign_signed",
+          },
+        });
+      }
+    }
   } catch (err) {
     console.error("[clicksign webhook] falha ao baixar PDF assinado:", err);
   }

@@ -332,6 +332,7 @@ model DealAttachment {
 
   deal         Deal          @relation(fields: [dealId], references: [id], onDelete: Cascade)
   certidaoJobs CertidaoJob[]
+  envelopes    Envelope[]
 }
 
 model CertidaoJob {
@@ -1450,9 +1451,16 @@ model BankReconciliation {
 // Um Contract aprovado pode gerar 1+ envelopes (cancelamento permite reenvio).
 model Envelope {
   id                  String    @id @default(cuid())
-  contractId          String
+  // contractId é nullable: envelope avulso (source="attachment") nasce de um
+  // DealAttachment direto, sem passar por Contract aprovado. CHECK constraint
+  // na migration garante exatamente uma das duas FKs.
+  contractId          String?
+  attachmentId        String?
   dealId              String
   orgId               String
+  // source: "contract" | "attachment". Discrimina a origem do envelope no
+  // webhook close (categoria do DealAttachment final) e na UI.
+  source              String    @default("contract")
   // ID retornado pela Clicksign (data.id no payload JSON:API). Nulo enquanto
   // a row local existe mas a chamada à API ainda não completou.
   clicksignId         String?   @unique
@@ -1475,13 +1483,15 @@ model Envelope {
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 
-  contract Contract         @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  deal     Deal             @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  org      Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  signers  EnvelopeSigner[]
-  events   EnvelopeEvent[]
+  contract   Contract?        @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  attachment DealAttachment?  @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
+  deal       Deal             @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  org        Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  signers    EnvelopeSigner[]
+  events     EnvelopeEvent[]
 
   @@index([contractId])
+  @@index([attachmentId])
   @@index([dealId])
   @@index([orgId, status])
   @@index([status, updatedAt])

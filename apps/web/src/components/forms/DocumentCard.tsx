@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Loader2, AlertCircle, X, CheckCircle2, RefreshCw } from "lucide-react";
+import { FileText, Loader2, AlertCircle, X, CheckCircle2, RefreshCw, ExternalLink, Download } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -102,9 +102,15 @@ export function DocumentCard({
       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-medium text-foreground" title={doc.filename}>
+            <a
+              href={doc.fileUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="block truncate text-sm font-medium text-foreground hover:underline"
+              title={doc.filename}
+            >
               {doc.filename}
-            </p>
+            </a>
             <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
               {doc.category && (
                 <Badge variant="secondary" className="text-[10px]">
@@ -235,6 +241,37 @@ export function DocumentCard({
               options={assignmentOptions}
               className="h-8 text-xs"
             />
+          </div>
+        )}
+
+        {doc.status === "ready" && (
+          <div className="mt-1 flex gap-1">
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              asChild
+              className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              <a href={doc.fileUrl} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-3 w-3 mr-1" />
+                Abrir
+              </a>
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              asChild
+              className="h-7 px-2 text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              <a
+                href={`${doc.fileUrl}${doc.fileUrl.includes("?") ? "&" : "?"}download=1`}
+              >
+                <Download className="h-3 w-3 mr-1" />
+                Baixar
+              </a>
+            </Button>
           </div>
         )}
       </div>
