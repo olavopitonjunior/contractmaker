@@ -66,8 +66,14 @@ export async function addSigner(input: AddSignerInput) {
     email: input.email,
     has_documentation: input.hasDocumentation ?? Boolean(input.documentation),
     refusable: input.refusable ?? true,
-    communicate_by: input.communicateBy || "email",
   };
+  // `communicate_by` foi rejeitado pela ClickSign v3 em alguns workspaces
+  // ("communicate_by não está disponível"). A API infere o canal a partir
+  // dos contatos preenchidos (email/phone). Só mandamos quando precisamos
+  // forçar WhatsApp/SMS — nunca pra email default.
+  if (input.communicateBy && input.communicateBy !== "email") {
+    attributes.communicate_by = input.communicateBy;
+  }
   if (input.documentation) attributes.documentation = input.documentation;
   if (input.phoneNumber) attributes.phone_number = input.phoneNumber;
   if (input.birthday) attributes.birthday = input.birthday;
