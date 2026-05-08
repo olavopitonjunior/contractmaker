@@ -211,10 +211,42 @@ export async function classifyDocument(
   return valid.includes(text) ? text : "outro";
 }
 
+const FICHA_RESUMO_INSTRUCTIONS = `- ficha_resumo: documento mestre/dossie/ficha cadastral consolidando dados das partes de um negocio imobiliario. Reconheca pelo formato: tabela ou lista declarando explicitamente o papel de cada pessoa ("Vendedor 1", "Comprador 2", "Conjuge do vendedor", "Representante legal", etc), nomes, CPF/CNPJ, e dados pessoais. NAO confunda com escritura ou procuracao (que descrevem um ato juridico). Estrutura esperada:
+  {
+    "partes": [
+      {
+        "papel": "vendedor" | "comprador" | "conjuge_vendedor" | "conjuge_comprador" | "representante_vendedor" | "representante_comprador",
+        "indice_referencia": 0 (0 para "Vendedor 1", 1 para "Vendedor 2", etc),
+        "nome": "...",
+        "cpf": "...11 digitos",
+        "rg": "...",
+        "data_nascimento": "YYYY-MM-DD",
+        "nome_mae": "...",
+        "naturalidade": "...",
+        "estado_civil": "...",
+        "profissao": "...",
+        "nacionalidade": "...",
+        "email": "...",
+        "endereco": "...",
+        "numero": "...",
+        "complemento": "...",
+        "bairro": "...",
+        "cidade": "...",
+        "uf": "...",
+        "cep": "...",
+        "cnpj": "...14 digitos (so para PJ)",
+        "razao_social": "... (so para PJ)"
+      }
+    ],
+    "imoveis": [
+      { "rua": "...", "numero": "...", "bairro": "...", "cidade": "...", "uf": "...", "cep": "...", "matricula": "...", "cartorio": "...", "inscricao_iptu": "...", "sql": "...", "descricao": "..." }
+    ]
+  }`;
+
 const COMBINED_PROMPT = `Voce e um especialista em documentos brasileiros. Analise o documento anexo e retorne APENAS um JSON valido no formato:
 {"tipo": "<categoria>", "campos": { ... }, "confidence": <0-1>}
 
-Categorias validas: "rg", "cpf", "cnh", "matricula", "iptu", "escritura", "procuracao", "comprovante_residencia", "certidao_casamento", "outro".
+Categorias validas: "rg", "cpf", "cnh", "matricula", "iptu", "escritura", "procuracao", "comprovante_residencia", "certidao_casamento", "ficha_resumo", "outro".
 
 Campos esperados por categoria:
 - rg: nome_completo, rg_numero, orgao_expedidor, data_nascimento (YYYY-MM-DD), naturalidade, filiacao_mae, filiacao_pai, conjuge_nome (opcional, se aparecer no documento como qualificacao "casado(a) com X" ou em averbacao), conjuge_cpf (opcional)
@@ -226,6 +258,7 @@ Campos esperados por categoria:
 - procuracao: outorgante_nome, outorgante_cpf, outorgado_nome, outorgado_cpf, poderes_resumo, data_lavratura, prazo_validade
 - comprovante_residencia: titular_nome, endereco_completo, bairro, cidade, uf, cep, emissor (ex: concessionaria de energia, agua, telefone)
 - certidao_casamento: conjuge1_nome, conjuge1_cpf, conjuge2_nome, conjuge2_cpf, data_casamento, regime_bens (literal, ex: "Comunhao parcial de bens"), cartorio, data_lavratura
+${FICHA_RESUMO_INSTRUCTIONS}
 - outro: inclua todos os dados relevantes encontrados (nomes, cpf, cnpj, enderecos, valores, datas)
 
 Regras:
@@ -245,6 +278,7 @@ const VALID_CATEGORIES = [
   "procuracao",
   "comprovante_residencia",
   "certidao_casamento",
+  "ficha_resumo",
   "outro",
 ];
 
@@ -609,7 +643,7 @@ const BATCH_PROMPT = `Voce e um especialista em documentos brasileiros. Analise 
   ...
 ]
 
-Categorias validas: "rg", "cpf", "cnh", "matricula", "iptu", "escritura", "procuracao", "comprovante_residencia", "certidao_casamento", "outro".
+Categorias validas: "rg", "cpf", "cnh", "matricula", "iptu", "escritura", "procuracao", "comprovante_residencia", "certidao_casamento", "ficha_resumo", "outro".
 
 Use as mesmas regras e campos do prompt single-doc:
 - rg: nome_completo, rg_numero, orgao_expedidor, data_nascimento (YYYY-MM-DD), naturalidade, filiacao_mae, filiacao_pai, conjuge_nome (opcional), conjuge_cpf (opcional)
@@ -621,6 +655,7 @@ Use as mesmas regras e campos do prompt single-doc:
 - procuracao: outorgante_nome, outorgante_cpf, outorgado_nome, outorgado_cpf, poderes_resumo, data_lavratura, prazo_validade
 - comprovante_residencia: titular_nome, endereco_completo, bairro, cidade, uf, cep, emissor
 - certidao_casamento: conjuge1_nome, conjuge1_cpf, conjuge2_nome, conjuge2_cpf, data_casamento, regime_bens, cartorio, data_lavratura
+${FICHA_RESUMO_INSTRUCTIONS}
 - outro: inclua todos os dados relevantes
 
 Regras:

@@ -187,10 +187,15 @@ async function summarizeContract(
 async function diffManualEdits(
   contractId: string,
   htmlContent: string,
-  templateSource: string,
+  templateSource: string | null,
   dataJson: unknown,
   googleDocId: string | null
 ): Promise<Array<{ before: string; after: string }>> {
+  // Contratos importados não têm template Handlebars — não dá pra diffar
+  // contra uma fonte. Quem aprova um contrato externo está aceitando o doc
+  // como veio; manualEdits=[] é o sinal correto para a memória.
+  if (!templateSource) return [];
+
   try {
     const rendered = renderContratoHTML(templateSource, dataJson as Record<string, unknown>);
     const stripHtml = (s: string) =>
@@ -250,6 +255,7 @@ export async function createContractMemory(contractId: string): Promise<{
         template: true,
         suggestions: true,
         clauses: { include: { clause: true } },
+        deal: { include: { pipeline: { select: { orgId: true } } } },
       },
     });
 
@@ -257,23 +263,26 @@ export async function createContractMemory(contractId: string): Promise<{
       return { ok: false, error: "contrato não encontrado" };
     }
 
-    // Get orgId via the template
-    const orgId = contract.template.orgId;
+    // OrgId via deal.pipeline — funciona pra contratos com e sem template
+    // (importados têm templateId=null, então não dá pra usar template.orgId).
+    const orgId = contract.deal.pipeline.orgId;
 
     // 1. Fingerprint
     const fingerprint = extractFingerprint(
       contract.dataJson,
-      contract.template.modalidade,
-      contract.template.name
+      contract.template?.modalidade ?? null,
+      contract.template?.name ?? "Contrato importado"
     );
 
     // 2. Summary (LLM)
     const htmlContent =
       contract.htmlContent ||
-      renderContratoHTML(
-        contract.templateOverride || contract.template.handlebarsSource,
-        contract.dataJson as Record<string, unknown>
-      );
+      (contract.template
+        ? renderContratoHTML(
+            contract.templateOverride || contract.template.handlebarsSource,
+            contract.dataJson as Record<string, unknown>
+          )
+        : "");
     const summary = await summarizeContract(htmlContent, fingerprint, {
       orgId,
       contractId: contract.id,
@@ -302,7 +311,9 @@ export async function createContractMemory(contractId: string): Promise<{
     const manualEdits = await diffManualEdits(
       contract.id,
       htmlContent,
-      contract.templateOverride || contract.template.handlebarsSource,
+      contract.template
+        ? contract.templateOverride || contract.template.handlebarsSource
+        : null,
       contract.dataJson,
       contract.googleDocId
     );

@@ -4,7 +4,8 @@ export interface AgentContext {
   orgId: string;
   htmlContent: string;
   dataJson: Record<string, unknown>;
-  templateSource: string;
+  /** Null em contratos importados (sem template Handlebars). */
+  templateSource: string | null;
   templateModalidade?: string;
   templateName?: string;
   activeClauses: { id: string; clauseId: string; title: string; category: string; position: number; isActive: boolean }[];

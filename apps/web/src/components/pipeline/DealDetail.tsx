@@ -92,7 +92,7 @@ interface DealDetailProps {
       source: string;
       createdAt: Date;
     }[];
-    contracts: { id: string; version: number; status: string; template: { name: string }; createdAt: Date }[];
+    contracts: { id: string; version: number; status: string; template: { name: string } | null; createdAt: Date }[];
   };
 }
 
@@ -659,7 +659,7 @@ export function DealDetail({ deal }: DealDetailProps) {
                     <CardContent className="py-4 flex items-center justify-between">
                       <div>
                         <p className="font-medium text-sm">
-                          {contract.template.name}
+                          {contract.template?.name ?? "Contrato importado"}
                         </p>
                         <p className="text-xs text-muted-foreground">
                           Versão {contract.version} -{" "}
@@ -681,7 +681,7 @@ export function DealDetail({ deal }: DealDetailProps) {
               id: c.id,
               version: c.version,
               status: c.status,
-              templateName: c.template.name,
+              templateName: c.template?.name ?? "Contrato importado",
             }))}
             vendedores={vendedores}
             compradores={compradores}
@@ -769,12 +769,30 @@ interface FallbackAttachment {
   createdAt: Date;
 }
 
-const KIND_LABELS: Record<DocumentKind, string> = {
+/**
+ * Agrupamento de docs na aba Documentos. Cônjuges e representantes são
+ * exibidos junto com a parte titular (vendedor/comprador) — não criam
+ * grupo próprio na visualização do deal pra evitar fragmentação.
+ */
+type DocGroupKind = "vendedor" | "comprador" | "imovel" | "outro";
+
+const KIND_LABELS: Record<DocGroupKind, string> = {
   vendedor: "Parte Vendedora",
   comprador: "Parte Compradora",
   imovel: "Imóvel",
   outro: "Outros",
 };
+
+function groupKindOf(kind: DocumentKind): DocGroupKind {
+  if (kind === "vendedor" || kind === "conjuge_vendedor" || kind === "representante_vendedor") {
+    return "vendedor";
+  }
+  if (kind === "comprador" || kind === "conjuge_comprador" || kind === "representante_comprador") {
+    return "comprador";
+  }
+  if (kind === "imovel") return "imovel";
+  return "outro";
+}
 
 const PERSON_CATS = new Set(["rg", "cpf", "cnh", "procuracao", "comprovante_residencia"]);
 const PROPERTY_CATS = new Set(["matricula", "iptu", "escritura"]);
@@ -878,7 +896,7 @@ function DocumentsTab({
     );
   }
 
-  const groups: Record<DocumentKind, DocumentCardData[]> = {
+  const groups: Record<DocGroupKind, DocumentCardData[]> = {
     vendedor: [],
     comprador: [],
     imovel: [],
@@ -912,7 +930,7 @@ function DocumentsTab({
         confidence,
         assignment,
       };
-      groups[assignment.kind].push(card);
+      groups[groupKindOf(assignment.kind)].push(card);
     }
   }
 
@@ -934,7 +952,7 @@ function DocumentsTab({
       confidence: null,
       assignment,
     };
-    groups[assignment.kind].push(card);
+    groups[groupKindOf(assignment.kind)].push(card);
   }
 
   // Legacy manual attachments (no assignment, go to 'outro')
@@ -953,7 +971,7 @@ function DocumentsTab({
     groups.outro.push(card);
   }
 
-  const kinds: DocumentKind[] = ["vendedor", "comprador", "imovel", "outro"];
+  const kinds: DocGroupKind[] = ["vendedor", "comprador", "imovel", "outro"];
 
   return (
     <div className="space-y-5">

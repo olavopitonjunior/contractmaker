@@ -803,8 +803,13 @@ async function handleUpdateData(
     };
   }
 
-  // Re-render HTML with updated data
-  context.htmlContent = renderContratoHTML(context.templateSource, context.dataJson);
+  // Re-render HTML quando há fonte Handlebars. Em contratos importados
+  // (templateSource=null) o GDoc seria a fonte; já barramos em `context.googleDocId`
+  // acima — chegar aqui sem template indica contrato importado SEM GDoc, o que
+  // só acontece se a importação falhou. Mantém dataJson, sem re-render.
+  if (context.templateSource) {
+    context.htmlContent = renderContratoHTML(context.templateSource, context.dataJson);
+  }
 
   const updatedFields = Object.keys(patch);
   return {

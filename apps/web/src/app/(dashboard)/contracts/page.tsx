@@ -49,7 +49,7 @@ export default async function ContractsPage() {
                     <Badge variant="secondary">v{contract.version}</Badge>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    {contract.template.name}
+                    {contract.template?.name ?? "Contrato importado"}
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
                     Atualizado em{" "}

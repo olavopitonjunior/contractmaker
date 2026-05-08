@@ -22,7 +22,10 @@ export async function generateContractPdfBuffer(
 ): Promise<ContractPdfResult> {
   const contract = await prisma.contract.findUnique({
     where: { id: contractId },
-    include: { template: true },
+    include: {
+      template: true,
+      deal: { include: { pipeline: { select: { orgId: true } } } },
+    },
   });
   if (!contract) {
     throw new Error(`Contrato ${contractId} não encontrado`);
@@ -36,6 +39,14 @@ export async function generateContractPdfBuffer(
     return { buffer, filename };
   }
 
+  // Sem GDoc + sem template = contrato importado órfão. Não há fonte pra
+  // renderizar — caller (envelope Clicksign) precisa lidar antes de chegar aqui.
+  if (!contract.template) {
+    throw new Error(
+      `Contrato ${contractId} importado sem GDoc associado — não pode gerar PDF.`
+    );
+  }
+
   const templateSource =
     contract.templateOverride || contract.template.handlebarsSource;
   const html =
@@ -45,8 +56,9 @@ export async function generateContractPdfBuffer(
       contract.dataJson as Record<string, unknown>
     );
 
+  const orgId = contract.deal.pipeline.orgId;
   const documentStyle = await prisma.documentStyle.findFirst({
-    where: { orgId: contract.template.orgId, isDefault: true },
+    where: { orgId, isDefault: true },
   });
   const styleExport = documentStyle
     ? {

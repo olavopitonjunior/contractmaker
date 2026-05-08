@@ -8,6 +8,7 @@ import {
   replacePlaceholdersInDoc,
 } from "@/lib/google/replace-placeholders";
 import { watchFile } from "@/lib/google/watch";
+import { deriveDealMetadata } from "@/lib/contracts/derive-deal-metadata";
 
 interface GenerateResult {
   contractId: string;
@@ -322,22 +323,10 @@ export async function generateContractForDeal(
   }
 
   // Derive deal title and value from form data
-  const compradorNome = (dataJson.compradores as Array<{ nome?: string }>)?.[0]?.nome;
-  const vendedorNome = (dataJson.vendedores as Array<{ nome?: string }>)?.[0]?.nome;
-  const imovel = (dataJson.imoveis as Array<{ rua?: string; numero?: string; cidade?: string }>)?.[0];
-  const valorTotal = Number(pagamento?.valor_total || 0);
-
-  // Prioridade: titulo personalizado do formulario > vendedor→comprador > outros fallbacks
-  const formTitle = deal.form?.title?.trim();
-  const derivedTitle =
-    formTitle ||
-    (compradorNome && vendedorNome
-      ? `${vendedorNome} → ${compradorNome}`
-      : compradorNome
-      ? `Venda para ${compradorNome}`
-      : imovel?.rua
-      ? `Imóvel: ${imovel.rua}${imovel.numero ? `, ${imovel.numero}` : ""}`
-      : deal.title);
+  const { title: derivedTitle, value: derivedValue } = deriveDealMetadata(
+    dataJson,
+    { formTitle: deal.form?.title, fallbackTitle: deal.title }
+  );
 
   // Move deal to "Confeccao de Contrato" stage and sync title/value
   const pipeline = await prisma.pipeline.findFirst({
@@ -353,7 +342,7 @@ export async function generateContractForDeal(
     where: { id: deal.id },
     data: {
       title: derivedTitle,
-      value: valorTotal > 0 ? valorTotal : deal.value,
+      value: derivedValue ?? deal.value,
       ...(confeccaoStage ? { stageId: confeccaoStage.id } : {}),
     },
   });

@@ -3,8 +3,21 @@ import { prisma } from "@/lib/db/prisma";
 import { KanbanBoard } from "@/components/pipeline/KanbanBoard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import Link from "next/link";
-import { Plus, TrendingUp, DollarSign, BarChart3 } from "lucide-react";
+import {
+  Plus,
+  TrendingUp,
+  DollarSign,
+  BarChart3,
+  FileText,
+  Upload,
+} from "lucide-react";
 
 export default async function PipelinePage() {
   const session = await auth();
@@ -74,12 +87,43 @@ export default async function PipelinePage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Pipeline de Vendas</h1>
-        <Button size="sm" asChild>
-          <Link href="/forms/new">
-            <Plus className="mr-1.5 h-4 w-4" />
-            Novo Formulário
-          </Link>
-        </Button>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button size="sm">
+              <Plus className="mr-1.5 h-4 w-4" />
+              Novo negócio
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-72">
+            <DropdownMenuItem asChild>
+              <Link href="/forms/new" className="flex items-start gap-3 py-2">
+                <FileText className="h-4 w-4 mt-0.5 shrink-0" />
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-medium">Novo formulário (link público)</span>
+                  <span className="text-xs text-muted-foreground">
+                    Envia link para o cliente preencher os 7 passos. Contrato é
+                    gerado pelo template padrão.
+                  </span>
+                </div>
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link
+                href="/deals/new-from-upload"
+                className="flex items-start gap-3 py-2"
+              >
+                <Upload className="h-4 w-4 mt-0.5 shrink-0" />
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-medium">Cadastro rápido com upload</span>
+                  <span className="text-xs text-muted-foreground">
+                    Sobe um CCV (PDF/DOCX) pronto. Sistema lê os dados e abre o
+                    contrato no editor pra revisar e enviar pra assinatura.
+                  </span>
+                </div>
+              </Link>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
 
       {/* Metrics */}
