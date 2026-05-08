@@ -69,49 +69,50 @@ export async function POST(
       envResp as { data?: { attributes?: { status?: string } } }
     ).data?.attributes?.status;
 
-    // ClickSign v3: status do signer (signed/viewed/refused) NÃO está
-    // em /signers — está nos requirements. Cada signer tem 2:
-    //   - action="agree"            → fulfilled = signou
-    //   - action="provide_evidence" → fulfilled = autenticou (~viewed)
-    // Indexamos por signerId pra cruzar com nossos signers locais.
-    const reqsBySigner = indexRequirementsBySigner(requirementsResp);
+    // ClickSign v3: a fonte canônica de quem assinou está em /events.
+    // Cada event tem `name` (sign | signature_started | refusal | …) +
+    // `data.signer.key` (= signer clicksignId) + `created` (ISO).
+    // Iteramos eventos e mantemos por signer o mais "forte":
+    //   sign       (assinou)  > signature_started (visualizou) > nada
+    const stateBySigner = aggregateEventsBySigner(eventsResp);
 
     let signersUpdated = 0;
     for (const local of envelope.signers) {
       if (!local.clicksignId) continue;
-      const reqs = reqsBySigner.get(local.clicksignId) ?? [];
-
-      const agree = reqs.find((r) => r.action === "agree");
-      const evidence = reqs.find((r) => r.action === "provide_evidence");
+      const remote = stateBySigner.get(local.clicksignId);
+      if (!remote) continue;
 
       const updates: Prisma.EnvelopeSignerUpdateInput = {};
 
-      const isSigned = agree?.status === "fulfilled";
-      const isAuthenticated = evidence?.status === "fulfilled";
-      const isRefused =
-        agree?.status === "refused" || evidence?.status === "refused";
-
-      if (isRefused && local.status !== "refused") {
-        updates.status = "refused";
-        const refusedAt = parseDate(
-          agree?.refused_at ?? evidence?.refused_at
-        );
-        if (refusedAt) updates.refusedAt = refusedAt;
-      } else if (isSigned) {
-        if (local.status !== "signed") updates.status = "signed";
-        const signedAt = parseDate(agree?.fulfilled_at);
-        if (signedAt && (!local.signedAt || +signedAt !== +local.signedAt)) {
-          updates.signedAt = signedAt;
+      if (remote.refusedAt) {
+        if (local.status !== "refused") updates.status = "refused";
+        if (
+          !local.refusedAt ||
+          +remote.refusedAt !== +local.refusedAt
+        ) {
+          updates.refusedAt = remote.refusedAt;
         }
-      } else if (
-        isAuthenticated &&
-        local.status !== "signed" &&
-        local.status !== "viewed"
-      ) {
-        updates.status = "viewed";
-        const viewedAt = parseDate(evidence?.fulfilled_at);
-        if (viewedAt && (!local.viewedAt || +viewedAt !== +local.viewedAt)) {
-          updates.viewedAt = viewedAt;
+      } else if (remote.signedAt) {
+        if (local.status !== "signed") updates.status = "signed";
+        if (
+          !local.signedAt ||
+          +remote.signedAt !== +local.signedAt
+        ) {
+          updates.signedAt = remote.signedAt;
+        }
+        // Se assinou, populou viewedAt do signature_started anterior
+        if (
+          remote.viewedAt &&
+          (!local.viewedAt || +remote.viewedAt !== +local.viewedAt)
+        ) {
+          updates.viewedAt = remote.viewedAt;
+        }
+      } else if (remote.viewedAt) {
+        if (local.status !== "signed" && local.status !== "viewed") {
+          updates.status = "viewed";
+        }
+        if (!local.viewedAt || +remote.viewedAt !== +local.viewedAt) {
+          updates.viewedAt = remote.viewedAt;
         }
       }
 
@@ -198,52 +199,61 @@ export async function POST(
   }
 }
 
-interface RemoteRequirement {
-  id: string;
-  action: string;
-  status: string;
-  fulfilled_at?: string | null;
-  refused_at?: string | null;
-  signerId: string | null;
+interface SignerEventState {
+  signedAt: Date | null;
+  viewedAt: Date | null;
+  refusedAt: Date | null;
 }
 
 /**
- * Constrói um índice signerId → requirements[] a partir do payload
- * JSON:API da ClickSign. O signerId fica em
- * `relationships.signer.data.id` de cada requirement.
+ * Agrega o histórico de eventos da ClickSign v3 por signer (via
+ * `data.signer.key`). Mantém o "estado mais forte" pra cada signer:
+ *   sign  → signedAt
+ *   signature_started → viewedAt (só se ainda não signed)
+ *   refusal → refusedAt
  */
-function indexRequirementsBySigner(
+function aggregateEventsBySigner(
   resp: unknown
-): Map<string, RemoteRequirement[]> {
-  const out = new Map<string, RemoteRequirement[]>();
-  const data = (resp as { data?: unknown }).data;
+): Map<string, SignerEventState> {
+  const out = new Map<string, SignerEventState>();
+  const data = (resp as { data?: unknown } | null)?.data;
   if (!Array.isArray(data)) return out;
 
   for (const item of data as Array<{
-    id: string;
     attributes?: {
-      action?: string;
-      status?: string;
-      fulfilled_at?: string | null;
-      refused_at?: string | null;
-    };
-    relationships?: {
-      signer?: { data?: { id?: string } };
+      name?: string;
+      created?: string;
+      data?: { signer?: { key?: string } };
     };
   }>) {
-    const signerId = item.relationships?.signer?.data?.id ?? null;
-    if (!signerId) continue;
-    const req: RemoteRequirement = {
-      id: item.id,
-      action: item.attributes?.action ?? "",
-      status: item.attributes?.status ?? "",
-      fulfilled_at: item.attributes?.fulfilled_at ?? null,
-      refused_at: item.attributes?.refused_at ?? null,
-      signerId,
+    const name = item.attributes?.name;
+    const signerKey = item.attributes?.data?.signer?.key;
+    const createdAt = parseDate(item.attributes?.created);
+    if (!name || !signerKey || !createdAt) continue;
+
+    const cur = out.get(signerKey) ?? {
+      signedAt: null,
+      viewedAt: null,
+      refusedAt: null,
     };
-    const arr = out.get(signerId) ?? [];
-    arr.push(req);
-    out.set(signerId, arr);
+
+    if (name === "sign") {
+      // Mantém o evento mais antigo de assinatura caso existam múltiplos
+      // (evento idempotente — primeiro indica o momento real).
+      if (!cur.signedAt || +createdAt < +cur.signedAt) {
+        cur.signedAt = createdAt;
+      }
+    } else if (name === "signature_started") {
+      if (!cur.viewedAt || +createdAt < +cur.viewedAt) {
+        cur.viewedAt = createdAt;
+      }
+    } else if (name === "refusal") {
+      if (!cur.refusedAt || +createdAt < +cur.refusedAt) {
+        cur.refusedAt = createdAt;
+      }
+    }
+
+    out.set(signerKey, cur);
   }
   return out;
 }
