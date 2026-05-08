@@ -56,9 +56,31 @@ export async function GET(req: NextRequest) {
     (l) => l.action === "CLICKSIGN_WEBHOOK_REJECTED"
   ).length;
 
+  // Bonus: conta EnvelopeEvent recentes da org pra confirmar que webhooks
+  // não só chegam mas TAMBÉM são processados (lookup do envelope OK).
+  const recentEnvelopeEvents = await prisma.envelopeEvent.findMany({
+    where: {
+      envelope: { orgId: org.id },
+      source: "webhook",
+    },
+    orderBy: { createdAt: "desc" },
+    take: 30,
+    select: {
+      id: true,
+      eventName: true,
+      createdAt: true,
+      envelopeId: true,
+    },
+  });
+
   return NextResponse.json({
     ok: true,
-    summary: { received, rejected, total: logs.length },
+    summary: {
+      webhooksReceived: received,
+      webhooksRejected: rejected,
+      envelopeEventsProcessed: recentEnvelopeEvents.length,
+    },
     logs,
+    recentEnvelopeEvents,
   });
 }
