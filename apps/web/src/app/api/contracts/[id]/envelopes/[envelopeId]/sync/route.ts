@@ -139,11 +139,30 @@ export async function POST(
       });
     }
 
+    // ?debug=1 retorna shape cru — útil quando signersUpdated=0 inesperado
+    // (ex: ClickSign mudou nome de campo). Sem PII além do que o user já vê.
+    const url = new URL(req.url);
+    const debug = url.searchParams.get("debug") === "1";
+
     return NextResponse.json({
       ok: true,
       signersUpdated,
       envelopeUpdated,
       remoteStatus,
+      ...(debug && {
+        debug: {
+          remoteSigners: remoteSigners.map((r) => ({
+            id: r.id,
+            attributes: r.attributes,
+          })),
+          localSigners: envelope.signers.map((s) => ({
+            clicksignId: s.clicksignId,
+            name: s.name,
+            status: s.status,
+            signedAt: s.signedAt,
+          })),
+        },
+      }),
     });
   } catch (err) {
     if (err instanceof ClicksignError) {
