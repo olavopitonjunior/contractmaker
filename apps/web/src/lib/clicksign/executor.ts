@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db/prisma";
-import { uploadBufferToStorage } from "@/lib/storage/s3";
+import { uploadBufferToStorage, downloadBufferFromUrl } from "@/lib/storage/s3";
 import { generateContractPdfBuffer } from "@/lib/render/contract-pdf";
 import {
   activateEnvelope,
@@ -51,6 +51,26 @@ interface SendEnvelopeInput {
   deadlineAt?: Date | null;
 }
 
+/** Signer payload aceito pelo helper interno e pelo fluxo avulso. */
+export interface EnvelopeSignerInput {
+  name: string;
+  email: string;
+  documentation?: string | null;
+  phone?: string | null;
+  /** Origem semântica do signer no dataJson — quando aplicável. Para signers
+   *  avulsos digitados manualmente, default = "outro" / index 0. */
+  sourceKind?: string;
+  sourceIndex?: number;
+}
+
+interface SendEnvelopeForAttachmentInput {
+  attachmentId: string;
+  authMethod?: AuthMethod;
+  envelopeName?: string;
+  deadlineAt?: Date | null;
+  signers: EnvelopeSignerInput[];
+}
+
 export async function getMonthlySpendCents(orgId: string): Promise<number> {
   const start = new Date();
   start.setUTCDate(1);
@@ -67,8 +87,207 @@ export async function getMonthlySpendCents(orgId: string): Promise<number> {
 }
 
 /**
- * Executa o fluxo completo de envio. Faz rollback best-effort em caso de
- * falha parcial (deleta envelope draft na Clicksign + marca falha local).
+ * Executa o fluxo Clicksign a partir de um PDF já em buffer. Compartilhado
+ * pelos dois entry-points: `sendEnvelopeForContract` (CCV aprovado) e
+ * `sendEnvelopeForAttachment` (documento avulso da pasta Documentos).
+ *
+ * Faz: budget check → upload snapshot → cria Envelope local → cria envelope
+ * remoto + document + signers + requirements → ativa. Em qualquer falha,
+ * marca envelope local `failed` e tenta limpar o draft remoto.
+ */
+async function createEnvelopeFromBuffer(input: {
+  orgId: string;
+  dealId: string;
+  contractId: string | null;
+  attachmentId: string | null;
+  source: "contract" | "attachment";
+  name: string;
+  authMethod: AuthMethod;
+  deadlineAt: Date | null;
+  signers: EnvelopeSignerInput[];
+  pdfBuffer: Buffer;
+  filename: string;
+  /** Prefixo do path Blob ("envelopes/<id>/"). Usado pra organizar snapshots. */
+  storageKeyPrefix: string;
+}) {
+  const {
+    orgId,
+    dealId,
+    contractId,
+    attachmentId,
+    source,
+    name,
+    authMethod,
+    deadlineAt,
+    signers,
+    pdfBuffer,
+    filename,
+    storageKeyPrefix,
+  } = input;
+
+  if (signers.length === 0) {
+    throw new Error("Nenhum signatário válido encontrado");
+  }
+
+  const planCost = envelopeCostCents(signers.map(() => authMethod));
+  const budget = getMonthlyBudgetCents();
+  const spent = await getMonthlySpendCents(orgId);
+  if (spent + planCost > budget) {
+    throw new EnvelopeBudgetError(
+      "Orçamento mensal Clicksign excedido",
+      spent,
+      budget,
+      planCost
+    );
+  }
+
+  // 1. Snapshot do PDF (best-effort).
+  let documentUrl: string | null = null;
+  try {
+    documentUrl = await uploadBufferToStorage({
+      bucket: process.env.S3_BUCKET,
+      key: `${storageKeyPrefix}${Date.now()}-${filename}`,
+      body: pdfBuffer,
+      contentType: "application/pdf",
+    });
+  } catch (err) {
+    console.error("[clicksign] falha ao fazer upload do snapshot:", err);
+  }
+
+  // 2. Cria row local com status=draft.
+  const envelope = await prisma.envelope.create({
+    data: {
+      contractId,
+      attachmentId,
+      dealId,
+      orgId,
+      source,
+      name,
+      status: "draft",
+      authMethod,
+      documentUrl,
+      deadlineAt,
+      signers: {
+        create: signers.map((s) => ({
+          sourceKind: s.sourceKind ?? "outro",
+          sourceIndex: s.sourceIndex ?? 0,
+          name: s.name,
+          email: s.email,
+          documentation: s.documentation ?? null,
+          phone: s.phone ?? null,
+          authMethod,
+          status: "pending",
+        })),
+      },
+    },
+    include: { signers: true },
+  });
+
+  // 3. Sequência Clicksign. Em qualquer falha, marca failed + limpa draft.
+  let clicksignEnvelopeId: string | null = null;
+  try {
+    const envResp = await createEnvelope({
+      name: envelope.name,
+      deadlineAt: envelope.deadlineAt ?? undefined,
+    });
+    clicksignEnvelopeId = pickResourceId(envResp);
+    if (!clicksignEnvelopeId) throw new Error("Resposta sem id de envelope");
+
+    const base64 = pdfBuffer.toString("base64");
+    const docResp = await addDocument({
+      envelopeId: clicksignEnvelopeId,
+      filename,
+      contentBase64: base64,
+    });
+    const documentClicksignId = pickResourceId(docResp);
+    if (!documentClicksignId) throw new Error("Resposta sem id de documento");
+
+    const signerIdMap = new Map<string, { signerId: string; reqIds: string[] }>();
+    for (const localSigner of envelope.signers) {
+      const signerResp = await addSigner({
+        envelopeId: clicksignEnvelopeId,
+        name: localSigner.name,
+        email: localSigner.email,
+        documentation: localSigner.documentation ?? undefined,
+        phoneNumber: localSigner.phone ?? undefined,
+        hasDocumentation: Boolean(localSigner.documentation),
+        communicateBy: communicateByFor(authMethod),
+      });
+      const signerId = pickResourceId(signerResp);
+      if (!signerId) throw new Error("Resposta sem id de signer");
+
+      const authReq = await addRequirement({
+        envelopeId: clicksignEnvelopeId,
+        documentClicksignId,
+        signerClicksignId: signerId,
+        action: "provide_evidence",
+        auth: authMethod,
+      });
+      const signReq = await addRequirement({
+        envelopeId: clicksignEnvelopeId,
+        documentClicksignId,
+        signerClicksignId: signerId,
+        action: "qualify",
+        role: "sign",
+      });
+      const reqIds = [
+        pickResourceId(authReq),
+        pickResourceId(signReq),
+      ].filter(Boolean) as string[];
+      signerIdMap.set(localSigner.id, { signerId, reqIds });
+    }
+
+    await Promise.all(
+      Array.from(signerIdMap.entries()).map(([localId, info]) =>
+        prisma.envelopeSigner.update({
+          where: { id: localId },
+          data: { clicksignId: info.signerId, requirementIds: info.reqIds },
+        })
+      )
+    );
+
+    await activateEnvelope(clicksignEnvelopeId);
+
+    const updated = await prisma.envelope.update({
+      where: { id: envelope.id },
+      data: {
+        clicksignId: clicksignEnvelopeId,
+        documentClicksignId,
+        status: "running",
+        sentAt: new Date(),
+        costCents: planCost,
+        signers: undefined,
+      },
+      include: { signers: true },
+    });
+    await prisma.envelopeSigner.updateMany({
+      where: { envelopeId: envelope.id, status: "pending" },
+      data: { status: "notified", notifiedAt: new Date() },
+    });
+
+    return { ...updated, signers: await listSigners(envelope.id) };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[clicksign] falha durante o envio:", msg);
+    if (clicksignEnvelopeId) {
+      try {
+        await deleteDraftEnvelope(clicksignEnvelopeId);
+      } catch (cleanupErr) {
+        console.error("[clicksign] falha ao limpar envelope draft:", cleanupErr);
+      }
+    }
+    await prisma.envelope.update({
+      where: { id: envelope.id },
+      data: { status: "failed", lastError: msg.slice(0, 4000) },
+    });
+    throw err;
+  }
+}
+
+/**
+ * Executa o fluxo completo de envio de um Contract aprovado. Reaproveita
+ * `createEnvelopeFromBuffer` — só monta os signers a partir do dataJson e
+ * gera o PDF via Puppeteer/Drive antes de delegar.
  */
 export async function sendEnvelopeForContract(input: SendEnvelopeInput) {
   const authMethod: AuthMethod = input.authMethod ?? "email";
@@ -102,175 +321,110 @@ export async function sendEnvelopeForContract(input: SendEnvelopeInput) {
     (contract.dataJson as Record<string, unknown> | null) ?? null;
   const { signers, missing } = dealDataToSigners(dataSource, authMethod);
   if (missing.length > 0) throw new MissingEmailsError(missing);
-  if (signers.length === 0) {
-    throw new Error("Nenhum signatário válido encontrado nos dados do contrato");
-  }
 
-  const planCost = envelopeCostCents(signers.map(() => authMethod));
-  const budget = getMonthlyBudgetCents();
-  const spent = await getMonthlySpendCents(orgId);
-  if (spent + planCost > budget) {
-    throw new EnvelopeBudgetError(
-      "Orçamento mensal Clicksign excedido",
-      spent,
-      budget,
-      planCost
-    );
-  }
-
-  // 1. Gera o PDF e faz upload imediato (snapshot imutável).
   const { buffer: pdfBuffer, filename } = await generateContractPdfBuffer(
     contract.id
   );
-  let documentUrl: string | null = null;
-  try {
-    documentUrl = await uploadBufferToStorage({
-      bucket: process.env.S3_BUCKET,
-      key: `envelopes/${contract.id}/${Date.now()}-${filename}`,
-      body: pdfBuffer,
-      contentType: "application/pdf",
-    });
-  } catch (err) {
-    console.error("[clicksign] falha ao fazer upload do snapshot:", err);
-    // Continua sem persistir snapshot — não é bloqueante.
-  }
 
-  // 2. Cria a row local com status=draft.
-  const envelope = await prisma.envelope.create({
-    data: {
-      contractId: contract.id,
-      dealId: contract.dealId,
-      orgId,
-      name:
-        input.envelopeName ||
-        `Contrato ${contract.deal?.title || contract.id} (v${contract.version})`,
-      status: "draft",
-      authMethod,
-      documentUrl,
-      deadlineAt: input.deadlineAt ?? null,
-      signers: {
-        create: signers.map((s) => ({
-          sourceKind: s.sourceKind,
-          sourceIndex: s.sourceIndex,
-          name: s.name,
-          email: s.email,
-          documentation: s.documentation,
-          phone: s.phone,
-          authMethod,
-          status: "pending",
-        })),
-      },
-    },
-    include: { signers: true },
+  return createEnvelopeFromBuffer({
+    orgId,
+    dealId: contract.dealId,
+    contractId: contract.id,
+    attachmentId: null,
+    source: "contract",
+    name:
+      input.envelopeName ||
+      `Contrato ${contract.deal?.title || contract.id} (v${contract.version})`,
+    authMethod,
+    deadlineAt: input.deadlineAt ?? null,
+    signers: signers.map((s) => ({
+      name: s.name,
+      email: s.email,
+      documentation: s.documentation,
+      phone: s.phone,
+      sourceKind: s.sourceKind,
+      sourceIndex: s.sourceIndex,
+    })),
+    pdfBuffer,
+    filename,
+    storageKeyPrefix: `envelopes/${contract.id}/`,
   });
+}
 
-  // 3. Chama Clicksign passo a passo. Em qualquer falha, marca envelope failed.
-  let clicksignEnvelopeId: string | null = null;
-  try {
-    // a) Cria envelope na Clicksign
-    const envResp = await createEnvelope({
-      name: envelope.name,
-      deadlineAt: envelope.deadlineAt ?? undefined,
-    });
-    clicksignEnvelopeId = pickResourceId(envResp);
-    if (!clicksignEnvelopeId) throw new Error("Resposta sem id de envelope");
+/**
+ * Envia um DealAttachment (PDF) direto pra ClickSign sem precisar passar por
+ * Contract aprovado. Caso de uso: aditivos, distratos, procurações, recibos —
+ * docs avulsos da pasta Documentos. Os signers vêm 100% do input (manual ou
+ * pré-preenchidos pela UI a partir das partes do deal).
+ */
+export async function sendEnvelopeForAttachment(
+  input: SendEnvelopeForAttachmentInput
+) {
+  const authMethod: AuthMethod = input.authMethod ?? "email";
 
-    // b) Adiciona o documento (PDF base64)
-    const base64 = pdfBuffer.toString("base64");
-    const docResp = await addDocument({
-      envelopeId: clicksignEnvelopeId,
-      filename,
-      contentBase64: base64,
-    });
-    const documentClicksignId = pickResourceId(docResp);
-    if (!documentClicksignId) throw new Error("Resposta sem id de documento");
-
-    // c) Adiciona signers
-    const signerIdMap = new Map<string, { signerId: string; reqIds: string[] }>();
-    for (const localSigner of envelope.signers) {
-      const signerResp = await addSigner({
-        envelopeId: clicksignEnvelopeId,
-        name: localSigner.name,
-        email: localSigner.email,
-        documentation: localSigner.documentation ?? undefined,
-        phoneNumber: localSigner.phone ?? undefined,
-        hasDocumentation: Boolean(localSigner.documentation),
-        communicateBy: communicateByFor(authMethod),
-      });
-      const signerId = pickResourceId(signerResp);
-      if (!signerId) throw new Error("Resposta sem id de signer");
-
-      // d) Cria requirements (auth + sign) para o par signer/document
-      const authReq = await addRequirement({
-        envelopeId: clicksignEnvelopeId,
-        documentClicksignId,
-        signerClicksignId: signerId,
-        action: "provide_evidence",
-        auth: authMethod,
-      });
-      const signReq = await addRequirement({
-        envelopeId: clicksignEnvelopeId,
-        documentClicksignId,
-        signerClicksignId: signerId,
-        action: "qualify",
-        role: "sign",
-      });
-      const reqIds = [
-        pickResourceId(authReq),
-        pickResourceId(signReq),
-      ].filter(Boolean) as string[];
-      signerIdMap.set(localSigner.id, { signerId, reqIds });
-    }
-
-    // Persiste ids da Clicksign nos signers locais
-    await Promise.all(
-      Array.from(signerIdMap.entries()).map(([localId, info]) =>
-        prisma.envelopeSigner.update({
-          where: { id: localId },
-          data: { clicksignId: info.signerId, requirementIds: info.reqIds },
-        })
-      )
-    );
-
-    // e) Ativa envelope (status=running) — dispara notificações
-    await activateEnvelope(clicksignEnvelopeId);
-
-    const updated = await prisma.envelope.update({
-      where: { id: envelope.id },
-      data: {
-        clicksignId: clicksignEnvelopeId,
-        documentClicksignId,
-        status: "running",
-        sentAt: new Date(),
-        costCents: planCost,
-        signers: undefined,
-      },
-      include: { signers: true },
-    });
-    // Marca todos os signers como notified (a Clicksign confirma via webhook)
-    await prisma.envelopeSigner.updateMany({
-      where: { envelopeId: envelope.id, status: "pending" },
-      data: { status: "notified", notifiedAt: new Date() },
-    });
-
-    return { ...updated, signers: await listSigners(envelope.id) };
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[clicksign] falha durante o envio:", msg);
-    // Rollback best-effort: tenta deletar o envelope draft que ficou pendurado.
-    if (clicksignEnvelopeId) {
-      try {
-        await deleteDraftEnvelope(clicksignEnvelopeId);
-      } catch (cleanupErr) {
-        console.error("[clicksign] falha ao limpar envelope draft:", cleanupErr);
-      }
-    }
-    await prisma.envelope.update({
-      where: { id: envelope.id },
-      data: { status: "failed", lastError: msg.slice(0, 4000) },
-    });
-    throw err;
+  if (!input.signers || input.signers.length === 0) {
+    throw new Error("Informe ao menos um signatário");
   }
+  // Sanity check de email — espelha a guarda do dealDataToSigners.
+  const missingEmail = input.signers
+    .map((s, i) => ({ ...s, idx: i }))
+    .filter((s) => !s.email || !s.email.includes("@"));
+  if (missingEmail.length > 0) {
+    throw new MissingEmailsError(
+      missingEmail.map((m) => ({
+        sourceKind: m.sourceKind ?? "outro",
+        sourceIndex: m.sourceIndex ?? m.idx,
+        name: m.name,
+      }))
+    );
+  }
+
+  const attachment = await prisma.dealAttachment.findUnique({
+    where: { id: input.attachmentId },
+    include: {
+      deal: { include: { pipeline: { select: { orgId: true } } } },
+    },
+  });
+  if (!attachment) throw new Error("Documento não encontrado");
+  if (attachment.mime !== "application/pdf") {
+    throw new Error(
+      "Apenas documentos PDF podem ser enviados pra assinatura. Converta o arquivo antes."
+    );
+  }
+
+  const orgId = attachment.deal.pipeline.orgId;
+  if (!orgId) throw new Error("Deal sem organização vinculada");
+
+  // Bloqueia múltiplos envelopes ativos pro mesmo attachment.
+  const existingActive = await prisma.envelope.findFirst({
+    where: {
+      attachmentId: attachment.id,
+      status: { in: ["draft", "running"] },
+    },
+  });
+  if (existingActive) {
+    throw new Error(
+      `Já existe um envelope ${existingActive.status} para esse documento (id ${existingActive.id})`
+    );
+  }
+
+  // Baixa o PDF do storage (Vercel Blob ou S3, conforme a app).
+  const pdfBuffer = await downloadBufferFromUrl(attachment.url);
+
+  return createEnvelopeFromBuffer({
+    orgId,
+    dealId: attachment.dealId,
+    contractId: null,
+    attachmentId: attachment.id,
+    source: "attachment",
+    name: input.envelopeName || attachment.filename,
+    authMethod,
+    deadlineAt: input.deadlineAt ?? null,
+    signers: input.signers,
+    pdfBuffer,
+    filename: attachment.filename,
+    storageKeyPrefix: `envelopes/attachment/${attachment.id}/`,
+  });
 }
 
 export async function cancelEnvelopeFlow(envelopeId: string): Promise<void> {

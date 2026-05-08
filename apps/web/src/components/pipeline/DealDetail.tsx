@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX } from "lucide-react";
+import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
 import type { Assignment, DocumentKind } from "@/lib/forms/extracted-to-form";
 import { CertidoesTab } from "@/components/pipeline/CertidoesTab";
@@ -122,6 +123,39 @@ export function DealDetail({ deal }: DealDetailProps) {
   const [deletingContracts, setDeletingContracts] = useState(false);
   const [pendingAttachmentId, setPendingAttachmentId] = useState<string | null>(null);
   const [deletingAttachment, setDeletingAttachment] = useState(false);
+  const [reExtracting, setReExtracting] = useState(false);
+
+  // Detecta deal com contrato importado (templateId=null). UI muda em alguns
+  // pontos: esconde "Confeccionar Contrato" (substituído por "Abrir contrato"),
+  // mostra botão "Re-extrair dados" na aba Dados, abre porta para envelopes
+  // avulsos via aba Assinaturas.
+  const importedContract = deal.contracts.find((c) => c.template === null);
+  const isImportedDeal = Boolean(importedContract);
+  const latestImportedContractId = importedContract?.id ?? null;
+
+  async function handleReExtract() {
+    if (!latestImportedContractId) return;
+    setReExtracting(true);
+    try {
+      const res = await fetch(
+        `/api/contracts/${latestImportedContractId}/re-extract`,
+        { method: "POST" }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error || "Falha ao re-extrair dados");
+        return;
+      }
+      toast.success(
+        `Extração concluída: ${data.fieldsCount ?? 0} campos atualizados.`
+      );
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro de rede");
+    } finally {
+      setReExtracting(false);
+    }
+  }
 
   async function doGenerateContract() {
     setGenerating(true);
@@ -327,14 +361,23 @@ export function DealDetail({ deal }: DealDetailProps) {
               </Button>
             </>
           )}
-          <Button
-            size="sm"
-            onClick={handleGenerateContract}
-            disabled={generating}
-          >
-            <FileText className="h-4 w-4 mr-1" />
-            {generating ? "Gerando..." : "Confeccionar Contrato"}
-          </Button>
+          {isImportedDeal && latestImportedContractId ? (
+            <Button size="sm" asChild>
+              <Link href={`/contracts/${latestImportedContractId}`}>
+                <FileText className="h-4 w-4 mr-1" />
+                Abrir contrato
+              </Link>
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              onClick={handleGenerateContract}
+              disabled={generating}
+            >
+              <FileText className="h-4 w-4 mr-1" />
+              {generating ? "Gerando..." : "Confeccionar Contrato"}
+            </Button>
+          )}
           {deal.stage.name === "Assinatura" && (
             <Button
               size="sm"
@@ -491,6 +534,28 @@ export function DealDetail({ deal }: DealDetailProps) {
         </TabsList>
 
         <TabsContent value="dados" className="mt-4">
+          {isImportedDeal && (
+            <div className="mb-3 flex items-center justify-between rounded-md border border-dashed bg-muted/30 p-3">
+              <div className="text-xs text-muted-foreground">
+                Dados extraídos do contrato importado pelo OCR. Caso algum
+                campo esteja faltando, refaça a extração.
+              </div>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleReExtract}
+                disabled={reExtracting}
+              >
+                <RefreshCw
+                  className={cn(
+                    "h-3.5 w-3.5 mr-1",
+                    reExtracting && "animate-spin"
+                  )}
+                />
+                {reExtracting ? "Extraindo..." : "Re-extrair dados"}
+              </Button>
+            </div>
+          )}
           {formData ? (
             <div className="grid gap-4 md:grid-cols-2">
               <Card>
@@ -685,6 +750,13 @@ export function DealDetail({ deal }: DealDetailProps) {
             }))}
             vendedores={vendedores}
             compradores={compradores}
+            dealId={deal.id}
+            attachments={deal.attachments.map((a) => ({
+              id: a.id,
+              filename: a.filename,
+              mime: a.mime,
+              category: a.category,
+            }))}
           />
         </TabsContent>
 

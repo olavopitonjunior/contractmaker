@@ -26,7 +26,9 @@ import {
   type EnvelopeRow,
   type EnvelopeSignerRow,
 } from "@/hooks/useEnvelopePolling";
+import { useDealEnvelopePolling } from "@/hooks/useDealEnvelopePolling";
 import { SendEnvelopeDialog } from "./SendEnvelopeDialog";
+import { SendAttachmentEnvelopeDialog } from "./SendAttachmentEnvelopeDialog";
 import { EditEnvelopeDialog } from "./EditEnvelopeDialog";
 import { EditSignerDialog } from "./EditSignerDialog";
 import { cn } from "@/lib/utils";
@@ -44,10 +46,21 @@ interface ContractLite {
   templateName?: string | null;
 }
 
+interface AttachmentLite {
+  id: string;
+  filename: string;
+  mime: string;
+  category?: string | null;
+}
+
 interface SignaturesTabProps {
   contracts: ContractLite[];
   vendedores: PartyLite[];
   compradores: PartyLite[];
+  /** Quando passado, habilita o fluxo de envelope avulso a partir de
+   *  documentos da pasta. Pra retrocompat, é opcional. */
+  dealId?: string;
+  attachments?: AttachmentLite[];
 }
 
 const STATUS_LABEL: Record<EnvelopeRow["status"], string> = {
@@ -82,10 +95,17 @@ export function SignaturesTab({
   contracts,
   vendedores,
   compradores,
+  dealId,
+  attachments = [],
 }: SignaturesTabProps) {
   const approved = contracts.filter((c) => c.status === "aprovado");
+  const pdfAttachments = attachments.filter((a) => a.mime === "application/pdf");
 
-  if (approved.length === 0) {
+  // Permite envelope avulso quando temos dealId + ao menos 1 PDF na pasta.
+  // Mostramos a seção mesmo sem PDFs pra explicar como liberar (placeholder).
+  const showAttachmentSection = Boolean(dealId);
+
+  if (approved.length === 0 && !showAttachmentSection) {
     return (
       <div className="rounded-lg border border-dashed p-8 text-center">
         <FileSignature className="h-10 w-10 mx-auto text-muted-foreground mb-3" />
@@ -99,6 +119,14 @@ export function SignaturesTab({
 
   return (
     <div className="space-y-6">
+      {showAttachmentSection && dealId && (
+        <AttachmentEnvelopesSection
+          dealId={dealId}
+          attachments={pdfAttachments}
+          vendedores={vendedores}
+          compradores={compradores}
+        />
+      )}
       {approved.map((c) => (
         <ContractEnvelopesSection
           key={c.id}
@@ -107,6 +135,211 @@ export function SignaturesTab({
           compradores={compradores}
         />
       ))}
+      {approved.length === 0 && showAttachmentSection && (
+        <div className="rounded-lg border border-dashed p-6 text-center text-sm text-muted-foreground">
+          Quando você aprovar um contrato no editor, ele aparece aqui pra
+          envio formal por modelo.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AttachmentEnvelopesSection({
+  dealId,
+  attachments,
+  vendedores,
+  compradores,
+}: {
+  dealId: string;
+  attachments: AttachmentLite[];
+  vendedores: PartyLite[];
+  compradores: PartyLite[];
+}) {
+  const { envelopes, loading, refetch } = useDealEnvelopePolling(dealId);
+  const [dialogOpen, setDialogOpen] = useState(false);
+
+  const partySuggestions = useMemo(() => {
+    return [
+      ...vendedores.map((p, idx) => ({
+        sourceKind: "vendedor" as const,
+        sourceIndex: idx,
+        name: (p.nome || p.razao_social || `Vendedor ${idx + 1}`).trim(),
+        email: p.email?.trim() || null,
+      })),
+      ...compradores.map((p, idx) => ({
+        sourceKind: "comprador" as const,
+        sourceIndex: idx,
+        name: (p.nome || p.razao_social || `Comprador ${idx + 1}`).trim(),
+        email: p.email?.trim() || null,
+      })),
+    ];
+  }, [vendedores, compradores]);
+
+  // Filtra só envelopes attachment-based; os contract-based ficam nas seções
+  // específicas de cada contrato logo abaixo.
+  const attachmentEnvelopes = envelopes.filter((e) => e.source === "attachment");
+
+  return (
+    <Card>
+      <CardHeader className="flex flex-row items-center justify-between gap-2 pb-3">
+        <div>
+          <CardTitle className="text-base flex items-center gap-2">
+            <FileSignature className="h-4 w-4" />
+            Documentos avulsos
+          </CardTitle>
+          <p className="text-xs text-muted-foreground mt-1">
+            Envie qualquer PDF da pasta Documentos pra assinatura — sem
+            precisar passar por aprovação de CCV.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button size="sm" variant="ghost" onClick={refetch} title="Atualizar">
+            <RefreshCw className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => setDialogOpen(true)}
+            disabled={attachments.length === 0}
+            title={
+              attachments.length === 0
+                ? "Suba um PDF na aba Documentos primeiro"
+                : undefined
+            }
+          >
+            <Send className="h-3.5 w-3.5 mr-1.5" />
+            Enviar documento da pasta
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {loading ? (
+          <div className="text-sm text-muted-foreground flex items-center gap-2">
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            Carregando envelopes...
+          </div>
+        ) : attachmentEnvelopes.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            Nenhum documento avulso enviado para assinatura ainda.
+          </p>
+        ) : (
+          attachmentEnvelopes.map((env) => (
+            <AttachmentEnvelopeRow
+              key={env.id}
+              envelope={env}
+              dealId={dealId}
+              onChange={refetch}
+            />
+          ))
+        )}
+      </CardContent>
+
+      <SendAttachmentEnvelopeDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        dealId={dealId}
+        attachments={attachments}
+        partySuggestions={partySuggestions}
+        onSent={refetch}
+      />
+    </Card>
+  );
+}
+
+function AttachmentEnvelopeRow({
+  envelope,
+  dealId,
+  onChange,
+}: {
+  envelope: ReturnType<typeof useDealEnvelopePolling>["envelopes"][number];
+  dealId: string;
+  onChange: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const signedCount = envelope.signers.filter((s) => s.status === "signed").length;
+  const totalActive = envelope.signers.filter((s) => s.status !== "removed").length;
+  const canCancel = envelope.status === "draft" || envelope.status === "running";
+
+  const handleCancel = async () => {
+    if (
+      !confirm(
+        "Cancelar este envelope? Os signatários não conseguirão mais assinar."
+      )
+    )
+      return;
+    setBusy(true);
+    try {
+      const res = await fetch(
+        `/api/deals/${dealId}/envelopes/${envelope.id}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error || `HTTP ${res.status}`);
+      }
+      toast.success("Envelope cancelado");
+      onChange();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao cancelar");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="rounded-md border">
+      <div className="flex items-center justify-between gap-2 px-3 py-2 border-b bg-muted/30">
+        <div className="min-w-0">
+          <p className="text-sm font-medium truncate">
+            {envelope.subjectLabel || envelope.name}
+          </p>
+          <p className="text-[11px] text-muted-foreground">
+            {STATUS_LABEL[envelope.status]} · {signedCount}/{totalActive} assinaram
+          </p>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <Badge variant={STATUS_VARIANT[envelope.status]} className="text-[10px]">
+            {STATUS_LABEL[envelope.status]}
+          </Badge>
+          {envelope.signedDocumentUrl && envelope.status === "closed" && (
+            <Button size="sm" variant="ghost" asChild>
+              <a
+                href={envelope.signedDocumentUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                <Download className="h-3.5 w-3.5 mr-1" />
+                PDF assinado
+              </a>
+            </Button>
+          )}
+          {canCancel && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={handleCancel}
+              disabled={busy}
+            >
+              <XCircle className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>
+      </div>
+      <div className="px-3 py-2 space-y-1 text-xs">
+        {envelope.signers.map((s) => (
+          <div
+            key={s.id}
+            className="flex items-center justify-between gap-2"
+          >
+            <span className="truncate">
+              {s.name} <span className="text-muted-foreground">({s.email})</span>
+            </span>
+            <Badge variant="outline" className="text-[9px]">
+              {SIGNER_STATUS_LABEL[s.status]}
+            </Badge>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

@@ -16,7 +16,9 @@ interface RecentEnvelope {
   costCents: number;
   sentAt: string | null;
   closedAt: string | null;
-  contractId: string;
+  contractId: string | null;
+  attachmentId: string | null;
+  source: string;
   dealId: string;
   signerCount: number;
 }
@@ -126,6 +128,8 @@ export async function GET(req: NextRequest) {
     sentAt: e.sentAt ? e.sentAt.toISOString() : null,
     closedAt: e.closedAt ? e.closedAt.toISOString() : null,
     contractId: e.contractId,
+    attachmentId: e.attachmentId,
+    source: e.source,
     dealId: e.dealId,
     signerCount: e._count.signers,
   }));

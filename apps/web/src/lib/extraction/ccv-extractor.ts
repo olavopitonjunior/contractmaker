@@ -72,11 +72,12 @@ Analise o documento anexo e extraia os dados em JSON ESTRITO no shape abaixo. Re
   "pagamento": {
     "valor_total": 0,             // em reais (number)
     "sinal": 0,
+    "sinal_data": "YYYY-MM-DD",   // data do sinal/arras quando explícita
     "alienacao_fiduciaria": 0,    // valor financiado
     "fgts": 0,
     "cessao_consorcio": 0,
     "parcelas": [
-      { "valor": 0, "vencimento": "YYYY-MM-DD", "descricao": "..." }
+      { "numero": 1, "valor": 0, "vencimento": "YYYY-MM-DD", "descricao": "..." }
     ]
   },
   "comissao": {
@@ -85,7 +86,17 @@ Analise o documento anexo e extraia os dados em JSON ESTRITO no shape abaixo. Re
     "corretora_cpf": "...",       // se PF
     "corretora_cnpj": "...",      // se PJ
     "valor": 0,
-    "percentual": 0
+    "percentual": 0,
+    "comissionados": [            // SEMPRE preencher quando houver comissão,
+      {                           // mesmo que seja UM único item.
+        "nome": "...",
+        "cpf": "...",             // ou cnpj quando PJ
+        "cnpj": "...",
+        "tipo_pessoa": "fisica" | "juridica",
+        "percentual": 0,          // % do valor total
+        "valor": 0                // valor absoluto em reais
+      }
+    ]
   }
 }
 
@@ -97,6 +108,8 @@ Regras:
 - Campos não encontrados: OMITA da resposta (não preencha com null nem string vazia).
 - Vendedor PJ: use "razao_social" + "cnpj" (não "nome"+"cpf").
 - Se houver múltiplos vendedores/compradores/imóveis, retorne array com TODOS.
+- **Parcelas**: SEMPRE preencher \`pagamento.parcelas\` quando o contrato listar parcelamentos explícitos (ex: "1ª parcela de R$ X em DD/MM, 2ª parcela..."), NÃO omita. Numere sequencialmente a partir de 1.
+- **Comissão**: se o contrato menciona comissão paga a múltiplas pessoas (corretora + intermediária + sub-corretor), liste TODAS em \`comissao.comissionados\`. Se a comissão é única (uma só pessoa/empresa), AINDA assim preencha \`comissionados\` com 1 item. Mantenha \`corretora_nome/cpf/cnpj\` apenas pelo retrocompatibilidade — \`comissionados\` é a fonte canônica.
 - NÃO invente dados. Se algo é ilegível ou ausente, omita.
 
 Retorne APENAS o JSON.`;
