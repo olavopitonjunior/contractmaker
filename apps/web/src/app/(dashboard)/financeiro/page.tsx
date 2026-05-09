@@ -74,7 +74,10 @@ export default async function FinanceiroPage() {
   const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const next30 = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
-  const [receivedThisMonth, pendingNext30, overdue, recent] = await Promise.all([
+  // Top categorias avulsas (últimos 90d) — só relevante quando org já usa avulsas
+  const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
+
+  const [receivedThisMonth, pendingNext30, overdue, recent, topCategoriesRaw] = await Promise.all([
     prisma.commissionCharge.aggregate({
       where: {
         orgId: org.id,
@@ -110,7 +113,28 @@ export default async function FinanceiroPage() {
         deal: { select: { id: true, title: true } },
       },
     }),
+    prisma.commissionCharge.groupBy({
+      by: ["categoryLabel"],
+      where: {
+        orgId: org.id,
+        kind: { not: "commission" },
+        categoryLabel: { not: null },
+        createdAt: { gte: ninetyDaysAgo },
+      },
+      _count: true,
+      _sum: { value: true },
+      orderBy: { _count: { categoryLabel: "desc" } },
+      take: 5,
+    }),
   ]);
+
+  const topCategories = topCategoriesRaw
+    .map((r) => ({
+      label: r.categoryLabel ?? "—",
+      count: r._count,
+      total: r._sum.value ?? 0,
+    }))
+    .filter((c) => c.label !== "—");
 
   return (
     <div className="space-y-6">
@@ -215,6 +239,31 @@ export default async function FinanceiroPage() {
           </CardContent>
         </Card>
       </div>
+
+      {topCategories.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              Top categorias avulsas (últimos 90 dias)
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-1">
+              {topCategories.map((c) => (
+                <div key={c.label} className="flex items-center justify-between text-sm py-1">
+                  <span>{c.label}</span>
+                  <span className="text-muted-foreground">
+                    {c.count} ·{" "}
+                    <span className="font-medium text-foreground">
+                      {fmtBRL(c.total)}
+                    </span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader>

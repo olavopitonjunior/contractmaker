@@ -13,9 +13,14 @@ import {
   resolvePayer,
   resolveCommissionValue,
   buildCommissionPayload,
+  generatePayerVisibleDescription,
   CommissionBuildError,
   type DadosContratoLite,
+  type SplitInputEntry,
+  type SplitDisplay,
+  type ResolvedPayer,
 } from "@/lib/asaas/commission";
+import { notifyChargeEvent } from "@/lib/financeiro/notifications";
 
 /**
  * Lógica de criação de comissão Asaas — extraída do route handler para
@@ -44,6 +49,19 @@ export interface CreateChargeInput {
    * precisa enriquecer metadata (ex.: via=newton).
    */
   skipAudit?: boolean;
+  // Pagadoria 2026-05-09 — overrides do wizard
+  /** Splits custom com asaas_wallet + pix_external. Substitui auto-platform-only. */
+  customSplits?: SplitInputEntry[];
+  /** Override do pagador (papel + dados editados na UI). */
+  payerOverride?: Partial<ResolvedPayer> & { papel?: "comprador" | "vendedor"; partyIndex?: number };
+  /** Override do valor a cobrar. */
+  valueOverride?: number;
+  /** Display block — splits ocultos para o pagador. */
+  display?: SplitDisplay;
+  /** kind explícito (para avulsa em deal). Default = "commission". */
+  kind?: "commission" | "avulsa" | "aluguel" | "outros";
+  /** Categoria livre (apenas para kind != commission). */
+  categoryLabel?: string;
 }
 
 export interface CreateChargeResult {
@@ -135,22 +153,41 @@ export async function runCreateCommissionCharge(
   let payload;
   try {
     const data = contract.dataJson as unknown as DadosContratoLite;
-    payer = resolvePayer(data);
-    value = resolveCommissionValue(data);
+    const { partyIndex, ...override } = input.payerOverride ?? {};
+    payer = resolvePayer(data, {
+      partyIndex: typeof partyIndex === "number" ? partyIndex : undefined,
+      override: Object.keys(override).length > 0 ? (override as Partial<ResolvedPayer> & { papel?: "comprador" | "vendedor" }) : undefined,
+    });
+    value = resolveCommissionValue(data, { override: input.valueOverride });
+    // Descrição: se não veio explícito, gera a partir dos splits visíveis
+    // (omitindo os ocultos via display.hiddenRecipientIds). Default histórico
+    // segue se não houver customSplits.
+    const description =
+      input.description ??
+      (input.customSplits && input.customSplits.length > 0
+        ? generatePayerVisibleDescription({
+            splits: input.customSplits,
+            hiddenRecipientIds: input.display?.hiddenRecipientIds ?? [],
+            dealTitle: deal.title,
+            kind: input.kind ?? "commission",
+            categoryLabel: input.categoryLabel ?? null,
+          })
+        : `Comissão — ${deal.title} (${payer.papel === "comprador" ? "Comprador" : "Vendedor"})`);
+
     payload = buildCommissionPayload({
       contractData: data,
       payer,
       value,
       billingType: input.billingType,
       dueDate: input.dueDate,
-      description:
-        input.description ??
-        `Comissão — ${deal.title} (${payer.papel === "comprador" ? "Comprador" : "Vendedor"})`,
+      description,
       externalReference: `contract:${contract.id}`,
       orgWalletId: account.walletId,
       platformFeePercent: platformFeePercent > 0 ? platformFeePercent : undefined,
       platformWalletId:
         platformFeePercent > 0 && platformWalletId ? platformWalletId : undefined,
+      customSplits: input.customSplits,
+      display: input.display,
     });
   } catch (err) {
     if (err instanceof CommissionBuildError) {
@@ -229,7 +266,8 @@ export async function runCreateCommissionCharge(
         contractId: contract.id,
         asaasCustomerId: localCustomer.id,
         asaasPaymentId: payment.id,
-        kind: "commission",
+        kind: input.kind ?? "commission",
+        categoryLabel: input.categoryLabel ?? null,
         billingType: input.billingType,
         value: payment.value,
         originalDueDate: new Date(payment.dueDate),
@@ -243,10 +281,13 @@ export async function runCreateCommissionCharge(
         pixQrCodePayload: pixQr?.payload ?? null,
         pixQrCodeImage: pixQr?.encodedImage ?? null,
         splitJson:
-          payload.paymentInput.split || payload.externalSplits.length > 0
+          payload.paymentInput.split ||
+          payload.externalSplits.length > 0 ||
+          payload.display
             ? ({
                 splits: payload.paymentInput.split ?? [],
                 external: payload.externalSplits,
+                display: payload.display ?? undefined,
               } as unknown as Prisma.InputJsonValue)
             : Prisma.JsonNull,
         payerSnapshot: payer as unknown as Prisma.InputJsonValue,
@@ -328,10 +369,21 @@ export async function runCreateCommissionCharge(
             value: payment.value,
             billingType: input.billingType,
             stageMovedTo,
+            kind: input.kind ?? "commission",
+            categoryLabel: input.categoryLabel ?? null,
+            customSplitsCount: input.customSplits?.length ?? 0,
+            hiddenSplitsCount: input.display?.hiddenRecipientIds.length ?? 0,
           },
         }
       );
     }
+
+    // Régua: notifica owner do deal (e admins/comissionados conforme settings)
+    void notifyChargeEvent({
+      chargeId: charge.id,
+      event: "created",
+      orgId: input.orgId,
+    });
 
     return {
       status: 200,

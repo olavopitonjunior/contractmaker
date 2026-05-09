@@ -19,6 +19,9 @@ export interface DadosContratoLite {
     valor?: number | string;
     percentual?: number | string;
     quem_paga?: "vendedor" | "comprador" | string;
+    quando_paga?: string;
+    prazo_dias_apos_marco?: number;
+    forma_pagamento_preferida?: "pix" | "boleto" | "qualquer";
     imobiliaria_nome?: string;
     imobiliaria_cnpj?: string;
   };
@@ -31,6 +34,7 @@ export interface PartyLike {
   cpf?: string;
   cnpj?: string;
   email?: string;
+  mobile_phone?: string;
   endereco?: string;
   numero?: string;
   complemento?: string;
@@ -70,8 +74,36 @@ function extractName(p: PartyLike): string {
 /**
  * Resolve quem é o pagador da comissão com base em `comissao.quem_paga`.
  * Default: comprador (o mais comum em venda).
+ *
+ * Aceita `partyIndex` para suportar compras conjuntas (escolher entre 2
+ * compradores como cobrável principal). Aceita `override` para a UI
+ * passar dados editados sem precisar persistir antes em DadosContrato.
  */
-export function resolvePayer(data: DadosContratoLite): ResolvedPayer {
+export interface ResolvePayerOpts {
+  partyIndex?: number;
+  override?: Partial<ResolvedPayer> & { papel?: "comprador" | "vendedor" };
+}
+
+export function resolvePayer(
+  data: DadosContratoLite,
+  opts: ResolvePayerOpts = {}
+): ResolvedPayer {
+  // Override total: se a UI já enviou nome+cpf+papel, confiamos
+  if (
+    opts.override?.nome &&
+    opts.override.cpfCnpj &&
+    opts.override.papel
+  ) {
+    return {
+      papel: opts.override.papel,
+      nome: opts.override.nome,
+      cpfCnpj: opts.override.cpfCnpj,
+      email: opts.override.email ?? null,
+      mobilePhone: opts.override.mobilePhone ?? null,
+      address: opts.override.address ?? {},
+    };
+  }
+
   const quemPaga = (data.comissao?.quem_paga ?? "comprador").toLowerCase();
   const source =
     quemPaga === "vendedor" || quemPaga.startsWith("vend")
@@ -85,9 +117,10 @@ export function resolvePayer(data: DadosContratoLite): ResolvedPayer {
     );
   }
 
-  const party = source[0];
-  const nome = extractName(party);
-  const cpfCnpj = extractCpfCnpj(party);
+  const idx = Math.min(Math.max(opts.partyIndex ?? 0, 0), source.length - 1);
+  const party = source[idx];
+  const nome = opts.override?.nome ?? extractName(party);
+  const cpfCnpj = opts.override?.cpfCnpj ?? extractCpfCnpj(party);
 
   if (!nome.trim()) {
     throw new CommissionBuildError(
@@ -106,9 +139,10 @@ export function resolvePayer(data: DadosContratoLite): ResolvedPayer {
     papel: quemPaga === "vendedor" ? "vendedor" : "comprador",
     nome,
     cpfCnpj,
-    email: party.email || null,
-    mobilePhone: null, // DadosContrato não captura celular — futuro
-    address: {
+    email: opts.override?.email ?? party.email ?? null,
+    mobilePhone:
+      opts.override?.mobilePhone ?? (party.mobile_phone || null),
+    address: opts.override?.address ?? {
       endereco: party.endereco,
       numero: party.numero,
       complemento: party.complemento,
@@ -133,9 +167,14 @@ function parseNumber(v: unknown): number {
 
 /**
  * Calcula o valor da comissão a cobrar.
- * Prioridade: `comissao.valor` > `comissao.percentual` × `pagamento.valor_total`.
+ * Prioridade: `override` > `comissao.valor` > `comissao.percentual` × `pagamento.valor_total`.
  */
-export function resolveCommissionValue(data: DadosContratoLite): number {
+export function resolveCommissionValue(
+  data: DadosContratoLite,
+  opts: { override?: number } = {}
+): number {
+  if (typeof opts.override === "number" && opts.override > 0) return opts.override;
+
   const valor = parseNumber(data.comissao?.valor);
   if (valor > 0) return valor;
 
@@ -204,6 +243,30 @@ export interface ComposedSplits {
   externalSplits: ExternalSplit[];
 }
 
+/**
+ * Bloco de display privado: informa ao corretor (e à UI interna) quais splits
+ * NÃO devem aparecer no resumo de quem recebe. O valor de uma linha oculta é
+ * mostrado consolidado dentro de uma linha visível (`consolidationMap`).
+ *
+ * O Asaas não expõe split publicamente, então isto é puramente exibição
+ * interna — `generatePayerVisibleDescription` usa `hiddenRecipientIds` para
+ * gerar a descrição da cobrança que o pagador efetivamente vê.
+ */
+export interface SplitDisplay {
+  /**
+   * IDs dos splits que devem aparecer como "Privado" na ChargeDetail e
+   * cujos nomes não entram na descrição da cobrança. Usa `recipientId`
+   * quando existe; quando não (split ad-hoc por walletId), usa `walletId`
+   * ou `pixAddressKey` como ID.
+   */
+  hiddenRecipientIds: string[];
+  /**
+   * Mapa hiddenId → visibleId que herda visualmente o valor. UI computa
+   * default (próxima visível) mas usuário pode override.
+   */
+  consolidationMap: Record<string, string>;
+}
+
 export interface BuildCommissionPayloadInput {
   contractData: DadosContratoLite;
   payer: ResolvedPayer;
@@ -227,6 +290,8 @@ export interface BuildCommissionPayloadInput {
    * é anexada automaticamente em cima desses custom splits.
    */
   customSplits?: SplitInputEntry[];
+  /** Display block — repassado para persistência em splitJson.display. */
+  display?: SplitDisplay;
 }
 
 export interface BuiltCommissionPayload {
@@ -368,6 +433,49 @@ export function composeSplits(params: {
 export interface BuiltCommissionPayloadV2 extends BuiltCommissionPayload {
   /** Splits externos (PIX) — para persistir em splitJson.external e disparar pós-pagamento. */
   externalSplits: ExternalSplit[];
+  /** Bloco de display interno (hiddenRecipientIds + consolidationMap). */
+  display?: SplitDisplay;
+}
+
+/**
+ * Gera a `description` da cobrança que o pagador vê (no email do Asaas, no
+ * /pay/[token], na fatura). Omite comissionados marcados como ocultos.
+ *
+ * Quando hidden está vazio: lista todos os comissionados visíveis.
+ * Quando todos estão ocultos: fallback pra dealTitle / categoryLabel sozinhos.
+ */
+export function generatePayerVisibleDescription(params: {
+  splits: SplitInputEntry[];
+  hiddenRecipientIds: string[];
+  dealTitle?: string | null;
+  kind: "commission" | "avulsa" | "aluguel" | "outros";
+  categoryLabel?: string | null;
+}): string {
+  const { splits, hiddenRecipientIds, dealTitle, kind, categoryLabel } = params;
+  const hidden = new Set(hiddenRecipientIds);
+  const isHidden = (s: SplitInputEntry): boolean => {
+    const id =
+      s.recipientId ??
+      (s.recipientType === "asaas_wallet" ? s.walletId : s.pixAddressKey);
+    return hidden.has(id);
+  };
+
+  const visibleNames = splits
+    .filter((s) => !isHidden(s))
+    .map((s) => s.label)
+    .filter((n): n is string => !!n && n.trim().length > 0);
+
+  const titlePart = dealTitle ? ` — ${dealTitle}` : "";
+
+  if (kind === "commission") {
+    const namesStr =
+      visibleNames.length > 0 ? ` (${visibleNames.join(", ")})` : "";
+    return `Comissão${titlePart}${namesStr}`.trim();
+  }
+
+  // Avulsa/aluguel/outros usam categoryLabel quando existe
+  const cat = (categoryLabel ?? "").trim() || "Cobrança";
+  return `${cat}${titlePart}`.trim();
 }
 
 export function buildCommissionPayload(
@@ -403,5 +511,5 @@ export function buildCommissionPayload(
     split: asaasSplits,
   };
 
-  return { customerInput, paymentInput, externalSplits };
+  return { customerInput, paymentInput, externalSplits, display: input.display };
 }

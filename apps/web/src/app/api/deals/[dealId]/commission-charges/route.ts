@@ -17,11 +17,59 @@ import {
 } from "@/lib/asaas/charges-action";
 import { requireApproval, approvalResponse } from "@/lib/api/intents";
 
+// Discriminated union igual ao /financeiro/charges/nova — extraído inline pra
+// evitar import circular; em refactor futuro mover para lib/asaas/zod-splits.ts
+const splitWalletSchema = z.object({
+  recipientType: z.literal("asaas_wallet").default("asaas_wallet"),
+  recipientId: z.string().optional(),
+  walletId: z.string().trim().min(1),
+  label: z.string().optional(),
+  percentualValue: z.number().min(0).max(100).optional(),
+  fixedValue: z.number().min(0).optional(),
+  totalFixedValue: z.number().min(0).optional(),
+});
+const splitPixSchema = z.object({
+  recipientType: z.literal("pix_external"),
+  recipientId: z.string().min(1),
+  pixAddressKey: z.string().trim().min(1),
+  pixKeyType: z.string().trim().min(1),
+  ownerName: z.string().trim().min(1),
+  ownerCpfCnpj: z.string().trim().min(11),
+  label: z.string().optional(),
+  percentualValue: z.number().min(0).max(100).optional(),
+  fixedValue: z.number().min(0).optional(),
+});
+const splitEntrySchema = z.discriminatedUnion("recipientType", [
+  splitWalletSchema,
+  splitPixSchema,
+]);
+
 const createSchema = z.object({
   billingType: z.enum(["PIX", "BOLETO"]),
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   contractId: z.string().optional(),
   description: z.string().optional(),
+  // Pagadoria 2026-05-09 — overrides do wizard
+  customSplits: z.array(splitEntrySchema).max(10).optional(),
+  payerOverride: z
+    .object({
+      papel: z.enum(["comprador", "vendedor"]).optional(),
+      partyIndex: z.number().int().min(0).optional(),
+      nome: z.string().optional(),
+      cpfCnpj: z.string().optional(),
+      email: z.string().optional().nullable(),
+      mobilePhone: z.string().optional().nullable(),
+    })
+    .optional(),
+  valueOverride: z.number().positive().optional(),
+  display: z
+    .object({
+      hiddenRecipientIds: z.array(z.string()),
+      consolidationMap: z.record(z.string()),
+    })
+    .optional(),
+  kind: z.enum(["commission", "avulsa", "aluguel", "outros"]).optional(),
+  categoryLabel: z.string().max(100).optional(),
 });
 
 /**
@@ -91,7 +139,18 @@ export async function POST(
   }
 
   // 5. Bearer → cria intent. Session → executa direto.
-  const { billingType, dueDate, contractId, description } = parsed.data;
+  const {
+    billingType,
+    dueDate,
+    contractId,
+    description,
+    customSplits,
+    payerOverride,
+    valueOverride,
+    display,
+    kind,
+    categoryLabel,
+  } = parsed.data;
   const idempotencyKey = req.headers.get("x-idempotency-key");
 
   // Pra Bearer, build preview SEM chamar Asaas
@@ -136,6 +195,18 @@ export async function POST(
           dueDate,
           contractId,
           description,
+          customSplits,
+          payerOverride: payerOverride
+            ? {
+                ...payerOverride,
+                email: payerOverride.email ?? null,
+                mobilePhone: payerOverride.mobilePhone ?? null,
+              }
+            : undefined,
+          valueOverride,
+          display,
+          kind,
+          categoryLabel,
           skipAudit: true, // auditamos abaixo com via=newton
         });
 
@@ -176,6 +247,18 @@ export async function POST(
     dueDate,
     contractId,
     description,
+    customSplits,
+    payerOverride: payerOverride
+      ? {
+          ...payerOverride,
+          email: payerOverride.email ?? null,
+          mobilePhone: payerOverride.mobilePhone ?? null,
+        }
+      : undefined,
+    valueOverride,
+    display,
+    kind,
+    categoryLabel,
   });
   return NextResponse.json(out.body, { status: out.status });
 }
@@ -222,6 +305,8 @@ export async function GET(
       value: c.value,
       netValue: c.netValue,
       billingType: c.billingType,
+      kind: c.kind,
+      categoryLabel: c.categoryLabel,
       status: c.status,
       asaasStatus: c.asaasStatus,
       description: c.description,

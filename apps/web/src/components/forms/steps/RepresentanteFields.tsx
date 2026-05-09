@@ -112,6 +112,13 @@ export function RepresentanteFields({ form, prefix }: RepresentanteFieldsProps) 
           placeholder="email@exemplo.com"
         />
       </FormField>
+      <FormField label="Celular (com DDD)">
+        <Input
+          {...form.register(`${prefix}.representante.mobile_phone`)}
+          type="tel"
+          placeholder="(11) 99999-9999"
+        />
+      </FormField>
     </div>
   );
 }

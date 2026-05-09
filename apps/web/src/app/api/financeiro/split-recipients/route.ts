@@ -16,6 +16,14 @@ const baseSchema = z.object({
   label: z.string().trim().min(1).max(120),
   cpfCnpj: z.string().trim().min(11).max(18).nullable().optional(),
   description: z.string().trim().max(500).nullable().optional(),
+  email: z
+    .string()
+    .trim()
+    .email("Email inválido")
+    .max(200)
+    .nullable()
+    .optional()
+    .or(z.literal("")),
 });
 
 const walletSchema = baseSchema.extend({
@@ -115,6 +123,7 @@ export async function POST(req: NextRequest) {
         ownerCpfCnpj: isPix ? data.ownerCpfCnpj : null,
         cpfCnpj: data.cpfCnpj ?? null,
         description: data.description ?? null,
+        email: data.email && data.email !== "" ? data.email : null,
       },
     });
 

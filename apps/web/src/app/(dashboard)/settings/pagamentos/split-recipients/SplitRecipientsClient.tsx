@@ -24,7 +24,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Pencil, Trash2, Save, Wallet, KeyRound } from "lucide-react";
+import { Plus, Pencil, Trash2, Save, Wallet, KeyRound, Upload, Search } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 type RecipientType = "asaas_wallet" | "pix_external";
 
@@ -200,6 +208,117 @@ export default function SplitRecipientsClient() {
   }
 
   const [confirmDeactivate, setConfirmDeactivate] = useState<Recipient | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkSubmitting, setBulkSubmitting] = useState(false);
+  const [findOpen, setFindOpen] = useState(false);
+  const [findItems, setFindItems] = useState<
+    Array<{
+      cpfCnpj: string;
+      nome: string;
+      cpf?: string;
+      cnpj?: string;
+      email?: string;
+      mobile_phone?: string;
+      seenInDeals: string[];
+    }>
+  >([]);
+  const [findLoading, setFindLoading] = useState(false);
+
+  async function submitBulk() {
+    setBulkSubmitting(true);
+    try {
+      const lines = bulkText
+        .split(/\r?\n/)
+        .map((l) => l.trim())
+        .filter((l) => l.length > 0 && !l.startsWith("#"));
+      const rows: Array<{
+        nome: string;
+        cpfCnpj: string;
+        tipo: "wallet" | "pix";
+        walletOuChave: string;
+        label?: string;
+        email?: string;
+      }> = [];
+      for (const line of lines) {
+        const parts = line.split(",").map((p) => p.trim());
+        if (parts.length < 4) continue;
+        const [nome, cpfCnpj, tipo, walletOuChave, label, email] = parts;
+        if (tipo !== "wallet" && tipo !== "pix") continue;
+        rows.push({
+          nome,
+          cpfCnpj,
+          tipo: tipo as "wallet" | "pix",
+          walletOuChave,
+          label: label || undefined,
+          email: email || undefined,
+        });
+      }
+      if (rows.length === 0) {
+        toast.error("Nenhuma linha válida no CSV");
+        return;
+      }
+      const res = await fetch("/api/financeiro/split-recipients/bulk-import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ rows }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "Falha");
+        return;
+      }
+      toast.success(
+        `${data.created.length} criado(s)${data.errors.length > 0 ? `, ${data.errors.length} erro(s)` : ""}`
+      );
+      if (data.errors.length > 0) {
+        console.warn("[bulk-import] erros:", data.errors);
+      }
+      setBulkOpen(false);
+      setBulkText("");
+      void load();
+    } finally {
+      setBulkSubmitting(false);
+    }
+  }
+
+  async function loadFindUncadastrados() {
+    setFindLoading(true);
+    try {
+      const res = await fetch("/api/financeiro/split-recipients/uncadastrados", {
+        credentials: "include",
+      });
+      if (!res.ok) {
+        toast.error("Falha ao buscar comissionados");
+        return;
+      }
+      const data = await res.json();
+      setFindItems(data.items ?? []);
+    } finally {
+      setFindLoading(false);
+    }
+  }
+
+  function startCreateFromUncadastrado(item: {
+    nome: string;
+    cpf?: string;
+    cnpj?: string;
+    email?: string;
+  }) {
+    setEditing(null);
+    setRecipientType("pix_external");
+    setLabel(item.nome);
+    setOwnerName(item.nome);
+    const doc = item.cpf || item.cnpj || "";
+    setOwnerCpfCnpj(doc);
+    setCpfCnpj(doc);
+    setPixAddressKey("");
+    setWalletId("");
+    setDescription("");
+    setFindOpen(false);
+    setOpen(true);
+  }
 
   async function remove(r: Recipient) {
     const res = await fetch(`/api/financeiro/split-recipients/${r.id}`, {
@@ -246,9 +365,23 @@ export default function SplitRecipientsClient() {
             banco (transferência automática após o pagamento).
           </p>
         </div>
-        <Button onClick={openCreate}>
-          <Plus className="h-4 w-4 mr-1" /> Novo destinatário
-        </Button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button
+            variant="outline"
+            onClick={() => {
+              setFindOpen(true);
+              void loadFindUncadastrados();
+            }}
+          >
+            <Search className="h-4 w-4 mr-1" /> Buscar comissionados sem cadastro
+          </Button>
+          <Button variant="outline" onClick={() => setBulkOpen(true)}>
+            <Upload className="h-4 w-4 mr-1" /> Importar em lote
+          </Button>
+          <Button onClick={openCreate}>
+            <Plus className="h-4 w-4 mr-1" /> Novo destinatário
+          </Button>
+        </div>
       </div>
 
       {loading ? (
@@ -468,6 +601,88 @@ export default function SplitRecipientsClient() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={bulkOpen} onOpenChange={setBulkOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Importar destinatários em lote</DialogTitle>
+            <DialogDescription>
+              Cole CSV com formato:{" "}
+              <code className="text-xs">
+                nome, cpf_cnpj, tipo, wallet_ou_chave, label?, email?
+              </code>
+              <br />
+              Onde <code>tipo</code> é <code>wallet</code> ou <code>pix</code>.
+              Linhas começando com <code>#</code> são ignoradas.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            rows={10}
+            placeholder={`# nome, cpf_cnpj, tipo, wallet_ou_chave, label, email\nMaria Silva, 12345678900, pix, maria@email.com, Corretora Maria, maria@email.com\nImobiliária X, 12345678000100, wallet, abc123-uuid, , contato@imobx.com`}
+            value={bulkText}
+            onChange={(e) => setBulkText(e.target.value)}
+            className="font-mono text-xs"
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setBulkOpen(false)} disabled={bulkSubmitting}>
+              Cancelar
+            </Button>
+            <Button onClick={submitBulk} disabled={bulkSubmitting || bulkText.trim().length === 0}>
+              {bulkSubmitting ? "Importando..." : "Importar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={findOpen} onOpenChange={setFindOpen}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Comissionados sem cadastro (últimos 90 dias)</DialogTitle>
+            <DialogDescription>
+              Lista de pessoas que aparecem em <code>comissao.comissionados[]</code>{" "}
+              de contratos recentes mas ainda não estão cadastradas como destinatário.
+              Cadastre individualmente para que possam receber repasse.
+            </DialogDescription>
+          </DialogHeader>
+          {findLoading ? (
+            <p className="text-sm text-muted-foreground">Carregando...</p>
+          ) : findItems.length === 0 ? (
+            <p className="text-sm text-muted-foreground italic">
+              Nada para cadastrar — todos os comissionados extraídos nos últimos 90 dias
+              já têm destinatário ativo.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {findItems.map((it) => (
+                <div
+                  key={it.cpfCnpj}
+                  className="border rounded p-3 flex items-center justify-between gap-3"
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium text-sm">{it.nome}</div>
+                    <div className="text-xs text-muted-foreground font-mono">
+                      {it.cpf || it.cnpj || it.cpfCnpj}
+                      {it.email ? ` · ${it.email}` : ""}
+                    </div>
+                    {it.seenInDeals.length > 0 && (
+                      <div className="text-xs text-muted-foreground mt-1 truncate">
+                        {it.seenInDeals.slice(0, 2).join(", ")}
+                        {it.seenInDeals.length > 2 && ` +${it.seenInDeals.length - 2}`}
+                      </div>
+                    )}
+                  </div>
+                  <Button
+                    size="sm"
+                    onClick={() => startCreateFromUncadastrado(it)}
+                  >
+                    Cadastrar
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

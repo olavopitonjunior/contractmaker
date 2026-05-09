@@ -127,6 +127,13 @@ export function ConjugeFields({ form, index, prefix, listKey }: ConjugeFieldsPro
             placeholder="email@exemplo.com"
           />
         </FormField>
+        <FormField label="Celular do Cônjuge (com DDD)">
+          <Input
+            {...form.register(`${prefix}.conjuge.mobile_phone`)}
+            type="tel"
+            placeholder="(11) 99999-9999"
+          />
+        </FormField>
       </div>
 
       <div className="flex items-center gap-2 pt-1">

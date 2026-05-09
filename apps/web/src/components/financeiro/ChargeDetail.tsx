@@ -226,6 +226,10 @@ interface SplitsState {
   asaasSplits: Array<{ walletId: string; percentualValue?: number; fixedValue?: number }>;
   externalSplits: ExternalSplitRow[];
   transfers: SplitTransferRow[];
+  display: {
+    hiddenRecipientIds?: string[];
+    consolidationMap?: Record<string, string>;
+  } | null;
 }
 
 export function ChargeDetail({ chargeId }: { chargeId: string }) {
@@ -620,22 +624,40 @@ export function ChargeDetail({ chargeId }: { chargeId: string }) {
                         Splits Asaas-nativos (instantâneos)
                       </div>
                       <ul className="space-y-1">
-                        {splits.asaasSplits.map((s, i) => (
-                          <li
-                            key={i}
-                            className="flex items-center justify-between text-sm border rounded px-2 py-1"
-                          >
-                            <span className="font-mono text-xs">
-                              {maskWallet(s.walletId)}
-                            </span>
-                            <Badge variant="outline" className="text-xs">
-                              {s.percentualValue
-                                ? `${s.percentualValue}%`
-                                : fmtBRL(s.fixedValue ?? 0)}
-                            </Badge>
-                          </li>
-                        ))}
+                        {splits.asaasSplits.map((s, i) => {
+                          const hidden = (splits.display?.hiddenRecipientIds ?? []).includes(s.walletId);
+                          return (
+                            <li
+                              key={i}
+                              className={`flex items-center justify-between text-sm border rounded px-2 py-1 ${hidden ? "bg-gray-100 border-gray-300" : ""}`}
+                            >
+                              <span className="font-mono text-xs">
+                                {maskWallet(s.walletId)}
+                                {hidden && (
+                                  <Badge variant="outline" className="ml-2 text-[10px] py-0 px-1">
+                                    Privado
+                                  </Badge>
+                                )}
+                              </span>
+                              <Badge variant="outline" className="text-xs">
+                                {s.percentualValue
+                                  ? `${s.percentualValue}%`
+                                  : fmtBRL(s.fixedValue ?? 0)}
+                              </Badge>
+                            </li>
+                          );
+                        })}
                       </ul>
+                    </div>
+                  )}
+
+                  {(splits.display?.hiddenRecipientIds?.length ?? 0) > 0 && (
+                    <div className="border-t pt-2 mt-2">
+                      <p className="text-xs text-muted-foreground italic">
+                        🔒 {splits.display?.hiddenRecipientIds?.length} split(s) privado(s) — o
+                        pagador não vê esses nomes na descrição da cobrança nem em /pay. Os
+                        valores foram consolidados em outras linhas para exibição interna.
+                      </p>
                     </div>
                   )}
 
@@ -649,15 +671,21 @@ export function ChargeDetail({ chargeId }: { chargeId: string }) {
                           const transfer = splits.transfers.find(
                             (t) => t.splitRecipientId === es.recipientId
                           );
+                          const hidden = (splits.display?.hiddenRecipientIds ?? []).includes(es.recipientId);
                           return (
                             <li
                               key={es.recipientId}
-                              className="border rounded p-2 space-y-1"
+                              className={`border rounded p-2 space-y-1 ${hidden ? "bg-gray-100 border-gray-300" : ""}`}
                             >
                               <div className="flex items-center justify-between">
                                 <div>
-                                  <div className="font-medium text-sm">
+                                  <div className="font-medium text-sm flex items-center gap-2">
                                     {es.label ?? es.ownerName}
+                                    {hidden && (
+                                      <Badge variant="outline" className="text-[10px] py-0 px-1">
+                                        Privado
+                                      </Badge>
+                                    )}
                                   </div>
                                   <div className="text-xs text-muted-foreground font-mono">
                                     {es.pixKeyType} ·{" "}

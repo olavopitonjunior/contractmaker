@@ -13,6 +13,8 @@ export interface Charge {
   value: number;
   netValue?: number | null;
   billingType: "PIX" | "BOLETO";
+  kind: string;
+  categoryLabel?: string | null;
   status: string;
   asaasStatus: string;
   description: string | null;
@@ -70,9 +72,12 @@ function CopyButton({ value, label = "Copiar" }: { value: string; label?: string
   );
 }
 
+type KindFilter = "all" | "commission" | "avulsa" | "aluguel" | "outros";
+
 export function CommissionChargeList({ dealId }: { dealId: string }) {
   const [charges, setCharges] = useState<Charge[]>([]);
   const [loading, setLoading] = useState(true);
+  const [kindFilter, setKindFilter] = useState<KindFilter>("all");
 
   async function load() {
     setLoading(true);
@@ -86,6 +91,11 @@ export function CommissionChargeList({ dealId }: { dealId: string }) {
       setLoading(false);
     }
   }
+
+  const filtered =
+    kindFilter === "all"
+      ? charges
+      : charges.filter((c) => c.kind === kindFilter);
 
   useEffect(() => {
     load();
@@ -107,28 +117,67 @@ export function CommissionChargeList({ dealId }: { dealId: string }) {
     );
   }
 
+  const counts = charges.reduce<Record<string, number>>((acc, c) => {
+    acc[c.kind] = (acc[c.kind] ?? 0) + 1;
+    return acc;
+  }, {});
+  const kinds: Array<{ value: KindFilter; label: string }> = [
+    { value: "all", label: `Tudo (${charges.length})` },
+    ...(counts.commission ? [{ value: "commission" as const, label: `Comissão (${counts.commission})` }] : []),
+    ...(counts.avulsa ? [{ value: "avulsa" as const, label: `Avulsa (${counts.avulsa})` }] : []),
+    ...(counts.aluguel ? [{ value: "aluguel" as const, label: `Aluguel (${counts.aluguel})` }] : []),
+    ...(counts.outros ? [{ value: "outros" as const, label: `Outros (${counts.outros})` }] : []),
+  ];
+
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-muted-foreground">
-          {charges.length} cobrança{charges.length > 1 ? "s" : ""}
-        </p>
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {kinds.map((k) => (
+            <button
+              key={k.value}
+              type="button"
+              onClick={() => setKindFilter(k.value)}
+              className={`text-xs rounded-full px-3 py-1 border transition ${
+                kindFilter === k.value
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-muted text-muted-foreground border-transparent hover:border-muted-foreground/30"
+              }`}
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
         <Button variant="ghost" size="sm" onClick={load}>
           <RefreshCw className="h-4 w-4 mr-1" /> Atualizar
         </Button>
       </div>
 
-      {charges.map((c) => {
+      {filtered.map((c) => {
         const status = STATUS_LABEL[c.status] ?? STATUS_LABEL.PENDING;
         return (
           <Card key={c.id}>
             <CardContent className="pt-4 space-y-3">
               <div className="flex items-start justify-between gap-4 flex-wrap">
                 <div>
-                  <div className="flex items-center gap-2 mb-1">
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
                     <Badge className={status.color} variant="outline">
                       {status.text}
                     </Badge>
+                    <Badge variant="secondary" className="text-xs">
+                      {c.kind === "commission"
+                        ? "Comissão"
+                        : c.kind === "avulsa"
+                          ? "Avulsa"
+                          : c.kind === "aluguel"
+                            ? "Aluguel"
+                            : "Outros"}
+                    </Badge>
+                    {c.categoryLabel && (
+                      <Badge variant="outline" className="text-xs">
+                        {c.categoryLabel}
+                      </Badge>
+                    )}
                     <span className="text-xs text-muted-foreground font-mono">
                       {c.asaasPaymentId}
                     </span>

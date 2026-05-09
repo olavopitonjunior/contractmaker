@@ -17,6 +17,7 @@ import {
   mapAsaasStatusToInternal,
 } from "./types";
 import { dispatchExternalSplits } from "./splitDispatcher";
+import { notifyChargeEvent, type ChargeEvent } from "@/lib/financeiro/notifications";
 
 export function validateWebhookToken(headerToken: string | null): boolean {
   const expected = process.env.ASAAS_WEBHOOK_TOKEN;
@@ -229,6 +230,26 @@ export async function applyWebhookToCharge(
         err instanceof Error ? err.message : err
       );
     }
+  }
+
+  // Régua interna (Pagadoria 2026-05-09): fan-out por evento. Inline
+  // pra mesma razão do dispatch — Vercel aborta promises pós-response.
+  // notifyChargeEvent é fire-and-forget interno (try/catch ao redor).
+  const eventToNotif: Partial<Record<string, ChargeEvent>> = {
+    PAYMENT_CREATED: "created",
+    PAYMENT_RECEIVED: "paid",
+    PAYMENT_CONFIRMED: "paid",
+    PAYMENT_OVERDUE: "overdue",
+    PAYMENT_REFUNDED: "refunded",
+    PAYMENT_DELETED: "cancelled",
+  };
+  const notifEvent = eventToNotif[eventName];
+  if (notifEvent) {
+    await notifyChargeEvent({
+      chargeId: charge.id,
+      event: notifEvent,
+      orgId: charge.orgId,
+    });
   }
 
   return {

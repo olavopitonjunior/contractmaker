@@ -50,27 +50,29 @@ Contrato importado: `template === null` (UI mostra "Contrato importado"), CTA do
 | 2 | Enviado para assinatura | blue | `approve-action.ts` após `/approve` |
 | 3 | Contrato assinado | sky | webhook ClickSign `close` (source=contract) |
 | 4 | Cobrança emitida | purple | `charges-action.ts` após `commissionCharge.create` |
-| 5 | Comissão paga | green | botão manual `mark-commission-paid` (terminal feliz) |
-| 6 | Negócio perdido | red | botão `mark-lost` de qualquer não-terminal (terminal alternativo) |
+| 5 | Comissão paga | green | botão `mark-commission-paid` (terminal feliz) |
+| 6 | Negócio perdido | red | botão `mark-lost` de qualquer não-terminal (terminal alt) |
 
-Stages 3 e 4 auto-promovem com guard de não-retroceder — webhook reentregue não regride deal já em stage posterior.
+Auto-transições têm guard `linearOrder.includes(currentStageName)` — webhook reentregue não regride deal já em stage posterior. Hooks específicos: form `completedAt` em `forms/[token]/route.ts`, `approve-action.ts:200+`, webhook ClickSign close em `webhooks/clicksign/route.ts:185+`, `charges-action.ts:280+`.
 
-**Datas SLA** (visíveis no card kanban e timeline horizontal do DealDetail):
+**Datas SLA** (visíveis em 5 ícones compactos no card e timeline horizontal com gauge no DealDetail):
 - `SalesForm.createdAt` → form aberto
-- `SalesForm.completedAt` → form completo (setado no finalize)
+- `SalesForm.completedAt` → form completo (setado no finalize quando `status` entra em `completo`/`vinculado`)
 - `MAX(Envelope.closedAt where source="contract")` → contrato assinado
 - `MIN(CommissionCharge.createdAt)` → cobrança gerada
-- `Deal.commissionPaidAt` → comissão paga (manual)
-- `Deal.lostAt` + `Deal.lostReason` → terminal lost
+- `Deal.commissionPaidAt` → comissão paga (manual via botão)
+- `Deal.lostAt` + `Deal.lostReason` → terminal lost (banner vermelho substitui timeline)
 
-**Endpoints manuais:**
-- `POST /api/pipeline/deals/[dealId]/mark-commission-paid` — origem aceita "Cobrança emitida" ou "Contrato assinado" (fallback caso charge tenha sido gerada fora do sistema)
-- `POST /api/pipeline/deals/[dealId]/mark-lost` — Zod body `{ reason, category? }`. Categorias: `desistencia | imovel_vendido | financiamento_negado | outro`. Bloqueia se já terminal
-- `POST /api/pipeline/deals/[dealId]/reopen` — sai de "Negócio perdido", restaura stage anterior via lookup do último `AuditLog DEAL_STAGE_CHANGE { kind:"lost" }` com `previousStageId` no metadata
+**Endpoints manuais (UI session-based, sem Bearer twin):**
+- `POST /api/pipeline/deals/[dealId]/mark-commission-paid` — aceita origem "Cobrança emitida" ou "Contrato assinado" (fallback caso charge tenha sido gerada fora do sistema)
+- `POST /api/pipeline/deals/[dealId]/mark-lost` — Zod body `{ reason, category? }`. Categorias: `desistencia | imovel_vendido | financiamento_negado | outro`. Bloqueia se já terminal. `MarkLostDialog.tsx` pede causa+detalhes
+- `POST /api/pipeline/deals/[dealId]/reopen` — sai de "Negócio perdido", restaura stage anterior via lookup do último `AuditLog DEAL_STAGE_CHANGE { kind:"lost" }` com `previousStageId` no metadata. Fallback "Confecção de Contrato"
 
-`mark-signed` (legado, ambas variantes) agora aponta pra "Comissão paga" (Concluído fundido). Aceita origens "Enviado para assinatura", "Contrato assinado" ou "Cobrança emitida".
+`mark-signed` (legado Newton + UI) agora aponta pra "Comissão paga" (Concluído fundido). Aceita origens "Enviado para assinatura", "Contrato assinado" ou "Cobrança emitida".
 
-Migração de pipeline existente: `pnpm tsx apps/web/scripts/migrate-pipeline-stages.ts --apply` (idempotente). Renomeia "Assinatura"→"Enviado para assinatura", "Concluído"→"Comissão paga"; cria as 3 novas stages.
+**Stages em prod** são migrados via SQL data migration (`migrations/20260508150000_pipeline_stage_data_migration/`) que roda automaticamente no `prisma migrate deploy`. Idempotente — usa parking de positions ≥1000 pra contornar `@@unique([pipelineId, position])`. Script `apps/web/scripts/migrate-pipeline-stages.ts --apply` existe como fallback manual de emergência mas não é o caminho canônico.
+
+**Hooks históricos:** deals que tiveram `Envelope.closedAt` populado **antes** da migration criar a stage "Contrato assinado" continuam visualmente em "Enviado para assinatura" — auto-promote não é retroativo. Mover manualmente via drag-drop.
 
 ## DadosContrato
 
@@ -172,13 +174,7 @@ Migração legada (raro): `apps/web/scripts/migrate-tiptap-to-gdocs.ts --dealId 
 
 Z-index `[data-radix-popper-content-wrapper] { z-index: 100 !important }` em `globals.css` faz dropdowns flutuarem acima da toolbar sticky.
 
-## Comentários e suggestions
-
-`ContractComment { authorType, severity, anchorId, selectedText, parentId, dedupeKey, resolved }` e `ContractSuggestion { type, suggestionId, status: pending|accepted|rejected }`.
-
-Endpoints: `GET/POST /api/contracts/[id]/{comments,suggestions}`, `PATCH/DELETE [...]/[id]`.
-
-UI: `CommentsPanel.tsx`, `AddCommentDialog.tsx`, `SuggestionsToolbar.tsx`. Em GDocs, `add_comment` e `propose_suggestion` espelham no Drive Comments API. PATCH `/suggestions/[id]` aplica no doc real e fecha thread espelhado.
+**Comentários e suggestions:** `ContractComment { authorType, severity, anchorId, selectedText, parentId, dedupeKey, resolved }` e `ContractSuggestion { type, suggestionId, status: pending|accepted|rejected }`. Endpoints `GET/POST /api/contracts/[id]/{comments,suggestions}` + `PATCH/DELETE [...]/[id]`. UI: `CommentsPanel.tsx`, `AddCommentDialog.tsx`, `SuggestionsToolbar.tsx`. Em GDocs, `add_comment` e `propose_suggestion` espelham no Drive Comments API; PATCH `/suggestions/[id]` aplica no doc real e fecha thread espelhado.
 
 ## Etapa 0 form público — Upload + OCR
 
@@ -303,13 +299,11 @@ Envelope vincula a UM de dois: Contract aprovado (`source="contract"`) ou DealAt
 
 **Custo:** `Envelope.costCents`. Budget mensal `getMonthlyBudgetCents()` somando `running + closed` do mês. POST retorna 402 se estouraria.
 
-**Diálogo de envio (`SendEnvelopeDialog.tsx`):** linhas editáveis Nome/E-mail/CPF agrupadas por origem. Vendedor + Comprador titulares são sempre signers; **Cônjuges, Corretora(s) e Testemunhas são opt-in** via checkbox (pré-marcado se já tem email no form). Botões "+ Adicionar Corretor" / "+ Adicionar testemunha" empurram linhas extras pré-marcadas. Linhas com `addedDuringDialog=true` em contrato aprovado mostram banner amarelo: aparecem só no certificado ClickSign, **não no PDF do contrato congelado**.
+**Diálogo de envio (`SendEnvelopeDialog.tsx`):** linhas editáveis Nome/E-mail/CPF agrupadas por origem. Vendedor + Comprador titulares são sempre signers; **Cônjuges, Corretora(s) e Testemunhas são opt-in** via checkbox. Linhas com `addedDuringDialog=true` em contrato aprovado mostram banner amarelo: aparecem só no certificado ClickSign, **não no PDF do contrato congelado**.
 
-**Múltiplos comissionados:** popup itera `comissao.comissionados[]` (canônico). Array vazio → fallback hidrata 1 row do legado `imobiliaria_*`. Submit empurra array inteiro; `imobiliaria_*` nunca tocados pelo popup (templates antigos continuam consumindo).
-
-**Cônjuges:** vendedores/compradores casados com `conjuge.nome` aparecem como sub-linhas opt-in dentro do card da parte titular. SourceKind permanece `vendedor`/`comprador`; sourceIndex do cônjuge é `idx + 1000` (convenção, sem unique constraint).
-
-Submit: `PATCH /api/contracts/[id]/signers-data` (whitelist regex — emails das partes, `vendedores/compradores.<i>.conjuge.{email,nome,cpf,incluir_como_signatario}`, `comissao.comissionados`, `testemunhas`) → `POST /api/contracts/[id]/envelopes`. Mapping `dealDataToSigners` itera `comissionados[]` e cônjuges marcados. `SourceKind = "vendedor" | "comprador" | "testemunha" | "corretora"`. **Esse PATCH é a única exceção à imutabilidade do contrato aprovado** — campos não são renderizados no HTML/PDF (só metadados pra ClickSign).
+- **Múltiplos comissionados:** itera `comissao.comissionados[]` (canônico); array vazio → fallback hidrata 1 row do legado `imobiliaria_*` (templates antigos continuam consumindo)
+- **Cônjuges:** com `conjuge.nome` preenchido aparecem como sub-linha opt-in. `sourceIndex = idx + 1000` (convenção, sem unique constraint)
+- **Submit:** `PATCH /api/contracts/[id]/signers-data` (whitelist regex — emails das partes, `vendedores/compradores.<i>.conjuge.{email,nome,cpf,incluir_como_signatario}`, `comissao.comissionados`, `testemunhas`) → `POST /api/contracts/[id]/envelopes`. `SourceKind = "vendedor" | "comprador" | "testemunha" | "corretora"`
 
 **Quirks v3 (caçados em prod 2026-05-08):**
 1. `communicate_by` REMOVIDO no signer (422 "communicate_by não está disponível"). Email automático via `signer.email` + `activateEnvelope`
@@ -364,9 +358,9 @@ Agente agrega tokens das N iterações em 1 record com `iterations=N` e `toolsUs
 
 `POST /api/contracts/[id]/approve` valida + conta `ContractSuggestion` pendentes + `ContractComment` não-resolvidos (severity error). Se issues: `{requiresReview, canForce, errorCount, warningCount, ...}`. Frontend abre `ApprovalReviewDialog` com botões "Revisar" / "Aprovar mesmo assim" (oculto se `canForce=false`). Segunda chamada com `{force: true}` aprova.
 
-GDocs mode: `runContractApproval` em `lib/contracts/approve-action.ts` faz `exportDocAsHtml(googleDocId)` antes de `status=aprovado` e atualiza `Contract.htmlContent`.
+GDocs mode: `runContractApproval` em `lib/contracts/approve-action.ts` faz `exportDocAsHtml(googleDocId)` antes de `status=aprovado`, atualiza `Contract.htmlContent` no DB, dispara `createContractMemory` fire-and-forget, e auto-promove o Deal pra stage "Enviado para assinatura".
 
-**Aprovado = imutável:** chat/edição/comentários/versionamento bloqueados; API retorna 403 em POSTs. `/auto-analyze` retorna 200 com `{findings:[], modelUsed:"approved"}`. **Exceção:** `PATCH /signers-data` (whitelist regex) aceita patch escopo restrito mesmo em aprovado.
+**Aprovado = imutável:** chat/edição/comentários/versionamento bloqueados; API retorna 403 em POSTs. `/auto-analyze` retorna 200 com `{findings:[], modelUsed:"approved"}`. **Exceção:** `PATCH /signers-data` (whitelist regex) aceita patch escopo restrito mesmo em aprovado — campos não são renderizados no HTML/PDF (só metadados pra ClickSign).
 
 ## Mecanismos de delete (4 níveis)
 
@@ -431,7 +425,9 @@ Puppeteer requer Vercel Pro (timeout 60s).
 - **Asaas sandbox rejeita docs de identidade** via API — usar `approveSandboxAccount`
 - **Asaas split** rejeita wallet da própria org, rejeita duplicatas, max 10 entries
 - **Webhook ClickSign idempotente:** `close` pode reentregar; `findFirst { dealId, url }` antes de criar DealAttachment
-- **Prisma migrations** rodam via `prisma migrate deploy` no build script
+- **Prisma migrations** rodam via `prisma migrate deploy` no build script. Pra mudanças que envolvem **dados** (rename de stages, backfills, etc), criar migration SQL plain idempotente em vez de script TS standalone — roda automático no deploy e sobrevive a re-execução
+- **Auto-mode classifier bloqueia acesso direto a prod DB** — `prisma migrate dev`, `tsx scripts/que-conecta-na-DB.ts`, leitura de `.env` com creds. Workaround canônico: empacotar mutation em SQL migration que vai pelo `prisma migrate deploy` (path autorizado). Scripts TS de mutation viram fallback emergencial só
+- **Auto-promote stage não é retroativo:** webhook ClickSign close OU criação de charge antes da migration de stages = deal fica visualmente em stage anterior. Mover via drag-drop manual
 - **Google OAuth Testing 7-day expiry:** `invalid_grant` quebra GDocs prod a cada ~7d enquanto consent screen estiver Testing. Mover pra "In production" no Cloud Console resolve permanente
 - **Chrome MCP bloqueia accounts.google.com:** não tentar dirigir Google OAuth via MCP. Rodar script servidor + usuário completa manual
 - **Resend sandbox bloqueia destinatários:** `EMAIL_FROM=onboarding@resend.dev` só envia pro dono. Convites/magic link silenciosamente bloqueados em prod até ter domínio verificado

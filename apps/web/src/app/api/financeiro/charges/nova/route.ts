@@ -17,7 +17,13 @@ import {
   getPixQrCode,
   getBankSlipData,
 } from "@/lib/asaas/payments";
-import { composeSplits, CommissionBuildError } from "@/lib/asaas/commission";
+import {
+  composeSplits,
+  CommissionBuildError,
+  generatePayerVisibleDescription,
+  type SplitDisplay,
+} from "@/lib/asaas/commission";
+import { notifyChargeEvent } from "@/lib/financeiro/notifications";
 
 // Fase 6: discriminated union — wallet Asaas (split nativo) OU PIX externo (post-payment dispatch)
 const splitWalletSchema = z.object({
@@ -55,6 +61,15 @@ const createSchema = z.object({
   description: z.string().max(500).optional(),
   kind: z.enum(["avulsa", "aluguel", "outros"]).default("avulsa"),
   customSplits: z.array(splitEntrySchema).max(10).optional(),
+  // Pagadoria 2026-05-09 — categoria livre + vínculo opcional a deal
+  categoryLabel: z.string().max(100).optional(),
+  dealId: z.string().optional(),
+  display: z
+    .object({
+      hiddenRecipientIds: z.array(z.string()),
+      consolidationMap: z.record(z.string()),
+    })
+    .optional(),
 });
 
 /**
@@ -119,6 +134,22 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Cross-org guard: se dealId vier, valida que pertence à mesma org
+  let resolvedDealTitle: string | null = null;
+  if (parsed.data.dealId) {
+    const deal = await prisma.deal.findFirst({
+      where: { id: parsed.data.dealId, pipeline: { orgId: ctx.orgId } },
+      select: { id: true, title: true },
+    });
+    if (!deal) {
+      return NextResponse.json(
+        { error: "Deal não encontrado nesta org" },
+        { status: 404 }
+      );
+    }
+    resolvedDealTitle = deal.title ?? null;
+  }
+
   const apiKey = decryptSecret({
     ciphertext: account.apiKeyEncrypted,
     iv: account.apiKeyIvBase64,
@@ -160,6 +191,19 @@ export async function POST(req: NextRequest) {
     throw err;
   }
 
+  // Resolve descrição final aplicando hide-from-payer quando há display block
+  const display: SplitDisplay | undefined = parsed.data.display;
+  let finalDescription = parsed.data.description;
+  if (!finalDescription && (parsed.data.customSplits ?? []).length > 0) {
+    finalDescription = generatePayerVisibleDescription({
+      splits: parsed.data.customSplits ?? [],
+      hiddenRecipientIds: display?.hiddenRecipientIds ?? [],
+      dealTitle: resolvedDealTitle,
+      kind: parsed.data.kind === "avulsa" ? "avulsa" : parsed.data.kind,
+      categoryLabel: parsed.data.categoryLabel ?? null,
+    });
+  }
+
   try {
     const payment = await createPayment({
       input: {
@@ -167,8 +211,10 @@ export async function POST(req: NextRequest) {
         billingType: parsed.data.billingType,
         value: parsed.data.value,
         dueDate: parsed.data.dueDate,
-        description: parsed.data.description,
-        externalReference: `avulsa:${customer.id}:${Date.now()}`,
+        description: finalDescription,
+        externalReference: parsed.data.dealId
+          ? `avulsa:${customer.id}:deal:${parsed.data.dealId}:${Date.now()}`
+          : `avulsa:${customer.id}:${Date.now()}`,
         split: asaasSplits,
       },
       apiKey,
@@ -189,9 +235,11 @@ export async function POST(req: NextRequest) {
     const charge = await prisma.commissionCharge.create({
       data: {
         orgId: ctx.orgId,
+        dealId: parsed.data.dealId ?? null,
         asaasCustomerId: customer.id,
         asaasPaymentId: payment.id,
         kind: parsed.data.kind,
+        categoryLabel: parsed.data.categoryLabel ?? null,
         billingType: parsed.data.billingType,
         value: payment.value,
         originalDueDate: new Date(payment.dueDate),
@@ -205,8 +253,12 @@ export async function POST(req: NextRequest) {
         pixQrCodePayload: pixQr?.payload ?? null,
         pixQrCodeImage: pixQr?.encodedImage ?? null,
         splitJson:
-          asaasSplits || externalSplits.length > 0
-            ? ({ splits: asaasSplits ?? [], external: externalSplits } as any)
+          asaasSplits || externalSplits.length > 0 || display
+            ? ({
+                splits: asaasSplits ?? [],
+                external: externalSplits,
+                display: display ?? undefined,
+              } as any)
             : null,
       },
     });
@@ -225,12 +277,22 @@ export async function POST(req: NextRequest) {
         resource: `commission_charge:${charge.id}`,
         metadata: {
           kind: parsed.data.kind,
+          categoryLabel: parsed.data.categoryLabel ?? null,
+          dealId: parsed.data.dealId ?? null,
           billingType: parsed.data.billingType,
           value: payment.value,
           customerId: customer.id,
+          customSplitsCount: parsed.data.customSplits?.length ?? 0,
+          hiddenSplitsCount: display?.hiddenRecipientIds.length ?? 0,
         },
       }
     );
+
+    void notifyChargeEvent({
+      chargeId: charge.id,
+      event: "created",
+      orgId: ctx.orgId,
+    });
 
     return NextResponse.json({ charge: { id: charge.id } });
   } catch (err) {

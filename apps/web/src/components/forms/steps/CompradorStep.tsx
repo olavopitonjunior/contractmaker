@@ -117,11 +117,19 @@ function PessoaFisicaFields({
           />
         </FormField>
 
-        <FormField label="Email" className="md:col-span-2">
+        <FormField label="Email">
           <Input
             {...form.register(`${prefix}.email`)}
             type="email"
             placeholder="email@exemplo.com"
+          />
+        </FormField>
+
+        <FormField label="Celular (com DDD)">
+          <Input
+            {...form.register(`${prefix}.mobile_phone`)}
+            type="tel"
+            placeholder="(11) 99999-9999"
           />
         </FormField>
       </div>

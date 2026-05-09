@@ -14,6 +14,7 @@ const pessoaFisicaSchema = z.object({
   // H.3 (Phase H, 2026-04-18) — exigido pelo TJSP pedido-cível (code 606 sem)
   nome_mae: z.string().optional().default(""),
   email: z.string().email("Email invalido").optional().or(z.literal("")),
+  mobile_phone: z.string().optional().default(""),
   endereco: z.string().optional().default(""),
   numero: z.string().optional().default(""),
   complemento: z.string().optional().default(""),
@@ -33,6 +34,7 @@ const pessoaFisicaSchema = z.object({
     nome_mae: z.string().optional().default(""),
     naturalidade: z.string().optional().default(""),
     email: z.string().email("Email invalido").optional().or(z.literal("")),
+    mobile_phone: z.string().optional().default(""),
     // Endereço próprio do cônjuge — só usado quando endereco_igual_ao_titular === false
     endereco: z.string().optional().default(""),
     numero: z.string().optional().default(""),
@@ -82,6 +84,7 @@ const pessoaJuridicaSchema = z.object({
     nome_mae: z.string().optional().default(""),
     naturalidade: z.string().optional().default(""),
     email: z.string().email("Email invalido").optional().or(z.literal("")),
+    mobile_phone: z.string().optional().default(""),
   }).optional(),
 });
 
@@ -186,6 +189,12 @@ export const step7Schema = z.object({
     quem_paga_texto: z.string().optional().default("Parte Compradora"),
     quando_paga: z.string().optional().default("assinatura"),
     quando_paga_texto: z.string().optional().default("no ato da assinatura"),
+    // Captura na cobrança (Pagadoria) — bias do tipo de cobrança e prazo
+    // pós-marco. Default "qualquer" deixa o corretor escolher na hora de
+    // gerar a cobrança. `prazo_dias_apos_marco` quando ausente cai na
+    // heurística de due-date-resolver.ts (3/30/60 por marco).
+    forma_pagamento_preferida: z.enum(["pix", "boleto", "qualquer"]).optional().default("qualquer"),
+    prazo_dias_apos_marco: z.number().optional(),
     // H.16 (Phase H, 2026-04-18) — suporta corretor PF ou imobiliária PJ
     corretora_tipo_pessoa: z
       .enum(["fisica", "juridica"])
@@ -208,6 +217,7 @@ export const step7Schema = z.object({
       tipo_pessoa: z.enum(["fisica", "juridica"]).optional(),
       creci: z.string().optional().default(""),
       email: z.string().email("Email invalido").optional().or(z.literal("")),
+      mobile_phone: z.string().optional().default(""),
       percentual: z.number().optional(),
       valor: z.number().optional(),
       incluir_como_signatario: z.boolean().optional().default(false),

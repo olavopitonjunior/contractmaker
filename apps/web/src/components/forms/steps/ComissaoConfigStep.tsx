@@ -212,11 +212,41 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
                 onChange={(v) => form.setValue("comissao.quando_paga", v, { shouldDirty: true })}
                 options={[
                   { value: "assinatura", label: "Na assinatura do contrato" },
+                  { value: "chaves", label: "Na entrega das chaves" },
                   { value: "quitacao", label: "Na quitação total" },
                   { value: "registro", label: "No registro da escritura" },
                   { value: "parcelas", label: "Em parcelas" },
                 ]}
               />
+            </FormField>
+
+            <FormField label="Forma de pagamento preferida">
+              <NativeSelect
+                value={form.watch("comissao.forma_pagamento_preferida") || "qualquer"}
+                onChange={(v) =>
+                  form.setValue("comissao.forma_pagamento_preferida", v, { shouldDirty: true })
+                }
+                options={[
+                  { value: "qualquer", label: "Qualquer (escolher na cobrança)" },
+                  { value: "pix", label: "PIX" },
+                  { value: "boleto", label: "Boleto" },
+                ]}
+              />
+            </FormField>
+
+            <FormField label="Prazo após o marco (dias)">
+              <Input
+                type="number"
+                min="0"
+                placeholder="Padrão da modalidade"
+                {...form.register("comissao.prazo_dias_apos_marco", {
+                  valueAsNumber: true,
+                  setValueAs: (v) => (v === "" || isNaN(v) ? undefined : Number(v)),
+                })}
+              />
+              <p className="text-xs text-muted-foreground">
+                Se vazio: 3 dias úteis (assinatura), 30 dias (chaves), 60 dias (registro).
+              </p>
             </FormField>
           </div>
 
@@ -338,8 +368,7 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
                     />
                   </FormField>
                   <FormField
-                    label="E-mail (para assinatura digital)"
-                    className="md:col-span-2"
+                    label="E-mail (para assinatura e notificações)"
                   >
                     <Input
                       type="email"
@@ -347,6 +376,15 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
                         `comissao.comissionados.${index}.email`
                       )}
                       placeholder="contato@imobiliaria.com"
+                    />
+                  </FormField>
+                  <FormField label="Celular (com DDD)">
+                    <Input
+                      type="tel"
+                      {...form.register(
+                        `comissao.comissionados.${index}.mobile_phone`
+                      )}
+                      placeholder="(11) 99999-9999"
                     />
                   </FormField>
                   <Controller

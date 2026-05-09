@@ -47,7 +47,11 @@ export async function GET(
   }
 
   const splitJson = (charge.splitJson ?? null) as
-    | { splits?: unknown[]; external?: unknown[] }
+    | {
+        splits?: unknown[];
+        external?: unknown[];
+        display?: { hiddenRecipientIds?: string[]; consolidationMap?: Record<string, string> };
+      }
     | null;
 
   const transfers = await prisma.asaasTransfer.findMany({
@@ -73,6 +77,7 @@ export async function GET(
   return NextResponse.json({
     asaasSplits: splitJson?.splits ?? [],
     externalSplits: splitJson?.external ?? [],
+    display: splitJson?.display ?? null,
     transfers,
   });
 }

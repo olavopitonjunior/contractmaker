@@ -7,7 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, PenLine, Receipt } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, PenLine, Receipt, ChevronDown } from "lucide-react";
 import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
 import { cn } from "@/lib/utils";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
@@ -128,6 +134,9 @@ export function DealDetail({ deal }: DealDetailProps) {
   const [generating, setGenerating] = useState(false);
   const [confirmDuplicateOpen, setConfirmDuplicateOpen] = useState(false);
   const [chargeDialogOpen, setChargeDialogOpen] = useState(false);
+  const [chargeDialogMode, setChargeDialogMode] = useState<
+    "commission_from_deal" | "avulsa_in_deal"
+  >("commission_from_deal");
   const [chargeRefreshKey, setChargeRefreshKey] = useState(0);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -953,13 +962,34 @@ export function DealDetail({ deal }: DealDetailProps) {
                   Gere cobranças de comissão a partir do contrato aprovado.
                 </p>
               </div>
-              <Button
-                onClick={() => setChargeDialogOpen(true)}
-                disabled={!deal.contracts.some((c) => c.status === "aprovado")}
-              >
-                <Wallet className="h-4 w-4 mr-1" />
-                Gerar cobrança
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button>
+                    <Wallet className="h-4 w-4 mr-1" />
+                    Nova cobrança
+                    <ChevronDown className="h-4 w-4 ml-1" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem
+                    disabled={!deal.contracts.some((c) => c.status === "aprovado")}
+                    onClick={() => {
+                      setChargeDialogMode("commission_from_deal");
+                      setChargeDialogOpen(true);
+                    }}
+                  >
+                    💼 Comissão (do contrato)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onClick={() => {
+                      setChargeDialogMode("avulsa_in_deal");
+                      setChargeDialogOpen(true);
+                    }}
+                  >
+                    📄 Avulsa neste deal
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
             {!deal.contracts.some((c) => c.status === "aprovado") && (
               <div className="p-3 border rounded-md bg-amber-50 text-sm text-amber-900">
@@ -976,6 +1006,7 @@ export function DealDetail({ deal }: DealDetailProps) {
         open={chargeDialogOpen}
         onOpenChange={setChargeDialogOpen}
         onCreated={() => setChargeRefreshKey((k) => k + 1)}
+        mode={chargeDialogMode}
       />
 
       <AlertDialog open={confirmDuplicateOpen} onOpenChange={setConfirmDuplicateOpen}>

@@ -1227,6 +1227,10 @@ model CommissionCharge {
   asaasPaymentId      String    @unique
   asaasInstallmentId  String?
   kind                String    @default("commission") // commission | avulsa | aluguel | outros
+  // Texto livre para identificação de cobranças avulsas (ex.: "Reembolso de
+  // matrícula", "Honorários advogado"). Filtrável e agrupável no dashboard.
+  // Não usado em kind="commission".
+  categoryLabel       String?
   billingType         String // PIX | BOLETO
   value               Float
   netValue            Float?
@@ -1317,10 +1321,19 @@ model OrgFinancialSettings {
   brandDisplayName        String?
   brandSupportEmail       String?
   brandSupportPhone       String?
-  // Defaults de notificação (NotificationDisabled do Asaas)
+  // Defaults de notificação Asaas → pagador (NotificationDisabled)
   notifyEmail             Boolean  @default(true)
   notifySms               Boolean  @default(false)
   defaultDueDays          Int      @default(7)
+  // Régua interna (Pagadoria 2026-05-09): notificações ao corretor/admins/comissionados
+  // por email + sino quando a cobrança muda de estado. Asaas continua notificando
+  // o pagador conforme `notifyEmail`/`notifySms`.
+  notifyOwnerOnCreated    Boolean  @default(true)
+  notifyOwnerOnPaid       Boolean  @default(true)
+  notifyOwnerOnOverdue    Boolean  @default(true)
+  notifyOwnerOnDueSoon    Boolean  @default(true)
+  notifyAdminsOnPaid      Boolean  @default(false)
+  notifyComissionados     Boolean  @default(true)
   // Política de taxa para splits PIX externos (Fase 6):
   //   "org_absorbs"           — beneficiário recebe valor cheio, org paga taxa Asaas
   //   "deduct_from_recipient" — taxa é descontada do split do beneficiário
@@ -1356,6 +1369,10 @@ model SplitRecipient {
   // Comum:
   cpfCnpj       String?
   description   String?
+  // Email pra notificação interna (régua Pagadoria) quando cobrança paga
+  // dispara split pra este destinatário. Opt-in: sem email, comissionado
+  // não é notificado (Asaas notifica direto o pagador, não o beneficiário).
+  email         String?
   active        Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt

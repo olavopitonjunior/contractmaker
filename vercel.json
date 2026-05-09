@@ -32,6 +32,10 @@
     {
       "path": "/api/cron/api-usage/cleanup",
       "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/charges/due-soon",
+      "schedule": "0 12 * * *"
     }
   ]
 }
