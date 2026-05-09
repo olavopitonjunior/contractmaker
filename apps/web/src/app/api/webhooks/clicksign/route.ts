@@ -12,10 +12,7 @@ import {
   parseWebhookEventName,
   verifyWebhookSignature,
 } from "@/lib/clicksign/webhook";
-import {
-  listDocumentFiles,
-  listEnvelopeDocuments,
-} from "@/lib/clicksign/envelopes";
+import { listEnvelopeDocuments } from "@/lib/clicksign/envelopes";
 import type { WebhookPayload } from "@/lib/clicksign/types";
 
 export const runtime = "nodejs";
@@ -237,36 +234,15 @@ async function resolveAndDownload(envelopeId: string, clicksignId: string) {
     const docs = await listEnvelopeDocuments(clicksignId);
     const docsData = (docs as { data?: unknown }).data;
     if (!Array.isArray(docsData)) return;
-    for (const doc of docsData as Array<{ id?: string }>) {
-      if (!doc.id) continue;
-      const filesResp = await listDocumentFiles(clicksignId, doc.id);
-      const filesData = (filesResp as { data?: unknown }).data;
-      if (!Array.isArray(filesData)) continue;
-      // Procura signed primeiro
-      for (const file of filesData as Array<{
-        attributes?: {
-          kind?: string;
-          name?: string;
-          url?: string;
-          download_url?: string;
-        };
-      }>) {
-        const kind = file.attributes?.kind ?? file.attributes?.name ?? "";
-        const url = file.attributes?.url ?? file.attributes?.download_url;
-        if (url && /sign|closed|finalized/i.test(kind)) {
-          await downloadSignedPdf(envelopeId, url);
-          return;
-        }
-      }
-      // Fallback: primeiro arquivo com URL
-      for (const file of filesData as Array<{
-        attributes?: { url?: string; download_url?: string };
-      }>) {
-        const url = file.attributes?.url ?? file.attributes?.download_url;
-        if (url) {
-          await downloadSignedPdf(envelopeId, url);
-          return;
-        }
+    // ClickSign v3: cada doc tem `links.files: { original, signed, ziped }`
+    // com URLs pré-assinadas direto pro PDF binário.
+    for (const doc of docsData as Array<{
+      links?: { files?: { signed?: string; original?: string } };
+    }>) {
+      const url = doc.links?.files?.signed ?? doc.links?.files?.original;
+      if (url) {
+        await downloadSignedPdf(envelopeId, url);
+        return;
       }
     }
   } catch (err) {

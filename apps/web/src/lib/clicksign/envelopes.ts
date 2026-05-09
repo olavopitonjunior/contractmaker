@@ -246,8 +246,13 @@ export async function listEnvelopeEvents(envelopeId: string) {
 /**
  * Lista documentos do envelope. Atributos retornados v3:
  * `status, filename, template, metadata, migrated, created, modified`.
- * Cada doc tem `links.files` apontando pro endpoint que lista os
- * arquivos do documento (original + signed PDF após close).
+ *
+ * Cada doc tem `links.files` (objeto, não string) com URLs pré-assinadas
+ * direto pro PDF binário:
+ * ```
+ * { original: "https://...", signed: "https://...", ziped: "https://..." }
+ * ```
+ * Após close, `signed` aponta pro PDF com certificado de assinatura.
  */
 export async function listEnvelopeDocuments(envelopeId: string) {
   return clicksignRequest<ClicksignResponse>({
@@ -256,18 +261,6 @@ export async function listEnvelopeDocuments(envelopeId: string) {
   });
 }
 
-/**
- * Lista arquivos de um documento — após o envelope fechar, retorna o
- * PDF original + PDF assinado (com certificado). Cada item tem
- * `attributes.url` ou `attributes.download_url` apontando pro arquivo
- * binário.
- */
-export async function listDocumentFiles(envelopeId: string, documentId: string) {
-  return clicksignRequest<ClicksignResponse>({
-    method: "GET",
-    path: `/api/v3/envelopes/${envelopeId}/documents/${documentId}/files`,
-  });
-}
 
 /**
  * Lista webhooks cadastrados na conta ClickSign. Usado pra diagnosticar

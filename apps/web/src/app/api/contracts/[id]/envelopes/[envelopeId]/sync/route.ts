@@ -4,7 +4,6 @@ import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 import {
   getEnvelope,
-  listDocumentFiles,
   listEnvelopeDocuments,
   listEnvelopeEvents,
   listEnvelopeRequirements,
@@ -68,22 +67,6 @@ export async function POST(
         listEnvelopeDocuments(envelope.clicksignId).catch(() => null),
       ]);
 
-    // Pra debug=1: também busca files do primeiro doc pra ver shape v3
-    let firstDocFilesResp: unknown = null;
-    let firstDocFilesError: string | null = null;
-    const firstDocId = (documentsResp as { data?: Array<{ id?: string }> })
-      ?.data?.[0]?.id;
-    if (firstDocId && envelope.clicksignId) {
-      try {
-        firstDocFilesResp = await listDocumentFiles(
-          envelope.clicksignId,
-          firstDocId
-        );
-      } catch (err) {
-        firstDocFilesError =
-          err instanceof Error ? err.message : String(err);
-      }
-    }
 
     const remoteStatus = (
       envResp as { data?: { attributes?: { status?: string } } }
@@ -222,9 +205,6 @@ export async function POST(
           requirementsRaw: requirementsResp,
           eventsRaw: eventsResp,
           documentsRaw: documentsResp,
-          firstDocFilesRaw: firstDocFilesResp,
-          firstDocFilesError,
-          firstDocId,
           aggregatedByEmail: Array.from(stateByEmail.entries()).map(
             ([email, state]) => ({
               email,
@@ -364,39 +344,21 @@ async function resolveSignedUrl(
   const fromIncluded = extractSignedUrl(envResp);
   if (fromIncluded) return fromIncluded;
 
-  // 2. v3: lista documents → pra cada doc lista files → pega URL do
-  //    PDF assinado. ClickSign v3 separa em 2 endpoints:
-  //    /documents (metadata) e /documents/{id}/files (binários).
+  // 2. v3: lista documents — cada doc tem `links.files` (objeto):
+  //    { original, signed, ziped } com URLs pré-assinadas direto pro
+  //    PDF binário (sem precisar JSON intermediário).
   try {
     const docs = await listEnvelopeDocuments(clicksignId);
     const docsData = (docs as { data?: unknown }).data;
     if (!Array.isArray(docsData)) return null;
-    for (const doc of docsData as Array<{ id?: string }>) {
-      if (!doc.id) continue;
-      const filesResp = await listDocumentFiles(clicksignId, doc.id);
-      const filesData = (filesResp as { data?: unknown }).data;
-      if (!Array.isArray(filesData)) continue;
-      // Procura primeiro o file marcado como signed/closed; cai pro
-      // primeiro com URL caso a v3 não exponha o flag.
-      for (const file of filesData as Array<{
-        attributes?: {
-          kind?: string;
-          name?: string;
-          url?: string;
-          download_url?: string;
-        };
-      }>) {
-        const kind = file.attributes?.kind ?? file.attributes?.name ?? "";
-        const url = file.attributes?.url ?? file.attributes?.download_url;
-        if (url && /sign|closed|finalized/i.test(kind)) return url;
-      }
-      // Fallback: primeiro arquivo com URL
-      for (const file of filesData as Array<{
-        attributes?: { url?: string; download_url?: string };
-      }>) {
-        const url = file.attributes?.url ?? file.attributes?.download_url;
-        if (url) return url;
-      }
+    for (const doc of docsData as Array<{
+      links?: { files?: { signed?: string; original?: string } };
+    }>) {
+      const signedUrl = doc.links?.files?.signed;
+      if (signedUrl) return signedUrl;
+      // Fallback: original (envelope ainda não fechou ou v3 mudou flags)
+      const originalUrl = doc.links?.files?.original;
+      if (originalUrl) return originalUrl;
     }
   } catch (err) {
     console.error("[envelope sync] falha resolveSignedUrl:", err);
