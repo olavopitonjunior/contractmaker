@@ -58,12 +58,13 @@ export async function POST(
   }
 
   try {
-    const [envResp, signersResp, requirementsResp, eventsResp] =
+    const [envResp, signersResp, requirementsResp, eventsResp, documentsResp] =
       await Promise.all([
         getEnvelope(envelope.clicksignId),
         listEnvelopeSigners(envelope.clicksignId),
         listEnvelopeRequirements(envelope.clicksignId),
         listEnvelopeEvents(envelope.clicksignId).catch(() => null),
+        listEnvelopeDocuments(envelope.clicksignId).catch(() => null),
       ]);
 
     const remoteStatus = (
@@ -202,6 +203,7 @@ export async function POST(
           signersRaw: signersResp,
           requirementsRaw: requirementsResp,
           eventsRaw: eventsResp,
+          documentsRaw: documentsResp,
           aggregatedByEmail: Array.from(stateByEmail.entries()).map(
             ([email, state]) => ({
               email,
