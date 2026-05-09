@@ -43,10 +43,29 @@ export default async function PipelinePage() {
           deals: {
             orderBy: { position: "asc" },
             include: {
-              form: { select: { id: true, status: true, token: true } },
+              form: {
+                select: {
+                  id: true,
+                  status: true,
+                  token: true,
+                  createdAt: true,
+                  completedAt: true,
+                },
+              },
               contracts: {
                 where: { isLatest: true },
                 select: { id: true, version: true },
+              },
+              envelopes: {
+                where: { source: "contract", status: "closed" },
+                select: { closedAt: true },
+                orderBy: { closedAt: "desc" },
+                take: 1,
+              },
+              commissionCharges: {
+                select: { createdAt: true },
+                orderBy: { createdAt: "asc" },
+                take: 1,
               },
             },
           },
@@ -60,9 +79,11 @@ export default async function PipelinePage() {
   }
 
   const allDeals = pipeline.stages.flatMap((s) => s.deals);
-  const concludedStage = pipeline.stages.find((s) => s.name === "Concluído");
+  const concludedStage = pipeline.stages.find((s) => s.name === "Comissão paga");
   const concludedDeals = concludedStage?.deals.length || 0;
-  const activeDeals = allDeals.length - concludedDeals;
+  const lostStage = pipeline.stages.find((s) => s.name === "Negócio perdido");
+  const lostDeals = lostStage?.deals.length || 0;
+  const activeDeals = allDeals.length - concludedDeals - lostDeals;
   const totalValue = allDeals.reduce((sum, d) => sum + (d.value || 0), 0);
   const conversionRate =
     allDeals.length > 0 ? Math.round((concludedDeals / allDeals.length) * 100) : 0;
@@ -79,6 +100,13 @@ export default async function PipelinePage() {
       formStatus: deal.form?.status || null,
       formToken: deal.form?.token || null,
       hasContract: deal.contracts.length > 0,
+      formOpenedAt: deal.form?.createdAt?.toISOString() ?? null,
+      formCompletedAt: deal.form?.completedAt?.toISOString() ?? null,
+      contractSignedAt: deal.envelopes[0]?.closedAt?.toISOString() ?? null,
+      chargeCreatedAt: deal.commissionCharges[0]?.createdAt.toISOString() ?? null,
+      commissionPaidAt: deal.commissionPaidAt?.toISOString() ?? null,
+      lostAt: deal.lostAt?.toISOString() ?? null,
+      lostReason: deal.lostReason ?? null,
     })),
   }));
 

@@ -53,8 +53,11 @@ async function main() {
           create: [
             { name: "Formulário", color: "#6366f1", position: 0 },
             { name: "Confecção de Contrato", color: "#f59e0b", position: 1 },
-            { name: "Assinatura", color: "#3b82f6", position: 2 },
-            { name: "Concluído", color: "#22c55e", position: 3 },
+            { name: "Enviado para assinatura", color: "#3b82f6", position: 2 },
+            { name: "Contrato assinado", color: "#0ea5e9", position: 3 },
+            { name: "Cobrança emitida", color: "#a855f7", position: 4 },
+            { name: "Comissão paga", color: "#22c55e", position: 5 },
+            { name: "Negócio perdido", color: "#ef4444", position: 6 },
           ],
         },
       },

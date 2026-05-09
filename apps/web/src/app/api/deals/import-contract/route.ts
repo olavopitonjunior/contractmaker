@@ -76,6 +76,24 @@ export async function POST(req: NextRequest) {
   const file = formData.get("file");
   const title = ((formData.get("title") as string | null) || "").trim() || null;
 
+  const ALLOWED_TARGET_STAGES = [
+    "Confecção de Contrato",
+    "Enviado para assinatura",
+    "Contrato assinado",
+  ] as const;
+  type AllowedTargetStage = (typeof ALLOWED_TARGET_STAGES)[number];
+  const rawTargetStage =
+    (formData.get("targetStage") as string | null) || "Confecção de Contrato";
+  if (!ALLOWED_TARGET_STAGES.includes(rawTargetStage as AllowedTargetStage)) {
+    return NextResponse.json(
+      {
+        error: `targetStage inválido. Aceitos: ${ALLOWED_TARGET_STAGES.join(", ")}`,
+      },
+      { status: 400 }
+    );
+  }
+  const targetStageName = rawTargetStage as AllowedTargetStage;
+
   if (!(file instanceof File)) {
     return NextResponse.json(
       { error: "Campo 'file' é obrigatório" },
@@ -127,6 +145,7 @@ export async function POST(req: NextRequest) {
       }
 
       const stage =
+        pipeline.stages.find((s) => s.name === targetStageName) ??
         pipeline.stages.find((s) => s.name === "Confecção de Contrato") ??
         pipeline.stages[0];
 
@@ -228,6 +247,7 @@ export async function POST(req: NextRequest) {
               filename: file.name,
               mime,
               sizeBytes: file.size,
+              targetStage: targetStageName,
             },
             auth.actor
           ),

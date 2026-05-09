@@ -251,6 +251,12 @@ model Deal {
   value      Float?
   dataJson   Json?
   position   Int      @default(0)
+  // SLA pós-assinatura — datas terminais do funil.
+  // commissionPaidAt: setado pelo botão "Marcar comissão paga" no DealDetail.
+  // lostAt + lostReason: terminal alternativo via mark-lost (qualquer stage).
+  commissionPaidAt DateTime?
+  lostAt           DateTime?
+  lostReason       String?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -482,6 +488,9 @@ model SalesForm {
   schemaType String   @default("compra_venda_v1")
   dataJson   Json     @default("{}")
   status     String   @default("rascunho")
+  // Setado quando status transiciona pra "completo"|"vinculado". Marco SLA
+  // do funil — diferente de updatedAt (qualquer auto-save bumpa updatedAt).
+  completedAt DateTime?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 

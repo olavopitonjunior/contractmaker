@@ -278,6 +278,36 @@ export async function runCreateCommissionCharge(
       },
     });
 
+    // Auto-promove deal pra "Cobrança emitida". Não retrocede se já passou —
+    // criação de cobrança extra pra um deal em "Comissão paga" mantém stage.
+    let stageMovedTo: string | null = null;
+    {
+      const dealWithStage = await prisma.deal.findUnique({
+        where: { id: deal.id },
+        include: { stage: true, pipeline: { include: { stages: true } } },
+      });
+      const cobrancaStage = dealWithStage?.pipeline.stages.find(
+        (s) => s.name === "Cobrança emitida"
+      );
+      const linearOrder = [
+        "Formulário",
+        "Confecção de Contrato",
+        "Enviado para assinatura",
+        "Contrato assinado",
+      ];
+      if (
+        dealWithStage &&
+        cobrancaStage &&
+        linearOrder.includes(dealWithStage.stage.name)
+      ) {
+        await prisma.deal.update({
+          where: { id: dealWithStage.id },
+          data: { stageId: cobrancaStage.id },
+        });
+        stageMovedTo = cobrancaStage.id;
+      }
+    }
+
     if (!input.skipAudit) {
       await audit(
         {
@@ -297,6 +327,7 @@ export async function runCreateCommissionCharge(
             asaasPaymentId: payment.id,
             value: payment.value,
             billingType: input.billingType,
+            stageMovedTo,
           },
         }
       );

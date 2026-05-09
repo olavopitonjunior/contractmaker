@@ -62,6 +62,7 @@ export async function PATCH(
       dataJson: mergedData,
       title: body.title ?? form.title,
       status: newStatus,
+      ...(isFinalizing ? { completedAt: new Date() } : {}),
     },
   });
 

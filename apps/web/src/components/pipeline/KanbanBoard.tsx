@@ -116,15 +116,38 @@ export function KanbanBoard({ stages: initialStages }: KanbanBoardProps) {
       onDragEnd={handleDragEnd}
     >
       <div className="flex gap-4 overflow-x-auto pb-4">
-        {stages.map((stage) => (
-          <KanbanColumn
-            key={stage.id}
-            id={stage.id}
-            name={stage.name}
-            color={stage.color}
-            deals={stage.deals}
-          />
-        ))}
+        {stages
+          .filter((s) => s.name !== "Negócio perdido")
+          .map((stage) => (
+            <KanbanColumn
+              key={stage.id}
+              id={stage.id}
+              name={stage.name}
+              color={stage.color}
+              deals={stage.deals}
+            />
+          ))}
+        {stages.find((s) => s.name === "Negócio perdido") && (
+          <>
+            <div
+              aria-hidden
+              className="self-stretch border-l border-muted mx-1"
+            />
+            {(() => {
+              const lost = stages.find((s) => s.name === "Negócio perdido")!;
+              return (
+                <KanbanColumn
+                  key={lost.id}
+                  id={lost.id}
+                  name={lost.name}
+                  color={lost.color}
+                  deals={lost.deals}
+                  isLost
+                />
+              );
+            })()}
+          </>
+        )}
       </div>
       <DragOverlay>
         {activeCard ? <KanbanCard deal={activeCard} isOverlay /> : null}

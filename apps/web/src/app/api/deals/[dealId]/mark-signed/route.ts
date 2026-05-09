@@ -14,8 +14,9 @@ export const runtime = "nodejs";
  * POST /api/deals/:dealId/mark-signed
  *
  * Newton-friendly Bearer twin de `/api/pipeline/deals/:dealId/mark-signed`.
- * Move deal de stage "Assinatura" para "Concluído". Sem HITL — operação
- * reversível via mover stage de volta.
+ * Move deal pra "Comissão paga" (terminal único pós-fusão de "Concluído").
+ * Aceita origens "Enviado para assinatura", "Contrato assinado" ou "Cobrança
+ * emitida". Sem HITL — reversível movendo stage de volta.
  */
 export async function POST(
   req: NextRequest,
@@ -41,24 +42,33 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  if (deal.stage.name !== "Assinatura") {
+  const ALLOWED_FROM = [
+    "Enviado para assinatura",
+    "Contrato assinado",
+    "Cobrança emitida",
+  ];
+  if (!ALLOWED_FROM.includes(deal.stage.name)) {
     return NextResponse.json(
-      { error: `Negócio precisa estar no estágio "Assinatura" (está em "${deal.stage.name}")` },
+      {
+        error: `Negócio precisa estar entre "Enviado para assinatura" e "Cobrança emitida" (está em "${deal.stage.name}")`,
+      },
       { status: 400 }
     );
   }
 
-  const concluidoStage = deal.pipeline.stages.find((s) => s.name === "Concluído");
-  if (!concluidoStage) {
+  const targetStage = deal.pipeline.stages.find(
+    (s) => s.name === "Comissão paga"
+  );
+  if (!targetStage) {
     return NextResponse.json(
-      { error: "Estágio Concluído não encontrado no pipeline" },
+      { error: 'Estágio "Comissão paga" não encontrado no pipeline' },
       { status: 400 }
     );
   }
 
   await prisma.deal.update({
     where: { id: deal.id },
-    data: { stageId: concluidoStage.id },
+    data: { stageId: targetStage.id, commissionPaidAt: new Date() },
   });
 
   await audit(
@@ -69,16 +79,16 @@ export async function POST(
       resource: deal.id,
       resourceType: "Deal",
       metadata: mergeAuditMetadata(
-        { fromStage: deal.stage.id, toStage: concluidoStage.id },
+        { kind: "commission_paid", fromStage: deal.stage.id, toStage: targetStage.id },
         apiAuth.actor
       ),
     }
   );
 
   return NextResponse.json({
-    status: "concluido",
+    status: "comissao_paga",
     dealId: deal.id,
-    stageId: concluidoStage.id,
-    stageName: concluidoStage.name,
+    stageId: targetStage.id,
+    stageName: targetStage.name,
   });
 }

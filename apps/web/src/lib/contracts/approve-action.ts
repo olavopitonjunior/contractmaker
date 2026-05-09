@@ -207,7 +207,7 @@ export async function runContractApproval(
     });
     if (deal?.pipeline) {
       const assinaturaStage = deal.pipeline.stages.find(
-        (s) => s.name === "Assinatura"
+        (s) => s.name === "Enviado para assinatura"
       );
       if (assinaturaStage) {
         await prisma.deal.update({

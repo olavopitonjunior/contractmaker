@@ -26,6 +26,17 @@ export default async function DealPage({
         orderBy: { version: "desc" },
       },
       certidaoJobs: { orderBy: { createdAt: "desc" }, take: 1 },
+      envelopes: {
+        where: { source: "contract", status: "closed" },
+        select: { closedAt: true },
+        orderBy: { closedAt: "desc" },
+        take: 1,
+      },
+      commissionCharges: {
+        select: { createdAt: true },
+        orderBy: { createdAt: "asc" },
+        take: 1,
+      },
     },
   });
 

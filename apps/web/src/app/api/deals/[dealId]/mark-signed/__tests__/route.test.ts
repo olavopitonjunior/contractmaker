@@ -24,13 +24,13 @@ const baseDeal = {
   id: "d1",
   stageId: "s1",
   pipelineId: "p1",
-  stage: { id: "s1", name: "Assinatura" },
+  stage: { id: "s1", name: "Enviado para assinatura" },
   pipeline: {
     orgId: "org-1",
     stages: [
-      { id: "s0", name: "Lead", position: 0 },
-      { id: "s1", name: "Assinatura", position: 1 },
-      { id: "s2", name: "Concluído", position: 2 },
+      { id: "s0", name: "Confecção de Contrato", position: 1 },
+      { id: "s1", name: "Enviado para assinatura", position: 2 },
+      { id: "s2", name: "Comissão paga", position: 5 },
     ],
   },
   form: { orgId: "org-1" },
@@ -61,17 +61,17 @@ describe("POST /api/deals/[dealId]/mark-signed", () => {
     expect(res.status).toBe(403);
   });
 
-  it("400 quando deal não está em stage Assinatura", async () => {
+  it("400 quando deal não está em stage permitida", async () => {
     mockAuth.mockResolvedValue(createMockSession() as never);
     mockPrisma.deal.findUnique.mockResolvedValue({
       ...baseDeal,
-      stage: { id: "s0", name: "Lead" },
+      stage: { id: "s0", name: "Confecção de Contrato" },
     } as never);
     const res = await POST(makeReq(), { params: { dealId: "d1" } });
     expect(res.status).toBe(400);
   });
 
-  it("200 happy path: move pra Concluído", async () => {
+  it("200 happy path: move pra Comissão paga", async () => {
     mockAuth.mockResolvedValue(createMockSession() as never);
     mockPrisma.deal.findUnique.mockResolvedValue(baseDeal as never);
     mockPrisma.deal.update.mockResolvedValue({} as never);
@@ -79,11 +79,11 @@ describe("POST /api/deals/[dealId]/mark-signed", () => {
     const res = await POST(makeReq(), { params: { dealId: "d1" } });
     expect(res.status).toBe(200);
     const json = await res.json();
-    expect(json.status).toBe("concluido");
-    expect(json.stageName).toBe("Concluído");
+    expect(json.status).toBe("comissao_paga");
+    expect(json.stageName).toBe("Comissão paga");
     expect(mockPrisma.deal.update).toHaveBeenCalledWith({
       where: { id: "d1" },
-      data: { stageId: "s2" },
+      data: expect.objectContaining({ stageId: "s2" }),
     });
   });
 });

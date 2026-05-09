@@ -6,6 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { ArrowLeft, FileSignature, Sparkles, Upload } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -16,6 +23,9 @@ export default function NewDealFromUploadPage() {
   const [title, setTitle] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [targetStage, setTargetStage] = useState<
+    "Confecção de Contrato" | "Enviado para assinatura" | "Contrato assinado"
+  >("Confecção de Contrato");
 
   async function handleSubmit() {
     if (!file) {
@@ -27,6 +37,7 @@ export default function NewDealFromUploadPage() {
     const formData = new FormData();
     formData.append("file", file);
     if (title.trim()) formData.append("title", title.trim());
+    formData.append("targetStage", targetStage);
 
     const idempotencyKey =
       typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -118,6 +129,41 @@ export default function NewDealFromUploadPage() {
             />
             <p className="text-xs text-muted-foreground">
               Se deixar em branco, vamos usar os nomes extraídos do contrato.
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="targetStage">Em qual etapa este negócio entra?</Label>
+            <Select
+              value={targetStage}
+              onValueChange={(v) =>
+                setTargetStage(
+                  v as
+                    | "Confecção de Contrato"
+                    | "Enviado para assinatura"
+                    | "Contrato assinado"
+                )
+              }
+              disabled={uploading}
+            >
+              <SelectTrigger id="targetStage">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="Confecção de Contrato">
+                  Confecção de Contrato (padrão)
+                </SelectItem>
+                <SelectItem value="Enviado para assinatura">
+                  Enviado para assinatura
+                </SelectItem>
+                <SelectItem value="Contrato assinado">
+                  Contrato assinado
+                </SelectItem>
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Use "Contrato assinado" pra contratos já assinados externamente
+              (escritura, distrato consumado, etc.).
             </p>
           </div>
 

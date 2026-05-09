@@ -3,16 +3,17 @@
 import { useDroppable } from "@dnd-kit/core";
 import { KanbanCard, type DealCard } from "./KanbanCard";
 import { cn } from "@/lib/utils";
-import { Plus } from "lucide-react";
+import { Plus, XOctagon } from "lucide-react";
 
 interface KanbanColumnProps {
   id: string;
   name: string;
   color: string;
   deals: DealCard[];
+  isLost?: boolean;
 }
 
-export function KanbanColumn({ id, name, color, deals }: KanbanColumnProps) {
+export function KanbanColumn({ id, name, color, deals, isLost }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
 
   const totalValue = deals.reduce((sum, d) => sum + (d.value || 0), 0);
@@ -21,15 +22,19 @@ export function KanbanColumn({ id, name, color, deals }: KanbanColumnProps) {
     <div
       ref={setNodeRef}
       className={cn(
-        "min-w-[260px] w-[260px] sm:min-w-[300px] sm:w-[300px] rounded-xl bg-muted/30 transition-all flex flex-col",
-        isOver && "bg-muted/60 ring-2 ring-primary/20"
+        "min-w-[260px] w-[260px] sm:min-w-[300px] sm:w-[300px] rounded-xl transition-all flex flex-col",
+        isLost ? "bg-red-500/[0.04]" : "bg-muted/30",
+        isOver && (isLost ? "bg-red-500/10 ring-2 ring-red-500/30" : "bg-muted/60 ring-2 ring-primary/20")
       )}
     >
       {/* Column header with color bar */}
       <div className="rounded-t-xl px-4 pt-1 pb-3" style={{ borderTop: `3px solid ${color}` }}>
         <div className="flex items-center justify-between mt-3">
           <div className="flex items-center gap-2">
-            <h3 className="font-semibold text-sm">{name}</h3>
+            {isLost && <XOctagon className="h-4 w-4 text-red-500" />}
+            <h3 className={cn("font-semibold text-sm", isLost && "text-red-700 dark:text-red-400")}>
+              {name}
+            </h3>
             <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-foreground/10 px-1.5 text-[11px] font-medium">
               {deals.length}
             </span>
@@ -54,7 +59,7 @@ export function KanbanColumn({ id, name, color, deals }: KanbanColumnProps) {
               <Plus className="h-4 w-4 text-muted-foreground" />
             </div>
             <p className="text-xs text-muted-foreground">
-              Arraste negocios aqui
+              {isLost ? "Sem negócios perdidos" : "Arraste negocios aqui"}
             </p>
           </div>
         )}

@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw } from "lucide-react";
+import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, PenLine, Receipt } from "lucide-react";
+import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
 import { cn } from "@/lib/utils";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
 import type { Assignment, DocumentKind } from "@/lib/forms/extracted-to-form";
@@ -74,12 +75,17 @@ interface DealDetailProps {
     title: string;
     value: number | null;
     createdAt: Date;
+    commissionPaidAt: Date | null;
+    lostAt: Date | null;
+    lostReason: string | null;
     stage: { name: string; color: string | null };
     form: {
       id: string;
       token: string;
       dataJson: unknown;
       status: string;
+      createdAt: Date;
+      completedAt: Date | null;
       attachments: {
         id: string;
         filename: string;
@@ -100,6 +106,8 @@ interface DealDetailProps {
       createdAt: Date;
     }[];
     contracts: { id: string; version: number; status: string; template: { name: string } | null; createdAt: Date }[];
+    envelopes: { closedAt: Date | null }[];
+    commissionCharges: { createdAt: Date }[];
   };
 }
 
@@ -118,7 +126,6 @@ export function DealDetail({ deal }: DealDetailProps) {
   const tabParam = searchParams.get("tab");
   const initialTab = tabParam && VALID_TABS.has(tabParam) ? tabParam : "dados";
   const [generating, setGenerating] = useState(false);
-  const [signing, setSigning] = useState(false);
   const [confirmDuplicateOpen, setConfirmDuplicateOpen] = useState(false);
   const [chargeDialogOpen, setChargeDialogOpen] = useState(false);
   const [chargeRefreshKey, setChargeRefreshKey] = useState(0);
@@ -130,6 +137,55 @@ export function DealDetail({ deal }: DealDetailProps) {
   const [pendingAttachmentId, setPendingAttachmentId] = useState<string | null>(null);
   const [deletingAttachment, setDeletingAttachment] = useState(false);
   const [reExtracting, setReExtracting] = useState(false);
+  const [markLostDialogOpen, setMarkLostDialogOpen] = useState(false);
+  const [markingPaid, setMarkingPaid] = useState(false);
+  const [reopening, setReopening] = useState(false);
+
+  const stageName = deal.stage.name;
+  const isLost = stageName === "Negócio perdido";
+  const isCommissionPaid = stageName === "Comissão paga";
+  const isTerminal = isLost || isCommissionPaid;
+
+  async function handleMarkCommissionPaid() {
+    setMarkingPaid(true);
+    try {
+      const res = await fetch(
+        `/api/pipeline/deals/${deal.id}/mark-commission-paid`,
+        { method: "POST" }
+      );
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success("Comissão marcada como paga!");
+        router.refresh();
+      } else {
+        toast.error(data.error || "Erro ao marcar comissão paga");
+      }
+    } catch {
+      toast.error("Erro de conexão");
+    } finally {
+      setMarkingPaid(false);
+    }
+  }
+
+  async function handleReopen() {
+    setReopening(true);
+    try {
+      const res = await fetch(`/api/pipeline/deals/${deal.id}/reopen`, {
+        method: "POST",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success(`Negócio reaberto em "${data.stageName}"`);
+        router.refresh();
+      } else {
+        toast.error(data.error || "Erro ao reabrir negócio");
+      }
+    } catch {
+      toast.error("Erro de conexão");
+    } finally {
+      setReopening(false);
+    }
+  }
 
   // Detecta deal com contrato importado (templateId=null). UI muda em alguns
   // pontos: esconde "Confeccionar Contrato" (substituído por "Abrir contrato"),
@@ -184,27 +240,6 @@ export function DealDetail({ deal }: DealDetailProps) {
       return;
     }
     doGenerateContract();
-  }
-
-  async function handleMarkSigned() {
-    setSigning(true);
-    try {
-      const res = await fetch(
-        `/api/pipeline/deals/${deal.id}/mark-signed`,
-        { method: "POST" }
-      );
-      if (res.ok) {
-        toast.success("Negócio marcado como assinado e movido para Concluído!");
-        router.refresh();
-      } else {
-        const data = await res.json();
-        toast.error(data.error || "Erro ao marcar como assinado");
-      }
-    } catch {
-      toast.error("Erro de conexão");
-    } finally {
-      setSigning(false);
-    }
   }
 
   function handleCopyFormLink() {
@@ -410,16 +445,38 @@ export function DealDetail({ deal }: DealDetailProps) {
               {generating ? "Gerando..." : "Confeccionar Contrato"}
             </Button>
           )}
-          {deal.stage.name === "Assinatura" && (
+          {stageName === "Cobrança emitida" && (
             <Button
               size="sm"
               variant="default"
               className="bg-green-600 hover:bg-green-700"
-              onClick={handleMarkSigned}
-              disabled={signing}
+              onClick={handleMarkCommissionPaid}
+              disabled={markingPaid}
             >
-              <CheckCircle2 className="h-4 w-4 mr-1" />
-              {signing ? "Processando..." : "Marcar como Assinado"}
+              <Wallet className="h-4 w-4 mr-1" />
+              {markingPaid ? "Marcando..." : "Marcar comissão paga"}
+            </Button>
+          )}
+          {isLost && (
+            <Button
+              size="sm"
+              variant="default"
+              onClick={handleReopen}
+              disabled={reopening}
+            >
+              <RotateCcw className="h-4 w-4 mr-1" />
+              {reopening ? "Reabrindo..." : "Reabrir negócio"}
+            </Button>
+          )}
+          {!isTerminal && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-red-600 border-red-300 hover:bg-red-50 dark:hover:bg-red-950/20"
+              onClick={() => setMarkLostDialogOpen(true)}
+            >
+              <XOctagon className="h-4 w-4 mr-1" />
+              Marcar como perdido
             </Button>
           )}
           {deal.contracts.length > 0 && (
@@ -444,6 +501,99 @@ export function DealDetail({ deal }: DealDetailProps) {
           </Button>
         </div>
       </div>
+
+      {/* Banner de perdido */}
+      {isLost && deal.lostAt && (
+        <div className="rounded-lg border border-red-300 bg-red-50 dark:bg-red-950/20 px-4 py-3">
+          <div className="flex items-start gap-3">
+            <XOctagon className="h-5 w-5 mt-0.5 shrink-0 text-red-600" />
+            <div className="flex-1">
+              <p className="font-medium text-red-700 dark:text-red-400">
+                Perdido em{" "}
+                {new Date(deal.lostAt).toLocaleDateString("pt-BR", {
+                  day: "2-digit",
+                  month: "2-digit",
+                  year: "numeric",
+                })}
+              </p>
+              {deal.lostReason && (
+                <p className="text-sm text-red-700/80 dark:text-red-400/80 mt-0.5">
+                  {deal.lostReason}
+                </p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Timeline horizontal — datas-marco do funil */}
+      {!isLost && (() => {
+        const milestones: Array<{
+          Icon: typeof FileText;
+          label: string;
+          date: Date | null;
+        }> = [
+          { Icon: FileText, label: "Form aberto", date: deal.form?.createdAt ?? null },
+          { Icon: CheckCircle2, label: "Form completo", date: deal.form?.completedAt ?? null },
+          { Icon: PenLine, label: "Contrato assinado", date: deal.envelopes[0]?.closedAt ?? null },
+          { Icon: Receipt, label: "Cobrança gerada", date: deal.commissionCharges[0]?.createdAt ?? null },
+          { Icon: Wallet, label: "Comissão paga", date: deal.commissionPaidAt },
+        ];
+        return (
+          <div className="rounded-lg border bg-card p-4">
+            <div className="flex items-center justify-between gap-2 overflow-x-auto">
+              {milestones.map(({ Icon, label, date }, idx) => (
+                <div key={label} className="flex items-center gap-2 min-w-0">
+                  <div
+                    className={cn(
+                      "flex flex-col items-center gap-1 px-1",
+                      date ? "text-foreground" : "text-muted-foreground/50"
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "h-8 w-8 rounded-full flex items-center justify-center border-2",
+                        date
+                          ? "bg-primary/10 border-primary text-primary"
+                          : "border-muted-foreground/30"
+                      )}
+                    >
+                      <Icon className="h-4 w-4" />
+                    </div>
+                    <span className="text-[10px] font-medium whitespace-nowrap">
+                      {label}
+                    </span>
+                    <span className="text-[10px] tabular-nums text-muted-foreground">
+                      {date
+                        ? new Date(date).toLocaleDateString("pt-BR", {
+                            day: "2-digit",
+                            month: "2-digit",
+                          })
+                        : "—"}
+                    </span>
+                  </div>
+                  {idx < milestones.length - 1 && (
+                    <div
+                      className={cn(
+                        "flex-1 h-0.5 min-w-[20px]",
+                        date && milestones[idx + 1].date
+                          ? "bg-primary/40"
+                          : "bg-muted-foreground/20"
+                      )}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+
+      <MarkLostDialog
+        dealId={deal.id}
+        open={markLostDialogOpen}
+        onOpenChange={setMarkLostDialogOpen}
+      />
 
       <AlertDialog
         open={deleteContractsDialogOpen}

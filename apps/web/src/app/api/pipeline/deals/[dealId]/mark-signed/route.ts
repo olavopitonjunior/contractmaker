@@ -28,28 +28,35 @@ export async function POST(
     return NextResponse.json({ error: "Deal not found" }, { status: 404 });
   }
 
-  if (deal.stage.name !== "Assinatura") {
+  // Aceita stages do meio do funil pós-assinatura — usuário pode chamar este
+  // endpoint legado pra pular direto pra "Comissão paga" (compat).
+  const ALLOWED_FROM = [
+    "Enviado para assinatura",
+    "Contrato assinado",
+    "Cobrança emitida",
+  ];
+  if (!ALLOWED_FROM.includes(deal.stage.name)) {
     return NextResponse.json(
-      { error: "Negócio precisa estar no estágio Assinatura" },
+      { error: `Negócio precisa estar entre "Enviado para assinatura" e "Cobrança emitida" (está em "${deal.stage.name}")` },
       { status: 400 }
     );
   }
 
-  const concluidoStage = deal.pipeline.stages.find(
-    (s) => s.name === "Concluído"
+  const targetStage = deal.pipeline.stages.find(
+    (s) => s.name === "Comissão paga"
   );
 
-  if (!concluidoStage) {
+  if (!targetStage) {
     return NextResponse.json(
-      { error: "Estágio Concluído não encontrado" },
+      { error: 'Estágio "Comissão paga" não encontrado' },
       { status: 400 }
     );
   }
 
   await prisma.deal.update({
     where: { id: deal.id },
-    data: { stageId: concluidoStage.id },
+    data: { stageId: targetStage.id, commissionPaidAt: new Date() },
   });
 
-  return NextResponse.json({ status: "concluido", stageId: concluidoStage.id });
+  return NextResponse.json({ status: "comissao_paga", stageId: targetStage.id });
 }
