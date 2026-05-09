@@ -12,6 +12,7 @@ import {
   parseWebhookEventName,
   verifyWebhookSignature,
 } from "@/lib/clicksign/webhook";
+import { listEnvelopeDocuments } from "@/lib/clicksign/envelopes";
 import type { WebhookPayload } from "@/lib/clicksign/types";
 
 export const runtime = "nodejs";
@@ -188,9 +189,14 @@ export async function POST(req: NextRequest) {
         where: { id: envelope.id },
         data: { status: "closed", closedAt: new Date() },
       });
-      const signedUrl = getSignedDocumentUrlFromPayload(payload);
-      if (signedUrl) {
-        void downloadSignedPdf(envelope.id, signedUrl);
+      // v3 NÃO traz signed_file_url no payload — tentamos extrair do
+      // payload (compat v2) e, se vier null, fazemos lookup via
+      // /api/v3/envelopes/{id}/documents (canônico v3).
+      const fromPayload = getSignedDocumentUrlFromPayload(payload);
+      if (fromPayload) {
+        void downloadSignedPdf(envelope.id, fromPayload);
+      } else if (envelope.clicksignId) {
+        void resolveAndDownload(envelope.id, envelope.clicksignId);
       }
       break;
     }
@@ -217,6 +223,29 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({ ok: true });
+}
+
+/**
+ * Lookup signed_file_url via ClickSign /documents endpoint quando o
+ * webhook payload v3 não traz a URL inline (caso típico).
+ */
+async function resolveAndDownload(envelopeId: string, clicksignId: string) {
+  try {
+    const docs = await listEnvelopeDocuments(clicksignId);
+    const data = (docs as { data?: unknown }).data;
+    if (!Array.isArray(data)) return;
+    for (const doc of data as Array<{
+      attributes?: { downloads?: { signed_file_url?: string } };
+    }>) {
+      const url = doc.attributes?.downloads?.signed_file_url;
+      if (url) {
+        await downloadSignedPdf(envelopeId, url);
+        return;
+      }
+    }
+  } catch (err) {
+    console.error("[clicksign webhook] falha resolveAndDownload:", err);
+  }
 }
 
 async function downloadSignedPdf(envelopeId: string, url: string) {

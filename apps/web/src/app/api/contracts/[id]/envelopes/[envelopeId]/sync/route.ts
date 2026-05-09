@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 import {
   getEnvelope,
+  listEnvelopeDocuments,
   listEnvelopeEvents,
   listEnvelopeRequirements,
   listEnvelopeSigners,
@@ -140,7 +141,7 @@ export async function POST(
         where: { id: envelope.id },
         data: { status: "closed", closedAt: new Date() },
       });
-      const signedUrl = extractSignedUrl(envResp);
+      const signedUrl = await resolveSignedUrl(envelope.clicksignId, envResp);
       if (signedUrl) void downloadSignedPdf(envelope.id, signedUrl);
       envelopeUpdated = true;
     } else if (remoteStatus === "canceled" && envelope.status !== "canceled") {
@@ -149,6 +150,24 @@ export async function POST(
         data: { status: "canceled", canceledAt: new Date() },
       });
       envelopeUpdated = true;
+    }
+
+    // Fallback: se já está closed localmente mas o PDF assinado nunca
+    // foi baixado (webhook v3 close não traz signed_file_url), tenta
+    // baixar agora consultando /documents.
+    if (
+      remoteStatus === "closed" &&
+      envelope.status === "closed" &&
+      !envelope.signedDocumentUrl
+    ) {
+      const signedUrl = await resolveSignedUrl(
+        envelope.clicksignId,
+        envResp
+      );
+      if (signedUrl) {
+        await downloadSignedPdf(envelope.id, signedUrl);
+        envelopeUpdated = true;
+      }
     }
 
     if (signersUpdated > 0 || envelopeUpdated) {
@@ -304,6 +323,39 @@ function parseDate(s: string | null | undefined): Date | null {
   if (!s) return null;
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/**
+ * Resolve URL do PDF assinado em 2 etapas:
+ * 1. Tenta extrair de `included` da resposta de getEnvelope (legacy v2)
+ * 2. Fallback: chama `/api/v3/envelopes/{id}/documents` e procura
+ *    `attributes.downloads.signed_file_url` no primeiro doc
+ *
+ * Necessário porque webhook v3 `document_closed` NÃO traz a URL no payload.
+ */
+async function resolveSignedUrl(
+  clicksignId: string,
+  envResp: unknown
+): Promise<string | null> {
+  const fromIncluded = extractSignedUrl(envResp);
+  if (fromIncluded) return fromIncluded;
+  try {
+    const docs = await listEnvelopeDocuments(clicksignId);
+    const data = (docs as { data?: unknown }).data;
+    if (Array.isArray(data)) {
+      for (const doc of data as Array<{
+        attributes?: {
+          downloads?: { signed_file_url?: string };
+        };
+      }>) {
+        const url = doc.attributes?.downloads?.signed_file_url;
+        if (url) return url;
+      }
+    }
+  } catch (err) {
+    console.error("[envelope sync] falha listEnvelopeDocuments:", err);
+  }
+  return null;
 }
 
 function extractSignedUrl(resp: unknown): string | null {

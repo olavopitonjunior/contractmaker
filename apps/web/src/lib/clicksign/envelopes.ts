@@ -244,6 +244,19 @@ export async function listEnvelopeEvents(envelopeId: string) {
 }
 
 /**
+ * Lista documentos do envelope. Após `close`, cada documento ganha
+ * `attributes.downloads.signed_file_url` (PDF com certificado de
+ * assinatura) e `original_file_url`. Webhook `document_closed` v3 NÃO
+ * traz a URL inline — fonte canônica é este endpoint.
+ */
+export async function listEnvelopeDocuments(envelopeId: string) {
+  return clicksignRequest<ClicksignResponse>({
+    method: "GET",
+    path: `/api/v3/envelopes/${envelopeId}/documents`,
+  });
+}
+
+/**
  * Lista webhooks cadastrados na conta ClickSign. Usado pra diagnosticar
  * quando webhooks não estão chegando (URL não registrada, eventos
  * filtrados, etc.).
