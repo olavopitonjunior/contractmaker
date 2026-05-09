@@ -244,15 +244,28 @@ export async function listEnvelopeEvents(envelopeId: string) {
 }
 
 /**
- * Lista documentos do envelope. Após `close`, cada documento ganha
- * `attributes.downloads.signed_file_url` (PDF com certificado de
- * assinatura) e `original_file_url`. Webhook `document_closed` v3 NÃO
- * traz a URL inline — fonte canônica é este endpoint.
+ * Lista documentos do envelope. Atributos retornados v3:
+ * `status, filename, template, metadata, migrated, created, modified`.
+ * Cada doc tem `links.files` apontando pro endpoint que lista os
+ * arquivos do documento (original + signed PDF após close).
  */
 export async function listEnvelopeDocuments(envelopeId: string) {
   return clicksignRequest<ClicksignResponse>({
     method: "GET",
     path: `/api/v3/envelopes/${envelopeId}/documents`,
+  });
+}
+
+/**
+ * Lista arquivos de um documento — após o envelope fechar, retorna o
+ * PDF original + PDF assinado (com certificado). Cada item tem
+ * `attributes.url` ou `attributes.download_url` apontando pro arquivo
+ * binário.
+ */
+export async function listDocumentFiles(envelopeId: string, documentId: string) {
+  return clicksignRequest<ClicksignResponse>({
+    method: "GET",
+    path: `/api/v3/envelopes/${envelopeId}/documents/${documentId}/files`,
   });
 }
 

@@ -4,6 +4,7 @@ import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 import {
   getEnvelope,
+  listDocumentFiles,
   listEnvelopeDocuments,
   listEnvelopeEvents,
   listEnvelopeRequirements,
@@ -66,6 +67,17 @@ export async function POST(
         listEnvelopeEvents(envelope.clicksignId).catch(() => null),
         listEnvelopeDocuments(envelope.clicksignId).catch(() => null),
       ]);
+
+    // Pra debug=1: também busca files do primeiro doc pra ver shape v3
+    let firstDocFilesResp: unknown = null;
+    const firstDocId = (documentsResp as { data?: Array<{ id?: string }> })
+      ?.data?.[0]?.id;
+    if (firstDocId && envelope.clicksignId) {
+      firstDocFilesResp = await listDocumentFiles(
+        envelope.clicksignId,
+        firstDocId
+      ).catch(() => null);
+    }
 
     const remoteStatus = (
       envResp as { data?: { attributes?: { status?: string } } }
@@ -204,6 +216,7 @@ export async function POST(
           requirementsRaw: requirementsResp,
           eventsRaw: eventsResp,
           documentsRaw: documentsResp,
+          firstDocFilesRaw: firstDocFilesResp,
           aggregatedByEmail: Array.from(stateByEmail.entries()).map(
             ([email, state]) => ({
               email,
@@ -339,23 +352,46 @@ async function resolveSignedUrl(
   clicksignId: string,
   envResp: unknown
 ): Promise<string | null> {
+  // 1. Legacy v2: pode vir em getEnvelope(?include=documents)
   const fromIncluded = extractSignedUrl(envResp);
   if (fromIncluded) return fromIncluded;
+
+  // 2. v3: lista documents → pra cada doc lista files → pega URL do
+  //    PDF assinado. ClickSign v3 separa em 2 endpoints:
+  //    /documents (metadata) e /documents/{id}/files (binários).
   try {
     const docs = await listEnvelopeDocuments(clicksignId);
-    const data = (docs as { data?: unknown }).data;
-    if (Array.isArray(data)) {
-      for (const doc of data as Array<{
+    const docsData = (docs as { data?: unknown }).data;
+    if (!Array.isArray(docsData)) return null;
+    for (const doc of docsData as Array<{ id?: string }>) {
+      if (!doc.id) continue;
+      const filesResp = await listDocumentFiles(clicksignId, doc.id);
+      const filesData = (filesResp as { data?: unknown }).data;
+      if (!Array.isArray(filesData)) continue;
+      // Procura primeiro o file marcado como signed/closed; cai pro
+      // primeiro com URL caso a v3 não exponha o flag.
+      for (const file of filesData as Array<{
         attributes?: {
-          downloads?: { signed_file_url?: string };
+          kind?: string;
+          name?: string;
+          url?: string;
+          download_url?: string;
         };
       }>) {
-        const url = doc.attributes?.downloads?.signed_file_url;
+        const kind = file.attributes?.kind ?? file.attributes?.name ?? "";
+        const url = file.attributes?.url ?? file.attributes?.download_url;
+        if (url && /sign|closed|finalized/i.test(kind)) return url;
+      }
+      // Fallback: primeiro arquivo com URL
+      for (const file of filesData as Array<{
+        attributes?: { url?: string; download_url?: string };
+      }>) {
+        const url = file.attributes?.url ?? file.attributes?.download_url;
         if (url) return url;
       }
     }
   } catch (err) {
-    console.error("[envelope sync] falha listEnvelopeDocuments:", err);
+    console.error("[envelope sync] falha resolveSignedUrl:", err);
   }
   return null;
 }
