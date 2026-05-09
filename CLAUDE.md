@@ -332,6 +332,36 @@ Fases entregues:
 - **3 Transferências + dual approval + conciliação + relatórios:** `AsaasTransfer` com preview de taxas + dual approval > `dualApprovalCapCents`, `BankReconciliation` auto-match via `externalReference`, 4 relatórios (recebíveis/aging/cashflow/inadimplentes)
 - **4 Polish:** notif bell, devices UI, platform fee (`platformFeePercent` + `platformFeeWalletId`)
 - **5 Split multi-recipient:** `SplitRecipient { orgId, label, walletId, active }`, CRUD `/settings/pagamentos/split-recipients`. `composeSplits()`: max 10 entries, sem duplicatas, sem wallet própria, soma `percentualValue ≤ 100`. Persistido em `CommissionCharge.splitJson`. **`platformFeePercent` só gera split se `platformFeeWalletId` configurado**
+- **v2 Wizard 2026-05-09:** `ChargeWizard` reusa 4 etapas em 3 modes (`commission_from_deal | avulsa_in_deal | avulsa_standalone`) com pré-preenchimento + microcopy + chips stateful + banner contextual + drawer "De onde vieram" (botão `?` no header). `CommissionCharge.kind` (`commission|avulsa|aluguel|outros`) + `categoryLabel String?` (texto livre filtrável). `OrgFinancialSettings.notify*` (6 flags: created/paid/overdue/dueSoon/admins/comissionados) + régua de notificações via `notifyChargeEvent`. Cron D-3 em `/api/cron/charges/due-soon` (12:00 UTC).
+
+### Pagadoria v2 (2026-05-09) — mapper, multi-corretora, fallbacks
+
+**Mapper imobiliária→comissionados[]:** `GET /api/deals/[id]/contract-data-summary` em `deriveComissionados()` converte campos planos `comissao.imobiliaria_*` (schema legado mono-corretora) numa entrada de `comissionados[]` com `source: "ccv.imobiliaria_principal"` quando array explícito vazio. Source values: `ccv.comissionados | ccv.imobiliaria_principal | manual` — UI usa pra microcopy.
+
+**Multi-corretora:** schema Zod ganhou `comissao.comissionados[].papel: enum(captador|intermediador|indicador|imobiliaria_principal|outro)` + superRefine soma ≤ 100%. `ComissaoConfigStep` renderiza Percentual + Papel + soma visual. Templates Handlebars `ccv_a_vista_v2.hbs` e `ccv_financiamento_v2.hbs` ganharam `{{#if comissao.comissionados.length}}` loop com fallback `imobiliaria_*`. Prompt Gemini estendido. **Sync templates obrigatório** (`pnpm tsx apps/web/scripts/sync-templates.ts --apply`) pra novos contratos pegarem.
+
+**Hide-from-payer:** `splitJson.display.{hiddenRecipientIds,consolidationMap}`. `generatePayerVisibleDescription()` em `lib/asaas/commission.ts` gera `description` da cobrança omitindo splits ocultos. Asaas não expõe split publicamente — privacidade fica intacta. UI `SplitEditor` ganhou toggle por linha + select de consolidação.
+
+**Rascunho `SplitRecipient` (4.1):** `SplitRecipient.pendingFields String[]` permite cadastrar inline com chave PIX/walletId vazios → marca `active: false`. `splitDispatcher` pula recipients pendentes/inativos criando `AsaasTransfer { status: "FAILED", failureReason: "Cadastro pendente — completar..." }` — cobrança ainda emite. UI `/settings/pagamentos/split-recipients` ganhou seção "⚠️ Pendentes de completar" com botão `[Pedir dados]`.
+
+**Magic link (4.2):** `SplitRecipient.completionToken/Exp` (JWT-HMAC `AUTH_SECRET`, 7d). `POST /api/financeiro/split-recipients/[id]/request-completion` envia email Resend pro destinatário. Página pública `/financeiro/completar-cadastro?token=` (sem auth) → `POST /api/public/split-recipients/complete` valida token persistido, marca `active: true`, esvazia pendingFields. Token único por uso.
+
+**Wizard draft (4.5):** Model `CommissionChargeDraft { dealId, userId @@unique, state Json, expiresAt }` (30d TTL). `POST/GET/DELETE /api/deals/[id]/commission-charges/draft`. Wizard auto-aplica state no mount + toast "Continuando rascunho de…". Submit final → `DELETE`. Cron diário 03:00 UTC limpa expirados.
+
+**Validate por etapa:** `POST /api/deals/[id]/commission-charges/validate?step=payer|charge|splits|all`. Funções puras em `lib/asaas/charge-validators.ts` (`validatePayer/Charge/Splits`). Chips stateful no client computam status localmente; endpoint serve pra fluxos automatizados (Newton/Bearer).
+
+**Trocar pra avulsa:** Banner "Sem comissionados no contrato" oferece `[Trocar para cobrança avulsa]` que muda `mode` preservando state via `onModeChange` callback. CommissionChargeDialog é controlado em `activeMode` interno.
+
+**Endpoints novos:**
+- `GET /api/deals/[id]/contract-data-summary` — readonly, alimenta wizard
+- `POST /api/deals/[id]/commission-charges/validate?step=` — validações puras
+- `GET/POST/DELETE /api/deals/[id]/commission-charges/draft`
+- `POST /api/financeiro/split-recipients/[id]/request-completion`
+- `POST /api/public/split-recipients/complete` (público)
+- `GET /api/financeiro/categories?q=` — autocomplete categoryLabel
+- `GET /api/financeiro/split-recipients/uncadastrados`
+- `POST /api/financeiro/split-recipients/bulk-import`
+- `GET /api/cron/charges/due-soon` (12:00 UTC) e `/api/cron/drafts/cleanup` (03:00 UTC)
 
 **QA:** preflight `GET /api/admin/preflight-qa` (30+ checks). Setup `apps/web/scripts/setup-pagadoria-qa.ts`. Sandbox helper `lib/asaas/sandbox.ts::approveSandboxAccount` força os 4 status pra APPROVED via `POST /v3/sandbox/myAccount/approve` — **guard interno rejeita se `ASAAS_ENV=production`**.
 
@@ -406,8 +436,13 @@ Puppeteer requer Vercel Pro (timeout 60s).
 - **`Contract.templateId`** nullable. Null = importado, conteúdo no GDoc
 - **`Envelope`** XOR: `contractId` ou `attachmentId`. `source: "contract" | "attachment"`
 - **Deal NÃO tem `orgId` direto** — escopo via `pipeline.orgId`. `Contract` idem. Pra Contract importado (`templateId=null`) usar `deal.pipeline.orgId` (não `template.orgId` — null-deref)
+- **`SplitRecipient.pendingFields String[]`** — quando não-vazio, recipient `active: false` automaticamente. `splitDispatcher` pula com FAILED. Magic link via `completionToken/Exp` (JWT-HMAC 7d).
+- **`CommissionCharge.kind`:** `commission | avulsa | aluguel | outros`. `categoryLabel String?` filtrável (avulsas).
+- **`splitJson`:** `{ splits: AsaasSplit[], external: ExternalSplit[], display?: { hiddenRecipientIds, consolidationMap } }`. Display é puramente UI/descrição — Asaas não vê.
+- **`comissao.comissionados[]`** canônico (multi-corretora) com `papel`. Fallback `imobiliaria_*` mantido pra retrocompat — `deriveComissionados` em `/contract-data-summary` sintetiza 1 entrada com `source: "ccv.imobiliaria_principal"` quando array vazio.
+- **`CommissionChargeDraft`** XOR `(dealId, userId)` único. `expiresAt` = +30d. Cron diário cleanup.
 
-**Audit actions:** `DEAL_*`, `FORM_*`, `ATTACHMENT_*`, `CONTRACT_GENERATE/IMPORT/REEXTRACT/STATUS_UPDATE/APPROVE/DELETE/DELETE_BULK`, `ENVELOPE_CREATE/RESEND`, `CERTIDAO_BATCH_DISPATCH`, `KYC_*`, `CHARGE_*`, `TRANSFER_*`, `INTENT_*`, `CLICKSIGN_WEBHOOK_RECEIVED|REJECTED`.
+**Audit actions:** `DEAL_*`, `FORM_*`, `ATTACHMENT_*`, `CONTRACT_GENERATE/IMPORT/REEXTRACT/STATUS_UPDATE/APPROVE/DELETE/DELETE_BULK`, `ENVELOPE_CREATE/RESEND`, `CERTIDAO_BATCH_DISPATCH`, `KYC_*`, `CHARGE_*`, `TRANSFER_*`, `INTENT_*`, `CLICKSIGN_WEBHOOK_RECEIVED|REJECTED`, `SPLIT_RECIPIENT_CREATED/UPDATED/DELETED/BULK_IMPORT/COMPLETION_REQUESTED/COMPLETED`.
 
 ## Gotchas
 
@@ -430,5 +465,6 @@ Puppeteer requer Vercel Pro (timeout 60s).
 - **Auto-promote stage não é retroativo:** webhook ClickSign close OU criação de charge antes da migration de stages = deal fica visualmente em stage anterior. Mover via drag-drop manual
 - **Google OAuth Testing 7-day expiry:** `invalid_grant` quebra GDocs prod a cada ~7d enquanto consent screen estiver Testing. Mover pra "In production" no Cloud Console resolve permanente
 - **Chrome MCP bloqueia accounts.google.com:** não tentar dirigir Google OAuth via MCP. Rodar script servidor + usuário completa manual
-- **Resend sandbox bloqueia destinatários:** `EMAIL_FROM=onboarding@resend.dev` só envia pro dono. Convites/magic link silenciosamente bloqueados em prod até ter domínio verificado
+- **Resend sandbox bloqueia destinatários:** `EMAIL_FROM=onboarding@resend.dev` só envia pro dono. Convites/magic link silenciosamente bloqueados em prod até ter domínio verificado. **Magic link Pagadoria v2** (split-recipient completion) cai nessa armadilha — sem domínio verificado, recipients não recebem email
 - **Forms públicos não requerem auth** — qualquer um com o link pode editar
+- **Mudanças em `templates/ccv_*.hbs` exigem sync após editar** — `pnpm tsx apps/web/scripts/sync-templates.ts --apply` contra prod DB. `ContractTemplate.handlebarsSource` no DB é a source of truth pra novos contratos. Sem sync, o loop `comissionados[]` v2 não aparece pra contratos novos
