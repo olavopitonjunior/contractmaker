@@ -70,13 +70,19 @@ export async function POST(
 
     // Pra debug=1: também busca files do primeiro doc pra ver shape v3
     let firstDocFilesResp: unknown = null;
+    let firstDocFilesError: string | null = null;
     const firstDocId = (documentsResp as { data?: Array<{ id?: string }> })
       ?.data?.[0]?.id;
     if (firstDocId && envelope.clicksignId) {
-      firstDocFilesResp = await listDocumentFiles(
-        envelope.clicksignId,
-        firstDocId
-      ).catch(() => null);
+      try {
+        firstDocFilesResp = await listDocumentFiles(
+          envelope.clicksignId,
+          firstDocId
+        );
+      } catch (err) {
+        firstDocFilesError =
+          err instanceof Error ? err.message : String(err);
+      }
     }
 
     const remoteStatus = (
@@ -217,6 +223,8 @@ export async function POST(
           eventsRaw: eventsResp,
           documentsRaw: documentsResp,
           firstDocFilesRaw: firstDocFilesResp,
+          firstDocFilesError,
+          firstDocId,
           aggregatedByEmail: Array.from(stateByEmail.entries()).map(
             ([email, state]) => ({
               email,
