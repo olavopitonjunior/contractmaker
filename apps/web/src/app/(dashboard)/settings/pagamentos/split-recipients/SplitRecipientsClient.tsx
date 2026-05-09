@@ -420,6 +420,22 @@ export default function SplitRecipientsClient() {
                   pending
                   onEdit={() => openEdit(r)}
                   onDeactivate={() => setConfirmDeactivate(r)}
+                  onRequestCompletion={async () => {
+                    if (!r.email) {
+                      toast.error("Cadastre o email do destinatário antes de pedir os dados");
+                      return;
+                    }
+                    const res = await fetch(
+                      `/api/financeiro/split-recipients/${r.id}/request-completion`,
+                      { method: "POST", credentials: "include" }
+                    );
+                    const data = await res.json().catch(() => ({}));
+                    if (!res.ok) {
+                      toast.error(data.error ?? "Falha ao gerar link");
+                      return;
+                    }
+                    toast.success(`Email enviado para ${r.email}`);
+                  }}
                 />
               ))}
             </div>
@@ -723,6 +739,7 @@ function RecipientRow({
   onEdit,
   onDeactivate,
   onReactivate,
+  onRequestCompletion,
 }: {
   r: Recipient;
   inactive?: boolean;
@@ -730,6 +747,7 @@ function RecipientRow({
   onEdit: () => void;
   onDeactivate?: () => void;
   onReactivate?: () => void;
+  onRequestCompletion?: () => void;
 }) {
   const isPix = r.recipientType === "pix_external";
   return (
@@ -790,6 +808,17 @@ function RecipientRow({
           )}
         </div>
         <div className="flex gap-1 shrink-0">
+          {pending && onRequestCompletion && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onRequestCompletion}
+              title="Enviar link pro destinatário completar"
+              disabled={!r.email}
+            >
+              Pedir dados
+            </Button>
+          )}
           <Button variant="ghost" size="icon" onClick={onEdit} title="Editar">
             <Pencil className="h-4 w-4" />
           </Button>

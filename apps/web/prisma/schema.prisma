@@ -57,6 +57,7 @@ model User {
   // Pagadoria — Fase 3 (transferências)
   asaasTransfers        AsaasTransfer[]
   reconciliationMatches BankReconciliation[]
+  commissionChargeDrafts CommissionChargeDraft[]
 
   // Newton — API tokens e idempotência
   apiTokens       UserApiToken[]
@@ -151,6 +152,7 @@ model Organization {
 
   // Pagadoria — Fase 5 (split multi-recipient)
   splitRecipients SplitRecipient[]
+  commissionChargeDrafts CommissionChargeDraft[]
 
   // Clicksign — assinatura eletrônica
   envelopes Envelope[]
@@ -270,6 +272,7 @@ model Deal {
   certidoesShareLinks CertidoesShareLink[]
   diligentedPersons   DiligentedPerson[]
   commissionCharges   CommissionCharge[]
+  commissionChargeDrafts CommissionChargeDraft[]
   envelopes           Envelope[]
 
   // Lead que originou (se veio de conversão Lead -> Deal)
@@ -1394,6 +1397,28 @@ model SplitRecipient {
   @@unique([orgId, pixAddressKey])
   @@index([orgId, active])
   @@index([orgId, recipientType])
+}
+
+// Rascunho do wizard de geração de cobrança (Pagadoria v2 2026-05-09).
+// Permite ao operador salvar progresso e retomar depois — útil quando precisa
+// sair pra buscar PIX de um comissionado, conferir contrato, etc. 1 draft por
+// (deal, user). Cleanup diário deleta drafts com expiresAt < now.
+model CommissionChargeDraft {
+  id        String   @id @default(cuid())
+  orgId     String
+  dealId    String
+  userId    String
+  state     Json // serialização completa do estado do wizard
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  expiresAt DateTime // now + 30d
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  deal Deal         @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([dealId, userId])
+  @@index([orgId, expiresAt])
 }
 
 // Link público de pagamento — URL /pay/[token] com branding.

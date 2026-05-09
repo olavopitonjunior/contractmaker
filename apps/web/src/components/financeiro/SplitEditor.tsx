@@ -250,21 +250,10 @@ export default function SplitEditor({
 
   return (
     <div className="space-y-3 border rounded-md p-3 bg-muted/30">
-      <div className="flex items-start gap-2 text-xs text-muted-foreground">
-        <Info className="h-4 w-4 shrink-0 mt-0.5" />
-        <div>
-          O remanescente cai na subconta desta org automaticamente. Splits
-          Asaas (wallet) são instantâneos e gratuitos. PIX externos disparam
-          transferência automática após o pagamento (~R$ 1 de taxa por
-          transferência).
-        </div>
-      </div>
-
       {value.length === 0 && (
-        <p className="text-sm text-muted-foreground italic">
-          Nenhum split ainda. Cadastre destinatários em{" "}
-          <b>Configurações → Pagamentos → Destinatários de split</b> e adicione
-          aqui.
+        <p className="text-xs text-muted-foreground italic">
+          Nenhum split. Cadastre destinatários em{" "}
+          <b>Configurações → Pagamentos</b>.
         </p>
       )}
 
@@ -342,28 +331,9 @@ export default function SplitEditor({
                       : `Conta Asaas`}
                   </div>
                 )}
-                {line.sourceComissionado?.source && (
-                  <div className="text-[11px] text-muted-foreground mt-1">
-                    └─ origem:{" "}
-                    {line.sourceComissionado.source === "ccv.imobiliaria_principal"
-                      ? "extraído do contrato (corretora principal)"
-                      : line.sourceComissionado.source === "ccv.comissionados"
-                        ? "extraído do contrato (lista explícita)"
-                        : "adicionado manualmente"}
-                  </div>
-                )}
-                {line.sourceComissionado && (
-                  <div className="text-[11px] mt-0.5">
-                    └─ status:{" "}
-                    {line.recipientId ? (
-                      <span className="text-green-700">
-                        ✓ destinatário cadastrado
-                      </span>
-                    ) : (
-                      <span className="text-amber-800">
-                        ⚠️ destinatário não cadastrado
-                      </span>
-                    )}
+                {line.sourceComissionado && line.recipientId && (
+                  <div className="text-[11px] text-green-700 mt-0.5">
+                    ✓ cadastrado
                   </div>
                 )}
                 {noMatch && line.sourceComissionado && (

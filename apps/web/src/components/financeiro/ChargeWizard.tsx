@@ -24,8 +24,10 @@ import {
   AlertTriangle,
   Lightbulb,
   EyeOff,
+  HelpCircle,
 } from "lucide-react";
 import { maskCpfCnpj } from "@/lib/security/pii";
+import { DataOriginDrawer } from "@/components/financeiro/DataOriginDrawer";
 import { checkBusinessDay } from "@/lib/financeiro/businessDay";
 import SplitEditor, {
   type SplitEntry,
@@ -176,6 +178,10 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
   const isAvulsaInDeal = mode === "avulsa_in_deal";
   const isAvulsaStandalone = mode === "avulsa_standalone";
   const [step, setStep] = useState<Step>("payer");
+  const [draftLoaded, setDraftLoaded] = useState(false);
+  const [savingDraft, setSavingDraft] = useState(false);
+  const [resumePromptShown, setResumePromptShown] = useState(false);
+  const [originDrawerOpen, setOriginDrawerOpen] = useState(false);
 
   // ---------- Deal summary (modes deal-bound) ----------
   const [summary, setSummary] = useState<DealSummary | null>(null);
@@ -185,6 +191,39 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
     if (!dealId) return;
     (async () => {
       try {
+        // 1) Tenta retomar rascunho (commission_from_deal | avulsa_in_deal)
+        if (!isAvulsaStandalone && !resumePromptShown) {
+          const dRes = await fetch(
+            `/api/deals/${dealId}/commission-charges/draft`,
+            { credentials: "include" }
+          );
+          if (dRes.ok) {
+            const { draft } = await dRes.json();
+            if (draft?.state) {
+              const s = draft.state as Record<string, unknown>;
+              if (typeof s.selectedPartyKey === "string") setSelectedPartyKey(s.selectedPartyKey);
+              if (typeof s.payerName === "string") setPayerName(s.payerName);
+              if (typeof s.payerCpfCnpj === "string") setPayerCpfCnpj(s.payerCpfCnpj);
+              if (typeof s.payerEmail === "string") setPayerEmail(s.payerEmail);
+              if (typeof s.payerPhone === "string") setPayerPhone(s.payerPhone);
+              if (s.billingType === "PIX" || s.billingType === "BOLETO") setBillingType(s.billingType);
+              if (typeof s.value === "string") setValue(s.value);
+              if (typeof s.dueDate === "string") setDueDate(s.dueDate);
+              if (typeof s.description === "string") setDescription(s.description);
+              if (s.kind === "avulsa" || s.kind === "aluguel" || s.kind === "outros") setKind(s.kind);
+              if (typeof s.categoryLabel === "string") setCategoryLabel(s.categoryLabel);
+              if (Array.isArray(s.splits)) setSplits(s.splits as SplitEntry[]);
+              if (s.step === "payer" || s.step === "charge" || s.step === "splits" || s.step === "review") setStep(s.step);
+              setDraftLoaded(true);
+              setResumePromptShown(true);
+              toast.info(
+                `Continuando rascunho de ${new Date(draft.updatedAt).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
+              );
+            }
+          }
+        }
+
+        // 2) Carrega summary do contrato
         const res = await fetch(
           `/api/deals/${dealId}/contract-data-summary`,
           { credentials: "include" }
@@ -196,16 +235,19 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
         }
         const data = (await res.json()) as DealSummary;
         setSummary(data);
-        if (data.suggestedPayer) {
-          setSelectedPartyKey(
-            `${data.suggestedPayer.papel}-${data.suggestedPayer.index}`
-          );
-          applyPartyToForm(data.suggestedPayer);
+        // Aplica defaults APENAS quando não veio rascunho
+        if (!draftLoaded) {
+          if (data.suggestedPayer) {
+            setSelectedPartyKey(
+              `${data.suggestedPayer.papel}-${data.suggestedPayer.index}`
+            );
+            applyPartyToForm(data.suggestedPayer);
+          }
+          if (data.suggestedValue) setValue(String(data.suggestedValue));
+          if (data.suggestedDueDate.iso) setDueDate(data.suggestedDueDate.iso);
+          if (data.formaPagamentoPreferida === "pix") setBillingType("PIX");
+          else if (data.formaPagamentoPreferida === "boleto") setBillingType("BOLETO");
         }
-        if (data.suggestedValue) setValue(String(data.suggestedValue));
-        if (data.suggestedDueDate.iso) setDueDate(data.suggestedDueDate.iso);
-        if (data.formaPagamentoPreferida === "pix") setBillingType("PIX");
-        else if (data.formaPagamentoPreferida === "boleto") setBillingType("BOLETO");
       } catch (err) {
         setSummaryError(err instanceof Error ? err.message : "Erro ao carregar");
       }
@@ -334,6 +376,39 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
 
   const [submitting, setSubmitting] = useState(false);
 
+  async function saveDraft() {
+    if (!dealId || isAvulsaStandalone) return;
+    setSavingDraft(true);
+    try {
+      const state = {
+        selectedPartyKey, payerName, payerCpfCnpj, payerEmail, payerPhone,
+        billingType, value, dueDate, description, kind, categoryLabel, splits, step,
+      };
+      const res = await fetch(`/api/deals/${dealId}/commission-charges/draft`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ state }),
+      });
+      if (!res.ok) {
+        toast.error("Falha ao salvar rascunho");
+        return;
+      }
+      toast.success("Rascunho salvo (válido por 30 dias)");
+      onCancel?.();
+    } finally {
+      setSavingDraft(false);
+    }
+  }
+
+  async function discardDraft() {
+    if (!dealId || isAvulsaStandalone) return;
+    await fetch(`/api/deals/${dealId}/commission-charges/draft`, {
+      method: "DELETE",
+      credentials: "include",
+    }).catch(() => {});
+  }
+
   async function submit() {
     setSubmitting(true);
     try {
@@ -388,6 +463,7 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
           return;
         }
         toast.success("Cobrança gerada");
+        await discardDraft();
         onCreated(data.charge);
         return;
       }
@@ -447,6 +523,7 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
         return;
       }
       toast.success("Cobrança gerada");
+      await discardDraft();
       onCreated(data.charge);
     } finally {
       setSubmitting(false);
@@ -509,9 +586,56 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
   return (
     <div className="max-w-2xl mx-auto space-y-4">
       {onCancel && (
-        <Button variant="ghost" size="sm" onClick={onCancel}>
-          <ArrowLeft className="h-4 w-4 mr-1" /> Cancelar
-        </Button>
+        <div className="flex items-center justify-between gap-2">
+          <Button variant="ghost" size="sm" onClick={onCancel}>
+            <ArrowLeft className="h-4 w-4 mr-1" /> Cancelar
+          </Button>
+          <div className="flex items-center gap-2">
+            {!isAvulsaStandalone && summary && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setOriginDrawerOpen(true)}
+                title="De onde vieram esses valores?"
+              >
+                <HelpCircle className="h-4 w-4" />
+              </Button>
+            )}
+            {!isAvulsaStandalone && dealId && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={saveDraft}
+                disabled={savingDraft}
+              >
+                {savingDraft ? "Salvando..." : "Salvar rascunho"}
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {summary && (
+        <DataOriginDrawer
+          open={originDrawerOpen}
+          onOpenChange={setOriginDrawerOpen}
+          payerName={payerName}
+          payerCpfCnpj={payerCpfCnpj}
+          payerOrigem={
+            summary.suggestedPayer
+              ? `dataJson.${summary.suggestedPayer.papel}es[${summary.suggestedPayer.index}] · regra comissao.quem_paga`
+              : "manual"
+          }
+          valor={value ? `R$ ${parseFloat(value).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : "—"}
+          valorOrigem={
+            summary.suggestedValue !== null
+              ? `comissao.valor (R$ ${summary.suggestedValue.toLocaleString("pt-BR")})`
+              : "comissao.percentual × pagamento.valor_total"
+          }
+          vencimento={fmtDueDate(dueDate)}
+          vencimentoReason={summary.suggestedDueDate.reason}
+          comissionados={summary.comissionados}
+        />
       )}
 
       <div>
@@ -570,69 +694,51 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
         </div>
       )}
 
-      {/* Banner contextual — aparece quando há problema/sinal previsível */}
+      {/* Banners contextuais — 1 linha cada, só sinal + ação */}
       {summary && mode === "commission_from_deal" && (() => {
-        const banners: Array<{
-          color: "yellow" | "red";
-          title: string;
-          body: React.ReactNode;
-        }> = [];
+        const banners: Array<{ color: "yellow" | "red"; body: React.ReactNode }> = [];
 
-        // 1) Apenas 1 corretora extraída do legado imobiliaria_*
         if (
           summary.comissionados.length === 1 &&
           summary.comissionados[0].source === "ccv.imobiliaria_principal"
         ) {
           banners.push({
             color: "yellow",
-            title: "Apenas 1 corretora declarada",
             body: (
-              <span>
-                Este contrato declara apenas 1 corretora ({summary.comissionados[0].nome ?? "—"}, 100%).
-                Se houver co-corretagem, edite o contrato pra adicionar mais comissionados ou
-                cadastre destinatários adicionais nesta cobrança antes de prosseguir.
-              </span>
+              <>
+                Apenas 1 corretora ({summary.comissionados[0].nome ?? "—"}). Se houver
+                co-corretagem, adicione destinatários abaixo.
+              </>
             ),
           });
         }
 
-        // 2) Pagador sem email + PIX selecionado
         if (!payerEmail && billingType === "PIX" && payerName.trim().length > 0) {
           banners.push({
             color: "red",
-            title: "Pagador sem email cadastrado",
-            body: (
-              <span>
-                Cobrança PIX não poderá ser entregue por email automaticamente. Edite o
-                pagador acima ou troque para Boleto na próxima etapa.
-              </span>
-            ),
+            body: <>Pagador sem email — Asaas não envia PIX automático. Adicione email ou use Boleto.</>,
           });
         }
 
-        // 3) Comissionados vazios mesmo com contrato aprovado
         if (
           summary.comissionados.length === 0 &&
           summary.contract?.status === "aprovado"
         ) {
           banners.push({
             color: "red",
-            title: "Nenhum comissionado declarado",
             body: (
-              <span>
-                Este contrato aprovado não tem comissionados. Adicione destinatários
-                manualmente na etapa Splits{onModeChange ? " ou " : "."}
+              <>
+                Sem comissionados no contrato.{" "}
                 {onModeChange && (
                   <button
                     type="button"
                     onClick={() => onModeChange("avulsa_in_deal")}
                     className="underline font-medium hover:text-red-700"
                   >
-                    troque para cobrança avulsa
+                    Trocar para cobrança avulsa
                   </button>
                 )}
-                {onModeChange && " (preserva pagador, valor e vencimento)."}
-              </span>
+              </>
             ),
           });
         }
@@ -640,17 +746,14 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
         return banners.map((b, i) => (
           <div
             key={i}
-            className={`border rounded p-3 text-sm flex gap-2 ${
+            className={`border rounded px-3 py-2 text-xs flex items-center gap-2 ${
               b.color === "red"
                 ? "bg-red-50 text-red-900 border-red-300"
                 : "bg-amber-50 text-amber-900 border-amber-300"
             }`}
           >
-            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
-            <div>
-              <div className="font-medium">{b.title}</div>
-              <div className="text-xs mt-0.5">{b.body}</div>
-            </div>
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            <div>{b.body}</div>
           </div>
         ));
       })()}
@@ -828,17 +931,11 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
                     const isOverridden =
                       selectedPartyKey !==
                       `${summary.suggestedPayer.papel}-${summary.suggestedPayer.index}`;
-                    const sugLabel =
-                      QUEM_PAGA_LABEL[summary.suggestedPayer.papel] ??
-                      `${summary.suggestedPayer.papel} paga a comissão`;
+                    if (!isOverridden) return null; // padrão é o sugerido — sem ruído
                     return (
-                      <p className="text-xs text-muted-foreground mt-1 flex items-start gap-1">
-                        <Lightbulb className="h-3 w-3 mt-0.5 shrink-0" />
-                        <span>
-                          {isOverridden
-                            ? `Você trocou de parte. Sugestão original do contrato era ${summary.suggestedPayer.papel} (${summary.suggestedPayer.nome || "—"}).`
-                            : `Pré-selecionado: ${sugLabel} (regra do contrato: comissao.quem_paga).`}
-                        </span>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Sugestão original: {summary.suggestedPayer.papel} (
+                        {summary.suggestedPayer.nome || "—"})
                       </p>
                     );
                   })()}
@@ -912,44 +1009,22 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
           </CardHeader>
           <CardContent className="space-y-3">
             {summary?.suggestedDueDate.reason && mode === "commission_from_deal" && (() => {
-              // Sinal de "ainda não há marco confirmado" — heurística usa hoje
-              // como referência (resolveDefaultDueDate em runtime).
               const usandoHojeComoBase =
                 /^\d+ dias após (registro|chaves|quitação)/i.test(
                   summary.suggestedDueDate.reason
                 );
-              const valorOrigem =
-                summary.suggestedValue !== null
-                  ? `comissao.valor (R$ ${summary.suggestedValue.toLocaleString("pt-BR")})`
-                  : "comissao.percentual × pagamento.valor_total";
               return (
-                <div className="border rounded p-2 bg-blue-50 text-xs text-blue-900 space-y-1">
-                  <div className="flex gap-2">
-                    <Lightbulb className="h-3 w-3 shrink-0 mt-0.5" />
-                    <div>
-                      <strong>Vencimento sugerido:</strong>{" "}
-                      {fmtDueDate(summary.suggestedDueDate.iso)} —{" "}
-                      {summary.suggestedDueDate.reason}
-                    </div>
+                <div className="border rounded p-2 bg-blue-50 text-xs text-blue-900 flex gap-2">
+                  <Lightbulb className="h-3 w-3 shrink-0 mt-0.5" />
+                  <div>
+                    Sugerido: {summary.suggestedDueDate.reason}
+                    {usandoHojeComoBase && (
+                      <span className="text-amber-800">
+                        {" "}
+                        (a partir de hoje)
+                      </span>
+                    )}
                   </div>
-                  {usandoHojeComoBase && (
-                    <div className="pl-5 text-amber-800">
-                      ⚠️ Como ainda não há data de marco confirmada, foi usado
-                      hoje como referência. Ajuste se houver data prevista no
-                      contrato.
-                    </div>
-                  )}
-                  <div className="pl-5">
-                    <strong>Valor:</strong> calculado a partir de {valorOrigem}.
-                  </div>
-                  {summary.formaPagamentoPreferida !== "qualquer" && (
-                    <div className="pl-5">
-                      <strong>Forma preferida:</strong>{" "}
-                      {summary.formaPagamentoPreferida.toUpperCase()} (lido
-                      de comissao.forma_pagamento_preferida).
-                    </div>
-                  )}
-                  <div className="pl-5 italic">Edite abaixo se quiser ajustar.</div>
                 </div>
               );
             })()}
@@ -1092,18 +1167,17 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
       {step === "splits" && mode === "commission_from_deal" && (
         <Card>
           <CardHeader>
-            <CardTitle>Repasse de comissão (split)</CardTitle>
+            <CardTitle className="flex items-center gap-2">
+              Repasse de comissão
+              <span
+                className="text-xs font-normal text-muted-foreground cursor-help"
+                title="Splits pré-preenchidos do contrato. EyeOff oculta linhas do pagador (valor consolida em outra). PIX externos disparam após pagamento."
+              >
+                (?)
+              </span>
+            </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Splits pré-preenchidos a partir dos comissionados extraídos do
-              contrato. Marque com{" "}
-              <EyeOff className="h-3.5 w-3.5 inline align-text-bottom" /> linhas
-              que devem ficar ocultas do pagador (valor consolida em outra linha
-              visível). Splits PIX externos são disparados automaticamente após
-              confirmação do pagamento.
-            </p>
-
             <SplitEditor
               value={splits}
               onChange={setSplits}
