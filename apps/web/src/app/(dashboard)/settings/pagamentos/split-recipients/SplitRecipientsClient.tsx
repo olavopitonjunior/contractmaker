@@ -47,6 +47,8 @@ interface Recipient {
   ownerCpfCnpj: string | null;
   cpfCnpj: string | null;
   description: string | null;
+  email: string | null;
+  pendingFields: string[];
   active: boolean;
   createdAt: string;
 }
@@ -351,8 +353,15 @@ export default function SplitRecipientsClient() {
     void load();
   }
 
-  const active = recipients.filter((r) => r.active);
-  const inactive = recipients.filter((r) => !r.active);
+  const pendentes = recipients.filter(
+    (r) => (r.pendingFields ?? []).length > 0
+  );
+  const active = recipients.filter(
+    (r) => r.active && (r.pendingFields ?? []).length === 0
+  );
+  const inactive = recipients.filter(
+    (r) => !r.active && (r.pendingFields ?? []).length === 0
+  );
 
   return (
     <div className="space-y-4">
@@ -395,6 +404,26 @@ export default function SplitRecipientsClient() {
         </Card>
       ) : (
         <>
+          {pendentes.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-amber-900 uppercase flex items-center gap-2">
+                ⚠️ Pendentes de completar ({pendentes.length})
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Estes destinatários não recebem split em cobranças até completar
+                os campos faltantes (chave PIX ou wallet ID).
+              </p>
+              {pendentes.map((r) => (
+                <RecipientRow
+                  key={r.id}
+                  r={r}
+                  pending
+                  onEdit={() => openEdit(r)}
+                  onDeactivate={() => setConfirmDeactivate(r)}
+                />
+              ))}
+            </div>
+          )}
           {active.length > 0 && (
             <div className="space-y-2">
               <div className="text-xs font-medium text-muted-foreground uppercase">
@@ -690,19 +719,29 @@ export default function SplitRecipientsClient() {
 function RecipientRow({
   r,
   inactive,
+  pending,
   onEdit,
   onDeactivate,
   onReactivate,
 }: {
   r: Recipient;
   inactive?: boolean;
+  pending?: boolean;
   onEdit: () => void;
   onDeactivate?: () => void;
   onReactivate?: () => void;
 }) {
   const isPix = r.recipientType === "pix_external";
   return (
-    <Card className={inactive ? "opacity-60" : ""}>
+    <Card
+      className={
+        pending
+          ? "border-amber-300 bg-amber-50/40"
+          : inactive
+            ? "opacity-60"
+            : ""
+      }
+    >
       <CardContent className="flex items-center justify-between p-4 gap-4">
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
@@ -718,7 +757,15 @@ function RecipientRow({
                 </>
               )}
             </Badge>
-            {inactive && (
+            {pending && (
+              <Badge
+                variant="outline"
+                className="text-xs bg-amber-100 border-amber-400 text-amber-900"
+              >
+                ⚠️ pendente: {(r.pendingFields ?? []).join(", ")}
+              </Badge>
+            )}
+            {inactive && !pending && (
               <Badge variant="outline" className="text-xs">
                 inativo
               </Badge>
@@ -726,8 +773,10 @@ function RecipientRow({
           </div>
           <div className="text-xs text-muted-foreground font-mono mt-1">
             {isPix
-              ? `${r.pixKeyType} · ${maskPixKey(r.pixAddressKey ?? "", r.pixKeyType)}`
-              : maskWallet(r.walletId ?? "")}
+              ? `${r.pixKeyType ?? "—"} · ${r.pixAddressKey ? maskPixKey(r.pixAddressKey, r.pixKeyType) : "(sem chave)"}`
+              : r.walletId
+                ? maskWallet(r.walletId)
+                : "(sem walletId)"}
           </div>
           {isPix && r.ownerName && (
             <div className="text-xs text-muted-foreground mt-1">

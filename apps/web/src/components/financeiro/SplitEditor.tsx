@@ -297,6 +297,7 @@ export default function SplitEditor({
                 </Label>
                 {recipients.length > 0 ? (
                   <select
+                    data-split-line={line.key}
                     className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                     value={line.recipientId ?? ""}
                     onChange={(e) => {
@@ -341,21 +342,68 @@ export default function SplitEditor({
                       : `Conta Asaas`}
                   </div>
                 )}
+                {line.sourceComissionado?.source && (
+                  <div className="text-[11px] text-muted-foreground mt-1">
+                    └─ origem:{" "}
+                    {line.sourceComissionado.source === "ccv.imobiliaria_principal"
+                      ? "extraído do contrato (corretora principal)"
+                      : line.sourceComissionado.source === "ccv.comissionados"
+                        ? "extraído do contrato (lista explícita)"
+                        : "adicionado manualmente"}
+                  </div>
+                )}
+                {line.sourceComissionado && (
+                  <div className="text-[11px] mt-0.5">
+                    └─ status:{" "}
+                    {line.recipientId ? (
+                      <span className="text-green-700">
+                        ✓ destinatário cadastrado
+                      </span>
+                    ) : (
+                      <span className="text-amber-800">
+                        ⚠️ destinatário não cadastrado
+                      </span>
+                    )}
+                  </div>
+                )}
                 {noMatch && line.sourceComissionado && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setInlineDialog({
-                        forKey: line.key,
-                        prefill: line.sourceComissionado!,
-                      })
-                    }
-                    className="mt-1 text-xs text-amber-900 underline hover:text-amber-700 flex items-center gap-1"
-                  >
-                    <AlertTriangle className="h-3 w-3" />
-                    Cadastrar &ldquo;{line.sourceComissionado.nome}&rdquo; como
-                    destinatário
-                  </button>
+                  <div className="mt-1 flex flex-col gap-1">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setInlineDialog({
+                          forKey: line.key,
+                          prefill: line.sourceComissionado!,
+                        })
+                      }
+                      className="text-xs text-amber-900 underline hover:text-amber-700 flex items-center gap-1"
+                    >
+                      <AlertTriangle className="h-3 w-3" />
+                      Cadastrar &ldquo;{line.sourceComissionado.nome}&rdquo; como
+                      destinatário
+                    </button>
+                    {recipients.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // Foca o select de destinatário pra escolha manual.
+                          // Como o select já está renderizado acima, scroll/focus
+                          // seria overkill — basta sinalizar via outline.
+                          const selectEl = document.querySelector<HTMLSelectElement>(
+                            `select[data-split-line="${line.key}"]`
+                          );
+                          if (selectEl) {
+                            selectEl.focus();
+                            selectEl.scrollIntoView({ block: "center", behavior: "smooth" });
+                          }
+                        }}
+                        className="text-xs text-blue-700 underline hover:text-blue-900 flex items-center gap-1"
+                      >
+                        <Wallet className="h-3 w-3" />
+                        Vincular destinatário existente
+                      </button>
+                    )}
+                  </div>
                 )}
               </div>
               <div className="col-span-3">

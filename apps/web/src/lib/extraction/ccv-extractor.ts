@@ -99,10 +99,11 @@ Analise o documento anexo e extraia os dados em JSON ESTRITO no shape abaixo. Re
         "cpf": "...",             // ou cnpj quando PJ
         "cnpj": "...",
         "tipo_pessoa": "fisica" | "juridica",
+        "papel": "imobiliaria_principal" | "captador" | "intermediador" | "indicador" | "outro",
         "email": "...",
         "mobile_phone": "...",
-        "percentual": 0,          // % do valor total
-        "valor": 0                // valor absoluto em reais
+        "percentual": 0,          // % da comissão TOTAL (soma <=100 entre todos)
+        "valor": 0                // valor absoluto em reais (opcional)
       }
     ]
   }
@@ -117,7 +118,7 @@ Regras:
 - Vendedor PJ: use "razao_social" + "cnpj" (não "nome"+"cpf").
 - Se houver múltiplos vendedores/compradores/imóveis, retorne array com TODOS.
 - **Parcelas**: SEMPRE preencher \`pagamento.parcelas\` quando o contrato listar parcelamentos explícitos (ex: "1ª parcela de R$ X em DD/MM, 2ª parcela..."), NÃO omita. Numere sequencialmente a partir de 1.
-- **Comissão**: se o contrato menciona comissão paga a múltiplas pessoas (corretora + intermediária + sub-corretor), liste TODAS em \`comissao.comissionados\`. Se a comissão é única (uma só pessoa/empresa), AINDA assim preencha \`comissionados\` com 1 item. Mantenha \`corretora_nome/cpf/cnpj\` apenas pelo retrocompatibilidade — \`comissionados\` é a fonte canônica.
+- **Comissão**: se o contrato menciona comissão paga a múltiplas pessoas (corretora + intermediária + sub-corretor / co-corretagem captador+intermediador / indicação), liste TODAS em \`comissao.comissionados\` com \`papel\` apropriado (\`captador\` | \`intermediador\` | \`indicador\` | \`imobiliaria_principal\` | \`outro\`) e \`percentual\` da participação na comissão (0-100, soma ≤ 100). Se a comissão é única (uma só pessoa/empresa), AINDA assim preencha \`comissionados\` com 1 item (papel \`imobiliaria_principal\`, percentual 100). Mantenha \`corretora_nome/cpf/cnpj\` por retrocompatibilidade — \`comissionados\` é a fonte canônica.
 - **quando_paga**: \`assinatura\` quando comissão paga junto com sinal/ato; \`chaves\` quando paga na entrega da posse; \`registro\` quando paga após registro/escritura (típico em financiamento).
 - **forma_pagamento_preferida**: extrair do contrato apenas se houver menção explícita ("via PIX", "boleto bancário"). Caso contrário use \`qualquer\`.
 - **prazo_dias_apos_marco**: se contrato disser "até X dias após [assinatura|chaves|registro]", extrair X. Caso contrário omita.

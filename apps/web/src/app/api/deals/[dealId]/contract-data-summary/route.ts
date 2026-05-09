@@ -8,6 +8,10 @@ import {
   type DadosContratoLite,
 } from "@/lib/asaas/commission";
 import { resolveDefaultDueDate } from "@/lib/asaas/due-date-resolver";
+import {
+  matchComissionadosToSplitRecipients,
+  type ComissionadoLike,
+} from "@/lib/asaas/commissionados-matcher";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +23,117 @@ interface PartySummary {
   cpfCnpj: string;
   email: string | null;
   mobilePhone: string | null;
+}
+
+/**
+ * Origem auditável do comissionado retornado para o wizard. UI usa pra
+ * microcopy de "de onde veio esse dado".
+ *   ccv.comissionados        — array explícito em dataJson.comissao.comissionados[]
+ *   ccv.imobiliaria_principal — sintetizado dos campos planos imobiliaria_*
+ *   manual                    — adicionado pelo operador no wizard (não retornado por este endpoint)
+ */
+type ComissionadoSource =
+  | "ccv.comissionados"
+  | "ccv.imobiliaria_principal"
+  | "manual";
+
+interface EnrichedComissionado {
+  nome: string | undefined;
+  cpf: string | undefined;
+  cnpj: string | undefined;
+  tipo_pessoa: "fisica" | "juridica" | undefined;
+  email: string | undefined;
+  mobile_phone: string | undefined;
+  creci?: string;
+  papel?: string;
+  percentual: number | undefined;
+  valor: number | undefined;
+  source: ComissionadoSource;
+  splitRecipientId: string | null;
+  matchedBy: "cpf_cnpj" | "name" | null;
+}
+
+interface ComissaoLegada {
+  imobiliaria_nome?: string;
+  imobiliaria_cnpj?: string;
+  imobiliaria_email?: string;
+  creci?: string;
+  corretora_tipo_pessoa?: "fisica" | "juridica";
+  valor?: number;
+}
+
+/**
+ * Resolve a lista canônica de comissionados a partir de dataJson.comissao.
+ *
+ * Ordem de prioridade:
+ *   1. comissionados[] explícito (preferência do operador, multi-corretora)
+ *   2. campos planos imobiliaria_* (legado mono-corretora — sintetiza 1 entrada com 100%)
+ *   3. lista vazia (contrato sem comissionado declarado)
+ *
+ * Para cada comissionado, faz match contra SplitRecipient cadastrados na
+ * org (por CPF/CNPJ ou nome normalizado) — se houver match, retorna
+ * splitRecipientId pra UI render linha verde "destinatário cadastrado".
+ */
+async function deriveComissionados(
+  data: DadosContratoLite | null,
+  orgId: string
+): Promise<EnrichedComissionado[]> {
+  if (!data?.comissao) return [];
+
+  // 1) source of truth: comissionados[] explícito
+  const explicit = (data.comissao as { comissionados?: ComissionadoLike[] })
+    .comissionados;
+  if (explicit && explicit.length > 0) {
+    return enrichWithMatch(explicit, orgId, "ccv.comissionados");
+  }
+
+  // 2) fallback: imobiliaria_* (mono-corretora legado)
+  const c = data.comissao as ComissaoLegada;
+  if (!c.imobiliaria_nome) return [];
+
+  const tipo = c.corretora_tipo_pessoa ?? "fisica";
+  const synthesized: ComissionadoLike = {
+    nome: c.imobiliaria_nome,
+    cpf: tipo === "fisica" ? c.imobiliaria_cnpj ?? "" : "",
+    cnpj: tipo === "juridica" ? c.imobiliaria_cnpj ?? "" : "",
+    tipo_pessoa: tipo,
+    email: c.imobiliaria_email,
+    percentual: 100,
+    valor: typeof c.valor === "number" ? c.valor : undefined,
+  };
+  return enrichWithMatch([synthesized], orgId, "ccv.imobiliaria_principal");
+}
+
+async function enrichWithMatch(
+  list: ComissionadoLike[],
+  orgId: string,
+  source: ComissionadoSource
+): Promise<EnrichedComissionado[]> {
+  const recipients = await prisma.splitRecipient.findMany({
+    where: { orgId, active: true },
+  });
+  const matches = matchComissionadosToSplitRecipients(list, recipients);
+  return matches.map((m) => {
+    const c = m.comissionado as ComissionadoLike & {
+      creci?: string;
+      papel?: string;
+    };
+    return {
+      nome: c.nome,
+      cpf: c.cpf,
+      cnpj: c.cnpj,
+      tipo_pessoa: c.tipo_pessoa,
+      email: c.email,
+      mobile_phone: c.mobile_phone,
+      creci: c.creci,
+      papel: c.papel,
+      percentual: c.percentual,
+      valor: c.valor,
+      source,
+      splitRecipientId: m.matchedRecipient?.id ?? null,
+      matchedBy: m.matchedBy ?? null,
+    };
+  });
 }
 
 /**
@@ -139,6 +254,8 @@ export async function GET(
     (data?.comissao as { forma_pagamento_preferida?: "pix" | "boleto" | "qualquer" })
       ?.forma_pagamento_preferida ?? "qualquer";
 
+  const comissionados = await deriveComissionados(data, ctx.orgId);
+
   return NextResponse.json({
     deal: { id: deal.id, title: deal.title },
     contract: contract
@@ -149,8 +266,7 @@ export async function GET(
         }
       : null,
     parties,
-    comissionados:
-      (data?.comissao as { comissionados?: unknown[] })?.comissionados ?? [],
+    comissionados,
     suggestedPayer,
     payerError,
     suggestedValue,

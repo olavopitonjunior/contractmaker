@@ -19,6 +19,14 @@ export interface ComissionadoLike {
   mobile_phone?: string;
   percentual?: number;
   valor?: number;
+  /**
+   * Origem auditável do comissionado (set pelo backend mapper). Passa-thru
+   * pra UI mostrar microcopy "de onde veio esse split". Opcional pra não
+   * quebrar callers que sintetizam ComissionadoLike sem essa info.
+   */
+  source?: "ccv.comissionados" | "ccv.imobiliaria_principal" | "manual";
+  /** Match já resolvido pelo backend; UI usa pra mostrar linha verde direto. */
+  splitRecipientId?: string | null;
 }
 
 export type MatchSuggestion = "matched" | "create" | "manual";

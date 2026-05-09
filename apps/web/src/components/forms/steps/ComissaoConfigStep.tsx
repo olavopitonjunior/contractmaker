@@ -367,6 +367,38 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
                       }
                     />
                   </FormField>
+                  <FormField label="Percentual da comissão (%)">
+                    <Input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      max="100"
+                      {...form.register(
+                        `comissao.comissionados.${index}.percentual`,
+                        {
+                          setValueAs: (v) =>
+                            v === "" || isNaN(v) ? undefined : Number(v),
+                        }
+                      )}
+                      placeholder={index === 0 ? "100" : "Ex: 30"}
+                    />
+                  </FormField>
+                  <FormField label="Papel">
+                    <select
+                      {...form.register(
+                        `comissao.comissionados.${index}.papel`
+                      )}
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                    >
+                      <option value="imobiliaria_principal">
+                        Imobiliária / Corretora principal
+                      </option>
+                      <option value="captador">Captador</option>
+                      <option value="intermediador">Intermediador</option>
+                      <option value="indicador">Indicador</option>
+                      <option value="outro">Outro</option>
+                    </select>
+                  </FormField>
                   <FormField
                     label="E-mail (para assinatura e notificações)"
                   >
@@ -405,6 +437,35 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
               </div>
             );
           })}
+
+          {/* Soma de percentuais — só aparece se há múltiplos */}
+          {comissionadoFields.length > 1 && (() => {
+            const soma = comissionadoFields.reduce((acc, _f, i) => {
+              const v = form.watch(
+                `comissao.comissionados.${i}.percentual`
+              ) as number | undefined;
+              return acc + (v ?? 0);
+            }, 0);
+            const overflow = soma > 100;
+            return (
+              <div
+                className={`rounded-md border p-2 text-xs ${
+                  overflow
+                    ? "border-destructive/40 bg-destructive/5 text-destructive"
+                    : soma === 100
+                      ? "border-green-300 bg-green-50 text-green-900"
+                      : "border-amber-300 bg-amber-50 text-amber-900"
+                }`}
+              >
+                Soma dos percentuais: <strong>{soma.toFixed(2)}%</strong>
+                {overflow
+                  ? " — excede 100%, ajuste antes de finalizar."
+                  : soma === 100
+                    ? " — comissão totalmente distribuída."
+                    : ` — restam ${(100 - soma).toFixed(2)}% sem destino (campo opcional, mas recomendado completar).`}
+              </div>
+            );
+          })()}
         </CardContent>
       </Card>
 

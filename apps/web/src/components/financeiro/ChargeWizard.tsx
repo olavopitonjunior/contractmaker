@@ -47,18 +47,32 @@ interface PartySummary {
   mobilePhone: string | null;
 }
 
+type ComissionadoSource =
+  | "ccv.comissionados"
+  | "ccv.imobiliaria_principal"
+  | "manual";
+
+interface SummaryComissionado {
+  nome?: string;
+  cpf?: string;
+  cnpj?: string;
+  tipo_pessoa?: "fisica" | "juridica";
+  percentual?: number;
+  valor?: number;
+  email?: string;
+  mobile_phone?: string;
+  creci?: string;
+  papel?: string;
+  source?: ComissionadoSource;
+  splitRecipientId?: string | null;
+  matchedBy?: "cpf_cnpj" | "name" | null;
+}
+
 interface DealSummary {
   deal: { id: string; title: string };
   contract: { id: string; status: string; isImported: boolean } | null;
   parties: PartySummary[];
-  comissionados: Array<{
-    nome?: string;
-    cpf?: string;
-    cnpj?: string;
-    percentual?: number;
-    email?: string;
-    mobile_phone?: string;
-  }>;
+  comissionados: SummaryComissionado[];
   suggestedPayer: PartySummary | null;
   payerError: string | null;
   suggestedValue: number | null;
@@ -66,6 +80,18 @@ interface DealSummary {
   formaPagamentoPreferida: "pix" | "boleto" | "qualquer";
   modalidade: string | null;
 }
+
+const SOURCE_LABEL: Record<ComissionadoSource, string> = {
+  "ccv.comissionados": "extraído do contrato (lista explícita)",
+  "ccv.imobiliaria_principal": "extraído do contrato (corretora principal)",
+  manual: "adicionado manualmente",
+};
+
+const QUEM_PAGA_LABEL: Record<string, string> = {
+  comprador: "comprador paga a comissão",
+  vendedor: "vendedor paga a comissão",
+  ambos: "ambos pagam a comissão (50/50)",
+};
 
 interface CustomerSummary {
   id: string;
@@ -82,6 +108,11 @@ interface Props {
   dealId?: string;
   onCreated: (charge: { id: string }) => void;
   onCancel?: () => void;
+  /**
+   * Permite trocar de mode em runtime preservando state. Usado pelo CTA
+   * "Trocar para cobrança avulsa" quando contrato não tem comissionados.
+   */
+  onModeChange?: (mode: ChargeWizardMode) => void;
 }
 
 function fmtBRL(v: number) {
@@ -95,32 +126,52 @@ function fmtDueDate(iso: string): string {
   return `${m[3]}/${m[2]}/${m[1]}`;
 }
 
+type StepStatus = "pending" | "ok" | "warning" | "blocking";
+
 function StepPill({
   active,
   done,
+  status = "pending",
+  badgeCount,
   label,
 }: {
   active: boolean;
   done: boolean;
+  status?: StepStatus;
+  badgeCount?: number;
   label: string;
 }) {
+  const cls = active
+    ? "bg-primary text-primary-foreground"
+    : status === "blocking"
+      ? "bg-red-100 text-red-900 border border-red-300"
+      : status === "warning"
+        ? "bg-amber-100 text-amber-900 border border-amber-300"
+        : status === "ok" || done
+          ? "bg-green-100 text-green-900 border border-green-300"
+          : "bg-muted text-muted-foreground";
+  const icon =
+    status === "blocking" ? (
+      <AlertTriangle className="h-3 w-3 inline mr-1" />
+    ) : status === "warning" ? (
+      <AlertTriangle className="h-3 w-3 inline mr-1" />
+    ) : status === "ok" || done ? (
+      <CheckCircle2 className="h-3 w-3 inline mr-1" />
+    ) : null;
   return (
-    <div
-      className={`px-3 py-1 rounded-full text-xs font-medium ${
-        active
-          ? "bg-primary text-primary-foreground"
-          : done
-            ? "bg-green-100 text-green-900 border border-green-300"
-            : "bg-muted text-muted-foreground"
-      }`}
-    >
-      {done && <CheckCircle2 className="h-3 w-3 inline mr-1" />}
+    <div className={`px-3 py-1 rounded-full text-xs font-medium ${cls}`}>
+      {icon}
       {label}
+      {status === "blocking" && badgeCount !== undefined && badgeCount > 0 && (
+        <span className="ml-1 inline-flex items-center justify-center min-w-[1.25rem] h-5 px-1 rounded-full bg-red-600 text-white text-[10px] font-bold">
+          {badgeCount}
+        </span>
+      )}
     </div>
   );
 }
 
-export default function ChargeWizard({ mode, dealId, onCreated, onCancel }: Props) {
+export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onModeChange }: Props) {
   const isAvulsa = mode !== "commission_from_deal";
   const isAvulsaInDeal = mode === "avulsa_in_deal";
   const isAvulsaStandalone = mode === "avulsa_standalone";
@@ -426,6 +477,34 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel }: Prop
     ).length;
   }, [splits, mode]);
 
+  // ---------- Step status (chips stateful) ----------
+  // Computa em paralelo assim que summary chega — operador vê problemas
+  // de etapas posteriores antes de chegar lá.
+  const payerStatus: StepStatus = !payerReady
+    ? "blocking"
+    : !payerEmail && billingType === "PIX" && mode !== "avulsa_standalone"
+      ? "warning"
+      : "ok";
+  const chargeStatus: StepStatus = !chargeReady ? "blocking" : "ok";
+  const splitsStatus: StepStatus =
+    mode !== "commission_from_deal"
+      ? "ok"
+      : !summary
+        ? "pending"
+        : summary.comissionados.length === 0
+          ? "warning"
+          : blockingNoMatch > 0
+            ? "blocking"
+            : "ok";
+  const reviewStatus: StepStatus =
+    payerStatus === "blocking" ||
+    chargeStatus === "blocking" ||
+    splitsStatus === "blocking"
+      ? "blocking"
+      : payerStatus === "warning" || splitsStatus === "warning"
+        ? "warning"
+        : "ok";
+
   // ---------- Render ----------
   return (
     <div className="max-w-2xl mx-auto space-y-4">
@@ -453,22 +532,31 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel }: Prop
       </div>
 
       <div className="flex items-center gap-2 text-sm flex-wrap">
-        <StepPill active={step === "payer"} done={step !== "payer"} label="1. Pagador" />
+        <StepPill
+          active={step === "payer"}
+          done={step !== "payer"}
+          status={payerStatus}
+          label="1. Pagador"
+        />
         <StepPill
           active={step === "charge"}
           done={step === "splits" || step === "review"}
+          status={chargeStatus}
           label="2. Cobrança"
         />
         {mode === "commission_from_deal" && (
           <StepPill
             active={step === "splits"}
             done={step === "review"}
+            status={splitsStatus}
+            badgeCount={blockingNoMatch}
             label="3. Splits"
           />
         )}
         <StepPill
           active={step === "review"}
           done={false}
+          status={reviewStatus}
           label={mode === "commission_from_deal" ? "4. Revisão" : "3. Revisão"}
         />
       </div>
@@ -481,6 +569,91 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel }: Prop
           </div>
         </div>
       )}
+
+      {/* Banner contextual — aparece quando há problema/sinal previsível */}
+      {summary && mode === "commission_from_deal" && (() => {
+        const banners: Array<{
+          color: "yellow" | "red";
+          title: string;
+          body: React.ReactNode;
+        }> = [];
+
+        // 1) Apenas 1 corretora extraída do legado imobiliaria_*
+        if (
+          summary.comissionados.length === 1 &&
+          summary.comissionados[0].source === "ccv.imobiliaria_principal"
+        ) {
+          banners.push({
+            color: "yellow",
+            title: "Apenas 1 corretora declarada",
+            body: (
+              <span>
+                Este contrato declara apenas 1 corretora ({summary.comissionados[0].nome ?? "—"}, 100%).
+                Se houver co-corretagem, edite o contrato pra adicionar mais comissionados ou
+                cadastre destinatários adicionais nesta cobrança antes de prosseguir.
+              </span>
+            ),
+          });
+        }
+
+        // 2) Pagador sem email + PIX selecionado
+        if (!payerEmail && billingType === "PIX" && payerName.trim().length > 0) {
+          banners.push({
+            color: "red",
+            title: "Pagador sem email cadastrado",
+            body: (
+              <span>
+                Cobrança PIX não poderá ser entregue por email automaticamente. Edite o
+                pagador acima ou troque para Boleto na próxima etapa.
+              </span>
+            ),
+          });
+        }
+
+        // 3) Comissionados vazios mesmo com contrato aprovado
+        if (
+          summary.comissionados.length === 0 &&
+          summary.contract?.status === "aprovado"
+        ) {
+          banners.push({
+            color: "red",
+            title: "Nenhum comissionado declarado",
+            body: (
+              <span>
+                Este contrato aprovado não tem comissionados. Adicione destinatários
+                manualmente na etapa Splits{onModeChange ? " ou " : "."}
+                {onModeChange && (
+                  <button
+                    type="button"
+                    onClick={() => onModeChange("avulsa_in_deal")}
+                    className="underline font-medium hover:text-red-700"
+                  >
+                    troque para cobrança avulsa
+                  </button>
+                )}
+                {onModeChange && " (preserva pagador, valor e vencimento)."}
+              </span>
+            ),
+          });
+        }
+
+        return banners.map((b, i) => (
+          <div
+            key={i}
+            className={`border rounded p-3 text-sm flex gap-2 ${
+              b.color === "red"
+                ? "bg-red-50 text-red-900 border-red-300"
+                : "bg-amber-50 text-amber-900 border-amber-300"
+            }`}
+          >
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-medium">{b.title}</div>
+              <div className="text-xs mt-0.5">{b.body}</div>
+            </div>
+          </div>
+        ));
+      })()}
 
       {/* STEP 1: Payer */}
       {step === "payer" && (
@@ -651,6 +824,24 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel }: Prop
                       {summary.payerError}
                     </p>
                   )}
+                  {summary.suggestedPayer && !summary.payerError && (() => {
+                    const isOverridden =
+                      selectedPartyKey !==
+                      `${summary.suggestedPayer.papel}-${summary.suggestedPayer.index}`;
+                    const sugLabel =
+                      QUEM_PAGA_LABEL[summary.suggestedPayer.papel] ??
+                      `${summary.suggestedPayer.papel} paga a comissão`;
+                    return (
+                      <p className="text-xs text-muted-foreground mt-1 flex items-start gap-1">
+                        <Lightbulb className="h-3 w-3 mt-0.5 shrink-0" />
+                        <span>
+                          {isOverridden
+                            ? `Você trocou de parte. Sugestão original do contrato era ${summary.suggestedPayer.papel} (${summary.suggestedPayer.nome || "—"}).`
+                            : `Pré-selecionado: ${sugLabel} (regra do contrato: comissao.quem_paga).`}
+                        </span>
+                      </p>
+                    );
+                  })()}
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -720,22 +911,48 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel }: Prop
             <CardTitle>Dados da cobrança</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            {summary?.suggestedDueDate.reason && mode === "commission_from_deal" && (
-              <div className="border rounded p-2 bg-blue-50 text-xs text-blue-900 flex gap-2">
-                <Lightbulb className="h-3 w-3 shrink-0 mt-0.5" />
-                <div>
-                  Sugestão automática: vencimento em{" "}
-                  <strong>{summary.suggestedDueDate.reason}</strong>
-                  {summary.formaPagamentoPreferida !== "qualquer" && (
-                    <>
-                      , forma preferida{" "}
-                      <strong>{summary.formaPagamentoPreferida.toUpperCase()}</strong>
-                    </>
+            {summary?.suggestedDueDate.reason && mode === "commission_from_deal" && (() => {
+              // Sinal de "ainda não há marco confirmado" — heurística usa hoje
+              // como referência (resolveDefaultDueDate em runtime).
+              const usandoHojeComoBase =
+                /^\d+ dias após (registro|chaves|quitação)/i.test(
+                  summary.suggestedDueDate.reason
+                );
+              const valorOrigem =
+                summary.suggestedValue !== null
+                  ? `comissao.valor (R$ ${summary.suggestedValue.toLocaleString("pt-BR")})`
+                  : "comissao.percentual × pagamento.valor_total";
+              return (
+                <div className="border rounded p-2 bg-blue-50 text-xs text-blue-900 space-y-1">
+                  <div className="flex gap-2">
+                    <Lightbulb className="h-3 w-3 shrink-0 mt-0.5" />
+                    <div>
+                      <strong>Vencimento sugerido:</strong>{" "}
+                      {fmtDueDate(summary.suggestedDueDate.iso)} —{" "}
+                      {summary.suggestedDueDate.reason}
+                    </div>
+                  </div>
+                  {usandoHojeComoBase && (
+                    <div className="pl-5 text-amber-800">
+                      ⚠️ Como ainda não há data de marco confirmada, foi usado
+                      hoje como referência. Ajuste se houver data prevista no
+                      contrato.
+                    </div>
                   )}
-                  . Edite abaixo se quiser ajustar.
+                  <div className="pl-5">
+                    <strong>Valor:</strong> calculado a partir de {valorOrigem}.
+                  </div>
+                  {summary.formaPagamentoPreferida !== "qualquer" && (
+                    <div className="pl-5">
+                      <strong>Forma preferida:</strong>{" "}
+                      {summary.formaPagamentoPreferida.toUpperCase()} (lido
+                      de comissao.forma_pagamento_preferida).
+                    </div>
+                  )}
+                  <div className="pl-5 italic">Edite abaixo se quiser ajustar.</div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             <div>
               <Label className="mb-2 block">Método</Label>

@@ -1373,6 +1373,16 @@ model SplitRecipient {
   // dispara split pra este destinatário. Opt-in: sem email, comissionado
   // não é notificado (Asaas notifica direto o pagador, não o beneficiário).
   email         String?
+  // Pagadoria v2 — rascunho de cadastro: lista de campos pendentes (ex:
+  // ["pixAddressKey"]). Quando não-vazio, splitDispatcher pula este recipient
+  // marcando o transfer como FAILED. Comissionado pode completar via UI
+  // admin OU magic link público (completionToken).
+  pendingFields      String[]   @default([])
+  // Magic link pra comissionado completar dados sem login. Token JWT
+  // assinado com AUTH_SECRET, exp 7d. Página pública /financeiro/completar-cadastro
+  // valida e marca active: true + esvazia pendingFields.
+  completionToken    String?    @db.Text
+  completionTokenExp DateTime?
   active        Boolean  @default(true)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt

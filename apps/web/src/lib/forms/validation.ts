@@ -220,6 +220,13 @@ export const step7Schema = z.object({
       mobile_phone: z.string().optional().default(""),
       percentual: z.number().optional(),
       valor: z.number().optional(),
+      // Papel auditável do comissionado na divisão da comissão. Default
+      // imobiliaria_principal pra retrocompat com comissionados sintetizados
+      // a partir do legado imobiliaria_* (Frente 1).
+      papel: z
+        .enum(["captador", "intermediador", "indicador", "imobiliaria_principal", "outro"])
+        .optional()
+        .default("imobiliaria_principal"),
       incluir_como_signatario: z.boolean().optional().default(false),
     })).optional(),
   }).optional(),
@@ -296,6 +303,23 @@ export const dadosContratoSchema = step1Schema
     };
     data.vendedores.forEach((p, i) => checkParte("vendedores", i, p));
     data.compradores.forEach((p, i) => checkParte("compradores", i, p));
+
+    // Multi-corretora: soma de percentuais ≤ 100 (apenas quando há
+    // comissionados explícitos; campos planos imobiliaria_* não têm percentual)
+    const comissionados = data.comissao?.comissionados ?? [];
+    if (comissionados.length > 0) {
+      const soma = comissionados.reduce(
+        (acc, c) => acc + (c.percentual ?? 0),
+        0
+      );
+      if (soma > 100) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: `Soma dos percentuais dos comissionados é ${soma.toFixed(2)}% (máximo 100%)`,
+          path: ["comissao", "comissionados"],
+        });
+      }
+    }
   });
 
 export type DadosContratoForm = z.infer<typeof dadosContratoSchema>;

@@ -119,8 +119,22 @@ Profissão: {{this.representante.profissao}}
 {{/if}}
 {{/each}}
 
-<h3>INTERMEDIADORA</h3>
+<h3>INTERMEDIADORA{{#if comissao.comissionados.length}}{{#if (gt comissao.comissionados.length 1)}}S{{/if}}{{/if}}</h3>
 
+{{#if comissao.comissionados.length}}
+{{#each comissao.comissionados}}
+<p>
+{{#if (eq tipo_pessoa "fisica")}}
+Corretor(a): {{nome}}<br>
+CPF: {{cpf cpf}}<br>
+{{else}}
+Imobiliária: {{nome}}<br>
+CNPJ: nº {{cnpj cnpj}}<br>
+{{/if}}
+{{#if (existe creci)}}CRECI: {{creci}}{{#if percentual}} — Participação: {{percentual}}%{{/if}}{{else}}{{#if percentual}}Participação: {{percentual}}%{{/if}}{{/if}}
+</p>
+{{/each}}
+{{else}}
 <p>
 {{#if (eq comissao.corretora_tipo_pessoa "fisica")}}
 Corretor(a): {{comissao.imobiliaria_nome}}<br>
@@ -132,6 +146,7 @@ CNPJ: nº {{cnpj comissao.imobiliaria_cnpj}}<br>
 CRECI: {{comissao.creci}}
 {{/if}}
 </p>
+{{/if}}
 
 <hr>
 
@@ -402,13 +417,24 @@ CPF: {{cpf this.conjuge.cpf}}<br>
 {{/if}}
 {{/each}}
 
-<h3>INTERMEDIADORA</h3>
+<h3>INTERMEDIADORA{{#if comissao.comissionados.length}}{{#if (gt comissao.comissionados.length 1)}}S{{/if}}{{/if}}</h3>
+{{#if comissao.comissionados.length}}
+{{#each comissao.comissionados}}
+<p>
+_______________________________<br>
+{{nome}}<br>
+{{#if (eq tipo_pessoa "fisica")}}CPF: {{cpf cpf}}{{else}}CNPJ: {{cnpj cnpj}}{{/if}}{{#if (existe creci)}}<br>
+CRECI: {{creci}}{{/if}}
+</p>
+{{/each}}
+{{else}}
 <p>
 _______________________________<br>
 {{comissao.imobiliaria_nome}}<br>
 {{#if (eq comissao.corretora_tipo_pessoa "fisica")}}CPF: {{cpf comissao.imobiliaria_cnpj}}{{else}}CNPJ: {{cnpj comissao.imobiliaria_cnpj}}{{/if}}{{#if (existe comissao.creci)}}<br>
 CRECI: {{comissao.creci}}{{/if}}
 </p>
+{{/if}}
 
 <h3>TESTEMUNHAS</h3>
 {{#each testemunhas}}

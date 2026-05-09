@@ -63,11 +63,23 @@ export function SplitRecipientInlineDialog({
     prefill.cpf || prefill.cnpj || ""
   );
   const [email, setEmail] = useState(prefill.email ?? "");
+  const [draftMode, setDraftMode] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
   async function submit() {
     setSubmitting(true);
     try {
+      // Em rascunho, marca campos críticos como pendentes.
+      const pendingFields: string[] = [];
+      if (draftMode) {
+        if (tipo === "asaas_wallet" && walletId.trim() === "") {
+          pendingFields.push("walletId");
+        }
+        if (tipo === "pix_external" && pixKey.trim() === "") {
+          pendingFields.push("pixAddressKey");
+        }
+      }
+
       const body =
         tipo === "asaas_wallet"
           ? {
@@ -76,6 +88,7 @@ export function SplitRecipientInlineDialog({
               walletId: walletId.trim(),
               cpfCnpj: ownerCpfCnpj.trim() || undefined,
               email: email.trim() || undefined,
+              pendingFields: pendingFields.length > 0 ? pendingFields : undefined,
             }
           : {
               recipientType: "pix_external" as const,
@@ -84,6 +97,7 @@ export function SplitRecipientInlineDialog({
               ownerName: ownerName.trim(),
               ownerCpfCnpj: ownerCpfCnpj.trim(),
               email: email.trim() || undefined,
+              pendingFields: pendingFields.length > 0 ? pendingFields : undefined,
             };
       const res = await fetch("/api/financeiro/split-recipients", {
         method: "POST",
@@ -105,11 +119,17 @@ export function SplitRecipientInlineDialog({
 
   const canSubmit =
     label.trim().length > 0 &&
-    (tipo === "asaas_wallet"
-      ? walletId.trim().length > 0
-      : pixKey.trim().length > 0 &&
-        ownerName.trim().length > 0 &&
-        ownerCpfCnpj.replace(/\D/g, "").length >= 11);
+    (draftMode
+      ? // rascunho: só exige label + dados de identificação
+        tipo === "asaas_wallet"
+        ? true
+        : ownerName.trim().length > 0 &&
+          ownerCpfCnpj.replace(/\D/g, "").length >= 11
+      : tipo === "asaas_wallet"
+        ? walletId.trim().length > 0
+        : pixKey.trim().length > 0 &&
+          ownerName.trim().length > 0 &&
+          ownerCpfCnpj.replace(/\D/g, "").length >= 11);
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
@@ -229,6 +249,27 @@ export function SplitRecipientInlineDialog({
               Se preenchido, o destinatário recebe email quando uma cobrança que
               o inclui no split é paga.
             </p>
+          </div>
+
+          <div className="border-t pt-3">
+            <label className="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5 h-4 w-4 rounded border-input accent-primary"
+                checked={draftMode}
+                onChange={(e) => setDraftMode(e.target.checked)}
+              />
+              <div className="flex-1">
+                <span className="text-sm font-medium">
+                  Salvar com dados mínimos (rascunho)
+                </span>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Permite cadastrar sem chave PIX/wallet agora. O destinatário
+                  fica inativo até completar o cadastro — splits desta cobrança
+                  ficarão em estado FALHOU até resolver.
+                </p>
+              </div>
+            </label>
           </div>
         </div>
 

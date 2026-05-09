@@ -24,16 +24,19 @@ const baseSchema = z.object({
     .nullable()
     .optional()
     .or(z.literal("")),
+  // Pagadoria v2 — rascunho. Quando não-vazio, força active:false e
+  // permite campos críticos (pixAddressKey/walletId) virem vazios.
+  pendingFields: z.array(z.string()).max(10).optional(),
 });
 
 const walletSchema = baseSchema.extend({
   recipientType: z.literal("asaas_wallet").default("asaas_wallet"),
-  walletId: z.string().trim().min(1).max(200),
+  walletId: z.string().trim().max(200).optional().default(""),
 });
 
 const pixSchema = baseSchema.extend({
   recipientType: z.literal("pix_external"),
-  pixAddressKey: z.string().trim().min(1).max(200),
+  pixAddressKey: z.string().trim().max(200).optional().default(""),
   ownerName: z.string().trim().min(1).max(200),
   ownerCpfCnpj: z.string().trim().min(11).max(18),
 });
@@ -97,10 +100,28 @@ export async function POST(req: NextRequest) {
 
   const data = parsed.data;
   const isPix = data.recipientType === "pix_external";
+  const pendingFields = data.pendingFields ?? [];
+  const isDraft = pendingFields.length > 0;
 
-  // Para PIX, detectar tipo da chave automaticamente
+  // Validações relaxadas para rascunho (campos críticos podem vir vazios)
+  if (!isDraft) {
+    if (isPix && (!data.pixAddressKey || data.pixAddressKey.trim() === "")) {
+      return NextResponse.json(
+        { error: "Chave PIX obrigatória (ou marque pendingFields=['pixAddressKey'] para rascunho)" },
+        { status: 400 }
+      );
+    }
+    if (!isPix && (!data.walletId || data.walletId.trim() === "")) {
+      return NextResponse.json(
+        { error: "walletId obrigatório (ou marque pendingFields=['walletId'] para rascunho)" },
+        { status: 400 }
+      );
+    }
+  }
+
+  // Para PIX, detectar tipo da chave automaticamente (apenas quando preenchida)
   let pixKeyType: string | null = null;
-  if (isPix) {
+  if (isPix && data.pixAddressKey && data.pixAddressKey.trim() !== "") {
     pixKeyType = detectPixKeyType(data.pixAddressKey);
     if (!pixKeyType) {
       return NextResponse.json(
@@ -116,14 +137,17 @@ export async function POST(req: NextRequest) {
         orgId: ctx.orgId,
         label: data.label,
         recipientType: data.recipientType,
-        walletId: isPix ? null : data.walletId,
-        pixAddressKey: isPix ? data.pixAddressKey : null,
+        walletId: isPix ? null : (data.walletId && data.walletId.trim() !== "" ? data.walletId : null),
+        pixAddressKey: isPix && data.pixAddressKey && data.pixAddressKey.trim() !== "" ? data.pixAddressKey : null,
         pixKeyType: pixKeyType,
         ownerName: isPix ? data.ownerName : null,
         ownerCpfCnpj: isPix ? data.ownerCpfCnpj : null,
         cpfCnpj: data.cpfCnpj ?? null,
         description: data.description ?? null,
         email: data.email && data.email !== "" ? data.email : null,
+        pendingFields,
+        // Rascunho não pode ser usado em cobranças até completar
+        active: !isDraft,
       },
     });
 

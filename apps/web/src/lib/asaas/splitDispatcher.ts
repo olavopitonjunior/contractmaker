@@ -102,12 +102,59 @@ export async function dispatchExternalSplits(
     //   (b) string arbitrária pra pix_external one-shot (sem cadastro prévio).
     // No caso (b), splitRecipientId tem que ir como NULL (FK viola senão).
     let splitRecipientFk: string | null = null;
+    let recipientPending: string[] = [];
+    let recipientInactive = false;
     if (entry.recipientId) {
       const exists = await prisma.splitRecipient.findUnique({
         where: { id: entry.recipientId },
-        select: { id: true },
+        select: { id: true, pendingFields: true, active: true },
       });
-      if (exists) splitRecipientFk = exists.id;
+      if (exists) {
+        splitRecipientFk = exists.id;
+        recipientPending = exists.pendingFields ?? [];
+        recipientInactive = !exists.active;
+      }
+    }
+
+    // Pagadoria v2 — rascunho de SplitRecipient: pula dispatch e marca como
+    // FAILED com motivo claro. Cobrança continua emitida normalmente; admin
+    // pode completar cadastro via UI ou magic link e re-tentar transfer.
+    if (recipientPending.length > 0 || recipientInactive) {
+      const reason =
+        recipientPending.length > 0
+          ? `Cadastro pendente — campos faltando: ${recipientPending.join(", ")}. Complete via /settings/pagamentos/split-recipients ou magic link.`
+          : "Destinatário inativo — reative ou edite o split.";
+      try {
+        await prisma.asaasTransfer.create({
+          data: {
+            orgId: charge.orgId,
+            commissionChargeId: charge.id,
+            splitRecipientId: splitRecipientFk,
+            asaasTransferId: null,
+            value: computeAmount(base, entry, feeAdjustment),
+            type: "PIX",
+            status: "FAILED",
+            pixAddressKey: entry.pixAddressKey,
+            pixKeyType: entry.pixKeyType,
+            ownerName: entry.ownerName,
+            ownerCpfCnpj: entry.ownerCpfCnpj,
+            origin: "split_dispatch",
+            description: `Split de ${charge.id} — ${entry.label ?? entry.ownerName} (cadastro pendente)`,
+            failureReason: reason.slice(0, 1000),
+          },
+        });
+      } catch (err) {
+        const code = (err as { code?: string }).code;
+        if (code !== "P2002") {
+          console.error(
+            `[splitDispatcher] failed to mark draft transfer for ${charge.id}/${entry.recipientId}:`,
+            err instanceof Error ? err.message : err
+          );
+        }
+      }
+      result.skipped++;
+      result.errors.push({ recipientId: entry.recipientId, reason });
+      continue;
     }
 
     // Idempotência: tenta criar registro local com unique key.
