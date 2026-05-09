@@ -183,9 +183,26 @@ export async function POST(
           signersRaw: signersResp,
           requirementsRaw: requirementsResp,
           eventsRaw: eventsResp,
+          aggregatedByEmail: Array.from(stateByEmail.entries()).map(
+            ([email, state]) => ({
+              email,
+              signedAt: state.signedAt,
+              viewedAt: state.viewedAt,
+              refusedAt: state.refusedAt,
+            })
+          ),
+          aggregatedByKey: Array.from(stateBySigner.entries()).map(
+            ([key, state]) => ({
+              key,
+              signedAt: state.signedAt,
+              viewedAt: state.viewedAt,
+              refusedAt: state.refusedAt,
+            })
+          ),
           localSigners: envelope.signers.map((s) => ({
             clicksignId: s.clicksignId,
             name: s.name,
+            email: s.email,
             status: s.status,
             signedAt: s.signedAt,
           })),
