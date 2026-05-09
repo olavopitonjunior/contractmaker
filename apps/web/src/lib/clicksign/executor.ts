@@ -45,11 +45,23 @@ export class MissingEmailsError extends Error {
   }
 }
 
+/** Override de role ClickSign por signer — UI permite usuário escolher
+ *  via select na popup. Match canônico por (sourceKind, sourceIndex,
+ *  subKind). Fallback pro defaultRoleForSourceKind quando signer não
+ *  tem override. */
+export interface SignerRoleOverride {
+  sourceKind: "vendedor" | "comprador" | "testemunha" | "corretora";
+  sourceIndex: number;
+  subKind?: "titular" | "conjuge";
+  role: ClicksignRole;
+}
+
 interface SendEnvelopeInput {
   contractId: string;
   authMethod?: AuthMethod;
   envelopeName?: string;
   deadlineAt?: Date | null;
+  signerRoles?: SignerRoleOverride[];
 }
 
 /** Signer payload aceito pelo helper interno e pelo fluxo avulso. */
@@ -106,6 +118,7 @@ async function createEnvelopeFromBuffer(input: {
   authMethod: AuthMethod;
   deadlineAt: Date | null;
   signers: EnvelopeSignerInput[];
+  signerRoles?: SignerRoleOverride[];
   pdfBuffer: Buffer;
   filename: string;
   /** Prefixo do path Blob ("envelopes/<id>/"). Usado pra organizar snapshots. */
@@ -223,14 +236,17 @@ async function createEnvelopeFromBuffer(input: {
         action: "provide_evidence",
         auth: authMethod,
       });
-      // Role default por sourceKind quando o signer não trouxe override
-      // explícito. Mapping conservador (todos como "sign") evita
-      // dependência das roles especializadas (buyer/seller/...) nos primeiros
-      // envelopes — usuário pode customizar no popup quando o seletor for
-      // adicionado.
-      const role: ClicksignRole = defaultRoleForSourceKind(
-        localSigner.sourceKind
+      // Role: usuário pode customizar no popup via select. Override match
+      // canônico por (sourceKind, sourceIndex). Fallback pro default por
+      // sourceKind quando não há override (backward compat com callers
+      // antigos como sendEnvelopeForAttachment).
+      const override = input.signerRoles?.find(
+        (r) =>
+          r.sourceKind === localSigner.sourceKind &&
+          r.sourceIndex === localSigner.sourceIndex
       );
+      const role: ClicksignRole =
+        override?.role ?? defaultRoleForSourceKind(localSigner.sourceKind);
       const signReq = await addRequirement({
         envelopeId: clicksignEnvelopeId,
         documentClicksignId,
@@ -353,6 +369,7 @@ export async function sendEnvelopeForContract(input: SendEnvelopeInput) {
       sourceKind: s.sourceKind,
       sourceIndex: s.sourceIndex,
     })),
+    signerRoles: input.signerRoles,
     pdfBuffer,
     filename,
     storageKeyPrefix: `envelopes/${contract.id}/`,

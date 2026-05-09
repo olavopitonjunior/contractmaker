@@ -79,6 +79,49 @@ interface SendEnvelopeDialogProps {
 type RowKind = "vendedor" | "comprador" | "testemunha" | "corretora";
 type SubKind = "titular" | "conjuge";
 
+/** Role ClickSign v3 — define a "qualificação" do signatário no PDF assinado.
+ *  Espelha o enum em `lib/clicksign/envelopes.ts::ClicksignRole`. */
+type ClicksignRole =
+  | "sign"
+  | "buyer"
+  | "seller"
+  | "intervening"
+  | "realestate"
+  | "witness"
+  | "consenting"
+  | "attorney";
+
+const ROLE_OPTIONS: Array<{ value: ClicksignRole; label: string }> = [
+  { value: "buyer", label: "Comprador" },
+  { value: "seller", label: "Vendedor" },
+  { value: "intervening", label: "Intermediador" },
+  { value: "realestate", label: "Imobiliária" },
+  { value: "witness", label: "Testemunha" },
+  { value: "consenting", label: "Anuente" },
+  { value: "attorney", label: "Representante" },
+  { value: "sign", label: "Assinante" },
+];
+
+function defaultRoleFor(
+  sourceKind: RowKind,
+  subKind: SubKind,
+  isPJ?: boolean
+): ClicksignRole {
+  if (subKind === "conjuge") return "consenting";
+  switch (sourceKind) {
+    case "vendedor":
+      return "seller";
+    case "comprador":
+      return "buyer";
+    case "testemunha":
+      return "witness";
+    case "corretora":
+      return isPJ === false ? "intervening" : "realestate";
+    default:
+      return "sign";
+  }
+}
+
 interface EditableRow {
   rowId: string;
   sourceKind: RowKind;
@@ -94,6 +137,10 @@ interface EditableRow {
   addedDuringDialog: boolean;
   /** Para corretora: tipo de pessoa (afeta máscara do documento e label). */
   isPJ?: boolean;
+  /** Qualificação ClickSign — usuário pode mudar o default se o papel
+   *  não bate com o sourceKind (ex: corretor PF como Intermediador,
+   *  Imobiliária PJ como Imobiliária, testemunha como Anuente). */
+  clicksignRole: ClicksignRole;
 }
 
 const COST_PER_SIGNER_CENTS = 150;
@@ -147,6 +194,7 @@ function buildInitialRows(
         includeInEnvelope: true,
         isOptional: false,
         addedDuringDialog: false,
+        clicksignRole: defaultRoleFor(sourceKind, "titular"),
       });
       // Cônjuge só vira linha quando o form trouxe nome explícito —
       // valor padrão pra estado civil "Solteiro(a)" deixa conjuge vazio.
@@ -166,6 +214,7 @@ function buildInitialRows(
             (conjugeEmail.length > 0 && EMAIL_REGEX.test(conjugeEmail)),
           isOptional: true,
           addedDuringDialog: false,
+          clicksignRole: defaultRoleFor(sourceKind, "conjuge"),
         });
       }
     });
@@ -202,12 +251,14 @@ function buildInitialRows(
         isOptional: true,
         addedDuringDialog: false,
         isPJ,
+        clicksignRole: defaultRoleFor("corretora", "titular", isPJ),
       });
     });
   } else {
     const corrEmail = (comissao?.imobiliaria_email ?? "").trim();
     const corrName = (comissao?.imobiliaria_nome ?? "").trim();
     const corrDoc = (comissao?.imobiliaria_cnpj ?? "").replace(/\D/g, "");
+    const isPJ = comissao?.corretora_tipo_pessoa !== "fisica";
     rows.push({
       rowId: "corretora-0",
       sourceKind: "corretora",
@@ -221,7 +272,8 @@ function buildInitialRows(
         (corrEmail.length > 0 && EMAIL_REGEX.test(corrEmail)),
       isOptional: true,
       addedDuringDialog: false,
-      isPJ: comissao?.corretora_tipo_pessoa !== "fisica",
+      isPJ,
+      clicksignRole: defaultRoleFor("corretora", "titular", isPJ),
     });
   }
 
@@ -246,6 +298,7 @@ function buildInitialRows(
         (email.length > 0 && EMAIL_REGEX.test(email)),
       isOptional: true,
       addedDuringDialog: false,
+      clicksignRole: defaultRoleFor("testemunha", "titular"),
     });
   });
 
@@ -330,6 +383,7 @@ export function SendEnvelopeDialog({
           isOptional: true,
           addedDuringDialog: true,
           isPJ: true,
+          clicksignRole: defaultRoleFor("corretora", "titular", true),
         },
       ];
     });
@@ -367,6 +421,7 @@ export function SendEnvelopeDialog({
           includeInEnvelope: true,
           isOptional: true,
           addedDuringDialog: true,
+          clicksignRole: defaultRoleFor("testemunha", "titular"),
         },
       ];
     });
@@ -414,10 +469,18 @@ export function SendEnvelopeDialog({
       }
 
       // 2) POST /envelopes — executor re-lê contract.dataJson agora atualizado.
+      // Mandamos signerRoles pra o executor sobrescrever o default por
+      // sourceKind quando o usuário escolheu role custom no select.
+      const signerRoles = includedRows.map((r) => ({
+        sourceKind: r.sourceKind,
+        sourceIndex: r.sourceIndex,
+        subKind: r.subKind,
+        role: r.clicksignRole,
+      }));
       const res = await fetch(`/api/contracts/${contractId}/envelopes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ authMethod: "email" }),
+        body: JSON.stringify({ authMethod: "email", signerRoles }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -708,6 +771,24 @@ function SignerRowEditor({
             }
             placeholder="000.000.000-00"
           />
+        </div>
+        <div className="space-y-1 md:col-span-2">
+          <Label className="text-xs">Assina como</Label>
+          <select
+            value={row.clicksignRole}
+            onChange={(e) =>
+              onChange(row.rowId, {
+                clicksignRole: e.target.value as ClicksignRole,
+              })
+            }
+            className="flex h-9 w-full rounded-md border border-input bg-transparent px-2 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+          >
+            {ROLE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
     </div>

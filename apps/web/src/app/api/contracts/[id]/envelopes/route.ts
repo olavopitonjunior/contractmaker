@@ -18,6 +18,25 @@ const sendSchema = z.object({
   authMethod: z.enum(["email", "whatsapp", "selfie", "icp_brasil"]).optional(),
   envelopeName: z.string().min(1).max(200).optional(),
   deadlineAt: z.string().datetime().optional(),
+  signerRoles: z
+    .array(
+      z.object({
+        sourceKind: z.enum(["vendedor", "comprador", "testemunha", "corretora"]),
+        sourceIndex: z.number().int().nonnegative(),
+        subKind: z.enum(["titular", "conjuge"]).optional(),
+        role: z.enum([
+          "sign",
+          "buyer",
+          "seller",
+          "intervening",
+          "realestate",
+          "witness",
+          "consenting",
+          "attorney",
+        ]),
+      })
+    )
+    .optional(),
 });
 
 export async function GET(
@@ -130,6 +149,7 @@ export async function POST(
             deadlineAt: parsed.data.deadlineAt
               ? new Date(parsed.data.deadlineAt)
               : null,
+            signerRoles: parsed.data.signerRoles,
           });
           return { status: 201, body: { envelope } };
         } catch (err) {
