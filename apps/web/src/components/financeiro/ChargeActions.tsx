@@ -134,7 +134,13 @@ export function ChargeActions({
         toast.error(data.details?.[0]?.description ?? data.error ?? "Falha");
         return;
       }
-      toast.success("Cobrança cancelada");
+      if (data.dealStageRegressed) {
+        toast.success(
+          `Cobrança cancelada · negócio voltou para "${data.regressedToStage}"`
+        );
+      } else {
+        toast.success("Cobrança cancelada");
+      }
       setCancelOpen(false);
       onChanged();
     } finally {

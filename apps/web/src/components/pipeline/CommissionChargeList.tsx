@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -77,6 +78,7 @@ function CopyButton({ value, label = "Copiar" }: { value: string; label?: string
 type KindFilter = "all" | "commission" | "avulsa" | "aluguel" | "outros";
 
 export function CommissionChargeList({ dealId }: { dealId: string }) {
+  const router = useRouter();
   const [charges, setCharges] = useState<Charge[]>([]);
   const [loading, setLoading] = useState(true);
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
@@ -94,6 +96,14 @@ export function CommissionChargeList({ dealId }: { dealId: string }) {
     }
   }
 
+  // Após mutação no ChargeActions (cancel/refund/edit/cash), recarrega
+  // a lista E pede refresh do server component pai pra atualizar o badge
+  // de stage + timeline (regressão de stage acontece no DELETE).
+  function reloadAll() {
+    load();
+    router.refresh();
+  }
+
   const filtered =
     kindFilter === "all"
       ? charges
@@ -101,9 +111,19 @@ export function CommissionChargeList({ dealId }: { dealId: string }) {
 
   useEffect(() => {
     load();
-    // Poll a cada 15s para status updates
-    const t = setInterval(load, 15000);
-    return () => clearInterval(t);
+    // Polling a cada 10s + refetch ao voltar pra aba (cobre o caso "cancelei
+    // no /financeiro e voltei pro deal" sem esperar o tick).
+    const t = setInterval(load, 10000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dealId]);
 
@@ -207,7 +227,7 @@ export function CommissionChargeList({ dealId }: { dealId: string }) {
                     value={c.value}
                     currentDueDate={c.currentDueDate}
                     description={c.description}
-                    onChanged={load}
+                    onChanged={reloadAll}
                     compact
                   />
                   <Link

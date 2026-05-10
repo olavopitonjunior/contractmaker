@@ -12,6 +12,7 @@ import { audit } from "@/lib/security/audit";
 import { decryptSecret } from "@/lib/security/crypto";
 import { AsaasError } from "@/lib/asaas/errors";
 import { cancelPayment, updatePayment } from "@/lib/asaas/payments";
+import { regressDealStageAfterChargeCancel } from "@/lib/charges/regress-stage";
 
 async function loadCharge(chargeId: string, orgId: string, userId: string) {
   const charge = await prisma.commissionCharge.findFirst({
@@ -269,6 +270,12 @@ export async function DELETE(
       data: { status: "CANCELLED", cancelledAt: new Date() },
     });
 
+    // Regride o stage do Kanban se essa era a última cobrança ativa.
+    const regress = await regressDealStageAfterChargeCancel(charge.dealId, {
+      orgId: ctx.orgId,
+      userId: ctx.userId,
+    });
+
     await audit(
       { orgId: ctx.orgId, userId: ctx.userId, ipAddress: ctx.ipAddress, userAgent: ctx.userAgent },
       {
@@ -276,10 +283,20 @@ export async function DELETE(
         result: "SUCCESS",
         resourceType: "commission_charge",
         resource: `commission_charge:${charge.id}`,
+        metadata: {
+          dealStageRegressed: regress.regressed,
+          ...(regress.regressed
+            ? { regressedTo: regress.toStageName }
+            : { regressSkippedReason: regress.reason }),
+        },
       }
     );
 
-    return NextResponse.json({ charge: updated });
+    return NextResponse.json({
+      charge: updated,
+      dealStageRegressed: regress.regressed,
+      ...(regress.regressed && { regressedToStage: regress.toStageName }),
+    });
   } catch (err) {
     if (err instanceof AsaasError) {
       return NextResponse.json(
