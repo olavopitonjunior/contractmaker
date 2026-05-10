@@ -1,8 +1,87 @@
-# Handoff — Módulo Pagadoria (atualizado 2026-04-20 — sessão tarde)
+# Handoff — Módulo Pagadoria (atualizado 2026-05-09 — Pagadoria v2 entregue)
+
+Status: **v2 deployada em prod**. Wizard reusável `ChargeWizard` (3 modes), mapper imobiliária→comissionados, multi-corretora, magic link público, wizard draft, drawer de origem, validate por etapa, UI cleanup pós-feedback. Smoke estrutural OK em prod via Chrome MCP até Etapa 4 (smoke real R$ 5 cancelado por decisão do usuário pra não tocar cliente real do contrato).
+
+Este doc consolida o trabalho feito, o estado atual, e o checklist para retomar. Manter atualizado conforme novas sessões avançam.
+
+## v2 (2026-05-09) — sumário
+
+Commits empilhados em master:
+- `9a440762` feat(pagadoria): wizard v2 — mapper, multi-corretora, transparência, fallbacks
+- `cfda756f` feat(pagadoria): magic link + wizard draft + drawer origem + validate por etapa + UI cleanup
+- `72da91df` docs(claude.md): seção Pagadoria v2 + schemas críticos atualizados
+- `1eb90cd9` test(pagadoria): unit tests matcher + validators (27/27)
+
+Origem da v2: smoke E2E na venda Sandra Yamamoto (deal `cmosu2mze0005111ecs2bpi8j`) revelou que `comissionados[]` retornava vazio mesmo com 1 corretora declarada no CCV — schema mono-corretora `comissao.imobiliaria_*` não convertido em entrada de array. Casos reais inutilizáveis no wizard.
+
+### Mudanças centrais
+
+1. **Backend mapper** (`apps/web/src/app/api/deals/[dealId]/contract-data-summary/route.ts`)
+   - `deriveComissionados()` converte `imobiliaria_*` → `comissionados[{source: "ccv.imobiliaria_principal"}]` quando array explícito vazio
+   - `enrichWithMatch()` reusa `commissionados-matcher.ts` pra preencher `splitRecipientId` quando há recipient cadastrado por CPF/CNPJ ou nome
+
+2. **Multi-corretora** (schema + form + templates + Gemini)
+   - `comissao.comissionados[].papel` enum (captador/intermediador/indicador/imobiliaria_principal/outro)
+   - `superRefine` no Zod: soma percentuais ≤ 100
+   - `ComissaoConfigStep` UI com Percentual + Papel + soma visual com cores
+   - Templates Handlebars `ccv_a_vista_v2.hbs` e `ccv_financiamento_v2.hbs` com `{{#if comissao.comissionados.length}}{{#each ...}}` + fallback `imobiliaria_*`. **Sync já rodado contra prod DB**
+   - Prompt Gemini estendido com `papel` + `percentual`
+
+3. **Hide-from-payer** (privacidade interna)
+   - `splitJson.display.{hiddenRecipientIds, consolidationMap}` persistido
+   - `generatePayerVisibleDescription()` em `lib/asaas/commission.ts` omite ocultos
+   - SplitEditor: toggle por linha + select de consolidação
+   - Asaas não expõe split → privacidade real intacta
+
+4. **Rascunho `SplitRecipient`** com `pendingFields String[]`
+   - Permite cadastrar inline com chave PIX/walletId vazios
+   - `splitDispatcher` pula recipients pendentes/inativos com `failureReason` claro
+   - `/settings/pagamentos/split-recipients` ganhou seção "⚠️ Pendentes de completar"
+
+5. **Magic link público** pra completar cadastro
+   - `SplitRecipient.completionToken/Exp` — JWT-HMAC `AUTH_SECRET`, 7d
+   - `POST /api/financeiro/split-recipients/[id]/request-completion` envia email Resend
+   - `/financeiro/completar-cadastro?token=` (sem auth, token = credencial)
+   - `POST /api/public/split-recipients/complete` valida e marca active:true
+   - **Limitação:** sem domínio Resend verificado, magic link não chega em terceiros (memo `feedback_resend_sandbox`)
+
+6. **Wizard draft** (salvar e retomar)
+   - Model `CommissionChargeDraft { dealId, userId @@unique, state Json, expiresAt }` (30d)
+   - `GET/POST/DELETE /api/deals/[id]/commission-charges/draft`
+   - Wizard auto-aplica state no mount + toast "Continuando rascunho de…"
+   - Submit final → `DELETE` automático
+   - Cron diário 03:00 UTC: `/api/cron/drafts/cleanup`
+
+7. **Drawer "De onde vieram esses valores?"** — botão `?` no header, render puro
+
+8. **Validações por etapa** (transversal)
+   - `lib/asaas/charge-validators.ts` puros (`validatePayer/Charge/Splits`)
+   - `POST /api/deals/[id]/commission-charges/validate?step=...`
+   - UI usa chips stateful client-side; endpoint serve fluxos automatizados
+
+9. **UI cleanup pós-feedback** — wizard tinha texto demais
+   - Banners 1 linha; microcopy de origem só quando relevante
+   - Caixa azul Etapa 2: 4 linhas → 1
+   - Parágrafo introdutório Etapa 3 → tooltip `(?)`
+   - Memo `feedback_ui_density.md` pra próximas iterações
+
+### Novas migrations (idempotentes)
+
+- `20260509120000_charge_categorization_and_notif_prefs` — `categoryLabel` + 6 notify flags + `email`
+- `20260509180000_pagadoria_v2_drafts_pending` — `pendingFields/completionToken/completionTokenExp`
+- `20260509190000_commission_charge_draft` — model novo
+
+### Pendências conhecidas (não-bloqueantes)
+
+- **Wire validate na UI** — endpoint existe, wizard usa chips client-side. Marginal.
+- **Smoke real R$ 5** — cancelado pra não tocar cliente real. Magic link bloqueado por Resend sandbox.
+- **Resend domain** — `EMAIL_FROM=onboarding@resend.dev` só envia pro dono. Magic link, créditos a comissionados, etc. dependem de domínio verificado.
+
+---
+
+# Histórico (v1 — referência)
 
 Status: **pronto para QA Round 2**. Ambiente de produção funcionando, 2FA do admin configurado, subconta sandbox aprovada, webhook cadastrado, Fase 5 (split multi-recipient) implementada e pushada.
-
-Este doc consolida todo o trabalho feito, o estado atual, e o checklist para retomar. Manter atualizado conforme novas sessões avançam.
 
 ---
 
