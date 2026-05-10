@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db/prisma";
 import { getEnvelope } from "@/lib/clicksign/envelopes";
 import { ClicksignError } from "@/lib/clicksign/client";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
+import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-signed";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -66,6 +67,7 @@ export async function GET(req: NextRequest) {
         });
         const signedUrl = extractSignedUrl(resp);
         if (signedUrl) void downloadSignedPdf(env.id, signedUrl);
+        await autoPromoteDealOnContractSigned(env.id);
         drifted += 1;
       } else if (remoteStatus === "canceled") {
         await prisma.envelope.update({

@@ -14,6 +14,7 @@ import {
 } from "@/lib/clicksign/webhook";
 import { listEnvelopeDocuments } from "@/lib/clicksign/envelopes";
 import type { WebhookPayload } from "@/lib/clicksign/types";
+import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-signed";
 
 export const runtime = "nodejs";
 
@@ -191,59 +192,9 @@ export async function POST(req: NextRequest) {
       });
 
       // Auto-promove deal pra "Contrato assinado" — apenas envelopes
-      // vinculados a Contract aprovado (source="contract"). Anexos avulsos
-      // (aditivos/distratos/procurações) não mexem no funil. Guard de não
-      // retroceder: webhook é idempotente (ClickSign reentrega close), e
-      // o deal pode já ter avançado pra "Cobrança emitida"/"Comissão paga".
-      if (envelope.source === "contract") {
-        try {
-          const deal = await prisma.deal.findUnique({
-            where: { id: envelope.dealId },
-            include: {
-              stage: true,
-              pipeline: { include: { stages: true } },
-            },
-          });
-          const targetStage = deal?.pipeline.stages.find(
-            (s) => s.name === "Contrato assinado"
-          );
-          const linearOrder = [
-            "Formulário",
-            "Confecção de Contrato",
-            "Enviado para assinatura",
-          ];
-          if (
-            deal &&
-            targetStage &&
-            linearOrder.includes(deal.stage.name)
-          ) {
-            await prisma.deal.update({
-              where: { id: deal.id },
-              data: { stageId: targetStage.id },
-            });
-            await audit(
-              { orgId: envelope.orgId, userId: null },
-              {
-                action: "DEAL_STAGE_CHANGE",
-                result: "SUCCESS",
-                resource: deal.id,
-                resourceType: "Deal",
-                metadata: {
-                  kind: "auto_signed",
-                  fromStage: deal.stage.id,
-                  toStage: targetStage.id,
-                  envelopeId: envelope.id,
-                },
-              }
-            ).catch(() => {});
-          }
-        } catch (err) {
-          console.error(
-            "[clicksign webhook] falha ao auto-promover deal:",
-            err
-          );
-        }
-      }
+      // vinculados a Contract (source="contract"). Helper compartilhado
+      // garante mesma lógica em webhook + sync route + cron.
+      await autoPromoteDealOnContractSigned(envelope.id);
 
       // v3 NÃO traz signed_file_url no payload — tentamos extrair do
       // payload (compat v2) e, se vier null, fazemos lookup via

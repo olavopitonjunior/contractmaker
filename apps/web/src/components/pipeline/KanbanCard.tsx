@@ -9,14 +9,11 @@ import {
   Clock,
   Home,
   Link2,
-  CheckCircle2,
-  PenLine,
-  Receipt,
-  Wallet,
   XOctagon,
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
+import { DealProgressTimeline } from "@/components/pipeline/DealProgressTimeline";
 
 export interface DealCard {
   id: string;
@@ -47,17 +44,6 @@ function formatShort(iso: string | null): string {
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 }
 
-function formatLong(iso: string | null): string {
-  if (!iso) return "Pendente";
-  return new Date(iso).toLocaleString("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 export function KanbanCard({ deal, isOverlay }: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: deal.id,
@@ -78,18 +64,6 @@ export function KanbanCard({ deal, isOverlay }: KanbanCardProps) {
   }
 
   const isLost = !!deal.lostAt;
-
-  const milestones: Array<{
-    Icon: typeof FileText;
-    label: string;
-    date: string | null;
-  }> = [
-    { Icon: FileText, label: "Form aberto", date: deal.formOpenedAt },
-    { Icon: CheckCircle2, label: "Form completo", date: deal.formCompletedAt },
-    { Icon: PenLine, label: "Contrato assinado", date: deal.contractSignedAt },
-    { Icon: Receipt, label: "Cobrança gerada", date: deal.chargeCreatedAt },
-    { Icon: Wallet, label: "Comissão paga", date: deal.commissionPaidAt },
-  ];
 
   return (
     <div
@@ -158,24 +132,16 @@ export function KanbanCard({ deal, isOverlay }: KanbanCardProps) {
                 </div>
               </div>
             ) : (
-              /* Timeline de 5 datas-marco */
-              <div className="flex flex-wrap gap-x-2 gap-y-1">
-                {milestones.map(({ Icon, label, date }) => (
-                  <div
-                    key={label}
-                    className={cn(
-                      "flex items-center gap-1 text-[10px]",
-                      date
-                        ? "text-foreground/80"
-                        : "text-muted-foreground/40"
-                    )}
-                    title={`${label}: ${formatLong(date)}`}
-                  >
-                    <Icon className="h-3 w-3 shrink-0" />
-                    <span className="tabular-nums">{formatShort(date)}</span>
-                  </div>
-                ))}
-              </div>
+              /* Timeline compacta — 6 stages + marcos SLA */
+              <DealProgressTimeline
+                variant="compact"
+                currentStageName={null}
+                formOpenedAt={deal.formOpenedAt}
+                formCompletedAt={deal.formCompletedAt}
+                contractSignedAt={deal.contractSignedAt}
+                chargeCreatedAt={deal.chargeCreatedAt}
+                commissionPaidAt={deal.commissionPaidAt}
+              />
             )}
 
             {/* Value + badges */}

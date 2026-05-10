@@ -22,6 +22,7 @@ import { CertidoesTab } from "@/components/pipeline/CertidoesTab";
 import { SignaturesTab } from "@/components/pipeline/SignaturesTab";
 import { CommissionChargeDialog } from "@/components/pipeline/CommissionChargeDialog";
 import { CommissionChargeList } from "@/components/pipeline/CommissionChargeList";
+import { DealProgressTimeline } from "@/components/pipeline/DealProgressTimeline";
 import { toast } from "sonner";
 import Link from "next/link";
 import {
@@ -131,6 +132,7 @@ export function DealDetail({ deal }: DealDetailProps) {
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
   const initialTab = tabParam && VALID_TABS.has(tabParam) ? tabParam : "dados";
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [generating, setGenerating] = useState(false);
   const [confirmDuplicateOpen, setConfirmDuplicateOpen] = useState(false);
   const [chargeDialogOpen, setChargeDialogOpen] = useState(false);
@@ -535,68 +537,18 @@ export function DealDetail({ deal }: DealDetailProps) {
         </div>
       )}
 
-      {/* Timeline horizontal — datas-marco do funil */}
-      {!isLost && (() => {
-        const milestones: Array<{
-          Icon: typeof FileText;
-          label: string;
-          date: Date | null;
-        }> = [
-          { Icon: FileText, label: "Form aberto", date: deal.form?.createdAt ?? null },
-          { Icon: CheckCircle2, label: "Form completo", date: deal.form?.completedAt ?? null },
-          { Icon: PenLine, label: "Contrato assinado", date: deal.envelopes[0]?.closedAt ?? null },
-          { Icon: Receipt, label: "Cobrança gerada", date: deal.commissionCharges[0]?.createdAt ?? null },
-          { Icon: Wallet, label: "Comissão paga", date: deal.commissionPaidAt },
-        ];
-        return (
-          <div className="rounded-lg border bg-card p-4">
-            <div className="flex items-center justify-between gap-2 overflow-x-auto">
-              {milestones.map(({ Icon, label, date }, idx) => (
-                <div key={label} className="flex items-center gap-2 min-w-0">
-                  <div
-                    className={cn(
-                      "flex flex-col items-center gap-1 px-1",
-                      date ? "text-foreground" : "text-muted-foreground/50"
-                    )}
-                  >
-                    <div
-                      className={cn(
-                        "h-8 w-8 rounded-full flex items-center justify-center border-2",
-                        date
-                          ? "bg-primary/10 border-primary text-primary"
-                          : "border-muted-foreground/30"
-                      )}
-                    >
-                      <Icon className="h-4 w-4" />
-                    </div>
-                    <span className="text-[10px] font-medium whitespace-nowrap">
-                      {label}
-                    </span>
-                    <span className="text-[10px] tabular-nums text-muted-foreground">
-                      {date
-                        ? new Date(date).toLocaleDateString("pt-BR", {
-                            day: "2-digit",
-                            month: "2-digit",
-                          })
-                        : "—"}
-                    </span>
-                  </div>
-                  {idx < milestones.length - 1 && (
-                    <div
-                      className={cn(
-                        "flex-1 h-0.5 min-w-[20px]",
-                        date && milestones[idx + 1].date
-                          ? "bg-primary/40"
-                          : "bg-muted-foreground/20"
-                      )}
-                    />
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        );
-      })()}
+      {/* Timeline horizontal — 6 stages do funil + datas-marco SLA */}
+      {!isLost && (
+        <DealProgressTimeline
+          variant="full"
+          currentStageName={deal.stage.name}
+          formOpenedAt={deal.form?.createdAt ?? null}
+          formCompletedAt={deal.form?.completedAt ?? null}
+          contractSignedAt={deal.envelopes[0]?.closedAt ?? null}
+          chargeCreatedAt={deal.commissionCharges[0]?.createdAt ?? null}
+          commissionPaidAt={deal.commissionPaidAt}
+        />
+      )}
 
       <MarkLostDialog
         dealId={deal.id}
@@ -701,7 +653,7 @@ export function DealDetail({ deal }: DealDetailProps) {
         </AlertDialogContent>
       </AlertDialog>
 
-      <Tabs defaultValue={initialTab}>
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="dados">Dados</TabsTrigger>
           <TabsTrigger value="anexos">
@@ -955,6 +907,26 @@ export function DealDetail({ deal }: DealDetailProps) {
 
         <TabsContent value="pagamentos" className="mt-4">
           <div className="space-y-4">
+            {!deal.contracts.some((c) => c.status === "aprovado") && (
+              <div className="p-3 border rounded-md bg-amber-50 border-amber-300 text-sm text-amber-900 flex items-start gap-2">
+                <FileText className="h-4 w-4 mt-0.5 shrink-0" />
+                <div className="flex-1">
+                  <p className="font-medium">Sem contrato aprovado.</p>
+                  <p className="text-xs mt-0.5">
+                    Para cobrar a comissão a partir do contrato (com pagador, valor
+                    e splits pré-preenchidos), aprove a versão atual na aba{" "}
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab("contratos")}
+                      className="underline font-medium hover:text-amber-950"
+                    >
+                      Contratos
+                    </button>
+                    . Você pode gerar cobrança avulsa neste deal sem aprovação.
+                  </p>
+                </div>
+              </div>
+            )}
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div>
                 <h3 className="text-lg font-semibold">Cobranças</h3>
@@ -972,8 +944,17 @@ export function DealDetail({ deal }: DealDetailProps) {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   <DropdownMenuItem
-                    disabled={!deal.contracts.some((c) => c.status === "aprovado")}
                     onClick={() => {
+                      const hasApproved = deal.contracts.some(
+                        (c) => c.status === "aprovado"
+                      );
+                      if (!hasApproved) {
+                        toast.error(
+                          "Aprove um contrato primeiro — abrindo aba Contratos"
+                        );
+                        setActiveTab("contratos");
+                        return;
+                      }
                       setChargeDialogMode("commission_from_deal");
                       setChargeDialogOpen(true);
                     }}
@@ -991,11 +972,6 @@ export function DealDetail({ deal }: DealDetailProps) {
                 </DropdownMenuContent>
               </DropdownMenu>
             </div>
-            {!deal.contracts.some((c) => c.status === "aprovado") && (
-              <div className="p-3 border rounded-md bg-amber-50 text-sm text-amber-900">
-                Nenhum contrato aprovado ainda. Aprove um contrato antes de gerar cobrança.
-              </div>
-            )}
             <CommissionChargeList key={chargeRefreshKey} dealId={deal.id} />
           </div>
         </TabsContent>

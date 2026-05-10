@@ -11,6 +11,7 @@ import {
 } from "@/lib/clicksign/envelopes";
 import { ClicksignError } from "@/lib/clicksign/client";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
+import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-signed";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -138,6 +139,7 @@ export async function POST(
     }
 
     let envelopeUpdated = false;
+    let dealStagePromoted = false;
     if (remoteStatus === "closed" && envelope.status !== "closed") {
       await prisma.envelope.update({
         where: { id: envelope.id },
@@ -146,12 +148,26 @@ export async function POST(
       const signedUrl = await resolveSignedUrl(envelope.clicksignId, envResp);
       if (signedUrl) void downloadSignedPdf(envelope.id, signedUrl);
       envelopeUpdated = true;
+
+      // Paridade com webhook: promove deal pra "Contrato assinado" se aplicável.
+      // Importante quando o webhook não chegou (HMAC, entrega) e o usuário
+      // dispara o sync manual — sem isso, o stage fica preso no anterior.
+      const promote = await autoPromoteDealOnContractSigned(envelope.id);
+      dealStagePromoted = promote.promoted;
     } else if (remoteStatus === "canceled" && envelope.status !== "canceled") {
       await prisma.envelope.update({
         where: { id: envelope.id },
         data: { status: "canceled", canceledAt: new Date() },
       });
       envelopeUpdated = true;
+    } else if (remoteStatus === "closed" && envelope.status === "closed") {
+      // Envelope já estava closed localmente, mas o stage do deal pode ter
+      // ficado pra trás se o webhook caiu antes do auto-promote. Tenta agora.
+      const promote = await autoPromoteDealOnContractSigned(envelope.id);
+      if (promote.promoted) {
+        dealStagePromoted = true;
+        envelopeUpdated = true;
+      }
     }
 
     // Fallback: se já está closed localmente mas o PDF assinado nunca
@@ -197,6 +213,7 @@ export async function POST(
       ok: true,
       signersUpdated,
       envelopeUpdated,
+      dealStagePromoted,
       remoteStatus,
       ...(debug && {
         debug: {
