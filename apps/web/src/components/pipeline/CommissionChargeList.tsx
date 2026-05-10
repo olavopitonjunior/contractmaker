@@ -1,10 +1,12 @@
 "use client";
 import { useEffect, useState } from "react";
 import Image from "next/image";
+import Link from "next/link";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { ChargeActions } from "@/components/financeiro/ChargeActions";
 import { Copy, Check, Download, ExternalLink, RefreshCw } from "lucide-react";
 
 export interface Charge {
@@ -159,7 +161,7 @@ export function CommissionChargeList({ dealId }: { dealId: string }) {
           <Card key={c.id}>
             <CardContent className="pt-4 space-y-3">
               <div className="flex items-start justify-between gap-4 flex-wrap">
-                <div>
+                <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
                     <Badge className={status.color} variant="outline">
                       {status.text}
@@ -197,6 +199,23 @@ export function CommissionChargeList({ dealId }: { dealId: string }) {
                       {c.description}
                     </div>
                   )}
+                </div>
+                <div className="flex flex-col items-end gap-2">
+                  <ChargeActions
+                    chargeId={c.id}
+                    status={c.status}
+                    value={c.value}
+                    currentDueDate={c.currentDueDate}
+                    description={c.description}
+                    onChanged={load}
+                    compact
+                  />
+                  <Link
+                    href={`/financeiro/cobrancas/${c.id}`}
+                    className="text-xs text-muted-foreground hover:underline"
+                  >
+                    Ver detalhes →
+                  </Link>
                 </div>
               </div>
 

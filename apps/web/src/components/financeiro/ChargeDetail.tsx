@@ -2,7 +2,6 @@
 import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   Card,
@@ -12,45 +11,13 @@ import {
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
+import { ChargeActions } from "@/components/financeiro/ChargeActions";
 import {
   ArrowLeft,
   Copy,
   Check,
   ExternalLink,
   Download,
-  MoreVertical,
-  Calendar,
-  Mail,
-  Wallet,
-  Undo2,
-  Ban,
   RefreshCw,
   Link2,
 } from "lucide-react";
@@ -233,20 +200,9 @@ interface SplitsState {
 }
 
 export function ChargeDetail({ chargeId }: { chargeId: string }) {
-  const router = useRouter();
   const [charge, setCharge] = useState<ChargeDetailData | null>(null);
   const [events, setEvents] = useState<EventEntry[]>([]);
   const [loading, setLoading] = useState(true);
-  const [editOpen, setEditOpen] = useState(false);
-  const [editValue, setEditValue] = useState("");
-  const [editDueDate, setEditDueDate] = useState("");
-  const [editDescription, setEditDescription] = useState("");
-  const [cancelOpen, setCancelOpen] = useState(false);
-  const [cashOpen, setCashOpen] = useState(false);
-  const [cashDate, setCashDate] = useState(
-    new Date().toISOString().slice(0, 10)
-  );
-  const [busy, setBusy] = useState(false);
   const [splits, setSplits] = useState<SplitsState | null>(null);
   const [retryingId, setRetryingId] = useState<string | null>(null);
 
@@ -263,7 +219,6 @@ export function ChargeDetail({ chargeId }: { chargeId: string }) {
       }
       setCharge(data.charge);
       setEvents(data.events);
-      // edit form é preenchido só ao abrir o dialog (openEditDialog)
     } finally {
       setLoading(false);
     }
@@ -312,147 +267,11 @@ export function ChargeDetail({ chargeId }: { chargeId: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chargeId]);
 
-  async function cancel() {
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/financeiro/charges/${chargeId}`, {
-        method: "DELETE",
-        credentials: "include",
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.details?.[0]?.description ?? data.error ?? "Falha");
-        return;
-      }
-      toast.success("Cobrança cancelada");
-      setCancelOpen(false);
-      await load();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  function openEditDialog() {
-    if (!charge) return;
-    setEditValue(charge.value.toString());
-    setEditDueDate(charge.currentDueDate.slice(0, 10));
-    setEditDescription(charge.description ?? "");
-    setEditOpen(true);
-  }
-
-  async function refund() {
-    if (!charge) return;
-    if (!confirm(`Estornar ${fmtBRL(charge.value)}? O valor retorna ao pagador.`)) return;
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/financeiro/charges/${chargeId}/refund`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({}),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        if (data.error === "ELEVATION_REQUIRED") {
-          toast.error("Refund > R$10k exige confirmação extra — tente novamente após confirmar identidade");
-        } else {
-          toast.error(data.details?.[0]?.description ?? data.error ?? "Falha");
-        }
-        return;
-      }
-      toast.success("Estorno iniciado");
-      await load();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function resendNotif() {
-    setBusy(true);
-    try {
-      const res = await fetch(
-        `/api/financeiro/charges/${chargeId}/resend-notification`,
-        { method: "POST", credentials: "include" }
-      );
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.details?.[0]?.description ?? data.error ?? "Falha");
-        return;
-      }
-      toast.success("Notificação reenviada");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function saveEdit() {
-    if (!charge) return;
-    const body: { value?: number; dueDate?: string; description?: string } = {};
-    const valueNum = parseFloat(editValue);
-    if (!Number.isNaN(valueNum) && valueNum !== charge.value) body.value = valueNum;
-    if (editDueDate && editDueDate !== charge.currentDueDate.slice(0, 10)) {
-      body.dueDate = editDueDate;
-    }
-    if (editDescription !== (charge.description ?? "")) {
-      body.description = editDescription;
-    }
-    if (Object.keys(body).length === 0) {
-      toast.info("Nada foi alterado");
-      setEditOpen(false);
-      return;
-    }
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/financeiro/charges/${chargeId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.message ?? data.details?.[0]?.description ?? data.error ?? "Falha");
-        return;
-      }
-      toast.success("Cobrança atualizada");
-      setEditOpen(false);
-      await load();
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function markCash() {
-    setBusy(true);
-    try {
-      const res = await fetch(
-        `/api/financeiro/charges/${chargeId}/mark-received-in-cash`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({ paymentDate: cashDate }),
-        }
-      );
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.details?.[0]?.description ?? data.error ?? "Falha");
-        return;
-      }
-      toast.success("Pagamento em dinheiro registrado");
-      setCashOpen(false);
-      await load();
-    } finally {
-      setBusy(false);
-    }
-  }
-
   if (loading && !charge)
     return <p className="text-sm text-muted-foreground">Carregando...</p>;
   if (!charge) return null;
 
   const isActive = ["PENDING", "OVERDUE"].includes(charge.status);
-  const isRefundable = ["RECEIVED", "CONFIRMED"].includes(charge.status);
   const statusColor = STATUS_COLOR[charge.status] ?? "";
 
   return (
@@ -488,40 +307,14 @@ export function ChargeDetail({ chargeId }: { chargeId: string }) {
                     </div>
                   )}
                 </div>
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button variant="outline" disabled={busy}>
-                      <MoreVertical className="h-4 w-4 mr-1" /> Ações
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end">
-                    {isActive && (
-                      <>
-                        <DropdownMenuItem onSelect={openEditDialog}>
-                          <Calendar className="h-4 w-4 mr-2" /> Editar cobrança
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={resendNotif}>
-                          <Mail className="h-4 w-4 mr-2" /> Reenviar notificação
-                        </DropdownMenuItem>
-                        <DropdownMenuItem onSelect={() => setCashOpen(true)}>
-                          <Wallet className="h-4 w-4 mr-2" /> Marcar como pago em dinheiro
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem
-                          onSelect={() => setCancelOpen(true)}
-                          className="text-red-600"
-                        >
-                          <Ban className="h-4 w-4 mr-2" /> Cancelar cobrança
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                    {isRefundable && (
-                      <DropdownMenuItem onSelect={refund} className="text-red-600">
-                        <Undo2 className="h-4 w-4 mr-2" /> Estornar
-                      </DropdownMenuItem>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                <ChargeActions
+                  chargeId={charge.id}
+                  status={charge.status}
+                  value={charge.value}
+                  currentDueDate={charge.currentDueDate}
+                  description={charge.description}
+                  onChanged={load}
+                />
               </div>
 
               <hr className="my-3" />
@@ -867,116 +660,6 @@ export function ChargeDetail({ chargeId }: { chargeId: string }) {
           </Button>
         </div>
       </div>
-
-      {/* Dialog editar cobrança */}
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Editar cobrança</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <div>
-              <Label htmlFor="edit-value">Valor (R$)</Label>
-              <Input
-                id="edit-value"
-                type="number"
-                step="0.01"
-                min="0.01"
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-due">Vencimento</Label>
-              <Input
-                id="edit-due"
-                type="date"
-                value={editDueDate}
-                onChange={(e) => setEditDueDate(e.target.value)}
-                min={new Date().toISOString().slice(0, 10)}
-              />
-            </div>
-            <div>
-              <Label htmlFor="edit-desc">Descrição</Label>
-              <Textarea
-                id="edit-desc"
-                rows={3}
-                value={editDescription}
-                onChange={(e) => setEditDescription(e.target.value)}
-                maxLength={500}
-                placeholder="Ex: Aluguel abril/2026"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditOpen(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={saveEdit} disabled={busy}>
-              Salvar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* AlertDialog cancelar cobrança */}
-      <AlertDialog open={cancelOpen} onOpenChange={setCancelOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Cancelar cobrança?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Esta ação cancela a cobrança no Asaas e marca como CANCELLED no
-              sistema. Não pode ser desfeita.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy}>Voltar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                cancel();
-              }}
-              disabled={busy}
-              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
-            >
-              Cancelar cobrança
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* Dialog baixa manual */}
-      <Dialog open={cashOpen} onOpenChange={setCashOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Marcar como pago em dinheiro</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            <p className="text-sm text-muted-foreground">
-              Registra o pagamento fora do Asaas (dinheiro, transferência direta, etc).
-              Não movimenta saldo na Asaas.
-            </p>
-            <div>
-              <Label htmlFor="cash-date">Data do pagamento</Label>
-              <Input
-                id="cash-date"
-                type="date"
-                value={cashDate}
-                onChange={(e) => setCashDate(e.target.value)}
-                max={new Date().toISOString().slice(0, 10)}
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCashOpen(false)}>
-              Cancelar
-            </Button>
-            <Button onClick={markCash} disabled={busy || !cashDate}>
-              Confirmar baixa
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
