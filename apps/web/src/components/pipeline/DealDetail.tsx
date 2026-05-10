@@ -7,13 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { FileText, Plus, ExternalLink, ArrowLeft, CheckCircle2, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, PenLine, Receipt, ChevronDown } from "lucide-react";
+import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw } from "lucide-react";
 import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
 import { cn } from "@/lib/utils";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
@@ -934,43 +928,37 @@ export function DealDetail({ deal }: DealDetailProps) {
                   Gere cobranças de comissão a partir do contrato aprovado.
                 </p>
               </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button>
-                    <Wallet className="h-4 w-4 mr-1" />
-                    Nova cobrança
-                    <ChevronDown className="h-4 w-4 ml-1" />
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem
-                    onClick={() => {
-                      const hasApproved = deal.contracts.some(
-                        (c) => c.status === "aprovado"
+              <div className="flex items-center gap-2">
+                <Button
+                  onClick={() => {
+                    const hasApproved = deal.contracts.some(
+                      (c) => c.status === "aprovado"
+                    );
+                    if (!hasApproved) {
+                      toast.error(
+                        "Aprove um contrato primeiro — abrindo aba Contratos"
                       );
-                      if (!hasApproved) {
-                        toast.error(
-                          "Aprove um contrato primeiro — abrindo aba Contratos"
-                        );
-                        setActiveTab("contratos");
-                        return;
-                      }
-                      setChargeDialogMode("commission_from_deal");
-                      setChargeDialogOpen(true);
-                    }}
-                  >
-                    💼 Comissão (do contrato)
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => {
-                      setChargeDialogMode("avulsa_in_deal");
-                      setChargeDialogOpen(true);
-                    }}
-                  >
-                    📄 Avulsa neste deal
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+                      setActiveTab("contratos");
+                      return;
+                    }
+                    setChargeDialogMode("commission_from_deal");
+                    setChargeDialogOpen(true);
+                  }}
+                >
+                  <Wallet className="h-4 w-4 mr-1" />
+                  Cobrança de comissão
+                </Button>
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setChargeDialogMode("avulsa_in_deal");
+                    setChargeDialogOpen(true);
+                  }}
+                >
+                  <FileText className="h-4 w-4 mr-1" />
+                  Avulsa
+                </Button>
+              </div>
             </div>
             <CommissionChargeList key={chargeRefreshKey} dealId={deal.id} />
           </div>

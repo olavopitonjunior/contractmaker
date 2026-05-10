@@ -140,13 +140,11 @@ export function DealProgressTimeline(props: Props) {
   ];
 
   const states = nodes.map((n, idx): "reached" | "current" | "future" => {
+    if (idx === currentIdx) return "current";
     const reachedByStage =
       currentIdx >= 0 && n.reachedAtStages.includes(STAGE_ORDER[currentIdx]);
     const reachedByDate = n.date !== null;
-    if (reachedByStage || reachedByDate) {
-      return idx === currentIdx ? "current" : "reached";
-    }
-    if (idx === currentIdx + 1) return "current";
+    if (reachedByStage || reachedByDate) return "reached";
     return "future";
   });
 
