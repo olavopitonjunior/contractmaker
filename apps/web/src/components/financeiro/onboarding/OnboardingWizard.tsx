@@ -95,12 +95,20 @@ export function OnboardingWizard({ mode = "bootstrap" }: OnboardingWizardProps =
     setElevOpen(true);
   }
 
-  async function load() {
+  async function load(opts?: { accountId?: string | null }) {
     setLoading(true);
     try {
+      // `effectiveAccountId` resolve da chamada direta (caso pós-create, em
+      // que o setState do createdAccountId ainda nem foi flushado) com fallback
+      // pro estado. Sem isso, o load disparado logo após o submit lê o
+      // closure antigo (createdAccountId=null) e cai no DRAFT vazio em vez de
+      // puxar status da conta recém-criada — exatamente o sintoma "conta
+      // criada no Asaas mas wizard não avançou pro KYC".
+      const effectiveAccountId = opts?.accountId ?? createdAccountId;
+
       // Em "newAccount" antes de criar a conta: pula direto pro DraftStep —
       // não consulta status (não há conta ainda).
-      if (mode === "newAccount" && !createdAccountId) {
+      if (mode === "newAccount" && !effectiveAccountId) {
         setState({
           status: "DRAFT" as OnboardingStatus,
           nextStep: "FILL_DATA",
@@ -111,8 +119,8 @@ export function OnboardingWizard({ mode = "bootstrap" }: OnboardingWizardProps =
       }
       // Bootstrap OU newAccount pós-criação: passa accountId explícito quando
       // disponível pra rotear pra conta certa.
-      const url = createdAccountId
-        ? `/api/financeiro/onboarding?accountId=${createdAccountId}`
+      const url = effectiveAccountId
+        ? `/api/financeiro/onboarding?accountId=${effectiveAccountId}`
         : "/api/financeiro/onboarding";
       const res = await fetch(url, { credentials: "include" });
       const data = await res.json();
@@ -203,7 +211,9 @@ export function OnboardingWizard({ mode = "bootstrap" }: OnboardingWizardProps =
             if (mode === "newAccount" && accountIdCreated) {
               setCreatedAccountId(accountIdCreated);
             }
-            load();
+            // Passa o accountId direto pro load (setState acima ainda não
+            // flushou no closure desta callback).
+            load({ accountId: accountIdCreated ?? null });
           }}
           onElevationRequired={() => {
             setPendingAction("submit");
