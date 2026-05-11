@@ -613,14 +613,24 @@ export function planCertidoesForDeal(
         // Phase F.II-γ — multi-tipo: uma chamada por tipo_certidao (cível,
         // família, falência, execução fiscal) para cobrir os 4 distribuidores
         // exigidos em transação imobiliária (Comunicado SPI nº 37 - 10 anos).
+        //
+        // I.4 (2026-05-11) — incluir municipio/uf/pais também para PF.
+        // Infosimples começou a recusar com code 606 ("parâmetros obrigatórios
+        // não foram enviados") quando esses campos vinham vazios pra pessoa
+        // física. Doc oficial lista os três como input válido — mesmo padrão
+        // do TJRJ que já manda `comarca`.
+        const partyMunicipio = (parte.cidade || "").trim();
         for (const t of TJSP_TIPOS) {
           const base: Record<string, unknown> = {
             email,
             finalidade: DEFAULT_FINALIDADE,
             instancia: 1,
             tipo_certidao: t.tipo_certidao,
+            pais: "Brasil",
+            ...(partyUf ? { uf: partyUf } : {}),
+            ...(partyMunicipio ? { municipio: partyMunicipio } : {}),
             ...(isPJ
-              ? { cnpj: cnpj!, razao_social: label, pais: "Brasil" }
+              ? { cnpj: cnpj!, razao_social: label }
               : { cpf: cpf!, nome: label }),
           };
           // H.3 — adicionar campos de identificação quando disponíveis
