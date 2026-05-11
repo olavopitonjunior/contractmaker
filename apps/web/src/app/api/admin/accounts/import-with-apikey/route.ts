@@ -82,8 +82,15 @@ export async function POST(req: NextRequest) {
   const raw = await req.json().catch(() => ({}));
   const parsed = importSchema.safeParse(raw);
   if (!parsed.success) {
+    const issues = parsed.error.issues
+      .map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`)
+      .join("; ");
     return NextResponse.json(
-      { error: "Body inválido", details: parsed.error.format() },
+      {
+        error: "Body inválido",
+        message: issues,
+        details: parsed.error.format(),
+      },
       { status: 400 }
     );
   }
