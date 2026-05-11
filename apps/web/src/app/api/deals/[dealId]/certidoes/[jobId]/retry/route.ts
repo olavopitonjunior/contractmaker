@@ -66,7 +66,16 @@ export async function POST(
     (job.status === "fetching" || job.status === "pending") &&
     now - startedMs > STALE_AFTER_MS;
 
-  const canReExecute = job.status === "failed" || isStuckFetching;
+  // I.5 (2026-05-11) — `data_missing` e `failed_permanent` também passam por
+  // re-execute. Antes só `failed`/stuck eram retentáveis pelo botão individual,
+  // e UX mostrava CTA de retry em data_missing sem botão "Complementar" quando
+  // missingFields vinha vazio do classifier. Agora o user pode tentar de novo
+  // após corrigir o payload (via complement-data ou edição manual do deal).
+  const canReExecute =
+    job.status === "failed" ||
+    job.status === "data_missing" ||
+    job.status === "failed_permanent" ||
+    isStuckFetching;
   const canPollPortal = job.status === "awaiting_portal";
   const canReAttach = job.status === "success" && !job.attachmentId;
 
