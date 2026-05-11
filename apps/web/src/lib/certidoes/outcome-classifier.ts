@@ -158,16 +158,37 @@ export function classifyOutcome(
 
   // Falhas (code !== 200) — rotear por categoria
   switch (category) {
-    case "missing_input":
+    case "missing_input": {
+      const parsed = parseMissingFields(resp.code_message);
+      // I.6 (2026-05-11) — quando o provedor manda mensagem genérica sem
+      // nome de campo (TJSP code 606 padrão: "Parâmetros obrigatórios não
+      // foram enviados. Por favor, verifique a documentação"), parseMissingFields
+      // não consegue extrair nada. Sem detalhe a UI ficaria em "Faltam dados"
+      // sem botão "Complementar" — beco sem saída. Se há portalUrl cacheada,
+      // escala pra failed_permanent + CTA "use o portal oficial".
+      if (parsed.length === 0 && portalUrl) {
+        return {
+          status: "failed_permanent",
+          errorMessage: resp.code_message
+            ? `${resp.code_message} (provedor não detalhou os campos faltantes)`
+            : "Provedor recusou — emita no portal oficial",
+          failureCategory: category, // mantém "missing_input" pra analytics
+          costCents: 0,
+          nextRetryAt: null,
+          missingFields: [],
+          portalUrl,
+        };
+      }
       return {
         status: "data_missing",
         errorMessage: resp.code_message,
         failureCategory: category,
         costCents: 0,
         nextRetryAt: null, // não retry auto — user action
-        missingFields: parseMissingFields(resp.code_message),
+        missingFields: parsed,
         portalUrl,
       };
+    }
     case "inconsistent_input":
       return {
         status: "data_invalid",

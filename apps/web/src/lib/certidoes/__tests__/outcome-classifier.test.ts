@@ -89,6 +89,48 @@ describe("classifyOutcome — Phase J", () => {
     expect(out.costCents).toBe(0);
   });
 
+  // I.6 (2026-05-11) — fallback para 606 genérico (TJSP padrão)
+  it("code 606 genérico + portalUrl → failed_permanent com CTA portal", () => {
+    const resp = {
+      code: 606,
+      code_message:
+        "Parâmetros obrigatórios não foram enviados. Por favor, verifique a documentação de uso do serviço.",
+      data: [],
+    } as unknown as InfosimplesResponse;
+    const norm = {
+      ...normEmpty,
+      situacao: "nao_emitida" as const,
+      failureCategory: "missing_input" as const,
+    };
+    const out = classifyOutcome(resp, norm, baseEndpoint, opts);
+    expect(out.status).toBe("failed_permanent");
+    expect(out.missingFields).toEqual([]);
+    expect(out.portalUrl).toBe("https://esaj.tjsp.jus.br/");
+    expect(out.errorMessage).toMatch(/provedor não detalhou/);
+    expect(out.failureCategory).toBe("missing_input"); // mantém categoria pra analytics
+    expect(out.nextRetryAt).toBeNull();
+  });
+
+  it("code 606 genérico sem portalUrl → continua data_missing (sem fallback)", () => {
+    const endpointSemPortal: EndpointInfo = {
+      ...baseEndpoint,
+      portalUrl: undefined,
+    };
+    const resp = {
+      code: 606,
+      code_message: "Parâmetros obrigatórios não foram enviados",
+      data: [],
+    } as unknown as InfosimplesResponse;
+    const norm = {
+      ...normEmpty,
+      situacao: "nao_emitida" as const,
+      failureCategory: "missing_input" as const,
+    };
+    const out = classifyOutcome(resp, norm, endpointSemPortal, opts);
+    expect(out.status).toBe("data_missing");
+    expect(out.portalUrl).toBeNull();
+  });
+
   it("code 614 → data_invalid + portalUrl presente", () => {
     const resp = {
       code: 614,
