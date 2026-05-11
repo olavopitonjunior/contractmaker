@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
+import { waitUntil } from "@vercel/functions";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { runSingleJob, pollPortalJob } from "@/lib/certidoes/executor";
@@ -84,9 +85,11 @@ export async function POST(
       where: { id: params.jobId },
       data: { retryCount: { increment: 1 } },
     });
-    void pollPortalJob(params.jobId).catch((err) => {
-      console.error("[certidoes] portal retry failed", err);
-    });
+    waitUntil(
+      pollPortalJob(params.jobId).catch((err) => {
+        console.error("[certidoes] portal retry failed", err);
+      })
+    );
     return NextResponse.json({ ok: true, action: "poll_portal" }, { status: 202 });
   }
 
@@ -104,9 +107,11 @@ export async function POST(
       );
     }
     // Fire-and-forget wrapper: keeps existing success status but re-runs download
-    void runSingleJob(params.jobId, params.dealId).catch((err) => {
-      console.error("[certidoes] re-attach failed", err);
-    });
+    waitUntil(
+      runSingleJob(params.jobId, params.dealId).catch((err) => {
+        console.error("[certidoes] re-attach failed", err);
+      })
+    );
     return NextResponse.json({ ok: true, action: "re_attach" }, { status: 202 });
   }
 
@@ -132,9 +137,11 @@ export async function POST(
     },
   });
 
-  void runSingleJob(params.jobId, params.dealId).catch((err) => {
-    console.error("[certidoes] retry failed", err);
-  });
+  waitUntil(
+    runSingleJob(params.jobId, params.dealId).catch((err) => {
+      console.error("[certidoes] retry failed", err);
+    })
+  );
 
   return NextResponse.json({ ok: true, action: "re_execute" }, { status: 202 });
 }

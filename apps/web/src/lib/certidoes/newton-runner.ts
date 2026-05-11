@@ -1,3 +1,4 @@
+import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
 import { planCertidoesForDeal } from "@/lib/certidoes/planner";
 import { runBatch, getMonthlySpend } from "@/lib/certidoes/executor";
@@ -147,9 +148,11 @@ export async function runCertidoesBatchInline(
     }),
   ]);
 
-  void runBatch(batchId, dealId).catch((err) => {
-    console.error("[certidoes-newton] runBatch failed", err);
-  });
+  waitUntil(
+    runBatch(batchId, dealId).catch((err) => {
+      console.error("[certidoes-newton] runBatch failed", err);
+    })
+  );
 
   return {
     status: 202,

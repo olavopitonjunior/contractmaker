@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { planCertidoesForDeal } from "@/lib/certidoes/planner";
@@ -303,15 +304,14 @@ export async function POST(
     }),
   ]);
 
-  // Fire-and-forget: execute batch while the response is returned to the client.
-  // In Next 14 on Vercel, the function lives until maxDuration (300s) as long
-  // as the promise is running — even after the response is sent, because we
-  // are NOT awaiting it. We rely on Node's event loop keeping the process
-  // alive for the duration of the promise. If the runtime terminates early,
-  // jobs stuck in 'pending' will be picked up by the portal poller cron.
-  void runBatch(batchId, params.dealId).catch((err) => {
-    console.error("[certidoes] runBatch failed", err);
-  });
+  // Mantém o lambda vivo até runBatch terminar (até maxDuration). Sem
+  // waitUntil, Vercel cancela a promise assim que o NextResponse é enviado
+  // e os jobs ficam orphaned em 'fetching' até o sweep (incidente 2026-05-11).
+  waitUntil(
+    runBatch(batchId, params.dealId).catch((err) => {
+      console.error("[certidoes] runBatch failed", err);
+    })
+  );
 
   return NextResponse.json(
     {

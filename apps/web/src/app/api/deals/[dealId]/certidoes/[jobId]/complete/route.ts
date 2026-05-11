@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { planCertidoesForDeal } from "@/lib/certidoes/planner";
@@ -155,9 +156,11 @@ export async function POST(
     },
   });
 
-  void runSingleJob(newJob.id, params.dealId).catch((err) => {
-    console.error("[certidoes] complete retry failed", err);
-  });
+  waitUntil(
+    runSingleJob(newJob.id, params.dealId).catch((err) => {
+      console.error("[certidoes] complete retry failed", err);
+    })
+  );
 
   return NextResponse.json(
     { ok: true, newJobId: newJob.id },

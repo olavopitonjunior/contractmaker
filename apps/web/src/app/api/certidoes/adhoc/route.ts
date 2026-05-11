@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { planCertidoesForDeal } from "@/lib/certidoes/planner";
@@ -169,10 +170,13 @@ export async function POST(req: NextRequest) {
     ),
   ]);
 
-  // Fire-and-forget — runBatch aceita dealId null (Phase C).
-  void runBatch(batchId, null).catch((err) => {
-    console.error("[certidoes adhoc] runBatch failed", err);
-  });
+  // waitUntil mantém o lambda vivo até o batch terminar; sem ele as
+  // promises orfanam após o NextResponse (vide incidente 2026-05-11).
+  waitUntil(
+    runBatch(batchId, null).catch((err) => {
+      console.error("[certidoes adhoc] runBatch failed", err);
+    })
+  );
 
   return NextResponse.json(
     {
