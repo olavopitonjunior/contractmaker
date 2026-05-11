@@ -1,8 +1,139 @@
-# Handoff — Módulo Pagadoria (atualizado 2026-05-09 — Pagadoria v2 entregue)
+# Handoff — Módulo Pagadoria (atualizado 2026-05-10 — Multi-account Asaas entregue)
 
-Status: **v2 deployada em prod**. Wizard reusável `ChargeWizard` (3 modes), mapper imobiliária→comissionados, multi-corretora, magic link público, wizard draft, drawer de origem, validate por etapa, UI cleanup pós-feedback. Smoke estrutural OK em prod via Chrome MCP até Etapa 4 (smoke real R$ 5 cancelado por decisão do usuário pra não tocar cliente real do contrato).
+Status: **v3 (multi-account) deployada em prod**. N contas Asaas por org com seletor admin + capabilities granulares (`view | create_charge | init_transfer | configure`). Cobranças em aberto ficam coladas à conta que as emitiu (paymentId/walletId são per-subconta no Asaas). UI completa em `/settings/pagamentos/contas/*`, wizard de KYC reusado via prop `mode`, webhook `ACCOUNT_STATUS_UPDATED` automatiza refresh do KYC. Build production READY (deploy `dpl_7TZwaF57MVyy92n67aEczcurb6yb`, commit `b7c0449a`).
+
+**Próximo passo do usuário (Olavo, owner):** abrir a 2ª conta PJ definitiva via `https://imobpro.ia.br/settings/pagamentos/contas/nova` — documentos já em mãos, vai direto pra produção (sem sandbox). Asaas analisa em 1-2 dias úteis; webhook promove automaticamente quando aprovada.
+
+**v2 anterior** (2026-05-09): wizard reusável `ChargeWizard` (3 modes), mapper imobiliária→comissionados, multi-corretora, magic link público, wizard draft, drawer de origem, validate por etapa, UI cleanup pós-feedback. Smoke estrutural OK em prod via Chrome MCP até Etapa 4 (smoke real R$ 5 cancelado por decisão do usuário pra não tocar cliente real do contrato).
 
 Este doc consolida o trabalho feito, o estado atual, e o checklist para retomar. Manter atualizado conforme novas sessões avançam.
+
+## v3 (2026-05-10) — multi-account Asaas
+
+Commit único em master: `b7c0449a` — `feat(financeiro): multi-account Asaas com seletor admin + capabilities granulares`. 73 arquivos, +4600/−828.
+
+Origem: empresa abriu uma nova subconta PJ e precisa migrar destino default de novas cobranças, mantendo a conta antiga acessível pra cobranças em aberto. Single-account-per-org bloqueava esse caso.
+
+### Mudanças centrais
+
+1. **Schema** (`apps/web/prisma/migrations/20260510130000_multi_asaas_account/migration.sql` — idempotente, backfill seguro)
+   - `AsaasAccount.orgId` deixa de ser `@unique` → vira `@index([orgId])`; ganha `label String?`, `archivedAt DateTime?`
+   - `Organization.activeAsaasAccountId String? FK SetNull` — conta selecionada pelo admin como destino default
+   - `accountId String?` persistido em `CommissionCharge`, `AsaasCustomer`, `AsaasTransfer`, `BankReconciliation`, `AsaasWebhookEvent`
+   - `OrgFinancialSettings.accountId String? @unique` (FK Cascade) — settings agora **per-conta** (taxas, branding, notify*, platformFee)
+   - `AsaasCustomer` dedupe muda de `(orgId, cpfCnpj)` para `(accountId, cpfCnpj)` + `(accountId, asaasId)` — cliente é per-subconta no Asaas
+   - `AsaasAccountPermission { accountId, userId, capability, grantedBy }` — capabilities granulares por (conta, user)
+
+2. **Helpers canônicos** (`apps/web/src/lib/asaas/account.ts`) substituem 28 sites que usavam `prisma.asaasAccount.findUnique({ where: { orgId } })`
+   - `resolveAsaasAccount({ userId, orgId, hintAccountId?, requireCapability? })` — ordem hint > active > primeira_acessivel
+   - `getAccountWithApiKey(accountId)` — encapsula decryptSecret
+   - `userHasAccountCapability(userId, accountId, cap)` — owner bypassa implicitamente
+   - `listAccessibleAccounts(userId, orgId)` — owner vê todas não-arquivadas; non-owner vê só com grant
+   - `getAccountCapabilitiesByUser`, `maskWalletId`, `isOrgOwner`, `AccountNotFoundError`, `AccountNotApprovedError`, `ACCOUNT_CAPABILITIES`, `ACCOUNT_CAPABILITY_LABELS_PT`
+
+3. **RBAC**
+   - 4 PERMISSION.* org-level: `ACCOUNT_CREATE`, `ACCOUNT_ACTIVATE`, `ACCOUNT_ARCHIVE`, `ACCOUNT_PERMISSIONS_MANAGE` — só owner herda (admin tem `false` explícito em `roles.ts::adminAccess`)
+   - 4 capabilities account-level vivem em `AsaasAccountPermission`, **não** no RBAC global; tipo `AccountCapability` em `lib/asaas/account.ts`
+   - `requireAccountCapability({ userId, accountId, capability })` em `rbac/guard.ts`; classe `AccountCapabilityDeniedError` (status 403, code `ACCOUNT_CAPABILITY_DENIED`)
+   - `ElevationScope` += `"BANK_ACCOUNT_SWITCH"` — exigido em `/activate`
+
+4. **Endpoints novos** em `/api/financeiro/accounts/*`
+   - `GET /` — lista contas acessíveis ao user (com `_count.charges`, `isActive`, status KYC, walletId mascarado)
+   - `POST /` — cria nova subconta (helper `createAsaasAccount` em `lib/asaas/account-create.ts`); exige `ACCOUNT_CREATE` + elevation `KYC_EDIT`
+   - `POST /[id]/activate` — define `Organization.activeAsaasAccountId`; exige `ACCOUNT_ACTIVATE` + elevation `BANK_ACCOUNT_SWITCH`
+   - `PATCH /[id]` — edita `label`
+   - `DELETE /[id]` — soft archive; 409 se a conta é ativa ou há cobranças PENDING/OVERDUE
+   - `GET/PUT /[id]/permissions` — owner-only; PUT sobrescreve grants do user em N caps
+
+5. **UI multi-account** (`/settings/pagamentos/contas/*`)
+   - `page.tsx` (server) — tabela das contas com badges (ATIVA/ARQUIVADA/status KYC), `_count.charges`, botão "+ Nova conta"
+   - `nova/page.tsx` — owner-only; renderiza `<OnboardingWizard mode="newAccount" />`
+   - `[id]/page.tsx` — detalhe (status fields, identificadores, docs KYC com badges, contadores)
+   - `[id]/permissoes/page.tsx` — owner-only; `AccountPermissionsEditor` com toggles por user × cap (owner badge "implícito" read-only)
+   - `AccountsTableActions.tsx` — dropdown (Tornar ativa / Editar rótulo / Arquivar) com elevation prompt quando necessário
+   - `AccountSwitcher.tsx` — self-aware do `?accountId=` no URL; dropdown owner / label fixo non-owner; botão "Tornar ativa" inline
+   - `OnboardingWizard` ganhou prop `mode: "bootstrap" | "newAccount"` — newAccount captura `accountId` da resposta e roteia próximos fetches via `?accountId=` (load + refresh + upload)
+
+6. **Páginas `/financeiro/*` propagam `?accountId=`**
+   - `layout.tsx` (server) renderiza `<AccountSwitcher />` no header (exceto na raiz e onboarding)
+   - Hook `useAccountIdParam()` em `hooks/useAccountIdParam.ts` lê o param
+   - Páginas atualizadas: `clientes`, `extrato`, `transferencias`, `conciliacao`, `relatorios`, `cobrancas` (via `ChargesList`)
+   - Endpoints `/api/financeiro/{charges, reconciliation, reports}` aceitam `accountId` na query
+
+7. **ChargeWizard** ganha dropdown "Conta destino" quando há +1 conta accessível com cap `create_charge` (label fixo quando só 1). `accountId` persistido no draft + enviado em todos os submits
+
+8. **Webhook adaptado** (`lib/asaas/webhook.ts`)
+   - PAYMENT_*: popula `AsaasWebhookEvent.accountId` via `charge.accountId` persistido
+   - TRANSFER_*: popula via `asaasTransfer.accountId`
+   - **Novo branch `ACCOUNT_STATUS_UPDATED`**: lookup `AsaasAccount.findFirst({ asaasId })` → update dos 4 status fields + promove `status=APPROVED+approvedAt` quando `general=APPROVED`. Substitui o refresh manual via `/onboarding/refresh`
+
+9. **Migration de cobranças em aberto: ZERO** (decisão consciente)
+   - paymentId/walletId no Asaas são per-subconta — não dá pra "mover" uma cobrança PENDING entre contas
+   - `CommissionCharge.accountId` é persistido na criação e nunca muda
+   - `splitDispatcher` usa `charge.accountId` (com fallback pra primeira conta da org em cobranças legadas)
+   - Settings (taxas/branding) também resolvem via `charge.accountId` em vez de `charge.orgId`
+
+10. **Bootstrap legado mantido**: `/financeiro/onboarding/subaccount` ainda existe pra orgs com 0 contas (1ª conta da org). Redireciona pra `/settings/pagamentos/contas` quando há ≥1 conta. Wizard antigo continua funcional via prop `mode="bootstrap"` (default)
+
+### Testes
+
+- `apps/web/src/lib/asaas/__tests__/account.test.ts` (novo) — 20 testes cobrindo `isOrgOwner`, `userHasAccountCapability` (owner bypass + grants explícitos + arquivada), `listAccessibleAccounts` (owner vs non-owner + arquivadas), `resolveAsaasAccount` (3 ordens + null), `getAccountCapabilitiesByUser` (owner vs grants), `maskWalletId`
+- `apps/web/src/lib/asaas/__tests__/webhook-retry.test.ts` (estendido) — 4 novos casos: `ACCOUNT_STATUS_UPDATED` resolve via asaasId + atualiza fields + promove APPROVED; partial PENDING → AWAITING_APPROVAL; skip silencioso se asaasId não bate; PAYMENT_RECEIVED escreve charge.accountId no log
+- Build production: **OK** (deploy `dpl_7TZwaF57MVyy92n67aEczcurb6yb` READY)
+- Typecheck: **limpo**
+- Suite Asaas: **74/74 testes passando**
+
+### Como o admin usa (fluxo definitivo, sem sandbox)
+
+1. Login em `https://imobpro.ia.br` como Olavo (owner)
+2. `/settings/pagamentos/contas` → "Nova conta" (botão visível só pra owner)
+3. Confirmar elevation 2FA (scope `KYC_EDIT`)
+4. Preencher: rótulo, tipo de pessoa (LEGAL para PJ), CNPJ, razão social, comprovante de receita mensal, endereço completo, telefone, email corporativo, tipo de empresa
+5. Submit → Asaas cria subconta de produção e retorna apiKey real. Sistema persiste com encryption AES-256-GCM em `AsaasAccount.apiKeyEncrypted`
+6. Próxima etapa carrega documentos KYC que Asaas pediu → upload de cada um (max 10 MB, JPG/PNG/WEBP/PDF). Ao subir o último, conta vira `AWAITING_APPROVAL` automaticamente
+7. Análise Asaas: 1-2 dias úteis. Webhook `ACCOUNT_STATUS_UPDATED` atualiza os 4 status fields + promove `APPROVED` quando `general=APPROVED` — sem intervenção
+8. Após `APPROVED`, em `/settings/pagamentos/contas` clicar "Tornar ativa" na linha da nova → elevation `BANK_ACCOUNT_SWITCH` → `Organization.activeAsaasAccountId` atualizado
+9. A partir daí, novas cobranças usam a nova conta como destino default (wizard ainda permite escolher outra conta acessível via dropdown)
+10. Conta antiga continua acessível com badge sem ATIVA; cobranças em aberto continuam sendo pagas/conciliadas nela normalmente
+
+### Arquivos críticos (v3)
+
+| Tipo | Caminho |
+|---|---|
+| Migration | `apps/web/prisma/migrations/20260510130000_multi_asaas_account/migration.sql` |
+| Schema | `apps/web/prisma/schema.prisma` |
+| Helpers | `apps/web/src/lib/asaas/account.ts`, `account-create.ts` |
+| RBAC | `lib/security/rbac/{permissions,roles,guard}.ts`, `lib/security/elevation.ts` |
+| Webhook | `apps/web/src/lib/asaas/webhook.ts` |
+| Endpoints | `apps/web/src/app/api/financeiro/accounts/**` |
+| UI | `apps/web/src/app/(dashboard)/settings/pagamentos/contas/**`, `apps/web/src/components/{financeiro/AccountSwitcher.tsx, settings/AccountPermissionsEditor.tsx, settings/AccountsTableActions.tsx}` |
+| Hook | `apps/web/src/hooks/useAccountIdParam.ts` |
+| Layout switcher | `apps/web/src/app/(dashboard)/financeiro/layout.tsx` |
+| Tests | `apps/web/src/lib/asaas/__tests__/{account,webhook-retry}.test.ts` |
+
+### Decisões arquiteturais (v3)
+
+- **DEC-2026-006**: `accountId` persistido na criação (não resolvido em runtime). Cobranças em aberto NÃO migram entre contas — paymentId/walletId são per-subconta no Asaas; tentar mover quebra integração.
+- **DEC-2026-007**: Owner bypassa todas as 4 capabilities implicitamente (sem inserir rows em `AsaasAccountPermission`). Admin tem `ACCOUNT_*` org-level **false** explícito — só owner gerencia contas bancárias.
+- **DEC-2026-008**: `OrgFinancialSettings` vira per-account (`accountId @unique`). Branding/taxas/notify por conta. Cada subconta pode ter sua própria identidade visual em `/pay/[token]`.
+- **DEC-2026-009**: Webhook `ACCOUNT_STATUS_UPDATED` substitui refresh manual. Lookup via `asaasId` externo (não `accountId` local) porque é o que Asaas envia no payload.
+- **DEC-2026-010**: Migration backfill preserva todas as cobranças/transferências legadas com `accountId` apontando pra única conta existente naquele momento. Org com 0 contas (raro) deixa `accountId` null em registros legados → fallback no código pega "primeira conta da org" quando precisar.
+
+### Checklist pós-sessão (pra próxima sessão validar)
+
+- [ ] Olavo criou a 2ª conta PJ via `/settings/pagamentos/contas/nova` em prod
+- [ ] Upload dos 4 documentos KYC concluído
+- [ ] Status `AWAITING_APPROVAL` registrado
+- [ ] Webhook `ACCOUNT_STATUS_UPDATED` recebido (verificar em `/api/admin/clicksign/webhook-attempts` ou logs Vercel)
+- [ ] Conta promovida pra `APPROVED` automaticamente (sem refresh manual)
+- [ ] Admin ativou via "Tornar ativa" no seletor
+- [ ] Primeira cobrança nova já cai na conta nova (verificar `CommissionCharge.accountId` no DB)
+- [ ] Cobranças antigas continuam pagáveis na conta antiga (sem regressão)
+- [ ] Conta antiga permanece visível em `/settings/pagamentos/contas` (sem badge ATIVA)
+
+---
+
+
 
 ## v2 (2026-05-09) — sumário
 
@@ -102,8 +233,10 @@ Status: **pronto para QA Round 2**. Ambiente de produção funcionando, 2FA do a
 | Helpers MCP Asaas + script setup automatizado | ✅ | 3083b48b, 3de7f143 |
 | Fix env vars corrompidas (`\n` em Production) + 2FA destravado | ✅ | — (só Vercel dashboard) |
 | Fix script orgMemberships + approve subconta sandbox | ✅ | 93c6acd6 |
-| **Fase 5 — Split multi-recipient por cobrança** | ✅ | e1ed755a |
-| **QA UX Round 2 (produção)** | 🟢 **DESBLOQUEADO — pronto pra rodar** | — |
+| Fase 5 — Split multi-recipient por cobrança | ✅ | e1ed755a |
+| Pagadoria v2 (wizard reusável + mapper + multi-corretora + magic link + draft + drawer + validate) | ✅ | 9a440762, cfda756f, 72da91df, 1eb90cd9 |
+| **v3 — Multi-account Asaas (seletor admin + capabilities granulares)** | ✅ | **b7c0449a** |
+| **Olavo criar 2ª conta PJ definitiva via UI em prod** | 🟢 **pendente — aguardando ação do usuário** | — |
 
 ### 1.2 Branch + PR
 
@@ -472,4 +605,4 @@ Consultar [C:\Users\User\.claude\plans\memoized-herding-panda.md](../../../C:/Us
 
 ---
 
-**Última atualização:** 2026-04-20 (sessão tarde). Próximo agent: rodar preflight em prod, confirmar deploy de `e1ed755a` aplicou migration `SplitRecipient`, depois colar `docs/qa-round-2-prompt.md` no Claude Chrome pra QA Round 2.
+**Última atualização:** 2026-05-10 (sessão multi-account). Próximo agent: aguardar Olavo criar a 2ª conta PJ definitiva via `/settings/pagamentos/contas/nova` em prod, validar checklist pós-sessão da v3, depois confirmar que cobranças novas saem na conta nova após "Tornar ativa". Se webhook `ACCOUNT_STATUS_UPDATED` não disparar (Asaas pode demorar pra suportar), aviso pra rodar `/onboarding/refresh?accountId=<novo>` manualmente como fallback.
