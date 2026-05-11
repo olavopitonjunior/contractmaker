@@ -326,11 +326,33 @@ export async function POST(req: NextRequest) {
       }
     );
     if (err instanceof AsaasError) {
+      // Log estruturado pra debug — AsaasError.errors tem [{code, description}]
+      // do upstream. Sem isso, a UI mostra só "ASAAS_ERROR" sem detalhe e o
+      // log do Vercel trunca a mensagem padrão.
+      console.error(
+        "[recover-orphan][asaas]",
+        JSON.stringify({
+          status: err.status,
+          message: err.message,
+          errors: err.errors,
+          input: {
+            asaasId: parsed.data.asaasId ?? null,
+            cpfCnpjMasked: parsed.data.cpfCnpj
+              ? parsed.data.cpfCnpj.slice(0, 3) + "***" + parsed.data.cpfCnpj.slice(-2)
+              : null,
+            email: parsed.data.email ?? null,
+          },
+        })
+      );
       return NextResponse.json(
         {
           error: "ASAAS_ERROR",
           status: err.status,
           details: err.errors,
+          message:
+            err.errors?.[0]?.description ??
+            err.message ??
+            "Asaas rejeitou a operação",
         },
         { status: err.status === 401 ? 500 : 422 }
       );
