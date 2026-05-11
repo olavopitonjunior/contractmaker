@@ -8,10 +8,6 @@ import {
   MembershipRequiredError,
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
-import {
-  requireElevation,
-  ElevationRequiredError,
-} from "@/lib/security/elevation";
 import { audit } from "@/lib/security/audit";
 import { AsaasError } from "@/lib/asaas/errors";
 import { createAsaasAccount } from "@/lib/asaas/account-create";
@@ -92,7 +88,7 @@ const createSchema = z.object({
 /**
  * POST /api/financeiro/accounts — cria nova subconta Asaas.
  * Diferente do legado /onboarding/subaccount: NÃO bloqueia se já existem contas.
- * Requer permissão ACCOUNT_CREATE (owner-only por padrão) + elevation KYC_EDIT.
+ * Requer permissão ACCOUNT_CREATE (owner-only por padrão).
  */
 export async function POST(req: NextRequest) {
   const authResult = await requireAuth(req);
@@ -105,12 +101,10 @@ export async function POST(req: NextRequest) {
       orgId: ctx.orgId,
       permission: PERMISSION.ACCOUNT_CREATE,
     });
-    await requireElevation(ctx.userId, "KYC_EDIT");
   } catch (err) {
     if (
       err instanceof PermissionDeniedError ||
-      err instanceof MembershipRequiredError ||
-      err instanceof ElevationRequiredError
+      err instanceof MembershipRequiredError
     ) {
       return NextResponse.json({ error: err.code }, { status: err.status });
     }
