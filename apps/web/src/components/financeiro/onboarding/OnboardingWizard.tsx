@@ -194,17 +194,32 @@ export function OnboardingWizard({ mode = "bootstrap" }: OnboardingWizardProps =
   // DRAFT — formulário de dados
   if (state.status === "DRAFT") {
     return (
-      <DataStep
-        mode={mode}
-        onSuccess={(accountIdCreated) => {
-          // Em newAccount, captura o accountId pra rotear próximos fetches
-          // pra conta nova (e não pra primeira da org).
-          if (mode === "newAccount" && accountIdCreated) {
-            setCreatedAccountId(accountIdCreated);
-          }
-          load();
-        }}
-      />
+      <>
+        <DataStep
+          mode={mode}
+          onSuccess={(accountIdCreated) => {
+            // Em newAccount, captura o accountId pra rotear próximos fetches
+            // pra conta nova (e não pra primeira da org).
+            if (mode === "newAccount" && accountIdCreated) {
+              setCreatedAccountId(accountIdCreated);
+            }
+            load();
+          }}
+          onElevationRequired={() => {
+            setPendingAction("submit");
+            setElevOpen(true);
+          }}
+        />
+        <ElevationDialog
+          open={elevOpen}
+          onOpenChange={setElevOpen}
+          scopes={["KYC_EDIT"]}
+          onSuccess={() => {
+            setPendingAction(null);
+            toast.success("Identidade confirmada — clique em \"Criar subconta Asaas\" novamente");
+          }}
+        />
+      </>
     );
   }
 
@@ -435,9 +450,11 @@ const initialPF = {
 function DataStep({
   onSuccess,
   mode = "bootstrap",
+  onElevationRequired,
 }: {
   onSuccess: (accountId?: string) => void;
   mode?: "bootstrap" | "newAccount";
+  onElevationRequired?: () => void;
 }) {
   const [data, setData] = useState(initialPF);
   const [label, setLabel] = useState("");
@@ -501,6 +518,10 @@ function DataStep({
       });
       const result = await res.json();
       if (!res.ok) {
+        if (result.error === "ELEVATION_REQUIRED" && onElevationRequired) {
+          onElevationRequired();
+          return;
+        }
         const msg =
           result.details?.[0]?.description ?? result.error ?? result.message ?? "Erro";
         toast.error(msg);
