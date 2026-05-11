@@ -34,9 +34,16 @@ import {
   listSubaccounts,
   retrieveSubaccount,
   createSubaccountAccessToken,
+  resendActivationLink,
   getMyAccountStatus,
   listMyAccountDocuments,
 } from "@/lib/asaas/kyc";
+
+function isWhitelistError(err: AsaasError): boolean {
+  if (err.status !== 400) return false;
+  const msg = (err.errors?.[0]?.description ?? err.message ?? "").toLowerCase();
+  return msg.includes("whitelist") || msg.includes("white list");
+}
 
 const recoverSchema = z
   .object({
@@ -154,11 +161,72 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // 3) Cria nova apiKey (a original foi perdida — só vem no POST /accounts)
-    const tokenResp = await createSubaccountAccessToken({
-      asaasAccountId: subaccount.id,
-      name: `Contractmaker recovery ${new Date().toISOString().slice(0, 10)}`,
-    });
+    // 3) Cria nova apiKey (a original foi perdida — só vem no POST /accounts).
+    //    Asaas pode bloquear esse endpoint com `invalid_action` se a conta-mãe
+    //    não tem whitelist de IPs (Vercel serverless é dinâmico). Quando isso
+    //    acontece, fallback automático pra `resendActivationLink` — Asaas
+    //    manda email pra subconta com link de ativação, onde o owner vê a
+    //    apiKey. UI: usuário cola a apiKey via "Importar com apiKey existente".
+    let tokenResp;
+    try {
+      tokenResp = await createSubaccountAccessToken({
+        asaasAccountId: subaccount.id,
+        name: `Contractmaker recovery ${new Date().toISOString().slice(0, 10)}`,
+      });
+    } catch (apiKeyErr) {
+      if (apiKeyErr instanceof AsaasError && isWhitelistError(apiKeyErr)) {
+        // Fallback: dispara reenvio do link de ativação por email
+        let activationResent = false;
+        let activationError: string | undefined;
+        try {
+          await resendActivationLink({ asaasAccountId: subaccount.id });
+          activationResent = true;
+        } catch (resendErr) {
+          activationError =
+            resendErr instanceof AsaasError
+              ? resendErr.errors?.[0]?.description ?? resendErr.message
+              : resendErr instanceof Error
+                ? resendErr.message
+                : String(resendErr);
+        }
+        await audit(
+          {
+            orgId: ctx.orgId,
+            userId: ctx.userId,
+            ipAddress: ctx.ipAddress,
+            userAgent: ctx.userAgent,
+          },
+          {
+            action: "ACCOUNT_CREATE",
+            result: "FAILURE",
+            metadata: {
+              recovered: true,
+              mode: "activation_link_fallback",
+              asaasId: subaccount.id,
+              email: subaccount.email,
+              activationResent,
+              activationError,
+            },
+          }
+        );
+        return NextResponse.json(
+          {
+            error: "ACTIVATION_LINK_REQUIRED",
+            mode: "activation_link_sent",
+            asaasId: subaccount.id,
+            email: subaccount.email,
+            walletId: subaccount.walletId,
+            activationResent,
+            activationError,
+            message: activationResent
+              ? `Asaas exige whitelist de IPs nesta org pra gerar apiKey via API. Como fallback, enviamos um link de ativação pra ${subaccount.email}. Abra o link, defina a senha, copie a apiKey e use o botão "Importar com apiKey existente".`
+              : `Asaas exige whitelist de IPs. Tentei reenviar o link de ativação mas falhou: ${activationError}. Solicite a apiKey via suporte Asaas e use "Importar com apiKey existente".`,
+          },
+          { status: 422 }
+        );
+      }
+      throw apiKeyErr;
+    }
     const apiKey = tokenResp.apiKey;
     if (!apiKey) {
       throw new Error(

@@ -100,6 +100,12 @@ export async function retrieveSubaccount(params: {
  *
  * IMPORTANTE: a apiKey só é retornada nesta criação — não há endpoint pra
  * buscar a string da apiKey depois. GET /accessTokens só lista metadados.
+ *
+ * GOTCHA: este endpoint exige WHITELIST DE IPs configurada na conta-mãe.
+ * Vercel serverless tem IPs dinâmicos do AWS Lambda — uso prático limitado.
+ * Caso receba `invalid_action` com mensagem de whitelist, cair pra
+ * `resendActivationLink` (envia email pra subconta com link de ativação,
+ * onde o owner vê a apiKey).
  */
 export async function createSubaccountAccessToken(params: {
   asaasAccountId: string;
@@ -116,6 +122,22 @@ export async function createSubaccountAccessToken(params: {
         expirationDate: params.expirationDate,
       },
     }
+  );
+}
+
+/**
+ * Reenvia o link de ativação/reset de senha pro email registrado da subconta
+ * non-BaaS. Use case: a apiKey foi perdida e a whitelist bloqueia
+ * /accessTokens — o owner abre o link no email e vê a apiKey no portal Asaas.
+ *
+ * Limitação Asaas: só permite UM reenvio por subconta.
+ */
+export async function resendActivationLink(params: {
+  asaasAccountId: string;
+}): Promise<void> {
+  await asaasFetch<void>(
+    `/accounts/${params.asaasAccountId}/resendActivationLink`,
+    { method: "POST", body: {} }
   );
 }
 
