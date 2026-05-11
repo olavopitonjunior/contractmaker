@@ -92,26 +92,76 @@ export async function applyWebhookToCharge(
   //    Útil para TRANSFER_*, ACCOUNT_STATUS_UPDATED, etc. Não atualiza charge
   //    porque não há paymentId; mas evita ficar "órfão" pro cron.
   if (!payload.payment?.id) {
-    // Inferir orgId: para TRANSFER_*, payload pode trazer transfer.id que
-    // já temos local em AsaasTransfer.asaasTransferId. Caso contrário,
-    // logamos sem orgId (campo é obrigatório no schema atual; usamos null
-    // se não houver — quando schema permitir — ou skip).
     const eventName = payload.event as string;
     let inferredOrgId: string | null = null;
+    let inferredAccountId: string | null = null;
 
-    // Tenta inferir orgId via transfer
-    if ((payload as any).transfer?.id) {
+    // 2a) ACCOUNT_STATUS_UPDATED: atualiza status da AsaasAccount em si.
+    //     Substitui o refresh manual que era feito via /onboarding/refresh.
+    if (eventName === "ACCOUNT_STATUS_UPDATED") {
+      const externalAsaasId = (payload as any).account?.id as string | undefined;
+      if (externalAsaasId) {
+        const acc = await prisma.asaasAccount.findFirst({
+          where: { asaasId: externalAsaasId },
+          select: {
+            id: true,
+            orgId: true,
+            status: true,
+          },
+        });
+        if (acc) {
+          inferredOrgId = acc.orgId;
+          inferredAccountId = acc.id;
+          const statusPayload = (payload as any).account?.status ?? {};
+          const updateData: Record<string, unknown> = {
+            lastStatusCheckAt: new Date(),
+          };
+          if (typeof statusPayload.general === "string")
+            updateData.generalStatus = statusPayload.general;
+          if (typeof statusPayload.documentation === "string")
+            updateData.documentationStatus = statusPayload.documentation;
+          if (typeof statusPayload.commercialInfo === "string")
+            updateData.commercialInfoStatus = statusPayload.commercialInfo;
+          if (typeof statusPayload.bankAccountInfo === "string")
+            updateData.bankAccountInfoStatus = statusPayload.bankAccountInfo;
+          // Mapeamento canonical → AsaasAccount.status
+          if (statusPayload.general === "APPROVED" && acc.status !== "APPROVED") {
+            updateData.status = "APPROVED";
+            updateData.approvedAt = new Date();
+          } else if (
+            statusPayload.general === "REJECTED" &&
+            acc.status !== "REJECTED"
+          ) {
+            updateData.status = "REJECTED";
+          } else if (
+            statusPayload.general === "PENDING" &&
+            acc.status === "PENDING" &&
+            (statusPayload.documentation === "PENDING" ||
+              statusPayload.commercialInfo === "PENDING")
+          ) {
+            updateData.status = "AWAITING_APPROVAL";
+          }
+          await prisma.asaasAccount.update({
+            where: { id: acc.id },
+            data: updateData,
+          });
+        }
+      }
+    }
+
+    // 2b) TRANSFER_*: lookup via asaasTransfer.findUnique
+    if (!inferredOrgId && (payload as any).transfer?.id) {
       const transfer = await prisma.asaasTransfer.findUnique({
         where: { asaasTransferId: (payload as any).transfer.id },
-        select: { orgId: true },
+        select: { orgId: true, accountId: true },
       });
-      if (transfer) inferredOrgId = transfer.orgId;
+      if (transfer) {
+        inferredOrgId = transfer.orgId;
+        inferredAccountId = transfer.accountId;
+      }
     }
 
     if (!inferredOrgId) {
-      // Sem orgId, não conseguimos persistir (FK obrigatório).
-      // Retorna processed: false com razão clara — cron de retry vai
-      // ignorar entries que nunca foram inseridas.
       return {
         eventId: payload.id,
         processed: false,
@@ -119,11 +169,11 @@ export async function applyWebhookToCharge(
       };
     }
 
-    // Upsert para evitar P2002 em retry
     await prisma.asaasWebhookEvent.upsert({
       where: { asaasEventId: payload.id },
       create: {
         orgId: inferredOrgId,
+        accountId: inferredAccountId,
         asaasEventId: payload.id,
         event: eventName,
         payloadJson: payload as any,
@@ -132,6 +182,7 @@ export async function applyWebhookToCharge(
       update: {
         processedAt: new Date(),
         processingError: null,
+        accountId: inferredAccountId,
       },
     });
 
@@ -147,6 +198,8 @@ export async function applyWebhookToCharge(
   // 3. Encontra CommissionCharge
   const charge = await prisma.commissionCharge.findUnique({
     where: { asaasPaymentId },
+    // accountId é a chave per-conta; precisamos pra popular AsaasWebhookEvent
+    // e pra dispatchExternalSplits abaixo (que precisa da apiKey da conta certa).
   });
 
   if (!charge) {
@@ -170,6 +223,7 @@ export async function applyWebhookToCharge(
       where: { asaasEventId: payload.id },
       create: {
         orgId: charge.orgId,
+        accountId: charge.accountId,
         asaasEventId: payload.id,
         event: eventName,
         asaasPaymentId,
@@ -180,6 +234,7 @@ export async function applyWebhookToCharge(
       update: {
         processedAt: new Date(),
         processingError: null,
+        accountId: charge.accountId,
       },
     });
 

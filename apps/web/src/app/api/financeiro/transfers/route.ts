@@ -11,11 +11,18 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { requireElevation, ElevationRequiredError } from "@/lib/security/elevation";
 import { validateChallengeToken, hashPayload } from "@/lib/security/challenge";
 import { audit } from "@/lib/security/audit";
-import { decryptSecret } from "@/lib/security/crypto";
 import { RateLimits } from "@/lib/security/ratelimit";
 import { AsaasError } from "@/lib/asaas/errors";
 import { createTransfer, type CreateTransferInput } from "@/lib/asaas/transfers";
 import { detectPixKeyType } from "@/lib/asaas/pix";
+import {
+  getAccountWithApiKey,
+  resolveAsaasAccount,
+} from "@/lib/asaas/account";
+import {
+  requireAccountCapability,
+  AccountCapabilityDeniedError,
+} from "@/lib/security/rbac/guard";
 import {
   createDualApproval,
   hashApprovalPayload,
@@ -25,6 +32,8 @@ import { DualApprovalRequestEmail } from "@/lib/email/templates/dual-approval-re
 import { emitDualApprovalNotifs } from "@/lib/financeiro/notifications";
 
 const bodySchema = z.object({
+  /** Conta de origem da transferência. Default = conta ativa do user. */
+  accountId: z.string().optional(),
   type: z.enum(["PIX", "TED"]),
   value: z.number().positive(),
   description: z.string().optional(),
@@ -124,19 +133,42 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Load account + settings
-  const account = await prisma.asaasAccount.findUnique({
-    where: { orgId: ctx.orgId },
+  // Resolve a conta de origem + capability init_transfer
+  const resolved = await resolveAsaasAccount({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    hintAccountId: parsed.data.accountId,
+    requireCapability: "init_transfer",
   });
-  if (!account || account.status !== "APPROVED") {
+  if (!resolved || resolved.account.status !== "APPROVED") {
     return NextResponse.json(
-      { error: "Conta Asaas não aprovada" },
+      {
+        error: "Conta Asaas não aprovada",
+        accountStatus: resolved?.account.status ?? null,
+      },
       { status: 422 }
     );
   }
-  const settings = await prisma.orgFinancialSettings.findUnique({
-    where: { orgId: ctx.orgId },
-  });
+  try {
+    await requireAccountCapability({
+      userId: ctx.userId,
+      accountId: resolved.account.id,
+      capability: "init_transfer",
+    });
+  } catch (err) {
+    if (err instanceof AccountCapabilityDeniedError) {
+      return NextResponse.json({ error: err.code }, { status: err.status });
+    }
+    throw err;
+  }
+  const account = resolved.account;
+  const settings =
+    (await prisma.orgFinancialSettings.findUnique({
+      where: { accountId: account.id },
+    })) ??
+    (await prisma.orgFinancialSettings.findFirst({
+      where: { orgId: ctx.orgId, accountId: null },
+    }));
   const dualCap = settings?.dualApprovalCapCents ?? 5_000_000;
   const hardCap = settings?.hardCapCents ?? 10_000_000;
   const valueCents = Math.round(parsed.data.value * 100);
@@ -270,11 +302,7 @@ export async function POST(req: NextRequest) {
   }
 
   // Execute transfer
-  const apiKey = decryptSecret({
-    ciphertext: account.apiKeyEncrypted,
-    iv: account.apiKeyIvBase64,
-    tag: account.apiKeyTagBase64,
-  });
+  const { apiKey } = await getAccountWithApiKey(account.id);
 
   const transferInput: CreateTransferInput = {
     value: parsed.data.value,
@@ -305,6 +333,7 @@ export async function POST(req: NextRequest) {
     const local = await prisma.asaasTransfer.create({
       data: {
         orgId: ctx.orgId,
+        accountId: account.id,
         asaasTransferId: asaas.id,
         value: asaas.value,
         netValue: asaas.netValue ?? null,
@@ -388,12 +417,24 @@ export async function GET(req: NextRequest) {
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
 
+  const url = new URL(req.url);
+  const accountIdHint = url.searchParams.get("accountId");
+  const resolved = await resolveAsaasAccount({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    hintAccountId: accountIdHint,
+    requireCapability: "view",
+  });
+  if (!resolved) {
+    return NextResponse.json({ accountId: null, transfers: [] });
+  }
+
   const transfers = await prisma.asaasTransfer.findMany({
-    where: { orgId: ctx.orgId },
+    where: { orgId: ctx.orgId, accountId: resolved.account.id },
     orderBy: { createdAt: "desc" },
     take: 50,
     include: { user: { select: { id: true, name: true } } },
   });
 
-  return NextResponse.json({ transfers });
+  return NextResponse.json({ accountId: resolved.account.id, transfers });
 }

@@ -34,10 +34,16 @@ function fullAccess(): PermissionMap {
 
 function adminAccess(): PermissionMap {
   const perms = fullAccess();
-  // Admin NÃO pode: deletar org, transferir ownership, rotacionar api key
+  // Admin NÃO pode: deletar org, transferir ownership, rotacionar api key,
+  // criar/ativar/arquivar contas bancárias (escopo exclusivo do owner) ou
+  // gerenciar permissões por conta.
   perms[PERMISSION.ORG_DELETE] = false;
   perms[PERMISSION.ORG_TRANSFER_OWNERSHIP] = false;
   perms[PERMISSION.API_KEY_ROTATE] = false;
+  perms[PERMISSION.ACCOUNT_CREATE] = false;
+  perms[PERMISSION.ACCOUNT_ACTIVATE] = false;
+  perms[PERMISSION.ACCOUNT_ARCHIVE] = false;
+  perms[PERMISSION.ACCOUNT_PERMISSIONS_MANAGE] = false;
   return perms;
 }
 

@@ -37,14 +37,41 @@ export function ensureIntentExecutorsRegistered(): void {
   registerIntentExecutor("CHARGE_CREATE", async (payload, ctx) => {
     const p = payload as {
       dealId: string;
+      accountId?: string;
       billingType: "PIX" | "BOLETO";
       dueDate: string;
       contractId?: string;
       description?: string;
     };
+    // Se accountId não veio no payload (intents pré-multi-account), resolve
+    // pra conta ativa da org. Newton/Bearer tipicamente passa accountId
+    // explícito quando UI/admin escolhe.
+    let accountId = p.accountId;
+    if (!accountId) {
+      const org = await prisma.organization.findUnique({
+        where: { id: ctx.orgId },
+        select: { activeAsaasAccountId: true },
+      });
+      accountId = org?.activeAsaasAccountId ?? undefined;
+      if (!accountId) {
+        const fallback = await prisma.asaasAccount.findFirst({
+          where: { orgId: ctx.orgId, archivedAt: null, status: "APPROVED" },
+          orderBy: { createdAt: "asc" },
+          select: { id: true },
+        });
+        accountId = fallback?.id;
+      }
+    }
+    if (!accountId) {
+      return {
+        status: 422,
+        body: { error: "Nenhuma conta Asaas aprovada disponível na org" },
+      };
+    }
     return runCreateCommissionCharge({
       dealId: p.dealId,
       orgId: ctx.orgId,
+      accountId,
       userId: ctx.requestedBy,
       ipAddress: null,
       userAgent: `Newton/intent ${ctx.intentId}`,

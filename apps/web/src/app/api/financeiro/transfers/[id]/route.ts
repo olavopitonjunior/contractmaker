@@ -8,12 +8,13 @@ import {
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
-import { decryptSecret } from "@/lib/security/crypto";
 import { cancelTransfer } from "@/lib/asaas/transfers";
 import { AsaasError } from "@/lib/asaas/errors";
+import { getAccountWithApiKey } from "@/lib/asaas/account";
 
 /**
  * DELETE /api/financeiro/transfers/[id] — cancela transfer PENDING.
+ * Resolve a conta via transfer.accountId (multi-account).
  */
 export async function DELETE(
   req: NextRequest,
@@ -39,7 +40,6 @@ export async function DELETE(
 
   const transfer = await prisma.asaasTransfer.findFirst({
     where: { id, orgId: ctx.orgId },
-    include: { org: { select: { asaasAccount: true } } },
   });
   if (!transfer) return NextResponse.json({ error: "Não encontrada" }, { status: 404 });
   if (transfer.status !== "PENDING") {
@@ -49,13 +49,20 @@ export async function DELETE(
     );
   }
 
-  const account = transfer.org.asaasAccount;
-  if (!account) return NextResponse.json({ error: "Conta Asaas inválida" }, { status: 422 });
-  const apiKey = decryptSecret({
-    ciphertext: account.apiKeyEncrypted,
-    iv: account.apiKeyIvBase64,
-    tag: account.apiKeyTagBase64,
-  });
+  // Conta resolvida via transfer.accountId (persistido na criação). Fallback
+  // pra primeira conta da org pra transfers legados.
+  let resolvedAccountId = transfer.accountId;
+  if (!resolvedAccountId) {
+    const fallback = await prisma.asaasAccount.findFirst({
+      where: { orgId: ctx.orgId, archivedAt: null },
+      orderBy: { createdAt: "asc" },
+    });
+    if (!fallback) {
+      return NextResponse.json({ error: "Conta Asaas inválida" }, { status: 422 });
+    }
+    resolvedAccountId = fallback.id;
+  }
+  const { apiKey } = await getAccountWithApiKey(resolvedAccountId);
 
   if (!transfer.asaasTransferId) {
     return NextResponse.json(

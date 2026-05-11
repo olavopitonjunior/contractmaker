@@ -15,6 +15,14 @@ import {
   runCreateCommissionCharge,
   buildChargePreview,
 } from "@/lib/asaas/charges-action";
+import {
+  resolveAsaasAccount,
+  AccountNotFoundError,
+} from "@/lib/asaas/account";
+import {
+  requireAccountCapability,
+  AccountCapabilityDeniedError,
+} from "@/lib/security/rbac/guard";
 import { requireApproval, approvalResponse } from "@/lib/api/intents";
 
 // Discriminated union igual ao /financeiro/charges/nova — extraído inline pra
@@ -47,6 +55,11 @@ const splitEntrySchema = z.discriminatedUnion("recipientType", [
 const createSchema = z.object({
   billingType: z.enum(["PIX", "BOLETO"]),
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  /**
+   * Conta Asaas que vai emitir a cobrança. Opcional pra retrocompat — caller
+   * sem accountId cai na conta ativa da org.
+   */
+  accountId: z.string().optional(),
   contractId: z.string().optional(),
   description: z.string().optional(),
   // Pagadoria 2026-05-09 — overrides do wizard
@@ -142,6 +155,7 @@ export async function POST(
   const {
     billingType,
     dueDate,
+    accountId: accountIdHint,
     contractId,
     description,
     customSplits,
@@ -153,11 +167,39 @@ export async function POST(
   } = parsed.data;
   const idempotencyKey = req.headers.get("x-idempotency-key");
 
+  // 5a. Resolve a conta Asaas que vai emitir a cobrança e checa capability.
+  const resolved = await resolveAsaasAccount({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    hintAccountId: accountIdHint,
+    requireCapability: "create_charge",
+  });
+  if (!resolved) {
+    return NextResponse.json(
+      { error: "ACCOUNT_NOT_FOUND", message: "Conta Asaas não encontrada ou inacessível" },
+      { status: 422 }
+    );
+  }
+  try {
+    await requireAccountCapability({
+      userId: ctx.userId,
+      accountId: resolved.account.id,
+      capability: "create_charge",
+    });
+  } catch (err) {
+    if (err instanceof AccountCapabilityDeniedError) {
+      return NextResponse.json({ error: err.code, accountId: err.accountId }, { status: err.status });
+    }
+    throw err;
+  }
+  const accountId = resolved.account.id;
+
   // Pra Bearer, build preview SEM chamar Asaas
   if (ctx.via === "bearer") {
     const preview = await buildChargePreview({
       dealId,
       orgId: ctx.orgId,
+      accountId,
       contractId,
       billingType,
       dueDate,
@@ -188,6 +230,7 @@ export async function POST(
         const out = await runCreateCommissionCharge({
           dealId,
           orgId: ctx.orgId,
+          accountId,
           userId: ctx.userId,
           ipAddress: ctx.ipAddress,
           userAgent: ctx.userAgent,
@@ -240,6 +283,7 @@ export async function POST(
   const out = await runCreateCommissionCharge({
     dealId,
     orgId: ctx.orgId,
+    accountId,
     userId: ctx.userId,
     ipAddress: ctx.ipAddress,
     userAgent: ctx.userAgent,

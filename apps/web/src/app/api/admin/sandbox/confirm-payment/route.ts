@@ -9,8 +9,8 @@ import {
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
-import { decryptSecret } from "@/lib/security/crypto";
 import { confirmSandboxPayment } from "@/lib/asaas/sandbox";
+import { getAccountWithApiKey } from "@/lib/asaas/account";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,6 +30,8 @@ export const dynamic = "force-dynamic";
  */
 const bodySchema = z.object({
   asaasPaymentId: z.string().trim().min(3),
+  /** Conta Asaas dona do pagamento. Default: charge.accountId via lookup. */
+  accountId: z.string().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -69,21 +71,33 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const account = await prisma.asaasAccount.findUnique({
-    where: { orgId: ctx.orgId },
-  });
-  if (!account) {
+  // Multi-account: lookup via charge.accountId (sandbox confirma paymentId
+  // específico, então a conta vem da própria charge).
+  let resolvedAccountId = parsed.data.accountId;
+  if (!resolvedAccountId) {
+    const charge = await prisma.commissionCharge.findUnique({
+      where: { asaasPaymentId: parsed.data.asaasPaymentId },
+      select: { accountId: true, orgId: true },
+    });
+    if (charge && charge.orgId === ctx.orgId) {
+      resolvedAccountId = charge.accountId ?? undefined;
+    }
+  }
+  if (!resolvedAccountId) {
+    const fallback = await prisma.asaasAccount.findFirst({
+      where: { orgId: ctx.orgId, archivedAt: null },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    });
+    resolvedAccountId = fallback?.id;
+  }
+  if (!resolvedAccountId) {
     return NextResponse.json(
       { error: "Subconta Asaas não encontrada para esta org" },
       { status: 422 }
     );
   }
-
-  const apiKey = decryptSecret({
-    ciphertext: account.apiKeyEncrypted,
-    iv: account.apiKeyIvBase64,
-    tag: account.apiKeyTagBase64,
-  });
+  const { apiKey } = await getAccountWithApiKey(resolvedAccountId);
 
   let asaasResponse: unknown;
   try {

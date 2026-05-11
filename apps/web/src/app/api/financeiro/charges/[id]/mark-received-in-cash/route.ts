@@ -9,9 +9,9 @@ import {
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
-import { decryptSecret } from "@/lib/security/crypto";
 import { AsaasError } from "@/lib/asaas/errors";
 import { markAsReceivedInCash } from "@/lib/asaas/payments";
+import { getAccountWithApiKey } from "@/lib/asaas/account";
 
 const bodySchema = z.object({
   paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
@@ -47,7 +47,6 @@ export async function POST(
 
   const charge = await prisma.commissionCharge.findFirst({
     where: { id, orgId: ctx.orgId },
-    include: { org: { select: { asaasAccount: true } } },
   });
   if (!charge) return NextResponse.json({ error: "Não encontrada" }, { status: 404 });
   if (charge.status !== "PENDING" && charge.status !== "OVERDUE") {
@@ -61,13 +60,19 @@ export async function POST(
   const parsed = bodySchema.safeParse(raw);
   if (!parsed.success) return NextResponse.json({ error: "Body inválido" }, { status: 400 });
 
-  const account = charge.org.asaasAccount;
-  if (!account) return NextResponse.json({ error: "Conta Asaas não configurada" }, { status: 422 });
-  const apiKey = decryptSecret({
-    ciphertext: account.apiKeyEncrypted,
-    iv: account.apiKeyIvBase64,
-    tag: account.apiKeyTagBase64,
-  });
+  let resolvedAccountId = charge.accountId;
+  if (!resolvedAccountId) {
+    const fallback = await prisma.asaasAccount.findFirst({
+      where: { orgId: ctx.orgId, archivedAt: null },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    });
+    if (!fallback) {
+      return NextResponse.json({ error: "Conta Asaas não configurada" }, { status: 422 });
+    }
+    resolvedAccountId = fallback.id;
+  }
+  const { apiKey } = await getAccountWithApiKey(resolvedAccountId);
 
   try {
     await markAsReceivedInCash({

@@ -1,26 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
-import { decryptSecret } from "@/lib/security/crypto";
 import { audit } from "@/lib/security/audit";
 import { AsaasError } from "@/lib/asaas/errors";
 import {
   getMyAccountStatus,
   listMyAccountDocuments,
 } from "@/lib/asaas/kyc";
+import { getAccountWithApiKey } from "@/lib/asaas/account";
 
 /**
- * POST /api/financeiro/onboarding/refresh
+ * POST /api/financeiro/onboarding/refresh?accountId=
  * Faz pull do status atual da subconta + atualiza docs.
+ * Multi-account: aceita ?accountId= explícito; default = primeira conta da org.
  */
 export async function POST(req: NextRequest) {
   const authResult = await requireAuth(req);
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
 
-  const account = await prisma.asaasAccount.findUnique({
-    where: { orgId: ctx.orgId },
-  });
+  const url = new URL(req.url);
+  const accountIdHint = url.searchParams.get("accountId");
+  const account = accountIdHint
+    ? await prisma.asaasAccount.findFirst({
+        where: { id: accountIdHint, orgId: ctx.orgId },
+      })
+    : await prisma.asaasAccount.findFirst({
+        where: { orgId: ctx.orgId },
+        orderBy: { createdAt: "asc" },
+      });
   if (!account) {
     return NextResponse.json(
       { error: "Subconta não encontrada" },
@@ -28,11 +36,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const apiKey = decryptSecret({
-    ciphertext: account.apiKeyEncrypted,
-    iv: account.apiKeyIvBase64,
-    tag: account.apiKeyTagBase64,
-  });
+  const { apiKey } = await getAccountWithApiKey(account.id);
 
   try {
     const [statusRes, docsRes] = await Promise.all([

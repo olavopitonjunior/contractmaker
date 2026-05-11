@@ -32,13 +32,18 @@ export async function GET(req: NextRequest) {
     throw err;
   }
 
-  const type = new URL(req.url).searchParams.get("type") ?? "receivables";
+  const url = new URL(req.url);
+  const type = url.searchParams.get("type") ?? "receivables";
+  const accountId = url.searchParams.get("accountId");
+  // Filtros base — escopo per-account quando accountId vem na query
+  const baseWhere: { orgId: string; accountId?: string } = { orgId: ctx.orgId };
+  if (accountId) baseWhere.accountId = accountId;
   const now = new Date();
 
   if (type === "receivables") {
     const byStatus = await prisma.commissionCharge.groupBy({
       by: ["status"],
-      where: { orgId: ctx.orgId },
+      where: baseWhere,
       _sum: { value: true },
       _count: true,
     });
@@ -53,7 +58,7 @@ export async function GET(req: NextRequest) {
   if (type === "aging") {
     // Cobranças vencidas agrupadas em buckets
     const overdue = await prisma.commissionCharge.findMany({
-      where: { orgId: ctx.orgId, status: "OVERDUE" },
+      where: { ...baseWhere, status: "OVERDUE" },
       select: {
         id: true,
         value: true,
@@ -111,7 +116,7 @@ export async function GET(req: NextRequest) {
     const [receivedBulk, expectedBulk] = await Promise.all([
       prisma.commissionCharge.findMany({
         where: {
-          orgId: ctx.orgId,
+          ...baseWhere,
           status: { in: ["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"] },
           paidAt: { gte: startDate },
         },
@@ -119,7 +124,7 @@ export async function GET(req: NextRequest) {
       }),
       prisma.commissionCharge.findMany({
         where: {
-          orgId: ctx.orgId,
+          ...baseWhere,
           currentDueDate: { gte: startDate },
         },
         select: { value: true, currentDueDate: true },
@@ -145,7 +150,7 @@ export async function GET(req: NextRequest) {
     // Top 10 clientes com valor vencido
     const overdue = await prisma.commissionCharge.groupBy({
       by: ["asaasCustomerId"],
-      where: { orgId: ctx.orgId, status: "OVERDUE" },
+      where: { ...baseWhere, status: "OVERDUE" },
       _sum: { value: true },
       _count: true,
       orderBy: { _sum: { value: "desc" } },

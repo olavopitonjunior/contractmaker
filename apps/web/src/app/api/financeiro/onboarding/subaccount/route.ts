@@ -13,12 +13,8 @@ import {
   ElevationRequiredError,
 } from "@/lib/security/elevation";
 import { audit } from "@/lib/security/audit";
-import { encryptSecret } from "@/lib/security/crypto";
 import { AsaasError } from "@/lib/asaas/errors";
-import {
-  createSubaccount,
-  listMyAccountDocuments,
-} from "@/lib/asaas/kyc";
+import { createAsaasAccount } from "@/lib/asaas/account-create";
 
 const subaccountSchema = z.object({
   personType: z.enum(["PHYSICAL", "LEGAL"]),
@@ -40,8 +36,13 @@ const subaccountSchema = z.object({
 
 /**
  * POST /api/financeiro/onboarding/subaccount
- * Cria subconta Asaas via POST /v3/accounts.
- * Exige elevation KYC_EDIT + permission kyc.submit.
+ *
+ * Bootstrap legado: cria a primeira subconta Asaas pra org. Mantido só pra
+ * compatibilidade com o OnboardingWizard original em /financeiro/onboarding.
+ * Novas contas adicionais devem usar POST /api/financeiro/accounts (suporta N).
+ *
+ * Se já existe ≥1 conta, retorna 409 com instrução pra usar o novo endpoint.
+ * Exige permission KYC_SUBMIT + elevation KYC_EDIT (regras antigas mantidas).
  */
 export async function POST(req: NextRequest) {
   const authResult = await requireAuth(req);
@@ -66,13 +67,19 @@ export async function POST(req: NextRequest) {
     throw err;
   }
 
-  // Guard: já tem subconta
-  const existing = await prisma.asaasAccount.findUnique({
+  // Guard de bootstrap: este endpoint só serve quando a org ainda não tem
+  // nenhuma conta. Pra criar contas adicionais, usar POST /accounts (multi).
+  const existingCount = await prisma.asaasAccount.count({
     where: { orgId: ctx.orgId },
   });
-  if (existing) {
+  if (existingCount > 0) {
     return NextResponse.json(
-      { error: "Já existe subconta Asaas para esta organização", status: existing.status },
+      {
+        error: "Org já tem conta Asaas",
+        code: "USE_NEW_ACCOUNTS_ENDPOINT",
+        message:
+          "Use POST /api/financeiro/accounts para criar contas adicionais.",
+      },
       { status: 409 }
     );
   }
@@ -85,123 +92,14 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
-  const data = parsed.data;
-
-  const baseUrl = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
-  const webhookUrl = `${baseUrl}/api/webhooks/asaas`;
-  const webhookToken = process.env.ASAAS_WEBHOOK_TOKEN;
-  // Asaas não aceita URLs localhost nem HTTP em prod. Só cadastra webhook
-  // se URL for HTTPS (produção ou tunnel público tipo cloudflared/ngrok).
-  const webhookConfigurable = webhookUrl.startsWith("https://");
 
   try {
-    const subaccount = await createSubaccount({
-      name: data.name,
-      email: data.email,
-      cpfCnpj: data.cpfCnpj,
-      mobilePhone: data.mobilePhone,
-      phone: data.phone,
-      site: data.site,
-      incomeValue: data.incomeValue,
-      address: data.address,
-      addressNumber: data.addressNumber,
-      complement: data.complement,
-      province: data.province,
-      postalCode: data.postalCode,
-      birthDate: data.birthDate,
-      companyType: data.companyType,
-      webhooks:
-        webhookToken && webhookConfigurable
-          ? [
-              {
-                name: "Contractmaker default",
-                url: webhookUrl,
-                email: data.email,
-                enabled: true,
-                interrupted: false,
-                authToken: webhookToken,
-                apiVersion: 3,
-                events: [
-                  "PAYMENT_CREATED",
-                  "PAYMENT_UPDATED",
-                  "PAYMENT_CONFIRMED",
-                  "PAYMENT_RECEIVED",
-                  "PAYMENT_OVERDUE",
-                  "PAYMENT_DELETED",
-                  "PAYMENT_REFUNDED",
-                ],
-              },
-            ]
-          : undefined,
+    const result = await createAsaasAccount({
+      orgId: ctx.orgId,
+      ...parsed.data,
+      // Bootstrap: a primeira conta criada vira automaticamente a ativa.
+      setActive: true,
     });
-
-    // Encrypt apiKey antes de persistir
-    const enc = encryptSecret(subaccount.apiKey);
-
-    // Persist local record
-    const account = await prisma.asaasAccount.create({
-      data: {
-        orgId: ctx.orgId,
-        asaasId: subaccount.id,
-        walletId: subaccount.walletId,
-        accountNumber: subaccount.accountNumber
-          ? `${subaccount.accountNumber.agency}/${subaccount.accountNumber.account}-${subaccount.accountNumber.accountDigit}`
-          : null,
-        apiKeyEncrypted: enc.ciphertext,
-        apiKeyIvBase64: enc.iv,
-        apiKeyTagBase64: enc.tag,
-        personType: data.personType,
-        kyc: {
-          name: data.name,
-          email: data.email,
-          cpfCnpjMasked: data.cpfCnpj.slice(0, 3) + "***" + data.cpfCnpj.slice(-2),
-          incomeValue: data.incomeValue,
-          postalCode: data.postalCode,
-          companyType: data.companyType,
-          personType: data.personType,
-          submittedAt: new Date().toISOString(),
-        } as any,
-        status: "PENDING",
-        generalStatus: subaccount.status?.general ?? "PENDING",
-        documentationStatus: subaccount.status?.documentation ?? "PENDING",
-        commercialInfoStatus: subaccount.status?.commercialInfo ?? "PENDING",
-        bankAccountInfoStatus: subaccount.status?.bankAccountInfo ?? "PENDING",
-      },
-    });
-
-    // Fetch document slots (lista de docs pendentes)
-    try {
-      const docsRes = await listMyAccountDocuments({ apiKey: subaccount.apiKey });
-      if (docsRes?.data?.length) {
-        await prisma.asaasAccountDocument.createMany({
-          data: docsRes.data.map((slot) => ({
-            accountId: account.id,
-            asaasDocumentId: slot.id,
-            type: slot.type,
-            title: slot.title ?? slot.type,
-            description: slot.description ?? null,
-            status: mapDocSlotStatus(slot.status),
-          })),
-          skipDuplicates: true,
-        });
-      }
-    } catch (err) {
-      console.error(
-        "[onboarding/subaccount] listDocuments falhou — continuando sem slots",
-        err instanceof Error ? err.message : err
-      );
-    }
-
-    // Se já há docs listados, atualiza status da account para AWAITING_DOCS
-    const docCount = await prisma.asaasAccountDocument.count({
-      where: { accountId: account.id },
-    });
-    if (docCount > 0) {
-      await prisma.asaasAccount.update({
-        where: { id: account.id },
-        data: { status: "AWAITING_DOCS" },
-      });
-    }
 
     await audit(
       {
@@ -214,22 +112,16 @@ export async function POST(req: NextRequest) {
         action: "KYC_SUBMIT",
         result: "SUCCESS",
         resourceType: "asaas_account",
-        resource: `asaas_account:${account.id}`,
+        resource: `asaas_account:${result.accountId}`,
         metadata: {
-          asaasId: subaccount.id,
-          walletId: subaccount.walletId,
-          personType: data.personType,
+          asaasId: result.asaasId,
+          walletId: result.walletId,
+          personType: parsed.data.personType,
         },
       }
     );
 
-    return NextResponse.json({
-      accountId: account.id,
-      asaasId: subaccount.id,
-      walletId: subaccount.walletId,
-      status: "PENDING",
-      docsListed: docCount,
-    });
+    return NextResponse.json(result);
   } catch (err) {
     await audit(
       {
@@ -265,9 +157,5 @@ export async function POST(req: NextRequest) {
   }
 }
 
-function mapDocSlotStatus(s: string): string {
-  const up = s.toUpperCase();
-  if (up === "APPROVED" || up === "REJECTED" || up === "PENDING") return up;
-  if (up === "RECEIVED") return "PENDING";
-  return "NOT_SENT";
-}
+export const runtime = "nodejs";
+export const maxDuration = 30;

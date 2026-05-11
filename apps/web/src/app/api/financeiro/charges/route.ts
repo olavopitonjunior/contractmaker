@@ -10,6 +10,7 @@ import {
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 const querySchema = z.object({
+  accountId: z.string().optional(),
   status: z.string().optional(), // CSV: PENDING,CONFIRMED
   billingType: z.enum(["PIX", "BOLETO"]).optional(),
   search: z.string().optional(), // busca em customer.name ou description
@@ -58,6 +59,7 @@ export async function GET(req: NextRequest) {
   });
 
   const where: any = { orgId: ctx.orgId };
+  if (q.accountId) where.accountId = q.accountId;
   if (q.status) {
     const statuses = q.status.split(",").map((s) => s.trim()).filter(Boolean);
     if (statuses.length > 0) where.status = { in: statuses };
@@ -95,10 +97,14 @@ export async function GET(req: NextRequest) {
     }),
   ]);
 
-  // Status aggregations para chips da UI
+  // Status aggregations para chips da UI — também escopadas por accountId
   const byStatus = await prisma.commissionCharge.groupBy({
     by: ["status"],
-    where: { orgId: ctx.orgId, ...(membership?.role === "sales" ? { deal: { userId: ctx.userId } } : {}) },
+    where: {
+      orgId: ctx.orgId,
+      ...(q.accountId ? { accountId: q.accountId } : {}),
+      ...(membership?.role === "sales" ? { deal: { userId: ctx.userId } } : {}),
+    },
     _count: true,
   });
 

@@ -6,6 +6,7 @@ export type ElevationScope =
   | "TRANSFER"
   | "KYC_EDIT"
   | "BANK_ACCOUNT"
+  | "BANK_ACCOUNT_SWITCH"
   | "API_KEY_ROTATE"
   | "MEMBER_MANAGE"
   | "FEES_CONFIG";

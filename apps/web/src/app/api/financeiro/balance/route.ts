@@ -1,21 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/context";
-import { prisma } from "@/lib/db/prisma";
 import {
   requirePermission,
   PermissionDeniedError,
   MembershipRequiredError,
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
-import { decryptSecret } from "@/lib/security/crypto";
 import { getBalance } from "@/lib/asaas/finance";
 import { AsaasError } from "@/lib/asaas/errors";
+import {
+  getAccountWithApiKey,
+  resolveAsaasAccount,
+} from "@/lib/asaas/account";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 30; // cache 30s
 
 /**
- * GET /api/financeiro/balance — saldo atual da subconta.
+ * GET /api/financeiro/balance?accountId=
+ * Saldo atual da subconta. Sem accountId = conta ativa do user.
  */
 export async function GET(req: NextRequest) {
   const authResult = await requireAuth(req);
@@ -35,25 +38,35 @@ export async function GET(req: NextRequest) {
     throw err;
   }
 
-  const account = await prisma.asaasAccount.findUnique({
-    where: { orgId: ctx.orgId },
+  const url = new URL(req.url);
+  const accountIdHint = url.searchParams.get("accountId");
+  const resolved = await resolveAsaasAccount({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    hintAccountId: accountIdHint,
+    requireCapability: "view",
   });
-  if (!account) {
-    return NextResponse.json({ error: "Conta Asaas não configurada" }, { status: 422 });
+  if (!resolved) {
+    return NextResponse.json(
+      { error: "Conta Asaas não configurada ou inacessível" },
+      { status: 422 }
+    );
   }
+  const account = resolved.account;
   if (account.status !== "APPROVED") {
-    return NextResponse.json({ balance: null, accountStatus: account.status });
+    return NextResponse.json({
+      balance: null,
+      accountId: account.id,
+      accountStatus: account.status,
+    });
   }
 
-  const apiKey = decryptSecret({
-    ciphertext: account.apiKeyEncrypted,
-    iv: account.apiKeyIvBase64,
-    tag: account.apiKeyTagBase64,
-  });
+  const { apiKey } = await getAccountWithApiKey(account.id);
 
   try {
     const balance = await getBalance({ apiKey });
     return NextResponse.json({
+      accountId: account.id,
       balance:
         balance.totalBalance ??
         balance.availableBalance ??

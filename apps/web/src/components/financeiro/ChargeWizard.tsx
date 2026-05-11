@@ -212,6 +212,7 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
               if (typeof s.description === "string") setDescription(s.description);
               if (s.kind === "avulsa" || s.kind === "aluguel" || s.kind === "outros") setKind(s.kind);
               if (typeof s.categoryLabel === "string") setCategoryLabel(s.categoryLabel);
+              if (typeof s.accountId === "string") setAccountId(s.accountId);
               if (Array.isArray(s.splits)) setSplits(s.splits as SplitEntry[]);
               if (s.step === "payer" || s.step === "charge" || s.step === "splits" || s.step === "review") setStep(s.step);
               setDraftLoaded(true);
@@ -360,19 +361,56 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
   const [splits, setSplits] = useState<SplitEntry[]>([]);
   const [platformFeePercent, setPlatformFeePercent] = useState(0);
 
+  // ---------- Account state (multi-account) ----------
+  // Lista de contas Asaas accessíveis ao user com cap create_charge.
+  // Owner sempre vê dropdown; non-owner vê só a conta ativa (label fixo).
+  interface AccountOption {
+    id: string;
+    label: string | null;
+    walletIdMasked: string;
+    isActive: boolean;
+    status: string;
+  }
+  const [accounts, setAccounts] = useState<AccountOption[]>([]);
+  const [accountId, setAccountId] = useState<string>("");
+
   useEffect(() => {
     (async () => {
       try {
-        const res = await fetch("/api/financeiro/settings", {
+        const res = await fetch("/api/financeiro/accounts", {
           credentials: "include",
         });
+        if (!res.ok) return;
+        const data = await res.json();
+        const opts: AccountOption[] = (data.accounts ?? [])
+          .filter((a: { status: string }) => a.status === "APPROVED")
+          .map((a: AccountOption) => a);
+        setAccounts(opts);
+        // Default: ativa do user; fallback primeira
+        const initial =
+          opts.find((a) => a.isActive)?.id ?? opts[0]?.id ?? "";
+        // Não sobrescreve se draft já trouxe accountId
+        setAccountId((prev) => prev || initial);
+      } catch {}
+    })();
+  }, []);
+
+  useEffect(() => {
+    // Settings agora é per-conta — refazer fetch quando troca account
+    if (!accountId) return;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/financeiro/settings?accountId=${accountId}`,
+          { credentials: "include" }
+        );
         if (res.ok) {
           const data = await res.json();
           setPlatformFeePercent(data.settings?.platformFeePercent ?? 0);
         }
       } catch {}
     })();
-  }, []);
+  }, [accountId]);
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -383,6 +421,7 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
       const state = {
         selectedPartyKey, payerName, payerCpfCnpj, payerEmail, payerPhone,
         billingType, value, dueDate, description, kind, categoryLabel, splits, step,
+        accountId,
       };
       const res = await fetch(`/api/deals/${dealId}/commission-charges/draft`, {
         method: "POST",
@@ -437,6 +476,7 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
             body: JSON.stringify({
               billingType,
               dueDate,
+              accountId: accountId || undefined,
               contractId: summary?.contract?.id,
               description: description || undefined,
               customSplits: apiSplits.length > 0 ? apiSplits : undefined,
@@ -473,12 +513,14 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
       // se ainda não existir; em avulsa_standalone vem do customer já selecionado.
       let customerId = selectedCustomer?.id ?? "";
       if (isAvulsaInDeal && !customerId && payerCpfCnpj) {
-        // Cria/recupera customer com base nos dados do payer-override
+        // Cria/recupera customer com base nos dados do payer-override.
+        // Multi-account: customer é per-conta; passa accountId pro upsert.
         const res = await fetch("/api/financeiro/customers", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
           body: JSON.stringify({
+            accountId: accountId || undefined,
             name: payerName,
             cpfCnpj: payerCpfCnpj,
             email: payerEmail || undefined,
@@ -500,6 +542,7 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
+          accountId: accountId || undefined,
           customerId,
           billingType,
           value: parseFloat(value),
@@ -1008,6 +1051,42 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
             <CardTitle>Dados da cobrança</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
+            {/* Conta destino — só aparece quando há +1 conta acessível */}
+            {accounts.length > 1 && (
+              <div>
+                <Label htmlFor="charge-account" className="text-xs">
+                  Conta destino
+                </Label>
+                <Select
+                  value={accountId}
+                  onValueChange={(v) => setAccountId(v)}
+                >
+                  <SelectTrigger id="charge-account">
+                    <SelectValue placeholder="Selecione a conta" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {accounts.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.label ?? `Conta ${a.id.slice(0, 6)}`}
+                        {a.isActive ? " · ativa" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  A cobrança ficará vinculada permanentemente a essa conta.
+                </p>
+              </div>
+            )}
+            {accounts.length === 1 && (
+              <p className="text-xs text-muted-foreground">
+                Conta destino:{" "}
+                <strong>
+                  {accounts[0].label ?? `Conta ${accounts[0].id.slice(0, 6)}`}
+                </strong>
+              </p>
+            )}
+
             {summary?.suggestedDueDate.reason && mode === "commission_from_deal" && (() => {
               const usandoHojeComoBase =
                 /^\d+ dias após (registro|chaves|quitação)/i.test(

@@ -9,10 +9,30 @@ import {
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
-import { decryptSecret } from "@/lib/security/crypto";
 import { AsaasError } from "@/lib/asaas/errors";
 import { cancelPayment, updatePayment } from "@/lib/asaas/payments";
 import { regressDealStageAfterChargeCancel } from "@/lib/charges/regress-stage";
+import { getAccountWithApiKey } from "@/lib/asaas/account";
+
+/**
+ * Resolve a conta Asaas associada à cobrança. Multi-account: usa charge.accountId
+ * persistido. Fallback (cobranças legadas): primeira conta da org.
+ */
+async function resolveAccountForCharge(
+  charge: { accountId: string | null; orgId: string }
+) {
+  let resolvedAccountId = charge.accountId;
+  if (!resolvedAccountId) {
+    const fallback = await prisma.asaasAccount.findFirst({
+      where: { orgId: charge.orgId, archivedAt: null },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    });
+    if (!fallback) return null;
+    resolvedAccountId = fallback.id;
+  }
+  return getAccountWithApiKey(resolvedAccountId);
+}
 
 async function loadCharge(chargeId: string, orgId: string, userId: string) {
   const charge = await prisma.commissionCharge.findFirst({
@@ -25,7 +45,6 @@ async function loadCharge(chargeId: string, orgId: string, userId: string) {
         orderBy: { receivedAt: "desc" },
         take: 50,
       },
-      org: { select: { asaasAccount: true } },
     },
   });
   if (!charge) return null;
@@ -164,15 +183,11 @@ export async function PATCH(
     );
   }
 
-  const account = charge.org.asaasAccount;
-  if (!account) {
+  const accountResolved = await resolveAccountForCharge(charge);
+  if (!accountResolved) {
     return NextResponse.json({ error: "Conta Asaas não configurada" }, { status: 422 });
   }
-  const apiKey = decryptSecret({
-    ciphertext: account.apiKeyEncrypted,
-    iv: account.apiKeyIvBase64,
-    tag: account.apiKeyTagBase64,
-  });
+  const { apiKey } = accountResolved;
 
   try {
     await updatePayment({
@@ -253,15 +268,11 @@ export async function DELETE(
     );
   }
 
-  const account = charge.org.asaasAccount;
-  if (!account) {
+  const accountResolved = await resolveAccountForCharge(charge);
+  if (!accountResolved) {
     return NextResponse.json({ error: "Conta Asaas não configurada" }, { status: 422 });
   }
-  const apiKey = decryptSecret({
-    ciphertext: account.apiKeyEncrypted,
-    iv: account.apiKeyIvBase64,
-    tag: account.apiKeyTagBase64,
-  });
+  const { apiKey } = accountResolved;
 
   try {
     await cancelPayment({ asaasId: charge.asaasPaymentId, apiKey });

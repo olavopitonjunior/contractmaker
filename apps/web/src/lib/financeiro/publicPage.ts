@@ -15,12 +15,39 @@ export async function mintPublicLink(chargeId: string): Promise<string> {
   const charge = await prisma.commissionCharge.findUnique({
     where: { id: chargeId },
     include: {
-      org: { select: { financialSettings: true, name: true } },
+      org: { select: { name: true } },
     },
   });
   if (!charge) throw new Error("Charge not found");
 
-  const brand = charge.org.financialSettings;
+  // Branding agora é per-conta (financialSettings.accountId @unique). Resolve
+  // via charge.accountId; fallback pra primeira conta da org.
+  let brand: { brandDisplayName: string | null; brandLogoUrl: string | null; brandPrimaryColor: string | null; brandSupportEmail: string | null; brandSupportPhone: string | null } | null = null;
+  if (charge.accountId) {
+    brand = await prisma.orgFinancialSettings.findUnique({
+      where: { accountId: charge.accountId },
+      select: {
+        brandDisplayName: true,
+        brandLogoUrl: true,
+        brandPrimaryColor: true,
+        brandSupportEmail: true,
+        brandSupportPhone: true,
+      },
+    });
+  }
+  if (!brand) {
+    brand = await prisma.orgFinancialSettings.findFirst({
+      where: { orgId: charge.orgId },
+      select: {
+        brandDisplayName: true,
+        brandLogoUrl: true,
+        brandPrimaryColor: true,
+        brandSupportEmail: true,
+        brandSupportPhone: true,
+      },
+      orderBy: { createdAt: "asc" },
+    });
+  }
   const snapshot = {
     displayName: brand?.brandDisplayName ?? charge.org.name,
     logoUrl: brand?.brandLogoUrl ?? null,

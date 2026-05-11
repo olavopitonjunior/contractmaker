@@ -91,10 +91,24 @@ export async function POST(
     return NextResponse.json({ error: "Body inválido" }, { status: 400 });
   }
 
-  const account = await prisma.asaasAccount.findUnique({ where: { orgId: ctx.orgId } });
-  const settings = await prisma.orgFinancialSettings.findUnique({
-    where: { orgId: ctx.orgId },
+  // Multi-account: aceita ?accountId= como hint, default = ativa do user.
+  const accountIdHint = url.searchParams.get("accountId");
+  const { resolveAsaasAccount } = await import("@/lib/asaas/account");
+  const resolved = await resolveAsaasAccount({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    hintAccountId: accountIdHint,
+    requireCapability: "view",
   });
+  const account = resolved?.account ?? null;
+  const settings = account
+    ? (await prisma.orgFinancialSettings.findUnique({
+        where: { accountId: account.id },
+      })) ??
+      (await prisma.orgFinancialSettings.findFirst({
+        where: { orgId: ctx.orgId, accountId: null },
+      }))
+    : null;
 
   const results: Record<string, ValidationResult> = {};
 

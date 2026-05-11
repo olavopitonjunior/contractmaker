@@ -234,9 +234,19 @@ export async function notifyChargeEvent(params: {
     });
     if (!charge) return;
 
-    const settings = await prisma.orgFinancialSettings.findUnique({
-      where: { orgId },
-    });
+    // Per-account: resolve via charge.accountId; fallback pra primeira conta.
+    const settings = charge.accountId
+      ? (await prisma.orgFinancialSettings.findUnique({
+          where: { accountId: charge.accountId },
+        })) ??
+        (await prisma.orgFinancialSettings.findFirst({
+          where: { orgId },
+          orderBy: { createdAt: "asc" },
+        }))
+      : await prisma.orgFinancialSettings.findFirst({
+          where: { orgId },
+          orderBy: { createdAt: "asc" },
+        });
 
     const baseUrl = process.env.NEXTAUTH_URL ?? "https://imobpro.ia.br";
     const linkUrl = `${baseUrl}/financeiro/cobrancas/${charge.id}`;

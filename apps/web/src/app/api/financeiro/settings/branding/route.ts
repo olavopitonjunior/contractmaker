@@ -9,8 +9,10 @@ import {
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
+import { resolveAsaasAccount } from "@/lib/asaas/account";
 
 const brandingSchema = z.object({
+  accountId: z.string().optional(),
   brandLogoUrl: z.string().url().nullable().optional(),
   brandPrimaryColor: z
     .string()
@@ -74,19 +76,36 @@ export async function PATCH(req: NextRequest) {
   }
 
   // Normalize empty strings to null
-  const data: any = { ...parsed.data };
+  const { accountId: _accId, ...dataRest } = parsed.data;
+  void _accId;
+  const data: any = { ...dataRest };
   if (data.brandSupportEmail === "") data.brandSupportEmail = null;
 
+  // Resolve a conta cuja branding será editada (per-account)
+  const resolved = await resolveAsaasAccount({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    hintAccountId: parsed.data.accountId,
+    requireCapability: "configure",
+  });
+  if (!resolved) {
+    return NextResponse.json(
+      { error: "Nenhuma conta Asaas configurável encontrada" },
+      { status: 422 }
+    );
+  }
+  const accountId = resolved.account.id;
+
   let existing = await prisma.orgFinancialSettings.findUnique({
-    where: { orgId: ctx.orgId },
+    where: { accountId },
   });
   if (!existing) {
     existing = await prisma.orgFinancialSettings.create({
-      data: { orgId: ctx.orgId },
+      data: { orgId: ctx.orgId, accountId },
     });
   }
   const updated = await prisma.orgFinancialSettings.update({
-    where: { orgId: ctx.orgId },
+    where: { accountId },
     data,
   });
 

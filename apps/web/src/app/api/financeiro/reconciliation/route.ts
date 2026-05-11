@@ -10,6 +10,7 @@ import {
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 const querySchema = z.object({
+  accountId: z.string().optional(),
   status: z.enum(["pending", "matched", "ignored", "manual"]).optional(),
   from: z.string().optional(),
   to: z.string().optional(),
@@ -41,12 +42,16 @@ export async function GET(req: NextRequest) {
   const q = parsed.data;
 
   const where: any = { orgId: ctx.orgId };
+  if (q.accountId) where.accountId = q.accountId;
   if (q.status) where.status = q.status;
   if (q.from || q.to) {
     where.date = {};
     if (q.from) where.date.gte = new Date(q.from);
     if (q.to) where.date.lte = new Date(q.to);
   }
+
+  const countsWhere: any = { orgId: ctx.orgId };
+  if (q.accountId) countsWhere.accountId = q.accountId;
 
   const [total, rows, counts] = await Promise.all([
     prisma.bankReconciliation.count({ where }),
@@ -58,7 +63,7 @@ export async function GET(req: NextRequest) {
     }),
     prisma.bankReconciliation.groupBy({
       by: ["status"],
-      where: { orgId: ctx.orgId },
+      where: countsWhere,
       _count: true,
     }),
   ]);

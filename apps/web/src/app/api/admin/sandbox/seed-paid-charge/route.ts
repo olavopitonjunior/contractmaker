@@ -108,9 +108,21 @@ export async function POST(req: NextRequest) {
 
   const { customerId, value, description, splits } = parsed.data;
 
-  const account = await prisma.asaasAccount.findUnique({
-    where: { orgId: ctx.orgId },
+  // Multi-account: usa a conta ativa da org (sandbox helper)
+  const org = await prisma.organization.findUnique({
+    where: { id: ctx.orgId },
+    select: { activeAsaasAccountId: true },
   });
+  const account =
+    (org?.activeAsaasAccountId
+      ? await prisma.asaasAccount.findFirst({
+          where: { id: org.activeAsaasAccountId, archivedAt: null },
+        })
+      : null) ??
+    (await prisma.asaasAccount.findFirst({
+      where: { orgId: ctx.orgId, archivedAt: null },
+      orderBy: { createdAt: "asc" },
+    }));
   if (!account) {
     return NextResponse.json(
       { error: "Subconta Asaas não encontrada para esta org" },
@@ -118,8 +130,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Customer agora é per-conta
   const customer = await prisma.asaasCustomer.findFirst({
-    where: { id: customerId, orgId: ctx.orgId },
+    where: { id: customerId, accountId: account.id },
   });
   if (!customer) {
     return NextResponse.json(
@@ -153,6 +166,7 @@ export async function POST(req: NextRequest) {
   const charge = await prisma.commissionCharge.create({
     data: {
       orgId: ctx.orgId,
+      accountId: account.id,
       asaasCustomerId: customer.id,
       asaasPaymentId: fakePaymentId,
       kind: "avulsa",

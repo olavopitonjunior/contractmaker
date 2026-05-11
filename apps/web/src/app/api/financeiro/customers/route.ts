@@ -9,17 +9,22 @@ import {
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
-import { decryptSecret } from "@/lib/security/crypto";
 import { AsaasError } from "@/lib/asaas/errors";
 import { upsertCustomer } from "@/lib/asaas/customers";
+import {
+  getAccountWithApiKey,
+  resolveAsaasAccount,
+} from "@/lib/asaas/account";
 
 const querySchema = z.object({
+  accountId: z.string().optional(),
   search: z.string().optional(),
   offset: z.coerce.number().int().min(0).default(0),
   limit: z.coerce.number().int().min(1).max(100).default(50),
 });
 
 const createSchema = z.object({
+  accountId: z.string().optional(),
   name: z.string().min(2),
   cpfCnpj: z.string().min(11),
   email: z.string().email().optional(),
@@ -45,7 +50,21 @@ export async function GET(req: NextRequest) {
   if (!parsed.success) return NextResponse.json({ error: "Query inválida" }, { status: 400 });
   const q = parsed.data;
 
-  const where: any = { orgId: ctx.orgId };
+  // Resolve a conta de visualização (default: ativa do user)
+  const resolved = await resolveAsaasAccount({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    hintAccountId: q.accountId,
+    requireCapability: "view",
+  });
+  if (!resolved) {
+    return NextResponse.json(
+      { error: "Conta Asaas não encontrada ou inacessível" },
+      { status: 422 }
+    );
+  }
+
+  const where: any = { orgId: ctx.orgId, accountId: resolved.account.id };
   if (q.search) {
     where.OR = [
       { name: { contains: q.search, mode: "insensitive" } },
@@ -67,15 +86,20 @@ export async function GET(req: NextRequest) {
     }),
   ]);
 
-  // Aggregate de totais pagos por cliente
+  // Aggregate de totais pagos por cliente — escopado pela conta resolvida
   const totalsPaid = await prisma.commissionCharge.groupBy({
     by: ["asaasCustomerId"],
-    where: { orgId: ctx.orgId, status: { in: ["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"] } },
+    where: {
+      orgId: ctx.orgId,
+      accountId: resolved.account.id,
+      status: { in: ["RECEIVED", "CONFIRMED", "RECEIVED_IN_CASH"] },
+    },
     _sum: { value: true },
   });
   const paidMap = new Map(totalsPaid.map((t) => [t.asaasCustomerId, t._sum.value ?? 0]));
 
   return NextResponse.json({
+    accountId: resolved.account.id,
     total,
     offset: q.offset,
     limit: q.limit,
@@ -121,18 +145,23 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const account = await prisma.asaasAccount.findUnique({ where: { orgId: ctx.orgId } });
-  if (!account || account.status !== "APPROVED") {
+  const resolvedAccount = await resolveAsaasAccount({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    hintAccountId: parsed.data.accountId,
+    requireCapability: "create_charge",
+  });
+  if (!resolvedAccount || resolvedAccount.account.status !== "APPROVED") {
     return NextResponse.json(
-      { error: "Conta Asaas não aprovada" },
+      {
+        error: "Conta Asaas não aprovada",
+        accountStatus: resolvedAccount?.account.status ?? null,
+      },
       { status: 422 }
     );
   }
-  const apiKey = decryptSecret({
-    ciphertext: account.apiKeyEncrypted,
-    iv: account.apiKeyIvBase64,
-    tag: account.apiKeyTagBase64,
-  });
+  const account = resolvedAccount.account;
+  const { apiKey } = await getAccountWithApiKey(account.id);
 
   try {
     const asaasCustomer = await upsertCustomer({
@@ -152,9 +181,15 @@ export async function POST(req: NextRequest) {
 
     const cpfCnpjDigits = asaasCustomer.cpfCnpj.replace(/\D/g, "");
     const local = await prisma.asaasCustomer.upsert({
-      where: { orgId_cpfCnpj: { orgId: ctx.orgId, cpfCnpj: cpfCnpjDigits } },
+      where: {
+        accountId_cpfCnpj: {
+          accountId: account.id,
+          cpfCnpj: cpfCnpjDigits,
+        },
+      },
       create: {
         orgId: ctx.orgId,
+        accountId: account.id,
         asaasId: asaasCustomer.id,
         name: asaasCustomer.name,
         cpfCnpj: cpfCnpjDigits,

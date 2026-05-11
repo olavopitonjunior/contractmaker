@@ -17,9 +17,9 @@
  */
 
 import { prisma } from "@/lib/db/prisma";
-import { decryptSecret } from "@/lib/security/crypto";
 import { createTransfer } from "./transfers";
 import { AsaasError } from "./errors";
+import { getAccountWithApiKey } from "./account";
 import type { ExternalSplit } from "./commission";
 
 interface ChargeSplitJson {
@@ -72,18 +72,29 @@ export async function dispatchExternalSplits(
   const externals = splitJson?.external ?? [];
   if (externals.length === 0) return result;
 
-  // Carrega Asaas account + settings da org
-  const [account, settings] = await Promise.all([
-    prisma.asaasAccount.findUnique({ where: { orgId: charge.orgId } }),
-    prisma.orgFinancialSettings.findUnique({ where: { orgId: charge.orgId } }),
-  ]);
-  if (!account) return result;
+  // Resolve a conta que emitiu a charge (accountId persistido na criação).
+  // Sem accountId = charge legado pré-multi-account; cai no fallback de buscar
+  // a única conta da org.
+  let resolvedAccountId = charge.accountId;
+  if (!resolvedAccountId) {
+    const fallback = await prisma.asaasAccount.findFirst({
+      where: { orgId: charge.orgId, archivedAt: null },
+      orderBy: { createdAt: "asc" },
+    });
+    if (!fallback) return result;
+    resolvedAccountId = fallback.id;
+  }
 
-  const apiKey = decryptSecret({
-    ciphertext: account.apiKeyEncrypted,
-    iv: account.apiKeyIvBase64,
-    tag: account.apiKeyTagBase64,
-  });
+  const { account, apiKey } = await getAccountWithApiKey(resolvedAccountId);
+
+  // Settings: prefer per-account, fallback to legacy org-level (accountId=null)
+  const settings =
+    (await prisma.orgFinancialSettings.findUnique({
+      where: { accountId: account.id },
+    })) ??
+    (await prisma.orgFinancialSettings.findFirst({
+      where: { orgId: charge.orgId, accountId: null },
+    }));
 
   const base = charge.netValue ?? charge.value;
   const feePolicy = settings?.pixSplitFeePolicy ?? "org_absorbs";
@@ -128,6 +139,7 @@ export async function dispatchExternalSplits(
         await prisma.asaasTransfer.create({
           data: {
             orgId: charge.orgId,
+            accountId: account.id,
             commissionChargeId: charge.id,
             splitRecipientId: splitRecipientFk,
             asaasTransferId: null,
@@ -164,6 +176,7 @@ export async function dispatchExternalSplits(
       localTransfer = await prisma.asaasTransfer.create({
         data: {
           orgId: charge.orgId,
+          accountId: account.id,
           commissionChargeId: charge.id,
           splitRecipientId: splitRecipientFk,
           asaasTransferId: null,
@@ -244,9 +257,10 @@ export async function dispatchExternalSplits(
       // foi efetivamente cobrada). transferFee em reais → centavos.
       if (typeof asaas.transferFee === "number" && asaas.transferFee > 0) {
         const cents = Math.round(asaas.transferFee * 100);
+        // Per-account: atualiza settings da conta que emitiu a charge.
         await prisma.orgFinancialSettings
           .update({
-            where: { orgId: charge.orgId },
+            where: { accountId: account.id },
             data: { lastObservedPixFeeCents: cents },
           })
           .catch(() => {
@@ -302,16 +316,18 @@ export async function retryFailedTransfer(transferId: string): Promise<{
     return { ok: false, reason: "Dados de PIX faltando" };
   }
 
-  const account = await prisma.asaasAccount.findUnique({
-    where: { orgId: transfer.orgId },
-  });
-  if (!account) return { ok: false, reason: "Conta Asaas não encontrada" };
-
-  const apiKey = decryptSecret({
-    ciphertext: account.apiKeyEncrypted,
-    iv: account.apiKeyIvBase64,
-    tag: account.apiKeyTagBase64,
-  });
+  // Conta resolvida via transfer.accountId (persistido na criação). Fallback
+  // pra primeira conta da org pra transfers legados pré-multi-account.
+  let resolvedAccountId = transfer.accountId;
+  if (!resolvedAccountId) {
+    const fallback = await prisma.asaasAccount.findFirst({
+      where: { orgId: transfer.orgId, archivedAt: null },
+      orderBy: { createdAt: "asc" },
+    });
+    if (!fallback) return { ok: false, reason: "Conta Asaas não encontrada" };
+    resolvedAccountId = fallback.id;
+  }
+  const { apiKey } = await getAccountWithApiKey(resolvedAccountId);
 
   try {
     const asaas = await createTransfer({

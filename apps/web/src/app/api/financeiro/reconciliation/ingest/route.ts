@@ -8,11 +8,15 @@ import {
   MembershipRequiredError,
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
-import { decryptSecret } from "@/lib/security/crypto";
 import { ingestFinancialTransactions } from "@/lib/asaas/reconciliation";
 import { AsaasError } from "@/lib/asaas/errors";
+import {
+  getAccountWithApiKey,
+  resolveAsaasAccount,
+} from "@/lib/asaas/account";
 
 const bodySchema = z.object({
+  accountId: z.string().optional(),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   finishDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
 });
@@ -39,25 +43,27 @@ export async function POST(req: NextRequest) {
   const parsed = bodySchema.safeParse(raw);
   if (!parsed.success) return NextResponse.json({ error: "Body inválido" }, { status: 400 });
 
-  const account = await prisma.asaasAccount.findUnique({ where: { orgId: ctx.orgId } });
-  if (!account || account.status !== "APPROVED") {
+  const resolved = await resolveAsaasAccount({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    hintAccountId: parsed.data.accountId,
+    requireCapability: "view",
+  });
+  if (!resolved || resolved.account.status !== "APPROVED") {
     return NextResponse.json({ error: "Conta Asaas não aprovada" }, { status: 422 });
   }
-
-  const apiKey = decryptSecret({
-    ciphertext: account.apiKeyEncrypted,
-    iv: account.apiKeyIvBase64,
-    tag: account.apiKeyTagBase64,
-  });
+  const account = resolved.account;
+  const { apiKey } = await getAccountWithApiKey(account.id);
 
   try {
     const result = await ingestFinancialTransactions({
       orgId: ctx.orgId,
+      accountId: account.id,
       apiKey,
       startDate: parsed.data.startDate,
       finishDate: parsed.data.finishDate,
     });
-    return NextResponse.json(result);
+    return NextResponse.json({ accountId: account.id, ...result });
   } catch (err) {
     if (err instanceof AsaasError) {
       return NextResponse.json({ error: "ASAAS_ERROR", details: err.errors }, { status: 422 });

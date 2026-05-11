@@ -17,6 +17,12 @@ import {
   GitMerge,
   BarChart3,
 } from "lucide-react";
+import {
+  listAccessibleAccounts,
+  resolveAsaasAccount,
+  maskWalletId,
+} from "@/lib/asaas/account";
+import { AccountSwitcher } from "@/components/financeiro/AccountSwitcher";
 
 export const dynamic = "force-dynamic";
 
@@ -24,50 +30,74 @@ function fmtBRL(v: number): string {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-export default async function FinanceiroPage() {
+export default async function FinanceiroPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ accountId?: string }>;
+}) {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
 
   const org = await getUserOrg(session.user.id);
   if (!org) redirect("/");
 
-  const account = await prisma.asaasAccount.findUnique({
-    where: { orgId: org.id },
-  });
+  const sp = (await searchParams) ?? {};
+  const accessible = await listAccessibleAccounts(session.user.id, org.id);
 
-  // KYC gate
-  if (!account || account.status !== "APPROVED") {
+  // Sem nenhuma conta acessível APPROVED: mostra CTA bootstrap.
+  const hasApproved = accessible.some((a) => a.status === "APPROVED");
+  if (!hasApproved) {
+    const firstNonApproved = accessible[0] ?? null;
     return (
       <div className="max-w-2xl mx-auto py-8">
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <AlertCircle className="h-5 w-5 text-amber-500" />
-              Configure sua conta Asaas
+              {accessible.length === 0
+                ? "Configure sua conta Asaas"
+                : "Aguardando aprovação"}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             <p className="text-sm text-muted-foreground">
-              Para usar o módulo financeiro, você precisa abrir uma subconta
-              Asaas e passar pela aprovação KYC. O processo é digital e leva
-              ~2 minutos.
+              {accessible.length === 0
+                ? "Para usar o módulo financeiro, abra uma subconta Asaas e passe pela aprovação KYC. O processo é digital e leva ~2 minutos."
+                : "Sua conta ainda está em análise. Você receberá um email assim que for aprovada."}
             </p>
-            {account && (
+            {firstNonApproved && (
               <p className="text-sm">
                 Status atual:{" "}
-                <Badge variant="outline">{account.status}</Badge>
+                <Badge variant="outline">{firstNonApproved.status}</Badge>
               </p>
             )}
-            <Button asChild>
-              <Link href="/financeiro/onboarding">
-                {account ? "Continuar onboarding" : "Começar agora"}
-              </Link>
-            </Button>
+            <div className="flex gap-2">
+              <Button asChild>
+                <Link href="/financeiro/onboarding">
+                  {accessible.length === 0 ? "Começar agora" : "Continuar onboarding"}
+                </Link>
+              </Button>
+              <Button asChild variant="outline">
+                <Link href="/settings/pagamentos/contas">Gerenciar contas</Link>
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>
     );
   }
+
+  // Resolve a conta em foco — hint vence se válido + acessível com cap "view".
+  const resolved = await resolveAsaasAccount({
+    userId: session.user.id,
+    orgId: org.id,
+    hintAccountId: sp.accountId ?? null,
+    requireCapability: "view",
+  });
+  if (!resolved) {
+    redirect("/financeiro");
+  }
+  const account = resolved.account;
 
   // Aggregate KPIs
   const now = new Date();
@@ -77,10 +107,11 @@ export default async function FinanceiroPage() {
   // Top categorias avulsas (últimos 90d) — só relevante quando org já usa avulsas
   const ninetyDaysAgo = new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000);
 
+  const accountFilter = { orgId: org.id, accountId: account.id };
   const [receivedThisMonth, pendingNext30, overdue, recent, topCategoriesRaw] = await Promise.all([
     prisma.commissionCharge.aggregate({
       where: {
-        orgId: org.id,
+        ...accountFilter,
         status: { in: ["RECEIVED", "CONFIRMED"] },
         paidAt: { gte: firstOfMonth },
       },
@@ -89,7 +120,7 @@ export default async function FinanceiroPage() {
     }),
     prisma.commissionCharge.aggregate({
       where: {
-        orgId: org.id,
+        ...accountFilter,
         status: "PENDING",
         currentDueDate: { gte: now, lte: next30 },
       },
@@ -98,14 +129,14 @@ export default async function FinanceiroPage() {
     }),
     prisma.commissionCharge.aggregate({
       where: {
-        orgId: org.id,
+        ...accountFilter,
         status: "OVERDUE",
       },
       _sum: { value: true },
       _count: true,
     }),
     prisma.commissionCharge.findMany({
-      where: { orgId: org.id },
+      where: accountFilter,
       orderBy: { createdAt: "desc" },
       take: 10,
       include: {
@@ -116,7 +147,7 @@ export default async function FinanceiroPage() {
     prisma.commissionCharge.groupBy({
       by: ["categoryLabel"],
       where: {
-        orgId: org.id,
+        ...accountFilter,
         kind: { not: "commission" },
         categoryLabel: { not: null },
         createdAt: { gte: ninetyDaysAgo },
@@ -139,15 +170,28 @@ export default async function FinanceiroPage() {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold flex items-center gap-2">
-            <Wallet className="h-6 w-6" />
-            Financeiro
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Conta Asaas aprovada — walletId{" "}
-            <code className="text-xs">{account.walletId.slice(0, 8)}…</code>
-          </p>
+        <div className="flex items-start gap-4 flex-wrap">
+          <div>
+            <h1 className="text-2xl font-semibold flex items-center gap-2">
+              <Wallet className="h-6 w-6" />
+              Financeiro
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              {account.label ? `${account.label} · ` : ""}
+              walletId <code className="text-xs">{maskWalletId(account.walletId)}</code>
+            </p>
+          </div>
+          <AccountSwitcher
+            currentAccountId={account.id}
+            accounts={accessible
+              .filter((a) => a.status === "APPROVED")
+              .map((a) => ({
+                id: a.id,
+                label: a.label ?? `Conta ${a.id.slice(0, 6)}`,
+                walletIdMasked: maskWalletId(a.walletId),
+                isActive: a.id === account.id,
+              }))}
+          />
         </div>
         <div className="flex gap-2 flex-wrap">
           <Button variant="outline" size="sm" asChild>

@@ -1,9 +1,9 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { audit } from "@/lib/security/audit";
-import { decryptSecret } from "@/lib/security/crypto";
 import { AsaasError } from "@/lib/asaas/errors";
 import { upsertCustomer } from "@/lib/asaas/customers";
+import { getAccountWithApiKey } from "@/lib/asaas/account";
 import {
   createPayment,
   getPixQrCode,
@@ -35,6 +35,11 @@ import { notifyChargeEvent } from "@/lib/financeiro/notifications";
 export interface CreateChargeInput {
   dealId: string;
   orgId: string;
+  /**
+   * Conta Asaas que emite a cobrança. Persistida em CommissionCharge.accountId
+   * — paymentId/walletId são per-conta no Asaas, não dá pra trocar depois.
+   */
+  accountId: string;
   /** userId que dispara — usado em audit. */
   userId: string;
   ipAddress: string | null;
@@ -100,24 +105,29 @@ export async function runCreateCommissionCharge(
     };
   }
 
-  const account = await prisma.asaasAccount.findUnique({
-    where: { orgId: input.orgId },
+  // Resolve a conta especificada (multi-account: caller passa accountId)
+  const accountFromInput = await prisma.asaasAccount.findFirst({
+    where: { id: input.accountId, orgId: input.orgId, archivedAt: null },
   });
-  if (!account) {
+  if (!accountFromInput) {
     return {
       status: 422,
-      body: { error: "Configure sua conta Asaas em /financeiro/onboarding" },
+      body: {
+        error: "Conta Asaas inválida ou inacessível",
+        accountId: input.accountId,
+      },
     };
   }
-  if (account.status !== "APPROVED") {
+  if (accountFromInput.status !== "APPROVED") {
     return {
       status: 422,
       body: {
         error: "Conta Asaas ainda não aprovada",
-        accountStatus: account.status,
+        accountStatus: accountFromInput.status,
       },
     };
   }
+  const account = accountFromInput;
 
   // Duplicate guard
   const existingActive = await prisma.commissionCharge.findFirst({
@@ -138,10 +148,15 @@ export async function runCreateCommissionCharge(
     };
   }
 
-  // Build payload
-  const feesSettings = await prisma.orgFinancialSettings.findUnique({
-    where: { orgId: input.orgId },
-  });
+  // Build payload — settings agora são per-conta. Fallback pra org-level
+  // mantido durante migração (settings antigas com accountId=null).
+  const feesSettings =
+    (await prisma.orgFinancialSettings.findUnique({
+      where: { accountId: account.id },
+    })) ??
+    (await prisma.orgFinancialSettings.findFirst({
+      where: { orgId: input.orgId, accountId: null },
+    }));
   const platformFeePercent = feesSettings?.platformFeePercent ?? 0;
   const platformWalletId =
     feesSettings?.platformFeeWalletId ??
@@ -196,23 +211,24 @@ export async function runCreateCommissionCharge(
     throw err;
   }
 
-  const apiKey = decryptSecret({
-    ciphertext: account.apiKeyEncrypted,
-    iv: account.apiKeyIvBase64,
-    tag: account.apiKeyTagBase64,
-  });
+  const { apiKey } = await getAccountWithApiKey(account.id);
 
   try {
     const asaasCustomer = await upsertCustomer({
       input: payload.customerInput,
       apiKey,
     });
+    // Customer agora é per-conta — mesmo CPF pode existir em N subcontas.
     const localCustomer = await prisma.asaasCustomer.upsert({
       where: {
-        orgId_cpfCnpj: { orgId: input.orgId, cpfCnpj: asaasCustomer.cpfCnpj },
+        accountId_cpfCnpj: {
+          accountId: account.id,
+          cpfCnpj: asaasCustomer.cpfCnpj,
+        },
       },
       create: {
         orgId: input.orgId,
+        accountId: account.id,
         asaasId: asaasCustomer.id,
         name: asaasCustomer.name,
         cpfCnpj: asaasCustomer.cpfCnpj,
@@ -262,6 +278,7 @@ export async function runCreateCommissionCharge(
     const charge = await prisma.commissionCharge.create({
       data: {
         orgId: input.orgId,
+        accountId: account.id,
         dealId: deal.id,
         contractId: contract.id,
         asaasCustomerId: localCustomer.id,
@@ -455,6 +472,7 @@ export interface ChargePreview {
 export async function buildChargePreview(args: {
   dealId: string;
   orgId: string;
+  accountId: string;
   contractId?: string;
   billingType: "PIX" | "BOLETO";
   dueDate: string;
@@ -475,19 +493,23 @@ export async function buildChargePreview(args: {
     return { error: "Nenhum contrato aprovado neste deal", status: 422 };
   }
 
-  const account = await prisma.asaasAccount.findUnique({
-    where: { orgId: args.orgId },
+  const account = await prisma.asaasAccount.findFirst({
+    where: { id: args.accountId, orgId: args.orgId, archivedAt: null },
   });
   if (!account) {
     return {
-      error: "Configure sua conta Asaas em /financeiro/onboarding",
+      error: "Conta Asaas inválida ou inacessível",
       status: 422,
     };
   }
 
-  const feesSettings = await prisma.orgFinancialSettings.findUnique({
-    where: { orgId: args.orgId },
-  });
+  const feesSettings =
+    (await prisma.orgFinancialSettings.findUnique({
+      where: { accountId: account.id },
+    })) ??
+    (await prisma.orgFinancialSettings.findFirst({
+      where: { orgId: args.orgId, accountId: null },
+    }));
   const platformFeePercent = feesSettings?.platformFeePercent ?? 0;
   const platformWalletId =
     feesSettings?.platformFeeWalletId ??

@@ -34,6 +34,8 @@ export interface IngestResult {
 
 export async function ingestFinancialTransactions(params: {
   orgId: string;
+  /** Conta Asaas cujo extrato foi consultado — persistido em BankReconciliation. */
+  accountId: string;
   apiKey: string;
   startDate?: string;
   finishDate?: string;
@@ -103,6 +105,7 @@ export async function ingestFinancialTransactions(params: {
     await prisma.bankReconciliation.create({
       data: {
         orgId: params.orgId,
+        accountId: params.accountId,
         financialTransactionId: txId,
         type: t.type,
         value: t.value,

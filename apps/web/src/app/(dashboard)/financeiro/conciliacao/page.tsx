@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RefreshCw, CheckCircle2, Ban, Link2 } from "lucide-react";
+import { useAccountIdParam } from "@/hooks/useAccountIdParam";
 
 interface Recon {
   id: string;
@@ -49,6 +50,7 @@ const STATUS_UI: Record<string, { color: string; label: string }> = {
 };
 
 export default function ConciliacaoPage() {
+  const accountId = useAccountIdParam();
   const [rows, setRows] = useState<Recon[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [status, setStatus] = useState("pending");
@@ -58,10 +60,11 @@ export default function ConciliacaoPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(
-        `/api/financeiro/reconciliation?status=${status}`,
-        { credentials: "include" }
-      );
+      const params = new URLSearchParams({ status });
+      if (accountId) params.set("accountId", accountId);
+      const res = await fetch(`/api/financeiro/reconciliation?${params}`, {
+        credentials: "include",
+      });
       if (res.ok) {
         const data = await res.json();
         setRows(data.rows);
@@ -70,7 +73,7 @@ export default function ConciliacaoPage() {
     } finally {
       setLoading(false);
     }
-  }, [status]);
+  }, [status, accountId]);
 
   useEffect(() => {
     load();
@@ -87,6 +90,7 @@ export default function ConciliacaoPage() {
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({
+          accountId: accountId || undefined,
           startDate: thirtyAgo.toISOString().slice(0, 10),
           finishDate: today.toISOString().slice(0, 10),
         }),

@@ -3,22 +3,29 @@ import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 
 /**
- * GET /api/financeiro/onboarding
- * Retorna status da subconta Asaas da org + próximo passo do wizard.
+ * GET /api/financeiro/onboarding?accountId=
+ * Retorna status da subconta Asaas + próximo passo do wizard.
+ * Multi-account: aceita ?accountId= explícito; default = primeira conta da
+ * org (compat com bootstrap legado de 1-conta-por-org).
  */
 export async function GET(req: NextRequest) {
   const authResult = await requireAuth(req);
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
 
-  const account = await prisma.asaasAccount.findUnique({
-    where: { orgId: ctx.orgId },
-    include: {
-      documents: {
+  const url = new URL(req.url);
+  const accountIdHint = url.searchParams.get("accountId");
+
+  const account = accountIdHint
+    ? await prisma.asaasAccount.findFirst({
+        where: { id: accountIdHint, orgId: ctx.orgId },
+        include: { documents: { orderBy: { createdAt: "asc" } } },
+      })
+    : await prisma.asaasAccount.findFirst({
+        where: { orgId: ctx.orgId },
         orderBy: { createdAt: "asc" },
-      },
-    },
-  });
+        include: { documents: { orderBy: { createdAt: "asc" } } },
+      });
 
   if (!account) {
     return NextResponse.json({
@@ -45,6 +52,7 @@ export async function GET(req: NextRequest) {
     accountId: account.id,
     asaasId: account.asaasId,
     walletId: account.walletId,
+    label: account.label,
     personType: account.personType,
     generalStatus: account.generalStatus,
     documentationStatus: account.documentationStatus,

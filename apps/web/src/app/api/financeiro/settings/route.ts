@@ -9,6 +9,7 @@ import {
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
+import { resolveAsaasAccount } from "@/lib/asaas/account";
 
 const discountPresetSchema = z.object({
   id: z.string(),
@@ -19,6 +20,7 @@ const discountPresetSchema = z.object({
 });
 
 const patchSchema = z.object({
+  accountId: z.string().optional(),
   platformFeePercent: z.number().min(0).max(10).optional(),
   platformFeeWalletId: z.string().trim().min(1).max(200).nullable().optional(),
   overpricePolicy: z.enum(["none", "absorb", "asaas_fee", "custom"]).optional(),
@@ -38,9 +40,14 @@ const patchSchema = z.object({
   pixSplitFeePolicy: z.enum(["org_absorbs", "deduct_from_recipient"]).optional(),
 });
 
-async function getOrCreate(orgId: string) {
-  let s = await prisma.orgFinancialSettings.findUnique({ where: { orgId } });
-  if (!s) s = await prisma.orgFinancialSettings.create({ data: { orgId } });
+async function getOrCreate(orgId: string, accountId: string) {
+  let s = await prisma.orgFinancialSettings.findUnique({
+    where: { accountId },
+  });
+  if (!s)
+    s = await prisma.orgFinancialSettings.create({
+      data: { orgId, accountId },
+    });
   return s;
 }
 
@@ -49,8 +56,19 @@ export async function GET(req: NextRequest) {
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
 
-  const s = await getOrCreate(ctx.orgId);
-  return NextResponse.json({ settings: s });
+  const url = new URL(req.url);
+  const accountIdHint = url.searchParams.get("accountId");
+  const resolved = await resolveAsaasAccount({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    hintAccountId: accountIdHint,
+    requireCapability: "view",
+  });
+  if (!resolved) {
+    return NextResponse.json({ settings: null, accountId: null });
+  }
+  const s = await getOrCreate(ctx.orgId, resolved.account.id);
+  return NextResponse.json({ settings: s, accountId: resolved.account.id });
 }
 
 export async function PATCH(req: NextRequest) {
@@ -80,10 +98,25 @@ export async function PATCH(req: NextRequest) {
     );
   }
 
-  await getOrCreate(ctx.orgId);
+  const resolved = await resolveAsaasAccount({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    hintAccountId: parsed.data.accountId,
+    requireCapability: "configure",
+  });
+  if (!resolved) {
+    return NextResponse.json(
+      { error: "Nenhuma conta Asaas configurável encontrada" },
+      { status: 422 }
+    );
+  }
+
+  const { accountId: _accId, ...patchData } = parsed.data;
+  void _accId;
+  await getOrCreate(ctx.orgId, resolved.account.id);
   const updated = await prisma.orgFinancialSettings.update({
-    where: { orgId: ctx.orgId },
-    data: parsed.data as any,
+    where: { accountId: resolved.account.id },
+    data: patchData as any,
   });
 
   await audit(
@@ -93,9 +126,9 @@ export async function PATCH(req: NextRequest) {
       result: "SUCCESS",
       resourceType: "org_financial_settings",
       resource: `org_financial_settings:${updated.id}`,
-      metadata: parsed.data as any,
+      metadata: { ...patchData, accountId: resolved.account.id } as any,
     }
   );
 
-  return NextResponse.json({ settings: updated });
+  return NextResponse.json({ settings: updated, accountId: resolved.account.id });
 }

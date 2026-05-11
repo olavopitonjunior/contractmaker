@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import { decryptSecret } from "@/lib/security/crypto";
 import { getBalance } from "@/lib/asaas/finance";
 import { getMyAccountStatus } from "@/lib/asaas/kyc";
+import { getAccountWithApiKey } from "@/lib/asaas/account";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -33,9 +33,22 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "No org" }, { status: 401 });
   }
 
-  const account = await prisma.asaasAccount.findUnique({
-    where: { orgId: org.id },
+  // Multi-account: aceita ?accountId= no querystring; default = ativa da org.
+  const url = new URL(req.url);
+  const accountIdHint = url.searchParams.get("accountId");
+  const orgRow = await prisma.organization.findUnique({
+    where: { id: org.id },
+    select: { activeAsaasAccountId: true },
   });
+  const wantedId = accountIdHint ?? orgRow?.activeAsaasAccountId ?? null;
+  const account = wantedId
+    ? await prisma.asaasAccount.findFirst({
+        where: { id: wantedId, orgId: org.id, archivedAt: null },
+      })
+    : await prisma.asaasAccount.findFirst({
+        where: { orgId: org.id, archivedAt: null },
+        orderBy: { createdAt: "asc" },
+      });
   if (!account) {
     return NextResponse.json(
       { ok: false, reason: "no_asaas_account" },
@@ -43,24 +56,21 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const apiKey = decryptSecret({
-    ciphertext: account.apiKeyEncrypted,
-    iv: account.apiKeyIvBase64,
-    tag: account.apiKeyTagBase64,
-  });
+  const { apiKey } = await getAccountWithApiKey(account.id);
 
   const [statusResult, balanceResult, lastWebhook, sevenDayErrors] =
     await Promise.allSettled([
       getMyAccountStatus({ apiKey }),
       getBalance({ apiKey }),
       prisma.asaasWebhookEvent.findFirst({
-        where: { orgId: org.id },
+        where: { orgId: org.id, accountId: account.id },
         orderBy: { receivedAt: "desc" },
         select: { receivedAt: true, event: true },
       }),
       prisma.asaasWebhookEvent.count({
         where: {
           orgId: org.id,
+          accountId: account.id,
           receivedAt: {
             gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000),
           },

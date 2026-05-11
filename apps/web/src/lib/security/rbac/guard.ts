@@ -1,5 +1,9 @@
 import { PermissionKey } from "./permissions";
 import { EffectivePermissions, can, getEffectivePermissions } from "./check";
+import {
+  AccountCapability,
+  userHasAccountCapability,
+} from "@/lib/asaas/account";
 
 export class PermissionDeniedError extends Error {
   status = 403;
@@ -20,6 +24,39 @@ export class MembershipRequiredError extends Error {
   constructor() {
     super("User is not a member of this organization");
     this.name = "MembershipRequiredError";
+  }
+}
+
+export class AccountCapabilityDeniedError extends Error {
+  status = 403;
+  code = "ACCOUNT_CAPABILITY_DENIED";
+  capability: AccountCapability;
+  accountId: string;
+
+  constructor(capability: AccountCapability, accountId: string) {
+    super(`Account capability denied: ${capability} on account ${accountId}`);
+    this.name = "AccountCapabilityDeniedError";
+    this.capability = capability;
+    this.accountId = accountId;
+  }
+}
+
+/**
+ * Lança AccountCapabilityDeniedError se o user não tem a capability na conta.
+ * Owner da org bypassa via userHasAccountCapability.
+ */
+export async function requireAccountCapability(params: {
+  userId: string;
+  accountId: string;
+  capability: AccountCapability;
+}): Promise<void> {
+  const ok = await userHasAccountCapability(
+    params.userId,
+    params.accountId,
+    params.capability
+  );
+  if (!ok) {
+    throw new AccountCapabilityDeniedError(params.capability, params.accountId);
   }
 }
 

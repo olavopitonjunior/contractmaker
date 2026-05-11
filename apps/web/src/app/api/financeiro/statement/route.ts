@@ -1,18 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth/context";
-import { prisma } from "@/lib/db/prisma";
 import {
   requirePermission,
   PermissionDeniedError,
   MembershipRequiredError,
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
-import { decryptSecret } from "@/lib/security/crypto";
 import { listFinancialTransactions } from "@/lib/asaas/finance";
 import { AsaasError, AsaasConfigError } from "@/lib/asaas/errors";
+import {
+  getAccountWithApiKey,
+  resolveAsaasAccount,
+} from "@/lib/asaas/account";
 
 const querySchema = z.object({
+  accountId: z.string().optional(),
   startDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   finishDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
   offset: z.coerce.number().int().min(0).default(0),
@@ -46,23 +49,25 @@ export async function GET(req: NextRequest) {
   const parsed = querySchema.safeParse(Object.fromEntries(url.searchParams));
   if (!parsed.success) return NextResponse.json({ error: "Query inválida" }, { status: 400 });
 
-  const account = await prisma.asaasAccount.findUnique({ where: { orgId: ctx.orgId } });
-  if (!account || account.status !== "APPROVED") {
+  const resolved = await resolveAsaasAccount({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    hintAccountId: parsed.data.accountId,
+    requireCapability: "view",
+  });
+  if (!resolved || resolved.account.status !== "APPROVED") {
     return NextResponse.json({
       hasMore: false,
       totalCount: 0,
       limit: 0,
       offset: 0,
       data: [],
-      accountStatus: account?.status ?? "NOT_STARTED",
+      accountId: resolved?.account.id ?? null,
+      accountStatus: resolved?.account.status ?? "NOT_STARTED",
     });
   }
-
-  const apiKey = decryptSecret({
-    ciphertext: account.apiKeyEncrypted,
-    iv: account.apiKeyIvBase64,
-    tag: account.apiKeyTagBase64,
-  });
+  const account = resolved.account;
+  const { apiKey } = await getAccountWithApiKey(account.id);
 
   try {
     const res = await listFinancialTransactions({
@@ -85,6 +90,7 @@ export async function GET(req: NextRequest) {
     }
 
     return NextResponse.json({
+      accountId: account.id,
       hasMore: res.hasMore,
       totalCount: res.totalCount,
       limit: res.limit,

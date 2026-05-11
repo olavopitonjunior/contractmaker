@@ -9,6 +9,7 @@ import {
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
+import { resolveAsaasAccount } from "@/lib/asaas/account";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -84,10 +85,29 @@ export async function POST(req: NextRequest) {
       token,
     });
 
-    // Persiste URL em OrgFinancialSettings (upsert para criar se não existir)
+    // Persiste URL em OrgFinancialSettings (per-account a partir desta migration).
+    // Usa a conta ativa do user com cap configure.
+    const url2 = new URL(req.url);
+    const accountIdHint = url2.searchParams.get("accountId");
+    const resolved = await resolveAsaasAccount({
+      userId: ctx.userId,
+      orgId: ctx.orgId,
+      hintAccountId: accountIdHint,
+      requireCapability: "configure",
+    });
+    if (!resolved) {
+      return NextResponse.json(
+        { error: "Nenhuma conta Asaas configurável encontrada" },
+        { status: 422 }
+      );
+    }
     await prisma.orgFinancialSettings.upsert({
-      where: { orgId: ctx.orgId },
-      create: { orgId: ctx.orgId, brandLogoUrl: blob.url },
+      where: { accountId: resolved.account.id },
+      create: {
+        orgId: ctx.orgId,
+        accountId: resolved.account.id,
+        brandLogoUrl: blob.url,
+      },
       update: { brandLogoUrl: blob.url },
     });
 

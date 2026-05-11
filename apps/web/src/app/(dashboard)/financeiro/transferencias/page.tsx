@@ -17,6 +17,7 @@ import {
 import { ElevationDialog } from "@/components/security/ElevationDialog";
 import { ChallengeDialog } from "@/components/security/ChallengeDialog";
 import { useElevation } from "@/hooks/useElevation";
+import { useAccountIdParam } from "@/hooks/useAccountIdParam";
 import {
   Wallet,
   ArrowUpRight,
@@ -69,6 +70,8 @@ const STATUS_UI: Record<
 
 export default function TransferenciasPage() {
   const elevation = useElevation();
+  const accountId = useAccountIdParam();
+  const accountQs = accountId ? `?accountId=${accountId}` : "";
   const [balance, setBalance] = useState<number | null>(null);
   const [transfers, setTransfers] = useState<TransferRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -91,8 +94,8 @@ export default function TransferenciasPage() {
     setLoading(true);
     try {
       const [balRes, trRes] = await Promise.all([
-        fetch("/api/financeiro/balance", { credentials: "include" }),
-        fetch("/api/financeiro/transfers", { credentials: "include" }),
+        fetch(`/api/financeiro/balance${accountQs}`, { credentials: "include" }),
+        fetch(`/api/financeiro/transfers${accountQs}`, { credentials: "include" }),
       ]);
       if (balRes.ok) {
         const b = await balRes.json();
@@ -105,7 +108,7 @@ export default function TransferenciasPage() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [accountQs]);
 
   useEffect(() => {
     load();
@@ -126,6 +129,7 @@ export default function TransferenciasPage() {
         type,
         value: parseFloat(value),
       };
+      if (accountId) body.accountId = accountId;
       if (type === "PIX") body.pixAddressKey = pixKey;
 
       const res = await fetch("/api/financeiro/transfers/preview", {
@@ -165,6 +169,7 @@ export default function TransferenciasPage() {
     setBusy(true);
     try {
       const body: any = { type, value: parseFloat(value), description };
+      if (accountId) body.accountId = accountId;
       if (type === "PIX") body.pixAddressKey = pixKey;
 
       const res = await fetch("/api/financeiro/transfers", {

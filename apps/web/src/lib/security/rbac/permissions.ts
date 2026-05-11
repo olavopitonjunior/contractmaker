@@ -23,6 +23,10 @@ export const PERMISSION = {
   KYC_VIEW_STATUS: "kyc.view_status",
   API_KEY_ROTATE: "api_key.rotate",
   API_KEY_VIEW_MASKED: "api_key.view_masked",
+  ACCOUNT_CREATE: "account.create",
+  ACCOUNT_ACTIVATE: "account.activate",
+  ACCOUNT_ARCHIVE: "account.archive",
+  ACCOUNT_PERMISSIONS_MANAGE: "account.permissions.manage",
 
   // Cobranças
   CHARGE_CREATE_FROM_DEAL: "charge.create.from_deal",
@@ -92,6 +96,10 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionKey[]> = {
     PERMISSION.KYC_VIEW_STATUS,
     PERMISSION.API_KEY_ROTATE,
     PERMISSION.API_KEY_VIEW_MASKED,
+    PERMISSION.ACCOUNT_CREATE,
+    PERMISSION.ACCOUNT_ACTIVATE,
+    PERMISSION.ACCOUNT_ARCHIVE,
+    PERMISSION.ACCOUNT_PERMISSIONS_MANAGE,
   ],
   "Cobranças": [
     PERMISSION.CHARGE_CREATE_FROM_DEAL,
@@ -152,6 +160,10 @@ export const PERMISSION_LABELS_PT: Record<PermissionKey, string> = {
   [PERMISSION.KYC_VIEW_STATUS]: "Ver status do KYC",
   [PERMISSION.API_KEY_ROTATE]: "Rotacionar API key da conta Asaas",
   [PERMISSION.API_KEY_VIEW_MASKED]: "Ver API key (mascarada)",
+  [PERMISSION.ACCOUNT_CREATE]: "Criar nova conta bancária Asaas",
+  [PERMISSION.ACCOUNT_ACTIVATE]: "Selecionar conta bancária ativa da org",
+  [PERMISSION.ACCOUNT_ARCHIVE]: "Arquivar conta bancária",
+  [PERMISSION.ACCOUNT_PERMISSIONS_MANAGE]: "Gerenciar permissões por conta",
   [PERMISSION.CHARGE_CREATE_FROM_DEAL]: "Criar cobrança a partir de Deal",
   [PERMISSION.CHARGE_CREATE_AVULSA]: "Criar cobrança avulsa",
   [PERMISSION.CHARGE_VIEW_ALL]: "Ver todas as cobranças",

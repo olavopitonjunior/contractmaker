@@ -17,6 +17,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Plus, Search, RefreshCw } from "lucide-react";
 import { maskCpfCnpj } from "@/lib/security/pii";
+import { useAccountIdParam } from "@/hooks/useAccountIdParam";
 
 interface CustomerRow {
   id: string;
@@ -36,6 +37,7 @@ function fmtBRL(v: number) {
 }
 
 export default function ClientesPage() {
+  const accountId = useAccountIdParam();
   const [rows, setRows] = useState<CustomerRow[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -50,6 +52,7 @@ export default function ClientesPage() {
     try {
       const params = new URLSearchParams();
       if (debouncedSearch) params.set("search", debouncedSearch);
+      if (accountId) params.set("accountId", accountId);
       const res = await fetch(`/api/financeiro/customers?${params}`, {
         credentials: "include",
       });
@@ -61,7 +64,7 @@ export default function ClientesPage() {
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearch]);
+  }, [debouncedSearch, accountId]);
 
   useEffect(() => {
     load();
@@ -74,7 +77,7 @@ export default function ClientesPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify(form),
+        body: JSON.stringify({ ...form, accountId: accountId || undefined }),
       });
       const data = await res.json();
       if (!res.ok) {

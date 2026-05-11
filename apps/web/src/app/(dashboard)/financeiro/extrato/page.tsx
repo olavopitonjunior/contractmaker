@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { RefreshCw, Download, TrendingUp, TrendingDown } from "lucide-react";
+import { useAccountIdParam } from "@/hooks/useAccountIdParam";
 import {
   Tooltip,
   TooltipContent,
@@ -57,6 +58,10 @@ export default function ExtratoPage() {
     .toISOString()
     .slice(0, 10);
 
+  const accountId = useAccountIdParam();
+  const accountQs = accountId ? `&accountId=${accountId}` : "";
+  const accountQsLeading = accountId ? `?accountId=${accountId}` : "";
+
   const [balance, setBalance] = useState<BalanceData | null>(null);
   const [startDate, setStartDate] = useState(monthAgo);
   const [finishDate, setFinishDate] = useState(today);
@@ -69,9 +74,11 @@ export default function ExtratoPage() {
     setLoading(true);
     try {
       const [balRes, stmtRes] = await Promise.all([
-        fetch("/api/financeiro/balance", { credentials: "include" }),
+        fetch(`/api/financeiro/balance${accountQsLeading}`, {
+          credentials: "include",
+        }),
         fetch(
-          `/api/financeiro/statement?startDate=${startDate}&finishDate=${finishDate}&limit=100`,
+          `/api/financeiro/statement?startDate=${startDate}&finishDate=${finishDate}&limit=100${accountQs}`,
           { credentials: "include" }
         ),
       ]);
@@ -88,7 +95,7 @@ export default function ExtratoPage() {
     } finally {
       setLoading(false);
     }
-  }, [startDate, finishDate]);
+  }, [startDate, finishDate, accountQs, accountQsLeading]);
 
   useEffect(() => {
     load();

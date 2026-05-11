@@ -13,9 +13,9 @@ import {
   ElevationRequiredError,
 } from "@/lib/security/elevation";
 import { audit } from "@/lib/security/audit";
-import { decryptSecret } from "@/lib/security/crypto";
 import { AsaasError } from "@/lib/asaas/errors";
 import { refundPayment } from "@/lib/asaas/payments";
+import { getAccountWithApiKey } from "@/lib/asaas/account";
 
 const bodySchema = z.object({
   value: z.number().positive().optional(),
@@ -52,7 +52,6 @@ export async function POST(
 
   const charge = await prisma.commissionCharge.findFirst({
     where: { id, orgId: ctx.orgId },
-    include: { org: { select: { asaasAccount: true } } },
   });
   if (!charge) return NextResponse.json({ error: "Não encontrada" }, { status: 404 });
   if (!["RECEIVED", "CONFIRMED"].includes(charge.status)) {
@@ -85,13 +84,20 @@ export async function POST(
     }
   }
 
-  const account = charge.org.asaasAccount;
-  if (!account) return NextResponse.json({ error: "Conta Asaas não configurada" }, { status: 422 });
-  const apiKey = decryptSecret({
-    ciphertext: account.apiKeyEncrypted,
-    iv: account.apiKeyIvBase64,
-    tag: account.apiKeyTagBase64,
-  });
+  // Resolve a conta da cobrança (multi-account: charge.accountId persistido).
+  let resolvedAccountId = charge.accountId;
+  if (!resolvedAccountId) {
+    const fallback = await prisma.asaasAccount.findFirst({
+      where: { orgId: ctx.orgId, archivedAt: null },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    });
+    if (!fallback) {
+      return NextResponse.json({ error: "Conta Asaas não configurada" }, { status: 422 });
+    }
+    resolvedAccountId = fallback.id;
+  }
+  const { apiKey } = await getAccountWithApiKey(resolvedAccountId);
 
   try {
     await refundPayment({

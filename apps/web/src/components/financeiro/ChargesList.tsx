@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { RefreshCw, Search, Plus, ChevronLeft, ChevronRight } from "lucide-react";
 import { maskCpfCnpj } from "@/lib/security/pii";
+import { useAccountIdParam } from "@/hooks/useAccountIdParam";
 
 interface ChargeRow {
   id: string;
@@ -63,6 +64,7 @@ export interface ChargesListProps {
 }
 
 export function ChargesList({ hideNewButton, dealId }: ChargesListProps) {
+  const accountId = useAccountIdParam();
   const [rows, setRows] = useState<ChargeRow[]>([]);
   const [total, setTotal] = useState(0);
   const [statusCounts, setStatusCounts] = useState<Record<string, number>>({});
@@ -88,6 +90,7 @@ export function ChargesList({ hideNewButton, dealId }: ChargesListProps) {
       if (billingFilter !== "all") params.set("billingType", billingFilter);
       if (debouncedSearch) params.set("search", debouncedSearch);
       if (dealId) params.set("dealId", dealId);
+      if (accountId) params.set("accountId", accountId);
 
       const res = await fetch(`/api/financeiro/charges?${params}`, {
         credentials: "include",
@@ -103,7 +106,7 @@ export function ChargesList({ hideNewButton, dealId }: ChargesListProps) {
     } finally {
       setLoading(false);
     }
-  }, [offset, statusFilter, billingFilter, debouncedSearch, dealId]);
+  }, [offset, statusFilter, billingFilter, debouncedSearch, dealId, accountId]);
 
   useEffect(() => {
     load();

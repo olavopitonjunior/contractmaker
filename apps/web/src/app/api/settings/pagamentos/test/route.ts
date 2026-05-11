@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
-import { decryptSecret } from "@/lib/security/crypto";
 import { pingAsaas } from "@/lib/asaas/client";
 import { getMyAccountStatus } from "@/lib/asaas/kyc";
+import { getAccountWithApiKey } from "@/lib/asaas/account";
 
 /**
  * POST /api/settings/pagamentos/test
@@ -27,20 +27,23 @@ export async function POST(req: NextRequest) {
     detail: masterPing.ok ? `sandbox=${masterPing.env === "sandbox"}` : masterPing.error,
   });
 
-  // 2. Subconta (se existir)
-  const account = await prisma.asaasAccount.findUnique({
-    where: { orgId: ctx.orgId },
-  });
-  if (account) {
-    try {
-      const apiKey = decryptSecret({
-        ciphertext: account.apiKeyEncrypted,
-        iv: account.apiKeyIvBase64,
-        tag: account.apiKeyTagBase64,
+  // 2. Subcontas (multi-account: testa cada conta não-arquivada da org)
+  const url = new URL(req.url);
+  const accountIdHint = url.searchParams.get("accountId");
+  const accounts = accountIdHint
+    ? await prisma.asaasAccount.findMany({
+        where: { id: accountIdHint, orgId: ctx.orgId, archivedAt: null },
+      })
+    : await prisma.asaasAccount.findMany({
+        where: { orgId: ctx.orgId, archivedAt: null },
       });
+  for (const account of accounts) {
+    const acctTag = account.label ? `:${account.label}` : `:${account.id.slice(0, 6)}`;
+    try {
+      const { apiKey } = await getAccountWithApiKey(account.id);
       const subPing = await pingAsaas(apiKey);
       checks.push({
-        name: "subaccount_api_key",
+        name: `subaccount_api_key${acctTag}`,
         ok: subPing.ok,
         detail: subPing.ok ? "ok" : subPing.error ?? "unknown",
       });
@@ -49,13 +52,13 @@ export async function POST(req: NextRequest) {
         try {
           const status = await getMyAccountStatus({ apiKey });
           checks.push({
-            name: "subaccount_kyc_status",
+            name: `subaccount_kyc_status${acctTag}`,
             ok: true,
             detail: `general=${status.general} docs=${status.documentation}`,
           });
         } catch (e) {
           checks.push({
-            name: "subaccount_kyc_status",
+            name: `subaccount_kyc_status${acctTag}`,
             ok: false,
             detail: e instanceof Error ? e.message : "unknown",
           });
@@ -63,7 +66,7 @@ export async function POST(req: NextRequest) {
       }
     } catch (e) {
       checks.push({
-        name: "subaccount_api_key",
+        name: `subaccount_api_key${acctTag}`,
         ok: false,
         detail: e instanceof Error ? e.message : "decrypt failed",
       });

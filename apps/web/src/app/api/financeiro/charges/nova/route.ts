@@ -9,8 +9,15 @@ import {
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
-import { decryptSecret } from "@/lib/security/crypto";
 import { RateLimits } from "@/lib/security/ratelimit";
+import {
+  getAccountWithApiKey,
+  resolveAsaasAccount,
+} from "@/lib/asaas/account";
+import {
+  requireAccountCapability,
+  AccountCapabilityDeniedError,
+} from "@/lib/security/rbac/guard";
 import { AsaasError, AsaasConfigError } from "@/lib/asaas/errors";
 import {
   createPayment,
@@ -54,6 +61,8 @@ const splitEntrySchema = z.discriminatedUnion("recipientType", [
 ]);
 
 const createSchema = z.object({
+  /** Conta Asaas que vai emitir a cobrança. Default = conta ativa do user. */
+  accountId: z.string().optional(),
   customerId: z.string(), // AsaasCustomer.id local
   billingType: z.enum(["PIX", "BOLETO"]),
   value: z.number().positive(),
@@ -114,18 +123,38 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const account = await prisma.asaasAccount.findUnique({
-    where: { orgId: ctx.orgId },
+  const resolved = await resolveAsaasAccount({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    hintAccountId: parsed.data.accountId,
+    requireCapability: "create_charge",
   });
-  if (!account || account.status !== "APPROVED") {
+  if (!resolved || resolved.account.status !== "APPROVED") {
     return NextResponse.json(
-      { error: "Conta Asaas não aprovada" },
+      {
+        error: "Conta Asaas não aprovada",
+        accountStatus: resolved?.account.status ?? null,
+      },
       { status: 422 }
     );
   }
+  try {
+    await requireAccountCapability({
+      userId: ctx.userId,
+      accountId: resolved.account.id,
+      capability: "create_charge",
+    });
+  } catch (err) {
+    if (err instanceof AccountCapabilityDeniedError) {
+      return NextResponse.json({ error: err.code }, { status: err.status });
+    }
+    throw err;
+  }
+  const account = resolved.account;
 
+  // Customer agora é per-conta — busca pelo accountId em vez de orgId.
   const customer = await prisma.asaasCustomer.findFirst({
-    where: { id: parsed.data.customerId, orgId: ctx.orgId },
+    where: { id: parsed.data.customerId, accountId: account.id },
   });
   if (!customer) {
     return NextResponse.json(
@@ -150,16 +179,16 @@ export async function POST(req: NextRequest) {
     resolvedDealTitle = deal.title ?? null;
   }
 
-  const apiKey = decryptSecret({
-    ciphertext: account.apiKeyEncrypted,
-    iv: account.apiKeyIvBase64,
-    tag: account.apiKeyTagBase64,
-  });
+  const { apiKey } = await getAccountWithApiKey(account.id);
 
-  // Carrega platform fee da org (Fase 3 continua ativo para avulsas)
-  const feeSettings = await prisma.orgFinancialSettings.findUnique({
-    where: { orgId: ctx.orgId },
-  });
+  // Carrega platform fee da conta (per-account; fallback p/ legacy org-level)
+  const feeSettings =
+    (await prisma.orgFinancialSettings.findUnique({
+      where: { accountId: account.id },
+    })) ??
+    (await prisma.orgFinancialSettings.findFirst({
+      where: { orgId: ctx.orgId, accountId: null },
+    }));
 
   let asaasSplits;
   let externalSplits: Array<{
@@ -235,6 +264,7 @@ export async function POST(req: NextRequest) {
     const charge = await prisma.commissionCharge.create({
       data: {
         orgId: ctx.orgId,
+        accountId: account.id,
         dealId: parsed.data.dealId ?? null,
         asaasCustomerId: customer.id,
         asaasPaymentId: payment.id,

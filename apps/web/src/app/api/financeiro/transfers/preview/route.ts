@@ -8,12 +8,16 @@ import {
   MembershipRequiredError,
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
-import { decryptSecret } from "@/lib/security/crypto";
 import { getBalance } from "@/lib/asaas/finance";
 import { validatePixKey, detectPixKeyType } from "@/lib/asaas/pix";
 import { readElevation } from "@/lib/security/elevation";
+import {
+  getAccountWithApiKey,
+  resolveAsaasAccount,
+} from "@/lib/asaas/account";
 
 const bodySchema = z.object({
+  accountId: z.string().optional(),
   type: z.enum(["PIX", "TED"]),
   value: z.number().positive(),
   pixAddressKey: z.string().optional(),
@@ -71,18 +75,17 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const account = await prisma.asaasAccount.findUnique({
-    where: { orgId: ctx.orgId },
+  const resolved = await resolveAsaasAccount({
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    hintAccountId: parsed.data.accountId,
+    requireCapability: "init_transfer",
   });
-  if (!account || account.status !== "APPROVED") {
+  if (!resolved || resolved.account.status !== "APPROVED") {
     return NextResponse.json({ error: "Conta Asaas não aprovada" }, { status: 422 });
   }
-
-  const apiKey = decryptSecret({
-    ciphertext: account.apiKeyEncrypted,
-    iv: account.apiKeyIvBase64,
-    tag: account.apiKeyTagBase64,
-  });
+  const account = resolved.account;
+  const { apiKey } = await getAccountWithApiKey(account.id);
 
   const balance = await getBalance({ apiKey });
   const available =
@@ -99,10 +102,14 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Settings — caps
-  const settings = await prisma.orgFinancialSettings.findUnique({
-    where: { orgId: ctx.orgId },
-  });
+  // Settings — caps (per-account; fallback p/ legacy org-level)
+  const settings =
+    (await prisma.orgFinancialSettings.findUnique({
+      where: { accountId: account.id },
+    })) ??
+    (await prisma.orgFinancialSettings.findFirst({
+      where: { orgId: ctx.orgId, accountId: null },
+    }));
   const dualCap = settings?.dualApprovalCapCents ?? 5_000_000;
   const hardCap = settings?.hardCapCents ?? 10_000_000;
 
@@ -146,6 +153,7 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
+    accountId: account.id,
     availableBalance: available,
     requestedValue: parsed.data.value,
     estimatedFee,

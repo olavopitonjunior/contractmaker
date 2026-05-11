@@ -11,6 +11,7 @@ import {
   Users,
 } from "lucide-react";
 import { maskCpfCnpj } from "@/lib/security/pii";
+import { useAccountIdParam } from "@/hooks/useAccountIdParam";
 
 function fmtBRL(v: number) {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
@@ -100,12 +101,16 @@ export default function RelatoriosPage() {
 }
 
 function ReceivablesReport() {
+  const accountId = useAccountIdParam();
+  const acctQs = accountId ? `&accountId=${accountId}` : "";
   const [data, setData] = useState<any>(null);
   useEffect(() => {
-    fetch("/api/financeiro/reports?type=receivables", { credentials: "include" })
+    fetch(`/api/financeiro/reports?type=receivables${acctQs}`, {
+      credentials: "include",
+    })
       .then((r) => r.json())
       .then(setData);
-  }, []);
+  }, [acctQs]);
   if (!data) return <p className="text-sm text-muted-foreground">Carregando...</p>;
 
   const total = (data.summary as any[]).reduce((s, r) => s + r.value, 0);
@@ -150,12 +155,16 @@ function ReceivablesReport() {
 }
 
 function AgingReport() {
+  const accountId = useAccountIdParam();
+  const acctQs = accountId ? `&accountId=${accountId}` : "";
   const [data, setData] = useState<any>(null);
   useEffect(() => {
-    fetch("/api/financeiro/reports?type=aging", { credentials: "include" })
+    fetch(`/api/financeiro/reports?type=aging${acctQs}`, {
+      credentials: "include",
+    })
       .then((r) => r.json())
       .then(setData);
-  }, []);
+  }, [acctQs]);
   if (!data) return <p className="text-sm text-muted-foreground">Carregando...</p>;
 
   const buckets = data.buckets as Record<string, { count: number; value: number; charges: any[] }>;
@@ -196,12 +205,16 @@ function AgingReport() {
 }
 
 function CashflowReport() {
+  const accountId = useAccountIdParam();
+  const acctQs = accountId ? `&accountId=${accountId}` : "";
   const [data, setData] = useState<any>(null);
   useEffect(() => {
-    fetch("/api/financeiro/reports?type=cashflow", { credentials: "include" })
+    fetch(`/api/financeiro/reports?type=cashflow${acctQs}`, {
+      credentials: "include",
+    })
       .then((r) => r.json())
       .then(setData);
-  }, []);
+  }, [acctQs]);
   if (!data) return <p className="text-sm text-muted-foreground">Carregando...</p>;
 
   const months = data.months as { key: string; label: string; received: number; expected: number }[];
@@ -246,12 +259,16 @@ function CashflowReport() {
 }
 
 function DefaultersReport() {
+  const accountId = useAccountIdParam();
+  const acctQs = accountId ? `&accountId=${accountId}` : "";
   const [data, setData] = useState<any>(null);
   useEffect(() => {
-    fetch("/api/financeiro/reports?type=defaulters", { credentials: "include" })
+    fetch(`/api/financeiro/reports?type=defaulters${acctQs}`, {
+      credentials: "include",
+    })
       .then((r) => r.json())
       .then(setData);
-  }, []);
+  }, [acctQs]);
   if (!data) return <p className="text-sm text-muted-foreground">Carregando...</p>;
 
   return (

@@ -68,12 +68,27 @@ interface DocumentSlot {
   uploadedAt: string | null;
 }
 
-export function OnboardingWizard() {
+/**
+ * Modos do wizard:
+ *   - "bootstrap": fluxo legado /financeiro/onboarding (primeira conta da org).
+ *   - "newAccount": criação de conta adicional via /settings/pagamentos/contas/nova
+ *     — pula tela inicial "NOT_STARTED" e desconsidera o status da conta primária
+ *     da org (sempre cria nova).
+ */
+export interface OnboardingWizardProps {
+  mode?: "bootstrap" | "newAccount";
+}
+
+export function OnboardingWizard({ mode = "bootstrap" }: OnboardingWizardProps = {}) {
   const elevation = useElevation();
   const [state, setState] = useState<OnboardingState | null>(null);
   const [loading, setLoading] = useState(true);
   const [elevOpen, setElevOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<"start" | "submit" | "upload" | null>(null);
+  // newAccount: ID da conta recém-criada — usado pra rotear /onboarding e
+  // /onboarding/refresh pro accountId correto (sem isso, server retorna a
+  // primeira conta da org, que é a antiga).
+  const [createdAccountId, setCreatedAccountId] = useState<string | null>(null);
 
   function handleUploadElevationRequired() {
     setPendingAction("upload");
@@ -83,9 +98,23 @@ export function OnboardingWizard() {
   async function load() {
     setLoading(true);
     try {
-      const res = await fetch("/api/financeiro/onboarding", {
-        credentials: "include",
-      });
+      // Em "newAccount" antes de criar a conta: pula direto pro DraftStep —
+      // não consulta status (não há conta ainda).
+      if (mode === "newAccount" && !createdAccountId) {
+        setState({
+          status: "DRAFT" as OnboardingStatus,
+          nextStep: "FILL_DATA",
+          documents: [],
+          docsPendingCount: 0,
+        });
+        return;
+      }
+      // Bootstrap OU newAccount pós-criação: passa accountId explícito quando
+      // disponível pra rotear pra conta certa.
+      const url = createdAccountId
+        ? `/api/financeiro/onboarding?accountId=${createdAccountId}`
+        : "/api/financeiro/onboarding";
+      const res = await fetch(url, { credentials: "include" });
       const data = await res.json();
       setState(data);
     } finally {
@@ -94,7 +123,10 @@ export function OnboardingWizard() {
   }
 
   async function refresh() {
-    const res = await fetch("/api/financeiro/onboarding/refresh", {
+    const url = createdAccountId
+      ? `/api/financeiro/onboarding/refresh?accountId=${createdAccountId}`
+      : "/api/financeiro/onboarding/refresh";
+    const res = await fetch(url, {
       method: "POST",
       credentials: "include",
     });
@@ -161,7 +193,19 @@ export function OnboardingWizard() {
 
   // DRAFT — formulário de dados
   if (state.status === "DRAFT") {
-    return <DataStep onSuccess={() => load()} />;
+    return (
+      <DataStep
+        mode={mode}
+        onSuccess={(accountIdCreated) => {
+          // Em newAccount, captura o accountId pra rotear próximos fetches
+          // pra conta nova (e não pra primeira da org).
+          if (mode === "newAccount" && accountIdCreated) {
+            setCreatedAccountId(accountIdCreated);
+          }
+          load();
+        }}
+      />
+    );
   }
 
   // AWAITING_APPROVAL — esperando análise
@@ -388,8 +432,15 @@ const initialPF = {
   companyType: undefined as "MEI" | "LIMITED" | "INDIVIDUAL" | "ASSOCIATION" | undefined,
 };
 
-function DataStep({ onSuccess }: { onSuccess: () => void }) {
+function DataStep({
+  onSuccess,
+  mode = "bootstrap",
+}: {
+  onSuccess: (accountId?: string) => void;
+  mode?: "bootstrap" | "newAccount";
+}) {
   const [data, setData] = useState(initialPF);
+  const [label, setLabel] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   function update<K extends keyof typeof data>(key: K, value: (typeof data)[K]) {
@@ -431,8 +482,18 @@ function DataStep({ onSuccess }: { onSuccess: () => void }) {
       if (data.personType === "LEGAL" && data.companyType) {
         body.companyType = data.companyType;
       }
+      if (mode === "newAccount" && label.trim()) {
+        body.label = label.trim();
+      }
 
-      const res = await fetch("/api/financeiro/onboarding/subaccount", {
+      // Endpoint depende do modo: bootstrap (1ª conta da org) usa o legado;
+      // newAccount (Nª conta) usa o endpoint de multi-account, que ativa
+      // automaticamente a 1ª conta criada e exige permission ACCOUNT_CREATE.
+      const url =
+        mode === "newAccount"
+          ? "/api/financeiro/accounts"
+          : "/api/financeiro/onboarding/subaccount";
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -446,7 +507,9 @@ function DataStep({ onSuccess }: { onSuccess: () => void }) {
         return;
       }
       toast.success("Subconta Asaas criada");
-      onSuccess();
+      // Propaga accountId pro caller — newAccount usa pra rotear próximos
+      // fetches; bootstrap ignora.
+      onSuccess(result.accountId);
     } finally {
       setSubmitting(false);
     }
@@ -455,9 +518,26 @@ function DataStep({ onSuccess }: { onSuccess: () => void }) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Dados cadastrais</CardTitle>
+        <CardTitle>
+          {mode === "newAccount" ? "Nova conta bancária" : "Dados cadastrais"}
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        {mode === "newAccount" && (
+          <div className="space-y-2">
+            <Label htmlFor="account-label">Rótulo da conta</Label>
+            <Input
+              id="account-label"
+              value={label}
+              onChange={(e) => setLabel(e.target.value)}
+              placeholder="Ex.: Imobiliária PJ, Holding..."
+            />
+            <p className="text-xs text-muted-foreground">
+              Nome interno pra distinguir essa conta das outras no seletor.
+              Não afeta nada na Asaas.
+            </p>
+          </div>
+        )}
         <div>
           <Label className="mb-2 block">Tipo de pessoa</Label>
           <div className="grid grid-cols-2 gap-2">

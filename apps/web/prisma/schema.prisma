@@ -59,6 +59,10 @@ model User {
   reconciliationMatches BankReconciliation[]
   commissionChargeDrafts CommissionChargeDraft[]
 
+  // Pagadoria — Multi-account (capabilities granulares por conta bancária)
+  accountPermissions      AsaasAccountPermission[] @relation("AccountPermissionUser")
+  accountPermissionsGiven AsaasAccountPermission[] @relation("AccountPermissionGranter")
+
   // Newton — API tokens e idempotência
   apiTokens       UserApiToken[]
   idempotencyKeys IdempotencyKey[]
@@ -112,11 +116,14 @@ model VerificationToken {
 // ============================================
 
 model Organization {
-  id        String   @id @default(cuid())
-  name      String
-  slug      String   @unique
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id                   String   @id @default(cuid())
+  name                 String
+  slug                 String   @unique
+  // Conta Asaas selecionada pelo admin como destino default de novas cobranças
+  // e fonte das telas financeiras quando o user não passa hint explícito.
+  activeAsaasAccountId String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   members             OrgMembership[]
   invitations         OrgInvitation[]
@@ -140,11 +147,12 @@ model Organization {
   dualApprovals  DualApproval[]
 
   // Pagadoria — Fase 1b (Asaas + KYC + cobrança)
-  asaasAccount       AsaasAccount?
+  asaasAccounts      AsaasAccount[]
+  activeAsaasAccount AsaasAccount?       @relation("OrgActiveAsaasAccount", fields: [activeAsaasAccountId], references: [id], onDelete: SetNull)
   asaasCustomers     AsaasCustomer[]
   commissionCharges  CommissionCharge[]
   asaasWebhookEvents AsaasWebhookEvent[]
-  financialSettings  OrgFinancialSettings?
+  financialSettings  OrgFinancialSettings[]
 
   // Pagadoria — Fase 3 (transferências + conciliação)
   asaasTransfers      AsaasTransfer[]
@@ -1143,10 +1151,13 @@ model DualApproval {
 // ============================================
 
 // Subconta Asaas white-label da Organization (criada via POST /v3/accounts).
-// Armazena walletId + apiKey encrypted + status KYC.
+// Armazena walletId + apiKey encrypted + status KYC. Org pode ter N contas;
+// admin escolhe qual está ativa via Organization.activeAsaasAccountId.
 model AsaasAccount {
   id                    String    @id @default(cuid())
-  orgId                 String    @unique
+  orgId                 String
+  // Rótulo livre para distinguir contas no seletor (ex: "Imobiliária PJ", "Holding").
+  label                 String?
   asaasId               String    @unique
   walletId              String    @unique
   accountNumber         String?
@@ -1163,11 +1174,42 @@ model AsaasAccount {
   bankAccountInfoStatus String?
   lastStatusCheckAt     DateTime?
   approvedAt            DateTime?
+  // Soft delete: archivedAt != null oculta dos seletores e impede novas cobranças,
+  // mas mantém histórico (cobranças/transferências antigas continuam acessíveis).
+  archivedAt            DateTime?
   createdAt             DateTime  @default(now())
   updatedAt             DateTime  @updatedAt
 
-  org       Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  documents AsaasAccountDocument[]
+  org                  Organization             @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  activeForOrgs        Organization[]           @relation("OrgActiveAsaasAccount")
+  documents            AsaasAccountDocument[]
+  customers            AsaasCustomer[]
+  commissionCharges    CommissionCharge[]
+  transfers            AsaasTransfer[]
+  reconciliations      BankReconciliation[]
+  webhookEvents        AsaasWebhookEvent[]
+  financialSettings    OrgFinancialSettings?
+  permissions          AsaasAccountPermission[]
+
+  @@index([orgId])
+}
+
+// Capabilities granulares por (conta, user). Owner da org bypassa via OrgMembership.role.
+// Capability values: "view" | "create_charge" | "init_transfer" | "configure".
+model AsaasAccountPermission {
+  id         String   @id @default(cuid())
+  accountId  String
+  userId     String
+  capability String
+  grantedBy  String?
+  createdAt  DateTime @default(now())
+
+  account   AsaasAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user      User         @relation("AccountPermissionUser", fields: [userId], references: [id], onDelete: Cascade)
+  granter   User?        @relation("AccountPermissionGranter", fields: [grantedBy], references: [id])
+
+  @@unique([accountId, userId, capability])
+  @@index([userId])
 }
 
 // Documentos KYC pendentes/enviados — mirror do GET /v3/myAccount/documents.
@@ -1195,10 +1237,13 @@ model AsaasAccountDocument {
   @@index([accountId, status])
 }
 
-// Cliente Asaas (pagador) — unificado por org. Dedupe por CPF/CNPJ.
+// Cliente Asaas (pagador) — escopado por subconta (cada AsaasAccount tem seu
+// próprio cadastro de customers no Asaas). Dedupe por (accountId, cpfCnpj).
+// Mesmo CPF/CNPJ pode existir em N contas independentemente.
 model AsaasCustomer {
   id                String    @id @default(cuid())
   orgId             String
+  accountId         String?
   asaasId           String
   name              String
   cpfCnpj           String
@@ -1213,17 +1258,22 @@ model AsaasCustomer {
   updatedAt         DateTime  @updatedAt
 
   org     Organization       @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  account AsaasAccount?      @relation(fields: [accountId], references: [id], onDelete: Restrict)
   charges CommissionCharge[]
 
-  @@unique([orgId, asaasId])
-  @@unique([orgId, cpfCnpj])
+  @@unique([accountId, asaasId])
+  @@unique([accountId, cpfCnpj])
   @@index([orgId, name])
 }
 
 // Cobrança de comissão — pode estar vinculada a Deal ou ser avulsa.
+// accountId persistido na criação: cobrança fica colada à conta que a emitiu
+// (paymentId+walletId valem só naquela subconta). Trocar conta ativa NÃO
+// afeta cobranças já emitidas.
 model CommissionCharge {
   id                  String    @id @default(cuid())
   orgId               String
+  accountId           String?
   dealId              String?
   contractId          String?
   asaasCustomerId     String
@@ -1258,6 +1308,7 @@ model CommissionCharge {
   updatedAt           DateTime  @updatedAt
 
   org        Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  account    AsaasAccount?       @relation(fields: [accountId], references: [id], onDelete: Restrict)
   deal       Deal?               @relation(fields: [dealId], references: [id], onDelete: SetNull)
   contract   Contract?           @relation(fields: [contractId], references: [id], onDelete: SetNull)
   customer   AsaasCustomer       @relation(fields: [asaasCustomerId], references: [id])
@@ -1267,15 +1318,19 @@ model CommissionCharge {
 
   @@index([orgId, status])
   @@index([orgId, currentDueDate])
+  @@index([accountId])
   @@index([dealId])
   @@index([contractId])
   @@index([asaasCustomerId])
 }
 
 // Log imutável de webhooks Asaas — idempotência via asaasEventId.
+// accountId resolvido via charge/transfer lookup; nullable porque eventos
+// non-payment sem transfer (raro) podem chegar sem inferência possível.
 model AsaasWebhookEvent {
   id              String    @id @default(cuid())
   orgId           String
+  accountId       String?
   asaasEventId    String    @unique
   event           String
   asaasPaymentId  String?
@@ -1285,17 +1340,21 @@ model AsaasWebhookEvent {
   processedAt     DateTime?
   processingError String?
 
-  org    Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  charge CommissionCharge? @relation(fields: [chargeId], references: [id], onDelete: SetNull)
+  org     Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  account AsaasAccount?     @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  charge  CommissionCharge? @relation(fields: [chargeId], references: [id], onDelete: SetNull)
 
   @@index([orgId, event])
   @@index([asaasPaymentId])
 }
 
-// Configurações financeiras da org — taxas, overprice, descontos, branding.
+// Configurações financeiras escopadas por subconta — taxas, overprice, descontos,
+// branding. accountId é canônico (1:1 com AsaasAccount). orgId mantido como
+// shortcut de query/audit, mas a unicidade real é por accountId.
 model OrgFinancialSettings {
   id                      String   @id @default(cuid())
-  orgId                   String   @unique
+  orgId                   String
+  accountId               String?  @unique
   // Platform fee (Fase 3)
   platformFeePercent      Float    @default(0)
   platformFeeWalletId     String?
@@ -1348,7 +1407,10 @@ model OrgFinancialSettings {
   createdAt               DateTime @default(now())
   updatedAt               DateTime @updatedAt
 
-  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  org     Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  account AsaasAccount? @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
 }
 
 // Cadastro de destinatários de split de pagamento (Fase 5).
@@ -1439,9 +1501,12 @@ model ChargePublicLink {
 // ============================================
 
 // Transferências (saque) da subconta Asaas → conta bancária da org.
+// accountId persistido na criação: a transfer "sai" do saldo daquela subconta
+// específica.
 model AsaasTransfer {
   id                 String    @id @default(cuid())
   orgId              String
+  accountId          String?
   asaasTransferId    String?   @unique // tra_xxx — null antes da chamada Asaas (status=PENDING_DISPATCH)
   value              Float
   netValue           Float?
@@ -1467,6 +1532,7 @@ model AsaasTransfer {
   updatedAt          DateTime  @updatedAt
 
   org              Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  account          AsaasAccount?     @relation(fields: [accountId], references: [id], onDelete: Restrict)
   user             User?             @relation(fields: [requestedBy], references: [id])
   commissionCharge CommissionCharge? @relation(fields: [commissionChargeId], references: [id], onDelete: SetNull)
   splitRecipient   SplitRecipient?   @relation(fields: [splitRecipientId], references: [id], onDelete: SetNull)
@@ -1474,13 +1540,16 @@ model AsaasTransfer {
   @@unique([commissionChargeId, splitRecipientId])
   @@index([orgId, status])
   @@index([orgId, createdAt])
+  @@index([accountId])
   @@index([commissionChargeId])
 }
 
 // Conciliação — match entre lançamentos do extrato Asaas e cobranças locais.
+// accountId identifica a subconta cujo extrato originou a row.
 model BankReconciliation {
   id                     String    @id @default(cuid())
   orgId                  String
+  accountId              String?
   financialTransactionId String // id do extrato Asaas (pode ser hash se sem id)
   type                   String // PAYMENT_RECEIVED | PAYMENT_FEE | TRANSFER | REFUND | CHARGEBACK | OTHER
   value                  Float
@@ -1495,12 +1564,14 @@ model BankReconciliation {
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
 
-  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  user User?        @relation(fields: [matchedBy], references: [id], onDelete: SetNull)
+  org     Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  account AsaasAccount? @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  user    User?         @relation(fields: [matchedBy], references: [id], onDelete: SetNull)
 
   @@unique([orgId, financialTransactionId])
   @@index([orgId, status])
   @@index([orgId, date])
+  @@index([accountId])
   @@index([matchedChargeId])
 }
 

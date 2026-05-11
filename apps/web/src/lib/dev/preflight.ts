@@ -184,10 +184,21 @@ async function checkAsaas(orgId: string | null): Promise<CheckResult[]> {
     return out;
   }
 
-  const account = await prisma.asaasAccount.findUnique({
-    where: { orgId },
-    select: { id: true, status: true, walletId: true, approvedAt: true },
+  // Multi-account: usa a conta ativa da org (primeira aprovada como fallback)
+  const orgRow = await prisma.organization.findUnique({
+    where: { id: orgId },
+    select: { activeAsaasAccountId: true },
   });
+  const account = orgRow?.activeAsaasAccountId
+    ? await prisma.asaasAccount.findFirst({
+        where: { id: orgRow.activeAsaasAccountId, orgId, archivedAt: null },
+        select: { id: true, status: true, walletId: true, approvedAt: true },
+      })
+    : await prisma.asaasAccount.findFirst({
+        where: { orgId, archivedAt: null },
+        orderBy: { createdAt: "asc" },
+        select: { id: true, status: true, walletId: true, approvedAt: true },
+      });
   if (!account) {
     out.push({
       category: "asaas",
