@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { runSingleJob } from "@/lib/certidoes/executor";
@@ -140,13 +141,16 @@ export async function POST(
     },
   });
 
-  // Fire-and-forget execution. Each job roda independente — falhas não
-  // abortam os outros.
-  void Promise.allSettled(
-    retriable.map((j) => runSingleJob(j.id, params.dealId))
-  ).catch((err) => {
-    console.error("[bulk-retry] batch failed:", err);
-  });
+  // waitUntil mantém o lambda vivo até o batch terminar; sem ele as
+  // promises orfanam após o NextResponse (mesmo bug do POST principal).
+  // Cada job roda independente — falhas não abortam os outros.
+  waitUntil(
+    Promise.allSettled(
+      retriable.map((j) => runSingleJob(j.id, params.dealId))
+    ).catch((err) => {
+      console.error("[bulk-retry] batch failed:", err);
+    })
+  );
 
   return NextResponse.json(
     {

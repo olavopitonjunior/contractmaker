@@ -645,11 +645,11 @@ export function CertidoesTab({
         {/* G.2 — bulk retry por categoria quando houver failed ou skipped */}
         {(stats.failed > 0 || stats.skipped > 0) && (
           <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline">
-                <RefreshCw className="h-4 w-4 mr-1" />
-                Retry em massa
-              </Button>
+            <DropdownMenuTrigger
+              className="inline-flex h-9 items-center justify-center gap-1 whitespace-nowrap rounded-md border border-input bg-background px-3 text-sm font-medium shadow-sm ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
+            >
+              <RefreshCw className="h-4 w-4 mr-1" />
+              Retry em massa
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-64">
               <DropdownMenuLabel className="text-xs">
