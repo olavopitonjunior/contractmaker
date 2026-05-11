@@ -77,9 +77,18 @@ interface DocumentSlot {
  */
 export interface OnboardingWizardProps {
   mode?: "bootstrap" | "newAccount";
+  /**
+   * Conta existente pra gerenciar (envio de docs, refresh de status).
+   * Quando setado, pula StartStep/DataStep e vai direto pro fluxo de
+   * KYC da conta especificada — útil em `/contas/[id]/page.tsx` pós-import.
+   */
+  accountId?: string;
 }
 
-export function OnboardingWizard({ mode = "bootstrap" }: OnboardingWizardProps = {}) {
+export function OnboardingWizard({
+  mode = "bootstrap",
+  accountId,
+}: OnboardingWizardProps = {}) {
   const elevation = useElevation();
   const [state, setState] = useState<OnboardingState | null>(null);
   const [loading, setLoading] = useState(true);
@@ -88,7 +97,11 @@ export function OnboardingWizard({ mode = "bootstrap" }: OnboardingWizardProps =
   // newAccount: ID da conta recém-criada — usado pra rotear /onboarding e
   // /onboarding/refresh pro accountId correto (sem isso, server retorna a
   // primeira conta da org, que é a antiga).
-  const [createdAccountId, setCreatedAccountId] = useState<string | null>(null);
+  // Quando `accountId` é passado como prop (gerenciar conta existente),
+  // já inicializa com ele — pula DRAFT vazio e puxa direto do server.
+  const [createdAccountId, setCreatedAccountId] = useState<string | null>(
+    accountId ?? null
+  );
 
   function handleUploadElevationRequired() {
     setPendingAction("upload");

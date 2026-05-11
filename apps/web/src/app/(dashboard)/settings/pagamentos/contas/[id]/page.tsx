@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, KeyRound, FileText } from "lucide-react";
+import { OnboardingWizard } from "@/components/financeiro/onboarding/OnboardingWizard";
 
 export const dynamic = "force-dynamic";
 
@@ -162,50 +163,67 @@ export default async function ContaDetailPage({
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm flex items-center gap-2">
-            <FileText className="h-4 w-4" />
-            Documentos KYC
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {account.documents.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              Sem documentos listados pela Asaas.
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {account.documents.map((d) => (
-                <div
-                  key={d.id}
-                  className="flex items-center justify-between text-sm py-1.5 border-b last:border-b-0"
-                >
-                  <div>
-                    <div className="font-medium">{d.title}</div>
-                    {d.description && (
-                      <div className="text-xs text-muted-foreground">
-                        {d.description}
-                      </div>
-                    )}
-                  </div>
-                  <Badge
-                    variant={
-                      d.status === "APPROVED"
-                        ? "default"
-                        : d.status === "REJECTED"
-                          ? "destructive"
-                          : "outline"
-                    }
+      {/* Wizard interativo de KYC: upload de docs + refresh de status.
+          Pula quando aprovada (somente leitura). Owner-only escrita; non-owner
+          com cap "view" só vê (wizard tem branches read-only). */}
+      {account.status !== "APPROVED" && owner ? (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              Documentos KYC
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <OnboardingWizard mode="newAccount" accountId={account.id} />
+          </CardContent>
+        </Card>
+      ) : (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <FileText className="h-4 w-4" />
+              Documentos KYC
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {account.documents.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Sem documentos listados pela Asaas.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {account.documents.map((d) => (
+                  <div
+                    key={d.id}
+                    className="flex items-center justify-between text-sm py-1.5 border-b last:border-b-0"
                   >
-                    {SUBSTATUS_LABEL[d.status] ?? d.status}
-                  </Badge>
-                </div>
-              ))}
-            </div>
-          )}
-        </CardContent>
-      </Card>
+                    <div>
+                      <div className="font-medium">{d.title}</div>
+                      {d.description && (
+                        <div className="text-xs text-muted-foreground">
+                          {d.description}
+                        </div>
+                      )}
+                    </div>
+                    <Badge
+                      variant={
+                        d.status === "APPROVED"
+                          ? "default"
+                          : d.status === "REJECTED"
+                            ? "destructive"
+                            : "outline"
+                      }
+                    >
+                      {SUBSTATUS_LABEL[d.status] ?? d.status}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
         <CardHeader className="pb-2">
