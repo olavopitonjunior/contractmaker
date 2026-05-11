@@ -386,7 +386,9 @@ model CertidaoJob {
   maxRetries      Int       @default(3)
   // missingFields popula quando status=data_missing para UX direcionar o
   // usuário ao campo específico que precisa preencher.
-  missingFields   String[]
+  // @default([]) é obrigatório — sem ele, Prisma migrate deploy derruba o
+  // DEFAULT no Postgres e quebra inserts (que omitem a coluna).
+  missingFields   String[]  @default([])
   // Copia do portalUrl do endpoint no instante do job — cached para UI
   // renderizar CTA "Abrir portal oficial" sem re-consultar catálogo.
   portalUrl       String?

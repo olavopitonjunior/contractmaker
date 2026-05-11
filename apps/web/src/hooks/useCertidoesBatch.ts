@@ -138,9 +138,11 @@ export function useCertidoesBatch(dealId: string) {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(jobs ? { batchId, jobs } : { batchId }),
         });
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (!res.ok) {
-          setError(data.error || "Falha ao iniciar extração");
+          setError(
+            data.error || `Falha ao iniciar extração (HTTP ${res.status})`
+          );
           setLoading(false);
           return null;
         }
