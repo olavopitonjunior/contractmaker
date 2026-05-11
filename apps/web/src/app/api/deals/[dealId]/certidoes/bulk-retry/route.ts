@@ -6,7 +6,9 @@ import { runSingleJob } from "@/lib/certidoes/executor";
 import { z } from "zod";
 
 export const runtime = "nodejs";
-export const maxDuration = 300;
+// I.7 (2026-05-11) — bulk-retry dispara N runSingleJob em paralelo; com
+// TJSP+auth GOV.BR cada um pode levar 3-10min. 300s era insuficiente.
+export const maxDuration = 660;
 
 const bulkRetrySchema = z.object({
   // Filtra jobs por: (a) failureCategory específica (provider_timeout,

@@ -9,7 +9,9 @@ import { sanitizePayload } from "@/lib/certidoes/infosimples";
 import { z } from "zod";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// I.7 (2026-05-11) — complete dispara runSingleJob via waitUntil; pode ser
+// TJSP que demora 3-10min com auth GOV.BR. Alinha com POST /certidoes.
+export const maxDuration = 660;
 
 const completeSchema = z.object({
   fields: z.record(z.union([z.string(), z.number(), z.null()])),

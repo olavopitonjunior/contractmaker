@@ -6,7 +6,11 @@ import { prisma } from "@/lib/db/prisma";
 import { runSingleJob, pollPortalJob } from "@/lib/certidoes/executor";
 
 export const runtime = "nodejs";
-export const maxDuration = 120;
+// I.7 (2026-05-11) — TJSP com auth GOV.BR (login_cpf/login_senha) demora
+// 3-10min na primeira chamada pedido-civel (Infosimples faz proxy login no
+// e-SAJ). maxDuration de 120s era insuficiente — lambda morria silenciosamente
+// e jobs ficavam zumbis em `fetching`. Alinha com POST /certidoes (660s).
+export const maxDuration = 660;
 
 const MAX_RETRIES = 3;
 const STALE_AFTER_MS = 5 * 60_000; // 5 min
