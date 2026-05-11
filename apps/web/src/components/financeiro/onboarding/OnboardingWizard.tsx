@@ -24,7 +24,13 @@ import {
   AlertTriangle,
   FileText,
   Shield,
+  Info,
+  Camera,
 } from "lucide-react";
+import {
+  getKycInstruction,
+  KYC_PROCESS_OVERVIEW,
+} from "@/lib/asaas/kyc-instructions";
 
 type PersonType = "PHYSICAL" | "LEGAL";
 
@@ -355,6 +361,30 @@ export function OnboardingWizard({
               de {state.documents.length} enviados
             </div>
           </div>
+
+          {/* Banner explicativo do processo */}
+          <div className="border border-blue-200 bg-blue-50 rounded p-3 text-xs space-y-2">
+            <div className="flex items-start gap-2">
+              <Info className="h-4 w-4 text-blue-700 flex-shrink-0 mt-0.5" />
+              <div className="space-y-2 text-blue-900">
+                <p className="font-medium">Como funciona</p>
+                <ol className="list-decimal ml-4 space-y-0.5">
+                  {KYC_PROCESS_OVERVIEW.steps.map((s, i) => (
+                    <li key={i}>{s}</li>
+                  ))}
+                </ol>
+                <p className="pt-1">
+                  <strong>Quem valida:</strong>{" "}
+                  {KYC_PROCESS_OVERVIEW.whoValidates}
+                </p>
+                <p>
+                  <strong>Quem envia:</strong>{" "}
+                  {KYC_PROCESS_OVERVIEW.whoSendsDocs}
+                </p>
+              </div>
+            </div>
+          </div>
+
           <DocumentsGrid
             documents={state.documents}
             onAfterUpload={load}
@@ -850,14 +880,41 @@ function DocumentCard({
       ? "bg-blue-50 border-blue-300"
       : "border-muted";
 
+  const instruction = getKycInstruction(doc.type);
+  const displayTitle = instruction?.title ?? doc.title;
+  const Icon = doc.type.toUpperCase() === "SELFIE" ? Camera : FileText;
+
   return (
     <div className={`border rounded p-3 ${statusColor}`}>
       <div className="flex items-start gap-2 mb-2">
-        <FileText className="h-5 w-5 flex-shrink-0 mt-0.5" />
+        <Icon className="h-5 w-5 flex-shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0">
-          <div className="font-medium text-sm">{doc.title}</div>
-          {doc.description && (
-            <div className="text-xs text-muted-foreground">{doc.description}</div>
+          <div className="font-medium text-sm">{displayTitle}</div>
+          {instruction ? (
+            <div className="text-xs text-muted-foreground mt-1 space-y-1.5">
+              <p>{instruction.what}</p>
+              {instruction.whoSends && (
+                <p className="bg-amber-50 border border-amber-200 rounded px-1.5 py-1 text-amber-900">
+                  <strong>Quem envia:</strong> {instruction.whoSends}
+                </p>
+              )}
+              {instruction.tips.length > 0 && (
+                <ul className="list-disc ml-4 space-y-0.5">
+                  {instruction.tips.map((tip, i) => (
+                    <li key={i}>{tip}</li>
+                  ))}
+                </ul>
+              )}
+              {doc.description && (
+                <p className="italic">Asaas: {doc.description}</p>
+              )}
+            </div>
+          ) : (
+            doc.description && (
+              <div className="text-xs text-muted-foreground mt-1">
+                {doc.description}
+              </div>
+            )
           )}
         </div>
       </div>
