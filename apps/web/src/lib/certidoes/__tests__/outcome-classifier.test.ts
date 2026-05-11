@@ -101,14 +101,37 @@ describe("classifyOutcome — Phase J", () => {
       ...normEmpty,
       situacao: "nao_emitida" as const,
       failureCategory: "missing_input" as const,
+      detalhes: resp.code_message, // o normalizer real preenche assim
     };
     const out = classifyOutcome(resp, norm, baseEndpoint, opts);
     expect(out.status).toBe("failed_permanent");
     expect(out.missingFields).toEqual([]);
     expect(out.portalUrl).toBe("https://esaj.tjsp.jus.br/");
-    expect(out.errorMessage).toMatch(/provedor não detalhou/);
+    expect(out.errorMessage).toMatch(/Parâmetros obrigatórios/);
     expect(out.failureCategory).toBe("missing_input"); // mantém categoria pra analytics
     expect(out.nextRetryAt).toBeNull();
+  });
+
+  // I.7 (2026-05-11) — Infosimples errors[] propagado no errorMessage
+  it("code 606 com errors[] específico → failed_permanent com mensagem rica", () => {
+    const resp = {
+      code: 606,
+      code_message: "Parâmetros obrigatórios não foram enviados",
+      errors: ["CPF e senha ou certificado digital devem ser informados para login com gov.br"],
+      data: [],
+    } as unknown as InfosimplesResponse;
+    // O normalizer real consolida errors + code_message em detalhes
+    const norm = {
+      ...normEmpty,
+      situacao: "nao_emitida" as const,
+      failureCategory: "missing_input" as const,
+      detalhes:
+        "CPF e senha ou certificado digital devem ser informados para login com gov.br (Parâmetros obrigatórios não foram enviados)",
+    };
+    const out = classifyOutcome(resp, norm, baseEndpoint, opts);
+    expect(out.status).toBe("failed_permanent");
+    expect(out.errorMessage).toMatch(/login com gov\.br/);
+    expect(out.portalUrl).toBe("https://esaj.tjsp.jus.br/");
   });
 
   it("code 606 genérico sem portalUrl → continua data_missing (sem fallback)", () => {

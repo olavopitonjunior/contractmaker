@@ -104,6 +104,11 @@ export function classifyOutcome(
   const category = normalized.failureCategory ?? null;
   const billable = resp.header?.billable;
   const portalUrl = info.portalUrl ?? null;
+  // I.7 (2026-05-11) — Infosimples retorna detalhe específico do erro no
+  // array `errors[]`. O normalizer já consolidou tudo em `normalized.detalhes`
+  // (errors[] + code_message). Usa esse texto rico como errorMessage em vez
+  // do code_message genérico.
+  const effectiveErrorMessage = normalized.detalhes ?? resp.code_message;
 
   // Endpoints informativos (cadastro, fgts) — Receita CNPJ, CRF
   if (info.category === "cadastro" || info.category === "fgts") {
@@ -159,19 +164,16 @@ export function classifyOutcome(
   // Falhas (code !== 200) — rotear por categoria
   switch (category) {
     case "missing_input": {
-      const parsed = parseMissingFields(resp.code_message);
-      // I.6 (2026-05-11) — quando o provedor manda mensagem genérica sem
-      // nome de campo (TJSP code 606 padrão: "Parâmetros obrigatórios não
-      // foram enviados. Por favor, verifique a documentação"), parseMissingFields
-      // não consegue extrair nada. Sem detalhe a UI ficaria em "Faltam dados"
-      // sem botão "Complementar" — beco sem saída. Se há portalUrl cacheada,
-      // escala pra failed_permanent + CTA "use o portal oficial".
+      // I.7 — parseMissingFields agora vê texto consolidado (errors[] +
+      // code_message). Pra TJSP 606 atual, errors=["CPF e senha gov.br..."]
+      // não casa com nenhuma heurística de fieldname, então parsed=[] e
+      // cai no fallback failed_permanent + portal (mensagem fica rica via
+      // effectiveErrorMessage, não mais genérica).
+      const parsed = parseMissingFields(effectiveErrorMessage);
       if (parsed.length === 0 && portalUrl) {
         return {
           status: "failed_permanent",
-          errorMessage: resp.code_message
-            ? `${resp.code_message} (provedor não detalhou os campos faltantes)`
-            : "Provedor recusou — emita no portal oficial",
+          errorMessage: effectiveErrorMessage || "Provedor recusou — emita no portal oficial",
           failureCategory: category, // mantém "missing_input" pra analytics
           costCents: 0,
           nextRetryAt: null,
@@ -181,7 +183,7 @@ export function classifyOutcome(
       }
       return {
         status: "data_missing",
-        errorMessage: resp.code_message,
+        errorMessage: effectiveErrorMessage,
         failureCategory: category,
         costCents: 0,
         nextRetryAt: null, // não retry auto — user action
@@ -192,17 +194,17 @@ export function classifyOutcome(
     case "inconsistent_input":
       return {
         status: "data_invalid",
-        errorMessage: resp.code_message,
+        errorMessage: effectiveErrorMessage,
         failureCategory: category,
         costCents: 0,
         nextRetryAt: null,
-        missingFields: parseMissingFields(resp.code_message),
+        missingFields: parseMissingFields(effectiveErrorMessage),
         portalUrl,
       };
     case "rate_limited":
       return planRetry(
         "rate_limited",
-        resp.code_message,
+        effectiveErrorMessage,
         "rate_limited",
         opts,
         portalUrl
@@ -210,7 +212,7 @@ export function classifyOutcome(
     case "portal_unavailable":
       return planRetry(
         "portal_unavailable",
-        resp.code_message,
+        effectiveErrorMessage,
         "portal_unavailable",
         opts,
         portalUrl
@@ -218,7 +220,7 @@ export function classifyOutcome(
     case "provider_timeout":
       return planRetry(
         "api_error",
-        resp.code_message,
+        effectiveErrorMessage,
         "api_error",
         opts,
         portalUrl
@@ -229,7 +231,7 @@ export function classifyOutcome(
       return {
         status: "failed_permanent",
         errorMessage:
-          resp.code_message ||
+          effectiveErrorMessage ||
           "Endpoint depreciado pelo provedor — use o portal oficial",
         failureCategory: category,
         costCents: 0,
@@ -241,7 +243,7 @@ export function classifyOutcome(
       // Saldo / token — failed_permanent mas sem portalUrl (admin action)
       return {
         status: "failed_permanent",
-        errorMessage: resp.code_message || "Problema na conta do provedor",
+        errorMessage: effectiveErrorMessage || "Problema na conta do provedor",
         failureCategory: category,
         costCents: 0,
         nextRetryAt: null,
@@ -254,7 +256,7 @@ export function classifyOutcome(
       if (opts.retryAttempts === 0) {
         return planRetry(
           "portal_unavailable",
-          resp.code_message,
+          effectiveErrorMessage,
           "portal_unavailable",
           opts,
           portalUrl
@@ -273,7 +275,7 @@ export function classifyOutcome(
       // Unknown — trata como api_error pra retry
       return planRetry(
         "api_error",
-        resp.code_message ||
+        effectiveErrorMessage ||
           `Código ${resp.code} não reconhecido — retry agendado`,
         "api_error",
         opts,

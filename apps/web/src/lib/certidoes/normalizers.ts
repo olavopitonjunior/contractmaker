@@ -494,11 +494,21 @@ export function normalize(
     if (category === "genuine_no_data") situacao = "negativa";
     else if (category === "unknown") situacao = "indeterminado";
     else situacao = "nao_emitida";
+    // I.7 (2026-05-11) — Infosimples retorna detalhe específico do erro no
+    // array `errors[]` (ex: TJSP code 606 → ["CPF e senha ou certificado
+    // digital devem ser informados para login com gov.br"]). Antes só
+    // líamos `code_message` que é genérico ("Parâmetros obrigatórios não
+    // foram enviados"). Agora prepend os errors específicos pra que o
+    // classifier + UI mostrem o motivo real.
+    const errorsText = resp.errors?.filter(Boolean).join("; ") || null;
+    const detalhes = errorsText
+      ? errorsText + (resp.code_message ? ` (${resp.code_message})` : "")
+      : resp.code_message || null;
     return {
       situacao,
       validade: null,
       emissao: null,
-      detalhes: resp.code_message || null,
+      detalhes,
       consta_debito: false,
       failureCategory: category,
       raw: resp,

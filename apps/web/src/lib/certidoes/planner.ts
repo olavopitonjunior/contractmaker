@@ -615,11 +615,15 @@ export function planCertidoesForDeal(
         // exigidos em transação imobiliária (Comunicado SPI nº 37 - 10 anos).
         //
         // I.4 (2026-05-11) — incluir municipio/uf/pais também para PF.
-        // Infosimples começou a recusar com code 606 ("parâmetros obrigatórios
-        // não foram enviados") quando esses campos vinham vazios pra pessoa
-        // física. Doc oficial lista os três como input válido — mesmo padrão
-        // do TJRJ que já manda `comarca`.
+        // I.7 (2026-05-11) — TJSP cível agora exige autenticação GOV.BR
+        // (confirmado pelo suporte Infosimples). Quando INFOSIMPLES_GOVBR_CPF
+        // e INFOSIMPLES_GOVBR_PASSWORD estão setados, anexa ao payload e
+        // Infosimples loga no e-SAJ via gov.br como proxy. Sem essas vars
+        // o endpoint sempre retorna 606 "CPF e senha gov.br devem ser
+        // informados" — classifier cai no fallback failed_permanent + portal.
         const partyMunicipio = (parte.cidade || "").trim();
+        const govbrCpf = process.env.INFOSIMPLES_GOVBR_CPF?.trim();
+        const govbrPassword = process.env.INFOSIMPLES_GOVBR_PASSWORD?.trim();
         for (const t of TJSP_TIPOS) {
           const base: Record<string, unknown> = {
             email,
@@ -629,6 +633,9 @@ export function planCertidoesForDeal(
             pais: "Brasil",
             ...(partyUf ? { uf: partyUf } : {}),
             ...(partyMunicipio ? { municipio: partyMunicipio } : {}),
+            ...(govbrCpf && govbrPassword
+              ? { login_cpf: govbrCpf, login_senha: govbrPassword }
+              : {}),
             ...(isPJ
               ? { cnpj: cnpj!, razao_social: label }
               : { cpf: cpf!, nome: label }),
