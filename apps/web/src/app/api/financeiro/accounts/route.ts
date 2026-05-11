@@ -150,6 +150,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(result);
   } catch (err) {
+    const errAny = err as Record<string, unknown> | null;
+    const prismaCode = typeof errAny?.code === "string" ? errAny.code : undefined;
+    const prismaMeta = errAny?.meta ?? undefined;
     await audit(
       {
         orgId: ctx.orgId,
@@ -162,6 +165,8 @@ export async function POST(req: NextRequest) {
         result: "FAILURE",
         metadata: {
           error: err instanceof Error ? err.message : String(err),
+          prismaCode,
+          prismaMeta,
         },
       }
     );
@@ -175,11 +180,24 @@ export async function POST(req: NextRequest) {
         { status: err.status === 401 ? 500 : 422 }
       );
     }
-    console.error("[accounts/POST]", err);
+    // Log estruturado pra debug em prod — captura code/meta do Prisma error
+    // (P2002/P2003/etc) e stack inteira em uma linha, pra ficar legível no
+    // dashboard de runtime logs (que trunca em ~150 chars por linha).
+    console.error(
+      "[accounts/POST]",
+      JSON.stringify({
+        message: err instanceof Error ? err.message : String(err),
+        name: err instanceof Error ? err.name : undefined,
+        prismaCode,
+        prismaMeta,
+        stack: err instanceof Error ? err.stack?.split("\n").slice(0, 6).join(" | ") : undefined,
+      })
+    );
     return NextResponse.json(
       {
         error: "Falha ao criar subconta",
         message: err instanceof Error ? err.message : "unknown",
+        prismaCode,
       },
       { status: 500 }
     );
