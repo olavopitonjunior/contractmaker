@@ -3,7 +3,6 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
@@ -92,17 +91,15 @@ export function AccountSwitcher({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-2">
-          <Wallet className="h-4 w-4" />
-          <span className="font-medium">{current.label}</span>
-          {current.isActive && (
-            <Badge variant="secondary" className="text-xs">
-              ATIVA
-            </Badge>
-          )}
-          <ChevronDown className="h-3 w-3 opacity-60" />
-        </Button>
+      <DropdownMenuTrigger className="inline-flex h-8 items-center gap-2 rounded-md border bg-background px-3 text-sm font-medium shadow-xs transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50">
+        <Wallet className="h-4 w-4" />
+        <span className="font-medium">{current.label}</span>
+        {current.isActive && (
+          <Badge variant="secondary" className="text-xs">
+            ATIVA
+          </Badge>
+        )}
+        <ChevronDown className="h-3 w-3 opacity-60" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-72">
         <DropdownMenuLabel>Contas bancárias</DropdownMenuLabel>
