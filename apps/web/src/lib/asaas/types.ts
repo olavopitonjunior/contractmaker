@@ -186,6 +186,7 @@ export interface CreateSubaccountInput {
     enabled?: boolean;
     interrupted?: boolean;
     apiVersion?: number;
+    sendType?: "SEQUENTIALLY" | "NON_SEQUENTIALLY";
     events?: string[];
   }>;
 }

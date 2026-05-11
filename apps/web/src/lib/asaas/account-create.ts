@@ -87,6 +87,7 @@ export async function createAsaasAccount(
               interrupted: false,
               authToken: webhookToken,
               apiVersion: 3,
+              sendType: "SEQUENTIALLY",
               events: [
                 "PAYMENT_CREATED",
                 "PAYMENT_UPDATED",
