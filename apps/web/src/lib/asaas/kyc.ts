@@ -14,6 +14,9 @@ import type {
   CreateSubaccountInput,
   AsaasMyAccountStatus,
   AsaasDocumentSlot,
+  AsaasSubaccountListItem,
+  AsaasAccountListResponse,
+  AsaasAccessTokenResponse,
 } from "./types";
 
 /**
@@ -51,6 +54,68 @@ export async function listMyAccountDocuments(params: {
   return await asaasFetch<{ data: AsaasDocumentSlot[] }>(
     "/myAccount/documents",
     { apiKey: params.apiKey }
+  );
+}
+
+/**
+ * Lista subcontas criadas pela conta-mãe Asaas. Usa master key (ASAAS_API_KEY).
+ * Filtros por cpfCnpj/email/name/walletId. Não retorna apiKey (recuperar via
+ * createSubaccountAccessToken se necessário).
+ *
+ * Use case principal: recuperar conta órfã — subconta criada com sucesso no
+ * Asaas mas cujo POST /accounts falhou no commit local antes de persistir
+ * apiKey/walletId.
+ */
+export async function listSubaccounts(params: {
+  cpfCnpj?: string;
+  email?: string;
+  name?: string;
+  walletId?: string;
+  limit?: number;
+  offset?: number;
+}): Promise<AsaasAccountListResponse> {
+  return await asaasFetch<AsaasAccountListResponse>("/accounts", {
+    query: {
+      cpfCnpj: params.cpfCnpj?.replace(/\D/g, "") || undefined,
+      email: params.email,
+      name: params.name,
+      walletId: params.walletId,
+      limit: params.limit ?? 20,
+      offset: params.offset ?? 0,
+    },
+  });
+}
+
+export async function retrieveSubaccount(params: {
+  asaasAccountId: string;
+}): Promise<AsaasSubaccountListItem> {
+  return await asaasFetch<AsaasSubaccountListItem>(
+    `/accounts/${params.asaasAccountId}`
+  );
+}
+
+/**
+ * Cria uma nova apiKey pra subconta usando a master key. Útil pra recovery
+ * de conta órfã (apiKey original perdida no commit local falho).
+ *
+ * IMPORTANTE: a apiKey só é retornada nesta criação — não há endpoint pra
+ * buscar a string da apiKey depois. GET /accessTokens só lista metadados.
+ */
+export async function createSubaccountAccessToken(params: {
+  asaasAccountId: string;
+  name: string;
+  /** ISO date string. Sem, expira por desuso. */
+  expirationDate?: string;
+}): Promise<AsaasAccessTokenResponse> {
+  return await asaasFetch<AsaasAccessTokenResponse>(
+    `/accounts/${params.asaasAccountId}/accessTokens`,
+    {
+      method: "POST",
+      body: {
+        name: params.name,
+        expirationDate: params.expirationDate,
+      },
+    }
   );
 }
 

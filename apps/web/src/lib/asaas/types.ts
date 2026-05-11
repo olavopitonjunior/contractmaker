@@ -213,6 +213,49 @@ export interface AsaasSubaccountResponse {
   };
 }
 
+/**
+ * Subconta retornada por GET /accounts (sem apiKey — só metadados).
+ * Usado pra recovery de conta órfã (cuja apiKey foi perdida no commit local
+ * falho após POST /accounts ter sucesso na Asaas).
+ */
+export interface AsaasSubaccountListItem {
+  object?: string;
+  id: string;
+  name: string;
+  email: string;
+  cpfCnpj: string;
+  walletId: string;
+  personType: "JURIDICA" | "FISICA";
+  companyType?: "MEI" | "LIMITED" | "INDIVIDUAL" | "ASSOCIATION";
+  accountNumber?: {
+    agency: string;
+    account: string;
+    accountDigit: string;
+  };
+}
+
+export interface AsaasAccountListResponse {
+  object: "list";
+  hasMore: boolean;
+  totalCount: number;
+  limit: number;
+  offset: number;
+  data: AsaasSubaccountListItem[];
+}
+
+/**
+ * Resposta de POST /accounts/{id}/accessTokens — apiKey é retornada APENAS
+ * nesta criação inicial. Sem como recuperar depois (precisa criar outra).
+ */
+export interface AsaasAccessTokenResponse {
+  id: string;
+  name: string;
+  enabled: boolean;
+  apiKey: string;
+  expirationDate?: string;
+  dateCreated?: string;
+}
+
 export interface AsaasMyAccountStatus {
   id?: string;
   commercialInfo: string;

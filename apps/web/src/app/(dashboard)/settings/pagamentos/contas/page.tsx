@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Wallet, Plus, KeyRound, Archive, Settings as SettingsIcon } from "lucide-react";
 import { AccountsTableActions } from "@/components/settings/AccountsTableActions";
+import { RecoverOrphanButton } from "@/components/settings/RecoverOrphanButton";
 
 export const dynamic = "force-dynamic";
 
@@ -62,12 +63,15 @@ export default async function ContasBancariasPage() {
           </p>
         </div>
         {isOwner && (
-          <Button asChild>
-            <Link href="/settings/pagamentos/contas/nova">
-              <Plus className="h-4 w-4 mr-1" />
-              Nova conta
-            </Link>
-          </Button>
+          <div className="flex items-center gap-2">
+            <RecoverOrphanButton />
+            <Button asChild>
+              <Link href="/settings/pagamentos/contas/nova">
+                <Plus className="h-4 w-4 mr-1" />
+                Nova conta
+              </Link>
+            </Button>
+          </div>
         )}
       </div>
 
