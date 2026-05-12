@@ -250,9 +250,32 @@ export function classifyOutcome(
         missingFields: [],
         portalUrl: null,
       };
-    case "genuine_no_data":
-      // Portal confirmou ausência mas não emitiu PDF — retry uma vez
-      // (pode ter sido glitch) depois vira success negativa sem PDF
+    case "genuine_no_data": {
+      // I.8 (2026-05-12) — Infosimples às vezes retorna code 600 com
+      // code_message "Um erro inesperado ocorreu e será analisado" +
+      // billable=false (não cobra) em vez de erro explícito. Antes virava
+      // success negativa direto, gerando jobs sem PDF mas marcados como
+      // emitidos — falso positivo.
+      //
+      // Pra endpoints que EXIGEM PDF (civel/trabalhista/fiscal/protesto/
+      // municipal/federal — definido em CATEGORIES_REQUIRING_PDF), success
+      // sem attachment é inaceitável. Retry com backoff portal_unavailable
+      // até esgotar — aí vira failed_permanent + CTA portal.
+      const requiresPdf =
+        info.emitsPdf === false
+          ? false
+          : CATEGORIES_REQUIRING_PDF.has(info.category);
+      if (requiresPdf && opts.attachmentId === null) {
+        return planRetry(
+          "portal_unavailable",
+          effectiveErrorMessage,
+          "portal_unavailable",
+          opts,
+          portalUrl
+        );
+      }
+      // Endpoints informativos / sem PDF obrigatório seguem o fluxo antigo:
+      // 1 retry profilático, depois success negativa
       if (opts.retryAttempts === 0) {
         return planRetry(
           "portal_unavailable",
@@ -271,6 +294,7 @@ export function classifyOutcome(
         missingFields: [],
         portalUrl,
       };
+    }
     default:
       // Unknown — trata como api_error pra retry
       return planRetry(

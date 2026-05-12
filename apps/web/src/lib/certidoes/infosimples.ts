@@ -64,23 +64,34 @@ export async function callInfosimples(
   const body = new URLSearchParams();
   body.set("token", token);
   body.set("timeout", "600");
-  // I.7 (2026-05-11) — re-injeta credenciais GOV.BR em endpoints TJSP/* na
-  // hora da chamada. O payload gravado em CertidaoJob.requestPayload passa
-  // por sanitizePayload() que REMOVE login_cpf/login_senha para não vazar
-  // no DB/logs/audit. Sem essa re-injeção, retries (que leem o payload do
-  // DB direto via runSingleJob) iam sem credenciais e Infosimples retornaria
-  // code 606 "CPF e senha gov.br devem ser informados".
-  const govbrCpf = process.env.INFOSIMPLES_GOVBR_CPF?.trim();
-  const govbrPassword = process.env.INFOSIMPLES_GOVBR_PASSWORD?.trim();
-  const requiresGovbrAuth =
-    endpoint.startsWith("tribunal/tjsp/") && govbrCpf && govbrPassword;
+  // I.7 (2026-05-11) — re-injeta credenciais em endpoints TJSP/* na hora
+  // da chamada. O payload gravado em CertidaoJob.requestPayload passa por
+  // sanitizePayload() que REMOVE login_cpf/login_senha/pkcs12_cert/pkcs12_pass
+  // para não vazar no DB/logs/audit. Sem essa re-injeção, retries (que leem
+  // o payload do DB direto via runSingleJob) iam sem credenciais e
+  // Infosimples retornaria 606.
+  //
+  // I.8 (2026-05-12) — suporte a certificado digital A1 (pkcs12) como
+  // alternativa mais robusta ao gov.br login_cpf/login_senha. Prioridade:
+  // se INFOSIMPLES_PKCS12_CERT_BASE64 + INFOSIMPLES_PKCS12_PASSWORD existem,
+  // usa pkcs12; senão fallback pro login_cpf/login_senha. Útil pra casos
+  // onde TJSP rejeita consulta de terceiro com gov.br pessoal.
   for (const [key, value] of Object.entries(args)) {
     if (value === undefined || value === null) continue;
     body.set(key, String(value));
   }
-  if (requiresGovbrAuth) {
-    body.set("login_cpf", govbrCpf!);
-    body.set("login_senha", govbrPassword!);
+  if (endpoint.startsWith("tribunal/tjsp/")) {
+    const pkcs12Cert = process.env.INFOSIMPLES_PKCS12_CERT_BASE64?.trim();
+    const pkcs12Pass = process.env.INFOSIMPLES_PKCS12_PASSWORD?.trim();
+    const govbrCpf = process.env.INFOSIMPLES_GOVBR_CPF?.trim();
+    const govbrPassword = process.env.INFOSIMPLES_GOVBR_PASSWORD?.trim();
+    if (pkcs12Cert && pkcs12Pass) {
+      body.set("pkcs12_cert", pkcs12Cert);
+      body.set("pkcs12_pass", pkcs12Pass);
+    } else if (govbrCpf && govbrPassword) {
+      body.set("login_cpf", govbrCpf);
+      body.set("login_senha", govbrPassword);
+    }
   }
 
   const doRequest = async () => {
