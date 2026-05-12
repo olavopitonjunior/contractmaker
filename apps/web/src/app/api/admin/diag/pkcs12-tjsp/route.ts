@@ -227,6 +227,23 @@ export async function GET(_req: NextRequest) {
     );
   }
 
+  async function callE_no_creds(): Promise<VariantResult> {
+    const t0 = Date.now();
+    const body = new URLSearchParams();
+    body.set("token", TOKEN!);
+    body.set("timeout", "600");
+    for (const [k, v] of Object.entries(TEST_PAYLOAD)) body.set(k, v);
+    // Sem pkcs12_cert nem pkcs12_pass nem login_cpf/senha — testa se a
+    // Infosimples agora resolve auth via cert cadastrado no painel deles.
+    return doCall(
+      "E_no_creds",
+      "URL-encoded sem creds (assume A1 cadastrado no painel Infosimples)",
+      { "Content-Type": "application/x-www-form-urlencoded" },
+      body.toString(),
+      t0
+    );
+  }
+
   async function doCall(
     name: string,
     description: string,
@@ -289,6 +306,7 @@ export async function GET(_req: NextRequest) {
     callB_multi_b64(),
     callC_multi_bin(),
     callD_urlenc_safe(),
+    callE_no_creds(),
   ]);
 
   return NextResponse.json({
