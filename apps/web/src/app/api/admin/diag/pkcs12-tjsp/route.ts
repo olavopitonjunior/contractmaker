@@ -65,15 +65,28 @@ export async function GET(_req: NextRequest) {
   }
 
   // --- PASSO 1: validar .pfx + senha local ---
+  // Metadata da env var em si (não credencial — só shape).
+  const envMeta = {
+    envCharCount: CERT_B64.length,
+    hasBom: CERT_B64.charCodeAt(0) === 0xfeff,
+    hasNewline: /[\r\n]/.test(CERT_B64),
+    hasWhitespace: /\s/.test(CERT_B64),
+    firstChars: CERT_B64.slice(0, 8),
+    lastChars: CERT_B64.slice(-8),
+  };
   const localCheck: {
     ok: boolean;
     bytes: number;
     derHeaderOk: boolean;
+    firstHex: string;
     decryptError?: string;
-  } = { ok: false, bytes: 0, derHeaderOk: false };
+  } = { ok: false, bytes: 0, derHeaderOk: false, firstHex: "" };
   try {
     const pfxBuffer = Buffer.from(CERT_B64, "base64");
     localCheck.bytes = pfxBuffer.length;
+    localCheck.firstHex = [...pfxBuffer.subarray(0, 4)]
+      .map((b) => b.toString(16).padStart(2, "0").toUpperCase())
+      .join(" ");
     localCheck.derHeaderOk = pfxBuffer[0] === 0x30 && pfxBuffer[1] === 0x82;
     tls.createSecureContext({ pfx: pfxBuffer, passphrase: CERT_PASS });
     localCheck.ok = true;
@@ -84,7 +97,7 @@ export async function GET(_req: NextRequest) {
   if (!localCheck.ok) {
     // Se nem local decripta, não adianta testar contra Infosimples
     return NextResponse.json(
-      { localCheck, hint: "Cert ou senha inválidos no próprio runtime — fix antes" },
+      { envMeta, localCheck, hint: "Cert ou senha inválidos no próprio runtime — fix antes" },
       { status: 200 }
     );
   }
