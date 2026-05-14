@@ -470,9 +470,37 @@ export function SalesFormWizard({
           return next;
         });
         if (stepFields.length > 0) {
+          // Non-empty check manual: `form.trigger` só roda Zod schema, e a
+          // maioria dos paths de DadosContrato é `.optional().default("")`
+          // — string vazia passa no schema. Pra "obrigatório" funcionar
+          // de verdade, checamos null/undefined/"" diretamente nos values
+          // e marcamos `setError` pra aria-invalid + RequiredFieldMarker.
+          let firstMissing: string | null = null;
+          for (const path of stepFields) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const raw = form.getValues(path as any) as unknown;
+            const isEmpty =
+              raw === undefined ||
+              raw === null ||
+              raw === "" ||
+              (Array.isArray(raw) && raw.length === 0);
+            if (isEmpty) {
+              if (!firstMissing) firstMissing = path;
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              form.setError(path as any, {
+                type: "required",
+                message: "Campo obrigatório",
+              });
+            } else {
+              // Limpa erro manual se valor agora existe (re-tentativa).
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              form.clearErrors(path as any);
+            }
+          }
+          // Roda o trigger pra cobrir refines/min(N) que o non-empty não pega.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const isValid = await form.trigger(stepFields as any);
-          if (!isValid) {
+          const triggerValid = await form.trigger(stepFields as any);
+          if (firstMissing !== null || !triggerValid) {
             setFailedTriggerCount((n) => n + 1);
             toast.error(
               `Preencha os campos obrigatórios da etapa ${i + 1} antes de avançar.`,
