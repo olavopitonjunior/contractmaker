@@ -59,6 +59,7 @@ export async function POST(
     userId: auth.actor.effectiveUserId,
     orgId: auth.org.id,
     mode: parsed.data.mode,
+    sessionId: parsed.data.sessionId,
   };
 
   const stream = new ReadableStream({

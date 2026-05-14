@@ -16,10 +16,13 @@ import {
   XCircle,
   ShieldAlert,
   Loader2,
+  Menu,
+  X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentEvent, AgentMode } from "@/lib/ai/types";
 import { describeTool, KIND_CLASSES } from "@/lib/ai/event-icons";
+import { ChatSessionSidebar } from "./ChatSessionSidebar";
 
 interface Message {
   id: string;
@@ -39,6 +42,8 @@ interface ChatPanelProps {
   /** Disparado a cada turn que termina com sucesso (evento `done`). */
   onChatTurnComplete?: () => void;
   initialInput?: string;
+  /** Session inicial (do prop messages). UI deixa o usuário trocar via sidebar. */
+  initialSessionId?: string | null;
 }
 
 export function ChatPanel({
@@ -47,12 +52,52 @@ export function ChatPanel({
   onContentUpdate,
   onChatTurnComplete,
   initialInput,
+  initialSessionId,
 }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState(initialInput ?? "");
   const [loading, setLoading] = useState(false);
   const [mode, setMode] = useState<AgentMode>("plan");
+  const [sessionId, setSessionId] = useState<string | null>(initialSessionId ?? null);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarReloadKey, setSidebarReloadKey] = useState(0);
+  const [switchingSession, setSwitchingSession] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Quando o usuário troca de session via sidebar, busca as mensagens
+  // daquela session e troca o state local (não persiste optimisticamente).
+  async function switchToSession(newSessionId: string) {
+    if (newSessionId === sessionId || switchingSession) return;
+    setSwitchingSession(true);
+    try {
+      const res = await fetch(
+        `/api/contracts/${contractId}/chat-sessions/${newSessionId}`
+      );
+      if (!res.ok) throw new Error("load_failed");
+      const data = await res.json();
+      setMessages(
+        (data.messages || []).map((m: { id: string; role: string; content: string; events?: AgentEvent[] | null }) => ({
+          id: m.id,
+          role: m.role,
+          content: m.content,
+          events: m.events || undefined,
+        }))
+      );
+      setSessionId(newSessionId);
+      setSidebarOpen(false);
+    } catch {
+      // toast handled inside fetch fallback
+    } finally {
+      setSwitchingSession(false);
+    }
+  }
+
+  // "Nova sessão" criada via sidebar — limpa mensagens e foca no input.
+  function handleNewSession(newSessionId: string) {
+    setMessages([]);
+    setSessionId(newSessionId);
+    setSidebarOpen(false);
+  }
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -84,7 +129,11 @@ export function ChatPanel({
       const res = await fetch(`/api/contracts/${contractId}/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: userMessage, mode }),
+        body: JSON.stringify({
+          message: userMessage,
+          mode,
+          ...(sessionId ? { sessionId } : {}),
+        }),
         signal: controller.signal,
       });
 
@@ -176,6 +225,8 @@ export function ChatPanel({
             if (event.result.htmlContent && onContentUpdate) {
               onContentUpdate(event.result.htmlContent);
             }
+            // Re-busca sidebar pra refletir nova msgCount e auto-title da 1ª msg
+            setSidebarReloadKey((k) => k + 1);
             onChatTurnComplete?.();
           } else if (event.type === "error") {
             setMessages((prev) =>
@@ -249,8 +300,49 @@ export function ChatPanel({
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="flex flex-col h-full max-h-[calc(100dvh-80px)]">
-        <ModeHeader mode={mode} onChange={setMode} disabled={loading} />
+      <div className="flex h-full max-h-[calc(100dvh-80px)] -mx-6 -mb-6">
+        {/* Sidebar de sessions — só ocupa espaço quando aberta. Mobile: overlay
+            absoluto sobre o chat. Desktop: empurra o chat pra direita. */}
+        <div
+          className={cn(
+            "shrink-0 transition-all duration-200 overflow-hidden",
+            sidebarOpen ? "w-[220px]" : "w-0"
+          )}
+        >
+          <ChatSessionSidebar
+            contractId={contractId}
+            activeSessionId={sessionId}
+            onSelect={switchToSession}
+            onCreate={handleNewSession}
+            reloadKey={sidebarReloadKey}
+          />
+        </div>
+
+        <div className="flex flex-col flex-1 min-w-0 px-6 pb-6">
+          <div className="flex items-center gap-2 pb-2 border-b">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 shrink-0"
+              onClick={() => setSidebarOpen((v) => !v)}
+              aria-label={sidebarOpen ? "Fechar sessões" : "Abrir sessões"}
+            >
+              {sidebarOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+            </Button>
+            <div className="flex-1 min-w-0">
+              <ModeHeader mode={mode} onChange={setMode} disabled={loading} />
+            </div>
+          </div>
+
+          {switchingSession && (
+            <div className="flex items-center justify-center py-3">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              <span className="ml-2 text-xs text-muted-foreground">
+                Carregando sessão…
+              </span>
+            </div>
+          )}
 
         <ScrollArea className="flex-1 min-h-0 pr-4" ref={scrollRef}>
           <div className="space-y-4 py-4">
@@ -287,6 +379,7 @@ export function ChatPanel({
           <Button size="icon" onClick={handleSend} disabled={loading || !input.trim()}>
             <Send className="h-4 w-4" />
           </Button>
+        </div>
         </div>
       </div>
     </TooltipProvider>

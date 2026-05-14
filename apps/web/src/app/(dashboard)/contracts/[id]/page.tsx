@@ -17,8 +17,9 @@ export default async function ContractPage({
       deal: { select: { id: true, title: true } },
       template: { select: { id: true, name: true } },
       chatSessions: {
+        where: { archived: false },
         include: { messages: { orderBy: { createdAt: "asc" } } },
-        orderBy: { createdAt: "desc" },
+        orderBy: { updatedAt: "desc" },
         take: 1,
       },
       exports: { orderBy: { createdAt: "desc" }, take: 5 },
@@ -52,6 +53,7 @@ export default async function ContractPage({
           // de tool_use / tool_result após reload da página.
           events: (m.events as unknown as import("@/lib/ai/types").AgentEvent[]) || undefined,
         })) || [],
+        sessionId: contract.chatSessions[0]?.id ?? null,
         exports: contract.exports.map((e) => ({
           id: e.id,
           format: e.format,

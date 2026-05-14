@@ -51,6 +51,10 @@ interface ContractData {
   htmlContent: string;
   dataJson: Record<string, unknown>;
   messages: { id: string; role: string; content: string }[];
+  /** ID da session ativa carregada server-side (a mais recente não-arquivada).
+   *  Null quando o contrato ainda não tem nenhuma session. UI cria via POST
+   *  quando user envia primeira mensagem. */
+  sessionId: string | null;
   exports: { id: string; format: string; url: string; createdAt: string }[];
   googleDocId?: string | null;
   googleDocUrl?: string | null;
@@ -551,6 +555,7 @@ export function ContractEditorPage({
             <ChatPanel
               contractId={contract.id}
               messages={contract.messages}
+              initialSessionId={contract.sessionId}
               onContentUpdate={() => {}}
               onChatTurnComplete={() => setCommentsVersion((v) => v + 1)}
               initialInput={chatInitialInput}

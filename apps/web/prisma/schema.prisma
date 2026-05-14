@@ -673,11 +673,21 @@ model ChatSession {
   id         String   @id @default(cuid())
   contractId String
   userId     String
+  /// Título da session. Auto-derivado da 1ª mensagem do usuário (primeiros
+  /// 60 chars) ou rename manual via PATCH. Null em sessions recém-criadas.
+  title      String?
+  /// Soft delete — sessions arquivadas somem da sidebar mas mantêm mensagens.
+  archived   Boolean  @default(false)
   createdAt  DateTime @default(now())
+  /// Atualizado a cada mensagem nova (toque manual em agent.ts). Usado pra
+  /// ordenar a sidebar "Recentes".
+  updatedAt  DateTime @default(now()) @updatedAt
 
   contract Contract      @relation(fields: [contractId], references: [id], onDelete: Cascade)
   user     User          @relation(fields: [userId], references: [id])
   messages ChatMessage[]
+
+  @@index([contractId, archived, updatedAt(sort: Desc)])
 }
 
 model ChatMessage {

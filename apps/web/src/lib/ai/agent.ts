@@ -31,6 +31,9 @@ interface AgentParams {
   orgId: string;
   /** Modo do agente. Default 'plan' (multi-turn com expert context). */
   mode?: AgentMode;
+  /** Session específica pra continuar. Se omitido, usa a última não-arquivada
+   *  ou cria uma nova. UI passa explicitamente quando há múltiplas sessions. */
+  sessionId?: string;
 }
 
 const HAIKU_MODEL = "claude-haiku-4-5-20251001";
@@ -107,15 +110,51 @@ async function loadContext(contractId: string, orgId: string): Promise<AgentCont
   };
 }
 
-async function loadChatHistory(contractId: string) {
-  const session = await prisma.chatSession.findFirst({
-    where: { contractId },
-    include: { messages: { orderBy: { createdAt: "asc" }, take: 20 } },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!session?.messages.length) return [];
+/**
+ * Resolve a session ativa pra esse turn:
+ *  - Se `sessionId` foi passado e a session pertence ao contrato (e não está
+ *    arquivada), usa essa.
+ *  - Senão, pega a mais recente não-arquivada.
+ *  - Senão (primeira conversa), cria uma session vazia.
+ */
+async function resolveSession(
+  contractId: string,
+  userId: string,
+  sessionId?: string
+): Promise<{ id: string }> {
+  if (sessionId) {
+    const session = await prisma.chatSession.findUnique({
+      where: { id: sessionId },
+      select: { id: true, contractId: true, archived: true },
+    });
+    if (session && session.contractId === contractId && !session.archived) {
+      return { id: session.id };
+    }
+    // sessionId inválido pra esse contrato — cai pro fallback.
+  }
 
-  return session.messages.map((m) => ({
+  const recent = await prisma.chatSession.findFirst({
+    where: { contractId, archived: false },
+    orderBy: { updatedAt: "desc" },
+    select: { id: true },
+  });
+  if (recent) return recent;
+
+  const created = await prisma.chatSession.create({
+    data: { contractId, userId },
+    select: { id: true },
+  });
+  return created;
+}
+
+async function loadChatHistory(sessionId: string) {
+  const messages = await prisma.chatMessage.findMany({
+    where: { sessionId },
+    orderBy: { createdAt: "asc" },
+    take: 20,
+    select: { role: true, content: true },
+  });
+  return messages.map((m) => ({
     role: m.role as "user" | "assistant",
     content: m.content,
   }));
@@ -371,6 +410,14 @@ export async function* streamContractAgent(
       }
     }
 
+    // 3.6. Resolve session (multi-session support). UI passa sessionId
+    //      explicitamente; sem ela, usa a mais recente não-arquivada ou cria.
+    const activeSession = await resolveSession(
+      params.contractId,
+      params.userId,
+      params.sessionId
+    );
+
     const started: AgentEvent = {
       type: "started",
       mode,
@@ -381,7 +428,7 @@ export async function* streamContractAgent(
     yield started;
 
     // 4. Messages + intent detection
-    const history = await loadChatHistory(params.contractId);
+    const history = await loadChatHistory(activeSession.id);
     const contextMsg = buildContextMessage({
       dataJson: context.dataJson,
       htmlContent: context.htmlContent,
@@ -636,22 +683,33 @@ export async function* streamContractAgent(
       });
     }
 
-    // Persist chat messages
-    let session = await prisma.chatSession.findFirst({
-      where: { contractId: params.contractId },
-      orderBy: { createdAt: "desc" },
+    // Persist chat messages na session resolvida e toca updatedAt + auto-titula
+    // se for o primeiro turn. Title derivado dos primeiros 60 chars da msg
+    // do user (truncado limpo no espaço mais próximo do limite).
+    const sessionRow = await prisma.chatSession.findUnique({
+      where: { id: activeSession.id },
+      select: { title: true },
     });
-    if (!session) {
-      session = await prisma.chatSession.create({
-        data: { contractId: params.contractId, userId: params.userId },
-      });
-    }
+    const shouldAutoTitle = !sessionRow?.title;
+    const autoTitle = shouldAutoTitle
+      ? params.message.length <= 60
+        ? params.message
+        : params.message.slice(0, 57).replace(/\s+\S*$/, "") + "…"
+      : null;
+
+    await prisma.chatSession.update({
+      where: { id: activeSession.id },
+      data: {
+        updatedAt: new Date(),
+        ...(autoTitle ? { title: autoTitle } : {}),
+      },
+    });
 
     await prisma.chatMessage.createMany({
       data: [
-        { sessionId: session.id, role: "user", content: params.message },
+        { sessionId: activeSession.id, role: "user", content: params.message },
         {
-          sessionId: session.id,
+          sessionId: activeSession.id,
           role: "assistant",
           content: finalMessage || "Operação concluída.",
           metadata: { toolsUsed: changeLogs.map((l) => l.action), mode } as object,
