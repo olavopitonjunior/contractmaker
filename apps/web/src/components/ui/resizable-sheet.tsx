@@ -140,6 +140,22 @@ export function ResizableSheet({
               : "inset-y-0 right-0 h-full border-l data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right",
             className
           )}
+          // Popover/DropdownMenu renderizam em portal fora do Content. Sem
+          // este handler, clicar num popover interno fecha o Sheet inteiro
+          // (Radix interpreta como click-outside). Ignoramos eventos cuja
+          // target esta dentro de qualquer Radix popper wrapper.
+          onPointerDownOutside={(e) => {
+            const target = e.target as HTMLElement | null;
+            if (target?.closest("[data-radix-popper-content-wrapper]")) {
+              e.preventDefault();
+            }
+          }}
+          onInteractOutside={(e) => {
+            const target = e.target as HTMLElement | null;
+            if (target?.closest("[data-radix-popper-content-wrapper]")) {
+              e.preventDefault();
+            }
+          }}
         >
           {/* Drag handle — só renderiza em desktop e quando não-fullscreen */}
           {!effectiveFullscreen && (
