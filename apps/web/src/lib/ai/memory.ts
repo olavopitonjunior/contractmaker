@@ -385,8 +385,10 @@ export async function findSimilarContracts(
     currentTemplateName
   );
 
-  // Fast path: no embeddings → rank by fingerprint match score
-  if (!isEmbeddingsConfigured()) {
+  // Fingerprint-only path — usado como fast path quando embeddings desligadas
+  // e como fallback quando o caminho semântico falha (Voyage 429, pgvector
+  // ausente, etc).
+  async function rankByFingerprint() {
     const memories = await prisma.contractMemory.findMany({
       where: { orgId },
       orderBy: { createdAt: "desc" },
@@ -412,57 +414,68 @@ export async function findSimilarContracts(
       acceptedSuggestions: (memory.acceptedSuggestions as unknown[]) || [],
       rejectedSuggestions: (memory.rejectedSuggestions as unknown[]) || [],
       manualEdits: (memory.manualEdits as unknown[]) || [],
-      similarity: null,
+      similarity: null as number | null,
     }));
   }
 
+  if (!isEmbeddingsConfigured()) {
+    return rankByFingerprint();
+  }
+
   // Semantic path: embed the query "fingerprint + focus" and search by cosine
-  const queryText = `${focus || "contrato similar"}\n\nFingerprint: ${JSON.stringify(currentFingerprint)}`;
-  const queryVec = await embedOne(queryText, "query", {
-    orgId,
-    operation: "embed_query",
-  });
+  try {
+    const queryText = `${focus || "contrato similar"}\n\nFingerprint: ${JSON.stringify(currentFingerprint)}`;
+    const queryVec = await embedOne(queryText, "query", {
+      orgId,
+      operation: "embed_query",
+    });
 
-  const rows = await prisma.$queryRawUnsafe<
-    Array<{
-      id: string;
-      contractId: string | null;
-      summary: string;
-      dataFingerprint: unknown;
-      acceptedSuggestions: unknown;
-      rejectedSuggestions: unknown;
-      manualEdits: unknown;
-      similarity: number;
-    }>
-  >(
-    `
-    SELECT
-      id,
-      "contractId",
-      summary,
-      "dataFingerprint",
-      "acceptedSuggestions",
-      "rejectedSuggestions",
-      "manualEdits",
-      1 - (embedding <=> $1::vector) AS similarity
-    FROM "ContractMemory"
-    WHERE "orgId" = $2
-      AND embedding IS NOT NULL
-    ORDER BY embedding <=> $1::vector
-    LIMIT ${Math.max(1, Math.min(topK, 10))}
-    `,
-    toPgVector(queryVec),
-    orgId
-  );
+    const rows = await prisma.$queryRawUnsafe<
+      Array<{
+        id: string;
+        contractId: string | null;
+        summary: string;
+        dataFingerprint: unknown;
+        acceptedSuggestions: unknown;
+        rejectedSuggestions: unknown;
+        manualEdits: unknown;
+        similarity: number;
+      }>
+    >(
+      `
+      SELECT
+        id,
+        "contractId",
+        summary,
+        "dataFingerprint",
+        "acceptedSuggestions",
+        "rejectedSuggestions",
+        "manualEdits",
+        1 - (embedding <=> $1::vector) AS similarity
+      FROM "ContractMemory"
+      WHERE "orgId" = $2
+        AND embedding IS NOT NULL
+      ORDER BY embedding <=> $1::vector
+      LIMIT ${Math.max(1, Math.min(topK, 10))}
+      `,
+      toPgVector(queryVec),
+      orgId
+    );
 
-  return rows.map((r) => ({
-    id: r.id,
-    contractId: r.contractId,
-    summary: r.summary,
-    fingerprint: r.dataFingerprint as ContractFingerprint,
-    acceptedSuggestions: (r.acceptedSuggestions as unknown[]) || [],
-    rejectedSuggestions: (r.rejectedSuggestions as unknown[]) || [],
-    manualEdits: (r.manualEdits as unknown[]) || [],
-    similarity: Number((r.similarity as unknown as number)?.toFixed?.(3) ?? r.similarity),
-  }));
+    return rows.map((r) => ({
+      id: r.id,
+      contractId: r.contractId,
+      summary: r.summary,
+      fingerprint: r.dataFingerprint as ContractFingerprint,
+      acceptedSuggestions: (r.acceptedSuggestions as unknown[]) || [],
+      rejectedSuggestions: (r.rejectedSuggestions as unknown[]) || [],
+      manualEdits: (r.manualEdits as unknown[]) || [],
+      similarity: Number((r.similarity as unknown as number)?.toFixed?.(3) ?? r.similarity),
+    }));
+  } catch (err) {
+    // Voyage rate limit / billing, pgvector indisponível, rede: cai pra
+    // fingerprint scoring transparente. Caller não precisa diferenciar.
+    console.error("[findSimilarContracts] semantic path falhou, usando fingerprint:", err);
+    return rankByFingerprint();
+  }
 }

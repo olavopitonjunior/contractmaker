@@ -436,6 +436,43 @@ async function handleProposeTemplateChange(
   };
 }
 
+async function knowledgeBaseKeywordFallback(
+  query: string,
+  category: string | undefined,
+  topK: number,
+  orgId: string,
+  reason: string
+): Promise<Record<string, unknown>> {
+  const rows = await prisma.knowledgeItem.findMany({
+    where: {
+      orgId,
+      ...(category ? { category } : {}),
+      OR: [
+        { title: { contains: query, mode: "insensitive" } },
+        { content: { contains: query, mode: "insensitive" } },
+      ],
+    },
+    take: topK,
+    orderBy: { updatedAt: "desc" },
+    select: {
+      id: true,
+      title: true,
+      content: true,
+      category: true,
+      tags: true,
+      source: true,
+    },
+  });
+  return {
+    results: rows.map((r) => ({
+      ...r,
+      content: r.content.slice(0, 800),
+    })),
+    mode: "keyword_fallback",
+    note: `Busca por palavra-chave (recall inferior). Motivo: ${reason}`,
+  };
+}
+
 async function handleQueryKnowledgeBase(
   input: Record<string, unknown>,
   context: AgentContext
@@ -452,32 +489,13 @@ async function handleQueryKnowledgeBase(
   }
 
   if (!isEmbeddingsConfigured()) {
-    // Fallback: keyword search via PostgreSQL ILIKE when embeddings are off
-    const rows = await prisma.knowledgeItem.findMany({
-      where: {
-        orgId: context.orgId,
-        ...(category ? { category } : {}),
-        OR: [
-          { title: { contains: query, mode: "insensitive" } },
-          { content: { contains: query, mode: "insensitive" } },
-        ],
-      },
-      take: topK,
-      orderBy: { updatedAt: "desc" },
-      select: {
-        id: true,
-        title: true,
-        content: true,
-        category: true,
-        tags: true,
-        source: true,
-      },
-    });
-    return {
-      results: rows,
-      mode: "keyword_fallback",
-      note: "VOYAGE_API_KEY não configurada — busca por palavra-chave (recall inferior)",
-    };
+    return knowledgeBaseKeywordFallback(
+      query,
+      category,
+      topK,
+      context.orgId,
+      "VOYAGE_API_KEY não configurada"
+    );
   }
 
   try {
@@ -535,22 +553,34 @@ async function handleQueryKnowledgeBase(
       topK,
     };
   } catch (err) {
-    if (err instanceof VoyageError) {
+    // Em vez de retornar {error} e gastar o turn do agente esperando um
+    // fallback explícito (que ele às vezes não faz), caímos no keyword
+    // fallback que já é coded path. UX win: stream sempre devolve algo útil
+    // mesmo com Voyage 429 ou pgvector parcialmente quebrado.
+    const reason =
+      err instanceof VoyageError
+        ? `Voyage API: ${err.message}`
+        : err instanceof Error
+        ? err.message.slice(0, 160)
+        : String(err).slice(0, 160);
+    console.error("[query_knowledge_base] fallback acionado:", reason);
+    try {
+      const fallback = await knowledgeBaseKeywordFallback(
+        query,
+        category,
+        topK,
+        context.orgId,
+        reason
+      );
+      return fallback;
+    } catch (fallbackErr) {
+      console.error("[query_knowledge_base] fallback também falhou:", fallbackErr);
       return {
-        error: `Falha na busca semântica: ${err.message}`,
-        fallback_suggestion: "Tente reformular a query ou verifique VOYAGE_API_KEY",
+        error: `query_knowledge_base falhou: ${reason}`,
+        fallback_suggestion:
+          "Busca semântica e fallback ILIKE ambos falharam — verifique conexão com Postgres.",
       };
     }
-    // Qualquer outro erro (Prisma raw query, schema drift, pgvector ausente,
-    // rede) converte em resposta estruturada — assim o agente reage com
-    // fallback no próximo turn em vez de derrubar o stream.
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[query_knowledge_base] erro inesperado:", err);
-    return {
-      error: `query_knowledge_base falhou: ${msg.slice(0, 200)}`,
-      fallback_suggestion:
-        "Pode ser pgvector ausente (column embedding) ou rede pra Voyage. Verifique migrations e VOYAGE_API_KEY.",
-    };
   }
 }
 
