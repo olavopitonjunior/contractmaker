@@ -1,11 +1,26 @@
 /**
  * Faz o flow OAuth do owner (você) para obter um refresh_token usado pelo
- * runtime do app criar Google Docs no seu Drive. Usa o OAuth Client JSON que
- * você baixou do Console.
+ * runtime do app criar Google Docs no seu Drive.
  *
- * Uso:
- *   npx ts-node scripts/oauth-bootstrap.ts \
- *     --clientFile=C:\Users\User\.gcp\oauth-client.json
+ * 3 formas de passar credenciais (em ordem de prioridade):
+ *
+ *   1) Arquivo JSON baixado do Console (modo legado — Google removeu o
+ *      download direto em 2026, mas se você tem um JSON antigo guardado
+ *      ainda funciona):
+ *        npx ts-node scripts/oauth-bootstrap.ts \
+ *          --clientFile=C:\Users\User\.gcp\oauth-client.json
+ *
+ *   2) Flags --clientId e --clientSecret:
+ *        npx ts-node scripts/oauth-bootstrap.ts \
+ *          --clientId=247409780710-xxx.apps.googleusercontent.com \
+ *          --clientSecret=GOCSPX-xxx
+ *
+ *   3) Env vars GOOGLE_OAUTH_CLIENT_ID + GOOGLE_OAUTH_CLIENT_SECRET
+ *      (ex.: `vercel env pull` cria .env.local e você roda `dotenv -e .env.local --
+ *      npx ts-node scripts/oauth-bootstrap.ts`):
+ *        $env:GOOGLE_OAUTH_CLIENT_ID="247409780710-..."
+ *        $env:GOOGLE_OAUTH_CLIENT_SECRET="GOCSPX-..."
+ *        npx ts-node scripts/oauth-bootstrap.ts
  *
  * Sai com sucesso quando recebe o callback e imprime as 3 vars que você
  * cola em .env e Vercel:
@@ -31,17 +46,60 @@ function arg(name: string): string | undefined {
   return found?.slice(prefix.length);
 }
 
-async function main() {
+function resolveCreds(): { clientId: string; clientSecret: string; source: string } {
+  // Prioridade 1: arquivo JSON (compat com fluxos antigos)
   const clientFile = arg("clientFile");
-  if (!clientFile) {
-    console.error("Uso: --clientFile=path/oauth-client.json");
-    process.exit(1);
+  if (clientFile) {
+    const raw = JSON.parse(fs.readFileSync(clientFile, "utf-8"));
+    const installed = raw.installed || raw.web;
+    if (!installed?.client_id || !installed?.client_secret) {
+      throw new Error(
+        `Arquivo ${clientFile} não tem client_id/client_secret em installed/web. Verifique o formato.`
+      );
+    }
+    return {
+      clientId: installed.client_id,
+      clientSecret: installed.client_secret,
+      source: `arquivo ${clientFile}`,
+    };
   }
 
-  const raw = JSON.parse(fs.readFileSync(clientFile, "utf-8"));
-  const installed = raw.installed || raw.web;
-  const clientId = installed.client_id;
-  const clientSecret = installed.client_secret;
+  // Prioridade 2: flags
+  const cliId = arg("clientId");
+  const cliSecret = arg("clientSecret");
+  if (cliId && cliSecret) {
+    return { clientId: cliId, clientSecret: cliSecret, source: "flags --clientId/--clientSecret" };
+  }
+
+  // Prioridade 3: env vars
+  const envId = process.env.GOOGLE_OAUTH_CLIENT_ID;
+  const envSecret = process.env.GOOGLE_OAUTH_CLIENT_SECRET;
+  if (envId && envSecret) {
+    return {
+      clientId: envId,
+      clientSecret: envSecret,
+      source: "env GOOGLE_OAUTH_CLIENT_ID/CLIENT_SECRET",
+    };
+  }
+
+  throw new Error(
+    [
+      "Credenciais OAuth não encontradas. Use uma das opções:",
+      "  1) --clientFile=path/oauth-client.json (se você tem o JSON baixado)",
+      "  2) --clientId=... --clientSecret=...",
+      "  3) Env vars GOOGLE_OAUTH_CLIENT_ID + GOOGLE_OAUTH_CLIENT_SECRET",
+      "",
+      "Se você não tem o secret salvo, pode pegar do Vercel via:",
+      "  vercel env pull .env.vercel-prod",
+      "  $env:GOOGLE_OAUTH_CLIENT_ID=$(Select-String 'GOOGLE_OAUTH_CLIENT_ID' .env.vercel-prod | %% { ($_ -split '=', 2)[1].Trim('\"') })",
+      "  $env:GOOGLE_OAUTH_CLIENT_SECRET=$(Select-String 'GOOGLE_OAUTH_CLIENT_SECRET' .env.vercel-prod | %% { ($_ -split '=', 2)[1].Trim('\"') })",
+    ].join("\n")
+  );
+}
+
+async function main() {
+  const { clientId, clientSecret, source } = resolveCreds();
+  console.log(`Credenciais OAuth carregadas de: ${source}`);
   const redirectUri = `http://localhost:${PORT}/callback`;
 
   const authUrl =
