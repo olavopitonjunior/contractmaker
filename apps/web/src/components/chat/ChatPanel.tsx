@@ -24,7 +24,16 @@ import {
   FileText,
   Globe,
   GitCommit,
+  Copy,
+  Check,
+  Sparkles,
+  ScrollText,
+  AlertTriangle,
+  ListChecks,
+  Pencil,
 } from "lucide-react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
 import type { AgentEvent, AgentMode } from "@/lib/ai/types";
 import { describeTool, KIND_CLASSES } from "@/lib/ai/event-icons";
@@ -555,12 +564,12 @@ export function ChatPanel({
 
         <ScrollArea className="flex-1 min-h-0 pr-4" ref={scrollRef}>
           <div className="space-y-4 py-4">
-            {messages.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-8">
-                Envie uma mensagem para editar o contrato com IA.
-                <br />
-                Ex: &quot;Altere o valor do sinal para R$ 80.000&quot;
-              </p>
+            {messages.length === 0 && !switchingSession && (
+              <EmptyState
+                mode={mode}
+                onPickPrompt={(p) => setInput(p)}
+                disabled={loading}
+              />
             )}
             {messages.map((msg) => (
               <MessageRow
@@ -811,40 +820,217 @@ function MessageRow({
   loading: boolean;
   onRetry: (payload: string) => void;
 }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(msg.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // clipboard pode estar bloqueado em iframe — silencia
+    }
+  }
+
   if (msg.role === "user") {
     return (
-      <div className="rounded-lg p-3 text-sm bg-primary text-primary-foreground ml-8">
-        <p className="whitespace-pre-wrap">{msg.content}</p>
+      <div className="flex justify-end ml-10">
+        <div className="rounded-2xl bg-primary text-primary-foreground px-4 py-2.5 text-sm max-w-[85%]">
+          <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+        </div>
       </div>
     );
   }
 
   return (
-    <div
-      className={cn(
-        "rounded-lg p-3 text-sm mr-8",
-        msg.isError
-          ? "bg-destructive/10 border border-destructive/30 text-destructive-foreground"
-          : "bg-muted"
-      )}
-    >
-      <EventTimeline events={msg.events} streaming={!!msg.streaming} />
-      {msg.content && <p className="whitespace-pre-wrap mt-2">{msg.content}</p>}
-      {!msg.content && msg.streaming && (
-        <p className="text-xs text-muted-foreground italic mt-1">Pensando…</p>
-      )}
-      {msg.isError && msg.retryPayload && (
-        <Button
-          variant="outline"
-          size="sm"
-          className="mt-2"
-          disabled={loading}
-          onClick={() => onRetry(msg.retryPayload!)}
+    <div className="group flex gap-3 mr-10">
+      <div
+        className={cn(
+          "h-7 w-7 rounded-full flex items-center justify-center shrink-0 text-[11px] font-semibold mt-0.5",
+          msg.isError
+            ? "bg-destructive/15 text-destructive"
+            : "bg-primary/10 text-primary"
+        )}
+        aria-hidden="true"
+      >
+        <Sparkles className="h-3.5 w-3.5" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <div
+          className={cn(
+            "rounded-lg text-sm",
+            msg.isError
+              ? "bg-destructive/10 border border-destructive/30 p-3"
+              : msg.events && msg.events.length > 0
+                ? "bg-muted/40 p-3"
+                : "p-0"
+          )}
         >
-          <RotateCw className="h-3 w-3 mr-1" />
-          Tentar novamente
-        </Button>
-      )}
+          <EventTimeline events={msg.events} streaming={!!msg.streaming} />
+          {msg.content && (
+            <div
+              className={cn(
+                "prose prose-sm dark:prose-invert max-w-none",
+                "prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5",
+                "prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0",
+                "prose-code:before:content-none prose-code:after:content-none",
+                "prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-[12.5px]",
+                "prose-pre:my-2 prose-pre:p-2 prose-pre:text-xs",
+                "prose-strong:text-foreground",
+                msg.events && msg.events.length > 0 && "mt-2"
+              )}
+            >
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                {msg.content}
+              </ReactMarkdown>
+            </div>
+          )}
+          {!msg.content && msg.streaming && <ThinkingDots />}
+        </div>
+
+        {msg.isError && msg.retryPayload && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-2"
+            disabled={loading}
+            onClick={() => onRetry(msg.retryPayload!)}
+          >
+            <RotateCw className="h-3 w-3 mr-1" />
+            Tentar novamente
+          </Button>
+        )}
+
+        {/* Hover actions — só pra mensagens AI completas (não streaming, não erro) */}
+        {!msg.isError && !msg.streaming && msg.content && (
+          <div className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 mt-1">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <button
+                  type="button"
+                  onClick={handleCopy}
+                  className="rounded-sm p-1 hover:bg-muted-foreground/10 text-muted-foreground"
+                  aria-label="Copiar resposta"
+                >
+                  {copied ? (
+                    <Check className="h-3 w-3" />
+                  ) : (
+                    <Copy className="h-3 w-3" />
+                  )}
+                </button>
+              </TooltipTrigger>
+              <TooltipContent>{copied ? "Copiado" : "Copiar"}</TooltipContent>
+            </Tooltip>
+            {msg.retryPayload && (
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <button
+                    type="button"
+                    onClick={() => onRetry(msg.retryPayload!)}
+                    disabled={loading}
+                    className="rounded-sm p-1 hover:bg-muted-foreground/10 text-muted-foreground disabled:opacity-50"
+                    aria-label="Retentar"
+                  >
+                    <RotateCw className="h-3 w-3" />
+                  </button>
+                </TooltipTrigger>
+                <TooltipContent>Refazer este turn</TooltipContent>
+              </Tooltip>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 3 dots animation pra indicar que a IA esta processando antes do primeiro
+ * text_delta chegar. Substitui o "Pensando..." italico textual.
+ */
+function ThinkingDots() {
+  return (
+    <div className="flex items-center gap-1 py-1" aria-label="Pensando">
+      {[0, 150, 300].map((delay) => (
+        <span
+          key={delay}
+          className="h-1.5 w-1.5 rounded-full bg-muted-foreground/60 animate-pulse"
+          style={{ animationDelay: `${delay}ms` }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ============================================
+// EMPTY STATE — prompts canonicos
+// ============================================
+
+const CANONICAL_PROMPTS: Array<{
+  icon: typeof ListChecks;
+  label: string;
+  prompt: string;
+}> = [
+  {
+    icon: ListChecks,
+    label: "Validar contrato",
+    prompt: "Valide este contrato e liste os problemas encontrados, separados por gravidade.",
+  },
+  {
+    icon: AlertTriangle,
+    label: "Buscar contradições",
+    prompt: "Analise possíveis contradições internas entre as cláusulas do contrato.",
+  },
+  {
+    icon: ScrollText,
+    label: "Resumir cláusulas",
+    prompt: "Liste cada cláusula do contrato com número, título em negrito e resumo de 1-2 linhas.",
+  },
+  {
+    icon: Pencil,
+    label: "Sugerir melhorias",
+    prompt: "Sugira melhorias para tornar este contrato mais claro e juridicamente seguro, sem alterar o doc.",
+  },
+];
+
+function EmptyState({
+  mode,
+  onPickPrompt,
+  disabled,
+}: {
+  mode: AgentMode;
+  onPickPrompt: (prompt: string) => void;
+  disabled: boolean;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
+      <div className="h-10 w-10 rounded-full bg-primary/10 text-primary flex items-center justify-center mb-3">
+        <Sparkles className="h-5 w-5" />
+      </div>
+      <h3 className="text-sm font-medium">Como posso ajudar com este contrato?</h3>
+      <p className="text-xs text-muted-foreground mt-1 max-w-[280px]">
+        {mode === "fast"
+          ? "Modo rápido — edição direta no Google Docs em ~3s."
+          : "Modo planejamento — análise profunda com expert context."}
+      </p>
+      <div className="grid grid-cols-2 gap-2 mt-5 w-full max-w-sm">
+        {CANONICAL_PROMPTS.map((p) => (
+          <button
+            key={p.label}
+            type="button"
+            disabled={disabled}
+            onClick={() => onPickPrompt(p.prompt)}
+            className={cn(
+              "flex items-start gap-2 rounded-lg border px-2.5 py-2 text-left text-xs",
+              "hover:bg-muted/60 transition-colors",
+              "disabled:opacity-50 disabled:cursor-not-allowed"
+            )}
+          >
+            <p.icon className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
+            <span className="leading-tight">{p.label}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
