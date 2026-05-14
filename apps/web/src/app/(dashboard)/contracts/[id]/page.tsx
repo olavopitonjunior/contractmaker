@@ -48,6 +48,9 @@ export default async function ContractPage({
           id: m.id,
           role: m.role,
           content: m.content,
+          // events: persistido por streamContractAgent pra rehidratar chips
+          // de tool_use / tool_result após reload da página.
+          events: (m.events as unknown as import("@/lib/ai/types").AgentEvent[]) || undefined,
         })) || [],
         exports: contract.exports.map((e) => ({
           id: e.id,
