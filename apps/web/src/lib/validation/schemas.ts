@@ -22,7 +22,8 @@ export const renderContractSchema = z.object({
 export const chatSchema = z.object({
   message: z.string().min(1),
   mode: z.enum(['fast', 'plan']).default('plan'),
-  sessionId: z.string().cuid().optional()
+  sessionId: z.string().cuid().optional(),
+  attachmentIds: z.array(z.string().cuid()).max(5).optional()
 });
 
 export const exportSchema = z.object({

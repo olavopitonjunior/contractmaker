@@ -29,6 +29,11 @@ export interface ChangeLogEntry {
   summary: string;
   details: Record<string, unknown>;
   source: "ai" | "user" | "system";
+  /** Texto do doc antes da tool de write executar — só populado em edits
+   *  com googleDocId. Lê via getDocPlainText. Cap aplicado no persist. */
+  htmlBefore?: string;
+  /** Texto após a write. Pode coincidir com htmlBefore se o tool failou. */
+  htmlAfter?: string;
 }
 
 export interface ValidationIssue {

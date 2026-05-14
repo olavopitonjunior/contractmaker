@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Send,
   RotateCw,
@@ -18,11 +19,17 @@ import {
   Loader2,
   Menu,
   X,
+  Paperclip,
+  Link2,
+  FileText,
+  Globe,
+  GitCommit,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { AgentEvent, AgentMode } from "@/lib/ai/types";
 import { describeTool, KIND_CLASSES } from "@/lib/ai/event-icons";
 import { ChatSessionSidebar } from "./ChatSessionSidebar";
+import { ChangesPanel } from "./ChangesPanel";
 
 interface Message {
   id: string;
@@ -33,6 +40,15 @@ interface Message {
   events?: AgentEvent[];
   mode?: AgentMode;
   streaming?: boolean;
+}
+
+interface ChatAttachment {
+  id: string;
+  name: string;
+  source: "upload" | "url";
+  sourceUrl?: string;
+  extractedChars?: number;
+  loading?: boolean;
 }
 
 interface ChatPanelProps {
@@ -62,7 +78,161 @@ export function ChatPanel({
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarReloadKey, setSidebarReloadKey] = useState(0);
   const [switchingSession, setSwitchingSession] = useState(false);
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([]);
+  const [attaching, setAttaching] = useState(false);
+  const [urlPopoverOpen, setUrlPopoverOpen] = useState(false);
+  const [urlInput, setUrlInput] = useState("");
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const [changesPanelOpen, setChangesPanelOpen] = useState(false);
+  const [changesReloadKey, setChangesReloadKey] = useState(0);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  /**
+   * Garante que há uma session ativa antes de anexar — anexos vivem dentro
+   * de uma session. Se ainda nao existe (primeira mensagem do contrato),
+   * cria uma via POST /chat-sessions e retorna o id.
+   */
+  async function ensureSession(): Promise<string | null> {
+    if (sessionId) return sessionId;
+    try {
+      const res = await fetch(`/api/contracts/${contractId}/chat-sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      setSessionId(data.id);
+      setSidebarReloadKey((k) => k + 1);
+      return data.id;
+    } catch {
+      return null;
+    }
+  }
+
+  async function handleUploadFile(file: File) {
+    setAttachmentError(null);
+    const sid = await ensureSession();
+    if (!sid) {
+      setAttachmentError("Nao foi possivel criar uma sessao");
+      return;
+    }
+    if (attachments.length >= 5) {
+      setAttachmentError("Maximo 5 anexos por turn");
+      return;
+    }
+    setAttaching(true);
+    const tempId = `tmp-${Date.now()}`;
+    setAttachments((prev) => [
+      ...prev,
+      { id: tempId, name: file.name, source: "upload", loading: true },
+    ]);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("sessionId", sid);
+      const res = await fetch(`/api/contracts/${contractId}/chat-attachments`, {
+        method: "POST",
+        body: fd,
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setAttachments((prev) => prev.filter((a) => a.id !== tempId));
+        setAttachmentError(data.error || "Falha ao anexar");
+        return;
+      }
+      setAttachments((prev) =>
+        prev.map((a) =>
+          a.id === tempId
+            ? {
+                id: data.id,
+                name: data.name,
+                source: data.source,
+                extractedChars: data.extractedChars,
+              }
+            : a
+        )
+      );
+    } catch (err) {
+      setAttachments((prev) => prev.filter((a) => a.id !== tempId));
+      setAttachmentError(err instanceof Error ? err.message : "Falha ao anexar");
+    } finally {
+      setAttaching(false);
+    }
+  }
+
+  async function handleAttachUrl() {
+    const raw = urlInput.trim();
+    if (!raw) return;
+    setAttachmentError(null);
+    const sid = await ensureSession();
+    if (!sid) {
+      setAttachmentError("Nao foi possivel criar uma sessao");
+      return;
+    }
+    if (attachments.length >= 5) {
+      setAttachmentError("Maximo 5 anexos por turn");
+      return;
+    }
+    setAttaching(true);
+    const tempId = `tmp-${Date.now()}`;
+    setAttachments((prev) => [
+      ...prev,
+      { id: tempId, name: raw, source: "url", loading: true },
+    ]);
+    try {
+      const res = await fetch(
+        `/api/contracts/${contractId}/chat-attachments/url`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId: sid, url: raw }),
+        }
+      );
+      const data = await res.json();
+      if (!res.ok) {
+        setAttachments((prev) => prev.filter((a) => a.id !== tempId));
+        setAttachmentError(data.error || "Falha ao buscar URL");
+        return;
+      }
+      setAttachments((prev) =>
+        prev.map((a) =>
+          a.id === tempId
+            ? {
+                id: data.id,
+                name: data.name,
+                source: data.source,
+                sourceUrl: data.sourceUrl,
+                extractedChars: data.extractedChars,
+              }
+            : a
+        )
+      );
+      setUrlInput("");
+      setUrlPopoverOpen(false);
+    } catch (err) {
+      setAttachments((prev) => prev.filter((a) => a.id !== tempId));
+      setAttachmentError(err instanceof Error ? err.message : "Falha ao buscar URL");
+    } finally {
+      setAttaching(false);
+    }
+  }
+
+  async function handleRemoveAttachment(id: string) {
+    // Remove otimisticamente — server delete e best-effort.
+    const target = attachments.find((a) => a.id === id);
+    setAttachments((prev) => prev.filter((a) => a.id !== id));
+    if (target && !id.startsWith("tmp-")) {
+      try {
+        await fetch(
+          `/api/contracts/${contractId}/chat-attachments/${id}`,
+          { method: "DELETE" }
+        );
+      } catch {
+        // ignora — UI ja removeu, dangling row no DB nao machuca
+      }
+    }
+  }
 
   // Quando o usuário troca de session via sidebar, busca as mensagens
   // daquela session e troca o state local (não persiste optimisticamente).
@@ -133,6 +303,13 @@ export function ChatPanel({
           message: userMessage,
           mode,
           ...(sessionId ? { sessionId } : {}),
+          ...(attachments.length > 0
+            ? {
+                attachmentIds: attachments
+                  .filter((a) => !a.loading && !a.id.startsWith("tmp-"))
+                  .map((a) => a.id),
+              }
+            : {}),
         }),
         signal: controller.signal,
       });
@@ -227,6 +404,9 @@ export function ChatPanel({
             }
             // Re-busca sidebar pra refletir nova msgCount e auto-title da 1ª msg
             setSidebarReloadKey((k) => k + 1);
+            // Re-busca painel de mudanças — turn que terminou pode ter editado
+            // o doc e gerado novas ChangeLog entries com snapshots.
+            setChangesReloadKey((k) => k + 1);
             onChatTurnComplete?.();
           } else if (event.type === "error") {
             setMessages((prev) =>
@@ -277,11 +457,25 @@ export function ChatPanel({
 
   async function handleSend() {
     if (!input.trim() || loading) return;
+    if (attaching) return; // espera anexos terminarem
     const userMessage = input.trim();
+    const attached = attachments;
     setInput("");
+    // Anexos viajam UMA vez por turn — limpa o chip rack apos enviar.
+    // O texto extraido fica no DB e pode ser referenciado em turns futuros
+    // se o usuario re-anexar (DELETE limpa de vez).
+    setAttachments([]);
+    // Prefix visual na mensagem do user: lista compacta de anexos enviados.
+    const attachmentNote =
+      attached.length > 0
+        ? attached.map((a) => `${a.source === "url" ? "🔗" : "📄"} ${a.name}`).join("  ")
+        : "";
+    const displayContent = attachmentNote
+      ? `${attachmentNote}\n\n${userMessage}`
+      : userMessage;
     setMessages((prev) => [
       ...prev,
-      { id: `user-${Date.now()}`, role: "user", content: userMessage },
+      { id: `user-${Date.now()}`, role: "user", content: displayContent },
     ]);
     await sendMessage(userMessage);
   }
@@ -333,6 +527,21 @@ export function ChatPanel({
             <div className="flex-1 min-w-0">
               <ModeHeader mode={mode} onChange={setMode} disabled={loading} />
             </div>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant={changesPanelOpen ? "secondary" : "ghost"}
+                  size="icon"
+                  className="h-7 w-7 shrink-0"
+                  onClick={() => setChangesPanelOpen((v) => !v)}
+                  aria-label="Mostrar mudanças"
+                >
+                  <GitCommit className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Mudanças deste chat</TooltipContent>
+            </Tooltip>
           </div>
 
           {switchingSession && (
@@ -364,23 +573,163 @@ export function ChatPanel({
           </div>
         </ScrollArea>
 
-        <div className="border-t pt-4 flex gap-2">
-          <Input
-            placeholder={
-              mode === "fast"
-                ? "Edição rápida — Haiku · ~3s"
-                : "Pergunte ou planeje uma alteração — Sonnet · ~20s"
-            }
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            disabled={loading}
+        <div className="border-t pt-4 space-y-2">
+          {(attachments.length > 0 || attachmentError) && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              {attachments.map((a) => (
+                <span
+                  key={a.id}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full border bg-muted/40 pl-2 pr-1 py-0.5 text-xs",
+                    a.loading && "opacity-60"
+                  )}
+                  title={
+                    a.source === "url" && a.sourceUrl
+                      ? a.sourceUrl
+                      : a.extractedChars
+                        ? `${a.extractedChars} chars extraidos`
+                        : undefined
+                  }
+                >
+                  {a.source === "url" ? (
+                    <Globe className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  ) : (
+                    <FileText className="h-3 w-3 shrink-0 text-muted-foreground" />
+                  )}
+                  <span className="max-w-[180px] truncate">{a.name}</span>
+                  {a.loading ? (
+                    <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveAttachment(a.id)}
+                      className="rounded-full p-0.5 hover:bg-muted-foreground/20"
+                      aria-label="Remover anexo"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </span>
+              ))}
+              {attachmentError && (
+                <span className="text-xs text-destructive">{attachmentError}</span>
+              )}
+            </div>
+          )}
+          <div className="flex gap-2 items-end">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) handleUploadFile(file);
+                if (fileInputRef.current) fileInputRef.current.value = "";
+              }}
+            />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 shrink-0 text-muted-foreground"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={loading || attaching || attachments.length >= 5}
+                  aria-label="Anexar PDF/DOCX"
+                >
+                  <Paperclip className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Anexar PDF/DOCX (max 5MB)</TooltipContent>
+            </Tooltip>
+            <Popover open={urlPopoverOpen} onOpenChange={setUrlPopoverOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-9 w-9 shrink-0 text-muted-foreground"
+                  disabled={loading || attaching || attachments.length >= 5}
+                  aria-label="Anexar URL"
+                >
+                  <Link2 className="h-4 w-4" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent side="top" align="start" className="w-80">
+                <div className="space-y-2">
+                  <p className="text-xs font-medium">Anexar URL</p>
+                  <p className="text-xs text-muted-foreground">
+                    Buscamos o texto da pagina e enviamos junto com sua mensagem.
+                  </p>
+                  <Input
+                    placeholder="https://..."
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleAttachUrl();
+                      }
+                    }}
+                  />
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setUrlInput("");
+                        setUrlPopoverOpen(false);
+                      }}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button
+                      size="sm"
+                      onClick={handleAttachUrl}
+                      disabled={!urlInput.trim() || attaching}
+                    >
+                      {attaching ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        "Anexar"
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </PopoverContent>
+            </Popover>
+            <Input
+              placeholder={
+                mode === "fast"
+                  ? "Edição rápida — Haiku · ~3s"
+                  : "Pergunte ou planeje uma alteração — Sonnet · ~20s"
+              }
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              disabled={loading}
+            />
+            <Button
+              size="icon"
+              onClick={handleSend}
+              disabled={loading || attaching || !input.trim()}
+            >
+              <Send className="h-4 w-4" />
+            </Button>
+          </div>
+        </div>
+        </div>
+
+        {changesPanelOpen && (
+          <ChangesPanel
+            contractId={contractId}
+            sessionId={sessionId}
+            reloadKey={changesReloadKey}
+            onClose={() => setChangesPanelOpen(false)}
           />
-          <Button size="icon" onClick={handleSend} disabled={loading || !input.trim()}>
-            <Send className="h-4 w-4" />
-          </Button>
-        </div>
-        </div>
+        )}
       </div>
     </TooltipProvider>
   );

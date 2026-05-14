@@ -186,6 +186,7 @@ vi.mock("@/lib/validation/schemas", async () => {
       message: z.string().min(1),
       mode: z.enum(["fast", "plan"]).default("plan"),
       sessionId: z.string().optional(),
+      attachmentIds: z.array(z.string()).optional(),
     }),
     // Newton — schemas reais (sem mock) para tests novos
     apiTokenCreateSchema: z.object({

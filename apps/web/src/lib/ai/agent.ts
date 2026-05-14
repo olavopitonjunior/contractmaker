@@ -34,6 +34,10 @@ interface AgentParams {
   /** Session específica pra continuar. Se omitido, usa a última não-arquivada
    *  ou cria uma nova. UI passa explicitamente quando há múltiplas sessions. */
   sessionId?: string;
+  /** IDs de ChatAttachment a anexar nesse turn — extractedText vai como
+   *  prefixo no prompt do user. Limitado pelo TEXT_CAP per-attachment já
+   *  aplicado no upload. */
+  attachmentIds?: string[];
 }
 
 const HAIKU_MODEL = "claude-haiku-4-5-20251001";
@@ -418,6 +422,33 @@ export async function* streamContractAgent(
       params.sessionId
     );
 
+    // 3.7. Anexos do turn — extractedText vira prefixo do prompt do user.
+    //      Guard: só anexos da session ativa.
+    let attachmentsBlock = "";
+    if (params.attachmentIds && params.attachmentIds.length > 0) {
+      const attachments = await prisma.chatAttachment.findMany({
+        where: {
+          id: { in: params.attachmentIds },
+          sessionId: activeSession.id,
+        },
+        select: { name: true, source: true, sourceUrl: true, extractedText: true },
+      });
+      if (attachments.length > 0) {
+        const parts = attachments
+          .filter((a) => a.extractedText && a.extractedText.trim().length > 0)
+          .map((a) => {
+            const icon = a.source === "url" ? "🔗" : "📄";
+            const label = a.source === "url" && a.sourceUrl
+              ? `${a.name} (${a.sourceUrl})`
+              : a.name;
+            return `${icon} ${label}:\n${a.extractedText}`;
+          });
+        if (parts.length > 0) {
+          attachmentsBlock = `ANEXOS DESTE TURN (referencia pro usuario — o contrato em si esta na proxima secao):\n\n${parts.join("\n\n---\n\n")}\n\n---\n`;
+        }
+      }
+    }
+
     const started: AgentEvent = {
       type: "started",
       mode,
@@ -461,7 +492,7 @@ export async function* streamContractAgent(
       ...history.map((m) => ({ role: m.role, content: m.content })),
       {
         role: "user" as const,
-        content: `${expertBlock}${contextMsg}${editReminderTemplate}\n\n---\nMENSAGEM DO USUÁRIO:\n${params.message}`,
+        content: `${expertBlock}${attachmentsBlock}${contextMsg}${editReminderTemplate}\n\n---\nMENSAGEM DO USUÁRIO:\n${params.message}`,
       },
     ];
 
@@ -546,6 +577,18 @@ export async function* streamContractAgent(
         // generator → event `error` → cliente vê chat morto. Empacotamos em
         // {error} pra que o tool_result evento normal seja emitido e o agente
         // continue a iteração ou termine com texto.
+        // Snapshot ANTES de executar — só vale a pena em writes contra GDoc.
+        // Read tools (validate, query_*) não mutam o doc, então não snapshot.
+        let htmlBefore: string | undefined;
+        if (isEditTool(block.name) && context.googleDocId) {
+          try {
+            const { getDocPlainText } = await import("@/lib/google/docs");
+            htmlBefore = await getDocPlainText(context.googleDocId);
+          } catch {
+            // Falha de Drive não bloqueia execução — segue sem snapshot.
+          }
+        }
+
         let result: ToolOutput;
         try {
           result = (await executeToolHandler(
@@ -557,6 +600,19 @@ export async function* streamContractAgent(
           const msg = err instanceof Error ? err.message : String(err);
           console.error(`[streamContractAgent] tool ${block.name} threw:`, err);
           result = { error: `Tool ${block.name} falhou: ${msg.slice(0, 200)}` };
+        }
+
+        // Snapshot DEPOIS — apenas se houve before (write tool + GDoc) e o
+        // result indica sucesso. Falha → htmlAfter fica igual a before, diff
+        // é vazio (UI não mostra o turn no painel).
+        let htmlAfter: string | undefined;
+        if (htmlBefore !== undefined && context.googleDocId && !result.error) {
+          try {
+            const { getDocPlainText } = await import("@/lib/google/docs");
+            htmlAfter = await getDocPlainText(context.googleDocId);
+          } catch {
+            htmlAfter = htmlBefore;
+          }
         }
 
         const success = !result.error;
@@ -592,6 +648,8 @@ export async function* streamContractAgent(
           summary: buildToolSummary(block.name, block.input as Record<string, unknown>),
           details: { tool: block.name, input: block.input, output: result },
           source: "ai",
+          htmlBefore,
+          htmlAfter,
         });
 
         toolResults.push({
@@ -669,8 +727,13 @@ export async function* streamContractAgent(
       }
     }
 
-    // Persist change logs
+    // Persist change logs. Cap de snapshot em 50kb pra não estourar Text col
+    // em turns que tocam contratos gigantes — o ChangesPanel já trunca pra UI
+    // de qualquer jeito.
     if (changeLogs.length > 0) {
+      const SNAPSHOT_CAP = 50_000;
+      const trim = (s: string | undefined) =>
+        s && s.length > SNAPSHOT_CAP ? s.slice(0, SNAPSHOT_CAP) : s ?? null;
       await prisma.contractChangeLog.createMany({
         data: changeLogs.map((log) => ({
           contractId: params.contractId,
@@ -679,6 +742,9 @@ export async function* streamContractAgent(
           summary: log.summary,
           details: log.details as object,
           source: log.source,
+          htmlBefore: trim(log.htmlBefore),
+          htmlAfter: trim(log.htmlAfter),
+          sessionId: activeSession.id,
         })),
       });
     }

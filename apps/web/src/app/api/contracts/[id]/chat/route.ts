@@ -60,6 +60,7 @@ export async function POST(
     orgId: auth.org.id,
     mode: parsed.data.mode,
     sessionId: parsed.data.sessionId,
+    attachmentIds: parsed.data.attachmentIds,
   };
 
   const stream = new ReadableStream({

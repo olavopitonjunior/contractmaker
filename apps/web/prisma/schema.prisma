@@ -683,11 +683,34 @@ model ChatSession {
   /// ordenar a sidebar "Recentes".
   updatedAt  DateTime @default(now()) @updatedAt
 
-  contract Contract      @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  user     User          @relation(fields: [userId], references: [id])
-  messages ChatMessage[]
+  contract    Contract         @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  user        User             @relation(fields: [userId], references: [id])
+  messages    ChatMessage[]
+  attachments ChatAttachment[]
 
   @@index([contractId, archived, updatedAt(sort: Desc)])
+}
+
+model ChatAttachment {
+  id            String   @id @default(cuid())
+  sessionId     String
+  /// Nome amigável (filename original ou hostname pra URLs).
+  name          String
+  /// "upload" = PDF/DOCX enviado pelo usuário; "url" = link extraído.
+  source        String
+  /// URL do Vercel Blob pra source=upload. Null pra source=url.
+  blobUrl       String?
+  /// URL original pra source=url. Null pra source=upload.
+  sourceUrl     String?
+  /// Texto extraído via OCR (PDF) ou Readability (URL). Pode ser null
+  /// enquanto a extração ainda está em curso.
+  extractedText String?  @db.Text
+  byteSize      Int?
+  createdAt     DateTime @default(now())
+
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
 }
 
 model ChatMessage {
@@ -806,9 +829,21 @@ model ContractChangeLog {
   details    Json?
   source     String   @default("user")
   createdAt  DateTime @default(now())
+  // Snapshot do plain text antes/depois do turn de edição (populado SOMENTE
+  // em turns que chamaram tools de write — reads não capturam). UI do
+  // ChangesPanel renderiza diff via lib `diff`. Cap de 50kb por snapshot.
+  htmlBefore String? @db.Text
+  htmlAfter  String? @db.Text
+  // Atribui o turn à session de chat — UI filtra "mudanças desta session"
+  // vs todas as mudanças do contrato. Null pra edições manuais no GDoc
+  // (capturadas pelo watch do Drive).
+  sessionId  String?
 
   contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
   user     User?    @relation("userChangeLogs", fields: [userId], references: [id])
+
+  @@index([contractId, createdAt(sort: Desc)])
+  @@index([sessionId])
 }
 
 // ============================================
