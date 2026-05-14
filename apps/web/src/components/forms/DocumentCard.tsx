@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Loader2, AlertCircle, X, CheckCircle2, RefreshCw, ExternalLink, Download } from "lucide-react";
+import { FileText, Loader2, AlertCircle, X, CheckCircle2, RefreshCw, ExternalLink, Download, Sparkles } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,7 +12,12 @@ import { cn } from "@/lib/utils";
 import type { Assignment } from "@/lib/forms/extracted-to-form";
 import { categoryLabel } from "@/lib/forms/extracted-to-form";
 
-export type DocumentCardStatus = "uploading" | "extracting" | "ready" | "failed";
+export type DocumentCardStatus =
+  | "uploading"
+  | "awaiting"
+  | "extracting"
+  | "ready"
+  | "failed";
 
 export interface DocumentCardData {
   id: string;
@@ -36,6 +41,11 @@ interface DocumentCardProps {
   onAssignmentChange?: (id: string, assignmentValue: string) => void;
   onRemove?: (id: string) => void;
   onRetry?: (id: string) => void;
+  /**
+   * Disparado quando o usuário clica em "Extrair com IA" pra um doc com
+   * status "awaiting". Caller faz POST /attachments/[id]/extract.
+   */
+  onExtract?: (id: string) => void;
   readOnly?: boolean;
 }
 
@@ -43,6 +53,8 @@ function statusLabel(status: DocumentCardStatus): string {
   switch (status) {
     case "uploading":
       return "Enviando…";
+    case "awaiting":
+      return "Aguardando extração";
     case "extracting":
       return "Analisando…";
     case "ready":
@@ -69,6 +81,7 @@ export function DocumentCard({
   onAssignmentChange,
   onRemove,
   onRetry,
+  onExtract,
   readOnly = false,
 }: DocumentCardProps) {
   const isImage = doc.mime.startsWith("image/");
@@ -128,6 +141,8 @@ export function DocumentCard({
                     <Loader2 className="h-3 w-3 animate-spin" />
                   ) : doc.status === "failed" ? (
                     <AlertCircle className="h-3 w-3 text-destructive" />
+                  ) : doc.status === "awaiting" ? (
+                    <Sparkles className="h-3 w-3 text-amber-600" />
                   ) : null}
                   {statusLabel(doc.status)}
                 </span>
@@ -154,6 +169,27 @@ export function DocumentCard({
             </Button>
           )}
         </div>
+
+        {/* Status "awaiting": doc anexado, mas extração IA não rolou ainda.
+            Usuário decide quando gastar tokens — alguns docs são apenas
+            evidência visual e não precisam de OCR. */}
+        {doc.status === "awaiting" && !readOnly && onExtract && (
+          <div className="flex flex-wrap items-center gap-1.5 rounded bg-amber-50 border border-amber-200 px-2 py-1.5 text-[11px] dark:bg-amber-950/40 dark:border-amber-900">
+            <span className="text-amber-900 dark:text-amber-200 flex-1 min-w-0">
+              Anexado. Quer que a IA leia e preencha os campos automaticamente?
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-6 px-2 text-[11px] border-amber-400 text-amber-900 hover:bg-amber-100 dark:text-amber-200 dark:hover:bg-amber-900/50"
+              onClick={() => onExtract(doc.id)}
+            >
+              <Sparkles className="h-3 w-3 mr-1" />
+              Extrair com IA
+            </Button>
+          </div>
+        )}
 
         {doc.status === "failed" && (doc.error || true) && (
           <div className="flex flex-col gap-1.5 rounded bg-destructive/10 px-2 py-2 text-[11px] text-destructive">

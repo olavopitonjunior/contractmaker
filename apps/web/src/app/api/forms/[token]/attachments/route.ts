@@ -3,7 +3,6 @@ import { createHash } from "crypto";
 import { Prisma } from "@prisma/client";
 import { put, del } from "@vercel/blob";
 import { prisma } from "@/lib/db/prisma";
-import { processOcrQueue } from "@/lib/ai/ocr-worker";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -123,10 +122,15 @@ export async function POST(
       token: blobToken,
     });
 
-    // Phase F.I-α — status inicial:
+    // Status inicial — economia de tokens:
     //   "ready" se content-hash bateu (cache pre-warm resolveu imediato)
-    //   "queued" caso contrário — worker vai pegar
-    const initialStatus = cached ? "ready" : "queued";
+    //   "awaiting_user" caso contrário — fica parado até o usuário clicar
+    //                    "Extrair com IA" no UI. Worker do cron NÃO pega
+    //                    awaiting_user, só queued/extracting. Mudança feita
+    //                    para que documentos visuais (foto da fachada,
+    //                    contrato anterior só pra arquivar) não queimem
+    //                    tokens Gemini.
+    const initialStatus = cached ? "ready" : "awaiting_user";
 
     const attachment = await prisma.formAttachment.create({
       data: {
@@ -141,14 +145,10 @@ export async function POST(
       },
     });
 
-    // Phase F.I-α — dispara worker fire-and-forget se não foi cache hit.
-    // Worker processa em background, client polla GET /attachments.
-    // Se a função serverless morrer antes de terminar, o cron pega.
-    if (!cached) {
-      void processOcrQueue({ formId: form.id }).catch((err) => {
-        console.error("[attachments POST] worker dispatch failed:", err);
-      });
-    }
+    // NÃO dispara worker fire-and-forget. Extração agora é on-demand:
+    // o usuário clica "Extrair com IA" no card e o cliente bate em
+    // POST /attachments/[id]/extract. Cache hit (cached !== null) já tem
+    // dados sem chamada Gemini.
 
     return NextResponse.json(
       {

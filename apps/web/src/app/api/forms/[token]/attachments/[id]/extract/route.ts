@@ -120,8 +120,10 @@ export async function POST(
       await prisma.formAttachment.update({
         where: { id: attachment.id },
         data: {
+          status: "ready",
           category: cached.category,
           extractedData: cached.extractedData as object,
+          extractError: null,
         },
       });
       return NextResponse.json({
@@ -229,8 +231,10 @@ export async function POST(
     await prisma.formAttachment.update({
       where: { id: attachment.id },
       data: {
+        status: "ready",
         category: result.documentType,
         extractedData: payload as object,
+        extractError: null,
         // Leave extractingStartedAt set — it's a no-op now that extractedData
         // is non-null (the claim guard requires extractedData: null).
       },
@@ -242,11 +246,20 @@ export async function POST(
       extractedData: payload,
     });
   } catch (err) {
-    // Release the lock so the user (or a retry) can claim it again.
+    const raw = err instanceof Error ? err.message : String(err);
+    const friendly = humanizeExtractError(raw);
+    // Marca como failed + libera lock pra retry. Antes ficava no status
+    // anterior ("queued"/"awaiting_user") sem feedback — UI mostrava
+    // skeleton eterno. Agora vira "failed" com mensagem clara + botão
+    // "Tentar novamente" no card.
     await prisma.formAttachment
       .update({
         where: { id: attachment.id },
-        data: { extractingStartedAt: null },
+        data: {
+          status: "failed",
+          extractError: friendly,
+          extractingStartedAt: null,
+        },
       })
       .catch((releaseErr) => {
         console.warn(
@@ -254,12 +267,8 @@ export async function POST(
           releaseErr instanceof Error ? releaseErr.message : String(releaseErr)
         );
       });
-    const raw = err instanceof Error ? err.message : String(err);
     console.error("[form extract] failed:", raw);
-    return NextResponse.json(
-      { error: humanizeExtractError(raw) },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: friendly }, { status: 500 });
   }
 }
 

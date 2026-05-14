@@ -307,14 +307,19 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
           const extracted = a.extractedData || {};
           const fields = extracted.fields || null;
           const assignment = suggestAssignment(a.category, fields || {}, snapshot);
-          // Phase F.I-α — mapeia o novo status enum do server para o status
-          // do card. Server retorna: "queued" | "extracting" | "ready" | "failed"
+          // Mapeia status enum do server pro status do card.
+          // Server: "awaiting_user" | "queued" | "extracting" | "ready" | "failed"
+          // UI:     "awaiting"      | "extracting"             | "ready" | "failed"
+          // - awaiting_user: doc subido, IA não rolou — UI mostra botão
+          //                  "Extrair com IA" pra usuário decidir.
+          // - queued/extracting: legacy do worker — mostra spinner.
           let cardStatus: DocumentCardData["status"];
           if (a.status === "ready") cardStatus = "ready";
           else if (a.status === "failed") cardStatus = "failed";
+          else if (a.status === "awaiting_user") cardStatus = "awaiting";
           else if (a.status === "extracting" || a.status === "queued") cardStatus = "extracting";
           else if (fields) cardStatus = "ready";
-          else cardStatus = "failed";
+          else cardStatus = "awaiting";
           // Phase F.I-α+fix — timestamp de quando entrou em extracting
           // (usado pelo DocumentCard para mostrar aviso > 60s)
           const extractingSince =
@@ -981,29 +986,48 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
 
       {docs.length > 0 && (
         <div className="space-y-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <p className="text-sm text-muted-foreground">
-              {/* H.11 (Phase H, 2026-04-18) — antes só "11 documentos" com
-                  possível drift vs cards renderizados. Agora breakdown
-                  explícito: prontos / processando / falhados de total. */}
               {readyCount} de {docs.length} prontos
               {hasPending && ` · ${docs.filter((d) => d.status === "uploading" || d.status === "extracting").length} processando`}
+              {docs.some((d) => d.status === "awaiting") &&
+                ` · ${docs.filter((d) => d.status === "awaiting").length} aguardando extração`}
               {docs.some((d) => d.status === "failed") &&
                 ` · ${docs.filter((d) => d.status === "failed").length} com falha`}
             </p>
-            <Button
-              type="button"
-              onClick={handleApply}
-              disabled={readyCount === 0 || hasUploading || needsExplicitAssignment}
-              size="sm"
-              title={
-                needsExplicitAssignment
-                  ? `${unassignedPersonDocs.length} documento(s) sem atribuição — escolha vendedor/comprador no dropdown antes de aplicar`
-                  : undefined
-              }
-            >
-              Aplicar aos campos ({readyCount})
-            </Button>
+            <div className="flex items-center gap-2 flex-wrap">
+              {docs.some((d) => d.status === "awaiting") && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const awaiting = docs.filter((d) => d.status === "awaiting");
+                    awaiting.forEach((d) => handleRetry(d.id));
+                    toast.info(
+                      `Extraindo ${awaiting.length} documento(s) com IA…`,
+                    );
+                  }}
+                  title="Dispara a IA Gemini em todos os documentos aguardando extração. Consome tokens — só clique nos docs que você quer auto-preencher."
+                >
+                  <Sparkles className="h-3.5 w-3.5 mr-1" />
+                  Extrair todos com IA ({docs.filter((d) => d.status === "awaiting").length})
+                </Button>
+              )}
+              <Button
+                type="button"
+                onClick={handleApply}
+                disabled={readyCount === 0 || hasUploading || needsExplicitAssignment}
+                size="sm"
+                title={
+                  needsExplicitAssignment
+                    ? `${unassignedPersonDocs.length} documento(s) sem atribuição — escolha vendedor/comprador no dropdown antes de aplicar`
+                    : undefined
+                }
+              >
+                Aplicar aos campos ({readyCount})
+              </Button>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
@@ -1015,6 +1039,7 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
                 onAssignmentChange={handleAssignmentChange}
                 onRemove={handleRemove}
                 onRetry={handleRetry}
+                onExtract={handleRetry}
               />
             ))}
           </div>
