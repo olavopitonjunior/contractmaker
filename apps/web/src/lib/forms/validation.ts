@@ -335,8 +335,12 @@ export const STEP_LABELS = [
   "Comissão e Config",
 ] as const;
 
-// Campos obrigatorios por etapa (usado por form.trigger para validacao)
-export const STEP_REQUIRED_FIELDS: ReadonlyArray<ReadonlyArray<string>> = [
+// Campos obrigatórios por etapa — array LEGADO mantido pra retrocompat.
+// A fonte canônica passou pra `lib/forms/presets.ts` que resolve baseado em
+// OrgFormSettings.preset. Este array é referenciado pelo preset "legado"
+// (default em orgs criadas antes da migração 20260515120000_org_form_settings).
+// NÃO mexer aqui — mudar este array afeta orgs legadas sem aviso.
+export const STEP_REQUIRED_FIELDS_LEGACY: ReadonlyArray<ReadonlyArray<string>> = [
   [],
   ["vendedores"],
   ["compradores"],
@@ -346,3 +350,8 @@ export const STEP_REQUIRED_FIELDS: ReadonlyArray<ReadonlyArray<string>> = [
   [],
   [],
 ] as const;
+
+// Alias mantido pra qualquer caller legado durante a transição.
+// Novos callers devem usar `resolveRequiredFields(orgFormSettings, stepIndex)`
+// de `lib/forms/presets.ts`.
+export const STEP_REQUIRED_FIELDS = STEP_REQUIRED_FIELDS_LEGACY;

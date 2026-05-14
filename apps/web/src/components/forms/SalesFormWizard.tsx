@@ -5,10 +5,9 @@ import { useForm, useWatch } from "react-hook-form";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
-  dadosContratoSchema,
   DadosContratoForm,
   STEP_LABELS,
-  STEP_REQUIRED_FIELDS,
+  STEP_REQUIRED_FIELDS_LEGACY,
 } from "@/lib/forms/validation";
 import { toast } from "sonner";
 import { useAutoSave } from "@/hooks/use-auto-save";
@@ -21,13 +20,62 @@ import { PagamentoStep } from "@/components/forms/steps/PagamentoStep";
 import { PosseTituloStep } from "@/components/forms/steps/PosseTituloStep";
 import { ComissaoConfigStep } from "@/components/forms/steps/ComissaoConfigStep";
 import { PrivacyConsent } from "@/components/legal/PrivacyConsent";
+import { RequiredFieldMarker } from "@/components/forms/RequiredFieldMarker";
+import { VoiceInputButton } from "@/components/forms/VoiceInputButton";
+
+// Apenas steps com schema definido em `lib/ai/voice-extract.ts` ativam o
+// botão de voz. Steps 0, 4, 6, 7 (Documentos, Status/Débitos, Posse/Título,
+// Comissão/Config) ficam fora da v1 — preenchimento por voz não casa bem
+// com upload de docs ou cálculo de multa.
+const STEPS_WITH_VOICE = new Set([1, 2, 3, 5]);
 
 interface SalesFormWizardProps {
   token: string;
   initialData: Record<string, unknown>;
+  /**
+   * Required fields por step calculado server-side a partir de
+   * OrgFormSettings.preset + customRequiredPaths (PR 1).
+   * Quando ausente, cai no array legado pra manter retrocompat com
+   * callers que ainda não passam (testes, eventual standalone).
+   */
+  requiredFieldsByStep?: readonly (readonly string[])[];
+  /**
+   * Quando true, mostra banner no topo informando que os dados foram
+   * extraídos de uma proposta enviada pelo corretor e devem ser revisados
+   * antes do finalize. Vem de `?prefilled=1` no `/f/[token]`.
+   */
+  prefilled?: boolean;
+  /**
+   * URL do FormAttachment da proposta original (PDF/DOCX). Quando presente,
+   * banner ganha botão "Ver original".
+   */
+  proposalAttachmentUrl?: string | null;
+  /**
+   * Subset de step indexes (0..7) a mostrar. Usado por subtoken (PR 4)
+   * pra esconder steps que não pertencem ao role (vendedor não vê
+   * comprador, comprador não vê imóvel/comissão/pagamento). Quando
+   * ausente, mostra todos os 8 steps (comportamento padrão).
+   */
+  stepIndexes?: readonly number[];
+  /**
+   * Endpoint custom pro auto-save (PR 4). Default `/api/forms/${token}`.
+   * Subtoken passa `/api/forms/participant/${subtoken}`.
+   */
+  endpoint?: string;
+  /**
+   * pathScope pro useAutoSave (PR 4). Subtoken passa `ROLE_PATHS[role]`
+   * pra mandar apenas keys autorizadas.
+   */
+  pathScope?: readonly string[];
+  /**
+   * Finalize do subtoken (PR 4): em vez de PATCH `status: "completo"` no
+   * form principal (que dispara geração de contrato), PATCH no subtoken
+   * com `markCompleted: true`. Subtoken nunca "finaliza" o form principal.
+   */
+  finalizeMode?: "main" | "participant";
 }
 
-const TOTAL_STEPS = STEP_LABELS.length;
+const FULL_STEP_INDEXES: readonly number[] = [0, 1, 2, 3, 4, 5, 6, 7];
 
 function SaveStatusBadge({
   status,
@@ -69,34 +117,101 @@ function SaveStatusBadge({
   );
 }
 
+type StepState = "completed" | "current" | "pending-warning" | "untouched";
+
+interface StepIndicatorProps {
+  currentStep: number;
+  totalSteps: number;
+  /** Labels já filtradas pelos steps visíveis (subtoken vê subset). */
+  stepLabels: readonly string[];
+  visitedSteps: ReadonlySet<number>;
+  /**
+   * Computa estado de cada step para destacar "pending-warning" — visitado
+   * mas com required fields ainda não preenchidos. Recebe cursor virtual
+   * (0..N-1), não trueIndex.
+   */
+  stepHasErrors: (stepIndex: number) => boolean;
+  onStepClick: (target: number) => void;
+}
+
 function StepIndicator({
   currentStep,
   totalSteps,
-}: {
-  currentStep: number;
-  totalSteps: number;
-}) {
+  stepLabels,
+  visitedSteps,
+  stepHasErrors,
+  onStepClick,
+}: StepIndicatorProps) {
+  // Keyboard: ←/→ navegam para vizinhos. Hold Shift+arrow não pula validation —
+  // mesma regra do click. Tab continua nativo (passa por cada bullet).
+  const handleKeyDown = (e: React.KeyboardEvent, index: number) => {
+    if (e.key === "ArrowLeft" && index > 0) {
+      e.preventDefault();
+      onStepClick(index - 1);
+    } else if (e.key === "ArrowRight" && index < totalSteps - 1) {
+      e.preventDefault();
+      onStepClick(index + 1);
+    }
+  };
+
+  function getState(index: number): StepState {
+    if (index === currentStep) return "current";
+    if (index < currentStep) return "completed";
+    if (visitedSteps.has(index) && stepHasErrors(index)) {
+      return "pending-warning";
+    }
+    return "untouched";
+  }
+
   return (
-    <div className="w-full overflow-x-auto pb-2">
+    <div
+      role="tablist"
+      aria-label="Etapas do formulário"
+      className="w-full overflow-x-auto pb-2"
+    >
       <div className="flex items-start min-w-max">
-        {STEP_LABELS.map((label, index) => {
+        {stepLabels.map((label, index) => {
           const stepNumber = index + 1;
-          const isCompleted = index < currentStep;
-          const isCurrent = index === currentStep;
+          const state = getState(index);
+          const isCurrent = state === "current";
+          const isCompleted = state === "completed";
+          const isPending = state === "pending-warning";
+
+          const bulletClass = {
+            completed:
+              "bg-primary border-primary text-primary-foreground hover:bg-primary/90",
+            current: "bg-primary/10 border-primary text-primary",
+            "pending-warning":
+              "bg-amber-50 border-amber-400 text-amber-700 hover:bg-amber-100 dark:bg-amber-950/60 dark:border-amber-600 dark:text-amber-300",
+            untouched:
+              "bg-background border-border text-muted-foreground hover:bg-muted hover:border-muted-foreground/30",
+          }[state];
+
+          const labelClass = isCurrent
+            ? "text-primary font-medium"
+            : isCompleted
+              ? "text-foreground"
+              : isPending
+                ? "text-amber-700 dark:text-amber-300 font-medium"
+                : "text-muted-foreground";
 
           return (
             <div key={index} className="flex items-start">
               <div className="flex flex-col items-center gap-1.5">
-                <div
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={isCurrent}
+                  aria-current={isCurrent ? "step" : undefined}
+                  aria-label={`Etapa ${stepNumber}: ${label}${
+                    isPending ? " (pendências)" : ""
+                  }`}
+                  onClick={() => onStepClick(index)}
+                  onKeyDown={(e) => handleKeyDown(e, index)}
                   className={`
-                    flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold border-2 transition-all
-                    ${
-                      isCompleted
-                        ? "bg-primary border-primary text-primary-foreground"
-                        : isCurrent
-                        ? "bg-primary/10 border-primary text-primary"
-                        : "bg-background border-border text-muted-foreground"
-                    }
+                    flex h-8 w-8 items-center justify-center rounded-full text-sm font-semibold border-2 transition-all cursor-pointer
+                    focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2
+                    ${bulletClass}
                   `}
                 >
                   {isCompleted ? (
@@ -113,21 +228,20 @@ function StepIndicator({
                         d="M5 13l4 4L19 7"
                       />
                     </svg>
+                  ) : isPending ? (
+                    "!"
                   ) : (
                     stepNumber
                   )}
-                </div>
-                <span
-                  className={`text-xs whitespace-nowrap max-w-[80px] text-center leading-tight ${
-                    isCurrent
-                      ? "text-primary font-medium"
-                      : isCompleted
-                      ? "text-foreground"
-                      : "text-muted-foreground"
-                  }`}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onStepClick(index)}
+                  className={`text-xs whitespace-nowrap max-w-[80px] text-center leading-tight cursor-pointer hover:underline ${labelClass}`}
+                  tabIndex={-1}
                 >
                   {label}
-                </span>
+                </button>
               </div>
 
               {index < totalSteps - 1 && (
@@ -272,13 +386,36 @@ const defaultFormValues: Partial<DadosContratoForm> = {
   },
 };
 
-export function SalesFormWizard({ token, initialData }: SalesFormWizardProps) {
+export function SalesFormWizard({
+  token,
+  initialData,
+  requiredFieldsByStep,
+  prefilled,
+  proposalAttachmentUrl,
+  stepIndexes,
+  endpoint,
+  pathScope,
+  finalizeMode = "main",
+}: SalesFormWizardProps) {
+  // `visibleStepIndexes` mapeia cursor virtual (0..N-1) para índice "real"
+  // dos 8 steps existentes. Default = todos os 8. Subtoken passa subset.
+  const visibleStepIndexes: readonly number[] = stepIndexes ?? FULL_STEP_INDEXES;
+  const TOTAL_STEPS = visibleStepIndexes.length;
+
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
   const [generatedContractId, setGeneratedContractId] = useState<string | null>(null);
   const [generatedDealId, setGeneratedDealId] = useState<string | null>(null);
+  // Incrementa toda vez que validateAndNavigate falha — RequiredFieldMarker observa
+  // pra disparar scroll/focus no primeiro [aria-invalid="true"].
+  const [failedTriggerCount, setFailedTriggerCount] = useState(0);
+  // Cursors virtuais visitados (não trueIndexes). Step 0 (virtual) entra
+  // na inicialização — é o primeiro step visível pro role.
+  const [visitedSteps, setVisitedSteps] = useState<ReadonlySet<number>>(
+    () => new Set([0]),
+  );
 
   const form = useForm<DadosContratoForm>({
     defaultValues: {
@@ -289,47 +426,141 @@ export function SalesFormWizard({ token, initialData }: SalesFormWizardProps) {
   });
 
   const watchedData = useWatch({ control: form.control }) as Record<string, unknown>;
-  const { status: saveStatus } = useAutoSave(token, watchedData);
+  const autoSaveEndpoint = endpoint ?? `/api/forms/${token}`;
+  const { status: saveStatus } = useAutoSave(token, watchedData, {
+    endpoint: autoSaveEndpoint,
+    pathScope,
+  });
 
   const isLastStep = currentStep === TOTAL_STEPS - 1;
 
-  const goToNext = async () => {
-    // Validate required fields for current step before advancing
-    const fieldsToValidate = STEP_REQUIRED_FIELDS[currentStep];
-    if (fieldsToValidate.length > 0) {
-      const isValid = await form.trigger(fieldsToValidate as any);
-      if (!isValid) {
-        toast.error("Preencha os campos obrigatórios antes de avançar.");
-        return;
+  // Index "verdadeiro" no schema de 8 steps. Usado pra resolver label,
+  // required fields e step component.
+  const currentTrueIndex = visibleStepIndexes[currentStep] ?? 0;
+
+  // Fallback pro array legado quando server não passa (testes etc.).
+  const effectiveRequiredFields: readonly (readonly string[])[] =
+    requiredFieldsByStep ?? STEP_REQUIRED_FIELDS_LEGACY;
+  const currentRequiredFields = effectiveRequiredFields[currentTrueIndex] ?? [];
+
+  /**
+   * Navega para o step target. Pra forward (target > current), revalida cada
+   * step intermediário; primeiro fail interrompe e pousa o usuário no step
+   * com erro. Pra backward (target ≤ current), navega direto sem revalidar —
+   * usuário pode voltar livremente pra revisar.
+   *
+   * Marca todos os steps por onde a transição passou como visited (mesmo o
+   * step que falhou), permitindo o StepIndicator destacar pendências em
+   * cinza-âmbar pra steps que o usuário "encostou".
+   */
+  const validateAndNavigate = async (target: number): Promise<boolean> => {
+    if (target < 0 || target >= TOTAL_STEPS) return false;
+    if (target === currentStep) return true;
+
+    if (target > currentStep) {
+      for (let i = currentStep; i < target; i++) {
+        const trueIndex = visibleStepIndexes[i] ?? i;
+        const stepFields = effectiveRequiredFields[trueIndex] ?? [];
+        // Marca step como visited antes de validar — quem visita primeiro
+        // gera o sinal de "pendência conhecida" se faltar coisa.
+        setVisitedSteps((prev) => {
+          if (prev.has(i)) return prev;
+          const next = new Set(prev);
+          next.add(i);
+          return next;
+        });
+        if (stepFields.length > 0) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const isValid = await form.trigger(stepFields as any);
+          if (!isValid) {
+            setFailedTriggerCount((n) => n + 1);
+            toast.error(
+              `Preencha os campos obrigatórios da etapa ${i + 1} antes de avançar.`,
+            );
+            setCurrentStep(i);
+            window.scrollTo({ top: 0, behavior: "smooth" });
+            return false;
+          }
+        }
       }
     }
-    if (currentStep < TOTAL_STEPS - 1) {
-      setCurrentStep((prev) => prev + 1);
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
+
+    setCurrentStep(target);
+    setVisitedSteps((prev) => {
+      if (prev.has(target)) return prev;
+      const next = new Set(prev);
+      next.add(target);
+      return next;
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+    return true;
   };
 
-  const goToPrev = () => {
-    if (currentStep > 0) {
-      setCurrentStep((prev) => prev - 1);
-      window.scrollTo({ top: 0, behavior: "smooth" });
+  const goToNext = () => validateAndNavigate(currentStep + 1);
+  const goToPrev = () => validateAndNavigate(currentStep - 1);
+
+  /**
+   * Reflete em tempo real se um step VIRTUAL (cursor) tem required fields
+   * com erro. Resolve trueIndex via visibleStepIndexes pra lookup correto.
+   * Step "current" pode estar pendente mas não é highlight (já é foco).
+   * Step "completed" também pode estar pendente se o user voltou e
+   * apagou algo — re-marcação correta exige reagir a errors.
+   */
+  const stepHasErrors = (stepIndex: number): boolean => {
+    const trueIndex = visibleStepIndexes[stepIndex] ?? stepIndex;
+    const paths = effectiveRequiredFields[trueIndex] ?? [];
+    if (paths.length === 0) return false;
+    const errors = form.formState.errors as Record<string, unknown>;
+    for (const path of paths) {
+      const parts = path.split(".");
+      let cur: unknown = errors;
+      for (const part of parts) {
+        if (cur == null || typeof cur !== "object") {
+          cur = undefined;
+          break;
+        }
+        cur = (cur as Record<string, unknown>)[part];
+      }
+      if (cur && typeof cur === "object") {
+        const maybeMsg = (cur as { message?: unknown }).message;
+        if (typeof maybeMsg === "string" || Object.keys(cur).length > 0) {
+          return true;
+        }
+      }
     }
+    return false;
   };
 
   const handleFinalize = async () => {
     setIsSubmitting(true);
     try {
-      const res = await fetch(`/api/forms/${token}`, {
+      // Subtoken (PR 4): PATCH no endpoint do participant com markCompleted.
+      // Form principal NÃO transiciona pra "completo" — quem fecha o form
+      // inteiro é o admin via token principal. Subtoken só sinaliza "essa
+      // parte terminou de preencher".
+      const isParticipant = finalizeMode === "participant";
+      const fullValues = form.getValues();
+      const body = isParticipant
+        ? {
+            dataJson: pathScope
+              ? Object.fromEntries(
+                  Object.entries(fullValues as Record<string, unknown>).filter(
+                    ([k]) => pathScope.includes(k),
+                  ),
+                )
+              : fullValues,
+            markCompleted: true,
+          }
+        : { dataJson: fullValues, status: "completo" };
+
+      const res = await fetch(autoSaveEndpoint, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          dataJson: form.getValues(),
-          status: "completo",
-        }),
+        body: JSON.stringify(body),
       });
 
       if (res.ok) {
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         if (data.contractId) setGeneratedContractId(data.contractId);
         if (data.dealId) setGeneratedDealId(data.dealId);
         setIsComplete(true);
@@ -399,6 +630,34 @@ export function SalesFormWizard({ token, initialData }: SalesFormWizardProps) {
 
   return (
     <div className="w-full max-w-4xl mx-auto">
+      {/* Banner "dados extraídos da proposta" — só com ?prefilled=1 */}
+      {prefilled && (
+        <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 dark:border-amber-700 dark:bg-amber-950/40">
+          <div className="flex items-start gap-3 flex-wrap">
+            <div className="flex-1 min-w-[200px]">
+              <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+                Dados extraídos da proposta
+              </p>
+              <p className="text-xs text-amber-800/80 dark:text-amber-300/80 mt-0.5">
+                Revise cada etapa antes de finalizar. A extração pode ter
+                interpretado campos errado — é seguro corrigir.
+              </p>
+            </div>
+            {proposalAttachmentUrl && (
+              <Button asChild size="sm" variant="outline" className="shrink-0">
+                <a
+                  href={proposalAttachmentUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Ver original
+                </a>
+              </Button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Header */}
       <div className="mb-6 space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
@@ -408,19 +667,50 @@ export function SalesFormWizard({ token, initialData }: SalesFormWizardProps) {
             </h1>
             <p className="text-sm text-muted-foreground mt-0.5">
               Etapa {currentStep + 1} de {TOTAL_STEPS} &mdash;{" "}
-              {STEP_LABELS[currentStep]}
+              {STEP_LABELS[currentTrueIndex]}
             </p>
           </div>
           <SaveStatusBadge status={saveStatus} />
         </div>
 
-        <StepIndicator currentStep={currentStep} totalSteps={TOTAL_STEPS} />
+        <StepIndicator
+          currentStep={currentStep}
+          totalSteps={TOTAL_STEPS}
+          stepLabels={visibleStepIndexes.map((i) => STEP_LABELS[i])}
+          visitedSteps={visitedSteps}
+          stepHasErrors={stepHasErrors}
+          onStepClick={(target) => {
+            void validateAndNavigate(target);
+          }}
+        />
 
         <Separator />
       </div>
 
-      {/* Step Content */}
-      <div>{stepComponents[currentStep]}</div>
+      {/* Sticky bolha de pendências — substitui toast genérico de "Preencha os campos" */}
+      <RequiredFieldMarker
+        requiredFields={currentRequiredFields}
+        errors={form.formState.errors}
+        trigger={failedTriggerCount}
+      />
+
+      {/* Voice input — só nos steps que têm schema mapeado em voice-extract.ts */}
+      {STEPS_WITH_VOICE.has(currentTrueIndex) && (
+        <div className="mb-3 flex items-center justify-end gap-2">
+          <span className="text-xs text-muted-foreground hidden sm:inline">
+            Prefere falar?
+          </span>
+          <VoiceInputButton
+            form={form as never}
+            stepIndex={currentTrueIndex}
+            endpoint={`${autoSaveEndpoint}/voice-extract`}
+            pathScope={pathScope}
+          />
+        </div>
+      )}
+
+      {/* Step Content — resolve trueIndex pra mapear no array de 8 components */}
+      <div>{stepComponents[currentTrueIndex]}</div>
 
       {/* LGPD consent — exibido só na última etapa */}
       {isLastStep && (
@@ -446,21 +736,25 @@ export function SalesFormWizard({ token, initialData }: SalesFormWizardProps) {
             Anterior
           </Button>
 
-          {/* Progress dots */}
+          {/* Progress dots — passam por validateAndNavigate igual ao stepper top */}
           <div className="hidden sm:flex items-center gap-1.5">
             {Array.from({ length: TOTAL_STEPS }).map((_, i) => (
               <button
                 key={i}
                 type="button"
-                onClick={() => setCurrentStep(i)}
+                onClick={() => {
+                  void validateAndNavigate(i);
+                }}
                 className={`h-2 rounded-full transition-all ${
                   i === currentStep
                     ? "w-5 bg-primary"
                     : i < currentStep
-                    ? "w-2 bg-primary/50"
-                    : "w-2 bg-border"
+                      ? "w-2 bg-primary/50"
+                      : visitedSteps.has(i) && stepHasErrors(i)
+                        ? "w-2 bg-amber-400"
+                        : "w-2 bg-border"
                 }`}
-                aria-label={`Ir para etapa ${i + 1}: ${STEP_LABELS[i]}`}
+                aria-label={`Ir para etapa ${i + 1}: ${STEP_LABELS[visibleStepIndexes[i] ?? i]}`}
               />
             ))}
           </div>

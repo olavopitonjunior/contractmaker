@@ -5,9 +5,18 @@ import { SalesFormWizard } from "@/components/forms/SalesFormWizard";
 interface FormPageClientProps {
   token: string;
   initialData: Record<string, unknown>;
+  requiredFieldsByStep: readonly (readonly string[])[];
+  prefilled?: boolean;
+  proposalAttachmentUrl?: string | null;
 }
 
-export function FormPageClient({ token, initialData }: FormPageClientProps) {
+export function FormPageClient({
+  token,
+  initialData,
+  requiredFieldsByStep,
+  prefilled,
+  proposalAttachmentUrl,
+}: FormPageClientProps) {
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <header className="border-b bg-card px-6 py-4 shrink-0">
@@ -19,7 +28,13 @@ export function FormPageClient({ token, initialData }: FormPageClientProps) {
         </div>
       </header>
       <main className="flex-1 mx-auto w-full max-w-4xl p-6 pb-16">
-        <SalesFormWizard token={token} initialData={initialData} />
+        <SalesFormWizard
+          token={token}
+          initialData={initialData}
+          requiredFieldsByStep={requiredFieldsByStep}
+          prefilled={prefilled}
+          proposalAttachmentUrl={proposalAttachmentUrl}
+        />
       </main>
     </div>
   );

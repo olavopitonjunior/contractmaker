@@ -15,6 +15,7 @@ build/
 .env.development.local
 .env.test.local
 .env.production.local
+.env.vercel*
 
 # debug
 npm-debug.log*
@@ -25,6 +26,11 @@ yarn-error.log*
 .DS_Store
 *.pem
 Thumbs.db
+desktop.ini
+
+# QA fixtures (binários soltos no working dir)
+/Modelo teste.pdf
+/Modelo*.pdf
 
 # storage
 .storage/

@@ -129,6 +129,7 @@ model Organization {
   invitations         OrgInvitation[]
   pipelines           Pipeline[]
   forms               SalesForm[]
+  formSettings        OrgFormSettings?
   templates           ContractTemplate[]
   clauses             Clause[]
   agentConfig         AgentConfig?
@@ -507,9 +508,36 @@ model SalesForm {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  org         Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  deal        Deal?
+  org          Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  deal         Deal?
+  attachments  FormAttachment[]
+  participants SalesFormParticipant[]
+}
+
+// Subtoken por parte (vendedor/comprador) pro mesmo SalesForm.
+// O admin gera links isolados pra cada parte preencher só seus dados —
+// vendedor não vê dados do comprador e vice-versa. Token é JWT-HMAC com
+// AUTH_SECRET, expira em 7d. Server enforça allowlist de paths via
+// `deepMergeAtPaths` no PATCH e filtra dataJson na leitura.
+//
+// `partyIndex` permite múltiplos vendedores/compradores no futuro (v1
+// suporta apenas 1+1 por form, mas a coluna já existe pra evitar
+// migração quebrando linha).
+model SalesFormParticipant {
+  id            String    @id @default(cuid())
+  formId        String
+  role          String // "vendedor" | "comprador"
+  partyIndex    Int       @default(0)
+  token         String    @unique
+  tokenExp      DateTime
+  completedAt   DateTime?
+  lastAccessAt  DateTime?
+  createdAt     DateTime  @default(now())
+
+  form        SalesForm        @relation(fields: [formId], references: [id], onDelete: Cascade)
   attachments FormAttachment[]
+
+  @@index([formId, role])
 }
 
 // ============================================
@@ -780,6 +808,10 @@ model ContractChangeLog {
 model FormAttachment {
   id                  String    @id @default(cuid())
   formId              String
+  // Quando upload veio de um subtoken (PR 4), aponta para o participant.
+  // Null = upload pelo admin via token principal. Usado pra filtrar visão
+  // por parte: vendedor não vê documentos subidos pelo comprador.
+  participantId       String?
   filename            String
   mime                String
   url                 String
@@ -805,11 +837,13 @@ model FormAttachment {
   extractError        String?
   createdAt           DateTime  @default(now())
 
-  form SalesForm @relation(fields: [formId], references: [id], onDelete: Cascade)
+  form        SalesForm             @relation(fields: [formId], references: [id], onDelete: Cascade)
+  participant SalesFormParticipant? @relation(fields: [participantId], references: [id], onDelete: SetNull)
 
   @@index([contentHash])
   @@index([extractingStartedAt])
   @@index([status, createdAt])
+  @@index([formId, participantId])
 }
 
 // ============================================
@@ -1417,6 +1451,23 @@ model OrgFinancialSettings {
   account AsaasAccount? @relation(fields: [accountId], references: [id], onDelete: Cascade)
 
   @@index([orgId])
+}
+
+// Configuração de obrigatoriedade dos campos do formulário público (`/f/[token]`).
+// `preset` aponta para um array declarativo em `lib/forms/presets.ts` —
+// "legado" preserva o STEP_REQUIRED_FIELDS hardcoded original (default em orgs
+// existentes pra não quebrar fluxos ativos). Orgs novas nascem como "padrao".
+// `customRequiredPaths` é union ADICIONAL ao preset quando admin clica em
+// "Personalizar" — paths extras de DadosContrato (ex: "vendedores.0.rg").
+model OrgFormSettings {
+  id                  String   @id @default(cuid())
+  orgId               String   @unique
+  preset              String   @default("legado") // legado | minimo | padrao | completo | custom
+  customRequiredPaths Json     @default("[]")
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 }
 
 // Cadastro de destinatários de split de pagamento (Fase 5).

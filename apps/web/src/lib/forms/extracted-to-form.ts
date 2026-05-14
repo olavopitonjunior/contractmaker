@@ -176,13 +176,18 @@ export function mapExtractedToForm(
   extraction: ExtractedDoc,
   assignment: Assignment,
   form: UseFormReturn<Record<string, unknown>>,
-  options: { skipIfDirty?: boolean } = {}
+  options: { skipIfDirty?: boolean; forceBasePath?: string } = {}
 ): number {
-  const { skipIfDirty = true } = options;
+  const { skipIfDirty = true, forceBasePath } = options;
   const { category, fields } = extraction;
   if (!category || !fields) return 0;
 
-  const basePath = resolveBasePath(assignment);
+  // `forceBasePath` é usado por subtokens (PR 4): mesmo se a heurística do
+  // OCR classificar o doc como cross-role (ex: vendedor sobe matrícula com
+  // o próprio nome dele e o classificador acharia que é doc pessoal),
+  // forçamos o basePath garantindo isolamento de dados entre partes.
+  // Caller é responsável por validar que o kind faz sentido pro role.
+  const basePath = forceBasePath ?? resolveBasePath(assignment);
   if (!basePath) return 0;
 
   const isPerson = PERSON_CATEGORIES.has(category);

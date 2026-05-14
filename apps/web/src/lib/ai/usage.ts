@@ -74,7 +74,8 @@ export type AIOperation =
   | "summarize_memory"
   | "clause_generate"
   | "doc_analysis"
-  | "extract_ccv_doc";
+  | "extract_ccv_doc"
+  | "voice_extract";
 
 export interface RecordUsageParams {
   orgId: string;

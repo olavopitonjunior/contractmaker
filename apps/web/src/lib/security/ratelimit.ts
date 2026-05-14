@@ -153,6 +153,12 @@ export const RateLimits = {
     rateLimit({ identifier: `public:${ip}`, limit: 30, window: "1 m" }),
   publicResendByToken: (token: string) =>
     rateLimit({ identifier: `public-resend:${token}`, limit: 1, window: "1 h" }),
+  /**
+   * Voz no formulário: 30 chamadas/h por token (~$0.30/h de Gemini no
+   * pior caso). Evita abuse de scrapers e custo descontrolado.
+   */
+  voiceExtractPerForm: (token: string) =>
+    rateLimit({ identifier: `voice:${token}`, limit: 30, window: "1 h" }),
 
   /**
    * Newton API per-token + per-scope. Limites variam por scope:

@@ -17,6 +17,7 @@ import {
   BarChart3,
   FileText,
   Upload,
+  Sparkles,
 } from "lucide-react";
 
 export default async function PipelinePage() {
@@ -131,6 +132,22 @@ export default async function PipelinePage() {
                   <span className="text-xs text-muted-foreground">
                     Envia link para o cliente preencher os 7 passos. Contrato é
                     gerado pelo template padrão.
+                  </span>
+                </div>
+              </Link>
+            </DropdownMenuItem>
+            <DropdownMenuItem asChild>
+              <Link
+                href="/deals/new-from-proposal"
+                className="flex items-start gap-3 py-2"
+              >
+                <Sparkles className="h-4 w-4 mt-0.5 shrink-0" />
+                <div className="flex flex-col gap-0.5">
+                  <span className="font-medium">Cadastro com proposta</span>
+                  <span className="text-xs text-muted-foreground">
+                    Sobe uma proposta (PDF/DOCX). Sistema lê tudo (partes,
+                    valores, comissão) e abre o formulário pré-preenchido pra
+                    revisar antes de gerar o contrato.
                   </span>
                 </div>
               </Link>

@@ -3,6 +3,8 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { generateContractForDeal } from "@/lib/services/contract-generation";
 import { dedupConjuges } from "@/lib/forms/dedup-conjuges";
+import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
+import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
 // GET: public - fetch form data by token
 export async function GET(
@@ -44,7 +46,34 @@ export async function PATCH(
   }
 
   const currentData = (form.dataJson as Record<string, unknown>) || {};
-  const rawMergedData = { ...currentData, ...body.dataJson };
+  // Deep-merge restrito substitui `{ ...current, ...incoming }` raso.
+  // Sem allowlist no token principal — subtokens (PR 4) passam ROLE_PATHS.
+  // undefined/null em incoming não apaga chave existente. Arrays substituem
+  // inteiros pra permitir remoção de itens (ex: deletar 2º comprador).
+  const mergeOutcome = deepMergeAtPaths(
+    currentData,
+    (body.dataJson ?? {}) as Record<string, unknown>,
+  );
+  const rawMergedData = mergeOutcome.merged;
+
+  if (mergeOutcome.rejectedPaths.length > 0) {
+    // Token principal não deveria ter allowlist — qualquer rejectedPath aqui
+    // é bug. Audita best-effort sem bloquear save.
+    console.warn("[forms PATCH] rejected paths (token principal)", {
+      token: params.token,
+      rejectedPaths: mergeOutcome.rejectedPaths,
+    });
+    audit(
+      extractAuditContextFromRequest(req, form.orgId, null),
+      {
+        action: "FORM_PATCH_REJECTED_PATH",
+        result: "DENIED",
+        resource: form.id,
+        resourceType: "SalesForm",
+        metadata: { rejectedPaths: mergeOutcome.rejectedPaths },
+      },
+    );
+  }
 
   const previousStatus = form.status;
   const newStatus = body.status ?? form.status;
@@ -59,7 +88,7 @@ export async function PATCH(
   const updated = await prisma.salesForm.update({
     where: { token: params.token },
     data: {
-      dataJson: mergedData,
+      dataJson: mergedData as Prisma.InputJsonValue,
       title: body.title ?? form.title,
       status: newStatus,
       ...(isFinalizing ? { completedAt: new Date() } : {}),

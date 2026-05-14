@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { ExternalLink, Copy, Plus, Check } from "lucide-react";
+import { ExternalLink, Copy, Plus, Check, Users } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
 
@@ -79,6 +79,12 @@ export function FormsActions({ formId, token, status, hasDeal, dealId, title }: 
             <Copy className="mr-1 h-3 w-3" />
           )}
           {copied ? "Copiado!" : "Copiar link"}
+        </Button>
+        <Button variant="outline" size="sm" asChild>
+          <Link href={`/forms/${formId}/share`}>
+            <Users className="mr-1 h-3 w-3" />
+            Compartilhar por parte
+          </Link>
         </Button>
         {hasDeal && dealId && (
           <Button size="sm" variant="outline" asChild>

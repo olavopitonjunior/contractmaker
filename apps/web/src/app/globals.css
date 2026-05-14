@@ -483,3 +483,20 @@
     display: none;
   }
 }
+
+/* VoiceInputButton — campos preenchidos por voz piscam verde por 3s.
+ * Aplicado via setAttribute("data-voice-filled","true") + removeAttribute
+ * com setTimeout. Não usa keyframes infinitos pra não distrair em revisão. */
+[data-voice-filled="true"] {
+  animation: voice-filled-flash 3s ease-out;
+}
+@keyframes voice-filled-flash {
+  0% {
+    background-color: hsl(142 76% 90%);
+    box-shadow: 0 0 0 2px hsl(142 76% 60%);
+  }
+  100% {
+    background-color: transparent;
+    box-shadow: 0 0 0 2px transparent;
+  }
+}

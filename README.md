@@ -5,14 +5,15 @@ Plataforma de gestao de vendas e contratos imobiliarios. Esteira completa: formu
 ## Tech Stack
 
 - **Framework:** Next.js 14 (App Router)
-- **UI:** Tailwind CSS v3 + Shadcn/ui + Lucide React
-- **Auth:** NextAuth.js v5 + Prisma Adapter (JWT)
-- **DB:** PostgreSQL (Neon) + Prisma ORM
-- **Editor:** TipTap (ProseMirror)
-- **AI:** Anthropic Claude (agente com 10 tools)
+- **UI:** Tailwind CSS v4 + Shadcn/ui + Lucide React
+- **Auth:** NextAuth.js v5 + Prisma Adapter (JWT) + 2FA TOTP
+- **DB:** PostgreSQL (Neon) + Prisma ORM + pgvector (RAG)
+- **Editor:** Google Docs embedado (Drive/Docs API)
+- **AI:** Anthropic Claude (agente Haiku 4.5 com 18 tools) + Gemini 2.5 Flash (OCR) + Voyage law-2 (embeddings)
+- **Pagamentos:** Asaas v3 · **Assinatura:** ClickSign v3 · **Certidões:** Infosimples
 - **Templates:** Handlebars com helpers brasileiros
-- **Export:** PDF (puppeteer-core) + DOCX (html-to-docx)
-- **Deploy:** Vercel
+- **Export:** PDF (Drive native + puppeteer-core fallback) + DOCX (html-to-docx fallback)
+- **Deploy:** Vercel Pro
 
 ## Estrutura
 
