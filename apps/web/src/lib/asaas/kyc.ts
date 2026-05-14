@@ -14,6 +14,7 @@ import type {
   CreateSubaccountInput,
   AsaasMyAccountStatus,
   AsaasDocumentSlot,
+  AsaasDocumentsResponse,
   AsaasSubaccountListItem,
   AsaasAccountListResponse,
   AsaasAccessTokenResponse,
@@ -55,6 +56,57 @@ export async function listMyAccountDocuments(params: {
     "/myAccount/documents",
     { apiKey: params.apiKey }
   );
+}
+
+/**
+ * Mesmo endpoint de `listMyAccountDocuments`, mas tipa o shape completo
+ * incluindo `rejectReasons` agregado e `onboardingUrl`/`expirationDate` por
+ * grupo. Use quando precisar da URL do hosted onboarding (cadastro.io).
+ */
+export async function getMyAccountDocumentsFull(params: {
+  apiKey: string;
+}): Promise<AsaasDocumentsResponse> {
+  return await asaasFetch<AsaasDocumentsResponse>("/myAccount/documents", {
+    apiKey: params.apiKey,
+  });
+}
+
+/**
+ * Seleciona o `onboardingUrl` ativo da resposta — preferência pelo grupo
+ * `IDENTIFICATION_SELFIE` (caminho com biometria), com fallback pra primeiro
+ * grupo não-aprovado que tenha URL. Filtra URLs expiradas.
+ *
+ * Retorna `null` se nada disponível (tudo aprovado ou todas URLs expiradas).
+ */
+export function pickActiveOnboardingUrl(
+  resp: AsaasDocumentsResponse
+): { url: string; expiresAt: Date | null; type: string } | null {
+  const now = Date.now();
+  const candidates = (resp.data ?? []).filter((g) => {
+    if (!g.onboardingUrl) return false;
+    if (g.status === "APPROVED" || g.status === "IGNORED") return false;
+    if (g.onboardingUrlExpirationDate) {
+      const exp = Date.parse(
+        g.onboardingUrlExpirationDate.replace(" ", "T")
+      );
+      if (Number.isFinite(exp) && exp < now) return false;
+    }
+    return true;
+  });
+  if (candidates.length === 0) return null;
+  // Preferência: o grupo de selfie/biometria — fluxo mais crítico.
+  const selfie = candidates.find(
+    (g) => g.type.toUpperCase() === "IDENTIFICATION_SELFIE"
+  );
+  const picked = selfie ?? candidates[0];
+  const expRaw = picked.onboardingUrlExpirationDate;
+  return {
+    url: picked.onboardingUrl!,
+    expiresAt: expRaw
+      ? new Date(Date.parse(expRaw.replace(" ", "T")))
+      : null,
+    type: picked.type,
+  };
 }
 
 /**

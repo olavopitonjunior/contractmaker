@@ -266,15 +266,43 @@ export interface AsaasMyAccountStatus {
   rejectReasonDescriptions?: string;
 }
 
+/**
+ * Grupo de documentos retornado por GET /myAccount/documents. Cada grupo
+ * tem seu próprio onboardingUrl (página hospedada pelo Asaas em cadastro.io)
+ * que faz selfie + biometria + upload de docs num fluxo único.
+ *
+ * Type aberto (string) pra não quebrar quando Asaas adicionar novos slots —
+ * enum conhecido inclui: IDENTIFICATION, IDENTIFICATION_SELFIE,
+ * SOCIAL_CONTRACT, ADDRESS_PROOF, ALLOW_BANK_ACCOUNT_DEPOSIT_STATEMENT,
+ * EMANCIPATION_OF_MINORS, ENTREPRENEUR_REQUIREMENT, INVOICE, MEI_CERTIFICATE,
+ * MINUTES_OF_CONSTITUTION, MINUTES_OF_ELECTION, POWER_OF_ATTORNEY, CUSTOM.
+ */
 export interface AsaasDocumentSlot {
   id: string;
   type: string;
   title?: string;
   description?: string;
   onboardingStep?: string;
-  status: "NOT_SENT" | "PENDING" | "APPROVED" | "REJECTED" | "RECEIVED";
+  status: "NOT_SENT" | "PENDING" | "APPROVED" | "REJECTED" | "RECEIVED" | "IGNORED";
+  /** URL do Asaas hosted onboarding (cadastro.io) — selfie + docs num fluxo. */
+  onboardingUrl?: string | null;
+  /** ISO datetime. Após expirar, novo GET /myAccount/documents normalmente regenera. */
+  onboardingUrlExpirationDate?: string | null;
   responsibleType?: "PJ" | "PF";
+  /** Quem é responsável por enviar (sócio, PF dono da conta, etc.). */
+  responsible?: { name?: string; type?: string[] } | null;
+  /** Docs já enviados dentro do grupo (status individual por arquivo). */
+  documents?: Array<{ id: string; status: string }>;
   rejectReasonDescriptions?: string | null;
+}
+
+/**
+ * Response completa de GET /myAccount/documents.
+ * rejectReasons é mensagem agregada quando a conta foi rejeitada.
+ */
+export interface AsaasDocumentsResponse {
+  rejectReasons?: string | null;
+  data: AsaasDocumentSlot[];
 }
 
 // ---------- Webhook event ----------

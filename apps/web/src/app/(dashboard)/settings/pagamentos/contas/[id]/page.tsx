@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, KeyRound, FileText } from "lucide-react";
-import { OnboardingWizard } from "@/components/financeiro/onboarding/OnboardingWizard";
 import { AccountKycLinkCard } from "@/components/settings/AccountKycLinkCard";
 
 export const dynamic = "force-dynamic";
@@ -178,71 +177,53 @@ export default async function ContaDetailPage({
         />
       )}
 
-      {/* Wizard interativo de KYC: upload de docs + refresh de status.
-          Pula quando aprovada (somente leitura). Owner-only escrita; non-owner
-          com cap "view" só vê (wizard tem branches read-only).
-          Atrás de <details> porque o caminho principal é o link de ativação
-          acima — uploads aqui só fazem sentido quando o admin tem acesso aos
-          docs pessoais do titular (raro). */}
-      {account.status !== "APPROVED" && owner ? (
-        <details className="group">
-          <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground transition flex items-center gap-2 py-2">
+      {/* Status read-only dos slots de docs no Asaas. Ação real (enviar
+          selfie + docs) é feita pelo titular via o link em AccountKycLinkCard
+          acima — não temos mais upload manual aqui. */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center gap-2">
             <FileText className="h-4 w-4" />
-            Enviar documentos manualmente (avançado)
-            <span className="text-xs text-muted-foreground/70 ml-1">
-              — use só se tiver os documentos pessoais do titular em mãos
-            </span>
-          </summary>
-          <div className="mt-2">
-            <OnboardingWizard mode="newAccount" accountId={account.id} />
-          </div>
-        </details>
-      ) : (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <FileText className="h-4 w-4" />
-              Documentos KYC
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {account.documents.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Sem documentos listados pela Asaas.
-              </p>
-            ) : (
-              <div className="space-y-2">
-                {account.documents.map((d) => (
-                  <div
-                    key={d.id}
-                    className="flex items-center justify-between text-sm py-1.5 border-b last:border-b-0"
-                  >
-                    <div>
-                      <div className="font-medium">{d.title}</div>
-                      {d.description && (
-                        <div className="text-xs text-muted-foreground">
-                          {d.description}
-                        </div>
-                      )}
-                    </div>
-                    <Badge
-                      variant={
-                        d.status === "APPROVED"
-                          ? "default"
-                          : d.status === "REJECTED"
-                            ? "destructive"
-                            : "outline"
-                      }
-                    >
-                      {SUBSTATUS_LABEL[d.status] ?? d.status}
-                    </Badge>
+            Documentos KYC
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {account.documents.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              Sem documentos listados pela Asaas ainda.
+            </p>
+          ) : (
+            <div className="space-y-2">
+              {account.documents.map((d) => (
+                <div
+                  key={d.id}
+                  className="flex items-center justify-between text-sm py-1.5 border-b last:border-b-0"
+                >
+                  <div>
+                    <div className="font-medium">{d.title}</div>
+                    {d.description && (
+                      <div className="text-xs text-muted-foreground">
+                        {d.description}
+                      </div>
+                    )}
                   </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+                  <Badge
+                    variant={
+                      d.status === "APPROVED"
+                        ? "default"
+                        : d.status === "REJECTED"
+                          ? "destructive"
+                          : "outline"
+                    }
+                  >
+                    {SUBSTATUS_LABEL[d.status] ?? d.status}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-2">

@@ -17,13 +17,14 @@ import {
 } from "lucide-react";
 
 /**
- * Card "KYC pelo titular" — exibe a URL pública hospedada pelo Contractmaker
- * (/kyc/[token]) pra admin copiar e mandar via WhatsApp/email/etc. Não
- * depende do email de ativação do Asaas — usa a apiKey já armazenada
- * pra proxiar uploads server-side.
+ * Card "Link de onboarding KYC" — vanity URL `/kyc/[token]` que faz
+ * server-side redirect pro hosted onboarding do Asaas (cadastro.io). O
+ * titular abre o link no celular e completa: captura biométrica (selfie ao
+ * vivo) + upload de documentos no fluxo nativo do Asaas. Sem upload manual
+ * de selfie, sem email forwarding.
  *
- * Fallbacks (linha secundária): abrir painel Asaas + reenviar email Asaas
- * (1× via API). Sem precisar pedir forward.
+ * Botões: Copy / WhatsApp share / Email share / Rotacionar token.
+ * Fallback (linha secundária): painel Asaas + reenviar email Asaas (1×).
  */
 export function AccountKycLinkCard({
   accountId,
@@ -107,25 +108,25 @@ export function AccountKycLinkCard({
     const lines = [
       `Olá! Para concluir o cadastro da sua subconta${
         accountName ? ` (${accountName})` : ""
-      } na nossa pagadoria, envie os documentos por este link:`,
+      } na nossa pagadoria, abra este link no celular:`,
       "",
       publicLink,
       "",
-      "É rápido e mobile-friendly. Qualquer dúvida, me chame.",
+      "Você vai fazer a selfie ao vivo e enviar os documentos no próprio fluxo do Asaas. Leva uns 5 minutos.",
     ];
     return `https://wa.me/?text=${encodeURIComponent(lines.join("\n"))}`;
   }
 
   function emailShareUrl(): string {
     if (!publicLink) return "";
-    const subject = `Envio de documentos KYC — ${accountName ?? "subconta"}`;
+    const subject = `Onboarding KYC — ${accountName ?? "subconta"}`;
     const body = [
       `Olá,`,
       "",
-      `Para concluir o cadastro da subconta de pagadoria, envie os documentos por este link:`,
+      `Para concluir o cadastro da subconta de pagadoria, abra o link abaixo no celular. Você fará captura de selfie ao vivo e enviará os documentos no fluxo nativo do Asaas:`,
       publicLink,
       "",
-      `Abraço,`,
+      `Leva ~5 minutos. Qualquer dúvida, me avise.`,
     ].join("\n");
     return `mailto:${email ?? ""}?subject=${encodeURIComponent(
       subject
@@ -137,7 +138,7 @@ export function AccountKycLinkCard({
       <CardHeader className="pb-2">
         <CardTitle className="text-sm flex items-center gap-2">
           <LinkIcon className="h-4 w-4" />
-          Link de KYC para o titular
+          Link de onboarding KYC (selfie + documentos)
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
@@ -150,8 +151,9 @@ export function AccountKycLinkCard({
           ) : (
             " o titular "
           )}
-          enviar os documentos diretamente. Hospedado pelo Contractmaker, não
-          exige login nem que o titular receba qualquer email do Asaas.
+          fazer o onboarding direto no fluxo oficial do Asaas. Abre no
+          celular, faz a captura de selfie ao vivo (biometria) e envia os
+          documentos em uma só etapa — sem precisar de email de ativação.
         </p>
 
         {publicLink ? (
@@ -262,9 +264,10 @@ export function AccountKycLinkCard({
         <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/40 rounded p-2">
           <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
           <div>
-            O link público é guess-resistant (256 bits de entropia) e válido
-            até você gerar um novo. Os arquivos vão direto pro Asaas — não
-            ficam armazenados no Contractmaker.
+            O link é guess-resistant (256 bits de entropia) e funciona até
+            você rotacionar o token. Cada clique busca a URL atualizada do
+            Asaas e redireciona — não armazenamos cópia das credenciais nem
+            dos arquivos.
           </div>
         </div>
       </CardContent>
