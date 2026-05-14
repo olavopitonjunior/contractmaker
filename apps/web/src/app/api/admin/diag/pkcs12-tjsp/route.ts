@@ -9,20 +9,27 @@ export const maxDuration = 660;
 /**
  * GET /api/admin/diag/pkcs12-tjsp
  *
- * Diagnóstico do `code 604` que Infosimples retorna no tribunal/tjsp/pedido-civel
- * quando enviamos pkcs12_cert + pkcs12_pass.
+ * Diagnóstico do `code 604` que Infosimples retornava no tribunal/tjsp/pedido-civel
+ * quando enviamos pkcs12_cert + pkcs12_pass em base64 plain.
  *
- * Fluxo:
+ * NOTA (2026-05-14): após migrar pra criptograma AES-256-GCM (env vars
+ * INFOSIMPLES_PKCS12_CERT_CRYPT / INFOSIMPLES_PKCS12_PASS_CRYPT), este
+ * endpoint passa a retornar 503 "Env vars ausentes" porque lê as vars legadas
+ * (_BASE64 / _PASSWORD). É útil só pra re-validar a senha do A1 contra
+ * OpenSSL local — nesse caso re-setar temporariamente _BASE64/_PASSWORD.
+ *
+ * Fluxo original (preservado pra referência histórica):
  *   1. Valida que session.user é owner/admin
  *   2. Decodifica INFOSIMPLES_PKCS12_CERT_BASE64 e tenta abrir com a senha
  *      via tls.createSecureContext — confirma se o .pfx + senha são válidos
  *      do ponto de vista OpenSSL (mesma engine da Infosimples backend)
- *   3. Dispara 4 chamadas REAIS em paralelo contra Infosimples com variações
+ *   3. Dispara 5 chamadas REAIS em paralelo contra Infosimples com variações
  *      de envio do cert:
  *        A) URL-encoded baseline (formato atual)
  *        B) multipart com base64 string
  *        C) multipart com cert binário (sem base64)
  *        D) URL-encoded com base64 URL-safe (+ → -, / → _)
+ *        E) URL-encoded sem creds (testa A1 cadastrado no painel)
  *   4. Retorna code/code_message/errors[]/billable de cada variação
  *
  * NUNCA retorna o cert nem a senha no response. Custo: zero (Infosimples

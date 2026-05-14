@@ -71,23 +71,30 @@ export async function callInfosimples(
   // o payload do DB direto via runSingleJob) iam sem credenciais e
   // Infosimples retornaria 606.
   //
-  // I.8 (2026-05-12) — suporte a certificado digital A1 (pkcs12) como
-  // alternativa mais robusta ao gov.br login_cpf/login_senha. Prioridade:
-  // se INFOSIMPLES_PKCS12_CERT_BASE64 + INFOSIMPLES_PKCS12_PASSWORD existem,
-  // usa pkcs12; senão fallback pro login_cpf/login_senha. Útil pra casos
-  // onde TJSP rejeita consulta de terceiro com gov.br pessoal.
+  // I.8 (2026-05-14) — suporte a certificado digital A1 (pkcs12) via
+  // criptograma AES-256-GCM. A Infosimples NÃO aceita o .pfx base64 plain
+  // (code 604 "Não foi possível decriptar os parâmetros"); a API exige que
+  // tanto o cert quanto a senha sejam encriptados AES-256-GCM com a chave
+  // da conta antes do envio. Os criptogramas são gerados uma única vez no
+  // painel Infosimples (https://api.infosimples.com/consultas/docs/certificados)
+  // e ficam fixos enquanto o cert não for renovado.
+  //
+  // Prioridade: pkcs12 (criptograma) > gov.br (login_cpf/login_senha).
+  // pkcs12 funciona pra consulta de terceiro; gov.br pessoal pode bater em
+  // "Um erro inesperado" (code 600) quando o CPF consultado não é o dono
+  // da conta gov.br.
   for (const [key, value] of Object.entries(args)) {
     if (value === undefined || value === null) continue;
     body.set(key, String(value));
   }
   if (endpoint.startsWith("tribunal/tjsp/")) {
-    const pkcs12Cert = process.env.INFOSIMPLES_PKCS12_CERT_BASE64?.trim();
-    const pkcs12Pass = process.env.INFOSIMPLES_PKCS12_PASSWORD?.trim();
+    const pkcs12CertCrypt = process.env.INFOSIMPLES_PKCS12_CERT_CRYPT?.trim();
+    const pkcs12PassCrypt = process.env.INFOSIMPLES_PKCS12_PASS_CRYPT?.trim();
     const govbrCpf = process.env.INFOSIMPLES_GOVBR_CPF?.trim();
     const govbrPassword = process.env.INFOSIMPLES_GOVBR_PASSWORD?.trim();
-    if (pkcs12Cert && pkcs12Pass) {
-      body.set("pkcs12_cert", pkcs12Cert);
-      body.set("pkcs12_pass", pkcs12Pass);
+    if (pkcs12CertCrypt && pkcs12PassCrypt) {
+      body.set("pkcs12_cert", pkcs12CertCrypt);
+      body.set("pkcs12_pass", pkcs12PassCrypt);
     } else if (govbrCpf && govbrPassword) {
       body.set("login_cpf", govbrCpf);
       body.set("login_senha", govbrPassword);
