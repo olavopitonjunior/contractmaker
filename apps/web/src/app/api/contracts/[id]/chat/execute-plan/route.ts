@@ -17,6 +17,10 @@ export const maxDuration = 300;
 const schema = z.object({
   planId: z.string().cuid(),
   approvedStepIds: z.array(z.string()).default([]),
+  /** Sobreescreve o `input` de um step antes de executar. Usado quando o
+   *  usuário edita um write via dialog do PlanCard antes de aprovar.
+   *  Shape: { [stepId]: { ...novoInput } } */
+  stepInputOverrides: z.record(z.string(), z.record(z.string(), z.unknown())).optional(),
 });
 
 /**
@@ -43,7 +47,7 @@ export async function POST(
   if (!parsed.success) {
     return NextResponse.json({ error: "Invalid payload" }, { status: 400 });
   }
-  const { planId, approvedStepIds } = parsed.data;
+  const { planId, approvedStepIds, stepInputOverrides } = parsed.data;
 
   const plan = await prisma.chatPlan.findUnique({
     where: { id: planId },
@@ -177,6 +181,14 @@ export async function POST(
               status: "rejected",
             });
             continue;
+          }
+
+          // Aplica override de input se o usuario editou o step antes de
+          // aprovar. Persiste no step pra que stepsJson final reflita o
+          // que foi de fato executado (auditoria + UI rehydrate).
+          const override = stepInputOverrides?.[step.id];
+          if (override && typeof override === "object") {
+            step.input = override as Record<string, unknown>;
           }
 
           iteration++;

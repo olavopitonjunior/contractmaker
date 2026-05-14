@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import {
   CheckCircle2,
   XCircle,
@@ -11,8 +11,18 @@ import {
   ListChecks,
   Eye,
   Pencil,
+  Edit3,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import type { PlanStep, AgentEvent } from "@/lib/ai/types";
 
@@ -42,6 +52,13 @@ export function PlanCard({ contractId, planId, steps, onExecuted }: PlanCardProp
   const [completed, setCompleted] = useState(
     !writeSteps.some((s) => s.status === "pending")
   );
+  // Overrides do input editados pelo usuario via dialog. Sao mesclados no
+  // POST /execute-plan via stepInputOverrides. Persistem ate o turn ser
+  // executado (recarrega do server depois).
+  const [overrides, setOverrides] = useState<
+    Record<string, Record<string, unknown>>
+  >({});
+  const [editingStepId, setEditingStepId] = useState<string | null>(null);
   const [stepStates, setStepStates] = useState<
     Record<string, { status: PlanStep["status"]; summary?: string }>
   >(
@@ -68,7 +85,11 @@ export function PlanCard({ contractId, planId, steps, onExecuted }: PlanCardProp
       const res = await fetch(`/api/contracts/${contractId}/chat/execute-plan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ planId, approvedStepIds: Array.from(approved) }),
+        body: JSON.stringify({
+          planId,
+          approvedStepIds: Array.from(approved),
+          ...(Object.keys(overrides).length > 0 ? { stepInputOverrides: overrides } : {}),
+        }),
       });
       if (!res.ok || !res.body) {
         const data = await res.json().catch(() => ({}));
@@ -230,11 +251,28 @@ export function PlanCard({ contractId, planId, steps, onExecuted }: PlanCardProp
                         <code className="bg-muted/60 rounded px-1 py-0.5">
                           {step.tool}
                         </code>
+                        {overrides[step.id] && (
+                          <span className="ml-1 text-amber-700 font-medium">
+                            (editado)
+                          </span>
+                        )}
                         {state.summary && (
                           <span className="ml-1">— {state.summary}</span>
                         )}
                       </div>
                     </label>
+                    {isPending && !completed && (
+                      <button
+                        type="button"
+                        onClick={() => setEditingStepId(step.id)}
+                        disabled={executing}
+                        className="rounded-sm p-1 hover:bg-muted-foreground/10 text-muted-foreground disabled:opacity-40"
+                        aria-label="Editar input do step"
+                        title="Editar"
+                      >
+                        <Edit3 className="h-3 w-3" />
+                      </button>
+                    )}
                   </li>
                 );
               })}
@@ -272,6 +310,142 @@ export function PlanCard({ contractId, planId, steps, onExecuted }: PlanCardProp
           </>
         )}
       </div>
+
+      {/* Dialog de edição do input do step. Renderiza quando editingStepId
+          aponta pra um step pendente. Salvar valida JSON, atualiza overrides
+          state e fecha — só vai pro server no proximo /execute-plan. */}
+      <EditStepDialog
+        step={
+          editingStepId
+            ? writeSteps.find((s) => s.id === editingStepId) ?? null
+            : null
+        }
+        currentInput={
+          editingStepId
+            ? overrides[editingStepId] ??
+              writeSteps.find((s) => s.id === editingStepId)?.input ??
+              {}
+            : {}
+        }
+        onClose={() => setEditingStepId(null)}
+        onSave={(stepId, newInput) => {
+          setOverrides((prev) => ({ ...prev, [stepId]: newInput }));
+          setEditingStepId(null);
+        }}
+        onReset={(stepId) => {
+          setOverrides((prev) => {
+            const next = { ...prev };
+            delete next[stepId];
+            return next;
+          });
+          setEditingStepId(null);
+        }}
+      />
     </div>
+  );
+}
+
+/**
+ * Dialog pra editar o `input` de um step antes de aprovar. Aceita JSON
+ * livre (textarea), valida no submit. Em caso de input invalido mostra
+ * erro inline. "Restaurar original" remove o override e usa o input
+ * proposto pelo agente.
+ */
+function EditStepDialog({
+  step,
+  currentInput,
+  onClose,
+  onSave,
+  onReset,
+}: {
+  step: PlanStep | null;
+  currentInput: Record<string, unknown>;
+  onClose: () => void;
+  onSave: (stepId: string, newInput: Record<string, unknown>) => void;
+  onReset: (stepId: string) => void;
+}) {
+  const [text, setText] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const open = step !== null;
+
+  // Atualiza textarea quando abre o dialog (step muda).
+  React.useEffect(() => {
+    if (step) {
+      setText(JSON.stringify(currentInput, null, 2));
+      setError(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step?.id]);
+
+  if (!step) return null;
+
+  function handleSave() {
+    try {
+      const parsed = JSON.parse(text);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+        setError("Input precisa ser um objeto JSON ({...}).");
+        return;
+      }
+      onSave(step!.id, parsed);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "JSON inválido");
+    }
+  }
+
+  const isModified =
+    JSON.stringify(currentInput) !== JSON.stringify(step.input);
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-xl">
+        <DialogHeader>
+          <DialogTitle className="text-sm">Editar step</DialogTitle>
+          <DialogDescription className="text-xs">
+            <code className="bg-muted/60 rounded px-1 py-0.5">{step.tool}</code>
+            {" — "}
+            {step.description}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2">
+          <label className="text-xs font-medium">Input (JSON)</label>
+          <Textarea
+            value={text}
+            onChange={(e) => {
+              setText(e.target.value);
+              setError(null);
+            }}
+            rows={12}
+            className="font-mono text-xs"
+            spellCheck={false}
+          />
+          {error && (
+            <p className="text-xs text-destructive">{error}</p>
+          )}
+          <p className="text-[10px] text-muted-foreground">
+            Edite só se você sabe o que está fazendo. Campos comuns:{" "}
+            <code className="bg-muted/40 px-1">target</code>,{" "}
+            <code className="bg-muted/40 px-1">replacement</code> em{" "}
+            <code>edit_contract_section</code>.
+          </p>
+        </div>
+        <DialogFooter className="gap-2 sm:gap-2">
+          {isModified && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => onReset(step.id)}
+            >
+              Restaurar original
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={onClose}>
+            Cancelar
+          </Button>
+          <Button size="sm" onClick={handleSave}>
+            Salvar edição
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
