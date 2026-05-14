@@ -145,6 +145,18 @@ export async function POST(
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
       };
 
+      // Snapshots htmlBefore/htmlAfter por write step pra alimentar o
+      // ChangesPanel. Mesma logica do streamContractAgent em agent.ts —
+      // sem isso writes via Plan-execute nao aparecem no painel.
+      type ChangeLogEntry = {
+        action: string;
+        summary: string;
+        details: object;
+        htmlBefore?: string;
+        htmlAfter?: string;
+      };
+      const changeLogs: ChangeLogEntry[] = [];
+
       try {
         let iteration = 0;
         let executedCount = 0;
@@ -175,6 +187,16 @@ export async function POST(
             iteration,
           });
 
+          // Snapshot ANTES — so vale a pena pra writes contra GDoc.
+          let htmlBefore: string | undefined;
+          if (context.googleDocId) {
+            try {
+              htmlBefore = await getDocPlainText(context.googleDocId);
+            } catch {
+              // Falha de Drive nao bloqueia execucao.
+            }
+          }
+
           let result: { error?: string; success?: boolean; [k: string]: unknown };
           try {
             result = (await executeToolHandler(step.tool, step.input, context)) as {
@@ -186,12 +208,32 @@ export async function POST(
             result = { error: `Tool ${step.tool} falhou: ${msg.slice(0, 200)}` };
           }
 
+          // Snapshot DEPOIS — so se before foi capturado e nao houve erro.
+          let htmlAfter: string | undefined;
+          if (htmlBefore !== undefined && context.googleDocId && !result.error) {
+            try {
+              htmlAfter = await getDocPlainText(context.googleDocId);
+            } catch {
+              htmlAfter = htmlBefore;
+            }
+          }
+
           const success = !result.error;
           step.status = success ? "executed" : "failed";
           step.result = {
             success,
             summary: success ? "OK" : String(result.error).slice(0, 200),
           };
+
+          // Push ChangeLog entry pra persistir no final do turn (mesmo
+          // formato que agent.ts gera, action=ai_edit).
+          changeLogs.push({
+            action: "ai_edit",
+            summary: step.description || `Executou ${step.tool}`,
+            details: { tool: step.tool, input: step.input, output: result, planId },
+            htmlBefore,
+            htmlAfter,
+          });
 
           send({
             type: "tool_result",
@@ -210,6 +252,27 @@ export async function POST(
 
           if (success) executedCount++;
           else failedCount++;
+        }
+
+        // Persiste change logs com snapshots (cap 50kb cada). Sem isso, o
+        // painel Mudanças nao mostra os writes do plan-and-approve.
+        if (changeLogs.length > 0) {
+          const SNAPSHOT_CAP = 50_000;
+          const trim = (s: string | undefined) =>
+            s && s.length > SNAPSHOT_CAP ? s.slice(0, SNAPSHOT_CAP) : s ?? null;
+          await prisma.contractChangeLog.createMany({
+            data: changeLogs.map((log) => ({
+              contractId: params.id,
+              userId: contract.userId,
+              action: log.action,
+              summary: log.summary,
+              details: log.details,
+              source: "ai",
+              htmlBefore: trim(log.htmlBefore),
+              htmlAfter: trim(log.htmlAfter),
+              sessionId: plan.sessionId,
+            })),
+          });
         }
 
         // Persiste steps atualizados + status final do plan
