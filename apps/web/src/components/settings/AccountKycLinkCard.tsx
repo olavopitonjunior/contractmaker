@@ -5,84 +5,44 @@ import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
-  Link as LinkIcon,
+  Mail,
   ExternalLink,
   Send,
+  CheckCircle2,
   Info,
-  Copy,
-  Check,
-  RotateCcw,
-  MessageCircle,
-  Mail,
+  AlertCircle,
 } from "lucide-react";
 
 /**
- * Card "Link de onboarding KYC" — vanity URL `/kyc/[token]` que faz
- * server-side redirect pro hosted onboarding do Asaas (cadastro.io). O
- * titular abre o link no celular e completa: captura biométrica (selfie ao
- * vivo) + upload de documentos no fluxo nativo do Asaas. Sem upload manual
- * de selfie, sem email forwarding.
+ * Card "KYC pelo titular" — fluxo 100% por email. A Asaas envia o link de
+ * cadastro pro `loginEmail` da subconta (auto na criação + 1 reenvio via API).
+ * Não há como obter a URL via API pra subcontas non-BaaS.
  *
- * Botões: Copy / WhatsApp share / Email share / Rotacionar token.
- * Fallback (linha secundária): painel Asaas + reenviar email Asaas (1×).
+ * Mostra:
+ *  - Email cadastrado
+ *  - Status do envio (Enviado em DD/MM, Reenviado em DD/MM, ou Reenvio esgotado)
+ *  - Botão "Reenviar email Asaas" (desativado quando já reenviou)
+ *  - Link direto pro painel Asaas (app.asaas.com)
  */
 export function AccountKycLinkCard({
   accountId,
   email,
   accountName,
-  initialKycToken,
+  initialSentAt,
+  initialResentAt,
 }: {
   accountId: string;
   email: string | null;
   accountName: string | null;
-  initialKycToken: string | null;
+  initialSentAt: string | null;
+  initialResentAt: string | null;
 }) {
-  const [token, setToken] = useState<string | null>(initialKycToken);
-  const [submittingRotate, setSubmittingRotate] = useState(false);
-  const [submittingResend, setSubmittingResend] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [sentAt] = useState<string | null>(initialSentAt);
+  const [resentAt, setResentAt] = useState<string | null>(initialResentAt);
+  const [submitting, setSubmitting] = useState(false);
 
-  const origin =
-    typeof window !== "undefined" ? window.location.origin : "";
-  const publicLink = token ? `${origin}/kyc/${token}` : null;
-
-  async function handleGenerate() {
-    setSubmittingRotate(true);
-    try {
-      const res = await fetch(
-        `/api/financeiro/accounts/${accountId}/kyc-token`,
-        { method: "POST", credentials: "include" }
-      );
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.error ?? "Falha ao gerar link");
-        return;
-      }
-      setToken(data.kycToken);
-      toast.success(
-        token
-          ? "Link rotacionado — o antigo deixou de funcionar"
-          : "Link gerado"
-      );
-    } finally {
-      setSubmittingRotate(false);
-    }
-  }
-
-  async function handleCopy() {
-    if (!publicLink) return;
-    try {
-      await navigator.clipboard.writeText(publicLink);
-      setCopied(true);
-      toast.success("Link copiado");
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      toast.error("Falha ao copiar — selecione manualmente");
-    }
-  }
-
-  async function handleResendEmail() {
-    setSubmittingResend(true);
+  async function handleResend() {
+    setSubmitting(true);
     try {
       const res = await fetch(
         `/api/financeiro/accounts/${accountId}/resend-activation-link`,
@@ -93,181 +53,124 @@ export function AccountKycLinkCard({
         toast.error(data.message ?? data.error ?? "Falha ao reenviar");
         return;
       }
+      setResentAt(data.resentAt);
       toast.success(
         email
-          ? `Email Asaas reenviado pra ${email}`
-          : "Email Asaas reenviado"
+          ? `Email reenviado para ${email}`
+          : "Email reenviado pelo Asaas"
       );
     } finally {
-      setSubmittingResend(false);
+      setSubmitting(false);
     }
   }
 
-  function whatsappShareUrl(): string {
-    if (!publicLink) return "";
-    const lines = [
-      `Olá! Para concluir o cadastro da sua subconta${
-        accountName ? ` (${accountName})` : ""
-      } na nossa pagadoria, abra este link no celular:`,
-      "",
-      publicLink,
-      "",
-      "Você vai fazer a selfie ao vivo e enviar os documentos no próprio fluxo do Asaas. Leva uns 5 minutos.",
-    ];
-    return `https://wa.me/?text=${encodeURIComponent(lines.join("\n"))}`;
-  }
+  const fmt = (iso: string | null) =>
+    iso
+      ? new Date(iso).toLocaleString("pt-BR", {
+          day: "2-digit",
+          month: "2-digit",
+          year: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        })
+      : null;
 
-  function emailShareUrl(): string {
-    if (!publicLink) return "";
-    const subject = `Onboarding KYC — ${accountName ?? "subconta"}`;
-    const body = [
-      `Olá,`,
-      "",
-      `Para concluir o cadastro da subconta de pagadoria, abra o link abaixo no celular. Você fará captura de selfie ao vivo e enviará os documentos no fluxo nativo do Asaas:`,
-      publicLink,
-      "",
-      `Leva ~5 minutos. Qualquer dúvida, me avise.`,
-    ].join("\n");
-    return `mailto:${email ?? ""}?subject=${encodeURIComponent(
-      subject
-    )}&body=${encodeURIComponent(body)}`;
-  }
+  const sent = fmt(sentAt);
+  const resent = fmt(resentAt);
+  const resendExhausted = resentAt !== null;
 
   return (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-sm flex items-center gap-2">
-          <LinkIcon className="h-4 w-4" />
-          Link de onboarding KYC (selfie + documentos)
+          <Mail className="h-4 w-4" />
+          Onboarding KYC por email
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3 text-sm">
         <p className="text-muted-foreground">
-          Envie este link para
+          A Asaas envia o link de cadastro
           {accountName ? (
             <>
-              {" "}<strong>{accountName}</strong>{" "}
+              {" "}para <strong>{accountName}</strong>{" "}
             </>
           ) : (
-            " o titular "
+            " para o titular "
           )}
-          fazer o onboarding direto no fluxo oficial do Asaas. Abre no
-          celular, faz a captura de selfie ao vivo (biometria) e envia os
-          documentos em uma só etapa — sem precisar de email de ativação.
+          no email cadastrado. O titular acessa o painel, faz a selfie ao vivo
+          e envia os documentos (RG, comprovante, contrato social) por lá.
         </p>
 
-        {publicLink ? (
-          <div className="border rounded p-2.5 bg-emerald-50/50 border-emerald-200 space-y-2">
-            <div className="text-xs font-medium text-emerald-900 flex items-center gap-1">
-              <Check className="h-3.5 w-3.5" /> Link ativo
+        <div className="border rounded p-3 space-y-2">
+          <div>
+            <div className="text-xs text-muted-foreground">
+              Email cadastrado
             </div>
-            <div className="font-mono text-xs break-all bg-white border rounded p-2">
-              {publicLink}
-            </div>
-            <div className="flex flex-wrap gap-2 pt-1">
-              <Button size="sm" onClick={handleCopy} className="gap-1.5">
-                {copied ? (
-                  <Check className="h-4 w-4" />
-                ) : (
-                  <Copy className="h-4 w-4" />
-                )}
-                {copied ? "Copiado" : "Copiar"}
-              </Button>
-              <Button
-                asChild
-                size="sm"
-                variant="outline"
-                className="gap-1.5"
-              >
-                <a
-                  href={whatsappShareUrl()}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <MessageCircle className="h-4 w-4" />
-                  WhatsApp
-                </a>
-              </Button>
-              <Button
-                asChild
-                size="sm"
-                variant="outline"
-                className="gap-1.5"
-              >
-                <a href={emailShareUrl()}>
-                  <Mail className="h-4 w-4" />
-                  Email
-                </a>
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={handleGenerate}
-                disabled={submittingRotate}
-                className="gap-1.5 text-muted-foreground"
-              >
-                <RotateCcw className="h-4 w-4" />
-                {submittingRotate ? "Rotacionando…" : "Gerar novo"}
-              </Button>
+            <div className="font-mono text-sm">
+              {email ?? <span className="text-muted-foreground">—</span>}
             </div>
           </div>
-        ) : (
-          <div className="border rounded p-3 bg-amber-50 border-amber-200 space-y-2">
-            <p className="text-xs text-amber-900">
-              Esta conta ainda não tem link público. Gere um agora — você vai
-              poder copiar e enviar via WhatsApp/email assim que aparecer.
-            </p>
-            <Button
-              size="sm"
-              onClick={handleGenerate}
-              disabled={submittingRotate}
-              className="gap-1.5"
-            >
-              <LinkIcon className="h-4 w-4" />
-              {submittingRotate ? "Gerando…" : "Gerar link"}
-            </Button>
-          </div>
-        )}
 
-        <div className="border-t pt-3 space-y-2">
-          <p className="text-xs text-muted-foreground">
-            Alternativas (caso prefira o painel oficial do Asaas):
-          </p>
-          <div className="flex flex-wrap gap-2">
-            <Button asChild variant="outline" size="sm" className="gap-1.5">
-              <a
-                href="https://app.asaas.com"
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <ExternalLink className="h-4 w-4" />
-                Painel Asaas
-              </a>
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleResendEmail}
-              disabled={submittingResend}
-              className="gap-1.5"
-            >
-              <Send className="h-4 w-4" />
-              {submittingResend
-                ? "Enviando…"
-                : email
-                  ? `Reenviar email Asaas pra ${email}`
-                  : "Reenviar email Asaas"}
-            </Button>
+          <div className="border-t pt-2 text-xs space-y-1">
+            {sent ? (
+              <div className="flex items-center gap-1.5 text-emerald-700">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Enviado em {sent}
+              </div>
+            ) : (
+              <div className="flex items-center gap-1.5 text-amber-700">
+                <AlertCircle className="h-3.5 w-3.5" />
+                Email ainda não enviado
+              </div>
+            )}
+            {resent && (
+              <div className="flex items-center gap-1.5 text-emerald-700">
+                <CheckCircle2 className="h-3.5 w-3.5" />
+                Reenviado em {resent}
+              </div>
+            )}
           </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="default"
+            size="sm"
+            onClick={handleResend}
+            disabled={submitting || resendExhausted}
+            className="gap-1.5"
+            title={
+              resendExhausted
+                ? "Asaas só permite 1 reenvio via API"
+                : undefined
+            }
+          >
+            <Send className="h-4 w-4" />
+            {submitting
+              ? "Enviando…"
+              : resendExhausted
+                ? "Reenvio esgotado"
+                : "Reenviar email Asaas"}
+          </Button>
+          <Button asChild variant="outline" size="sm" className="gap-1.5">
+            <a
+              href="https://app.asaas.com"
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <ExternalLink className="h-4 w-4" />
+              Abrir painel Asaas
+            </a>
+          </Button>
         </div>
 
         <div className="flex items-start gap-2 text-xs text-muted-foreground bg-muted/40 rounded p-2">
           <Info className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />
           <div>
-            O link é guess-resistant (256 bits de entropia) e funciona até
-            você rotacionar o token. Cada clique busca a URL atualizada do
-            Asaas e redireciona — não armazenamos cópia das credenciais nem
-            dos arquivos.
+            A Asaas só permite <strong>1 reenvio por subconta</strong> via API
+            (o primeiro envio é automático na criação). Se o titular perder os
+            dois, ele pode usar &quot;Esqueci minha senha&quot; no painel Asaas
+            com o email acima.
           </div>
         </div>
       </CardContent>

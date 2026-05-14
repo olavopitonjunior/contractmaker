@@ -51,7 +51,13 @@ export async function POST(
 
   const account = await prisma.asaasAccount.findFirst({
     where: { id, orgId: ctx.orgId },
-    select: { id: true, asaasId: true, kyc: true, status: true },
+    select: {
+      id: true,
+      asaasId: true,
+      kyc: true,
+      status: true,
+      activationLinkResentAt: true,
+    },
   });
   if (!account) {
     return NextResponse.json(
@@ -128,6 +134,11 @@ export async function POST(
     );
   }
 
+  await prisma.asaasAccount.update({
+    where: { id },
+    data: { activationLinkResentAt: new Date() },
+  });
+
   await audit(
     {
       orgId: ctx.orgId,
@@ -144,7 +155,11 @@ export async function POST(
     }
   );
 
-  return NextResponse.json({ ok: true, email: kycEmail });
+  return NextResponse.json({
+    ok: true,
+    email: kycEmail,
+    resentAt: new Date().toISOString(),
+  });
 }
 
 export const runtime = "nodejs";

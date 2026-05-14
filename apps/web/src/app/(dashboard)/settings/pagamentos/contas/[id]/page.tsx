@@ -173,7 +173,16 @@ export default async function ContaDetailPage({
           accountName={
             (account.kyc as { name?: string } | null)?.name ?? account.label
           }
-          initialKycToken={account.kycToken ?? null}
+          initialSentAt={
+            account.activationLinkSentAt
+              ? account.activationLinkSentAt.toISOString()
+              : null
+          }
+          initialResentAt={
+            account.activationLinkResentAt
+              ? account.activationLinkResentAt.toISOString()
+              : null
+          }
         />
       )}
 

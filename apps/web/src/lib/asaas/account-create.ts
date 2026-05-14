@@ -7,7 +7,6 @@
  * tem o guard).
  */
 
-import { randomBytes } from "crypto";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { encryptSecret } from "@/lib/security/crypto";
@@ -15,11 +14,6 @@ import {
   createSubaccount,
   listMyAccountDocuments,
 } from "./kyc";
-
-function generateKycToken(): string {
-  // 64 chars hex (256 bits de entropia) — guess-resistant pra URL pública.
-  return randomBytes(32).toString("hex");
-}
 
 export interface CreateAccountInput {
   orgId: string;
@@ -139,7 +133,8 @@ export async function createAsaasAccount(
       documentationStatus: subaccount.status?.documentation ?? "PENDING",
       commercialInfoStatus: subaccount.status?.commercialInfo ?? "PENDING",
       bankAccountInfoStatus: subaccount.status?.bankAccountInfo ?? "PENDING",
-      kycToken: generateKycToken(),
+      // Asaas dispara email de ativação automaticamente no POST /accounts.
+      activationLinkSentAt: new Date(),
     },
   });
 
