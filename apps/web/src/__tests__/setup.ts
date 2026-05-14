@@ -182,7 +182,10 @@ vi.mock("@/lib/render/handlebars", () => ({
 vi.mock("@/lib/validation/schemas", async () => {
   const { z } = await import("zod");
   return {
-    chatSchema: z.object({ message: z.string().min(1) }),
+    chatSchema: z.object({
+      message: z.string().min(1),
+      mode: z.enum(["fast", "plan"]).default("plan"),
+    }),
     // Newton — schemas reais (sem mock) para tests novos
     apiTokenCreateSchema: z.object({
       name: z.string().min(1).max(100),

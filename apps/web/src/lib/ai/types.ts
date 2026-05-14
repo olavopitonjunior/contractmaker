@@ -19,6 +19,9 @@ export interface AgentResult {
   htmlContent: string | null;
   dataJson: Record<string, unknown> | null;
   changeLogs: ChangeLogEntry[];
+  /** Eventos emitidos durante o turn, persistidos pra rehidratar o chip
+   *  timeline ao recarregar o chat. */
+  events?: AgentEvent[];
 }
 
 export interface ChangeLogEntry {
@@ -49,3 +52,58 @@ export interface ExtractionResult {
   confidence: number;
   rawText?: string;
 }
+
+/**
+ * Modos do agente:
+ * - `fast`: 1 iteração, Haiku, sem expert context, edição direta em GDocs.
+ *   Otimizado pra latência (~2-4s). Usado em correções pontuais e no
+ *   "Resolver com IA" da aba de comentários.
+ * - `plan`: até 5 iterações, Sonnet por default, expert context completo,
+ *   propose_suggestion preferido em GDocs. Usado quando a tarefa exige
+ *   raciocínio jurídico ou múltiplas tools encadeadas.
+ */
+export type AgentMode = "fast" | "plan";
+
+/**
+ * Eventos emitidos pelo streamContractAgent durante o turn. Consumidos pela
+ * UI (chips ao vivo) e persistidos em ChatMessage.events pra rehidratar o
+ * histórico.
+ */
+export type AgentEvent =
+  | {
+      type: "started";
+      mode: AgentMode;
+      model: string;
+      hasExpertContext: boolean;
+    }
+  | {
+      type: "tool_use";
+      name: string;
+      input: Record<string, unknown>;
+      iteration: number;
+    }
+  | {
+      type: "tool_result";
+      name: string;
+      iteration: number;
+      success: boolean;
+      summary: string;
+    }
+  | {
+      type: "verification";
+      tool: string;
+      verified: boolean;
+      detail: string;
+    }
+  | {
+      type: "text_delta";
+      text: string;
+    }
+  | {
+      type: "done";
+      result: AgentResult;
+    }
+  | {
+      type: "error";
+      message: string;
+    };

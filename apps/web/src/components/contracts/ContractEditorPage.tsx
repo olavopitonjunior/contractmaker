@@ -481,7 +481,12 @@ export function ContractEditorPage({
             key={commentsVersion}
             contractId={contract.id}
             onCommentClick={() => {}}
-            onCommentResolved={() => {}}
+            onCommentResolved={() => {
+              setCommentsVersion((v) => v + 1);
+              refreshAiCommentsCount();
+            }}
+            isApproved={isApproved}
+            onContentUpdate={() => {}}
             onAddComment={
               !isApproved
                 ? () => {

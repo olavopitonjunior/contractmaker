@@ -658,6 +658,10 @@ model ChatMessage {
   role      String
   content   String   @db.Text
   metadata  Json?
+  /// Eventos do streamContractAgent (tool_use, tool_result, verification, ...)
+  /// pra rehidratar o chip timeline ao recarregar o chat. Nullable — turns
+  /// pré-streaming não têm e UI esconde a seção.
+  events    Json?
   createdAt DateTime @default(now())
 
   session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)

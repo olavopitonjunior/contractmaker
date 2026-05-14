@@ -5,8 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
-import { Check, MessageSquare, Trash2, Send, Bot, User as UserIcon, AlertTriangle, Plus } from "lucide-react";
+import { Check, MessageSquare, Trash2, Send, Bot, User as UserIcon, AlertTriangle, Plus, Sparkles } from "lucide-react";
 import { toast } from "sonner";
+import { AiResolveDialog } from "./AiResolveDialog";
 
 interface Comment {
   id: string;
@@ -28,6 +29,12 @@ interface CommentsPanelProps {
   /** Quando definido, mostra botão "Novo comentário" no header. Em GDocs o
    *  parent abre AddCommentDialog com `requireSelectedTextInput`. */
   onAddComment?: () => void;
+  /** Quando true, esconde o botão "Resolver com IA" (contrato aprovado é
+   *  imutável). Default false (mostra). */
+  isApproved?: boolean;
+  /** Callback chamado quando a IA aplica uma correção via dialog. Usado pra
+   *  refrescar o conteúdo do iframe Google Docs. */
+  onContentUpdate?: (html: string) => void;
 }
 
 function formatRelative(iso: string): string {
@@ -45,11 +52,14 @@ export function CommentsPanel({
   onCommentClick,
   onCommentResolved,
   onAddComment,
+  isApproved = false,
+  onContentUpdate,
 }: CommentsPanelProps) {
   const [comments, setComments] = useState<Comment[]>([]);
   const [loading, setLoading] = useState(true);
   const [replyingTo, setReplyingTo] = useState<string | null>(null);
   const [replyText, setReplyText] = useState("");
+  const [aiResolveTarget, setAiResolveTarget] = useState<Comment | null>(null);
 
   async function load() {
     setLoading(true);
@@ -220,7 +230,7 @@ export function CommentsPanel({
               </div>
             ) : (
               <div
-                className="flex gap-1 pt-1"
+                className="flex flex-wrap gap-1 pt-1"
                 onClick={(e) => e.stopPropagation()}
               >
                 <Button
@@ -240,6 +250,17 @@ export function CommentsPanel({
                   <Check className="h-3 w-3 mr-1" />
                   Resolver
                 </Button>
+                {c.authorType === "ai" && !isApproved && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-7 text-xs text-purple-600 hover:text-purple-700"
+                    onClick={() => setAiResolveTarget(c)}
+                  >
+                    <Sparkles className="h-3 w-3 mr-1" />
+                    Resolver com IA
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="ghost"
@@ -254,6 +275,27 @@ export function CommentsPanel({
         ))}
       </div>
       </ScrollArea>
+      <AiResolveDialog
+        open={!!aiResolveTarget}
+        contractId={contractId}
+        comment={
+          aiResolveTarget
+            ? {
+                id: aiResolveTarget.id,
+                text: aiResolveTarget.text,
+                selectedText: aiResolveTarget.selectedText,
+                severity: aiResolveTarget.severity,
+              }
+            : null
+        }
+        onClose={() => setAiResolveTarget(null)}
+        onContentUpdate={onContentUpdate}
+        onSuccess={() => {
+          toast.success("Correção aplicada pela IA");
+          onCommentResolved?.(aiResolveTarget?.anchorId || "");
+          load();
+        }}
+      />
     </>
   );
 }

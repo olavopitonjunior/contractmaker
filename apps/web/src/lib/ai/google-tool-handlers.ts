@@ -90,7 +90,26 @@ export async function googleInsertClause(
       },
     ];
     await batchUpdateDoc(docId, requests);
-    return { success: true, insertedAt: insertIndex };
+
+    // Verificação pós-mutação: releitura do doc e checagem de que o trecho
+    // realmente apareceu. Drive insertText nunca lança em índice válido, mas
+    // pode ficar misalinhado se o usuário tiver editado entre getDocStructure
+    // e batchUpdateDoc. Sem releitura o agente acreditaria que aplicou e
+    // declararia o turn um sucesso.
+    const probe = plain.slice(0, 80).trim();
+    if (probe.length >= 12) {
+      const after = await getDocPlainText(docId);
+      if (!after.includes(probe)) {
+        return {
+          success: false,
+          error: "Inserção não verificada: trecho não foi encontrado após o batchUpdate. Doc pode ter sido editado em paralelo.",
+          verified: false,
+          insertedAt: insertIndex,
+        };
+      }
+    }
+
+    return { success: true, insertedAt: insertIndex, verified: true };
   });
 }
 
@@ -113,7 +132,24 @@ export async function googleRemoveClause(
       },
     ];
     await batchUpdateDoc(docId, requests);
-    return { success: true, removedRange: range };
+
+    // Verificação pós-mutação: confirma que o trecho NÃO aparece mais. Probe
+    // usa as primeiras 80 chars do texto removido — colisão fortuita com
+    // outro parágrafo é extremamente improvável nesse tamanho.
+    const probe = clauseText.slice(0, 80).trim();
+    if (probe.length >= 12) {
+      const after = await getDocPlainText(docId);
+      if (after.includes(probe)) {
+        return {
+          success: false,
+          error: "Remoção não confirmada: trecho ainda aparece no doc após o batchUpdate. Doc pode ter sido editado em paralelo.",
+          verified: false,
+          removedRange: range,
+        };
+      }
+    }
+
+    return { success: true, removedRange: range, verified: true };
   });
 }
 

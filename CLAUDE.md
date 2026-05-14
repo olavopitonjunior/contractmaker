@@ -30,6 +30,7 @@ Plataforma de gestão de vendas e contratos imobiliários. Esteira: Lead/form p�
 - Validação Zod em todas APIs; Server Components por padrão; path alias `@/*` → `src/*`
 - Migrations via `prisma migrate`; pgvector em SQL raw
 - `DadosContrato` e Handlebars helpers (`src/lib/render/handlebars.ts`) são aditivos — não alterar existentes (quebra contratos antigos)
+- **CLAUDE.md ≤ 40k char** (validado por `apps/web/scripts/check-claude-md-size.mjs` via hook PostToolUse). Estourar = mover detalhe pra `MEMORY.md` ou `docs/`
 
 ## Pontos de entrada do deal
 
@@ -96,27 +97,25 @@ G1 Sinal/arras (3) · G2 Imissão (4) · G3 Rescisão (4) · G4 Financiamento (4
 
 **Budget per-contrato** (`budget.ts::assertContractBudget`): antes de cada `messages.create`. Soma `AIUsage.totalTokens` por contractId; bloqueia se ≥ `CONTRACT_AI_TOKEN_BUDGET` (default 200k). `GET /api/contracts/[id]/budget`. Badge IA no header (cinza <80%, âmbar 80-100%, vermelho ≥100%).
 
-**Tools (18):**
+**Tools (18, em `tools.ts`):**
 - **Consulta:** `query_clauses`, `query_templates`, `explain_clause`
 - **Edição:** `edit_contract_section`, `update_contract_data`, `insert_clause`, `remove_clause`
-- **Análise:** `validate_contract`, `suggest_improvements`, `analyze_contradictions`
-- **OCR:** `extract_document_data` (Anthropic — diferente do form que usa Gemini)
-- **RAG/Aprendizado:** `query_knowledge_base` (Voyage pgvector; fallback ILIKE), `find_similar_contracts` (embedding/fingerprint), `add_comment` (valida `selectedText`)
-- **Propose** (NUNCA edita templates direto): `propose_new_clause` → `ClauseProposal`; `propose_template_change` → `TemplateSuggestion` com `diffHunks`. Rate limit 5 pendentes/org, 1/dia/template. Hunks revalidados antes de aplicar
-- **Design:** `apply_style_preset`, `insert_image` (Vercel Blob, 5MB max)
+- **Análise:** `validate_contract`, `suggest_improvements`, `analyze_contradictions`, `extract_document_data` (OCR Anthropic — distinto do form que usa Gemini)
+- **RAG/Aprendizado:** `query_knowledge_base` (Voyage pgvector + fallback ILIKE), `find_similar_contracts`, `add_comment` (valida `selectedText`)
+- **Propose** (NUNCA edita template direto): `propose_new_clause` → `ClauseProposal`; `propose_template_change` → `TemplateSuggestion` com `diffHunks`. Rate limit 5 pendentes/org, 1/dia/template. Hunks revalidados antes de aplicar
+- **Design:** `apply_style_preset`, `insert_image` (Vercel Blob 5MB max)
 
 System prompt (`prompts.ts`) tem 18 regras. Destaques: regra 10 obriga markdown estruturado (`## Alterações Realizadas / ## Justificativa / ## Verificação`); 10.1 proíbe edição em pergunta informativa; 11 prefere sugestão a edição direta; 13 obriga placeholders `[preencher X]` quando dados ausentes; 8.1/8.2 proíbem JSON cru e citação de outros contratos sem evidência ancorada.
 
 **Em GDocs:** `propose_suggestion` é DEFAULT mesmo pra verbos imperativos. Force direta via "aplique direto"/"faça já"/"sem revisão" (regex `FORCE_DIRECT_EDIT`). Razão: iframe Drive não permite undo do que a SA fez.
 
+**Modos Fast vs Plan + streaming SSE** (`streamContractAgent`): toggle no header do chat. **Fast** = Haiku, 1 iteração, sem expert context, edita direto em GDoc (~3-5s). **Plan** = Sonnet 4.6 default, até 5 iterações, expert context, `propose_suggestion` preferido em GDocs. `/api/contracts/[id]/chat` responde `text/event-stream` com `tool_use|tool_result|verification|text_delta|done`. UI mostra chips ao vivo (lib/ai/event-icons.ts). `googleInsertClause`/`googleRemoveClause` releem o doc pós-mutação e retornam `{verified:false}` quando não confirmam. `ChatMessage.events Json?` persiste timeline pra rehidratar histórico.
+
+**Resolver com IA** (`/api/contracts/[id]/comments/[commentId]/ai-resolve`): botão `[✨ Resolver com IA]` em comments de `authorType=ai` não-resolvidos. Roda agente em modo Fast com prompt sintético do `selectedText + text + suggestedFix`. Marca `resolved=true` SÓ se houve edição com `success:true` E `verified !== false`. Audit `CONTRACT_COMMENT_AI_RESOLVED`. Falha controlada (dado faltante): toast âmbar, comentário permanece pendente.
+
 ## Análise automática (passive)
 
-`useAutoAnalyze.ts` — server lê `getDocPlainText` direto do Drive (cliente não envia HTML). On-mount `trigger=open` (Sonnet 4.5 deep); polling 90s `GDOCS_REFRESH_MS` `trigger=edit` (Haiku 4.5 via `ANTHROPIC_PASSIVE_MODEL`).
-
-- **Quick checks (zero LLM):** `quickChecks.ts` — soma de parcelas, CPF/CNPJ checksum, refs internas, duplicação de qualificação
-- **Dedupe:** `ContractComment.dedupeKey = FNV-1a(authorType+selectedText+text)` + `@@unique([contractId, dedupeKey])`
-- **Cap de custo:** 50 unresolved/contrato; skip-no-change via `ContractChangeLog`; `max_tokens` 1024 + `analysisInput` 8000 chars + 3 findings/run. Cleanup: `cleanup-stale-ai-comments.ts --apply --contractId=<id>`
-- **Backoff:** `lastAttemptAt` setado ANTES da request
+`useAutoAnalyze.ts` — server lê `getDocPlainText` direto do Drive. On-mount `trigger=open` (Sonnet 4.5 deep); polling 90s `trigger=edit` (Haiku 4.5 via `ANTHROPIC_PASSIVE_MODEL`). **Quick checks** (`quickChecks.ts`, zero LLM): soma parcelas, CPF/CNPJ checksum, refs internas, duplicação qualificação. **Dedupe** via `ContractComment.dedupeKey = FNV-1a(authorType+selectedText+text)` + `@@unique([contractId, dedupeKey])`. **Cap:** 50 unresolved/contrato, skip-no-change via `ContractChangeLog`, `max_tokens` 1024, `analysisInput` 8000 chars, 3 findings/run. **Backoff:** `lastAttemptAt` setado ANTES da request. Cleanup: `cleanup-stale-ai-comments.ts --apply --contractId=<id>`.
 
 ## Editor — Google Docs
 
@@ -128,26 +127,13 @@ System prompt (`prompts.ts`) tem 18 regras. Destaques: regra 10 obriga markdown 
 - **Versão `/version`:** `exportDocAsHtml` snapshot + `copyContractGoogleDoc` + reaplica DocumentStyle + novo watch
 - **Aprovação `/approve`:** `exportDocAsHtml` antes de `status=aprovado`, atualiza `Contract.htmlContent` — snapshot pro `createContractMemory` indexar embedding
 
-**GDocs runtime:**
-- Iframe `https://docs.google.com/document/d/{id}/edit?embedded=true&rm=embedded`. Read-only `/preview` quando aprovado
-- "Compartilhar" via `ShareDialog.tsx` consome `GET/POST/DELETE /api/contracts/[id]/share` (Drive permissions + owner OAuth). `lib/google/docs.ts` filtra SA + `GOOGLE_OWNER_EMAIL`. POST bloqueado em aprovado
-- Tools usam `safeGoogleCall` — exceções viram `{error, googleApiError:true}`
-- Auto-save desligado. Watch Drive em `/api/webhooks/google-drive` popula `ContractChangeLog`
-- `SuggestionsToolbar` quando há pending; `PATCH /suggestions/[id]` aplica `replaceAllText`/`deleteContentRange`/`insertText` no doc real
-- `CommentsPanel` "+ Novo comentário" com `requireSelectedTextInput=true` (POST valida via `createAnchoredComment`, 422 se trecho não existir)
-- Banner `CloudOff` quando `googleDocStatus.startsWith("error:")` (causa truncada 240 chars)
-
-Migração legada (raro): `apps/web/scripts/migrate-tiptap-to-gdocs.ts --dealId <id> --apply`. Z-index `[data-radix-popper-content-wrapper]{z-index:100!important}` em `globals.css` faz dropdowns flutuarem acima da toolbar sticky.
+**GDocs runtime:** iframe `docs.google.com/document/d/{id}/edit?embedded=true&rm=embedded` (read-only `/preview` quando aprovado). "Compartilhar" via `ShareDialog.tsx` → `GET/POST/DELETE /api/contracts/[id]/share` (filtra SA + `GOOGLE_OWNER_EMAIL`; POST bloqueado em aprovado). Tools usam `safeGoogleCall` → `{error, googleApiError:true}`. Auto-save off; watch Drive em `/api/webhooks/google-drive` popula `ContractChangeLog`. `SuggestionsToolbar` aplica `replaceAllText`/`deleteContentRange`/`insertText` via `PATCH /suggestions/[id]`. `CommentsPanel` com `requireSelectedTextInput=true` valida via `createAnchoredComment` (422 se trecho não existir). Banner `CloudOff` em `googleDocStatus.startsWith("error:")`. Migração legada: `apps/web/scripts/migrate-tiptap-to-gdocs.ts --dealId <id> --apply`.
 
 **Comentários e suggestions:** `ContractComment { authorType, severity, anchorId, selectedText, parentId, dedupeKey, resolved }` e `ContractSuggestion { type, suggestionId, status: pending|accepted|rejected }`. Endpoints `GET/POST /api/contracts/[id]/{comments,suggestions}` + `PATCH/DELETE`. Em GDocs, `add_comment` e `propose_suggestion` espelham no Drive Comments API; PATCH aplica no doc real e fecha thread.
 
 ## Etapa 0 form público — Upload + OCR
 
-`/f/[token]` tem 8 etapas; etapa 0 opcional pra docs identificadores. `STEP_LABELS` em `lib/forms/validation.ts`. `DocumentosStep.tsx`: dropzone JPG/PNG/WebP/GIF + PDF até 10MB, max 15. Resize client `createImageBitmap` pra 2000px (PDFs direto).
-
-**OCR engine** (`lib/ai/ocr.ts::classifyAndExtract`): uma chamada Gemini 2.5 Flash via `@google/genai` retorna `{tipo, campos, confidence}` JSON. Suporta imagens E PDFs. Override `GEMINI_OCR_MODEL`. Categorias: `rg|cpf|cnh|matricula|iptu|escritura|procuracao|comprovante_residencia|certidao_casamento|ficha_resumo|outro`. Custo ~$0.01/form (8 docs), 58% mais barato que Haiku 4.5 vision.
-
-`mapExtractedToForm` chama `form.setValue` respeitando `skipIfDirty`; `suggestAssignment` matcha por CPF/nome (sem match → `kind: "outro"`). Ao finalize, `PATCH /api/forms/[token]` copia FormAttachments → DealAttachments com `extractedData` inteiro (incluindo `assignment`).
+`/f/[token]` 8 etapas (etapa 0 opcional pra docs). `DocumentosStep.tsx`: dropzone JPG/PNG/WebP/GIF + PDF até 10MB, max 15. Resize client pra 2000px. **OCR** (`lib/ai/ocr.ts::classifyAndExtract`): Gemini 2.5 Flash via `@google/genai` retorna `{tipo, campos, confidence}` JSON, suporta imagens E PDFs. Categorias: `rg|cpf|cnh|matricula|iptu|escritura|procuracao|comprovante_residencia|certidao_casamento|ficha_resumo|outro`. ~$0.01/form. `mapExtractedToForm` respeita `skipIfDirty`; `suggestAssignment` matcha CPF/nome. Finalize copia FormAttachments → DealAttachments com `extractedData`.
 
 ## Import de contrato
 
@@ -238,14 +224,7 @@ Envelope vincula a UM de dois (CHECK XOR): Contract aprovado (`source="contract"
 - **Cônjuges:** com `conjuge.nome` aparecem como sub-linha opt-in. `sourceIndex = idx + 1000`
 - **Submit:** `PATCH /api/contracts/[id]/signers-data` (whitelist regex — emails, `conjuge.{email,nome,cpf,incluir_como_signatario}`, `comissao.comissionados`, `testemunhas`) → `POST /api/contracts/[id]/envelopes`. `SourceKind = "vendedor" | "comprador" | "testemunha" | "corretora"`
 
-**Quirks v3 (prod 2026-05-08):**
-1. `communicate_by` REMOVIDO no signer (422). Email automático via `signer.email` + `activateEnvelope`
-2. `documentation` (CPF/CNPJ) exige máscara `123.456.789-00`/`12.345.678/0001-90`. Helper `formatCpfCnpj`
-3. Requirement usa `action="agree"` + `role` (não `action="sign"`). Roles: `sign|buyer|seller|intervening|realestate|witness|consenting|attorney`. Mapping em `executor.ts::defaultRoleForSourceKind`
-4. **Status em `/events`**, não `/signers`/`/requirements`. `listEnvelopeEvents` retorna histórico canônico (`name: sign|signature_started|refusal`, `data.signer.{key,email}`, `created`)
-5. **Webhook v3 NÃO tem `envelope.id`** — só `event` + `document.{key,filename,path}`. Lookup local: `Envelope.documentClicksignId === payload.document.key`
-6. **Match signer no sync /events:** ClickSign edita signer (PATCH) gerando `remove_signer + add_signer` com novo `signer.key`; DB local fica com key antigo. Match canônico por key, fallback por email lowercase
-7. Host `app.clicksign.com` (não `api.`); auth via `?access_token=TOKEN` query string (Bearer header retorna 401 enganoso)
+**Quirks v3** (memória [feedback_clicksign_v3_quirks]): host `app.clicksign.com` + `?access_token=` query (Bearer dá 401 enganoso); `documentation` com máscara (helper `formatCpfCnpj`); requirement `action="agree"`+`role` (mapping em `executor.ts::defaultRoleForSourceKind`); `communicate_by` removido — email via `signer.email`+`activateEnvelope`; status canônico em `/events` (não `/signers`); webhook sem `envelope.id` — lookup por `documentClicksignId === document.key`; match signer por key + fallback email lowercase (PATCH gera `remove+add_signer` com key novo).
 
 **Webhook close** (`https://imobpro.ia.br/api/webhooks/clicksign`): valida HMAC-SHA256 (header `content-hmac` ou `x-clicksign-signature`). Eventos `close|auto_close|document_closed` disparam `downloadSignedPdf` fire-and-forget → `uploadBufferToStorage` (`envelopes/<id>/signed.pdf`) → grava `Envelope.signedDocumentUrl`. Cria DealAttachment automático (idempotente via `findFirst { dealId, url }`): `category="contrato_assinado"` (contract) ou `"documento_assinado"` (attachment), `source="clicksign_signed"`.
 
@@ -257,35 +236,25 @@ Envelope vincula a UM de dois (CHECK XOR): Contract aprovado (`source="contract"
 
 Documentação consolidada em [docs/pagadoria-handoff.md](docs/pagadoria-handoff.md) — sempre consultar antes de mexer.
 
-**Fases entregues:**
-- **1a-1b Security + Asaas:** RBAC (`CustomRole`+`PERMISSION.*`), 2FA, SessionElevation, TrustedDevice. `AsaasAccount` (apiKey AES-256-GCM + walletId + 4 status fields), upload KYC multipart, `CommissionCharge` status canônico, idempotência via `AsaasWebhookEvent.asaasEventId`
-- **2 `/financeiro` + `/pay`:** KPIs, taxas (`OrgFinancialSettings.finePercent/interestPercentMonth` com limites CDC), branding por org, `/pay/[token]` com PII mascarada
-- **3 Transferências + conciliação + relatórios:** `AsaasTransfer` + dual approval > `dualApprovalCapCents`, `BankReconciliation` auto-match via `externalReference`, 4 relatórios
-- **4 Polish:** notif bell, devices UI, platform fee (`platformFeePercent` + `platformFeeWalletId`)
-- **5 Split multi-recipient:** `SplitRecipient { orgId, label, walletId, active }`, CRUD `/settings/pagamentos/split-recipients`. `composeSplits()`: max 10 entries, sem duplicatas, sem wallet própria, soma `percentualValue ≤ 100`. Persistido em `CommissionCharge.splitJson`. `platformFeePercent` só gera split se `platformFeeWalletId` configurado
-- **Multi-account (2026-05-10):** N contas Asaas por org com seletor admin. `Organization.activeAsaasAccountId` define a conta default; `AsaasAccount.label/archivedAt` + `@index(orgId)` (não mais @unique). `OrgFinancialSettings`, `AsaasCustomer`, `CommissionCharge`, `AsaasTransfer`, `BankReconciliation`, `AsaasWebhookEvent` ganham `accountId` (persistido na criação). `AsaasAccountPermission { accountId, userId, capability }` libera 4 caps granulares: `view | create_charge | init_transfer | configure`. Owner bypassa. Helpers canônicos em `lib/asaas/account.ts` (`resolveAsaasAccount{hint→active→first_accessible}`, `getAccountWithApiKey`, `userHasAccountCapability`, `listAccessibleAccounts`). `requireAccountCapability` em `rbac/guard.ts`. `BANK_ACCOUNT_SWITCH` em `ElevationScope`. Endpoints `/api/financeiro/accounts/*` (CRUD + activate + permissions). UI `/settings/pagamentos/contas/*` com wizard reusado (`OnboardingWizard mode="newAccount"`). `<AccountSwitcher />` no layout `/financeiro/*` lê `?accountId=` do URL e dispara `/activate` (owner). Webhook `ACCOUNT_STATUS_UPDATED` automatiza refresh do KYC. **Cobranças em aberto NÃO migram** entre contas (paymentId/walletId são per-conta no Asaas — decisão consciente)
+**Fases entregues** (detalhes em [docs/pagadoria-handoff.md](docs/pagadoria-handoff.md)):
+- **1a-1b** RBAC (`CustomRole`+`PERMISSION.*`) + 2FA + SessionElevation + TrustedDevice + `AsaasAccount` (apiKey AES-256-GCM) + KYC multipart + `CommissionCharge` status canônico + idempotência via `AsaasWebhookEvent.asaasEventId`
+- **2** `/financeiro` + `/pay/[token]` com taxas (`OrgFinancialSettings.finePercent/interestPercentMonth`), branding org, PII mascarada
+- **3** `AsaasTransfer` (dual approval > `dualApprovalCapCents`) + `BankReconciliation` auto-match via `externalReference` + 4 relatórios
+- **4** notif bell, devices UI, platform fee (`platformFeePercent` + `platformFeeWalletId`)
+- **5** `SplitRecipient` + `composeSplits()` (max 10, sem duplicatas/wallet própria, soma ≤100%). Persiste em `CommissionCharge.splitJson`
+- **Multi-account** (memória [project_multi_account_asaas]): N contas Asaas/org. `Organization.activeAsaasAccountId` define default. `AsaasAccountPermission { accountId, userId, capability }` com caps `view | create_charge | init_transfer | configure` (owner bypassa). Helpers em `lib/asaas/account.ts` (`resolveAsaasAccount`, `getAccountWithApiKey`, `userHasAccountCapability`). `requireAccountCapability` em `rbac/guard.ts`. Endpoints `/api/financeiro/accounts/*` + UI `/settings/pagamentos/contas/*` com `OnboardingWizard mode="newAccount"`. `<AccountSwitcher />` no `/financeiro/*` lê `?accountId=` e dispara `/activate`. Webhook `ACCOUNT_STATUS_UPDATED` refresca KYC. **Cobranças em aberto NÃO migram entre contas**
 
-### v2 Wizard (2026-05-09)
+### v2 Wizard (memória [project_pagadoria_v2])
 
-**ChargeWizard:** 4 etapas reusadas em 3 modes (`commission_from_deal | avulsa_in_deal | avulsa_standalone`) com pré-preenchimento + chips stateful + drawer "De onde vieram" (botão `?`). `CommissionCharge.kind` + `categoryLabel String?` (texto livre filtrável). `OrgFinancialSettings.notify*` (6 flags: created/paid/overdue/dueSoon/admins/comissionados) + régua via `notifyChargeEvent`. Cron D-3 em `/api/cron/charges/due-soon` (12 UTC).
-
-**Mapper imobiliária→comissionados[]:** `GET /api/deals/[id]/contract-data-summary` em `deriveComissionados()` converte `comissao.imobiliaria_*` (legado mono-corretora) numa entrada com `source: "ccv.imobiliaria_principal"` quando array vazio. Source values: `ccv.comissionados | ccv.imobiliaria_principal | manual`.
-
-**Multi-corretora:** `comissao.comissionados[].papel: enum(captador|intermediador|indicador|imobiliaria_principal|outro)` + superRefine soma ≤ 100%. `ComissaoConfigStep` renderiza Percentual + Papel + soma visual. Templates `ccv_*_v2.hbs` ganharam `{{#if comissao.comissionados.length}}` loop com fallback `imobiliaria_*`.
-
-**Hide-from-payer:** `splitJson.display.{hiddenRecipientIds,consolidationMap}`. `generatePayerVisibleDescription()` em `lib/asaas/commission.ts` gera `description` omitindo splits ocultos. Asaas não expõe split publicamente.
-
-**Rascunho `SplitRecipient`:** `pendingFields String[]` permite cadastrar inline com PIX/walletId vazios → `active: false`. `splitDispatcher` pula criando `AsaasTransfer { status: "FAILED", failureReason: "Cadastro pendente..." }` — cobrança ainda emite. UI ganhou seção "⚠️ Pendentes" com botão `[Pedir dados]`.
-
-**Magic link:** `completionToken/Exp` (JWT-HMAC `AUTH_SECRET`, 7d). `POST /api/financeiro/split-recipients/[id]/request-completion` envia email Resend. Página pública `/financeiro/completar-cadastro?token=` → `POST /api/public/split-recipients/complete` valida token, marca `active: true`, esvazia pendingFields. Token único por uso.
-
-**Wizard draft:** `CommissionChargeDraft { dealId, userId @@unique, state Json, expiresAt }` (30d TTL). `POST/GET/DELETE /api/deals/[id]/commission-charges/draft`. Wizard auto-aplica state no mount + toast. Submit final → `DELETE`. Cron 03 UTC limpa expirados.
-
-**Validate por etapa:** `POST .../commission-charges/validate?step=payer|charge|splits|all`. Funções puras em `lib/asaas/charge-validators.ts`. Chips stateful no client computam status localmente; endpoint serve pra Newton/Bearer.
-
-**Trocar pra avulsa:** Banner "Sem comissionados no contrato" oferece `[Trocar para cobrança avulsa]` que muda `mode` preservando state via `onModeChange`.
-
-**Endpoints v2:** `GET /api/deals/[id]/contract-data-summary` (readonly) · `POST .../commission-charges/validate?step=` · `GET/POST/DELETE .../commission-charges/draft` · `POST /api/financeiro/split-recipients/[id]/request-completion` · `POST /api/public/split-recipients/complete` · `GET /api/financeiro/categories?q=` (autocomplete) · `GET /api/financeiro/split-recipients/uncadastrados` · `POST .../bulk-import` · crons `/api/cron/charges/due-soon` (12 UTC) e `/api/cron/drafts/cleanup` (03 UTC)
+- **ChargeWizard:** 4 etapas em 3 modes (`commission_from_deal | avulsa_in_deal | avulsa_standalone`), chips stateful, drawer "De onde vieram". `CommissionCharge.kind` + `categoryLabel String?`. `OrgFinancialSettings.notify*` (6 flags) + `notifyChargeEvent`. Cron D-3 `/api/cron/charges/due-soon` (12 UTC)
+- **Mapper imobiliária→comissionados[]:** `deriveComissionados()` em `GET /api/deals/[id]/contract-data-summary` converte legado mono-corretora quando array vazio. Sources: `ccv.comissionados | ccv.imobiliaria_principal | manual`
+- **Multi-corretora:** `comissao.comissionados[].papel: enum(captador|intermediador|indicador|imobiliaria_principal|outro)`, superRefine soma ≤100%. Templates `ccv_*_v2.hbs` com loop + fallback `imobiliaria_*`
+- **Hide-from-payer:** `splitJson.display.{hiddenRecipientIds,consolidationMap}` + `generatePayerVisibleDescription()` em `lib/asaas/commission.ts`. Asaas não expõe split publicamente
+- **Rascunho SplitRecipient:** `pendingFields String[]` não-vazio → `active: false`; `splitDispatcher` pula com `AsaasTransfer FAILED` mas cobrança emite. UI "⚠️ Pendentes" + `[Pedir dados]`
+- **Magic link:** `completionToken/Exp` (JWT-HMAC `AUTH_SECRET`, 7d). `POST /api/financeiro/split-recipients/[id]/request-completion` → Resend → `/financeiro/completar-cadastro?token=` → `POST /api/public/split-recipients/complete`
+- **Wizard draft:** `CommissionChargeDraft { dealId, userId @@unique, state, expiresAt }` (30d TTL). `POST/GET/DELETE /api/deals/[id]/commission-charges/draft`. Cron 03 UTC limpa
+- **Validate por etapa:** `POST .../commission-charges/validate?step=payer|charge|splits|all` — funções puras em `lib/asaas/charge-validators.ts`
+- **Endpoints v2 extras:** `GET /api/financeiro/categories?q=` · `.../split-recipients/uncadastrados` · `.../bulk-import`
 
 **QA:** preflight `GET /api/admin/preflight-qa` (30+ checks). Setup `apps/web/scripts/setup-pagadoria-qa.ts`. Sandbox helper `lib/asaas/sandbox.ts::approveSandboxAccount` força 4 status pra APPROVED via `POST /v3/sandbox/myAccount/approve` — guard interno rejeita se `ASAAS_ENV=production`.
 
@@ -301,22 +270,18 @@ Documentação consolidada em [docs/pagadoria-handoff.md](docs/pagadoria-handoff
 
 ## Aprovação
 
-`POST /api/contracts/[id]/approve` valida + conta `ContractSuggestion` pendentes + `ContractComment` não-resolvidos (severity error). Se issues: `{requiresReview, canForce, errorCount, warningCount, ...}`. Frontend abre `ApprovalReviewDialog` com "Revisar" / "Aprovar mesmo assim" (oculto se `canForce=false`). Segunda chamada com `{force: true}` aprova.
+`POST /api/contracts/[id]/approve` valida + conta `ContractSuggestion` pendentes + `ContractComment` não-resolvidos (severity error). Se issues: `{requiresReview, canForce, errorCount, warningCount}` → `ApprovalReviewDialog` ("Revisar" / "Aprovar mesmo assim" — oculto se `canForce=false`). Segunda chamada `{force: true}` aprova. GDocs: `runContractApproval` em `lib/contracts/approve-action.ts` faz `exportDocAsHtml` antes de `status=aprovado`, atualiza `htmlContent`, dispara `createContractMemory` fire-and-forget, auto-promove Deal pra "Enviado para assinatura".
 
-GDocs mode: `runContractApproval` em `lib/contracts/approve-action.ts` faz `exportDocAsHtml(googleDocId)` antes de `status=aprovado`, atualiza `Contract.htmlContent`, dispara `createContractMemory` fire-and-forget, e auto-promove o Deal pra "Enviado para assinatura".
+**Aprovado = imutável:** chat/edição/comentários/versionamento bloqueados (403). `/auto-analyze` → 200 com `{findings:[], modelUsed:"approved"}`. **Exceção:** `PATCH /signers-data` (whitelist regex) aceita patch escopo restrito — campos só metadados pra ClickSign, não renderizados.
 
-**Aprovado = imutável:** chat/edição/comentários/versionamento bloqueados; API retorna 403 em POSTs. `/auto-analyze` retorna 200 com `{findings:[], modelUsed:"approved"}`. **Exceção:** `PATCH /signers-data` (whitelist regex) aceita patch escopo restrito mesmo em aprovado — campos não são renderizados no HTML/PDF (só metadados pra ClickSign).
+## Mecanismos de delete (4 níveis — memória [project_delete_mechanisms])
 
-## Mecanismos de delete (4 níveis)
+Todos com auth + cross-org guard via `deal.pipeline.orgId` + audit + bloqueio quando há `Envelope closed/running` (409). GDocs vão pra lixeira do Drive.
 
-Todos com auth + cross-org guard via `deal.pipeline.orgId` + audit log + bloqueio quando há `Envelope` em `closed`/`running` (409). GDocs vão pra lixeira do Drive (best-effort).
-
-- `DELETE /api/contracts/[id]` (`VersionTimeline`) — versão específica. Cascata: ContractClause/Comment/Suggestion/ChangeLog/ChatSession/Envelope. Promove próxima se era `isLatest`. Bloqueia aprovado
-- `DELETE /api/pipeline/deals/[dealId]/contracts` ("Excluir contratos") — todas Contract rows (mantém Deal+SalesForm). Sequencial trash dos GDocs
-- `DELETE /api/deals/[dealId]/attachments/[attachmentId]` (ícone X) — anexo individual. `CertidaoJob.attachmentId` vira null
-- `DELETE /api/pipeline/deals/[dealId]` ("Excluir negócio") — Deal completo. Cascata CertidaoJob → DealAttachment → Contract → Deal. SalesForm condicional via `?deleteForm=true`
-
-Audit: `CONTRACT_DELETE`, `CONTRACT_DELETE_BULK`, `ATTACHMENT_DELETE`, `DEAL_DELETE`.
+- `DELETE /api/contracts/[id]` — versão específica (cascata Clause/Comment/Suggestion/ChangeLog/ChatSession/Envelope; promove próxima se `isLatest`; bloqueia aprovado)
+- `DELETE /api/pipeline/deals/[dealId]/contracts` — todas Contract rows (mantém Deal+SalesForm)
+- `DELETE /api/deals/[dealId]/attachments/[attachmentId]` — anexo individual (`CertidaoJob.attachmentId` vira null)
+- `DELETE /api/pipeline/deals/[dealId]` — Deal completo (cascata CertidaoJob → Attachment → Contract → Deal). SalesForm via `?deleteForm=true`
 
 ## Rotas públicas (sem auth)
 
@@ -337,23 +302,17 @@ Audit: `CONTRACT_DELETE`, `CONTRACT_DELETE_BULK`, `ATTACHMENT_DELETE`, `DEAL_DEL
 
 ## Schemas críticos
 
-- **`DealAttachment.source`:** `manual | form_copy | infosimples | upload | clicksign_signed`
-- **`DealAttachment.category`:** `contrato_original | contrato_assinado | documento_assinado | relatorio_certidoes | rg | cpf | cnh | matricula | iptu | comprovante_residencia | escritura | procuracao | ...`
-- **`Contract.templateId`** nullable. Null = importado, conteúdo no GDoc
-- **`Envelope`** XOR: `contractId` ou `attachmentId`. `source: "contract" | "attachment"`
-- **Deal NÃO tem `orgId` direto** — escopo via `pipeline.orgId`. Pra Contract importado (`templateId=null`) usar `deal.pipeline.orgId` (não `template.orgId` — null-deref)
-- **`SplitRecipient.pendingFields String[]`** — quando não-vazio, `active: false` automaticamente; `splitDispatcher` pula com FAILED. Magic link via `completionToken/Exp` (JWT-HMAC 7d)
-- **`CommissionCharge.kind`:** `commission | avulsa | aluguel | outros`. `categoryLabel String?` filtrável (avulsas)
-- **`splitJson`:** `{ splits: AsaasSplit[], external: ExternalSplit[], display?: { hiddenRecipientIds, consolidationMap } }`. Display é puramente UI/descrição — Asaas não vê
-- **`comissao.comissionados[]`** canônico (multi-corretora) com `papel`. Fallback `imobiliaria_*` mantido — `deriveComissionados` em `/contract-data-summary` sintetiza 1 entrada com `source: "ccv.imobiliaria_principal"` quando array vazio
-- **`CommissionChargeDraft`** `(dealId, userId)` único, `expiresAt = +30d`, cron diário cleanup
-- **`AsaasAccount.orgId`** **NÃO** é mais @unique — N contas por org permitidas. Tem `label`, `archivedAt` (soft delete), `@@index([orgId])`. Conta ativa via `Organization.activeAsaasAccountId` (FK SetNull)
-- **`OrgFinancialSettings.accountId @unique`** — settings agora per-conta. `orgId` mantido como índice/conveniência mas NÃO é mais @unique. Cada conta tem suas próprias taxas/branding/notify*/platformFee
-- **`AsaasCustomer @@unique([accountId, cpfCnpj])`** e `@@unique([accountId, asaasId])` — cliente é per-subconta no Asaas. Mesmo CPF pode existir em N contas
-- **`CommissionCharge.accountId`** persistido na criação (FK Restrict). Webhook handler popula `AsaasWebhookEvent.accountId` via charge lookup. Trocar conta ativa NÃO afeta cobranças já emitidas
-- **`AsaasAccountPermission { accountId, userId, capability }`** com cap em `view | create_charge | init_transfer | configure`. Owner bypassa implicitamente (não inserir rows). RBAC global ganhou 4 perms org-level: `ACCOUNT_CREATE/ACTIVATE/ARCHIVE/PERMISSIONS_MANAGE` (só owner herda; admin tem `false` explícito)
+Não-óbvios (enums e structure: ver `prisma/schema.prisma`):
 
-**Audit actions:** `DEAL_*`, `FORM_*`, `ATTACHMENT_*`, `CONTRACT_GENERATE/IMPORT/REEXTRACT/STATUS_UPDATE/APPROVE/DELETE/DELETE_BULK`, `ENVELOPE_CREATE/RESEND`, `CERTIDAO_BATCH_DISPATCH`, `KYC_*`, `CHARGE_*`, `TRANSFER_*`, `INTENT_*`, `CLICKSIGN_WEBHOOK_RECEIVED|REJECTED`, `SPLIT_RECIPIENT_*`, `ACCOUNT_CREATE/ACTIVATE/ARCHIVE/LABEL_UPDATE/PERMISSION_GRANT/PERMISSION_REVOKE`.
+- **`Contract.templateId` nullable** — null = importado, conteúdo no GDoc. `/render` e `/contract-pdf` erram sem `googleDocId`
+- **`Envelope`** XOR: `contractId` ou `attachmentId` (`source: "contract" | "attachment"`)
+- **Deal NÃO tem `orgId` direto** — escopo via `pipeline.orgId`. Pra Contract importado usar `deal.pipeline.orgId` (não `template.orgId`)
+- **`splitJson`:** `{ splits, external, display? }`. `display` é UI-only — Asaas não vê
+- **`comissao.comissionados[]`** canônico com `papel`. Fallback `imobiliaria_*` sintetizado por `deriveComissionados` quando array vazio
+- **`SplitRecipient.pendingFields`** não-vazio → `active: false` + `splitDispatcher` skip FAILED. Magic link via `completionToken/Exp` (JWT-HMAC 7d)
+- **Multi-account schema:** `AsaasAccount.orgId` NÃO mais @unique (N contas/org). `OrgFinancialSettings.accountId @unique`. `AsaasCustomer @@unique([accountId, cpfCnpj])`. `CommissionCharge.accountId` (FK Restrict) persistido na criação — trocar conta ativa NÃO afeta cobranças emitidas. Owner bypassa `AsaasAccountPermission`. RBAC org-level: `ACCOUNT_CREATE/ACTIVATE/ARCHIVE/PERMISSIONS_MANAGE`
+
+**Audit actions:** lista canônica em `lib/audit/actions.ts` — prefixos `DEAL_*`, `FORM_*`, `ATTACHMENT_*`, `CONTRACT_*`, `ENVELOPE_*`, `CERTIDAO_*`, `KYC_*`, `CHARGE_*`, `TRANSFER_*`, `INTENT_*`, `CLICKSIGN_*`, `SPLIT_RECIPIENT_*`, `ACCOUNT_*`.
 
 ## Gotchas
 
@@ -366,11 +325,8 @@ Audit: `CONTRACT_DELETE`, `CONTRACT_DELETE_BULK`, `ATTACHMENT_DELETE`, `DEAL_DEL
 - **Upload de imagens** `/api/contracts/[id]/images`: 5MB max, JPEG/PNG/WebP. Requer `BLOB_READ_WRITE_TOKEN`
 - **Cron certidões** requer Vercel Pro. Sem ele, `awaiting_portal` fica eterno. Schedule `*/5min` em `vercel.json`
 - **Normalizers de certidões são frágeis:** Infosimples muda nomes de campo. Após primeira extração em prod, salvar `resultData` como fixture + teste de regressão
-- **Asaas sandbox rejeita docs de identidade** via API — usar `approveSandboxAccount`. Split rejeita wallet própria, duplicatas, max 10
-- **Prisma migrations** rodam via `prisma migrate deploy` no build. Mudanças em **dados** (rename, backfills) → migration SQL plain idempotente, roda automático
-- **Auto-mode classifier bloqueia acesso direto a prod DB** (`prisma migrate dev`, scripts TS que conectam, leitura de `.env` com creds). Workaround canônico: SQL migration via `prisma migrate deploy`. Scripts TS são fallback emergencial
+- **Prisma migrations** rodam via `prisma migrate deploy` no build. Mudanças em dados (rename, backfills) → migration SQL plain idempotente
 - **Auto-promote stage não é retroativo:** webhook ClickSign close OU charge antes da migration de stages = deal fica em stage anterior. Drag-drop manual
-- **Google OAuth Testing 7-day expiry:** `invalid_grant` quebra GDocs prod a cada ~7d enquanto consent screen Testing. Mover pra "In production" no Cloud Console resolve permanente
-- **Chrome MCP bloqueia accounts.google.com:** não tentar dirigir Google OAuth via MCP — rodar script servidor + usuário completa manual
-- **Resend sandbox bloqueia destinatários:** `EMAIL_FROM=onboarding@resend.dev` só envia pro dono. Convites/magic link silenciosamente bloqueados até domínio verificado. **Magic link Pagadoria v2** cai nessa armadilha
+- **Split Asaas:** rejeita wallet própria, duplicatas, max 10. Sandbox rejeita docs de identidade via API — usar `approveSandboxAccount`
 - **Forms públicos não requerem auth** — qualquer um com o link pode editar
+- Vários gotchas operacionais cobertos por memória: OAuth Testing 7d, Chrome MCP + Google auth, Resend sandbox, auto-mode classifier vs prod DB, printf single quotes pra Asaas, vercel env pull com `\n`

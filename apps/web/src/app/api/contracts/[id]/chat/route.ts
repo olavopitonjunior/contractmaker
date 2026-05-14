@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { chatSchema } from "@/lib/validation/schemas";
-import { runContractAgent } from "@/lib/ai/agent";
+import { streamContractAgent } from "@/lib/ai/agent";
 import {
   requireApiAuth,
   isAuthFailure,
@@ -31,7 +31,6 @@ export async function POST(
     return NextResponse.json({ error: "Contract not found" }, { status: 404 });
   }
 
-  // Cross-user guard via Bearer: usuário só conversa com seus próprios contratos.
   if (auth.ident.via === "bearer" && contract.userId !== auth.ident.userId) {
     return NextResponse.json(
       { error: "Forbidden", reason: "not the contract owner" },
@@ -50,24 +49,44 @@ export async function POST(
     );
   }
 
-  try {
-    const result = await runContractAgent({
-      message: parsed.data.message,
-      contractId: params.id,
-      userId: auth.actor.effectiveUserId,
-      orgId: auth.org.id,
-    });
+  // SSE response — cada AgentEvent vira uma frame `data: <json>\n\n`.
+  // O cliente parseia em ChatPanel via ReadableStreamReader e renderiza
+  // chips ao vivo conforme tool_use/tool_result chegam.
+  const encoder = new TextEncoder();
+  const agentParams = {
+    message: parsed.data.message,
+    contractId: params.id,
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    mode: parsed.data.mode,
+  };
 
-    return NextResponse.json({
-      message: result.message,
-      htmlContent: result.htmlContent,
-      dataJson: result.dataJson,
-      toolsUsed: result.changeLogs.map((l) => l.action),
-    });
-  } catch (error: unknown) {
-    console.error("Agent error:", error);
-    const message =
-      error instanceof Error ? error.message : "Erro ao processar mensagem";
-    return NextResponse.json({ error: message }, { status: 500 });
-  }
+  const stream = new ReadableStream({
+    async start(controller) {
+      try {
+        for await (const event of streamContractAgent(agentParams)) {
+          controller.enqueue(
+            encoder.encode(`data: ${JSON.stringify(event)}\n\n`)
+          );
+        }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Erro ao processar mensagem";
+        console.error("[chat SSE] error:", err);
+        controller.enqueue(
+          encoder.encode(`data: ${JSON.stringify({ type: "error", message })}\n\n`)
+        );
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }

@@ -7,7 +7,13 @@ import { quickChecks, dedupeKeyFor, type QuickFinding } from "./quickChecks";
 import { recordAIUsage } from "./usage";
 import { assertContractBudget, ContractBudgetExceededError } from "./budget";
 import { loadExpertContext } from "./expert-context";
-import type { AgentContext, AgentResult, ChangeLogEntry } from "./types";
+import type {
+  AgentContext,
+  AgentEvent,
+  AgentMode,
+  AgentResult,
+  ChangeLogEntry,
+} from "./types";
 
 function getAnthropicClient() {
   const apiKey = process.env.ANTHROPIC_API_KEY;
@@ -23,19 +29,29 @@ interface AgentParams {
   contractId: string;
   userId: string;
   orgId: string;
+  /** Modo do agente. Default 'plan' (multi-turn com expert context). */
+  mode?: AgentMode;
 }
 
-async function getAgentConfig(orgId: string) {
+const HAIKU_MODEL = "claude-haiku-4-5-20251001";
+const SONNET_MODEL = "claude-sonnet-4-6";
+
+async function getAgentConfig(orgId: string, mode: AgentMode) {
   const config = await prisma.agentConfig.findUnique({ where: { orgId } });
+
+  // Resolução de modelo por modo:
+  // - fast: SEMPRE Haiku (sobrepõe AgentConfig.model). Otimizado pra latência.
+  // - plan: respeita AgentConfig.model > ANTHROPIC_MODEL env > default Sonnet
+  //   (raciocínio mais profundo justifica o custo 3× maior).
+  let model: string;
+  if (mode === "fast") {
+    model = HAIKU_MODEL;
+  } else {
+    model = config?.model || process.env.ANTHROPIC_MODEL || SONNET_MODEL;
+  }
+
   return {
-    // Default Haiku 4.5: ~3× mais barato que Sonnet ($1/MT in vs $3, $5/MT out
-    // vs $15) e suficiente para tool-use + edições dirigidas. Orgs que querem
-    // raciocínio jurídico mais profundo configuram em AgentConfig.model ou
-    // via env ANTHROPIC_MODEL=claude-sonnet-4-6.
-    model:
-      config?.model ||
-      process.env.ANTHROPIC_MODEL ||
-      "claude-haiku-4-5-20251001",
+    model,
     temperature: config?.temperature ?? 0.3,
     maxTokens: config?.maxTokens ?? 4096,
     systemPrompt: config?.systemPrompt || DEFAULT_SYSTEM_PROMPT,
@@ -147,185 +163,374 @@ function buildToolSummary(toolName: string, input: Record<string, unknown>): str
       return `Gerou sugestões de melhoria${input.focus ? ` (foco: ${input.focus})` : ""}`;
     case "extract_document_data":
       return `Extraiu dados do documento ${input.attachmentId}`;
+    case "query_knowledge_base":
+      return `Consultou base${input.query ? `: "${(input.query as string).slice(0, 60)}"` : ""}`;
+    case "find_similar_contracts":
+      return "Buscou contratos similares aprovados";
+    case "propose_suggestion":
+      return `Propôs alteração (${input.type || "replacement"})`;
+    case "add_comment":
+      return `Adicionou comentário ${input.severity ? `[${input.severity}]` : ""}`;
     default:
       return `Executou ${toolName}`;
   }
 }
 
-export async function runContractAgent(params: AgentParams): Promise<AgentResult> {
-  // 1. Check contract status
-  const contract = await prisma.contract.findUniqueOrThrow({
-    where: { id: params.contractId },
-  });
+// Tool names que são tentativas de mutação no contrato — usado pra determinar
+// se um turn produziu edição (pra refresh do htmlContent no client) e pra
+// gating em "Resolver com IA" (só marca resolved se houve edição com sucesso).
+const EDIT_TOOL_NAMES = new Set([
+  "edit_contract_section",
+  "update_contract_data",
+  "insert_clause",
+  "remove_clause",
+  "apply_style_preset",
+  "insert_image",
+]);
 
-  if (contract.status === "aprovado") {
-    return {
-      message: "⚠️ Este contrato já foi aprovado e não pode mais ser alterado. Para modificações, crie uma nova versão a partir do deal.",
-      htmlContent: null,
-      dataJson: null,
-      changeLogs: [],
-    };
+interface ToolOutput {
+  success?: boolean;
+  verified?: boolean;
+  error?: string;
+  [k: string]: unknown;
+}
+
+function isEditTool(name: string): boolean {
+  return EDIT_TOOL_NAMES.has(name);
+}
+
+function summarizeToolResult(name: string, output: ToolOutput): string {
+  if (output.error) return String(output.error).slice(0, 200);
+  if (name === "edit_contract_section" && typeof output.occurrencesChanged === "number") {
+    return `${output.occurrencesChanged} ocorrência(s) substituída(s)`;
   }
+  if (name === "insert_clause" && output.success) return "Cláusula inserida";
+  if (name === "remove_clause" && output.success) return "Cláusula removida";
+  if (output.success) return "OK";
+  return "Concluído";
+}
 
-  // 1.5. Budget guard — bloqueia se o contrato esgotou o teto de tokens IA.
-  // Mensagem amigável + sem chamar Anthropic.
-  try {
-    await assertContractBudget(params.contractId);
-  } catch (err) {
-    if (err instanceof ContractBudgetExceededError) {
-      return {
-        message: `⚠️ ${err.message}\n\nApós aprovar este contrato (ou ajustar a env \`CONTRACT_AI_TOKEN_BUDGET\`) o assistente volta a responder.`,
-        htmlContent: null,
-        dataJson: null,
-        changeLogs: [],
-      };
-    }
-    throw err;
-  }
-
-  // 2. Load agent config
-  const config = await getAgentConfig(params.orgId);
-
-  // 3. Load contract context
-  const context = await loadContext(params.contractId, params.orgId);
-
-  // 3.5. Pre-load expert context (top contratos similares, cláusulas mais
-  //      usadas, templates ativos). Injetado antes da pergunta do usuário pra
-  //      o agente abrir já com o conhecimento do escritório, em vez de gastar
-  //      iterações de tool-use chamando query_clauses / find_similar_contracts.
-  let expertContext = "";
-  try {
-    expertContext = await loadExpertContext(context);
-  } catch (err) {
-    console.error("[runContractAgent] loadExpertContext falhou (segue sem):", err);
-  }
-
-  // 4. Build messages with history
-  const history = await loadChatHistory(params.contractId);
-  const contextMsg = buildContextMessage({
-    dataJson: context.dataJson,
-    htmlContent: context.htmlContent,
-    activeClauses: context.activeClauses,
-    templateModalidade: context.templateModalidade,
-    templateName: context.templateName,
-    isGoogleDocs: !!context.googleDocId,
-  });
-
-  // Classify intent: if the message looks like an edit command, force tool use
-  // on the first iteration so the agent cannot respond conversationally without
-  // actually mutating the contract. Regex picks up common PT-BR verbs.
-  const EDIT_INTENT =
-    /\b(altere|mude|troque|substitua|atualize|corrija|modifique|remova|insira|adicione|coloque|ponha|apague|delete|reescreva|reescreva|inclua|retire|exclua)\b/i;
-  const isEditCommand = EDIT_INTENT.test(params.message);
-
-  // "Aplique direto" / "faça já" / "sem revisão" — usuário quer edição direta
-  // mesmo em GDocs. Caso contrário, em GDocs preferimos propose_suggestion
-  // (track changes via comment ancorado) porque o iframe Drive não tem o mesmo
-  // controle granular de aceitar/rejeitar inline que o TipTap.
-  const FORCE_DIRECT_EDIT =
-    /\b(aplique\s+direto|aplique\s+já|faça\s+já|faça\s+agora|sem\s+revis[ãa]o|edite\s+direto|altere\s+agora|aplica\s+direto|sem\s+sugest[ãa]o)\b/i;
-  const wantsDirectEdit = FORCE_DIRECT_EDIT.test(params.message);
-  const isGoogleDocs = !!context.googleDocId;
-  const preferProposeInGDocs = isGoogleDocs && !wantsDirectEdit;
-
-  const editReminderTemplate = isEditCommand
-    ? `\n\n---\nLEMBRETE DE FORMATO OBRIGATORIO: este pedido e um comando de edicao. Voce DEVE:\n1. Chamar pelo menos uma tool de edicao (${preferProposeInGDocs ? "PREFIRA propose_suggestion — o contrato esta em modo Google Docs e o usuario quer revisar antes de aplicar; só use edit_contract_section se a mensagem do usuario disser explicitamente 'aplique direto' / 'faça já' / 'sem revisao'" : "edit_contract_section, update_contract_data, insert_clause, remove_clause, propose_suggestion"}).\n2. Apos executar as tools, responder EXATAMENTE nesta estrutura em markdown (copie os 3 headings literais, sem emoji, sem alterar capitalizacao):\n\n## Alteracoes Realizadas\n(lista do que foi alterado no contrato)\n\n## Justificativa\n(razao juridica da alteracao)\n\n## Verificacao\n(como o usuario pode verificar que a alteracao foi aplicada)\n`
-    : "";
-
-  const expertBlock = expertContext ? `${expertContext}\n\n---\n` : "";
-  const messages: Anthropic.MessageParam[] = [
-    ...history.map((m) => ({ role: m.role, content: m.content })),
-    {
-      role: "user" as const,
-      content: `${expertBlock}${contextMsg}${editReminderTemplate}\n\n---\nMENSAGEM DO USUÁRIO:\n${params.message}`,
-    },
-  ];
-
-  // 5. Call Anthropic with tools — tracking aggregate usage across the loop
-  const usageAgg = {
-    promptTokens: 0,
-    completionTokens: 0,
-    cacheReadTokens: 0,
-    cacheWriteTokens: 0,
+interface StreamedTurnResult {
+  contentBlocks: Anthropic.ContentBlock[];
+  stopReason: Anthropic.Message["stop_reason"] | null;
+  usage: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
   };
-  const toolsUsedSet = new Set<string>();
-  const t0 = Date.now();
+}
 
-  // System prompt cacheável: ~6k tokens compartilhados entre turns; com
-  // cache_control "ephemeral" (TTL 5min) o segundo turn em diante paga ~10%
-  // do custo de input no system block. Tools ficam fora do cache porque
-  // mudam pouco mas não justificam o overhead de cache hit/miss tracking.
-  // SDK 0.30.x ainda não tipa cache_control no TextBlockParam GA — a API
-  // aceita o campo, então usamos cast localizado.
-  const systemBlocks = [
-    {
-      type: "text" as const,
-      text: config.systemPrompt,
-      cache_control: { type: "ephemeral" as const },
-    },
-  ] as unknown as Anthropic.TextBlockParam[];
+/**
+ * Roda UMA chamada à API Anthropic em streaming e emite eventos `text_delta`
+ * pelo generator. Acumula blocos de content e retorna no final pra continuar
+ * o loop tool-use.
+ */
+async function* streamOneTurn(
+  params: Anthropic.MessageCreateParamsStreaming
+): AsyncGenerator<AgentEvent, StreamedTurnResult, void> {
+  const stream = await anthropic.messages.create(params);
 
-  let response;
-  try {
-    response = await anthropic.messages.create({
-      model: config.model,
-      max_tokens: config.maxTokens,
-      temperature: config.temperature,
-      system: systemBlocks,
-      tools: AGENT_TOOLS,
-      // Force the model into tool-use mode when the intent is clearly an edit.
-      // Without this, Sonnet sometimes replies conversationally on the first
-      // iteration ("Alteracao concluida") WITHOUT calling any edit tool.
-      ...(isEditCommand ? { tool_choice: { type: "any" as const } } : {}),
-      messages,
-    });
-    usageAgg.promptTokens += response.usage?.input_tokens ?? 0;
-    usageAgg.completionTokens += response.usage?.output_tokens ?? 0;
-    usageAgg.cacheReadTokens += (response.usage as { cache_read_input_tokens?: number })?.cache_read_input_tokens ?? 0;
-    usageAgg.cacheWriteTokens += (response.usage as { cache_creation_input_tokens?: number })?.cache_creation_input_tokens ?? 0;
-  } catch (err) {
-    recordAIUsage({
-      orgId: params.orgId,
-      userId: params.userId,
-      contractId: params.contractId,
-      provider: "anthropic",
-      model: config.model,
-      operation: "chat",
-      promptTokens: 0,
-      latencyMs: Date.now() - t0,
-      success: false,
-      errorMessage: err instanceof Error ? err.message : String(err),
-    });
-    throw err;
+  const contentBlocks: Anthropic.ContentBlock[] = [];
+  let currentText = "";
+  let currentToolUse:
+    | { id: string; name: string; jsonBuf: string }
+    | null = null;
+  let stopReason: Anthropic.Message["stop_reason"] | null = null;
+  const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+
+  for await (const evt of stream) {
+    if (evt.type === "message_start") {
+      usage.input += evt.message.usage?.input_tokens ?? 0;
+      const u = evt.message.usage as {
+        cache_read_input_tokens?: number;
+        cache_creation_input_tokens?: number;
+      };
+      usage.cacheRead += u?.cache_read_input_tokens ?? 0;
+      usage.cacheWrite += u?.cache_creation_input_tokens ?? 0;
+    } else if (evt.type === "content_block_start") {
+      const cb = evt.content_block;
+      if (cb.type === "text") {
+        currentText = "";
+      } else if (cb.type === "tool_use") {
+        currentToolUse = { id: cb.id, name: cb.name, jsonBuf: "" };
+      }
+    } else if (evt.type === "content_block_delta") {
+      const d = evt.delta;
+      if (d.type === "text_delta") {
+        currentText += d.text;
+        yield { type: "text_delta", text: d.text };
+      } else if (d.type === "input_json_delta" && currentToolUse) {
+        currentToolUse.jsonBuf += d.partial_json;
+      }
+    } else if (evt.type === "content_block_stop") {
+      if (currentToolUse) {
+        let input: Record<string, unknown> = {};
+        if (currentToolUse.jsonBuf) {
+          try {
+            input = JSON.parse(currentToolUse.jsonBuf) as Record<string, unknown>;
+          } catch {
+            // Buf incompleto / inválido — manda input vazio, handler trata.
+          }
+        }
+        contentBlocks.push({
+          type: "tool_use",
+          id: currentToolUse.id,
+          name: currentToolUse.name,
+          input,
+        });
+        currentToolUse = null;
+      } else if (currentText) {
+        contentBlocks.push({
+          type: "text",
+          text: currentText,
+          citations: null,
+        } as unknown as Anthropic.ContentBlock);
+        currentText = "";
+      }
+    } else if (evt.type === "message_delta") {
+      stopReason = evt.delta.stop_reason;
+      usage.output += evt.usage?.output_tokens ?? 0;
+    }
   }
 
-  const changeLogs: ChangeLogEntry[] = [];
-  let iterations = 0;
-  const maxIterations = 5;
+  return { contentBlocks, stopReason, usage };
+}
 
-  // 6. Tool-use loop
-  while (response.stop_reason === "tool_use" && iterations < maxIterations) {
-    iterations++;
-    const toolResults: Anthropic.ToolResultBlockParam[] = [];
+/**
+ * Roda o agente em modo streaming, emitindo eventos AgentEvent durante o
+ * loop tool-use. Cada chamada à API Anthropic é streamed e cada tool
+ * dispatch é anunciado antes (tool_use) e depois (tool_result + opcionalmente
+ * verification).
+ *
+ * O último evento é sempre `done` (com AgentResult completo) ou `error`.
+ */
+export async function* streamContractAgent(
+  params: AgentParams
+): AsyncGenerator<AgentEvent, void, void> {
+  const mode: AgentMode = params.mode ?? "plan";
+  const events: AgentEvent[] = [];
 
-    for (const block of response.content) {
-      if (block.type === "tool_use") {
+  try {
+    // 1. Check contract status
+    const contract = await prisma.contract.findUniqueOrThrow({
+      where: { id: params.contractId },
+    });
+
+    if (contract.status === "aprovado") {
+      const done: AgentEvent = {
+        type: "done",
+        result: {
+          message:
+            "⚠️ Este contrato já foi aprovado e não pode mais ser alterado. Para modificações, crie uma nova versão a partir do deal.",
+          htmlContent: null,
+          dataJson: null,
+          changeLogs: [],
+          events: [],
+        },
+      };
+      yield done;
+      return;
+    }
+
+    // 1.5. Budget guard
+    try {
+      await assertContractBudget(params.contractId);
+    } catch (err) {
+      if (err instanceof ContractBudgetExceededError) {
+        const done: AgentEvent = {
+          type: "done",
+          result: {
+            message: `⚠️ ${err.message}\n\nApós aprovar este contrato (ou ajustar a env \`CONTRACT_AI_TOKEN_BUDGET\`) o assistente volta a responder.`,
+            htmlContent: null,
+            dataJson: null,
+            changeLogs: [],
+            events: [],
+          },
+        };
+        yield done;
+        return;
+      }
+      throw err;
+    }
+
+    // 2. Config
+    const config = await getAgentConfig(params.orgId, mode);
+
+    // 3. Context
+    const context = await loadContext(params.contractId, params.orgId);
+
+    // 3.5. Expert context só em modo Plan. Fast pula pra cortar 200-500ms
+    //      + 3 Prisma queries + Voyage call.
+    let expertContext = "";
+    if (mode === "plan") {
+      try {
+        expertContext = await loadExpertContext(context);
+      } catch (err) {
+        console.error("[streamContractAgent] loadExpertContext falhou (segue sem):", err);
+      }
+    }
+
+    const started: AgentEvent = {
+      type: "started",
+      mode,
+      model: config.model,
+      hasExpertContext: !!expertContext,
+    };
+    events.push(started);
+    yield started;
+
+    // 4. Messages + intent detection
+    const history = await loadChatHistory(params.contractId);
+    const contextMsg = buildContextMessage({
+      dataJson: context.dataJson,
+      htmlContent: context.htmlContent,
+      activeClauses: context.activeClauses,
+      templateModalidade: context.templateModalidade,
+      templateName: context.templateName,
+      isGoogleDocs: !!context.googleDocId,
+    });
+
+    const EDIT_INTENT =
+      /\b(altere|mude|troque|substitua|atualize|corrija|modifique|remova|insira|adicione|coloque|ponha|apague|delete|reescreva|inclua|retire|exclua)\b/i;
+    const isEditCommand = EDIT_INTENT.test(params.message);
+
+    const FORCE_DIRECT_EDIT =
+      /\b(aplique\s+direto|aplique\s+já|faça\s+já|faça\s+agora|sem\s+revis[ãa]o|edite\s+direto|altere\s+agora|aplica\s+direto|sem\s+sugest[ãa]o)\b/i;
+    const wantsDirectEdit = FORCE_DIRECT_EDIT.test(params.message);
+    const isGoogleDocs = !!context.googleDocId;
+
+    // Em modo Fast: sempre edição direta no GDoc (Haiku, 1 turn, sem cerimônia).
+    // Em modo Plan + GDoc: propose_suggestion default (segurança), exceto se
+    // o usuário disser "aplique direto".
+    const preferProposeInGDocs = mode === "plan" && isGoogleDocs && !wantsDirectEdit;
+
+    const editReminderTemplate = isEditCommand
+      ? `\n\n---\nLEMBRETE DE FORMATO OBRIGATORIO: este pedido e um comando de edicao. Voce DEVE:\n1. Chamar pelo menos uma tool de edicao (${preferProposeInGDocs ? "PREFIRA propose_suggestion — o contrato esta em modo Google Docs e o usuario quer revisar antes de aplicar; só use edit_contract_section se a mensagem do usuario disser explicitamente 'aplique direto' / 'faça já' / 'sem revisao'" : "edit_contract_section, update_contract_data, insert_clause, remove_clause" + (mode === "plan" ? ", propose_suggestion" : "")}).\n2. Apos executar as tools, responder EXATAMENTE nesta estrutura em markdown (copie os 3 headings literais, sem emoji, sem alterar capitalizacao):\n\n## Alteracoes Realizadas\n(lista do que foi alterado no contrato)\n\n## Justificativa\n(razao juridica da alteracao)\n\n## Verificacao\n(como o usuario pode verificar que a alteracao foi aplicada)\n`
+      : "";
+
+    const expertBlock = expertContext ? `${expertContext}\n\n---\n` : "";
+    const messages: Anthropic.MessageParam[] = [
+      ...history.map((m) => ({ role: m.role, content: m.content })),
+      {
+        role: "user" as const,
+        content: `${expertBlock}${contextMsg}${editReminderTemplate}\n\n---\nMENSAGEM DO USUÁRIO:\n${params.message}`,
+      },
+    ];
+
+    // 5. Streaming loop
+    const systemBlocks = [
+      {
+        type: "text" as const,
+        text: config.systemPrompt,
+        cache_control: { type: "ephemeral" as const },
+      },
+    ] as unknown as Anthropic.TextBlockParam[];
+
+    const usageAgg = {
+      promptTokens: 0,
+      completionTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+    };
+    const toolsUsedSet = new Set<string>();
+    const changeLogs: ChangeLogEntry[] = [];
+    const t0 = Date.now();
+
+    // Fast = 1 iteração só. Plan = até 5.
+    const maxIterations = mode === "fast" ? 1 : 5;
+    let iterations = 0;
+
+    let turnResult: StreamedTurnResult;
+    try {
+      turnResult = yield* streamOneTurn({
+        model: config.model,
+        max_tokens: config.maxTokens,
+        temperature: config.temperature,
+        system: systemBlocks,
+        tools: AGENT_TOOLS,
+        ...(isEditCommand ? { tool_choice: { type: "any" as const } } : {}),
+        messages,
+        stream: true,
+      });
+    } catch (err) {
+      recordAIUsage({
+        orgId: params.orgId,
+        userId: params.userId,
+        contractId: params.contractId,
+        provider: "anthropic",
+        model: config.model,
+        operation: "chat",
+        promptTokens: 0,
+        latencyMs: Date.now() - t0,
+        success: false,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+
+    usageAgg.promptTokens += turnResult.usage.input;
+    usageAgg.completionTokens += turnResult.usage.output;
+    usageAgg.cacheReadTokens += turnResult.usage.cacheRead;
+    usageAgg.cacheWriteTokens += turnResult.usage.cacheWrite;
+
+    // Loop tool-use
+    while (turnResult.stopReason === "tool_use" && iterations < maxIterations) {
+      iterations++;
+      const toolResults: Anthropic.ToolResultBlockParam[] = [];
+
+      for (const block of turnResult.contentBlocks) {
+        if (block.type !== "tool_use") continue;
         toolsUsedSet.add(block.name);
-        const result = await executeToolHandler(
+
+        // Emit tool_use ANTES de executar (UI mostra chip "em andamento").
+        const useEvt: AgentEvent = {
+          type: "tool_use",
+          name: block.name,
+          input: block.input as Record<string, unknown>,
+          iteration: iterations,
+        };
+        events.push(useEvt);
+        yield useEvt;
+
+        const result = (await executeToolHandler(
           block.name,
           block.input as Record<string, unknown>,
           context
-        );
+        )) as ToolOutput;
 
-        // Log every tool use
+        const success = !result.error;
+        const summary = summarizeToolResult(block.name, result);
+
+        const resultEvt: AgentEvent = {
+          type: "tool_result",
+          name: block.name,
+          iteration: iterations,
+          success,
+          summary,
+        };
+        events.push(resultEvt);
+        yield resultEvt;
+
+        // Verificação explícita pra tools que populam `verified` (insert_clause,
+        // remove_clause em GDocs). UI destaca com ícone diferente.
+        if (typeof result.verified === "boolean" && isEditTool(block.name)) {
+          const verifyEvt: AgentEvent = {
+            type: "verification",
+            tool: block.name,
+            verified: result.verified,
+            detail: result.verified
+              ? "Mutação confirmada via releitura do doc"
+              : String(result.error || "Releitura não confirmou a mutação"),
+          };
+          events.push(verifyEvt);
+          yield verifyEvt;
+        }
+
         changeLogs.push({
           action: mapToolToAction(block.name),
           summary: buildToolSummary(block.name, block.input as Record<string, unknown>),
-          details: {
-            tool: block.name,
-            input: block.input,
-            output: result,
-          },
+          details: { tool: block.name, input: block.input, output: result },
           source: "ai",
         });
 
@@ -335,110 +540,169 @@ export async function runContractAgent(params: AgentParams): Promise<AgentResult
           content: JSON.stringify(result),
         });
       }
+
+      messages.push({ role: "assistant", content: turnResult.contentBlocks });
+      messages.push({ role: "user", content: toolResults });
+
+      if (iterations >= maxIterations) break;
+
+      try {
+        turnResult = yield* streamOneTurn({
+          model: config.model,
+          max_tokens: config.maxTokens,
+          temperature: config.temperature,
+          system: systemBlocks,
+          tools: AGENT_TOOLS,
+          messages,
+          stream: true,
+        });
+      } catch (err) {
+        recordAIUsage({
+          orgId: params.orgId,
+          userId: params.userId,
+          contractId: params.contractId,
+          provider: "anthropic",
+          model: config.model,
+          operation: "chat",
+          promptTokens: usageAgg.promptTokens,
+          completionTokens: usageAgg.completionTokens,
+          cacheReadTokens: usageAgg.cacheReadTokens,
+          cacheWriteTokens: usageAgg.cacheWriteTokens,
+          latencyMs: Date.now() - t0,
+          toolsUsed: Array.from(toolsUsedSet),
+          iterations,
+          success: false,
+          errorMessage: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }
+
+      usageAgg.promptTokens += turnResult.usage.input;
+      usageAgg.completionTokens += turnResult.usage.output;
+      usageAgg.cacheReadTokens += turnResult.usage.cacheRead;
+      usageAgg.cacheWriteTokens += turnResult.usage.cacheWrite;
     }
 
-    // Continue conversation with tool results
-    messages.push({ role: "assistant", content: response.content });
-    messages.push({ role: "user", content: toolResults });
-
-    response = await anthropic.messages.create({
+    // Agrega usage do turn inteiro (initial + N tool-use iterations)
+    recordAIUsage({
+      orgId: params.orgId,
+      userId: params.userId,
+      contractId: params.contractId,
+      provider: "anthropic",
       model: config.model,
-      max_tokens: config.maxTokens,
-      temperature: config.temperature,
-      system: systemBlocks,
-      tools: AGENT_TOOLS,
-      messages,
+      operation: "chat",
+      promptTokens: usageAgg.promptTokens,
+      completionTokens: usageAgg.completionTokens,
+      cacheReadTokens: usageAgg.cacheReadTokens,
+      cacheWriteTokens: usageAgg.cacheWriteTokens,
+      latencyMs: Date.now() - t0,
+      toolsUsed: Array.from(toolsUsedSet),
+      iterations: iterations + 1,
+      success: true,
     });
-    usageAgg.promptTokens += response.usage?.input_tokens ?? 0;
-    usageAgg.completionTokens += response.usage?.output_tokens ?? 0;
-    usageAgg.cacheReadTokens += (response.usage as { cache_read_input_tokens?: number })?.cache_read_input_tokens ?? 0;
-    usageAgg.cacheWriteTokens += (response.usage as { cache_creation_input_tokens?: number })?.cache_creation_input_tokens ?? 0;
-  }
 
-  // Record aggregated usage for the whole turn (initial + N tool-use iterations)
-  recordAIUsage({
-    orgId: params.orgId,
-    userId: params.userId,
-    contractId: params.contractId,
-    provider: "anthropic",
-    model: config.model,
-    operation: "chat",
-    promptTokens: usageAgg.promptTokens,
-    completionTokens: usageAgg.completionTokens,
-    cacheReadTokens: usageAgg.cacheReadTokens,
-    cacheWriteTokens: usageAgg.cacheWriteTokens,
-    latencyMs: Date.now() - t0,
-    toolsUsed: Array.from(toolsUsedSet),
-    iterations: iterations + 1,
-    success: true,
-  });
-
-  // 7. Extract final text
-  let finalMessage = "";
-  for (const block of response.content) {
-    if (block.type === "text") {
-      finalMessage += block.text;
+    // Final text do último turn
+    let finalMessage = "";
+    for (const block of turnResult.contentBlocks) {
+      if (block.type === "text") {
+        finalMessage += block.text;
+      }
     }
-  }
 
-  // 8. Persist change logs
-  if (changeLogs.length > 0) {
-    await prisma.contractChangeLog.createMany({
-      data: changeLogs.map((log) => ({
-        contractId: params.contractId,
-        userId: params.userId,
-        action: log.action,
-        summary: log.summary,
-        details: log.details as any,
-        source: log.source,
-      })),
+    // Persist change logs
+    if (changeLogs.length > 0) {
+      await prisma.contractChangeLog.createMany({
+        data: changeLogs.map((log) => ({
+          contractId: params.contractId,
+          userId: params.userId,
+          action: log.action,
+          summary: log.summary,
+          details: log.details as object,
+          source: log.source,
+        })),
+      });
+    }
+
+    // Persist chat messages
+    let session = await prisma.chatSession.findFirst({
+      where: { contractId: params.contractId },
+      orderBy: { createdAt: "desc" },
     });
-  }
+    if (!session) {
+      session = await prisma.chatSession.create({
+        data: { contractId: params.contractId, userId: params.userId },
+      });
+    }
 
-  // 9. Save chat messages
-  let session = await prisma.chatSession.findFirst({
-    where: { contractId: params.contractId },
-    orderBy: { createdAt: "desc" },
-  });
-  if (!session) {
-    session = await prisma.chatSession.create({
-      data: { contractId: params.contractId, userId: params.userId },
+    await prisma.chatMessage.createMany({
+      data: [
+        { sessionId: session.id, role: "user", content: params.message },
+        {
+          sessionId: session.id,
+          role: "assistant",
+          content: finalMessage || "Operação concluída.",
+          metadata: { toolsUsed: changeLogs.map((l) => l.action), mode } as object,
+          events: events as object,
+        },
+      ],
     });
+
+    // Update contract content snapshot quando houve edição
+    const hasEdits = changeLogs.some((l) =>
+      ["ai_edit", "data_patch", "clause_added", "clause_removed"].includes(l.action)
+    );
+    if (hasEdits) {
+      await prisma.contract.update({
+        where: { id: params.contractId },
+        data: {
+          htmlContent: context.htmlContent,
+          dataJson: context.dataJson as object,
+        },
+      });
+    }
+
+    const result: AgentResult = {
+      message: finalMessage,
+      htmlContent: hasEdits ? context.htmlContent : null,
+      dataJson: hasEdits ? context.dataJson : null,
+      changeLogs,
+      events,
+    };
+
+    yield { type: "done", result };
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    console.error("[streamContractAgent] error:", err);
+    yield { type: "error", message };
+  }
+}
+
+/**
+ * Wrapper síncrono — consome o stream completo e retorna AgentResult.
+ * Usado por callers que não querem SSE (testes, scripts internos).
+ */
+export async function runContractAgent(params: AgentParams): Promise<AgentResult> {
+  let result: AgentResult | null = null;
+  let errorMessage: string | null = null;
+
+  for await (const event of streamContractAgent(params)) {
+    if (event.type === "done") result = event.result;
+    else if (event.type === "error") errorMessage = event.message;
   }
 
-  await prisma.chatMessage.createMany({
-    data: [
-      { sessionId: session.id, role: "user", content: params.message },
-      {
-        sessionId: session.id,
-        role: "assistant",
-        content: finalMessage || "Operação concluída.",
-        metadata: { toolsUsed: changeLogs.map((l) => l.action) } as any,
-      },
-    ],
-  });
+  if (errorMessage && !result) {
+    throw new Error(errorMessage);
+  }
 
-  // 10. Update contract if context was modified
-  const hasEdits = changeLogs.some((l) =>
-    ["ai_edit", "data_patch", "clause_added", "clause_removed"].includes(l.action)
+  return (
+    result || {
+      message: "Operação concluída sem retorno.",
+      htmlContent: null,
+      dataJson: null,
+      changeLogs: [],
+      events: [],
+    }
   );
-
-  if (hasEdits) {
-    await prisma.contract.update({
-      where: { id: params.contractId },
-      data: {
-        htmlContent: context.htmlContent,
-        dataJson: context.dataJson as any,
-      },
-    });
-  }
-
-  return {
-    message: finalMessage,
-    htmlContent: hasEdits ? context.htmlContent : null,
-    dataJson: hasEdits ? context.dataJson : null,
-    changeLogs,
-  };
 }
 
 // ============================================
@@ -487,10 +751,6 @@ REGRAS:
 9. Se você já viu este trecho com este tipo de problema antes, NÃO repita — a deduplicação é por (categoria + trecho), não por phrasing.
 10. NUNCA invente valores plausíveis para campos qualificatórios ausentes (profissão, nacionalidade, naturalidade, RG, estado civil, nome da mãe). Se o contrato tem esses campos vazios ou claramente inválidos (ex: "[preencher profissão]"), reporte como finding category="qualification" severity="warning" e suggestedFix="preencher manualmente — não invente". Profissões alucinadas como "economiário" são proibidas.`;
 
-// Cap absoluto de comentários AI não-resolvidos por contrato. Quando atingido,
-// runPassiveAnalysis retorna sem chamar LLM. Limite calibrado: 50 é suficiente
-// pra cobrir os principais problemas de um contrato; acima disso o sinal vira
-// ruído e custo (incidente cmons9hbh: 942 comments / $10 USD num único doc).
 const MAX_AI_UNRESOLVED_COMMENTS = 50;
 
 /**
@@ -510,9 +770,6 @@ export async function runPassiveAnalysis(
     return { findings: [], commentsCreated: 0, modelUsed: "none" };
   }
 
-  // Cap: se já há muitos comments AI não-resolvidos, não dispara LLM. O usuário
-  // precisa resolver/limpar antes de a IA gerar mais. Evita o cenário do contrato
-  // cmons9hbh (942 comments / $10 USD em uma sessão de teste).
   const existingUnresolved = await prisma.contractComment.count({
     where: {
       contractId: params.contractId,
@@ -528,8 +785,6 @@ export async function runPassiveAnalysis(
     };
   }
 
-  // Budget guard — passive analysis também respeita o teto. Sem isso, polling
-  // de 90s em GDocs poderia continuar gastando até estourar o budget total.
   try {
     await assertContractBudget(params.contractId);
   } catch (err) {
@@ -543,10 +798,6 @@ export async function runPassiveAnalysis(
     throw err;
   }
 
-  // Skip-no-change: se a última run de validação foi APÓS a última edição
-  // detectável (ChangeLog não-validation), não há mudança nova — pula LLM.
-  // Isso elimina re-runs caros quando o usuário só abre o doc e nada muda.
-  // Não aplica a trigger="open" porque o usuário pode estar abrindo após reload.
   if (params.trigger === "edit") {
     const lastValidation = await prisma.contractChangeLog.findFirst({
       where: { contractId: params.contractId, action: "validation" },
@@ -572,8 +823,6 @@ export async function runPassiveAnalysis(
     }
   }
 
-  // Texto vivo via Drive export (fonte de verdade). Snapshot persistido é
-  // fallback defensivo. Quick checks são tolerantes a texto plano.
   let htmlContent: string;
   if (contract.googleDocId) {
     const { getDocPlainText } = await import("@/lib/google/docs");
@@ -582,16 +831,9 @@ export async function runPassiveAnalysis(
     htmlContent = params.htmlOverride || contract.htmlContent || "";
   }
 
-  // 1. Client-safe deterministic checks first
   const quick: QuickFinding[] = quickChecks(contract.dataJson, htmlContent);
   const quickFindings: PassiveFinding[] = quick.map((q) => ({ ...q, source: "quickChecks" }));
 
-  // 2. Decide whether to call LLM
-  // - On 'open' (first load): always call LLM for deep analysis with Sonnet
-  // - On 'edit' (passive): always call LLM with Haiku. quickChecks only covers
-  //   data-bound checks (dataJson) but manual HTML edits require LLM to catch
-  //   inconsistencies that don't show up in the structured data.
-  // - On 'approve': validators run elsewhere, we skip here
   let llmFindings: PassiveFinding[] = [];
   let modelUsed = "quickChecks-only";
 
@@ -604,7 +846,6 @@ export async function runPassiveAnalysis(
         : process.env.ANTHROPIC_PASSIVE_MODEL || "claude-haiku-4-5-20251001";
     modelUsed = passiveModel;
 
-    // Build analysis prompt — trim context when doing edit-scoped analysis
     let analysisInput: string;
     if (params.scope?.changedText) {
       const idx = htmlContent.indexOf(params.scope.changedText);
@@ -612,9 +853,6 @@ export async function runPassiveAnalysis(
       const after = idx >= 0 ? htmlContent.slice(idx + params.scope.changedText.length, idx + params.scope.changedText.length + 500) : "";
       analysisInput = `CONTEXTO ANTES:\n${before}\n\n--- TRECHO EDITADO ---\n${params.scope.changedText}\n--- FIM ---\n\nCONTEXTO DEPOIS:\n${after}`;
     } else {
-      // Reduzido de 15000 → 8000 chars: contratos típicos cabem com folga; cap
-      // reduz custo proporcional em ~47% no input. Os findings críticos
-      // (cláusulas 1-9) ficam completos.
       analysisInput = htmlContent.slice(0, 8000);
     }
 
@@ -622,7 +860,6 @@ export async function runPassiveAnalysis(
     try {
       const response = await anthropic.messages.create({
         model: passiveModel,
-        // Reduzido de 2048 → 1024: 3 findings × ~250 tokens cabem confortável.
         max_tokens: 1024,
         temperature: 0.1,
         system: PASSIVE_SYSTEM_PROMPT,
@@ -651,7 +888,6 @@ export async function runPassiveAnalysis(
 
       const textBlock = response.content.find((b) => b.type === "text");
       if (textBlock && textBlock.type === "text") {
-        // Extract JSON from response (model may add stray whitespace)
         const match = textBlock.text.match(/\{[\s\S]*\}/);
         if (match) {
           try {
@@ -685,10 +921,6 @@ export async function runPassiveAnalysis(
 
   const allFindings = [...quickFindings, ...llmFindings];
 
-  // 3. Persist findings as ContractComment with dedupeKey (upsert pattern).
-  // dedupeKey é (authorType + category + selectedText) — não inclui a mensagem
-  // da LLM porque ela varia entre runs com o mesmo problema (188× duplicação
-  // observada no contrato fixture cmons9hbh).
   let commentsCreated = 0;
   for (const finding of allFindings) {
     const dedupeKey = dedupeKeyFor("ai", finding.category, finding.selectedText);
@@ -712,7 +944,6 @@ export async function runPassiveAnalysis(
           dedupeKey,
         },
         update: {
-          // Touch updatedAt so we know the finding is still current
           updatedAt: new Date(),
         },
       });
@@ -722,7 +953,6 @@ export async function runPassiveAnalysis(
     }
   }
 
-  // 4. Log the analysis run
   await prisma.contractChangeLog.create({
     data: {
       contractId: params.contractId,
