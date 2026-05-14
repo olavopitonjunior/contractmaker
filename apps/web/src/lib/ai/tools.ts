@@ -433,6 +433,51 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
       required: ["url", "alt"],
     },
   },
+  // --- Group 7: Plan-and-approve ---
+  {
+    name: "propose_plan",
+    description:
+      "Em modo Planejamento, propõe um PLANO de ações ao usuário antes de executar qualquer edição. O sistema EXECUTA AUTOMATICAMENTE os steps `type: read` (validate_contract, query_*, analyze_*) e PAUSA nos `type: write` (edit_*, insert_*, remove_*, update_data) esperando aprovação humana via UI. Use ESTA tool quando o usuário pedir 'planeje', 'liste o que fazer', ou quando a mudança envolver múltiplas edições encadeadas. Para edições simples e isoladas em modo Rápido, use diretamente as tools de edição. O response retorna {planId, readsCompleted, writesPending} — você deve então escrever um texto explicativo amigável sobre o plano para o usuário, citando os reads já realizados.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        steps: {
+          type: "array",
+          description:
+            "Lista ordenada de steps. Reads primeiro (auto-exec), writes depois (aguardam aprovação).",
+          items: {
+            type: "object",
+            properties: {
+              type: {
+                type: "string",
+                enum: ["read", "write"],
+                description:
+                  "read = tool de consulta/validação que o sistema executa imediatamente; write = tool que muta o contrato e exige aprovação humana.",
+              },
+              tool: {
+                type: "string",
+                description:
+                  "Nome do tool em AGENT_TOOLS (ex: validate_contract, edit_contract_section, insert_clause, propose_suggestion).",
+              },
+              input: {
+                type: "object",
+                description:
+                  "Input que será passado pra esse tool. Deve seguir o schema do tool referenciado.",
+                additionalProperties: true,
+              },
+              description: {
+                type: "string",
+                description:
+                  "Frase curta em PT-BR mostrada no PlanCard. Ex: 'Validar contrato completo', 'Substituir R$ 80.000 por R$ 90.000 na cláusula segunda'.",
+              },
+            },
+            required: ["type", "tool", "input", "description"],
+          },
+        },
+      },
+      required: ["steps"],
+    },
+  },
 ];
 
 export function getToolNames(): string[] {

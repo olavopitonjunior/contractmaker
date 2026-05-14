@@ -12,6 +12,13 @@ export interface AgentContext {
   /** Quando setado, o conteúdo do contrato vive em um Google Doc; tools de
    *  edição roteiam via Docs API em vez de mutar `htmlContent`. */
   googleDocId?: string | null;
+  /** Session ativa do chat (necessário pra `propose_plan` persistir o ChatPlan
+   *  com sessionId correto). Setado pelo streamContractAgent ao montar contexto. */
+  sessionId?: string;
+  /** ID pre-alocado da mensagem assistant que vai carregar o turn atual.
+   *  Necessario pra `propose_plan` linkar ChatPlan.messageId antes da msg
+   *  existir no DB (1:1 unique). Setado pelo streamContractAgent. */
+  pendingAssistantMessageId?: string;
 }
 
 export interface AgentResult {
@@ -105,6 +112,20 @@ export type AgentEvent =
       text: string;
     }
   | {
+      type: "plan_proposed";
+      planId: string;
+      steps: PlanStep[];
+      /** Texto que o agente colocou junto com o propose_plan (`reasoning`). */
+      reasoning?: string;
+    }
+  | {
+      type: "plan_step_result";
+      planId: string;
+      stepId: string;
+      status: "executed" | "failed" | "rejected";
+      summary?: string;
+    }
+  | {
       type: "done";
       result: AgentResult;
     }
@@ -112,3 +133,23 @@ export type AgentEvent =
       type: "error";
       message: string;
     };
+
+/**
+ * Step de um plano proposto pelo agente em modo Plan-and-approve.
+ * `read` steps sao auto-executados; `write` steps esperam aprovacao humana
+ * via UI antes de rodar.
+ */
+export interface PlanStep {
+  /** ID local (cuid) — UI usa pra checkbox/diff. */
+  id: string;
+  type: "read" | "write";
+  /** Nome do tool em AGENT_TOOLS (validate_contract, edit_contract_section, etc). */
+  tool: string;
+  /** Input que sera passado pro tool. Pode ser editado pela UI antes da exec. */
+  input: Record<string, unknown>;
+  /** Descrição em PT-BR pra mostrar no PlanCard. */
+  description: string;
+  status: "pending" | "approved" | "rejected" | "executed" | "failed";
+  /** Populado apos execucao. */
+  result?: { success: boolean; summary: string };
+}

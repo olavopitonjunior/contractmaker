@@ -687,8 +687,34 @@ model ChatSession {
   user        User             @relation(fields: [userId], references: [id])
   messages    ChatMessage[]
   attachments ChatAttachment[]
+  plans       ChatPlan[]
 
   @@index([contractId, archived, updatedAt(sort: Desc)])
+}
+
+/// Plano proposto pelo agente em modo Plan-and-approve. Cada plano tem
+/// N steps (PlanStep TS shape em lib/ai/types.ts). Reads sao auto-executados;
+/// writes esperam aprovacao do usuario via UI antes do execute-plan endpoint
+/// rodar eles.
+model ChatPlan {
+  id        String   @id @default(cuid())
+  sessionId String
+  /// Mensagem assistant que carregou esse plan (1:1) — quando UI rehidrata
+  /// historico, encontra o plan pela messageId pra renderizar PlanCard.
+  messageId String   @unique
+  /// JSON shape: PlanStep[] (id, type, tool, input, description, status, result?).
+  stepsJson Json
+  /// proposed → reads ja foram executados, writes pendentes
+  /// executing → /execute-plan esta rodando writes
+  /// completed → tudo terminou (sucesso ou falha em algum step)
+  /// cancelled → user marcou cancel ou nao aprovou nada
+  status    String   @default("proposed")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @default(now()) @updatedAt
+
+  session ChatSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
 }
 
 model ChatAttachment {

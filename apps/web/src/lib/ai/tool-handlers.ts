@@ -78,9 +78,171 @@ export async function executeToolHandler(
       return handleApplyStylePreset(input, context);
     case "insert_image":
       return handleInsertImage(input, context);
+    case "propose_plan":
+      return handleProposePlan(input, context);
     default:
       return { error: `Tool desconhecida: ${toolName}` };
   }
+}
+
+const READ_TOOL_NAMES = new Set([
+  "validate_contract",
+  "query_clauses",
+  "query_templates",
+  "explain_clause",
+  "query_knowledge_base",
+  "find_similar_contracts",
+  "analyze_contradictions",
+  "suggest_improvements",
+]);
+
+/**
+ * Handler do `propose_plan`. Recebe array de steps do LLM, auto-executa os
+ * `type:"read"` chamando executeToolHandler recursivamente, persiste ChatPlan
+ * com messageId pre-alocado (context.pendingAssistantMessageId), e retorna
+ * {planId, readsCompleted, writesPending} pro LLM continuar com texto
+ * explicativo.
+ *
+ * Writes NUNCA executam aqui — ficam pendentes esperando POST /execute-plan
+ * que o usuario dispara via PlanCard na UI.
+ */
+async function handleProposePlan(
+  input: Record<string, unknown>,
+  context: AgentContext
+): Promise<Record<string, unknown>> {
+  const sessionId = context.sessionId;
+  const messageId = context.pendingAssistantMessageId;
+  if (!sessionId || !messageId) {
+    return {
+      error:
+        "propose_plan exige sessionId + messageId no context. Bug interno do agente.",
+    };
+  }
+
+  const rawSteps = Array.isArray(input.steps) ? input.steps : [];
+  if (rawSteps.length === 0) {
+    return { error: "Plano vazio — informe ao menos um step." };
+  }
+  if (rawSteps.length > 12) {
+    return { error: "Plano com >12 steps — quebre em partes." };
+  }
+
+  type RawStep = {
+    type?: string;
+    tool?: string;
+    input?: Record<string, unknown>;
+    description?: string;
+  };
+  type PersistedStep = {
+    id: string;
+    type: "read" | "write";
+    tool: string;
+    input: Record<string, unknown>;
+    description: string;
+    status: "pending" | "approved" | "rejected" | "executed" | "failed";
+    result?: { success: boolean; summary: string };
+  };
+
+  const steps: PersistedStep[] = rawSteps.map((s: unknown, idx: number) => {
+    const r = (s ?? {}) as RawStep;
+    return {
+      id: `${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 8)}`,
+      type: r.type === "read" ? "read" : "write",
+      tool: typeof r.tool === "string" ? r.tool : "unknown",
+      input: (typeof r.input === "object" && r.input ? r.input : {}) as Record<string, unknown>,
+      description:
+        typeof r.description === "string" && r.description.trim().length > 0
+          ? r.description.trim()
+          : `${r.tool ?? "?"}`,
+      status: "pending",
+    };
+  });
+
+  let readsCompleted = 0;
+  let writesPending = 0;
+
+  for (const step of steps) {
+    if (step.type !== "read") {
+      writesPending++;
+      continue;
+    }
+    if (!READ_TOOL_NAMES.has(step.tool)) {
+      // LLM pediu pra rodar como read um tool que nao e read — marca falha
+      step.status = "failed";
+      step.result = {
+        success: false,
+        summary: `Tool ${step.tool} nao e read — pule pra writes ou use um nome valido.`,
+      };
+      continue;
+    }
+    try {
+      const result = (await executeToolHandler(step.tool, step.input, context)) as {
+        error?: string;
+        [k: string]: unknown;
+      };
+      if (result.error) {
+        step.status = "failed";
+        step.result = { success: false, summary: String(result.error).slice(0, 200) };
+      } else {
+        step.status = "executed";
+        step.result = {
+          success: true,
+          summary: summarizePlanReadResult(step.tool, result),
+        };
+        readsCompleted++;
+      }
+    } catch (err) {
+      step.status = "failed";
+      step.result = {
+        success: false,
+        summary: err instanceof Error ? err.message.slice(0, 200) : String(err),
+      };
+    }
+  }
+
+  const plan = await prisma.chatPlan.create({
+    data: {
+      sessionId,
+      messageId,
+      stepsJson: steps as object,
+      status: "proposed",
+    },
+    select: { id: true },
+  });
+
+  return {
+    planId: plan.id,
+    readsCompleted,
+    writesPending,
+    steps,
+  };
+}
+
+/** Sumariza output de tools de read pra mostrar no PlanCard. */
+function summarizePlanReadResult(tool: string, result: Record<string, unknown>): string {
+  if (tool === "validate_contract") {
+    const issues = Array.isArray(result.issues) ? result.issues : [];
+    const errors = issues.filter((i: { severity?: string }) => i.severity === "error").length;
+    const warnings = issues.filter((i: { severity?: string }) => i.severity === "warning").length;
+    return `${errors} erro(s), ${warnings} aviso(s)`;
+  }
+  if (tool === "analyze_contradictions") {
+    const c = Array.isArray(result.contradictions) ? result.contradictions.length : 0;
+    return `${c} contradiç${c === 1 ? "ão" : "ões"} encontrada(s)`;
+  }
+  if (tool === "find_similar_contracts") {
+    const m = Array.isArray(result.matches) ? result.matches.length : 0;
+    return `${m} contrato(s) similar(es)`;
+  }
+  if (tool === "query_knowledge_base") {
+    const r = Array.isArray(result.results) ? result.results.length : 0;
+    return `${r} entrada(s) na base`;
+  }
+  if (tool === "suggest_improvements") {
+    const s = Array.isArray(result.suggestions) ? result.suggestions.length : 0;
+    return `${s} sugestão(ões)`;
+  }
+  return "OK";
 }
 
 async function handleApplyStylePreset(

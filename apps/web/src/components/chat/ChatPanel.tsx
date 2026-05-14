@@ -39,6 +39,7 @@ import type { AgentEvent, AgentMode } from "@/lib/ai/types";
 import { describeTool, KIND_CLASSES } from "@/lib/ai/event-icons";
 import { ChatSessionSidebar } from "./ChatSessionSidebar";
 import { ChangesPanel } from "./ChangesPanel";
+import { PlanCard } from "./PlanCard";
 
 interface Message {
   id: string;
@@ -577,6 +578,11 @@ export function ChatPanel({
                 msg={msg}
                 loading={loading}
                 onRetry={handleRetry}
+                contractId={contractId}
+                onPlanExecuted={() => {
+                  setChangesReloadKey((k) => k + 1);
+                  onChatTurnComplete?.();
+                }}
               />
             ))}
           </div>
@@ -815,10 +821,14 @@ function MessageRow({
   msg,
   loading,
   onRetry,
+  contractId,
+  onPlanExecuted,
 }: {
   msg: Message;
   loading: boolean;
   onRetry: (payload: string) => void;
+  contractId: string;
+  onPlanExecuted?: () => void;
 }) {
   const [copied, setCopied] = useState(false);
 
@@ -887,6 +897,21 @@ function MessageRow({
           )}
           {!msg.content && msg.streaming && <ThinkingDots />}
         </div>
+
+        {/* PlanCard — quando o turn produziu propose_plan event, renderiza
+            o card com reads ✓ + writes pendentes pra aprovacao humana. */}
+        {(() => {
+          const planEvt = msg.events?.find((e) => e.type === "plan_proposed");
+          if (!planEvt || planEvt.type !== "plan_proposed") return null;
+          return (
+            <PlanCard
+              contractId={contractId}
+              planId={planEvt.planId}
+              steps={planEvt.steps}
+              onExecuted={onPlanExecuted}
+            />
+          );
+        })()}
 
         {msg.isError && msg.retryPayload && (
           <Button

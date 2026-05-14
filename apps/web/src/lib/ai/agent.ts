@@ -13,6 +13,7 @@ import type {
   AgentMode,
   AgentResult,
   ChangeLogEntry,
+  PlanStep,
 } from "./types";
 
 function getAnthropicClient() {
@@ -421,6 +422,12 @@ export async function* streamContractAgent(
       params.userId,
       params.sessionId
     );
+    context.sessionId = activeSession.id;
+    // Pre-aloca o ID da mensagem assistant — propose_plan precisa dele pra
+    // gravar ChatPlan.messageId ANTES da msg existir no DB (1:1 unique).
+    // A persistencia ao final do turn usa esse mesmo id.
+    const pendingAssistantMessageId = crypto.randomUUID();
+    context.pendingAssistantMessageId = pendingAssistantMessageId;
 
     // 3.7. Anexos do turn — extractedText vira prefixo do prompt do user.
     //      Guard: só anexos da session ativa.
@@ -628,6 +635,18 @@ export async function* streamContractAgent(
         events.push(resultEvt);
         yield resultEvt;
 
+        // propose_plan: emit plan_proposed pra UI renderizar PlanCard.
+        // O LLM ainda vai escrever texto explicativo no proximo turn.
+        if (block.name === "propose_plan" && success && typeof result.planId === "string") {
+          const planEvt: AgentEvent = {
+            type: "plan_proposed",
+            planId: result.planId as string,
+            steps: (result.steps as PlanStep[]) || [],
+          };
+          events.push(planEvt);
+          yield planEvt;
+        }
+
         // Verificação explícita pra tools que populam `verified` (insert_clause,
         // remove_clause em GDocs). UI destaca com ícone diferente.
         if (typeof result.verified === "boolean" && isEditTool(block.name)) {
@@ -775,6 +794,9 @@ export async function* streamContractAgent(
       data: [
         { sessionId: activeSession.id, role: "user", content: params.message },
         {
+          // id pre-alocado pra propose_plan poder linkar ChatPlan.messageId
+          // antes do final do turn. Cuid format funciona equivalente a uuid.
+          id: pendingAssistantMessageId,
           sessionId: activeSession.id,
           role: "assistant",
           content: finalMessage || "Operação concluída.",
