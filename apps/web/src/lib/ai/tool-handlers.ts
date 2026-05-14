@@ -541,7 +541,16 @@ async function handleQueryKnowledgeBase(
         fallback_suggestion: "Tente reformular a query ou verifique VOYAGE_API_KEY",
       };
     }
-    throw err;
+    // Qualquer outro erro (Prisma raw query, schema drift, pgvector ausente,
+    // rede) converte em resposta estruturada — assim o agente reage com
+    // fallback no próximo turn em vez de derrubar o stream.
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[query_knowledge_base] erro inesperado:", err);
+    return {
+      error: `query_knowledge_base falhou: ${msg.slice(0, 200)}`,
+      fallback_suggestion:
+        "Pode ser pgvector ausente (column embedding) ou rede pra Voyage. Verifique migrations e VOYAGE_API_KEY.",
+    };
   }
 }
 

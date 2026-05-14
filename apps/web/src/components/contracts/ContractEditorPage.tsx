@@ -246,6 +246,19 @@ export function ContractEditorPage({
             <p className="text-xs mt-2 text-muted-foreground">
               Recrie o contrato pelo deal — o sistema cria o GDoc automaticamente.
             </p>
+            {googleDocFailureReason?.includes("invalid_grant") && (
+              <p className="text-xs mt-2 text-amber-700 dark:text-amber-300">
+                <strong>OAuth expirado</strong> — o consent screen do Google está em modo
+                Testing e o refresh token vence em 7 dias. Rode{" "}
+                <code className="font-mono text-[11px]">
+                  npx ts-node apps/web/scripts/oauth-bootstrap.ts
+                </code>{" "}
+                pra renovar e atualize{" "}
+                <code className="font-mono text-[11px]">GOOGLE_OWNER_REFRESH_TOKEN</code>{" "}
+                no Vercel. Fix permanente: mover o consent screen pra &quot;In production&quot;
+                no Cloud Console.
+              </p>
+            )}
           </div>
         </div>
         <Button asChild variant="outline">

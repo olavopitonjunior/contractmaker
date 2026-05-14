@@ -316,6 +316,7 @@ Não-óbvios (enums e structure: ver `prisma/schema.prisma`):
 
 ## Gotchas
 
+- **OAuth expirado → contratos sem GDoc:** se `googleDocStatus` começar com `error:invalid_grant`, o refresh token venceu (consent screen em Testing tem 7d). Rode `npx ts-node apps/web/scripts/oauth-bootstrap.ts --clientFile=<path>`, copie o novo `GOOGLE_OWNER_REFRESH_TOKEN`, atualize via `printf '%s' '<token>' | vercel env add` (aspas simples). Fix permanente: Cloud Console → OAuth consent screen → Publish to production.
 - **Env vars Vercel:** `printf '%s' 'value' | vercel env add NAME ENV` com aspas SIMPLES (obrigatório quando valor tem `$` — chaves Asaas; aspas duplas causam shell expansion). `echo` insere `\n` literal e corrompe runtime. `vercel env pull` mostra `\n` escapado, mascarando. Scripts locais: `perl -pe 's/\\\\n"$/"/' .env.vercel-prod > .env.vercel-prod.clean`
 - **Logout completo:** sidebar usa `<Link href="/logout">` (não `signOut()` direto) — `/logout` faz `POST /api/auth/logout` (revoga elevation, deleta sessions, audit) + `signOut`
 - **Radix DropdownMenu + asChild** envolvendo function component sem forwardRef pode falhar a recalcular position em `side="top"` — usar links diretos

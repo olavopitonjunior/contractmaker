@@ -493,11 +493,24 @@ export async function* streamContractAgent(
         events.push(useEvt);
         yield useEvt;
 
-        const result = (await executeToolHandler(
-          block.name,
-          block.input as Record<string, unknown>,
-          context
-        )) as ToolOutput;
+        // Tool errors must NOT terminate the stream. Sem este wrap, uma exception
+        // num handler (ex.: Prisma 42703 em query_knowledge_base quando pgvector
+        // não está populado) bolha pelo executeToolHandler → catch global do
+        // generator → event `error` → cliente vê chat morto. Empacotamos em
+        // {error} pra que o tool_result evento normal seja emitido e o agente
+        // continue a iteração ou termine com texto.
+        let result: ToolOutput;
+        try {
+          result = (await executeToolHandler(
+            block.name,
+            block.input as Record<string, unknown>,
+            context
+          )) as ToolOutput;
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          console.error(`[streamContractAgent] tool ${block.name} threw:`, err);
+          result = { error: `Tool ${block.name} falhou: ${msg.slice(0, 200)}` };
+        }
 
         const success = !result.error;
         const summary = summarizeToolResult(block.name, result);
