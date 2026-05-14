@@ -19,7 +19,16 @@ export default function NewDealFromProposalPage() {
 
   async function handleSubmit() {
     if (!file) {
-      toast.error("Selecione um arquivo da proposta (PDF ou DOCX).");
+      toast.error("Selecione um PDF da proposta.");
+      return;
+    }
+    // Gemini não parseia DOCX nativamente (recebe bytes ZIP brutos).
+    // Bloqueio aqui evita má UX "subi DOCX e nada veio preenchido".
+    // Follow-up: converter DOCX→PDF server-side antes de mandar.
+    if (file.type !== "application/pdf") {
+      toast.error(
+        "Por ora só PDF funciona aqui. Exporte como PDF e tente de novo.",
+      );
       return;
     }
     setUploading(true);
@@ -72,7 +81,7 @@ export default function NewDealFromProposalPage() {
         </Button>
         <h1 className="text-2xl font-semibold">Cadastro com proposta</h1>
         <p className="text-sm text-muted-foreground mt-1">
-          Suba uma proposta já preenchida (PDF ou DOCX) com dados das partes,
+          Suba uma proposta já preenchida (PDF) com dados das partes,
           valores, parcelas e comissão. O sistema lê tudo e abre o formulário
           pré-preenchido pra você revisar antes de gerar o contrato.
         </p>

@@ -16,10 +16,12 @@ import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const ALLOWED_MIMES: readonly ImportableMime[] = [
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-];
+// Gemini API processa PDF nativamente (até 100 páginas) mas NÃO DOCX —
+// recebe bytes ZIP brutos e retorna {} sem extrair. Pra evitar a má UX
+// "subi DOCX e nada veio preenchido", rejeitamos DOCX aqui com mensagem
+// clara. Follow-up: converter DOCX→PDF server-side (mammoth + puppeteer
+// ou docx2pdf) antes de mandar pro extractor.
+const ALLOWED_MIMES: readonly ImportableMime[] = ["application/pdf"];
 const MAX_BYTES = 20 * 1024 * 1024;
 
 function validateFileHeader(buffer: Buffer, mime: ImportableMime): boolean {
@@ -83,10 +85,15 @@ export async function POST(req: NextRequest) {
 
   const mime = file.type as ImportableMime;
   if (!ALLOWED_MIMES.includes(mime)) {
-    return NextResponse.json(
-      { error: `Mime ${file.type} não suportado. Envie PDF ou DOCX.` },
-      { status: 415 },
-    );
+    // Mensagem específica pra DOCX (caso de uso comum) — outros mimes
+    // recebem mensagem genérica.
+    const isDocx =
+      file.type ===
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    const msg = isDocx
+      ? "DOCX ainda não é suportado pela extração automática. Exporte como PDF e tente de novo."
+      : `Mime ${file.type} não suportado. Envie PDF.`;
+    return NextResponse.json({ error: msg }, { status: 415 });
   }
 
   if (file.size > MAX_BYTES) {
