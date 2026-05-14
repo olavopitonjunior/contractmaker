@@ -20,19 +20,23 @@ const bodySchema = z.object({
 });
 
 /**
- * GET /api/forms/[id]/participants
+ * GET /api/forms/[token]/participants
  * Lista participants existentes do form. Admin via session.
+ *
+ * `[token]` é o SalesForm.token (único). Usar token em vez de id evita
+ * conflito com `/api/forms/[token]/...` (Next.js não aceita slugs
+ * diferentes no mesmo nível) e mantém um único nome de slug por route tree.
  */
 export async function GET(
   req: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: { token: string } },
 ) {
   const authResult = await requireAuth(req);
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
 
   const form = await prisma.salesForm.findFirst({
-    where: { id: params.id, orgId: ctx.orgId },
+    where: { token: params.token, orgId: ctx.orgId },
     select: { id: true, token: true },
   });
   if (!form) {
@@ -61,14 +65,14 @@ export async function GET(
 }
 
 /**
- * POST /api/forms/[id]/participants
+ * POST /api/forms/[token]/participants
  * Cria participants pros roles solicitados. Idempotente — se já existir
  * participant pro (formId, role, partyIndex), retorna o existente sem
  * regenerar token. Pra regenerar, usar /participants/[id]/regenerate.
  */
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } },
+  { params }: { params: { token: string } },
 ) {
   const authResult = await requireAuth(req);
   if (!authResult.ok) return authResult.response;
@@ -83,7 +87,7 @@ export async function POST(
   }
 
   const form = await prisma.salesForm.findFirst({
-    where: { id: params.id, orgId: ctx.orgId },
+    where: { token: params.token, orgId: ctx.orgId },
     select: { id: true, token: true },
   });
   if (!form) {

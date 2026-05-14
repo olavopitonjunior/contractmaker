@@ -19,7 +19,7 @@ import { audit } from "@/lib/security/audit";
  */
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string; participantId: string } },
+  { params }: { params: { token: string; participantId: string } },
 ) {
   const authResult = await requireAuth(req);
   if (!authResult.ok) return authResult.response;
@@ -34,9 +34,9 @@ export async function POST(
   }
 
   // Cross-org guard: form precisa pertencer à org do ctx, e participant
-  // precisa pertencer ao form. Dois lookups encadeados.
+  // precisa pertencer ao form. `[token]` é o SalesForm.token (lookup único).
   const form = await prisma.salesForm.findFirst({
-    where: { id: params.id, orgId: ctx.orgId },
+    where: { token: params.token, orgId: ctx.orgId },
     select: { id: true },
   });
   if (!form) {

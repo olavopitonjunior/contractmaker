@@ -44,7 +44,7 @@ export default async function ShareFormByPartyPage({
       </div>
 
       <ShareByPartyClient
-        formId={form.id}
+        formToken={form.token}
         mainFormUrl={`/f/${form.token}`}
         initialParticipants={form.participants.map((p) => ({
           id: p.id,

@@ -25,7 +25,7 @@ interface Participant {
 }
 
 interface ShareByPartyClientProps {
-  formId: string;
+  formToken: string;
   mainFormUrl: string;
   initialParticipants: Participant[];
 }
@@ -58,7 +58,7 @@ function relativeTime(iso: string): string {
 }
 
 export function ShareByPartyClient({
-  formId,
+  formToken,
   mainFormUrl,
   initialParticipants,
 }: ShareByPartyClientProps) {
@@ -70,7 +70,7 @@ export function ShareByPartyClient({
   async function ensureParticipants() {
     setBusy("create");
     try {
-      const res = await fetch(`/api/forms/${formId}/participants`, {
+      const res = await fetch(`/api/forms/${formToken}/participants`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -94,7 +94,7 @@ export function ShareByPartyClient({
     setBusy(participantId);
     try {
       const res = await fetch(
-        `/api/forms/${formId}/participants/${participantId}/regenerate`,
+        `/api/forms/${formToken}/participants/${participantId}/regenerate`,
         { method: "POST", credentials: "include" },
       );
       const data = await res.json();
