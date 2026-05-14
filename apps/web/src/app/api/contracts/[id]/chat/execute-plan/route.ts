@@ -284,11 +284,25 @@ export async function POST(
           },
         });
 
-        // Mensagem assistant de fechamento
-        const summary =
-          `Executei **${executedCount}** de ${executedCount + failedCount + rejectedCount} steps aprovados.` +
-          (failedCount > 0 ? `\n\n⚠️ ${failedCount} falharam.` : "") +
-          (rejectedCount > 0 ? `\n\n${rejectedCount} rejeitados.` : "");
+        // Mensagem assistant de fechamento. Y = aprovados tentados (executed +
+        // failed). Rejected aparecem em linha separada porque NAO foram parte
+        // do conjunto aprovado.
+        const approvedAttempted = executedCount + failedCount;
+        const parts: string[] = [];
+        if (approvedAttempted > 0) {
+          parts.push(
+            `Executei **${executedCount}** de ${approvedAttempted} alteraç${approvedAttempted === 1 ? "ão aprovada" : "ões aprovadas"}.`
+          );
+        }
+        if (failedCount > 0) {
+          parts.push(`⚠️ ${failedCount} falh${failedCount === 1 ? "ou" : "aram"}.`);
+        }
+        if (rejectedCount > 0) {
+          parts.push(
+            `${rejectedCount} ${rejectedCount === 1 ? "rejeitada (não selecionada)" : "rejeitadas (não selecionadas)"}.`
+          );
+        }
+        const summary = parts.join("\n\n") || "Nenhuma alteração foi executada.";
 
         await prisma.chatMessage.create({
           data: {
