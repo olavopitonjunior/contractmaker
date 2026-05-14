@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, KeyRound, FileText } from "lucide-react";
 import { OnboardingWizard } from "@/components/financeiro/onboarding/OnboardingWizard";
+import { AccountKycLinkCard } from "@/components/settings/AccountKycLinkCard";
 
 export const dynamic = "force-dynamic";
 
@@ -163,21 +164,39 @@ export default async function ContaDetailPage({
         </CardContent>
       </Card>
 
+      {/* Fluxo recomendado pra subcontas de terceiros: o titular recebe um
+          link de ativação no email cadastrado, define senha, e completa KYC
+          no painel Asaas. Sem precisar passar docs pessoais pra gente. */}
+      {account.status !== "APPROVED" && owner && (
+        <AccountKycLinkCard
+          accountId={account.id}
+          email={(account.kyc as { email?: string } | null)?.email ?? null}
+          accountName={
+            (account.kyc as { name?: string } | null)?.name ?? account.label
+          }
+          initialKycToken={account.kycToken ?? null}
+        />
+      )}
+
       {/* Wizard interativo de KYC: upload de docs + refresh de status.
           Pula quando aprovada (somente leitura). Owner-only escrita; non-owner
-          com cap "view" só vê (wizard tem branches read-only). */}
+          com cap "view" só vê (wizard tem branches read-only).
+          Atrás de <details> porque o caminho principal é o link de ativação
+          acima — uploads aqui só fazem sentido quando o admin tem acesso aos
+          docs pessoais do titular (raro). */}
       {account.status !== "APPROVED" && owner ? (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <FileText className="h-4 w-4" />
-              Documentos KYC
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
+        <details className="group">
+          <summary className="cursor-pointer text-sm font-medium text-muted-foreground hover:text-foreground transition flex items-center gap-2 py-2">
+            <FileText className="h-4 w-4" />
+            Enviar documentos manualmente (avançado)
+            <span className="text-xs text-muted-foreground/70 ml-1">
+              — use só se tiver os documentos pessoais do titular em mãos
+            </span>
+          </summary>
+          <div className="mt-2">
             <OnboardingWizard mode="newAccount" accountId={account.id} />
-          </CardContent>
-        </Card>
+          </div>
+        </details>
       ) : (
         <Card>
           <CardHeader className="pb-2">

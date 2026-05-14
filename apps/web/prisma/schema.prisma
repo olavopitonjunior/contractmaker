@@ -1259,6 +1259,10 @@ model AsaasAccount {
   bankAccountInfoStatus String?
   lastStatusCheckAt     DateTime?
   approvedAt            DateTime?
+  // Token público pra rota /kyc/[token] hospedada pelo Contractmaker —
+  // UI alternativa ao painel Asaas pra titular enviar docs sem email
+  // de ativação. Backend usa a apiKey criptografada pra proxiar uploads.
+  kycToken              String?   @unique
   // Soft delete: archivedAt != null oculta dos seletores e impede novas cobranças,
   // mas mantém histórico (cobranças/transferências antigas continuam acessíveis).
   archivedAt            DateTime?
