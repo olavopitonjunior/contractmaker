@@ -12,6 +12,7 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
+import { ResizableSheet } from "@/components/ui/resizable-sheet";
 import { GoogleDocsEditor } from "./GoogleDocsEditor";
 import { ChatPanel } from "@/components/chat/ChatPanel";
 import { VersionTimeline } from "./VersionTimeline";
@@ -542,26 +543,24 @@ export function ContractEditorPage({
 
       {/* Chat Panel */}
       {!isApproved && (
-        <Sheet open={chatOpen} onOpenChange={setChatOpen}>
-          <SheetContent
-            side="right"
-            className="w-full sm:w-[400px] md:w-[540px]"
-            onInteractOutside={(e) => e.preventDefault()}
-            onPointerDownOutside={(e) => e.preventDefault()}
-          >
-            <SheetHeader>
-              <SheetTitle>Assistente Jurídico IA</SheetTitle>
-            </SheetHeader>
-            <ChatPanel
-              contractId={contract.id}
-              messages={contract.messages}
-              initialSessionId={contract.sessionId}
-              onContentUpdate={() => {}}
-              onChatTurnComplete={() => setCommentsVersion((v) => v + 1)}
-              initialInput={chatInitialInput}
-            />
-          </SheetContent>
-        </Sheet>
+        <ResizableSheet
+          open={chatOpen}
+          onOpenChange={setChatOpen}
+          defaultWidth={540}
+          storageKey="chat:size"
+        >
+          <SheetHeader>
+            <SheetTitle>Assistente Jurídico IA</SheetTitle>
+          </SheetHeader>
+          <ChatPanel
+            contractId={contract.id}
+            messages={contract.messages}
+            initialSessionId={contract.sessionId}
+            onContentUpdate={() => {}}
+            onChatTurnComplete={() => setCommentsVersion((v) => v + 1)}
+            initialInput={chatInitialInput}
+          />
+        </ResizableSheet>
       )}
 
     </div>
