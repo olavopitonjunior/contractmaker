@@ -77,6 +77,8 @@ TS: vendedores, compradores, imóveis, pagamento, comissão, config. Mudanças a
 
 **Layout** (validado vs v1 Sandra Yamamoto): `<h1>INSTRUMENTO...</h1>` + `<h2>Modalidade: …</h2>` + separador `❦`. Sem cover-page. Bloco intermediadora: `{{#if comissao.comissionados.length}}` loop multi-corretora + fallback `{{#if (eq comissao.corretora_tipo_pessoa "fisica")}}`. Parcelas: à vista `{{this.letra}})`; financiamento `Parcela {{this.numero}}.` (`enrichContractData`). Slots `<!-- CLAUSE_SLOT:Gx -->` (HTML comments — Drive descarta).
 
+**Form → template bridges (2026-05-16):** `enrichContractData` mapeia top-level do form Zod (`saldo_devedor`, `incluso_no_preco`, `debitos`, `vicios`, `regularizacoes`, `debitos_assumidos`, `locacao`, `desistencia`, `permuta`) pra `config.*` esperado pelos templates. Parcelas ganham `momento_texto` / `momento_data_texto` / `meio_pagamento_texto` / `destino_texto` (PIX completo, bancários ou banco financiador). Comissionados: `papel_texto`, valor↔percentual derivados, auto-promote legado `imobiliaria_*`, breakdown na cláusula 11.1/14.1 quando `length>1`, `incluir_como_signatario=false` filtra assinaturas. Labels em `lib/forms/payment-labels.ts`. Memórias `project_form_template_bridges` e `feedback_handlebars_helper_shadowing`.
+
 **Sync DB obrigatório:** mudanças nos `.hbs` SÓ afetam contratos novos depois de `pnpm tsx apps/web/scripts/sync-templates.ts --apply`. `ContractTemplate.handlebarsSource` é source-of-truth. Flags `--seed`, `--update-metadata`.
 
 **Default por (orgId, modalidade):** invariant — `POST/PATCH /api/templates` faz `updateMany { isDefault: false }` antes. UI `/templates` mostra "Padrão atual" + `_count.contracts` + Arquivados. Versão congela `templateId`.
@@ -339,4 +341,4 @@ Não-óbvios (enums e structure: ver `prisma/schema.prisma`):
 - **Auto-promote stage não é retroativo:** webhook ClickSign close OU charge antes da migration = deal fica em stage anterior. Drag-drop manual
 - **Split Asaas:** rejeita wallet própria, duplicatas, max 10. Sandbox rejeita docs de identidade via API — usar `approveSandboxAccount`
 - **Forms públicos não requerem auth** — qualquer um com o link pode editar
-- **Operacionais em memória** (ver `MEMORY.md`): OAuth Testing 7d, `printf` single quotes pra envs Vercel, `vercel env pull \n`, normalizers de provedor mudam de shape, Chrome MCP + Google auth, Resend sandbox, auto-mode vs prod DB
+- **Operacionais em memória** (ver `MEMORY.md`): OAuth Testing 7d, `printf` single quotes pra envs Vercel, `vercel env pull \n`, normalizers de provedor mudam de shape, Chrome MCP + Google auth, Resend sandbox, auto-mode vs prod DB, Handlebars helper shadowing (`{{this.X}}`), date parse timezone drift
