@@ -3,6 +3,7 @@ import { renderContratoHTML } from "@/lib/render/handlebars";
 import { isGoogleDocsFeatureEnabled } from "@/lib/google/client";
 import { uploadHtmlAsGoogleDoc } from "@/lib/google/upload-rendered-html";
 import { copyContractGoogleDoc } from "@/lib/google/copy-doc";
+import { shareDocWithOrgMembers } from "@/lib/google/share-org";
 import {
   flattenForPlaceholders,
   replacePlaceholdersInDoc,
@@ -278,6 +279,19 @@ export async function generateContractForDeal(
         },
       });
       googleDocUrl = created.webViewLink;
+
+      // Compartilha com membros da org (writer). Sem isso, usuários não-owner
+      // veem "Solicitar acesso" no iframe — Drive autentica direto contra a
+      // conta Google, fora da sessão NextAuth. Falha não bloqueia: helper
+      // nunca lança e usa Promise.allSettled per-membro.
+      try {
+        await shareDocWithOrgMembers(created.docId, orgId);
+      } catch (shareErr) {
+        console.error(
+          "[contract-generation] Falha ao compartilhar com org members:",
+          shareErr
+        );
+      }
 
       // Aplica DocumentStyle default da org (fonte, tamanho, line-height,
       // margens) — Drive descarta CSS de classes ao importar HTML, então

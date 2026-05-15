@@ -6,6 +6,7 @@ import {
 } from "@/lib/google/upload-file-as-gdoc";
 import { exportDocAsHtml } from "@/lib/google/docs";
 import { watchFile } from "@/lib/google/watch";
+import { shareDocWithOrgMembers } from "@/lib/google/share-org";
 import { extractCcvDataJson } from "@/lib/extraction/ccv-extractor";
 import { deriveDealMetadata } from "@/lib/contracts/derive-deal-metadata";
 
@@ -63,6 +64,17 @@ export async function importContractFromFile(
     sourceMime: input.sourceMime,
     name: docName,
   });
+
+  // 1b. Compartilha com membros da org (writer). Sem isso, usuários não-owner
+  // veem "Solicitar acesso" no iframe. Falha não bloqueia.
+  try {
+    await shareDocWithOrgMembers(uploaded.docId, input.orgId);
+  } catch (shareErr) {
+    console.error(
+      "[contract-import] Falha ao compartilhar com org members:",
+      shareErr
+    );
+  }
 
   // 2. Watch Drive (best-effort)
   let watchData: {

@@ -5,6 +5,7 @@ import { isGoogleDocsFeatureEnabled } from "@/lib/google/client";
 import { copyContractGoogleDoc } from "@/lib/google/copy-doc";
 import { exportDocAsHtml } from "@/lib/google/docs";
 import { watchFile } from "@/lib/google/watch";
+import { shareDocWithOrgMembers } from "@/lib/google/share-org";
 
 export async function POST(
   req: NextRequest,
@@ -66,6 +67,23 @@ export async function POST(
       });
       copiedDocId = copy.docId;
       copiedWebViewLink = copy.webViewLink;
+
+      // Compartilha o doc copiado com membros da org. file.copy NÃO herda
+      // permissions do source no Drive — novo arquivo nasce só com owner+SA.
+      // Falha não bloqueia.
+      try {
+        const deal = await prisma.deal.findUnique({
+          where: { id: current.dealId },
+          select: { pipeline: { select: { orgId: true } } },
+        });
+        const orgId = deal?.pipeline?.orgId;
+        if (orgId) await shareDocWithOrgMembers(copy.docId, orgId);
+      } catch (shareErr) {
+        console.error(
+          "[version] Falha ao compartilhar com org members:",
+          shareErr
+        );
+      }
 
       const webhookBase = process.env.NEXTAUTH_URL || process.env.PUBLIC_APP_URL;
       const watchToken = process.env.GOOGLE_WATCH_TOKEN?.trim();
