@@ -183,7 +183,11 @@ export function ComissaoConfigStep({ form, token }: ComissaoConfigStepProps) {
     setLookupLoading(true);
     const q = lookupQuery.trim();
     const url = `/api/forms/${token}/commissioners${q ? `?q=${encodeURIComponent(q)}` : ""}`;
-    fetch(url, { credentials: "omit" })
+    // credentials default (same-origin): em prod imobpro.ia.br o endpoint
+    // é público sem auth — cookie da sessão NextAuth é inofensivo (route
+    // não chama requireAuth). Em preview Vercel com SSO, `credentials: "omit"`
+    // quebrava a request com 401 porque não enviava o cookie de SSO.
+    fetch(url)
       .then((r) => (r.ok ? r.json() : { items: [] }))
       .then((data) => {
         if (!cancelled) {
