@@ -400,9 +400,10 @@ describe("Template v2 Rendering", () => {
       expect(html).toContain("<strong>b)</strong> Parcela 1:");
       expect(html).toContain("<strong>c)</strong> Parcela 2:");
       expect(html).toContain("<strong>d)</strong> Parcela 3:");
-      expect(html).toContain("em 30 dia");
-      expect(html).toContain("em 60 dia");
-      expect(html).toContain("em 90 dia");
+      // Loop agora renderiza "em N (extenso) dia(s) corridos contados de..."
+      expect(html).toContain("em 30 (trinta) dia(s)");
+      expect(html).toContain("em 60 (sessenta) dia(s)");
+      expect(html).toContain("em 90 (noventa) dia(s)");
       // Sem parcelas, cairia no fallback "O saldo remanescente de {moeda}" — esse
       // texto específico (com "de " seguido por valor) NÃO deve aparecer.
       // Outras menções a "saldo remanescente" em cláusulas de rescisão são OK.
@@ -721,6 +722,278 @@ describe("Template v2 Rendering", () => {
       expect(html).not.toContain("5.4.");
       expect(html).not.toContain("9.5.");
       expect(html).not.toContain("10.4.");
+    });
+  });
+
+  // Revisão 2026-05-16: parcelas tipadas devem renderizar com meio_pagamento +
+  // destino corretos (chave PIX, dados bancários, banco financiamento) e
+  // preservar semântica de `momento` (escritura/registro/data_exata).
+  describe("Parcelas — formato detalhado (meio + destino + momento)", () => {
+    it("parcela com PIX renderiza chave + titular", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = {
+        ...mockDataAVista,
+        pagamento: {
+          ...mockDataAVista.pagamento,
+          parcelas: [
+            {
+              tipo: "recursos_proprios",
+              valor: 540000,
+              momento: "assinatura",
+              meio_pagamento: "pix",
+              pix: {
+                tipo_chave: "EMAIL",
+                chave: "vendedor@email.com",
+                titular_nome: "João Carlos da Silva",
+                titular_cpf_cnpj: "52998224725",
+              },
+            },
+          ],
+        },
+      };
+      const html = renderWithEnrich(template, data);
+      expect(html).toContain("mediante PIX");
+      expect(html).toContain("chave PIX (e-mail): vendedor@email.com");
+      expect(html).toContain("titularidade de João Carlos da Silva");
+      expect(html).toContain("529.982.247-25");
+    });
+
+    it("parcela com TED renderiza banco/agência/conta + titular", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = {
+        ...mockDataAVista,
+        pagamento: {
+          ...mockDataAVista.pagamento,
+          parcelas: [
+            {
+              tipo: "recursos_proprios",
+              valor: 540000,
+              momento: "assinatura",
+              meio_pagamento: "ted",
+              bancarios: {
+                banco: "Itaú",
+                agencia: "0001",
+                conta: "12345-6",
+                tipo_conta: "corrente",
+                titular_nome: "João Silva",
+                titular_cpf_cnpj: "52998224725",
+              },
+            },
+          ],
+        },
+      };
+      const html = renderWithEnrich(template, data);
+      expect(html).toContain("mediante TED ou transferência bancária");
+      expect(html).toContain("Banco Itaú");
+      expect(html).toContain("Agência 0001");
+      expect(html).toContain("Conta corrente nº 12345-6");
+      expect(html).toContain("titular João Silva");
+    });
+
+    it("parcela com boleto renderiza texto canônico", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = {
+        ...mockDataAVista,
+        pagamento: {
+          ...mockDataAVista.pagamento,
+          parcelas: [
+            { tipo: "recursos_proprios", valor: 540000, momento: "assinatura", meio_pagamento: "boleto" },
+          ],
+        },
+      };
+      const html = renderWithEnrich(template, data);
+      expect(html).toContain("mediante boleto bancário");
+      // Sem destino preenchido → preserva fallback genérico
+      expect(html).toContain("nas contas indicadas");
+    });
+
+    it("momento='escritura' preserva semântica no texto", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = {
+        ...mockDataAVista,
+        pagamento: {
+          ...mockDataAVista.pagamento,
+          parcelas: [
+            { tipo: "recursos_proprios", valor: 540000, momento: "escritura", meio_pagamento: "ted" },
+          ],
+        },
+      };
+      const html = renderWithEnrich(template, data);
+      expect(html).toContain("contados da lavratura da escritura");
+      expect(html).not.toContain("contados da assinatura deste instrumento, mediante TED");
+    });
+
+    it("momento='data_exata' renderiza 'até DD de mês de AAAA'", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = {
+        ...mockDataAVista,
+        pagamento: {
+          ...mockDataAVista.pagamento,
+          parcelas: [
+            {
+              tipo: "recursos_proprios",
+              valor: 540000,
+              momento: "data_exata",
+              data_exata: "2026-09-15",
+              meio_pagamento: "ted",
+            },
+          ],
+        },
+      };
+      const html = renderWithEnrich(template, data);
+      expect(html).toMatch(/até 15 de setembro de 2026/);
+    });
+
+    it("financiamento com banco_financiamento renderiza nome do banco", () => {
+      const template = loadTemplate("ccv_financiamento_v2.hbs");
+      // Limpa banco_financiamento existente em config pra exercitar a derivação
+      // a partir da parcela. Em forms reais, o user só preenche num lugar.
+      const { banco_financiamento: _ignored, ...configClean } = mockDataFinanciamento.config;
+      const data = {
+        ...mockDataFinanciamento,
+        config: configClean,
+        pagamento: {
+          ...mockDataFinanciamento.pagamento,
+          parcelas: [
+            {
+              tipo: "financiamento",
+              valor: 500000,
+              momento: "registro",
+              meio_pagamento: "financiamento",
+              banco_financiamento: "caixa",
+            },
+          ],
+        },
+      };
+      const html = renderWithEnrich(template, data);
+      expect(html).toContain("Caixa Econômica Federal");
+    });
+  });
+
+  // Revisão 2026-05-16: multi-corretora deve aparecer na cláusula de comissão
+  // com breakdown por comissionado, papel deve aparecer na qualificação,
+  // incluir_como_signatario=false deve filtrar do bloco de assinaturas.
+  describe("Comissionados — multi-corretora + papel + opt-in signatário", () => {
+    const mockComMultiComissionados = {
+      ...mockDataAVista,
+      comissao: {
+        valor: 36000,
+        quem_paga_texto: "Parte Vendedora",
+        quando_paga_texto: "no ato do recebimento do saldo",
+        corretora_tipo_pessoa: "juridica",
+        comissionados: [
+          {
+            nome: "Imobiliária Principal Ltda",
+            tipo_pessoa: "juridica",
+            cnpj: "12345678000190",
+            creci: "J-12345",
+            papel: "imobiliaria_principal",
+            percentual: 50,
+            incluir_como_signatario: true,
+          },
+          {
+            nome: "Maria Captadora",
+            tipo_pessoa: "fisica",
+            cpf: "52998224725",
+            creci: "199.905",
+            papel: "captador",
+            percentual: 30,
+            incluir_como_signatario: true,
+          },
+          {
+            nome: "José Indicador",
+            tipo_pessoa: "fisica",
+            cpf: "45317828791",
+            papel: "indicador",
+            percentual: 20,
+            incluir_como_signatario: false,
+          },
+        ],
+      },
+    };
+
+    it("3 comissionados → cláusula 11.1 lista cada um com valor absoluto", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const html = renderWithEnrich(template, mockComMultiComissionados);
+      // 50% de R$ 36.000 = R$ 18.000
+      expect(html).toContain("Imobiliária Principal Ltda");
+      expect(html).toContain("50%");
+      expect(html).toContain("18.000");
+      // 30% = R$ 10.800
+      expect(html).toContain("Maria Captadora");
+      expect(html).toContain("30%");
+      expect(html).toContain("10.800");
+      // 20% = R$ 7.200
+      expect(html).toContain("José Indicador");
+      expect(html).toContain("20%");
+      expect(html).toContain("7.200");
+    });
+
+    it("papel renderiza como 'Função' na qualificação", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const html = renderWithEnrich(template, mockComMultiComissionados);
+      expect(html).toContain("Função: Imobiliária principal");
+      expect(html).toContain("Função: Captador(a) do imóvel");
+      expect(html).toContain("Função: Indicador(a)");
+    });
+
+    it("incluir_como_signatario=false remove do bloco de assinaturas", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const html = renderWithEnrich(template, mockComMultiComissionados);
+      // José Indicador (false) deve aparecer SÓ na qualificação, NÃO no signature.
+      // Maria Captadora (true) e Principal (true) aparecem em ambos.
+      const signaturePart = html.split('<div class="assinaturas">')[1] ?? "";
+      expect(signaturePart).toContain("Imobiliária Principal Ltda");
+      expect(signaturePart).toContain("Maria Captadora");
+      expect(signaturePart).not.toContain("José Indicador");
+      // José continua presente na qualificação (parte acima do signature)
+      const qualificacaoPart = html.split('<div class="assinaturas">')[0] ?? "";
+      expect(qualificacaoPart).toContain("José Indicador");
+    });
+
+    it("form legado (sem comissionados[], com imobiliaria_*) sintetiza comissionado[0]", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = {
+        ...mockDataAVista,
+        comissao: {
+          valor: 36000,
+          corretora_tipo_pessoa: "juridica",
+          imobiliaria_nome: "Imobiliária Legado Ltda",
+          imobiliaria_cnpj: "12345678000190",
+          creci: "J-9999",
+          quem_paga_texto: "Parte Compradora",
+          quando_paga_texto: "no ato do recebimento do saldo",
+          comissionados: [],
+        },
+      };
+      const html = renderWithEnrich(template, data);
+      // Como há apenas 1 comissionado (sintetizado), cláusula usa fallback texto
+      // mas qualificação inicial deve ter o nome do legado
+      expect(html).toContain("Imobiliária Legado Ltda");
+      // Função "Imobiliária principal" deve aparecer na qualificação (sintetizada)
+      expect(html).toContain("Função: Imobiliária principal");
+    });
+
+    it("comissionado com só percentual (sem valor) → enrich deriva valor", () => {
+      const template = loadTemplate("ccv_financiamento_v2.hbs");
+      const data = {
+        ...mockDataFinanciamento,
+        comissao: {
+          valor: 50000,
+          quem_paga_texto: "Parte Vendedora",
+          quando_paga_texto: "na liberação do financiamento",
+          comissionados: [
+            { nome: "Corretor A", tipo_pessoa: "fisica", cpf: "11122233344", percentual: 60, papel: "intermediador" },
+            { nome: "Corretora B", tipo_pessoa: "juridica", cnpj: "12345678000190", percentual: 40, papel: "imobiliaria_principal" },
+          ],
+        },
+      };
+      const html = renderWithEnrich(template, data);
+      // 60% de R$ 50.000 = R$ 30.000; 40% = R$ 20.000
+      expect(html).toContain("30.000");
+      expect(html).toContain("20.000");
+      expect(html).toContain("Corretor A");
+      expect(html).toContain("Corretora B");
     });
   });
 });

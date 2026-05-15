@@ -126,14 +126,14 @@ Profissão: {{this.representante.profissao}}
 <p>
 {{#if (eq tipo_pessoa "fisica")}}
 Corretor(a): {{nome}}<br>
-CPF: {{cpf cpf}}{{#if (existe creci)}}<br>
-CRECI: nº {{creci}}{{/if}}
+CPF: {{cpf cpf}}
 {{else}}
 Imobiliária: {{nome}}<br>
-CNPJ: nº {{cnpj cnpj}}{{#if (existe creci)}}<br>
-CRECI: nº {{creci}}{{/if}}
+CNPJ: nº {{cnpj cnpj}}
 {{/if}}
-{{#if percentual}}<br>Participação: {{percentual}}%{{/if}}
+{{#if (existe papel_texto)}}<br>Função: {{papel_texto}}{{/if}}
+{{#if (existe creci)}}<br>CRECI: nº {{creci}}{{/if}}
+{{#if this.percentual}}<br>Participação: {{this.percentual}}%{{/if}}
 </p>
 {{/each}}
 {{else}}
@@ -185,7 +185,7 @@ Descrição: {{this.descricao}}
 
 <!-- CLAUSE_SLOT:G1 -->
 
-<p><strong>b)</strong> Financiamento imobiliário com alienação fiduciária em garantia: {{moeda pagamento.alienacao_fiduciaria}} ({{extenso pagamento.alienacao_fiduciaria}}), cujo valor será liberado pelo agente financeiro em favor do(s) PROMITENTE(S) VENDEDOR(ES) no prazo de até 10 (dez) dias úteis contados do registro do Contrato de Financiamento junto ao Cartório de Registro de Imóveis competente.</p>
+<p><strong>b)</strong> Financiamento imobiliário com alienação fiduciária em garantia{{#if (existe config.banco_financiamento)}}, junto à {{config.banco_financiamento}}{{/if}}: {{moeda pagamento.alienacao_fiduciaria}} ({{extenso pagamento.alienacao_fiduciaria}}), cujo valor será liberado pelo agente financeiro em favor do(s) PROMITENTE(S) VENDEDOR(ES) no prazo de até 10 (dez) dias úteis contados do registro do Contrato de Financiamento junto ao Cartório de Registro de Imóveis competente.</p>
 
 {{#if (gt pagamento.fgts 0)}}
 <p><strong>b.1)</strong> Do montante financiado, o valor de {{moeda pagamento.fgts}} ({{extenso pagamento.fgts}}) será proveniente de utilização de saldo do FGTS (Fundo de Garantia do Tempo de Serviço), conforme regras vigentes do agente financeiro e da Caixa Econômica Federal.</p>
@@ -197,7 +197,7 @@ Descrição: {{this.descricao}}
 
 {{#if pagamento.parcelas.length}}
 {{#each pagamento.parcelas}}
-<p><strong>Parcela {{this.numero}}.</strong> {{this.tipo_texto}}: {{moeda this.valor}} ({{extenso this.valor}}), em {{numero this.dias}} dia(s) corridos contados da assinatura, mediante transferência bancária (TED/PIX) nas contas indicadas pelo(s) PROMITENTE(S) VENDEDOR(ES).</p>
+<p><strong>Parcela {{this.numero}}.</strong> {{this.tipo_texto}}: {{moeda this.valor}} ({{extenso this.valor}}), {{#if (existe this.momento_data_texto)}}até {{this.momento_data_texto}}{{else}}em {{numero this.dias}} ({{numeroExtenso this.dias}}) dia(s) corridos {{#if (existe this.momento_texto)}}{{this.momento_texto}}{{else}}contados da assinatura deste instrumento{{/if}}{{/if}}, {{#if (existe this.meio_pagamento_texto)}}{{this.meio_pagamento_texto}}{{else}}mediante transferência bancária (TED ou PIX){{/if}}{{#if (existe this.destino_texto)}}, {{this.destino_texto}}{{else}} nas contas indicadas pelo(s) PROMITENTE(S) VENDEDOR(ES){{/if}}.</p>
 {{/each}}
 {{/if}}
 
@@ -376,7 +376,16 @@ Descrição: {{this.descricao}}
 
 <h2>CLÁUSULA DÉCIMA QUARTA - DA COMISSÃO</h2>
 
+{{#if (gt comissao.comissionados.length 1)}}
+<p><strong>14.1.</strong> Pela intermediação e assessoria prestadas, será devida comissão de corretagem total no valor de {{moeda comissao.valor}} ({{extenso comissao.valor}}), equivalente a {{percentual comissao.valor pagamento.valor_total}} do valor total da transação, a ser paga pela {{#if (existe comissao.quem_paga_texto)}}{{comissao.quem_paga_texto}}{{else}}Parte Compradora{{/if}}{{#if (existe comissao.quando_paga_texto)}} {{comissao.quando_paga_texto}}{{/if}}, distribuída entre os comissionados conforme abaixo:</p>
+<ul>
+{{#each comissao.comissionados}}
+<li>{{#if (eq tipo_pessoa "fisica")}}ao(à) corretor(a) {{nome}}, inscrito(a) no CPF nº {{cpf cpf}}{{else}}à imobiliária {{nome}}, inscrita no CNPJ nº {{cnpj cnpj}}{{/if}}{{#if (existe creci)}}, CRECI nº {{creci}}{{/if}}{{#if (existe papel_texto)}} ({{papel_texto}}){{/if}} — {{#if this.percentual}}{{this.percentual}}% = {{/if}}{{moeda valor}} ({{extenso valor}}).</li>
+{{/each}}
+</ul>
+{{else}}
 <p><strong>14.1.</strong> Pela intermediação e assessoria prestadas, será devida a comissão de corretagem no valor total de {{moeda comissao.valor}} ({{extenso comissao.valor}}), equivalente a {{percentual comissao.valor pagamento.valor_total}} do valor total da transação, a ser paga pela {{comissao.quem_paga_texto}} {{#if (eq comissao.corretora_tipo_pessoa "fisica")}}ao(à) corretor(a) {{comissao.imobiliaria_nome}}, inscrito(a) no CPF nº {{cpf comissao.imobiliaria_cnpj}}{{else}}à imobiliária intermediadora {{comissao.imobiliaria_nome}}, inscrita no CNPJ nº {{cnpj comissao.imobiliaria_cnpj}}{{/if}}{{#if (existe comissao.creci)}}, CRECI nº {{comissao.creci}}{{/if}}.</p>
+{{/if}}
 
 <p><strong>14.2.</strong> {{#if (existe comissao.quando_paga_texto)}}O pagamento da comissão será efetuado {{comissao.quando_paga_texto}}, no prazo de até 5 (cinco) dias úteis contados do respectivo evento.{{else}}O pagamento da comissão está atrelado à liberação dos recursos previstos na alínea "b" da Cláusula Segunda (financiamento imobiliário), devendo ser efetuado no prazo de até 5 (cinco) dias úteis contados da efetiva liberação dos valores pelo agente financeiro em favor do(s) PROMITENTE(S) VENDEDOR(ES).{{/if}}</p>
 
@@ -444,7 +453,9 @@ Descrição: {{this.descricao}}
 <h3>INTERMEDIADORA{{#if comissao.comissionados.length}}{{#if (gt comissao.comissionados.length 1)}}S{{/if}}{{/if}}</h3>
 {{#if comissao.comissionados.length}}
 {{#each comissao.comissionados}}
+{{#unless (eq incluir_como_signatario false)}}
 <p>_______________________________<br>{{nome}}<br>{{#if (eq tipo_pessoa "fisica")}}CPF: {{cpf cpf}}{{else}}CNPJ: {{cnpj cnpj}}{{/if}}{{#if (existe creci)}}<br>CRECI: {{creci}}{{/if}}</p>
+{{/unless}}
 {{/each}}
 {{else}}
 <p>_______________________________<br>{{comissao.imobiliaria_nome}}<br>{{#if (eq comissao.corretora_tipo_pessoa "fisica")}}CPF: {{cpf comissao.imobiliaria_cnpj}}{{else}}CNPJ: {{cnpj comissao.imobiliaria_cnpj}}{{/if}}{{#if (existe comissao.creci)}}<br>CRECI: {{comissao.creci}}{{/if}}</p>

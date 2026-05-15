@@ -10,6 +10,14 @@ import {
 } from "@/lib/google/replace-placeholders";
 import { watchFile } from "@/lib/google/watch";
 import { deriveDealMetadata } from "@/lib/contracts/derive-deal-metadata";
+import {
+  MOMENTO_TEXTO,
+  MEIO_PAGAMENTO_TEXTO,
+  PIX_TIPO_CHAVE_LABELS,
+  TIPO_CONTA_LABELS,
+  BANCO_FINANCIAMENTO_LABELS,
+  PAPEL_LABELS,
+} from "@/lib/forms/payment-labels";
 
 interface GenerateResult {
   contractId: string;
@@ -71,6 +79,76 @@ const TIPOS_HARDCODED_FINANCIAMENTO = new Set([
   "fgts",
   "recursos_proprios",
 ]);
+
+function formatCpfCnpjMasked(raw: string | undefined): string {
+  if (!raw) return "";
+  const digits = String(raw).replace(/\D/g, "");
+  if (digits.length === 11) {
+    return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4");
+  }
+  if (digits.length === 14) {
+    return digits.replace(/(\d{2})(\d{3})(\d{3})(\d{4})(\d{2})/, "$1.$2.$3/$4-$5");
+  }
+  return raw;
+}
+
+/**
+ * Texto narrativo do destino da parcela. Compõe a partir dos sub-objetos
+ * `pix`, `bancarios` ou `banco_financiamento` conforme `meio_pagamento`.
+ * Retorna "" quando o dado está incompleto — template oculta via `existe`.
+ */
+function buildDestinoTexto(out: Record<string, unknown>): string {
+  const meio = typeof out.meio_pagamento === "string" ? (out.meio_pagamento as string) : "";
+  if (meio === "pix") {
+    const pix = (out.pix as Record<string, unknown> | undefined) || {};
+    const chave = typeof pix.chave === "string" ? pix.chave.trim() : "";
+    if (!chave) return "";
+    const tipoChave = typeof pix.tipo_chave === "string"
+      ? PIX_TIPO_CHAVE_LABELS[pix.tipo_chave as keyof typeof PIX_TIPO_CHAVE_LABELS] || ""
+      : "";
+    const titularNome = typeof pix.titular_nome === "string" ? pix.titular_nome.trim() : "";
+    const titularDoc = typeof pix.titular_cpf_cnpj === "string"
+      ? formatCpfCnpjMasked(pix.titular_cpf_cnpj)
+      : "";
+    let txt = `na chave PIX${tipoChave ? ` (${tipoChave})` : ""}: ${chave}`;
+    if (titularNome) {
+      txt += `, de titularidade de ${titularNome}`;
+      if (titularDoc) txt += ` (${titularDoc})`;
+    }
+    return txt;
+  }
+  if (meio === "ted") {
+    const b = (out.bancarios as Record<string, unknown> | undefined) || {};
+    const banco = typeof b.banco === "string" ? b.banco.trim() : "";
+    if (!banco) return "";
+    const agencia = typeof b.agencia === "string" ? b.agencia.trim() : "";
+    const conta = typeof b.conta === "string" ? b.conta.trim() : "";
+    const tipoConta = typeof b.tipo_conta === "string"
+      ? TIPO_CONTA_LABELS[b.tipo_conta as keyof typeof TIPO_CONTA_LABELS] || ""
+      : "";
+    const titularNome = typeof b.titular_nome === "string" ? b.titular_nome.trim() : "";
+    const titularDoc = typeof b.titular_cpf_cnpj === "string"
+      ? formatCpfCnpjMasked(b.titular_cpf_cnpj)
+      : "";
+    const parts: string[] = [`no Banco ${banco}`];
+    if (agencia) parts.push(`Agência ${agencia}`);
+    if (conta) parts.push(`Conta${tipoConta ? ` ${tipoConta}` : ""} nº ${conta}`);
+    if (titularNome) {
+      let titularPart = `titular ${titularNome}`;
+      if (titularDoc) titularPart += ` (${titularDoc})`;
+      parts.push(titularPart);
+    }
+    return parts.join(", ");
+  }
+  if (meio === "financiamento") {
+    const bancoKey = typeof out.banco_financiamento === "string"
+      ? (out.banco_financiamento as keyof typeof BANCO_FINANCIAMENTO_LABELS)
+      : null;
+    const label = bancoKey ? BANCO_FINANCIAMENTO_LABELS[bancoKey] : "";
+    return label ? `através da ${label}` : "";
+  }
+  return "";
+}
 
 export function enrichContractData(
   data: Record<string, unknown>
@@ -300,6 +378,60 @@ export function enrichContractData(
           out.tipo_texto = TIPO_TEXTO_CANONICO[tipoKey] ?? "";
         }
       }
+
+      // Texto canônico do "contados de" — preserva semântica original de
+      // momento mesmo quando dias virou número. Default 'assinatura' bate
+      // com o comportamento histórico do template.
+      const momentoKey = momento as keyof typeof MOMENTO_TEXTO;
+      out.momento_texto =
+        MOMENTO_TEXTO[momentoKey] ?? MOMENTO_TEXTO.assinatura;
+
+      // Data absoluta — quando momento=data_exata, formata em PT-BR longo
+      // pra template render "até DD de mês de AAAA" em vez de "em X dias".
+      // Parse com âncora ao meio-dia local pra estabilizar timezone — sem isso,
+      // "2026-09-15" vira meia-noite UTC e desliza pra dia anterior em UTC-3.
+      if (momento === "data_exata" && typeof out.data_exata === "string") {
+        const dataStr = (out.data_exata as string).trim();
+        const ymd = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dataStr);
+        const dt = ymd
+          ? new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]), 12, 0, 0)
+          : new Date(dataStr);
+        if (!Number.isNaN(dt.getTime())) {
+          out.momento_data_texto = new Intl.DateTimeFormat("pt-BR", {
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+          }).format(dt);
+        }
+      }
+
+      // Texto canônico do "mediante X" — substitui o hardcoded TED/PIX do
+      // template. Fallback pra "transferencia" preserva forms legados sem
+      // meio_pagamento setado.
+      const meio = typeof out.meio_pagamento === "string"
+        ? (out.meio_pagamento as keyof typeof MEIO_PAGAMENTO_TEXTO)
+        : "transferencia";
+      out.meio_pagamento_texto =
+        MEIO_PAGAMENTO_TEXTO[meio] ?? MEIO_PAGAMENTO_TEXTO.transferencia;
+
+      // Destino — chave PIX, dados bancários ou banco financiador. Só
+      // renderiza quando há dado completo; abstrato (campos vazios) cai
+      // pra string vazia e o template oculta com {{#if existe}}.
+      out.destino_texto = buildDestinoTexto(out);
+
+      // Promover banco_financiamento da parcela pra config quando ainda
+      // não setado — alínea "b)" hardcoded do template financiamento usa
+      // config.banco_financiamento pra mencionar a instituição.
+      if (
+        typeof out.banco_financiamento === "string" &&
+        out.banco_financiamento &&
+        !config.banco_financiamento
+      ) {
+        const bancoKey = out.banco_financiamento as keyof typeof BANCO_FINANCIAMENTO_LABELS;
+        config.banco_financiamento =
+          BANCO_FINANCIAMENTO_LABELS[bancoKey] ?? out.banco_financiamento;
+      }
+
       return out;
     });
 
@@ -385,6 +517,68 @@ export function enrichContractData(
       letra: indexToLetter(i + 1),
       numero: i + 1,
     }));
+  }
+
+  // ===== Comissionados — papel + derivação valor↔percentual + auto-promote =====
+  // Templates novos iteram comissao.comissionados[]. Enrich garante 3 coisas:
+  //  1. Cada comissionado tem `papel_texto` PT-BR pra qualificação/cláusula
+  //  2. `valor` e `percentual` são complementares — quando há um, deriva o outro
+  //  3. Forms legados (só comissao.imobiliaria_*, sem array) sintetizam um
+  //     comissionado único pra cláusula de breakdown poder iterar
+  const comissaoMut = enriched.comissao as Record<string, unknown> | undefined;
+  if (comissaoMut) {
+    const valorTotalComissao = Number(comissaoMut.valor || 0);
+    const comissionados = (comissaoMut.comissionados as Array<Record<string, unknown>> | undefined) ?? [];
+
+    if (comissionados.length === 0) {
+      const imobNome = typeof comissaoMut.imobiliaria_nome === "string"
+        ? (comissaoMut.imobiliaria_nome as string).trim()
+        : "";
+      if (imobNome) {
+        const tipoPessoa = comissaoMut.corretora_tipo_pessoa === "fisica" ? "fisica" : "juridica";
+        const docRaw = typeof comissaoMut.imobiliaria_cnpj === "string"
+          ? (comissaoMut.imobiliaria_cnpj as string)
+          : "";
+        const sintetizado: Record<string, unknown> = {
+          nome: imobNome,
+          tipo_pessoa: tipoPessoa,
+          papel: "imobiliaria_principal",
+          incluir_como_signatario: comissaoMut.incluir_como_signatario !== false,
+        };
+        if (tipoPessoa === "fisica") sintetizado.cpf = docRaw;
+        else sintetizado.cnpj = docRaw;
+        if (typeof comissaoMut.creci === "string" && comissaoMut.creci) {
+          sintetizado.creci = comissaoMut.creci;
+        }
+        if (typeof comissaoMut.imobiliaria_email === "string" && comissaoMut.imobiliaria_email) {
+          sintetizado.email = comissaoMut.imobiliaria_email;
+        }
+        if (typeof comissaoMut.percentual === "number" && comissaoMut.percentual > 0) {
+          sintetizado.percentual = comissaoMut.percentual;
+        }
+        if (valorTotalComissao > 0) sintetizado.valor = valorTotalComissao;
+        comissaoMut.comissionados = [sintetizado];
+      }
+    }
+
+    const arr = (comissaoMut.comissionados as Array<Record<string, unknown>> | undefined) ?? [];
+    comissaoMut.comissionados = arr.map((c) => {
+      const out: Record<string, unknown> = { ...c };
+      // Texto PT-BR do papel
+      if (typeof out.papel === "string") {
+        const label = PAPEL_LABELS[out.papel as keyof typeof PAPEL_LABELS];
+        if (label) out.papel_texto = label;
+      }
+      // Derivar valor a partir de percentual (ou vice-versa)
+      const pct = typeof out.percentual === "number" ? out.percentual : null;
+      const val = typeof out.valor === "number" ? out.valor : null;
+      if (pct != null && pct > 0 && (val == null || val === 0) && valorTotalComissao > 0) {
+        out.valor = Math.round(valorTotalComissao * pct) / 100;
+      } else if (val != null && val > 0 && (pct == null || pct === 0) && valorTotalComissao > 0) {
+        out.percentual = Math.round((val / valorTotalComissao) * 10000) / 100;
+      }
+      return out;
+    });
   }
 
   return enriched;

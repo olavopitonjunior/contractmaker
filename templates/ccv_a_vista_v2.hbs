@@ -126,12 +126,14 @@ Profissão: {{this.representante.profissao}}
 <p>
 {{#if (eq tipo_pessoa "fisica")}}
 Corretor(a): {{nome}}<br>
-CPF: {{cpf cpf}}<br>
+CPF: {{cpf cpf}}
 {{else}}
 Imobiliária: {{nome}}<br>
-CNPJ: nº {{cnpj cnpj}}<br>
+CNPJ: nº {{cnpj cnpj}}
 {{/if}}
-{{#if (existe creci)}}CRECI: {{creci}}{{#if percentual}} — Participação: {{percentual}}%{{/if}}{{else}}{{#if percentual}}Participação: {{percentual}}%{{/if}}{{/if}}
+{{#if (existe papel_texto)}}<br>Função: {{papel_texto}}{{/if}}
+{{#if (existe creci)}}<br>CRECI: {{creci}}{{/if}}
+{{#if this.percentual}}<br>Participação: {{this.percentual}}%{{/if}}
 </p>
 {{/each}}
 {{else}}
@@ -187,7 +189,7 @@ Descrição: {{this.descricao}}
 
 {{#if pagamento.parcelas.length}}
 {{#each pagamento.parcelas}}
-<p><strong>{{this.letra}})</strong> {{this.tipo_texto}}: {{moeda this.valor}} ({{extenso this.valor}}), em {{numero this.dias}} dia(s) corridos contados da assinatura, mediante transferência bancária (TED/PIX) nas contas indicadas pelos PROMITENTES VENDEDORES.</p>
+<p><strong>{{this.letra}})</strong> {{this.tipo_texto}}: {{moeda this.valor}} ({{extenso this.valor}}), {{#if (existe this.momento_data_texto)}}até {{this.momento_data_texto}}{{else}}em {{numero this.dias}} ({{numeroExtenso this.dias}}) dia(s) corridos {{#if (existe this.momento_texto)}}{{this.momento_texto}}{{else}}contados da assinatura deste instrumento{{/if}}{{/if}}, {{#if (existe this.meio_pagamento_texto)}}{{this.meio_pagamento_texto}}{{else}}mediante transferência bancária (TED ou PIX){{/if}}{{#if (existe this.destino_texto)}}, {{this.destino_texto}}{{else}} nas contas indicadas pelos PROMITENTES VENDEDORES{{/if}}.</p>
 {{/each}}
 {{else}}
 <p><strong>b)</strong> O saldo remanescente de {{moeda pagamento.recursos_proprios}} ({{extenso pagamento.recursos_proprios}}), a título de recursos próprios, a ser pago à vista mediante transferência bancária (TED/PIX) nas contas indicadas pelos PROMITENTES VENDEDORES.</p>
@@ -377,7 +379,16 @@ Descrição: {{this.descricao}}
 
 <h2>CLÁUSULA DÉCIMA PRIMEIRA - DA COMISSÃO</h2>
 
-<p><strong>11.1.</strong> A comissão de intermediação imobiliária devida à INTERMEDIADORA{{#if (existe comissao.imobiliaria_nome)}}, {{comissao.imobiliaria_nome}}, {{#if (eq comissao.corretora_tipo_pessoa "fisica")}}inscrito(a) no CPF nº {{cpf comissao.imobiliaria_cnpj}}{{else}}inscrita no CNPJ nº {{cnpj comissao.imobiliaria_cnpj}}{{/if}}{{#if (existe comissao.creci)}}, CRECI nº {{comissao.creci}}{{/if}},{{/if}} é de {{moeda comissao.valor}} ({{extenso comissao.valor}}), correspondente a {{percentual comissao.valor pagamento.valor_total}} do valor total da transação, a ser paga na forma e condições ajustadas entre as partes.</p>
+{{#if (gt comissao.comissionados.length 1)}}
+<p><strong>11.1.</strong> A comissão total de corretagem desta transação é de {{moeda comissao.valor}} ({{extenso comissao.valor}}), correspondente a {{percentual comissao.valor pagamento.valor_total}} do valor total da transação, a ser paga pela {{#if (existe comissao.quem_paga_texto)}}{{comissao.quem_paga_texto}}{{else}}Parte Compradora{{/if}}{{#if (existe comissao.quando_paga_texto)}} {{comissao.quando_paga_texto}}{{/if}}, distribuída entre os comissionados conforme abaixo:</p>
+<ul>
+{{#each comissao.comissionados}}
+<li>{{#if (eq tipo_pessoa "fisica")}}ao(à) corretor(a) {{nome}}, inscrito(a) no CPF nº {{cpf cpf}}{{else}}à imobiliária {{nome}}, inscrita no CNPJ nº {{cnpj cnpj}}{{/if}}{{#if (existe creci)}}, CRECI nº {{creci}}{{/if}}{{#if (existe papel_texto)}} ({{papel_texto}}){{/if}} — {{#if this.percentual}}{{this.percentual}}% = {{/if}}{{moeda valor}} ({{extenso valor}}).</li>
+{{/each}}
+</ul>
+{{else}}
+<p><strong>11.1.</strong> A comissão de intermediação imobiliária devida à INTERMEDIADORA{{#if (existe comissao.imobiliaria_nome)}}, {{comissao.imobiliaria_nome}}, {{#if (eq comissao.corretora_tipo_pessoa "fisica")}}inscrito(a) no CPF nº {{cpf comissao.imobiliaria_cnpj}}{{else}}inscrita no CNPJ nº {{cnpj comissao.imobiliaria_cnpj}}{{/if}}{{#if (existe comissao.creci)}}, CRECI nº {{comissao.creci}}{{/if}},{{/if}} é de {{moeda comissao.valor}} ({{extenso comissao.valor}}), correspondente a {{percentual comissao.valor pagamento.valor_total}} do valor total da transação, a ser paga{{#if (existe comissao.quem_paga_texto)}} pela {{comissao.quem_paga_texto}}{{/if}}{{#if (existe comissao.quando_paga_texto)}} {{comissao.quando_paga_texto}}{{/if}}.</p>
+{{/if}}
 
 <p><strong>11.2.</strong> Em caso de rescisão contratual, a responsabilidade pelo pagamento da comissão será de quem der causa ao desfazimento do negócio, nos termos do artigo 723 do Código Civil.</p>
 
@@ -479,12 +490,14 @@ CPF: {{cpf this.conjuge.cpf}}<br>
 <h3>INTERMEDIADORA{{#if comissao.comissionados.length}}{{#if (gt comissao.comissionados.length 1)}}S{{/if}}{{/if}}</h3>
 {{#if comissao.comissionados.length}}
 {{#each comissao.comissionados}}
+{{#unless (eq incluir_como_signatario false)}}
 <p>
 _______________________________<br>
 {{nome}}<br>
 {{#if (eq tipo_pessoa "fisica")}}CPF: {{cpf cpf}}{{else}}CNPJ: {{cnpj cnpj}}{{/if}}{{#if (existe creci)}}<br>
 CRECI: {{creci}}{{/if}}
 </p>
+{{/unless}}
 {{/each}}
 {{else}}
 <p>

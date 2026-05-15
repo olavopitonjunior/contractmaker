@@ -13,6 +13,15 @@ import { Button } from "@/components/ui/button";
 import { MoneyInput } from "@/components/forms/MoneyInput";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import { Trash2, Plus } from "lucide-react";
+import {
+  TIPO_LABELS,
+  MOMENTO_LABELS,
+  MEIO_LABELS,
+  PIX_TIPO_CHAVE_LABELS,
+  TIPO_CONTA_LABELS,
+  BANCO_FINANCIAMENTO_LABELS,
+  toOptions,
+} from "@/lib/forms/payment-labels";
 
 interface PagamentoStepProps {
   form: UseFormReturn<any>;
@@ -63,59 +72,20 @@ function formatBRL(value: number): string {
   });
 }
 
-// Opções pro select de tipo. Match com `parcelaTipoEnum` em validation.ts.
-const TIPO_OPTIONS = [
-  { value: "sinal_arras", label: "Sinal / Arras" },
-  { value: "recursos_proprios", label: "Recursos Próprios" },
-  { value: "fgts", label: "FGTS" },
-  { value: "financiamento", label: "Financiamento Bancário" },
-  { value: "cessao_consorcio", label: "Cessão de Consórcio" },
-  { value: "permuta_veiculo", label: "Permuta com Veículo" },
-  { value: "permuta_imovel", label: "Permuta com Imóvel" },
-  { value: "outros", label: "Outros (especificar)" },
-];
-
-const MOMENTO_OPTIONS = [
-  { value: "assinatura", label: "Na assinatura do contrato" },
-  { value: "escritura", label: "Na escritura pública" },
-  { value: "registro", label: "No registro do imóvel" },
-  { value: "dias", label: "X dias após a assinatura" },
-  { value: "data_exata", label: "Em data específica" },
-];
-
-const MEIO_OPTIONS = [
-  { value: "pix", label: "PIX" },
-  { value: "ted", label: "TED / Transferência Bancária" },
-  { value: "boleto", label: "Boleto" },
-  { value: "dinheiro", label: "Dinheiro (espécie)" },
-  { value: "cheque", label: "Cheque" },
-  { value: "financiamento", label: "Financiamento Bancário" },
-  { value: "fgts_saque", label: "Saque do FGTS" },
-  { value: "permuta", label: "Permuta" },
-];
-
-const PIX_TIPO_CHAVE_OPTIONS = [
-  { value: "CPF", label: "CPF" },
-  { value: "CNPJ", label: "CNPJ" },
-  { value: "EMAIL", label: "E-mail" },
-  { value: "PHONE", label: "Telefone" },
-  { value: "EVP", label: "Chave aleatória (EVP)" },
-];
-
-const TIPO_CONTA_OPTIONS = [
-  { value: "corrente", label: "Corrente" },
-  { value: "poupanca", label: "Poupança" },
-];
-
-const BANCO_FINANCIAMENTO_OPTIONS = [
-  { value: "caixa", label: "Caixa Econômica Federal" },
-  { value: "bb", label: "Banco do Brasil" },
-  { value: "itau", label: "Itaú" },
-  { value: "bradesco", label: "Bradesco" },
-  { value: "santander", label: "Santander" },
-  { value: "inter", label: "Banco Inter" },
-  { value: "outro", label: "Outro" },
-];
+// Opções pros selects — fonte canônica em lib/forms/payment-labels.ts.
+// Esse módulo compartilhado é importado também pelo enrichContractData
+// pra garantir que o texto canônico no contrato bate com o que o user
+// selecionou no form (label = label).
+const TIPO_OPTIONS = toOptions(TIPO_LABELS);
+const MOMENTO_OPTIONS = toOptions(MOMENTO_LABELS);
+// MEIO_LABELS inclui um valor legado "transferencia" pra retrocompat de Zod;
+// o select da UI lista só os modernos (mesma ordem do enum original).
+const MEIO_OPTIONS = (
+  ["pix", "ted", "boleto", "dinheiro", "cheque", "financiamento", "fgts_saque", "permuta"] as const
+).map((k) => ({ value: k, label: MEIO_LABELS[k] }));
+const PIX_TIPO_CHAVE_OPTIONS = toOptions(PIX_TIPO_CHAVE_LABELS);
+const TIPO_CONTA_OPTIONS = toOptions(TIPO_CONTA_LABELS);
+const BANCO_FINANCIAMENTO_OPTIONS = toOptions(BANCO_FINANCIAMENTO_LABELS);
 
 function ParcelaCard({
   index,

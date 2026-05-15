@@ -67,7 +67,7 @@ Auto-transições têm guard `linearOrder.includes(currentStageName)` — webhoo
 
 ## DadosContrato
 
-TS: vendedores, compradores, imóveis, pagamento, comissão, config. Mudanças aditivas só. Fontes: form público (8 etapas) ou OCR de CCV via Gemini. `modalidade: "a_vista" | "financiamento"` decide o template.
+TS: vendedores, compradores, imóveis, pagamento, comissão, config. Mudanças aditivas só. Fontes: form público (7 etapas) ou OCR de CCV via Gemini. `modalidade: "a_vista" | "financiamento"` decide o template.
 
 ## Templates v2 (CCV Zimmermann)
 
@@ -142,7 +142,7 @@ System prompt (`prompts.ts`) tem 18 regras. Destaques: regra 10 obriga markdown 
 
 ## Etapa 0 form público — Upload + OCR
 
-`/f/[token]` 8 etapas (etapa 0 opcional pra docs). `DocumentosStep.tsx`: dropzone JPG/PNG/WebP/GIF + PDF até 10MB, max 15. Resize client pra 2000px. **OCR** (`lib/ai/ocr.ts::classifyAndExtract`): Gemini 2.5 Flash via `@google/genai` retorna `{tipo, campos, confidence}` JSON, suporta imagens E PDFs. Categorias: `rg|cpf|cnh|matricula|iptu|escritura|procuracao|comprovante_residencia|certidao_casamento|ficha_resumo|outro`. ~$0.01/form. `mapExtractedToForm` respeita `skipIfDirty`; `suggestAssignment` matcha CPF/nome. Finalize copia FormAttachments → DealAttachments com `extractedData`.
+`/f/[token]` 7 etapas (etapa 0 opcional pra docs). `DocumentosStep.tsx`: dropzone JPG/PNG/WebP/GIF + PDF até 10MB, max 15. Resize client pra 2000px. **OCR** (`lib/ai/ocr.ts::classifyAndExtract`): Gemini 2.5 Flash via `@google/genai` retorna `{tipo, campos, confidence}` JSON, suporta imagens E PDFs. Categorias: `rg|cpf|cnh|matricula|iptu|escritura|procuracao|comprovante_residencia|certidao_casamento|ficha_resumo|outro`. ~$0.01/form. `mapExtractedToForm` respeita `skipIfDirty`; `suggestAssignment` matcha CPF/nome. Finalize copia FormAttachments → DealAttachments com `extractedData`.
 
 ## Import de contrato
 
@@ -215,7 +215,7 @@ Disparo manual no Deal → aba Certidões. Pipeline: client gera `batchId` UUID 
 
 ### Serasa Experian (2026-05)
 
-Segundo provider via `CertidaoJob.provider="serasa"`. 5 endpoints: `serasa/score-{pf,pj}` (0-1000 + drivers), `serasa/restritivos-{pf,pj}` (Pefin/Refin, protestos, ações), `serasa/vinculos-pj-pf` (CNPJs em que o CPF é sócio). OAuth2 em `lib/serasa/client.ts` (cache Upstash/in-memory, TTL `expires_in-60s`, retry 1× em 401+5xx). JSON → PDF próprio via `exportPdfToBuffer` + `templates/serasa_report.hbs` → `DealAttachment { source:"serasa" }`. Normalizers em `serasa-normalizers.ts`; `Situacao` ganha `sem_restricao | com_restricao`. Budget isolado `SERASA_MONTHLY_BUDGET_CENTS` (default R$ 5k) via `getMonthlySpendByProvider`. **Gate LGPD por deal:** `Deal.complianceJson.serasaConsent { at, by, baseLegal }`; POST `/certidoes` 412 sem consent → UI abre `SerasaConsentDialog` e re-tenta. **Vínculos opt-in:** `POST /deals/[id]/serasa/expand-vinculos { cpf }` enfileira job único; `VinculosExpandDialog` cria `DiligentedPerson` por CNPJ escolhido — sem auto-cascata. Picker mostra grupo "Serasa Experian" com aviso LGPD (scope=`serasa`). Audit: `SERASA_QUERY_DISPATCH | SERASA_CONSENT_GIVEN | SERASA_VINCULOS_EXPAND | SERASA_BUDGET_EXCEEDED`. Dashboard `/settings/certidoes` ganha card Serasa + `/api/org/serasa-budget`. Smoke: `scripts/serasa-ping.ts`. Fixtures + testes em `__tests__/serasa-normalizers.test.ts`. **R$ 5/consulta placeholder** — ajustar antes de prod.
+Segundo provider via `CertidaoJob.provider="serasa"`. 5 endpoints (score/restritivos PF+PJ + vínculos). Gate LGPD por deal via `Deal.complianceJson.serasaConsent`. Detalhes operacionais (auth, budget, audit, opt-in vínculos) em [docs/certidoes-serasa.md](docs/certidoes-serasa.md).
 
 ## Assinatura digital (ClickSign v3)
 
