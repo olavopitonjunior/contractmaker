@@ -6,6 +6,20 @@ import path from "path";
 vi.unmock("@/lib/render/handlebars");
 
 import { renderContratoHTML } from "@/lib/render/handlebars";
+import { enrichContractData } from "@/lib/services/contract-generation";
+
+// Helper que mimica o fluxo de produção: data do form → enrich → render.
+// SEMPRE usar esse helper nos testes pra garantir que estamos exercitando
+// o mesmo pipeline que generateContractForDeal executa.
+// Passa um deep clone da data porque enrichContractData muta `config` nested —
+// sem isso, fixtures reusadas vazam estado entre testes (ex.: config.saldo_devedor_vendedor
+// setado num test fica visível pro próximo). Em prod, dataJson é JSON do DB,
+// sem compartilhamento, então o JSON.parse(JSON.stringify(...)) só é defensivo aqui.
+function renderWithEnrich(template: string, data: Record<string, unknown>): string {
+  const cloned = JSON.parse(JSON.stringify(data)) as Record<string, unknown>;
+  const enriched = enrichContractData(cloned);
+  return renderContratoHTML(template, enriched as Record<string, unknown>);
+}
 
 // Realistic mock data matching DadosContrato structure
 const mockDataAVista = {
@@ -116,6 +130,14 @@ const mockDataAVista = {
 const mockDataFinanciamento = {
   ...mockDataAVista,
   modalidade: "financiamento",
+  // Saldo devedor no caminho TOP-LEVEL — exatamente como o form Zod salva
+  // (step4Schema.saldo_devedor). enrichContractData mapeia pra
+  // config.saldo_devedor_vendedor antes do render.
+  saldo_devedor: 150000,
+  status_propriedade: "financiado-saldo",
+  // Bens inclusos no caminho TOP-LEVEL (step5Schema.incluso_no_preco).
+  incluso_no_preco:
+    "armários embutidos da cozinha e quartos, vasos sanitários, pias, metálicos, lustres da sala e quartos",
   pagamento: {
     valor_total: 600000,
     sinal_arras: 60000,
@@ -129,11 +151,8 @@ const mockDataFinanciamento = {
   },
   config: {
     ...mockDataAVista.config,
-    saldo_devedor_vendedor: 150000,
     banco_financiamento: "Banco Itaú S/A",
     data_referencia_saldo: "2026-03-15",
-    itens_entrega:
-      "armários embutidos da cozinha e quartos, vasos sanitários, pias, metálicos, lustres da sala e quartos",
     data_posse_precaria: "2026-05-15",
   },
 };
@@ -151,46 +170,46 @@ describe("Template v2 Rendering", () => {
   describe("CCV À Vista", () => {
     it("should render without errors", () => {
       const template = loadTemplate("ccv_a_vista_v2.hbs");
-      const html = renderContratoHTML(template, mockDataAVista);
+      const html = renderWithEnrich(template,mockDataAVista);
       expect(html).toBeTruthy();
       expect(html.length).toBeGreaterThan(1000);
     });
 
     it("should contain vendedor qualification with CPF formatted", () => {
       const template = loadTemplate("ccv_a_vista_v2.hbs");
-      const html = renderContratoHTML(template, mockDataAVista);
+      const html = renderWithEnrich(template,mockDataAVista);
       expect(html).toContain("João Carlos da Silva");
       expect(html).toContain("529.982.247-25"); // formatted CPF
     });
 
     it("should contain comprador qualification", () => {
       const template = loadTemplate("ccv_a_vista_v2.hbs");
-      const html = renderContratoHTML(template, mockDataAVista);
+      const html = renderWithEnrich(template,mockDataAVista);
       expect(html).toContain("Ana Paula Oliveira");
     });
 
     it("should contain conjuge info for married vendedor", () => {
       const template = loadTemplate("ccv_a_vista_v2.hbs");
-      const html = renderContratoHTML(template, mockDataAVista);
+      const html = renderWithEnrich(template,mockDataAVista);
       expect(html).toContain("Maria Helena da Silva");
     });
 
     it("should render payment value with moeda helper", () => {
       const template = loadTemplate("ccv_a_vista_v2.hbs");
-      const html = renderContratoHTML(template, mockDataAVista);
+      const html = renderWithEnrich(template,mockDataAVista);
       expect(html).toContain("R$"); // moeda helper output
       expect(html).toContain("600.000"); // valor_total formatted
     });
 
     it("should render extenso helper for payment", () => {
       const template = loadTemplate("ccv_a_vista_v2.hbs");
-      const html = renderContratoHTML(template, mockDataAVista);
+      const html = renderWithEnrich(template,mockDataAVista);
       expect(html).toContain("seiscentos mil reais");
     });
 
     it("should contain imovel address and matricula", () => {
       const template = loadTemplate("ccv_a_vista_v2.hbs");
-      const html = renderContratoHTML(template, mockDataAVista);
+      const html = renderWithEnrich(template,mockDataAVista);
       expect(html).toContain("Rua Augusta");
       expect(html).toContain("12345"); // matricula
       expect(html).toContain("01305-100"); // CEP formatted
@@ -198,7 +217,7 @@ describe("Template v2 Rendering", () => {
 
     it("should contain CLAUSE_SLOT comments for variable clauses", () => {
       const template = loadTemplate("ccv_a_vista_v2.hbs");
-      const html = renderContratoHTML(template, mockDataAVista);
+      const html = renderWithEnrich(template,mockDataAVista);
       expect(html).toContain("<!-- CLAUSE_SLOT:G1 -->");
       expect(html).toContain("<!-- CLAUSE_SLOT:G2 -->");
       expect(html).toContain("<!-- CLAUSE_SLOT:G3 -->");
@@ -206,7 +225,7 @@ describe("Template v2 Rendering", () => {
 
     it("should render 15 main sections (CLÁUSULA)", () => {
       const template = loadTemplate("ccv_a_vista_v2.hbs");
-      const html = renderContratoHTML(template, mockDataAVista);
+      const html = renderWithEnrich(template,mockDataAVista);
       // Count CLÁUSULA occurrences in headings
       const clauseMatches = html.match(/CLÁUSULA/gi);
       expect(clauseMatches).toBeTruthy();
@@ -215,14 +234,14 @@ describe("Template v2 Rendering", () => {
 
     it("should contain CNPJ for intermediadora", () => {
       const template = loadTemplate("ccv_a_vista_v2.hbs");
-      const html = renderContratoHTML(template, mockDataAVista);
+      const html = renderWithEnrich(template,mockDataAVista);
       expect(html).toContain("Zimmermann");
       expect(html).toContain("12.345.678/0001-90"); // CNPJ formatted
     });
 
     it("should render foro clause for justica publica", () => {
       const template = loadTemplate("ccv_a_vista_v2.hbs");
-      const html = renderContratoHTML(template, mockDataAVista);
+      const html = renderWithEnrich(template,mockDataAVista);
       expect(html).toContain("foro da situação do imóvel");
     });
   });
@@ -230,39 +249,39 @@ describe("Template v2 Rendering", () => {
   describe("CCV Financiamento", () => {
     it("should render without errors", () => {
       const template = loadTemplate("ccv_financiamento_v2.hbs");
-      const html = renderContratoHTML(template, mockDataFinanciamento);
+      const html = renderWithEnrich(template,mockDataFinanciamento);
       expect(html).toBeTruthy();
       expect(html.length).toBeGreaterThan(1000);
     });
 
     it("should contain financing-specific payment section", () => {
       const template = loadTemplate("ccv_financiamento_v2.hbs");
-      const html = renderContratoHTML(template, mockDataFinanciamento);
+      const html = renderWithEnrich(template,mockDataFinanciamento);
       // Should have financing amount
       expect(html).toContain("500.000"); // alienacao_fiduciaria
     });
 
     it("should contain FGTS section when fgts > 0", () => {
       const template = loadTemplate("ccv_financiamento_v2.hbs");
-      const html = renderContratoHTML(template, mockDataFinanciamento);
+      const html = renderWithEnrich(template,mockDataFinanciamento);
       expect(html).toContain("40.000"); // FGTS value
     });
 
     it("should contain G4 CLAUSE_SLOT for financiamento clauses", () => {
       const template = loadTemplate("ccv_financiamento_v2.hbs");
-      const html = renderContratoHTML(template, mockDataFinanciamento);
+      const html = renderWithEnrich(template,mockDataFinanciamento);
       expect(html).toContain("<!-- CLAUSE_SLOT:G4 -->");
     });
 
     it("should contain saldo devedor info", () => {
       const template = loadTemplate("ccv_financiamento_v2.hbs");
-      const html = renderContratoHTML(template, mockDataFinanciamento);
+      const html = renderWithEnrich(template,mockDataFinanciamento);
       expect(html).toContain("150.000"); // saldo_devedor_vendedor
     });
 
     it("should have more sections than a_vista (17 vs 15)", () => {
       const template = loadTemplate("ccv_financiamento_v2.hbs");
-      const html = renderContratoHTML(template, mockDataFinanciamento);
+      const html = renderWithEnrich(template,mockDataFinanciamento);
       const clauseMatches = html.match(/CLÁUSULA/gi);
       expect(clauseMatches).toBeTruthy();
       expect(clauseMatches!.length).toBeGreaterThanOrEqual(17);
@@ -270,7 +289,7 @@ describe("Template v2 Rendering", () => {
 
     it("should contain rescisao por nao obtencao de financiamento (9.5)", () => {
       const template = loadTemplate("ccv_financiamento_v2.hbs");
-      const html = renderContratoHTML(template, mockDataFinanciamento);
+      const html = renderWithEnrich(template,mockDataFinanciamento);
       expect(html).toContain("financiamento imobiliário");
       expect(html).toContain("restituição integral e sem penalidades");
     });
@@ -278,8 +297,8 @@ describe("Template v2 Rendering", () => {
     it("should render vendedor and comprador blocks identically to a_vista", () => {
       const templateAVista = loadTemplate("ccv_a_vista_v2.hbs");
       const templateFin = loadTemplate("ccv_financiamento_v2.hbs");
-      const htmlAVista = renderContratoHTML(templateAVista, mockDataAVista);
-      const htmlFin = renderContratoHTML(templateFin, mockDataFinanciamento);
+      const htmlAVista = renderWithEnrich(templateAVista,mockDataAVista);
+      const htmlFin = renderWithEnrich(templateFin,mockDataFinanciamento);
       // Both should contain the same vendedor
       expect(htmlAVista).toContain("João Carlos da Silva");
       expect(htmlFin).toContain("João Carlos da Silva");
@@ -299,8 +318,14 @@ describe("Template v2 Rendering", () => {
     });
 
     it("should render a G4 clause with financing data", () => {
+      // Stub de cláusula G4 que lê config.saldo_devedor_vendedor — esse campo
+      // é populado por enrichContractData a partir de data.saldo_devedor.
+      // Como o stub não passa pelo template completo, aplicamos enrich aqui.
       const clauseContent = `<p>Saldo devedor junto à {{config.banco_financiamento}}, no valor de {{moeda config.saldo_devedor_vendedor}}.</p>`;
-      const html = renderContratoHTML(clauseContent, mockDataFinanciamento);
+      const enriched = enrichContractData(
+        JSON.parse(JSON.stringify(mockDataFinanciamento)) as Record<string, unknown>
+      );
+      const html = renderContratoHTML(clauseContent, enriched as Record<string, unknown>);
       expect(html).toContain("Banco Itaú S/A");
       expect(html).toContain("150.000");
     });
@@ -319,7 +344,7 @@ describe("Template v2 Rendering", () => {
           creci: "199.905",
         },
       };
-      const html = renderContratoHTML(template, data);
+      const html = renderWithEnrich(template,data);
       expect(html).toContain("Corretor(a): Carlos Henrique Souza");
       expect(html).toContain("CPF: 529.982.247-25");
       expect(html).not.toMatch(/Imobili[áa]ria:\s*Carlos/);
@@ -334,7 +359,7 @@ describe("Template v2 Rendering", () => {
           corretora_tipo_pessoa: "juridica",
         },
       };
-      const html = renderContratoHTML(template, data);
+      const html = renderWithEnrich(template,data);
       expect(html).toContain("Imobiliária: Zimmermann Imóveis Ltda");
       expect(html).toContain("CNPJ: nº 12.345.678/0001-90");
       expect(html).not.toContain("Corretor(a):");
@@ -351,7 +376,7 @@ describe("Template v2 Rendering", () => {
           imobiliaria_cnpj: "52998224725",
         },
       };
-      const html = renderContratoHTML(template, data);
+      const html = renderWithEnrich(template,data);
       expect(html).toContain("ao(à) corretor(a) Lucas Pereira");
       expect(html).toContain("inscrito(a) no CPF nº 529.982.247-25");
     });
@@ -371,7 +396,7 @@ describe("Template v2 Rendering", () => {
           ],
         },
       };
-      const html = renderContratoHTML(template, data);
+      const html = renderWithEnrich(template,data);
       expect(html).toContain("<strong>b)</strong> Parcela 1:");
       expect(html).toContain("<strong>c)</strong> Parcela 2:");
       expect(html).toContain("<strong>d)</strong> Parcela 3:");
@@ -396,7 +421,7 @@ describe("Template v2 Rendering", () => {
           ],
         },
       };
-      const html = renderContratoHTML(template, data);
+      const html = renderWithEnrich(template,data);
       expect(html).toContain("<strong>Parcela 1.</strong> Reforço:");
       expect(html).toContain("<strong>Parcela 2.</strong> Reforço final:");
     });
@@ -404,7 +429,7 @@ describe("Template v2 Rendering", () => {
     it("falls back to 'saldo remanescente' when parcelas empty", () => {
       const template = loadTemplate("ccv_a_vista_v2.hbs");
       // mockDataAVista already has parcelas: []
-      const html = renderContratoHTML(template, mockDataAVista);
+      const html = renderWithEnrich(template,mockDataAVista);
       expect(html).toContain("saldo remanescente");
     });
   });
@@ -429,7 +454,7 @@ describe("Template v2 Rendering", () => {
           },
         ],
       };
-      const html = renderContratoHTML(template, data);
+      const html = renderWithEnrich(template,data);
       expect(html).toContain("Vendedor Um");
       expect(html).toContain("Vendedor Dois");
       expect(html).toContain("Cônjuge Um");
@@ -449,7 +474,7 @@ describe("Template v2 Rendering", () => {
           },
         ],
       };
-      const html = renderContratoHTML(template, data);
+      const html = renderWithEnrich(template,data);
       // Não deve ter (Cônjuge/Companheiro) na seção de comprador
       const compradorSection = html.split("PARTE COMPRADORA")[1] ?? "";
       expect(compradorSection).not.toContain("(Cônjuge/Companheiro)");
@@ -469,7 +494,7 @@ describe("Template v2 Rendering", () => {
           },
         ],
       };
-      const html = renderContratoHTML(template, data);
+      const html = renderWithEnrich(template,data);
       expect(html).toContain("Inscrição Municipal: nº MUN-99887");
     });
 
@@ -485,8 +510,217 @@ describe("Template v2 Rendering", () => {
           },
         ],
       };
-      const html = renderContratoHTML(template, data);
+      const html = renderWithEnrich(template,data);
       expect(html).not.toContain("Inscrição Municipal:");
+    });
+  });
+
+  // Regressão do caso Aide (2026-05-15): saldo_devedor preenchido no form
+  // sumia do contrato porque o template lê config.saldo_devedor_vendedor
+  // mas o form salva em data.saldo_devedor top-level. enrichContractData
+  // agora faz a ponte. Não remova esses testes sem checar com o caso.
+  describe("Form → template field bridges (caso Aide e correlatos)", () => {
+    it("financiamento: saldo_devedor top-level → cláusula 2.1.4 com valor formatado", () => {
+      const template = loadTemplate("ccv_financiamento_v2.hbs");
+      const data = {
+        ...mockDataFinanciamento,
+        saldo_devedor: 200000,
+        // garante que não há valor em config.saldo_devedor_vendedor — enrich precisa popular
+        config: { ...mockDataFinanciamento.config, saldo_devedor_vendedor: undefined },
+      };
+      const html = renderWithEnrich(template, data);
+      expect(html).toContain("200.000");
+      expect(html).toContain("duzentos mil reais");
+      expect(html).toContain("saldo devedor de alienação fiduciária");
+    });
+
+    it("à vista: saldo_devedor top-level → cláusula 2.1.3 com quitação prévia", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = { ...mockDataAVista, saldo_devedor: 80000 };
+      const html = renderWithEnrich(template, data);
+      expect(html).toContain("2.1.3.");
+      expect(html).toContain("80.000");
+      expect(html).toContain("quitação");
+    });
+
+    it("debitos.iptu.selecionado=true com valor → cláusula 5.2 renderiza IPTU", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = {
+        ...mockDataAVista,
+        tem_debitos: true,
+        debitos: {
+          iptu: { selecionado: true, valor: 3500 },
+          condominio: { selecionado: false, valor: 0 },
+          outros: "",
+        },
+      };
+      const html = renderWithEnrich(template, data);
+      expect(html).toContain("5.2.");
+      expect(html).toContain("IPTU em atraso");
+      expect(html).toContain("3.500");
+    });
+
+    it("vicios.opcao='reparar' com descrição → cláusula 10.4 lista os reparos", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = {
+        ...mockDataAVista,
+        vicios: {
+          opcao: "reparar",
+          descricao_reparar: "trocar telhado e impermeabilizar laje",
+        },
+      };
+      const html = renderWithEnrich(template, data);
+      expect(html).toContain("10.4.");
+      expect(html).toContain("trocar telhado e impermeabilizar laje");
+      // Não deve ter o texto das outras variantes
+      expect(html).not.toContain("renunciando expressamente ao direito de pleitear");
+    });
+
+    it("vicios.opcao='renuncia' → cláusula 10.4 com texto de renúncia, sem mencionar reparos", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = { ...mockDataAVista, vicios: { opcao: "renuncia" } };
+      const html = renderWithEnrich(template, data);
+      expect(html).toContain("10.4.");
+      expect(html).toContain("renunciando expressamente");
+      expect(html).not.toContain("trocar telhado");
+    });
+
+    it("incluso_no_preco top-level → cláusula de bens inclusos renderiza", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = {
+        ...mockDataAVista,
+        incluso_no_preco: "armários da cozinha e ar-condicionado",
+      };
+      const html = renderWithEnrich(template, data);
+      expect(html).toContain("3.4.");
+      expect(html).toContain("armários da cozinha e ar-condicionado");
+    });
+
+    it("regularizacoes com prazo customizado → cláusula 5.4 usa o prazo informado", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = {
+        ...mockDataAVista,
+        regularizacoes: {
+          tem: true,
+          prazo_dias: 60,
+          descricao: "averbar ampliação na matrícula",
+        },
+      };
+      const html = renderWithEnrich(template, data);
+      expect(html).toContain("5.4.");
+      expect(html).toContain("averbar ampliação na matrícula");
+      expect(html).toContain("60");
+    });
+
+    it("debitos_assumidos.assume=true → cláusula 5.3 em derrogação à 5.2", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = {
+        ...mockDataAVista,
+        tem_debitos: true,
+        debitos: {
+          iptu: { selecionado: true, valor: 1500 },
+          condominio: { selecionado: false, valor: 0 },
+          outros: "",
+        },
+        debitos_assumidos: {
+          assume: true,
+          descricao: "IPTU em atraso de 2025",
+        },
+      };
+      const html = renderWithEnrich(template, data);
+      expect(html).toContain("5.3.");
+      expect(html).toContain("IPTU em atraso de 2025");
+      expect(html).toContain("derrogação");
+    });
+
+    it("ocupacao='ocupado-terceiro' + locacao.situacao='vendedor-entregara' → cláusula 3.3 desocupação", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = {
+        ...mockDataAVista,
+        ocupacao: "ocupado-terceiro",
+        locacao: { situacao: "vendedor-entregara", data_preferencia: "30/06/2026" },
+      };
+      const html = renderWithEnrich(template, data);
+      expect(html).toContain("3.3.");
+      expect(html).toContain("desocupado");
+      expect(html).toContain("30/06/2026");
+    });
+
+    it("desistencia.permite=true → cláusula 9.5 com prazo informado", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const data = {
+        ...mockDataAVista,
+        desistencia: { permite: true, prazo_dias: 14 },
+      };
+      const html = renderWithEnrich(template, data);
+      expect(html).toContain("9.5.");
+      expect(html).toContain("direito de desistência");
+      expect(html).toContain("14");
+    });
+
+    it("parcelas[].tipo='financiamento' soma → pagamento.alienacao_fiduciaria via bucket", () => {
+      const template = loadTemplate("ccv_financiamento_v2.hbs");
+      const data = {
+        ...mockDataFinanciamento,
+        pagamento: {
+          ...mockDataFinanciamento.pagamento,
+          alienacao_fiduciaria: 0, // zerado — bucket deve preencher a partir das parcelas
+          parcelas: [
+            { tipo: "financiamento", valor: 400000, momento: "registro", tipo_texto: "" },
+          ],
+        },
+      };
+      const html = renderWithEnrich(template, data);
+      expect(html).toContain("400.000");
+      expect(html).toContain("Financiamento imobiliário com alienação fiduciária");
+    });
+
+    it("parcelas[].tipo='permuta_imovel' → cláusula 2.1.5 (financiamento) com descrição da permuta", () => {
+      const template = loadTemplate("ccv_financiamento_v2.hbs");
+      const data = {
+        ...mockDataFinanciamento,
+        pagamento: {
+          ...mockDataFinanciamento.pagamento,
+          parcelas: [
+            {
+              tipo: "permuta_imovel",
+              valor: 200000,
+              permuta_descricao: "apartamento em São Caetano matrícula 12345",
+            },
+          ],
+        },
+      };
+      const html = renderWithEnrich(template, data);
+      expect(html).toContain("2.1.5.");
+      expect(html).toContain("permuta");
+      expect(html).toContain("apartamento em São Caetano matrícula 12345");
+    });
+
+    it("enrichContractData é idempotente — segunda execução não duplica", () => {
+      const fresh = JSON.parse(
+        JSON.stringify({ ...mockDataFinanciamento, saldo_devedor: 100000 })
+      ) as Record<string, unknown>;
+      const once = enrichContractData(fresh);
+      const twice = enrichContractData(once as Record<string, unknown>);
+      const c1 = (once as any).config as Record<string, unknown>;
+      const c2 = (twice as any).config as Record<string, unknown>;
+      expect(c1.saldo_devedor_vendedor).toBe(100000);
+      expect(c2.saldo_devedor_vendedor).toBe(100000);
+    });
+
+    it("contrato sem nenhum campo rich → cláusulas opcionais não aparecem (a_vista)", () => {
+      const template = loadTemplate("ccv_a_vista_v2.hbs");
+      const html = renderWithEnrich(template, mockDataAVista);
+      // mockDataAVista é o caso "happy" sem saldo/debitos/vicios/regularizacoes —
+      // as cláusulas opcionais devem ficar invisíveis.
+      expect(html).not.toContain("2.1.3.");
+      expect(html).not.toContain("3.3.");
+      expect(html).not.toContain("3.4.");
+      expect(html).not.toContain("5.2.");
+      expect(html).not.toContain("5.3.");
+      expect(html).not.toContain("5.4.");
+      expect(html).not.toContain("9.5.");
+      expect(html).not.toContain("10.4.");
     });
   });
 });

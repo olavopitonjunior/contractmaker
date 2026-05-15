@@ -213,6 +213,10 @@ Descrição: {{this.descricao}}
 <p><strong>2.1.4.</strong> Do valor liberado pelo agente financeiro, será automaticamente abatido pela instituição financeira o saldo devedor de alienação fiduciária existente em favor do(s) PROMITENTE(S) VENDEDOR(ES), no montante aproximado de {{moeda config.saldo_devedor_vendedor}} ({{extenso config.saldo_devedor_vendedor}}), sendo o eventual saldo remanescente creditado na conta indicada pelo(s) PROMITENTE(S) VENDEDOR(ES).</p>
 {{/if}}
 
+{{#if (existe config.permuta_descricao)}}
+<p><strong>2.1.5.</strong> Parte do preço estipulado nesta cláusula é satisfeita mediante permuta, nos seguintes termos: {{config.permuta_descricao}}. A entrega efetiva do(s) bem(ns) permutado(s), com a documentação regularizada e livre de quaisquer ônus, é condição para a quitação parcial correspondente.</p>
+{{/if}}
+
 <hr>
 
 <h2>CLÁUSULA TERCEIRA - DA IMISSÃO NA POSSE</h2>
@@ -221,7 +225,15 @@ Descrição: {{this.descricao}}
 
 <p><strong>3.1.1.</strong> O atraso na entrega da posse por parte do(s) PROMITENTE(S) VENDEDOR(ES) sujeitará ao pagamento de multa diária no valor de {{moeda config.multa_diaria_posse}} ({{extenso config.multa_diaria_posse}}), a ser paga ao(s) PROMISSÁRIO(S) COMPRADOR(ES). Transcorridos 30 (trinta) dias de atraso, a multa diária será acrescida de 20% (vinte por cento) sobre o valor originário, sem prejuízo de eventuais perdas e danos.</p>
 
-<p><strong>3.2.</strong> O imóvel será entregue no estado em que se encontra, tendo o(s) PROMISSÁRIO(S) COMPRADOR(ES) vistoriado e aceito suas condições atuais, incluindo os seguintes itens e acessórios: {{config.itens_entrega}}.</p>
+<p><strong>3.2.</strong> O imóvel será entregue no estado em que se encontra, tendo o(s) PROMISSÁRIO(S) COMPRADOR(ES) vistoriado e aceito suas condições atuais{{#if (existe config.itens_entrega)}}, incluindo os seguintes itens, benfeitorias e acessórios: {{config.itens_entrega}}{{/if}}.</p>
+
+{{#if (existe config.locacao_situacao)}}
+{{#if (eq config.locacao_situacao "vendedor-entregara")}}
+<p><strong>3.3.</strong> O imóvel encontra-se atualmente ocupado por terceiro em contrato de locação. O(s) PROMITENTE(S) VENDEDOR(ES) compromete(m)-se a entregá-lo desocupado{{#if (existe config.locacao_data)}}, até {{config.locacao_data}}{{/if}}, livre de quaisquer ocupantes e de seus pertences, sob pena de rescisão por culpa do(s) PROMITENTE(S) VENDEDOR(ES).</p>
+{{else}}
+<p><strong>3.3.</strong> O imóvel encontra-se atualmente ocupado por terceiro em contrato de locação{{#if (existe config.locacao_data)}}, com vigência prevista até {{config.locacao_data}}{{/if}}. O(s) PROMISSÁRIO(S) COMPRADOR(ES) declara(m) ciência e concordância em manter o contrato de locação vigente, sub-rogando-se nos direitos e obrigações do locador a partir da imissão na posse.</p>
+{{/if}}
+{{/if}}
 
 <!-- CLAUSE_SLOT:G2 -->
 
@@ -250,6 +262,23 @@ Descrição: {{this.descricao}}
 <p><strong>5.1.</strong> Todos os tributos, taxas, contribuições e encargos incidentes sobre o imóvel (incluindo IPTU, taxas de condomínio, água, luz, gás e demais despesas <em>propter rem</em>) são de responsabilidade exclusiva do(s) PROMITENTE(S) VENDEDOR(ES) até a data da efetiva entrega da posse ao(s) PROMISSÁRIO(S) COMPRADOR(ES), passando a ser de responsabilidade deste(s) a partir de então, calculados <em>pro rata die</em> no mês de transição.</p>
 
 <p><strong>5.1.1.</strong> O(s) PROMISSÁRIO(S) COMPRADOR(ES) deverá(ão) providenciar a transferência de titularidade das contas de consumo (água, luz, gás, condomínio) junto aos respectivos órgãos e concessionárias, no prazo de 30 (trinta) dias contados da imissão na posse.</p>
+
+{{#if (eq config.tem_debitos true)}}
+<p><strong>5.2.</strong> O(s) PROMITENTE(S) VENDEDOR(ES) declara(m) a existência dos seguintes débitos pendentes sobre o imóvel, cuja quitação será de sua exclusiva responsabilidade{{#if (existe config.debitos_assumidos_descricao)}}, ressalvada a exceção da Cláusula 5.3{{/if}}, devendo ser comprovada antes da liberação dos valores pelo agente financeiro:</p>
+<ul>
+{{#if (existe config.debito_iptu_valor)}}<li>IPTU em atraso: {{moeda config.debito_iptu_valor}} ({{extenso config.debito_iptu_valor}});</li>{{/if}}
+{{#if (existe config.debito_condominio_valor)}}<li>Despesas condominiais em atraso: {{moeda config.debito_condominio_valor}} ({{extenso config.debito_condominio_valor}});</li>{{/if}}
+{{#if (existe config.debito_outros_descricao)}}<li>Outros débitos: {{config.debito_outros_descricao}}.</li>{{/if}}
+</ul>
+{{/if}}
+
+{{#if (existe config.debitos_assumidos_descricao)}}
+<p><strong>5.3.</strong> Em derrogação parcial às cláusulas anteriores, o(s) PROMISSÁRIO(S) COMPRADOR(ES) assume(m) expressamente, com pleno conhecimento de causa, o pagamento dos seguintes débitos: {{config.debitos_assumidos_descricao}}. O valor assumido foi considerado na composição do preço pactuado na Cláusula Segunda.</p>
+{{/if}}
+
+{{#if (existe config.regularizacoes_descricao)}}
+<p><strong>5.4.</strong> O(s) PROMITENTE(S) VENDEDOR(ES) compromete(m)-se a promover, às suas exclusivas expensas, as seguintes regularizações pendentes: {{config.regularizacoes_descricao}}. O prazo para conclusão é de {{#if (existe config.regularizacoes_prazo_dias)}}{{numero config.regularizacoes_prazo_dias}} ({{numeroExtenso config.regularizacoes_prazo_dias}}){{else}}30 (trinta){{/if}} dias corridos contados da assinatura deste instrumento, sendo certo que a não conclusão tempestiva pode prejudicar a aprovação do financiamento pela engenharia do agente financeiro, hipótese em que se aplica a Cláusula 9.5.</p>
+{{/if}}
 
 <hr>
 
@@ -289,6 +318,10 @@ Descrição: {{this.descricao}}
 
 <p><strong>9.5.</strong> Na hipótese de a não obtenção do financiamento imobiliário previsto na alínea "b" da Cláusula Segunda decorrer de reprovação cadastral, documental ou de engenharia pelo agente financeiro, por motivos alheios à vontade do(s) PROMISSÁRIO(S) COMPRADOR(ES) e não imputáveis ao(s) PROMITENTE(S) VENDEDOR(ES), o presente instrumento será rescindido de pleno direito, independentemente de notificação judicial ou extrajudicial, com a <strong>restituição integral e sem penalidades</strong> de todos os valores pagos pelo(s) PROMISSÁRIO(S) COMPRADOR(ES), no prazo de 15 (quinze) dias contados da comunicação formal da negativa do financiamento.</p>
 
+{{#if (eq config.desistencia_permite true)}}
+<p><strong>9.6.</strong> Fica facultado ao(s) PROMISSÁRIO(S) COMPRADOR(ES), no prazo de {{#if (existe config.desistencia_prazo_dias)}}{{numero config.desistencia_prazo_dias}} ({{numeroExtenso config.desistencia_prazo_dias}}){{else}}7 (sete){{/if}} dias corridos contados da assinatura deste instrumento, o direito de desistência sem qualquer penalidade, mediante notificação escrita ao(s) PROMITENTE(S) VENDEDOR(ES) e restituição integral dos valores eventualmente pagos no prazo de 5 (cinco) dias úteis contados da notificação.</p>
+{{/if}}
+
 <!-- CLAUSE_SLOT:G3 -->
 
 <hr>
@@ -308,6 +341,24 @@ Descrição: {{this.descricao}}
 <p><strong>11.3.</strong> As partes declaram que a presente transação é celebrada em caráter <em>ad corpus</em>, de modo que eventuais diferenças de metragem encontradas não darão ensejo a complemento de preço ou devolução de valores, nos termos do art. 500 do Código Civil.</p>
 
 <p><strong>11.4.</strong> As partes declaram, sob as penas da lei, que não mantêm relações de união estável com terceiros não nominados neste instrumento, nos termos do art. 1.723 do Código Civil, responsabilizando-se civil e criminalmente pela veracidade desta declaração.</p>
+
+{{#if (existe config.vicios_opcao)}}
+{{#if (eq config.vicios_opcao "renuncia")}}
+<p><strong>11.5.</strong> O(s) PROMISSÁRIO(S) COMPRADOR(ES) declara(m) ter vistoriado o imóvel no estado em que se encontra e o aceita(m) como tal, renunciando expressamente ao direito de pleitear qualquer indenização, abatimento de preço ou rescisão em razão de vícios redibitórios aparentes, ressalvada a hipótese de vícios ocultos não detectáveis em vistoria normal e dos quais o(s) PROMITENTE(S) VENDEDOR(ES) tinha(m) ciência prévia, hipótese em que respondem pela evicção nos termos dos arts. 441 a 446 do Código Civil.</p>
+{{else}}
+{{#if (eq config.vicios_opcao "detalhado")}}
+<p><strong>11.5.</strong> O(s) PROMITENTE(S) VENDEDOR(ES) declara(m), sob as penas da lei, que o imóvel se encontra livre de vícios construtivos, redibitórios ou ocultos, responsabilizando-se nos termos dos arts. 441 a 446 do Código Civil pelos vícios eventualmente descobertos pelo(s) PROMISSÁRIO(S) COMPRADOR(ES) no prazo legal.</p>
+{{else}}
+{{#if (eq config.vicios_opcao "reparar")}}
+<p><strong>11.5.</strong> O(s) PROMITENTE(S) VENDEDOR(ES) compromete(m)-se a realizar, às suas exclusivas expensas, os seguintes reparos antes da entrega da posse: {{config.vicios_descricao}}. A não execução tempestiva e adequada dos reparos autoriza o(s) PROMISSÁRIO(S) COMPRADOR(ES) a executá-los e descontar o respectivo valor do saldo do preço, ou a rescindir o contrato sem ônus, com restituição integral dos valores pagos.</p>
+{{else}}
+{{#if (eq config.vicios_opcao "desocultados")}}
+<p><strong>11.5.</strong> O(s) PROMITENTE(S) VENDEDOR(ES) declara(m), com expressa ciência e concordância do(s) PROMISSÁRIO(S) COMPRADOR(ES), a existência dos seguintes vícios construtivos ou ocultos no imóvel: {{config.vicios_descricao}}. O(s) PROMISSÁRIO(S) COMPRADOR(ES), cientes destes vícios, renuncia(m) ao direito de pleitear sua reparação, indenização ou abatimento de preço com fundamento nos vícios ora declarados.</p>
+{{/if}}
+{{/if}}
+{{/if}}
+{{/if}}
+{{/if}}
 
 <hr>
 

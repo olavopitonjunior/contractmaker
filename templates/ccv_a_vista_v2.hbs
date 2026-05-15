@@ -197,6 +197,14 @@ Descrição: {{this.descricao}}
 
 <p><strong>2.1.2.</strong> Todos os pagamentos deverão ser realizados exclusivamente nas contas bancárias indicadas por escrito pelos PROMITENTES VENDEDORES, servindo os comprovantes de transferência como recibos de quitação parcial ou total.</p>
 
+{{#if (existe config.saldo_devedor_vendedor)}}
+<p><strong>2.1.3.</strong> Os PROMITENTES VENDEDORES declaram que sobre o imóvel objeto deste instrumento incide saldo devedor de alienação fiduciária em favor de instituição financeira, no montante aproximado de {{moeda config.saldo_devedor_vendedor}} ({{extenso config.saldo_devedor_vendedor}}), obrigando-se a promover a sua quitação e a respectiva baixa do gravame na matrícula do imóvel, em prazo compatível com a entrega da posse e a lavratura da escritura definitiva, sob pena de rescisão por culpa dos PROMITENTES VENDEDORES.</p>
+{{/if}}
+
+{{#if (existe config.permuta_descricao)}}
+<p><strong>2.1.4.</strong> Parte do preço estipulado nesta cláusula é satisfeita mediante permuta nos seguintes termos: {{config.permuta_descricao}}. A entrega efetiva do(s) bem(ns) permutado(s), com a documentação regularizada e livre de quaisquer ônus, é condição para a quitação parcial correspondente.</p>
+{{/if}}
+
 <!-- CLAUSE_SLOT:G1 -->
 
 <hr>
@@ -208,6 +216,18 @@ Descrição: {{this.descricao}}
 <p><strong>3.1.1.</strong> O atraso injustificado na entrega da posse por parte dos PROMITENTES VENDEDORES acarretará multa diária de {{moeda config.multa_diaria_posse}} ({{extenso config.multa_diaria_posse}}), sem prejuízo das demais cominações legais. Após 30 (trinta) dias de atraso, a multa diária será acrescida de 20% (vinte por cento) sobre o seu valor.</p>
 
 <p><strong>3.2.</strong> O imóvel será entregue no estado em que se encontra, tendo os PROMISSÁRIOS COMPRADORES vistoriado e aceito o bem na modalidade <em>ad corpus</em>, não cabendo reclamação posterior quanto às suas dimensões, características e estado de conservação.</p>
+
+{{#if (existe config.locacao_situacao)}}
+{{#if (eq config.locacao_situacao "vendedor-entregara")}}
+<p><strong>3.3.</strong> O imóvel encontra-se atualmente ocupado por terceiro em contrato de locação. Os PROMITENTES VENDEDORES comprometem-se a entregá-lo desocupado{{#if (existe config.locacao_data)}}, até {{config.locacao_data}}{{/if}}, livre de quaisquer ocupantes e de seus pertences, sob pena de rescisão por culpa dos PROMITENTES VENDEDORES.</p>
+{{else}}
+<p><strong>3.3.</strong> O imóvel encontra-se atualmente ocupado por terceiro em contrato de locação{{#if (existe config.locacao_data)}}, com vigência prevista até {{config.locacao_data}}{{/if}}. Os PROMISSÁRIOS COMPRADORES declaram ciência e concordância em manter o contrato de locação vigente, sub-rogando-se nos direitos e obrigações do locador a partir da imissão na posse.</p>
+{{/if}}
+{{/if}}
+
+{{#if (existe config.itens_entrega)}}
+<p><strong>3.4.</strong> Acompanham o imóvel e estão inclusos no preço total estipulado na Cláusula Segunda os seguintes itens, benfeitorias e acessórios: {{config.itens_entrega}}. Os PROMISSÁRIOS COMPRADORES declaram tê-los vistoriado e os aceitam no estado em que se encontram.</p>
+{{/if}}
 
 <!-- CLAUSE_SLOT:G2 -->
 
@@ -230,6 +250,23 @@ Descrição: {{this.descricao}}
 <p><strong>5.1.</strong> Todos os tributos, taxas, contribuições condominiais e demais encargos incidentes sobre o imóvel serão de responsabilidade dos PROMITENTES VENDEDORES até a data da efetiva entrega das chaves e imissão na posse dos PROMISSÁRIOS COMPRADORES, passando a ser de responsabilidade destes a partir de então.</p>
 
 <p><strong>5.1.1.</strong> Os PROMISSÁRIOS COMPRADORES deverão providenciar a transferência de titularidade das contas de consumo (água, energia elétrica, gás) e demais cadastros perante a Prefeitura Municipal e administradora condominial no prazo de 30 (trinta) dias contados da imissão na posse.</p>
+
+{{#if (eq config.tem_debitos true)}}
+<p><strong>5.2.</strong> Os PROMITENTES VENDEDORES declaram a existência dos seguintes débitos pendentes sobre o imóvel, cuja quitação será de sua exclusiva responsabilidade{{#if (existe config.debitos_assumidos_descricao)}}, ressalvada a exceção da Cláusula 5.3{{/if}}, devendo ser comprovada antes da lavratura da escritura definitiva:</p>
+<ul>
+{{#if (existe config.debito_iptu_valor)}}<li>IPTU em atraso: {{moeda config.debito_iptu_valor}} ({{extenso config.debito_iptu_valor}});</li>{{/if}}
+{{#if (existe config.debito_condominio_valor)}}<li>Despesas condominiais em atraso: {{moeda config.debito_condominio_valor}} ({{extenso config.debito_condominio_valor}});</li>{{/if}}
+{{#if (existe config.debito_outros_descricao)}}<li>Outros débitos: {{config.debito_outros_descricao}}.</li>{{/if}}
+</ul>
+{{/if}}
+
+{{#if (existe config.debitos_assumidos_descricao)}}
+<p><strong>5.3.</strong> Em derrogação parcial às cláusulas anteriores, os PROMISSÁRIOS COMPRADORES assumem expressamente, com pleno conhecimento de causa, o pagamento dos seguintes débitos: {{config.debitos_assumidos_descricao}}. O valor assumido foi considerado na composição do preço pactuado na Cláusula Segunda.</p>
+{{/if}}
+
+{{#if (existe config.regularizacoes_descricao)}}
+<p><strong>5.4.</strong> Os PROMITENTES VENDEDORES comprometem-se a promover, às suas exclusivas expensas, as seguintes regularizações pendentes: {{config.regularizacoes_descricao}}. O prazo para conclusão é de {{#if (existe config.regularizacoes_prazo_dias)}}{{numero config.regularizacoes_prazo_dias}} ({{numeroExtenso config.regularizacoes_prazo_dias}}){{else}}30 (trinta){{/if}} dias corridos contados da assinatura deste instrumento, sob pena de retenção, pelos PROMISSÁRIOS COMPRADORES, do saldo do preço até a efetiva regularização.</p>
+{{/if}}
 
 <hr>
 
@@ -294,6 +331,10 @@ Descrição: {{this.descricao}}
 
 <p><strong>9.4.</strong> O atraso na devolução dos valores devidos por força de rescisão contratual acarretará multa diária de R$ 500,00 (quinhentos reais), além dos encargos moratórios previstos na Cláusula Oitava.</p>
 
+{{#if (eq config.desistencia_permite true)}}
+<p><strong>9.5.</strong> Fica facultado aos PROMISSÁRIOS COMPRADORES, no prazo de {{#if (existe config.desistencia_prazo_dias)}}{{numero config.desistencia_prazo_dias}} ({{numeroExtenso config.desistencia_prazo_dias}}){{else}}7 (sete){{/if}} dias corridos contados da assinatura deste instrumento, o direito de desistência sem qualquer penalidade, mediante notificação escrita aos PROMITENTES VENDEDORES e restituição integral dos valores eventualmente pagos no prazo de 5 (cinco) dias úteis contados da notificação.</p>
+{{/if}}
+
 <!-- CLAUSE_SLOT:G3 -->
 
 <hr>
@@ -311,6 +352,24 @@ Descrição: {{this.descricao}}
 <p><strong>10.2.</strong> As partes declaram ter lido integralmente o presente contrato, estando cientes de todos os seus termos e condições, firmando-o de livre e espontânea vontade, nos termos do artigo 54 da Lei nº 13.097/2015.</p>
 
 <p><strong>10.3.</strong> A presente venda é realizada na modalidade <em>ad corpus</em>, sendo meramente enunciativas as referências a medidas e confrontações do imóvel, prevalecendo a área existente sobre a área mencionada em eventual descrição.</p>
+
+{{#if (existe config.vicios_opcao)}}
+{{#if (eq config.vicios_opcao "renuncia")}}
+<p><strong>10.4.</strong> Os PROMISSÁRIOS COMPRADORES declaram ter vistoriado o imóvel no estado em que se encontra e o aceitam como tal, renunciando expressamente ao direito de pleitear qualquer indenização, abatimento de preço ou rescisão em razão de vícios redibitórios aparentes, ressalvada a hipótese de vícios ocultos não detectáveis em vistoria normal e dos quais os PROMITENTES VENDEDORES tinham ciência prévia, hipótese em que respondem pela evicção nos termos dos arts. 441 a 446 do Código Civil.</p>
+{{else}}
+{{#if (eq config.vicios_opcao "detalhado")}}
+<p><strong>10.4.</strong> Os PROMITENTES VENDEDORES declaram, sob as penas da lei, que o imóvel se encontra livre de vícios construtivos, redibitórios ou ocultos, responsabilizando-se nos termos dos arts. 441 a 446 do Código Civil pelos vícios eventualmente descobertos pelos PROMISSÁRIOS COMPRADORES no prazo legal.</p>
+{{else}}
+{{#if (eq config.vicios_opcao "reparar")}}
+<p><strong>10.4.</strong> Os PROMITENTES VENDEDORES comprometem-se a realizar, às suas exclusivas expensas, os seguintes reparos antes da entrega da posse: {{config.vicios_descricao}}. A não execução tempestiva e adequada dos reparos autoriza os PROMISSÁRIOS COMPRADORES a executá-los e descontar o respectivo valor do saldo do preço, ou a rescindir o contrato sem ônus, com restituição integral dos valores pagos.</p>
+{{else}}
+{{#if (eq config.vicios_opcao "desocultados")}}
+<p><strong>10.4.</strong> Os PROMITENTES VENDEDORES declaram, com expressa ciência e concordância dos PROMISSÁRIOS COMPRADORES, a existência dos seguintes vícios construtivos ou ocultos no imóvel: {{config.vicios_descricao}}. Os PROMISSÁRIOS COMPRADORES, cientes destes vícios, renunciam ao direito de pleitear sua reparação, indenização ou abatimento de preço com fundamento nos vícios ora declarados.</p>
+{{/if}}
+{{/if}}
+{{/if}}
+{{/if}}
+{{/if}}
 
 <!-- CLAUSE_SLOT:G6 -->
 

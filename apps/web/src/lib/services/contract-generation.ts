@@ -119,6 +119,135 @@ export function enrichContractData(
     entregaPosse.momento = "assinatura";
   }
 
+  // ===== Form → template field bridges =====
+  // O form (lib/forms/validation.ts) salva esses campos em paths top-level
+  // que os templates v2 não leem. Mapeia agora pra config.* esperado pelo
+  // Handlebars. Idempotente: nunca sobrescreve quando o destino já tem valor.
+
+  // Saldo devedor de financiamento (form.saldo_devedor → config.saldo_devedor_vendedor)
+  const saldoDevedorForm = Number(enriched.saldo_devedor || 0);
+  if (saldoDevedorForm > 0 && config.saldo_devedor_vendedor == null) {
+    config.saldo_devedor_vendedor = saldoDevedorForm;
+  }
+
+  // Bens inclusos no preço (form.incluso_no_preco → config.itens_entrega)
+  const inclusoNoPreco =
+    typeof enriched.incluso_no_preco === "string"
+      ? (enriched.incluso_no_preco as string).trim()
+      : "";
+  if (inclusoNoPreco && config.itens_entrega == null) {
+    config.itens_entrega = inclusoNoPreco;
+  }
+
+  // Débitos pendentes (IPTU, condomínio, outros)
+  const debitos =
+    ((enriched.debitos as Record<string, unknown>) || {}) as {
+      iptu?: { selecionado?: boolean; valor?: number };
+      condominio?: { selecionado?: boolean; valor?: number };
+      outros?: string;
+    };
+  if (enriched.tem_debitos === true) {
+    if (config.tem_debitos == null) config.tem_debitos = true;
+    if (
+      debitos.iptu?.selecionado &&
+      Number(debitos.iptu.valor) > 0 &&
+      config.debito_iptu_valor == null
+    ) {
+      config.debito_iptu_valor = debitos.iptu.valor;
+    }
+    if (
+      debitos.condominio?.selecionado &&
+      Number(debitos.condominio.valor) > 0 &&
+      config.debito_condominio_valor == null
+    ) {
+      config.debito_condominio_valor = debitos.condominio.valor;
+    }
+    const debitosOutros =
+      typeof debitos.outros === "string" ? debitos.outros.trim() : "";
+    if (debitosOutros && config.debito_outros_descricao == null) {
+      config.debito_outros_descricao = debitosOutros;
+    }
+  }
+
+  // Vícios construtivos / ocultos — 4 variantes (renuncia/detalhado/reparar/desocultados).
+  // Consolida descricao_reparar | descricao_desocultados em vicios_descricao
+  // quando aplicável; opções "renuncia"/"detalhado" só setam vicios_opcao.
+  const vicios = ((enriched.vicios as Record<string, unknown>) || {}) as {
+    opcao?: string;
+    descricao_reparar?: string;
+    descricao_desocultados?: string;
+  };
+  if (vicios.opcao && config.vicios_opcao == null) {
+    config.vicios_opcao = vicios.opcao;
+    if (vicios.opcao === "reparar" && vicios.descricao_reparar?.trim()) {
+      config.vicios_descricao = vicios.descricao_reparar.trim();
+    } else if (
+      vicios.opcao === "desocultados" &&
+      vicios.descricao_desocultados?.trim()
+    ) {
+      config.vicios_descricao = vicios.descricao_desocultados.trim();
+    }
+  }
+
+  // Débitos assumidos pelo comprador (em derrogação à cláusula de tributos)
+  const debitosAssumidos =
+    ((enriched.debitos_assumidos as Record<string, unknown>) || {}) as {
+      assume?: boolean;
+      descricao?: string;
+    };
+  if (
+    debitosAssumidos.assume === true &&
+    debitosAssumidos.descricao?.trim() &&
+    config.debitos_assumidos_descricao == null
+  ) {
+    config.debitos_assumidos_descricao = debitosAssumidos.descricao.trim();
+  }
+
+  // Regularizações pendentes (vendedor compromete-se a regularizar X em Y dias)
+  const regs = ((enriched.regularizacoes as Record<string, unknown>) || {}) as {
+    tem?: boolean;
+    prazo_dias?: number;
+    descricao?: string;
+  };
+  if (regs.tem === true && regs.descricao?.trim()) {
+    if (config.regularizacoes_descricao == null) {
+      config.regularizacoes_descricao = regs.descricao.trim();
+    }
+    if (Number(regs.prazo_dias) > 0 && config.regularizacoes_prazo_dias == null) {
+      config.regularizacoes_prazo_dias = regs.prazo_dias;
+    }
+  }
+
+  // Locação preexistente — só quando imóvel está ocupado por terceiro
+  const locacao = ((enriched.locacao as Record<string, unknown>) || {}) as {
+    data_preferencia?: string;
+    situacao?: string;
+  };
+  if (enriched.ocupacao === "ocupado-terceiro" && locacao.situacao) {
+    if (config.locacao_situacao == null) {
+      config.locacao_situacao = locacao.situacao;
+    }
+    if (locacao.data_preferencia && config.locacao_data == null) {
+      config.locacao_data = locacao.data_preferencia;
+    }
+  }
+
+  // Direito de desistência
+  const desistencia =
+    ((enriched.desistencia as Record<string, unknown>) || {}) as {
+      permite?: boolean;
+      prazo_dias?: number;
+    };
+  if (desistencia.permite === true) {
+    if (config.desistencia_permite == null) config.desistencia_permite = true;
+    if (
+      Number(desistencia.prazo_dias) > 0 &&
+      config.desistencia_prazo_dias == null
+    ) {
+      config.desistencia_prazo_dias = desistencia.prazo_dias;
+    }
+  }
+
   // Pagamento — derivação canônica das parcelas tipadas.
   const pagamentoMut = enriched.pagamento as
     | (Record<string, unknown> & {
@@ -200,6 +329,36 @@ export function enrichContractData(
       for (const [k, v] of Object.entries(buckets)) {
         pagamentoMut[k] = v;
       }
+    }
+
+    // 2.1. Permuta — consolida descrições + valores em config.permuta_descricao
+    // pra cláusula condicional dedicada. Parcelas permuta_* já entraram em
+    // pagamento.outras_formas no bucket map acima, mas o template precisa do
+    // texto narrativo separado.
+    const permutaItems: string[] = [];
+    for (const p of pagamentoMut.parcelas) {
+      const tipo = typeof p.tipo === "string" ? (p.tipo as string) : null;
+      const valor = Number(p.valor) || 0;
+      if (
+        valor > 0 &&
+        (tipo === "permuta_veiculo" || tipo === "permuta_imovel")
+      ) {
+        const descr =
+          typeof p.permuta_descricao === "string"
+            ? (p.permuta_descricao as string).trim()
+            : "";
+        const valorTxt = new Intl.NumberFormat("pt-BR", {
+          style: "currency",
+          currency: "BRL",
+        }).format(valor);
+        const tipoTxt = tipo === "permuta_veiculo" ? "veículo" : "imóvel";
+        permutaItems.push(
+          `${tipoTxt} no valor de ${valorTxt}${descr ? ` — ${descr}` : ""}`
+        );
+      }
+    }
+    if (permutaItems.length > 0 && config.permuta_descricao == null) {
+      config.permuta_descricao = permutaItems.join("; ");
     }
 
     // 3. Filtrar parcelas que já viram bucket renderizado HARDCODED no
