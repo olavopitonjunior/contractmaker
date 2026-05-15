@@ -60,9 +60,14 @@ export function matchComissionadosToSplitRecipients(
   comissionados: ComissionadoLike[],
   recipients: SplitRecipient[]
 ): MatchResult[] {
+  // Index direto por ID — usado quando comissionado.splitRecipientId está
+  // setado (vinculação explícita pelo form via picker "Selecionar cadastrado"
+  // ou pelo botão "Salvar como cadastro reutilizável").
+  const byId = new Map<string, SplitRecipient>();
   const byDoc = new Map<string, SplitRecipient>();
   const byName = new Map<string, SplitRecipient>();
   for (const r of recipients) {
+    byId.set(r.id, r);
     if (!r.active) continue;
     const doc = normalizeDoc(r.cpfCnpj ?? r.ownerCpfCnpj);
     if (doc.length >= 11) {
@@ -73,6 +78,21 @@ export function matchComissionadosToSplitRecipients(
   }
 
   return comissionados.map((c) => {
+    // Prioridade 1: ID explícito vindo do form. Pula matching heurístico
+    // por CPF/CNPJ ou nome — usuário já escolheu manualmente.
+    if (c.splitRecipientId) {
+      const m = byId.get(c.splitRecipientId);
+      if (m && m.active) {
+        return {
+          comissionado: c,
+          matchedRecipient: m,
+          suggestion: "matched",
+          matchedBy: "cpf_cnpj", // melhor representação genérica do tipo
+        };
+      }
+      // ID inválido ou inativo: cai no fallback heurístico.
+    }
+
     const doc = normalizeDoc(c.cpf || c.cnpj);
     if (doc.length >= 11) {
       const m = byDoc.get(doc);

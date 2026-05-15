@@ -1584,6 +1584,22 @@ model SplitRecipient {
   completionToken    String?    @db.Text
   completionTokenExp DateTime?
   active        Boolean  @default(true)
+  // Cadastro reutilizável de comissionado (2026-05-16). Quando kind="commissioner"
+  // o recipient pode ser escolhido por autocomplete na etapa Comissão do form
+  // público (/api/forms/[token]/commissioners). kind="other" mantém uso pré-existente.
+  kind            String?  @default("commissioner")
+  tipoPessoa      String?  // fisica | juridica
+  creci           String?
+  papel           String?  // imobiliaria_principal | captador | intermediador | indicador | outro
+  phone           String?
+  // Dados bancários (TED) — alternativa quando o destinatário não tem
+  // conta Asaas (asaas_wallet) nem PIX cadastrado. Capturado no form.
+  bankName        String?
+  bankBranch      String?
+  bankAccount     String?
+  bankAccountType String?  // corrente | poupanca
+  bankHolderName  String?
+  bankHolderDoc   String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -1594,6 +1610,7 @@ model SplitRecipient {
   @@unique([orgId, pixAddressKey])
   @@index([orgId, active])
   @@index([orgId, recipientType])
+  @@index([orgId, kind, active])
 }
 
 // Rascunho do wizard de geração de cobrança (Pagadoria v2 2026-05-09).
