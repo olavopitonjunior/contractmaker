@@ -293,6 +293,11 @@ export const step7Schema = z.object({
         .optional()
         .default("imobiliaria_principal"),
       incluir_como_signatario: z.boolean().optional().default(false),
+      // Ligação opcional com SplitRecipient (Pagadoria). Quando setado,
+      // composeSplits e deriveComissionados pulam o matching por CPF/CNPJ
+      // e usam o id direto. Setado pelo form ao escolher "Selecionar
+      // cadastrado" ou após criar inline via POST /api/forms/[token]/commissioners.
+      splitRecipientId: z.string().optional(),
     })).optional(),
   }).optional(),
   desistencia: z.object({

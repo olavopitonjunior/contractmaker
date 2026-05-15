@@ -27,6 +27,27 @@ const baseSchema = z.object({
   // Pagadoria v2 — rascunho. Quando não-vazio, força active:false e
   // permite campos críticos (pixAddressKey/walletId) virem vazios.
   pendingFields: z.array(z.string()).max(10).optional(),
+  // Cadastro reutilizável de comissionado (2026-05-16). Aditivo.
+  kind: z.enum(["commissioner", "other"]).optional(),
+  tipoPessoa: z.enum(["fisica", "juridica"]).nullable().optional(),
+  creci: z.string().trim().max(50).nullable().optional(),
+  papel: z
+    .enum([
+      "imobiliaria_principal",
+      "captador",
+      "intermediador",
+      "indicador",
+      "outro",
+    ])
+    .nullable()
+    .optional(),
+  phone: z.string().trim().max(30).nullable().optional(),
+  bankName: z.string().trim().max(80).nullable().optional(),
+  bankBranch: z.string().trim().max(20).nullable().optional(),
+  bankAccount: z.string().trim().max(30).nullable().optional(),
+  bankAccountType: z.enum(["corrente", "poupanca"]).nullable().optional(),
+  bankHolderName: z.string().trim().max(200).nullable().optional(),
+  bankHolderDoc: z.string().trim().max(18).nullable().optional(),
 });
 
 const walletSchema = baseSchema.extend({
@@ -148,6 +169,18 @@ export async function POST(req: NextRequest) {
         pendingFields,
         // Rascunho não pode ser usado em cobranças até completar
         active: !isDraft,
+        // Aditivos 2026-05-16 — cadastro reutilizável de comissionado.
+        kind: data.kind ?? undefined,
+        tipoPessoa: data.tipoPessoa ?? undefined,
+        creci: data.creci ?? undefined,
+        papel: data.papel ?? undefined,
+        phone: data.phone ?? undefined,
+        bankName: data.bankName ?? undefined,
+        bankBranch: data.bankBranch ?? undefined,
+        bankAccount: data.bankAccount ?? undefined,
+        bankAccountType: data.bankAccountType ?? undefined,
+        bankHolderName: data.bankHolderName ?? undefined,
+        bankHolderDoc: data.bankHolderDoc ?? undefined,
       },
     });
 

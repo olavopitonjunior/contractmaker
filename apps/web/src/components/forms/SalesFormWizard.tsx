@@ -655,7 +655,7 @@ export function SalesFormWizard({
     <ImovelStep key="step-3" form={form} />,
     <StatusDebitosStep key="step-4" form={form} />,
     <PagamentoStep key="step-5" form={form} />,
-    <ComissaoConfigStep key="step-6" form={form} />,
+    <ComissaoConfigStep key="step-6" form={form} token={token} />,
   ];
 
   return (

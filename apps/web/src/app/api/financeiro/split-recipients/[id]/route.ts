@@ -14,7 +14,36 @@ const patchSchema = z.object({
   label: z.string().trim().min(1).max(120).optional(),
   cpfCnpj: z.string().trim().min(11).max(18).nullable().optional(),
   description: z.string().trim().max(500).nullable().optional(),
+  email: z
+    .string()
+    .trim()
+    .email("Email inválido")
+    .max(200)
+    .nullable()
+    .optional()
+    .or(z.literal("")),
   active: z.boolean().optional(),
+  // Aditivos 2026-05-16 — cadastro reutilizável de comissionado.
+  kind: z.enum(["commissioner", "other"]).nullable().optional(),
+  tipoPessoa: z.enum(["fisica", "juridica"]).nullable().optional(),
+  creci: z.string().trim().max(50).nullable().optional(),
+  papel: z
+    .enum([
+      "imobiliaria_principal",
+      "captador",
+      "intermediador",
+      "indicador",
+      "outro",
+    ])
+    .nullable()
+    .optional(),
+  phone: z.string().trim().max(30).nullable().optional(),
+  bankName: z.string().trim().max(80).nullable().optional(),
+  bankBranch: z.string().trim().max(20).nullable().optional(),
+  bankAccount: z.string().trim().max(30).nullable().optional(),
+  bankAccountType: z.enum(["corrente", "poupanca"]).nullable().optional(),
+  bankHolderName: z.string().trim().max(200).nullable().optional(),
+  bankHolderDoc: z.string().trim().max(18).nullable().optional(),
 });
 
 export async function PATCH(

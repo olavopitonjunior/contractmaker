@@ -1,19 +1,33 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useId, useState } from "react";
 import { useFieldArray, UseFormReturn, Controller } from "react-hook-form";
+import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2, UserPlus, Building2, Search } from "lucide-react";
 import { UFSelect } from "@/components/forms/UFSelect";
 import { MoneyInput } from "@/components/forms/MoneyInput";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 
 interface ComissaoConfigStepProps {
   form: UseFormReturn<any>;
+  /** Token do form público — usado pra chamar /api/forms/[token]/commissioners */
+  token?: string;
+}
+
+interface CommissionerLookup {
+  id: string;
+  label: string;
+  tipoPessoa: string | null;
+  doc: string | null;
+  creci: string | null;
+  papel: string | null;
+  email: string | null;
+  phone: string | null;
 }
 
 function FormField({
@@ -60,11 +74,136 @@ function CheckboxField({
   );
 }
 
-export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
+/**
+ * Botão "Salvar como cadastro reutilizável" — persiste o comissionado como
+ * SplitRecipient via /api/forms/[token]/commissioners e armazena o id no
+ * form. Próximos negócios encontram esse cadastro pelo autocomplete.
+ *
+ * Sem dados de PIX/banco, o cadastro fica como rascunho (active=false) —
+ * admin completa em /settings/pagamentos/split-recipients depois.
+ */
+function SaveAsCadastroButton({
+  form,
+  index,
+  token,
+}: {
+  form: UseFormReturn<any>;
+  index: number;
+  token: string;
+}) {
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
+    const base = `comissao.comissionados.${index}`;
+    const tipoPessoa = (form.getValues(`${base}.tipo_pessoa`) || "juridica") as
+      | "fisica"
+      | "juridica";
+    const nome = String(form.getValues(`${base}.nome`) || "").trim();
+    const doc = String(
+      form.getValues(
+        tipoPessoa === "fisica" ? `${base}.cpf` : `${base}.cnpj`
+      ) || ""
+    ).trim();
+    if (!nome || !doc) {
+      toast.error("Preencha pelo menos Nome e CPF/CNPJ antes de salvar.");
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/forms/${token}/commissioners`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          label: nome,
+          tipoPessoa,
+          cpfCnpj: doc,
+          creci: String(form.getValues(`${base}.creci`) || "") || undefined,
+          papel: form.getValues(`${base}.papel`) || "imobiliaria_principal",
+          email: String(form.getValues(`${base}.email`) || "") || undefined,
+          phone:
+            String(form.getValues(`${base}.mobile_phone`) || "") || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        toast.error(body?.error ?? "Falha ao salvar cadastro.");
+        return;
+      }
+      const data = await res.json();
+      const recipientId = data?.recipient?.id;
+      if (recipientId) {
+        form.setValue(`${base}.splitRecipientId`, recipientId, {
+          shouldDirty: true,
+        });
+      }
+      toast.success(
+        data?.existed
+          ? "Cadastro já existia e foi vinculado."
+          : "Cadastro salvo. Próximos negócios podem reusá-lo."
+      );
+    } catch (err) {
+      console.error("[SaveAsCadastroButton]", err);
+      toast.error("Erro ao salvar cadastro.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      onClick={handleSave}
+      disabled={saving}
+      className="text-xs"
+    >
+      {saving ? "Salvando..." : "Salvar como cadastro reutilizável"}
+    </Button>
+  );
+}
+
+export function ComissaoConfigStep({ form, token }: ComissaoConfigStepProps) {
   const quemPaga = form.watch("comissao.quem_paga");
   const quandoPaga = form.watch("comissao.quando_paga");
   const permiteDesistencia = form.watch("desistencia.permite");
   const foro = form.watch("foro");
+
+  // Lookup público de comissionados cadastrados na org.
+  // Carregado sob demanda quando usuário abre o picker "Selecionar cadastrado".
+  const [lookupOpen, setLookupOpen] = useState(false);
+  const [lookupQuery, setLookupQuery] = useState("");
+  const [lookupResults, setLookupResults] = useState<CommissionerLookup[]>([]);
+  const [lookupLoading, setLookupLoading] = useState(false);
+  const datalistId = useId();
+
+  useEffect(() => {
+    if (!lookupOpen || !token) return;
+    let cancelled = false;
+    setLookupLoading(true);
+    const q = lookupQuery.trim();
+    const url = `/api/forms/${token}/commissioners${q ? `?q=${encodeURIComponent(q)}` : ""}`;
+    // credentials default (same-origin): em prod imobpro.ia.br o endpoint
+    // é público sem auth — cookie da sessão NextAuth é inofensivo (route
+    // não chama requireAuth). Em preview Vercel com SSO, `credentials: "omit"`
+    // quebrava a request com 401 porque não enviava o cookie de SSO.
+    fetch(url)
+      .then((r) => (r.ok ? r.json() : { items: [] }))
+      .then((data) => {
+        if (!cancelled) {
+          setLookupResults(Array.isArray(data?.items) ? data.items : []);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLookupResults([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLookupLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [lookupOpen, lookupQuery, token]);
 
   const {
     fields: testemunhaFields,
@@ -252,29 +391,64 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
 
           <Separator />
 
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between flex-wrap gap-2">
             <p className="text-sm font-semibold text-foreground">
               Comissionados (Corretores e Imobiliárias)
             </p>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() =>
-                appendComissionado({
-                  nome: "",
-                  tipo_pessoa: "juridica",
-                  cpf: "",
-                  cnpj: "",
-                  creci: "",
-                  email: "",
-                  incluir_como_signatario: false,
-                })
-              }
-            >
-              <Plus className="h-3.5 w-3.5 mr-1.5" />
-              Adicionar Comissionado
-            </Button>
+            <div className="flex items-center gap-2 flex-wrap">
+              {token && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setLookupOpen((v) => !v);
+                    setLookupQuery("");
+                  }}
+                >
+                  <Search className="h-3.5 w-3.5 mr-1.5" />
+                  Selecionar cadastrado
+                </Button>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  appendComissionado({
+                    nome: "",
+                    tipo_pessoa: "fisica",
+                    cpf: "",
+                    cnpj: "",
+                    creci: "",
+                    email: "",
+                    incluir_como_signatario: false,
+                  })
+                }
+              >
+                <UserPlus className="h-3.5 w-3.5 mr-1.5" />
+                Novo corretor (PF)
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() =>
+                  appendComissionado({
+                    nome: "",
+                    tipo_pessoa: "juridica",
+                    cpf: "",
+                    cnpj: "",
+                    creci: "",
+                    email: "",
+                    incluir_como_signatario: false,
+                  })
+                }
+              >
+                <Building2 className="h-3.5 w-3.5 mr-1.5" />
+                Nova imobiliária (PJ)
+              </Button>
+            </div>
           </div>
           <p className="text-xs text-muted-foreground -mt-2">
             Suporta múltiplos corretores e imobiliárias dividindo a comissão.
@@ -282,21 +456,110 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
             assinantes adicionais no envelope ClickSign.
           </p>
 
+          {lookupOpen && token && (
+            <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <Search className="h-3.5 w-3.5 text-muted-foreground" />
+                <Input
+                  list={datalistId}
+                  value={lookupQuery}
+                  onChange={(e) => setLookupQuery(e.target.value)}
+                  placeholder="Buscar por nome, CPF/CNPJ ou CRECI..."
+                  className="bg-background"
+                />
+              </div>
+              <datalist id={datalistId}>
+                {lookupResults.map((r) => (
+                  <option key={r.id} value={r.label}>
+                    {r.label} — {r.tipoPessoa === "fisica" ? "Corretor" : "Imobiliária"}
+                    {r.creci ? ` · CRECI ${r.creci}` : ""}
+                  </option>
+                ))}
+              </datalist>
+              <p className="text-xs text-muted-foreground">
+                Dados bancários ficam visíveis apenas no painel administrativo.
+              </p>
+              {lookupLoading && (
+                <p className="text-xs text-muted-foreground">Buscando...</p>
+              )}
+              {!lookupLoading && lookupResults.length === 0 && lookupQuery && (
+                <p className="text-xs text-muted-foreground">
+                  Nenhum cadastrado encontrado. Use os botões "Novo corretor" ou
+                  "Nova imobiliária" pra cadastrar.
+                </p>
+              )}
+              {!lookupLoading && lookupResults.length > 0 && (
+                <div className="space-y-1 max-h-60 overflow-y-auto">
+                  {lookupResults.map((r) => (
+                    <button
+                      key={r.id}
+                      type="button"
+                      onClick={() => {
+                        const isPF = r.tipoPessoa === "fisica";
+                        appendComissionado({
+                          splitRecipientId: r.id,
+                          nome: r.label,
+                          tipo_pessoa: isPF ? "fisica" : "juridica",
+                          cpf: isPF ? (r.doc ?? "") : "",
+                          cnpj: !isPF ? (r.doc ?? "") : "",
+                          creci: r.creci ?? "",
+                          email: r.email ?? "",
+                          mobile_phone: r.phone ?? "",
+                          papel: (r.papel as
+                            | "captador"
+                            | "intermediador"
+                            | "indicador"
+                            | "imobiliaria_principal"
+                            | "outro"
+                            | null) ?? "imobiliaria_principal",
+                          incluir_como_signatario: false,
+                        });
+                        toast.success(`${r.label} adicionado(a) como comissionado.`);
+                        setLookupOpen(false);
+                      }}
+                      className="w-full text-left rounded border bg-background hover:bg-accent p-2 text-sm transition-colors"
+                    >
+                      <div className="flex items-center justify-between">
+                        <span className="font-medium">{r.label}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {r.tipoPessoa === "fisica" ? "Corretor" : "Imobiliária"}
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {r.doc ?? ""}{r.creci ? ` · CRECI ${r.creci}` : ""}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {comissionadoFields.map((field, index) => {
             const tipoPath =
               `comissao.comissionados.${index}.tipo_pessoa` as const;
             const tipoPessoa = form.watch(tipoPath) || "juridica";
+            const splitRecipientId = form.watch(
+              `comissao.comissionados.${index}.splitRecipientId`
+            ) as string | undefined;
             return (
               <div
                 key={field.id}
                 className="rounded-md border p-4 space-y-3 bg-muted/20"
               >
-                <div className="flex items-center justify-between">
-                  <p className="text-sm font-medium">
-                    {index === 0
-                      ? "Comissionado principal"
-                      : `Comissionado ${index + 1}`}
-                  </p>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-medium">
+                      {index === 0
+                        ? "Comissionado principal"
+                        : `Comissionado ${index + 1}`}
+                    </p>
+                    {splitRecipientId && (
+                      <span className="inline-flex items-center rounded-full border border-green-300 bg-green-50 px-2 py-0.5 text-xs font-medium text-green-800 dark:border-green-800 dark:bg-green-950/40 dark:text-green-300">
+                        Cadastro vinculado
+                      </span>
+                    )}
+                  </div>
                   {comissionadoFields.length > 1 && (
                     <Button
                       type="button"
@@ -434,6 +697,16 @@ export function ComissaoConfigStep({ form }: ComissaoConfigStepProps) {
                     )}
                   />
                 </div>
+
+                {token && !splitRecipientId && (
+                  <div className="pt-2 border-t border-dashed">
+                    <SaveAsCadastroButton
+                      form={form}
+                      index={index}
+                      token={token}
+                    />
+                  </div>
+                )}
               </div>
             );
           })}
