@@ -771,6 +771,232 @@ export const tools: Tool[] = [
     },
   },
 
+  // ───────────── Pipeline aggregates (client-side compositions) ─────────────
+  {
+    name: "summarize_pipeline",
+    description:
+      "Sumário rápido do pipeline aberto agrupado por stage. Útil pra briefing matinal e overviews — compõe list_deals + agrega sem ir 2x no backend. Retorna { byStage: { <stageName>: { count, deals: [{id, title}] } }, totalOpen, totalClosed, generatedAt }.",
+    inputSchema: { type: "object", properties: {} },
+    handler: async () => {
+      const r = await callApi({ method: "GET", path: "/api/pipeline/deals" });
+      const deals = Array.isArray(r.body)
+        ? r.body
+        : (r.body as { deals?: unknown[] })?.deals ?? [];
+      const TERMINAL = new Set(["Concluído", "Concluido", "Cancelado", "Perdido"]);
+      const byStage: Record<string, { count: number; deals: Array<{ id: string; title?: string }> }> = {};
+      let totalOpen = 0;
+      let totalClosed = 0;
+      for (const raw of deals as Array<Record<string, unknown>>) {
+        const stage = typeof raw.stage === "string" ? raw.stage : "Desconhecido";
+        const id = typeof raw.id === "string" ? raw.id : "";
+        const title = typeof raw.title === "string" ? raw.title : undefined;
+        if (TERMINAL.has(stage)) {
+          totalClosed++;
+        } else {
+          totalOpen++;
+          if (!byStage[stage]) byStage[stage] = { count: 0, deals: [] };
+          byStage[stage].count++;
+          byStage[stage].deals.push({ id, title });
+        }
+      }
+      return { byStage, totalOpen, totalClosed, generatedAt: new Date().toISOString() };
+    },
+  },
+  {
+    name: "list_stale_deals",
+    description:
+      "Lista deals que ultrapassaram o SLA do seu stage atual (parado tempo demais). Compõe list_deals + calcula gap baseado em lastStageChangeAt|updatedAt. SLA default por stage (em dias): Lead 2, Briefing 2, Documentação 4, Análise 3, Aprovação 2, Assinatura 5. Aceita slaOverride pra customizar. Retorna { stale: [{id, title, stage, daysParked, slaDays, lastChangeAt}], generatedAt }. Vazio se nenhum estagnado.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        slaOverride: {
+          type: "object",
+          description:
+            "Opcional. Map { stageName: days } pra sobrescrever SLA default. Stages não listados usam default.",
+        },
+      },
+    },
+    handler: async (args) => {
+      const DEFAULT_SLA: Record<string, number> = {
+        Lead: 2,
+        Briefing: 2,
+        Documentação: 4,
+        Documentacao: 4,
+        Análise: 3,
+        Analise: 3,
+        Aprovação: 2,
+        Aprovacao: 2,
+        Assinatura: 5,
+      };
+      const override = (args.slaOverride as Record<string, number>) ?? {};
+      const sla = { ...DEFAULT_SLA, ...override };
+      const TERMINAL = new Set(["Concluído", "Concluido", "Cancelado", "Perdido"]);
+
+      const r = await callApi({ method: "GET", path: "/api/pipeline/deals" });
+      const deals = Array.isArray(r.body)
+        ? r.body
+        : (r.body as { deals?: unknown[] })?.deals ?? [];
+      const now = Date.now();
+      const stale: Array<{
+        id: string;
+        title?: string;
+        stage: string;
+        daysParked: number;
+        slaDays: number;
+        lastChangeAt: string;
+      }> = [];
+
+      for (const raw of deals as Array<Record<string, unknown>>) {
+        const stage = typeof raw.stage === "string" ? raw.stage : "";
+        if (TERMINAL.has(stage)) continue;
+        const slaDays = sla[stage] ?? null;
+        if (slaDays === null) continue;
+        const lastChange =
+          (typeof raw.lastStageChangeAt === "string" && raw.lastStageChangeAt) ||
+          (typeof raw.updatedAt === "string" && raw.updatedAt) ||
+          (typeof raw.createdAt === "string" && raw.createdAt) ||
+          null;
+        if (!lastChange) continue;
+        const lastMs = new Date(lastChange).getTime();
+        if (!Number.isFinite(lastMs)) continue;
+        const daysParked = Math.floor((now - lastMs) / (24 * 3600 * 1000));
+        if (daysParked > slaDays) {
+          stale.push({
+            id: typeof raw.id === "string" ? raw.id : "",
+            title: typeof raw.title === "string" ? raw.title : undefined,
+            stage,
+            daysParked,
+            slaDays,
+            lastChangeAt: lastChange,
+          });
+        }
+      }
+      stale.sort((a, b) => b.daysParked - a.daysParked);
+      return { stale, generatedAt: new Date().toISOString() };
+    },
+  },
+
+  {
+    name: "list_overdue_charges",
+    description:
+      "Lista cobranças em atraso (currentDueDate < hoje E status != PAID). Compõe /api/financeiro/charges?status=PENDING,CONFIRMED + filtra client-side por currentDueDate. Útil pra régua semanal de comissão atrasada. Retorna { overdue: [{id, dealTitle, customerName, value, currentDueDate, daysOverdue, status, asaasPaymentId}], total, generatedAt }. Vazio se nada atrasado.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        graceDays: {
+          type: "number",
+          description:
+            "Opcional. Tolerância em dias antes de considerar atrasado (default 0 = considera atrasado no mesmo dia do vencimento).",
+        },
+      },
+    },
+    handler: async (args) => {
+      const graceDays = typeof args.graceDays === "number" ? args.graceDays : 0;
+      // Status não-pagos: PENDING (aguardando pagamento), CONFIRMED (recebido mas
+      // não conciliado), AWAITING_RISK_ANALYSIS, OVERDUE (caso o backend já marque).
+      // Asaas usa esses + RECEIVED/CONFIRMED. PAID/RECEIVED_IN_CASH são finais.
+      const r = await callApi({
+        method: "GET",
+        path: "/api/financeiro/charges",
+        query: {
+          status: "PENDING,CONFIRMED,AWAITING_RISK_ANALYSIS,OVERDUE",
+          limit: "100",
+        },
+      });
+      const body = r.body as { rows?: Array<Record<string, unknown>> };
+      const rows = body?.rows ?? [];
+      const cutoff = Date.now() - graceDays * 24 * 3600 * 1000;
+      const overdue: Array<{
+        id: string;
+        dealTitle?: string;
+        customerName?: string;
+        value: unknown;
+        currentDueDate: string;
+        daysOverdue: number;
+        status: string;
+        asaasPaymentId?: string;
+      }> = [];
+      for (const c of rows) {
+        const due =
+          typeof c.currentDueDate === "string" ? c.currentDueDate : null;
+        if (!due) continue;
+        const dueMs = new Date(due).getTime();
+        if (!Number.isFinite(dueMs) || dueMs > cutoff) continue;
+        const daysOverdue = Math.floor((Date.now() - dueMs) / (24 * 3600 * 1000));
+        const deal = c.deal as { title?: string } | undefined;
+        const customer = c.customer as { name?: string } | undefined;
+        overdue.push({
+          id: String(c.id ?? ""),
+          dealTitle: deal?.title,
+          customerName: customer?.name,
+          value: c.value,
+          currentDueDate: due,
+          daysOverdue,
+          status: String(c.status ?? ""),
+          asaasPaymentId:
+            typeof c.asaasPaymentId === "string" ? c.asaasPaymentId : undefined,
+        });
+      }
+      overdue.sort((a, b) => b.daysOverdue - a.daysOverdue);
+      return { overdue, total: overdue.length, generatedAt: new Date().toISOString() };
+    },
+  },
+
+  {
+    name: "list_aging_certidoes",
+    description:
+      "Lista certidões emitidas há ≥ daysOld dias (default 25). Usado pra alertar antes do vencimento (certidão Infosimples vale 30 dias da finishedAt). Retorna { aging: [{id, dealId, label, endpoint, finishedAt, daysOld, status}], total, generatedAt }. Vazio se nenhuma envelhecendo.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        daysOld: {
+          type: "number",
+          description:
+            "Idade mínima em dias da certidão pra ser listada. Default 25 (alerta 5 dias antes do vencimento de 30d).",
+        },
+      },
+    },
+    handler: async (args) => {
+      const daysOld = typeof args.daysOld === "number" ? args.daysOld : 25;
+      const r = await callApi({
+        method: "GET",
+        path: "/api/certidoes",
+        query: { status: "done", daysOld: String(daysOld), limit: "100" },
+      });
+      const body = r.body as { rows?: Array<Record<string, unknown>> };
+      const rows = body?.rows ?? [];
+      const now = Date.now();
+      const aging: Array<{
+        id: string;
+        dealId?: string;
+        label?: string;
+        endpoint?: string;
+        finishedAt: string;
+        daysOld: number;
+        status: string;
+      }> = [];
+      for (const row of rows) {
+        const finishedAt =
+          typeof row.finishedAt === "string" ? row.finishedAt : null;
+        if (!finishedAt) continue;
+        const finishedMs = new Date(finishedAt).getTime();
+        if (!Number.isFinite(finishedMs)) continue;
+        const ageDays = Math.floor((now - finishedMs) / (24 * 3600 * 1000));
+        aging.push({
+          id: String(row.id ?? ""),
+          dealId: typeof row.dealId === "string" ? row.dealId : undefined,
+          label: typeof row.label === "string" ? row.label : undefined,
+          endpoint: typeof row.endpoint === "string" ? row.endpoint : undefined,
+          finishedAt,
+          daysOld: ageDays,
+          status: String(row.status ?? ""),
+        });
+      }
+      aging.sort((a, b) => b.daysOld - a.daysOld);
+      return { aging, total: aging.length, generatedAt: new Date().toISOString() };
+    },
+  },
+
   // ───────────── WhatsApp ─────────────
   {
     name: "whatsapp_send",
