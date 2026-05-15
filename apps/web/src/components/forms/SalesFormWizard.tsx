@@ -17,14 +17,13 @@ import { CompradorStep } from "@/components/forms/steps/CompradorStep";
 import { ImovelStep } from "@/components/forms/steps/ImovelStep";
 import { StatusDebitosStep } from "@/components/forms/steps/StatusDebitosStep";
 import { PagamentoStep } from "@/components/forms/steps/PagamentoStep";
-import { PosseTituloStep } from "@/components/forms/steps/PosseTituloStep";
 import { ComissaoConfigStep } from "@/components/forms/steps/ComissaoConfigStep";
 import { PrivacyConsent } from "@/components/legal/PrivacyConsent";
 import { RequiredFieldMarker } from "@/components/forms/RequiredFieldMarker";
 import { VoiceInputButton } from "@/components/forms/VoiceInputButton";
 
 // Apenas steps com schema definido em `lib/ai/voice-extract.ts` ativam o
-// botão de voz. Steps 0, 4, 6, 7 (Documentos, Status/Débitos, Posse/Título,
+// botão de voz. Steps 0, 4, 6 (Documentos, Status/Posse/Débitos,
 // Comissão/Config) ficam fora da v1 — preenchimento por voz não casa bem
 // com upload de docs ou cálculo de multa.
 const STEPS_WITH_VOICE = new Set([1, 2, 3, 5]);
@@ -75,7 +74,7 @@ interface SalesFormWizardProps {
   finalizeMode?: "main" | "participant";
 }
 
-const FULL_STEP_INDEXES: readonly number[] = [0, 1, 2, 3, 4, 5, 6, 7];
+const FULL_STEP_INDEXES: readonly number[] = [0, 1, 2, 3, 4, 5, 6];
 
 function SaveStatusBadge({
   status,
@@ -652,8 +651,7 @@ export function SalesFormWizard({
     <ImovelStep key="step-3" form={form} />,
     <StatusDebitosStep key="step-4" form={form} />,
     <PagamentoStep key="step-5" form={form} />,
-    <PosseTituloStep key="step-6" form={form} />,
-    <ComissaoConfigStep key="step-7" form={form} />,
+    <ComissaoConfigStep key="step-6" form={form} />,
   ];
 
   return (
