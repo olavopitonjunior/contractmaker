@@ -113,6 +113,15 @@ System prompt (`prompts.ts`) tem 18 regras. Destaques: regra 10 obriga markdown 
 
 **Resolver com IA** (`/api/contracts/[id]/comments/[commentId]/ai-resolve`): botão `[✨ Resolver com IA]` em comments de `authorType=ai` não-resolvidos. Roda agente em modo Fast com prompt sintético do `selectedText + text + suggestedFix`. Marca `resolved=true` SÓ se houve edição com `success:true` E `verified !== false`. Audit `CONTRACT_COMMENT_AI_RESOLVED`. Falha controlada (dado faltante): toast âmbar, comentário permanece pendente.
 
+**Chat redesenhado 2026-05-14/15** (detalhes em memórias `chat-redesign-2026-05`, `chat-multi-session`, `plan-and-approve`, `chat-attachments-changes`, `data-chat-panel-scope`, `chat-container-responsive`):
+
+- **Multi-session:** `ChatSession { contractId, userId, title?, archived }` + sidebar agrupada por data. `resolveSession` prefere id explícito → mais recente → cria. Auto-title 60 chars.
+- **Plan-and-approve:** modo Plan chama `propose_plan({steps})` antes de writes (regra 11). Reads (`READ_TOOL_NAMES`) auto-executam; writes ficam `pending`. `ChatPlan { messageId @unique }` 1:1 via `crypto.randomUUID()` pré-alocado. `POST /chat/execute-plan { planId, approvedStepIds, stepInputOverrides? }` captura `htmlBefore/htmlAfter` (replicar lógica do agent.ts — senão Mudanças fica vazio). PlanCard: dots + reads collapsible + writes checkbox+Edit3 hover. Regra 11.0: writes com ID dependente exigem `query_clauses` antes.
+- **Anexos:** `ChatAttachment { sessionId, source:"upload"|"url", extractedText }`. PDF→Gemini, DOCX→mammoth, URL→SSRF guard + regex stripper (cap 2MB/20k chars). Prefix "ANEXOS DESTE TURN:" no prompt.
+- **Painel Mudanças:** `ContractChangeLog` +`htmlBefore/htmlAfter` (cap 50kb) + `sessionId?`. `GET /api/contracts/[id]/changes?sessionId&onlyDiffs=true`. DiffView client via lib `diff`.
+- **Paleta Lovable escopada:** `[data-chat-panel]` no ResizableSheet Content + bloco CSS sobrescreve vars (off-white + violet-600) só dentro do escopo. KIND_CLASSES via `hsl(var(--chat-tool-*))`.
+- **Layout responsivo:** ChatPanel root com `ResizeObserver` no rootRef → `containerWidth`. ChangesPanel: inline `w-[360px]` ≥700px, overlay absolute `w-[85%] max-w-[360px] z-20` <700px (prop `floating`). Sidebar auto-close <800px. Default sheet 540→600.
+
 ## Análise automática (passive)
 
 `useAutoAnalyze.ts` — server lê `getDocPlainText` direto do Drive. On-mount `trigger=open` (Sonnet 4.5 deep); polling 90s `trigger=edit` (Haiku 4.5 via `ANTHROPIC_PASSIVE_MODEL`). **Quick checks** (`quickChecks.ts`, zero LLM): soma parcelas, CPF/CNPJ checksum, refs internas, duplicação qualificação. **Dedupe** via `ContractComment.dedupeKey = FNV-1a(authorType+selectedText+text)` + `@@unique([contractId, dedupeKey])`. **Cap:** 50 unresolved/contrato, skip-no-change via `ContractChangeLog`, `max_tokens` 1024, `analysisInput` 8000 chars, 3 findings/run. **Backoff:** `lastAttemptAt` setado ANTES da request. Cleanup: `cleanup-stale-ai-comments.ts --apply --contractId=<id>`.
