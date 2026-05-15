@@ -1,12 +1,18 @@
 "use client";
 
-import { useFieldArray, UseFormReturn, useWatch, Controller } from "react-hook-form";
+import {
+  useFieldArray,
+  UseFormReturn,
+  useWatch,
+  Controller,
+} from "react-hook-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { MoneyInput } from "@/components/forms/MoneyInput";
 import { NativeSelect } from "@/components/forms/NativeSelect";
+import { Trash2, Plus } from "lucide-react";
 
 interface PagamentoStepProps {
   form: UseFormReturn<any>;
@@ -57,6 +63,291 @@ function formatBRL(value: number): string {
   });
 }
 
+// Opções pro select de tipo. Match com `parcelaTipoEnum` em validation.ts.
+const TIPO_OPTIONS = [
+  { value: "sinal_arras", label: "Sinal / Arras" },
+  { value: "recursos_proprios", label: "Recursos Próprios" },
+  { value: "fgts", label: "FGTS" },
+  { value: "financiamento", label: "Financiamento Bancário" },
+  { value: "cessao_consorcio", label: "Cessão de Consórcio" },
+  { value: "permuta_veiculo", label: "Permuta com Veículo" },
+  { value: "permuta_imovel", label: "Permuta com Imóvel" },
+  { value: "outros", label: "Outros (especificar)" },
+];
+
+const MOMENTO_OPTIONS = [
+  { value: "assinatura", label: "Na assinatura do contrato" },
+  { value: "escritura", label: "Na escritura pública" },
+  { value: "registro", label: "No registro do imóvel" },
+  { value: "dias", label: "X dias após a assinatura" },
+  { value: "data_exata", label: "Em data específica" },
+];
+
+const MEIO_OPTIONS = [
+  { value: "pix", label: "PIX" },
+  { value: "ted", label: "TED / Transferência Bancária" },
+  { value: "boleto", label: "Boleto" },
+  { value: "dinheiro", label: "Dinheiro (espécie)" },
+  { value: "cheque", label: "Cheque" },
+  { value: "financiamento", label: "Financiamento Bancário" },
+  { value: "fgts_saque", label: "Saque do FGTS" },
+  { value: "permuta", label: "Permuta" },
+];
+
+const PIX_TIPO_CHAVE_OPTIONS = [
+  { value: "CPF", label: "CPF" },
+  { value: "CNPJ", label: "CNPJ" },
+  { value: "EMAIL", label: "E-mail" },
+  { value: "PHONE", label: "Telefone" },
+  { value: "EVP", label: "Chave aleatória (EVP)" },
+];
+
+const TIPO_CONTA_OPTIONS = [
+  { value: "corrente", label: "Corrente" },
+  { value: "poupanca", label: "Poupança" },
+];
+
+const BANCO_FINANCIAMENTO_OPTIONS = [
+  { value: "caixa", label: "Caixa Econômica Federal" },
+  { value: "bb", label: "Banco do Brasil" },
+  { value: "itau", label: "Itaú" },
+  { value: "bradesco", label: "Bradesco" },
+  { value: "santander", label: "Santander" },
+  { value: "inter", label: "Banco Inter" },
+  { value: "outro", label: "Outro" },
+];
+
+function ParcelaCard({
+  index,
+  form,
+  onRemove,
+}: {
+  index: number;
+  form: UseFormReturn<any>;
+  onRemove: () => void;
+}) {
+  const base = `pagamento.parcelas.${index}`;
+  const tipo = form.watch(`${base}.tipo`);
+  const momento = form.watch(`${base}.momento`);
+  const meio = form.watch(`${base}.meio_pagamento`);
+
+  const showTipoOutros = tipo === "outros";
+  const showPermutaDesc = tipo === "permuta_veiculo" || tipo === "permuta_imovel";
+  const showDias = momento === "dias";
+  const showDataExata = momento === "data_exata";
+  const showPix = meio === "pix";
+  const showBancarios = meio === "ted";
+  const showBancoFinanciamento = meio === "financiamento";
+
+  return (
+    <div className="rounded-md border p-4 space-y-3 bg-muted/20">
+      <div className="flex items-center justify-between">
+        <p className="text-sm font-medium">Parcela {index + 1}</p>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-7 text-xs text-destructive hover:text-destructive"
+          onClick={onRemove}
+        >
+          <Trash2 className="h-3 w-3 mr-1" />
+          Remover
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <FormField label="Tipo">
+          <NativeSelect
+            value={tipo || ""}
+            onChange={(v) =>
+              form.setValue(`${base}.tipo`, v, { shouldDirty: true })
+            }
+            options={[{ value: "", label: "Selecione..." }, ...TIPO_OPTIONS]}
+          />
+        </FormField>
+
+        <FormField label="Valor">
+          <ControlledMoney name={`${base}.valor`} form={form} />
+        </FormField>
+
+        {showTipoOutros && (
+          <FormField label="Especificar tipo" className="md:col-span-2">
+            <Input
+              {...form.register(`${base}.tipo_outros_texto`)}
+              placeholder="Descreva o tipo de pagamento..."
+            />
+          </FormField>
+        )}
+
+        {showPermutaDesc && (
+          <FormField label="Descrição da permuta" className="md:col-span-2">
+            <textarea
+              {...form.register(`${base}.permuta_descricao`)}
+              placeholder={
+                tipo === "permuta_veiculo"
+                  ? "Ex: Veículo Honda Civic 2022, placa ABC1234..."
+                  : "Ex: Apartamento na Rua X, matrícula nº 12345..."
+              }
+              rows={2}
+              className="flex min-h-[60px] w-full rounded-md border border-input bg-transparent px-3 py-2 text-sm shadow-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:border-ring resize-none"
+            />
+          </FormField>
+        )}
+
+        <FormField label="Quando">
+          <NativeSelect
+            value={momento || "assinatura"}
+            onChange={(v) =>
+              form.setValue(`${base}.momento`, v, { shouldDirty: true })
+            }
+            options={MOMENTO_OPTIONS}
+          />
+        </FormField>
+
+        {showDias && (
+          <FormField label="Dias após a assinatura">
+            <Input
+              type="number"
+              min="0"
+              {...form.register(`${base}.dias`, { valueAsNumber: true })}
+              placeholder="Ex: 30"
+            />
+          </FormField>
+        )}
+
+        {showDataExata && (
+          <FormField label="Data específica">
+            <Input
+              type="date"
+              {...form.register(`${base}.data_exata`)}
+            />
+          </FormField>
+        )}
+
+        <FormField label="Meio de pagamento" className="md:col-span-2">
+          <NativeSelect
+            value={meio || ""}
+            onChange={(v) =>
+              form.setValue(`${base}.meio_pagamento`, v, { shouldDirty: true })
+            }
+            options={[{ value: "", label: "Selecione..." }, ...MEIO_OPTIONS]}
+          />
+        </FormField>
+
+        {showPix && (
+          <div className="md:col-span-2 rounded-md border border-dashed bg-background p-3 space-y-3">
+            <p className="text-xs font-semibold text-muted-foreground">
+              Dados do PIX (vendedor recebe nesta chave)
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <FormField label="Tipo de chave">
+                <NativeSelect
+                  value={form.watch(`${base}.pix.tipo_chave`) || ""}
+                  onChange={(v) =>
+                    form.setValue(`${base}.pix.tipo_chave`, v, {
+                      shouldDirty: true,
+                    })
+                  }
+                  options={[
+                    { value: "", label: "Selecione..." },
+                    ...PIX_TIPO_CHAVE_OPTIONS,
+                  ]}
+                />
+              </FormField>
+              <FormField label="Chave PIX">
+                <Input
+                  {...form.register(`${base}.pix.chave`)}
+                  placeholder="CPF, CNPJ, email, telefone ou EVP"
+                />
+              </FormField>
+              <FormField label="Titular (nome)">
+                <Input
+                  {...form.register(`${base}.pix.titular_nome`)}
+                  placeholder="Nome do titular da chave"
+                />
+              </FormField>
+              <FormField label="CPF/CNPJ do titular">
+                <Input
+                  {...form.register(`${base}.pix.titular_cpf_cnpj`)}
+                  placeholder="000.000.000-00"
+                />
+              </FormField>
+            </div>
+          </div>
+        )}
+
+        {showBancarios && (
+          <div className="md:col-span-2 rounded-md border border-dashed bg-background p-3 space-y-3">
+            <p className="text-xs font-semibold text-muted-foreground">
+              Dados bancários (vendedor recebe nesta conta)
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <FormField label="Banco">
+                <Input
+                  {...form.register(`${base}.bancarios.banco`)}
+                  placeholder="Ex: Itaú"
+                />
+              </FormField>
+              <FormField label="Agência">
+                <Input
+                  {...form.register(`${base}.bancarios.agencia`)}
+                  placeholder="0001"
+                />
+              </FormField>
+              <FormField label="Conta">
+                <Input
+                  {...form.register(`${base}.bancarios.conta`)}
+                  placeholder="12345-6"
+                />
+              </FormField>
+              <FormField label="Tipo de conta">
+                <NativeSelect
+                  value={form.watch(`${base}.bancarios.tipo_conta`) || "corrente"}
+                  onChange={(v) =>
+                    form.setValue(`${base}.bancarios.tipo_conta`, v, {
+                      shouldDirty: true,
+                    })
+                  }
+                  options={TIPO_CONTA_OPTIONS}
+                />
+              </FormField>
+              <FormField label="Titular (nome)">
+                <Input
+                  {...form.register(`${base}.bancarios.titular_nome`)}
+                  placeholder="Nome do titular"
+                />
+              </FormField>
+              <FormField label="CPF/CNPJ do titular">
+                <Input
+                  {...form.register(`${base}.bancarios.titular_cpf_cnpj`)}
+                  placeholder="000.000.000-00"
+                />
+              </FormField>
+            </div>
+          </div>
+        )}
+
+        {showBancoFinanciamento && (
+          <FormField label="Banco do financiamento" className="md:col-span-2">
+            <NativeSelect
+              value={form.watch(`${base}.banco_financiamento`) || ""}
+              onChange={(v) =>
+                form.setValue(`${base}.banco_financiamento`, v, {
+                  shouldDirty: true,
+                })
+              }
+              options={[
+                { value: "", label: "Selecione o banco..." },
+                ...BANCO_FINANCIAMENTO_OPTIONS,
+              ]}
+            />
+          </FormField>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function PagamentoStep({ form }: PagamentoStepProps) {
   const { fields, append, remove } = useFieldArray({
     control: form.control,
@@ -64,33 +355,31 @@ export function PagamentoStep({ form }: PagamentoStepProps) {
   });
 
   const addParcela = () => {
-    append({ tipo_texto: "", dias: 0, valor: 0 });
+    append({
+      tipo_texto: "",
+      dias: 0,
+      valor: 0,
+      tipo: "",
+      momento: "assinatura",
+      meio_pagamento: "",
+    });
   };
 
-  // Soma das parcelas para validacao visual
   const pagamento = useWatch({
     control: form.control,
     name: "pagamento",
   }) as
     | {
         valor_total?: number;
-        sinal_arras?: number;
-        recursos_proprios?: number;
-        fgts?: number;
-        cessao_consorcio?: number;
-        alienacao_fiduciaria?: number;
-        outras_formas?: number;
+        parcelas?: Array<{ valor?: number }>;
       }
     | undefined;
 
   const valorTotal = Number(pagamento?.valor_total || 0);
-  const somaParcelas =
-    Number(pagamento?.sinal_arras || 0) +
-    Number(pagamento?.recursos_proprios || 0) +
-    Number(pagamento?.fgts || 0) +
-    Number(pagamento?.cessao_consorcio || 0) +
-    Number(pagamento?.alienacao_fiduciaria || 0) +
-    Number(pagamento?.outras_formas || 0);
+  const somaParcelas = (pagamento?.parcelas ?? []).reduce(
+    (acc, p) => acc + Number(p?.valor || 0),
+    0
+  );
 
   const diferenca = valorTotal - somaParcelas;
   const bate = Math.abs(diferenca) < 0.01;
@@ -98,48 +387,57 @@ export function PagamentoStep({ form }: PagamentoStepProps) {
 
   return (
     <div className="space-y-4">
-      {/* Valores */}
+      {/* Valor Total */}
       <Card className="border border-border">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base font-semibold">Valores</CardTitle>
+          <CardTitle className="text-base font-semibold">
+            Valor Total da Venda
+          </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="Valor Total da Venda" className="md:col-span-2">
-              <ControlledMoney name="pagamento.valor_total" form={form} />
-            </FormField>
+        <CardContent>
+          <FormField label="Valor total ajustado">
+            <ControlledMoney name="pagamento.valor_total" form={form} />
+          </FormField>
+        </CardContent>
+      </Card>
 
-            <FormField label="Sinal / Arras">
-              <ControlledMoney name="pagamento.sinal_arras" form={form} />
-            </FormField>
+      {/* Parcelas */}
+      <Card className="border border-border">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base font-semibold">
+            Parcelas / Cronograma de Pagamento
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          {fields.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              Nenhuma parcela adicionada. Clique abaixo para adicionar o
+              cronograma de pagamento (sinal, financiamento, FGTS, etc).
+            </p>
+          )}
 
-            <FormField label="Recursos Próprios">
-              <ControlledMoney name="pagamento.recursos_proprios" form={form} />
-            </FormField>
+          {fields.map((field, index) => (
+            <ParcelaCard
+              key={field.id}
+              index={index}
+              form={form}
+              onRemove={() => remove(index)}
+            />
+          ))}
 
-            <FormField label="FGTS">
-              <ControlledMoney name="pagamento.fgts" form={form} />
-            </FormField>
-
-            <FormField label="Cessão de Consórcio">
-              <ControlledMoney name="pagamento.cessao_consorcio" form={form} />
-            </FormField>
-
-            <FormField label="Alienação Fiduciária / Financiamento">
-              <ControlledMoney
-                name="pagamento.alienacao_fiduciaria"
-                form={form}
-              />
-            </FormField>
-
-            <FormField label="Outras Formas de Pagamento">
-              <ControlledMoney name="pagamento.outras_formas" form={form} />
-            </FormField>
-          </div>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={addParcela}
+            className="w-full border-dashed"
+          >
+            <Plus className="h-3.5 w-3.5 mr-1.5" />
+            Adicionar Parcela
+          </Button>
 
           {hasValue && (
             <div
-              className={`rounded-md border p-3 text-sm ${
+              className={`sticky bottom-0 rounded-md border p-3 text-sm ${
                 bate
                   ? "border-green-300 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-950/30 dark:text-green-400"
                   : "border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950/30 dark:text-red-400"
@@ -165,102 +463,6 @@ export function PagamentoStep({ form }: PagamentoStepProps) {
               )}
             </div>
           )}
-        </CardContent>
-      </Card>
-
-      {/* Meio de Pagamento */}
-      <Card className="border border-border">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base font-semibold">
-            Meio de Pagamento
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <FormField label="Forma de Pagamento Principal">
-            <NativeSelect
-              className="w-full md:w-80"
-              value={form.watch("pagamento.meio_pagamento") || "transferencia bancaria"}
-              onChange={(v) => form.setValue("pagamento.meio_pagamento", v, { shouldDirty: true })}
-              options={[
-                { value: "transferencia bancaria", label: "Transferência Bancária (TED/PIX)" },
-                { value: "cheque", label: "Cheque" },
-                { value: "dinheiro", label: "Dinheiro (Espécie)" },
-                { value: "financiamento bancario", label: "Financiamento Bancário" },
-                { value: "permuta", label: "Permuta" },
-                { value: "misto", label: "Misto" },
-              ]}
-            />
-          </FormField>
-        </CardContent>
-      </Card>
-
-      {/* Parcelas */}
-      <Card className="border border-border">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base font-semibold">
-            Parcelas / Cronograma de Pagamento
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {fields.length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              Nenhuma parcela adicionada. Clique abaixo para adicionar o
-              cronograma de pagamento.
-            </p>
-          )}
-
-          {fields.map((field, index) => (
-            <div
-              key={field.id}
-              className="grid grid-cols-1 md:grid-cols-[1fr_100px_180px_auto] gap-3 items-end p-3 rounded-md border border-border bg-muted/30"
-            >
-              <FormField label={`Parcela ${index + 1} - Descrição`}>
-                <Input
-                  {...form.register(`pagamento.parcelas.${index}.tipo_texto`)}
-                  placeholder="Ex: Sinal na assinatura, 1ª parcela..."
-                />
-              </FormField>
-
-              <FormField label="Dias">
-                <Input
-                  type="number"
-                  min="0"
-                  {...form.register(`pagamento.parcelas.${index}.dias`, {
-                    valueAsNumber: true,
-                  })}
-                  placeholder="0"
-                />
-              </FormField>
-
-              <FormField label="Valor">
-                <ControlledMoney
-                  name={`pagamento.parcelas.${index}.valor`}
-                  form={form}
-                />
-              </FormField>
-
-              <div className="flex items-end pb-0.5">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => remove(index)}
-                  className="text-destructive border-destructive/30 hover:bg-destructive/10"
-                >
-                  Remover
-                </Button>
-              </div>
-            </div>
-          ))}
-
-          <Button
-            type="button"
-            variant="outline"
-            onClick={addParcela}
-            className="w-full border-dashed"
-          >
-            + Adicionar Parcela
-          </Button>
         </CardContent>
       </Card>
 
