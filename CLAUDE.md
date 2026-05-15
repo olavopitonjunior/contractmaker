@@ -182,7 +182,7 @@ Pra contratos importados (`templateId=null`), `diffManualEdits` retorna `[]` e `
 
 Export PDF: `/api/contracts/[id]/export` carrega preset default da org → Puppeteer aplica `margin/headerTemplate/footerTemplate`. `<span class="pageNumber">/<span class="totalPages">` no footer default. GDocs mode usa `drive.files.export` nativo.
 
-## Certidões (Infosimples)
+## Certidões (Infosimples + Serasa)
 
 Disparo manual no Deal → aba Certidões. Pipeline: client gera `batchId` UUID → `POST /api/deals/:id/certidoes` retorna 202 em <500ms e dispara `runBatch(batchId)` fire-and-forget → `pLimit(5)` com `Promise.allSettled` → cada job chama `callInfosimples`, normaliza, baixa PDF de `site_receipts[0]`, cria `DealAttachment { source: "infosimples" }` → client polla 2s.
 
@@ -205,13 +205,17 @@ Disparo manual no Deal → aba Certidões. Pipeline: client gera `batchId` UUID 
 
 **Planner** (`planner.ts`) percorre vendedores/compradores/imóveis. PF sem `data_nascimento` bloqueia PGFN/TJSP/Antecedentes PF. Imóvel SP sem `sql` bloqueia IPTU SP. RJ sem `inscricao_municipal` bloqueia ambos IPTU RJ. Comarca TJRJ via `comarcas-rj.ts` (fallback "Capital").
 
-**Endpoints cobertos:** Federais (PGFN/CND PF+PJ, CNDT, TRF), trabalhistas (TRT2/15/1/4 CEAT), cíveis (TJSP/TJRJ 2-step, TJRS 5 chamadas), protestos SP (CENPROT), municipais (IPTU SP via SQL, IPTU+CND RJ via inscricao_municipal). Receita CPF + Antecedentes PF auto em financiamento. CCIR/Matrícula ONR só via picker manual.
+**Endpoints cobertos:** Federais (PGFN, CNDT, TRF), trabalhistas (TRT2/15/1/4 CEAT), cíveis (TJSP/TJRJ 2-step, TJRS), protestos SP (CENPROT), municipais (IPTU SP via SQL, IPTU+CND RJ). Receita CPF + Antecedentes PF auto em financiamento. CCIR/Matrícula ONR só via picker manual.
 
 **Catálogo** (`endpoints.ts`): `category`, `emitsPdf?`, `portalUrl?`, `expectedWaitMinutes?`. `CATEGORIES_REQUIRING_PDF` exportado. **Normalizers** com fallback chains de nomes. Codes 6xx geralmente viram `nao_emitida`.
 
 **Budget guard** `INFOSIMPLES_MONTHLY_BUDGET_CENTS` (default 5000), POST retorna 402 se estouraria. **Relatório PDF:** `POST /api/deals/:id/certidoes/report` → `DealAttachment { category: "relatorio_certidoes" }`. **Dashboard `/settings/certidoes`:** gasto/budget, sucesso, p50/p95, últimos erros.
 
 **Gaps:** CNIB, ITR, TJMG/TJPR/TJES cível — `portalUrl` manual. IPTU Porto Alegre sem cobertura. Casos especiais (estrangeiro, espólio, menor, divórcio, falência) → futuro.
+
+### Serasa Experian (2026-05)
+
+Segundo provider via `CertidaoJob.provider="serasa"`. 5 endpoints: `serasa/score-{pf,pj}` (0-1000 + drivers), `serasa/restritivos-{pf,pj}` (Pefin/Refin, protestos, ações), `serasa/vinculos-pj-pf` (CNPJs em que o CPF é sócio). OAuth2 em `lib/serasa/client.ts` (cache Upstash/in-memory, TTL `expires_in-60s`, retry 1× em 401+5xx). JSON → PDF próprio via `exportPdfToBuffer` + `templates/serasa_report.hbs` → `DealAttachment { source:"serasa" }`. Normalizers em `serasa-normalizers.ts`; `Situacao` ganha `sem_restricao | com_restricao`. Budget isolado `SERASA_MONTHLY_BUDGET_CENTS` (default R$ 5k) via `getMonthlySpendByProvider`. **Gate LGPD por deal:** `Deal.complianceJson.serasaConsent { at, by, baseLegal }`; POST `/certidoes` 412 sem consent → UI abre `SerasaConsentDialog` e re-tenta. **Vínculos opt-in:** `POST /deals/[id]/serasa/expand-vinculos { cpf }` enfileira job único; `VinculosExpandDialog` cria `DiligentedPerson` por CNPJ escolhido — sem auto-cascata. Picker mostra grupo "Serasa Experian" com aviso LGPD (scope=`serasa`). Audit: `SERASA_QUERY_DISPATCH | SERASA_CONSENT_GIVEN | SERASA_VINCULOS_EXPAND | SERASA_BUDGET_EXCEEDED`. Dashboard `/settings/certidoes` ganha card Serasa + `/api/org/serasa-budget`. Smoke: `scripts/serasa-ping.ts`. Fixtures + testes em `__tests__/serasa-normalizers.test.ts`. **R$ 5/consulta placeholder** — ajustar antes de prod.
 
 ## Assinatura digital (ClickSign v3)
 
@@ -325,18 +329,14 @@ Não-óbvios (enums e structure: ver `prisma/schema.prisma`):
 
 ## Gotchas
 
-- **OAuth expirado → contratos sem GDoc:** se `googleDocStatus` começar com `error:invalid_grant`, o refresh token venceu (consent screen em Testing tem 7d). Rode `npx ts-node apps/web/scripts/oauth-bootstrap.ts --clientFile=<path>`, copie o novo `GOOGLE_OWNER_REFRESH_TOKEN`, atualize via `printf '%s' '<token>' | vercel env add` (aspas simples). Fix permanente: Cloud Console → OAuth consent screen → Publish to production.
-- **Env vars Vercel:** `printf '%s' 'value' | vercel env add NAME ENV` com aspas SIMPLES (obrigatório quando valor tem `$` — chaves Asaas; aspas duplas causam shell expansion). `echo` insere `\n` literal e corrompe runtime. `vercel env pull` mostra `\n` escapado, mascarando. Scripts locais: `perl -pe 's/\\\\n"$/"/' .env.vercel-prod > .env.vercel-prod.clean`
-- **Logout completo:** sidebar usa `<Link href="/logout">` (não `signOut()` direto) — `/logout` faz `POST /api/auth/logout` (revoga elevation, deleta sessions, audit) + `signOut`
 - **Radix DropdownMenu + asChild** envolvendo function component sem forwardRef pode falhar a recalcular position em `side="top"` — usar links diretos
 - **pgvector** exige Neon Standard+. Inserts/queries via `$executeRawUnsafe`/`$queryRawUnsafe` com `<=>`
 - **`VOYAGE_API_KEY` opcional:** sem ele, `query_knowledge_base` e `find_similar_contracts` caem em fallback ILIKE/fingerprint
 - **Análise passiva** envia `htmlContent` atual no body — server usa `params.htmlOverride` pra ver estado live
 - **Upload de imagens** `/api/contracts/[id]/images`: 5MB max, JPEG/PNG/WebP. Requer `BLOB_READ_WRITE_TOKEN`
 - **Cron certidões** requer Vercel Pro. Sem ele, `awaiting_portal` fica eterno. Schedule `*/5min` em `vercel.json`
-- **Normalizers de certidões são frágeis:** Infosimples muda nomes de campo. Após primeira extração em prod, salvar `resultData` como fixture + teste de regressão
 - **Prisma migrations** rodam via `prisma migrate deploy` no build. Mudanças em dados (rename, backfills) → migration SQL plain idempotente
-- **Auto-promote stage não é retroativo:** webhook ClickSign close OU charge antes da migration de stages = deal fica em stage anterior. Drag-drop manual
+- **Auto-promote stage não é retroativo:** webhook ClickSign close OU charge antes da migration = deal fica em stage anterior. Drag-drop manual
 - **Split Asaas:** rejeita wallet própria, duplicatas, max 10. Sandbox rejeita docs de identidade via API — usar `approveSandboxAccount`
 - **Forms públicos não requerem auth** — qualquer um com o link pode editar
-- Vários gotchas operacionais cobertos por memória: OAuth Testing 7d, Chrome MCP + Google auth, Resend sandbox, auto-mode classifier vs prod DB, printf single quotes pra Asaas, vercel env pull com `\n`
+- **Operacionais em memória** (ver `MEMORY.md`): OAuth Testing 7d, `printf` single quotes pra envs Vercel, `vercel env pull \n`, normalizers de provedor mudam de shape, Chrome MCP + Google auth, Resend sandbox, auto-mode vs prod DB
