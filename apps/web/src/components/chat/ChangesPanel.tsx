@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { ChevronDown, ChevronRight, Loader2, GitCommit, X } from "lucide-react";
 import { diffLines } from "diff";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { cn } from "@/lib/utils";
@@ -90,18 +91,20 @@ export function ChangesPanel({
 
   return (
     <div className="flex flex-col h-full w-[360px] shrink-0 border-l bg-background">
-      <div className="flex items-center justify-between px-4 py-3 border-b">
+      <div className="flex h-12 items-center justify-between gap-2 px-3 border-b">
         <div className="flex items-center gap-2 min-w-0">
           <GitCommit className="h-4 w-4 text-muted-foreground shrink-0" />
-          <h3 className="text-sm font-medium">Mudanças</h3>
+          <h3 className="text-sm font-semibold">Mudanças</h3>
           {items.length > 0 && (
-            <span className="text-xs text-muted-foreground">({items.length})</span>
+            <Badge variant="secondary" className="ml-1 h-5 px-1.5 text-[10px] font-medium">
+              {items.length}
+            </Badge>
           )}
         </div>
         <Button
           variant="ghost"
           size="icon"
-          className="h-7 w-7"
+          className="h-8 w-8"
           onClick={onClose}
           aria-label="Fechar painel"
         >
@@ -110,17 +113,41 @@ export function ChangesPanel({
       </div>
 
       {sessionId && (
-        <div className="flex items-center justify-between px-4 py-2 border-b text-xs">
-          <span className="text-muted-foreground">
-            {filterAll ? "Todas as sessões" : "Esta sessão"}
-          </span>
-          <button
-            type="button"
-            onClick={() => setFilterAll((v) => !v)}
-            className="text-primary hover:underline"
+        <div className="px-3 py-2 border-b">
+          <div
+            className="inline-flex w-full items-center rounded-full bg-muted p-0.5"
+            role="tablist"
+            aria-label="Filtrar mudanças"
           >
-            {filterAll ? "Filtrar esta sessão" : "Ver tudo"}
-          </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={!filterAll}
+              onClick={() => setFilterAll(false)}
+              className={cn(
+                "flex-1 rounded-full px-3 h-6 text-[11px] font-medium transition-colors",
+                !filterAll
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Esta sessão
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={filterAll}
+              onClick={() => setFilterAll(true)}
+              className={cn(
+                "flex-1 rounded-full px-3 h-6 text-[11px] font-medium transition-colors",
+                filterAll
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              Todas
+            </button>
+          </div>
         </div>
       )}
 
@@ -226,7 +253,7 @@ function DiffView({ before, after }: { before: string; after: string }) {
   }
 
   return (
-    <pre className="text-[11px] font-mono whitespace-pre-wrap break-words leading-snug">
+    <pre className="text-[11px] font-mono whitespace-pre-wrap break-words leading-[1.5]">
       {trimmed.map((p, idx) => (
         <span
           key={idx}

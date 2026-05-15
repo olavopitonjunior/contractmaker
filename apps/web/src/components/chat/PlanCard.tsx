@@ -143,14 +143,43 @@ export function PlanCard({ contractId, planId, steps, onExecuted }: PlanCardProp
     }
   }
 
+  // Progress dots: 1 dot per step (read+write). Verde se executed, vermelho
+  // se failed, vazio se pending/rejected.
+  const allStepStatuses = steps.map((s) => stepStates[s.id]?.status || s.status);
+
   return (
     <div className="rounded-md border bg-card mt-2">
-      <div className="flex items-center gap-2 px-3 py-2 border-b">
-        <ListChecks className="h-3.5 w-3.5 text-primary" />
-        <span className="text-xs font-medium">Plano de execução</span>
-        <span className="text-[10px] text-muted-foreground ml-auto">
-          {writeSteps.length} write{writeSteps.length !== 1 ? "s" : ""} · {readSteps.length} read{readSteps.length !== 1 ? "s" : ""}
-        </span>
+      <div className="flex items-start gap-3 px-3 py-2.5 border-b">
+        <ListChecks className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-semibold leading-tight">Plano de execução</p>
+          <p className="text-[11px] text-muted-foreground mt-0.5">
+            {readSteps.filter((s) => (stepStates[s.id]?.status || s.status) === "executed").length}{" "}
+            análise{readSteps.length !== 1 ? "s" : ""} concluída{readSteps.length !== 1 ? "s" : ""}
+            {writeSteps.length > 0 && (
+              <>
+                ,{" "}
+                {writeSteps.filter((s) => (stepStates[s.id]?.status || s.status) === "pending").length}{" "}
+                ação{writeSteps.filter((s) => (stepStates[s.id]?.status || s.status) === "pending").length !== 1 ? "ões" : ""} pendente{writeSteps.filter((s) => (stepStates[s.id]?.status || s.status) === "pending").length !== 1 ? "s" : ""}
+              </>
+            )}
+          </p>
+        </div>
+        <div className="flex items-center gap-1 shrink-0 mt-0.5" aria-hidden="true">
+          {allStepStatuses.map((status, i) => (
+            <span
+              key={i}
+              className={cn(
+                "h-1.5 w-1.5 rounded-full",
+                status === "executed" && "bg-emerald-500",
+                status === "failed" && "bg-destructive",
+                status === "rejected" && "bg-muted-foreground/30",
+                (status === "pending" || status === "approved") &&
+                  "bg-muted-foreground/40 ring-1 ring-muted-foreground/40 ring-offset-0"
+              )}
+            />
+          ))}
+        </div>
       </div>
 
       {/* Reads — collapsible (auto-executados) */}
@@ -203,7 +232,7 @@ export function PlanCard({ contractId, planId, steps, onExecuted }: PlanCardProp
         </div>
       )}
 
-      {/* Writes — checkboxes + aprovar */}
+      {/* Writes — checkboxes + Edit como hover + footer 3-zonas */}
       <div className="p-3">
         {writeSteps.length === 0 ? (
           <p className="text-xs text-muted-foreground">
@@ -212,14 +241,17 @@ export function PlanCard({ contractId, planId, steps, onExecuted }: PlanCardProp
         ) : (
           <>
             <p className="text-[11px] font-medium mb-2 text-muted-foreground">
-              Próximas alterações:
+              Próximas alterações
             </p>
-            <ul className="space-y-1.5 mb-3">
+            <ul className="space-y-1 mb-3">
               {writeSteps.map((step) => {
                 const state = stepStates[step.id] || { status: step.status };
                 const isPending = state.status === "pending";
                 return (
-                  <li key={step.id} className="flex items-start gap-2">
+                  <li
+                    key={step.id}
+                    className="group flex items-start gap-2 rounded-md px-2 py-2 hover:bg-muted/40 transition-colors"
+                  >
                     {isPending && !completed ? (
                       <input
                         type="checkbox"
@@ -241,23 +273,23 @@ export function PlanCard({ contractId, planId, steps, onExecuted }: PlanCardProp
                     <label
                       htmlFor={`step-${step.id}`}
                       className={cn(
-                        "flex-1 text-xs leading-snug cursor-pointer",
+                        "flex-1 text-xs leading-snug cursor-pointer min-w-0",
                         state.status === "rejected" && "line-through text-muted-foreground/60",
                         !isPending && "cursor-default"
                       )}
                     >
                       <div className="font-medium">{step.description}</div>
-                      <div className="text-[10px] text-muted-foreground mt-0.5">
-                        <code className="bg-muted/60 rounded px-1 py-0.5">
+                      <div className="text-[10px] text-muted-foreground mt-1 flex items-center gap-1.5 flex-wrap">
+                        <code className="bg-muted/80 text-foreground/70 rounded px-1.5 py-0.5 font-mono">
                           {step.tool}
                         </code>
                         {overrides[step.id] && (
-                          <span className="ml-1 text-amber-700 font-medium">
-                            (editado)
+                          <span className="rounded bg-amber-100 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 px-1.5 py-0.5 font-medium">
+                            editado
                           </span>
                         )}
                         {state.summary && (
-                          <span className="ml-1">— {state.summary}</span>
+                          <span className="truncate">— {state.summary}</span>
                         )}
                       </div>
                     </label>
@@ -266,11 +298,14 @@ export function PlanCard({ contractId, planId, steps, onExecuted }: PlanCardProp
                         type="button"
                         onClick={() => setEditingStepId(step.id)}
                         disabled={executing}
-                        className="rounded-sm p-1 hover:bg-muted-foreground/10 text-muted-foreground disabled:opacity-40"
+                        className={cn(
+                          "rounded-sm p-1 hover:bg-muted-foreground/20 text-muted-foreground disabled:opacity-40",
+                          "opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity"
+                        )}
                         aria-label="Editar input do step"
                         title="Editar"
                       >
-                        <Edit3 className="h-3 w-3" />
+                        <Edit3 className="h-3.5 w-3.5" />
                       </button>
                     )}
                   </li>
@@ -279,31 +314,41 @@ export function PlanCard({ contractId, planId, steps, onExecuted }: PlanCardProp
             </ul>
 
             {!completed && (
-              <div className="flex items-center justify-end gap-2">
-                <span className="text-[10px] text-muted-foreground mr-auto">
+              <div className="flex items-center gap-2 pt-2 border-t">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 text-xs text-muted-foreground hover:text-foreground"
+                  onClick={() => setApproved(new Set())}
+                  disabled={executing || approved.size === 0}
+                >
+                  Recusar tudo
+                </Button>
+                <span className="flex-1 text-center text-[11px] text-muted-foreground">
                   {approved.size} de {writeSteps.length} selecionada{writeSteps.length === 1 ? "" : "s"}
                 </span>
                 <Button
                   size="sm"
+                  className="h-8"
                   onClick={handleApprove}
                   disabled={executing || approved.size === 0}
                 >
                   {executing ? (
                     <>
-                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                      <Loader2 className="h-3.5 w-3.5 animate-spin mr-1.5" />
                       Executando…
                     </>
                   ) : (
                     <>
-                      <Pencil className="h-3 w-3 mr-1" />
-                      Aprovar {approved.size > 0 ? `(${approved.size})` : ""}
+                      <Pencil className="h-3.5 w-3.5 mr-1.5" />
+                      Aprovar ({approved.size})
                     </>
                   )}
                 </Button>
               </div>
             )}
             {completed && (
-              <p className="text-[11px] text-muted-foreground text-center mt-1">
+              <p className="text-[11px] text-muted-foreground text-center mt-2 pt-2 border-t">
                 Plano concluído.
               </p>
             )}
@@ -399,7 +444,7 @@ function EditStepDialog({
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle className="text-sm">Editar step</DialogTitle>
+          <DialogTitle className="text-sm">Ajustar parâmetros do step</DialogTitle>
           <DialogDescription className="text-xs">
             <code className="bg-muted/60 rounded px-1 py-0.5">{step.tool}</code>
             {" — "}
@@ -407,7 +452,7 @@ function EditStepDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-2">
-          <label className="text-xs font-medium">Input (JSON)</label>
+          <label className="text-xs font-medium">Parâmetros (JSON)</label>
           <Textarea
             value={text}
             onChange={(e) => {
@@ -421,11 +466,11 @@ function EditStepDialog({
           {error && (
             <p className="text-xs text-destructive">{error}</p>
           )}
-          <p className="text-[10px] text-muted-foreground">
-            Edite só se você sabe o que está fazendo. Campos comuns:{" "}
-            <code className="bg-muted/40 px-1">target</code>,{" "}
-            <code className="bg-muted/40 px-1">replacement</code> em{" "}
-            <code>edit_contract_section</code>.
+          <p className="text-[11px] text-muted-foreground leading-relaxed">
+            Ajuste só se a IA inferiu errado (ex: trecho com aspas diferentes do
+            doc). Campos comuns em <code className="font-mono">edit_contract_section</code>:{" "}
+            <code className="font-mono bg-muted/60 px-1 py-0.5 rounded">target</code> e{" "}
+            <code className="font-mono bg-muted/60 px-1 py-0.5 rounded">replacement</code>.
           </p>
         </div>
         <DialogFooter className="gap-2 sm:gap-2">

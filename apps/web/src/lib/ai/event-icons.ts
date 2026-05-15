@@ -76,11 +76,16 @@ export function describeTool(name: string): ToolDescriptor {
   return TOOL_REGISTRY[name] || { ...FALLBACK, label: `Executou ${name}` };
 }
 
-/** Classes Tailwind por kind — usadas pra colorir chips. */
+/**
+ * Classes Tailwind por kind — usam CSS vars semanticos definidos em
+ * globals.css sob `[data-chat-panel]`. Light + dark equivalentes vem
+ * automaticamente das vars. Permite trocar a paleta inteira em 1 lugar
+ * sem editar este arquivo.
+ */
 export const KIND_CLASSES: Record<ToolDescriptor["kind"], string> = {
-  kb: "border-blue-200 bg-blue-50 text-blue-700 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-300",
-  edit: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300",
-  suggest: "border-purple-200 bg-purple-50 text-purple-700 dark:border-purple-900/50 dark:bg-purple-950/30 dark:text-purple-300",
-  analyze: "border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-800 dark:bg-slate-900/60 dark:text-slate-300",
-  design: "border-cyan-200 bg-cyan-50 text-cyan-700 dark:border-cyan-900/50 dark:bg-cyan-950/30 dark:text-cyan-300",
+  kb: "border-[hsl(var(--chat-tool-kb-border))] bg-[hsl(var(--chat-tool-kb-bg))] text-[hsl(var(--chat-tool-kb-fg))]",
+  edit: "border-[hsl(var(--chat-tool-edit-border))] bg-[hsl(var(--chat-tool-edit-bg))] text-[hsl(var(--chat-tool-edit-fg))]",
+  suggest: "border-[hsl(var(--chat-tool-suggest-border))] bg-[hsl(var(--chat-tool-suggest-bg))] text-[hsl(var(--chat-tool-suggest-fg))]",
+  analyze: "border-[hsl(var(--chat-tool-analyze-border))] bg-[hsl(var(--chat-tool-analyze-bg))] text-[hsl(var(--chat-tool-analyze-fg))]",
+  design: "border-[hsl(var(--chat-tool-design-border))] bg-[hsl(var(--chat-tool-design-bg))] text-[hsl(var(--chat-tool-design-fg))]",
 };

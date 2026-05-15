@@ -1,9 +1,29 @@
 "use client";
 
 import * as React from "react";
-import { Maximize2, Minimize2, XIcon } from "lucide-react";
 import { Dialog as SheetPrimitive } from "radix-ui";
 import { cn } from "@/lib/utils";
+
+/**
+ * Context exposto pelo ResizableSheet pros filhos renderizarem seus
+ * proprios botoes de fullscreen na position certa do header sem usar
+ * absolute positioning. Filho que NAO usa o context cai no comportamento
+ * default (sem fullscreen exposto). SheetPrimitive.Close pode ser usado
+ * diretamente pra fechar (Radix Dialog cuida).
+ */
+const ResizableSheetContext = React.createContext<{
+  fullscreen: boolean;
+  toggleFullscreen: () => void;
+  canToggleFullscreen: boolean;
+}>({
+  fullscreen: false,
+  toggleFullscreen: () => {},
+  canToggleFullscreen: true,
+});
+
+export function useResizableSheet() {
+  return React.useContext(ResizableSheetContext);
+}
 
 interface ResizableSheetProps {
   open: boolean;
@@ -128,6 +148,7 @@ export function ResizableSheet({
         />
         <SheetPrimitive.Content
           data-slot="resizable-sheet-content"
+          data-chat-panel=""
           style={
             effectiveFullscreen
               ? undefined
@@ -157,52 +178,38 @@ export function ResizableSheet({
             }
           }}
         >
-          {/* Drag handle — só renderiza em desktop e quando não-fullscreen */}
+          {/* Drag handle — hit area de 8px com indicador visual de 4px que
+              aparece no hover. Sem fullscreen, sem hit area. */}
           {!effectiveFullscreen && (
             <div
               onPointerDown={onPointerDown}
               onPointerMove={onPointerMove}
               onPointerUp={onPointerUp}
               className={cn(
-                "absolute left-0 top-0 h-full w-1 cursor-ew-resize",
-                "transition-colors hover:bg-primary/40",
+                "group absolute left-0 top-0 h-full w-2 cursor-ew-resize z-10",
                 draggingRef.current && "bg-primary/60"
               )}
               aria-hidden="true"
-            />
+            >
+              <div
+                className={cn(
+                  "absolute left-0 top-0 h-full w-1 transition-colors",
+                  "group-hover:bg-primary/40",
+                  draggingRef.current && "bg-primary/60"
+                )}
+              />
+            </div>
           )}
 
-          {/* Botão de fullscreen no canto superior direito */}
-          <button
-            type="button"
-            onClick={() => setFullscreen((v) => !v)}
-            disabled={touchOnly}
-            className={cn(
-              "absolute top-4 right-12 rounded-sm p-1 opacity-60 hover:opacity-100 transition",
-              "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
-              touchOnly && "hidden"
-            )}
-            aria-label={effectiveFullscreen ? "Sair de tela cheia" : "Tela cheia"}
+          <ResizableSheetContext.Provider
+            value={{
+              fullscreen: effectiveFullscreen,
+              toggleFullscreen: () => setFullscreen((v) => !v),
+              canToggleFullscreen: !touchOnly,
+            }}
           >
-            {effectiveFullscreen ? (
-              <Minimize2 className="h-4 w-4" />
-            ) : (
-              <Maximize2 className="h-4 w-4" />
-            )}
-          </button>
-
-          {/* Botão de close — herdado do Sheet padrão */}
-          <SheetPrimitive.Close
-            className={cn(
-              "absolute top-4 right-4 rounded-sm p-1 opacity-70 hover:opacity-100 transition",
-              "focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-            )}
-          >
-            <XIcon className="size-4" />
-            <span className="sr-only">Fechar</span>
-          </SheetPrimitive.Close>
-
-          {children}
+            {children}
+          </ResizableSheetContext.Provider>
         </SheetPrimitive.Content>
       </SheetPrimitive.Portal>
     </SheetPrimitive.Root>

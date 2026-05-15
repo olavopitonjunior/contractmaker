@@ -79,6 +79,85 @@
     @apply bg-background text-foreground;
     font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
   }
+
+  /* Chat panel — paleta Lovable-style escopada ao Sheet do chat.
+     Resto do app continua warm beige + laranja queimado. Sobrescreve
+     as CSS vars principais (background/foreground/primary/etc.) só
+     dentro do data-chat-panel, sem vazar pro restante do app. */
+  [data-chat-panel] {
+    --background: 220 17% 99%;      /* off-white #FCFCFD */
+    --foreground: 222 47% 11%;       /* slate-900 */
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 262 83% 58%;          /* violet-600 */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96%;        /* slate-100 */
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;            /* slate-100 */
+    --muted-foreground: 215 16% 47%; /* slate-500 */
+    --accent: 210 40% 96%;           /* slate-100 */
+    --accent-foreground: 222 47% 11%;
+    --border: 214 32% 91%;           /* slate-200 */
+    --input: 214 32% 91%;
+    --ring: 262 83% 58%;             /* violet-600 */
+
+    /* Tokens semânticos pros tool kinds — KIND_CLASSES em event-icons.ts
+       referencia esses como `bg-[hsl(var(--chat-tool-kb-bg))]` etc. */
+    --chat-tool-kb-bg: 214 95% 96%;     /* sky-100 */
+    --chat-tool-kb-fg: 217 91% 35%;     /* sky-700 darker */
+    --chat-tool-kb-border: 213 96% 87%; /* sky-200 */
+    --chat-tool-edit-bg: 48 100% 96%;   /* amber-100 */
+    --chat-tool-edit-fg: 32 95% 35%;    /* amber-700 */
+    --chat-tool-edit-border: 48 96% 76%;
+    --chat-tool-suggest-bg: 270 100% 97%; /* violet-50 */
+    --chat-tool-suggest-fg: 263 70% 45%;  /* violet-700 */
+    --chat-tool-suggest-border: 269 100% 92%;
+    --chat-tool-analyze-bg: 220 14% 96%; /* slate-100 */
+    --chat-tool-analyze-fg: 215 25% 27%; /* slate-700 */
+    --chat-tool-analyze-border: 220 13% 91%;
+    --chat-tool-design-bg: 187 92% 96%;  /* cyan-100 */
+    --chat-tool-design-fg: 195 81% 30%;  /* cyan-700 */
+    --chat-tool-design-border: 187 85% 86%;
+  }
+
+  .dark [data-chat-panel],
+  [data-chat-panel].dark {
+    --background: 222 47% 8%;          /* slate-950ish */
+    --foreground: 210 40% 98%;
+    --card: 222 47% 11%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222 47% 11%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 262 83% 65%;            /* violet-500 */
+    --primary-foreground: 222 47% 8%;
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+    --accent: 217 33% 17%;
+    --accent-foreground: 210 40% 98%;
+    --border: 217 33% 22%;
+    --input: 217 33% 22%;
+    --ring: 262 83% 65%;
+
+    --chat-tool-kb-bg: 217 91% 18%;
+    --chat-tool-kb-fg: 213 96% 78%;
+    --chat-tool-kb-border: 217 91% 28%;
+    --chat-tool-edit-bg: 32 95% 18%;
+    --chat-tool-edit-fg: 48 96% 76%;
+    --chat-tool-edit-border: 32 95% 28%;
+    --chat-tool-suggest-bg: 263 70% 18%;
+    --chat-tool-suggest-fg: 269 100% 82%;
+    --chat-tool-suggest-border: 263 70% 28%;
+    --chat-tool-analyze-bg: 222 47% 14%;
+    --chat-tool-analyze-fg: 215 20% 75%;
+    --chat-tool-analyze-border: 222 47% 22%;
+    --chat-tool-design-bg: 195 81% 14%;
+    --chat-tool-design-fg: 187 85% 76%;
+    --chat-tool-design-border: 195 81% 22%;
+  }
 }
 
 /* A4 page visual wrapper for the contract editor (210mm x 297mm @ 96dpi) */

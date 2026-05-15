@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -31,9 +32,13 @@ import {
   AlertTriangle,
   ListChecks,
   Pencil,
+  Maximize2,
+  Minimize2,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import { Dialog as SheetPrimitive } from "radix-ui";
+import { useResizableSheet } from "@/components/ui/resizable-sheet";
 import { cn } from "@/lib/utils";
 import type { AgentEvent, AgentMode } from "@/lib/ai/types";
 import { describeTool, KIND_CLASSES } from "@/lib/ai/event-icons";
@@ -80,6 +85,7 @@ export function ChatPanel({
   initialInput,
   initialSessionId,
 }: ChatPanelProps) {
+  const { fullscreen, toggleFullscreen, canToggleFullscreen } = useResizableSheet();
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [input, setInput] = useState(initialInput ?? "");
   const [loading, setLoading] = useState(false);
@@ -522,36 +528,87 @@ export function ChatPanel({
           />
         </div>
 
-        <div className="flex flex-col flex-1 min-w-0 px-6 pb-6">
-          <div className="flex items-center gap-2 pb-2 border-b">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 shrink-0"
-              onClick={() => setSidebarOpen((v) => !v)}
-              aria-label={sidebarOpen ? "Fechar sessões" : "Abrir sessões"}
-            >
-              {sidebarOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
-            </Button>
-            <div className="flex-1 min-w-0">
-              <ModeHeader mode={mode} onChange={setMode} disabled={loading} />
+        <div className="flex flex-col flex-1 min-w-0 px-4 pb-4">
+          {/* Header bar h-12 com 3 zonas: structural (sidebar+title) |
+              center (mode segmented) | meta actions (changes, fullscreen, close).
+              fullscreen e close vem do ResizableSheetContext. */}
+          <div className="flex h-12 items-center gap-3 border-b -mx-4 px-3">
+            <div className="flex items-center gap-1 min-w-0">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={() => setSidebarOpen((v) => !v)}
+                    aria-label={sidebarOpen ? "Fechar sessões" : "Abrir sessões"}
+                  >
+                    {sidebarOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">
+                  {sidebarOpen ? "Fechar sessões" : "Sessões"}
+                </TooltipContent>
+              </Tooltip>
+              <h2 className="text-sm font-semibold truncate ml-1">Assistente Jurídico</h2>
             </div>
-            <Tooltip>
-              <TooltipTrigger asChild>
+
+            <div className="flex-1 flex justify-center">
+              <ModeToggle mode={mode} onChange={setMode} disabled={loading} />
+            </div>
+
+            <div className="flex items-center gap-1 shrink-0">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    type="button"
+                    variant={changesPanelOpen ? "secondary" : "ghost"}
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={() => setChangesPanelOpen((v) => !v)}
+                    aria-label="Mostrar mudanças"
+                  >
+                    <GitCommit className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">Mudanças deste chat</TooltipContent>
+              </Tooltip>
+              {canToggleFullscreen && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8"
+                      onClick={toggleFullscreen}
+                      aria-label={fullscreen ? "Sair de tela cheia" : "Tela cheia"}
+                    >
+                      {fullscreen ? (
+                        <Minimize2 className="h-4 w-4" />
+                      ) : (
+                        <Maximize2 className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="bottom">
+                    {fullscreen ? "Sair de tela cheia" : "Tela cheia"}
+                  </TooltipContent>
+                </Tooltip>
+              )}
+              <SheetPrimitive.Close asChild>
                 <Button
                   type="button"
-                  variant={changesPanelOpen ? "secondary" : "ghost"}
+                  variant="ghost"
                   size="icon"
-                  className="h-7 w-7 shrink-0"
-                  onClick={() => setChangesPanelOpen((v) => !v)}
-                  aria-label="Mostrar mudanças"
+                  className="h-8 w-8"
+                  aria-label="Fechar"
                 >
-                  <GitCommit className="h-4 w-4" />
+                  <X className="h-4 w-4" />
                 </Button>
-              </TooltipTrigger>
-              <TooltipContent>Mudanças deste chat</TooltipContent>
-            </Tooltip>
+              </SheetPrimitive.Close>
+            </div>
           </div>
 
           {switchingSession && (
@@ -588,151 +645,175 @@ export function ChatPanel({
           </div>
         </ScrollArea>
 
-        <div className="border-t pt-4 space-y-2">
-          {(attachments.length > 0 || attachmentError) && (
-            <div className="flex flex-wrap items-center gap-1.5">
-              {attachments.map((a) => (
-                <span
-                  key={a.id}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full border bg-muted/40 pl-2 pr-1 py-0.5 text-xs",
-                    a.loading && "opacity-60"
-                  )}
-                  title={
-                    a.source === "url" && a.sourceUrl
-                      ? a.sourceUrl
-                      : a.extractedChars
-                        ? `${a.extractedChars} chars extraidos`
-                        : undefined
-                  }
-                >
-                  {a.source === "url" ? (
-                    <Globe className="h-3 w-3 shrink-0 text-muted-foreground" />
-                  ) : (
-                    <FileText className="h-3 w-3 shrink-0 text-muted-foreground" />
-                  )}
-                  <span className="max-w-[180px] truncate">{a.name}</span>
-                  {a.loading ? (
-                    <Loader2 className="h-3 w-3 shrink-0 animate-spin text-muted-foreground" />
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveAttachment(a.id)}
-                      className="rounded-full p-0.5 hover:bg-muted-foreground/20"
-                      aria-label="Remover anexo"
-                    >
-                      <X className="h-3 w-3" />
-                    </button>
-                  )}
-                </span>
-              ))}
-              {attachmentError && (
-                <span className="text-xs text-destructive">{attachmentError}</span>
-              )}
-            </div>
+        {/* Input supercard — Lovable-style. Card unico com chips de anexo
+            no topo, textarea multi-line no meio, toolbar (anexos esquerda /
+            model centro / Enviar direita) no rodape. */}
+        <div className="pt-3">
+          {attachmentError && (
+            <p className="text-xs text-destructive px-1 pb-2">{attachmentError}</p>
           )}
-          <div className="flex gap-2 items-end">
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) handleUploadFile(file);
-                if (fileInputRef.current) fileInputRef.current.value = "";
-              }}
-            />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9 shrink-0 text-muted-foreground"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={loading || attaching || attachments.length >= 5}
-                  aria-label="Anexar PDF/DOCX"
-                >
-                  <Paperclip className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Anexar PDF/DOCX (max 5MB)</TooltipContent>
-            </Tooltip>
-            <Popover open={urlPopoverOpen} onOpenChange={setUrlPopoverOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9 shrink-0 text-muted-foreground"
-                  disabled={loading || attaching || attachments.length >= 5}
-                  aria-label="Anexar URL"
-                >
-                  <Link2 className="h-4 w-4" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent side="top" align="start" className="w-80">
-                <div className="space-y-2">
-                  <p className="text-xs font-medium">Anexar URL</p>
-                  <p className="text-xs text-muted-foreground">
-                    Buscamos o texto da pagina e enviamos junto com sua mensagem.
-                  </p>
-                  <Input
-                    placeholder="https://..."
-                    value={urlInput}
-                    onChange={(e) => setUrlInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        handleAttachUrl();
-                      }
-                    }}
-                  />
-                  <div className="flex justify-end gap-2">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        setUrlInput("");
-                        setUrlPopoverOpen(false);
-                      }}
-                    >
-                      Cancelar
-                    </Button>
-                    <Button
-                      size="sm"
-                      onClick={handleAttachUrl}
-                      disabled={!urlInput.trim() || attaching}
-                    >
-                      {attaching ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        "Anexar"
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              </PopoverContent>
-            </Popover>
-            <Input
+          <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+            {attachments.length > 0 && (
+              <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2.5">
+                {attachments.map((a) => (
+                  <span
+                    key={a.id}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 rounded-full border bg-muted/60 pl-2 pr-1 py-0.5 text-xs",
+                      a.loading && "opacity-60"
+                    )}
+                    title={
+                      a.source === "url" && a.sourceUrl
+                        ? a.sourceUrl
+                        : a.extractedChars
+                          ? `${a.extractedChars} chars extraídos`
+                          : undefined
+                    }
+                  >
+                    {a.source === "url" ? (
+                      <Globe className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    ) : (
+                      <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    )}
+                    <span className="max-w-[180px] truncate">{a.name}</span>
+                    {a.loading ? (
+                      <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveAttachment(a.id)}
+                        className="rounded-full p-0.5 hover:bg-muted-foreground/20"
+                        aria-label="Remover anexo"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <Textarea
               placeholder={
                 mode === "fast"
                   ? "Edição rápida — Haiku · ~3s"
-                  : "Pergunte ou planeje uma alteração — Sonnet · ~20s"
+                  : "Pergunte ou planeje uma alteração…"
               }
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
               disabled={loading}
+              rows={1}
+              className="min-h-[44px] max-h-[200px] resize-none border-0 shadow-none px-3 py-2.5 text-sm focus-visible:ring-0 focus-visible:ring-offset-0 bg-transparent"
             />
-            <Button
-              size="icon"
-              onClick={handleSend}
-              disabled={loading || attaching || !input.trim()}
-            >
-              <Send className="h-4 w-4" />
-            </Button>
+
+            <div className="flex items-center justify-between gap-2 border-t border-dashed px-2 py-1.5">
+              <div className="flex items-center gap-0.5">
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleUploadFile(file);
+                    if (fileInputRef.current) fileInputRef.current.value = "";
+                  }}
+                />
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={loading || attaching || attachments.length >= 5}
+                      aria-label="Anexar PDF/DOCX"
+                    >
+                      <Paperclip className="h-3.5 w-3.5" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent side="top">Anexar PDF/DOCX (max 5MB)</TooltipContent>
+                </Tooltip>
+                <Popover open={urlPopoverOpen} onOpenChange={setUrlPopoverOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-7 w-7 text-muted-foreground"
+                      disabled={loading || attaching || attachments.length >= 5}
+                      aria-label="Anexar URL"
+                    >
+                      <Link2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent side="top" align="start" className="w-80">
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium">Anexar URL</p>
+                      <p className="text-xs text-muted-foreground">
+                        Buscamos o texto da página e enviamos junto com sua mensagem.
+                      </p>
+                      <Input
+                        placeholder="https://..."
+                        value={urlInput}
+                        onChange={(e) => setUrlInput(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleAttachUrl();
+                          }
+                        }}
+                      />
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setUrlInput("");
+                            setUrlPopoverOpen(false);
+                          }}
+                        >
+                          Cancelar
+                        </Button>
+                        <Button
+                          size="sm"
+                          onClick={handleAttachUrl}
+                          disabled={!urlInput.trim() || attaching}
+                        >
+                          {attaching ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            "Anexar"
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              <span className="text-[10px] text-muted-foreground select-none">
+                {mode === "fast" ? "Haiku · ~3s" : "Sonnet · ~20s"}
+              </span>
+
+              <Button
+                size="sm"
+                onClick={handleSend}
+                disabled={loading || attaching || !input.trim()}
+                className="h-7 px-3 gap-1.5"
+              >
+                {loading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <>
+                    Enviar
+                    <Send className="h-3.5 w-3.5" />
+                  </>
+                )}
+              </Button>
+            </div>
           </div>
         </div>
         </div>
@@ -754,7 +835,12 @@ export function ChatPanel({
 // SUB-COMPONENTES
 // ============================================
 
-function ModeHeader({
+/**
+ * ModeToggle — segmented control Rápido/Planejar. Pill arredondado com
+ * indicador deslizante. Substitui dois Button outline/default. Tooltip
+ * detalha o que cada modo faz.
+ */
+function ModeToggle({
   mode,
   onChange,
   disabled,
@@ -764,21 +850,31 @@ function ModeHeader({
   disabled?: boolean;
 }) {
   return (
-    <div className="flex items-center gap-1 pb-2 border-b">
-      <span className="text-xs text-muted-foreground mr-2">Modo</span>
+    <div
+      className="inline-flex items-center gap-1 rounded-full bg-muted p-1"
+      role="tablist"
+      aria-label="Modo do assistente"
+    >
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
+          <button
             type="button"
-            variant={mode === "fast" ? "default" : "outline"}
-            size="sm"
-            className="h-7"
-            onClick={() => onChange("fast")}
+            role="tab"
+            aria-selected={mode === "fast"}
             disabled={disabled}
+            onClick={() => onChange("fast")}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full px-3 h-7 text-xs font-medium transition-colors",
+              "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+              "disabled:opacity-50 disabled:cursor-not-allowed",
+              mode === "fast"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
           >
-            <Zap className="h-3 w-3 mr-1" />
+            <Zap className="h-3.5 w-3.5" />
             Rápido
-          </Button>
+          </button>
         </TooltipTrigger>
         <TooltipContent side="bottom">
           <div className="text-xs max-w-[220px]">
@@ -789,20 +885,26 @@ function ModeHeader({
           </div>
         </TooltipContent>
       </Tooltip>
-
       <Tooltip>
         <TooltipTrigger asChild>
-          <Button
+          <button
             type="button"
-            variant={mode === "plan" ? "default" : "outline"}
-            size="sm"
-            className="h-7"
-            onClick={() => onChange("plan")}
+            role="tab"
+            aria-selected={mode === "plan"}
             disabled={disabled}
+            onClick={() => onChange("plan")}
+            className={cn(
+              "inline-flex items-center gap-1 rounded-full px-3 h-7 text-xs font-medium transition-colors",
+              "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1",
+              "disabled:opacity-50 disabled:cursor-not-allowed",
+              mode === "plan"
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
           >
-            <Brain className="h-3 w-3 mr-1" />
+            <Brain className="h-3.5 w-3.5" />
             Planejar
-          </Button>
+          </button>
         </TooltipTrigger>
         <TooltipContent side="bottom">
           <div className="text-xs max-w-[220px]">
@@ -856,7 +958,7 @@ function MessageRow({
     <div className="group flex gap-3 mr-10">
       <div
         className={cn(
-          "h-7 w-7 rounded-full flex items-center justify-center shrink-0 text-[11px] font-semibold mt-0.5",
+          "h-6 w-6 rounded-full flex items-center justify-center shrink-0 mt-1",
           msg.isError
             ? "bg-destructive/15 text-destructive"
             : "bg-primary/10 text-primary"
@@ -880,9 +982,10 @@ function MessageRow({
           {msg.content && (
             <div
               className={cn(
-                "prose prose-sm dark:prose-invert max-w-none",
-                "prose-p:my-1.5 prose-headings:mt-3 prose-headings:mb-1.5",
-                "prose-ul:my-1.5 prose-ol:my-1.5 prose-li:my-0",
+                "prose prose-sm dark:prose-invert max-w-none leading-relaxed",
+                "prose-p:my-2 prose-p:leading-relaxed",
+                "prose-headings:mt-3 prose-headings:mb-1.5",
+                "prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5",
                 "prose-code:before:content-none prose-code:after:content-none",
                 "prose-code:bg-muted prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-[12.5px]",
                 "prose-pre:my-2 prose-pre:p-2 prose-pre:text-xs",
@@ -1028,17 +1131,17 @@ function EmptyState({
   disabled: boolean;
 }) {
   return (
-    <div className="flex flex-col items-center justify-center py-10 px-4 text-center">
-      <div className="h-10 w-10 rounded-full bg-primary/10 text-primary flex items-center justify-center mb-3">
+    <div className="flex flex-col items-center justify-center py-12 px-4 text-center">
+      <div className="h-12 w-12 rounded-full bg-primary/10 text-primary flex items-center justify-center mb-4">
         <Sparkles className="h-5 w-5" />
       </div>
-      <h3 className="text-sm font-medium">Como posso ajudar com este contrato?</h3>
-      <p className="text-xs text-muted-foreground mt-1 max-w-[280px]">
+      <h3 className="text-base font-semibold">Como posso ajudar com este contrato?</h3>
+      <p className="text-xs text-muted-foreground mt-1.5 max-w-[300px] leading-relaxed">
         {mode === "fast"
           ? "Modo rápido — edição direta no Google Docs em ~3s."
           : "Modo planejamento — análise profunda com expert context."}
       </p>
-      <div className="grid grid-cols-2 gap-2 mt-5 w-full max-w-sm">
+      <div className="grid grid-cols-2 gap-2 mt-6 w-full max-w-sm">
         {CANONICAL_PROMPTS.map((p) => (
           <button
             key={p.label}
@@ -1046,9 +1149,9 @@ function EmptyState({
             disabled={disabled}
             onClick={() => onPickPrompt(p.prompt)}
             className={cn(
-              "flex items-start gap-2 rounded-lg border px-2.5 py-2 text-left text-xs",
-              "hover:bg-muted/60 transition-colors",
-              "disabled:opacity-50 disabled:cursor-not-allowed"
+              "flex items-start gap-2 rounded-lg border bg-card px-3 py-3 text-left text-xs",
+              "hover:bg-muted/60 hover:scale-[1.02] transition-all",
+              "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
             )}
           >
             <p.icon className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
