@@ -66,37 +66,97 @@ async function main() {
   }
 
   if (candidates.length === 0) {
-    console.log("Nenhum deal encontrado com 'aide'. Tentando busca mais ampla por 'aíde'/'Aide'...");
-    const broad = (await prisma.$queryRawUnsafe(
-      `SELECT "Deal"."id", "Deal"."title"
-       FROM "Deal"
-       WHERE "Deal"."title" ILIKE '%aíde%'
-          OR "Deal"."dataJson"::text ILIKE '%aíde%'
-       LIMIT 10`
-    )) as Array<{ id: string; title: string }>;
-    console.log(`Busca ampla matches: ${broad.length}`);
-    for (const d of broad) candidates.push(d.id);
+    console.log("Nenhum deal encontrado com 'aide'. Tentando 'aída', 'aíd', 'ayde'...");
+    const patterns = ["%aída%", "%aíd%", "%ayde%", "%aida%", "%ai%d%"];
+    for (const pat of patterns) {
+      const broad = (await prisma.$queryRawUnsafe(
+        `SELECT "Deal"."id", "Deal"."title"
+         FROM "Deal"
+         WHERE "Deal"."title" ILIKE $1
+            OR "Deal"."dataJson"::text ILIKE $1
+         LIMIT 10`,
+        pat
+      )) as Array<{ id: string; title: string }>;
+      if (broad.length > 0) {
+        console.log(`Pattern '${pat}': ${broad.length} matches`);
+        for (const d of broad) {
+          console.log(`  ${d.id} — ${d.title}`);
+          if (!seen.has(d.id)) {
+            seen.add(d.id);
+            candidates.push(d.id);
+          }
+        }
+      }
+    }
+    // Sondagem geral: deals recentes c/ financiamento + saldo > 0
+    if (candidates.length === 0) {
+      console.log("\nFallback: deals recentes com saldo_devedor > 0 (qualquer nome):");
+      const withSaldo = (await prisma.$queryRawUnsafe(
+        `SELECT d."id", d."title", d."createdAt",
+                COALESCE(f."dataJson"->>'saldo_devedor', d."dataJson"->>'saldo_devedor') as saldo
+         FROM "Deal" d
+         LEFT JOIN "SalesForm" f ON f."id" = d."formId"
+         WHERE COALESCE(f."dataJson"->>'saldo_devedor', d."dataJson"->>'saldo_devedor') IS NOT NULL
+           AND COALESCE(f."dataJson"->>'saldo_devedor', d."dataJson"->>'saldo_devedor') <> '0'
+         ORDER BY d."createdAt" DESC
+         LIMIT 20`
+      )) as Array<{ id: string; title: string; createdAt: Date; saldo: string }>;
+      for (const d of withSaldo) {
+        console.log(`  ${d.id} | ${d.createdAt.toISOString()} | saldo=R$ ${d.saldo} | ${d.title}`);
+        if (!seen.has(d.id)) {
+          seen.add(d.id);
+          candidates.push(d.id);
+        }
+      }
+    }
   }
 
   for (const id of candidates) {
-    const deal = titleMatches.find((d) => d.id === id) ?? (await prisma.deal.findUnique({
-      where: { id },
-      include: {
-        form: { select: { dataJson: true, completedAt: true } },
-        contracts: {
-          where: { isLatest: true },
-          select: {
-            id: true,
-            version: true,
-            status: true,
-            googleDocId: true,
-            googleDocUrl: true,
-            dataJson: true,
-          },
-        },
-      },
-    }));
-    if (!deal) continue;
+    // Usa raw SQL pra evitar drift de schema (ex.: Deal.complianceJson
+    // existe local mas não em prod). select explícito só dos campos que precisamos.
+    const dealRows = (await prisma.$queryRawUnsafe(
+      `SELECT d."id", d."title", d."createdAt", d."formId", d."dataJson",
+              f."dataJson" as "form_dataJson", f."completedAt" as "form_completedAt"
+       FROM "Deal" d
+       LEFT JOIN "SalesForm" f ON f."id" = d."formId"
+       WHERE d."id" = $1`,
+      id
+    )) as Array<{
+      id: string;
+      title: string;
+      createdAt: Date;
+      formId: string | null;
+      dataJson: Record<string, unknown> | null;
+      form_dataJson: Record<string, unknown> | null;
+      form_completedAt: Date | null;
+    }>;
+    if (dealRows.length === 0) continue;
+    const row = dealRows[0];
+    const contractRows = (await prisma.$queryRawUnsafe(
+      `SELECT "id", "version", "status", "googleDocId", "googleDocUrl", "dataJson"
+       FROM "Contract"
+       WHERE "dealId" = $1 AND "isLatest" = true
+       LIMIT 1`,
+      id
+    )) as Array<{
+      id: string;
+      version: number;
+      status: string;
+      googleDocId: string | null;
+      googleDocUrl: string | null;
+      dataJson: Record<string, unknown> | null;
+    }>;
+    const deal = {
+      id: row.id,
+      title: row.title,
+      createdAt: row.createdAt,
+      formId: row.formId,
+      dataJson: row.dataJson,
+      form: row.formId
+        ? { dataJson: row.form_dataJson, completedAt: row.form_completedAt }
+        : null,
+      contracts: contractRows,
+    };
 
     const formData = (deal.form?.dataJson ?? deal.dataJson) as Record<string, unknown>;
     const saldoForm = formData?.saldo_devedor ?? null;
