@@ -19,9 +19,59 @@ interface GenerateResult {
 
 /**
  * Enriches form data with sensible defaults for template variables that
- * aren't captured in the 7-step wizard but are required by the contract
+ * aren't captured in the wizard but are required by the contract
  * template (delivery deadlines, daily penalties, commission percentage, etc).
+ *
+ * 2026-05-16: pagamento.parcelas[] virou canônico com tipo/momento/meio.
+ * Esta função:
+ *   1. Soma parcelas por tipo → buckets nomeados (sinal_arras, fgts, ...)
+ *      pra preservar templates atuais sem mudança.
+ *   2. Filtra parcelas que já viram bucket (renderizadas hardcoded no
+ *      template) pra não duplicar no loop {{#each parcelas}}.
+ *   3. Deriva dias do momento (assinatura=0, escritura=prazo_escritura_dias,
+ *      data_exata=delta, dias=mantém input).
+ *   4. Deriva tipo_texto canônico quando o form não preencheu.
  */
+
+const TIPO_TEXTO_CANONICO: Record<string, string> = {
+  sinal_arras: "Sinal e princípio de pagamento (arras confirmatórias)",
+  recursos_proprios: "Recursos próprios",
+  fgts: "FGTS — Fundo de Garantia do Tempo de Serviço",
+  cessao_consorcio: "Cessão de consórcio",
+  financiamento: "Financiamento bancário com alienação fiduciária",
+  permuta_veiculo: "Permuta com veículo",
+  permuta_imovel: "Permuta com imóvel",
+  outros: "Outras formas de pagamento",
+};
+
+// Mapeia tipo da parcela → nome do bucket no shape `pagamento.*`.
+// `financiamento` → `alienacao_fiduciaria` por convenção dos templates v2.
+// `permuta_*` e `outros` caem em `outras_formas`.
+const TIPO_TO_BUCKET: Record<string, string> = {
+  sinal_arras: "sinal_arras",
+  recursos_proprios: "recursos_proprios",
+  fgts: "fgts",
+  cessao_consorcio: "cessao_consorcio",
+  financiamento: "alienacao_fiduciaria",
+  permuta_veiculo: "outras_formas",
+  permuta_imovel: "outras_formas",
+  outros: "outras_formas",
+};
+
+// Tipos renderizados HARDCODED na cláusula 2.1 do template a_vista — `a)`
+// sempre é o sinal. Não pode aparecer duplicado dentro do loop {{#each}}.
+const TIPOS_HARDCODED_AVISTA = new Set(["sinal_arras"]);
+
+// Tipos renderizados HARDCODED no template financiamento:
+// `a)` sinal, `b)` financiamento, `b.1)` fgts, `c)` recursos próprios.
+// Tudo isso já sai pelo bucket nomeado — não repetir no loop.
+const TIPOS_HARDCODED_FINANCIAMENTO = new Set([
+  "sinal_arras",
+  "financiamento",
+  "fgts",
+  "recursos_proprios",
+]);
+
 export function enrichContractData(
   data: Record<string, unknown>
 ): Record<string, unknown> {
@@ -69,16 +119,112 @@ export function enrichContractData(
     entregaPosse.momento = "assinatura";
   }
 
-  // Parcelas: letra do alfabeto a partir de 'b' (sinal sempre 'a').
-  // Handlebars não tem helper de índice→letra, então fazemos no enrich.
+  // Pagamento — derivação canônica das parcelas tipadas.
   const pagamentoMut = enriched.pagamento as
-    | { parcelas?: Array<Record<string, unknown>> }
+    | (Record<string, unknown> & {
+        parcelas?: Array<Record<string, unknown>>;
+      })
     | undefined;
+
   if (pagamentoMut?.parcelas?.length) {
+    // 1. Derivar dias e tipo_texto pra cada parcela quando faltam.
+    const prazoEscritura = Number(config.prazo_escritura_dias || 60);
+    const prazoTitulo = Number(
+      config.prazo_titulo_dias || config.prazo_escritura_dias || 60
+    );
+    pagamentoMut.parcelas = pagamentoMut.parcelas.map((p) => {
+      const out: Record<string, unknown> = { ...p };
+      const momento = String(out.momento || "");
+      // Derivar dias quando vazio/0 mas momento canônico setado.
+      if ((!out.dias || Number(out.dias) === 0) && momento) {
+        if (momento === "assinatura") out.dias = 0;
+        else if (momento === "escritura") out.dias = prazoEscritura;
+        else if (momento === "registro") out.dias = prazoTitulo;
+        else if (momento === "data_exata" && typeof out.data_exata === "string") {
+          const dt = new Date(out.data_exata);
+          if (!Number.isNaN(dt.getTime())) {
+            const delta = Math.max(
+              0,
+              Math.round((dt.getTime() - Date.now()) / (24 * 60 * 60 * 1000))
+            );
+            out.dias = delta;
+          }
+        }
+      }
+      // Derivar tipo_texto quando vazio mas tipo setado.
+      if (
+        (!out.tipo_texto || String(out.tipo_texto).trim() === "") &&
+        typeof out.tipo === "string"
+      ) {
+        const tipoKey = String(out.tipo);
+        if (tipoKey === "outros" && typeof out.tipo_outros_texto === "string") {
+          out.tipo_texto = out.tipo_outros_texto;
+        } else if (
+          tipoKey.startsWith("permuta_") &&
+          typeof out.permuta_descricao === "string"
+        ) {
+          const base = TIPO_TEXTO_CANONICO[tipoKey] ?? "Permuta";
+          out.tipo_texto = out.permuta_descricao
+            ? `${base}: ${out.permuta_descricao}`
+            : base;
+        } else {
+          out.tipo_texto = TIPO_TEXTO_CANONICO[tipoKey] ?? "";
+        }
+      }
+      return out;
+    });
+
+    // 2. Derivar buckets nomeados a partir de parcelas tipadas. Só
+    // sobrescreve quando há ≥1 parcela com `tipo` setado (preserva forms
+    // legados que editavam buckets direto sem tipar parcelas).
+    const temParcelaTipada = pagamentoMut.parcelas.some(
+      (p) => typeof p.tipo === "string"
+    );
+    if (temParcelaTipada) {
+      const buckets: Record<string, number> = {
+        sinal_arras: 0,
+        recursos_proprios: 0,
+        fgts: 0,
+        cessao_consorcio: 0,
+        alienacao_fiduciaria: 0,
+        outras_formas: 0,
+      };
+      for (const p of pagamentoMut.parcelas) {
+        const tipo = typeof p.tipo === "string" ? p.tipo : null;
+        if (!tipo) continue;
+        const bucket = TIPO_TO_BUCKET[tipo];
+        if (bucket && buckets[bucket] !== undefined) {
+          buckets[bucket] += Number(p.valor) || 0;
+        }
+      }
+      for (const [k, v] of Object.entries(buckets)) {
+        pagamentoMut[k] = v;
+      }
+    }
+
+    // 3. Filtrar parcelas que já viram bucket renderizado HARDCODED no
+    // template, pra evitar duplicação ("a) sinal_arras" + loop com outro
+    // "sinal_arras"). Heurística da modalidade segue mesma regra abaixo.
+    const isFinanciamento =
+      (Number(pagamentoMut.alienacao_fiduciaria) || 0) > 0 ||
+      (Number(pagamentoMut.fgts) || 0) > 0 ||
+      (Number(pagamentoMut.cessao_consorcio) || 0) > 0;
+    const hardcoded = isFinanciamento
+      ? TIPOS_HARDCODED_FINANCIAMENTO
+      : TIPOS_HARDCODED_AVISTA;
+    pagamentoMut.parcelas = pagamentoMut.parcelas.filter((p) => {
+      const tipo = typeof p.tipo === "string" ? p.tipo : null;
+      // Sem tipo (forms legados ou CCV import) → mantém no loop pra não
+      // sumir conteúdo de contratos antigos.
+      if (!tipo) return true;
+      return !hardcoded.has(tipo);
+    });
+
+    // 4. Letra do alfabeto (a_vista) e número sequencial (financiamento).
     pagamentoMut.parcelas = pagamentoMut.parcelas.map((p, i) => ({
       ...p,
-      letra: indexToLetter(i + 1), // 0 → 'b', 1 → 'c', ... (template à vista)
-      numero: i + 1, // 1, 2, 3 ... (template financiamento)
+      letra: indexToLetter(i + 1),
+      numero: i + 1,
     }));
   }
 
@@ -88,7 +234,6 @@ export function enrichContractData(
 function indexToLetter(idx: number): string {
   if (idx < 0) return "";
   if (idx < 26) return String.fromCharCode(97 + idx);
-  // overflow improvável em parcelas reais, mas evita "undefined"
   return `${idx + 1}`;
 }
 

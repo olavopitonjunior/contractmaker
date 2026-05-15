@@ -326,6 +326,10 @@ const defaultFormValues: Partial<DadosContratoForm> = {
   saldo_devedor: 0,
   tem_debitos: false,
   pagamento: {
+    // valor_total é o único bucket editável diretamente pelo form 2026-05-16+.
+    // Os demais (sinal_arras, fgts, ...) são derivados via enrichContractData
+    // a partir de pagamento.parcelas[].tipo. Mantidos como 0 inicial pra
+    // retrocompat com forms legados que ainda escrevem direto.
     valor_total: 0,
     sinal_arras: 0,
     recursos_proprios: 0,

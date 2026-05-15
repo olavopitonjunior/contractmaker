@@ -146,10 +146,79 @@ export const step4Schema = z.object({
   }).optional(),
 });
 
+// Tipos de parcela (canônicos). `sinal_arras`/`recursos_proprios`/`fgts`/
+// `financiamento`/`cessao_consorcio` viram buckets nomeados no contrato via
+// enrichContractData. `permuta_*` e `outros` caem em "outras_formas".
+const parcelaTipoEnum = z.enum([
+  "sinal_arras",
+  "recursos_proprios",
+  "fgts",
+  "financiamento",
+  "cessao_consorcio",
+  "permuta_veiculo",
+  "permuta_imovel",
+  "outros",
+]);
+
+const parcelaMomentoEnum = z.enum([
+  "assinatura",
+  "escritura",
+  "registro",
+  "dias",
+  "data_exata",
+]);
+
+const parcelaMeioEnum = z.enum([
+  "pix",
+  "ted",
+  "transferencia",
+  "boleto",
+  "dinheiro",
+  "cheque",
+  "financiamento",
+  "fgts_saque",
+  "permuta",
+]);
+
+const parcelaSchema = z.object({
+  // legado (mantido pra retrocompat com CCV import e contratos em DB)
+  tipo_texto: z.string().default(""),
+  dias: z.number().default(0),
+  valor: z.number().default(0),
+  // canônico (form novo)
+  tipo: parcelaTipoEnum.optional(),
+  tipo_outros_texto: z.string().optional(),
+  permuta_descricao: z.string().optional(),
+  momento: parcelaMomentoEnum.optional().default("assinatura"),
+  data_exata: z.string().optional(),
+  meio_pagamento: parcelaMeioEnum.optional(),
+  pix: z
+    .object({
+      chave: z.string().optional(),
+      tipo_chave: z.enum(["CPF", "CNPJ", "EMAIL", "PHONE", "EVP"]).optional(),
+      titular_nome: z.string().optional(),
+      titular_cpf_cnpj: z.string().optional(),
+    })
+    .optional(),
+  bancarios: z
+    .object({
+      banco: z.string().optional(),
+      agencia: z.string().optional(),
+      conta: z.string().optional(),
+      tipo_conta: z.enum(["corrente", "poupanca"]).optional(),
+      titular_nome: z.string().optional(),
+      titular_cpf_cnpj: z.string().optional(),
+    })
+    .optional(),
+  banco_financiamento: z.string().optional(),
+});
+
 export const step5Schema = z.object({
   modalidade: z.enum(["a_vista", "financiamento"]).default("a_vista"),
   pagamento: z.object({
     valor_total: z.number().min(0).default(0),
+    // Buckets derivados via enrichContractData a partir de parcelas[].tipo.
+    // Mantidos no schema pra retrocompat — forms antigos editavam direto.
     sinal_arras: z.number().default(0),
     recursos_proprios: z.number().default(0),
     fgts: z.number().default(0),
@@ -157,11 +226,7 @@ export const step5Schema = z.object({
     alienacao_fiduciaria: z.number().default(0),
     outras_formas: z.number().default(0),
     meio_pagamento: z.string().optional().default("transferencia bancaria"),
-    parcelas: z.array(z.object({
-      tipo_texto: z.string().default(""),
-      dias: z.number().default(0),
-      valor: z.number().default(0),
-    })).optional().default([]),
+    parcelas: z.array(parcelaSchema).optional().default([]),
   }),
   incluso_no_preco: z.string().optional().default(""),
 });
@@ -319,6 +384,22 @@ export const dadosContratoSchema = step1Schema
           path: ["comissao", "comissionados"],
         });
       }
+    }
+
+    // Pagamento: soma das parcelas == valor_total (tolerância 0.01).
+    // Só aplica quando ambos > 0 — formulários em rascunho ficam livres.
+    const valorTotal = data.pagamento?.valor_total ?? 0;
+    const parcelas = data.pagamento?.parcelas ?? [];
+    const somaParcelas = parcelas.reduce(
+      (acc, p) => acc + (Number(p.valor) || 0),
+      0
+    );
+    if (valorTotal > 0 && somaParcelas > 0 && Math.abs(valorTotal - somaParcelas) > 0.01) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: `Soma das parcelas (R$ ${somaParcelas.toFixed(2)}) difere do valor total (R$ ${valorTotal.toFixed(2)})`,
+        path: ["pagamento", "parcelas"],
+      });
     }
   });
 
