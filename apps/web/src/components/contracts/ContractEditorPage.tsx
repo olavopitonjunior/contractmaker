@@ -541,7 +541,9 @@ export function ContractEditorPage({
         onForceApprove={() => handleApprove(true)}
       />
 
-      {/* Chat Panel */}
+      {/* Chat Panel — ChatPanel ja renderiza seu proprio header com
+          titulo + mode toggle + meta buttons. SheetHeader removido pra
+          nao duplicar. SR-only title via SheetTitle pra acessibilidade. */}
       {!isApproved && (
         <ResizableSheet
           open={chatOpen}
@@ -549,9 +551,7 @@ export function ContractEditorPage({
           defaultWidth={540}
           storageKey="chat:size"
         >
-          <SheetHeader>
-            <SheetTitle>Assistente Jurídico IA</SheetTitle>
-          </SheetHeader>
+          <SheetTitle className="sr-only">Assistente Jurídico IA</SheetTitle>
           <ChatPanel
             contractId={contract.id}
             messages={contract.messages}
