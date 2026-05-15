@@ -10,6 +10,14 @@ import { UFSelect } from "@/components/forms/UFSelect";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import { ConjugeFields } from "@/components/forms/steps/ConjugeFields";
 import { RepresentanteFields } from "@/components/forms/steps/RepresentanteFields";
+import {
+  PIX_TIPO_CHAVE_LABELS,
+  TIPO_CONTA_LABELS,
+  toOptions,
+} from "@/lib/forms/payment-labels";
+
+const PIX_TIPO_CHAVE_OPTIONS = toOptions(PIX_TIPO_CHAVE_LABELS);
+const TIPO_CONTA_OPTIONS = toOptions(TIPO_CONTA_LABELS);
 
 interface VendedorStepProps {
   form: UseFormReturn<any>;
@@ -42,6 +50,89 @@ function FormField({
     <div className={`flex flex-col gap-1.5 ${className}`}>
       <Label className="text-sm font-medium text-muted-foreground">{label}</Label>
       {children}
+    </div>
+  );
+}
+
+/**
+ * Dados de recebimento do vendedor (PIX + conta bancária).
+ * Migrado em 2026-05-16 de pagamento.parcelas[].pix/bancarios pra cá —
+ * é dado do vendedor (uma vez), não da parcela individual.
+ * Usado por PessoaFisicaFields e PessoaJuridicaFields.
+ */
+function RecebimentoFields({
+  form,
+  prefix,
+}: {
+  form: UseFormReturn<any>;
+  prefix: string;
+}) {
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-muted-foreground">
+        Conta/PIX onde o vendedor recebe os pagamentos do comprador. Opcional —
+        pode ser informado depois.
+      </p>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <FormField label="Tipo de chave PIX">
+          <NativeSelect
+            value={form.watch(`${prefix}.recebimento.pix_tipo_chave`) || ""}
+            onChange={(v) =>
+              form.setValue(`${prefix}.recebimento.pix_tipo_chave`, v, {
+                shouldDirty: true,
+              })
+            }
+            options={[
+              { value: "", label: "Selecione..." },
+              ...PIX_TIPO_CHAVE_OPTIONS,
+            ]}
+          />
+        </FormField>
+        <FormField label="Chave PIX">
+          <Input
+            {...form.register(`${prefix}.recebimento.pix_chave`)}
+            placeholder="CPF, CNPJ, email, telefone ou EVP"
+          />
+        </FormField>
+      </div>
+      <Separator />
+      <p className="text-xs font-semibold text-muted-foreground">
+        Conta bancária (TED) — opcional
+      </p>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <FormField label="Banco">
+          <Input
+            {...form.register(`${prefix}.recebimento.banco`)}
+            placeholder="Ex: Itaú"
+          />
+        </FormField>
+        <FormField label="Agência">
+          <Input
+            {...form.register(`${prefix}.recebimento.agencia`)}
+            placeholder="0001"
+          />
+        </FormField>
+        <FormField label="Conta">
+          <Input
+            {...form.register(`${prefix}.recebimento.conta`)}
+            placeholder="12345-6"
+          />
+        </FormField>
+        <FormField label="Tipo de conta">
+          <NativeSelect
+            value={form.watch(`${prefix}.recebimento.tipo_conta`) || ""}
+            onChange={(v) =>
+              form.setValue(`${prefix}.recebimento.tipo_conta`, v, {
+                shouldDirty: true,
+              })
+            }
+            options={[
+              { value: "", label: "Selecione..." },
+              ...TIPO_CONTA_OPTIONS,
+            ]}
+          />
+        </FormField>
+      </div>
     </div>
   );
 }
@@ -283,6 +374,12 @@ function PessoaFisicaFields({
           </div>
         </>
       )}
+
+      <Separator />
+      <p className="text-sm font-semibold text-foreground">
+        Dados de Recebimento
+      </p>
+      <RecebimentoFields form={form} prefix={prefix} />
     </div>
   );
 }
@@ -343,6 +440,12 @@ function PessoaJuridicaFields({
       <Separator />
       <p className="text-sm font-semibold text-foreground">Representante Legal</p>
       <RepresentanteFields form={form} prefix={prefix} />
+
+      <Separator />
+      <p className="text-sm font-semibold text-foreground">
+        Dados de Recebimento
+      </p>
+      <RecebimentoFields form={form} prefix={prefix} />
     </div>
   );
 }

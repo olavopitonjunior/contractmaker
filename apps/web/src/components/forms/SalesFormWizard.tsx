@@ -236,7 +236,7 @@ function StepIndicator({
                 <button
                   type="button"
                   onClick={() => onStepClick(index)}
-                  className={`text-xs whitespace-nowrap max-w-[80px] text-center leading-tight cursor-pointer hover:underline ${labelClass}`}
+                  className={`text-[11px] whitespace-normal max-w-[96px] text-center leading-tight cursor-pointer hover:underline ${labelClass}`}
                   tabIndex={-1}
                 >
                   {label}

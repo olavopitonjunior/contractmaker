@@ -2,6 +2,18 @@ import { z } from "zod";
 
 // ========= Shared schemas =========
 
+// Recebimento (PIX + dados bancários) do vendedor.
+// Migrado em 2026-05-16 de pagamento.parcelas[].pix/bancarios pra cá —
+// dados são do vendedor (uma vez), não da parcela individual.
+const recebimentoSchema = z.object({
+  pix_chave: z.string().optional().default(""),
+  pix_tipo_chave: z.enum(["CPF", "CNPJ", "EMAIL", "PHONE", "EVP"]).optional(),
+  banco: z.string().optional().default(""),
+  agencia: z.string().optional().default(""),
+  conta: z.string().optional().default(""),
+  tipo_conta: z.enum(["corrente", "poupanca"]).optional(),
+}).optional();
+
 const pessoaFisicaSchema = z.object({
   tipo_pessoa: z.literal("fisica"),
   nome: z.string().min(2, "Nome obrigatorio"),
@@ -23,6 +35,7 @@ const pessoaFisicaSchema = z.object({
   uf: z.string().optional().default(""),
   cep: z.string().optional().default(""),
   tem_procurador: z.boolean().optional().default(false),
+  recebimento: recebimentoSchema,
   conjuge: z.object({
     nome: z.string().optional().default(""),
     cpf: z.string().optional().default(""),
@@ -71,6 +84,7 @@ const pessoaJuridicaSchema = z.object({
   cidade: z.string().optional().default(""),
   uf: z.string().optional().default(""),
   cep: z.string().optional().default(""),
+  recebimento: recebimentoSchema,
   representante: z.object({
     nome: z.string().optional().default(""),
     cpf: z.string().optional().default(""),
@@ -226,6 +240,10 @@ export const step5Schema = z.object({
     alienacao_fiduciaria: z.number().default(0),
     outras_formas: z.number().default(0),
     meio_pagamento: z.string().optional().default("transferencia bancaria"),
+    // Banco do financiamento — subiu de parcela pra nível raiz em 2026-05-16
+    // (era redundante por parcela). UI mostra card só quando ≥1 parcela é
+    // tipo=financiamento.
+    banco_financiamento: z.string().optional(),
     parcelas: z.array(parcelaSchema).optional().default([]),
   }),
   incluso_no_preco: z.string().optional().default(""),
@@ -415,7 +433,7 @@ export const STEP_LABELS = [
   "Vendedor(es)",
   "Comprador(es)",
   "Imóvel(is)",
-  "Imóvel — Status, Posse e Débitos",
+  "Posse/Propriedade",
   "Pagamento",
   "Comissão e Config",
 ] as const;
