@@ -87,9 +87,9 @@ export async function POST(
     );
   }
   const stepIndex = Number(stepIndexRaw);
-  if (!Number.isFinite(stepIndex) || stepIndex < 0 || stepIndex > 7) {
+  if (!Number.isFinite(stepIndex) || stepIndex < 0 || stepIndex > 6) {
     return NextResponse.json(
-      { error: "stepIndex inválido (0..7)" },
+      { error: "stepIndex inválido (0..6)" },
       { status: 400 },
     );
   }

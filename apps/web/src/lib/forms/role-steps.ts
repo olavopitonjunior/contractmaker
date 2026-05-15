@@ -2,10 +2,11 @@ import type { ParticipantRole } from "./participant-token";
 
 /**
  * Mapa role → steps que aquele subtoken deve ver no wizard. Os steps do
- * form principal são (`STEP_LABELS` em `validation.ts`):
+ * form principal são (`STEP_LABELS` em `validation.ts`, 7 etapas pós
+ * merge Posse/Título no Status/Débitos em 2026-05-16):
  *   0 Documentos       1 Vendedor(es)     2 Comprador(es)
- *   3 Imóvel(is)       4 Status/Débitos   5 Pagamento
- *   6 Posse/Título     7 Comissão e Config
+ *   3 Imóvel(is)       4 Imóvel — Status, Posse e Débitos
+ *   5 Pagamento        6 Comissão e Config
  *
  * Vendedor:
  *   - 0 Documentos (filtrado por participantId no upload)
@@ -16,7 +17,7 @@ import type { ParticipantRole } from "./participant-token";
  *   - 0 Documentos (filtrado)
  *   - 2 Comprador
  *
- * Demais steps (status, pagamento, posse, comissão) ficam pro admin no
+ * Demais steps (status/posse, pagamento, comissão) ficam pro admin no
  * token principal. Comprador não negocia comissão; vendedor não decide
  * meio de pagamento sozinho.
  */

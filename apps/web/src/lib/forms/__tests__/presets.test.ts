@@ -5,7 +5,8 @@ import {
   resolveAllRequiredFields,
 } from "../presets";
 
-const TOTAL_STEPS = 8;
+// 7 etapas pós merge Posse/Título no Status/Débitos (2026-05-16).
+const TOTAL_STEPS = 7;
 
 describe("resolveRequiredFields", () => {
   describe("settings null/undefined → fallback legado", () => {
@@ -151,7 +152,7 @@ describe("resolveRequiredFields", () => {
 });
 
 describe("resolveAllRequiredFields", () => {
-  it("retorna array de exatamente 8 elementos", () => {
+  it("retorna array de exatamente 7 elementos", () => {
     const all = resolveAllRequiredFields(null);
     expect(all).toHaveLength(TOTAL_STEPS);
   });
@@ -186,7 +187,7 @@ describe("FORM_REQUIRED_PRESETS shape", () => {
     expect(FORM_REQUIRED_PRESETS).toHaveProperty("completo");
   });
 
-  it("cada preset tem array de 8 steps", () => {
+  it("cada preset tem array de 7 steps", () => {
     for (const preset of Object.values(FORM_REQUIRED_PRESETS)) {
       expect(preset).toHaveLength(TOTAL_STEPS);
     }

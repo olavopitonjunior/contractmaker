@@ -329,9 +329,8 @@ export const STEP_LABELS = [
   "Vendedor(es)",
   "Comprador(es)",
   "Imóvel(is)",
-  "Status e Débitos",
+  "Imóvel — Status, Posse e Débitos",
   "Pagamento",
-  "Posse e Título",
   "Comissão e Config",
 ] as const;
 
@@ -340,6 +339,8 @@ export const STEP_LABELS = [
 // OrgFormSettings.preset. Este array é referenciado pelo preset "legado"
 // (default em orgs criadas antes da migração 20260515120000_org_form_settings).
 // NÃO mexer aqui — mudar este array afeta orgs legadas sem aviso.
+// Atualizado 2026-05-16: 8→7 etapas (merge Posse/Título no Status/Débitos).
+// Slot Posse era `[]` em todos os presets, então nenhuma org perde required path.
 export const STEP_REQUIRED_FIELDS_LEGACY: ReadonlyArray<ReadonlyArray<string>> = [
   [],
   ["vendedores"],
@@ -347,7 +348,6 @@ export const STEP_REQUIRED_FIELDS_LEGACY: ReadonlyArray<ReadonlyArray<string>> =
   ["imoveis.0.rua", "imoveis.0.cidade", "imoveis.0.uf", "imoveis.0.descricao"],
   [],
   ["pagamento.valor_total"],
-  [],
   [],
 ] as const;
 

@@ -2,9 +2,10 @@
  * Presets de campos obrigatórios por etapa do formulário público.
  *
  * Substitui o STEP_REQUIRED_FIELDS estático que vivia em `validation.ts`.
- * Cada preset é um `string[][]` indexado por step (8 etapas — DocumentosStep,
- * Vendedor, Comprador, Imovel, StatusDebitos, Pagamento, PosseTitulo,
+ * Cada preset é um `string[][]` indexado por step (7 etapas — DocumentosStep,
+ * Vendedor, Comprador, Imovel, StatusDebitos (com Posse), Pagamento,
  * ComissaoConfig). Cada elemento é um path para `form.trigger` do RHF.
+ * Atualizado 2026-05-16: 8→7 etapas (merge Posse/Título no Status/Débitos).
  *
  * Por que declarativo em código (não DB):
  * - Paths estão acoplados ao schema Zod em `validation.ts`. Renomeação de
@@ -30,7 +31,6 @@ const PRESET_LEGADO: readonly (readonly string[])[] = [
   [],
   ["pagamento.valor_total"],
   [],
-  [],
 ] as const;
 
 // Mínimo viável: nome + identidade fiscal + valor + descrição imóvel.
@@ -41,7 +41,6 @@ const PRESET_MINIMO: readonly (readonly string[])[] = [
   ["imoveis.0.descricao"],
   [],
   ["pagamento.valor_total"],
-  [],
   [],
 ] as const;
 
@@ -68,7 +67,6 @@ const PRESET_PADRAO: readonly (readonly string[])[] = [
   ["imoveis.0.rua", "imoveis.0.cidade", "imoveis.0.uf", "imoveis.0.descricao"],
   [],
   ["pagamento.valor_total"],
-  [],
   [],
 ] as const;
 
@@ -114,7 +112,6 @@ const PRESET_COMPLETO: readonly (readonly string[])[] = [
   ],
   [],
   ["pagamento.valor_total"],
-  [],
   [],
 ] as const;
 
@@ -168,7 +165,7 @@ export function resolveRequiredFields(
 }
 
 /**
- * Versão de conveniência que retorna o array completo (8 steps).
+ * Versão de conveniência que retorna o array completo (7 steps).
  * Usada server-side em `f/[token]/page.tsx` pra passar pro client de uma vez.
  */
 export function resolveAllRequiredFields(
