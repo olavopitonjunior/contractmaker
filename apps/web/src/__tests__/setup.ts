@@ -1,6 +1,11 @@
 import "@testing-library/jest-dom/vitest";
 import { vi } from "vitest";
 
+// ANTHROPIC_API_KEY precisa estar setada antes do import de agent.ts —
+// `getAnthropicClient()` faz early-throw se vazia (mesmo com SDK mockado).
+process.env.ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "test-key";
+process.env.AUTH_SECRET = process.env.AUTH_SECRET || "test-secret";
+
 // --- Prisma mock ---
 vi.mock("@/lib/db/prisma", () => {
   // Reference que vai ser preenchida abaixo — permite $transaction passar

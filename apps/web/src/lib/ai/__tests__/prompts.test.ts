@@ -20,13 +20,19 @@ describe("DEFAULT_SYSTEM_PROMPT", () => {
 });
 
 describe("buildContextMessage", () => {
-  it("includes JSON-stringified data", () => {
+  it("includes dataJson rendered as markdown (post 2026-05 refactor)", () => {
     const result = buildContextMessage({
-      dataJson: { valor: 500000 },
+      dataJson: {
+        vendedores: [{ tipo_pessoa: "fisica", nome: "João Silva", cpf: "11111111111", estado_civil: "Solteiro(a)", profissao: "Engenheiro" }],
+      },
       htmlContent: "<p>test</p>",
       activeClauses: [],
     });
-    expect(result).toContain('"valor": 500000');
+    // dataJsonToMarkdown processa campos canônicos: vendedores/compradores/imoveis/pagamento/comissao.
+    // Output é markdown, não JSON stringified.
+    expect(result).toContain("## DADOS DO CONTRATO");
+    expect(result).toContain("### Vendedores");
+    expect(result).toContain("João Silva");
   });
 
   it("includes clause list formatted as [category] title", () => {
@@ -80,6 +86,7 @@ describe("buildContextMessage", () => {
       htmlContent: "<p>test</p>",
       activeClauses: [],
     });
-    expect(result).toContain("{}");
+    // dataJsonToMarkdown retorna "(dataJson vazio)" pra objetos sem chaves
+    expect(result).toContain("(dataJson vazio)");
   });
 });
