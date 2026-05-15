@@ -127,6 +127,15 @@ export type AuditAction =
   | "CONTRACT_DELETE_BULK"
   | "CONTRACT_SIGNERS_DATA_UPDATE"
   | "CERTIDAO_BATCH_DISPATCH"
+  // Serasa Experian — consultas restritas (score, restritivos, vínculos).
+  // SERASA_QUERY_DISPATCH grava qualquer batch que inclua endpoint Serasa;
+  // SERASA_CONSENT_GIVEN registra o consentimento LGPD por deal;
+  // SERASA_VINCULOS_EXPAND marca a descoberta opt-in de CNPJs vinculados;
+  // SERASA_BUDGET_EXCEEDED captura 402 quando o cap mensal Serasa estoura.
+  | "SERASA_QUERY_DISPATCH"
+  | "SERASA_CONSENT_GIVEN"
+  | "SERASA_VINCULOS_EXPAND"
+  | "SERASA_BUDGET_EXCEEDED"
   | "ENVELOPE_CREATE"
   | "ENVELOPE_RESEND"
   | "CLICKSIGN_WEBHOOK_RECEIVED"

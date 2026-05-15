@@ -61,12 +61,23 @@ export default async function CertidoesSettingsPage() {
   });
 
   const monthJobs = recent.filter((j) => j.createdAt >= firstOfMonth);
-  const monthSpend = monthJobs.reduce((a, j) => a + (j.costCents ?? 0), 0);
+  // Split Infosimples vs Serasa pra exibir os dois budgets sem se confundir.
+  // O type do select acima não inclui `provider`, então usamos o prefixo do
+  // endpoint como discriminador (todos os Serasa começam com "serasa/").
+  const monthJobsInfosimples = monthJobs.filter((j) => !j.endpoint.startsWith("serasa/"));
+  const monthJobsSerasa = monthJobs.filter((j) => j.endpoint.startsWith("serasa/"));
+  const monthSpend = monthJobsInfosimples.reduce((a, j) => a + (j.costCents ?? 0), 0);
+  const monthSpendSerasa = monthJobsSerasa.reduce((a, j) => a + (j.costCents ?? 0), 0);
   const budgetCents = Number(
     process.env.INFOSIMPLES_MONTHLY_BUDGET_CENTS ?? "20000"
   );
+  const budgetCentsSerasa = Number(process.env.SERASA_MONTHLY_BUDGET_CENTS ?? "500000");
   const budgetPct =
     budgetCents > 0 ? Math.min(100, Math.round((monthSpend / budgetCents) * 100)) : 0;
+  const budgetPctSerasa =
+    budgetCentsSerasa > 0
+      ? Math.min(100, Math.round((monthSpendSerasa / budgetCentsSerasa) * 100))
+      : 0;
 
   const totalLast30 = recent.length;
   const successCount = recent.filter((j) => j.status === "success").length;
@@ -188,7 +199,7 @@ export default async function CertidoesSettingsPage() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-2">
-              <Wallet className="h-4 w-4" /> Gasto do mês
+              <Wallet className="h-4 w-4" /> Infosimples — mês
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -204,6 +215,35 @@ export default async function CertidoesSettingsPage() {
                 style={{ width: `${budgetPct}%` }}
               />
             </div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Wallet className="h-4 w-4 text-amber-700" /> Serasa — mês
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-2xl font-semibold">{brl(monthSpendSerasa)}</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              de {brl(budgetCentsSerasa)} · {budgetPctSerasa}%
+            </p>
+            <div className="mt-2 h-1.5 bg-muted rounded overflow-hidden">
+              <div
+                className={`h-full ${
+                  budgetPctSerasa >= 90
+                    ? "bg-red-500"
+                    : budgetPctSerasa >= 70
+                    ? "bg-amber-500"
+                    : "bg-amber-600"
+                }`}
+                style={{ width: `${budgetPctSerasa}%` }}
+              />
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-2">
+              {monthJobsSerasa.length} consulta{monthJobsSerasa.length === 1 ? "" : "s"}
+            </p>
           </CardContent>
         </Card>
 

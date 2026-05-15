@@ -1,5 +1,6 @@
 import { endpointInfo, TJRS_TIPOS } from "./endpoints";
 import { comarcaForCidade } from "./comarcas-rj";
+import { isSerasaConfigured } from "@/lib/serasa/client";
 import type {
   ExtractionPlan,
   MissingField,
@@ -771,6 +772,43 @@ export function planCertidoesForDeal(
           `TJ da UF ${partyUf} sem cobertura Infosimples — extrair manualmente no portal TJ${partyUf}`
         )
       );
+    }
+  }
+
+  // ---- Serasa Experian (score + restritivos) ----
+  // Gate: roda APENAS em `expandAll` (i.e. quando o picker pede o catálogo
+  // completo). O auto-plan default fica Infosimples-only pra evitar surpresa
+  // de custo — usuário tem que marcar Serasa explicitamente no picker. Além
+  // disso, exige `isSerasaConfigured()` (env vars set) e consentimento LGPD
+  // checado na rota POST /certidoes (412 sem ele).
+  //
+  // Vínculos PJ↔PF (serasa/vinculos-pj-pf) NUNCA entra aqui — disparo só via
+  // POST /api/deals/:id/serasa/expand-vinculos (opt-in manual, S4).
+  if (expandAll && isSerasaConfigured()) {
+    for (const { kind, index, parte } of pessoas) {
+      const isPJ = parte.tipo_pessoa === "juridica";
+      const label = personLabel(parte);
+      const cpf = normalizeCpf(parte.cpf);
+      const cnpj = normalizeCnpj(parte.cnpj);
+      const scoreEp = isPJ ? "serasa/score-pj" : "serasa/score-pf";
+      const restritivosEp = isPJ ? "serasa/restritivos-pj" : "serasa/restritivos-pf";
+      if (isPJ) {
+        if (!cnpj) {
+          skipped.push(buildSkip(scoreEp, kind, index, label, "cnpj", "CNPJ invalido"));
+          skipped.push(buildSkip(restritivosEp, kind, index, label, "cnpj", "CNPJ invalido"));
+        } else {
+          jobs.push(buildJob(scoreEp, kind, index, label, { cnpj }));
+          jobs.push(buildJob(restritivosEp, kind, index, label, { cnpj }));
+        }
+      } else {
+        if (!cpf) {
+          skipped.push(buildSkip(scoreEp, kind, index, label, "cpf", "CPF invalido"));
+          skipped.push(buildSkip(restritivosEp, kind, index, label, "cpf", "CPF invalido"));
+        } else {
+          jobs.push(buildJob(scoreEp, kind, index, label, { cpf }));
+          jobs.push(buildJob(restritivosEp, kind, index, label, { cpf }));
+        }
+      }
     }
   }
 

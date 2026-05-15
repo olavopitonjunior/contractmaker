@@ -1,0 +1,30 @@
+{
+  "consultaProtocolo": "SERASA-REST-PF-DEMO-DEBT",
+  "totalOcorrencias": 3,
+  "valorTotal": 12450.55,
+  "pendencias": [
+    {
+      "tipo": "Pefin",
+      "origem": "Banco Demo S.A.",
+      "data": "2026-02-10",
+      "valor": 8200.00,
+      "descricao": "Empréstimo pessoal em atraso"
+    },
+    {
+      "tipo": "Refin",
+      "origem": "Financeira Demo",
+      "data": "2026-03-22",
+      "valor": 1800.55,
+      "descricao": "Refinanciamento atrasado"
+    }
+  ],
+  "protestos": [
+    {
+      "origem": "2º Cartório de Protesto - SP",
+      "data": "2026-04-01",
+      "valor": 2450.00
+    }
+  ],
+  "acoes": [],
+  "chequesSemFundo": []
+}

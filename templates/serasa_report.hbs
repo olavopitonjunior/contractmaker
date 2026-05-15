@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>Consulta Serasa — {{consultado.label}}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; color: #0f172a; line-height: 1.45; font-size: 11pt; margin: 0; }
+    header { border-bottom: 2px solid #0f172a; padding: 0 0 16px; margin: 0 0 24px; display: flex; justify-content: space-between; align-items: flex-start; }
+    header .brand { font-weight: 700; font-size: 14pt; letter-spacing: 0.04em; text-transform: uppercase; }
+    header .protocol { color: #475569; font-size: 9pt; text-align: right; }
+    h1 { font-size: 20pt; margin: 0 0 4px; }
+    h2 { font-size: 13pt; margin: 28px 0 8px; color: #0f172a; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
+    .card { border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px 20px; margin: 12px 0; background: #f8fafc; }
+    .pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 9pt; font-weight: 600; }
+    .pill.green { background: #dcfce7; color: #166534; }
+    .pill.amber { background: #fef3c7; color: #92400e; }
+    .pill.red { background: #fee2e2; color: #991b1b; }
+    .pill.slate { background: #e2e8f0; color: #334155; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px; }
+    .grid .k { color: #64748b; font-size: 9pt; }
+    .grid .v { font-weight: 500; }
+    table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin-top: 8px; }
+    th { text-align: left; background: #f1f5f9; padding: 6px 8px; font-weight: 600; }
+    td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; }
+    .score-big { font-size: 48pt; font-weight: 700; line-height: 1; }
+    .score-faixa { font-size: 11pt; color: #475569; }
+    footer { margin-top: 36px; padding-top: 12px; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 8.5pt; }
+    pre.raw { background: #0f172a; color: #f8fafc; font-size: 8pt; padding: 12px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <div class="brand">Serasa Experian</div>
+      <h1>{{titulo}}</h1>
+      <div style="color:#475569;font-size:10pt;">Consulta protocolada · {{dataEmissao}}</div>
+    </div>
+    <div class="protocol">
+      {{#if protocolo}}Protocolo<br/><strong>{{protocolo}}</strong>{{/if}}
+    </div>
+  </header>
+
+  <h2>Consultado</h2>
+  <div class="card">
+    <div class="grid">
+      <div class="k">Tipo</div><div class="v">{{consultado.tipo}}</div>
+      <div class="k">Nome / Razão Social</div><div class="v">{{consultado.label}}</div>
+      <div class="k">Documento</div><div class="v">{{consultado.documento}}</div>
+      {{#if consultado.uf}}<div class="k">UF</div><div class="v">{{consultado.uf}}</div>{{/if}}
+    </div>
+  </div>
+
+  <h2>Resultado</h2>
+  {{#if isScore}}
+    <div class="card" style="display:flex;align-items:center;gap:32px;">
+      <div>
+        <div class="score-big">{{score.score}}</div>
+        <div class="score-faixa">/ 1000</div>
+      </div>
+      <div>
+        <div><span class="pill {{riscoClass}}">Risco {{score.faixa}}</span></div>
+        <p style="margin:12px 0 0;color:#334155;">{{detalhes}}</p>
+      </div>
+    </div>
+    {{#if score.motivos}}
+      <h2>Drivers de risco</h2>
+      <table>
+        <thead><tr><th>Código</th><th>Descrição</th></tr></thead>
+        <tbody>
+          {{#each score.motivos}}
+            <tr><td>{{this.codigo}}</td><td>{{this.descricao}}</td></tr>
+          {{/each}}
+        </tbody>
+      </table>
+    {{/if}}
+  {{/if}}
+
+  {{#if isRestritivos}}
+    <div class="card">
+      <div><span class="pill {{situacaoClass}}">{{situacaoLabel}}</span></div>
+      <p style="margin:12px 0 0;color:#334155;">{{detalhes}}</p>
+    </div>
+    {{#if restritivos.pendencias.length}}
+      <h2>Pendências financeiras</h2>
+      <table>
+        <thead><tr><th>Origem</th><th>Tipo</th><th>Data</th><th style="text-align:right;">Valor</th></tr></thead>
+        <tbody>
+          {{#each restritivos.pendencias}}
+            <tr><td>{{this.origem}}</td><td>{{this.tipo}}</td><td>{{this.data}}</td><td style="text-align:right;">{{formatBRL this.valor}}</td></tr>
+          {{/each}}
+        </tbody>
+      </table>
+    {{/if}}
+    {{#if restritivos.protestos.length}}
+      <h2>Protestos</h2>
+      <table>
+        <thead><tr><th>Cartório</th><th>Data</th><th style="text-align:right;">Valor</th></tr></thead>
+        <tbody>
+          {{#each restritivos.protestos}}
+            <tr><td>{{this.origem}}</td><td>{{this.data}}</td><td style="text-align:right;">{{formatBRL this.valor}}</td></tr>
+          {{/each}}
+        </tbody>
+      </table>
+    {{/if}}
+    {{#if restritivos.acoes.length}}
+      <h2>Ações judiciais</h2>
+      <table>
+        <thead><tr><th>Tipo</th><th>Origem</th><th>Data</th><th style="text-align:right;">Valor</th></tr></thead>
+        <tbody>
+          {{#each restritivos.acoes}}
+            <tr><td>{{this.tipo}}</td><td>{{this.origem}}</td><td>{{this.data}}</td><td style="text-align:right;">{{formatBRL this.valor}}</td></tr>
+          {{/each}}
+        </tbody>
+      </table>
+    {{/if}}
+  {{/if}}
+
+  {{#if isVinculos}}
+    <div class="card">
+      <p style="margin:0;color:#334155;">{{detalhes}}</p>
+    </div>
+    {{#if vinculos.length}}
+      <h2>Empresas vinculadas</h2>
+      <table>
+        <thead><tr><th>CNPJ</th><th>Razão Social</th><th>Papel</th><th style="text-align:right;">%</th></tr></thead>
+        <tbody>
+          {{#each vinculos}}
+            <tr>
+              <td>{{this.cnpj}}</td>
+              <td>{{this.razaoSocial}}</td>
+              <td>{{this.papel}}</td>
+              <td style="text-align:right;">{{this.percentual}}</td>
+            </tr>
+          {{/each}}
+        </tbody>
+      </table>
+    {{/if}}
+  {{/if}}
+
+  <h2>Resposta bruta (apêndice)</h2>
+  <pre class="raw">{{raw}}</pre>
+
+  <footer>
+    Documento gerado automaticamente por Contractmaker · Consulta intermediada pela Serasa Experian.
+    Base legal: proteção ao crédito (Lei 12.414/2011, art. 7º e LGPD art. 7º, V).
+  </footer>
+</body>
+</html>

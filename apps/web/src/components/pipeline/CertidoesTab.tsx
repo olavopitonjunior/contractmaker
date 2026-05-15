@@ -36,6 +36,7 @@ import {
 import { useCertidoesBatch, type CertidaoJobRow } from "@/hooks/useCertidoesBatch";
 import { ExtractCertidoesDialog, type JobSelection } from "./ExtractCertidoesDialog";
 import { CertidaoDetailDialog } from "./CertidaoDetailDialog";
+import { SerasaConsentDialog } from "./SerasaConsentDialog";
 import { ComplementDadosForm } from "./ComplementDadosForm";
 import { ShareCertidoesDialog } from "./ShareCertidoesDialog";
 import { DiligentedPersonsSection } from "./DiligentedPersonsSection";
@@ -361,6 +362,9 @@ export function CertidoesTab({
   const [generatingReport, setGeneratingReport] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
+  // Serasa LGPD: quando POST /certidoes retorna 412 requiresConsent, abrimos
+  // o ConsentDialog e re-tentamos automaticamente com os mesmos jobs.
+  const [pendingConsentJobs, setPendingConsentJobs] = useState<JobSelection[] | null>(null);
   const [detailJob, setDetailJob] = useState<CertidaoJobRow | null>(null);
   const [complementJobId, setComplementJobId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -459,6 +463,11 @@ export function CertidoesTab({
     setExtracting(true);
     try {
       const result = await extract(jobs);
+      if (result?.requiresConsent) {
+        // Guarda os jobs pra re-tentar após o usuário registrar o consent.
+        setPendingConsentJobs(jobs ?? []);
+        return;
+      }
       if (result) {
         toast.success(`Iniciando ${result.jobCount} certidões…`);
       }
@@ -1076,6 +1085,19 @@ export function CertidoesTab({
         onOpenChange={setDialogOpen}
         dealId={dealId}
         onConfirm={handleExtract}
+      />
+
+      <SerasaConsentDialog
+        open={pendingConsentJobs !== null}
+        onOpenChange={(open) => !open && setPendingConsentJobs(null)}
+        dealId={dealId}
+        onGranted={async () => {
+          const jobs = pendingConsentJobs;
+          setPendingConsentJobs(null);
+          if (jobs) {
+            await handleExtract(jobs);
+          }
+        }}
       />
 
       {detailJob && (

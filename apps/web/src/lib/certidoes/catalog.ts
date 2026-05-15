@@ -48,6 +48,7 @@ export function listEndpointsByCategory(
     federal: 0,
     estadual: 1,
     municipal: 2,
+    serasa: 3,
   };
   return listAllForPicker()
     .filter((e) => e.category === category)
@@ -170,4 +171,7 @@ export const CATEGORY_LABELS: Record<EndpointCategory, string> = {
   municipal: "Municipal",
   cadastro: "Cadastro",
   fgts: "FGTS",
+  score: "Score",
+  negativacao: "Negativação",
+  vinculos: "Vínculos",
 };

@@ -16,6 +16,8 @@ export type Situacao =
   | "nao_emitida"
   | "aguardando_pdf"
   | "informativa"          // Cartão CNPJ, Cartão CPF — consulta de dados, sem negativa/positiva
+  | "sem_restricao"        // Serasa: consultado SEM pendências (verde, equivalente a "negativa" no léxico Infosimples)
+  | "com_restricao"        // Serasa: consultado COM pendências (vermelho/amarelo, equivalente a "positiva")
   | "indeterminado";
 
 // Re-exported from ./error-codes so callers that type-import from types.ts

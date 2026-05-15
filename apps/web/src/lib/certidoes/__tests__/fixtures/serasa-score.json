@@ -1,0 +1,21 @@
+{
+  "consultaProtocolo": "SERASA-SCORE-PF-DEMO-001",
+  "dataConsulta": "2026-05-15T10:00:00Z",
+  "score": 754,
+  "faixa": "baixo",
+  "classificacao": "Risco baixo",
+  "motivosScore": [
+    {
+      "codigo": "M07",
+      "descricao": "Histórico de pagamentos pontual nos últimos 12 meses"
+    },
+    {
+      "codigo": "M21",
+      "descricao": "Tempo de relacionamento estável com instituições financeiras"
+    },
+    {
+      "codigo": "M14",
+      "descricao": "Comprometimento de renda dentro do esperado para a faixa"
+    }
+  ]
+}

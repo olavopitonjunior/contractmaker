@@ -268,6 +268,12 @@ model Deal {
   commissionPaidAt DateTime?
   lostAt           DateTime?
   lostReason       String?
+  // Serasa (2026-05) — registro de consentimento LGPD por deal pra consultas
+  // restritas (score, restritivos, vínculos). Shape: { serasaConsent: { at,
+  // by, baseLegal } }. Sem o campo populado, POST /certidoes retorna 412
+  // quando o batch inclui endpoints Serasa. Json em vez de model dedicado
+  // pra evitar over-engineering — se virar 5+ tipos de consentimento, migrar.
+  complianceJson   Json?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 

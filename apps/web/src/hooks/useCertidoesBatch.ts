@@ -140,6 +140,12 @@ export function useCertidoesBatch(dealId: string) {
         });
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
+          // 412 = consentimento LGPD ausente pra Serasa. Não loga erro porque
+          // o caller vai abrir o ConsentDialog e re-tentar.
+          if (res.status === 412 && data.requiresConsent) {
+            setLoading(false);
+            return { requiresConsent: true, missingFor: data.missingFor ?? [] };
+          }
           setError(
             data.error || `Falha ao iniciar extração (HTTP ${res.status})`
           );

@@ -3,10 +3,12 @@ import { waitUntil } from "@vercel/functions";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { planCertidoesForDeal } from "@/lib/certidoes/planner";
-import { runBatch, getMonthlySpend } from "@/lib/certidoes/executor";
+import { runBatch, getMonthlySpend, getMonthlySpendByProvider } from "@/lib/certidoes/executor";
 import { endpointInfo } from "@/lib/certidoes/endpoints";
 import { sanitizePayload } from "@/lib/certidoes/infosimples";
+import { sanitizeSerasaPayload } from "@/lib/serasa/sanitize";
 import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
+import { audit } from "@/lib/security/audit";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -135,14 +137,14 @@ export async function POST(
     );
   }
 
-  // Budget guard (per-org)
+  // Budget guard (per-org, per-provider). Verificamos ambos os budgets aqui
+  // porque o batch pode misturar Infosimples e Serasa; cap separado evita que
+  // Serasa (ticket alto) bloqueie Infosimples e vice-versa.
   const spend = await getMonthlySpend(org.id);
+  const serasaSpend = await getMonthlySpendByProvider(org.id, "serasa");
   if (spend.exceeded) {
     return NextResponse.json(
-      {
-        error: "Budget mensal de certidoes atingido",
-        spend,
-      },
+      { error: "Budget mensal de certidoes Infosimples atingido", spend },
       { status: 402 }
     );
   }
@@ -231,17 +233,56 @@ export async function POST(
     );
   }
 
-  // Check if budget would be exceeded (sum only the non-skipped jobs)
+  // Check if budget would be exceeded — split por provider. Infosimples e
+  // Serasa têm budgets isolados (ticket muito diferente); validamos cada um
+  // contra seus próprios jobs.
   const totalCostCents = effectiveJobs.reduce((acc, j) => acc + j.costCents, 0);
-  if (spend.spentCents + totalCostCents > spend.budgetCents) {
+  const infosimplesCostCents = effectiveJobs
+    .filter((j) => (endpointInfo(j.endpoint).provider ?? "infosimples") === "infosimples")
+    .reduce((acc, j) => acc + j.costCents, 0);
+  const serasaCostCents = effectiveJobs
+    .filter((j) => endpointInfo(j.endpoint).provider === "serasa")
+    .reduce((acc, j) => acc + j.costCents, 0);
+  const hasSerasaJob = serasaCostCents > 0;
+
+  if (spend.spentCents + infosimplesCostCents > spend.budgetCents) {
     return NextResponse.json(
       {
-        error: "Este lote estouraria o budget mensal de certidoes",
+        error: "Este lote estouraria o budget mensal Infosimples",
         spend,
         plan: { ...plan, jobs: effectiveJobs, skipped: effectiveSkipped, totalCostCents },
       },
       { status: 402 }
     );
+  }
+  if (hasSerasaJob && serasaSpend.spentCents + serasaCostCents > serasaSpend.budgetCents) {
+    return NextResponse.json(
+      {
+        error: "Este lote estouraria o budget mensal Serasa",
+        spend: serasaSpend,
+        provider: "serasa",
+        plan: { ...plan, jobs: effectiveJobs, skipped: effectiveSkipped, totalCostCents },
+      },
+      { status: 402 }
+    );
+  }
+
+  // LGPD gate: dispatch de Serasa exige consentimento explícito por deal.
+  // Sem `Deal.complianceJson.serasaConsent`, retornamos 412 e a UI abre o
+  // SerasaConsentDialog (S5) antes de reenviar o POST.
+  if (hasSerasaJob) {
+    const compliance = (deal.complianceJson as Record<string, unknown> | null) ?? null;
+    const consent = compliance?.serasaConsent as Record<string, unknown> | undefined;
+    if (!consent || !consent.at) {
+      return NextResponse.json(
+        {
+          error: "Consentimento LGPD nao registrado para consulta Serasa",
+          requiresConsent: true,
+          missingFor: ["serasa"],
+        },
+        { status: 412 }
+      );
+    }
   }
 
   // Create all job rows atomically, including persisted skipped jobs so the
@@ -249,16 +290,25 @@ export async function POST(
   await prisma.$transaction([
     ...effectiveJobs.map((p) => {
       const info = endpointInfo(p.endpoint);
+      const provider = info.provider ?? "infosimples";
+      // Cada provider tem seu sanitizer (campos sensíveis diferentes). Sem
+      // o split, segredos Serasa (client_secret/access_token) iam pro DB.
+      const sanitized =
+        provider === "serasa"
+          ? sanitizeSerasaPayload(p.requestPayload)
+          : sanitizePayload(p.requestPayload);
       return prisma.certidaoJob.create({
         data: {
           dealId: params.dealId,
           userId,
           batchId,
+          provider,
+          orgId: org.id,
           endpoint: p.endpoint,
           label: p.label,
           targetKind: p.targetKind,
           targetIndex: p.targetIndex,
-          requestPayload: sanitizePayload(p.requestPayload) as object,
+          requestPayload: sanitized as object,
           status: info.initialStatus ?? "pending",
           costCents: null,
           // J.5 (Phase J) — cache portalUrl pra UI renderizar CTA quando
@@ -303,6 +353,29 @@ export async function POST(
       });
     }),
   ]);
+
+  // Audit dedicado pra dispatch de Serasa — separa visibilidade na trilha
+  // LGPD. CERTIDAO_BATCH_DISPATCH continua sendo gravado pelos demais
+  // observers (Newton/intent); aqui só marcamos Serasa explicitamente.
+  if (hasSerasaJob) {
+    const serasaCount = effectiveJobs.filter(
+      (j) => endpointInfo(j.endpoint).provider === "serasa"
+    ).length;
+    void audit(
+      { orgId: org.id, userId },
+      {
+        action: "SERASA_QUERY_DISPATCH",
+        result: "SUCCESS",
+        resource: params.dealId,
+        resourceType: "Deal",
+        metadata: {
+          batchId,
+          serasaJobs: serasaCount,
+          serasaCostCents,
+        },
+      }
+    );
+  }
 
   // Mantém o lambda vivo até runBatch terminar (até maxDuration). Sem
   // waitUntil, Vercel cancela a promise assim que o NextResponse é enviado

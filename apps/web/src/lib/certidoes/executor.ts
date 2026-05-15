@@ -1,10 +1,15 @@
 import { prisma } from "@/lib/db/prisma";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { callInfosimples, downloadReceipt, InfosimplesError } from "./infosimples";
+import { callSerasa } from "@/lib/serasa/client";
+import { SerasaError } from "@/lib/serasa/types";
 import { normalize } from "./normalizers";
+import { normalizeSerasa } from "./serasa-normalizers";
+import { renderSerasaHtml, type SerasaRenderContext } from "./serasa-render";
+import { exportPdfToBuffer } from "@/lib/render/exporter";
 import { endpointInfo } from "./endpoints";
 import { classifyOutcome } from "./outcome-classifier";
-import type { JobStatus, Situacao } from "./types";
+import type { JobStatus, Situacao, TargetKind } from "./types";
 import { emitNotification } from "@/lib/notifications/emit";
 
 /**
@@ -300,6 +305,15 @@ export async function runSingleJob(
 
   const info = endpointInfo(job.endpoint);
 
+  // Multi-provider dispatch. Serasa devolve JSON estruturado (sem PDF de
+  // portal), então tem seu próprio caminho — runSerasaJob cuida de normalizar,
+  // gerar PDF próprio via Puppeteer e anexar como DealAttachment.
+  if (info.provider === "serasa") {
+    await runSerasaJob(job, dealId, startedAt);
+    await checkBatchCompletion(job.batchId);
+    return;
+  }
+
   try {
     const args = job.requestPayload as Record<string, unknown>;
     const resp = await callInfosimples(job.endpoint, args);
@@ -450,6 +464,226 @@ export async function runSingleJob(
       costCents: info.costCents,
     });
     await checkBatchCompletion(job.batchId);
+  }
+}
+
+/**
+ * Runtime helper para resolver dados do consultado para renderização do PDF
+ * Serasa. Carrega vendedores/compradores via SalesForm.dataJson (mesma fonte
+ * que o planner usa) e diligenciados via DiligentedPerson. Cai num placeholder
+ * mínimo quando o deal já não existe (job ad-hoc).
+ */
+async function resolveSerasaConsultado(
+  dealId: string | null,
+  targetKind: TargetKind,
+  targetIndex: number
+): Promise<SerasaRenderContext["consultado"]> {
+  const fallback = {
+    tipo: "Pessoa fisica" as const,
+    label: `${targetKind} ${targetIndex + 1}`,
+    documento: "—",
+    kind: targetKind,
+    index: targetIndex,
+  };
+  if (!dealId) return fallback;
+  const deal = await prisma.deal.findUnique({
+    where: { id: dealId },
+    include: { form: { select: { dataJson: true } } },
+  });
+  if (!deal) return fallback;
+
+  if (targetKind === "diligenciado") {
+    const dilig = await prisma.diligentedPerson.findMany({
+      where: { dealId },
+      orderBy: { createdAt: "asc" },
+    });
+    const row = dilig[targetIndex];
+    if (!row) return fallback;
+    return {
+      tipo: row.tipoPessoa === "juridica" ? "Pessoa juridica" : "Pessoa fisica",
+      label: row.nome,
+      documento: (row.cnpj ?? row.cpf ?? "—") as string,
+      uf: row.uf ?? undefined,
+      kind: targetKind,
+      index: targetIndex,
+    };
+  }
+
+  const data = (deal.form?.dataJson ?? deal.dataJson) as Record<string, unknown> | null;
+  const listKey =
+    targetKind === "vendedor"
+      ? "vendedores"
+      : targetKind === "comprador"
+      ? "compradores"
+      : null;
+  if (!listKey || !data) return fallback;
+  const list = (data[listKey] as Array<Record<string, unknown>> | undefined) ?? [];
+  const row = list[targetIndex];
+  if (!row) return fallback;
+  const isPJ = !!(row.cnpj as string | undefined);
+  return {
+    tipo: isPJ ? "Pessoa juridica" : "Pessoa fisica",
+    label:
+      ((row.razao_social ?? row.nome) as string | undefined) ?? fallback.label,
+    documento: ((row.cnpj ?? row.cpf) as string | undefined) ?? "—",
+    uf: (row.uf as string | undefined) ?? undefined,
+    kind: targetKind,
+    index: targetIndex,
+  };
+}
+
+/**
+ * Executa um CertidaoJob com `provider: "serasa"`.
+ *
+ * Fluxo:
+ *   1. callSerasa(endpoint, payload) → JSON cru (OAuth2 + cache + retry 401/5xx
+ *      já está dentro do client).
+ *   2. normalizeSerasa(endpoint, body) → NormalizedResult (situacao + raw).
+ *   3. renderSerasaHtml → exportPdfToBuffer → uploadBufferToStorage →
+ *      DealAttachment { category: "certidao", source: "serasa" }.
+ *   4. Update do CertidaoJob com status final e cost.
+ *
+ * Erros:
+ *   - SerasaError com status conhecido → mapeia pra status do job (data_invalid
+ *     em 422, rate_limited em 429, api_error em 5xx, failed em 4xx genérico).
+ *   - Qualquer outra exceção → failed + integration_error.
+ *
+ * Diferença vs runSingleJob principal: Serasa NÃO emite PDF de portal, então
+ * o pipeline pula `downloadAndAttach` (que assume site_receipts[]) e usa
+ * geração própria via Puppeteer. Custos só são contabilizados em success —
+ * em api_error/rate_limited zera pra retry honesto.
+ */
+async function runSerasaJob(
+  job: { id: string; endpoint: string; label: string; targetKind: string; targetIndex: number; requestPayload: unknown; batchId: string; createdAt: Date },
+  dealId: string | null,
+  startedAt: Date
+): Promise<void> {
+  const info = endpointInfo(job.endpoint);
+  try {
+    const payload = (job.requestPayload as Record<string, unknown>) ?? {};
+    const { body } = await callSerasa(job.endpoint, payload);
+    const latencyMs = Date.now() - startedAt.getTime();
+
+    const normalized = normalizeSerasa(job.endpoint, body);
+    const consultado = await resolveSerasaConsultado(
+      dealId,
+      job.targetKind as TargetKind,
+      job.targetIndex
+    );
+
+    // Gera PDF próprio (Serasa não devolve PDF) e anexa como DealAttachment.
+    let attachmentId: string | null = null;
+    if (dealId) {
+      try {
+        const html = renderSerasaHtml(normalized, {
+          endpoint: job.endpoint,
+          label: job.label,
+          consultado,
+        });
+        const buffer = await exportPdfToBuffer(html);
+        const safeName = `${job.endpoint.replace(/[^a-z0-9]/gi, "_")}_${Date.now()}.pdf`;
+        const url = await uploadBufferToStorage({
+          bucket: process.env.S3_BUCKET,
+          key: `deal-certidoes/${dealId}/${safeName}`,
+          body: buffer,
+          contentType: "application/pdf",
+        });
+        const assignmentKind =
+          job.targetKind === "vendedor" ||
+          job.targetKind === "comprador" ||
+          job.targetKind === "imovel"
+            ? job.targetKind
+            : "outro";
+        const attachment = await prisma.dealAttachment.create({
+          data: {
+            dealId,
+            filename: safeName,
+            mime: "application/pdf",
+            url,
+            category: "certidao",
+            source: "serasa",
+            extractedData: {
+              certidao: { endpoint: job.endpoint, label: job.label },
+              assignment: { kind: assignmentKind, index: job.targetIndex },
+              serasa: { protocolo: (normalized.raw as Record<string, unknown> | undefined)?.protocolo ?? null },
+            },
+          },
+        });
+        attachmentId = attachment.id;
+      } catch (renderErr) {
+        // PDF é nice-to-have — perda de render NÃO invalida a consulta. Log e segue.
+        console.error("[serasa] falha ao gerar PDF/anexo:", renderErr);
+      }
+    }
+
+    await prisma.certidaoJob.update({
+      where: { id: job.id },
+      data: {
+        status: "success",
+        finishedAt: new Date(),
+        latencyMs,
+        resultCode: 200,
+        resultMessage: "ok",
+        resultData: normalized as unknown as object,
+        attachmentId,
+        costCents: info.costCents,
+      },
+    });
+    logTransition(job.id, "fetching", "success", "serasa ok", {
+      endpoint: job.endpoint,
+      situacao: normalized.situacao,
+      latencyMs,
+      costCents: info.costCents,
+      hasAttachment: attachmentId !== null,
+    });
+  } catch (err) {
+    const latencyMs = Date.now() - startedAt.getTime();
+    const isSerasa = err instanceof SerasaError;
+    const status = isSerasa ? err.status : 0;
+    const message = err instanceof Error ? err.message : "erro desconhecido";
+
+    // Roteamento por status HTTP. Retry transitório é deixado pro cron (status
+    // api_error/rate_limited mantém nextRetryAt; failed_permanent é terminal).
+    let jobStatus: JobStatus = "failed";
+    let nextRetryAt: Date | null = null;
+    let failureCategory = "integration_error";
+    if (isSerasa) {
+      if (status === 401) {
+        // Auth quebrada — não dá pra retentar até alguém corrigir credenciais.
+        failureCategory = "account_issue";
+      } else if (status === 422 || status === 400) {
+        jobStatus = "failed";
+        failureCategory = "inconsistent_input";
+      } else if (status === 429) {
+        nextRetryAt = new Date(Date.now() + 30 * 60_000);
+        failureCategory = "rate_limited";
+      } else if (status >= 500) {
+        nextRetryAt = new Date(Date.now() + 2 * 60_000);
+        failureCategory = "provider_timeout";
+      }
+    }
+
+    await prisma.certidaoJob.update({
+      where: { id: job.id },
+      data: {
+        status: jobStatus,
+        finishedAt: jobStatus === "failed" ? new Date() : null,
+        latencyMs,
+        resultCode: status || null,
+        resultMessage: message.slice(0, 500),
+        errorMessage: message.slice(0, 500),
+        // Cobrança honesta: erros não geram custo (a Serasa só cobra resposta válida).
+        costCents: 0,
+        nextRetryAt,
+        resultData: { failureCategory, errorMessage: message.slice(0, 500) },
+      },
+    });
+    logTransition(job.id, "fetching", jobStatus, failureCategory, {
+      endpoint: job.endpoint,
+      errorMessage: message.slice(0, 200),
+      latencyMs,
+      status,
+    });
   }
 }
 
@@ -692,6 +926,11 @@ export async function sweepStaleJobs(options: {
     "positiva_com_efeitos",
     "nao_emitida",
     "aguardando_pdf",
+    // Serasa: jobs com resultData persistido + situacao terminal são promovidos
+    // pelo sweeper igual aos Infosimples (resolve race container-morto-pós-update).
+    "sem_restricao",
+    "com_restricao",
+    "informativa",
   ]);
 
   const toPromote: string[] = [];
@@ -748,21 +987,44 @@ export async function sweepStaleJobs(options: {
  * Budget guard — returns current month spent for the given org and whether we
  * are over budget. Budget is per-org to isolate tenants — one org's spend does
  * not consume another org's quota.
+ *
+ * **Importante (Serasa integration, 2026-05):** este helper conta APENAS jobs
+ * Infosimples. Sem o filtro, jobs Serasa (ticket muito maior — R$ 5 vs R$ 0,04)
+ * estourariam o budget Infosimples e bloqueariam certidões legítimas. Use
+ * `getMonthlySpendByProvider` para Serasa.
  */
 export async function getMonthlySpend(orgId: string): Promise<{
   spentCents: number;
   budgetCents: number;
   exceeded: boolean;
 }> {
-  // Phase F.II-γ (2026-04-16): raised default from 10000 (R$ 100) to 20000
-  // (R$ 200) to accommodate Phase F.II-γ expansion — TJSP/TJRJ multi-tipo
-  // (4x chamadas por parte), TRF individual adicional, CENPROT nacional.
-  const budgetCents = Number(process.env.INFOSIMPLES_MONTHLY_BUDGET_CENTS ?? "20000");
+  return getMonthlySpendByProvider(orgId, "infosimples");
+}
+
+/**
+ * Budget guard generalizado por provider.
+ *
+ * - `infosimples` → INFOSIMPLES_MONTHLY_BUDGET_CENTS (default R$ 200)
+ * - `serasa`      → SERASA_MONTHLY_BUDGET_CENTS (default R$ 5.000)
+ *
+ * Mantemos budgets isolados porque os tickets são muito diferentes — Serasa
+ * R$ 5 por consulta vs Infosimples R$ 0,04. Compartilhar caixa sufoca um ou
+ * outro dependendo de onde a org puxa mais.
+ */
+export async function getMonthlySpendByProvider(
+  orgId: string,
+  provider: "infosimples" | "serasa"
+): Promise<{ spentCents: number; budgetCents: number; exceeded: boolean }> {
+  const budgetCents =
+    provider === "serasa"
+      ? Number(process.env.SERASA_MONTHLY_BUDGET_CENTS ?? "500000")
+      : Number(process.env.INFOSIMPLES_MONTHLY_BUDGET_CENTS ?? "20000");
   const now = new Date();
   const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   const agg = await prisma.certidaoJob.aggregate({
     where: {
       createdAt: { gte: firstOfMonth },
+      provider,
       deal: { form: { orgId } },
     },
     _sum: { costCents: true },

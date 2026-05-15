@@ -7,7 +7,7 @@
  * picker UI can group them by scope and filter by UF.
  */
 
-export type EndpointScope = "federal" | "estadual" | "municipal";
+export type EndpointScope = "federal" | "estadual" | "municipal" | "serasa";
 export type EndpointCategory =
   | "civel"
   | "trabalhista"
@@ -16,7 +16,11 @@ export type EndpointCategory =
   | "municipal"
   | "federal"
   | "cadastro"    // Phase B: Cartão CNPJ, CPF situation — informational dumps
-  | "fgts";        // Phase B: CRF FGTS (Caixa) — labor-adjacent regulatory
+  | "fgts"        // Phase B: CRF FGTS (Caixa) — labor-adjacent regulatory
+  | "score"       // Serasa: Score de crédito (0-1000)
+  | "negativacao" // Serasa: Restritivos (Pefin/Refin, protestos, ações)
+  | "vinculos";   // Serasa: vínculos PJ↔PF (sociedades, representação)
+export type EndpointProvider = "infosimples" | "serasa";
 export type EndpointAppliesTo = "pessoa" | "imovel";
 
 export interface EndpointInfo {
@@ -33,6 +37,13 @@ export interface EndpointInfo {
   appliesTo: EndpointAppliesTo[];
   /** F1: semantic category for filtering in the picker UI */
   category: EndpointCategory;
+  /**
+   * Provider que serve o endpoint. Default `infosimples` mantém retrocompat
+   * com o catálogo legado. O executor faz switch por este campo —
+   * `serasa` chama `lib/serasa/client.ts::callSerasa` com OAuth2 + cache;
+   * `infosimples` segue o caminho histórico via `callInfosimples`.
+   */
+  provider?: EndpointProvider;
   /** F1: tooltip shown in the picker */
   description?: string;
   /** F.II-γ: endpoint só dispara se checkGovBrAuth() retornar active=true */
@@ -629,6 +640,67 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     category: "protesto",
     requiresGovBrAuth: true,
     description: "Consulta nacional de protestos (exceto detalhes SP). Requer autenticacao GOV.BR ativa na conta Infosimples.",
+  },
+
+  // --- Serasa Experian ---
+  // Diferente da Infosimples, o Serasa devolve JSON estruturado. O executor
+  // gera PDF próprio (Puppeteer) a partir do normalized result e anexa como
+  // DealAttachment source="serasa". Custos placeholder (R$ 5) até pricing
+  // comercial fechar — NÃO mexer em prod sem ajustar.
+  "serasa/score-pf": {
+    id: "serasa/score-pf",
+    label: "Serasa — Score PF",
+    costCents: 500,
+    scope: "serasa",
+    appliesTo: ["pessoa"],
+    category: "score",
+    provider: "serasa",
+    emitsPdf: false,
+    description: "Score de credito (0-1000) e drivers de risco para pessoa fisica via Serasa Experian.",
+  },
+  "serasa/score-pj": {
+    id: "serasa/score-pj",
+    label: "Serasa — Score PJ",
+    costCents: 500,
+    scope: "serasa",
+    appliesTo: ["pessoa"],
+    category: "score",
+    provider: "serasa",
+    emitsPdf: false,
+    description: "Score de credito empresarial (0-1000) via Serasa Experian.",
+  },
+  "serasa/restritivos-pf": {
+    id: "serasa/restritivos-pf",
+    label: "Serasa — Negativacao PF",
+    costCents: 500,
+    scope: "serasa",
+    appliesTo: ["pessoa"],
+    category: "negativacao",
+    provider: "serasa",
+    emitsPdf: false,
+    description: "Pendencias financeiras (Pefin/Refin), protestos e acoes para pessoa fisica.",
+  },
+  "serasa/restritivos-pj": {
+    id: "serasa/restritivos-pj",
+    label: "Serasa — Negativacao PJ",
+    costCents: 500,
+    scope: "serasa",
+    appliesTo: ["pessoa"],
+    category: "negativacao",
+    provider: "serasa",
+    emitsPdf: false,
+    description: "Pendencias financeiras, protestos e acoes para pessoa juridica.",
+  },
+  "serasa/vinculos-pj-pf": {
+    id: "serasa/vinculos-pj-pf",
+    label: "Serasa — Vinculos PJ↔PF",
+    costCents: 500,
+    scope: "serasa",
+    appliesTo: ["pessoa"],
+    category: "vinculos",
+    provider: "serasa",
+    emitsPdf: false,
+    description: "Lista de CNPJs onde o CPF aparece como socio, administrador ou representante. Usado para diligenciar PJ ocultas.",
   },
 };
 

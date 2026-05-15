@@ -457,15 +457,20 @@ async function launchBrowser() {
   });
 }
 
-export async function exportPdf(
+/**
+ * Renderiza HTML em PDF e devolve o Buffer. Não escreve em disco.
+ *
+ * Usado pelo pipeline Serasa (relatório próprio anexado como DealAttachment)
+ * e em qualquer caller que precise do PDF em memória pra upload direto via
+ * `uploadBufferToStorage`. O wrapper `exportPdf` (mantido pra retrocompat com
+ * o pipeline legado de contratos) delega aqui e escreve no disco.
+ */
+export async function exportPdfToBuffer(
   html: string,
-  outputPath: string,
-  format = 'A4',
+  format: string = 'A4',
   style: DocumentStyleExport | null = null
-): Promise<void> {
-  ensureDir(outputPath);
+): Promise<Buffer> {
   const wrapped = wrapWithStyle(html, style);
-
   const browser = await launchBrowser();
 
   try {
@@ -473,15 +478,11 @@ export async function exportPdf(
     await page.setContent(wrapped, { waitUntil: 'networkidle0' });
 
     const defaultFooter = `<div style="width:100%;font-size:9pt;padding:0 25mm;color:#666;text-align:center;"><span class="pageNumber"></span> / <span class="totalPages"></span></div>`;
-    // Always show the page-number footer unless explicitly disabled by the preset.
     const displayHeaderFooter = style?.pageNumbers !== false;
-
-    // Classic typographic margins when no preset is configured: larger left
-    // margin for binding, slightly generous top for header breathing room.
     const classicMargin = { top: '30mm', bottom: '25mm', left: '35mm', right: '25mm' };
 
-    await page.pdf({
-      path: outputPath,
+    const result = await page.pdf({
+      // Sem `path` → puppeteer devolve Uint8Array (compatível com Buffer).
       format: format as any,
       printBackground: true,
       displayHeaderFooter,
@@ -497,7 +498,19 @@ export async function exportPdf(
           }
         : classicMargin,
     });
+    return Buffer.isBuffer(result) ? result : Buffer.from(result as Uint8Array);
   } finally {
     await browser.close();
   }
+}
+
+export async function exportPdf(
+  html: string,
+  outputPath: string,
+  format = 'A4',
+  style: DocumentStyleExport | null = null
+): Promise<void> {
+  ensureDir(outputPath);
+  const buffer = await exportPdfToBuffer(html, format, style);
+  fs.writeFileSync(outputPath, buffer);
 }

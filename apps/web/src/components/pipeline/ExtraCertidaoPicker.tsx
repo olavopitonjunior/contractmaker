@@ -46,6 +46,8 @@ function scopeLabel(scope: string): string {
     ? "Estadual"
     : scope === "municipal"
     ? "Municipal"
+    : scope === "serasa"
+    ? "Serasa Experian"
     : scope;
 }
 
@@ -81,9 +83,14 @@ export function ExtraCertidaoPicker({
       federal: [],
       estadual: [],
       municipal: [],
+      serasa: [],
     };
     for (const e of filtered) {
-      groups[e.scope].push(e);
+      // Scope "serasa" agrupa todos os endpoints do provider Serasa (score,
+      // restritivos, vínculos) numa seção dedicada — separa visualmente do
+      // resto pra deixar claro custo + base legal LGPD.
+      const scope = e.scope in groups ? e.scope : "federal";
+      groups[scope].push(e);
     }
     return groups;
   }, [filtered]);
@@ -152,13 +159,21 @@ export function ExtraCertidaoPicker({
         </div>
 
         <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-          {(["federal", "estadual", "municipal"] as const).map((scope) => {
+          {(["federal", "estadual", "municipal", "serasa"] as const).map((scope) => {
             const items = grouped[scope];
             if (!items || items.length === 0) return null;
+            const isSerasa = scope === "serasa";
             return (
               <div key={scope}>
-                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                <h3 className={`text-xs font-semibold uppercase tracking-wide mb-1 ${
+                  isSerasa ? "text-amber-700" : "text-muted-foreground"
+                }`}>
                   {scopeLabel(scope)}
+                  {isSerasa && (
+                    <span className="ml-2 text-[10px] font-normal normal-case text-amber-700/80">
+                      Consultas restritas — exigem base legal LGPD (proteção ao crédito).
+                    </span>
+                  )}
                 </h3>
                 <div className="space-y-1">
                   {items.map((e) => {
