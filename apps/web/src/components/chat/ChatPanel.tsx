@@ -103,6 +103,30 @@ export function ChatPanel({
   const [changesReloadKey, setChangesReloadKey] = useState(0);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Track container width pra decidir layout responsivo do ChangesPanel
+  // (overlay quando estreito) e auto-fechar sidebar quando 2 painéis nao
+  // cabem juntos. ResizeObserver no root garante reactivity ao drag handle
+  // do ResizableSheet sem dependência de window.innerWidth.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(600);
+  useEffect(() => {
+    if (!rootRef.current) return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width;
+      if (typeof w === "number") setContainerWidth(w);
+    });
+    ro.observe(rootRef.current);
+    return () => ro.disconnect();
+  }, []);
+  // Auto-fecha sidebar quando ChangesPanel abre e nao ha espaço pros dois
+  // (sidebar 220 + changes panel 360 + chat min ~280 = 860). Threshold 800
+  // dispara o fechamento.
+  useEffect(() => {
+    if (changesPanelOpen && containerWidth < 800 && sidebarOpen) {
+      setSidebarOpen(false);
+    }
+  }, [changesPanelOpen, containerWidth, sidebarOpen]);
+  const changesPanelFloating = containerWidth < 700;
 
   /**
    * Garante que há uma session ativa antes de anexar — anexos vivem dentro
@@ -510,13 +534,15 @@ export function ChatPanel({
 
   return (
     <TooltipProvider delayDuration={300}>
-      <div className="flex h-full max-h-[calc(100dvh-80px)] -mx-6 -mb-6">
-        {/* Sidebar de sessions — só ocupa espaço quando aberta. Mobile: overlay
-            absoluto sobre o chat. Desktop: empurra o chat pra direita. */}
+      {/* Root: relative pra ChangesPanel overlay em widths apertados.
+          overflow-hidden previne leak quando flex-1 do main fica esmagado.
+          rootRef monitora width via ResizeObserver pra responsividade. */}
+      <div ref={rootRef} className="relative flex h-full overflow-hidden">
+        {/* Sidebar — coluna estrutural que entra/sai com width animada. */}
         <div
           className={cn(
-            "shrink-0 transition-all duration-200 overflow-hidden",
-            sidebarOpen ? "w-[220px]" : "w-0"
+            "shrink-0 transition-all duration-200 overflow-hidden border-r",
+            sidebarOpen ? "w-[220px]" : "w-0 border-r-0"
           )}
         >
           <ChatSessionSidebar
@@ -528,11 +554,12 @@ export function ChatPanel({
           />
         </div>
 
-        <div className="flex flex-col flex-1 min-w-0 px-4 pb-4">
-          {/* Header bar h-12 com 3 zonas: structural (sidebar+title) |
-              center (mode segmented) | meta actions (changes, fullscreen, close).
-              fullscreen e close vem do ResizableSheetContext. */}
-          <div className="flex h-12 items-center gap-3 border-b -mx-4 px-3">
+        {/* Main — sem padding lateral próprio; cada filho declara o seu.
+            Garante regra única "16px breathing room" via px-4 em header/scroll/input. */}
+        <div className="flex flex-col flex-1 min-w-0">
+          {/* Header h-12 com padding consistente px-3. 3 zonas: structural |
+              center (mode) | meta. Título oculto em <640px pra evitar truncate. */}
+          <div className="flex h-12 shrink-0 items-center gap-2 px-3 border-b">
             <div className="flex items-center gap-1 min-w-0">
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -551,14 +578,18 @@ export function ChatPanel({
                   {sidebarOpen ? "Fechar sessões" : "Sessões"}
                 </TooltipContent>
               </Tooltip>
-              <h2 className="text-sm font-semibold truncate ml-1">Assistente Jurídico</h2>
+              <h2 className="text-sm font-semibold truncate ml-1 hidden md:block">
+                Assistente Jurídico
+              </h2>
             </div>
 
             <div className="flex-1 flex justify-center">
               <ModeToggle mode={mode} onChange={setMode} disabled={loading} />
             </div>
 
-            <div className="flex items-center gap-1 shrink-0">
+            {/* Cluster direita com pr-0 (já tem padding do header). gap-0.5
+                aproxima os 3 ícones formando um agrupamento óbvio. */}
+            <div className="flex items-center gap-0.5 shrink-0">
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -612,7 +643,7 @@ export function ChatPanel({
           </div>
 
           {switchingSession && (
-            <div className="flex items-center justify-center py-3">
+            <div className="flex items-center justify-center py-3 shrink-0">
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               <span className="ml-2 text-xs text-muted-foreground">
                 Carregando sessão…
@@ -620,39 +651,42 @@ export function ChatPanel({
             </div>
           )}
 
-        <ScrollArea className="flex-1 min-h-0 pr-4" ref={scrollRef}>
-          <div className="space-y-4 py-4">
-            {messages.length === 0 && !switchingSession && (
-              <EmptyState
-                mode={mode}
-                onPickPrompt={(p) => setInput(p)}
-                disabled={loading}
-              />
-            )}
-            {messages.map((msg) => (
-              <MessageRow
-                key={msg.id}
-                msg={msg}
-                loading={loading}
-                onRetry={handleRetry}
-                contractId={contractId}
-                onPlanExecuted={() => {
-                  setChangesReloadKey((k) => k + 1);
-                  onChatTurnComplete?.();
-                }}
-              />
-            ))}
-          </div>
-        </ScrollArea>
+          {/* ScrollArea ocupa o restante do main; px-4 dá breathing room
+              lateral consistente, pr-1 mantém gutter do scrollbar. */}
+          <ScrollArea className="flex-1 min-h-0 px-4" ref={scrollRef}>
+            <div className="space-y-4 py-4 pr-1">
+              {messages.length === 0 && !switchingSession && (
+                <EmptyState
+                  mode={mode}
+                  onPickPrompt={(p) => setInput(p)}
+                  disabled={loading}
+                />
+              )}
+              {messages.map((msg) => (
+                <MessageRow
+                  key={msg.id}
+                  msg={msg}
+                  loading={loading}
+                  onRetry={handleRetry}
+                  contractId={contractId}
+                  onPlanExecuted={() => {
+                    setChangesReloadKey((k) => k + 1);
+                    onChatTurnComplete?.();
+                  }}
+                />
+              ))}
+            </div>
+          </ScrollArea>
 
-        {/* Input supercard — Lovable-style. Card unico com chips de anexo
-            no topo, textarea multi-line no meio, toolbar (anexos esquerda /
-            model centro / Enviar direita) no rodape. */}
-        <div className="pt-3">
-          {attachmentError && (
-            <p className="text-xs text-destructive px-1 pb-2">{attachmentError}</p>
-          )}
-          <div className="rounded-xl border bg-card shadow-sm overflow-hidden">
+          {/* Input supercard — Lovable-style. Card unico com chips de anexo
+              no topo, textarea multi-line no meio, toolbar (anexos esquerda /
+              model centro / Enviar direita) no rodape. px-4 pt-3 pb-4 garante
+              breathing room consistente nas 4 bordas do main. */}
+          <div className="shrink-0 px-4 pt-3 pb-4">
+            {attachmentError && (
+              <p className="text-xs text-destructive px-1 pb-2">{attachmentError}</p>
+            )}
+            <div className="rounded-xl border border-border bg-card shadow-sm transition-all duration-150 hover:border-foreground/20 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/15 overflow-hidden">
             {attachments.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5 px-3 pt-2.5">
                 {attachments.map((a) => (
@@ -824,6 +858,7 @@ export function ChatPanel({
             sessionId={sessionId}
             reloadKey={changesReloadKey}
             onClose={() => setChangesPanelOpen(false)}
+            floating={changesPanelFloating}
           />
         )}
       </div>
@@ -873,7 +908,7 @@ function ModeToggle({
             )}
           >
             <Zap className="h-3.5 w-3.5" />
-            Rápido
+            <span className="hidden sm:inline">Rápido</span>
           </button>
         </TooltipTrigger>
         <TooltipContent side="bottom">
@@ -903,7 +938,7 @@ function ModeToggle({
             )}
           >
             <Brain className="h-3.5 w-3.5" />
-            Planejar
+            <span className="hidden sm:inline">Planejar</span>
           </button>
         </TooltipTrigger>
         <TooltipContent side="bottom">

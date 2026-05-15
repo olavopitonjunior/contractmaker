@@ -26,6 +26,9 @@ interface ChangesPanelProps {
   sessionId: string | null;
   reloadKey: number;
   onClose: () => void;
+  /** Renderiza como overlay absoluto sobre o chat quando o container
+   *  do ChatPanel é estreito (sheet < 700px). Default: inline coluna fixa. */
+  floating?: boolean;
 }
 
 /**
@@ -41,6 +44,7 @@ export function ChangesPanel({
   sessionId,
   reloadKey,
   onClose,
+  floating = false,
 }: ChangesPanelProps) {
   const [items, setItems] = useState<ChangeLogItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -90,7 +94,16 @@ export function ChangesPanel({
   }
 
   return (
-    <div className="flex flex-col h-full w-[360px] shrink-0 border-l bg-background">
+    <div
+      className={cn(
+        "flex flex-col bg-background border-l",
+        floating
+          ? // Overlay sobre o chat: absoluto à direita, full height do main.
+            "absolute right-0 inset-y-0 z-20 w-[85%] max-w-[360px] shadow-2xl"
+          : // Inline column: ocupa coluna fixa 360px ao lado do chat.
+            "h-full w-[360px] shrink-0"
+      )}
+    >
       <div className="flex h-12 items-center justify-between gap-2 px-3 border-b">
         <div className="flex items-center gap-2 min-w-0">
           <GitCommit className="h-4 w-4 text-muted-foreground shrink-0" />

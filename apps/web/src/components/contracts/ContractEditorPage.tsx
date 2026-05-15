@@ -548,7 +548,7 @@ export function ContractEditorPage({
         <ResizableSheet
           open={chatOpen}
           onOpenChange={setChatOpen}
-          defaultWidth={540}
+          defaultWidth={600}
           storageKey="chat:size"
         >
           <SheetTitle className="sr-only">Assistente Jurídico IA</SheetTitle>

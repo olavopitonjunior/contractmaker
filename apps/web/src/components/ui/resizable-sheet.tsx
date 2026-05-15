@@ -59,7 +59,7 @@ const SHEET_BASE =
 export function ResizableSheet({
   open,
   onOpenChange,
-  defaultWidth = 540,
+  defaultWidth = 600,
   storageKey = "chat:size",
   minWidth = 360,
   maxWidthRatio = 0.85,
