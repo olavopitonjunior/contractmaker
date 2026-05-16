@@ -1,8 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const mockPermissionsCreate = vi.fn();
+const mockPermissionsList = vi.fn();
+const mockPermissionsUpdate = vi.fn();
 const mockGetOwnerDriveClient = vi.fn(() => ({
-  permissions: { create: mockPermissionsCreate },
+  permissions: {
+    create: mockPermissionsCreate,
+    list: mockPermissionsList,
+    update: mockPermissionsUpdate,
+  },
 }));
 const mockGetServiceAccountEmail = vi.fn();
 const mockIsOwnerOAuthConfigured = vi.fn();
@@ -33,6 +39,8 @@ beforeEach(() => {
     name === "GOOGLE_OWNER_EMAIL" ? "olavo@example.com" : undefined
   );
   mockPermissionsCreate.mockResolvedValue({});
+  mockPermissionsList.mockResolvedValue({ data: { permissions: [] } });
+  mockPermissionsUpdate.mockResolvedValue({});
 });
 
 describe("shareDocWithOrgMembers", () => {
@@ -151,5 +159,75 @@ describe("shareDocWithOrgMembers", () => {
     const result = await shareDocWithOrgMembers("doc-1", "org-1");
     expect(mockPermissionsCreate).not.toHaveBeenCalled();
     expect(result).toEqual({ shared: [], skipped: [], failed: [] });
+  });
+});
+
+describe("ensureAnyonePermission", () => {
+  it("cria permission anyone quando não existe", async () => {
+    mockPermissionsList.mockResolvedValue({ data: { permissions: [] } });
+    const { ensureAnyonePermission } = await import("../share-org");
+    await ensureAnyonePermission("doc-1", "writer");
+    expect(mockPermissionsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fileId: "doc-1",
+        requestBody: {
+          type: "anyone",
+          role: "writer",
+          allowFileDiscovery: false,
+        },
+        supportsAllDrives: true,
+      })
+    );
+    expect(mockPermissionsUpdate).not.toHaveBeenCalled();
+  });
+
+  it("retorna no-op quando anyone já existe com a mesma role", async () => {
+    mockPermissionsList.mockResolvedValue({
+      data: {
+        permissions: [{ id: "anyoneWithLink", type: "anyone", role: "writer" }],
+      },
+    });
+    const { ensureAnyonePermission } = await import("../share-org");
+    await ensureAnyonePermission("doc-1", "writer");
+    expect(mockPermissionsCreate).not.toHaveBeenCalled();
+    expect(mockPermissionsUpdate).not.toHaveBeenCalled();
+  });
+
+  it("atualiza role da permission anyone existente em vez de criar nova", async () => {
+    mockPermissionsList.mockResolvedValue({
+      data: {
+        permissions: [{ id: "anyoneWithLink", type: "anyone", role: "writer" }],
+      },
+    });
+    const { ensureAnyonePermission } = await import("../share-org");
+    await ensureAnyonePermission("doc-1", "reader");
+    expect(mockPermissionsUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        fileId: "doc-1",
+        permissionId: "anyoneWithLink",
+        requestBody: { role: "reader" },
+        supportsAllDrives: true,
+      })
+    );
+    expect(mockPermissionsCreate).not.toHaveBeenCalled();
+  });
+
+  it("skip quando owner OAuth não configurado", async () => {
+    mockIsOwnerOAuthConfigured.mockReturnValue(false);
+    const { ensureAnyonePermission } = await import("../share-org");
+    await ensureAnyonePermission("doc-1", "writer");
+    expect(mockPermissionsList).not.toHaveBeenCalled();
+    expect(mockPermissionsCreate).not.toHaveBeenCalled();
+  });
+
+  it("nunca lança — falha do Drive vai pro console", async () => {
+    mockPermissionsList.mockRejectedValue(new Error("Drive 500: boom"));
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const { ensureAnyonePermission } = await import("../share-org");
+    await expect(
+      ensureAnyonePermission("doc-1", "writer")
+    ).resolves.toBeUndefined();
+    expect(errSpy).toHaveBeenCalled();
+    errSpy.mockRestore();
   });
 });

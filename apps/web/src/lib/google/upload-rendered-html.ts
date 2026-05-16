@@ -4,6 +4,7 @@ import {
   getServiceAccountEmail,
   isOwnerOAuthConfigured,
 } from "./client";
+import { ensureAnyonePermission } from "./share-org";
 import { wrapAsCompleteHtml } from "./template-migration";
 
 interface UploadInput {
@@ -85,6 +86,8 @@ export async function uploadHtmlAsGoogleDoc(
       console.error("[uploadHtmlAsGoogleDoc] Falha ao compartilhar com SA:", err);
     }
   }
+
+  await ensureAnyonePermission(id, "writer");
 
   const webViewLink =
     created.data.webViewLink || `https://docs.google.com/document/d/${id}/edit`;

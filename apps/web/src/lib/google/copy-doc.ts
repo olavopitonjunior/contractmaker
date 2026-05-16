@@ -4,6 +4,7 @@ import {
   getServiceAccountEmail,
   isOwnerOAuthConfigured,
 } from "./client";
+import { ensureAnyonePermission } from "./share-org";
 
 interface CopyInput {
   /** Drive file id do doc fonte. */
@@ -74,6 +75,8 @@ export async function copyContractGoogleDoc(
       console.error("[copyContractGoogleDoc] Falha ao compartilhar com SA:", err);
     }
   }
+
+  await ensureAnyonePermission(docId, "writer");
 
   const webViewLink =
     copy.data.webViewLink || `https://docs.google.com/document/d/${docId}/edit`;

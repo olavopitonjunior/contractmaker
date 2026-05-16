@@ -53,7 +53,7 @@ export function GoogleDocsEditor({
         <div className="text-xs text-muted-foreground">
           {readOnly
             ? "Visualização — contrato aprovado e somente leitura"
-            : "Edição via Google Docs · alterações sincronizam em tempo real"}
+            : "Edição via Google Docs · sem necessidade de login Google (autor aparece como anônimo no histórico do Drive)"}
         </div>
         <Button asChild size="sm" variant="ghost" className="h-7 text-xs">
           <a href={externalUrl} target="_blank" rel="noopener noreferrer">

@@ -5,6 +5,7 @@ import {
   getServiceAccountEmail,
   isOwnerOAuthConfigured,
 } from "./client";
+import { ensureAnyonePermission } from "./share-org";
 
 /**
  * Mime types aceitos pra conversão automática Drive → Google Doc nativo.
@@ -104,6 +105,8 @@ export async function uploadFileAsGoogleDoc(
       console.error("[uploadFileAsGoogleDoc] Falha ao compartilhar com SA:", err);
     }
   }
+
+  await ensureAnyonePermission(id, "writer");
 
   const webViewLink =
     created.data.webViewLink || `https://docs.google.com/document/d/${id}/edit`;

@@ -13,6 +13,66 @@ export interface ShareOrgResult {
 }
 
 /**
+ * Garante que o doc tenha permission `{ type: "anyone", role }` no Drive.
+ *
+ * Por que existe: o iframe Google Docs sempre autentica com a conta Google
+ * ativa do browser. Se o user logado na app tem outra conta Google ativa
+ * no Chrome (caso comum: várias contas), o iframe mostra "Solicitar acesso"
+ * mesmo com NextAuth válido. Anyone-link elimina essa dependência — qualquer
+ * um com a URL do doc edita/visualiza direto, sem precisar de conta Google.
+ *
+ * Segurança: a URL do doc só é entregue ao client após `auth()` validar a
+ * sessão NextAuth. Não aparece em rotas públicas. Para contratos aprovados,
+ * usar `role: "reader"` (chamada no approve-action). SA e owner OAuth
+ * continuam editando via API independentemente.
+ *
+ * Idempotente: lista permissions e atualiza a anyone existente in-place;
+ * cria nova se não houver. `allowFileDiscovery: false` mantém o doc oculto
+ * de buscas públicas — só quem tem a URL exata acessa.
+ * Best-effort: nunca lança — falha vai pro console.
+ */
+export async function ensureAnyonePermission(
+  docId: string,
+  role: "writer" | "reader"
+): Promise<void> {
+  if (!isOwnerOAuthConfigured()) {
+    console.error(
+      "[ensureAnyonePermission] Owner OAuth não configurado — skip anyone share."
+    );
+    return;
+  }
+  try {
+    const drive = getOwnerDriveClient();
+    const existing = await drive.permissions.list({
+      fileId: docId,
+      fields: "permissions(id, type, role)",
+      supportsAllDrives: true,
+    });
+    const anyone = existing.data.permissions?.find((p) => p.type === "anyone");
+    if (anyone?.id) {
+      if (anyone.role === role) return;
+      await drive.permissions.update({
+        fileId: docId,
+        permissionId: anyone.id,
+        requestBody: { role },
+        supportsAllDrives: true,
+      });
+      return;
+    }
+    await drive.permissions.create({
+      fileId: docId,
+      requestBody: { type: "anyone", role, allowFileDiscovery: false },
+      supportsAllDrives: true,
+    });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(
+      `[ensureAnyonePermission] Falha ao setar anyone=${role} em ${docId}: ${msg.slice(0, 200)}`
+    );
+  }
+}
+
+/**
  * Concede `writer` no GDoc pra todos os membros ativos da org.
  *
  * Por que existe: o pipeline de upload (`uploadHtmlAsGoogleDoc`,
