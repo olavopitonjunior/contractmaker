@@ -339,9 +339,79 @@ export function enrichContractData(
     const prazoTitulo = Number(
       config.prazo_titulo_dias || config.prazo_escritura_dias || 60
     );
+    // UX 2026-05-16: dados de PIX/banco do vendedor saíram do card de parcela
+    // e foram pra `vendedores[0].recebimento`. Banco do financiamento subiu
+    // de cada parcela pra `pagamento.banco_financiamento`. Aqui populamos
+    // de volta na parcela só pra alimentar `buildDestinoTexto` — preserva
+    // a saída do contrato sem mudar o template.
+    const vendedores = enriched.vendedores as Array<Record<string, unknown>> | undefined;
+    const recebimentoVendedor = vendedores?.[0]?.recebimento as
+      | Record<string, unknown>
+      | undefined;
+    const pagamentoBancoFin =
+      typeof pagamentoMut.banco_financiamento === "string"
+        ? (pagamentoMut.banco_financiamento as string)
+        : null;
+
     pagamentoMut.parcelas = pagamentoMut.parcelas.map((p) => {
       const out: Record<string, unknown> = { ...p };
       const momento = String(out.momento || "");
+
+      // Inferir meio_pagamento quando vazio (form novo não pergunta mais):
+      // - tipo=financiamento → meio=financiamento
+      // - tipo=fgts → meio=fgts_saque
+      // - tipo=permuta_* → meio=permuta
+      // - caso contrário → "pix" se vendedor tem chave PIX, senão "ted"
+      if (!out.meio_pagamento || out.meio_pagamento === "") {
+        const tipo = String(out.tipo || "");
+        if (tipo === "financiamento") out.meio_pagamento = "financiamento";
+        else if (tipo === "fgts") out.meio_pagamento = "fgts_saque";
+        else if (tipo.startsWith("permuta_")) out.meio_pagamento = "permuta";
+        else if (typeof recebimentoVendedor?.pix_chave === "string" && recebimentoVendedor.pix_chave) {
+          out.meio_pagamento = "pix";
+        } else if (typeof recebimentoVendedor?.banco === "string" && recebimentoVendedor.banco) {
+          out.meio_pagamento = "ted";
+        }
+      }
+
+      // Popular pix/bancarios/banco_financiamento da parcela a partir do
+      // vendedor / config quando vazios. Forms legados que já tinham esses
+      // dados na parcela mantêm seus valores (idempotente).
+      const meioCurrent = String(out.meio_pagamento || "");
+      if (meioCurrent === "pix" && !out.pix && recebimentoVendedor?.pix_chave) {
+        out.pix = {
+          chave: recebimentoVendedor.pix_chave,
+          tipo_chave: recebimentoVendedor.pix_tipo_chave,
+          titular_nome:
+            (vendedores?.[0]?.nome as string | undefined) ??
+            (vendedores?.[0]?.razao_social as string | undefined),
+          titular_cpf_cnpj:
+            (vendedores?.[0]?.cpf as string | undefined) ??
+            (vendedores?.[0]?.cnpj as string | undefined),
+        };
+      }
+      if (meioCurrent === "ted" && !out.bancarios && recebimentoVendedor?.banco) {
+        out.bancarios = {
+          banco: recebimentoVendedor.banco,
+          agencia: recebimentoVendedor.agencia,
+          conta: recebimentoVendedor.conta,
+          tipo_conta: recebimentoVendedor.tipo_conta,
+          titular_nome:
+            (vendedores?.[0]?.nome as string | undefined) ??
+            (vendedores?.[0]?.razao_social as string | undefined),
+          titular_cpf_cnpj:
+            (vendedores?.[0]?.cpf as string | undefined) ??
+            (vendedores?.[0]?.cnpj as string | undefined),
+        };
+      }
+      if (
+        meioCurrent === "financiamento" &&
+        !out.banco_financiamento &&
+        pagamentoBancoFin
+      ) {
+        out.banco_financiamento = pagamentoBancoFin;
+      }
+
       // Derivar dias quando vazio/0 mas momento canônico setado.
       if ((!out.dias || Number(out.dias) === 0) && momento) {
         if (momento === "assinatura") out.dias = 0;
