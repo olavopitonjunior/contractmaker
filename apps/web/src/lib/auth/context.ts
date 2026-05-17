@@ -22,7 +22,10 @@ const DELEGATION_SCOPE = "users:delegate";
 const DELEGATION_HEADER = "x-act-as-user";
 
 function delegationEnabled(): boolean {
-  return process.env.DELEGATION_ENABLED === "true";
+  // .trim() defende contra env value setado com newline final via CLI
+  // (`vercel env add` lê stdin com \n e salva literal). 2026-05-17 esse bug
+  // causou flag inerte por 30min em prod.
+  return (process.env.DELEGATION_ENABLED ?? "").trim() === "true";
 }
 
 /**

@@ -20,6 +20,10 @@ export const API_TOKEN_SCOPES = [
   "signatures:rw",
   "documents:rw",
   "metrics:r",
+  // Newton — delegação Bearer via header X-Act-As-User (Fase A RBAC
+  // hardening). Token com esse scope pode operar como qualquer user da
+  // mesma org. Tratado em lib/auth/context.ts atrás de DELEGATION_ENABLED.
+  "users:delegate",
 ] as const;
 
 export type ApiTokenScope = (typeof API_TOKEN_SCOPES)[number];
