@@ -152,4 +152,36 @@ export function ensureIntentExecutorsRegistered(): void {
       return { status: 500, body: { error: message } };
     }
   });
+
+  // ENVELOPE_CANCEL — cancela envelope ClickSign já enviado (HITL)
+  registerIntentExecutor("ENVELOPE_CANCEL", async (payload, ctx) => {
+    const p = payload as { envelopeId: string; reason: string };
+    const { runEnvelopeCancel } = await import(
+      "@/lib/clicksign/cancel-action"
+    );
+    return runEnvelopeCancel({
+      envelopeId: p.envelopeId,
+      reason: p.reason,
+      actorUserId: ctx.requestedBy,
+    });
+  });
+
+  // CONTRACT_FIELD_UPDATE — atualiza UM campo de contrato (whitelist enforced
+  // no route handler); cria nova version, mantém dataJson atualizado
+  registerIntentExecutor("CONTRACT_FIELD_UPDATE", async (payload, ctx) => {
+    const p = payload as {
+      contractId: string;
+      fieldPath: string;
+      value: unknown;
+    };
+    const { runContractFieldUpdate } = await import(
+      "@/lib/contracts/update-field-action"
+    );
+    return runContractFieldUpdate({
+      contractId: p.contractId,
+      fieldPath: p.fieldPath,
+      value: p.value,
+      actorUserId: ctx.requestedBy,
+    });
+  });
 }

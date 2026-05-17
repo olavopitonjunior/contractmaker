@@ -14,6 +14,12 @@ import { phoneE164Schema } from "@/lib/validation/schemas";
  *
  * Response: { userId, orgId, role, name } | { error: "not_found" }
  *
+ * Com `?withScope=true` (requer scope adicional `users:delegate`):
+ *   Response: { ..., accessibleDealIds: string[], accessibleContractIds: string[] }
+ *   IDs computados em uma query única, cap 500 cada (se exceder, MCP entende
+ *   role=admin/manager como scope=all e usa filtros server-side ao invés
+ *   de lista enumerada).
+ *
  * Privacy guard: telefone é PII. Endpoint não deve ser exposto publicamente.
  * Bearer scope é a primeira linha de defesa; UI admin é a segunda. Resposta
  * NÃO retorna `email` para minimizar superficie.
@@ -70,10 +76,47 @@ export async function GET(req: NextRequest) {
   }
 
   const membership = user.orgMemberships[0];
-  return NextResponse.json({
+
+  // Versão básica (default)
+  const base = {
     userId: user.id,
     orgId: membership.orgId,
     role: membership.role,
     name: user.name,
+  };
+
+  // Versão enriquecida: gated por `withScope=true` + scope `users:delegate`.
+  // Usada pela MCP tool `resolve_caller` pra pré-computar o universo do caller.
+  if (req.nextUrl.searchParams.get("withScope") !== "true") {
+    return NextResponse.json(base);
+  }
+  if (!hasScope(ident, "users:delegate")) {
+    return NextResponse.json(
+      { error: "Forbidden", reason: "withScope requires scope users:delegate" },
+      { status: 403 }
+    );
+  }
+
+  // `userId` é globalmente único entre orgs, então não filtramos por orgId
+  // explicitamente aqui — só os deals/contracts que pertencem ao user.
+  const SCOPE_CAP = 500;
+  const [deals, contracts] = await Promise.all([
+    prisma.deal.findMany({
+      where: { userId: user.id },
+      select: { id: true },
+      take: SCOPE_CAP,
+    }),
+    prisma.contract.findMany({
+      where: { userId: user.id },
+      select: { id: true },
+      take: SCOPE_CAP,
+    }),
+  ]);
+
+  return NextResponse.json({
+    ...base,
+    accessibleDealIds: deals.map((d) => d.id),
+    accessibleContractIds: contracts.map((c) => c.id),
+    scopeCapped: deals.length === SCOPE_CAP || contracts.length === SCOPE_CAP,
   });
 }

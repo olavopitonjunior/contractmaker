@@ -91,6 +91,10 @@ export type AuditAction =
   | "API_TOKEN_REVOKED"
   | "API_TOKEN_AUTH_FAILED"
   | "NEWTON_ACTOR_HEADER_REJECTED"
+  | "DELEGATION_ASSUMED"
+  | "DELEGATION_REJECTED"
+  | "CONTRACT_FIELD_UPDATE"
+  | "ENVELOPE_CANCEL"
   // Operações de domínio expostas a Newton via Bearer
   | "DEAL_CREATE"
   | "DEAL_UPDATE"
@@ -126,6 +130,9 @@ export type AuditAction =
   | "CONTRACT_DELETE"
   | "CONTRACT_DELETE_BULK"
   | "CONTRACT_SIGNERS_DATA_UPDATE"
+  // Multi-agent — Sentinel blocks
+  | "AGENT_TOOL_BLOCKED"
+  | "SENTINEL_ATTACHMENT_QUARANTINED"
   | "CERTIDAO_BATCH_DISPATCH"
   // Serasa Experian — consultas restritas (score, restritivos, vínculos).
   // SERASA_QUERY_DISPATCH grava qualquer batch que inclua endpoint Serasa;

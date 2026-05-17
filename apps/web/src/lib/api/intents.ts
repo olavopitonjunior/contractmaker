@@ -30,7 +30,9 @@ import { mergeAuditMetadata } from "@/lib/audit/newton";
 export const HIGH_RISK_ACTIONS = [
   "CHARGE_CREATE",
   "ENVELOPE_SEND",
+  "ENVELOPE_CANCEL",
   "CONTRACT_APPROVE",
+  "CONTRACT_FIELD_UPDATE",
   "DEAL_DELETE_HARD",
   "CERTIDAO_REQUEST",
 ] as const;

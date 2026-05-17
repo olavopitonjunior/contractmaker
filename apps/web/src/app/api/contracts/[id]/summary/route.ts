@@ -55,6 +55,7 @@ export async function GET(
       dataJson: true,
       updatedAt: true,
       userId: true,
+      googleDocId: true,
       envelopes: {
         orderBy: { createdAt: "desc" },
         take: 1,
@@ -102,6 +103,12 @@ export async function GET(
     ultimaAtualizacao: contract.updatedAt,
   });
 
+  // URL pra abrir o Google Doc do contrato (se mode=gdocs). Newton manda esse
+  // link no chat quando user pede "manda o link do contrato".
+  const gdocUrl = contract.googleDocId
+    ? `https://docs.google.com/document/d/${contract.googleDocId}/edit`
+    : null;
+
   return NextResponse.json({
     contractId: contract.id,
     dealId: contract.dealId,
@@ -111,6 +118,7 @@ export async function GET(
     valor,
     ultimaAtualizacao: contract.updatedAt.toISOString(),
     envelopeAtual,
+    gdocUrl,
     markdown,
   });
 }

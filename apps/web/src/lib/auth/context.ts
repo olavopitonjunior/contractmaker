@@ -4,6 +4,26 @@ import { authOrBearer, hasScope, type ResolvedAuth } from "./auth-or-bearer";
 import { resolveNewtonActor, isRejection, type NewtonActorContext } from "@/lib/audit/newton";
 import { prisma } from "@/lib/db/prisma";
 import { RateLimits } from "@/lib/security/ratelimit";
+import { audit } from "@/lib/security/audit";
+
+/**
+ * Delegação Bearer via `X-Act-As-User`: permite que um Bearer com scope
+ * `users:delegate` opere como se fosse outro usuário da MESMA org. Backend
+ * passa a aplicar filtros sales-role contra o user delegado, em vez do dono
+ * do token (Newton agent user).
+ *
+ * Gated por `DELEGATION_ENABLED=true` no env. Default false → header ignorado
+ * → comportamento idêntico ao atual (rollback é uma var).
+ *
+ * Distinto do `X-Newton-Actor` existente: este só TAG audit ("essa req é do
+ * Newton"); aquele MUDA quem é o ator efetivo da query.
+ */
+const DELEGATION_SCOPE = "users:delegate";
+const DELEGATION_HEADER = "x-act-as-user";
+
+function delegationEnabled(): boolean {
+  return process.env.DELEGATION_ENABLED === "true";
+}
 
 /**
  * Contexto unificado de auth para route handlers. Após a integração Newton:
@@ -26,6 +46,13 @@ export interface AuthContext {
   via: ResolvedAuth["via"];
   /** Actor para audit metadata (.via=newton quando bearer). */
   actor: NewtonActorContext;
+  /**
+   * Quando `X-Act-As-User` foi honrado, este campo guarda o `userId` do dono
+   * do token (Newton agent), separado do `userId` que é o user delegado.
+   * Usado em audit logs e em handlers que precisem distinguir "quem foi" vs
+   * "como quem está agindo". `undefined` quando não há delegação ativa.
+   */
+  delegatedFromUserId?: string;
 }
 
 export type AuthResult =
@@ -106,7 +133,95 @@ export async function requireAuth(
     };
   }
 
-  const org = await getUserOrg(actor.effectiveUserId);
+  // Delegação Bearer (X-Act-As-User). Atrás do flag DELEGATION_ENABLED.
+  // Substitui `actor.effectiveUserId` pelo target se: bearer + scope + same org.
+  let delegatedFromUserId: string | undefined;
+  let effectiveActor: NewtonActorContext = actor;
+  if (delegationEnabled() && ident.via === "bearer") {
+    const actAsHeader = req.headers.get(DELEGATION_HEADER);
+    if (actAsHeader) {
+      if (!hasScope(ident, DELEGATION_SCOPE)) {
+        // Header presente mas sem scope: warn + ignora (não 403).
+        // Evita quebrar outros bearers que mandem o header acidentalmente.
+        console.warn(
+          `[delegation] X-Act-As-User present but token ${ident.tokenId} lacks scope ${DELEGATION_SCOPE}`
+        );
+      } else {
+        // Resolve org do dono do token (pra validar mesma org)
+        const tokenOwnerOrg = await getUserOrg(ident.userId);
+        if (!tokenOwnerOrg) {
+          return {
+            ok: false,
+            response: NextResponse.json(
+              { error: "Forbidden", reason: "token owner has no org" },
+              { status: 403 }
+            ),
+          };
+        }
+        // OrgMembership não tem `status` — membership existir = ativo.
+        const target = await prisma.user
+          .findFirst({
+            where: {
+              id: actAsHeader,
+              orgMemberships: { some: { orgId: tokenOwnerOrg.id } },
+            },
+            select: { id: true },
+          })
+          .catch(() => null);
+        if (!target) {
+          // Audit a tentativa de delegação cross-org / target inexistente
+          audit(
+            {
+              orgId: tokenOwnerOrg.id,
+              userId: ident.userId,
+              ipAddress: extractIpAddress(req),
+              userAgent: req.headers.get("user-agent"),
+            },
+            {
+              action: "DELEGATION_REJECTED",
+              result: "DENIED",
+              metadata: {
+                via: "newton",
+                tokenId: ident.tokenId,
+                requestedTarget: actAsHeader,
+                reason: "target_not_in_token_org",
+              },
+            }
+          );
+          return {
+            ok: false,
+            response: NextResponse.json(
+              { error: "Forbidden", reason: "delegate target not in token's org" },
+              { status: 403 }
+            ),
+          };
+        }
+        // OK: switch effective actor
+        delegatedFromUserId = ident.userId;
+        effectiveActor = { ...actor, effectiveUserId: target.id };
+        // Fire-and-forget audit (não bloqueia request)
+        audit(
+          {
+            orgId: tokenOwnerOrg.id,
+            userId: ident.userId,
+            ipAddress: extractIpAddress(req),
+            userAgent: req.headers.get("user-agent"),
+          },
+          {
+            action: "DELEGATION_ASSUMED",
+            result: "SUCCESS",
+            metadata: {
+              via: "newton",
+              tokenId: ident.tokenId,
+              delegatedTo: target.id,
+            },
+          }
+        );
+      }
+    }
+  }
+
+  const org = await getUserOrg(effectiveActor.effectiveUserId);
   if (!org) {
     return {
       ok: false,
@@ -127,18 +242,19 @@ export async function requireAuth(
   } else {
     const u = await prisma.user
       .findUnique({
-        where: { id: actor.effectiveUserId },
+        where: { id: effectiveActor.effectiveUserId },
         select: { email: true, name: true },
       })
       .catch(() => null);
     userEmail = u?.email ?? "";
-    userName = u?.name ?? u?.email ?? `Newton (${actor.effectiveUserId.slice(0, 8)})`;
+    userName =
+      u?.name ?? u?.email ?? `Newton (${effectiveActor.effectiveUserId.slice(0, 8)})`;
   }
 
   return {
     ok: true,
     ctx: {
-      userId: actor.effectiveUserId,
+      userId: effectiveActor.effectiveUserId,
       userEmail,
       userName,
       orgId: org.id,
@@ -146,7 +262,8 @@ export async function requireAuth(
       ipAddress: extractIpAddress(req),
       userAgent: req.headers.get("user-agent"),
       via: ident.via,
-      actor,
+      actor: effectiveActor,
+      delegatedFromUserId,
     },
   };
 }
