@@ -133,10 +133,12 @@ describe("runContractAgent", () => {
       orgId: "org-1",
     });
 
-    // Initial call + 10 loop iterations = 11
-    expect(mockCreate).toHaveBeenCalledTimes(11);
-    // Should have 10 changeLogs (one per iteration)
-    expect(result.changeLogs).toHaveLength(10);
+    // maxIterations baixou de 10 → 5 (expert-context + budget). O loop dá
+    // `break` quando iterations >= maxIterations ANTES da próxima chamada, então:
+    //   call 1 (initial) + 4 loop transitions = 5 calls total
+    //   5 changeLogs (um por iteração, mesmo quando última não dispara mais call)
+    expect(mockCreate).toHaveBeenCalledTimes(5);
+    expect(result.changeLogs).toHaveLength(5);
   });
 
   // --- Persistence ---
@@ -303,12 +305,16 @@ describe("runContractAgent", () => {
       orgId: "org-1",
     });
 
+    // system agora é array com cache_control ephemeral (introduzido pra
+    // economizar tokens em chat multi-turn). Validamos só o text.
     expect(mockCreate).toHaveBeenCalledWith(
       expect.objectContaining({
         model: "claude-opus-4-20250514",
         temperature: 0.5,
         max_tokens: 8192,
-        system: "Custom prompt",
+        system: expect.arrayContaining([
+          expect.objectContaining({ type: "text", text: "Custom prompt" }),
+        ]),
       })
     );
   });

@@ -1,0 +1,68 @@
+# Política do Sentinel — regras de pré-validação de tool_use e de
+# classificação de inputs não-confiáveis (extractedText de anexos, URLs
+# externas, OCR).
+#
+# Carregada uma vez no boot (cache em memória). Para mudar policy em
+# produção, basta deploy — sem alterar código.
+#
+# Cada regra:
+#   id      — slug único (usado em AuditLog.payload.ruleId)
+#   when    — expressão lógica avaliada pelo middleware (ver
+#             sentinel/middleware.ts em F2). Variáveis disponíveis:
+#               tool, input, contractId, orgId, userId, mode,
+#               trustedScore, intent, tokensSpent, budgetCap.
+#   action  — reject | warn | reject_and_alert
+#   reason  — texto curto exibido ao usuário em PT-BR quando rejeitada.
+
+rules:
+  - id: no_external_url_in_insert_image
+    description: >
+      Só permite imagens vindas do Vercel Blob (storage gerenciado da
+      org) ou de domínios canônicos do produto. URLs externas arbitrárias
+      são bloqueadas pra impedir SSRF, exfil via beacon e exibição de
+      conteúdo malicioso no contrato.
+
+      Nota: usa `[.]` em vez de `\.` no regex porque YAML block scalar
+      `|` preserva escapes literais — `\\.` viraria `\\.` no string final
+      e quebraria o RegExp. `[.]` é equivalente e funciona em qualquer
+      formato de string.
+    when: |
+      tool == "insert_image" AND
+      NOT (
+        input.url MATCHES "^https://[a-z0-9-]+[.]public[.]blob[.]vercel-storage[.]com/" OR
+        input.url MATCHES "^https://imobpro[.]ia[.]br/"
+      )
+    action: reject
+    reason: >
+      URL de imagem fora da allow-list (Vercel Blob ou domínio canônico).
+      Faça upload via /api/contracts/[id]/images antes.
+
+  - id: no_template_change_without_evidence
+    description: >
+      propose_template_change exige ≥1 contractMemory id em `evidence`.
+      Mantém o flow Propose ancorado em padrões observados, não em
+      sugestões avulsas. Já era enforced no handler, agora vira regra
+      versionada.
+    when: |
+      tool == "propose_template_change" AND
+      (input.evidence == null OR input.evidence.length < 1)
+    action: reject
+    reason: >
+      Mudança de template exige evidência (≥1 contractMemory id em que o
+      padrão foi observado).
+
+  - id: budget_exceeded
+    description: >
+      Bloqueia qualquer tool_use quando o budget de tokens do contrato
+      foi atingido. Redundante com assertContractBudget mas garante
+      enforcement na camada Sentinel.
+    when: |
+      tokensSpent >= budgetCap
+    action: reject
+    reason: >
+      Budget de IA deste contrato atingido. Solicite aprovação pra
+      aumentar o limite ou aguarde o próximo ciclo.
+
+# Reservado pra F2:
+#   - injection_in_attachment_text  (Sentinel quarantina extractedText)
+#   - exfiltration_attempt          (detecta tool_use com dados sensíveis em URL)

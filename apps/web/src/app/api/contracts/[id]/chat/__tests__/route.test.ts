@@ -53,6 +53,10 @@ function mockGenerator(events: Array<Record<string, unknown>>) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockGetUserOrg.mockResolvedValue(createMockOrg() as never);
+  // F5 (2026-05-16) — flag default virou true (multi-agent). Estes testes
+  // assertam o caminho LEGACY (streamContractAgent), então forçamos rollback
+  // pra rodá-los. Testes do graph multi-agente vivem em orchestrator/__tests__.
+  process.env.ENABLE_MULTI_AGENT = "false";
 });
 
 describe("POST /api/contracts/[id]/chat", () => {

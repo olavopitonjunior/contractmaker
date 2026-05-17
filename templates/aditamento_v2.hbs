@@ -1,0 +1,98 @@
+<h1>INSTRUMENTO PARTICULAR DE ADITAMENTO AO COMPROMISSO DE COMPRA E VENDA</h1>
+<h2>Aditivo Nº {{aditivo_numero}} — {{aditivo_data_extenso}}</h2>
+
+<p style="text-align: center;">❦</p>
+
+<h3>QUALIFICAÇÃO DAS PARTES</h3>
+
+{{#each vendedores}}
+<p><strong>{{#if (eq tipo_pessoa "juridica")}}PROMITENTE VENDEDOR{{else}}PROMITENTE VENDEDOR(A){{/if}}{{#if @last}}{{else}} (consortes){{/if}}:</strong>
+{{#if (eq tipo_pessoa "juridica")}}
+{{razao_social}}, pessoa jurídica de direito privado, inscrita no CNPJ sob o nº {{cnpj this.cnpj}}, com sede em {{endereco_completo}}, neste ato representada por {{representante_nome}}, {{representante_qualificacao}}.
+{{else}}
+{{nome}}, {{nacionalidade}}, {{estado_civil}}{{#if regime_bens}} sob o regime de {{regime_bens}}{{/if}}, {{profissao}}, portador(a) do RG nº {{rg}} e inscrito(a) no CPF/MF sob o nº {{cpf this.cpf}}, residente e domiciliado(a) em {{endereco_completo}}{{#if conjuge.nome}}, sendo casado(a) com <strong>{{conjuge.nome}}</strong>, {{conjuge.nacionalidade}}, {{conjuge.profissao}}, portador(a) do RG nº {{conjuge.rg}} e CPF nº {{cpf conjuge.cpf}}{{/if}}.
+{{/if}}</p>
+{{/each}}
+
+{{#each compradores}}
+<p><strong>{{#if (eq tipo_pessoa "juridica")}}PROMITENTE COMPRADOR{{else}}PROMITENTE COMPRADOR(A){{/if}}{{#if @last}}{{else}} (consortes){{/if}}:</strong>
+{{#if (eq tipo_pessoa "juridica")}}
+{{razao_social}}, pessoa jurídica de direito privado, inscrita no CNPJ sob o nº {{cnpj this.cnpj}}, com sede em {{endereco_completo}}, neste ato representada por {{representante_nome}}, {{representante_qualificacao}}.
+{{else}}
+{{nome}}, {{nacionalidade}}, {{estado_civil}}{{#if regime_bens}} sob o regime de {{regime_bens}}{{/if}}, {{profissao}}, portador(a) do RG nº {{rg}} e inscrito(a) no CPF/MF sob o nº {{cpf this.cpf}}, residente e domiciliado(a) em {{endereco_completo}}{{#if conjuge.nome}}, sendo casado(a) com <strong>{{conjuge.nome}}</strong>, {{conjuge.nacionalidade}}, {{conjuge.profissao}}, portador(a) do RG nº {{conjuge.rg}} e CPF nº {{cpf conjuge.cpf}}{{/if}}.
+{{/if}}</p>
+{{/each}}
+
+{{#if intervenientes}}
+{{#each intervenientes}}
+<p><strong>INTERVENIENTE-ANUENTE ({{papel}}):</strong> {{nome}}{{#if cpf}}, CPF nº {{cpf this.cpf}}{{/if}}{{#if cnpj}}, CNPJ nº {{cnpj this.cnpj}}{{/if}}{{#if qualificacao}}, {{qualificacao}}{{/if}}.</p>
+{{/each}}
+{{/if}}
+
+<h3>CONSIDERANDO QUE</h3>
+
+<ol>
+  <li>As partes acima qualificadas celebraram, em {{parent_data_extenso}}, o <strong>Instrumento Particular de Compromisso de Compra e Venda nº {{parent_contract_numero}}</strong>, referente ao imóvel descrito a seguir: {{imovel_descricao}};</li>
+  <li>{{considerando_motivacao}}</li>
+  <li>As partes desejam adequar o ajuste à nova realidade sem desfazer o negócio, mantendo a íntegra do instrumento original naquilo que com este aditamento não conflitar;</li>
+</ol>
+
+<h3>RESOLVEM celebrar o presente ADITAMENTO, que se regerá pelas seguintes cláusulas:</h3>
+
+<h3>CLÁUSULA 1ª — DO OBJETO</h3>
+<p>O presente aditamento tem por objeto {{objeto_resumo}}.</p>
+
+<h3>CLÁUSULA 2ª — DA ALTERAÇÃO</h3>
+{{#each alteracoes}}
+<p><strong>{{numero}}.</strong> {{texto}}</p>
+{{/each}}
+
+<h3>CLÁUSULA 3ª — DA BASE LEGAL</h3>
+<p>O presente aditamento fundamenta-se nos seguintes dispositivos legais: {{base_legal}}.</p>
+
+<h3>CLÁUSULA 4ª — DA RATIFICAÇÃO</h3>
+<p>Permanecem inalteradas e em pleno vigor todas as demais cláusulas do Instrumento Particular de Compromisso de Compra e Venda nº {{parent_contract_numero}}, naquilo que não conflitar com o presente aditamento.</p>
+
+<h3>CLÁUSULA 5ª — DO FORO</h3>
+<p>Fica eleito o Foro da Comarca de {{foro_cidade}}/{{foro_uf}} para dirimir quaisquer dúvidas oriundas deste aditamento, com renúncia expressa a qualquer outro, por mais privilegiado que seja.</p>
+
+<p>E, por estarem assim justos e contratados, assinam o presente em {{vias}} vias de igual teor e forma, na presença das testemunhas abaixo.</p>
+
+<p style="text-align: right;">{{assinatura_cidade}}, {{assinatura_data_extenso}}.</p>
+
+<p style="text-align: center;">❦</p>
+
+<h4>ASSINATURAS</h4>
+
+{{#each vendedores}}
+<p>_________________________________________<br>
+<strong>{{#if (eq tipo_pessoa "juridica")}}{{razao_social}}{{else}}{{nome}}{{/if}}</strong> — Promitente Vendedor(a)</p>
+{{#if conjuge.nome}}
+<p>_________________________________________<br>
+<strong>{{conjuge.nome}}</strong> — Cônjuge</p>
+{{/if}}
+{{/each}}
+
+{{#each compradores}}
+<p>_________________________________________<br>
+<strong>{{#if (eq tipo_pessoa "juridica")}}{{razao_social}}{{else}}{{nome}}{{/if}}</strong> — Promitente Comprador(a)</p>
+{{#if conjuge.nome}}
+<p>_________________________________________<br>
+<strong>{{conjuge.nome}}</strong> — Cônjuge</p>
+{{/if}}
+{{/each}}
+
+{{#if intervenientes}}
+{{#each intervenientes}}
+<p>_________________________________________<br>
+<strong>{{nome}}</strong> — Interveniente-Anuente ({{papel}})</p>
+{{/each}}
+{{/if}}
+
+{{#if testemunhas}}
+<h4>TESTEMUNHAS</h4>
+{{#each testemunhas}}
+<p>_________________________________________<br>
+<strong>{{nome}}</strong>{{#if cpf}}, CPF nº {{cpf this.cpf}}{{/if}}</p>
+{{/each}}
+{{/if}}

@@ -1,4 +1,4 @@
-import { Anthropic } from "@anthropic-ai/sdk";
+import type { Anthropic } from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/db/prisma";
 import { AGENT_TOOLS } from "./tools";
 import { executeToolHandler } from "./tool-handlers";
@@ -7,8 +7,19 @@ import { quickChecks, dedupeKeyFor, type QuickFinding } from "./quickChecks";
 import { recordAIUsage } from "./usage";
 import { assertContractBudget, ContractBudgetExceededError } from "./budget";
 import { loadExpertContext } from "./expert-context";
+import { getAnthropicClient, HAIKU_MODEL, SONNET_MODEL } from "./shared/anthropic-client";
+import { loadContext } from "./shared/context";
+import { resolveSession, loadChatHistory } from "./shared/session";
+import { streamOneTurn, type StreamedTurnResult } from "./shared/turn";
+import {
+  EDIT_TOOL_NAMES,
+  isEditTool,
+  mapToolToAction,
+  buildToolSummary,
+  summarizeToolResult,
+  type ToolOutput,
+} from "./shared/tool-mapping";
 import type {
-  AgentContext,
   AgentEvent,
   AgentMode,
   AgentResult,
@@ -16,13 +27,6 @@ import type {
   PlanStep,
 } from "./types";
 
-function getAnthropicClient() {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    throw new Error("ANTHROPIC_API_KEY não configurada. Adicione a chave no .env");
-  }
-  return new Anthropic({ apiKey });
-}
 const anthropic = getAnthropicClient();
 
 interface AgentParams {
@@ -40,9 +44,6 @@ interface AgentParams {
    *  aplicado no upload. */
   attachmentIds?: string[];
 }
-
-const HAIKU_MODEL = "claude-haiku-4-5-20251001";
-const SONNET_MODEL = "claude-sonnet-4-6";
 
 async function getAgentConfig(orgId: string, mode: AgentMode) {
   const config = await prisma.agentConfig.findUnique({ where: { orgId } });
@@ -66,282 +67,24 @@ async function getAgentConfig(orgId: string, mode: AgentMode) {
   };
 }
 
-async function loadContext(contractId: string, orgId: string): Promise<AgentContext> {
-  const contract = await prisma.contract.findUniqueOrThrow({
-    where: { id: contractId },
-    include: {
-      template: true,
-      clauses: {
-        where: { isActive: true },
-        include: { clause: { select: { id: true, title: true, category: true } } },
-        orderBy: { position: "asc" },
-      },
-    },
-  });
-
-  // Quando o contrato é Google Doc, o doc é a fonte de verdade do texto.
-  // Texto vivo via Drive export (read-only tools como validate/analyze_contradictions/
-  // suggest_improvements veem o estado atual do doc). Snapshot persistido é
-  // fallback defensivo quando Drive falha ou quando o contrato (legado) ainda
-  // não tem doc associado.
-  let htmlContent: string;
-  if (contract.googleDocId) {
-    const { getDocPlainText } = await import("@/lib/google/docs");
-    htmlContent = await getDocPlainText(contract.googleDocId);
-  } else {
-    htmlContent = contract.htmlContent || "";
-  }
-
-  return {
-    contractId,
-    userId: contract.userId,
-    orgId,
-    htmlContent,
-    dataJson: contract.dataJson as Record<string, unknown>,
-    templateSource: contract.template
-      ? contract.templateOverride || contract.template.handlebarsSource
-      : null,
-    templateModalidade: contract.template?.modalidade || "a_vista",
-    templateName: contract.template?.name ?? "Contrato importado",
-    activeClauses: contract.clauses.map((cc) => ({
-      id: cc.id,
-      clauseId: cc.clause.id,
-      title: cc.clause.title,
-      category: cc.clause.category,
-      position: cc.position,
-      isActive: cc.isActive,
-    })),
-    googleDocId: contract.googleDocId,
-  };
-}
+// Helpers (loadContext, resolveSession, loadChatHistory, streamOneTurn,
+// mapToolToAction, buildToolSummary, summarizeToolResult, EDIT_TOOL_NAMES,
+// isEditTool, ToolOutput, StreamedTurnResult) extraídos pra `./shared/*` em
+// F1 da arquitetura multi-agente. Especialistas (analyst, legal, editor,
+// curator) reusam esses módulos sem duplicar lógica.
 
 /**
- * Resolve a session ativa pra esse turn:
- *  - Se `sessionId` foi passado e a session pertence ao contrato (e não está
- *    arquivada), usa essa.
- *  - Senão, pega a mais recente não-arquivada.
- *  - Senão (primeira conversa), cria uma session vazia.
- */
-async function resolveSession(
-  contractId: string,
-  userId: string,
-  sessionId?: string
-): Promise<{ id: string }> {
-  if (sessionId) {
-    const session = await prisma.chatSession.findUnique({
-      where: { id: sessionId },
-      select: { id: true, contractId: true, archived: true },
-    });
-    if (session && session.contractId === contractId && !session.archived) {
-      return { id: session.id };
-    }
-    // sessionId inválido pra esse contrato — cai pro fallback.
-  }
-
-  const recent = await prisma.chatSession.findFirst({
-    where: { contractId, archived: false },
-    orderBy: { updatedAt: "desc" },
-    select: { id: true },
-  });
-  if (recent) return recent;
-
-  const created = await prisma.chatSession.create({
-    data: { contractId, userId },
-    select: { id: true },
-  });
-  return created;
-}
-
-async function loadChatHistory(sessionId: string) {
-  const messages = await prisma.chatMessage.findMany({
-    where: { sessionId },
-    orderBy: { createdAt: "asc" },
-    take: 20,
-    select: { role: true, content: true },
-  });
-  return messages.map((m) => ({
-    role: m.role as "user" | "assistant",
-    content: m.content,
-  }));
-}
-
-function mapToolToAction(toolName: string): string {
-  const map: Record<string, string> = {
-    query_clauses: "ai_query",
-    query_templates: "ai_query",
-    explain_clause: "ai_query",
-    edit_contract_section: "ai_edit",
-    update_contract_data: "data_patch",
-    insert_clause: "clause_added",
-    remove_clause: "clause_removed",
-    validate_contract: "validation",
-    suggest_improvements: "validation",
-    extract_document_data: "ocr_extraction",
-    add_comment: "ai_query",
-    analyze_contradictions: "validation",
-    query_knowledge_base: "ai_query",
-    find_similar_contracts: "ai_query",
-    propose_new_clause: "ai_query",
-    propose_template_change: "ai_query",
-    apply_style_preset: "ai_edit",
-    insert_image: "ai_edit",
-  };
-  return map[toolName] || "ai_edit";
-}
-
-function buildToolSummary(toolName: string, input: Record<string, unknown>): string {
-  switch (toolName) {
-    case "query_clauses":
-      return `Consultou cláusulas${input.category ? ` (categoria: ${input.category})` : ""}${input.search ? ` (busca: "${input.search}")` : ""}`;
-    case "edit_contract_section":
-      return `Editou seção do contrato: substituiu ${(input.target as string)?.length || 0} caracteres`;
-    case "update_contract_data":
-      return `Atualizou dados: ${Object.keys(input.patch as Record<string, unknown> || {}).join(", ")}`;
-    case "insert_clause":
-      return `Inseriu cláusula ID ${input.clauseId}`;
-    case "remove_clause":
-      return `Removeu cláusula ID ${input.clauseId}`;
-    case "validate_contract":
-      return "Executou validação completa do contrato";
-    case "suggest_improvements":
-      return `Gerou sugestões de melhoria${input.focus ? ` (foco: ${input.focus})` : ""}`;
-    case "extract_document_data":
-      return `Extraiu dados do documento ${input.attachmentId}`;
-    case "query_knowledge_base":
-      return `Consultou base${input.query ? `: "${(input.query as string).slice(0, 60)}"` : ""}`;
-    case "find_similar_contracts":
-      return "Buscou contratos similares aprovados";
-    case "propose_suggestion":
-      return `Propôs alteração (${input.type || "replacement"})`;
-    case "add_comment":
-      return `Adicionou comentário ${input.severity ? `[${input.severity}]` : ""}`;
-    default:
-      return `Executou ${toolName}`;
-  }
-}
-
-// Tool names que são tentativas de mutação no contrato — usado pra determinar
-// se um turn produziu edição (pra refresh do htmlContent no client) e pra
-// gating em "Resolver com IA" (só marca resolved se houve edição com sucesso).
-const EDIT_TOOL_NAMES = new Set([
-  "edit_contract_section",
-  "update_contract_data",
-  "insert_clause",
-  "remove_clause",
-  "apply_style_preset",
-  "insert_image",
-]);
-
-interface ToolOutput {
-  success?: boolean;
-  verified?: boolean;
-  error?: string;
-  [k: string]: unknown;
-}
-
-function isEditTool(name: string): boolean {
-  return EDIT_TOOL_NAMES.has(name);
-}
-
-function summarizeToolResult(name: string, output: ToolOutput): string {
-  if (output.error) return String(output.error).slice(0, 200);
-  if (name === "edit_contract_section" && typeof output.occurrencesChanged === "number") {
-    return `${output.occurrencesChanged} ocorrência(s) substituída(s)`;
-  }
-  if (name === "insert_clause" && output.success) return "Cláusula inserida";
-  if (name === "remove_clause" && output.success) return "Cláusula removida";
-  if (output.success) return "OK";
-  return "Concluído";
-}
-
-interface StreamedTurnResult {
-  contentBlocks: Anthropic.ContentBlock[];
-  stopReason: Anthropic.Message["stop_reason"] | null;
-  usage: {
-    input: number;
-    output: number;
-    cacheRead: number;
-    cacheWrite: number;
-  };
-}
-
-/**
- * Roda UMA chamada à API Anthropic em streaming e emite eventos `text_delta`
- * pelo generator. Acumula blocos de content e retorna no final pra continuar
- * o loop tool-use.
- */
-async function* streamOneTurn(
-  params: Anthropic.MessageCreateParamsStreaming
-): AsyncGenerator<AgentEvent, StreamedTurnResult, void> {
-  const stream = await anthropic.messages.create(params);
-
-  const contentBlocks: Anthropic.ContentBlock[] = [];
-  let currentText = "";
-  let currentToolUse:
-    | { id: string; name: string; jsonBuf: string }
-    | null = null;
-  let stopReason: Anthropic.Message["stop_reason"] | null = null;
-  const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-
-  for await (const evt of stream) {
-    if (evt.type === "message_start") {
-      usage.input += evt.message.usage?.input_tokens ?? 0;
-      const u = evt.message.usage as {
-        cache_read_input_tokens?: number;
-        cache_creation_input_tokens?: number;
-      };
-      usage.cacheRead += u?.cache_read_input_tokens ?? 0;
-      usage.cacheWrite += u?.cache_creation_input_tokens ?? 0;
-    } else if (evt.type === "content_block_start") {
-      const cb = evt.content_block;
-      if (cb.type === "text") {
-        currentText = "";
-      } else if (cb.type === "tool_use") {
-        currentToolUse = { id: cb.id, name: cb.name, jsonBuf: "" };
-      }
-    } else if (evt.type === "content_block_delta") {
-      const d = evt.delta;
-      if (d.type === "text_delta") {
-        currentText += d.text;
-        yield { type: "text_delta", text: d.text };
-      } else if (d.type === "input_json_delta" && currentToolUse) {
-        currentToolUse.jsonBuf += d.partial_json;
-      }
-    } else if (evt.type === "content_block_stop") {
-      if (currentToolUse) {
-        let input: Record<string, unknown> = {};
-        if (currentToolUse.jsonBuf) {
-          try {
-            input = JSON.parse(currentToolUse.jsonBuf) as Record<string, unknown>;
-          } catch {
-            // Buf incompleto / inválido — manda input vazio, handler trata.
-          }
-        }
-        contentBlocks.push({
-          type: "tool_use",
-          id: currentToolUse.id,
-          name: currentToolUse.name,
-          input,
-        });
-        currentToolUse = null;
-      } else if (currentText) {
-        contentBlocks.push({
-          type: "text",
-          text: currentText,
-          citations: null,
-        } as unknown as Anthropic.ContentBlock);
-        currentText = "";
-      }
-    } else if (evt.type === "message_delta") {
-      stopReason = evt.delta.stop_reason;
-      usage.output += evt.usage?.output_tokens ?? 0;
-    }
-  }
-
-  return { contentBlocks, stopReason, usage };
-}
-
-/**
+ * @deprecated F5 (2026-05-16) — o caminho legado de chat single-agent está
+ * obsoleto. Todo chat de contrato roteia pelo `runOrchestrator` do graph
+ * multi-agente (`orchestrator/graph.ts`). Esta função permanece exportada
+ * apenas pra:
+ *   1. `runPassiveAnalysis` (análise automática open/edit/approve — não
+ *      migrada por enquanto, vive na mesma module).
+ *   2. `/api/contracts/[id]/comments/[commentId]/ai-resolve` (legacy path
+ *      planejado pra migrar em F6).
+ *
+ * NÃO use em novos endpoints — chame `runOrchestrator` diretamente.
+ *
  * Roda o agente em modo streaming, emitindo eventos AgentEvent durante o
  * loop tool-use. Cada chamada à API Anthropic é streamed e cada tool
  * dispatch é anunciado antes (tool_use) e depois (tool_result + opcionalmente

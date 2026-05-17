@@ -146,6 +146,21 @@ export async function POST(
     }
   );
 
+  // F4 iteração 2026-05-17 — quando a category é certidão ou matrícula anexada,
+  // dispara análise fire-and-forget: OCR estruturado → CertidaoJobLite sintético
+  // → crossCheckCertidoes → ContractComment por finding. Não bloqueia o response.
+  if (
+    attachment.category &&
+    (attachment.category.startsWith("certidao_") || attachment.category === "matricula_anexada")
+  ) {
+    void import("@/lib/services/manual-certidao-analysis").then(
+      ({ analyzeManualCertidaoForDeal }) =>
+        analyzeManualCertidaoForDeal(deal.id, attachment.id).catch((err) => {
+          console.error("[attachments-newton] analyzeManualCertidaoForDeal falhou:", err);
+        })
+    );
+  }
+
   return NextResponse.json(
     {
       id: attachment.id,

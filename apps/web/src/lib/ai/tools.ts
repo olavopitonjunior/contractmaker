@@ -258,6 +258,23 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
     },
   },
   {
+    name: "cross_check_certidoes",
+    description:
+      "Análise cruzada Certidões × Contrato. Lê todos os CertidaoJob emitidos pelo Deal (Infosimples) e detecta divergências contra o dataJson: matrícula com ônus/penhora/alienação fiduciária, matrícula vencida (>30 dias), certidões positivas (cível/trabalhista/fiscal/protesto/IPTU/antecedentes), CRF FGTS irregular. Retorna findings com severity error/warning/info, target (parte/imóvel), mensagem explicativa, base legal, sugestão de cláusula de aditamento, e quando há falha permanente também devolve link pro portal oficial.\n\nUse SEMPRE na revisão inicial de um contrato (intent=review) ANTES de propor mudanças. Em modalidade=financiamento, é OBRIGATÓRIO ler matrícula antes de aprovar.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        focus: {
+          type: "string",
+          enum: ["all", "matricula", "vendedores", "imovel"],
+          description:
+            "Filtra findings por categoria. 'matricula' só retorna ônus/vencimento/falta de matrícula. 'vendedores' filtra cível/trabalhista/fiscal/protesto/antecedentes. 'imovel' filtra IPTU/CCIR/matrícula. Default 'all'.",
+        },
+      },
+      required: [],
+    },
+  },
+  {
     name: "query_knowledge_base",
     description:
       "Consulta a base de conhecimento do escritório (legislação, modelos referenciais, regras internas, glossário). Use SEMPRE antes de citar base legal, antes de redigir cláusula técnica baseada em lei específica, e antes de decidir sobre termos do escritório. Retorna os itens mais relevantes por similaridade semântica (RAG via Voyage-law-2).",

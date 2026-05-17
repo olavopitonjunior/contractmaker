@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { streamContractAgent } from "@/lib/ai/agent";
+import { runOrchestrator } from "@/lib/ai/orchestrator/graph";
 import {
   requireApiAuth,
   isAuthFailure,
@@ -18,6 +19,11 @@ export const maxDuration = 120;
  * SSE com os mesmos AgentEvent que /chat. No final, se o turn teve pelo
  * menos uma tool de edição com `success: true`, marca o comentário como
  * resolvido e dispara AuditLog `CONTRACT_COMMENT_AI_RESOLVED`.
+ *
+ * F6 (2026-05-16) — migrado pro orchestrator multi-agente. Quando
+ * `ENABLE_MULTI_AGENT !== "false"`, usa `runOrchestrator` (graph) com
+ * mode=fast + intent forçado a edit_simple via prompt. Fallback legacy
+ * preservado pra rollback emergência (set ENABLE_MULTI_AGENT=false).
  */
 export async function POST(
   req: NextRequest,
@@ -87,16 +93,28 @@ export async function POST(
   const encoder = new TextEncoder();
   const collected: AgentEvent[] = [];
 
+  // F6: graph multi-agente por default; fallback legacy via env=false.
+  const useMultiAgent = process.env.ENABLE_MULTI_AGENT !== "false";
+
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        for await (const event of streamContractAgent({
-          message: prompt,
-          contractId: params.id,
-          userId: auth.actor.effectiveUserId,
-          orgId: auth.org.id,
-          mode: "fast",
-        })) {
+        const eventStream = useMultiAgent
+          ? runOrchestrator({
+              contractId: params.id,
+              userId: auth.actor.effectiveUserId,
+              orgId: auth.org.id,
+              userMessage: prompt,
+              mode: "fast",
+            })
+          : streamContractAgent({
+              message: prompt,
+              contractId: params.id,
+              userId: auth.actor.effectiveUserId,
+              orgId: auth.org.id,
+              mode: "fast",
+            });
+        for await (const event of eventStream) {
           collected.push(event);
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify(event)}\n\n`)

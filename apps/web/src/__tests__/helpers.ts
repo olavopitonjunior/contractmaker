@@ -65,8 +65,71 @@ export function createTestContractData(
 }
 
 // --- Anthropic response factories ---
+
+/**
+ * Wraps a Message-like object to ALSO be async-iterable, yielding fake
+ * streaming events that mimic the SDK's `MessageStreamEvent` sequence.
+ * This is the bridge between the legacy test mocks (which return plain
+ * Message objects) and the streaming agent runtime that does
+ * `for await (const evt of stream)`.
+ */
+function makeStreamable<T extends { content: Array<Record<string, unknown>>; stop_reason: string; usage: { input_tokens: number; output_tokens: number } }>(
+  message: T
+): T & AsyncIterable<unknown> {
+  const iter = async function* (): AsyncGenerator<unknown> {
+    yield {
+      type: "message_start",
+      message: { usage: { input_tokens: message.usage.input_tokens } },
+    };
+    for (let i = 0; i < message.content.length; i++) {
+      const block = message.content[i];
+      if (block.type === "text") {
+        yield {
+          type: "content_block_start",
+          index: i,
+          content_block: { type: "text" },
+        };
+        yield {
+          type: "content_block_delta",
+          index: i,
+          delta: { type: "text_delta", text: block.text },
+        };
+        yield { type: "content_block_stop", index: i };
+      } else if (block.type === "tool_use") {
+        yield {
+          type: "content_block_start",
+          index: i,
+          content_block: {
+            type: "tool_use",
+            id: block.id,
+            name: block.name,
+          },
+        };
+        yield {
+          type: "content_block_delta",
+          index: i,
+          delta: {
+            type: "input_json_delta",
+            partial_json: JSON.stringify(block.input ?? {}),
+          },
+        };
+        yield { type: "content_block_stop", index: i };
+      }
+    }
+    yield {
+      type: "message_delta",
+      delta: { stop_reason: message.stop_reason },
+      usage: { output_tokens: message.usage.output_tokens },
+    };
+    yield { type: "message_stop" };
+  };
+  return Object.assign(message, {
+    [Symbol.asyncIterator]: iter,
+  }) as T & AsyncIterable<unknown>;
+}
+
 export function createAnthropicTextResponse(text: string) {
-  return {
+  return makeStreamable({
     id: "msg_test",
     type: "message",
     role: "assistant",
@@ -74,7 +137,7 @@ export function createAnthropicTextResponse(text: string) {
     model: "claude-sonnet-4-20250514",
     stop_reason: "end_turn",
     usage: { input_tokens: 100, output_tokens: 50 },
-  };
+  });
 }
 
 export function createAnthropicToolUseResponse(
@@ -82,7 +145,7 @@ export function createAnthropicToolUseResponse(
   input: Record<string, unknown>,
   toolUseId = "toolu_test_1"
 ) {
-  return {
+  return makeStreamable({
     id: "msg_test",
     type: "message",
     role: "assistant",
@@ -97,7 +160,7 @@ export function createAnthropicToolUseResponse(
     model: "claude-sonnet-4-20250514",
     stop_reason: "tool_use",
     usage: { input_tokens: 100, output_tokens: 50 },
-  };
+  });
 }
 
 // --- NextAuth session factory ---

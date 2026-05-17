@@ -66,6 +66,8 @@ export async function executeToolHandler(
       return handleAddComment(input, context);
     case "analyze_contradictions":
       return handleAnalyzeContradictions(input, context);
+    case "cross_check_certidoes":
+      return handleCrossCheckCertidoes(input, context);
     case "query_knowledge_base":
       return handleQueryKnowledgeBase(input, context);
     case "find_similar_contracts":
@@ -94,6 +96,7 @@ const READ_TOOL_NAMES = new Set([
   "find_similar_contracts",
   "analyze_contradictions",
   "suggest_improvements",
+  "cross_check_certidoes",
 ]);
 
 /**
@@ -1526,5 +1529,120 @@ async function handleExtractDocument(
     mime: attachment.mime,
     message: "Documento identificado. Use a API de OCR para extrair os dados.",
     instruction: "Para extração completa, o documento precisa ser processado via endpoint dedicado /api/documents/extract-ai",
+  };
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// cross_check_certidoes — F4
+// ────────────────────────────────────────────────────────────────────────
+
+import { crossCheckCertidoes, type CrossCheckFinding } from "./crosscheck/certidoes";
+
+async function handleCrossCheckCertidoes(
+  input: Record<string, unknown>,
+  context: AgentContext
+): Promise<Record<string, unknown>> {
+  const focus = (input.focus as string) || "all";
+
+  // Resolve dealId via Contract
+  const contract = await prisma.contract.findUnique({
+    where: { id: context.contractId },
+    select: { dealId: true, dataJson: true },
+  });
+  if (!contract) {
+    return { error: "Contrato não encontrado", findings: [] };
+  }
+  if (!contract.dealId) {
+    return {
+      error:
+        "Contrato sem deal vinculado — análise de certidões exige dealId pra buscar CertidaoJob",
+      findings: [],
+    };
+  }
+
+  const jobs = await prisma.certidaoJob.findMany({
+    where: { dealId: contract.dealId },
+    select: {
+      id: true,
+      endpoint: true,
+      label: true,
+      targetKind: true,
+      targetIndex: true,
+      status: true,
+      resultCode: true,
+      resultData: true,
+      errorMessage: true,
+      finishedAt: true,
+      attachmentId: true,
+    },
+    orderBy: { finishedAt: "desc" },
+  });
+
+  if (jobs.length === 0) {
+    return {
+      success: true,
+      findings: [],
+      summary: {
+        total: 0,
+        bySeverity: { error: 0, warning: 0, info: 0 },
+        byKind: {},
+        hasBlockingIssues: false,
+      },
+      message:
+        "Nenhuma certidão emitida para este deal. Recomendado dispatch via /deals/[id]/certidoes antes da aprovação.",
+    };
+  }
+
+  const result = crossCheckCertidoes({
+    contractDataJson: contract.dataJson as Record<string, unknown>,
+    jobs,
+  });
+
+  let filtered: CrossCheckFinding[] = result.findings;
+  if (focus === "matricula") {
+    filtered = filtered.filter(
+      (f) =>
+        f.kind === "matricula_onus" ||
+        f.kind === "matricula_vencida" ||
+        f.kind === "matricula_faltando" ||
+        f.kind === "matricula_invalida"
+    );
+  } else if (focus === "vendedores") {
+    filtered = filtered.filter(
+      (f) =>
+        f.kind === "vendedor_civel_positiva" ||
+        f.kind === "vendedor_trabalhista_positiva" ||
+        f.kind === "vendedor_fiscal_positiva" ||
+        f.kind === "vendedor_antecedentes_positiva" ||
+        f.kind === "protesto_vendedor" ||
+        f.kind === "fgts_pendente"
+    );
+  } else if (focus === "imovel") {
+    filtered = filtered.filter(
+      (f) =>
+        f.kind === "matricula_onus" ||
+        f.kind === "matricula_vencida" ||
+        f.kind === "matricula_faltando" ||
+        f.kind === "matricula_invalida" ||
+        f.kind === "imovel_iptu_pendente"
+    );
+  }
+
+  return {
+    success: true,
+    focus,
+    jobs_analyzed: jobs.length,
+    findings: filtered,
+    summary: {
+      total: filtered.length,
+      bySeverity: filtered.reduce(
+        (acc, f) => {
+          acc[f.severity]++;
+          return acc;
+        },
+        { error: 0, warning: 0, info: 0 } as Record<string, number>
+      ),
+      hasBlockingIssues: filtered.some((f) => f.severity === "error"),
+    },
   };
 }

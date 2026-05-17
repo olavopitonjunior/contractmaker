@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { chatSchema } from "@/lib/validation/schemas";
 import { streamContractAgent } from "@/lib/ai/agent";
+import { runOrchestrator } from "@/lib/ai/orchestrator/graph";
+import { classifyIntent } from "@/lib/ai/orchestrator/routing";
 import {
   requireApiAuth,
   isAuthFailure,
@@ -63,10 +65,31 @@ export async function POST(
     attachmentIds: parsed.data.attachmentIds,
   };
 
+  // Feature flag F2: ENABLE_MULTI_AGENT=true roteia informational/edit_simple/
+  // review pro orquestrador multi-agente (Analyst+Legal+Editor+Curator com
+  // Sentinel). edit_multi continua no legacy (Plan-and-approve via
+  // streamContractAgent que escreve ChatPlan).
+  // F5: multi-agent é DEFAULT. Pra desligar (rollback), set ENABLE_MULTI_AGENT=false.
+  // Todos os intents (informational, edit_simple, edit_multi, review, propose)
+  // são roteados via graph — edit_multi força propose_plan no Editor.
+  void classifyIntent; // mantido pra debug/log futuro
+  const useMultiAgent = process.env.ENABLE_MULTI_AGENT !== "false";
+
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        for await (const event of streamContractAgent(agentParams)) {
+        const eventStream = useMultiAgent
+          ? runOrchestrator({
+              contractId: agentParams.contractId,
+              userId: agentParams.userId,
+              orgId: agentParams.orgId,
+              sessionId: agentParams.sessionId,
+              userMessage: agentParams.message,
+              mode: agentParams.mode ?? "plan",
+              attachmentIds: agentParams.attachmentIds,
+            })
+          : streamContractAgent(agentParams);
+        for await (const event of eventStream) {
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify(event)}\n\n`)
           );

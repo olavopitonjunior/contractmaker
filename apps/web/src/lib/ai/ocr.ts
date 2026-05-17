@@ -138,6 +138,72 @@ Retorne APENAS um JSON valido.`,
 - prazo_validade
 Retorne APENAS um JSON valido.`,
 
+  // F4 iteração 2026-05-17 — certidões anexadas manualmente (sem dispatch
+  // Infosimples). Campos análogos ao normalizer Infosimples pra alimentar
+  // cross_check_certidoes via CertidaoJobLite sintético.
+  certidao_civel: `Extraia os seguintes dados desta certidão cível (TJSP/TJRJ/outro tribunal estadual):
+- numero_certidao
+- tribunal (ex: "TJSP", "TJRJ")
+- cidade
+- uf
+- nome_consultado
+- cpf_cnpj_consultado
+- situacao ("negativa" se "nada consta", "positiva" se há ações em curso, "positiva_com_efeitos" se há condenações)
+- tem_acao_em_curso (true/false)
+- detalhes_acoes (resumo curto se positiva, "" se negativa)
+- data_emissao (formato YYYY-MM-DD)
+- validade_ate (formato YYYY-MM-DD)
+Retorne APENAS um JSON valido.`,
+
+  certidao_trabalhista: `Extraia os seguintes dados desta certidão trabalhista (CNDT, TRT, CEAT):
+- numero_certidao
+- tribunal (ex: "TST/CNDT", "TRT2", "TRT15")
+- nome_consultado
+- cpf_cnpj_consultado
+- situacao ("negativa" ou "positiva")
+- tem_pendencia (true/false)
+- detalhes (resumo da pendência se positiva)
+- data_emissao (YYYY-MM-DD)
+- validade_ate (YYYY-MM-DD, geralmente 180 dias)
+Retorne APENAS um JSON valido.`,
+
+  certidao_fiscal: `Extraia os seguintes dados desta certidão fiscal (CND federal, PGFN, Receita Federal, SEFAZ estadual):
+- numero_certidao
+- orgao_emissor (ex: "PGFN/Receita Federal", "SEFAZ-SP")
+- nome_consultado
+- cpf_cnpj_consultado
+- situacao ("negativa" sem débitos, "positiva_com_efeitos" com débitos parcelados/suspensos, "positiva" com débitos pendentes)
+- valor_debito_total (R$, se houver)
+- detalhes_debitos (lista curta)
+- data_emissao (YYYY-MM-DD)
+- validade_ate (YYYY-MM-DD, geralmente 180 dias)
+Retorne APENAS um JSON valido.`,
+
+  certidao_protesto: `Extraia os seguintes dados desta certidão de protesto (CENPROT SP/nacional, cartório de protesto):
+- numero_certidao
+- cartorio_emissor
+- nome_consultado
+- cpf_cnpj_consultado
+- situacao ("negativa" se nada consta, "positiva" se há protesto registrado)
+- tem_protesto (true/false)
+- valor_protesto_total (se positiva)
+- quantidade_protestos
+- detalhes (lista de protestos com data/valor/cartório)
+- data_emissao (YYYY-MM-DD)
+Retorne APENAS um JSON valido.`,
+
+  certidao_iptu: `Extraia os seguintes dados desta certidão negativa/positiva de IPTU municipal:
+- numero_certidao
+- prefeitura (ex: "São Paulo/SP", "Rio de Janeiro/RJ")
+- inscricao_imobiliaria
+- endereco_imovel
+- situacao ("negativa" sem débitos, "positiva" com débitos)
+- valor_debito_iptu (R$, se houver)
+- exercicios_em_aberto (lista de anos com débito)
+- data_emissao (YYYY-MM-DD)
+- validade_ate (YYYY-MM-DD)
+Retorne APENAS um JSON valido.`,
+
   outro: `Identifique o tipo de documento nesta imagem e extraia todos os dados pessoais e informações relevantes que encontrar (nomes, CPF, CNPJ, endereços, valores, datas). Retorne APENAS um JSON valido com os campos encontrados.`,
 };
 
@@ -167,7 +233,7 @@ export async function classifyDocument(
             },
             {
               type: "text",
-              text: 'Classifique este documento brasileiro. Retorne APENAS uma palavra: "rg", "cpf", "matricula", "iptu", "escritura", "procuracao" ou "outro".',
+              text: 'Classifique este documento brasileiro. Retorne APENAS uma palavra entre: "rg", "cpf", "matricula", "iptu", "escritura", "procuracao", "certidao_civel" (Justiça comum estadual/federal, TJ), "certidao_trabalhista" (CNDT, TRT, justiça do trabalho), "certidao_fiscal" (CND federal, PGFN, Receita Federal, SEFAZ), "certidao_protesto" (CENPROT, cartório de protesto), "certidao_iptu" (certidão municipal de IPTU/débitos tributários do imóvel) ou "outro".',
             },
           ],
         },
@@ -207,7 +273,20 @@ export async function classifyDocument(
   }
 
   const text = response.content[0].type === "text" ? response.content[0].text.trim().toLowerCase() : "outro";
-  const valid = ["rg", "cpf", "matricula", "iptu", "escritura", "procuracao", "outro"];
+  const valid = [
+    "rg",
+    "cpf",
+    "matricula",
+    "iptu",
+    "escritura",
+    "procuracao",
+    "certidao_civel",
+    "certidao_trabalhista",
+    "certidao_fiscal",
+    "certidao_protesto",
+    "certidao_iptu",
+    "outro",
+  ];
   return valid.includes(text) ? text : "outro";
 }
 

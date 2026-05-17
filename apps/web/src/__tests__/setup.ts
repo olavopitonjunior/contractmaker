@@ -38,9 +38,12 @@ vi.mock("@/lib/db/prisma", () => {
     },
     chatSession: {
       findFirst: vi.fn(),
+      findUnique: vi.fn().mockResolvedValue(null),
       create: vi.fn(),
+      update: vi.fn().mockResolvedValue({}),
     },
     chatMessage: {
+      findMany: vi.fn().mockResolvedValue([]),
       createMany: vi.fn(),
     },
     agentConfig: {
@@ -150,6 +153,19 @@ vi.mock("@/lib/db/prisma", () => {
       create: vi.fn(),
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
       groupBy: vi.fn().mockResolvedValue([]),
+    },
+    aIUsage: {
+      aggregate: vi.fn().mockResolvedValue({
+        _sum: { totalTokens: 0, promptTokens: 0, completionTokens: 0 },
+      }),
+      create: vi.fn().mockResolvedValue({}),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    envelope: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn(),
+      update: vi.fn(),
     },
   };
   Object.assign(prismaMock, mock);

@@ -132,6 +132,27 @@ export type AgentEvent =
   | {
       type: "error";
       message: string;
+    }
+  | {
+      /** Multi-agente: especialista começou a executar.
+       *  Emitido pelo graph (F1+) entre `started` e o primeiro `tool_use`. */
+      type: "agent_started";
+      agent: "analyst" | "legal" | "editor" | "curator" | "orchestrator";
+      model: string;
+    }
+  | {
+      /** Multi-agente: especialista terminou. UI fecha o chip. */
+      type: "agent_completed";
+      agent: "analyst" | "legal" | "editor" | "curator" | "orchestrator";
+      success: boolean;
+      /** Resumo curto pra UI (1 frase). */
+      summary?: string;
+    }
+  | {
+      /** Multi-agente: PostgresSaver persistiu checkpoint do turn. Útil para
+       *  UI de auditoria/time-travel em F3. */
+      type: "checkpoint_saved";
+      turnIndex: number;
     };
 
 /**

@@ -948,5 +948,130 @@ export async function generateContractForDeal(
     }
   }
 
+  // F4 — Análise automática de certidões na confecção. Fire-and-forget:
+  // não bloqueia retorno do contrato. Vai pra ContractComment como
+  // findings ancorados, severity error/warning. Usuário vê os warnings
+  // ao abrir o contrato.
+  void analyzeCertidoesForContract(contract.id, deal.id, orgId).catch((err) => {
+    console.error("[contract-generation] analyzeCertidoesForContract falhou:", err);
+  });
+
   return { contractId: contract.id, version: contract.version, googleDocUrl };
+}
+
+/**
+ * F4 — Análise fire-and-forget de certidões existentes pro contrato recém-criado.
+ * Lê CertidaoJob do deal, roda crossCheckCertidoes() (pure function), e cria
+ * ContractComment dedupe-key'ed para cada finding. Usuário vê os alertas no
+ * editor sem precisar pedir.
+ *
+ * Não bloqueia generateContractForDeal — erros são engolidos no caller.
+ */
+async function analyzeCertidoesForContract(
+  contractId: string,
+  dealId: string,
+  _orgId: string
+): Promise<void> {
+  const { crossCheckCertidoes } = await import("@/lib/ai/crosscheck/certidoes");
+  const { dedupeKeyFor } = await import("@/lib/ai/quickChecks");
+
+  const contract = await prisma.contract.findUnique({
+    where: { id: contractId },
+    select: { dataJson: true, status: true },
+  });
+  if (!contract || contract.status === "aprovado") return;
+
+  const jobs = await prisma.certidaoJob.findMany({
+    where: { dealId },
+    select: {
+      id: true,
+      endpoint: true,
+      label: true,
+      targetKind: true,
+      targetIndex: true,
+      status: true,
+      resultCode: true,
+      resultData: true,
+      errorMessage: true,
+      finishedAt: true,
+      attachmentId: true,
+    },
+  });
+
+  if (jobs.length === 0) {
+    // Sem certidões emitidas — registra info pro usuário saber que pode
+    // disparar via aba Certidões. NÃO cria comments (evita spam).
+    await prisma.contractChangeLog.create({
+      data: {
+        contractId,
+        userId: null,
+        action: "validation",
+        summary:
+          "Análise de certidões pulada — nenhum CertidaoJob emitido para o deal. Considere disparar via aba Certidões.",
+        details: { trigger: "contract_generation", jobsFound: 0 } as object,
+        source: "system",
+      },
+    });
+    return;
+  }
+
+  const { findings, summary } = crossCheckCertidoes({
+    contractDataJson: contract.dataJson as Record<string, unknown>,
+    jobs,
+  });
+
+  // Cria ContractComment por finding (dedupe via category + targetKind + targetIndex).
+  for (const finding of findings) {
+    const anchorBase = `${finding.kind}:${finding.target ?? "n/a"}:${finding.endpoint ?? ""}`;
+    const dedupeKey = dedupeKeyFor("ai", `crosscheck:${finding.kind}`, anchorBase);
+    try {
+      await prisma.contractComment.upsert({
+        where: {
+          contractId_dedupeKey: { contractId, dedupeKey },
+        },
+        create: {
+          contractId,
+          userId: null,
+          authorName: "Análise de Certidões",
+          authorType: "ai",
+          text: buildCommentText(finding),
+          // selectedText vazio porque a âncora não é num trecho do contrato —
+          // é um alerta global. Frontend exibe no painel sem ancorar.
+          selectedText: anchorBase.slice(0, 240),
+          anchorId: dedupeKey,
+          severity: finding.severity,
+          dedupeKey,
+        },
+        update: { updatedAt: new Date() },
+      });
+    } catch (err) {
+      console.error("[analyzeCertidoesForContract] upsert comment falhou:", err);
+    }
+  }
+
+  await prisma.contractChangeLog.create({
+    data: {
+      contractId,
+      userId: null,
+      action: "validation",
+      summary: `Análise inicial de certidões: ${summary.total} achados (${summary.bySeverity.error} erros, ${summary.bySeverity.warning} warnings)`,
+      details: {
+        trigger: "contract_generation",
+        jobsFound: jobs.length,
+        summary,
+      } as object,
+      source: "system",
+    },
+  });
+}
+
+function buildCommentText(finding: import("@/lib/ai/crosscheck/certidoes").CrossCheckFinding): string {
+  const parts: string[] = [finding.message];
+  if (finding.suggested_aditamento) {
+    parts.push(`\n**Sugestão de aditamento:**\n${finding.suggested_aditamento}`);
+  }
+  if (finding.manual_action?.url) {
+    parts.push(`\n**Ação manual:** [${finding.manual_action.label}](${finding.manual_action.url})`);
+  }
+  return parts.join("\n");
 }

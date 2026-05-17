@@ -1,0 +1,109 @@
+/**
+ * Router do graph multi-agente. Classifica a mensagem do usuário pra
+ * decidir qual especialista invocar. Reusa as regexes que o agente legacy
+ * já usa em `agent.ts:480-484` pra detectar comando de edição.
+ *
+ * Intents:
+ * - `informational` — pergunta, lista, explicação. Sem verbo de edição.
+ *   Roteia pra `legal` (read-only). Garantido pela regra 10.1 de `prompts.ts`.
+ * - `edit_simple` — verbo imperativo + alvo claro, 1 mudança. Roteia pra
+ *   `editor`.
+ * - `edit_multi` — verbo de edição + sinais de múltiplas mudanças (lista,
+ *   "e também", "revise tudo"). Roteia pra `propose_plan` (subgraph F2).
+ * - `review` — pedido explícito de análise sem editar ("analise",
+ *   "revise sem alterar"). Reads paralelos em analyst+legal+curator, sem editor.
+ */
+
+import type { OrchestratorState } from "./state";
+
+export type Intent = NonNullable<OrchestratorState["intent"]>;
+
+/** Verbos imperativos de edição. Mesma regex de `agent.ts:480-481`. */
+const EDIT_INTENT_REGEX =
+  /\b(altere|mude|troque|substitua|atualize|corrija|modifique|remova|insira|adicione|coloque|ponha|apague|delete|reescreva|inclua|retire|exclua)\b/i;
+
+/** Pedido explícito de edição imediata sem revisão. `agent.ts:483-484`. */
+const FORCE_DIRECT_EDIT_REGEX =
+  /\b(aplique\s+direto|aplique\s+já|faça\s+já|faça\s+agora|sem\s+revis[ãa]o|edite\s+direto|altere\s+agora|aplica\s+direto|sem\s+sugest[ãa]o)\b/i;
+
+/** Pedido explícito de análise sem edição. */
+const REVIEW_INTENT_REGEX =
+  /\b(analise|revise|avalie|verifique|valide|cheque|confira)\b/i;
+
+/** Pedido de proposta — vai pro Curator pra criar pending proposal. */
+const PROPOSE_INTENT_REGEX =
+  /\b(proponha|sugira|recomende|considere|crie\s+(?:uma|um)\s+proposta)\b/i;
+
+/** Aditamento — operação de write neste contrato (não proposta pra biblioteca).
+ *  Quando match, força edit_simple no roteamento, mesmo com verbo "proponha". */
+const ADITAMENTO_REGEX =
+  /\b(aditamento|aditivo|adendo|cl[áa]usula\s+adicional)\b/i;
+
+/** Contexto de certidões — quando o usuário menciona "certid", deal precisa
+ *  passar pelo Editor (com cross_check_certidoes) pra ações concretas. */
+const CERTIDOES_CONTEXT_REGEX =
+  /\b(certid[ãa]o|certid[õo]es|matr[íi]cula|ônus|gravame|penhora|aliena[çc][ãa]o\s+fiduci[áa]ria)\b/i;
+
+/** Pergunta interrogativa (PT-BR e EN). */
+const QUESTION_REGEX =
+  /^(o\s+que|qual|quais|como|onde|quando|por\s+que|porque|quem|how|what|where|when|why|who|which)\b/i;
+
+/** Sinais de múltiplas edições no mesmo turn. */
+const MULTI_EDIT_HINTS_REGEX =
+  /\b(todas|tudo|cada|revis[ãa]o\s+completa|geral|também|e\s+também|além\s+disso|ainda)\b/i;
+
+/**
+ * Heurística pura — classifica intent sem chamar LLM. Em F1 a precisão
+ * exigida é só "manda pro especialista certo"; o especialista refina.
+ *
+ * Em F2/F3 pode-se adicionar um classifier LLM (Haiku) pra casos ambíguos,
+ * mas o ROI é baixo: mensagens claras dominam.
+ */
+export function classifyIntent(message: string): Intent {
+  const msg = message.trim();
+
+  // 1. Pergunta com "?" ou começa com interrogativo → informational.
+  if (msg.endsWith("?") || QUESTION_REGEX.test(msg)) {
+    return "informational";
+  }
+
+  // 2. Aditamento (escrita NESTE contrato) — tem precedência sobre propose.
+  //    Vai pro Editor que chama cross_check_certidoes + propose_suggestion em 1 turn.
+  if (ADITAMENTO_REGEX.test(msg)) {
+    return "edit_simple";
+  }
+
+  // 3. Pedido de proposta (curator) — explicitamente para template/biblioteca.
+  //    Tem precedência sobre review/edit quando o verbo é "proponha"/"sugira".
+  if (PROPOSE_INTENT_REGEX.test(msg) && !EDIT_INTENT_REGEX.test(msg)) {
+    return "propose";
+  }
+
+  // 4. Pedido explícito de análise sem editar.
+  if (REVIEW_INTENT_REGEX.test(msg) && !EDIT_INTENT_REGEX.test(msg)) {
+    return "review";
+  }
+
+  // 5. Verbo de edição → simple vs multi.
+  if (EDIT_INTENT_REGEX.test(msg)) {
+    if (MULTI_EDIT_HINTS_REGEX.test(msg) || FORCE_DIRECT_EDIT_REGEX.test(msg) === false && msg.length > 200) {
+      return "edit_multi";
+    }
+    return "edit_simple";
+  }
+
+  // 6. Sem nenhum sinal → trata como informational (mais seguro).
+  return "informational";
+}
+
+/** Re-export pra outros módulos consumirem sem duplicar regex. */
+export const ROUTER_REGEXES = {
+  EDIT_INTENT: EDIT_INTENT_REGEX,
+  FORCE_DIRECT_EDIT: FORCE_DIRECT_EDIT_REGEX,
+  REVIEW_INTENT: REVIEW_INTENT_REGEX,
+  PROPOSE_INTENT: PROPOSE_INTENT_REGEX,
+  ADITAMENTO: ADITAMENTO_REGEX,
+  CERTIDOES_CONTEXT: CERTIDOES_CONTEXT_REGEX,
+  QUESTION: QUESTION_REGEX,
+  MULTI_EDIT_HINTS: MULTI_EDIT_HINTS_REGEX,
+} as const;

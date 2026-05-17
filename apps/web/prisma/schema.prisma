@@ -628,6 +628,12 @@ model Contract {
   status              String    @default("rascunho")
   isLatest            Boolean   @default(true)
   parentVersionId     String?
+  // kind discrimina natureza do instrumento:
+  //   "contract"  → CCV original (default — retrocompat com rows existentes)
+  //   "addendum"  → aditamento contratual (parentVersionId aponta pro CCV)
+  //   "distrato"  → reservado pra fluxo futuro
+  // Aditamento herda dataJson + templateId + DocumentStyle do parent.
+  kind                String    @default("contract")
   // Google Docs migration (Phase 0+): when set, the contract content lives in
   // a Google Doc owned by the Contractmaker service account; htmlContent stays
   // as a snapshot for legacy export/diff fallback.
@@ -655,6 +661,8 @@ model Contract {
   aiUsage           AIUsage[]
   commissionCharges CommissionCharge[]
   envelopes         Envelope[]
+
+  @@index([dealId, kind, isLatest])
 }
 
 model ContractClause {

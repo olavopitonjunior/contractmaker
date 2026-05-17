@@ -40,6 +40,7 @@ import { SerasaConsentDialog } from "./SerasaConsentDialog";
 import { ComplementDadosForm } from "./ComplementDadosForm";
 import { ShareCertidoesDialog } from "./ShareCertidoesDialog";
 import { DiligentedPersonsSection } from "./DiligentedPersonsSection";
+import { CertidoesAnalysisPanel } from "./CertidoesAnalysisPanel";
 import { EditPartyDialog } from "./EditPartyDialog";
 import {
   CATEGORY_LABEL,
@@ -624,6 +625,10 @@ export function CertidoesTab({
     <div className="space-y-4">
       {/* F3: diligenciados section at the top */}
       <DiligentedPersonsSection dealId={dealId} onChange={() => refresh()} />
+
+      {/* F4.7: Painel de Análise IA — findings de cross_check_certidoes
+          com botão "Aplicar Aditamento" que abre o contrato no chat. */}
+      <CertidoesAnalysisPanel dealId={dealId} />
 
       <div className="flex flex-wrap items-center gap-2">
         <Button onClick={() => setDialogOpen(true)} disabled={extracting}>

@@ -4,6 +4,66 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-05-16 - Multi-agent orchestrator (F0-F5)
+
+### Adicionado
+
+- **Orquestrador multi-agente** via LangGraph TS — substitui o `streamContractAgent` legacy como caminho principal de chat. 7 nodes (`loadContext`, `router`, `analyst`, `legal`, `editor`, `curator`, `aggregator`) com fanout paralelo para `intent=review` e `propose`. Mantém streaming SSE com formato `AgentEvent` compatível com front-end atual.
+- **6 especialistas** em `apps/web/src/lib/ai/specialists/`:
+  - `analyst.ts` — Haiku 4.5, read-only (validate_contract, analyze_contradictions, extract_document_data, add_comment, cross_check_certidoes)
+  - `legal.ts` — Haiku 4.5, RAG (query_clauses, query_templates, explain_clause, query_knowledge_base, find_similar_contracts)
+  - `editor.ts` — Sonnet 4.6, writes gated pelo Sentinel (edit_contract_section, update_contract_data, propose_suggestion, insert_clause, remove_clause, apply_style_preset, insert_image, add_comment, cross_check_certidoes, propose_plan)
+  - `curator.ts` — Haiku 4.5, propose-only (propose_new_clause, propose_template_change, find_similar_contracts)
+  - `ocr-quarantine.ts` — Gemini + Sentinel classifier (low-priv, sem tools de write)
+  - System prompts dedicados em `specialists/prompts.ts` (Analyst/Legal/Editor/Curator)
+- **Sentinel** (`apps/web/src/lib/ai/sentinel/`):
+  - `policy.yaml` versionada com 3 regras (no_external_url_in_insert_image, no_template_change_without_evidence, budget_exceeded)
+  - `policy-engine.ts` parser AST seguro (sem `eval`/`Function`) com tokens, funções (`contains_private_ip`), operadores (==, !=, <, >, >=, MATCHES, AND, OR, NOT)
+  - `classifier.ts` regex + Haiku 4.5 fallback contra prompt injection (11 patterns regex, LRU cache 100 entries por hash)
+  - `middleware.ts` `applyPolicy(toolCall, state)` + `quarantineAttachment(text, ctx)` — audit `AGENT_TOOL_BLOCKED` / `SENTINEL_ATTACHMENT_QUARANTINED`
+- **PostgresSaver checkpointer** — `@langchain/langgraph-checkpoint-postgres@^1.0` no mesmo Neon do Prisma. Tabelas `langgraph_*` criadas via `apps/web/scripts/setup-langgraph-tables.ts`. `thread_id = ChatSession.id` pra time-travel forense.
+- **Tool `cross_check_certidoes`** (21ª tool no AGENT_TOOLS) — Analyst e Editor cruzam `CertidaoJob.resultData` × `Contract.dataJson`. 11 categorias de finding (matricula_onus, matricula_vencida, matricula_faltando, vendedor_fiscal_positiva, vendedor_trabalhista_positiva, vendedor_civel_positiva, vendedor_antecedentes_positiva, imovel_iptu_pendente, protesto_vendedor, fgts_pendente, certidao_falhou_portal_manual). Cada finding com `suggested_aditamento` citando base legal (CC arts. 127, 418, 474, 475, 502, 503).
+- **Hook automático em `contract-generation.ts`** — após criar contrato, dispara `analyzeCertidoesForContract` fire-and-forget que cria `ContractComment` por finding (dedupe via `dedupeKey`). Usuário vê alertas no editor sem ação manual.
+- **Roteamento de aditamento (F4.x polish)** — `ADITAMENTO_REGEX` + nova regra de prompt do Editor (regra 19) ativam ciclo 1-turn: cross_check_certidoes → propose_suggestion. "Proponha aditamento" agora roteia pra Editor (não Curator) por ser write neste contrato.
+- **Audit API + UI time-travel** — `GET /api/contracts/[id]/audit` lê histórico via `graph.getStateHistory(sessionId)`; UI server-component em `/contracts/[id]/audit` mostra checkpoints com intent/agents/tools/respostas por turn.
+- **Memory service unificado** (`apps/web/src/lib/ai/multi-agent-memory.ts`) — `getTimeline(contractId)` consolida AuditLog + AIUsage + ContractChangeLog; `recordEvent()` helper fire-and-forget.
+- **Audit actions novas**: `AGENT_TOOL_BLOCKED`, `SENTINEL_ATTACHMENT_QUARANTINED` em `lib/security/audit.ts`.
+- **Doc**: `docs/multi-agent-architecture.md` com fases F0-F5, estrutura de arquivos, gestão das tabelas `langgraph_*` fora do Prisma.
+- **Scripts de diagnóstico** em `apps/web/scripts/`: `setup-langgraph-tables.ts`, `test-multi-agent.ts`, `test-f3-curator-and-audit.ts`, `test-f4-crosscheck.ts`, `test-f4-polish-aditamento.ts`, `test-f5-edit-multi.ts`.
+- **Tests**: +44 testes (24 Sentinel + 13 routing + 10 crosscheck − 3 atualizados de tools.test). Total 813/813.
+
+### Alterado
+
+- **`apps/web/src/lib/ai/agent.ts`** — `streamContractAgent` marcada `@deprecated` com nota explicando que só permanece pra `runPassiveAnalysis` + `ai-resolve` route (planejado pra F6). Helpers extraídos para `shared/`: `loadContext`, `resolveSession`, `loadChatHistory`, `streamOneTurn`, `mapToolToAction`, `summarizeToolResult`, `getAnthropicClient`, `snapshot` helpers.
+- **`apps/web/src/app/api/contracts/[id]/chat/route.ts`** — flag `ENABLE_MULTI_AGENT` agora default `true`. Para rollback emergência, set `ENABLE_MULTI_AGENT=false`. Todos os intents (informational, edit_simple, edit_multi, review, propose) roteiam via graph; edit_multi força Editor com `propose_plan`.
+- **`apps/web/src/lib/services/contract-generation.ts`** — adicionado `analyzeCertidoesForContract` chamado fire-and-forget no fim de `generateContractForDeal`.
+
+### Adicionado em schema
+
+- Tabelas `langgraph_*` no Neon (gerenciadas FORA do Prisma — não rodar `prisma db pull`).
+- Audit actions enum: `AGENT_TOOL_BLOCKED`, `SENTINEL_ATTACHMENT_QUARANTINED`.
+
+### Dependências
+
+- `@langchain/langgraph@^1.0.0`
+- `@langchain/langgraph-checkpoint-postgres@^1.0.0`
+- `@langchain/core@^1.0.0`
+- `js-yaml@^4.1.0` + `@types/js-yaml@^4.0.9`
+
+### Motivação
+
+Single-agent monolítico em `agent.ts` (1133 linhas, 18 tools, 18 regras de prompt) começou a apresentar:
+1. **Anti-prompt-injection** insuficiente — `ChatAttachment.extractedText` entra direto no prompt do mesmo agente que tem tools de write.
+2. **Tools demais por turn** — todas as 18 oferecidas mesmo em queries informacionais.
+3. **Zero paralelismo em reads** — `validate_contract + query_knowledge_base + find_similar_contracts` serializados.
+4. **Audit não replay-able** — sem checkpoint serializado por turn pra time-travel forense em casos de litígio.
+
+Multi-agente resolve os 4 gargalos: tools restritas por especialista, fanout paralelo em review (3 agents simultâneos), Sentinel hard-block em writes que violam policy, PostgresSaver enterprise-grade pra audit/replay (exposição regulatória mitigada).
+
+### Sobre Voyage API key inválida (warning persistente)
+
+Em prod a `VOYAGE_API_KEY` está retornando 401. O multi-agente roda normalmente — `query_knowledge_base` cai em fallback ILIKE e `find_similar_contracts` em fallback fingerprint — mas a qualidade RAG semântica está degradada. Rotacionar antes da release.
+
 ## [Unreleased] - 2026-05-07 - Newton extract_document_fields (Phase 3 do plano openclaw)
 
 ### Adicionado
