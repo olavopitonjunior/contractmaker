@@ -1,6 +1,44 @@
+import { spawn } from "node:child_process";
 import { callApi, callBridge } from "./index.js";
+import { validateInWindow } from "./cron-window.js";
 
 export type ToolHandler = (args: Record<string, unknown>) => Promise<unknown>;
+
+/**
+ * Spawn `openclaw cron <args> --json`. Como o MCP server roda dentro do mesmo
+ * container do gateway openclaw, o binário `openclaw` está na PATH e o token
+ * é resolvido naturalmente via OPENCLAW_GATEWAY_TOKEN herdado do env.
+ *
+ * Decisão arquitetural 2026-05-16: substituiu a abordagem original via sidecar
+ * (que exigiria docker.sock mount). Detalhes em
+ * docs/newton-proactive-dispatch-2026-05-16.md (seção "Correção arquitetural").
+ */
+async function spawnOpenclawCron(args: string[]): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const child = spawn("openclaw", ["cron", ...args, "--json"], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: process.env,
+    });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (b: Buffer) => (stdout += b.toString()));
+    child.stderr.on("data", (b: Buffer) => (stderr += b.toString()));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code !== 0) {
+        return reject(
+          new Error(`openclaw cron exit=${code} stderr=${stderr.trim()}`)
+        );
+      }
+      try {
+        resolve(stdout.trim() ? JSON.parse(stdout) : {});
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        reject(new Error(`Failed to parse cron JSON: ${msg} raw=${stdout}`));
+      }
+    });
+  });
+}
 
 interface Tool {
   name: string;
@@ -1030,6 +1068,177 @@ export const tools: Tool[] = [
       }
       const r = await callBridge({ path: "/api/send", body });
       return r.body;
+    },
+  },
+
+  // ───────────── Proactive Dispatch ─────────────
+  // 3 tools que wrappam o `openclaw cron` CLI (mesmo container). Persona em
+  // PROACTIVE.md define o protocolo de uso (confirmação verbal, anti-spam,
+  // saída fácil, etc). Validação de janela 7-22h é server-side via
+  // validateInWindow — Newton não decide isso.
+  {
+    name: "schedule_proactive_message",
+    description:
+      "Agenda dispatch proativo (cron job) que Newton dispara em hora marcada. " +
+      "Use quando o user pedir lembretes/agendamentos recorrentes ou one-shot " +
+      "('me lembra todo dia 9h', 'manda pra Cris segunda 10h'). " +
+      "SEMPRE confirma com o user antes de chamar (regra PROACTIVE.md). " +
+      "Default channel='whatsapp' (Newton é WhatsApp-first); Telegram só se " +
+      "user pedir explícito ou destinatário não tiver WA. " +
+      "Janela 7h-22h SP enforced server-side; cron fora da janela retorna erro. " +
+      "Exatamente um de cron/every/at obrigatório.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        name: {
+          type: "string",
+          description: "Slug human-readable a-z0-9_- (ex: 'briefing-cris', 'vistoria-yamamoto')",
+        },
+        description: {
+          type: "string",
+          description: "Motivo do agendamento, p/ memory_store posterior",
+        },
+        cron: {
+          type: "string",
+          description: "Expressão cron 5 ou 6 campos, ex: '0 9 * * 1-5'",
+        },
+        every: {
+          type: "string",
+          description: "Alternativa: '10m', '1h', '24h'",
+        },
+        at: {
+          type: "string",
+          description: "Alternativa one-shot: ISO datetime ou '+30m'",
+        },
+        tz: {
+          type: "string",
+          description: "Timezone IANA, default 'America/Sao_Paulo'",
+        },
+        channel: {
+          type: "string",
+          enum: ["whatsapp", "telegram"],
+          description: "Default 'whatsapp'. Telegram só se necessário.",
+        },
+        to: {
+          type: "string",
+          description: "Phone E.164 sem '+' (WA) ou chatId numérico (Telegram)",
+        },
+        message: {
+          type: "string",
+          description:
+            "Texto fixo OU template. Template pode conter instruções tipo " +
+            "'consulta a pipeline e me dá um resumo' — Newton resolve no trigger.",
+        },
+        expectFinal: {
+          type: "boolean",
+          description: "Aguarda resposta final do agente. Default true.",
+        },
+        oneShot: {
+          type: "boolean",
+          description: "Deleta o job após primeiro run. Default false.",
+        },
+      },
+      required: ["name", "to", "message"],
+    },
+    handler: async (args) => {
+      const name = args.name as string;
+      const channel = (args.channel as string | undefined) ?? "whatsapp";
+      const tz = (args.tz as string | undefined) ?? "America/Sao_Paulo";
+      const cronExpr = args.cron as string | undefined;
+      const every = args.every as string | undefined;
+      const at = args.at as string | undefined;
+      const to = args.to as string;
+      const message = args.message as string;
+
+      const whenCount = [cronExpr, every, at].filter(Boolean).length;
+      if (whenCount !== 1) {
+        throw new Error("exatamente um de cron/every/at obrigatório");
+      }
+      if (cronExpr) {
+        const v = validateInWindow(cronExpr);
+        if (!v.ok) throw new Error(`Window check: ${v.reason}`);
+      }
+
+      const cli: string[] = [
+        "add",
+        "--agent",
+        "main",
+        "--name",
+        name,
+        "--channel",
+        channel,
+        "--to",
+        to,
+        "--message",
+        message,
+        "--tz",
+        tz,
+      ];
+      if (args.description) cli.push("--description", args.description as string);
+      if (cronExpr) cli.push("--cron", cronExpr);
+      if (every) cli.push("--every", every);
+      if (at) cli.push("--at", at);
+      if (args.expectFinal !== false) cli.push("--expect-final");
+      if (args.oneShot === true) cli.push("--delete-after-run");
+      cli.push("--announce");
+
+      return spawnOpenclawCron(cli);
+    },
+  },
+  {
+    name: "list_proactive_dispatches",
+    description:
+      "Lista dispatches agendados (jobs do cron plugin). Filtros opcionais por " +
+      "destinatário (`to`) ou prefixo de nome. Use pra responder 'lista meus " +
+      "lembretes' ou pra encontrar IDs antes de cancelar.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        to: { type: "string", description: "Phone/chatId — filtra só desse destinatário" },
+        namePrefix: { type: "string" },
+      },
+    },
+    handler: async (args) => {
+      const result = (await spawnOpenclawCron(["list", "--all"])) as
+        | { jobs?: unknown[] }
+        | unknown[];
+      let jobs: unknown[] = Array.isArray(result)
+        ? result
+        : Array.isArray((result as { jobs?: unknown[] }).jobs)
+          ? (result as { jobs: unknown[] }).jobs
+          : [];
+      if (args.to) {
+        const to = args.to as string;
+        jobs = jobs.filter((j) => {
+          const job = j as Record<string, unknown>;
+          return job.to === to || job.destination === to;
+        });
+      }
+      if (args.namePrefix) {
+        const prefix = args.namePrefix as string;
+        jobs = jobs.filter((j) => {
+          const job = j as Record<string, unknown>;
+          return typeof job.name === "string" && job.name.startsWith(prefix);
+        });
+      }
+      return { jobs };
+    },
+  },
+  {
+    name: "cancel_proactive_dispatch",
+    description:
+      "Cancela dispatch agendado pelo id. Persona pede confirmação verbal antes. " +
+      "Após cancelar, registra memory_store pra rastreabilidade.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "ID do cron job (vem do list)" },
+      },
+      required: ["id"],
+    },
+    handler: async (args) => {
+      const id = args.id as string;
+      return spawnOpenclawCron(["rm", id]);
     },
   },
 ];
