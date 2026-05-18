@@ -108,7 +108,11 @@ export function AppSidebar({ user }: AppSidebarProps) {
       </SidebarContent>
 
       <SidebarFooter className="border-t">
-        <div className="flex items-center gap-2 px-2 py-2">
+        <Link
+          href="/settings/profile"
+          className="flex items-center gap-2 px-2 py-2 rounded-md hover:bg-accent transition"
+          aria-label="Editar perfil"
+        >
           <Avatar className="h-7 w-7 shrink-0">
             <AvatarFallback className="text-xs">{initials}</AvatarFallback>
           </Avatar>
@@ -122,7 +126,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
               </p>
             )}
           </div>
-        </div>
+        </Link>
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton asChild>

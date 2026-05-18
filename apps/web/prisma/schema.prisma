@@ -22,6 +22,17 @@ model User {
   role                String    @default("user")
   // Newton — telefone E.164 para mapeamento WhatsApp → user. Único, opcional.
   phone               String?   @unique
+  // Perfil PII (opcional, usado pra pré-popular OnboardingWizard Asaas)
+  cpf                 String?   @unique
+  birthDate           DateTime? @db.Date
+  incomeValueCents    Int?
+  postalCode          String?
+  addressStreet       String?
+  addressNumber       String?
+  addressComplement   String?
+  addressNeighborhood String?
+  addressCity         String?
+  addressState        String?
   // LGPD — soft delete com janela de reversal de 30 dias
   deletedAt           DateTime?
   deletionScheduledAt DateTime?
@@ -55,8 +66,8 @@ model User {
   dualApprovalsAck    DualApproval[]       @relation("DualApprovalAck")
 
   // Pagadoria — Fase 3 (transferências)
-  asaasTransfers        AsaasTransfer[]
-  reconciliationMatches BankReconciliation[]
+  asaasTransfers         AsaasTransfer[]
+  reconciliationMatches  BankReconciliation[]
   commissionChargeDrafts CommissionChargeDraft[]
 
   // Pagadoria — Multi-account (capabilities granulares por conta bancária)
@@ -149,7 +160,7 @@ model Organization {
 
   // Pagadoria — Fase 1b (Asaas + KYC + cobrança)
   asaasAccounts      AsaasAccount[]
-  activeAsaasAccount AsaasAccount?       @relation("OrgActiveAsaasAccount", fields: [activeAsaasAccountId], references: [id], onDelete: SetNull)
+  activeAsaasAccount AsaasAccount?          @relation("OrgActiveAsaasAccount", fields: [activeAsaasAccountId], references: [id], onDelete: SetNull)
   asaasCustomers     AsaasCustomer[]
   commissionCharges  CommissionCharge[]
   asaasWebhookEvents AsaasWebhookEvent[]
@@ -160,7 +171,7 @@ model Organization {
   bankReconciliations BankReconciliation[]
 
   // Pagadoria — Fase 5 (split multi-recipient)
-  splitRecipients SplitRecipient[]
+  splitRecipients        SplitRecipient[]
   commissionChargeDrafts CommissionChargeDraft[]
 
   // Clicksign — assinatura eletrônica
@@ -253,15 +264,15 @@ model PipelineStage {
 }
 
 model Deal {
-  id         String   @id @default(cuid())
-  pipelineId String
-  stageId    String
-  userId     String
-  formId     String?  @unique
-  title      String
-  value      Float?
-  dataJson   Json?
-  position   Int      @default(0)
+  id               String    @id @default(cuid())
+  pipelineId       String
+  stageId          String
+  userId           String
+  formId           String?   @unique
+  title            String
+  value            Float?
+  dataJson         Json?
+  position         Int       @default(0)
   // SLA pós-assinatura — datas terminais do funil.
   // commissionPaidAt: setado pelo botão "Marcar comissão paga" no DealDetail.
   // lostAt + lostReason: terminal alternativo via mark-lost (qualquer stage).
@@ -274,21 +285,21 @@ model Deal {
   // quando o batch inclui endpoints Serasa. Json em vez de model dedicado
   // pra evitar over-engineering — se virar 5+ tipos de consentimento, migrar.
   complianceJson   Json?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
-  pipeline            Pipeline             @relation(fields: [pipelineId], references: [id])
-  stage               PipelineStage        @relation(fields: [stageId], references: [id])
-  user                User                 @relation(fields: [userId], references: [id])
-  form                SalesForm?           @relation(fields: [formId], references: [id])
-  contracts           Contract[]
-  attachments         DealAttachment[]
-  certidaoJobs        CertidaoJob[]
-  certidoesShareLinks CertidoesShareLink[]
-  diligentedPersons   DiligentedPerson[]
-  commissionCharges   CommissionCharge[]
+  pipeline               Pipeline                @relation(fields: [pipelineId], references: [id])
+  stage                  PipelineStage           @relation(fields: [stageId], references: [id])
+  user                   User                    @relation(fields: [userId], references: [id])
+  form                   SalesForm?              @relation(fields: [formId], references: [id])
+  contracts              Contract[]
+  attachments            DealAttachment[]
+  certidaoJobs           CertidaoJob[]
+  certidoesShareLinks    CertidoesShareLink[]
+  diligentedPersons      DiligentedPerson[]
+  commissionCharges      CommissionCharge[]
   commissionChargeDrafts CommissionChargeDraft[]
-  envelopes           Envelope[]
+  envelopes              Envelope[]
 
   // Lead que originou (se veio de conversão Lead -> Deal)
   fromLead Lead?
@@ -304,23 +315,23 @@ model Deal {
 // Newton chama lookup_lead_by_phone antes de responder qualquer msg WhatsApp
 // pra evitar contextos cruzados.
 model Lead {
-  id        String   @id @default(cuid())
-  orgId     String
-  userId    String   // dono (negociadora ou Newton actor)
-  title     String   // "Yamamoto - Vila Mariana", "Sandra apto Pinheiros", etc
-  status    String   @default("open") // open | qualified | converted | lost | archived
-  phones    String[] @default([]) // E.164 das partes envolvidas (procurar por elemento)
-  notes     String   @default("") // texto livre — Newton appenda timeline de eventos
-  metadata  Json? // parties, imovel, valor estimado, source, etc — schema flexível
-  convertedDealId String? @unique
+  id              String   @id @default(cuid())
+  orgId           String
+  userId          String // dono (negociadora ou Newton actor)
+  title           String // "Yamamoto - Vila Mariana", "Sandra apto Pinheiros", etc
+  status          String   @default("open") // open | qualified | converted | lost | archived
+  phones          String[] @default([]) // E.164 das partes envolvidas (procurar por elemento)
+  notes           String   @default("") // texto livre — Newton appenda timeline de eventos
+  metadata        Json? // parties, imovel, valor estimado, source, etc — schema flexível
+  convertedDealId String?  @unique
   lastActivityAt  DateTime @default(now())
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  org         Organization     @relation(fields: [orgId], references: [id])
-  user        User             @relation(fields: [userId], references: [id])
-  convertedDeal Deal?          @relation(fields: [convertedDealId], references: [id])
-  attachments LeadAttachment[]
+  org           Organization     @relation(fields: [orgId], references: [id])
+  user          User             @relation(fields: [userId], references: [id])
+  convertedDeal Deal?            @relation(fields: [convertedDealId], references: [id])
+  attachments   LeadAttachment[]
 
   @@index([orgId, status])
   @@index([orgId, lastActivityAt])
@@ -501,18 +512,18 @@ model Notification {
 // ============================================
 
 model SalesForm {
-  id         String   @id @default(cuid())
-  orgId      String
-  token      String   @unique @default(cuid())
-  title      String?
-  schemaType String   @default("compra_venda_v1")
-  dataJson   Json     @default("{}")
-  status     String   @default("rascunho")
+  id          String    @id @default(cuid())
+  orgId       String
+  token       String    @unique @default(cuid())
+  title       String?
+  schemaType  String    @default("compra_venda_v1")
+  dataJson    Json      @default("{}")
+  status      String    @default("rascunho")
   // Setado quando status transiciona pra "completo"|"vinculado". Marco SLA
   // do funil — diferente de updatedAt (qualquer auto-save bumpa updatedAt).
   completedAt DateTime?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   org          Organization           @relation(fields: [orgId], references: [id], onDelete: Cascade)
   deal         Deal?
@@ -530,15 +541,15 @@ model SalesForm {
 // suporta apenas 1+1 por form, mas a coluna já existe pra evitar
 // migração quebrando linha).
 model SalesFormParticipant {
-  id            String    @id @default(cuid())
-  formId        String
-  role          String // "vendedor" | "comprador"
-  partyIndex    Int       @default(0)
-  token         String    @unique
-  tokenExp      DateTime
-  completedAt   DateTime?
-  lastAccessAt  DateTime?
-  createdAt     DateTime  @default(now())
+  id           String    @id @default(cuid())
+  formId       String
+  role         String // "vendedor" | "comprador"
+  partyIndex   Int       @default(0)
+  token        String    @unique
+  tokenExp     DateTime
+  completedAt  DateTime?
+  lastAccessAt DateTime?
+  createdAt    DateTime  @default(now())
 
   form        SalesForm        @relation(fields: [formId], references: [id], onDelete: Cascade)
   attachments FormAttachment[]
@@ -551,17 +562,17 @@ model SalesFormParticipant {
 // ============================================
 
 model ContractTemplate {
-  id                  String   @id @default(cuid())
+  id                  String    @id @default(cuid())
   orgId               String
   name                String
   description         String?
-  version             String   @default("1.0.0")
-  schemaType          String   @default("compra_venda_v1")
-  handlebarsSource    String   @db.Text
-  engine              String   @default("handlebars") // "handlebars" | "google_docs"
-  status              String   @default("active")
-  isDefault           Boolean  @default(false)
-  modalidade          String?  @default("a_vista")
+  version             String    @default("1.0.0")
+  schemaType          String    @default("compra_venda_v1")
+  handlebarsSource    String    @db.Text
+  engine              String    @default("handlebars") // "handlebars" | "google_docs"
+  status              String    @default("active")
+  isDefault           Boolean   @default(false)
+  modalidade          String?   @default("a_vista")
   // Google Docs migration: quando engine="google_docs", aponta para o doc-modelo
   // armazenado no Drive da service account. Os contratos são criados via
   // files.copy seguido de batchUpdate(replaceAllText).
@@ -571,8 +582,8 @@ model ContractTemplate {
   // (vira "desatualizado" na UI até o próximo POST /preview re-gerar).
   previewSourceHash   String?
   previewUpdatedAt    DateTime?
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
 
   org         Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
   contracts   Contract[]
@@ -583,6 +594,11 @@ model ContractTemplate {
 // CLAUSE LIBRARY
 // ============================================
 
+// Legado — Clause foi unificada em KnowledgeItem (category="clause") na
+// migration 20260518120000_unify_clause_to_knowledge_item. Esta tabela
+// agora é "Clause_legacy" no Postgres via @@map, mantida como janela de
+// rollback (30d). Não use em código novo — escreva contra KnowledgeItem.
+// PR follow-up dropa o model + tabela.
 model Clause {
   id          String   @id @default(cuid())
   orgId       String
@@ -602,9 +618,10 @@ model Clause {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  org             Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  author          User?            @relation("clauseAuthor", fields: [authorId], references: [id])
-  contractClauses ContractClause[]
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  author User?        @relation("clauseAuthor", fields: [authorId], references: [id])
+
+  @@map("Clause_legacy")
 }
 
 // ============================================
@@ -668,15 +685,15 @@ model Contract {
 model ContractClause {
   id              String  @id @default(cuid())
   contractId      String
-  clauseId        String
+  knowledgeItemId String
   position        Int
   isActive        Boolean @default(true)
   overrideContent String? @db.Text
 
-  contract Contract @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  clause   Clause   @relation(fields: [clauseId], references: [id])
+  contract      Contract      @relation(fields: [contractId], references: [id], onDelete: Cascade)
+  knowledgeItem KnowledgeItem @relation(fields: [knowledgeItemId], references: [id])
 
-  @@unique([contractId, clauseId])
+  @@unique([contractId, knowledgeItemId])
 }
 
 // ============================================
@@ -872,8 +889,8 @@ model ContractChangeLog {
   // Snapshot do plain text antes/depois do turn de edição (populado SOMENTE
   // em turns que chamaram tools de write — reads não capturam). UI do
   // ChangesPanel renderiza diff via lib `diff`. Cap de 50kb por snapshot.
-  htmlBefore String? @db.Text
-  htmlAfter  String? @db.Text
+  htmlBefore String?  @db.Text
+  htmlAfter  String?  @db.Text
   // Atribui o turn à session de chat — UI filtra "mudanças desta session"
   // vs todas as mudanças do contrato. Null pra edições manuais no GDoc
   // (capturadas pelo watch do Drive).
@@ -970,27 +987,39 @@ model LegacyTemplate {
 // ============================================
 
 model KnowledgeItem {
-  id         String   @id @default(cuid())
-  orgId      String
-  category   String // "legislation" | "model" | "rule" | "glossary"
-  title      String
-  content    String   @db.Text
-  chunkIndex Int      @default(0)
-  chunkTotal Int      @default(1)
-  parentId   String?
-  tags       String[]
-  source     String? // URL, doc id, "manual", "seed"
-  createdBy  String?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  id             String   @id @default(cuid())
+  orgId          String
+  category       String // "legislation" | "model" | "rule" | "glossary" | "clause"
+  title          String
+  content        String   @db.Text
+  chunkIndex     Int      @default(0)
+  chunkTotal     Int      @default(1)
+  parentId       String?
+  tags           String[]
+  source         String? // URL, doc id, "manual", "seed"
+  createdBy      String?
+  // Campos herdados de Clause na unificação de 2026-05-18.
+  // Aplicam quando category === "clause"; em outras categorias ficam ignorados.
+  agentNotes     String?  @db.Text
+  groupCode      String? // G1..G6 pra biblioteca de cláusulas (CLAUSE_SLOT)
+  subcategory    String? // partes|objeto|preco|posse|...
+  isVariable     Boolean  @default(false) // tem placeholders [preencher X]
+  status         String   @default("approved") // approved|pending|archived
+  usageCount     Int      @default(0)
+  legacyClauseId String? // rastreio durante janela de rollback 30d
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
   // embedding vector(1024) - added via raw migration, not visible to Prisma
 
-  org    Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  parent KnowledgeItem?  @relation("KnowledgeChunks", fields: [parentId], references: [id], onDelete: Cascade)
-  chunks KnowledgeItem[] @relation("KnowledgeChunks")
+  org             Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  parent          KnowledgeItem?   @relation("KnowledgeChunks", fields: [parentId], references: [id], onDelete: Cascade)
+  chunks          KnowledgeItem[]  @relation("KnowledgeChunks")
+  contractClauses ContractClause[]
 
   @@index([orgId, category])
   @@index([orgId, parentId])
+  @@index([orgId, category, groupCode])
+  @@index([legacyClauseId])
 }
 
 // ============================================
@@ -1279,49 +1308,49 @@ model DualApproval {
 // Armazena walletId + apiKey encrypted + status KYC. Org pode ter N contas;
 // admin escolhe qual está ativa via Organization.activeAsaasAccountId.
 model AsaasAccount {
-  id                    String    @id @default(cuid())
-  orgId                 String
+  id                     String    @id @default(cuid())
+  orgId                  String
   // Rótulo livre para distinguir contas no seletor (ex: "Imobiliária PJ", "Holding").
-  label                 String?
-  asaasId               String    @unique
-  walletId              String    @unique
-  accountNumber         String?
-  apiKeyEncrypted       String    @db.Text
-  apiKeyIvBase64        String
-  apiKeyTagBase64       String
-  personType            String // PHYSICAL | LEGAL
-  kyc                   Json // snapshot do payload submetido (sem secrets)
-  status                String    @default("PENDING") // PENDING | AWAITING_DOCS | AWAITING_APPROVAL | APPROVED | REJECTED | BLOCKED
-  rejectionReason       String?   @db.Text
-  generalStatus         String?
-  documentationStatus   String?
-  commercialInfoStatus  String?
-  bankAccountInfoStatus String?
-  lastStatusCheckAt     DateTime?
-  approvedAt            DateTime?
+  label                  String?
+  asaasId                String    @unique
+  walletId               String    @unique
+  accountNumber          String?
+  apiKeyEncrypted        String    @db.Text
+  apiKeyIvBase64         String
+  apiKeyTagBase64        String
+  personType             String // PHYSICAL | LEGAL
+  kyc                    Json // snapshot do payload submetido (sem secrets)
+  status                 String    @default("PENDING") // PENDING | AWAITING_DOCS | AWAITING_APPROVAL | APPROVED | REJECTED | BLOCKED
+  rejectionReason        String?   @db.Text
+  generalStatus          String?
+  documentationStatus    String?
+  commercialInfoStatus   String?
+  bankAccountInfoStatus  String?
+  lastStatusCheckAt      DateTime?
+  approvedAt             DateTime?
   // Quando o Asaas enviou o email inicial de ativação (auto na criação).
-  activationLinkSentAt  DateTime?
+  activationLinkSentAt   DateTime?
   // Quando o Asaas reenviou o email (limitado a 1× via API).
   activationLinkResentAt DateTime?
   // [LEGACY — não usado mais] Token público da rota /kyc/[token].
   // Mantido pra evitar migration de drop column; remover em cleanup futuro.
-  kycToken              String?   @unique
+  kycToken               String?   @unique
   // Soft delete: archivedAt != null oculta dos seletores e impede novas cobranças,
   // mas mantém histórico (cobranças/transferências antigas continuam acessíveis).
-  archivedAt            DateTime?
-  createdAt             DateTime  @default(now())
-  updatedAt             DateTime  @updatedAt
+  archivedAt             DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
 
-  org                  Organization             @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  activeForOrgs        Organization[]           @relation("OrgActiveAsaasAccount")
-  documents            AsaasAccountDocument[]
-  customers            AsaasCustomer[]
-  commissionCharges    CommissionCharge[]
-  transfers            AsaasTransfer[]
-  reconciliations      BankReconciliation[]
-  webhookEvents        AsaasWebhookEvent[]
-  financialSettings    OrgFinancialSettings?
-  permissions          AsaasAccountPermission[]
+  org               Organization             @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  activeForOrgs     Organization[]           @relation("OrgActiveAsaasAccount")
+  documents         AsaasAccountDocument[]
+  customers         AsaasCustomer[]
+  commissionCharges CommissionCharge[]
+  transfers         AsaasTransfer[]
+  reconciliations   BankReconciliation[]
+  webhookEvents     AsaasWebhookEvent[]
+  financialSettings OrgFinancialSettings?
+  permissions       AsaasAccountPermission[]
 
   @@index([orgId])
 }
@@ -1336,9 +1365,9 @@ model AsaasAccountPermission {
   grantedBy  String?
   createdAt  DateTime @default(now())
 
-  account   AsaasAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
-  user      User         @relation("AccountPermissionUser", fields: [userId], references: [id], onDelete: Cascade)
-  granter   User?        @relation("AccountPermissionGranter", fields: [grantedBy], references: [id])
+  account AsaasAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  user    User         @relation("AccountPermissionUser", fields: [userId], references: [id], onDelete: Cascade)
+  granter User?        @relation("AccountPermissionGranter", fields: [grantedBy], references: [id])
 
   @@unique([accountId, userId, capability])
   @@index([userId])
@@ -1566,56 +1595,56 @@ model OrgFormSettings {
 // Cada recipient representa uma wallet Asaas que pode receber repasse em
 // cobranças da org. Usados pelo SplitEditor no form de nova cobrança.
 model SplitRecipient {
-  id            String   @id @default(cuid())
-  orgId         String
-  label         String
+  id                 String    @id @default(cuid())
+  orgId              String
+  label              String
   // Tipo do beneficiário:
   //   "asaas_wallet" — beneficiário tem conta Asaas (split nativo, gratuito, instantâneo)
   //   "pix_external" — beneficiário só tem PIX em outro banco (transferência Asaas pós-pagamento)
-  recipientType String   @default("asaas_wallet")
+  recipientType      String    @default("asaas_wallet")
   // Para asaas_wallet:
-  walletId      String?
+  walletId           String?
   // Para pix_external:
-  pixAddressKey String?
-  pixKeyType    String? // CPF | CNPJ | EMAIL | PHONE | EVP
-  ownerName     String?
-  ownerCpfCnpj  String?
+  pixAddressKey      String?
+  pixKeyType         String? // CPF | CNPJ | EMAIL | PHONE | EVP
+  ownerName          String?
+  ownerCpfCnpj       String?
   // Comum:
-  cpfCnpj       String?
-  description   String?
+  cpfCnpj            String?
+  description        String?
   // Email pra notificação interna (régua Pagadoria) quando cobrança paga
   // dispara split pra este destinatário. Opt-in: sem email, comissionado
   // não é notificado (Asaas notifica direto o pagador, não o beneficiário).
-  email         String?
+  email              String?
   // Pagadoria v2 — rascunho de cadastro: lista de campos pendentes (ex:
   // ["pixAddressKey"]). Quando não-vazio, splitDispatcher pula este recipient
   // marcando o transfer como FAILED. Comissionado pode completar via UI
   // admin OU magic link público (completionToken).
-  pendingFields      String[]   @default([])
+  pendingFields      String[]  @default([])
   // Magic link pra comissionado completar dados sem login. Token JWT
   // assinado com AUTH_SECRET, exp 7d. Página pública /financeiro/completar-cadastro
   // valida e marca active: true + esvazia pendingFields.
-  completionToken    String?    @db.Text
+  completionToken    String?   @db.Text
   completionTokenExp DateTime?
-  active        Boolean  @default(true)
+  active             Boolean   @default(true)
   // Cadastro reutilizável de comissionado (2026-05-16). Quando kind="commissioner"
   // o recipient pode ser escolhido por autocomplete na etapa Comissão do form
   // público (/api/forms/[token]/commissioners). kind="other" mantém uso pré-existente.
-  kind            String?  @default("commissioner")
-  tipoPessoa      String?  // fisica | juridica
-  creci           String?
-  papel           String?  // imobiliaria_principal | captador | intermediador | indicador | outro
-  phone           String?
+  kind               String?   @default("commissioner")
+  tipoPessoa         String? // fisica | juridica
+  creci              String?
+  papel              String? // imobiliaria_principal | captador | intermediador | indicador | outro
+  phone              String?
   // Dados bancários (TED) — alternativa quando o destinatário não tem
   // conta Asaas (asaas_wallet) nem PIX cadastrado. Capturado no form.
-  bankName        String?
-  bankBranch      String?
-  bankAccount     String?
-  bankAccountType String?  // corrente | poupanca
-  bankHolderName  String?
-  bankHolderDoc   String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  bankName           String?
+  bankBranch         String?
+  bankAccount        String?
+  bankAccountType    String? // corrente | poupanca
+  bankHolderName     String?
+  bankHolderDoc      String?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
 
   org       Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
   transfers AsaasTransfer[]

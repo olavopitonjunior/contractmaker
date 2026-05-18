@@ -1,0 +1,14 @@
+-- Perfil PII opcional no User. Todos nullable — não quebra rows existentes.
+
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "cpf" TEXT;
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "birthDate" DATE;
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "incomeValueCents" INTEGER;
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "postalCode" TEXT;
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "addressStreet" TEXT;
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "addressNumber" TEXT;
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "addressComplement" TEXT;
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "addressNeighborhood" TEXT;
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "addressCity" TEXT;
+ALTER TABLE "User" ADD COLUMN IF NOT EXISTS "addressState" TEXT;
+
+CREATE UNIQUE INDEX IF NOT EXISTS "User_cpf_key" ON "User"("cpf") WHERE "cpf" IS NOT NULL;

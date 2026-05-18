@@ -87,9 +87,9 @@ TS: vendedores, compradores, imóveis, pagamento, comissão, config. Mudanças a
 
 **Preview:** `POST /api/templates/[id]/preview` renderiza contra `lib/templates/preview-sample-data.ts`, sobe via `uploadHtmlAsGoogleDoc`, cacheia `googleTemplateDocId` + `previewSourceHash` (zerado em PATCH quando `handlebarsSource` muda). Scripts: `audit-templates.ts` (read-only), `archive-legacy-templates.ts`.
 
-## Banco de cláusulas (23 em 6 grupos)
+## Banco de cláusulas
 
-G1 Sinal/arras (3) · G2 Imissão (4) · G3 Rescisão (4) · G4 Financiamento (4, obrigatório em financiamento) · G5 Comissão (3) · G6 Declarações (5). Cada cláusula tem `agentNotes` (orientação jurídica) e `groupCode`.
+`KnowledgeItem category="clause"` (unificado 2026-05-18). `query_knowledge_base({category:"clause", groupCode:"G1..G6"})`. G4 obrigatório em financiamento. `ContractClause.knowledgeItemId` é FK. Memória `project_clause_unification_2026_05`.
 
 ## Agente IA
 
@@ -99,13 +99,13 @@ G1 Sinal/arras (3) · G2 Imissão (4) · G3 Rescisão (4) · G4 Financiamento (4
 
 **Budget per-contrato** (`budget.ts::assertContractBudget`): antes de cada `messages.create`. Soma `AIUsage.totalTokens` por contractId; bloqueia se ≥ `CONTRACT_AI_TOKEN_BUDGET` (default 200k). `GET /api/contracts/[id]/budget`. Badge IA no header (cinza <80%, âmbar 80-100%, vermelho ≥100%).
 
-**Tools (18, em `tools.ts`):**
-- **Consulta:** `query_clauses`, `query_templates`, `explain_clause`
-- **Edição:** `edit_contract_section`, `update_contract_data`, `insert_clause`, `remove_clause`
-- **Análise:** `validate_contract`, `suggest_improvements`, `analyze_contradictions`, `extract_document_data` (OCR Anthropic — distinto do form que usa Gemini)
-- **RAG/Aprendizado:** `query_knowledge_base` (Voyage pgvector + fallback ILIKE), `find_similar_contracts`, `add_comment` (valida `selectedText`)
-- **Propose** (NUNCA edita template direto): `propose_new_clause` → `ClauseProposal`; `propose_template_change` → `TemplateSuggestion` com `diffHunks`. Rate limit 5 pendentes/org, 1/dia/template. Hunks revalidados antes de aplicar
-- **Design:** `apply_style_preset`, `insert_image` (Vercel Blob 5MB max)
+**Tools (20, em `tools.ts`):**
+- **Consulta:** `query_templates`, `explain_clause`
+- **Edição:** `edit_contract_section`, `update_contract_data`, `insert_clause`/`remove_clause` (`knowledgeItemId`)
+- **Análise:** `validate_contract`, `suggest_improvements`, `analyze_contradictions`, `extract_document_data` (OCR Anthropic)
+- **RAG:** `query_knowledge_base` (Voyage + fallback ILIKE; `category` aceita `clause`+`groupCode` ou `legislation|model|rule|glossary`), `find_similar_contracts`, `add_comment`
+- **Propose** (NUNCA edita template direto): `propose_new_clause` → `ClauseProposal`; `propose_template_change` → `TemplateSuggestion` com `diffHunks`. Rate limit 5 pendentes/org, 1/dia/template
+- **Design/Plan:** `apply_style_preset`, `insert_image`, `propose_plan`, `cross_check_certidoes`
 
 System prompt (`prompts.ts`) tem 18 regras. Destaques: regra 10 obriga markdown estruturado (`## Alterações Realizadas / ## Justificativa / ## Verificação`); 10.1 proíbe edição em pergunta informativa; 11 prefere sugestão a edição direta; 13 obriga placeholders `[preencher X]` quando dados ausentes; 8.1/8.2 proíbem JSON cru e citação de outros contratos sem evidência ancorada.
 
@@ -251,7 +251,7 @@ Envelope vincula a UM de dois (CHECK XOR): Contract aprovado (`source="contract"
 
 Documentação consolidada em [docs/pagadoria-handoff.md](docs/pagadoria-handoff.md) — sempre consultar antes de mexer.
 
-**Fases entregues** (detalhes em [docs/pagadoria-handoff.md](docs/pagadoria-handoff.md)):
+**Fases entregues:**
 - **1a-1b** RBAC (`CustomRole`+`PERMISSION.*`) + 2FA + SessionElevation + TrustedDevice + `AsaasAccount` (apiKey AES-256-GCM) + KYC multipart + `CommissionCharge` status canônico + idempotência via `AsaasWebhookEvent.asaasEventId`
 - **2** `/financeiro` + `/pay/[token]` com taxas (`OrgFinancialSettings.finePercent/interestPercentMonth`), branding org, PII mascarada
 - **3** `AsaasTransfer` (dual approval > `dualApprovalCapCents`) + `BankReconciliation` auto-match via `externalReference` + 4 relatórios

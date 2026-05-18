@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -512,6 +513,51 @@ function DataStep({
   const [data, setData] = useState(initialPF);
   const [label, setLabel] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [prefilled, setPrefilled] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const res = await fetch("/api/me/profile", { credentials: "include" });
+        if (!res.ok) return;
+        const p = await res.json();
+        if (!active) return;
+        setData((d) => ({
+          ...d,
+          name: d.name || p.name || "",
+          email: d.email || p.email || "",
+          cpfCnpj: d.cpfCnpj || (p.cpf ?? ""),
+          birthDate: d.birthDate || (p.birthDate ?? ""),
+          mobilePhone:
+            d.mobilePhone ||
+            (p.phone ? String(p.phone).replace(/^\+55/, "") : ""),
+          incomeValue:
+            d.incomeValue ||
+            (typeof p.incomeValueCents === "number"
+              ? p.incomeValueCents / 100
+              : 0),
+          postalCode: d.postalCode || (p.postalCode ?? ""),
+          address: d.address || (p.addressStreet ?? ""),
+          addressNumber: d.addressNumber || (p.addressNumber ?? ""),
+          complement: d.complement || (p.addressComplement ?? ""),
+          province: d.province || (p.addressNeighborhood ?? ""),
+        }));
+        const hasSomething =
+          p.cpf ||
+          p.phone ||
+          p.postalCode ||
+          p.addressStreet ||
+          p.birthDate;
+        if (hasSomething) setPrefilled(true);
+      } catch {
+        // silencioso — perfil opcional
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   function update<K extends keyof typeof data>(key: K, value: (typeof data)[K]) {
     setData((d) => ({ ...d, [key]: value }));
@@ -597,6 +643,25 @@ function DataStep({
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        {prefilled && (
+          <div className="border border-blue-200 bg-blue-50 rounded p-3 text-xs flex items-start gap-2 text-blue-900">
+            <Info className="h-4 w-4 flex-shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="font-medium">Pré-preenchemos a partir do seu perfil.</p>
+              <p>
+                Edite o que precisar.{" "}
+                <Link
+                  href="/settings/profile"
+                  className="underline font-medium"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  Atualizar perfil
+                </Link>
+              </p>
+            </div>
+          </div>
+        )}
         {mode === "newAccount" && (
           <div className="space-y-2">
             <Label htmlFor="account-label">Rótulo da conta</Label>

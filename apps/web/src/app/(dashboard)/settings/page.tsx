@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { AgentSettings } from "@/components/settings/AgentSettings";
-import { BookOpen, Palette, Lightbulb, ShieldCheck, Sparkles, KeyRound, Users, Split, FileSignature, Wallet, ListChecks } from "lucide-react";
+import { BookOpen, Palette, Lightbulb, ShieldCheck, Sparkles, KeyRound, Users, Split, FileSignature, Wallet, ListChecks, UserRound } from "lucide-react";
 
 export default async function SettingsPage() {
   const session = await auth();
@@ -22,6 +22,12 @@ export default async function SettingsPage() {
       <div className="flex items-center justify-between flex-wrap gap-3">
         <h1 className="text-2xl font-semibold">Configurações</h1>
         <div className="flex gap-2 flex-wrap">
+          <Button variant="outline" size="sm" asChild>
+            <Link href="/settings/profile">
+              <UserRound className="h-4 w-4 mr-1" />
+              Meu perfil
+            </Link>
+          </Button>
           <Button variant="outline" size="sm" asChild>
             <Link href="/settings/knowledge-base">
               <BookOpen className="h-4 w-4 mr-1" />
@@ -115,7 +121,7 @@ export default async function SettingsPage() {
             <CardHeader>
               <CardTitle>Perfil</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-2">
+            <CardContent className="space-y-3">
               <p className="text-sm">
                 <span className="text-muted-foreground">Nome:</span>{" "}
                 {session.user.name || "—"}
@@ -124,6 +130,12 @@ export default async function SettingsPage() {
                 <span className="text-muted-foreground">Email:</span>{" "}
                 {session.user.email}
               </p>
+              <Button variant="outline" size="sm" asChild>
+                <Link href="/settings/profile">
+                  <UserRound className="h-4 w-4 mr-1" />
+                  Editar perfil completo (CPF, telefone, endereço, senha)
+                </Link>
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>
