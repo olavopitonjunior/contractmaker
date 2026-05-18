@@ -158,6 +158,36 @@ async function handleProposePlan(
     };
   });
 
+  // Pré-validação anti-slug em write steps que dependem de knowledgeItemId.
+  // Sem isso, o user pode aprovar o PlanCard, execute-plan tenta rodar
+  // insert_clause/remove_clause com placeholder, o handler rejeita e a
+  // cláusula NUNCA entra no contrato. Falhamos cedo, antes de persistir o
+  // ChatPlan, pra que o Editor refaça a iteração com query_knowledge_base
+  // ANTES do propose_plan. Mensagem é o mesmo formato do handler downstream.
+  const SLUG_GUARDED_TOOLS = new Set(["insert_clause", "remove_clause"]);
+  const ID_REGEX = /^c[a-z0-9]{24,32}$/i;
+  for (const step of steps) {
+    if (step.type !== "write") continue;
+    if (!SLUG_GUARDED_TOOLS.has(step.tool)) continue;
+    const id =
+      (typeof step.input.knowledgeItemId === "string" && step.input.knowledgeItemId) ||
+      (typeof step.input.clauseId === "string" && step.input.clauseId) ||
+      "";
+    if (!id || !ID_REGEX.test(id)) {
+      return {
+        error:
+          `Step "${step.description}" usa knowledgeItemId="${id || "(vazio)"}" — ` +
+          `parece slug humano ou está vazio. IDs reais têm formato c<24-32 chars> ` +
+          `(ex: cd4a6eacc6d7e4b76a7aeaa0373bc7ecb). RESOLVA o ID ANTES de propose_plan: ` +
+          `chame query_knowledge_base({ category: "clause", groupCode: "G1..G6", query: "..." }) ` +
+          `como tool_use direto neste turn, leia o campo id do resultado, e refaça propose_plan ` +
+          `com o id real no step ${step.tool}. Reads como STEP do plano não ajudam aqui — o ` +
+          `Editor precisa do id na hora de redigir o step write.`,
+        hint: "resolve_knowledge_item_id_before_plan",
+      };
+    }
+  }
+
   let readsCompleted = 0;
   let writesPending = 0;
 
@@ -235,8 +265,19 @@ function summarizePlanReadResult(tool: string, result: Record<string, unknown>):
     return `${m} contrato(s) similar(es)`;
   }
   if (tool === "query_knowledge_base") {
-    const r = Array.isArray(result.results) ? result.results.length : 0;
-    return `${r} entrada(s) na base`;
+    const results = Array.isArray(result.results) ? result.results : [];
+    if (results.length === 0) return "0 entradas na base";
+    // Expor top-1 id+title no summary — sem isso, o Editor que olha o
+    // PlanCard rehidratado não tem como referenciar o ID resolvido pra
+    // refazer o plano com knowledgeItemId real (e o user também não vê
+    // qual entrada será inserida).
+    const top = results[0] as { id?: unknown; title?: unknown };
+    const id = typeof top.id === "string" ? top.id : "?";
+    const title = typeof top.title === "string" ? top.title : "?";
+    const more = results.length - 1;
+    return more > 0
+      ? `${results.length} entradas — top: ${title} (id ${id}) + ${more} outras`
+      : `1 entrada — ${title} (id ${id})`;
   }
   if (tool === "suggest_improvements") {
     const s = Array.isArray(result.suggestions) ? result.suggestions.length : 0;
