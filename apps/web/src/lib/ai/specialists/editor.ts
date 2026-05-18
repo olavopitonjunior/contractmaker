@@ -18,6 +18,7 @@ import { SONNET_MODEL } from "../shared/anthropic-client";
 import { runSpecialist, type ToolUseGuard } from "../shared/specialist-runner";
 import { applyPolicy } from "../sentinel/middleware";
 import { EDITOR_SYSTEM_PROMPT } from "./prompts";
+import { ROUTER_REGEXES } from "../orchestrator/routing";
 import type { OrchestratorState, SpecialistOutput } from "../orchestrator/state";
 
 const EDITOR_TOOL_NAMES = new Set([
@@ -55,13 +56,24 @@ export async function runEditor(state: OrchestratorState): Promise<SpecialistOut
     };
   };
 
-  const userPrompt = buildEditorPrompt(state);
+  // C4 — Quando o user disse "aplique direto"/"sem revisão", remover
+  // propose_plan e propose_suggestion das tools disponíveis. Sem a opção
+  // no toolbox, o LLM é forçado a executar a sequência query+insert/edit no
+  // mesmo turn. Belt + suspenders com a regra 0.2 do EDITOR_SYSTEM_PROMPT.
+  const wantsDirectEdit = ROUTER_REGEXES.FORCE_DIRECT_EDIT.test(state.userMessage);
+  const tools = wantsDirectEdit
+    ? EDITOR_TOOLS.filter(
+        (t) => t.name !== "propose_plan" && t.name !== "propose_suggestion"
+      )
+    : EDITOR_TOOLS;
+
+  const userPrompt = buildEditorPrompt(state, wantsDirectEdit);
 
   return runSpecialist({
     agentName: "editor",
     model: SONNET_MODEL,
     systemPrompt: EDITOR_SYSTEM_PROMPT,
-    tools: EDITOR_TOOLS,
+    tools,
     maxIterations: 3,
     userPrompt,
     context: state.contractContext,
@@ -75,7 +87,7 @@ export async function runEditor(state: OrchestratorState): Promise<SpecialistOut
   });
 }
 
-function buildEditorPrompt(state: OrchestratorState): string {
+function buildEditorPrompt(state: OrchestratorState, wantsDirectEdit = false): string {
   const expert = state.expertContext ? `${state.expertContext}\n\n---\n` : "";
   const attach = state.attachmentBlock ? `${state.attachmentBlock}\n\n---\n` : "";
   const ctx = state.contractContext!;
@@ -85,8 +97,11 @@ function buildEditorPrompt(state: OrchestratorState): string {
     ? "TEXTO ATUAL DO CONTRATO (Google Doc — sem markup HTML)"
     : "HTML ATUAL DO CONTRATO";
 
-  const intentHint =
-    state.intent === "edit_multi"
+  // C4 — FORCE_DIRECT_EDIT vence intent=edit_multi. Se o user pediu "aplique
+  // direto", mesmo que tenha vários verbos a intenção é commit imediato.
+  const intentHint = wantsDirectEdit
+    ? `\n\n⚡ INTENT=FORCE_DIRECT_EDIT: o user EXIGIU execução direta ("aplique direto"/"sem revisão"/"faça já"). Você NÃO tem acesso a \`propose_plan\` nem a \`propose_suggestion\` neste turn — foram removidos do toolbox propositalmente. Execute a sequência completa AGORA: se precisar do \`knowledgeItemId\`, chame \`query_knowledge_base\` no MESMO turn e em seguida chame o write (\`insert_clause\`/\`remove_clause\`/\`edit_contract_section\`/\`update_contract_data\`). Múltiplos tool_use no mesmo turn são esperados. NÃO pare após o read — o write é obrigatório.`
+    : state.intent === "edit_multi"
       ? `\n\n⚠️ INTENT=edit_multi: a mensagem do usuário envolve MÚLTIPLAS edições encadeadas. Você DEVE chamar \`propose_plan\` primeiro com a lista completa de steps (reads + writes), ANTES de qualquer write direto. O sistema vai persistir ChatPlan pendente e o usuário aprova via PlanCard na UI. Writes diretos sem propose_plan em edit_multi são bug.`
       : "";
 
