@@ -1,16 +1,20 @@
 /**
- * Policy engine — carrega `policy.yaml` no boot e avalia regras contra
- * propostas de tool_use vindas dos especialistas.
+ * Policy engine — carrega regras YAML em memória e avalia contra propostas
+ * de tool_use vindas dos especialistas.
  *
  * Diferentemente de Zod (que valida shape sintático no handler), a policy
  * é uma camada SEMÂNTICA expressando intenção do negócio (allow-list de
- * domínios, requisitos de evidência, limites de budget). Fica versionada
- * em YAML pra ser auditável sem deploy de código.
+ * domínios, requisitos de evidência, limites de budget).
+ *
+ * Bundling: o YAML é importado de `policy-raw.ts` (string TS embedada)
+ * em vez de lido com `fs.readFileSync` em runtime. Razão: Next.js empacota
+ * chunks em `.next/server/chunks/` sem copiar assets YAML, e em prod o
+ * serverless function falhava com ENOENT toda chamada do orchestrator
+ * multi-agent. Detalhes do trade-off em `policy-raw.ts`.
  */
 
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import yaml from "js-yaml";
+import { POLICY_YAML_RAW } from "./policy-raw";
 
 export type PolicyAction = "reject" | "warn" | "reject_and_alert";
 
@@ -43,11 +47,9 @@ let cachedRules: PolicyRule[] | null = null;
 
 export function loadPolicyRules(): PolicyRule[] {
   if (cachedRules) return cachedRules;
-  const path = resolve(__dirname, "policy.yaml");
-  const raw = readFileSync(path, "utf-8");
-  const parsed = yaml.load(raw) as PolicyFile | null;
+  const parsed = yaml.load(POLICY_YAML_RAW) as PolicyFile | null;
   if (!parsed || !Array.isArray(parsed.rules)) {
-    throw new Error("policy.yaml inválido — esperado { rules: [...] }");
+    throw new Error("policy YAML inválido — esperado { rules: [...] }");
   }
   cachedRules = parsed.rules;
   return cachedRules;
