@@ -242,7 +242,7 @@ export async function createContractMemory(contractId: string): Promise<{
       include: {
         template: true,
         suggestions: true,
-        clauses: { include: { clause: true } },
+        clauses: { include: { knowledgeItem: true } },
         deal: { include: { pipeline: { select: { orgId: true } } } },
       },
     });
@@ -337,13 +337,12 @@ export async function createContractMemory(contractId: string): Promise<{
     // 7. Increment usageCount on clauses that were used in the final contract
     for (const cc of contract.clauses) {
       if (cc.isActive) {
-        await prisma.clause
+        await prisma.knowledgeItem
           .update({
-            where: { id: cc.clauseId },
+            where: { id: cc.knowledgeItemId },
             data: { usageCount: { increment: 1 } },
           })
           .catch((err) => {
-            // Clause.usageCount may not exist in all schemas — tolerate
             console.error("[createContractMemory] usageCount increment failed:", err);
           });
       }

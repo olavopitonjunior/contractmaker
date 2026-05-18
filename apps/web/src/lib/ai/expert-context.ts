@@ -2,7 +2,7 @@
  * Pré-carrega contexto especialista que é injetado ANTES do primeiro turn do
  * chat agent. Sem isso, o agente costumava começar "às cegas" e ou (a) editava
  * direto sem consultar a memória, ou (b) gastava 2-3 iterações chamando
- * `query_clauses` / `find_similar_contracts` antes de agir.
+ * `query_knowledge_base` / `find_similar_contracts` antes de agir.
  *
  * Idempotente e cacheável (ContentMemory + Clauses + Templates não mudam dentro
  * de um turn). Retorna texto markdown pronto pra concatenar no prompt do user.
@@ -116,9 +116,10 @@ async function loadSimilarContracts(context: AgentContext) {
 async function loadTopClauses(context: AgentContext) {
   // Filtra por modalidade quando relevante (G4 só faz sentido em financiamento).
   const isFinanciamento = context.templateModalidade === "financiamento";
-  return prisma.clause.findMany({
+  return prisma.knowledgeItem.findMany({
     where: {
       orgId: context.orgId,
+      category: "clause",
       status: "approved",
       // Em a_vista, ignora G4 (financiamento) — não é aplicável.
       ...(isFinanciamento ? {} : { groupCode: { not: "G4" } }),

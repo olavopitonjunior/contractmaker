@@ -20,124 +20,22 @@ beforeEach(() => {
 // Routing
 // ==========================================
 describe("executeToolHandler routing", () => {
-  it("routes query_clauses to correct handler", async () => {
-    mockPrisma.clause.findMany.mockResolvedValue([]);
-    const ctx = createTestContext();
-    const result = await executeToolHandler("query_clauses", {}, ctx);
-    expect(result).toHaveProperty("found");
-    expect(mockPrisma.clause.findMany).toHaveBeenCalled();
-  });
-
   it("routes validate_contract to correct handler", async () => {
     const ctx = createTestContext();
     const result = await executeToolHandler("validate_contract", {}, ctx);
     expect(result).toHaveProperty("totalIssues");
   });
 
+  it("query_clauses is REMOVED (unification 2026-05-18)", async () => {
+    const ctx = createTestContext();
+    const result = await executeToolHandler("query_clauses", {}, ctx);
+    expect(result.error).toBe("Tool desconhecida: query_clauses");
+  });
+
   it("returns error for unknown tool", async () => {
     const ctx = createTestContext();
     const result = await executeToolHandler("unknown_tool", {}, ctx);
     expect(result.error).toBe("Tool desconhecida: unknown_tool");
-  });
-});
-
-// ==========================================
-// handleQueryClauses
-// ==========================================
-describe("handleQueryClauses", () => {
-  it("queries with orgId and approved status", async () => {
-    mockPrisma.clause.findMany.mockResolvedValue([]);
-    const ctx = createTestContext();
-    await executeToolHandler("query_clauses", {}, ctx);
-
-    expect(mockPrisma.clause.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          orgId: "org-1",
-          status: "approved",
-        }),
-      })
-    );
-  });
-
-  it("filters by category when provided", async () => {
-    mockPrisma.clause.findMany.mockResolvedValue([]);
-    const ctx = createTestContext();
-    await executeToolHandler(
-      "query_clauses",
-      { category: "penalidades" },
-      ctx
-    );
-
-    expect(mockPrisma.clause.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({ category: "penalidades" }),
-      })
-    );
-  });
-
-  it("filters by search with OR on title/content", async () => {
-    mockPrisma.clause.findMany.mockResolvedValue([]);
-    const ctx = createTestContext();
-    await executeToolHandler(
-      "query_clauses",
-      { search: "multa" },
-      ctx
-    );
-
-    expect(mockPrisma.clause.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({
-        where: expect.objectContaining({
-          OR: expect.arrayContaining([
-            expect.objectContaining({
-              title: expect.objectContaining({ contains: "multa" }),
-            }),
-          ]),
-        }),
-      })
-    );
-  });
-
-  it("returns found count and mapped clauses", async () => {
-    mockPrisma.clause.findMany.mockResolvedValue([
-      {
-        id: "c1",
-        category: "objeto",
-        subcategory: null,
-        title: "Cláusula Objeto",
-        content: "Texto longo da clausula...",
-        tags: ["objeto"],
-        usageCount: 5,
-      } as any,
-    ]);
-
-    const ctx = createTestContext();
-    const result = await executeToolHandler("query_clauses", {}, ctx);
-    expect(result.found).toBe(1);
-    expect((result.clauses as any[])[0]).toMatchObject({
-      id: "c1",
-      category: "objeto",
-      title: "Cláusula Objeto",
-    });
-  });
-
-  it("truncates content to 500 chars", async () => {
-    const longContent = "A".repeat(1000);
-    mockPrisma.clause.findMany.mockResolvedValue([
-      {
-        id: "c1",
-        category: "objeto",
-        subcategory: null,
-        title: "Test",
-        content: longContent,
-        tags: [],
-        usageCount: 0,
-      } as any,
-    ]);
-
-    const ctx = createTestContext();
-    const result = await executeToolHandler("query_clauses", {}, ctx);
-    expect(((result.clauses as any[])[0].content as string).length).toBe(500);
   });
 });
 
@@ -462,16 +360,16 @@ describe("handleProposeSuggestion", () => {
 });
 
 // ==========================================
-// handleInsertClause
+// handleInsertClause — pós-unificação Clause→KnowledgeItem (2026-05-18)
 // ==========================================
 describe("handleInsertClause", () => {
   it("returns error when clause not found", async () => {
-    mockPrisma.clause.findUnique.mockResolvedValue(null);
+    mockPrisma.knowledgeItem.findFirst.mockResolvedValue(null);
     const ctx = createTestContext();
 
     const result = await executeToolHandler(
       "insert_clause",
-      { clauseId: "nonexistent" },
+      { knowledgeItemId: "nonexistent" },
       ctx
     );
 
@@ -480,18 +378,20 @@ describe("handleInsertClause", () => {
   });
 
   it("returns error when clause already in contract", async () => {
-    mockPrisma.clause.findUnique.mockResolvedValue({
+    mockPrisma.knowledgeItem.findFirst.mockResolvedValue({
       id: "clause-1",
       title: "Existing",
-      category: "objeto",
+      category: "clause",
+      subcategory: "objeto",
       content: "<p>text</p>",
+      groupCode: null,
     } as any);
 
     const ctx = createTestContext(); // Has clause-1 in activeClauses
 
     const result = await executeToolHandler(
       "insert_clause",
-      { clauseId: "clause-1" },
+      { knowledgeItemId: "clause-1" },
       ctx
     );
 
@@ -500,27 +400,29 @@ describe("handleInsertClause", () => {
   });
 
   it("inserts clause successfully", async () => {
-    mockPrisma.clause.findUnique.mockResolvedValue({
+    mockPrisma.knowledgeItem.findFirst.mockResolvedValue({
       id: "clause-2",
       title: "Nova Cláusula",
-      category: "penalidades",
+      category: "clause",
+      subcategory: "penalidades",
       content: "<p>Penalidade</p>",
+      groupCode: null,
     } as any);
     mockPrisma.contractClause.create.mockResolvedValue({} as any);
-    mockPrisma.clause.update.mockResolvedValue({} as any);
+    mockPrisma.knowledgeItem.update.mockResolvedValue({} as any);
 
     const ctx = createTestContext();
 
     const result = await executeToolHandler(
       "insert_clause",
-      { clauseId: "clause-2" },
+      { knowledgeItemId: "clause-2" },
       ctx
     );
 
     expect(result.success).toBe(true);
     expect(result.clauseTitle).toBe("Nova Cláusula");
     expect(mockPrisma.contractClause.create).toHaveBeenCalled();
-    expect(mockPrisma.clause.update).toHaveBeenCalledWith(
+    expect(mockPrisma.knowledgeItem.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: { usageCount: { increment: 1 } },
       })
@@ -531,29 +433,58 @@ describe("handleInsertClause", () => {
   });
 
   it("appends HTML at last </div>", async () => {
-    mockPrisma.clause.findUnique.mockResolvedValue({
+    mockPrisma.knowledgeItem.findFirst.mockResolvedValue({
       id: "clause-new",
       title: "Test",
-      category: "objeto",
+      category: "clause",
+      subcategory: "objeto",
       content: "<p>New</p>",
+      groupCode: null,
     } as any);
     mockPrisma.contractClause.create.mockResolvedValue({} as any);
-    mockPrisma.clause.update.mockResolvedValue({} as any);
+    mockPrisma.knowledgeItem.update.mockResolvedValue({} as any);
 
     const ctx = createTestContext({
       htmlContent: '<div class="contrato"><p>Content</p></div>',
       activeClauses: [],
     });
 
-    await executeToolHandler("insert_clause", { clauseId: "clause-new" }, ctx);
+    await executeToolHandler(
+      "insert_clause",
+      { knowledgeItemId: "clause-new" },
+      ctx
+    );
 
     expect(ctx.htmlContent).toContain('class="clausula-inserida"');
     expect(ctx.htmlContent).toContain("</div>");
   });
+
+  it("accepts legacy clauseId field for retrocompat", async () => {
+    mockPrisma.knowledgeItem.findFirst.mockResolvedValue({
+      id: "clause-legacy",
+      title: "Legacy",
+      category: "clause",
+      subcategory: "objeto",
+      content: "<p>x</p>",
+      groupCode: null,
+    } as any);
+    mockPrisma.contractClause.create.mockResolvedValue({} as any);
+    mockPrisma.knowledgeItem.update.mockResolvedValue({} as any);
+
+    const ctx = createTestContext({ activeClauses: [] });
+
+    const result = await executeToolHandler(
+      "insert_clause",
+      { clauseId: "clause-legacy" } as any,
+      ctx
+    );
+
+    expect(result.success).toBe(true);
+  });
 });
 
 // ==========================================
-// handleRemoveClause
+// handleRemoveClause — pós-unificação Clause→KnowledgeItem (2026-05-18)
 // ==========================================
 describe("handleRemoveClause", () => {
   it("returns error when clause not linked to contract", async () => {
@@ -562,7 +493,7 @@ describe("handleRemoveClause", () => {
 
     const result = await executeToolHandler(
       "remove_clause",
-      { clauseId: "nonexistent" },
+      { knowledgeItemId: "nonexistent" },
       ctx
     );
 
@@ -573,8 +504,8 @@ describe("handleRemoveClause", () => {
   it("removes clause successfully", async () => {
     mockPrisma.contractClause.findFirst.mockResolvedValue({
       id: "cc-1",
-      clauseId: "clause-1",
-      clause: { title: "Cláusula Removida" },
+      knowledgeItemId: "clause-1",
+      knowledgeItem: { title: "Cláusula Removida", content: "<p>x</p>" },
     } as any);
     mockPrisma.contractClause.delete.mockResolvedValue({} as any);
 
@@ -582,7 +513,7 @@ describe("handleRemoveClause", () => {
 
     const result = await executeToolHandler(
       "remove_clause",
-      { clauseId: "clause-1" },
+      { knowledgeItemId: "clause-1" },
       ctx
     );
 
@@ -639,8 +570,9 @@ describe("handleValidateContract", () => {
 // ==========================================
 describe("handleSuggestImprovements", () => {
   beforeEach(() => {
-    // Mock clause.findMany for linked clause check in suggest_improvements
-    (prisma.clause.findMany as any).mockResolvedValue([]);
+    // Mock knowledgeItem.findMany pra checar cláusulas vinculadas
+    // (pós-unificação 2026-05-18: clause virou KnowledgeItem category="clause").
+    (prisma.knowledgeItem.findMany as any).mockResolvedValue([]);
   });
 
   it("suggests suspensive condition for financing", async () => {

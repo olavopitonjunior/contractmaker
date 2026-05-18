@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { createKnowledgeItem } from "@/lib/ai/knowledge";
 import { VoyageError } from "@/lib/ai/embeddings";
 
-const VALID_CATEGORIES = ["legislation", "model", "rule", "glossary"] as const;
+const VALID_CATEGORIES = ["legislation", "model", "rule", "glossary", "clause"] as const;
 type Category = (typeof VALID_CATEGORIES)[number];
 
 export async function GET(req: NextRequest) {

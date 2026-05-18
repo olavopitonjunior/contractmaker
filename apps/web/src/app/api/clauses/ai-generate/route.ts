@@ -3,6 +3,7 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { Anthropic } from "@anthropic-ai/sdk";
 import { recordAIUsage } from "@/lib/ai/usage";
+import { createKnowledgeItem } from "@/lib/ai/knowledge";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -85,21 +86,26 @@ ${context ? `Contexto adicional: ${context}` : ""}`,
     );
   }
 
-  // Save as pending clause
-  const clause = await prisma.clause.create({
-    data: {
-      orgId: org.id,
-      authorId: session.user.id,
-      category: category || "customizada",
-      subcategory: parsed.subcategory || null,
-      title: parsed.title,
-      content: parsed.content,
-      description,
-      tags: parsed.tags || [],
-      source: "ai-generated",
-      status: "pending",
-    },
+  // Save as pending clause (KnowledgeItem category="clause" + status=pending)
+  const result = await createKnowledgeItem({
+    orgId: org.id,
+    category: "clause",
+    title: parsed.title,
+    content: parsed.content,
+    tags: Array.isArray(parsed.tags) ? parsed.tags : [],
+    source: "ai-generated",
+    createdBy: session.user.id,
+    subcategory: parsed.subcategory || category || "customizada",
+    agentNotes: description ?? null,
+    status: "pending",
   });
 
-  return NextResponse.json(clause, { status: 201 });
+  const clause = await prisma.knowledgeItem.findUnique({
+    where: { id: result.parentId },
+  });
+
+  return NextResponse.json(
+    clause ? { ...clause, category: clause.subcategory ?? "customizada" } : null,
+    { status: 201 }
+  );
 }

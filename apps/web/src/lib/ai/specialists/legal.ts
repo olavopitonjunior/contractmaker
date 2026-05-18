@@ -3,10 +3,9 @@
  * de cláusulas e padrões da organização. Modelo: Haiku 4.5. Max 2 iterações.
  *
  * Tools (subset de `AGENT_TOOLS`):
- *   - query_clauses
  *   - query_templates
  *   - explain_clause
- *   - query_knowledge_base
+ *   - query_knowledge_base (cobre legislação + biblioteca de cláusulas via category="clause")
  *   - find_similar_contracts
  *
  * É o especialista invocado em perguntas informativas (regra 10.1) —
@@ -20,7 +19,6 @@ import { LEGAL_SYSTEM_PROMPT } from "./prompts";
 import type { OrchestratorState, SpecialistOutput } from "../orchestrator/state";
 
 const LEGAL_TOOL_NAMES = new Set([
-  "query_clauses",
   "query_templates",
   "explain_clause",
   "query_knowledge_base",

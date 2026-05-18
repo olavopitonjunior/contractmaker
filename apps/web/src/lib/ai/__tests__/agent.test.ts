@@ -92,12 +92,15 @@ describe("runContractAgent", () => {
 
   // --- Tool-use loop ---
   it("executes tool and returns final text", async () => {
-    // First call: tool_use (query_clauses)
+    // First call: tool_use (query_knowledge_base com category="clause")
     mockCreate.mockResolvedValueOnce(
-      createAnthropicToolUseResponse("query_clauses", { category: "objeto" })
+      createAnthropicToolUseResponse("query_knowledge_base", {
+        query: "objeto",
+        category: "clause",
+      })
     );
-    // Mock the clause query
-    mockPrisma.clause.findMany.mockResolvedValueOnce([]);
+    // Mock the knowledge-base query (fallback ILIKE pq sem Voyage no test)
+    mockPrisma.knowledgeItem.findMany.mockResolvedValueOnce([]);
 
     // Second call: end_turn with text
     mockCreate.mockResolvedValueOnce(
@@ -122,9 +125,12 @@ describe("runContractAgent", () => {
   it("respects maxIterations limit (10)", async () => {
     // Always return tool_use to test the loop limit
     mockCreate.mockResolvedValue(
-      createAnthropicToolUseResponse("query_clauses", {})
+      createAnthropicToolUseResponse("query_knowledge_base", {
+        query: "x",
+        category: "clause",
+      })
     );
-    mockPrisma.clause.findMany.mockResolvedValue([]);
+    mockPrisma.knowledgeItem.findMany.mockResolvedValue([]);
 
     const result = await runContractAgent({
       message: "loop forever",
@@ -173,9 +179,12 @@ describe("runContractAgent", () => {
 
   it("does NOT update contract for query-only tools", async () => {
     mockCreate.mockResolvedValueOnce(
-      createAnthropicToolUseResponse("query_clauses", {})
+      createAnthropicToolUseResponse("query_knowledge_base", {
+        query: "x",
+        category: "clause",
+      })
     );
-    mockPrisma.clause.findMany.mockResolvedValueOnce([]);
+    mockPrisma.knowledgeItem.findMany.mockResolvedValueOnce([]);
     mockCreate.mockResolvedValueOnce(
       createAnthropicTextResponse("Resultado da busca.")
     );

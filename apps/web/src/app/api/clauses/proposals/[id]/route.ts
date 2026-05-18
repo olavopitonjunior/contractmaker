@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import { createKnowledgeItem } from "@/lib/ai/knowledge";
 
 export async function PATCH(
   req: NextRequest,
@@ -44,22 +45,21 @@ export async function PATCH(
   }
 
   if (action === "accept") {
-    // Create the clause in the library
-    const clause = await prisma.clause.create({
-      data: {
-        orgId: org.id,
-        authorId: session.user.id,
-        title: proposal.title,
-        content: proposal.content,
-        description: `Criada a partir de proposta IA — ${proposal.reason.slice(0, 200)}`,
-        category: proposal.category || "customizada",
-        groupCode: proposal.groupCode,
-        isVariable: !!proposal.groupCode,
-        agentNotes: proposal.reason,
-        tags: proposal.tags,
-        status: "approved",
-        source: "ai_proposal",
-      },
+    // Cria como KnowledgeItem (pós-unificação 2026-05-18). Embedding gerado
+    // automaticamente em createKnowledgeItem se Voyage configurada.
+    const result = await createKnowledgeItem({
+      orgId: org.id,
+      category: "clause",
+      title: proposal.title,
+      content: proposal.content,
+      tags: proposal.tags,
+      source: "ai_proposal",
+      createdBy: session.user.id,
+      subcategory: proposal.category || "customizada",
+      groupCode: proposal.groupCode,
+      isVariable: !!proposal.groupCode,
+      agentNotes: proposal.reason,
+      status: "approved",
     });
 
     await prisma.clauseProposal.update({
@@ -71,7 +71,9 @@ export async function PATCH(
       },
     });
 
-    return NextResponse.json({ ok: true, clauseId: clause.id });
+    // `clauseId` no response mantido por retrocompat com UI consumer; aponta
+    // pro KnowledgeItem.parentId (mesma row no caso de chunkTotal=1).
+    return NextResponse.json({ ok: true, clauseId: result.parentId });
   }
 
   return NextResponse.json(

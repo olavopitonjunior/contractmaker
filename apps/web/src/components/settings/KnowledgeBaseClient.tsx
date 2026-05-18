@@ -46,6 +46,11 @@ const CATEGORY_LABELS: Record<string, { label: string; description: string }> = 
     label: "Glossário",
     description: "Termos técnicos e definições customizadas do escritório.",
   },
+  clause: {
+    label: "Cláusulas (Biblioteca)",
+    description:
+      "Cláusulas padronizadas G1-G6 e customizadas — biblioteca jurídica do escritório.",
+  },
 };
 
 export function KnowledgeBaseClient({

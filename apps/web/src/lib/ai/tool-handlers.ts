@@ -40,8 +40,6 @@ export async function executeToolHandler(
   context: AgentContext
 ): Promise<Record<string, unknown>> {
   switch (toolName) {
-    case "query_clauses":
-      return handleQueryClauses(input, context);
     case "query_templates":
       return handleQueryTemplates(input, context);
     case "explain_clause":
@@ -89,7 +87,6 @@ export async function executeToolHandler(
 
 const READ_TOOL_NAMES = new Set([
   "validate_contract",
-  "query_clauses",
   "query_templates",
   "explain_clause",
   "query_knowledge_base",
@@ -604,6 +601,7 @@ async function handleProposeTemplateChange(
 async function knowledgeBaseKeywordFallback(
   query: string,
   category: string | undefined,
+  groupCode: string | undefined,
   topK: number,
   orgId: string,
   reason: string
@@ -612,6 +610,7 @@ async function knowledgeBaseKeywordFallback(
     where: {
       orgId,
       ...(category ? { category } : {}),
+      ...(groupCode ? { groupCode } : {}),
       OR: [
         { title: { contains: query, mode: "insensitive" } },
         { content: { contains: query, mode: "insensitive" } },
@@ -624,6 +623,9 @@ async function knowledgeBaseKeywordFallback(
       title: true,
       content: true,
       category: true,
+      groupCode: true,
+      subcategory: true,
+      agentNotes: true,
       tags: true,
       source: true,
     },
@@ -644,6 +646,10 @@ async function handleQueryKnowledgeBase(
 ): Promise<Record<string, unknown>> {
   const query = typeof input.query === "string" ? input.query : "";
   const category = typeof input.category === "string" ? input.category : undefined;
+  const groupCode =
+    typeof input.groupCode === "string" && /^G[1-6]$/.test(input.groupCode)
+      ? input.groupCode
+      : undefined;
   const topK = Math.min(
     typeof input.topK === "number" && input.topK > 0 ? Math.floor(input.topK) : 5,
     10
@@ -657,6 +663,7 @@ async function handleQueryKnowledgeBase(
     return knowledgeBaseKeywordFallback(
       query,
       category,
+      groupCode,
       topK,
       context.orgId,
       "VOYAGE_API_KEY não configurada"
@@ -671,13 +678,29 @@ async function handleQueryKnowledgeBase(
     });
     const vecLiteral = toPgVector(queryVec);
 
-    // Raw SQL with pgvector cosine similarity; filter by org and optional category
+    // Raw SQL with pgvector cosine similarity; filter by org, optional
+    // category, and (for category='clause') optional groupCode.
+    const params: unknown[] = [vecLiteral, context.orgId];
+    let paramIdx = 3;
+    const filters: string[] = [];
+    if (category) {
+      filters.push(`AND category = $${paramIdx++}`);
+      params.push(category);
+    }
+    if (groupCode) {
+      filters.push(`AND "groupCode" = $${paramIdx++}`);
+      params.push(groupCode);
+    }
+
     const rows = await prisma.$queryRawUnsafe<
       Array<{
         id: string;
         title: string;
         content: string;
         category: string;
+        groupCode: string | null;
+        subcategory: string | null;
+        agentNotes: string | null;
         tags: string[];
         source: string | null;
         similarity: number;
@@ -689,19 +712,20 @@ async function handleQueryKnowledgeBase(
         title,
         content,
         category,
+        "groupCode",
+        subcategory,
+        "agentNotes",
         tags,
         source,
         1 - (embedding <=> $1::vector) AS similarity
       FROM "KnowledgeItem"
       WHERE "orgId" = $2
         AND embedding IS NOT NULL
-        ${category ? 'AND category = $3' : ''}
+        ${filters.join("\n        ")}
       ORDER BY embedding <=> $1::vector
       LIMIT ${topK}
       `,
-      vecLiteral,
-      context.orgId,
-      ...(category ? [category] : [])
+      ...params
     );
 
     return {
@@ -710,6 +734,9 @@ async function handleQueryKnowledgeBase(
         title: r.title,
         content: r.content.slice(0, 800),
         category: r.category,
+        groupCode: r.groupCode,
+        subcategory: r.subcategory,
+        agentNotes: r.agentNotes,
         tags: r.tags,
         source: r.source,
         similarity: Number(r.similarity?.toFixed?.(3) ?? r.similarity),
@@ -733,6 +760,7 @@ async function handleQueryKnowledgeBase(
       const fallback = await knowledgeBaseKeywordFallback(
         query,
         category,
+        groupCode,
         topK,
         context.orgId,
         reason
@@ -882,50 +910,6 @@ async function handleAddComment(
     anchorId,
     severity,
     message: `Comentário (${severity}) adicionado ao trecho: "${selectedText.slice(0, 80)}${selectedText.length > 80 ? "…" : ""}"`,
-  };
-}
-
-async function handleQueryClauses(
-  input: Record<string, unknown>,
-  context: AgentContext
-): Promise<Record<string, unknown>> {
-  const where: Record<string, unknown> = {
-    orgId: context.orgId,
-    status: "approved",
-  };
-  if (input.category) where.category = input.category;
-  if (input.groupCode) where.groupCode = input.groupCode;
-  if (input.isVariable !== undefined) where.isVariable = input.isVariable;
-
-  const clauses = await prisma.clause.findMany({
-    where: {
-      ...where,
-      ...(input.search
-        ? {
-            OR: [
-              { title: { contains: input.search as string, mode: "insensitive" as const } },
-              { content: { contains: input.search as string, mode: "insensitive" as const } },
-            ],
-          }
-        : {}),
-    },
-    orderBy: [{ usageCount: "desc" }, { category: "asc" }],
-    take: 15,
-  });
-
-  return {
-    found: clauses.length,
-    clauses: clauses.map((c) => ({
-      id: c.id,
-      category: c.category,
-      subcategory: c.subcategory,
-      title: c.title,
-      content: c.content.substring(0, 500),
-      tags: c.tags,
-      usageCount: c.usageCount,
-      groupCode: c.groupCode,
-      agentNotes: c.agentNotes,
-    })),
   };
 }
 
@@ -1147,15 +1131,31 @@ async function handleInsertClause(
   input: Record<string, unknown>,
   context: AgentContext
 ): Promise<Record<string, unknown>> {
-  const clauseId = input.clauseId as string;
+  // Aceita knowledgeItemId (novo, canônico) com fallback ao clauseId legado
+  // pra não quebrar planos antigos ainda na fila.
+  const knowledgeItemId =
+    (typeof input.knowledgeItemId === "string" && input.knowledgeItemId) ||
+    (typeof input.clauseId === "string" && input.clauseId) ||
+    "";
 
-  const clause = await prisma.clause.findUnique({ where: { id: clauseId } });
-  if (!clause) {
-    return { success: false, error: "Cláusula não encontrada" };
+  if (!knowledgeItemId) {
+    return { success: false, error: "knowledgeItemId é obrigatório" };
   }
 
+  const clause = await prisma.knowledgeItem.findFirst({
+    where: { id: knowledgeItemId, category: "clause" },
+  });
+  if (!clause) {
+    return { success: false, error: "Cláusula não encontrada na biblioteca" };
+  }
+
+  // Categoria semântica (partes/objeto/preco/...) vive em `subcategory` pós-unificação.
+  // Mantida como `category` no shape interno do AgentContext.activeClauses por
+  // compatibilidade com consumers (shared/context.ts, execute-plan/route.ts).
+  const semanticCategory = clause.subcategory ?? "clause";
+
   // Check if already in contract
-  const existing = context.activeClauses.find((c) => c.clauseId === clauseId);
+  const existing = context.activeClauses.find((c) => c.clauseId === knowledgeItemId);
   if (existing) {
     return { success: false, error: `Cláusula "${clause.title}" já está no contrato` };
   }
@@ -1165,15 +1165,15 @@ async function handleInsertClause(
   await prisma.contractClause.create({
     data: {
       contractId: context.contractId,
-      clauseId: clause.id,
+      knowledgeItemId: clause.id,
       position: maxPos + 1,
       isActive: true,
     },
   });
 
   // Increment usage count
-  await prisma.clause.update({
-    where: { id: clauseId },
+  await prisma.knowledgeItem.update({
+    where: { id: knowledgeItemId },
     data: { usageCount: { increment: 1 } },
   });
 
@@ -1194,14 +1194,14 @@ async function handleInsertClause(
         id: "",
         clauseId: clause.id,
         title: clause.title,
-        category: clause.category,
+        category: semanticCategory,
         position: maxPos + 1,
         isActive: true,
       });
       return {
         success: true,
         clauseTitle: clause.title,
-        category: clause.category,
+        category: semanticCategory,
         message: `Cláusula "${clause.title}" inserida no Google Doc`,
       };
     }
@@ -1255,13 +1255,13 @@ async function handleInsertClause(
 
   context.activeClauses.push({
     id: "", clauseId: clause.id, title: clause.title,
-    category: clause.category, position: maxPos + 1, isActive: true,
+    category: semanticCategory, position: maxPos + 1, isActive: true,
   });
 
   return {
     success: true,
     clauseTitle: clause.title,
-    category: clause.category,
+    category: semanticCategory,
     message: `Cláusula "${clause.title}" inserida no contrato`,
   };
 }
@@ -1270,11 +1270,18 @@ async function handleRemoveClause(
   input: Record<string, unknown>,
   context: AgentContext
 ): Promise<Record<string, unknown>> {
-  const clauseId = input.clauseId as string;
+  const knowledgeItemId =
+    (typeof input.knowledgeItemId === "string" && input.knowledgeItemId) ||
+    (typeof input.clauseId === "string" && input.clauseId) ||
+    "";
+
+  if (!knowledgeItemId) {
+    return { success: false, error: "knowledgeItemId é obrigatório" };
+  }
 
   const link = await prisma.contractClause.findFirst({
-    where: { contractId: context.contractId, clauseId },
-    include: { clause: { select: { title: true } } },
+    where: { contractId: context.contractId, knowledgeItemId },
+    include: { knowledgeItem: { select: { title: true, content: true } } },
   });
 
   if (!link) {
@@ -1283,28 +1290,27 @@ async function handleRemoveClause(
 
   // Google Docs path: remove o trecho da cláusula do doc também.
   if (context.googleDocId) {
-    const clauseFull = await prisma.clause.findUnique({ where: { id: clauseId } });
-    if (clauseFull) {
-      const renderedClause = renderContratoHTML(clauseFull.content, context.dataJson);
-      // Apenas a primeira linha não-vazia como âncora — texto completo seria
-      // frágil pra indexOf por ter sido reformatado pelo Google Docs.
-      const anchor = renderedClause
-        .replace(/<[^>]+>/g, "")
-        .split("\n")
-        .map((s) => s.trim())
-        .find((s) => s.length >= 30);
-      if (anchor) {
-        await googleRemoveClause(context.googleDocId, anchor);
-      }
+    const renderedClause = renderContratoHTML(link.knowledgeItem.content, context.dataJson);
+    // Apenas a primeira linha não-vazia como âncora — texto completo seria
+    // frágil pra indexOf por ter sido reformatado pelo Google Docs.
+    const anchor = renderedClause
+      .replace(/<[^>]+>/g, "")
+      .split("\n")
+      .map((s) => s.trim())
+      .find((s) => s.length >= 30);
+    if (anchor) {
+      await googleRemoveClause(context.googleDocId, anchor);
     }
   }
 
   await prisma.contractClause.delete({ where: { id: link.id } });
-  context.activeClauses = context.activeClauses.filter((c) => c.clauseId !== clauseId);
+  context.activeClauses = context.activeClauses.filter(
+    (c) => c.clauseId !== knowledgeItemId
+  );
 
   return {
     success: true,
-    message: `Cláusula "${link.clause.title}" removida do contrato`,
+    message: `Cláusula "${link.knowledgeItem.title}" removida do contrato`,
   };
 }
 
@@ -1369,9 +1375,10 @@ async function handleSuggestImprovements(
   const pagamento = data.pagamento as Record<string, unknown> | undefined;
 
   // Check which clause bank groups are linked via DB
-  const linkedClauses = await prisma.clause.findMany({
+  const linkedClauses = await prisma.knowledgeItem.findMany({
     where: {
       id: { in: context.activeClauses.map((c) => c.clauseId) },
+      category: "clause",
     },
     select: { groupCode: true, title: true },
   });
@@ -1387,7 +1394,7 @@ async function handleSuggestImprovements(
     suggestions.push({
       category: "titulo",
       title: "Cláusulas de Financiamento (Grupo G4) - OBRIGATÓRIO",
-      reason: "Contrato com financiamento bancário DEVE ter as cláusulas do Grupo G4: prazo de 45 dias úteis, diferença de valor liberado, suspensão por nota de exigência. Use query_clauses com groupCode='G4'.",
+      reason: "Contrato com financiamento bancário DEVE ter as cláusulas do Grupo G4: prazo de 45 dias úteis, diferença de valor liberado, suspensão por nota de exigência. Use query_knowledge_base com category='clause' groupCode='G4'.",
       importance: "critical",
     });
   }
@@ -1401,7 +1408,7 @@ async function handleSuggestImprovements(
       suggestions.push({
         category: "penalidades",
         title: "Condição Resolutiva por Não Obtenção de Financiamento (G3)",
-        reason: "OBRIGATÓRIO em financiamento: restituição integral sem penalidades se financiamento for negado. Use query_clauses com groupCode='G3'.",
+        reason: "OBRIGATÓRIO em financiamento: restituição integral sem penalidades se financiamento for negado. Use query_knowledge_base com category='clause' groupCode='G3'.",
         importance: "critical",
       });
     }
@@ -1412,7 +1419,7 @@ async function handleSuggestImprovements(
     suggestions.push({
       category: "preco",
       title: "Pagamento Proporcional em Contas Indicadas (G1)",
-      reason: "Pluralidade de vendedores detectada. Recomenda-se cláusula de pagamento proporcional com indicação de contas. Use query_clauses com groupCode='G1'.",
+      reason: "Pluralidade de vendedores detectada. Recomenda-se cláusula de pagamento proporcional com indicação de contas. Use query_knowledge_base com category='clause' groupCode='G1'.",
       importance: "high",
     });
   }
@@ -1426,7 +1433,7 @@ async function handleSuggestImprovements(
       suggestions.push({
         category: "preco",
         title: "Pagamento via FGTS (G6)",
-        reason: "FGTS > 0 no pagamento. Inserir cláusula com prazo de habilitação junto à CEF (Lei 8.036/1990). Use query_clauses com groupCode='G6'.",
+        reason: "FGTS > 0 no pagamento. Inserir cláusula com prazo de habilitação junto à CEF (Lei 8.036/1990). Use query_knowledge_base com category='clause' groupCode='G6'.",
         importance: "high",
       });
     }

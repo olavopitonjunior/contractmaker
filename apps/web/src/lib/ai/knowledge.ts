@@ -10,14 +10,29 @@ import { prisma } from "@/lib/db/prisma";
 import { embed, toPgVector, isEmbeddingsConfigured } from "./embeddings";
 import { chunkText } from "./chunking";
 
+export type KnowledgeCategory =
+  | "legislation"
+  | "model"
+  | "rule"
+  | "glossary"
+  | "clause";
+
 export interface CreateKnowledgeItemInput {
   orgId: string;
-  category: "legislation" | "model" | "rule" | "glossary";
+  category: KnowledgeCategory;
   title: string;
   content: string;
   tags?: string[];
   source?: string;
   createdBy?: string | null;
+  // Fields que só fazem sentido quando category === "clause".
+  // Ignorados pra outras categorias.
+  agentNotes?: string | null;
+  groupCode?: string | null;
+  subcategory?: string | null;
+  isVariable?: boolean;
+  status?: string;
+  usageCount?: number;
 }
 
 export interface KnowledgeItemRow {
@@ -35,6 +50,18 @@ export interface KnowledgeItemRow {
   updatedAt: Date;
 }
 
+function clauseExtras(input: CreateKnowledgeItemInput) {
+  if (input.category !== "clause") return {};
+  return {
+    agentNotes: input.agentNotes ?? null,
+    groupCode: input.groupCode ?? null,
+    subcategory: input.subcategory ?? null,
+    isVariable: input.isVariable ?? false,
+    status: input.status ?? "approved",
+    usageCount: input.usageCount ?? 0,
+  };
+}
+
 /**
  * Create a knowledge item. If content is long enough, split into chunks; each
  * chunk becomes its own row with a shared parentId. Embeddings are generated
@@ -47,6 +74,8 @@ export async function createKnowledgeItem(
   if (chunks.length === 0) {
     throw new Error("Conteúdo vazio após limpeza");
   }
+
+  const extras = clauseExtras(input);
 
   // Short path: single chunk = single row (no parent/children split)
   if (chunks.length === 1) {
@@ -62,6 +91,7 @@ export async function createKnowledgeItem(
         tags: input.tags ?? [],
         source: input.source ?? "manual",
         createdBy: input.createdBy ?? null,
+        ...extras,
       },
     });
 
@@ -94,6 +124,7 @@ export async function createKnowledgeItem(
       tags: input.tags ?? [],
       source: input.source ?? "manual",
       createdBy: input.createdBy ?? null,
+      ...extras,
     },
   });
 
@@ -151,6 +182,20 @@ export async function updateKnowledgeItem(
   const contentChanged =
     typeof patch.content === "string" && patch.content !== current.content;
 
+  // Patches específicos de clause só aplicam se a row já é category="clause"
+  // OU se o caller está explicitamente migrando uma row pra clause (não acontece
+  // hoje — todas as conversões saem de createKnowledgeItem).
+  const clausePatch = current.category === "clause"
+    ? {
+        agentNotes: patch.agentNotes !== undefined ? patch.agentNotes : current.agentNotes,
+        groupCode: patch.groupCode !== undefined ? patch.groupCode : current.groupCode,
+        subcategory: patch.subcategory !== undefined ? patch.subcategory : current.subcategory,
+        isVariable: patch.isVariable !== undefined ? patch.isVariable : current.isVariable,
+        status: patch.status !== undefined ? patch.status : current.status,
+        usageCount: patch.usageCount !== undefined ? patch.usageCount : current.usageCount,
+      }
+    : {};
+
   await prisma.knowledgeItem.update({
     where: { id },
     data: {
@@ -158,6 +203,7 @@ export async function updateKnowledgeItem(
       content: patch.content ?? current.content,
       tags: patch.tags ?? current.tags,
       source: patch.source ?? current.source,
+      ...clausePatch,
     },
   });
 

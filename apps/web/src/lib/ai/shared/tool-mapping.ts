@@ -30,7 +30,6 @@ export function isEditTool(name: string): boolean {
 /** Map tool name → action enum do ContractChangeLog. */
 export function mapToolToAction(toolName: string): string {
   const map: Record<string, string> = {
-    query_clauses: "ai_query",
     query_templates: "ai_query",
     explain_clause: "ai_query",
     edit_contract_section: "ai_edit",
@@ -58,16 +57,18 @@ export function buildToolSummary(
   input: Record<string, unknown>
 ): string {
   switch (toolName) {
-    case "query_clauses":
-      return `Consultou cláusulas${input.category ? ` (categoria: ${input.category})` : ""}${input.search ? ` (busca: "${input.search}")` : ""}`;
     case "edit_contract_section":
       return `Editou seção do contrato: substituiu ${(input.target as string)?.length || 0} caracteres`;
     case "update_contract_data":
       return `Atualizou dados: ${Object.keys(input.patch as Record<string, unknown> || {}).join(", ")}`;
-    case "insert_clause":
-      return `Inseriu cláusula ID ${input.clauseId}`;
-    case "remove_clause":
-      return `Removeu cláusula ID ${input.clauseId}`;
+    case "insert_clause": {
+      const id = (input.knowledgeItemId || input.clauseId) as string | undefined;
+      return `Inseriu cláusula da biblioteca${id ? ` (id ${id})` : ""}`;
+    }
+    case "remove_clause": {
+      const id = (input.knowledgeItemId || input.clauseId) as string | undefined;
+      return `Removeu cláusula${id ? ` (id ${id})` : ""}`;
+    }
     case "validate_contract":
       return "Executou validação completa do contrato";
     case "suggest_improvements":
@@ -75,7 +76,7 @@ export function buildToolSummary(
     case "extract_document_data":
       return `Extraiu dados do documento ${input.attachmentId}`;
     case "query_knowledge_base":
-      return `Consultou base${input.query ? `: "${(input.query as string).slice(0, 60)}"` : ""}`;
+      return `Consultou base${input.query ? `: "${(input.query as string).slice(0, 60)}"` : ""}${input.category ? ` [${input.category}]` : ""}`;
     case "find_similar_contracts":
       return "Buscou contratos similares aprovados";
     case "propose_suggestion":

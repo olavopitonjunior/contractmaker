@@ -60,7 +60,9 @@ export async function POST(
               clauses: {
                 where: { isActive: true },
                 include: {
-                  clause: { select: { id: true, title: true, category: true } },
+                  knowledgeItem: {
+                    select: { id: true, title: true, subcategory: true, category: true },
+                  },
                 },
                 orderBy: { position: "asc" },
               },
@@ -127,9 +129,9 @@ export async function POST(
     templateName: contract.template?.name ?? "Contrato importado",
     activeClauses: contract.clauses.map((cc) => ({
       id: cc.id,
-      clauseId: cc.clause.id,
-      title: cc.clause.title,
-      category: cc.clause.category,
+      clauseId: cc.knowledgeItem.id,
+      title: cc.knowledgeItem.title,
+      category: cc.knowledgeItem.subcategory ?? cc.knowledgeItem.category,
       position: cc.position,
       isActive: cc.isActive,
     })),

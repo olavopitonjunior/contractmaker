@@ -2,9 +2,9 @@ import { describe, it, expect } from "vitest";
 import { AGENT_TOOLS, getToolNames } from "../tools";
 
 describe("AGENT_TOOLS", () => {
-  it("has exactly 21 tools", () => {
-    // F4 (2026-05-16) — adicionou cross_check_certidoes (Analyst + Editor).
-    expect(AGENT_TOOLS).toHaveLength(21);
+  it("has exactly 20 tools", () => {
+    // 2026-05-18 — query_clauses removida na unificação Clause→KnowledgeItem.
+    expect(AGENT_TOOLS).toHaveLength(20);
   });
 
   it("each tool has name, description, and input_schema", () => {
@@ -24,7 +24,6 @@ describe("AGENT_TOOLS", () => {
   it("contains all expected tools", () => {
     const names = AGENT_TOOLS.map((t) => t.name);
     const expected = [
-      "query_clauses",
       "query_templates",
       "explain_clause",
       "edit_contract_section",
@@ -50,13 +49,43 @@ describe("AGENT_TOOLS", () => {
       expect(names).toContain(name);
     }
   });
+
+  it("does NOT contain query_clauses (removed in unification)", () => {
+    const names = AGENT_TOOLS.map((t) => t.name);
+    expect(names).not.toContain("query_clauses");
+  });
+
+  it("query_knowledge_base accepts category 'clause' and groupCode", () => {
+    const tool = AGENT_TOOLS.find((t) => t.name === "query_knowledge_base");
+    expect(tool).toBeDefined();
+    const props = tool!.input_schema.properties as Record<string, unknown>;
+    const categoryProp = props.category as { enum?: string[] };
+    expect(categoryProp.enum).toContain("clause");
+    expect(props.groupCode).toBeDefined();
+  });
+
+  it("insert_clause uses knowledgeItemId as required input", () => {
+    const tool = AGENT_TOOLS.find((t) => t.name === "insert_clause");
+    expect(tool).toBeDefined();
+    const required = tool!.input_schema.required as string[];
+    expect(required).toContain("knowledgeItemId");
+    expect(required).not.toContain("clauseId");
+  });
+
+  it("remove_clause uses knowledgeItemId as required input", () => {
+    const tool = AGENT_TOOLS.find((t) => t.name === "remove_clause");
+    expect(tool).toBeDefined();
+    const required = tool!.input_schema.required as string[];
+    expect(required).toContain("knowledgeItemId");
+    expect(required).not.toContain("clauseId");
+  });
 });
 
 describe("getToolNames", () => {
-  it("returns array of 21 tool names", () => {
+  it("returns array of 20 tool names", () => {
     const names = getToolNames();
-    expect(names).toHaveLength(21);
-    expect(names).toContain("query_clauses");
+    expect(names).toHaveLength(20);
+    expect(names).not.toContain("query_clauses");
     expect(names).toContain("validate_contract");
     expect(names).toContain("add_comment");
     expect(names).toContain("analyze_contradictions");

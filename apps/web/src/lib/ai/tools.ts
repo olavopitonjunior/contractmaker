@@ -3,41 +3,6 @@ import type { Anthropic } from "@anthropic-ai/sdk";
 export const AGENT_TOOLS: Anthropic.Tool[] = [
   // --- Group 1: Knowledge & Query ---
   {
-    name: "query_clauses",
-    description:
-      "Consulta a biblioteca de cláusulas contratuais aprovadas. Use SEMPRE antes de criar ou alterar cláusulas para verificar se já existe uma similar. Use groupCode para filtrar pelo banco de cláusulas padronizadas (G1-G6).",
-    input_schema: {
-      type: "object" as const,
-      properties: {
-        category: {
-          type: "string",
-          description:
-            "Categoria: partes, objeto, compromisso, preco, posse, titulo, comissao, penalidades, foro, customizada",
-        },
-        search: {
-          type: "string",
-          description: "Busca textual no título ou conteúdo da cláusula",
-        },
-        tags: {
-          type: "array",
-          items: { type: "string" },
-          description: "Tags para filtrar (ex: ['arbitragem', 'foro'])",
-        },
-        groupCode: {
-          type: "string",
-          description:
-            "Código do grupo do banco de cláusulas: G1 (sinal/arras), G2 (posse), G3 (rescisão), G4 (financiamento), G5 (comissão), G6 (declarações)",
-        },
-        isVariable: {
-          type: "boolean",
-          description:
-            "true para filtrar apenas cláusulas variáveis do banco padronizado, false para cláusulas fixas",
-        },
-      },
-      required: [],
-    },
-  },
-  {
     name: "query_templates",
     description: "Lista os templates de contrato disponíveis na organização.",
     input_schema: {
@@ -140,13 +105,13 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
   {
     name: "insert_clause",
     description:
-      "Insere uma cláusula da biblioteca no contrato. Primeiro use query_clauses para encontrar a cláusula desejada.",
+      "Insere uma cláusula da biblioteca (KnowledgeItem com category='clause') no contrato. Primeiro use query_knowledge_base com category='clause' (opcional: groupCode='G1'..'G6') para encontrar o knowledgeItemId desejado.",
     input_schema: {
       type: "object" as const,
       properties: {
-        clauseId: {
+        knowledgeItemId: {
           type: "string",
-          description: "ID da cláusula na biblioteca",
+          description: "ID do KnowledgeItem (categoria 'clause') na biblioteca",
         },
         afterSection: {
           type: "string",
@@ -154,7 +119,7 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
             "Título da seção após a qual inserir (ex: '8. IRRETRATABILIDADE'). Se omitido, insere no final.",
         },
       },
-      required: ["clauseId"],
+      required: ["knowledgeItemId"],
     },
   },
   {
@@ -163,12 +128,12 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
     input_schema: {
       type: "object" as const,
       properties: {
-        clauseId: {
+        knowledgeItemId: {
           type: "string",
-          description: "ID da cláusula a remover do contrato",
+          description: "ID do KnowledgeItem (categoria 'clause') a remover do contrato",
         },
       },
-      required: ["clauseId"],
+      required: ["knowledgeItemId"],
     },
   },
 
@@ -277,19 +242,25 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
   {
     name: "query_knowledge_base",
     description:
-      "Consulta a base de conhecimento do escritório (legislação, modelos referenciais, regras internas, glossário). Use SEMPRE antes de citar base legal, antes de redigir cláusula técnica baseada em lei específica, e antes de decidir sobre termos do escritório. Retorna os itens mais relevantes por similaridade semântica (RAG via Voyage-law-2).",
+      "Consulta a base de conhecimento do escritório (legislação, modelos referenciais, regras internas, glossário) e a biblioteca de cláusulas padronizadas (G1-G6). Use SEMPRE antes de inserir cláusula (category='clause' + filtro por groupCode), citar base legal, ou redigir texto baseado em norma específica. Retorna os itens mais relevantes por similaridade semântica (RAG via Voyage-law-2), com fallback ILIKE se Voyage não estiver configurado.",
     input_schema: {
       type: "object" as const,
       properties: {
         query: {
           type: "string",
-          description: "Pergunta ou tema em linguagem natural (ex: 'multa por atraso no pagamento do sinal')",
+          description: "Pergunta ou tema em linguagem natural (ex: 'multa por atraso no pagamento do sinal', 'cláusula de rescisão por não obtenção de financiamento')",
         },
         category: {
           type: "string",
-          enum: ["legislation", "model", "rule", "glossary"],
+          enum: ["legislation", "model", "rule", "glossary", "clause"],
           description:
-            "Filtrar por categoria: 'legislation' (Código Civil, Lei 8.245, LGPD), 'model' (contratos referenciais), 'rule' (regras do escritório), 'glossary' (termos técnicos)",
+            "Filtrar por categoria: 'legislation' (Código Civil, Lei 8.245, LGPD), 'model' (contratos referenciais), 'rule' (regras do escritório), 'glossary' (termos técnicos), 'clause' (biblioteca de cláusulas padronizadas G1-G6 da org)",
+        },
+        groupCode: {
+          type: "string",
+          enum: ["G1", "G2", "G3", "G4", "G5", "G6"],
+          description:
+            "Filtro extra de grupo do banco de cláusulas — só aplica quando category='clause'. G1 (sinal/arras), G2 (posse/imissão), G3 (rescisão), G4 (financiamento), G5 (comissão), G6 (declarações).",
         },
         topK: {
           type: "number",

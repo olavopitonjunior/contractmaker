@@ -37,10 +37,9 @@ export interface ToolDescriptor {
  */
 const TOOL_REGISTRY: Record<string, ToolDescriptor> = {
   // ===== Consulta / KB =====
-  query_clauses: { icon: Search, label: "Consultou banco de cláusulas", kind: "kb" },
   query_templates: { icon: FileSearch, label: "Consultou templates", kind: "kb" },
   explain_clause: { icon: BookOpen, label: "Explicou cláusula", kind: "kb" },
-  query_knowledge_base: { icon: BookOpen, label: "Consultou base de conhecimento", kind: "kb" },
+  query_knowledge_base: { icon: Search, label: "Consultou base de conhecimento", kind: "kb" },
   find_similar_contracts: { icon: GitCompare, label: "Buscou contratos similares", kind: "kb" },
 
   // ===== Edição =====

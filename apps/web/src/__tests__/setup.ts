@@ -23,6 +23,18 @@ vi.mock("@/lib/db/prisma", () => {
       findUnique: vi.fn(),
       update: vi.fn(),
     },
+    // Pós-unificação 2026-05-18 — biblioteca de cláusulas vive aqui
+    // (category="clause"). Clause acima fica até PR follow-up que dropa o model.
+    knowledgeItem: {
+      findFirst: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+      findUnique: vi.fn(),
+      create: vi.fn(),
+      update: vi.fn(),
+      delete: vi.fn(),
+      count: vi.fn().mockResolvedValue(0),
+      groupBy: vi.fn().mockResolvedValue([]),
+    },
     contractTemplate: {
       findMany: vi.fn(),
     },

@@ -14,7 +14,11 @@ export async function loadContext(contractId: string, orgId: string): Promise<Ag
       template: true,
       clauses: {
         where: { isActive: true },
-        include: { clause: { select: { id: true, title: true, category: true } } },
+        include: {
+          knowledgeItem: {
+            select: { id: true, title: true, subcategory: true, category: true },
+          },
+        },
         orderBy: { position: "asc" },
       },
     },
@@ -46,9 +50,12 @@ export async function loadContext(contractId: string, orgId: string): Promise<Ag
     templateName: contract.template?.name ?? "Contrato importado",
     activeClauses: contract.clauses.map((cc) => ({
       id: cc.id,
-      clauseId: cc.clause.id,
-      title: cc.clause.title,
-      category: cc.clause.category,
+      clauseId: cc.knowledgeItem.id,
+      title: cc.knowledgeItem.title,
+      // `subcategory` carrega a categoria semântica (partes/objeto/preco/...)
+      // que vivia em Clause.category pré-unificação. Fallback `category`
+      // ("clause" sempre) cobre rows criadas direto sem subcategory.
+      category: cc.knowledgeItem.subcategory ?? cc.knowledgeItem.category,
       position: cc.position,
       isActive: cc.isActive,
     })),

@@ -9,10 +9,23 @@ export default async function ClausesPage() {
   const org = await getUserOrg(session.user.id);
   if (!org) return <p className="text-muted-foreground p-6">Sem organizacao.</p>;
 
-  const clauses = await prisma.clause.findMany({
-    where: { orgId: org.id, status: { not: "archived" } },
-    orderBy: [{ category: "asc" }, { title: "asc" }],
+  // Pós-unificação 2026-05-18: biblioteca de cláusulas vive em KnowledgeItem
+  // com category="clause". A subcategoria semântica (partes/objeto/preco/...)
+  // que a UI usa pra agrupar fica em `subcategory` — re-exposta como `category`
+  // pra retrocompat com ClausesPageClient (campos antigos preservados).
+  const rows = await prisma.knowledgeItem.findMany({
+    where: {
+      orgId: org.id,
+      category: "clause",
+      status: { not: "archived" },
+    },
+    orderBy: [{ subcategory: "asc" }, { title: "asc" }],
   });
+
+  const clauses = rows.map((c) => ({
+    ...c,
+    category: c.subcategory ?? "customizada",
+  }));
 
   return <ClausesPageClient clauses={JSON.parse(JSON.stringify(clauses))} />;
 }
