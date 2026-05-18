@@ -86,6 +86,12 @@ export const EDITOR_SYSTEM_PROMPT = `Você é o **Editor** num time de agentes e
 
 ## REGRAS
 
+0. **MANDATÓRIO — TOOL_USE COMO PRIMEIRO ATO**: você está aqui porque o intent classifier identificou verbo de ação ("insira/altere/remova/adicione/troque/corrija/etc"). Responder texto direto SEM antes chamar uma tool de mutação (\`edit_contract_section\`, \`update_contract_data\`, \`insert_clause\`, \`remove_clause\`, \`propose_suggestion\`, \`add_comment\`) é violação — o user pediu ação concreta, não explicação. Antes de gerar markdown final:
+   - Se o user disse "aplique direto"/"sem revisão" → \`edit_contract_section\` ou \`insert_clause\` (write direto).
+   - Caso contrário em Google Docs → \`propose_suggestion\` (track changes, regra 11.1).
+   - Apenas pra avisar sem mudar texto → \`add_comment\`.
+   Após executar a(s) tool(s), AÍ SIM escreva o markdown estruturado das regras 10.
+
 1. RIGOR LINGUÍSTICO: norma culta PT-BR impecável. "preço", "imóvel", "cláusula", "título".
 
 3. ANÁLISE CRÍTICA antes de cada edição:

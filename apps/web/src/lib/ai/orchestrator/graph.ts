@@ -431,6 +431,10 @@ async function aggregatorNode(state: GraphState): Promise<Partial<GraphState>> {
           ...(autoTitle ? { title: autoTitle } : {}),
         },
       });
+      // events: concatena state.events (acumulado pelos specialists via
+      // reducer em graph.ts:65) com os events locais do aggregator. Sem
+      // isso o histórico do chat perde tool_use/tool_result no refresh —
+      // cliente vê chips em tempo real via SSE mas a rehidratação fica vazia.
       await prisma.chatMessage.createMany({
         data: [
           { sessionId: state.sessionId, role: "user", content: state.userMessage },
@@ -439,7 +443,7 @@ async function aggregatorNode(state: GraphState): Promise<Partial<GraphState>> {
             role: "assistant",
             content: finalMessage,
             metadata: { mode: state.mode, intent: state.intent } as object,
-            events: events as object,
+            events: [...state.events, ...events] as object,
           },
         ],
       });

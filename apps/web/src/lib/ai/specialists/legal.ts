@@ -27,6 +27,18 @@ const LEGAL_TOOL_NAMES = new Set([
 
 const LEGAL_TOOLS = AGENT_TOOLS.filter((t) => LEGAL_TOOL_NAMES.has(t.name));
 
+/**
+ * Verbos de consulta — quando o usuário pede "busque/encontre/liste/mostre",
+ * forçamos tool_choice=any pra que Haiku chame `query_knowledge_base` em vez
+ * de inventar a resposta a partir do expert-context pré-carregado.
+ *
+ * Sem isso o Haiku 4.5 frequentemente cita IDs que já estão no contexto sem
+ * fazer tool_call real — quebra a auditoria (ChatMessage.events fica sem
+ * tool_use) e impede o user de ver o chip da consulta na UI.
+ */
+const QUERY_VERBS_REGEX =
+  /\b(busque|encontre|liste|mostre|consulte|procure|ache|me\s+mostre)\b/i;
+
 export async function runLegal(state: OrchestratorState): Promise<SpecialistOutput> {
   if (!state.contractContext) {
     throw new Error("runLegal: contractContext não foi carregado (chame loadContext node antes)");
@@ -45,6 +57,7 @@ export async function runLegal(state: OrchestratorState): Promise<SpecialistOutp
     contractId: state.contractId,
     orgId: state.orgId,
     userId: state.userId,
+    forceToolUse: QUERY_VERBS_REGEX.test(state.userMessage),
   });
 }
 

@@ -56,6 +56,14 @@ export async function runCurator(state: OrchestratorState): Promise<SpecialistOu
     userId: state.userId,
     toolGuard: guard,
     captureSnapshots: false,
+    // Curator existe pra propor mudanças na biblioteca/templates. Sem
+    // forceToolUse, Haiku frequentemente responde "analisei e não há
+    // padrão pra propor" sem nem chamar `find_similar_contracts`. Como
+    // Sentinel já bloqueia `propose_template_change` sem evidence (regra
+    // `no_template_change_without_evidence`), forçar tool_use não cria
+    // propostas vazias — só garante que o agente CONSULTE a memória
+    // antes de decidir.
+    forceToolUse: true,
   });
 }
 
