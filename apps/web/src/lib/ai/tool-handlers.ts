@@ -1142,11 +1142,33 @@ async function handleInsertClause(
     return { success: false, error: "knowledgeItemId é obrigatório" };
   }
 
+  // Validação anti-slug: knowledgeItemId real tem formato `c<24-32 hex/alnum>`
+  // (cuid Prisma OU UUID-sem-traços gerado pela migration unify-clause).
+  // LLMs frequentemente inventam slugs humanos ("G4-prazo-financiamento-45du")
+  // — rejeitamos cedo com mensagem dirigindo o agente ao caminho correto.
+  if (!/^c[a-z0-9]{24,32}$/i.test(knowledgeItemId)) {
+    return {
+      success: false,
+      error:
+        `knowledgeItemId inválido: "${knowledgeItemId}" parece um slug humano. ` +
+        `IDs reais têm formato c<hash> (ex: cd4a6eacc6d7e4b76a7aeaa0373bc7ecb). ` +
+        `Chame query_knowledge_base({ category: "clause", groupCode: "...", query: "..." }) ` +
+        `PRIMEIRO e use o campo "id" do resultado.`,
+      hint: "call_query_knowledge_base_first",
+    };
+  }
+
   const clause = await prisma.knowledgeItem.findFirst({
     where: { id: knowledgeItemId, category: "clause" },
   });
   if (!clause) {
-    return { success: false, error: "Cláusula não encontrada na biblioteca" };
+    return {
+      success: false,
+      error:
+        `Nenhuma cláusula encontrada com knowledgeItemId="${knowledgeItemId}". ` +
+        `Confirme o ID via query_knowledge_base e tente de novo.`,
+      hint: "id_not_in_db",
+    };
   }
 
   // Categoria semântica (partes/objeto/preco/...) vive em `subcategory` pós-unificação.
@@ -1277,6 +1299,18 @@ async function handleRemoveClause(
 
   if (!knowledgeItemId) {
     return { success: false, error: "knowledgeItemId é obrigatório" };
+  }
+
+  // Mesma validação anti-slug do handleInsertClause.
+  if (!/^c[a-z0-9]{24,32}$/i.test(knowledgeItemId)) {
+    return {
+      success: false,
+      error:
+        `knowledgeItemId inválido: "${knowledgeItemId}" parece um slug humano. ` +
+        `Pra remover cláusula vinculada, primeiro confirme o ID via query_knowledge_base ` +
+        `ou olhe activeClauses do contexto do contrato.`,
+      hint: "use_real_id",
+    };
   }
 
   const link = await prisma.contractClause.findFirst({

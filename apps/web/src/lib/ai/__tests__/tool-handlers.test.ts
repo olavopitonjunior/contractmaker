@@ -362,24 +362,46 @@ describe("handleProposeSuggestion", () => {
 // ==========================================
 // handleInsertClause — pós-unificação Clause→KnowledgeItem (2026-05-18)
 // ==========================================
+// IDs em formato cuid válido (`c` + 24-32 chars alphanum) pra passar o
+// regex anti-slug do handler. Slugs humanos ("G4-prazo-financ") são
+// rejeitados com hint pro LLM chamar query_knowledge_base.
+const VALID_ID_1 = "cclause0000000000000000001";
+const VALID_ID_2 = "cclause0000000000000000002";
+const VALID_ID_NEW = "cclausenew00000000000000a1";
+const VALID_ID_LEGACY = "cclauselegacy0000000000a02";
+const VALID_ID_NONEXIST = "cnonexistent00000000000z03";
+
 describe("handleInsertClause", () => {
-  it("returns error when clause not found", async () => {
+  it("rejects slug-shaped knowledgeItemId with hint", async () => {
+    const ctx = createTestContext();
+    const result = await executeToolHandler(
+      "insert_clause",
+      { knowledgeItemId: "G4-prazo-financiamento-45du" },
+      ctx
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("parece um slug humano");
+    expect(result.hint).toBe("call_query_knowledge_base_first");
+  });
+
+  it("returns error when clause not found in DB", async () => {
     mockPrisma.knowledgeItem.findFirst.mockResolvedValue(null);
     const ctx = createTestContext();
 
     const result = await executeToolHandler(
       "insert_clause",
-      { knowledgeItemId: "nonexistent" },
+      { knowledgeItemId: VALID_ID_NONEXIST },
       ctx
     );
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("não encontrada");
+    expect(result.error).toContain("Nenhuma cláusula encontrada");
+    expect(result.hint).toBe("id_not_in_db");
   });
 
   it("returns error when clause already in contract", async () => {
     mockPrisma.knowledgeItem.findFirst.mockResolvedValue({
-      id: "clause-1",
+      id: VALID_ID_1,
       title: "Existing",
       category: "clause",
       subcategory: "objeto",
@@ -387,11 +409,11 @@ describe("handleInsertClause", () => {
       groupCode: null,
     } as any);
 
-    const ctx = createTestContext(); // Has clause-1 in activeClauses
+    const ctx = createTestContext(); // Has VALID_ID_1 in activeClauses (via helper)
 
     const result = await executeToolHandler(
       "insert_clause",
-      { knowledgeItemId: "clause-1" },
+      { knowledgeItemId: VALID_ID_1 },
       ctx
     );
 
@@ -401,7 +423,7 @@ describe("handleInsertClause", () => {
 
   it("inserts clause successfully", async () => {
     mockPrisma.knowledgeItem.findFirst.mockResolvedValue({
-      id: "clause-2",
+      id: VALID_ID_2,
       title: "Nova Cláusula",
       category: "clause",
       subcategory: "penalidades",
@@ -415,7 +437,7 @@ describe("handleInsertClause", () => {
 
     const result = await executeToolHandler(
       "insert_clause",
-      { knowledgeItemId: "clause-2" },
+      { knowledgeItemId: VALID_ID_2 },
       ctx
     );
 
@@ -427,14 +449,13 @@ describe("handleInsertClause", () => {
         data: { usageCount: { increment: 1 } },
       })
     );
-    // Clause should be added to activeClauses
     expect(ctx.activeClauses).toHaveLength(2);
-    expect(ctx.activeClauses[1].clauseId).toBe("clause-2");
+    expect(ctx.activeClauses[1].clauseId).toBe(VALID_ID_2);
   });
 
   it("appends HTML at last </div>", async () => {
     mockPrisma.knowledgeItem.findFirst.mockResolvedValue({
-      id: "clause-new",
+      id: VALID_ID_NEW,
       title: "Test",
       category: "clause",
       subcategory: "objeto",
@@ -451,7 +472,7 @@ describe("handleInsertClause", () => {
 
     await executeToolHandler(
       "insert_clause",
-      { knowledgeItemId: "clause-new" },
+      { knowledgeItemId: VALID_ID_NEW },
       ctx
     );
 
@@ -461,7 +482,7 @@ describe("handleInsertClause", () => {
 
   it("accepts legacy clauseId field for retrocompat", async () => {
     mockPrisma.knowledgeItem.findFirst.mockResolvedValue({
-      id: "clause-legacy",
+      id: VALID_ID_LEGACY,
       title: "Legacy",
       category: "clause",
       subcategory: "objeto",
@@ -475,7 +496,7 @@ describe("handleInsertClause", () => {
 
     const result = await executeToolHandler(
       "insert_clause",
-      { clauseId: "clause-legacy" } as any,
+      { clauseId: VALID_ID_LEGACY } as any,
       ctx
     );
 
@@ -487,13 +508,24 @@ describe("handleInsertClause", () => {
 // handleRemoveClause — pós-unificação Clause→KnowledgeItem (2026-05-18)
 // ==========================================
 describe("handleRemoveClause", () => {
+  it("rejects slug-shaped knowledgeItemId", async () => {
+    const ctx = createTestContext();
+    const result = await executeToolHandler(
+      "remove_clause",
+      { knowledgeItemId: "abatimento-saldo" },
+      ctx
+    );
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("parece um slug humano");
+  });
+
   it("returns error when clause not linked to contract", async () => {
     mockPrisma.contractClause.findFirst.mockResolvedValue(null);
     const ctx = createTestContext();
 
     const result = await executeToolHandler(
       "remove_clause",
-      { knowledgeItemId: "nonexistent" },
+      { knowledgeItemId: VALID_ID_NONEXIST },
       ctx
     );
 
@@ -504,7 +536,7 @@ describe("handleRemoveClause", () => {
   it("removes clause successfully", async () => {
     mockPrisma.contractClause.findFirst.mockResolvedValue({
       id: "cc-1",
-      knowledgeItemId: "clause-1",
+      knowledgeItemId: VALID_ID_1,
       knowledgeItem: { title: "Cláusula Removida", content: "<p>x</p>" },
     } as any);
     mockPrisma.contractClause.delete.mockResolvedValue({} as any);
@@ -513,7 +545,7 @@ describe("handleRemoveClause", () => {
 
     const result = await executeToolHandler(
       "remove_clause",
-      { knowledgeItemId: "clause-1" },
+      { knowledgeItemId: VALID_ID_1 },
       ctx
     );
 
@@ -521,7 +553,7 @@ describe("handleRemoveClause", () => {
     expect(mockPrisma.contractClause.delete).toHaveBeenCalledWith({
       where: { id: "cc-1" },
     });
-    expect(ctx.activeClauses.find((c) => c.clauseId === "clause-1")).toBeUndefined();
+    expect(ctx.activeClauses.find((c) => c.clauseId === VALID_ID_1)).toBeUndefined();
   });
 });
 

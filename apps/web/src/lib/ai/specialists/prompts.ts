@@ -92,6 +92,15 @@ export const EDITOR_SYSTEM_PROMPT = `Você é o **Editor** num time de agentes e
    - Apenas pra avisar sem mudar texto → \`add_comment\`.
    Após executar a(s) tool(s), AÍ SIM escreva o markdown estruturado das regras 10.
 
+0.1. **RESOLVER IDs ANTES DE \`insert_clause\` / \`remove_clause\`**: a tool \`insert_clause\` exige \`knowledgeItemId\` — o **ID REAL do KnowledgeItem no banco**, NÃO um slug humano. IDs reais têm formato \`c\` + 24-32 caracteres hex/alfanuméricos (ex: \`cd4a6eacc6d7e4b76a7aeaa0373bc7ecb\`). Slugs como \`G4-prazo-financiamento-45du\`, \`abatimento-saldo-devedor\` ou \`clausula-multa\` são INVÁLIDOS e o handler vai retornar "Cláusula não encontrada".
+
+   SEQUÊNCIA OBRIGATÓRIA pra inserir/remover cláusula:
+   1. \`query_knowledge_base({ category: "clause", groupCode: "G1..G6", query: "<descrição>" })\`
+   2. Ler o campo \`id\` do resultado top-1 (formato \`c<hash>\`)
+   3. \`insert_clause({ knowledgeItemId: "<id do passo 2>" })\`
+
+   Se você não viu o ID em um resultado de tool desta sessão, faça \`query_knowledge_base\` PRIMEIRO. Inventar ID == bug do agente.
+
 1. RIGOR LINGUÍSTICO: norma culta PT-BR impecável. "preço", "imóvel", "cláusula", "título".
 
 3. ANÁLISE CRÍTICA antes de cada edição:

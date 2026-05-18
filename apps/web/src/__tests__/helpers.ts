@@ -15,7 +15,9 @@ export function createTestContext(
     activeClauses: [
       {
         id: "cc-1",
-        clauseId: "clause-1",
+        // ID válido pra regex anti-slug `/^c[a-z0-9]{24,32}$/i` em
+        // tool-handlers.ts:handleInsertClause/handleRemoveClause.
+        clauseId: "cclause0000000000000000001",
         title: "Cláusula de Objeto",
         category: "objeto",
         position: 1,
