@@ -1,4 +1,5 @@
 ﻿import { z } from 'zod';
+import { API_TOKEN_SCOPES } from '@/lib/auth/api-token';
 
 export const loginSchema = z.object({
   email: z.string().email(),
@@ -33,18 +34,9 @@ export const exportSchema = z.object({
 // Newton — API tokens
 export const apiTokenCreateSchema = z.object({
   name: z.string().min(1).max(100),
-  scopes: z
-    .array(
-      z.enum([
-        'deals:rw',
-        'contracts:rw',
-        'charges:rw',
-        'signatures:rw',
-        'documents:rw',
-        'metrics:r'
-      ])
-    )
-    .min(1),
+  // Fonte única de verdade: API_TOKEN_SCOPES em lib/auth/api-token.ts.
+  // Manter aqui hardcoded já causou bug 2026-05-17 (users:delegate ausente).
+  scopes: z.array(z.enum(API_TOKEN_SCOPES)).min(1),
   expiresInDays: z.number().int().min(1).max(365).optional()
 });
 

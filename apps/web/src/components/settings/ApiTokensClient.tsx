@@ -51,6 +51,7 @@ const SCOPES = [
   { id: "signatures:rw", label: "Assinaturas ClickSign (read/write)", description: "Criar envelopes e gerenciar signatários" },
   { id: "documents:rw", label: "Documentos e certidões (read/write)", description: "Anexos, OCR e disparo de certidões Infosimples" },
   { id: "metrics:r", label: "Métricas (read-only)", description: "Saldos, contagens e atividade — sem dados pessoais" },
+  { id: "users:delegate", label: "Delegar como outro usuário (Newton)", description: "Permite header X-Act-As-User pra agir como qualquer user da mesma org. Use SÓ em tokens de agentes (Newton)." },
 ] as const;
 
 type ScopeId = (typeof SCOPES)[number]["id"];
