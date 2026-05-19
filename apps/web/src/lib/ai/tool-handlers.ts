@@ -1174,28 +1174,72 @@ async function handleInsertClause(
 ): Promise<Record<string, unknown>> {
   // Aceita knowledgeItemId (novo, canônico) com fallback ao clauseId legado
   // pra não quebrar planos antigos ainda na fila.
-  const knowledgeItemId =
+  let knowledgeItemId =
     (typeof input.knowledgeItemId === "string" && input.knowledgeItemId) ||
     (typeof input.clauseId === "string" && input.clauseId) ||
     "";
 
-  if (!knowledgeItemId) {
-    return { success: false, error: "knowledgeItemId é obrigatório" };
+  const clauseQuery =
+    typeof input.clauseQuery === "string" && input.clauseQuery.trim().length > 0
+      ? input.clauseQuery.trim()
+      : "";
+  const groupCode =
+    typeof input.groupCode === "string" && /^G[1-6]$/.test(input.groupCode)
+      ? input.groupCode
+      : undefined;
+
+  let resolvedVia: "explicit_id" | "auto_search" = "explicit_id";
+
+  // Auto-resolve via clauseQuery quando ID está vazio ou em formato inválido.
+  // Resolve C5 (LLM inventa slug ao ignorar id do tool_result anterior):
+  // o handler faz a busca semântica internamente e retorna o top-1 — o LLM
+  // só precisa descrever o que quer, não copiar IDs longos.
+  const idLooksValid = /^c[a-z0-9]{24,32}$/i.test(knowledgeItemId);
+  if (!idLooksValid && clauseQuery) {
+    const search = (await handleQueryKnowledgeBase(
+      { query: clauseQuery, category: "clause", groupCode, topK: 1 },
+      context
+    )) as { results?: Array<{ id: string; title: string; similarity?: number }>; error?: string };
+    if (search.error) {
+      return {
+        success: false,
+        error: `Auto-resolve falhou: ${search.error}`,
+        hint: "kb_search_failed",
+      };
+    }
+    const top = search.results?.[0];
+    if (!top || (typeof top.similarity === "number" && top.similarity < 0.4)) {
+      return {
+        success: false,
+        error: `Auto-resolve não encontrou cláusula compatível com "${clauseQuery}"${groupCode ? ` em ${groupCode}` : ""}. Ajuste o clauseQuery ou tente outro groupCode.`,
+        hint: "kb_search_no_match",
+      };
+    }
+    knowledgeItemId = top.id;
+    resolvedVia = "auto_search";
   }
 
-  // Validação anti-slug: knowledgeItemId real tem formato `c<24-32 hex/alnum>`
-  // (cuid Prisma OU UUID-sem-traços gerado pela migration unify-clause).
-  // LLMs frequentemente inventam slugs humanos ("G4-prazo-financiamento-45du")
-  // — rejeitamos cedo com mensagem dirigindo o agente ao caminho correto.
+  if (!knowledgeItemId) {
+    return {
+      success: false,
+      error:
+        "Forneça knowledgeItemId (formato c<hash>) OU clauseQuery (descrição em linguagem natural). " +
+        "Recomendado: clauseQuery — o handler busca na KB internamente.",
+      hint: "missing_input",
+    };
+  }
+
+  // Validação anti-slug final: depois do auto-resolve, o ID DEVE ser válido.
+  // Se chegou aqui com slug, é porque LLM passou knowledgeItemId mas não passou
+  // clauseQuery — rejeitamos com mensagem instrutiva.
   if (!/^c[a-z0-9]{24,32}$/i.test(knowledgeItemId)) {
     return {
       success: false,
       error:
         `knowledgeItemId inválido: "${knowledgeItemId}" parece um slug humano. ` +
-        `IDs reais têm formato c<hash> (ex: cd4a6eacc6d7e4b76a7aeaa0373bc7ecb). ` +
-        `Chame query_knowledge_base({ category: "clause", groupCode: "...", query: "..." }) ` +
-        `PRIMEIRO e use o campo "id" do resultado.`,
-      hint: "call_query_knowledge_base_first",
+        `IDs reais têm formato c<hash>. Em vez de inventar o ID, passe ` +
+        `clauseQuery="<descrição da cláusula>" — o handler faz a busca na KB pra você.`,
+      hint: "use_clauseQuery_instead",
     };
   }
 
@@ -1207,7 +1251,7 @@ async function handleInsertClause(
       success: false,
       error:
         `Nenhuma cláusula encontrada com knowledgeItemId="${knowledgeItemId}". ` +
-        `Confirme o ID via query_knowledge_base e tente de novo.`,
+        `Tente passar clauseQuery="<descrição>" pra auto-resolver via busca semântica.`,
       hint: "id_not_in_db",
     };
   }
@@ -1264,8 +1308,10 @@ async function handleInsertClause(
       return {
         success: true,
         clauseTitle: clause.title,
+        knowledgeItemId: clause.id,
         category: semanticCategory,
-        message: `Cláusula "${clause.title}" inserida no Google Doc`,
+        resolvedVia,
+        message: `Cláusula "${clause.title}" inserida no Google Doc${resolvedVia === "auto_search" ? " (resolvida via clauseQuery)" : ""}`,
       };
     }
     return result;
@@ -1324,8 +1370,10 @@ async function handleInsertClause(
   return {
     success: true,
     clauseTitle: clause.title,
+    knowledgeItemId: clause.id,
     category: semanticCategory,
-    message: `Cláusula "${clause.title}" inserida no contrato`,
+    resolvedVia,
+    message: `Cláusula "${clause.title}" inserida no contrato${resolvedVia === "auto_search" ? " (resolvida via clauseQuery)" : ""}`,
   };
 }
 
@@ -1333,24 +1381,54 @@ async function handleRemoveClause(
   input: Record<string, unknown>,
   context: AgentContext
 ): Promise<Record<string, unknown>> {
-  const knowledgeItemId =
+  let knowledgeItemId =
     (typeof input.knowledgeItemId === "string" && input.knowledgeItemId) ||
     (typeof input.clauseId === "string" && input.clauseId) ||
     "";
 
-  if (!knowledgeItemId) {
-    return { success: false, error: "knowledgeItemId é obrigatório" };
+  const clauseQuery =
+    typeof input.clauseQuery === "string" && input.clauseQuery.trim().length > 0
+      ? input.clauseQuery.trim().toLowerCase()
+      : "";
+
+  let resolvedVia: "explicit_id" | "auto_match" = "explicit_id";
+
+  // Auto-resolve via clauseQuery: matcheia contra activeClauses (subset que
+  // está no contrato). Match simples por substring case-insensitive no title
+  // — Voyage embedding seria overkill pra escopo pequeno.
+  const idLooksValid = /^c[a-z0-9]{24,32}$/i.test(knowledgeItemId);
+  if (!idLooksValid && clauseQuery) {
+    const match = context.activeClauses.find((c) =>
+      c.title.toLowerCase().includes(clauseQuery)
+    );
+    if (!match) {
+      return {
+        success: false,
+        error: `Nenhuma cláusula ativa neste contrato match "${clauseQuery}". ActiveClauses: ${context.activeClauses.map((c) => c.title).join(", ") || "(nenhuma)"}`,
+        hint: "no_match_in_active",
+      };
+    }
+    knowledgeItemId = match.clauseId;
+    resolvedVia = "auto_match";
   }
 
-  // Mesma validação anti-slug do handleInsertClause.
+  if (!knowledgeItemId) {
+    return {
+      success: false,
+      error: "Forneça knowledgeItemId OU clauseQuery (descrição da cláusula a remover).",
+      hint: "missing_input",
+    };
+  }
+
+  // Validação anti-slug final.
   if (!/^c[a-z0-9]{24,32}$/i.test(knowledgeItemId)) {
     return {
       success: false,
       error:
         `knowledgeItemId inválido: "${knowledgeItemId}" parece um slug humano. ` +
-        `Pra remover cláusula vinculada, primeiro confirme o ID via query_knowledge_base ` +
-        `ou olhe activeClauses do contexto do contrato.`,
-      hint: "use_real_id",
+        `Em vez de inventar o ID, passe clauseQuery="<descrição da cláusula>" — ` +
+        `o handler busca em activeClauses pra você.`,
+      hint: "use_clauseQuery_instead",
     };
   }
 
@@ -1385,7 +1463,10 @@ async function handleRemoveClause(
 
   return {
     success: true,
-    message: `Cláusula "${link.knowledgeItem.title}" removida do contrato`,
+    knowledgeItemId,
+    clauseTitle: link.knowledgeItem.title,
+    resolvedVia,
+    message: `Cláusula "${link.knowledgeItem.title}" removida do contrato${resolvedVia === "auto_match" ? " (resolvida via clauseQuery)" : ""}`,
   };
 }
 

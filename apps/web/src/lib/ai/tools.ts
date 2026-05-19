@@ -105,13 +105,21 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
   {
     name: "insert_clause",
     description:
-      "Insere uma cláusula da biblioteca (KnowledgeItem com category='clause') no contrato. Primeiro use query_knowledge_base com category='clause' (opcional: groupCode='G1'..'G6') para encontrar o knowledgeItemId desejado.",
+      "Insere uma cláusula da biblioteca (KnowledgeItem com category='clause') no contrato. Você pode fornecer (a) `knowledgeItemId` se já consultou e tem o ID exato no formato c<24-32 chars>, OU (b) `clauseQuery` em linguagem natural descrevendo a cláusula desejada — o handler faz a busca semântica internamente e usa o top-1 result. Recomendado: usar `clauseQuery` se você não tem certeza absoluta do ID — evita inventar IDs inválidos.",
     input_schema: {
       type: "object" as const,
       properties: {
         knowledgeItemId: {
           type: "string",
-          description: "ID do KnowledgeItem (categoria 'clause') na biblioteca",
+          description: "ID literal do KnowledgeItem (formato c<24-32 chars>). Use apenas se você JÁ viu este ID exato em um tool_result anterior de query_knowledge_base nesta sessão. Não invente.",
+        },
+        clauseQuery: {
+          type: "string",
+          description: "Descrição da cláusula em linguagem natural (ex: 'G4 prazo de 45 dias úteis pra financiamento'). O handler resolve internamente via busca semântica. Use isso se você não tem o ID exato.",
+        },
+        groupCode: {
+          type: "string",
+          description: "Filtro G1..G6 quando usar clauseQuery (opcional, mas recomendado pra precisão).",
         },
         afterSection: {
           type: "string",
@@ -119,21 +127,25 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
             "Título da seção após a qual inserir (ex: '8. IRRETRATABILIDADE'). Se omitido, insere no final.",
         },
       },
-      required: ["knowledgeItemId"],
+      required: [],
     },
   },
   {
     name: "remove_clause",
-    description: "Remove uma cláusula vinculada ao contrato.",
+    description: "Remove uma cláusula vinculada ao contrato. Você pode fornecer (a) `knowledgeItemId` literal OU (b) `clauseQuery` em linguagem natural — neste caso, busca apenas dentro das cláusulas JÁ ativas no contrato.",
     input_schema: {
       type: "object" as const,
       properties: {
         knowledgeItemId: {
           type: "string",
-          description: "ID do KnowledgeItem (categoria 'clause') a remover do contrato",
+          description: "ID literal do KnowledgeItem ativo neste contrato. Veja activeClauses no contexto.",
+        },
+        clauseQuery: {
+          type: "string",
+          description: "Descrição em linguagem natural da cláusula a remover. Match contra activeClauses do contrato.",
         },
       },
-      required: ["knowledgeItemId"],
+      required: [],
     },
   },
 

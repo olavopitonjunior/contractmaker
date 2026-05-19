@@ -64,20 +64,27 @@ describe("AGENT_TOOLS", () => {
     expect(props.groupCode).toBeDefined();
   });
 
-  it("insert_clause uses knowledgeItemId as required input", () => {
+  it("insert_clause accepts knowledgeItemId AND clauseQuery (neither required — auto-resolve)", () => {
     const tool = AGENT_TOOLS.find((t) => t.name === "insert_clause");
     expect(tool).toBeDefined();
-    const required = tool!.input_schema.required as string[];
-    expect(required).toContain("knowledgeItemId");
-    expect(required).not.toContain("clauseId");
+    const props = tool!.input_schema.properties as Record<string, unknown>;
+    expect(props.knowledgeItemId).toBeDefined();
+    expect(props.clauseQuery).toBeDefined();
+    expect(props.groupCode).toBeDefined();
+    // C5 fix: nem knowledgeItemId nem clauseQuery são required individualmente
+    // — handler valida que ao menos um veio. Permite LLM escolher modo natural.
+    const required = (tool!.input_schema.required as string[]) ?? [];
+    expect(required).toEqual([]);
   });
 
-  it("remove_clause uses knowledgeItemId as required input", () => {
+  it("remove_clause accepts knowledgeItemId AND clauseQuery (neither required — auto-match)", () => {
     const tool = AGENT_TOOLS.find((t) => t.name === "remove_clause");
     expect(tool).toBeDefined();
-    const required = tool!.input_schema.required as string[];
-    expect(required).toContain("knowledgeItemId");
-    expect(required).not.toContain("clauseId");
+    const props = tool!.input_schema.properties as Record<string, unknown>;
+    expect(props.knowledgeItemId).toBeDefined();
+    expect(props.clauseQuery).toBeDefined();
+    const required = (tool!.input_schema.required as string[]) ?? [];
+    expect(required).toEqual([]);
   });
 });
 

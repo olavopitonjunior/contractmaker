@@ -372,7 +372,7 @@ const VALID_ID_LEGACY = "cclauselegacy0000000000a02";
 const VALID_ID_NONEXIST = "cnonexistent00000000000z03";
 
 describe("handleInsertClause", () => {
-  it("rejects slug-shaped knowledgeItemId with hint", async () => {
+  it("rejects slug-shaped knowledgeItemId with hint when clauseQuery missing", async () => {
     const ctx = createTestContext();
     const result = await executeToolHandler(
       "insert_clause",
@@ -381,7 +381,9 @@ describe("handleInsertClause", () => {
     );
     expect(result.success).toBe(false);
     expect(result.error).toContain("parece um slug humano");
-    expect(result.hint).toBe("call_query_knowledge_base_first");
+    // C5 fix: hint mudou pra orientar ao novo caminho — usar clauseQuery
+    // em vez de forçar query_knowledge_base separado.
+    expect(result.hint).toBe("use_clauseQuery_instead");
   });
 
   it("returns error when clause not found in DB", async () => {
