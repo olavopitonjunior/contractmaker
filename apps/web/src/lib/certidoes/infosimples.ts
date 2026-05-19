@@ -87,7 +87,15 @@ export async function callInfosimples(
     if (value === undefined || value === null) continue;
     body.set(key, String(value));
   }
-  if (endpoint.startsWith("tribunal/tjsp/")) {
+  // Endpoints que exigem autenticação GOV.BR (proxy login via Infosimples).
+  // tribunal/tjsp/* — TJSP via e-SAJ (gov.br required pra pedido-civel/obter-civel)
+  // sefaz/* — Sefaz estaduais que usam gov.br como SSO (LIEU DU VIN/MG 2026-05-19
+  // retornou code 606 "CPF e senha ou certificado digital devem ser informados
+  // para login com gov.br" sem essas credenciais)
+  const requiresGovBrAuth =
+    endpoint.startsWith("tribunal/tjsp/") ||
+    endpoint.startsWith("sefaz/");
+  if (requiresGovBrAuth) {
     const pkcs12CertCrypt = process.env.INFOSIMPLES_PKCS12_CERT_CRYPT?.trim();
     const pkcs12PassCrypt = process.env.INFOSIMPLES_PKCS12_PASS_CRYPT?.trim();
     const govbrCpf = process.env.INFOSIMPLES_GOVBR_CPF?.trim();
