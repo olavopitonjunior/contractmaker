@@ -101,7 +101,7 @@ TS: vendedores, compradores, imóveis, pagamento, comissão, config. Mudanças a
 
 **Tools (20, em `tools.ts`):**
 - **Consulta:** `query_templates`, `explain_clause`
-- **Edição:** `edit_contract_section`, `update_contract_data`, `insert_clause`/`remove_clause` (`knowledgeItemId`)
+- **Edição:** `edit_contract_section`, `update_contract_data`, `insert_clause`/`remove_clause` (aceitam `knowledgeItemId` OU `clauseQuery` NL com auto-resolve Voyage)
 - **Análise:** `validate_contract`, `suggest_improvements`, `analyze_contradictions`, `extract_document_data` (OCR Anthropic)
 - **RAG:** `query_knowledge_base` (Voyage + fallback ILIKE; `category` aceita `clause`+`groupCode` ou `legislation|model|rule|glossary`), `find_similar_contracts`, `add_comment`
 - **Propose** (NUNCA edita template direto): `propose_new_clause` → `ClauseProposal`; `propose_template_change` → `TemplateSuggestion` com `diffHunks`. Rate limit 5 pendentes/org, 1/dia/template
