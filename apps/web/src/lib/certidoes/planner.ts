@@ -350,11 +350,13 @@ export function planCertidoesForDeal(
             )
           );
         } else {
+          // Per doc: token*, nome*, birthdate* obrigatórios. cpf/nome_mae opcionais.
+          // Campo se chama `birthdate` (ISO 8601), não `data_nascimento`.
           jobs.push(
             buildJob(ep, kind, index, label, {
               cpf,
               nome: label,
-              data_nascimento: birthdate,
+              birthdate,
               nome_mae: nomeMae,
             })
           );
@@ -453,13 +455,14 @@ export function planCertidoesForDeal(
       } else if (isTrf3) {
         // TRF3: 1 chamada Cível (default). Criminal TRF3 fica como backlog
         // — precisa rodar `tipo: 2` em chamada separada, também 2-step.
+        // Per doc TRF3 certidao-distr: cpf/cnpj e nome/razao_social são MUTUAMENTE
+        // EXCLUSIVOS (code 607 quando ambos). Preferimos cpf/cnpj — Infosimples
+        // resolve o nome via base interna.
         jobs.push(
           buildJob(ep, kind, index, label, {
             tipo: 1,
             email,
-            ...(isPJ
-              ? { cnpj, razao_social: label }
-              : { cpf, nome: label }),
+            ...(isPJ ? { cnpj } : { cpf }),
           })
         );
       } else {

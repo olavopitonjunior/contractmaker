@@ -516,7 +516,8 @@ describe("Phase K — antecedentes-criminais-pf em financiamento", () => {
     );
     expect(ac).toBeDefined();
     expect(ac?.requestPayload.nome_mae).toBe("Ana Aparecida Souza");
-    expect(ac?.requestPayload.data_nascimento).toBe("1980-05-14");
+    // Infosimples espera `birthdate` (ISO 8601), não `data_nascimento`
+    expect(ac?.requestPayload.birthdate).toBe("1980-05-14");
   });
 
   it("skipped com missing_fields quando financiamento mas falta nome_mae", () => {
