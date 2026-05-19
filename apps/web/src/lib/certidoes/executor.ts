@@ -713,6 +713,8 @@ export async function pollPortalJob(jobId: string): Promise<void> {
     ? "tribunal/tjsp/obter-civel"
     : job.endpoint.includes("/tjrj/")
     ? "tribunal/tjrj/obter-certidao"
+    : job.endpoint.includes("/trf3/")
+    ? "tribunal/trf3/obter-certidao"
     : null;
   if (!obterEndpoint) return;
 

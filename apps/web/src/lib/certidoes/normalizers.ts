@@ -462,8 +462,8 @@ const EXTRACTORS: Record<string, Extractor> = {
   "caixa/regularidade": crfFgtsExtractor,
   // Phase K (2026-04-18) — gaps do Mapeamento_Certidoes.md
   "receita-federal/cpf": receitaCpfExtractor,
-  "antecedentes-criminais-pf/emit": antecedentesPfExtractor,
-  "antecedentes-criminais-pf/validar": antecedentesPfExtractor,
+  "antecedentes-criminais/pf/emit": antecedentesPfExtractor,
+  "antecedentes-criminais/pf/val": antecedentesPfExtractor,
   "sncr/ccir": ccirExtractor,
   "registradores/matric-pedido": matriculaOnrExtractor,
   "registradores/matric-obter": matriculaOnrExtractor,

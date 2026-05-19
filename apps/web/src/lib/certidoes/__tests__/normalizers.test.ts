@@ -469,13 +469,13 @@ describe("Phase K — receita-federal/cpf (situação cadastral)", () => {
   });
 });
 
-describe("Phase K — antecedentes-criminais-pf/emit", () => {
+describe("Phase K — antecedentes-criminais/pf/emit", () => {
   it("Nada consta → negativa + validade", async () => {
     const fixture = await import(
       "../__fixtures__/antecedentes-pf-nada-consta.json"
     );
     const r = normalize(
-      "antecedentes-criminais-pf/emit",
+      "antecedentes-criminais/pf/emit",
       fixture.default as unknown as InfosimplesResponse
     );
     expect(r.situacao).toBe("negativa");
@@ -490,7 +490,7 @@ describe("Phase K — antecedentes-criminais-pf/emit", () => {
       data: [{ resultado: "CONSTA — Apuração em andamento" }],
     };
     const r = normalize(
-      "antecedentes-criminais-pf/emit",
+      "antecedentes-criminais/pf/emit",
       resp as unknown as InfosimplesResponse
     );
     expect(r.situacao).toBe("positiva");

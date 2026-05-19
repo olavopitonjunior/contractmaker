@@ -346,26 +346,58 @@ describe("Phase B — PJ sempre dispara CNPJ + CRF", () => {
 // default. Falhas serão tratadas pelo outcome-classifier (retry auto ou
 // failed_permanent com portalUrl).
 describe("Phase J — TRF unificada + TRF individual no plano default", () => {
-  it("plano default: parte SP dispara TRF unificada E TRF3 individual", () => {
+  it("plano default: parte SP dispara TRF unificada E TRF3 individual (2-step, tipo=1)", () => {
     const plan = planCertidoesForDeal({
       vendedores: [VENDEDOR_PF_SP],
       compradores: [],
       imoveis: [],
     });
     expect(plan.jobs.find((j) => j.endpoint === "tribunal/trf/cert-unificada")).toBeDefined();
-    const trf3 = plan.jobs.find((j) => j.endpoint === "tribunal/trf3/certidao");
+    const trf3 = plan.jobs.find((j) => j.endpoint === "tribunal/trf3/certidao-distr");
     expect(trf3).toBeDefined();
     expect(trf3?.requestPayload.cpf).toBe("52998224725");
+    // TRF3 usa `tipo` numérico (Infosimples doc) — 1 = Cível
+    expect(trf3?.requestPayload.tipo).toBe(1);
   });
 
-  it("parte BA dispara TRF1 (não TRF2/TRF3)", () => {
+  it("parte BA dispara TRF1 (CIVEL+CRIMINAL) e não TRF2/TRF3", () => {
     const plan = planCertidoesForDeal({
       vendedores: [{ ...VENDEDOR_PF_SP, uf: "BA", cidade: "Salvador" }],
       compradores: [],
       imoveis: [],
     });
-    expect(plan.jobs.find((j) => j.endpoint === "tribunal/trf1/certidao")).toBeDefined();
-    expect(plan.jobs.find((j) => j.endpoint === "tribunal/trf3/certidao")).toBeUndefined();
+    const trf1 = plan.jobs.filter((j) => j.endpoint === "tribunal/trf1/certidao");
+    expect(trf1).toHaveLength(2);
+    const tipos = new Set(trf1.map((j) => j.requestPayload.tipo_certidao));
+    expect(tipos).toEqual(new Set(["CIVEL", "CRIMINAL"]));
+    expect(plan.jobs.find((j) => j.endpoint === "tribunal/trf3/certidao-distr")).toBeUndefined();
+  });
+
+  it("parte MG dispara TRF6 CIVEL + CRIMINAL (2 jobs com tipo_certidao)", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [{ ...VENDEDOR_PF_SP, uf: "MG", cidade: "Belo Horizonte" }],
+      compradores: [],
+      imoveis: [],
+    });
+    const trf6 = plan.jobs.filter((j) => j.endpoint === "tribunal/trf6/certidao");
+    expect(trf6).toHaveLength(2);
+    expect(new Set(trf6.map((j) => j.requestPayload.tipo_certidao))).toEqual(
+      new Set(["CIVEL", "CRIMINAL"])
+    );
+  });
+});
+
+describe("Phase K — Receita CPF exige birthdate (fix 2026-05-19)", () => {
+  it("PF sem data_nascimento -> Receita CPF vai pra skipped", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [{ ...VENDEDOR_PF_SP, data_nascimento: "" }],
+      compradores: [],
+      imoveis: [],
+    });
+    expect(plan.jobs.find((j) => j.endpoint === "receita-federal/cpf")).toBeUndefined();
+    const skipped = plan.skipped.find((s) => s.endpoint === "receita-federal/cpf");
+    expect(skipped).toBeDefined();
+    expect(skipped?.missingField).toBe("data_nascimento");
   });
 });
 
@@ -466,7 +498,7 @@ describe("Phase K — antecedentes-criminais-pf em financiamento", () => {
       modalidade: "a_vista",
     });
     expect(
-      plan.jobs.find((j) => j.endpoint === "antecedentes-criminais-pf/emit")
+      plan.jobs.find((j) => j.endpoint === "antecedentes-criminais/pf/emit")
     ).toBeUndefined();
   });
 
@@ -480,7 +512,7 @@ describe("Phase K — antecedentes-criminais-pf em financiamento", () => {
       modalidade: "financiamento",
     });
     const ac = plan.jobs.find(
-      (j) => j.endpoint === "antecedentes-criminais-pf/emit"
+      (j) => j.endpoint === "antecedentes-criminais/pf/emit"
     );
     expect(ac).toBeDefined();
     expect(ac?.requestPayload.nome_mae).toBe("Ana Aparecida Souza");
@@ -495,10 +527,10 @@ describe("Phase K — antecedentes-criminais-pf em financiamento", () => {
       modalidade: "financiamento",
     });
     expect(
-      plan.jobs.find((j) => j.endpoint === "antecedentes-criminais-pf/emit")
+      plan.jobs.find((j) => j.endpoint === "antecedentes-criminais/pf/emit")
     ).toBeUndefined();
     const skip = plan.skipped.find(
-      (s) => s.endpoint === "antecedentes-criminais-pf/emit"
+      (s) => s.endpoint === "antecedentes-criminais/pf/emit"
     );
     expect(skip).toBeDefined();
     expect(skip?.reason).toContain("nome_mae");

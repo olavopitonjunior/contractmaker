@@ -78,8 +78,8 @@ const TRF_UF_MAP: Partial<Record<string, string>> = {
   TO: "tribunal/trf1/certidao",
   RJ: "tribunal/trf2/certidao",
   ES: "tribunal/trf2/certidao",
-  SP: "tribunal/trf3/certidao",
-  MS: "tribunal/trf3/certidao",
+  SP: "tribunal/trf3/certidao-distr",
+  MS: "tribunal/trf3/certidao-distr",
   RS: "tribunal/trf4/certidao",
   SC: "tribunal/trf4/certidao",
   PR: "tribunal/trf4/certidao",
@@ -91,6 +91,18 @@ const TRF_UF_MAP: Partial<Record<string, string>> = {
   SE: "tribunal/trf5/certidao",
   MG: "tribunal/trf6/certidao",
 };
+
+/**
+ * TRFs individuais 1/2/4/5/6 — `tipo_certidao` é obrigatório (per doc TRF6),
+ * com valores `CIVEL`/`CRIMINAL`/`ELEITORAL`. Disparamos `CIVEL` + `CRIMINAL`
+ * por pessoa (2 chamadas). `ELEITORAL` não interessa em transação imobiliária.
+ * TRF3 é exceção: usa `tipo` numérico (1=Cível) e endpoint 2-step
+ * `certidao-distr` — tratado em branch separado.
+ */
+const TRF_INDIVIDUAL_TIPOS: Array<{ tipo_certidao: string; label: string }> = [
+  { tipo_certidao: "CIVEL", label: "Cível" },
+  { tipo_certidao: "CRIMINAL", label: "Criminal" },
+];
 
 /**
  * Phase F.II-γ — múltiplos `tipo_certidao` do TJSP e TJRJ que cobrem os
@@ -290,9 +302,20 @@ export function planCertidoesForDeal(
         );
       } else {
         const birthdate = normalizeDate(parte.data_nascimento);
-        const payload: Record<string, unknown> = { cpf };
-        if (birthdate) payload.birthdate = birthdate;
-        jobs.push(buildJob(ep, kind, index, label, payload));
+        if (!birthdate) {
+          skipped.push(
+            buildSkip(
+              ep,
+              kind,
+              index,
+              label,
+              "data_nascimento",
+              "Receita CPF exige data de nascimento — complete os dados da parte"
+            )
+          );
+        } else {
+          jobs.push(buildJob(ep, kind, index, label, { cpf, birthdate }));
+        }
       }
     }
 
@@ -300,7 +323,7 @@ export function planCertidoesForDeal(
     // Opcional em transação entre particulares; obrigatório em financiamento.
     // Dispara apenas para PF quando `deal.modalidade === "financiamento"`.
     if (!isPJ && isFinanciamento) {
-      const ep = "antecedentes-criminais-pf/emit";
+      const ep = "antecedentes-criminais/pf/emit";
       if (!cpf) {
         skipped.push(
           buildSkip(ep, kind, index, label, "cpf", "CPF inválido")
@@ -415,22 +438,43 @@ export function planCertidoesForDeal(
       }
     }
 
-    // TRF regional individual (trf{1-6}/certidao) — retorna PDF.
-    // Code 602 (deprecated) do QA será capturado pelo executor como
-    // `failed_permanent` com `portalUrl` pro portal oficial do TRF.
+    // TRF regional individual — retorna PDF.
+    // TRFs 1/2/4/5/6 usam `tipo_certidao` (CIVEL/CRIMINAL/ELEITORAL),
+    // disparamos 2 chamadas (Cível + Criminal) por pessoa.
+    // TRF3 (SP/MS) é exceção: 2-step com `tipo` numérico — só dispara Cível
+    // (`tipo: 1`) por enquanto; cron `poll-portal` busca o PDF no 2o passo.
     if (partyUf && TRF_UF_MAP[partyUf]) {
       const ep = TRF_UF_MAP[partyUf]!;
+      const isTrf3 = ep === "tribunal/trf3/certidao-distr";
       if (isPJ && !cnpj) {
         skipped.push(buildSkip(ep, kind, index, label, "cnpj", "CNPJ invalido"));
       } else if (!isPJ && !cpf) {
         skipped.push(buildSkip(ep, kind, index, label, "cpf", "CPF invalido"));
-      } else {
+      } else if (isTrf3) {
+        // TRF3: 1 chamada Cível (default). Criminal TRF3 fica como backlog
+        // — precisa rodar `tipo: 2` em chamada separada, também 2-step.
         jobs.push(
           buildJob(ep, kind, index, label, {
+            tipo: 1,
             email,
-            ...(isPJ ? { cnpj } : { cpf }),
+            ...(isPJ
+              ? { cnpj, razao_social: label }
+              : { cpf, nome: label }),
           })
         );
+      } else {
+        // TRFs 1/2/4/5/6: loop CIVEL + CRIMINAL.
+        for (const t of TRF_INDIVIDUAL_TIPOS) {
+          jobs.push(
+            buildJob(ep, kind, index, `${label} - ${t.label}`, {
+              tipo_certidao: t.tipo_certidao,
+              email,
+              ...(isPJ
+                ? { cnpj, razao_social: label }
+                : { cpf, nome: label }),
+            })
+          );
+        }
       }
     }
 

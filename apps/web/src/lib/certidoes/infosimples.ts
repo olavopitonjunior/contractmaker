@@ -92,9 +92,16 @@ export async function callInfosimples(
     const pkcs12PassCrypt = process.env.INFOSIMPLES_PKCS12_PASS_CRYPT?.trim();
     const govbrCpf = process.env.INFOSIMPLES_GOVBR_CPF?.trim();
     const govbrPassword = process.env.INFOSIMPLES_GOVBR_PASSWORD?.trim();
-    if (pkcs12CertCrypt && pkcs12PassCrypt) {
-      body.set("pkcs12_cert", pkcs12CertCrypt);
-      body.set("pkcs12_pass", pkcs12PassCrypt);
+    // 2026-05-19 — toggle pra forçar CPF/Senha mesmo quando criptogramas
+    // PKCS12 estão setados. Permite trocar entre Cert A1 e CPF/Senha sem
+    // remover envs sensíveis. Valores aceitos: "cpf_senha" | "cert_a1" |
+    // undefined (default: prioridade Cert A1 > CPF/Senha por presença).
+    const authMode = process.env.INFOSIMPLES_AUTH_MODE?.trim();
+    const useCert =
+      authMode !== "cpf_senha" && !!pkcs12CertCrypt && !!pkcs12PassCrypt;
+    if (useCert) {
+      body.set("pkcs12_cert", pkcs12CertCrypt!);
+      body.set("pkcs12_pass", pkcs12PassCrypt!);
     } else if (govbrCpf && govbrPassword) {
       body.set("login_cpf", govbrCpf);
       body.set("login_senha", govbrPassword);

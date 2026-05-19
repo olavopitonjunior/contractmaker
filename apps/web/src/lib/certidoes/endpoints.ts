@@ -479,8 +479,8 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     emitsPdf: false, // informativo — retorna status textual
     portalUrl: "https://servicos.receitafederal.gov.br/servico/cpf",
   },
-  "antecedentes-criminais-pf/emit": {
-    id: "antecedentes-criminais-pf/emit",
+  "antecedentes-criminais/pf/emit": {
+    id: "antecedentes-criminais/pf/emit",
     label: "Antecedentes Criminais (PF)",
     costCents: 6,
     twoStep: true,
@@ -492,8 +492,8 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     expectedWaitMinutes: 5, // instantâneo na maioria dos casos
     portalUrl: "https://www.gov.br/pf/pt-br/assuntos/antecedentes-criminais",
   },
-  "antecedentes-criminais-pf/validar": {
-    id: "antecedentes-criminais-pf/validar",
+  "antecedentes-criminais/pf/val": {
+    id: "antecedentes-criminais/pf/val",
     label: "Antecedentes Criminais (PF) — Validar",
     costCents: 2,
     initialStatus: "awaiting_portal",
@@ -589,14 +589,27 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     description: "Certidao Negativa Civel e Criminal do TRF2 (RJ/ES)",
     portalUrl: "https://www10.trf2.jus.br/portal/certidao-eletronica/",
   },
-  "tribunal/trf3/certidao": {
-    id: "tribunal/trf3/certidao",
-    label: "Certidao Civel+Criminal TRF3",
+  "tribunal/trf3/certidao-distr": {
+    id: "tribunal/trf3/certidao-distr",
+    label: "Certidao TRF3 (pedido)",
     costCents: 4,
+    twoStep: true,
     scope: "federal",
     appliesTo: ["pessoa"],
     category: "federal",
-    description: "Certidao Negativa Civel e Criminal do TRF3 (SP/MS)",
+    description: "Pedido de Certidao de Distribuicao TRF3 (SP/MS) — 1o passo. TRF3 e o unico TRF com fluxo 2-step.",
+    expectedWaitMinutes: 15,
+    portalUrl: "https://www.trf3.jus.br/certidao/",
+  },
+  "tribunal/trf3/obter-certidao": {
+    id: "tribunal/trf3/obter-certidao",
+    label: "Certidao TRF3 (obter)",
+    costCents: 4,
+    initialStatus: "awaiting_portal",
+    scope: "federal",
+    appliesTo: ["pessoa"],
+    category: "federal",
+    description: "Obtencao da Certidao de Distribuicao TRF3 — 2o passo (automatico via cron).",
     portalUrl: "https://www.trf3.jus.br/certidao/",
   },
   "tribunal/trf4/certidao": {

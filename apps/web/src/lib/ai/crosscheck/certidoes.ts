@@ -331,7 +331,7 @@ function checkAntecedentes(input: CrossCheckInput): CrossCheckFinding[] {
   const findings: CrossCheckFinding[] = [];
   for (const job of input.jobs) {
     if (job.status !== "success") continue;
-    if (!job.endpoint.startsWith("antecedentes-criminais-pf/")) continue;
+    if (!job.endpoint.startsWith("antecedentes-criminais/pf/")) continue;
     const result = asResult(job.resultData);
     if (!result || !isPositive(result)) continue;
     const target = targetLabel(job.targetKind, job.targetIndex, input.contractDataJson);

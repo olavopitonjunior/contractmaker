@@ -69,7 +69,7 @@ describe("clarification_paths — findings ambíguos", () => {
         jobMatriculaLimpa(),
         {
           id: "j-antec",
-          endpoint: "antecedentes-criminais-pf/emit",
+          endpoint: "antecedentes-criminais/pf/emit",
           label: "Antecedentes PF",
           targetKind: "vendedor",
           targetIndex: 0,
