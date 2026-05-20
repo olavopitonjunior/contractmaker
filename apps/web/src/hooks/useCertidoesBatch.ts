@@ -185,13 +185,40 @@ export function useCertidoesBatch(dealId: string) {
   );
 
   const deleteJob = useCallback(
-    async (jobId: string): Promise<boolean> => {
-      const res = await fetch(`/api/deals/${dealId}/certidoes/${jobId}`, {
+    async (
+      jobId: string,
+      opts?: { withAttachment?: boolean }
+    ): Promise<boolean> => {
+      const qs = opts?.withAttachment ? "?withAttachment=true" : "";
+      const res = await fetch(`/api/deals/${dealId}/certidoes/${jobId}${qs}`, {
         method: "DELETE",
       });
       if (!res.ok) return false;
       await fetchJobs();
       return true;
+    },
+    [dealId, fetchJobs]
+  );
+
+  const bulkDelete = useCallback(
+    async (body: {
+      scope: "status" | "batch" | "replaced" | "all_terminal";
+      status?: string;
+      batchId?: string;
+      withAttachments?: boolean;
+    }): Promise<{ deleted: number; attachmentsDeleted: number } | null> => {
+      const res = await fetch(`/api/deals/${dealId}/certidoes/bulk-delete`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) return null;
+      await fetchJobs();
+      return {
+        deleted: data.deleted ?? 0,
+        attachmentsDeleted: data.attachmentsDeleted ?? 0,
+      };
     },
     [dealId, fetchJobs]
   );
@@ -244,6 +271,7 @@ export function useCertidoesBatch(dealId: string) {
     extract,
     retry,
     deleteJob,
+    bulkDelete,
     sweepStale,
     completeSkipped,
     refresh: fetchJobs,

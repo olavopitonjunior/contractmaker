@@ -136,6 +136,8 @@ export type AuditAction =
   | "AGENT_TOOL_BLOCKED"
   | "SENTINEL_ATTACHMENT_QUARANTINED"
   | "CERTIDAO_BATCH_DISPATCH"
+  | "CERTIDAO_JOB_DELETE"
+  | "CERTIDAO_BULK_DELETE"
   // Serasa Experian — consultas restritas (score, restritivos, vínculos).
   // SERASA_QUERY_DISPATCH grava qualquer batch que inclua endpoint Serasa;
   // SERASA_CONSENT_GIVEN registra o consentimento LGPD por deal;

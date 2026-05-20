@@ -28,7 +28,12 @@ export async function POST(
     where: { id: params.dealId },
     include: {
       form: { select: { orgId: true, dataJson: true } },
-      certidaoJobs: { orderBy: { createdAt: "desc" } },
+      // Exclui tentativas substituídas (replaced) — o relatório mostra só a
+      // tentativa viva de cada alvo, igual à lista consolidada da UI.
+      certidaoJobs: {
+        where: { status: { not: "replaced" } },
+        orderBy: { createdAt: "desc" },
+      },
     },
   });
   if (!deal) return NextResponse.json({ error: "Deal not found" }, { status: 404 });
