@@ -285,9 +285,45 @@ export async function POST(
     }
   }
 
+  // Consolidação por alvo: antes de criar as linhas novas, marcamos como
+  // `replaced` as tentativas TERMINAIS anteriores do mesmo (endpoint, parte).
+  // Assim a UI (que já filtra status="replaced") mostra só a tentativa viva
+  // por alvo e o histórico fica acessível via toggle. NÃO tocamos em jobs
+  // ainda ativos (pending/fetching/awaiting_portal) — eles podem concluir.
+  const TERMINAL_REPLACEABLE = [
+    "success",
+    "failed",
+    "failed_permanent",
+    "data_missing",
+    "data_invalid",
+    "informativo",
+    "skipped",
+    "replaced",
+  ];
+  const supersedeTargets = [
+    ...new Map(
+      [...effectiveJobs, ...effectiveSkipped].map((j) => [
+        `${j.endpoint}|${j.targetKind}|${j.targetIndex}`,
+        { endpoint: j.endpoint, targetKind: j.targetKind, targetIndex: j.targetIndex },
+      ])
+    ).values(),
+  ];
+
   // Create all job rows atomically, including persisted skipped jobs so the
   // UI can render them with a "Complementar dados" action (FIX-O).
   await prisma.$transaction([
+    ...supersedeTargets.map((t) =>
+      prisma.certidaoJob.updateMany({
+        where: {
+          dealId: params.dealId,
+          endpoint: t.endpoint,
+          targetKind: t.targetKind,
+          targetIndex: t.targetIndex,
+          status: { in: TERMINAL_REPLACEABLE },
+        },
+        data: { status: "replaced" },
+      })
+    ),
     ...effectiveJobs.map((p) => {
       const info = endpointInfo(p.endpoint);
       const provider = info.provider ?? "infosimples";

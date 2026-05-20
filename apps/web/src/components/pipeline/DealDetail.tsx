@@ -1025,14 +1025,20 @@ interface FallbackAttachment {
  * exibidos junto com a parte titular (vendedor/comprador) — não criam
  * grupo próprio na visualização do deal pra evitar fragmentação.
  */
-type DocGroupKind = "vendedor" | "comprador" | "imovel" | "outro";
+type DocGroupKind = "certidao" | "vendedor" | "comprador" | "imovel" | "outro";
 
 const KIND_LABELS: Record<DocGroupKind, string> = {
+  certidao: "Certidões",
   vendedor: "Parte Vendedora",
   comprador: "Parte Compradora",
   imovel: "Imóvel",
   outro: "Outros",
 };
+
+// Categorias de DealAttachment que são certidões/relatórios emitidos pela
+// esteira (Infosimples, Serasa, relatório consolidado). Agrupadas numa seção
+// dedicada na aba Documentos em vez de espalhadas por parte/imóvel.
+const CERTIDAO_CATS = new Set(["certidao", "relatorio_certidoes"]);
 
 function groupKindOf(kind: DocumentKind): DocGroupKind {
   if (kind === "vendedor" || kind === "conjuge_vendedor" || kind === "representante_vendedor") {
@@ -1122,17 +1128,27 @@ function DocumentsTab({
   // própria mas não é exposto remoção daqui (só dentro do form público).
   const dealAttachmentIds = new Set(fallbackAttachments.map((a) => a.id));
   const hasFormAttachments = formAttachments.length > 0 && formToken;
-  // Infosimples attachments always come in via fallbackAttachments (DealAttachment
-  // rows). They must be shown even when there are no form attachments.
+  // Certidões emitidas (Infosimples + Serasa) e relatórios consolidados —
+  // independem do source. Vão pra seção dedicada "Certidões".
+  const certidaoAttachments = fallbackAttachments.filter(
+    (att) => att.category != null && CERTIDAO_CATS.has(att.category)
+  );
+  const certidaoIds = new Set(certidaoAttachments.map((a) => a.id));
+  // Demais anexos Infosimples (sem categoria de certidão — raro) seguem o
+  // agrupamento por parte via assignment.
   const infosimplesAttachments = fallbackAttachments.filter(
-    (att) => att.source === "infosimples"
+    (att) => att.source === "infosimples" && !certidaoIds.has(att.id)
   );
   const manualFallback = fallbackAttachments.filter(
-    (att) => att.source !== "infosimples" && !formAttachments.some((f) => f.id === att.id)
+    (att) =>
+      att.source !== "infosimples" &&
+      !certidaoIds.has(att.id) &&
+      !formAttachments.some((f) => f.id === att.id)
   );
 
   const hasAnyContent =
     hasFormAttachments ||
+    certidaoAttachments.length > 0 ||
     infosimplesAttachments.length > 0 ||
     manualFallback.length > 0;
 
@@ -1148,11 +1164,27 @@ function DocumentsTab({
   }
 
   const groups: Record<DocGroupKind, DocumentCardData[]> = {
+    certidao: [],
     vendedor: [],
     comprador: [],
     imovel: [],
     outro: [],
   };
+
+  // Certidões + relatórios: seção própria, sem espalhar por parte/imóvel.
+  for (const att of certidaoAttachments) {
+    groups.certidao.push({
+      id: att.id,
+      filename: att.filename,
+      mime: att.mime,
+      fileUrl: `/api/deals/${dealId}/attachments/${att.id}/file`,
+      status: "ready",
+      category: att.category,
+      fields: null,
+      confidence: null,
+      assignment: { kind: "outro", index: 0 },
+    });
+  }
 
   // Form-uploaded documents (OCR autofill)
   if (hasFormAttachments) {
@@ -1222,7 +1254,7 @@ function DocumentsTab({
     groups.outro.push(card);
   }
 
-  const kinds: DocGroupKind[] = ["vendedor", "comprador", "imovel", "outro"];
+  const kinds: DocGroupKind[] = ["certidao", "vendedor", "comprador", "imovel", "outro"];
 
   return (
     <div className="space-y-5">

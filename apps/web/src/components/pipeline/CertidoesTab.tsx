@@ -355,6 +355,7 @@ export function CertidoesTab({
     extract,
     retry,
     deleteJob,
+    bulkDelete,
     sweepStale,
     completeSkipped,
     refresh,
@@ -374,11 +375,75 @@ export function CertidoesTab({
   // EditPartyDialog pre-filled with the current party snapshot; on save,
   // PATCHes the deal and retries the job.
   const [editingPartyJob, setEditingPartyJob] = useState<CertidaoJobRow | null>(null);
+  // Toggle "ver histórico": inclui as tentativas substituídas (replaced),
+  // ocultas por padrão. O backend já marca a tentativa antiga de cada alvo
+  // como replaced quando um novo lote roda — aqui só decidimos exibir ou não.
+  const [showHistory, setShowHistory] = useState(false);
+  // Filtro por status (chips): all | success | awaiting | action | failed.
+  const [statusFilter, setStatusFilter] = useState<
+    "all" | "success" | "awaiting" | "action" | "failed"
+  >("all");
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
+  // Base para stats: sempre exclui replaced (comportamento original).
   const visibleJobs = useMemo(
     () => jobs.filter((j) => j.status !== "replaced"),
     [jobs]
   );
+  const replacedCount = useMemo(
+    () => jobs.filter((j) => j.status === "replaced").length,
+    [jobs]
+  );
+
+  // "Ainda pode sair": jobs aguardando portal OU com retry automático futuro.
+  // Ordenados pelo prazo mais próximo, para o usuário ver de relance o que
+  // ainda está em curso e até quando.
+  const pendingSoon = useMemo(() => {
+    return visibleJobs
+      .filter((j) => {
+        const s = effectiveStatus(j);
+        if (s === "awaiting_portal") return true;
+        if (
+          (s === "api_error" ||
+            s === "portal_unavailable" ||
+            s === "rate_limited") &&
+          j.nextRetryAt
+        )
+          return true;
+        return false;
+      })
+      .map((j) => ({
+        job: j,
+        when: j.expectedReadyAt ?? j.nextRetryAt ?? null,
+      }))
+      .sort((a, b) => {
+        const ta = a.when ? new Date(a.when).getTime() : Infinity;
+        const tb = b.when ? new Date(b.when).getTime() : Infinity;
+        return ta - tb;
+      });
+  }, [visibleJobs]);
+
+  // Categoriza um job para o filtro por status.
+  const filterBucket = (
+    row: CertidaoJobRow
+  ): "success" | "awaiting" | "action" | "failed" | "other" => {
+    const s = effectiveStatus(row);
+    if (s === "success" || s === "informativo") return "success";
+    if (s === "awaiting_portal" || s === "fetching" || s === "pending")
+      return "awaiting";
+    if (s === "data_missing" || s === "data_invalid" || s === "failed_permanent" || s === "skipped")
+      return "action";
+    if (s === "failed" || s === "api_error" || s === "portal_unavailable" || s === "rate_limited")
+      return "failed";
+    return "other";
+  };
+
+  // Conjunto exibido nos grupos: respeita histórico + filtro por status.
+  const displayJobs = useMemo(() => {
+    const base = showHistory ? jobs : visibleJobs;
+    if (statusFilter === "all") return base;
+    return base.filter((j) => filterBucket(j) === statusFilter);
+  }, [jobs, visibleJobs, showHistory, statusFilter]);
 
   const groups = useMemo(() => {
     // Phase F.II-α: agrupamento fixo em 3 categorias — Vendedor, Comprador,
@@ -398,7 +463,7 @@ export function CertidoesTab({
         rows: [],
       })
     );
-    for (const job of visibleJobs) {
+    for (const job of displayJobs) {
       // F.II-α: drop jobs de imóvel legacy (não aparecem mais na UI)
       if (job.targetKind === "imovel") continue;
       const key = groupKey(job);
@@ -413,7 +478,7 @@ export function CertidoesTab({
       map.get(key)!.rows.push(job);
     }
     return Array.from(map.entries()).filter(([, g]) => g.rows.length > 0);
-  }, [visibleJobs, vendedores, compradores]);
+  }, [displayJobs, vendedores, compradores]);
 
   const stats = useMemo(() => {
     const total = visibleJobs.length;
@@ -434,6 +499,16 @@ export function CertidoesTab({
     const skipped = visibleJobs.filter(
       (j) => effectiveStatus(j) === "skipped"
     ).length;
+    // "Precisa ação": estados terminais que dependem do usuário pra resolver.
+    const actionNeeded = visibleJobs.filter((j) => {
+      const s = effectiveStatus(j);
+      return (
+        s === "data_missing" ||
+        s === "data_invalid" ||
+        s === "failed_permanent" ||
+        s === "skipped"
+      );
+    }).length;
     const stuck = visibleJobs.filter(isStuck).length;
     // Count ghost-data jobs: raw status says fetching/pending but data is valid.
     // These would be auto-promoted by sweeper or the UI already reads them as
@@ -452,6 +527,7 @@ export function CertidoesTab({
       awaiting,
       fetching,
       skipped,
+      actionNeeded,
       stuck,
       ghostPromotable,
       cost,
@@ -605,17 +681,59 @@ export function CertidoesTab({
     }
   };
 
-  const handleDelete = async (row: CertidaoJobRow) => {
+  const handleDelete = async (
+    row: CertidaoJobRow,
+    opts?: { withAttachment?: boolean }
+  ) => {
     setDeletingId(row.id);
     try {
-      const ok = await deleteJob(row.id);
+      const ok = await deleteJob(row.id, opts);
       if (ok) {
-        toast.success("Job removido");
+        toast.success(
+          opts?.withAttachment ? "Tentativa e documento removidos" : "Tentativa removida"
+        );
       } else {
         toast.error("Falha ao remover");
       }
     } finally {
       setDeletingId(null);
+    }
+  };
+
+  const handleBulkDelete = async (
+    body: {
+      scope: "status" | "batch" | "replaced" | "all_terminal";
+      status?: string;
+      batchId?: string;
+      withAttachments?: boolean;
+    },
+    label: string
+  ) => {
+    if (
+      !window.confirm(
+        `Limpar: ${label}\n\nEsta ação remove as tentativas selecionadas${
+          body.withAttachments ? " e os documentos ligados" : ""
+        }. Continuar?`
+      )
+    ) {
+      return;
+    }
+    setBulkDeleting(true);
+    try {
+      const result = await bulkDelete(body);
+      if (!result) {
+        toast.error("Falha ao limpar");
+        return;
+      }
+      toast.success(
+        `${result.deleted} tentativa(s) removida(s)${
+          result.attachmentsDeleted > 0
+            ? ` · ${result.attachmentsDeleted} documento(s)`
+            : ""
+        }`
+      );
+    } finally {
+      setBulkDeleting(false);
     }
   };
 
@@ -754,6 +872,92 @@ export function CertidoesTab({
             </Button>
           </>
         )}
+        {hasJobs && (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              disabled={bulkDeleting}
+              className="inline-flex h-9 items-center justify-center gap-1 whitespace-nowrap rounded-md border border-input bg-background px-3 text-sm font-medium text-destructive shadow-sm ring-offset-background transition-colors hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
+            >
+              <Trash2 className="h-4 w-4 mr-1" />
+              Limpar
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="w-64">
+              <DropdownMenuLabel className="text-xs">
+                Limpar lista
+              </DropdownMenuLabel>
+              {stats.failed > 0 && (
+                <DropdownMenuItem
+                  onSelect={() =>
+                    handleBulkDelete(
+                      { scope: "status", status: "failed" },
+                      `Todas as falhas (${stats.failed})`
+                    )
+                  }
+                >
+                  Falhas ({stats.failed})
+                </DropdownMenuItem>
+              )}
+              {stats.skipped > 0 && (
+                <DropdownMenuItem
+                  onSelect={() =>
+                    handleBulkDelete(
+                      { scope: "status", status: "skipped" },
+                      `Todas as puladas (${stats.skipped})`
+                    )
+                  }
+                >
+                  Puladas ({stats.skipped})
+                </DropdownMenuItem>
+              )}
+              {replacedCount > 0 && (
+                <DropdownMenuItem
+                  onSelect={() =>
+                    handleBulkDelete(
+                      { scope: "replaced" },
+                      `Histórico de tentativas substituídas (${replacedCount})`
+                    )
+                  }
+                >
+                  Histórico/substituídas ({replacedCount})
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="text-destructive"
+                onSelect={() =>
+                  handleBulkDelete(
+                    { scope: "all_terminal" },
+                    "Todas as tentativas finalizadas"
+                  )
+                }
+              >
+                Limpar todas (mantém só em andamento)
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                className="text-destructive"
+                onSelect={() =>
+                  handleBulkDelete(
+                    { scope: "all_terminal", withAttachments: true },
+                    "Todas as tentativas + documentos"
+                  )
+                }
+              >
+                Limpar todas + documentos
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+        {replacedCount > 0 && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowHistory((v) => !v)}
+            className="text-muted-foreground"
+          >
+            <Archive className="h-4 w-4 mr-1" />
+            {showHistory ? "Ocultar histórico" : `Ver histórico (${replacedCount})`}
+          </Button>
+        )}
       </div>
 
       {error && (
@@ -807,6 +1011,66 @@ export function CertidoesTab({
         </Card>
       )}
 
+      {/* "Ainda pode sair": fixado no topo, ordenado pelo prazo mais próximo,
+          com countdown em destaque. Resolve "não é fácil saber se ainda pode
+          sair alguma por prazo". */}
+      {pendingSoon.length > 0 && (
+        <Card className="border-amber-300 bg-amber-50/40">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-1.5 text-amber-800">
+              <CalendarClock className="h-4 w-4" />
+              Ainda pode sair ({pendingSoon.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1.5 pt-0">
+            {pendingSoon.map(({ job, when }) => {
+              const rel = formatRelativeTo(when);
+              return (
+                <button
+                  key={job.id}
+                  onClick={() => setDetailJob(job)}
+                  className="w-full flex items-center gap-2 rounded border border-amber-200 bg-background/60 px-2.5 py-1.5 text-left text-sm hover:bg-background"
+                >
+                  <Clock className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                  <span className="flex-1 min-w-0 truncate">{job.label}</span>
+                  {rel && (
+                    <span className="shrink-0 text-xs font-medium text-amber-800">
+                      {rel === "agora" ? "pronto p/ buscar" : rel}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Filtros por status — facilita achar emitidas / pendências num deal
+          com muitas partes. */}
+      {hasJobs && (
+        <div className="flex flex-wrap gap-1.5">
+          {(
+            [
+              ["all", `Todas (${stats.total})`],
+              ["success", `Emitidas (${stats.success})`],
+              ["awaiting", `Em andamento (${stats.awaiting + stats.fetching})`],
+              ["action", `Precisa ação (${stats.actionNeeded})`],
+              ["failed", `Falhas (${stats.failed})`],
+            ] as const
+          ).map(([key, label]) => (
+            <Button
+              key={key}
+              size="sm"
+              variant={statusFilter === key ? "default" : "outline"}
+              onClick={() => setStatusFilter(key)}
+              className="h-7 text-xs"
+            >
+              {label}
+            </Button>
+          ))}
+        </div>
+      )}
+
       {!hasJobs && !loading && (
         <Card>
           <CardContent className="py-12 text-center text-muted-foreground">
@@ -816,6 +1080,14 @@ export function CertidoesTab({
               Clique em &ldquo;Extrair certidões&rdquo; para disparar via
               Infosimples.
             </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {hasJobs && groups.length === 0 && (
+        <Card>
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            Nenhuma certidão neste filtro.
           </CardContent>
         </Card>
       )}
@@ -838,10 +1110,12 @@ export function CertidoesTab({
                   stuck ||
                   row.status === "awaiting_portal" ||
                   (row.status === "success" && !row.attachmentId);
-                const canDelete =
-                  row.status === "failed" ||
-                  row.status === "success" ||
-                  row.status === "skipped";
+                // Alinhado com o backend (DELETABLE): qualquer estado terminal
+                // pode ser excluído; só pending/fetching ficam de fora.
+                const canDelete = ![
+                  "pending",
+                  "fetching",
+                ].includes(row.status);
                 const isComplementing = complementJobId === row.id;
                 const skippedPayload =
                   row.status === "skipped"
@@ -1048,18 +1322,42 @@ export function CertidoesTab({
                             )}
                           </Button>
                         )}
-                        {canDelete && (
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleDelete(row)}
-                            disabled={deletingId === row.id}
-                            className="h-7 px-2 text-destructive hover:bg-destructive/10"
-                            title="Remover"
-                          >
-                            <Trash2 className="h-3 w-3" />
-                          </Button>
-                        )}
+                        {canDelete &&
+                          (row.attachmentId ? (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger
+                                disabled={deletingId === row.id}
+                                className="inline-flex h-7 items-center justify-center rounded-md px-2 text-destructive transition-colors hover:bg-destructive/10 focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50"
+                                title="Remover"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-56">
+                                <DropdownMenuItem onSelect={() => handleDelete(row)}>
+                                  Excluir tentativa
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  className="text-destructive"
+                                  onSelect={() =>
+                                    handleDelete(row, { withAttachment: true })
+                                  }
+                                >
+                                  Excluir tentativa + documento
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          ) : (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => handleDelete(row)}
+                              disabled={deletingId === row.id}
+                              className="h-7 px-2 text-destructive hover:bg-destructive/10"
+                              title="Remover"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                            </Button>
+                          ))}
                       </div>
                     </div>
                     {isComplementing && missingFields.length > 0 && (
