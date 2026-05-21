@@ -311,4 +311,76 @@ describe("classifyOutcome — Phase J", () => {
     expect(out.status).toBe("success");
     expect(out.costCents).toBe(0);
   });
+
+  // 2026-05-21 — CENPROT "não constam protestos" (code 612, sem PDF) → negativa
+  const cenprotEndpoint: EndpointInfo = {
+    id: "cenprot-sp/protestos",
+    label: "CENPROT SP (Protestos)",
+    costCents: 6,
+    scope: "estadual",
+    uf: "SP",
+    appliesTo: ["pessoa", "imovel"],
+    category: "protesto",
+    portalUrl: "https://www.pesquisaprotestosp.com.br",
+  };
+
+  it("CENPROT 612 'não constam protestos' → success (negativa, sem PDF)", () => {
+    const resp = {
+      code: 612,
+      code_message: "A consulta não retornou dados",
+      errors: [
+        "Não constam protestos nos cartórios participantes, cuja abrangência em SP é de 100%",
+      ],
+      data: [],
+      header: { billable: true },
+    } as unknown as InfosimplesResponse;
+    // normalizer real marca situacao negativa + genuine_no_data nesse caso
+    const norm = {
+      ...normEmpty,
+      situacao: "negativa" as const,
+      failureCategory: "genuine_no_data" as const,
+      detalhes: "Nada consta — sem protestos registrados",
+    };
+    const out = classifyOutcome(resp, norm, cenprotEndpoint, opts);
+    expect(out.status).toBe("success");
+    expect(out.failureCategory).toBeNull();
+    expect(out.costCents).toBe(6);
+    expect(out.nextRetryAt).toBeNull();
+  });
+
+  it("CENPROT 612 'não constam protestos' + billable false → success custo 0", () => {
+    const resp = {
+      code: 612,
+      code_message: "A consulta não retornou dados",
+      errors: ["Não constam protestos nos cartórios participantes"],
+      data: [],
+      header: { billable: false },
+    } as unknown as InfosimplesResponse;
+    const norm = {
+      ...normEmpty,
+      situacao: "negativa" as const,
+      failureCategory: "genuine_no_data" as const,
+      detalhes: "Nada consta — sem protestos registrados",
+    };
+    const out = classifyOutcome(resp, norm, cenprotEndpoint, opts);
+    expect(out.status).toBe("success");
+    expect(out.costCents).toBe(0);
+  });
+
+  it("CENPROT erro de transporte (fetch failed) NÃO vira success", () => {
+    const resp = {
+      code: 605,
+      code_message: "O site ou aplicativo de origem parece estar indisponível.",
+      data: [],
+    } as unknown as InfosimplesResponse;
+    const norm = {
+      ...normEmpty,
+      situacao: "nao_emitida" as const,
+      failureCategory: "portal_unavailable" as const,
+      detalhes: "O site ou aplicativo de origem parece estar indisponível.",
+    };
+    const out = classifyOutcome(resp, norm, cenprotEndpoint, opts);
+    expect(out.status).not.toBe("success");
+    expect(out.status).toBe("portal_unavailable");
+  });
 });

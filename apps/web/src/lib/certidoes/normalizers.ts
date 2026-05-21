@@ -1,5 +1,8 @@
 import type { InfosimplesResponse, NormalizedResult, Situacao } from "./types";
-import { mapInfosimplesCodeToCategory } from "./error-codes";
+import {
+  mapInfosimplesCodeToCategory,
+  isProtestoNadaConsta,
+} from "./error-codes";
 
 /**
  * Generic normalizer. Each endpoint has its own data shape, but most return
@@ -598,6 +601,21 @@ export function normalize(
     const detalhes = errorsText
       ? errorsText + (resp.code_message ? ` (${resp.code_message})` : "")
       : resp.code_message || null;
+    // CENPROT/IEPTB "não constam protestos" chega como 6xx (sem PDF). É uma
+    // negativa legítima — não uma falha. Marca situacao "negativa" +
+    // genuine_no_data; o classifier (isProtestoNadaConsta) fecha como success
+    // verde "nada consta". Ver isProtestoNadaConsta em error-codes.ts.
+    if (isProtestoNadaConsta(endpoint, detalhes)) {
+      return {
+        situacao: "negativa",
+        validade: null,
+        emissao: null,
+        detalhes: "Nada consta — sem protestos registrados",
+        consta_debito: false,
+        failureCategory: "genuine_no_data",
+        raw: resp,
+      };
+    }
     return {
       situacao,
       validade: null,

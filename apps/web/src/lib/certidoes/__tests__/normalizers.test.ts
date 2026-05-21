@@ -590,3 +590,50 @@ describe("Phase K — registradores/matric (ONR)", () => {
     expect(r.consta_debito).toBe(true);
   });
 });
+
+describe("CENPROT 'não constam protestos' (6xx sem PDF)", () => {
+  it("cenprot-sp/protestos 612 → situacao negativa + genuine_no_data", () => {
+    const resp = {
+      code: 612,
+      code_message: "A consulta não retornou dados",
+      errors: [
+        "Não constam protestos nos cartórios participantes, cuja abrangência em SP é de 100%",
+      ],
+      data: [],
+    };
+    const r = normalize(
+      "cenprot-sp/protestos",
+      resp as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).toBe("negativa");
+    expect(r.failureCategory).toBe("genuine_no_data");
+    expect(r.consta_debito).toBe(false);
+  });
+
+  it("ieptb/protestos 612 'nada consta' → situacao negativa", () => {
+    const resp = {
+      code: 612,
+      code_message: "Nada consta",
+      data: [],
+    };
+    const r = normalize(
+      "ieptb/protestos",
+      resp as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).toBe("negativa");
+  });
+
+  it("PGFN 612 (não-protesto) NÃO é tratado como nada consta", () => {
+    const resp = {
+      code: 612,
+      code_message: "CPF inválido",
+      data: [],
+    };
+    const r = normalize(
+      "receita-federal/pgfn",
+      resp as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).not.toBe("negativa");
+    expect(r.failureCategory).toBe("missing_input");
+  });
+});
