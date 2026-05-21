@@ -1025,10 +1025,9 @@ interface FallbackAttachment {
  * exibidos junto com a parte titular (vendedor/comprador) — não criam
  * grupo próprio na visualização do deal pra evitar fragmentação.
  */
-type DocGroupKind = "certidao" | "vendedor" | "comprador" | "imovel" | "outro";
+type DocGroupKind = "vendedor" | "comprador" | "imovel" | "outro";
 
 const KIND_LABELS: Record<DocGroupKind, string> = {
-  certidao: "Certidões",
   vendedor: "Parte Vendedora",
   comprador: "Parte Compradora",
   imovel: "Imóvel",
@@ -1164,16 +1163,27 @@ function DocumentsTab({
   }
 
   const groups: Record<DocGroupKind, DocumentCardData[]> = {
-    certidao: [],
     vendedor: [],
     comprador: [],
     imovel: [],
     outro: [],
   };
 
-  // Certidões + relatórios: seção própria, sem espalhar por parte/imóvel.
+  // Certidões + relatórios: seção própria, subdividida por parte/imóvel a
+  // partir do `assignment` que o executor persiste em cada anexo. O relatório
+  // consolidado (sem assignment) cai em "Gerais".
+  type CertidaoSubGroup = { key: string; label: string; order: number; rows: DocumentCardData[] };
+  const certidaoSubMap = new Map<string, CertidaoSubGroup>();
+  const ensureSub = (key: string, label: string, order: number): CertidaoSubGroup => {
+    let g = certidaoSubMap.get(key);
+    if (!g) {
+      g = { key, label, order, rows: [] };
+      certidaoSubMap.set(key, g);
+    }
+    return g;
+  };
   for (const att of certidaoAttachments) {
-    groups.certidao.push({
+    const card: DocumentCardData = {
       id: att.id,
       filename: att.filename,
       mime: att.mime,
@@ -1183,8 +1193,29 @@ function DocumentsTab({
       fields: null,
       confidence: null,
       assignment: { kind: "outro", index: 0 },
-    });
+    };
+    const extracted = (att.extractedData as Record<string, unknown> | null) || null;
+    const assignment = extracted?.assignment as Assignment | undefined;
+    if (att.category === "relatorio_certidoes" || !assignment) {
+      ensureSub("gerais", "Gerais", 999).rows.push(card);
+      continue;
+    }
+    const normalized = groupKindOf(assignment.kind);
+    const idx = assignment.index ?? 0;
+    if (normalized === "vendedor") {
+      ensureSub(`v-${idx}`, `Vendedor: ${vendedores[idx]?.nome ?? `Parte ${idx + 1}`}`, idx).rows.push(card);
+    } else if (normalized === "comprador") {
+      ensureSub(`c-${idx}`, `Comprador: ${compradores[idx]?.nome ?? `Parte ${idx + 1}`}`, 100 + idx).rows.push(card);
+    } else if (normalized === "imovel") {
+      ensureSub(`i-${idx}`, `Imóvel ${idx + 1}`, 200 + idx).rows.push(card);
+    } else {
+      ensureSub("outras", "Outras", 900).rows.push(card);
+    }
   }
+  const certidaoSubGroups = Array.from(certidaoSubMap.values()).sort(
+    (a, b) => a.order - b.order
+  );
+  const certidaoTotal = certidaoSubGroups.reduce((acc, g) => acc + g.rows.length, 0);
 
   // Form-uploaded documents (OCR autofill)
   if (hasFormAttachments) {
@@ -1254,10 +1285,51 @@ function DocumentsTab({
     groups.outro.push(card);
   }
 
-  const kinds: DocGroupKind[] = ["certidao", "vendedor", "comprador", "imovel", "outro"];
+  const kinds: DocGroupKind[] = ["vendedor", "comprador", "imovel", "outro"];
+
+  const renderDocCard = (doc: DocumentCardData) => {
+    const isDealAttachment = dealAttachmentIds.has(doc.id);
+    const canRemove = isDealAttachment && !!onRequestRemoveDealAttachment;
+    return (
+      <DocumentCard
+        key={doc.id}
+        doc={doc}
+        assignmentOptions={[]}
+        readOnly={!canRemove}
+        onRemove={canRemove ? (id) => onRequestRemoveDealAttachment(id) : undefined}
+      />
+    );
+  };
 
   return (
     <div className="space-y-5">
+      {/* Certidões: bloco próprio, subdividido por parte/imóvel (+ Gerais). */}
+      {certidaoSubGroups.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">
+              Certidões{" "}
+              <span className="text-muted-foreground font-normal">
+                ({certidaoTotal})
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {certidaoSubGroups.map((sub) => (
+              <div key={sub.key} className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">
+                  {sub.label}{" "}
+                  <span className="font-normal">({sub.rows.length})</span>
+                </p>
+                <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                  {sub.rows.map(renderDocCard)}
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       {kinds.map((kind) => {
         const items = groups[kind];
         if (items.length === 0) return null;
@@ -1272,24 +1344,7 @@ function DocumentsTab({
               </CardTitle>
             </CardHeader>
             <CardContent className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              {items.map((doc) => {
-                const isDealAttachment = dealAttachmentIds.has(doc.id);
-                const canRemove =
-                  isDealAttachment && !!onRequestRemoveDealAttachment;
-                return (
-                  <DocumentCard
-                    key={doc.id}
-                    doc={doc}
-                    assignmentOptions={[]}
-                    readOnly={!canRemove}
-                    onRemove={
-                      canRemove
-                        ? (id) => onRequestRemoveDealAttachment(id)
-                        : undefined
-                    }
-                  />
-                );
-              })}
+              {items.map(renderDocCard)}
             </CardContent>
           </Card>
         );
