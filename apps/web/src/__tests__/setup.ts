@@ -137,6 +137,14 @@ vi.mock("@/lib/db/prisma", () => {
       findMany: vi.fn().mockResolvedValue([]),
       upsert: vi.fn(),
     },
+    whatsappGroup: {
+      findUnique: vi.fn(),
+      upsert: vi.fn(),
+    },
+    whatsappGroupMember: {
+      findMany: vi.fn().mockResolvedValue([]),
+      upsert: vi.fn(),
+    },
     notification: {
       create: vi.fn().mockResolvedValue({}),
       findMany: vi.fn().mockResolvedValue([]),

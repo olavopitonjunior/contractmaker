@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import {
@@ -8,6 +9,7 @@ import {
 } from "@/lib/api/require-auth";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
+import { matchDealGroup } from "@/lib/newton/group-match";
 
 export const runtime = "nodejs";
 
@@ -97,6 +99,10 @@ export async function POST(
       ),
     }
   );
+
+  // Deal recém-convertido herda os telefones das partes do lead → tenta
+  // auto-vincular o grupo de WhatsApp do negócio. Best-effort.
+  waitUntil(matchDealGroup(result.deal.id).catch(() => {}));
 
   return NextResponse.json({
     leadId: lead.id,

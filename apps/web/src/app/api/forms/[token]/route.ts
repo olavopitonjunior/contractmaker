@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { matchDealGroup } from "@/lib/newton/group-match";
 import { generateContractForDeal } from "@/lib/services/contract-generation";
 import { dedupConjuges } from "@/lib/forms/dedup-conjuges";
 import { dadosContratoSchema } from "@/lib/forms/validation";
@@ -226,6 +228,10 @@ export async function PATCH(
         console.error("Auto-create DiligentedPerson from socio_pj failed:", error);
       }
     }
+
+    // Partes preenchidas → tenta auto-vincular o grupo de WhatsApp do negócio
+    // (cruza telefones das partes com os grupos conhecidos). Best-effort.
+    if (dealId) waitUntil(matchDealGroup(dealId).catch(() => {}));
   }
 
   return NextResponse.json({

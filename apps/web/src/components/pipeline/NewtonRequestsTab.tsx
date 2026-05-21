@@ -123,6 +123,13 @@ export function NewtonRequestsTab({ dealId }: { dealId: string }) {
   const [targetLabel, setTargetLabel] = useState("");
   const [priority, setPriority] = useState<"normal" | "high">("normal");
 
+  // Grupo do negócio (auto-match): vínculo atual + candidatos pra escolher.
+  const [groupInfo, setGroupInfo] = useState<{
+    linkedGroupId: string | null;
+    candidates: { groupId: string; name: string | null; hits: number }[];
+  } | null>(null);
+  const [groupLoading, setGroupLoading] = useState(false);
+
   const load = useCallback(async () => {
     try {
       const res = await fetch(`/api/deals/${dealId}/newton-requests`);
@@ -136,9 +143,41 @@ export function NewtonRequestsTab({ dealId }: { dealId: string }) {
     }
   }, [dealId]);
 
+  const loadGroupInfo = useCallback(async () => {
+    setGroupLoading(true);
+    try {
+      const res = await fetch(`/api/deals/${dealId}/group-candidates`);
+      if (res.ok) setGroupInfo(await res.json());
+    } catch {
+      /* silencioso */
+    } finally {
+      setGroupLoading(false);
+    }
+  }, [dealId]);
+
+  async function pickGroup(groupId: string, name: string | null) {
+    try {
+      const res = await fetch(`/api/newton/deal-group-link`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dealId, groupId, groupLabel: name ?? undefined }),
+      });
+      if (!res.ok) throw new Error();
+      toast.success("Grupo vinculado ao negócio");
+      setGroupInfo({ linkedGroupId: groupId, candidates: [] });
+    } catch {
+      toast.error("Falha ao vincular o grupo");
+    }
+  }
+
   useEffect(() => {
     load();
   }, [load]);
+
+  // Ao abrir o modal e escolher "grupo", busca o vínculo/candidatos.
+  useEffect(() => {
+    if (dialogOpen && targetType === "group" && !groupInfo) loadGroupInfo();
+  }, [dialogOpen, targetType, groupInfo, loadGroupInfo]);
 
   function resetForm() {
     setAsk("");
@@ -268,10 +307,40 @@ export function NewtonRequestsTab({ dealId }: { dealId: string }) {
                   />
                 </div>
               ) : (
-                <p className="text-xs text-muted-foreground">
-                  Newton usa o grupo de WhatsApp vinculado a este negócio. Se ainda
-                  não houver vínculo, ele confirma com você qual é o grupo.
-                </p>
+                <div className="space-y-1.5">
+                  <Label>Grupo do negócio</Label>
+                  {groupLoading ? (
+                    <p className="text-xs text-muted-foreground">Procurando grupos…</p>
+                  ) : groupInfo?.linkedGroupId ? (
+                    <p className="text-xs text-green-700 dark:text-green-400">
+                      Grupo vinculado ✓ — Newton vai cobrar nele.
+                    </p>
+                  ) : groupInfo && groupInfo.candidates.length > 0 ? (
+                    <div className="space-y-1">
+                      <p className="text-xs text-muted-foreground">
+                        Escolha o grupo deste negócio:
+                      </p>
+                      {groupInfo.candidates.map((c) => (
+                        <button
+                          key={c.groupId}
+                          type="button"
+                          onClick={() => pickGroup(c.groupId, c.name)}
+                          className="block w-full text-left text-sm rounded-md border px-2 py-1.5 hover:bg-muted"
+                        >
+                          {c.name ?? c.groupId}
+                          <span className="text-xs text-muted-foreground">
+                            {" "}· {c.hits} parte(s) no grupo
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Sem grupo identificado ainda. O Newton confirma com você qual é o
+                      grupo quando for cobrar.
+                    </p>
+                  )}
+                </div>
               )}
 
               <div className="space-y-1.5">
