@@ -197,6 +197,32 @@ export function enrichContractData(
     entregaPosse.momento = "assinatura";
   }
 
+  // Local e data da assinatura — F1 (QA deal 20486). O form salva em
+  // `assinatura.{cidade,uf,data}` (validation.ts step7), mas os templates v2
+  // renderizam o fecho como `{{config.municipio_imovel}}, {{dataExtenso config.data_assinatura}}.`.
+  // Sem esta ponte o contrato saía com ", ." (cidade+data vazias).
+  const assinatura = enriched.assinatura as
+    | { cidade?: string; uf?: string; data?: string }
+    | undefined;
+  const imoveis = enriched.imoveis as Array<Record<string, unknown>> | undefined;
+  const imovel0 = imoveis?.[0];
+  if (config.municipio_imovel == null || config.municipio_imovel === "") {
+    const cidade =
+      (typeof assinatura?.cidade === "string" && assinatura.cidade.trim()) ||
+      (typeof imovel0?.cidade === "string" ? (imovel0.cidade as string).trim() : "");
+    const uf =
+      (typeof assinatura?.uf === "string" && assinatura.uf.trim()) ||
+      (typeof imovel0?.uf === "string" ? (imovel0.uf as string).trim() : "");
+    if (cidade) config.municipio_imovel = uf ? `${cidade}/${uf}` : cidade;
+  }
+  if (
+    (config.data_assinatura == null || config.data_assinatura === "") &&
+    typeof assinatura?.data === "string" &&
+    assinatura.data.trim()
+  ) {
+    config.data_assinatura = assinatura.data.trim();
+  }
+
   // ===== Form → template field bridges =====
   // O form (lib/forms/validation.ts) salva esses campos em paths top-level
   // que os templates v2 não leem. Mapeia agora pra config.* esperado pelo
@@ -578,13 +604,22 @@ export function enrichContractData(
       // Sem tipo (forms legados ou CCV import) → mantém no loop pra não
       // sumir conteúdo de contratos antigos.
       if (!tipo) return true;
+      // F2 (QA deal 20486): permuta é renderizada na cláusula dedicada
+      // (2.1.4 à vista / 2.1.5 financiamento via `config.permuta_descricao`).
+      // Mantê-la também no loop duplicava os parágrafos da descrição e gerava
+      // gramática quebrada ("...vigente.: R$ ... mediante entrega ... nas contas").
+      if (tipo === "permuta_veiculo" || tipo === "permuta_imovel") return false;
       return !hardcoded.has(tipo);
     });
 
     // 4. Letra do alfabeto (a_vista) e número sequencial (financiamento).
+    // A5 (QA deal 20486): a alínea "a)" hardcoded só renderiza quando há sinal
+    // (sinal_arras > 0). Sem sinal, o loop começa em "a)" em vez de "b)" pra
+    // não deixar buraco de letra. Com sinal, mantém o offset (b, c, ...).
+    const hasSinalArras = Number(pagamentoMut.sinal_arras) > 0;
     pagamentoMut.parcelas = pagamentoMut.parcelas.map((p, i) => ({
       ...p,
-      letra: indexToLetter(i + 1),
+      letra: indexToLetter(hasSinalArras ? i + 1 : i),
       numero: i + 1,
     }));
   }
@@ -723,30 +758,34 @@ export async function generateContractForDeal(
     ? `<p>Contrato gerado a partir de Google Doc (${template.name}).</p>`
     : renderContratoHTML(template.handlebarsSource, enrichedData);
 
-  // Handle versioning
-  const existingCount = await prisma.contract.count({
+  // Versionamento atômico (C1 — QA deal 20486): a versão vem de MAX(version)+1
+  // (robusto a rows duplicadas legadas) e o par updateMany(isLatest:false) +
+  // create(isLatest:true) roda numa transação. Sem isso, gerações concorrentes
+  // produziam 2 linhas isLatest=true no mesmo deal. O índice único parcial
+  // `Contract_dealId_isLatest_unique` reforça a invariante no nível do banco.
+  const agg = await prisma.contract.aggregate({
     where: { dealId: deal.id },
+    _max: { version: true },
   });
+  const nextVersion = (agg._max.version ?? 0) + 1;
 
-  if (existingCount > 0) {
-    await prisma.contract.updateMany({
+  const contract = await prisma.$transaction(async (tx) => {
+    await tx.contract.updateMany({
       where: { dealId: deal.id, isLatest: true },
       data: { isLatest: false },
     });
-  }
-
-  // Create contract (save enriched data so re-renders stay consistent)
-  const contract = await prisma.contract.create({
-    data: {
-      dealId: deal.id,
-      templateId: template.id,
-      userId,
-      version: existingCount + 1,
-      dataJson: enrichedData as any,
-      htmlContent,
-      status: "rascunho",
-      isLatest: true,
-    },
+    return tx.contract.create({
+      data: {
+        dealId: deal.id,
+        templateId: template.id,
+        userId,
+        version: nextVersion,
+        dataJson: enrichedData as any,
+        htmlContent,
+        status: "rascunho",
+        isLatest: true,
+      },
+    });
   });
 
   // Google Docs nativo: gera o doc fazendo upload do HTML já renderizado pelo
@@ -956,7 +995,59 @@ export async function generateContractForDeal(
     console.error("[contract-generation] analyzeCertidoesForContract falhou:", err);
   });
 
+  // A0.3 — Gate de qualidade de render. Roda o linter determinístico sobre o
+  // HTML recém-renderizado e materializa findings como ContractComment. Severity
+  // "error" (ex.: local/data em branco, {{var}} não preenchida) é contada pelo
+  // /approve e BLOQUEIA a aprovação; "warning" só sinaliza. O agente pode
+  // autocorrigir via "Resolver com IA".
+  void analyzeRenderQualityForContract(contract.id, htmlContent).catch((err) => {
+    console.error("[contract-generation] analyzeRenderQualityForContract falhou:", err);
+  });
+
   return { contractId: contract.id, version: contract.version, googleDocUrl };
+}
+
+/**
+ * A0.3 — Materializa os findings do render linter (quickChecks.renderQualityChecks)
+ * como ContractComment dedupe-key'ed. Determinístico, sem LLM. Erros são engolidos
+ * no caller (fire-and-forget).
+ */
+async function analyzeRenderQualityForContract(
+  contractId: string,
+  htmlContent: string
+): Promise<void> {
+  const { renderQualityChecks, dedupeKeyFor } = await import("@/lib/ai/quickChecks");
+
+  const contract = await prisma.contract.findUnique({
+    where: { id: contractId },
+    select: { status: true },
+  });
+  if (!contract || contract.status === "aprovado") return;
+
+  const findings = renderQualityChecks(htmlContent);
+  for (const f of findings) {
+    const dedupeKey = dedupeKeyFor("ai", `render:${f.category}`, f.selectedText);
+    const text = f.suggestedFix ? `${f.message}\n\n**Sugestão:** ${f.suggestedFix}` : f.message;
+    try {
+      await prisma.contractComment.upsert({
+        where: { contractId_dedupeKey: { contractId, dedupeKey } },
+        create: {
+          contractId,
+          userId: null,
+          authorName: "Análise de Qualidade",
+          authorType: "ai",
+          text,
+          selectedText: f.selectedText.slice(0, 240),
+          anchorId: dedupeKey,
+          severity: f.severity,
+          dedupeKey,
+        },
+        update: { updatedAt: new Date() },
+      });
+    } catch (err) {
+      console.error("[analyzeRenderQualityForContract] upsert comment falhou:", err);
+    }
+  }
 }
 
 /**

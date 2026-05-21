@@ -221,6 +221,34 @@ export async function runSpecialist(
         ? await capturePostSnapshot(block.name, context, result, htmlBefore)
         : undefined;
 
+      // B3 (2026-05): realimenta o resultado de VERIFICAÇÃO ao LLM para tools
+      // cujo propósito é mutar o texto visível do doc. Se o snapshot mostra que
+      // o doc NÃO mudou, injetamos `verified:false` no tool_result — assim o
+      // Editor enxerga que a edição não pegou e pode reagir (auto-retry, B4),
+      // em vez de declarar sucesso. Escopo restrito: add_comment/
+      // update_contract_data/propose_* não mudam o texto e ficariam falso-negativos.
+      const DOC_MUTATING = new Set([
+        "edit_contract_section",
+        "insert_clause",
+        "remove_clause",
+      ]);
+      if (
+        DOC_MUTATING.has(block.name) &&
+        htmlBefore !== undefined &&
+        htmlAfter !== undefined &&
+        !result.error
+      ) {
+        const changed = htmlBefore !== htmlAfter;
+        (result as Record<string, unknown>).verified = changed;
+        if (!changed) {
+          (result as Record<string, unknown>).appliedToDoc = false;
+          (result as Record<string, unknown>).hint =
+            "A releitura do documento NÃO confirmou a mudança — o texto continua igual. " +
+            "Provavelmente o `target` não casou exatamente. Tente novamente com um trecho " +
+            "mais específico (copie o texto exato do documento) ou ajuste a abordagem.";
+        }
+      }
+
       const success = !result.error;
       const summary = summarizeToolResult(block.name, result);
 

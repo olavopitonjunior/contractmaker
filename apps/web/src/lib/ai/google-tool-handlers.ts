@@ -56,7 +56,18 @@ export async function googleEditSection(
     ];
     const res = await batchUpdateDoc(docId, requests);
     const replaced = res.data.replies?.[0]?.replaceAllText?.occurrencesChanged ?? 0;
-    return { success: replaced > 0, occurrencesChanged: replaced };
+    // B7: replaceAllText troca TODAS as ocorrências (matchCase). Sinaliza quando
+    // houve >1 substituição — alvos curtos podem casar em lugares não-intencionais.
+    return {
+      success: replaced > 0,
+      occurrencesChanged: replaced,
+      ...(replaced > 1
+        ? {
+            multipleOccurrences: true,
+            hint: `O trecho casou ${replaced}× no documento e TODAS foram substituídas. Se a intenção era alterar apenas uma, desfaça e use um \`target\` mais específico (com contexto ao redor).`,
+          }
+        : {}),
+    };
   });
 }
 

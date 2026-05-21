@@ -156,13 +156,36 @@ export function registerHandlebarsHelpers(): void {
 
   Handlebars.registerHelper('dataExtenso', (data: string | Date) => {
     if (!data) return '';
-    const parsed = data instanceof Date ? data : new Date(data);
+    // Âncora ao meio-dia local pra strings YYYY-MM-DD: sem isso, `new Date("2026-05-19")`
+    // vira meia-noite UTC e desliza pro dia anterior em UTC-3 (ex.: "18 de maio").
+    // Mesmo padrão de contract-generation.ts (momento_data_texto).
+    let parsed: Date;
+    if (data instanceof Date) {
+      parsed = data;
+    } else {
+      const ymd = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(data).trim());
+      parsed = ymd
+        ? new Date(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]), 12, 0, 0)
+        : new Date(String(data));
+    }
     if (Number.isNaN(parsed.getTime())) return '';
     return new Intl.DateTimeFormat('pt-BR', {
       day: 'numeric',
       month: 'long',
       year: 'numeric'
     }).format(parsed);
+  });
+
+  // Numeração sequencial de subcláusulas (A4 — QA deal 20486). Conta por
+  // "grupo" (ex.: "2.1", "5") e incrementa a cada render. Como subcláusulas
+  // condicionais ({{#if}}) só chamam o helper quando renderizadas, a sequência
+  // fica contígua — sem buracos tipo 2.1.1 → 2.1.2 → 2.1.4. Os contadores são
+  // zerados no início de cada `renderContratoHTML` (render é síncrono).
+  Handlebars.registerHelper('subnum', (group: string) => {
+    const key = String(group);
+    const next = (subnumCounters.get(key) ?? 0) + 1;
+    subnumCounters.set(key, next);
+    return next;
   });
 
   Handlebars.registerHelper('eq', (a, b) => a === b);
@@ -179,11 +202,15 @@ export function registerHandlebarsHelpers(): void {
 
 let helpersRegistered = false;
 
+// Contadores do helper `subnum`, zerados a cada render (ver registerHandlebarsHelpers).
+const subnumCounters = new Map<string, number>();
+
 export function renderContratoHTML(templateSource: string, data: Record<string, unknown>): string {
   if (!helpersRegistered) {
     registerHandlebarsHelpers();
     helpersRegistered = true;
   }
+  subnumCounters.clear();
   const template = Handlebars.compile(templateSource, { noEscape: true });
   return template(data);
 }

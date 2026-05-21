@@ -162,6 +162,11 @@ export const previewSampleDataAVista = {
   entrega_posse: {
     momento: "pagamento_integral",
   },
+  assinatura: {
+    cidade: "São Paulo",
+    uf: "SP",
+    data: "2026-05-19",
+  },
   observacao_imovel:
     "O imóvel encontra-se livre e desembaraçado de qualquer ônus, dívida ou gravame.",
 };

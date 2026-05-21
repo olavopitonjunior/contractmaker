@@ -18,9 +18,15 @@ import type { OrchestratorState } from "./state";
 
 export type Intent = NonNullable<OrchestratorState["intent"]>;
 
-/** Verbos imperativos de edição. Mesma regex de `agent.ts:480-481`. */
+/** Verbos imperativos de edição. Mesma regex de `agent.ts:480-481`.
+ *  2026-05 (QA deal 20486): incluídos preencha/preencher/complete/informe/
+ *  defina/registre/ajuste/conserte/escreva — "Preencha o local e a data" caía
+ *  em informational e o Editor nunca rodava (confabulação no aggregator). */
+// Verbos pré-existentes mantidos como imperativos (não adicionar infinitivos
+// como "mudar"/"alterar": quebram "considere mudar" → deveria ser propose).
+// Famílias NOVAS de preenchimento incluem infinitivo (baixa colisão com propose).
 const EDIT_INTENT_REGEX =
-  /\b(altere|mude|troque|substitua|atualize|corrija|modifique|remova|insira|adicione|coloque|ponha|apague|delete|reescreva|inclua|retire|exclua)\b/i;
+  /\b(altere|mude|troque|substitua|atualize|corrija|modifique|remova|insira|adicione|coloque|ponha|apague|delete|reescreva|inclua|retire|exclua|preencha|preencher|preenche|complete|completar|completa|informe|informar|defina|definir|registre|registrar|ajuste|ajustar|conserte|consertar|escreva|escrever)\b/i;
 
 /** Pedido explícito de edição imediata sem revisão. `agent.ts:483-484`. */
 const FORCE_DIRECT_EDIT_REGEX =

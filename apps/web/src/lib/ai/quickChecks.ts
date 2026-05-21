@@ -5,7 +5,7 @@
 
 export type QuickFinding = {
   severity: "info" | "warning" | "error";
-  category: "math" | "qualification" | "reference" | "format";
+  category: "math" | "qualification" | "reference" | "format" | "render";
   message: string;
   selectedText: string;
   suggestedFix?: string;
@@ -88,6 +88,217 @@ function isValidCNPJ(cnpj: string): boolean {
   const d1 = calc(digits.slice(0, 12), factors1);
   const d2 = calc(digits.slice(0, 13), factors2);
   return d1 === parseInt(digits[12], 10) && d2 === parseInt(digits[13], 10);
+}
+
+/**
+ * Converts contract HTML to plain text with paragraph breaks preserved.
+ * Used by the render-quality linter so the same checks work whether the input
+ * is the Handlebars-rendered HTML (generation time) or `getDocPlainText` from
+ * the Google Doc (passive analysis).
+ */
+function htmlToTextBlocks(html: string): string[] {
+  if (!html) return [];
+  // If it already looks like plain text (no tags), split on blank lines.
+  const looksHtml = /<\/?[a-z][^>]*>/i.test(html);
+  if (!looksHtml) {
+    return html
+      .split(/\n{2,}|\n/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  return html
+    // block-level boundaries become paragraph separators
+    .replace(/<\/(p|div|h[1-6]|li|tr)>/gi, "\n\n")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    // decode the few entities the templates emit
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .split(/\n{2,}/)
+    .map((s) => s.replace(/[ \t]+/g, " ").replace(/\n+/g, " ").trim())
+    .filter(Boolean);
+}
+
+/**
+ * Render-quality linter (A0.2). Pure, deterministic pass over the RENDERED
+ * contract (HTML or plain text) that catches the whole class of "form data
+ * silently lost / duplicated" defects without an LLM. Detects:
+ *   - leftover Handlebars `{{...}}` (template never rendered the var)
+ *   - empty closing place/date line ("`, .`")
+ *   - empty qualification labels (CPF/Nacionalidade/CEP/E-mail) and `xxxxx`
+ *   - "R$ 0,00 (zero reais)" in price/commission context
+ *   - subclause numbering gaps (2.1.1 → 2.1.2 → 2.1.4)
+ *   - long duplicated blocks (≥20-word chunk appearing twice)
+ *
+ * Severity: only truly broken render artifacts (leftover vars, empty
+ * place/date) are `error` (block approval); quality issues are `warning`.
+ */
+export function renderQualityChecks(htmlContent: string): QuickFinding[] {
+  const findings: QuickFinding[] = [];
+  if (!htmlContent || htmlContent.trim().length === 0) return findings;
+
+  // 1. Leftover Handlebars expressions — the template referenced a var that
+  //    had no value/source. Hard error (definitely broken).
+  const mustacheMatches = htmlContent.match(/\{\{[^{}]+\}\}/g);
+  if (mustacheMatches && mustacheMatches.length > 0) {
+    const sample = Array.from(new Set(mustacheMatches)).slice(0, 5).join(", ");
+    findings.push({
+      severity: "error",
+      category: "render",
+      message: `O contrato contém variáveis de template não preenchidas: ${sample}. Os dados de origem estão ausentes ou a ponte form→template está faltando.`,
+      selectedText: mustacheMatches[0].slice(0, 60),
+      suggestedFix:
+        "Preencha os dados de origem no formulário ou adicione o mapeamento em enrichContractData.",
+    });
+  }
+
+  const blocks = htmlToTextBlocks(htmlContent);
+
+  // 2. Empty closing place/date line — renders as just "`, .`" when
+  //    config.municipio_imovel / config.data_assinatura têm fonte ausente.
+  for (const b of blocks) {
+    if (/^,\s*\.?$/.test(b) || /^,\s*\.\s*$/.test(b)) {
+      findings.push({
+        severity: "error",
+        category: "render",
+        message:
+          'O local e a data de assinatura saíram em branco no fecho do contrato (aparece apenas ", ."). O formulário tem cidade/data, mas não foram aplicados ao documento.',
+        selectedText: b.slice(0, 40) || ", .",
+        suggestedFix:
+          "Preencha o local e a data da assinatura no fecho do contrato (ex.: Cidade-UF, DD de mês de AAAA).",
+      });
+      break;
+    }
+  }
+
+  // 3. Empty qualification labels + `xxxxx` placeholders. Skip lines with
+  //    underscores (testemunha placeholders são intencionais).
+  const LABELS = ["CPF", "CNPJ", "RG", "CEP", "Nacionalidade", "E-mail", "Profissão", "Estado Civil"];
+  const labelAlt = LABELS.map((l) => l.replace(/[-]/g, "\\-")).join("|");
+  const emptyLabelRe = new RegExp(`\\b(${labelAlt})\\s*:?\\s*$`, "i");
+  const seenEmptyLabels = new Set<string>();
+  for (const b of blocks) {
+    if (b.includes("___")) continue;
+    // split a multi-field paragraph into label segments
+    const segments = b.split(/(?=\b(?:CPF|CNPJ|RG|CEP|Nacionalidade|E-mail|Profissão|Estado Civil)\b)/);
+    for (const seg of segments) {
+      const m = emptyLabelRe.exec(seg.trim());
+      if (m) {
+        const label = m[1];
+        const isHardField = /^(CPF|CNPJ)$/i.test(label);
+        if (!seenEmptyLabels.has(label.toLowerCase())) {
+          seenEmptyLabels.add(label.toLowerCase());
+          findings.push({
+            severity: isHardField ? "warning" : "warning",
+            category: "render",
+            message: `Campo "${label}" aparece sem valor na qualificação de alguma parte. Verifique os dados no formulário.`,
+            selectedText: `${label}:`,
+            suggestedFix: `Preencha o ${label} da parte correspondente no formulário.`,
+          });
+        }
+      }
+    }
+    // placeholder xxxxx in value position
+    if (/(?:^|[\s:>])x{4,}(?:[\s<.,;]|$)/i.test(b)) {
+      const snippet = (b.match(/[^\s]*x{4,}[^\s]*/i)?.[0] || "xxxxx").slice(0, 40);
+      const key = `xxxxx:${snippet.toLowerCase()}`;
+      if (!seenEmptyLabels.has(key)) {
+        seenEmptyLabels.add(key);
+        findings.push({
+          severity: "warning",
+          category: "render",
+          message: `Há texto de preenchimento "${snippet}" no contrato — substitua pelo dado real.`,
+          selectedText: snippet,
+          suggestedFix: "Corrija o campo no formulário (e-mail/conta/CEP) para o valor real.",
+        });
+      }
+    }
+  }
+
+  // 4. "R$ 0,00 (zero reais)" — preço/comissão zerados.
+  if (/R\$\s*0,00\s*\(zero reais\)/i.test(htmlContent)) {
+    findings.push({
+      severity: "warning",
+      category: "render",
+      message:
+        'O contrato contém valor "R$ 0,00 (zero reais)" — possivelmente uma parcela/sinal/comissão que ficou sem valor. Confirme se é intencional.',
+      selectedText: "R$ 0,00 (zero reais)",
+      suggestedFix: "Informe o valor correto no formulário ou remova a cláusula de valor zerado.",
+    });
+  }
+
+  // 5. Subclause numbering gaps (N.N.x). Group bold-ish markers by parent.
+  const numMatches = htmlContent.match(/\b(\d+)\.(\d+)\.(\d+)\b/g) || [];
+  const byParent = new Map<string, Set<number>>();
+  for (const nm of numMatches) {
+    const parts = nm.split(".").map((n) => parseInt(n, 10));
+    const parent = `${parts[0]}.${parts[1]}`;
+    if (!byParent.has(parent)) byParent.set(parent, new Set());
+    byParent.get(parent)!.add(parts[2]);
+  }
+  for (const [parent, set] of byParent) {
+    const nums = Array.from(set).sort((a, b) => a - b);
+    if (nums.length < 2) continue;
+    const gaps: number[] = [];
+    for (let i = nums[0]; i < nums[nums.length - 1]; i++) {
+      if (!set.has(i)) gaps.push(i);
+    }
+    if (gaps.length > 0) {
+      findings.push({
+        severity: "warning",
+        category: "render",
+        message: `Numeração de subcláusulas com salto em ${parent}.x: falta ${gaps
+          .map((g) => `${parent}.${g}`)
+          .join(", ")} (presentes: ${nums.map((n) => `${parent}.${n}`).join(", ")}).`,
+        selectedText: `${parent}.${gaps[0]}`,
+        suggestedFix: "Renumere as subcláusulas para uma sequência contínua.",
+      });
+    }
+  }
+
+  // 6. Duplicated long blocks (≥20 words appearing twice). Catches the permuta
+  //    text rendered both in the parcela loop and in a dedicated clause.
+  const WINDOW = 20;
+  const normalized = blocks
+    .map((b) => {
+      const words = b
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}\s]/gu, "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .split(" ")
+        .filter(Boolean);
+      return { raw: b, words };
+    })
+    .filter((b) => b.words.length >= WINDOW);
+  let dupReported = false;
+  // A contiguous run of >=WINDOW words shared between two blocks => duplicate.
+  // Prefix-independent (handles "c) <texto>" vs "2.1.4. <texto>").
+  for (let i = 0; i < normalized.length && !dupReported; i++) {
+    for (let j = i + 1; j < normalized.length && !dupReported; j++) {
+      const shorter = normalized[i].words.length <= normalized[j].words.length ? normalized[i] : normalized[j];
+      const longerStr = " " + (shorter === normalized[i] ? normalized[j] : normalized[i]).words.join(" ") + " ";
+      for (let k = 0; k + WINDOW <= shorter.words.length; k++) {
+        const window = " " + shorter.words.slice(k, k + WINDOW).join(" ") + " ";
+        if (longerStr.includes(window)) {
+          findings.push({
+            severity: "warning",
+            category: "render",
+            message:
+              "Há um bloco de texto longo duplicado no contrato (mesmo conteúdo aparece em dois lugares). Verifique se uma das ocorrências deve ser removida.",
+            selectedText: normalized[i].raw.slice(0, 60),
+            suggestedFix: "Remova a duplicação, mantendo o texto em uma única cláusula.",
+          });
+          dupReported = true;
+          break;
+        }
+      }
+    }
+  }
+
+  return findings;
 }
 
 /**
@@ -210,6 +421,9 @@ export function quickChecks(
       });
     }
   }
+
+  // --- 5. Render-quality (A0.2): catches the form→contract fidelity class. ---
+  findings.push(...renderQualityChecks(htmlContent));
 
   return findings;
 }
