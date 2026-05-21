@@ -11,6 +11,7 @@ import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSigna
 import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
 import { cn } from "@/lib/utils";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
+import type { SelectGroup } from "@/components/forms/NativeSelect";
 import type { Assignment, DocumentKind } from "@/lib/forms/extracted-to-form";
 import { CertidoesTab } from "@/components/pipeline/CertidoesTab";
 import { SignaturesTab } from "@/components/pipeline/SignaturesTab";
@@ -92,6 +93,7 @@ interface DealDetailProps {
         filename: string;
         mime: string;
         category: string | null;
+        url: string;
         extractedData: unknown;
         createdAt: Date;
       }[];
@@ -141,6 +143,8 @@ export function DealDetail({ deal }: DealDetailProps) {
   const [deletingContracts, setDeletingContracts] = useState(false);
   const [pendingAttachmentId, setPendingAttachmentId] = useState<string | null>(null);
   const [deletingAttachment, setDeletingAttachment] = useState(false);
+  const [pendingDeleteContractId, setPendingDeleteContractId] = useState<string | null>(null);
+  const [deletingContract, setDeletingContract] = useState(false);
   const [reExtracting, setReExtracting] = useState(false);
   const [markLostDialogOpen, setMarkLostDialogOpen] = useState(false);
   const [markingPaid, setMarkingPaid] = useState(false);
@@ -324,6 +328,27 @@ export function DealDetail({ deal }: DealDetailProps) {
     } finally {
       setDeletingAttachment(false);
       setPendingAttachmentId(null);
+    }
+  }
+
+  async function handleDeleteContract(contractId: string) {
+    setDeletingContract(true);
+    try {
+      const res = await fetch(`/api/contracts/${contractId}`, {
+        method: "DELETE",
+      });
+      const data = await res.json().catch(() => null);
+      if (res.ok) {
+        toast.success("Rascunho excluído");
+        router.refresh();
+      } else {
+        toast.error(data?.error || "Erro ao excluir rascunho");
+      }
+    } catch {
+      toast.error("Erro de conexão");
+    } finally {
+      setDeletingContract(false);
+      setPendingDeleteContractId(null);
     }
   }
 
@@ -608,6 +633,35 @@ export function DealDetail({ deal }: DealDetailProps) {
         </AlertDialogContent>
       </AlertDialog>
 
+      <AlertDialog
+        open={!!pendingDeleteContractId}
+        onOpenChange={(open) => !open && setPendingDeleteContractId(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir este rascunho?</AlertDialogTitle>
+            <AlertDialogDescription>
+              O contrato (versão rascunho) será removido, junto com comentários,
+              sugestões e histórico. O Google Doc vai para a lixeira do Drive.
+              Não pode ser desfeito.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingContract}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() =>
+                pendingDeleteContractId &&
+                handleDeleteContract(pendingDeleteContractId)
+              }
+              disabled={deletingContract}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {deletingContract ? "Excluindo..." : "Excluir rascunho"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -828,6 +882,7 @@ export function DealDetail({ deal }: DealDetailProps) {
             fallbackAttachments={deal.attachments}
             vendedores={vendedores}
             compradores={compradores}
+            imoveis={imoveis}
             onRequestRemoveDealAttachment={(id) => setPendingAttachmentId(id)}
           />
         </TabsContent>
@@ -868,7 +923,24 @@ export function DealDetail({ deal }: DealDetailProps) {
                           {contract.createdAt.toLocaleDateString("pt-BR")}
                         </p>
                       </div>
-                      <Badge variant="outline">{contract.status}</Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline">{contract.status}</Badge>
+                        {contract.status === "rascunho" && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-destructive hover:bg-destructive/10"
+                            title="Excluir rascunho"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setPendingDeleteContractId(contract.id);
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
                     </CardContent>
                   </Card>
                 </Link>
@@ -1005,6 +1077,7 @@ interface FormAttachmentLite {
   filename: string;
   mime: string;
   category: string | null;
+  url: string;
   extractedData: unknown;
   createdAt: Date;
 }
@@ -1110,6 +1183,7 @@ function DocumentsTab({
   fallbackAttachments,
   vendedores,
   compradores,
+  imoveis,
   onRequestRemoveDealAttachment,
 }: {
   dealId: string;
@@ -1118,15 +1192,27 @@ function DocumentsTab({
   fallbackAttachments: FallbackAttachment[];
   vendedores: Parte[];
   compradores: Parte[];
+  imoveis: Imovel[];
   /** Callback chamado quando o usuário clica no X de um DealAttachment
    *  (Infosimples ou manual). Pai abre AlertDialog de confirmação. */
   onRequestRemoveDealAttachment?: (attachmentId: string) => void;
 }) {
+  const router = useRouter();
   // Set para identificar quais cards são DealAttachment (têm rota DELETE
   // /api/deals/[dealId]/attachments/[id]). FormAttachments têm sua rota
   // própria mas não é exposto remoção daqui (só dentro do form público).
   const dealAttachmentIds = new Set(fallbackAttachments.map((a) => a.id));
-  const hasFormAttachments = formAttachments.length > 0 && formToken;
+  // Dedupe form↔deal: no finalize os FormAttachments são copiados pra
+  // DealAttachment reusando a MESMA url. O DealAttachment é canônico (auth,
+  // editável/mov./delet. por aqui), então escondemos o FormAttachment quando
+  // já existe a cópia no deal. `formByUrl` deixa a cópia herdar o assignment
+  // do form pra deals legados cuja cópia veio sem extractedData.
+  const dealUrls = new Set(fallbackAttachments.map((a) => a.url));
+  const formByUrl = new Map(formAttachments.map((f) => [f.url, f]));
+  const visibleFormAttachments = formAttachments.filter(
+    (f) => !dealUrls.has(f.url)
+  );
+  const hasFormAttachments = visibleFormAttachments.length > 0 && formToken;
   // Certidões emitidas (Infosimples + Serasa) e relatórios consolidados —
   // independem do source. Vão pra seção dedicada "Certidões".
   const certidaoAttachments = fallbackAttachments.filter(
@@ -1139,10 +1225,7 @@ function DocumentsTab({
     (att) => att.source === "infosimples" && !certidaoIds.has(att.id)
   );
   const manualFallback = fallbackAttachments.filter(
-    (att) =>
-      att.source !== "infosimples" &&
-      !certidaoIds.has(att.id) &&
-      !formAttachments.some((f) => f.id === att.id)
+    (att) => att.source !== "infosimples" && !certidaoIds.has(att.id)
   );
 
   const hasAnyContent =
@@ -1217,9 +1300,10 @@ function DocumentsTab({
   );
   const certidaoTotal = certidaoSubGroups.reduce((acc, g) => acc + g.rows.length, 0);
 
-  // Form-uploaded documents (OCR autofill)
+  // Form-uploaded documents (OCR autofill) — só os que ainda não têm cópia
+  // no deal (visibleFormAttachments); os duplicados aparecem como DealAttachment.
   if (hasFormAttachments) {
-    for (const att of formAttachments) {
+    for (const att of visibleFormAttachments) {
       const extracted = (att.extractedData as Record<string, unknown> | null) || null;
       const fields = (extracted?.fields as Record<string, unknown> | null) ?? null;
       const confidence =
@@ -1269,8 +1353,28 @@ function DocumentsTab({
     groups[groupKindOf(assignment.kind)].push(card);
   }
 
-  // Legacy manual attachments (no assignment, go to 'outro')
+  // DealAttachments manuais / copiados do form. Lê o assignment do próprio
+  // extractedData; pra cópias legadas sem ele, herda do FormAttachment de
+  // mesma url (formByUrl). Sem nada → "Outros". Dedupe por url cobre deals
+  // legados que acumularam linhas duplicadas (cópia rodada > 1× antes do fix).
+  const seenManualUrls = new Set<string>();
   for (const att of manualFallback) {
+    if (seenManualUrls.has(att.url)) continue;
+    seenManualUrls.add(att.url);
+    const extracted = (att.extractedData as Record<string, unknown> | null) || null;
+    const formMatch = formByUrl.get(att.url);
+    const formExtracted =
+      (formMatch?.extractedData as Record<string, unknown> | null) || null;
+    const assignment =
+      (extracted?.assignment as Assignment | undefined) ??
+      (formExtracted?.assignment as Assignment | undefined) ?? {
+        kind: "outro" as DocumentKind,
+        index: 0,
+      };
+    const fields =
+      (extracted?.fields as Record<string, unknown> | null) ??
+      (formExtracted?.fields as Record<string, unknown> | null) ??
+      null;
     const card: DocumentCardData = {
       id: att.id,
       filename: att.filename,
@@ -1278,23 +1382,72 @@ function DocumentsTab({
       fileUrl: `/api/deals/${dealId}/attachments/${att.id}/file`,
       status: "ready",
       category: att.category,
-      fields: null,
+      fields,
       confidence: null,
-      assignment: { kind: "outro", index: 0 },
+      assignment,
     };
-    groups.outro.push(card);
+    groups[groupKindOf(assignment.kind)].push(card);
   }
 
   const kinds: DocGroupKind[] = ["vendedor", "comprador", "imovel", "outro"];
 
-  const renderDocCard = (doc: DocumentCardData) => {
+  // Opções do seletor "Mover para…" (pastas = partes/imóvel/outros). Valor no
+  // formato `${kind}:${index}` que o DocumentCard codifica/decodifica.
+  const assignmentOptions: SelectGroup[] = [
+    {
+      label: "Vendedores",
+      options: vendedores.map((v, i) => ({
+        value: `vendedor:${i}`,
+        label: `Vendedor: ${v.nome || v.razao_social || `Parte ${i + 1}`}`,
+      })),
+    },
+    {
+      label: "Compradores",
+      options: compradores.map((c, i) => ({
+        value: `comprador:${i}`,
+        label: `Comprador: ${c.nome || c.razao_social || `Parte ${i + 1}`}`,
+      })),
+    },
+    {
+      label: "Imóveis",
+      options: imoveis.map((im, i) => ({
+        value: `imovel:${i}`,
+        label: `Imóvel ${i + 1}${im.cidade ? ` — ${im.cidade}` : ""}`,
+      })),
+    },
+    { label: "Outros", options: [{ value: "outro:0", label: "Outros" }] },
+  ].filter((g) => g.options.length > 0);
+
+  const handleReassign = async (id: string, value: string) => {
+    const [kind, idxStr] = value.split(":");
+    const index = Number.parseInt(idxStr, 10) || 0;
+    const res = await fetch(`/api/deals/${dealId}/attachments/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ assignment: { kind, index } }),
+    });
+    if (res.ok) {
+      toast.success("Documento movido");
+      router.refresh();
+    } else {
+      const d = await res.json().catch(() => null);
+      toast.error(d?.error || "Erro ao mover documento");
+    }
+  };
+
+  // reassignable: mostra o seletor "Mover para…" (só faz sentido em
+  // DealAttachment, que tem rota PATCH autenticada). Certidões ficam de fora
+  // (são auto-classificadas pelo executor).
+  const renderDocCard = (doc: DocumentCardData, reassignable = false) => {
     const isDealAttachment = dealAttachmentIds.has(doc.id);
     const canRemove = isDealAttachment && !!onRequestRemoveDealAttachment;
+    const canReassign = reassignable && isDealAttachment;
     return (
       <DocumentCard
         key={doc.id}
         doc={doc}
-        assignmentOptions={[]}
+        assignmentOptions={canReassign ? assignmentOptions : []}
+        onAssignmentChange={canReassign ? handleReassign : undefined}
         readOnly={!canRemove}
         onRemove={canRemove ? (id) => onRequestRemoveDealAttachment(id) : undefined}
       />
@@ -1322,7 +1475,7 @@ function DocumentsTab({
                   <span className="font-normal">({sub.rows.length})</span>
                 </p>
                 <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-                  {sub.rows.map(renderDocCard)}
+                  {sub.rows.map((doc) => renderDocCard(doc))}
                 </div>
               </div>
             ))}
@@ -1344,7 +1497,7 @@ function DocumentsTab({
               </CardTitle>
             </CardHeader>
             <CardContent className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-              {items.map(renderDocCard)}
+              {items.map((doc) => renderDocCard(doc, true))}
             </CardContent>
           </Card>
         );
