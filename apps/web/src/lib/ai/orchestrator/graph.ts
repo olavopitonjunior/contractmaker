@@ -327,20 +327,23 @@ REGRAS:
 1. Responda em PT-BR com norma culta impecável.
 2. NUNCA exiba JSON cru.
 3. Se a pergunta for informativa (lista, explicação, status), responda com markdown organizado (≥100 caracteres). Use cabeçalhos, listas e tabelas quando ajudar.
-4. Se especialistas executaram tools de edição/sugestão (Editor em F2), use os 3 cabeçalhos LITERAIS:
-   ## Alterações Realizadas
-   ## Justificativa
-   ## Verificação
-5. Combine as saídas dos especialistas SEM repetir texto literal. Você é o ponto de síntese.
-6. Cite legislação ou padrões da organização quando especialistas trouxeram evidência. Não invente.
-7. Foque no contrato desta sessão. Não compare com outros contratos sem evidência ancorada.`;
+4. **LEDGER DE ESCRITAS É A FONTE DA VERDADE SOBRE O QUE FOI APLICADO.** Você recebe um bloco "## LEDGER DE ESCRITAS (determinístico)". Ele — e SOMENTE ele — define o que mudou no documento. NUNCA afirme que algo "foi aplicado/alterado/realizado" se não estiver em **APLICADAS** no ledger.
+   - Se houver itens em **APLICADAS**: use os 3 cabeçalhos LITERAIS \`## Alterações Realizadas\`, \`## Justificativa\`, \`## Verificação\`, descrevendo APENAS o que está em APLICADAS.
+   - Se houver itens em **PENDENTES** (sugestões/planos aguardando aprovação) e nenhuma aplicada: use \`## Proposta (aguardando aprovação)\` e explique que o usuário precisa aprovar via PlanCard/track changes. NÃO diga "realizado".
+   - Se houver **FALHAS** ou **NÃO APLICADAS** (edição não confirmada no documento): use \`## Não foi possível aplicar\`, explique o motivo objetivo do ledger e proponha o próximo passo. NÃO finja sucesso.
+   - Se o ledger estiver inteiramente vazio e a mensagem era informativa: responda normalmente como consulta (sem cabeçalho de alteração).
+5. **PROIBIDO INVENTAR "redação anterior".** Só cite o texto que estava no contrato se ele aparecer literalmente no contexto fornecido. NUNCA construa uma "redação anterior" plausível para depois "substituí-la".
+6. Combine as saídas dos especialistas SEM repetir texto literal. Você é o ponto de síntese.
+7. Cite legislação ou padrões da organização quando especialistas trouxeram evidência. Não invente.
+8. Foque no contrato desta sessão. Não compare com outros contratos sem evidência ancorada.`;
 
 async function aggregatorNode(state: GraphState): Promise<Partial<GraphState>> {
   const events: AgentEvent[] = [
     { type: "agent_started", agent: "orchestrator", model: state.mode === "fast" ? HAIKU_MODEL : SONNET_MODEL },
   ];
 
-  const specialistContext = buildSpecialistContext(state);
+  const writeLedger = buildWriteLedger(state.specialistOutputs);
+  const specialistContext = buildSpecialistContext(state, writeLedger);
   const anthropic = getAnthropicClient();
   const model = state.mode === "fast" ? HAIKU_MODEL : SONNET_MODEL;
   const t0 = Date.now();
@@ -387,10 +390,26 @@ async function aggregatorNode(state: GraphState): Promise<Partial<GraphState>> {
     });
 
     const textBlock = response.content.find((b) => b.type === "text");
-    const finalMessage =
+    let finalMessage =
       textBlock && textBlock.type === "text"
         ? textBlock.text
         : "Operação concluída.";
+
+    // B2 — pós-condição anti-confabulação (defensiva): se NADA foi aplicado mas
+    // o texto ainda afirma "Alterações Realizadas", anexa um aviso corretivo.
+    // Garante que o usuário não seja induzido a erro mesmo se o LLM ignorar o ledger.
+    let confabulationBlocked = false;
+    if (
+      writeLedger.applied.length === 0 &&
+      /##\s*Altera[çc][õo]es\s+Realizadas/i.test(finalMessage)
+    ) {
+      confabulationBlocked = true;
+      const banner =
+        writeLedger.pending.length > 0
+          ? "> ⚠️ **Nenhuma alteração foi aplicada ainda** — há proposta(s) aguardando sua aprovação.\n\n"
+          : "> ⚠️ **Nenhuma alteração foi efetivamente aplicada ao documento.** Revise os detalhes abaixo.\n\n";
+      finalMessage = banner + finalMessage;
+    }
 
     events.push({
       type: "text_delta",
@@ -449,6 +468,59 @@ async function aggregatorNode(state: GraphState): Promise<Partial<GraphState>> {
       });
     } catch (err) {
       console.error("[aggregator] persist chat falhou:", err);
+    }
+
+    // D2 — AgentRun: log/observabilidade do turn (ledger determinístico).
+    // Fire-and-forget, nunca lança (igual recordAIUsage).
+    try {
+      const outcome = confabulationBlocked
+        ? "confabulation_blocked"
+        : ledgerOutcome(writeLedger, state.intent);
+      const toolCalls = [
+        ...(state.specialistOutputs.editor?.toolCalls ?? []),
+        ...(state.specialistOutputs.curator?.toolCalls ?? []),
+      ].map((c) => ({
+        name: c.name,
+        success: c.success,
+        ...(c.htmlBefore !== undefined && c.htmlAfter !== undefined
+          ? { applied: c.htmlBefore !== c.htmlAfter }
+          : {}),
+      }));
+      const aggUsage = response.usage;
+      void prisma.agentRun
+        .create({
+          data: {
+            orgId: state.orgId,
+            contractId: state.contractId,
+            sessionId: state.sessionId,
+            userId: state.userId,
+            mode: state.mode,
+            intent: state.intent ?? null,
+            agentsRun: Object.keys(state.specialistOutputs),
+            toolCallsJson: toolCalls as object,
+            writesAttempted:
+              writeLedger.applied.length +
+              writeLedger.pending.length +
+              writeLedger.notApplied.length +
+              writeLedger.dataOnly.length +
+              writeLedger.failed.length,
+            writesApplied: writeLedger.applied.length,
+            writesPending: writeLedger.pending.length,
+            writesFailed: writeLedger.failed.length + writeLedger.notApplied.length,
+            outcome,
+            finalMessagePreview: finalMessage.slice(0, 500),
+            promptTokens: state.usage.promptTokens + (aggUsage?.input_tokens ?? 0),
+            completionTokens: state.usage.completionTokens + (aggUsage?.output_tokens ?? 0),
+            totalTokens:
+              state.usage.totalTokens +
+              (aggUsage?.input_tokens ?? 0) +
+              (aggUsage?.output_tokens ?? 0),
+            latencyMs: state.usage.latencyMs + (Date.now() - t0),
+          },
+        })
+        .catch((e) => console.error("[aggregator] AgentRun.create falhou:", e));
+    } catch (err) {
+      console.error("[aggregator] AgentRun prep falhou:", err);
     }
 
     if (hasEdits && state.contractContext) {
@@ -607,7 +679,96 @@ async function persistChangeLogs(
   );
 }
 
-function buildSpecialistContext(state: GraphState): string {
+// B2 (2026-05): ledger determinístico de escritas. Define — independentemente
+// do que os especialistas NARRARAM — o que realmente mudou no documento. É a
+// fonte da verdade que o aggregator usa pra não confabular "Alterações
+// Realizadas" sem write confirmada (bug do QA deal 20486).
+export interface WriteLedger {
+  applied: string[]; // doc text mudou e tool teve sucesso
+  pending: string[]; // propose_suggestion / propose_plan (aguardando aprovação)
+  notApplied: string[]; // write de mutação com sucesso mas doc NÃO mudou (verified=false)
+  dataOnly: string[]; // update_contract_data: muda dataJson, não o texto visível
+  failed: string[]; // qualquer write com erro / bloqueada por policy
+}
+
+const DOC_MUTATING_TOOLS = new Set([
+  "edit_contract_section",
+  "insert_clause",
+  "remove_clause",
+  "apply_style_preset",
+  "insert_image",
+]);
+const PENDING_TOOLS = new Set(["propose_suggestion", "propose_plan"]);
+
+export function buildWriteLedger(
+  specialistOutputs: Partial<Record<SpecialistName, SpecialistOutput>>
+): WriteLedger {
+  const ledger: WriteLedger = { applied: [], pending: [], notApplied: [], dataOnly: [], failed: [] };
+  const outputs = [specialistOutputs.editor, specialistOutputs.curator].filter(Boolean);
+  for (const out of outputs) {
+    for (const call of out!.toolCalls) {
+      const label = call.summary || call.name;
+      if (DOC_MUTATING_TOOLS.has(call.name)) {
+        if (!call.success) {
+          ledger.failed.push(`${call.name}: ${label}`);
+          continue;
+        }
+        // Quando há snapshot (GDoc), só conta como aplicada se o texto mudou.
+        const hasSnap = call.htmlBefore !== undefined && call.htmlAfter !== undefined;
+        const changed = hasSnap ? call.htmlBefore !== call.htmlAfter : true;
+        if (changed) ledger.applied.push(label);
+        else ledger.notApplied.push(`${call.name}: edição não confirmada no documento (${label})`);
+      } else if (call.name === "update_contract_data") {
+        if (call.success) ledger.dataOnly.push(`${label} (atualiza dados, não o texto visível)`);
+        else ledger.failed.push(`${call.name}: ${label}`);
+      } else if (PENDING_TOOLS.has(call.name)) {
+        if (call.success) ledger.pending.push(label);
+        else ledger.failed.push(`${call.name}: ${label}`);
+      }
+      // reads (query_*, cross_check_certidoes, add_comment) não entram no ledger.
+    }
+  }
+  return ledger;
+}
+
+export function ledgerIsEmpty(l: WriteLedger): boolean {
+  return (
+    l.applied.length === 0 &&
+    l.pending.length === 0 &&
+    l.notApplied.length === 0 &&
+    l.dataOnly.length === 0 &&
+    l.failed.length === 0
+  );
+}
+
+/** Outcome canônico p/ AgentRun (D) e telemetria. */
+export function ledgerOutcome(l: WriteLedger, intent: string | undefined): string {
+  if (l.applied.length > 0) return l.failed.length || l.notApplied.length ? "applied_partial" : "applied";
+  if (l.pending.length > 0) return "pending_plan";
+  if (l.failed.length > 0 || l.notApplied.length > 0) return "failed";
+  if (l.dataOnly.length > 0) return "failed"; // dados mudaram mas texto não — não é o que o usuário espera
+  return intent === "informational" ? "no_op_informational" : "no_op_informational";
+}
+
+function formatLedger(l: WriteLedger): string {
+  if (ledgerIsEmpty(l)) return "## LEDGER DE ESCRITAS (determinístico)\n(nenhuma tool de escrita foi executada — não houve alteração no documento)";
+  const lines: string[] = ["## LEDGER DE ESCRITAS (determinístico)"];
+  const sec = (title: string, items: string[]) => {
+    if (items.length) lines.push(`**${title}:**\n${items.map((i) => `- ${i}`).join("\n")}`);
+  };
+  sec("APLICADAS (confirmadas no documento)", l.applied);
+  sec("PENDENTES (aguardando aprovação do usuário)", l.pending);
+  sec("NÃO APLICADAS (edição não confirmada no documento)", l.notApplied);
+  sec("APENAS DADOS (não alterou o texto visível)", l.dataOnly);
+  sec("FALHAS", l.failed);
+  return lines.join("\n\n");
+}
+
+export function _formatLedgerForTest(l: WriteLedger): string {
+  return formatLedger(l);
+}
+
+function buildSpecialistContext(state: GraphState, ledger: WriteLedger): string {
   const parts: string[] = [];
   if (state.specialistOutputs.analyst?.text) {
     parts.push(`## Análise do Analista\n${state.specialistOutputs.analyst.text}`);
@@ -621,6 +782,8 @@ function buildSpecialistContext(state: GraphState): string {
   if (state.specialistOutputs.curator?.text) {
     parts.push(`## Curadoria do Curador\n${state.specialistOutputs.curator.text}`);
   }
+  // Ledger SEMPRE incluído — é o contrato de verdade sobre o que mudou.
+  parts.push(formatLedger(ledger));
   return parts.join("\n\n") || "(nenhum especialista executou)";
 }
 

@@ -1158,6 +1158,42 @@ model AIUsage {
   @@index([contractId, createdAt])
 }
 
+// AgentRun (D — QA deal 20486): 1 linha por turn do chat multi-agente, com o
+// LEDGER determinístico do que foi efetivamente aplicado. Serve de log pra
+// análise de funcionamento/output e base de treino/memória. SEM @relation de
+// propósito — o registro sobrevive à exclusão do contrato/sessão (histórico).
+model AgentRun {
+  id                  String   @id @default(cuid())
+  orgId               String
+  contractId          String?
+  sessionId           String?
+  messageId           String?
+  userId              String?
+  mode                String // "fast" | "plan"
+  intent              String? // informational | edit_simple | edit_multi | review | propose
+  agentsRun           String[] @default([])
+  /// [{ name, success, applied?, verified? }] — timeline resumida de tools.
+  toolCallsJson       Json?
+  writesAttempted     Int      @default(0)
+  writesApplied       Int      @default(0)
+  writesPending       Int      @default(0)
+  writesFailed        Int      @default(0)
+  /// applied | applied_partial | pending_plan | no_op_informational | failed | confabulation_blocked
+  outcome             String
+  finalMessagePreview String?  @db.Text
+  promptTokens        Int      @default(0)
+  completionTokens    Int      @default(0)
+  totalTokens         Int      @default(0)
+  estimatedCostUsd    Decimal  @default(0) @db.Decimal(12, 6)
+  latencyMs           Int      @default(0)
+  createdAt           DateTime @default(now())
+
+  @@index([orgId, createdAt])
+  @@index([orgId, outcome, createdAt])
+  @@index([sessionId])
+  @@index([contractId, createdAt])
+}
+
 // ============================================
 // PAGADORIA — SEGURANÇA BASELINE (Fase 1a)
 // ============================================

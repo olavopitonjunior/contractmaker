@@ -407,6 +407,23 @@ export const dadosContratoSchema = step1Schema
           path: ["comissao", "comissionados"],
         });
       }
+
+      // A3 (QA deal 20486): inconsistência — há comissionado com participação
+      // (percentual ou valor) mas a comissão TOTAL ficou 0. Renderiza
+      // "R$ 0,00 (zero reais)" no contrato. Só dispara quando há sinal de
+      // comissão real (não bloqueia negócios genuinamente sem corretagem).
+      const valorComissao = Number(data.comissao?.valor ?? 0);
+      const temParticipacao = comissionados.some(
+        (c) => (c.percentual ?? 0) > 0 || (c.valor ?? 0) > 0
+      );
+      if (temParticipacao && valorComissao <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message:
+            "Há comissionado com participação informada, mas o valor total da comissão está zerado. Informe o valor da comissão.",
+          path: ["comissao", "valor"],
+        });
+      }
     }
 
     // Pagamento: soma das parcelas == valor_total (tolerância 0.01).

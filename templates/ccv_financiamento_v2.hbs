@@ -203,18 +203,18 @@ Descrição: {{this.descricao}}
 
 <!-- CLAUSE_SLOT:G4 -->
 
-<p><strong>2.1.1.</strong> A não creditação do valor do sinal previsto na alínea "a" no prazo estipulado importará em rescisão automática do presente instrumento, independentemente de notificação judicial ou extrajudicial, retornando as partes ao <em>status quo ante</em>.</p>
+<p><strong>2.1.{{subnum "2.1"}}.</strong> A não creditação do valor do sinal previsto na alínea "a" no prazo estipulado importará em rescisão automática do presente instrumento, independentemente de notificação judicial ou extrajudicial, retornando as partes ao <em>status quo ante</em>.</p>
 
-<p><strong>2.1.2.</strong> Caso o agente financeiro aprove e libere valor inferior ao previsto na alínea "b", o(s) PROMISSÁRIO(S) COMPRADOR(ES) deverá(ão) complementar a diferença com recursos próprios, no prazo de 5 (cinco) dias úteis contados da comunicação da aprovação do financiamento, nos termos do art. 22 da Resolução BCB nº 4.676/2018.</p>
+<p><strong>2.1.{{subnum "2.1"}}.</strong> Caso o agente financeiro aprove e libere valor inferior ao previsto na alínea "b", o(s) PROMISSÁRIO(S) COMPRADOR(ES) deverá(ão) complementar a diferença com recursos próprios, no prazo de 5 (cinco) dias úteis contados da comunicação da aprovação do financiamento, nos termos do art. 22 da Resolução BCB nº 4.676/2018.</p>
 
-<p><strong>2.1.3.</strong> Os pagamentos referidos nesta cláusula deverão ser efetuados diretamente nas contas bancárias indicadas pelo(s) PROMITENTE(S) VENDEDOR(ES), mediante transferência eletrônica (TED, PIX ou DOC), servindo os comprovantes bancários como recibo de quitação parcial.</p>
+<p><strong>2.1.{{subnum "2.1"}}.</strong> Os pagamentos referidos nesta cláusula deverão ser efetuados diretamente nas contas bancárias indicadas pelo(s) PROMITENTE(S) VENDEDOR(ES), mediante transferência eletrônica (TED, PIX ou DOC), servindo os comprovantes bancários como recibo de quitação parcial.</p>
 
 {{#if (existe config.saldo_devedor_vendedor)}}
-<p><strong>2.1.4.</strong> Do valor liberado pelo agente financeiro, será automaticamente abatido pela instituição financeira o saldo devedor de alienação fiduciária existente em favor do(s) PROMITENTE(S) VENDEDOR(ES), no montante aproximado de {{moeda config.saldo_devedor_vendedor}} ({{extenso config.saldo_devedor_vendedor}}), sendo o eventual saldo remanescente creditado na conta indicada pelo(s) PROMITENTE(S) VENDEDOR(ES).</p>
+<p><strong>2.1.{{subnum "2.1"}}.</strong> Do valor liberado pelo agente financeiro, será automaticamente abatido pela instituição financeira o saldo devedor de alienação fiduciária existente em favor do(s) PROMITENTE(S) VENDEDOR(ES), no montante aproximado de {{moeda config.saldo_devedor_vendedor}} ({{extenso config.saldo_devedor_vendedor}}), sendo o eventual saldo remanescente creditado na conta indicada pelo(s) PROMITENTE(S) VENDEDOR(ES).</p>
 {{/if}}
 
 {{#if (existe config.permuta_descricao)}}
-<p><strong>2.1.5.</strong> Parte do preço estipulado nesta cláusula é satisfeita mediante permuta, nos seguintes termos: {{config.permuta_descricao}}. A entrega efetiva do(s) bem(ns) permutado(s), com a documentação regularizada e livre de quaisquer ônus, é condição para a quitação parcial correspondente.</p>
+<p><strong>2.1.{{subnum "2.1"}}.</strong> Parte do preço estipulado nesta cláusula é satisfeita mediante permuta, nos seguintes termos: {{config.permuta_descricao}}. A entrega efetiva do(s) bem(ns) permutado(s), com a documentação regularizada e livre de quaisquer ônus, é condição para a quitação parcial correspondente.</p>
 {{/if}}
 
 <hr>

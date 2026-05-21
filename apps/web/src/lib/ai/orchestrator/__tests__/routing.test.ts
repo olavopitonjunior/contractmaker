@@ -34,6 +34,24 @@ describe("classifyIntent", () => {
       expect(classifyIntent("remova a cláusula 5")).toBe("edit_simple");
       expect(classifyIntent("insira uma cláusula de FGTS")).toBe("edit_simple");
     });
+
+    it("detecta verbos de preenchimento (regressão QA deal 20486 — F1)", () => {
+      // "Preencha o local e a data" caía em informational → Editor nunca rodava
+      // → aggregator confabulava "Alterações Realizadas".
+      expect(
+        classifyIntent('Preencha o local e a data da assinatura com "Embu-Guaçu, 19 de maio de 2026"')
+      ).toBe("edit_simple");
+      expect(classifyIntent("preencha o CPF do cônjuge do comprador")).toBe("edit_simple");
+      expect(classifyIntent("complete a qualificação do vendedor")).toBe("edit_simple");
+      expect(classifyIntent("informe o valor da comissão")).toBe("edit_simple");
+      expect(classifyIntent("defina a data de assinatura")).toBe("edit_simple");
+      expect(classifyIntent("ajuste a comissão para R$ 24.000,00")).toBe("edit_simple");
+      expect(classifyIntent("conserte o valor zerado da comissão")).toBe("edit_simple");
+    });
+
+    it('não dispara falso-positivo com a preposição "por"', () => {
+      expect(classifyIntent("por favor, o que diz a cláusula 5?")).toBe("informational");
+    });
   });
 
   describe("edit_multi", () => {

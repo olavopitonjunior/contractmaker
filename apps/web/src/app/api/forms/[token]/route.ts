@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { generateContractForDeal } from "@/lib/services/contract-generation";
 import { dedupConjuges } from "@/lib/forms/dedup-conjuges";
+import { dadosContratoSchema } from "@/lib/forms/validation";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
@@ -84,6 +85,28 @@ export async function PATCH(
   // intermediário não rodamos dedup — usuário pode estar revendo.
   const isFinalizing = newStatus === "completo" && previousStatus !== "completo";
   const mergedData = isFinalizing ? dedupConjuges(rawMergedData) : rawMergedData;
+
+  // A6 (QA deal 20486): validação server-side no finalize. O form público é
+  // editável por qualquer um com o link e a validação client-side é burlável —
+  // sem isso, dados inválidos (ex.: CPF do cônjuge vazio quando casado, comissão
+  // zerada com comissionado, soma de parcelas ≠ total) finalizavam e geravam
+  // contrato sem aviso. NÃO bloqueia a geração (o render linter + o gate de
+  // aprovação barram o contrato defeituoso downstream), mas materializa os
+  // problemas na resposta e no audit pra correção pelo corretor.
+  let validationIssues: Array<{ path: string; message: string }> = [];
+  if (isFinalizing) {
+    const parsed = dadosContratoSchema.safeParse(mergedData);
+    if (!parsed.success) {
+      validationIssues = parsed.error.issues.map((i) => ({
+        path: i.path.join("."),
+        message: i.message,
+      }));
+      console.warn(
+        `[forms/finalize] form ${form.id} finalizado com ${validationIssues.length} problema(s) de validação:`,
+        validationIssues.map((v) => `${v.path}: ${v.message}`).join(" | ")
+      );
+    }
+  }
 
   const updated = await prisma.salesForm.update({
     where: { token: params.token },
@@ -211,5 +234,9 @@ export async function PATCH(
     updatedAt: updated.updatedAt,
     contractId,
     dealId,
+    // A6: problemas de validação detectados no finalize (não bloqueiam a
+    // geração, mas o cliente pode exibir e o contrato gerado terá os findings
+    // do render linter). Vazio quando os dados passam no dadosContratoSchema.
+    validationIssues,
   });
 }

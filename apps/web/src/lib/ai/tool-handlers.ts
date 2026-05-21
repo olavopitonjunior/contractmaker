@@ -164,6 +164,11 @@ async function handleProposePlan(
   // cláusula NUNCA entra no contrato. Falhamos cedo, antes de persistir o
   // ChatPlan, pra que o Editor refaça a iteração com query_knowledge_base
   // ANTES do propose_plan. Mensagem é o mesmo formato do handler downstream.
+  // B5 (2026-05, QA deal 20486): aceitar `clauseQuery` (NL) nos steps de
+  // insert_clause/remove_clause em vez de exigir knowledgeItemId pré-resolvido.
+  // Os handlers já auto-resolvem via busca semântica (C5), então a resolução
+  // acontece no /execute-plan. Só rejeitamos se NEM id válido NEM clauseQuery —
+  // aí sim o write não tem como resolver a cláusula.
   const SLUG_GUARDED_TOOLS = new Set(["insert_clause", "remove_clause"]);
   const ID_REGEX = /^c[a-z0-9]{24,32}$/i;
   for (const step of steps) {
@@ -173,17 +178,20 @@ async function handleProposePlan(
       (typeof step.input.knowledgeItemId === "string" && step.input.knowledgeItemId) ||
       (typeof step.input.clauseId === "string" && step.input.clauseId) ||
       "";
-    if (!id || !ID_REGEX.test(id)) {
+    const clauseQuery =
+      typeof step.input.clauseQuery === "string" && step.input.clauseQuery.trim().length > 0
+        ? step.input.clauseQuery.trim()
+        : "";
+    const hasValidId = ID_REGEX.test(id);
+    if (!hasValidId && !clauseQuery) {
       return {
         error:
-          `Step "${step.description}" usa knowledgeItemId="${id || "(vazio)"}" — ` +
-          `parece slug humano ou está vazio. IDs reais têm formato c<24-32 chars> ` +
-          `(ex: cd4a6eacc6d7e4b76a7aeaa0373bc7ecb). RESOLVA o ID ANTES de propose_plan: ` +
-          `chame query_knowledge_base({ category: "clause", groupCode: "G1..G6", query: "..." }) ` +
-          `como tool_use direto neste turn, leia o campo id do resultado, e refaça propose_plan ` +
-          `com o id real no step ${step.tool}. Reads como STEP do plano não ajudam aqui — o ` +
-          `Editor precisa do id na hora de redigir o step write.`,
-        hint: "resolve_knowledge_item_id_before_plan",
+          `Step "${step.description}" (${step.tool}) não tem como resolver a cláusula: ` +
+          `knowledgeItemId="${id || "(vazio)"}" inválido e clauseQuery ausente. ` +
+          `Adicione clauseQuery="<descrição da cláusula em linguagem natural>" no input do step — ` +
+          `o sistema busca a cláusula na base automaticamente na hora de executar. ` +
+          `(Alternativamente, passe um knowledgeItemId real no formato c<24-32 chars>.)`,
+        hint: "add_clauseQuery_to_step",
       };
     }
   }

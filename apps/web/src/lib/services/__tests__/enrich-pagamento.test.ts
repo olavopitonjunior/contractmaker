@@ -59,7 +59,10 @@ describe("enrichContractData — derivação de buckets de pagamento", () => {
     expect(parcelas).toHaveLength(0);
   });
 
-  it("permuta_veiculo cai em outras_formas e fica no loop", () => {
+  it("permuta_veiculo cai em outras_formas e SAI do loop (renderizada na cláusula dedicada)", () => {
+    // F2 (QA deal 20486): permuta é renderizada via config.permuta_descricao na
+    // cláusula 2.1.4/2.1.5 — NÃO deve ficar no loop de parcelas (duplicava os
+    // parágrafos da descrição e quebrava a gramática).
     const enriched = enrichContractData({
       pagamento: {
         valor_total: 200_000,
@@ -78,11 +81,11 @@ describe("enrichContractData — derivação de buckets de pagamento", () => {
     const pag = enriched.pagamento as AnyObj;
     expect(pag.outras_formas).toBe(150_000);
     const parcelas = pag.parcelas as Array<AnyObj>;
-    expect(parcelas).toHaveLength(1);
-    expect(parcelas[0].tipo).toBe("permuta_veiculo");
-    // tipo_texto derivado inclui descrição
-    expect(parcelas[0].tipo_texto).toMatch(/Permuta com veículo/);
-    expect(parcelas[0].tipo_texto).toMatch(/Honda Civic/);
+    // sinal_arras é hardcoded à vista, permuta sai do loop → loop vazio.
+    expect(parcelas.every((p) => p.tipo !== "permuta_veiculo")).toBe(true);
+    // A descrição da permuta foi consolidada em config.permuta_descricao.
+    const config = enriched.config as AnyObj;
+    expect(String(config.permuta_descricao)).toMatch(/Honda Civic/);
   });
 
   it("forma legada (sem tipo) preserva buckets originais sem derivar", () => {
