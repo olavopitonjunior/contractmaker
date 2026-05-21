@@ -708,19 +708,18 @@ export function planCertidoesForDeal(
           jobs.push(buildJob(ep, kind, index, `${label} - ${t.label}`, base));
         }
 
-        // E-Proc SP 1ª e 2ª instâncias — Infosimples não emite. SkippedJob
-        // com link externo para portal oficial (Phase F.II-γ).
-        skipped.push({
-          ...buildSkip(
-            "tribunal/tjsp/eproc",
+        // E-Proc SP — lista de processos eletrônicos (1ª/2ª instância) via
+        // tribunal/tjsp/eproc-lista. Consulta informativa (sem PDF) por
+        // CPF/CNPJ; complementa a certidão cível (pedido-civel acima).
+        jobs.push(
+          buildJob(
+            "tribunal/tjsp/eproc-lista",
             kind,
             index,
-            label,
-            "cobertura",
-            "E-Proc SP (1ª e 2ª instâncias) sem cobertura Infosimples — extrair no portal oficial com login GOV.BR"
-          ),
-          externalLink: "https://certidoes.tjsp.jus.br",
-        });
+            `${label} - E-Proc`,
+            isPJ ? { cnpj: cnpj! } : { cpf: cpf! }
+          )
+        );
       }
     }
     if (tjShouldRJ) {

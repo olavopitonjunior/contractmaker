@@ -591,6 +591,45 @@ describe("Phase K — registradores/matric (ONR)", () => {
   });
 });
 
+describe("TJSP E-Proc lista (informativa)", () => {
+  it("sem processos → negativa (nada consta)", () => {
+    const resp = {
+      code: 200,
+      code_message: "OK",
+      data: [{ total_registros_real: 0, lista_processos: [] }],
+    };
+    const r = normalize(
+      "tribunal/tjsp/eproc-lista",
+      resp as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).toBe("negativa");
+    expect(r.consta_debito).toBe(false);
+  });
+
+  it("com processos → positiva + contagem", () => {
+    const resp = {
+      code: 200,
+      code_message: "OK",
+      data: [
+        {
+          total_registros_real: 3,
+          lista_processos: [
+            { numero_processo: "1" },
+            { numero_processo: "2" },
+          ],
+        },
+      ],
+    };
+    const r = normalize(
+      "tribunal/tjsp/eproc-lista",
+      resp as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).toBe("positiva");
+    expect(r.consta_debito).toBe(true);
+    expect(r.detalhes).toContain("3");
+  });
+});
+
 describe("CENPROT 'não constam protestos' (6xx sem PDF)", () => {
   it("cenprot-sp/protestos 612 → situacao negativa + genuine_no_data", () => {
     const resp = {

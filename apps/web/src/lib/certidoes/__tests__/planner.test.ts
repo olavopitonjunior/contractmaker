@@ -126,13 +126,17 @@ describe("planCertidoesForDeal — dados completos (PF SP + PF RJ + imovel SP)",
     expect(iptu).toBeUndefined();
   });
 
-  it("gera SkippedJob de E-Proc SP para vendedor SP (Phase F.II-γ)", () => {
-    const eproc = plan.skipped.filter(
-      (s) => s.endpoint === "tribunal/tjsp/eproc"
+  it("dispara E-Proc SP (lista) para vendedor SP — Infosimples cobre", () => {
+    // 2026-05-21: E-Proc SP passou de SkippedJob → job real via
+    // tribunal/tjsp/eproc-lista (consulta informativa por CPF/CNPJ).
+    const eproc = plan.jobs.filter(
+      (j) => j.endpoint === "tribunal/tjsp/eproc-lista"
     );
-    // 1 skip por parte SP (vendedor SP). Comprador RJ não dispara E-Proc SP.
     expect(eproc.length).toBeGreaterThanOrEqual(1);
-    expect(eproc[0].externalLink).toBe("https://certidoes.tjsp.jus.br");
+    // não deve mais aparecer como skip "sem cobertura"
+    expect(
+      plan.skipped.some((s) => s.endpoint.startsWith("tribunal/tjsp/eproc"))
+    ).toBe(false);
   });
 
   it("custo total bate com a soma dos jobs", () => {

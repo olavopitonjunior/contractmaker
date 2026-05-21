@@ -186,6 +186,31 @@ function tjExtractor(resp: InfosimplesResponse): NormalizedResult {
   };
 }
 
+/**
+ * TJSP E-Proc — `tribunal/tjsp/eproc-lista`. Consulta informativa: retorna a
+ * lista de processos eletrônicos da parte (1ª/2ª instância). Sem PDF. "consta"
+ * quando há processos; o total real vem em `total_registros_real` (pode ser
+ * maior que o array retornado, limitado a 100).
+ */
+function eprocListaExtractor(resp: InfosimplesResponse): NormalizedResult {
+  const d = getFirst<Record<string, unknown>>(resp) ?? {};
+  const lista = Array.isArray(d.lista_processos)
+    ? (d.lista_processos as unknown[])
+    : [];
+  const totalReal = Number(d.total_registros_real ?? lista.length) || 0;
+  const consta = totalReal > 0;
+  return {
+    situacao: consta ? "positiva" : "negativa",
+    validade: null,
+    emissao: asString(d.data_consulta) ?? null,
+    detalhes: consta
+      ? `${totalReal} processo(s) eletrônico(s) no e-proc`
+      : "Nada consta — sem processos no e-proc",
+    consta_debito: consta,
+    raw: d,
+  };
+}
+
 function cenprotSpExtractor(resp: InfosimplesResponse): NormalizedResult {
   const d = getFirst<Record<string, unknown>>(resp) ?? {};
   const protestos = d.protestos;
@@ -536,6 +561,7 @@ const EXTRACTORS: Record<string, Extractor> = {
   "tribunal/tjrj/pedido-cert": tjExtractor,
   "tribunal/tjrj/obter-certidao": tjExtractor,
   "tribunal/tjrs/primeiro-grau": tjExtractor,
+  "tribunal/tjsp/eproc-lista": eprocListaExtractor,
   "cenprot-sp/protestos": cenprotSpExtractor,
   "pref/sp/sao-paulo/iptu": iptuExtractor,
   "pref/rj/rio-janeiro/cert-trib": iptuExtractor,
