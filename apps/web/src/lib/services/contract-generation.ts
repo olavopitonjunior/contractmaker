@@ -240,7 +240,17 @@ export function enrichContractData(
       ? (enriched.incluso_no_preco as string).trim()
       : "";
   if (inclusoNoPreco && config.itens_entrega == null) {
-    config.itens_entrega = inclusoNoPreco;
+    // A7 (QA deal 20486): não duplicar quando o texto já consta na descrição
+    // do imóvel (ex.: "Uma casa com área de 101,61m²" aparecia na cláusula 1.1
+    // E na 3.4). Já estando na descrição, a cláusula de itens inclusos é omitida.
+    const descricoes =
+      (enriched.imoveis as Array<{ descricao?: string }> | undefined)?.map((i) =>
+        (i.descricao ?? "").toLowerCase()
+      ) ?? [];
+    const jaNaDescricao = descricoes.some((d) => d.includes(inclusoNoPreco.toLowerCase()));
+    if (!jaNaDescricao) {
+      config.itens_entrega = inclusoNoPreco;
+    }
   }
 
   // Débitos pendentes (IPTU, condomínio, outros)
@@ -1004,7 +1014,95 @@ export async function generateContractForDeal(
     console.error("[contract-generation] analyzeRenderQualityForContract falhou:", err);
   });
 
+  // FU2/FU5 — Gate de validade de DADOS críticos. O finalize do form é
+  // leniente (gera rascunho mesmo com lacunas), mas lacunas LEGAIS críticas
+  // (cônjuge sem CPF/nome quando a parte é casada) viram ContractComment
+  // severity="error" → bloqueiam /approve. Mantém o rascunho navegável mas
+  // impede que um contrato juridicamente inválido seja aprovado/enviado.
+  void analyzeContractDataValidity(contract.id, dataJson).catch((err) => {
+    console.error("[contract-generation] analyzeContractDataValidity falhou:", err);
+  });
+
   return { contractId: contract.id, version: contract.version, googleDocUrl };
+}
+
+/**
+ * FU2/FU5 — Validação de dados críticos no nível do dataJson (não do texto
+ * renderizado). Espelha o superRefine de lib/forms/validation.ts para os itens
+ * que são bloqueadores legais e cria ContractComment severity="error"
+ * (bloqueia aprovação). Determinístico, fire-and-forget.
+ */
+async function analyzeContractDataValidity(
+  contractId: string,
+  dataJson: Record<string, unknown>
+): Promise<void> {
+  const { dedupeKeyFor } = await import("@/lib/ai/quickChecks");
+
+  const contract = await prisma.contract.findUnique({
+    where: { id: contractId },
+    select: { status: true },
+  });
+  if (!contract || contract.status === "aprovado") return;
+
+  type Parte = {
+    tipo_pessoa?: string;
+    nome?: string;
+    estado_civil?: string;
+    conjuge?: { nome?: string; cpf?: string };
+  };
+  const issues: Array<{ severity: "error" | "warning"; key: string; text: string; anchor: string }> = [];
+
+  const checkParte = (p: Parte, label: string) => {
+    if (p.tipo_pessoa !== "fisica") return;
+    const casado = p.estado_civil === "Casado(a)" || p.estado_civil === "União Estável";
+    if (!casado) return;
+    const nome = (p.conjuge?.nome ?? "").trim();
+    const cpf = (p.conjuge?.cpf ?? "").trim();
+    if (nome.length < 2) {
+      issues.push({
+        severity: "error",
+        key: `conjuge_nome:${label}`,
+        anchor: `${label} — cônjuge`,
+        text: `${label} é casado(a)/união estável, mas o NOME do cônjuge está ausente. Obrigatório para a venda (meação). Preencha no formulário.`,
+      });
+    }
+    if (cpf.length === 0) {
+      issues.push({
+        severity: "error",
+        key: `conjuge_cpf:${label}`,
+        anchor: `${label} — cônjuge`,
+        text: `${label} é casado(a)/união estável, mas o CPF do cônjuge está ausente. Obrigatório para a venda. Preencha no formulário.`,
+      });
+    }
+  };
+
+  const vendedores = (dataJson.vendedores as Parte[] | undefined) ?? [];
+  const compradores = (dataJson.compradores as Parte[] | undefined) ?? [];
+  vendedores.forEach((v, i) => checkParte(v, `Vendedor ${i + 1} (${v.nome ?? "?"})`));
+  compradores.forEach((c, i) => checkParte(c, `Comprador ${i + 1} (${c.nome ?? "?"})`));
+
+  for (const issue of issues) {
+    const dedupeKey = dedupeKeyFor("ai", `data:${issue.key}`, issue.anchor);
+    try {
+      await prisma.contractComment.upsert({
+        where: { contractId_dedupeKey: { contractId, dedupeKey } },
+        create: {
+          contractId,
+          userId: null,
+          authorName: "Validação de Dados",
+          authorType: "ai",
+          text: issue.text,
+          selectedText: issue.anchor.slice(0, 240),
+          anchorId: dedupeKey,
+          severity: issue.severity,
+          dedupeKey,
+        },
+        update: { updatedAt: new Date() },
+      });
+    } catch (err) {
+      console.error("[analyzeContractDataValidity] upsert comment falhou:", err);
+    }
+  }
 }
 
 /**

@@ -115,14 +115,18 @@ export default async function AIRunsPage({
                   <td className="max-w-sm px-3 py-2 text-xs text-gray-600">
                     {(r.finalMessagePreview ?? "").replace(/\n+/g, " ").slice(0, 160)}
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    <Link href={`/settings/ai-runs/${r.id}`} className="text-violet-600 hover:underline">
+                      detalhe
+                    </Link>
                     {r.contractId ? (
-                      <Link href={`/contracts/${r.contractId}`} className="text-violet-600 hover:underline">
-                        abrir
-                      </Link>
-                    ) : (
-                      "—"
-                    )}
+                      <>
+                        {" · "}
+                        <Link href={`/contracts/${r.contractId}`} className="text-violet-600 hover:underline">
+                          contrato
+                        </Link>
+                      </>
+                    ) : null}
                   </td>
                 </tr>
               );

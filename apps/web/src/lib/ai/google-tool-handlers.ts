@@ -46,6 +46,28 @@ export async function googleEditSection(
       };
     }
 
+    // FU4 (QA deal 20486): `replaceAllText` substitui TODAS as ocorrências.
+    // Um alvo curto/comum (ex.: "R$ 500,00") casava em duas cláusulas e a
+    // edição vazava pra cláusula não pretendida. Agora RECUSAMOS alvos
+    // ambíguos (>1 ocorrência) sem mutar nada — o agente deve incluir contexto
+    // ao redor pra tornar o `target` único. Ocorrência única preserva o
+    // `replaceAllText` (mantém formatação do trecho).
+    let count = 0;
+    for (let i = text.indexOf(selectedText); i !== -1; i = text.indexOf(selectedText, i + selectedText.length)) {
+      count++;
+    }
+    if (count > 1) {
+      return {
+        success: false,
+        error:
+          `O trecho "${selectedText.slice(0, 60)}…" aparece ${count}× no documento. ` +
+          `Nenhuma alteração foi feita para não atingir a ocorrência errada. ` +
+          `Inclua mais contexto no 'target' (a frase inteira ao redor) de modo a torná-lo único e tente de novo.`,
+        occurrences: count,
+        hint: "ambiguous_target",
+      };
+    }
+
     const requests: docs_v1.Schema$Request[] = [
       {
         replaceAllText: {
@@ -56,18 +78,7 @@ export async function googleEditSection(
     ];
     const res = await batchUpdateDoc(docId, requests);
     const replaced = res.data.replies?.[0]?.replaceAllText?.occurrencesChanged ?? 0;
-    // B7: replaceAllText troca TODAS as ocorrências (matchCase). Sinaliza quando
-    // houve >1 substituição — alvos curtos podem casar em lugares não-intencionais.
-    return {
-      success: replaced > 0,
-      occurrencesChanged: replaced,
-      ...(replaced > 1
-        ? {
-            multipleOccurrences: true,
-            hint: `O trecho casou ${replaced}× no documento e TODAS foram substituídas. Se a intenção era alterar apenas uma, desfaça e use um \`target\` mais específico (com contexto ao redor).`,
-          }
-        : {}),
-    };
+    return { success: replaced > 0, occurrencesChanged: replaced };
   });
 }
 
