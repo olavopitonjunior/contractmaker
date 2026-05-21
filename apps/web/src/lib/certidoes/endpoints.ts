@@ -189,6 +189,8 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
   // H.14 (Phase H, 2026-04-18) — placeholder para E-Proc SP 1ª/2ª instâncias.
   // Infosimples não emite; SkippedJob + externalLink abre portal oficial.
   // Entry no catálogo é necessária para CertidoesTab renderizar o card.
+  // Legado: mantido só p/ resolver endpointInfo de jobs antigos (skip "sem
+  // cobertura"). O planner agora dispara `tribunal/tjsp/eproc-lista` (abaixo).
   "tribunal/tjsp/eproc": {
     id: "tribunal/tjsp/eproc",
     label: "E-Proc SP (manual)",
@@ -197,7 +199,22 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     uf: "SP",
     appliesTo: ["pessoa"],
     category: "civel",
-    description: "E-Proc SP (1ª e 2ª instâncias) — sem cobertura Infosimples; extrair manualmente em certidoes.tjsp.jus.br com login GOV.BR",
+    description: "E-Proc SP (legado) — substituído por tribunal/tjsp/eproc-lista.",
+  },
+  "tribunal/tjsp/eproc-lista": {
+    id: "tribunal/tjsp/eproc-lista",
+    label: "E-Proc SP (processos eletrônicos)",
+    costCents: 6,
+    scope: "estadual",
+    uf: "SP",
+    appliesTo: ["pessoa"],
+    category: "civel",
+    // Consulta informativa: retorna a lista dos processos eletrônicos (e-proc)
+    // 1ª/2ª instância por CPF/CNPJ — NÃO emite PDF de certidão. Complementa a
+    // certidão cível (pedido-civel).
+    emitsPdf: false,
+    portalUrl: "https://esaj.tjsp.jus.br/",
+    description: "Lista de processos eletrônicos (e-proc) no TJSP por CPF/CNPJ — consulta informativa (1ª e 2ª instâncias).",
   },
 
   // --- Estadual RJ ---

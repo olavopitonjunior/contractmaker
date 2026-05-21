@@ -324,8 +324,17 @@ export async function runSingleJob(
     const isPedido = info.twoStep === true;
     if (isPedido && resp.code === 200) {
       const d = (resp.data?.[0] as Record<string, unknown>) ?? {};
+      // Protocolo p/ o 2º passo (obter). Cada portal usa um campo diferente:
+      // TJSP/TJRJ → numero_pedido/numero_requerimento; TRF3 → numero_certidao
+      // (a Certidão de Distribuição já volta com o número), com fallback no
+      // dados_solicitacao.protocolo. O obter usa esse valor (ver pollPortalJob).
+      const dadosSolic = d.dados_solicitacao as Record<string, unknown> | undefined;
       const numeroPedido =
-        (d.numero_pedido as string) ?? (d.numero_requerimento as string) ?? null;
+        (d.numero_pedido as string) ??
+        (d.numero_requerimento as string) ??
+        (d.numero_certidao as string) ??
+        (dadosSolic?.protocolo as string) ??
+        null;
       // F4: adaptive initial delay — TJSP 30min (normally ready in 5-15min),
       // TJRJ 6h (up to 8 business days). Previously fixed 1h / 24h.
       const expected = computeInitialExpectedReadyAt(job.endpoint);
@@ -778,10 +787,20 @@ export async function pollPortalJob(jobId: string): Promise<void> {
   const obterInfo = endpointInfo(obterEndpoint);
   const startedAt = new Date();
 
+  // Params do 2º passo variam por portal. TJSP/TJRJ: { numero_pedido }.
+  // TRF3: { numero_certidao, cpf|cnpj } — exige o documento junto do número
+  // da certidão (doc Infosimples tribunal/trf3/obter-certidao). O cpf/cnpj é
+  // recuperado do requestPayload do pedido original.
+  let obterArgs: Record<string, unknown> = { numero_pedido: numeroPedido };
+  if (obterEndpoint.includes("/trf3/")) {
+    const payload = (job.requestPayload as Record<string, unknown>) ?? {};
+    obterArgs = { numero_certidao: numeroPedido };
+    if (payload.cpf) obterArgs.cpf = payload.cpf;
+    else if (payload.cnpj) obterArgs.cnpj = payload.cnpj;
+  }
+
   try {
-    const resp = await callInfosimples(obterEndpoint, {
-      numero_pedido: numeroPedido,
-    });
+    const resp = await callInfosimples(obterEndpoint, obterArgs);
     const latencyMs = Date.now() - startedAt.getTime();
 
     // If not ready yet (business code indicating pending), push expectedReadyAt forward.
