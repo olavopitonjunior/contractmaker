@@ -1,6 +1,22 @@
+import { Agent, fetch as undiciFetch } from "undici";
 import type { InfosimplesResponse } from "./types";
 
 const BASE_URL = "https://api.infosimples.com/api/v2/consultas";
+
+// O fetch nativo do Node (undici) tem `headersTimeout`/`bodyTimeout` default de
+// 300s (5min). Portais lentos (CENPROT-SP, e-SAJ) levam MAIS que isso — a
+// Infosimples segura a conexão HTTP enquanto faz o scrape (até o `timeout=600`
+// que mandamos no body). Com o default, o undici aborta com "fetch failed" aos
+// exatos 5min, ANTES do nosso AbortController (630s) — foi o que matou o
+// CENPROT-SP de alguns CPFs. Dispatcher dedicado zera esses limites internos
+// (0 = sem timeout); o AbortController de `timeoutMs` vira a ÚNICA fonte de
+// timeout. Usamos o fetch do próprio undici p/ garantir compatibilidade do
+// dispatcher (evita mismatch com o undici interno do Node).
+const infosimplesDispatcher = new Agent({
+  headersTimeout: 0,
+  bodyTimeout: 0,
+  connectTimeout: 30_000,
+});
 // IMPORTANTE: este timeout DEVE ser maior que o parametro `timeout` enviado no
 // body da request (600s = 10min). Se for menor, nosso AbortController mata o
 // fetch antes da Infosimples responder, mas a chamada ja foi cobrada e o job
@@ -31,13 +47,17 @@ function getToken(): string {
 
 async function fetchWithTimeout(
   url: string,
-  init: RequestInit,
+  init: { method: string; headers?: Record<string, string>; body?: string },
   timeoutMs: number
-): Promise<Response> {
+) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    return await fetch(url, { ...init, signal: controller.signal });
+    return await undiciFetch(url, {
+      ...init,
+      signal: controller.signal,
+      dispatcher: infosimplesDispatcher,
+    });
   } finally {
     clearTimeout(timer);
   }
