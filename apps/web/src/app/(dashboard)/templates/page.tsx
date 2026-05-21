@@ -59,6 +59,7 @@ export default async function TemplatesPage({
           name: t.name,
           description: t.description,
           modalidade: t.modalidade,
+          category: t.category,
           version: t.version,
           isDefault: t.isDefault,
           status: t.status,

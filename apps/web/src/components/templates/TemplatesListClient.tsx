@@ -16,12 +16,18 @@ import {
   Globe,
   Layers,
 } from "lucide-react";
+import { CATEGORY_LABELS, isTemplateCategory } from "@/lib/contracts/template-category";
+
+function categoryLabel(category: string | null | undefined): string | null {
+  return isTemplateCategory(category) ? CATEGORY_LABELS[category] : null;
+}
 
 interface TemplateRow {
   id: string;
   name: string;
   description: string | null;
   modalidade: string | null;
+  category?: string | null;
   version: string;
   isDefault: boolean;
   status: string;
@@ -180,6 +186,11 @@ export function TemplatesListClient({
                   <Badge variant="secondary" className="text-xs">
                     {modalidadeLabel(t.modalidade)}
                   </Badge>
+                  {categoryLabel(t.category) && (
+                    <Badge variant="outline" className="text-xs">
+                      {categoryLabel(t.category)}
+                    </Badge>
+                  )}
                   <Badge
                     variant="outline"
                     className="text-xs gap-1"

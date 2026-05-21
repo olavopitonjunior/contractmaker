@@ -39,6 +39,7 @@ export default async function EditTemplatePage({
         description: template.description || "",
         handlebarsSource: template.handlebarsSource,
         modalidade: template.modalidade,
+        category: template.category,
         isDefault: template.isDefault,
         version: template.version,
         status: template.status,

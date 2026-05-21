@@ -573,6 +573,11 @@ model ContractTemplate {
   status              String    @default("active")
   isDefault           Boolean   @default(false)
   modalidade          String?   @default("a_vista")
+  // Categoria determinística (forma de pagamento → template, sem heurística).
+  // Grupo "sem alienação fiduciária": compra_e_venda | permuta | outros
+  // Grupo "com alienação fiduciária": financiamento | fgts | consorcio
+  // `modalidade` é derivada do grupo (a_vista | financiamento) p/ retrocompat.
+  category            String?
   // Google Docs migration: quando engine="google_docs", aponta para o doc-modelo
   // armazenado no Drive da service account. Os contratos são criados via
   // files.copy seguido de batchUpdate(replaceAllText).

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import { isTemplateCategory, modalidadeForCategory } from "@/lib/contracts/template-category";
 
 export async function GET(
   _req: NextRequest,
@@ -41,7 +42,13 @@ export async function PATCH(
     return NextResponse.json({ error: "Template not found" }, { status: 404 });
   }
 
-  const nextModalidade = body.modalidade ?? template.modalidade;
+  // Categoria é canônica: se vier, deriva a modalidade (grupo) dela.
+  const nextCategory = isTemplateCategory(body.category)
+    ? body.category
+    : template.category;
+  const nextModalidade = isTemplateCategory(body.category)
+    ? modalidadeForCategory(body.category)
+    : body.modalidade ?? template.modalidade;
   const nextIsDefault =
     typeof body.isDefault === "boolean" ? body.isDefault : template.isDefault;
   const nextSource = body.handlebarsSource ?? template.handlebarsSource;
@@ -66,6 +73,7 @@ export async function PATCH(
       description: body.description ?? template.description,
       handlebarsSource: nextSource,
       modalidade: nextModalidade,
+      category: nextCategory,
       isDefault: nextIsDefault,
       version: body.version ?? template.version,
       status: body.status ?? template.status,
