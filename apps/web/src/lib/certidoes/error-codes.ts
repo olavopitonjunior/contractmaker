@@ -187,3 +187,30 @@ export function isUserFixable(cat: FailureCategory): boolean {
 export function shouldAutoRetry(cat: FailureCategory): boolean {
   return cat === "portal_unavailable" || cat === "rate_limited";
 }
+
+/**
+ * CENPROT/IEPTB (protestos) sinaliza "não constam protestos" como erro 6xx
+ * (tipicamente 612, sem PDF e sem `data`) em vez de code 200 + situacao
+ * negativa. A mensagem é uma afirmação DEFINITIVA de ausência ("não constam
+ * protestos nos cartórios participantes, cuja abrangência ... é de 100%"),
+ * não uma falha de portal/dado.
+ *
+ * Sem tratamento especial isso cai em missing_input → failed_permanent
+ * (vermelho, "use o portal oficial"), apresentando um resultado LIMPO como
+ * falha. Esta detecção permite tratar o caso como negativa ("nada consta").
+ *
+ * Decisão de produto (2026-05-21): é uma EXCEÇÃO consciente ao princípio
+ * anti-falso-negativo (negativa sem PDF), gated na mensagem explícita +
+ * endpoint de protesto. NÃO casa com "fetch failed" (erro de transporte),
+ * "CPF inválido", nem "portal indisponível" — esses continuam falha/retry.
+ */
+export function isProtestoNadaConsta(
+  endpoint: string,
+  message: string | null | undefined
+): boolean {
+  if (!message) return false;
+  if (!/cenprot|ieptb|protesto/i.test(endpoint)) return false;
+  return /n[ãa]o\s+constam?\s+protestos?|nada\s+consta|n[ãa]o\s+h[áa]\s+protestos?/i.test(
+    message
+  );
+}

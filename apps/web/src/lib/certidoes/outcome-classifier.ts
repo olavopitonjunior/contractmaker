@@ -24,6 +24,7 @@ import type {
 } from "./types";
 import type { EndpointInfo } from "./endpoints";
 import { CATEGORIES_REQUIRING_PDF } from "./endpoints";
+import { isProtestoNadaConsta } from "./error-codes";
 
 export type RichStatus =
   | "queued"
@@ -150,6 +151,30 @@ export function classifyOutcome(
       );
     }
     // code 200 com situação válida → success legítimo
+    return {
+      status: "success",
+      errorMessage: null,
+      failureCategory: null,
+      costCents: billable === false ? 0 : info.costCents,
+      nextRetryAt: null,
+      missingFields: [],
+      portalUrl,
+    };
+  }
+
+  // CENPROT/IEPTB "não constam protestos" — chega como 6xx (sem PDF), mas é
+  // uma negativa legítima, não uma falha. Fecha como success (verde "nada
+  // consta"); o normalizer já marcou situacao "negativa". Gated na mensagem
+  // explícita + endpoint de protesto — ver isProtestoNadaConsta. Custo honesto
+  // (respeita billable). Decisão de produto 2026-05-21: exceção consciente ao
+  // anti-falso-negativo (negativa sem PDF) só pra este caso bem identificado.
+  const protestoMsg = [resp.code_message, ...(resp.errors ?? [])]
+    .filter(Boolean)
+    .join(" ");
+  if (
+    isProtestoNadaConsta(info.id, protestoMsg) ||
+    isProtestoNadaConsta(info.id, effectiveErrorMessage)
+  ) {
     return {
       status: "success",
       errorMessage: null,
