@@ -978,22 +978,36 @@ export async function generateContractForDeal(
     },
   });
 
-  // Transfer form attachments to deal
+  // Transfer form attachments to deal. Idempotente: pula urls que já viraram
+  // DealAttachment (evita duplicação quando o contrato é regerado). Preserva
+  // extractedData (assignment/fields) pra manter o agrupamento por parte na
+  // aba Documentos, e marca source="form".
   if (deal.formId) {
     const formAttachments = await prisma.formAttachment.findMany({
       where: { formId: deal.formId },
     });
 
     if (formAttachments.length > 0) {
-      await prisma.dealAttachment.createMany({
-        data: formAttachments.map((att) => ({
-          dealId: deal.id,
-          filename: att.filename,
-          mime: att.mime,
-          url: att.url,
-          category: att.category || "documento",
-        })),
+      const existing = await prisma.dealAttachment.findMany({
+        where: { dealId: deal.id },
+        select: { url: true },
       });
+      const existingUrls = new Set(existing.map((a) => a.url));
+      const toCopy = formAttachments.filter((att) => !existingUrls.has(att.url));
+
+      if (toCopy.length > 0) {
+        await prisma.dealAttachment.createMany({
+          data: toCopy.map((att) => ({
+            dealId: deal.id,
+            filename: att.filename,
+            mime: att.mime,
+            url: att.url,
+            category: att.category || "documento",
+            source: "form",
+            extractedData: (att.extractedData as object | null) ?? undefined,
+          })),
+        });
+      }
     }
   }
 

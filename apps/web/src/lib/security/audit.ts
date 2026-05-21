@@ -114,6 +114,7 @@ export type AuditAction =
   | "ATTACHMENT_UPLOAD"
   | "ATTACHMENT_DELETE"
   | "ATTACHMENT_EXTRACT"
+  | "ATTACHMENT_RECLASSIFY"
   // Newton — Leads (pré-Deal)
   | "LEAD_CREATE"
   | "LEAD_UPDATE"
