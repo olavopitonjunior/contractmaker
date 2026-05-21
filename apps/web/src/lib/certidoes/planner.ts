@@ -595,11 +595,13 @@ export function planCertidoesForDeal(
     }
 
     // ---- CENPROT Nacional (Phase F.II-γ) — exige GOV.BR ativo ----
-    // Cobre todos os estados exceto detalhes SP (supre item A da lista oficial
-    // para partes fora de SP). Se auth GOV.BR da conta Infosimples não estiver
-    // ativa, registra SkippedJob com instrução clara ao admin.
-    const nacionalNeeded = expandAll || (partyUf && partyUf !== "SP");
-    if (nacionalNeeded && (cpf || cnpj)) {
+    // Cobertura nacional de protestos (IEPTB/CENPROT) para TODAS as partes,
+    // independente da UF (2026-05-21: API liberada com sessão GOV.BR ativa na
+    // conta Infosimples). Partes de SP recebem também `cenprot-sp/protestos`
+    // (consulta SP direta) e o detalhamento de cartórios SP é encadeado pelo
+    // executor via `ieptb/protestos-detalhes-sp`. Se a sessão GOV.BR cair,
+    // registra SkippedJob com instrução clara ao admin.
+    if (cpf || cnpj) {
       const ep = "ieptb/protestos";
       if (govBrActive) {
         jobs.push(

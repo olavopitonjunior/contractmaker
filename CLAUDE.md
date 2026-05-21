@@ -207,7 +207,7 @@ Disparo manual no Deal → aba Certidões. Pipeline: client gera `batchId` UUID 
 
 **Planner** (`planner.ts`) percorre vendedores/compradores/imóveis. PF sem `data_nascimento` bloqueia PGFN/TJSP/Antecedentes PF. Imóvel SP sem `sql` bloqueia IPTU SP. RJ sem `inscricao_municipal` bloqueia ambos IPTU RJ. Comarca TJRJ via `comarcas-rj.ts` (fallback "Capital").
 
-**Endpoints cobertos:** Federais (PGFN, CNDT, TRF), trabalhistas (TRT2/15/1/4 CEAT), cíveis (TJSP/TJRJ 2-step, TJRS), protestos SP (CENPROT), municipais (IPTU SP via SQL, IPTU+CND RJ). Receita CPF + Antecedentes PF auto em financiamento. CCIR/Matrícula ONR só via picker manual.
+**Endpoints cobertos:** Federais (PGFN, CNDT, TRF), trabalhistas (CEAT), cíveis (TJSP/TJRJ 2-step, TJRS), protestos CENPROT (SP direto + Nacional IEPTB via GOV.BR p/ todas partes; detalhes SP encadeados), municipais (IPTU SP/RJ). Receita CPF + Antecedentes PF auto em financiamento. CCIR/Matrícula ONR só via picker.
 
 **Catálogo** (`endpoints.ts`): `category`, `emitsPdf?`, `portalUrl?`, `expectedWaitMinutes?`. `CATEGORIES_REQUIRING_PDF` exportado. **Normalizers** com fallback chains de nomes. Codes 6xx geralmente viram `nao_emitida`.
 

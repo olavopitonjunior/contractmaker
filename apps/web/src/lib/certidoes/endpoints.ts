@@ -69,6 +69,12 @@ export interface EndpointInfo {
    * ("Pronto em ~15 min" / "Pronto em até 5 dias úteis").
    */
   expectedWaitMinutes?: number;
+  /**
+   * Endpoint encadeado internamente pelo executor (não selecionável no picker
+   * nem emitido pelo planner como PlannedJob). Ex.: `ieptb/protestos-detalhes-sp`
+   * é disparado como follow-up síncrono a partir do resultado de `ieptb/protestos`.
+   */
+  internalOnly?: boolean;
 }
 
 /**
@@ -652,7 +658,23 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["pessoa"],
     category: "protesto",
     requiresGovBrAuth: true,
-    description: "Consulta nacional de protestos (exceto detalhes SP). Requer autenticacao GOV.BR ativa na conta Infosimples.",
+    description:
+      "Consulta nacional de protestos (IEPTB/CENPROT) para PF e PJ em todas as UFs. Os detalhes dos cartorios de SP sao obtidos automaticamente via ieptb/protestos-detalhes-sp. Requer sessao GOV.BR ativa na conta Infosimples.",
+  },
+  // Follow-up síncrono do nacional: detalhes dos cartórios SP via campo
+  // `obter_detalhes` da resposta de `ieptb/protestos`. Encadeado pelo
+  // executor (runSingleJob), nunca emitido pelo planner nem exibido no picker.
+  "ieptb/protestos-detalhes-sp": {
+    id: "ieptb/protestos-detalhes-sp",
+    label: "CENPROT Nacional — Detalhes SP",
+    costCents: 6,
+    scope: "federal",
+    appliesTo: ["pessoa"],
+    category: "protesto",
+    requiresGovBrAuth: true,
+    internalOnly: true,
+    description:
+      "Detalhes dos cartorios de SP obtidos via campo obter_detalhes da consulta nacional IEPTB. Disparado automaticamente como follow-up de ieptb/protestos.",
   },
 
   // --- Serasa Experian ---

@@ -199,6 +199,99 @@ function cenprotSpExtractor(resp: InfosimplesResponse): NormalizedResult {
   };
 }
 
+/**
+ * CENPROT Nacional (IEPTB) — `ieptb/protestos`. A resposta agrega protestos de
+ * todas as UFs. Cada item de protesto/cartório de SP traz um token
+ * `obter_detalhes` consumido depois por `ieptb/protestos-detalhes-sp` (o
+ * executor lê esse token do `resp.data` cru, não daqui).
+ *
+ * Shape defensivo: o array de protestos pode vir em `d.protestos` ou aninhado
+ * por cartório; consideramos "consta" quando encontramos qualquer protesto.
+ * O breakdown por UF é best-effort — campos ausentes não quebram a normalização.
+ */
+function cenprotNacionalExtractor(resp: InfosimplesResponse): NormalizedResult {
+  const d = getFirst<Record<string, unknown>>(resp) ?? {};
+  const protestos = collectProtestos(d);
+  const consta = protestos.length > 0;
+  // Breakdown por UF quando os itens trazem `uf`/`estado`.
+  const porUf = new Map<string, number>();
+  for (const p of protestos) {
+    const ufRaw =
+      asString((p as Record<string, unknown>).uf) ??
+      asString((p as Record<string, unknown>).estado);
+    const key = (ufRaw ?? "—").toUpperCase();
+    porUf.set(key, (porUf.get(key) ?? 0) + 1);
+  }
+  const breakdown = Array.from(porUf.entries())
+    .map(([k, n]) => `${k}: ${n}`)
+    .join(", ");
+  return {
+    situacao: consta ? "positiva" : "negativa",
+    validade: null,
+    emissao: asString(d.data_consulta) ?? null,
+    detalhes: consta
+      ? `${protestos.length} protesto(s) encontrado(s)${breakdown ? ` (${breakdown})` : ""}`
+      : "Nada consta",
+    consta_debito: consta,
+    raw: d,
+  };
+}
+
+/**
+ * Reúne protestos da resposta nacional de forma defensiva. Aceita tanto um
+ * array plano em `d.protestos` quanto um agrupamento por cartório/estado com
+ * sub-arrays de protestos.
+ */
+function collectProtestos(d: Record<string, unknown>): unknown[] {
+  const out: unknown[] = [];
+  const top = d.protestos;
+  if (Array.isArray(top)) {
+    for (const item of top) {
+      if (
+        item &&
+        typeof item === "object" &&
+        Array.isArray((item as Record<string, unknown>).protestos)
+      ) {
+        // Agrupamento por cartório: { cartorio, uf, protestos: [...] }
+        out.push(...((item as Record<string, unknown>).protestos as unknown[]));
+      } else {
+        out.push(item);
+      }
+    }
+  }
+  // Alguns retornos usam `cartorios` como container.
+  const cartorios = d.cartorios;
+  if (Array.isArray(cartorios)) {
+    for (const c of cartorios) {
+      const sub = (c as Record<string, unknown>)?.protestos;
+      if (Array.isArray(sub)) out.push(...sub);
+    }
+  }
+  return out;
+}
+
+/**
+ * CENPROT Nacional — Detalhes SP (`ieptb/protestos-detalhes-sp`). Retorna os
+ * dados de um cartório de SP (devedor, valor, data, título). Tratamos como
+ * "positiva" (há detalhe de protesto) e expomos um resumo legível.
+ */
+function cenprotDetalhesSpExtractor(resp: InfosimplesResponse): NormalizedResult {
+  const d = getFirst<Record<string, unknown>>(resp) ?? {};
+  const protestos = collectProtestos(d);
+  const cartorio = asString(d.cartorio) ?? asString(d.nome_cartorio);
+  const parts: string[] = [];
+  if (cartorio) parts.push(cartorio);
+  if (protestos.length > 0) parts.push(`${protestos.length} título(s)`);
+  return {
+    situacao: protestos.length > 0 ? "positiva" : "informativa",
+    validade: null,
+    emissao: asString(d.data_consulta) ?? null,
+    detalhes: parts.join(" · ") || "Detalhes do cartório SP",
+    consta_debito: protestos.length > 0,
+    raw: d,
+  };
+}
+
 function iptuExtractor(resp: InfosimplesResponse): NormalizedResult {
   const d = getFirst<Record<string, unknown>>(resp) ?? {};
   const consta = asBool(d.consta_debito) ?? asBool(d.tem_debito);
@@ -476,7 +569,8 @@ const EXTRACTORS: Record<string, Extractor> = {
   "tribunal/trf4/certidao": tjExtractor,
   "tribunal/trf5/certidao": tjExtractor,
   "tribunal/trf6/certidao": tjExtractor,
-  "ieptb/protestos": cenprotSpExtractor,  // mesma estrutura de resposta
+  "ieptb/protestos": cenprotNacionalExtractor,
+  "ieptb/protestos-detalhes-sp": cenprotDetalhesSpExtractor,
 };
 
 export function normalize(

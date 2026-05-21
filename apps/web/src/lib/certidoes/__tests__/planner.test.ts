@@ -425,15 +425,41 @@ describe("Phase F.II-γ — CENPROT Nacional com pre-flight GOV.BR", () => {
     expect(nacional).toBeDefined();
   });
 
-  it("parte SP NÃO dispara nacional (já tem cenprot-sp local)", () => {
+  it("parte SP dispara nacional E cenprot-sp local (2026-05-21: nacional p/ todos)", () => {
     const plan = planCertidoesForDeal(
       { vendedores: [VENDEDOR_PF_SP], compradores: [], imoveis: [] },
       undefined,
       undefined,
       { govBrActive: true }
     );
-    expect(plan.jobs.find((j) => j.endpoint === "ieptb/protestos")).toBeUndefined();
+    expect(plan.jobs.find((j) => j.endpoint === "ieptb/protestos")).toBeDefined();
     expect(plan.jobs.find((j) => j.endpoint === "cenprot-sp/protestos")).toBeDefined();
+  });
+
+  it("govBrActive=false + parte SP também gera SkippedJob nacional (gate vale p/ todos)", () => {
+    const plan = planCertidoesForDeal(
+      { vendedores: [VENDEDOR_PF_SP], compradores: [], imoveis: [] },
+      undefined,
+      undefined,
+      { govBrActive: false }
+    );
+    const nacional = plan.skipped.find((s) => s.endpoint === "ieptb/protestos");
+    expect(nacional).toBeDefined();
+    expect(nacional?.missingField).toBe("govbr");
+    // CENPROT SP direto continua disparando (não depende de GOV.BR).
+    expect(plan.jobs.find((j) => j.endpoint === "cenprot-sp/protestos")).toBeDefined();
+  });
+
+  it("nacional NÃO é planejado como job standalone para detalhes-sp (encadeado no executor)", () => {
+    const plan = planCertidoesForDeal(
+      { vendedores: [VENDEDOR_PF_SP], compradores: [], imoveis: [] },
+      undefined,
+      undefined,
+      { govBrActive: true }
+    );
+    expect(
+      plan.jobs.find((j) => j.endpoint === "ieptb/protestos-detalhes-sp")
+    ).toBeUndefined();
   });
 });
 
