@@ -1,0 +1,19 @@
+{
+  "code": 200,
+  "code_message": "Sucesso",
+  "data": [
+    {
+      "cartorio": "2 Tabelionato de Protesto de Sao Paulo",
+      "data_consulta": "21/05/2026",
+      "protestos": [
+        {
+          "devedor": "MARIA APARECIDA DE SOUZA",
+          "valor": 1234.56,
+          "data": "10/02/2026",
+          "titulo": "DMI"
+        }
+      ]
+    }
+  ],
+  "site_receipts": ["https://example.com/receipt_detalhes_sp.pdf"]
+}

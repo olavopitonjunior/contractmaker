@@ -11,6 +11,9 @@ import trfFail from "../__fixtures__/trf-unificada-falha.json";
 import ceatNeg from "../__fixtures__/ceat-trt2-negativa.json";
 import cenprotLimpo from "../__fixtures__/cenprot-sp-limpo.json";
 import cenprotComProtesto from "../__fixtures__/cenprot-sp-com-protesto.json";
+import ieptbLimpo from "../__fixtures__/ieptb-nacional-limpo.json";
+import ieptbComProtesto from "../__fixtures__/ieptb-nacional-com-protesto.json";
+import ieptbDetalhesSp from "../__fixtures__/ieptb-detalhes-sp.json";
 import iptuSp from "../__fixtures__/iptu-sp-negativa.json";
 import businessError from "../__fixtures__/business-error-606.json";
 import pgfnMissing612 from "../__fixtures__/pgfn-missing-birthdate-612.json";
@@ -185,6 +188,39 @@ describe("normalize — CENPROT SP", () => {
     expect(r.situacao).toBe("positiva");
     expect(r.consta_debito).toBe(true);
     expect(r.detalhes).toContain("1");
+  });
+});
+
+describe("normalize — CENPROT Nacional (IEPTB)", () => {
+  it("sem protestos -> negativa", () => {
+    const r = normalize("ieptb/protestos", ieptbLimpo as unknown as InfosimplesResponse);
+    expect(r.situacao).toBe("negativa");
+    expect(r.consta_debito).toBe(false);
+    expect(r.detalhes).toContain("Nada consta");
+  });
+
+  it("com protestos -> positiva + contagem e breakdown por UF", () => {
+    const r = normalize(
+      "ieptb/protestos",
+      ieptbComProtesto as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).toBe("positiva");
+    expect(r.consta_debito).toBe(true);
+    expect(r.detalhes).toContain("2 protesto");
+    expect(r.detalhes).toContain("SP: 1");
+    expect(r.detalhes).toContain("RJ: 1");
+  });
+});
+
+describe("normalize — CENPROT Nacional Detalhes SP", () => {
+  it("detalhes de cartório SP -> positiva com resumo", () => {
+    const r = normalize(
+      "ieptb/protestos-detalhes-sp",
+      ieptbDetalhesSp as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).toBe("positiva");
+    expect(r.consta_debito).toBe(true);
+    expect(r.detalhes).toContain("Tabelionato");
   });
 });
 

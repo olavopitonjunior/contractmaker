@@ -21,7 +21,7 @@ import {
  */
 export function listAllForPicker(): EndpointInfo[] {
   return Object.values(ENDPOINTS).filter(
-    (e) => e.initialStatus !== "awaiting_portal"
+    (e) => e.initialStatus !== "awaiting_portal" && e.internalOnly !== true
   );
 }
 

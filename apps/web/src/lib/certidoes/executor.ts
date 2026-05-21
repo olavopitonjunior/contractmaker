@@ -9,7 +9,7 @@ import { renderSerasaHtml, type SerasaRenderContext } from "./serasa-render";
 import { exportPdfToBuffer } from "@/lib/render/exporter";
 import { endpointInfo } from "./endpoints";
 import { classifyOutcome } from "./outcome-classifier";
-import type { JobStatus, Situacao, TargetKind } from "./types";
+import type { InfosimplesResponse, JobStatus, Situacao, TargetKind } from "./types";
 import { emitNotification } from "@/lib/notifications/emit";
 
 /**
@@ -373,6 +373,18 @@ export async function runSingleJob(
     };
     if (receipt) enrichedResultData._rawReceipt = receipt;
 
+    // CENPROT Nacional → encadeia o 2º passo de detalhes dos cartórios SP
+    // (follow-up síncrono via campo `obter_detalhes`). Best-effort: falha aqui
+    // não altera o status do job nacional.
+    let detalhesExtraCostCents = 0;
+    if (job.endpoint === "ieptb/protestos" && resp.code === 200) {
+      const det = await fetchCenprotDetalhesSp(resp, job, dealId);
+      if (det.detalhesSp.length > 0) {
+        enrichedResultData.detalhes_sp = det.detalhesSp;
+      }
+      detalhesExtraCostCents = det.extraCostCents;
+    }
+
     // J.3 (Phase J, 2026-04-18) — classifyOutcome() centraliza a decisão
     // de status rico (success, informativo, api_error, portal_unavailable,
     // data_missing, failed_permanent, …) e agenda retry automático
@@ -402,7 +414,10 @@ export async function runSingleJob(
         resultMessage: resp.code_message,
         resultData: enrichedResultData as object,
         attachmentId,
-        costCents: outcome.costCents,
+        costCents:
+          detalhesExtraCostCents > 0
+            ? (outcome.costCents ?? 0) + detalhesExtraCostCents
+            : outcome.costCents,
         errorMessage: outcome.errorMessage,
         nextRetryAt: outcome.nextRetryAt,
         missingFields: outcome.missingFields,
@@ -826,6 +841,87 @@ export async function pollPortalJob(jobId: string): Promise<void> {
     // F4: failure is also a terminal state — check batch
     await checkBatchCompletion(job.batchId);
   }
+}
+
+/**
+ * Encadeia o 2º passo de detalhes SP do CENPROT Nacional. A resposta de
+ * `ieptb/protestos` traz um ou mais tokens `obter_detalhes` (cartórios de SP);
+ * para cada um chamamos `ieptb/protestos-detalhes-sp`, anexamos o PDF e
+ * acumulamos o detalhe normalizado. Best-effort: qualquer falha é logada e não
+ * altera o status do job nacional.
+ */
+async function fetchCenprotDetalhesSp(
+  nacionalResp: InfosimplesResponse,
+  job: { endpoint: string; label: string; targetKind: string; targetIndex: number },
+  dealId: string | null
+): Promise<{ detalhesSp: unknown[]; extraCostCents: number }> {
+  const tokens = collectObterDetalhesTokens(nacionalResp);
+  if (tokens.length === 0) return { detalhesSp: [], extraCostCents: 0 };
+
+  const detEndpoint = "ieptb/protestos-detalhes-sp";
+  const detInfo = endpointInfo(detEndpoint);
+  const detalhesSp: unknown[] = [];
+  let extraCostCents = 0;
+
+  for (const token of tokens) {
+    try {
+      const resp = await callInfosimples(detEndpoint, { obter_detalhes: token });
+      if (resp.code !== 200) {
+        console.error(
+          `[certidoes] detalhes-sp code ${resp.code}: ${resp.code_message}`
+        );
+        continue;
+      }
+      extraCostCents += detInfo.costCents;
+      const normalized = normalize(detEndpoint, resp);
+      const receipt = resp.site_receipts?.[0];
+      let attachmentId: string | null = null;
+      if (receipt) {
+        attachmentId = await downloadAndAttach(
+          dealId,
+          detEndpoint,
+          `${job.label} — detalhes SP`,
+          receipt,
+          job.targetKind,
+          job.targetIndex
+        );
+      }
+      detalhesSp.push({
+        obter_detalhes: token,
+        ...(normalized as unknown as Record<string, unknown>),
+        attachmentId,
+      });
+    } catch (err) {
+      console.error("[certidoes] falha no detalhes-sp CENPROT:", err);
+    }
+  }
+  return { detalhesSp, extraCostCents };
+}
+
+/**
+ * Varre a resposta nacional em busca de tokens `obter_detalhes` (cartórios SP),
+ * de forma defensiva e recursiva, deduplicando. O shape exato da resposta
+ * Infosimples deve ser confirmado em QA — esta varredura tolera tanto tokens no
+ * topo quanto aninhados por protesto/cartório.
+ */
+function collectObterDetalhesTokens(resp: InfosimplesResponse): string[] {
+  const found = new Set<string>();
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== "object") return;
+    if (Array.isArray(node)) {
+      for (const item of node) visit(item);
+      return;
+    }
+    for (const [key, value] of Object.entries(node as Record<string, unknown>)) {
+      if (key === "obter_detalhes" && typeof value === "string" && value.trim()) {
+        found.add(value.trim());
+      } else {
+        visit(value);
+      }
+    }
+  };
+  visit(resp.data);
+  return Array.from(found);
 }
 
 async function downloadAndAttach(
