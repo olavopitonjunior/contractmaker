@@ -48,6 +48,10 @@
     {
       "path": "/api/cron/newton-requests/sweep",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/newton-requests/group-match",
+      "schedule": "30 * * * *"
     }
   ]
 }
