@@ -22,7 +22,7 @@ import { runEditor } from "../specialists/editor";
 import { runCurator } from "../specialists/curator";
 import { quarantineAttachment } from "../sentinel/middleware";
 import { mapToolToAction, buildToolSummary } from "../shared/tool-mapping";
-import { classifyIntent } from "./routing";
+import { resolveIntent } from "./intent-fallback";
 import { getCheckpointer } from "./checkpointer";
 import { prisma } from "@/lib/db/prisma";
 import { loadChatHistory as _loadChatHistory } from "../shared/session";
@@ -178,7 +178,13 @@ async function loadContextNode(state: GraphState): Promise<Partial<GraphState>> 
 }
 
 async function routerNode(state: GraphState): Promise<Partial<GraphState>> {
-  const intent = classifyIntent(state.userMessage);
+  // FU3: heurística + fallback Haiku só pra casos ambíguos (informational
+  // não-pergunta). resolveIntent cai na heurística em caso de falha.
+  const intent = await resolveIntent(state.userMessage, {
+    orgId: state.orgId,
+    userId: state.userId,
+    contractId: state.contractId,
+  });
   return { intent };
 }
 
@@ -508,7 +514,7 @@ async function aggregatorNode(state: GraphState): Promise<Partial<GraphState>> {
             writesPending: writeLedger.pending.length,
             writesFailed: writeLedger.failed.length + writeLedger.notApplied.length,
             outcome,
-            finalMessagePreview: finalMessage.slice(0, 500),
+            finalMessagePreview: finalMessage.slice(0, 2000),
             promptTokens: state.usage.promptTokens + (aggUsage?.input_tokens ?? 0),
             completionTokens: state.usage.completionTokens + (aggUsage?.output_tokens ?? 0),
             totalTokens:

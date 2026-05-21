@@ -219,8 +219,11 @@ export async function* streamContractAgent(
       isGoogleDocs: !!context.googleDocId,
     });
 
+    // Mantido em sincronia com EDIT_INTENT_REGEX de orchestrator/routing.ts
+    // (verbos de preenchimento incluídos em 2026-05 — QA deal 20486). Caminho
+    // legado (rollback ENABLE_MULTI_AGENT=false); o grafo é o default.
     const EDIT_INTENT =
-      /\b(altere|mude|troque|substitua|atualize|corrija|modifique|remova|insira|adicione|coloque|ponha|apague|delete|reescreva|inclua|retire|exclua)\b/i;
+      /\b(altere|mude|troque|substitua|atualize|corrija|modifique|remova|insira|adicione|coloque|ponha|apague|delete|reescreva|inclua|retire|exclua|preencha|preencher|preenche|complete|completar|completa|informe|informar|defina|definir|registre|registrar|ajuste|ajustar|conserte|consertar|escreva|escrever)\b/i;
     const isEditCommand = EDIT_INTENT.test(params.message);
 
     const FORCE_DIRECT_EDIT =
