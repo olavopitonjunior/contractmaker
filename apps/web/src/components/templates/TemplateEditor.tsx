@@ -10,10 +10,20 @@ import { Switch } from "@/components/ui/switch";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  TEMPLATE_CATEGORIES,
+  CATEGORY_LABELS,
+  CATEGORY_TO_GROUP,
+  GROUP_LABELS,
+  modalidadeForCategory,
+  type TemplateCategory,
+} from "@/lib/contracts/template-category";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -37,6 +47,7 @@ interface TemplateEditorProps {
     description: string;
     handlebarsSource: string;
     modalidade: string | null;
+    category?: string | null;
     isDefault: boolean;
     version: string;
     status: string;
@@ -54,9 +65,21 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
   const [name, setName] = useState(template?.name || "");
   const [description, setDescription] = useState(template?.description || "");
   const [handlebarsSource, setHandlebarsSource] = useState(template?.handlebarsSource || "");
-  const [modalidade, setModalidade] = useState(template?.modalidade || "a_vista");
+  // Categoria é canônica. Fallback p/ templates legados sem category: deriva do
+  // modalidade (financiamento → financiamento; resto → compra_e_venda).
+  const initialCategory: TemplateCategory =
+    (TEMPLATE_CATEGORIES as readonly string[]).includes(template?.category ?? "")
+      ? (template!.category as TemplateCategory)
+      : template?.modalidade === "financiamento"
+        ? "financiamento"
+        : "compra_e_venda";
+  const [category, setCategory] = useState<TemplateCategory>(initialCategory);
   const [isDefault, setIsDefault] = useState(template?.isDefault || false);
   const [version, setVersion] = useState(template?.version || "1.0.0");
+
+  // Modalidade (grupo) derivada da categoria — usada no preview e nos labels.
+  const modalidade = modalidadeForCategory(category);
+  const groupLabel = GROUP_LABELS[CATEGORY_TO_GROUP[category]];
 
   const engine = template?.engine || "handlebars";
   const canPreview =
@@ -74,7 +97,7 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
 
     setSaving(true);
     try {
-      const payload = { name, description, handlebarsSource, modalidade, isDefault, version };
+      const payload = { name, description, handlebarsSource, category, isDefault, version };
 
       const url = mode === "create" ? "/api/templates" : `/api/templates/${template!.id}`;
       const method = mode === "create" ? "POST" : "PATCH";
@@ -136,24 +159,38 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
           <Input id="version" value={version} onChange={(e) => setVersion(e.target.value)} placeholder="1.0.0" />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="modalidade">Modalidade</Label>
-          <Select value={modalidade} onValueChange={setModalidade}>
+          <Label htmlFor="category">Categoria (forma de pagamento)</Label>
+          <Select value={category} onValueChange={(v) => setCategory(v as TemplateCategory)}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="a_vista">A Vista</SelectItem>
-              <SelectItem value="financiamento">Financiamento</SelectItem>
+              <SelectGroup>
+                <SelectLabel>{GROUP_LABELS.sem_alienacao}</SelectLabel>
+                {TEMPLATE_CATEGORIES.filter((c) => CATEGORY_TO_GROUP[c] === "sem_alienacao").map((c) => (
+                  <SelectItem key={c} value={c}>{CATEGORY_LABELS[c]}</SelectItem>
+                ))}
+              </SelectGroup>
+              <SelectGroup>
+                <SelectLabel>{GROUP_LABELS.com_alienacao}</SelectLabel>
+                {TEMPLATE_CATEGORIES.filter((c) => CATEGORY_TO_GROUP[c] === "com_alienacao").map((c) => (
+                  <SelectItem key={c} value={c}>{CATEGORY_LABELS[c]}</SelectItem>
+                ))}
+              </SelectGroup>
             </SelectContent>
           </Select>
+          <p className="text-xs text-muted-foreground">
+            Grupo: {groupLabel}. A forma de pagamento do negócio puxa esta categoria automaticamente.
+          </p>
         </div>
         <div className="flex items-start gap-3 pt-6">
           <Switch id="isDefault" checked={isDefault} onCheckedChange={setIsDefault} />
           <div className="grid gap-0.5">
-            <Label htmlFor="isDefault">Template padrão</Label>
+            <Label htmlFor="isDefault">Principal do grupo (fallback)</Label>
             <p className="text-xs text-muted-foreground">
-              Será usado automaticamente em novos contratos da modalidade {modalidade === "financiamento" ? "Financiamento" : "À Vista"}.
-              Marcar aqui desfaz o padrão atual da mesma modalidade.
+              Usado quando uma categoria do grupo “{groupLabel}” não tiver template próprio
+              (ex.: consórcio sem modelo usa o principal de “com alienação fiduciária”).
+              Marcar desfaz o principal atual do mesmo grupo.
             </p>
           </div>
         </div>

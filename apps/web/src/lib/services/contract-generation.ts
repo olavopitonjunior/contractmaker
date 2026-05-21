@@ -10,6 +10,7 @@ import {
 } from "@/lib/google/replace-placeholders";
 import { watchFile } from "@/lib/google/watch";
 import { deriveDealMetadata } from "@/lib/contracts/derive-deal-metadata";
+import { selectTemplateForDeal } from "@/lib/contracts/template-category";
 import {
   MOMENTO_TEXTO,
   MEIO_PAGAMENTO_TEXTO,
@@ -728,33 +729,18 @@ export async function generateContractForDeal(
     ? (deal.form.dataJson as Record<string, unknown>)
     : (deal.dataJson as Record<string, unknown>) || {};
 
-  // Detect modalidade. Heuristic wins over dataJson.modalidade because Zod's
-  // .default("a_vista") always populates the field, even when the user never
-  // touched the UI — so relying on dataJson.modalidade alone would pin every
-  // contract as "a_vista". Any concrete payment flag signaling non-cash money
-  // (financiamento bancario, FGTS, cessao de consorcio) overrides the default.
-  const pagamento = dataJson.pagamento as Record<string, unknown> | undefined;
-  const hasFinanciamento =
-    !!pagamento &&
-    (Number(pagamento.alienacao_fiduciaria || 0) > 0 ||
-      Number(pagamento.fgts || 0) > 0 ||
-      Number(pagamento.cessao_consorcio || 0) > 0);
-  const modalidade: "financiamento" | "a_vista" = hasFinanciamento
-    ? "financiamento"
-    : (dataJson.modalidade as "financiamento" | "a_vista") || "a_vista";
-
-  // Find template
-  const template =
-    (await prisma.contractTemplate.findFirst({
-      where: { orgId, modalidade, isDefault: true, status: "active" },
-    })) ||
-    (await prisma.contractTemplate.findFirst({
-      where: { orgId, isDefault: true, status: "active" },
-    }));
-
-  if (!template) {
-    throw new Error("Nenhum template padrão encontrado para gerar o contrato.");
+  // Seleção DETERMINÍSTICA de template por categoria (forma de pagamento →
+  // template). Substitui a antiga detecção heurística de modalidade, que lia
+  // os buckets derivados (alienacao_fiduciaria/fgts/cessao_consorcio) ANTES do
+  // enrich rodar — eles saíam 0 e o fallback dataJson.modalidade (undefined)
+  // fazia um financiamento cair no template À Vista (QA contrato cmpfp60h5).
+  // Agora a categoria vem dos `parcelas[].tipo`, com fallback p/ o principal
+  // do grupo (ex.: consórcio sem template → financiamento).
+  const selection = await selectTemplateForDeal(orgId, dataJson);
+  if (!selection) {
+    throw new Error("Nenhum template ativo encontrado para gerar o contrato.");
   }
+  const template = selection.template;
 
   // Enrich data with template defaults (multas, prazos, percentual comissao)
   const enrichedData = enrichContractData(dataJson);
