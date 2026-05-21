@@ -84,6 +84,9 @@ model User {
 
   // Newton — Leads ownership
   leads Lead[]
+
+  // Newton — pedidos de cobrança de informação criados pela negociadora
+  newtonRequests NewtonRequest[]
 }
 
 model Account {
@@ -182,6 +185,12 @@ model Organization {
 
   // Newton — Lead (pré-Deal: acumula docs/contexto antes de virar negócio formal)
   leads Lead[]
+
+  // Newton — pedidos de cobrança de informação por negócio
+  newtonRequests NewtonRequest[]
+
+  // Newton — vínculo deal ↔ grupo WhatsApp
+  dealGroupLinks DealGroupLink[]
 }
 
 model OrgMembership {
@@ -300,6 +309,8 @@ model Deal {
   commissionCharges      CommissionCharge[]
   commissionChargeDrafts CommissionChargeDraft[]
   envelopes              Envelope[]
+  newtonRequests         NewtonRequest[]
+  groupLink              DealGroupLink?
 
   // Lead que originou (se veio de conversão Lead -> Deal)
   fromLead Lead?
@@ -505,6 +516,67 @@ model Notification {
   @@unique([type, batchId])
   @@index([orgId, read, createdAt])
   @@index([userId, read, createdAt])
+}
+
+// NewtonRequest — fila de "pedidos ao Newton" ancorada num Deal.
+//
+// A negociadora (que pode NÃO estar em nenhum grupo de WhatsApp) registra, de
+// dentro do negócio, uma informação que falta e para quem cobrar. Newton recebe
+// o gatilho, vai até o grupo/contato, pede o dado, agenda lembretes (crons) e
+// fecha o pedido quando a info chega — reportando de volta via Notification +
+// timeline + DM.
+//
+// Por que model dedicado (e não Notification/ContractComment): precisa de
+// lifecycle de status, alvo (contato/grupo) e vínculo com crons de lembrete —
+// nada disso cabe num alerta one-shot ou comentário ancorado em documento.
+model NewtonRequest {
+  id             String    @id @default(cuid())
+  orgId          String
+  dealId         String
+  createdBy      String // userId da negociadora que abriu o pedido
+  ask            String    @db.Text // o que falta obter ("matrícula atualizada do imóvel")
+  targetType     String // "contact" | "group"
+  targetRef      String? // phone E.164 sem '+' (contact) | groupJid (group). Null em group ainda não resolvido.
+  targetLabel    String? // rótulo humano: "vendedor Yamamoto", "grupo do negócio"
+  status         String    @default("open") // open | chasing | awaiting_reply | fulfilled | cancelled
+  priority       String    @default("normal") // normal | high
+  dueAt          DateTime?
+  cronJobIds     String[]  @default([]) // ids dos crons de lembrete que Newton criou (pra cancelar depois)
+  lastNudgeAt    DateTime? // última cobrança disparada
+  resolutionNote String?   @db.Text // resumo do que chegou, escrito por Newton no fechamento
+  // Timeline append-only: [{ at, actor: "negociadora"|"newton"|"contato", type, note }]
+  eventsJson     Json?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  deal Deal         @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [createdBy], references: [id])
+
+  @@index([orgId, status, createdAt])
+  @@index([dealId, status])
+}
+
+// DealGroupLink — vínculo persistido entre um Deal e o grupo de WhatsApp do
+// negócio (regra "um grupo = um deal"). O groupId (JID Z-API, ex.
+// "120363019502650977-group") é conhecimento do runtime do Newton; ele grava
+// aqui na 1ª vez que associa (após confirmação humana). Indexado nos dois
+// sentidos: deal→grupo (cobrar no grupo certo) e grupo→deal (detectar que a
+// info pedida chegou quando alguém responde no grupo).
+model DealGroupLink {
+  id          String   @id @default(cuid())
+  orgId       String
+  dealId      String   @unique
+  groupId     String // JID do grupo WhatsApp
+  groupLabel  String? // nome humano do grupo, p/ UI
+  confirmedBy String? // userId/ator que confirmou o vínculo
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  deal Deal         @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, groupId])
 }
 
 // ============================================

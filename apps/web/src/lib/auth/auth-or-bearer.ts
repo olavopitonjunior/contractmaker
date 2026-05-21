@@ -69,10 +69,20 @@ export async function authOrBearer(
  * Verifica se o token autenticado tem o escopo necessário. Para session-based
  * auth (UI web), todos os escopos são considerados presentes — usuário logado
  * tem permissão completa via UI. Para bearer-based, exige escopo explícito.
+ *
+ * Hierarquia rw⊇r: um scope de leitura (`X:r`) é satisfeito por quem tem o
+ * read-write correspondente (`X:rw`). Isso permite que endpoints exijam o scope
+ * mínimo (`deals:r`) sem precisar adicionar um scope dedicado ao catálogo nem
+ * recriar tokens que já têm `deals:rw`.
  */
 export function hasScope(ident: ResolvedAuth, scope: string): boolean {
   if (ident.via === "session") return true;
-  return ident.scopes.includes(scope);
+  if (ident.scopes.includes(scope)) return true;
+  // "deals:r" satisfeito por "deals:rw".
+  if (scope.endsWith(":r")) {
+    return ident.scopes.includes(`${scope}w`);
+  }
+  return false;
 }
 
 export function isBearerAuth(

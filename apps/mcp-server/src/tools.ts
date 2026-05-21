@@ -5,6 +5,20 @@ import { validateInWindow } from "./cron-window.js";
 export type ToolHandler = (args: Record<string, unknown>) => Promise<unknown>;
 
 /**
+ * Extrai o NOME do stage de um deal de /api/pipeline/deals. O backend devolve
+ * `stage` como objeto { id, name, ... } (relation incluída) — antes a gente lia
+ * `raw.stage` como string e caía sempre em "Desconhecido". Tolera string legada.
+ */
+function stageName(raw: Record<string, unknown>): string | null {
+  const s = raw.stage;
+  if (s && typeof s === "object" && typeof (s as { name?: unknown }).name === "string") {
+    return (s as { name: string }).name;
+  }
+  if (typeof s === "string") return s;
+  return null;
+}
+
+/**
  * Spawn `openclaw cron <args> --json`. Como o MCP server roda dentro do mesmo
  * container do gateway openclaw, o binário `openclaw` está na PATH e o token
  * é resolvido naturalmente via OPENCLAW_GATEWAY_TOKEN herdado do env.
@@ -825,7 +839,7 @@ export const tools: Tool[] = [
       let totalOpen = 0;
       let totalClosed = 0;
       for (const raw of deals as Array<Record<string, unknown>>) {
-        const stage = typeof raw.stage === "string" ? raw.stage : "Desconhecido";
+        const stage = stageName(raw) ?? "Desconhecido";
         const id = typeof raw.id === "string" ? raw.id : "";
         const title = typeof raw.title === "string" ? raw.title : undefined;
         if (TERMINAL.has(stage)) {
@@ -885,7 +899,7 @@ export const tools: Tool[] = [
       }> = [];
 
       for (const raw of deals as Array<Record<string, unknown>>) {
-        const stage = typeof raw.stage === "string" ? raw.stage : "";
+        const stage = stageName(raw) ?? "";
         if (TERMINAL.has(stage)) continue;
         const slaDays = sla[stage] ?? null;
         if (slaDays === null) continue;
@@ -1239,6 +1253,344 @@ export const tools: Tool[] = [
     handler: async (args) => {
       const id = args.id as string;
       return spawnOpenclawCron(["rm", id]);
+    },
+  },
+
+  // ───────────── Newton Requests (cobrança de info a partir do negócio) ─────────────
+  // A negociadora registra, de dentro do Deal, uma informação que falta e para
+  // quem cobrar. Newton recebe o gatilho ([deal-request · sistema]), lê o pedido,
+  // cobra via whatsapp_send, agenda lembretes (schedule_proactive_message) e fecha
+  // com update_newton_request quando a info chega. Protocolo em persona REQUESTS.md.
+  {
+    name: "list_newton_requests",
+    description:
+      "Lista pedidos da negociadora ao Newton (fila de cobrança de info ancorada em Deal). " +
+      "Use no gatilho [deal-request] (filtra por dealId) e ao receber resposta de um contato/grupo " +
+      "(filtra por targetRef=telefone ou groupId pra achar o pedido aberto que aquela resposta fecha). " +
+      "Sem status, retorna pendentes (open|chasing|awaiting_reply). Retorna { requests: [{id, dealId, " +
+      "ask, targetType, targetRef, targetLabel, status, priority, cronJobIds, events, ...}] }.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string", description: "Filtra pedidos de um negócio" },
+        status: {
+          type: "string",
+          description:
+            "Filtro de status (CSV aceito): open|chasing|awaiting_reply|fulfilled|cancelled. " +
+            "Default = pendentes.",
+        },
+        targetRef: {
+          type: "string",
+          description: "Telefone E.164 sem '+' — acha pedidos que cobram este contato",
+        },
+        groupId: {
+          type: "string",
+          description: "JID do grupo — acha pedidos do(s) deal(s) vinculado(s) a este grupo",
+        },
+      },
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/newton/requests",
+        query: {
+          dealId: args.dealId as string | undefined,
+          status: args.status as string | undefined,
+          targetRef: args.targetRef as string | undefined,
+          groupId: args.groupId as string | undefined,
+        },
+        actAsUserId: args.actAsUserId as string | undefined,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "update_newton_request",
+    description:
+      "Atualiza o andamento de um pedido (write). action: 'chasing' (cobrou — passe cronJobIds " +
+      "dos lembretes que agendou), 'awaiting' (aguardando resposta), 'fulfilled' (info chegou — passe " +
+      "resolutionNote; o backend avisa a negociadora in-app e fecha), 'note' (só registra evento). " +
+      "Ao fechar (fulfilled), MANDE TAMBÉM um DM via whatsapp_send pra negociadora avisando.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "id do NewtonRequest" },
+        action: {
+          type: "string",
+          enum: ["chasing", "awaiting", "fulfilled", "note"],
+        },
+        note: { type: "string", description: "Texto livre p/ timeline" },
+        resolutionNote: {
+          type: "string",
+          description: "Resumo do que chegou (usado no fechamento e na notificação)",
+        },
+        cronJobIds: {
+          type: "array",
+          items: { type: "string" },
+          description: "ids dos crons de lembrete agendados (acumula, dedupe)",
+        },
+      },
+      required: ["id", "action"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "PATCH",
+        path: `/api/newton/requests/${args.id}`,
+        body: {
+          action: args.action,
+          note: args.note,
+          resolutionNote: args.resolutionNote,
+          cronJobIds: args.cronJobIds,
+        },
+        actAsUserId: args.actAsUserId as string | undefined,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "resolve_deal_group",
+    description:
+      "Descobre qual grupo de WhatsApp está vinculado a um Deal (read). Use ANTES de cobrar em grupo. " +
+      "Retorna { link: { groupId, groupLabel, ... } } ou { link: null } se ainda não houver vínculo — " +
+      "neste caso, confirme com o operador qual é o grupo do negócio e grave com link_deal_group.",
+    inputSchema: {
+      type: "object",
+      properties: { dealId: { type: "string" } },
+      required: ["dealId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/newton/deal-group-link",
+        query: { dealId: args.dealId as string },
+        actAsUserId: args.actAsUserId as string | undefined,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "lookup_deal_by_group",
+    description:
+      "Inverso de resolve_deal_group: dado um groupId, retorna o(s) deal(s) vinculado(s) (read). " +
+      "Use ao receber uma resposta num grupo pra saber a qual negócio (e pedidos abertos) ela pertence.",
+    inputSchema: {
+      type: "object",
+      properties: { groupId: { type: "string", description: "JID do grupo WhatsApp" } },
+      required: ["groupId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/newton/deal-group-link",
+        query: { groupId: args.groupId as string },
+        actAsUserId: args.actAsUserId as string | undefined,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "link_deal_group",
+    description:
+      "Grava/atualiza o vínculo deal ↔ grupo de WhatsApp (write, upsert por dealId). Chame na 1ª vez " +
+      "que associar um grupo a um negócio, DEPOIS de confirmar com o operador. groupId é o JID do grupo " +
+      "(ex: '120363019502650977-group').",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        groupId: { type: "string", description: "JID do grupo WhatsApp" },
+        groupLabel: { type: "string", description: "Nome humano do grupo (opcional)" },
+      },
+      required: ["dealId", "groupId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: "/api/newton/deal-group-link",
+        body: {
+          dealId: args.dealId,
+          groupId: args.groupId,
+          groupLabel: args.groupLabel,
+        },
+        actAsUserId: args.actAsUserId as string | undefined,
+      });
+      return r.body;
+    },
+  },
+
+  // ───────────── RBAC delegation (Fase B do plano newton-rbac-hardening) ─────────────
+  // Tools que viabilizam Newton operar com identidade do caller em vez do
+  // token admin org-wide. Persona em SOUL.md ("Quem está falando comigo")
+  // manda chamar resolve_caller PRIMEIRA TOOL de todo turn em DM, depois
+  // propagar `actAsUserId` retornado pra todas as tool calls subsequentes.
+  // Sem actAsUserId, backend opera no modo legado (token owner = admin → vê
+  // tudo). Com actAsUserId + DELEGATION_ENABLED=true backend filtra por role.
+  {
+    name: "resolve_caller",
+    description:
+      "PRIMEIRA tool de todo turn em DM: mapeia phone E.164 → identidade + " +
+      "scope acessível (deals/contracts permitidos). Retorna `actAsUserId` que " +
+      "DEVE ser propagado em todas as tool calls subsequentes do mesmo turn pra " +
+      "scope server-side aplicar. Em grupo, NÃO chame (contexto vem do grupo, " +
+      "não do remetente). `notFound: true` = trate como Lead novo.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        phone: {
+          type: "string",
+          description: "Phone E.164 do caller (ex: '+5511999063228' com '+')",
+        },
+      },
+      required: ["phone"],
+    },
+    handler: async (args) => {
+      const phone = args.phone as string;
+      const r = await callApi({
+        method: "GET",
+        path: "/api/users/by-phone",
+        query: { phone, withScope: "true" },
+      });
+      if (r.status === 404) {
+        return { notFound: true };
+      }
+      const body = r.body as Record<string, unknown>;
+      return {
+        actAsUserId: body.userId,
+        name: body.name,
+        role: body.role,
+        orgId: body.orgId,
+        accessibleDealIds: body.accessibleDealIds ?? [],
+        accessibleContractIds: body.accessibleContractIds ?? [],
+        scopeCapped: body.scopeCapped ?? false,
+      };
+    },
+  },
+  {
+    name: "get_contract_doc_link",
+    description:
+      "Retorna o Google Docs URL do contrato. Read-only. Newton manda esse " +
+      "URL no chat; user clica e abre. Backend valida acesso via cross-user " +
+      "guard. Passe `actAsUserId` se houver delegação ativa pro filtro server-side.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        contractId: { type: "string" },
+        actAsUserId: {
+          type: "string",
+          description: "Vindo de resolve_caller. Omita se admin-mode.",
+        },
+      },
+      required: ["contractId"],
+    },
+    handler: async (args) => {
+      const contractId = args.contractId as string;
+      const actAsUserId = args.actAsUserId as string | undefined;
+      const r = await callApi({
+        method: "GET",
+        path: `/api/contracts/${encodeURIComponent(contractId)}/summary`,
+        actAsUserId,
+      });
+      if (r.status !== 200) return r;
+      const summary = r.body as Record<string, unknown>;
+      return {
+        contractId,
+        gdocUrl: summary.gdocUrl ?? null,
+        status: summary.status,
+        version: summary.version,
+      };
+    },
+  },
+  {
+    name: "download_attachment",
+    description:
+      "Retorna URL pra baixar attachment já uploaded. Read-only. Use pra " +
+      "entregar doc que o user pediu de volta no chat. NÃO use pra documentos " +
+      "sigilosos em conversa de grupo (per OCR.md regra 6). Passe `actAsUserId` " +
+      "se houver delegação ativa.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        attachmentId: { type: "string" },
+        actAsUserId: { type: "string", description: "Opcional, vindo de resolve_caller" },
+      },
+      required: ["attachmentId"],
+    },
+    handler: async (args) => {
+      const attachmentId = args.attachmentId as string;
+      const actAsUserId = args.actAsUserId as string | undefined;
+      const r = await callApi({
+        method: "GET",
+        path: `/api/attachments/${encodeURIComponent(attachmentId)}/url`,
+        actAsUserId,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "update_contract_field",
+    description:
+      "HITL. Cria ActionIntent pra atualizar UM campo do contrato. Owner aprova " +
+      "via UI. Whitelist de campos (counterparty.{cpf,rg,name,address}, " +
+      "pagamento.{valor_total,forma,prazo}, vigencia.{data_inicio,data_fim}, " +
+      "imovel.{endereco,matricula}). Bloqueia se contrato já aprovado. " +
+      "SEMPRE confirma verbalmente com user antes de chamar.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        contractId: { type: "string" },
+        fieldPath: {
+          type: "string",
+          description: "Path da whitelist (ex: 'vendedores[0].cpf', 'pagamento.valor_total')",
+        },
+        value: {
+          description: "string | number | null. Tipo correto pra o campo escolhido.",
+        },
+        idempotencyKey: {
+          type: "string",
+          description: "UUID v4. Retry com mesma key dentro de 24h retorna mesma intent.",
+        },
+        actAsUserId: { type: "string", description: "Opcional, vindo de resolve_caller" },
+      },
+      required: ["contractId", "fieldPath", "value", "idempotencyKey"],
+    },
+    handler: async (args) => {
+      const contractId = args.contractId as string;
+      const r = await callApi({
+        method: "POST",
+        path: `/api/contracts/${encodeURIComponent(contractId)}/intents/update-field`,
+        body: { fieldPath: args.fieldPath, value: args.value },
+        idempotencyKey: args.idempotencyKey as string,
+        actAsUserId: args.actAsUserId as string | undefined,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "cancel_envelope",
+    description:
+      "HITL. Cria ActionIntent pra cancelar envelope ClickSign já enviado. " +
+      "Owner aprova via UI. Bloqueia se envelope em estado terminal " +
+      "(closed/canceled/failed). SEMPRE confirma verbalmente com user antes.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        envelopeId: { type: "string" },
+        reason: { type: "string", minLength: 3, maxLength: 500 },
+        idempotencyKey: { type: "string", description: "UUID v4" },
+        actAsUserId: { type: "string", description: "Opcional, vindo de resolve_caller" },
+      },
+      required: ["envelopeId", "reason", "idempotencyKey"],
+    },
+    handler: async (args) => {
+      const envelopeId = args.envelopeId as string;
+      const r = await callApi({
+        method: "POST",
+        path: `/api/envelopes/${encodeURIComponent(envelopeId)}/cancel`,
+        body: { reason: args.reason },
+        idempotencyKey: args.idempotencyKey as string,
+        actAsUserId: args.actAsUserId as string | undefined,
+      });
+      return r.body;
     },
   },
 ];
