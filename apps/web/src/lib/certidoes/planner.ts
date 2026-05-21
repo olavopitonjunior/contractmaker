@@ -167,7 +167,22 @@ interface DealDataLike {
 // -------------------------------------------------------------------
 
 const DEFAULT_FINALIDADE = "Instrucao de compra e venda de imovel";
-const DEFAULT_EMAIL = "contato@contractmaker.com.br";
+// Fallback de ÚLTIMO caso: o caminho real passa o e-mail de login do operador
+// (route.ts → dealEmail). O e-SAJ (TJSP/TJRJ) VALIDA a entregabilidade desse
+// e-mail — domínio inexistente/sem MX é recusado com code 608 ("Favor preencher
+// com um email válido"). O antigo "contato@contractmaker.com.br" era um domínio
+// morto (NXDOMAIN, sem MX) pré-rebranding e quebrava 100% dos jobs de tribunal.
+// Configurável por env caso exista uma caixa real com MX.
+const DEFAULT_EMAIL =
+  process.env.CERTIDOES_FALLBACK_EMAIL?.trim() || "contato@imobpro.ia.br";
+
+/**
+ * Validação básica de formato de e-mail. Usada para decidir se o `dealEmail`
+ * recebido é aproveitável ou se caímos no DEFAULT_EMAIL.
+ */
+function isValidEmail(e: string | undefined | null): e is string {
+  return typeof e === "string" && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e.trim());
+}
 
 function onlyDigits(s: string | undefined | null): string {
   return typeof s === "string" ? s.replace(/\D/g, "") : "";
@@ -263,7 +278,7 @@ export function planCertidoesForDeal(
   const data = dealData ?? {};
   const jobs: PlannedJob[] = [];
   const skipped: SkippedJob[] = [];
-  const email = dealEmail || DEFAULT_EMAIL;
+  const email = isValidEmail(dealEmail) ? dealEmail.trim() : DEFAULT_EMAIL;
   const expandAll = options?.expandAll === true;
   const govBrActive = options?.govBrActive === true;
 
