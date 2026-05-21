@@ -31,7 +31,12 @@ async function authorizeDeal(dealId: string) {
   if (deal.form && deal.form.orgId !== org.id) {
     return { error: "Forbidden", status: 403 as const };
   }
-  return { deal, org, userId: session.user.id };
+  return {
+    deal,
+    org,
+    userId: session.user.id,
+    userEmail: session.user.email ?? null,
+  };
 }
 
 /**
@@ -107,7 +112,7 @@ export async function POST(
   if ("error" in authResult) {
     return NextResponse.json({ error: authResult.error }, { status: authResult.status });
   }
-  const { deal, org, userId } = authResult;
+  const { deal, org, userId, userEmail } = authResult;
 
   const body = await req.json().catch(() => ({}));
   const parsed = extractSchema.safeParse(body);
@@ -178,7 +183,10 @@ export async function POST(
   // cross-UF picks. Otherwise use the default auto-plan.
   const plan = planCertidoesForDeal(
     dealData as any,
-    undefined,
+    // E-mail do operador → vai pro campo `email` dos jobs de tribunal (TJSP/
+    // TJRJ/TJ), que o e-SAJ valida e usa pra notificar a certidão. Antes ia
+    // `undefined` → caía no DEFAULT_EMAIL morto e o portal recusava com 608.
+    userEmail ?? undefined,
     diligenciados,
     {
       expandAll: !!selectedJobs,
