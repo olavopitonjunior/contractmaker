@@ -12,6 +12,7 @@ export const DELETABLE = [
   "data_invalid",
   "informativo",
   "awaiting_portal",
+  "duplicate_pending",
   "replaced",
 ] as const;
 

@@ -112,6 +112,8 @@ function statusIcon(row: CertidaoJobRow) {
       return <Loader2 className="h-4 w-4 animate-spin text-blue-600" />;
     case "awaiting_portal":
       return <Clock className="h-4 w-4 text-amber-600" />;
+    case "duplicate_pending":
+      return <CalendarClock className="h-4 w-4 text-amber-600" />;
     case "skipped":
       return <SkipForward className="h-4 w-4 text-muted-foreground" />;
     case "replaced":
@@ -224,6 +226,15 @@ function statusLabel(row: CertidaoJobRow): string {
   if (status === "informativo") {
     return "Consulta informativa (não é certidão)";
   }
+  if (status === "duplicate_pending") {
+    const ep = row.endpoint.toLowerCase();
+    const eta = ep.includes("tjrj")
+      ? "previsão até 8 dias úteis"
+      : ep.includes("tjms")
+      ? "previsão até 48h"
+      : "previsão até 15 min";
+    return `Pedido já em andamento no portal · ${eta}`;
+  }
   if (status === "failed_permanent") {
     return row.portalUrl
       ? "Indisponível automaticamente — use o portal oficial"
@@ -283,6 +294,7 @@ function statusVariant(row: CertidaoJobRow): string {
   const status = effectiveStatus(row);
   if (status === "failed") return "border-red-300 bg-red-50";
   if (status === "awaiting_portal") return "border-amber-300 bg-amber-50";
+  if (status === "duplicate_pending") return "border-amber-300 bg-amber-50/60";
   if (status === "fetching" || status === "pending")
     return "border-blue-300 bg-blue-50/30";
   if (status === "skipped") return "border-muted bg-muted/20";
@@ -429,7 +441,12 @@ export function CertidoesTab({
   ): "success" | "awaiting" | "action" | "failed" | "other" => {
     const s = effectiveStatus(row);
     if (s === "success" || s === "informativo") return "success";
-    if (s === "awaiting_portal" || s === "fetching" || s === "pending")
+    if (
+      s === "awaiting_portal" ||
+      s === "duplicate_pending" ||
+      s === "fetching" ||
+      s === "pending"
+    )
       return "awaiting";
     if (s === "data_missing" || s === "data_invalid" || s === "failed_permanent" || s === "skipped")
       return "action";
@@ -489,9 +506,10 @@ export function CertidoesTab({
     const failed = visibleJobs.filter(
       (j) => effectiveStatus(j) === "failed"
     ).length;
-    const awaiting = visibleJobs.filter(
-      (j) => effectiveStatus(j) === "awaiting_portal"
-    ).length;
+    const awaiting = visibleJobs.filter((j) => {
+      const s = effectiveStatus(j);
+      return s === "awaiting_portal" || s === "duplicate_pending";
+    }).length;
     const fetching = visibleJobs.filter((j) => {
       const s = effectiveStatus(j);
       return s === "fetching" || s === "pending";
@@ -1265,6 +1283,7 @@ export function CertidoesTab({
                             row.status === "failed_permanent" ||
                             row.status === "data_missing" ||
                             row.status === "data_invalid" ||
+                            row.status === "duplicate_pending" ||
                             row.status === "skipped";
                           if (!showForTerminalFailure) return null;
                           return (

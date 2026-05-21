@@ -9,6 +9,7 @@ import { renderSerasaHtml, type SerasaRenderContext } from "./serasa-render";
 import { exportPdfToBuffer } from "@/lib/render/exporter";
 import { endpointInfo } from "./endpoints";
 import { classifyOutcome } from "./outcome-classifier";
+import { isPedidoDuplicado } from "./error-codes";
 import type { InfosimplesResponse, JobStatus, Situacao, TargetKind } from "./types";
 import { emitNotification } from "@/lib/notifications/emit";
 
@@ -348,6 +349,47 @@ export async function runSingleJob(
         latencyMs,
         costCents: info.costCents,
       });
+      return;
+    }
+
+    // Two-step "pedido duplicado": e-SAJ recusa com code 620 quando já existe
+    // um pedido do mesmo tipo em processamento (re-disparo enquanto a tentativa
+    // anterior ainda roda). NÃO retorna numero_pedido → não dá pra buscar por
+    // aqui; a certidão sai pela tentativa original. Marca estado neutro
+    // `duplicate_pending` + ETA (em vez de failed_permanent vermelho). NÃO é
+    // varrido pelo cron poll-portal (que só pega awaiting_portal). Gate por
+    // mensagem — code 620 também serve pra erro de 2FA GOV.BR. Ver
+    // isPedidoDuplicado em error-codes.ts.
+    const duplicadoMsg = [resp.code_message, ...(resp.errors ?? [])]
+      .filter(Boolean)
+      .join(" ");
+    if (isPedido && resp.code === 620 && isPedidoDuplicado(duplicadoMsg)) {
+      const expected = computeInitialExpectedReadyAt(job.endpoint);
+      const billable = resp.header?.billable;
+      await prisma.certidaoJob.update({
+        where: { id: jobId },
+        data: {
+          status: "duplicate_pending",
+          finishedAt: new Date(),
+          latencyMs,
+          resultCode: resp.code,
+          resultMessage: resp.code_message,
+          resultData: { duplicate_pending: true, numero_pedido: null },
+          errorMessage:
+            "Já existe um pedido deste tipo em andamento no portal. A certidão será emitida pela tentativa original — acompanhe no portal se não aparecer.",
+          expectedReadyAt: expected,
+          costCents: billable === false ? 0 : info.costCents,
+          portalUrl: info.portalUrl ?? null,
+        },
+      });
+      logTransition(jobId, "fetching", "duplicate_pending", "pedido duplicado no portal", {
+        endpoint: job.endpoint,
+        resultCode: resp.code,
+        expectedReadyAt: expected,
+        latencyMs,
+        costCents: billable === false ? 0 : info.costCents,
+      });
+      await checkBatchCompletion(job.batchId);
       return;
     }
 

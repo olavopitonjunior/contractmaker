@@ -306,6 +306,7 @@ export async function POST(
     "data_invalid",
     "informativo",
     "skipped",
+    "duplicate_pending",
     "replaced",
   ];
   const supersedeTargets = [

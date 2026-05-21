@@ -214,3 +214,24 @@ export function isProtestoNadaConsta(
     message
   );
 }
+
+/**
+ * Portais two-step (e-SAJ TJSP/TJRJ) recusam um pedido com code 620 quando JÁ
+ * EXISTE um pedido do mesmo tipo em processamento (ex.: o usuário re-disparou
+ * a certidão enquanto a tentativa anterior ainda rodava). A resposta NÃO traz
+ * `numero_pedido` (não dá pra buscar por aqui) — a certidão será emitida pela
+ * tentativa original. Detecção usada pra marcar `duplicate_pending` (estado
+ * neutro "pedido já em andamento" + ETA) em vez de failed_permanent vermelho.
+ *
+ * ATENÇÃO: code 620 é GENÉRICO na Infosimples — também aparece pra problemas
+ * de 2FA/autenticação GOV.BR ("verificação em duas etapas está ativada"). Por
+ * isso o gate é a mensagem específica de pedido duplicado, NÃO o code sozinho.
+ */
+export function isPedidoDuplicado(
+  message: string | null | undefined
+): boolean {
+  if (!message) return false;
+  return /j[áa]\s+existe.*pedido|aguarde\s+o\s+processamento\s+do\s+pedido/i.test(
+    message
+  );
+}

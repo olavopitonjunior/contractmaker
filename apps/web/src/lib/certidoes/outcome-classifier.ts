@@ -38,6 +38,7 @@ export type RichStatus =
   | "success"
   | "informativo"
   | "failed_permanent"
+  | "duplicate_pending"
   | "skipped"
   | "replaced";
 

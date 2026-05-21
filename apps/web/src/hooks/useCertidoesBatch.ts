@@ -24,6 +24,7 @@ export interface CertidaoJobRow {
     | "data_invalid"
     | "informativo"
     | "failed_permanent"
+    | "duplicate_pending"
     | "skipped"
     | "replaced";
   requestPayload: unknown;
