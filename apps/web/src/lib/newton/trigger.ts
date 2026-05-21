@@ -29,8 +29,11 @@ export interface TriggerArgs {
   targetLabel?: string | null;
   targetRef?: string | null;
   targetType: string;
-  /** "create" dispara cobrança; "cancel" pede pro Newton derrubar os lembretes. */
-  kind?: "create" | "cancel";
+  /**
+   * "create" dispara a 1ª cobrança; "remind" re-cobra um pedido ainda pendente
+   * (vem do sweep); "cancel" pede pro Newton parar.
+   */
+  kind?: "create" | "remind" | "cancel";
 }
 
 function buildText(a: TriggerArgs): string {
@@ -46,12 +49,22 @@ function buildText(a: TriggerArgs): string {
       `cronJobIds). Não trate isto como mensagem pessoal do operador.`
     );
   }
+  if (a.kind === "remind") {
+    return (
+      `[deal-request · sistema] Re-cobrança: o pedido #${a.requestId} no negócio ` +
+      `${a.dealId} ("${a.ask}") ainda está pendente. Veja o estado e a timeline com ` +
+      `list_newton_requests({dealId:"${a.dealId}"}) — NÃO cobre 2× no mesmo dia. Se ` +
+      `couber, cobre de novo ${alvo} de forma educada (varie o tom, não repita igual) e ` +
+      `marque o andamento com update_newton_request. Não trate isto como mensagem pessoal.`
+    );
+  }
   return (
     `[deal-request · sistema] Novo pedido da negociadora no negócio ${a.dealId}. ` +
     `Leia o pedido com list_newton_requests({dealId:"${a.dealId}", status:"open"}) — ` +
     `pedido #${a.requestId}: "${a.ask}". Cobre essa informação de ${alvo} via WhatsApp ` +
-    `(respeitando sigilo em grupo) e, se fizer sentido, agende lembretes. Marque o ` +
-    `andamento com update_newton_request. Não trate isto como mensagem pessoal do operador.`
+    `(respeitando sigilo em grupo) UMA vez e marque o andamento com update_newton_request ` +
+    `(action "chasing"). A re-cobrança é automática — NÃO agende cron. Não trate isto ` +
+    `como mensagem pessoal do operador.`
   );
 }
 

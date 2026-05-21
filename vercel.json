@@ -44,6 +44,10 @@
     {
       "path": "/api/cron/agent-runs/cleanup",
       "schedule": "0 4 * * *"
+    },
+    {
+      "path": "/api/cron/newton-requests/sweep",
+      "schedule": "0 * * * *"
     }
   ]
 }
