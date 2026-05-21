@@ -125,6 +125,21 @@ vi.mock("@/lib/db/prisma", () => {
       delete: vi.fn().mockResolvedValue({}),
       count: vi.fn().mockResolvedValue(0),
     },
+    newtonRequest: {
+      findUnique: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn(),
+      update: vi.fn().mockResolvedValue({}),
+    },
+    dealGroupLink: {
+      findUnique: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+      upsert: vi.fn(),
+    },
+    notification: {
+      create: vi.fn().mockResolvedValue({}),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     pipeline: {
       findFirst: vi.fn(),
     },

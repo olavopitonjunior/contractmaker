@@ -108,4 +108,26 @@ describe("hasScope", () => {
     expect(hasScope(ident, "metrics:r")).toBe(true);
     expect(hasScope(ident, "charges:rw")).toBe(false);
   });
+
+  it("rw implies r: deals:rw token satisfies deals:r", () => {
+    const ident = {
+      via: "bearer" as const,
+      userId: "u1",
+      tokenId: "t1",
+      scopes: ["deals:rw"],
+    };
+    expect(hasScope(ident, "deals:r")).toBe(true);
+    expect(hasScope(ident, "deals:rw")).toBe(true);
+  });
+
+  it("does not grant unrelated read scope", () => {
+    const ident = {
+      via: "bearer" as const,
+      userId: "u1",
+      tokenId: "t1",
+      scopes: ["metrics:r"],
+    };
+    // metrics:r não satisfaz deals:r (recurso diferente, e não há deals:rw)
+    expect(hasScope(ident, "deals:r")).toBe(false);
+  });
 });

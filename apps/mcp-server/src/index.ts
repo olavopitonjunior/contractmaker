@@ -82,6 +82,13 @@ export async function callApi(args: {
   query?: Record<string, string | undefined>;
   body?: unknown;
   idempotencyKey?: string;
+  /**
+   * Quando setado, injeta header `X-Act-As-User: <userId>`. Backend (atrás de
+   * DELEGATION_ENABLED=true) então aplica filtros sales-role contra esse user.
+   * Resolvido via tool `resolve_caller(phone)` e propagado pelas demais tools
+   * que aceitam este param.
+   */
+  actAsUserId?: string;
 }): Promise<{ status: number; body: unknown }> {
   const url = new URL(args.path, API_URL);
   if (args.query) {
@@ -98,6 +105,9 @@ export async function callApi(args: {
   }
   if (args.idempotencyKey) {
     headers["X-Idempotency-Key"] = args.idempotencyKey;
+  }
+  if (args.actAsUserId) {
+    headers["X-Act-As-User"] = args.actAsUserId;
   }
   const res = await fetch(url, {
     method: args.method,

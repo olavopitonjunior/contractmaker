@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw } from "lucide-react";
+import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot } from "lucide-react";
 import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
 import { cn } from "@/lib/utils";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
@@ -15,6 +15,7 @@ import type { SelectGroup } from "@/components/forms/NativeSelect";
 import type { Assignment, DocumentKind } from "@/lib/forms/extracted-to-form";
 import { CertidoesTab } from "@/components/pipeline/CertidoesTab";
 import { SignaturesTab } from "@/components/pipeline/SignaturesTab";
+import { NewtonRequestsTab } from "@/components/pipeline/NewtonRequestsTab";
 import { CommissionChargeDialog } from "@/components/pipeline/CommissionChargeDialog";
 import { CommissionChargeList } from "@/components/pipeline/CommissionChargeList";
 import { DealProgressTimeline } from "@/components/pipeline/DealProgressTimeline";
@@ -121,6 +122,7 @@ const VALID_TABS = new Set([
   "contratos",
   "assinaturas",
   "pagamentos",
+  "newton",
 ]);
 
 export function DealDetail({ deal }: DealDetailProps) {
@@ -722,6 +724,10 @@ export function DealDetail({ deal }: DealDetailProps) {
             <Wallet className="h-3.5 w-3.5 mr-1" />
             Pagamentos
           </TabsTrigger>
+          <TabsTrigger value="newton">
+            <Bot className="h-3.5 w-3.5 mr-1" />
+            Pedidos ao Newton
+          </TabsTrigger>
         </TabsList>
 
         <TabsContent value="dados" className="mt-4">
@@ -1034,6 +1040,10 @@ export function DealDetail({ deal }: DealDetailProps) {
             </div>
             <CommissionChargeList key={chargeRefreshKey} dealId={deal.id} />
           </div>
+        </TabsContent>
+
+        <TabsContent value="newton" className="mt-4">
+          <NewtonRequestsTab dealId={deal.id} />
         </TabsContent>
       </Tabs>
 
