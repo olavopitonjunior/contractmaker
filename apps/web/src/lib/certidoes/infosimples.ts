@@ -136,6 +136,32 @@ export async function callInfosimples(
     }
   }
 
+  // ONR/ARISP (Registradores) — endpoints `registradores/*` e `onr/*` usam as
+  // credenciais do portal de Registradores (separadas do gov.br/TJSP) e debitam
+  // o saldo daquele portal. Modo Cert A1 (pkcs12 criptograma) ou login/senha,
+  // resolvido pela mesma fonte de verdade que checkOnrAuth (onr-auth.ts).
+  // Injetado aqui (nunca persistido no requestPayload — sanitizePayload remove).
+  const requiresOnrAuth =
+    endpoint.startsWith("registradores/") || endpoint.startsWith("onr/");
+  if (requiresOnrAuth) {
+    const onrCertCrypt = process.env.INFOSIMPLES_ONR_PKCS12_CERT_CRYPT?.trim();
+    const onrPassCrypt = process.env.INFOSIMPLES_ONR_PKCS12_PASS_CRYPT?.trim();
+    const onrLogin = process.env.INFOSIMPLES_ONR_LOGIN?.trim();
+    const onrSenha = process.env.INFOSIMPLES_ONR_SENHA?.trim();
+    const onrTipoLogin = process.env.INFOSIMPLES_ONR_TIPO_LOGIN?.trim();
+    const onrAuthMode = process.env.INFOSIMPLES_ONR_AUTH_MODE?.trim();
+    const useOnrCert =
+      onrAuthMode !== "login_senha" && !!onrCertCrypt && !!onrPassCrypt;
+    if (useOnrCert) {
+      body.set("pkcs12_cert", onrCertCrypt!);
+      body.set("pkcs12_pass", onrPassCrypt!);
+    } else if (onrLogin && onrSenha) {
+      body.set("login", onrLogin);
+      body.set("senha", onrSenha);
+      if (onrTipoLogin) body.set("tipo_login", onrTipoLogin);
+    }
+  }
+
   const doRequest = async () => {
     const res = await fetchWithTimeout(
       url,
@@ -214,5 +240,9 @@ export function sanitizePayload(
   delete clean.login_senha;
   delete clean.pkcs12_cert;
   delete clean.pkcs12_pass;
+  // ONR/ARISP (Registradores) credentials — never persist.
+  delete clean.login;
+  delete clean.senha;
+  delete clean.tipo_login;
   return clean;
 }

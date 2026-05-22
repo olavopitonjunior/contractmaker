@@ -9,7 +9,11 @@ import { renderSerasaHtml, type SerasaRenderContext } from "./serasa-render";
 import { exportPdfToBuffer } from "@/lib/render/exporter";
 import { endpointInfo } from "./endpoints";
 import { classifyOutcome } from "./outcome-classifier";
-import { isPedidoDuplicado } from "./error-codes";
+import {
+  isPedidoDuplicado,
+  mapInfosimplesCodeToCategory,
+  decideObterOutcome,
+} from "./error-codes";
 import type { InfosimplesResponse, JobStatus, Situacao, TargetKind } from "./types";
 import { emitNotification } from "@/lib/notifications/emit";
 
@@ -77,6 +81,14 @@ function computeAdaptiveRetryDelta(
   if (endpoint.includes("/tjrj/")) {
     return ageMs < fortyEightHoursMs ? 6 * 60 * 60_000 : 24 * 60 * 60_000;
   }
+  // ONR matrícula: imediato a 5 dias úteis → 6h nas primeiras 48h, depois 24h.
+  if (endpoint.startsWith("registradores/")) {
+    return ageMs < fortyEightHoursMs ? 6 * 60 * 60_000 : 24 * 60 * 60_000;
+  }
+  // Antecedentes PF: normalmente instantâneo → poll agressivo a cada 30min.
+  if (endpoint.startsWith("antecedentes-criminais/")) {
+    return 30 * 60_000;
+  }
   // Unknown portal type — fall back to the old fixed 12h
   return 12 * 60 * 60_000;
 }
@@ -87,14 +99,106 @@ function computeAdaptiveRetryDelta(
  */
 function computeInitialExpectedReadyAt(endpoint: string): Date {
   const expected = new Date();
-  if (endpoint.includes("/tjsp/")) {
+  if (endpoint.includes("/tjsp/") || endpoint.startsWith("antecedentes-criminais/")) {
     expected.setTime(expected.getTime() + 30 * 60_000); // 30 min
-  } else if (endpoint.includes("/tjrj/")) {
+  } else if (endpoint.includes("/tjrj/") || endpoint.startsWith("registradores/")) {
     expected.setTime(expected.getTime() + 6 * 60 * 60_000); // 6h
   } else {
     expected.setTime(expected.getTime() + 60 * 60_000); // 1h default
   }
   return expected;
+}
+
+/**
+ * Prazo máximo (ms) que um pedido two-step pode ficar em awaiting_portal antes
+ * de virar problema. Substitui o MAX_AGE fixo de 14d — cada portal tem ritmo
+ * próprio (TJSP costuma sair em min/horas; TJRJ pode levar dias úteis).
+ */
+function maxPortalWaitMs(endpoint: string): number {
+  if (endpoint.includes("/tjsp/")) return 12 * 60 * 60_000; // 12h
+  if (endpoint.includes("/tjrj/")) return 14 * 24 * 60 * 60_000; // ~10 dias úteis
+  if (endpoint.includes("/tjms/")) return 3 * 24 * 60 * 60_000; // 3 dias
+  if (endpoint.includes("/trf3/")) return 2 * 24 * 60 * 60_000; // 2 dias
+  if (endpoint.startsWith("registradores/")) return 14 * 24 * 60 * 60_000; // ~5 dias úteis + folga
+  if (endpoint.startsWith("antecedentes-criminais/")) return 24 * 60 * 60_000; // 1 dia
+  return 2 * 24 * 60 * 60_000;
+}
+
+/**
+ * Phase L — Resolve o endpoint do 2º passo (obter/download/validar) a partir do
+ * endpoint do pedido (1º passo). Tabela por prefixo cobrindo todos os fluxos
+ * two-step. Antes era uma cadeia hardcoded só com tjsp/tjrj/trf3 — ONR
+ * matrícula, TJMS e Antecedentes PF caíam em null e ficavam presos.
+ */
+export function resolveObterEndpoint(pedidoEndpoint: string): string | null {
+  if (pedidoEndpoint.includes("/tjsp/")) return "tribunal/tjsp/obter-civel";
+  if (pedidoEndpoint.includes("/tjrj/")) return "tribunal/tjrj/obter-certidao";
+  if (pedidoEndpoint.includes("/trf3/")) return "tribunal/trf3/obter-certidao";
+  if (pedidoEndpoint.includes("/tjms/")) return "tribunal/tjms/obter-certidao";
+  if (pedidoEndpoint === "registradores/matric-pedido")
+    return "registradores/matric-download";
+  if (pedidoEndpoint === "antecedentes-criminais/pf/emit")
+    return "antecedentes-criminais/pf/val";
+  return null;
+}
+
+// Memo curto (TTL 60s) do gasto mensal por org — evita refazer o aggregate a
+// cada job numa varredura de cron (50+ jobs). Escopo de processo.
+const _spendMemo = new Map<string, { exceeded: boolean; ts: number }>();
+
+/**
+ * Fase 0 — Guard de custo/crédito. Antes de QUALQUER chamada paga à Infosimples
+ * (cron de poll/retry incluso), verifica se a org deve ser bloqueada:
+ *   - `budget`: gasto mensal já estourou INFOSIMPLES_MONTHLY_BUDGET_CENTS.
+ *   - `credit`: houve 603/604 ("limite de uso"/token) nos últimos 30min →
+ *     crédito Infosimples provavelmente esgotado; para de martelar a API até
+ *     recarga. (Infosimples não tem API de saldo; o 603 é o sinal in-band.)
+ * Retorna {blocked:false} quando orgId é nulo (não dá pra escopar).
+ */
+async function isOrgInfosimplesBlocked(
+  orgId: string | null | undefined
+): Promise<{ blocked: boolean; reason?: "budget" | "credit" }> {
+  if (!orgId) return { blocked: false };
+  const memo = _spendMemo.get(orgId);
+  let exceeded: boolean;
+  if (memo && Date.now() - memo.ts < 60_000) {
+    exceeded = memo.exceeded;
+  } else {
+    exceeded = (await getMonthlySpend(orgId)).exceeded;
+    _spendMemo.set(orgId, { exceeded, ts: Date.now() });
+  }
+  if (exceeded) return { blocked: true, reason: "budget" };
+  const recent603 = await prisma.certidaoJob.findFirst({
+    where: {
+      orgId,
+      resultCode: { in: [603, 604] },
+      finishedAt: { gte: new Date(Date.now() - 30 * 60_000) },
+    },
+    select: { id: true },
+  });
+  if (recent603) return { blocked: true, reason: "credit" };
+  return { blocked: false };
+}
+
+/**
+ * Fase 2 — Emite UM alerta de problema por lote (sino, deduped por batchId via
+ * unique constraint em emitNotification). Fire-and-forget. O e-mail resumo é
+ * enviado pelo cron diário `certidoes/problem-digest`.
+ */
+async function reportCertidaoProblem(
+  job: { id: string; orgId: string | null; dealId: string | null; batchId: string; endpoint: string; label: string },
+  reason: string
+): Promise<void> {
+  if (!job.orgId || !job.dealId) return;
+  await emitNotification({
+    orgId: job.orgId,
+    type: "certidao_problem",
+    title: "Certidões com problema",
+    body: `Há certidões que não puderam ser emitidas (${reason}). Abra o relatório de certidões do negócio.`,
+    linkUrl: `/deals/${job.dealId}`,
+    batchId: job.batchId,
+    metadata: { jobId: job.id, endpoint: job.endpoint, label: job.label, reason },
+  });
 }
 
 /**
@@ -315,6 +419,26 @@ export async function runSingleJob(
     return;
   }
 
+  // Fase 0 — guard de custo/crédito (Infosimples): se a org está bloqueada
+  // (orçamento mensal estourado ou crédito esgotado via 603 recente), NÃO chama
+  // a API paga. Marca como problema em vez de queimar crédito. Protege a task
+  // de retry do cron, que chama runSingleJob.
+  const blockedRun = await isOrgInfosimplesBlocked(job.orgId);
+  if (blockedRun.blocked) {
+    const reasonMsg =
+      blockedRun.reason === "credit"
+        ? "Crédito Infosimples esgotado — recarregue no portal"
+        : "Orçamento mensal de certidões esgotado";
+    await prisma.certidaoJob.update({
+      where: { id: jobId },
+      data: { status: "failed_permanent", finishedAt: new Date(), errorMessage: reasonMsg, portalUrl: job.portalUrl ?? info.portalUrl ?? null },
+    });
+    logTransition(jobId, "fetching", "failed_permanent", `blocked:${blockedRun.reason} (sem chamada)`, { endpoint: job.endpoint });
+    await reportCertidaoProblem(job, blockedRun.reason === "credit" ? "crédito Infosimples esgotado" : "orçamento mensal esgotado");
+    await checkBatchCompletion(job.batchId);
+    return;
+  }
+
   try {
     const args = job.requestPayload as Record<string, unknown>;
     const resp = await callInfosimples(job.endpoint, args);
@@ -487,6 +611,14 @@ export async function runSingleJob(
       nextRetryAt: outcome.nextRetryAt?.toISOString() ?? null,
       missingFieldsCount: outcome.missingFields.length,
     });
+    // Fase 2 — falha terminal vira problema (sino deduped por batch).
+    if (
+      outcome.status === "failed_permanent" ||
+      outcome.status === "data_missing" ||
+      outcome.status === "data_invalid"
+    ) {
+      await reportCertidaoProblem(job, outcome.errorMessage || outcome.status);
+    }
     // F4: single-job path (retry/complementar) — check batch. For multi-job
     // batches from runBatch this is also called but is idempotent via batchId
     // metadata lookup.
@@ -529,6 +661,7 @@ export async function runSingleJob(
       latencyMs,
       costCents: info.costCents,
     });
+    await reportCertidaoProblem(job, message.slice(0, 120));
     await checkBatchCompletion(job.batchId);
   }
 }
@@ -775,72 +908,141 @@ export async function pollPortalJob(jobId: string): Promise<void> {
     return;
   }
 
-  const obterEndpoint = job.endpoint.includes("/tjsp/")
-    ? "tribunal/tjsp/obter-civel"
-    : job.endpoint.includes("/tjrj/")
-    ? "tribunal/tjrj/obter-certidao"
-    : job.endpoint.includes("/trf3/")
-    ? "tribunal/trf3/obter-certidao"
-    : null;
+  // Resolve o endpoint do 2º passo a partir do prefixo do pedido. Antes só
+  // tjsp/tjrj/trf3 eram mapeados — qualquer outro two-step (ONR matrícula,
+  // TJMS, Antecedentes PF) caía em null e ficava preso em awaiting_portal.
+  const obterEndpoint = resolveObterEndpoint(job.endpoint);
   if (!obterEndpoint) return;
 
   const obterInfo = endpointInfo(obterEndpoint);
   const startedAt = new Date();
 
-  // Params do 2º passo variam por portal. TJSP/TJRJ: { numero_pedido }.
-  // TRF3: { numero_certidao, cpf|cnpj } — exige o documento junto do número
-  // da certidão (doc Infosimples tribunal/trf3/obter-certidao). O cpf/cnpj é
-  // recuperado do requestPayload do pedido original.
+  // Params do 2º passo variam por portal:
+  //   - TJSP/TJRJ/TJMS: { numero_pedido }
+  //   - TRF3: { numero_certidao, cpf|cnpj } (doc exige o documento junto)
+  //   - ONR matrícula: { numero_pedido } no download da matrícula gerada
+  //   - Antecedentes PF: { codigo, cpf } para validar o código emitido
+  const payload = (job.requestPayload as Record<string, unknown>) ?? {};
   let obterArgs: Record<string, unknown> = { numero_pedido: numeroPedido };
   if (obterEndpoint.includes("/trf3/")) {
-    const payload = (job.requestPayload as Record<string, unknown>) ?? {};
     obterArgs = { numero_certidao: numeroPedido };
     if (payload.cpf) obterArgs.cpf = payload.cpf;
     else if (payload.cnpj) obterArgs.cnpj = payload.cnpj;
+  } else if (obterEndpoint.startsWith("antecedentes-criminais/")) {
+    obterArgs = { codigo: numeroPedido };
+    if (payload.cpf) obterArgs.cpf = payload.cpf;
+  }
+
+  // Fase 0 — guard de custo/crédito: não chama a API paga se a org está
+  // bloqueada (orçamento mensal estourado ou crédito esgotado = 603 recente).
+  // Evita martelar a API e queimar crédito. Reagenda dentro do prazo do portal;
+  // se já estourou o prazo, vira problema.
+  const blocked = await isOrgInfosimplesBlocked(job.orgId);
+  if (blocked.blocked) {
+    const reasonMsg =
+      blocked.reason === "credit"
+        ? "Crédito Infosimples esgotado — recarregue no portal"
+        : "Orçamento mensal de certidões esgotado";
+    if (Date.now() - job.createdAt.getTime() > maxPortalWaitMs(job.endpoint)) {
+      await prisma.certidaoJob.update({
+        where: { id: jobId },
+        data: { status: "failed_permanent", finishedAt: new Date(), errorMessage: reasonMsg, portalUrl: job.portalUrl ?? obterInfo.portalUrl ?? null },
+      });
+      logTransition(jobId, "awaiting_portal", "failed_permanent", `blocked:${blocked.reason} + prazo esgotado`, { endpoint: obterEndpoint });
+      await reportCertidaoProblem(job, blocked.reason === "credit" ? "crédito Infosimples esgotado" : "orçamento mensal esgotado");
+      await checkBatchCompletion(job.batchId);
+    } else {
+      // Adia o poll ~1h sem chamar (não gasta) e avisa o problema.
+      await prisma.certidaoJob.update({
+        where: { id: jobId },
+        data: { expectedReadyAt: new Date(Date.now() + 60 * 60_000), resultMessage: reasonMsg },
+      });
+      logTransition(jobId, "awaiting_portal", "awaiting_portal", `blocked:${blocked.reason} — poll adiado (sem chamada)`, { endpoint: obterEndpoint });
+      await reportCertidaoProblem(job, blocked.reason === "credit" ? "crédito Infosimples esgotado" : "orçamento mensal esgotado");
+    }
+    return;
   }
 
   try {
     const resp = await callInfosimples(obterEndpoint, obterArgs);
     const latencyMs = Date.now() - startedAt.getTime();
 
-    // If not ready yet (business code indicating pending), push expectedReadyAt forward.
-    // F4: adaptive delay based on portal type + age — TJSP polls every 30min
-    // in the first 2h, TJRJ every 6h in the first 48h. Previously fixed 12h.
-    if (resp.code !== 200 && resp.code >= 600 && resp.code < 700) {
-      const next = new Date();
-      next.setTime(next.getTime() + computeAdaptiveRetryDelta(job.endpoint, job.createdAt));
-      const MAX_AGE = 14 * 24 * 60 * 60_000;
-      const tooOld = startedAt.getTime() - job.createdAt.getTime() > MAX_AGE;
+    // Classifica a resposta do obter (2º passo) em vez de tratar todo 6xx como
+    // "ainda processando" (loop infinito até 14d — bug que drenou crédito):
+    //  - account/integration (603/604/602) → falha IMEDIATA (não reagenda) +
+    //    problema. Não se resolve repetindo (token/crédito/endpoint inválido).
+    //  - portal fora / limite (transitório) → retry limitado a maxRetries (3),
+    //    depois falha + problema.
+    //  - demais 6xx → "ainda processando": reagenda até o prazo do portal
+    //    (maxPortalWaitMs), depois falha + problema.
+    if (resp.code !== 200) {
+      const category = mapInfosimplesCodeToCategory(resp.code, resp.code_message);
+      const obterCost = resp.header?.billable === false ? 0 : obterInfo.costCents;
+      const costAcc = (job.costCents ?? 0) + obterCost;
+      const ageMs = startedAt.getTime() - job.createdAt.getTime();
+      const portalUrl = job.portalUrl ?? obterInfo.portalUrl ?? null;
+      const attempts = (job.retryCount ?? 0) + 1;
+      const maxR = job.maxRetries ?? 3;
+      const decision = decideObterOutcome(category, {
+        ageMs,
+        attempts,
+        maxRetries: maxR,
+        maxWaitMs: maxPortalWaitMs(job.endpoint),
+      });
+
+      if (decision.action === "fail") {
+        const reasonMsg: Record<typeof decision.reason, string> = {
+          account: "crédito/conta Infosimples",
+          integration: "endpoint indisponível",
+          transient_exhausted: "portal indisponível (tentativas esgotadas)",
+          deadline: "prazo do portal esgotado",
+        };
+        await prisma.certidaoJob.update({
+          where: { id: jobId },
+          data: {
+            status: "failed_permanent",
+            finishedAt: new Date(),
+            retryCount: attempts,
+            resultCode: resp.code,
+            resultMessage: resp.code_message,
+            errorMessage: `${reasonMsg[decision.reason]}: ${resp.code_message ?? ""}`.slice(0, 500),
+            costCents: costAcc,
+            portalUrl,
+          },
+        });
+        logTransition(jobId, "awaiting_portal", "failed_permanent", `obter ${decision.reason}`, {
+          endpoint: obterEndpoint,
+          resultCode: resp.code,
+          attempts,
+          ageMs,
+        });
+        await reportCertidaoProblem(job, reasonMsg[decision.reason]);
+        await checkBatchCompletion(job.batchId);
+        return;
+      }
+
+      // retry (transitório, conta tentativa) ou wait (ainda processando, não
+      // conta) — ambos reagendam dentro do prazo do portal.
+      const next = new Date(Date.now() + computeAdaptiveRetryDelta(job.endpoint, job.createdAt));
       await prisma.certidaoJob.update({
         where: { id: jobId },
-        data: tooOld
-          ? {
-              status: "failed",
-              finishedAt: new Date(),
-              errorMessage: `Timeout portal: ${resp.code_message}`,
-              costCents: (job.costCents ?? 0) + obterInfo.costCents,
-            }
-          : {
-              expectedReadyAt: next,
-              resultMessage: resp.code_message,
-              costCents: (job.costCents ?? 0) + obterInfo.costCents,
-            },
+        data: {
+          expectedReadyAt: next,
+          resultCode: resp.code,
+          resultMessage: resp.code_message,
+          costCents: costAcc,
+          ...(decision.action === "retry" ? { retryCount: attempts } : {}),
+        },
       });
-      if (tooOld) {
-        logTransition(jobId, "awaiting_portal", "failed", "portal timeout (14d)", {
-          endpoint: obterEndpoint,
-          resultCode: resp.code,
-          ageMs: startedAt.getTime() - job.createdAt.getTime(),
-        });
-        await checkBatchCompletion(job.batchId);
-      } else {
-        // Reagendamento — log simples sem mudar status (continua awaiting_portal)
-        logTransition(jobId, "awaiting_portal", "awaiting_portal", "portal still processing — rescheduled", {
-          endpoint: obterEndpoint,
-          resultCode: resp.code,
-          nextCheck: next,
-        });
-      }
+      logTransition(
+        jobId,
+        "awaiting_portal",
+        "awaiting_portal",
+        decision.action === "retry"
+          ? `obter transitório — retry ${attempts}/${maxR}`
+          : "portal still processing — rescheduled",
+        { endpoint: obterEndpoint, resultCode: resp.code, nextCheck: next }
+      );
       return;
     }
 

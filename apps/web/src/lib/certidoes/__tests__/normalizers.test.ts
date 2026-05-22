@@ -562,7 +562,7 @@ describe("Phase K — registradores/matric (ONR)", () => {
   it("Sem ônus → negativa", async () => {
     const fixture = await import("../__fixtures__/matricula-onr-negativa.json");
     const r = normalize(
-      "registradores/matric-obter",
+      "registradores/matric-download",
       fixture.default as unknown as InfosimplesResponse
     );
     expect(r.situacao).toBe("negativa");
@@ -583,11 +583,42 @@ describe("Phase K — registradores/matric (ONR)", () => {
       ],
     };
     const r = normalize(
-      "registradores/matric-obter",
+      "registradores/matric-download",
       resp as unknown as InfosimplesResponse
     );
     expect(r.situacao).toBe("positiva");
     expect(r.consta_debito).toBe(true);
+  });
+});
+
+describe("Phase L — ONR Mapa (pesquisa de bens) + municipal", () => {
+  it("ONR Mapa com imóveis → informativa (não vira negativa/positiva)", () => {
+    const resp = {
+      code: 200,
+      code_message: "OK",
+      data: [{ imoveis: [{ cartorio: "1 RI", matricula: "10" }, { matricula: "20" }] }],
+    };
+    const r = normalize("onr/mapa-registro-imoveis", resp as unknown as InfosimplesResponse);
+    expect(r.situacao).toBe("informativa");
+    expect(r.consta_debito).toBe(false);
+    expect(r.detalhes).toContain("2 imóvel");
+  });
+
+  it("ONR Mapa sem imóveis → informativa 'nenhum imóvel'", () => {
+    const resp = { code: 200, code_message: "OK", data: [{ imoveis: [] }] };
+    const r = normalize("onr/mapa-registro-imoveis", resp as unknown as InfosimplesResponse);
+    expect(r.situacao).toBe("informativa");
+    expect(r.detalhes).toContain("Nenhum");
+  });
+
+  it("CND municipal (Porto Alegre) negativa", () => {
+    const resp = {
+      code: 200,
+      code_message: "OK",
+      data: [{ conseguiu_emitir_certidao_negativa: true, consta_debito: false }],
+    };
+    const r = normalize("pref/rs/porto-alegre/cnd", resp as unknown as InfosimplesResponse);
+    expect(r.situacao).toBe("negativa");
   });
 });
 

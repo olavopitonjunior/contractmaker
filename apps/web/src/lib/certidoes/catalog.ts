@@ -158,6 +158,7 @@ export function listCoveredCategories(): EndpointCategory[] {
     "fiscal",
     "protesto",
     "municipal",
+    "registro",
   ];
   return order.filter((c) => cats.has(c));
 }
@@ -169,6 +170,7 @@ export const CATEGORY_LABELS: Record<EndpointCategory, string> = {
   fiscal: "Fiscal",
   protesto: "Protesto",
   municipal: "Municipal",
+  registro: "Registro de Imóveis",
   cadastro: "Cadastro",
   fgts: "FGTS",
   score: "Score",

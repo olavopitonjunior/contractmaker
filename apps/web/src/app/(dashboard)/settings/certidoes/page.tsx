@@ -7,6 +7,8 @@ import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Wallet, CheckCircle2, XCircle, Clock, AlertTriangle, ShieldCheck, ShieldAlert, ExternalLink } from "lucide-react";
 import { endpointInfo } from "@/lib/certidoes/endpoints";
 import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
+import { mapInfosimplesCodeToCategory, CATEGORY_LABEL } from "@/lib/certidoes/error-codes";
+import { CertidoesMonitorClient, type ProblemRow } from "@/components/settings/CertidoesMonitorClient";
 
 export const dynamic = "force-dynamic";
 
@@ -57,6 +59,10 @@ export default async function CertidoesSettingsPage() {
       createdAt: true,
       label: true,
       dealId: true,
+      resultCode: true,
+      retryCount: true,
+      maxRetries: true,
+      portalUrl: true,
     },
   });
 
@@ -123,6 +129,46 @@ export default async function CertidoesSettingsPage() {
   const recentErrors = recent
     .filter((j) => j.status === "failed" && j.errorMessage)
     .slice(0, 10);
+
+  // --- Saúde da API + crédito (últimas 24h) ---
+  const last24 = new Date(now.getTime() - 24 * 60 * 60_000);
+  const recent24 = recent.filter((j) => j.createdAt >= last24);
+  // Crédito Infosimples esgotado é sinalizado in-band por 603/604 ("limite de
+  // uso"). Não há API de saldo — esse é o gatilho de alerta.
+  const creditExhausted = recent24.some(
+    (j) => j.resultCode === 603 || j.resultCode === 604
+  );
+  const pausedSpike = recent24.filter((j) => j.resultCode === 615).length;
+
+  // --- Relatório de problemas (falhas terminais em aberto) ---
+  const problemStatuses = new Set([
+    "failed_permanent",
+    "failed",
+    "data_missing",
+    "data_invalid",
+  ]);
+  const problems: ProblemRow[] = recent
+    .filter((j) => problemStatuses.has(j.status))
+    .slice(0, 100)
+    .map((j) => {
+      const category =
+        j.resultCode != null && j.resultCode !== 200
+          ? mapInfosimplesCodeToCategory(j.resultCode, j.errorMessage)
+          : null;
+      return {
+        id: j.id,
+        dealId: j.dealId,
+        label: j.label,
+        endpoint: j.endpoint,
+        status: j.status,
+        resultCode: j.resultCode,
+        errorMessage: j.errorMessage,
+        retryCount: j.retryCount ?? 0,
+        maxRetries: j.maxRetries ?? 3,
+        categoryLabel: category ? CATEGORY_LABEL[category] : null,
+        portalUrl: j.portalUrl,
+      };
+    });
 
   // Phase F.II-γ — status da autenticação GOV.BR na conta Infosimples.
   // Afeta quais endpoints ficam disponíveis (CENPROT nacional etc).
@@ -349,6 +395,49 @@ export default async function CertidoesSettingsPage() {
               </tbody>
             </table>
           </div>
+        </CardContent>
+      </Card>
+
+      {creditExhausted && (
+        <Card className="border-red-300 bg-red-50/40">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm flex items-center gap-2 text-red-800">
+              <AlertTriangle className="h-4 w-4 text-red-600" />
+              Crédito Infosimples esgotado
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm space-y-1">
+            <p className="text-red-900">
+              Detectamos respostas <span className="font-mono">603/604</span> ("limite de uso") nas últimas 24h —
+              o crédito da conta provavelmente acabou. As consultas pagas ficam <strong>pausadas</strong> (circuit
+              breaker) até a recarga, para não desperdiçar tentativas.
+            </p>
+            <a
+              href="https://portal.infosimples.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-blue-700 hover:underline mt-1"
+            >
+              Recarregar crédito no portal Infosimples <ExternalLink className="h-3 w-3" />
+            </a>
+          </CardContent>
+        </Card>
+      )}
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 text-amber-600" />
+            Monitoramento & Problemas
+            {pausedSpike > 0 && (
+              <Badge variant="outline" className="border-amber-500 text-amber-700">
+                {pausedSpike} resposta(s) "API pausada" (24h)
+              </Badge>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <CertidoesMonitorClient problems={problems} />
         </CardContent>
       </Card>
 

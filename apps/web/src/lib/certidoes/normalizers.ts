@@ -547,6 +547,55 @@ function matriculaOnrExtractor(resp: InfosimplesResponse): NormalizedResult {
   };
 }
 
+/**
+ * Phase L (2026-05-22) — ONR Mapa do Registro de Imóveis (pesquisa de bens).
+ * Informativo: retorna a lista de imóveis em nome do CPF/CNPJ (cartório,
+ * matrícula, data da última atualização). Não há negativa/positiva — `consta`
+ * indica apenas se há imóveis localizados. Shape defensivo: a lista pode vir
+ * em `imoveis`/`ocorrencias`/`bens`.
+ */
+function onrMapaExtractor(resp: InfosimplesResponse): NormalizedResult {
+  const d = getFirst<Record<string, unknown>>(resp) ?? {};
+  const lista =
+    (Array.isArray(d.imoveis) && (d.imoveis as unknown[])) ||
+    (Array.isArray(d.ocorrencias) && (d.ocorrencias as unknown[])) ||
+    (Array.isArray(d.bens) && (d.bens as unknown[])) ||
+    [];
+  const total = lista.length;
+  return {
+    situacao: "informativa",
+    validade: null,
+    emissao: asString(d.data_consulta) ?? asString(d.protocolo) ?? null,
+    detalhes:
+      total > 0
+        ? `${total} imóvel(is) localizado(s) em nome da parte`
+        : "Nenhum imóvel localizado",
+    consta_debito: false,
+    raw: d,
+  };
+}
+
+/**
+ * Phase L — Lista de pedidos de matrícula da conta ONR (`matric-lista`).
+ * Informativo (reconciliação): não consome saldo do portal.
+ */
+function matriculaListaExtractor(resp: InfosimplesResponse): NormalizedResult {
+  const d = getFirst<Record<string, unknown>>(resp) ?? {};
+  const pedidos = Array.isArray(d.pedidos)
+    ? (d.pedidos as unknown[])
+    : Array.isArray(d.lista)
+    ? (d.lista as unknown[])
+    : [];
+  return {
+    situacao: "informativa",
+    validade: null,
+    emissao: asString(d.data_consulta) ?? null,
+    detalhes: `${pedidos.length} pedido(s) de matrícula na conta ONR`,
+    consta_debito: false,
+    raw: d,
+  };
+}
+
 const EXTRACTORS: Record<string, Extractor> = {
   "receita-federal/pgfn": pgfnExtractor,
   "tribunal/tst/cndt": cndtExtractor,
@@ -564,8 +613,18 @@ const EXTRACTORS: Record<string, Extractor> = {
   "tribunal/tjsp/eproc-lista": eprocListaExtractor,
   "cenprot-sp/protestos": cenprotSpExtractor,
   "pref/sp/sao-paulo/iptu": iptuExtractor,
+  "pref/sp/sao-paulo/debitos-iptu": iptuExtractor,
+  "pref/sp/sao-paulo/dados-imovel": iptuExtractor,
   "pref/rj/rio-janeiro/cert-trib": iptuExtractor,
   "pref/rj/rio-janeiro/cnd": iptuExtractor,
+  "pref/rj/rio-janeiro/iptu": iptuExtractor,
+  // Phase L — municipais adicionais (8 capitais cobertas)
+  "pref/mg/belo-horizonte/cndiptu": iptuExtractor,
+  "pref/mg/belo-horizonte/cnd": iptuExtractor,
+  "pref/rs/porto-alegre/cnd": iptuExtractor,
+  "pref/pr/curitiba/cnd": iptuExtractor,
+  "pref/sc/florianopolis/cnd": iptuExtractor,
+  "pref/mt/cuiaba/cnd": iptuExtractor,
   // Phase B additions — share extractors where response shapes match.
   "tribunal/tjba/primeiro-grau": tjExtractor,
   "tribunal/tjgo/nada-consta": tjExtractor,
@@ -588,7 +647,9 @@ const EXTRACTORS: Record<string, Extractor> = {
   "antecedentes-criminais/pf/val": antecedentesPfExtractor,
   "sncr/ccir": ccirExtractor,
   "registradores/matric-pedido": matriculaOnrExtractor,
-  "registradores/matric-obter": matriculaOnrExtractor,
+  "registradores/matric-download": matriculaOnrExtractor,
+  "registradores/matric-lista": matriculaListaExtractor,
+  "onr/mapa-registro-imoveis": onrMapaExtractor,
   "sefaz/certidao-debitos": sefazUnificadaExtractor,
   "pge-sp/cndt": sefazUnificadaExtractor,
   // Phase F.II-γ — TRF individuais + CENPROT nacional

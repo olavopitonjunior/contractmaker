@@ -121,9 +121,22 @@ describe("planCertidoesForDeal — dados completos (PF SP + PF RJ + imovel SP)",
     expect(cenprot?.requestPayload.cpf).toBe("52998224725");
   });
 
-  it("NÃO gera IPTU SP mesmo com SQL preenchido (Phase F.II-α)", () => {
+  it("gera IPTU SP quando o imóvel tem SQL (Phase L — trilha reativada)", () => {
     const iptu = plan.jobs.find((j) => j.endpoint === "pref/sp/sao-paulo/iptu");
-    expect(iptu).toBeUndefined();
+    expect(iptu).toBeDefined();
+    expect(iptu?.targetKind).toBe("imovel");
+    expect(iptu?.requestPayload.sql).toBe("123.456.0789-0");
+  });
+
+  it("matrícula ONR vira skip quando onrActive não está setado", () => {
+    // sem onrActive (default), o pedido de matrícula é pulado com razão ONR.
+    const job = plan.jobs.find((j) => j.endpoint === "registradores/matric-pedido");
+    const skip = plan.skipped.find(
+      (s) => s.endpoint === "registradores/matric-pedido"
+    );
+    expect(job).toBeUndefined();
+    expect(skip).toBeDefined();
+    expect(skip?.missingField).toBe("onr");
   });
 
   it("dispara E-Proc SP (lista) para vendedor SP — Infosimples cobre", () => {
@@ -173,11 +186,10 @@ describe("planCertidoesForDeal — dados faltando", () => {
     expect(skippedEndpoints.has("tribunal/trf/cert-unificada")).toBe(true);
   });
 
-  // Phase F.II-α — testes de imóvel removidos pois IPTU SP/RJ e CND
-  // Municipal RJ foram retirados do planner (2026-04-16). Os endpoints
-  // permanecem no catálogo mas o loop de imóveis foi removido. CENPROT
-  // agora é testado em outro bloco (por parte PF/PJ).
-  it("imóvel presente no form NÃO gera jobs de IPTU nem CND municipal", () => {
+  // Phase L (2026-05-22) — trilha de imóvel REATIVADA. IPTU/CND municipal
+  // dispara quando o imóvel tem o identificador (SQL em SP, inscrição nas
+  // demais); sem ele, vira SkippedJob com missingFields.
+  it("imóvel SP com SQL gera IPTU SP; RJ com inscrição gera certidão tributária", () => {
     const plan = planCertidoesForDeal({
       vendedores: [VENDEDOR_PF_SP],
       compradores: [],
@@ -186,8 +198,71 @@ describe("planCertidoesForDeal — dados faltando", () => {
         { rua: "Rua Y", cidade: "Rio de Janeiro", uf: "RJ", inscricao_municipal: "99999" },
       ],
     });
-    expect(plan.jobs.find((j) => j.endpoint.startsWith("pref/"))).toBeUndefined();
-    expect(plan.skipped.find((s) => s.endpoint.startsWith("pref/"))).toBeUndefined();
+    const iptuSp = plan.jobs.find((j) => j.endpoint === "pref/sp/sao-paulo/iptu");
+    expect(iptuSp?.targetIndex).toBe(0);
+    const certRj = plan.jobs.find((j) => j.endpoint === "pref/rj/rio-janeiro/cert-trib");
+    expect(certRj?.targetIndex).toBe(1);
+    expect(certRj?.requestPayload.inscricao).toBe("99999");
+  });
+
+  it("imóvel SP SEM SQL → IPTU SP vira skip com missingField sql", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [VENDEDOR_PF_SP],
+      compradores: [],
+      imoveis: [{ rua: "Rua X", cidade: "Sao Paulo", uf: "SP" }],
+    });
+    expect(plan.jobs.find((j) => j.endpoint === "pref/sp/sao-paulo/iptu")).toBeUndefined();
+    const skip = plan.skipped.find((s) => s.endpoint === "pref/sp/sao-paulo/iptu");
+    expect(skip?.missingField).toBe("sql");
+  });
+
+  it("município sem cobertura Infosimples → skip manual", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [VENDEDOR_PF_SP],
+      compradores: [],
+      imoveis: [{ rua: "Rua Z", cidade: "Vitoria", uf: "ES", inscricao_municipal: "1" }],
+    });
+    const skip = plan.skipped.find((s) => s.endpoint === "pref/municipal-manual");
+    expect(skip).toBeDefined();
+  });
+
+  it("matrícula ONR dispara com onrActive + matrícula presente", () => {
+    const plan = planCertidoesForDeal(
+      {
+        vendedores: [VENDEDOR_PF_SP],
+        compradores: [],
+        imoveis: [
+          { rua: "Rua X", cidade: "Sao Paulo", uf: "SP", matricula: "54321", cartorio: "1 RI SP" },
+        ],
+      },
+      undefined,
+      undefined,
+      { onrActive: true }
+    );
+    const matric = plan.jobs.find((j) => j.endpoint === "registradores/matric-pedido");
+    expect(matric).toBeDefined();
+    expect(matric?.requestPayload.matricula).toBe("54321");
+  });
+
+  it("pesquisa de bens ONR (mapa) só com expandAll + onrActive", () => {
+    const base = {
+      vendedores: [VENDEDOR_PF_SP],
+      compradores: [],
+      imoveis: [],
+    };
+    // sem expandAll → não aparece
+    const auto = planCertidoesForDeal(base, undefined, undefined, { onrActive: true });
+    expect(
+      auto.jobs.find((j) => j.endpoint === "onr/mapa-registro-imoveis")
+    ).toBeUndefined();
+    // com expandAll + onrActive → aparece
+    const full = planCertidoesForDeal(base, undefined, undefined, {
+      expandAll: true,
+      onrActive: true,
+    });
+    expect(
+      full.jobs.find((j) => j.endpoint === "onr/mapa-registro-imoveis")
+    ).toBeDefined();
   });
 });
 

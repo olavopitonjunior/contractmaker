@@ -3,6 +3,8 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { planCertidoesForDeal } from "@/lib/certidoes/planner";
 import { getMonthlySpend } from "@/lib/certidoes/executor";
+import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
+import { checkOnrAuth } from "@/lib/certidoes/onr-auth";
 import {
   listAllForPicker,
   listCoveredUfs,
@@ -69,7 +71,14 @@ export async function GET(
   const { searchParams } = new URL(req.url);
   const full = searchParams.get("full") === "1";
 
-  const plan = planCertidoesForDeal(dealData as any, undefined, diligenciados);
+  // Pre-flight de auth para refletir no plano quais endpoints gated disparam
+  // (CENPROT nacional → GOV.BR; matrícula/pesquisa de bens → ONR). Cacheados.
+  const [govbr, onr] = await Promise.all([checkGovBrAuth(), checkOnrAuth()]);
+
+  const plan = planCertidoesForDeal(dealData as any, undefined, diligenciados, {
+    govBrActive: govbr.active,
+    onrActive: onr.active,
+  });
   const spend = await getMonthlySpend(org.id);
 
   if (!full) {
@@ -82,7 +91,7 @@ export async function GET(
     dealData as any,
     undefined,
     diligenciados,
-    { expandAll: true }
+    { expandAll: true, govBrActive: govbr.active, onrActive: onr.active }
   );
   const catalog = listAllForPicker();
 

@@ -4,6 +4,8 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { planCertidoesForDeal } from "@/lib/certidoes/planner";
 import { runSingleJob } from "@/lib/certidoes/executor";
+import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
+import { checkOnrAuth } from "@/lib/certidoes/onr-auth";
 import { endpointInfo } from "@/lib/certidoes/endpoints";
 import { sanitizePayload } from "@/lib/certidoes/infosimples";
 import { z } from "zod";
@@ -108,8 +110,31 @@ export async function POST(
     }
   });
 
-  // Re-plan with the merged data
-  const plan = planCertidoesForDeal(merged as any);
+  // Re-plan with the merged data. IMPORTANTE: passar as mesmas infos do POST
+  // /certidoes — sem govBrActive/onrActive/email/diligenciados, o re-plan do
+  // complemento de matrícula ONR (e TJSP, que exige email) re-skipava e o
+  // botão "Completar campos" não destravava o job.
+  const [govbr, onr] = await Promise.all([checkGovBrAuth(), checkOnrAuth()]);
+  const diligenciadosRaw = await prisma.diligentedPerson.findMany({
+    where: { dealId: params.dealId },
+    orderBy: { createdAt: "asc" },
+  });
+  const diligenciados = diligenciadosRaw.map((dp) => ({
+    id: dp.id,
+    tipoPessoa: dp.tipoPessoa as "fisica" | "juridica",
+    nome: dp.nome,
+    cpf: dp.cpf,
+    cnpj: dp.cnpj,
+    dataNascimento: dp.dataNascimento,
+    uf: dp.uf,
+    cidade: dp.cidade,
+  }));
+  const plan = planCertidoesForDeal(
+    merged as any,
+    session.user.email ?? undefined,
+    diligenciados,
+    { expandAll: true, govBrActive: govbr.active, onrActive: onr.active }
+  );
   const newPlanned = plan.jobs.find(
     (p) =>
       p.endpoint === job.endpoint &&
