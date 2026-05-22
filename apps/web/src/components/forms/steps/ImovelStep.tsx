@@ -54,6 +54,7 @@ export function ImovelStep({ form }: ImovelStepProps) {
       inscricao_iptu: "",
       sql: "",
       inscricao_municipal: "",
+      tipo_imovel: "",
       descricao: "",
     });
   };
@@ -166,10 +167,9 @@ export function ImovelStep({ form }: ImovelStepProps) {
                   />
                 </FormField>
 
-                {/* H.15 (Phase H, 2026-04-18) — campos condicionais por UF.
-                    Antes renderizava SQL (SP) + Inscrição Municipal (RJ)
-                    simultaneamente para qualquer estado, confundindo usuários
-                    SP que preenchiam os dois com o mesmo valor. */}
+                {/* H.15 (Phase H) / Phase L — campos condicionais por UF.
+                    SP usa SQL; as demais capitais cobertas (RJ, MG, RS, PR, SC,
+                    MT) usam a inscrição municipal/imobiliária para IPTU/CND. */}
                 {form.watch(`${prefix}.uf`) === "SP" && (
                   <FormField label="SQL (Setor-Quadra-Lote)">
                     <Input
@@ -179,14 +179,26 @@ export function ImovelStep({ form }: ImovelStepProps) {
                   </FormField>
                 )}
 
-                {form.watch(`${prefix}.uf`) === "RJ" && (
-                  <FormField label="Inscrição Municipal">
-                    <Input
-                      {...form.register(`${prefix}.inscricao_municipal`)}
-                      placeholder="Necessário para CND IPTU RJ"
-                    />
-                  </FormField>
-                )}
+                {form.watch(`${prefix}.uf`) &&
+                  form.watch(`${prefix}.uf`) !== "SP" && (
+                    <FormField label="Inscrição Municipal / Imobiliária">
+                      <Input
+                        {...form.register(`${prefix}.inscricao_municipal`)}
+                        placeholder="Necessário para CND/IPTU municipal"
+                      />
+                    </FormField>
+                  )}
+
+                <FormField label="Tipo do imóvel">
+                  <select
+                    {...form.register(`${prefix}.tipo_imovel`)}
+                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50"
+                  >
+                    <option value="">Não informado</option>
+                    <option value="urbano">Urbano</option>
+                    <option value="rural">Rural (habilita CCIR)</option>
+                  </select>
+                </FormField>
               </div>
 
               <FormField label="Descrição do Imóvel *">

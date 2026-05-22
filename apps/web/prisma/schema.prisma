@@ -424,6 +424,10 @@ model CertidaoJob {
   // Copia do portalUrl do endpoint no instante do job — cached para UI
   // renderizar CTA "Abrir portal oficial" sem re-consultar catálogo.
   portalUrl       String?
+  // Marca quando o problema (falha terminal) já entrou no e-mail resumo diário
+  // (cron problem-digest). Evita reavisar a mesma falha. Null = ainda não
+  // incluído no digest.
+  problemNotifiedAt DateTime?
   createdAt       DateTime  @default(now())
 
   deal         Deal?                 @relation(fields: [dealId], references: [id], onDelete: Cascade)

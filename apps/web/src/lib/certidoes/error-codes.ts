@@ -235,3 +235,41 @@ export function isPedidoDuplicado(
     message
   );
 }
+
+/**
+ * Decisão pura do 2º passo (obter) de portais two-step, dado o code/categoria
+ * da resposta. Substitui o "todo 6xx → reagenda pra sempre" (que escondia erro
+ * de crédito por 14 dias e drenava saldo). Regras:
+ *   - account_issue (603/604) / integration_error (602) → falha IMEDIATA
+ *     (não se resolve repetindo: token/crédito/endpoint inválido).
+ *   - transitório (portal_unavailable/rate_limited/provider_timeout) → retry
+ *     limitado a `maxRetries` (3); esgotado → falha.
+ *   - demais (genuíno "ainda processando") → aguarda até `maxWaitMs`; estourou
+ *     o prazo → falha.
+ * `attempts` é a tentativa ATUAL (retryCount + 1).
+ */
+export type ObterPollAction =
+  | { action: "fail"; reason: "account" | "integration" | "transient_exhausted" | "deadline" }
+  | { action: "retry" }
+  | { action: "wait" };
+
+export function decideObterOutcome(
+  category: FailureCategory,
+  ctx: { ageMs: number; attempts: number; maxRetries: number; maxWaitMs: number }
+): ObterPollAction {
+  if (category === "account_issue") return { action: "fail", reason: "account" };
+  if (category === "integration_error")
+    return { action: "fail", reason: "integration" };
+  if (
+    category === "portal_unavailable" ||
+    category === "rate_limited" ||
+    category === "provider_timeout"
+  ) {
+    return ctx.attempts >= ctx.maxRetries
+      ? { action: "fail", reason: "transient_exhausted" }
+      : { action: "retry" };
+  }
+  return ctx.ageMs > ctx.maxWaitMs
+    ? { action: "fail", reason: "deadline" }
+    : { action: "wait" };
+}

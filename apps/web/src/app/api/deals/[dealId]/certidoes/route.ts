@@ -8,6 +8,7 @@ import { endpointInfo } from "@/lib/certidoes/endpoints";
 import { sanitizePayload } from "@/lib/certidoes/infosimples";
 import { sanitizeSerasaPayload } from "@/lib/serasa/sanitize";
 import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
+import { checkOnrAuth } from "@/lib/certidoes/onr-auth";
 import { audit } from "@/lib/security/audit";
 import { z } from "zod";
 
@@ -177,6 +178,9 @@ export async function POST(
   // Phase F.II-γ — pre-flight GOV.BR (cached 5min) para decidir se endpoints
   // `requiresGovBrAuth` (CENPROT nacional) disparam ou viram SkippedJob.
   const govbr = await checkGovBrAuth();
+  // Phase L — pre-flight ONR (matrícula, pesquisa de bens). Sem credenciais
+  // configuradas, esses endpoints viram SkippedJob no planner.
+  const onr = await checkOnrAuth();
 
   // F2: if explicit selection provided, run planner with expandAll so we can
   // match any (endpoint, target) combo the user asked for — including
@@ -191,6 +195,7 @@ export async function POST(
     {
       expandAll: !!selectedJobs,
       govBrActive: govbr.active,
+      onrActive: onr.active,
     }
   );
 

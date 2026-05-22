@@ -192,28 +192,21 @@ Disparo manual no Deal → aba Certidões. Pipeline: client gera `batchId` UUID 
 
 **Schema:** `CertidaoJob { dealId, batchId, endpoint, label, targetKind, targetIndex, requestPayload, status, resultCode, resultData, attachmentId, errorMessage, latencyMs, costCents, expectedReadyAt, retryCount, nextRetryAt, maxRetries (3), missingFields[], portalUrl }`.
 
-**Estados** (`outcome-classifier.ts::classifyOutcome`):
-- `success` (code 200 + PDF) → verde, anexo
-- `informativo` (category `cadastro`/`fgts` code 200) → "Consulta informativa"
-- `api_error` (5xx/timeout) → retry 30s/2min/10min
-- `portal_unavailable` (615/665/666) → retry 10min/30min/2h
-- `rate_limited` (668) → retry 30min/1h
-- `data_missing` (606/612/613) → sem retry, `missingFields[]`, CTA "Completar campos"
-- `data_invalid` (614) → sem retry, abrir EditPartyDialog
-- `failed_permanent` (retries esgotados) → CTA "Abrir portal oficial" via `portalUrl`
-- `skipped` (dados faltando pré-dispatch) → card com `externalLink` se aplicável
+**Estados** (`outcome-classifier.ts::classifyOutcome`) — `success`/`informativo`/`api_error`(retry 30s/2min/10min)/`portal_unavailable`(615/665/666, retry 10min/30min/2h)/`rate_limited`(668)/`data_missing`(606/612/613, `missingFields[]` + "Completar campos")/`data_invalid`(614, EditPartyDialog)/`failed_permanent`(retries esgotados, `portalUrl`)/`skipped`(pré-dispatch). Ver [[certidoes_estados_ricos]].
 
-**Anti-falso-negativo:** categoria civel/trabalhista/fiscal/protesto/municipal/federal sem `site_receipts[0]` é sempre `failed`, ignorando code/billable. **Billing honesto:** respeita `resp.header.billable === false`.
+**Anti-falso-negativo:** categoria que exige PDF sem `site_receipts[0]` é sempre `failed`. **Billing honesto:** respeita `resp.header.billable === false`. Ver [[certidoes_falso_negativo]].
 
-**Planner** (`planner.ts`) percorre vendedores/compradores/imóveis. PF sem `data_nascimento` bloqueia PGFN/TJSP/Antecedentes PF. Imóvel SP sem `sql` bloqueia IPTU SP. RJ sem `inscricao_municipal` bloqueia ambos IPTU RJ. Comarca TJRJ via `comarcas-rj.ts` (fallback "Capital").
+**Planner** (`planner.ts`) percorre vendedores/compradores/imóveis. PF sem `data_nascimento` bloqueia PGFN/TJSP/Antecedentes PF. Comarca TJRJ via `comarcas-rj.ts` (fallback "Capital").
 
-**Endpoints cobertos:** Federais (PGFN, CNDT, TRF), trabalhistas (CEAT), cíveis (TJSP/TJRJ 2-step, TJRS), protestos CENPROT (SP direto + Nacional IEPTB via GOV.BR p/ todas partes; detalhes SP encadeados), municipais (IPTU SP/RJ). Receita CPF + Antecedentes PF auto em financiamento. CCIR/Matrícula ONR só via picker.
+**Endpoints cobertos:** Federais (PGFN, CNDT, TRF), trabalhistas (CEAT), cíveis (TJSP/TJRJ 2-step, TJRS), protestos CENPROT (SP direto + Nacional IEPTB via GOV.BR p/ todas partes; detalhes SP encadeados). Receita CPF + Antecedentes PF auto em financiamento.
 
-**Catálogo** (`endpoints.ts`): `category`, `emitsPdf?`, `portalUrl?`, `expectedWaitMinutes?`. `CATEGORIES_REQUIRING_PDF` exportado. **Normalizers** com fallback chains de nomes. Codes 6xx geralmente viram `nao_emitida`.
+**Imóvel (Phase L, trilha reativada):** auto-plano com identificadores. Municipal IPTU/CND em 8 capitais (`pref/*`, SP via `sql`, demais `inscricao_municipal`), ONR/ARISP (matrícula 2-step + `onr/mapa-registro-imoveis`) e CCIR rural — `category="registro"`, `requiresOnrAuth` (`INFOSIMPLES_ONR_*`, saldo ONR próprio), `checkOnrAuth()`→`onrActive`. `pollPortalJob`/`resolveObterEndpoint` destrava ONR/TJMS/Antecedentes. Ver [[project_certidoes_onr_imovel]].
 
-**Budget guard** `INFOSIMPLES_MONTHLY_BUDGET_CENTS` (default 5000), POST retorna 402 se estouraria. **Relatório PDF:** `POST /api/deals/:id/certidoes/report` → `DealAttachment { category: "relatorio_certidoes" }`. **Dashboard `/settings/certidoes`:** gasto/budget, sucesso, p50/p95, últimos erros.
+**Catálogo** (`endpoints.ts`): `category`, `emitsPdf?`, `portalUrl?`, `expectedWaitMinutes?`, `CATEGORIES_REQUIRING_PDF`. **Normalizers** com fallback chains; 6xx geralmente vira `nao_emitida`.
 
-**Gaps:** CNIB, ITR, TJMG/TJPR/TJES cível — `portalUrl` manual. IPTU Porto Alegre sem cobertura. Casos especiais (estrangeiro, espólio, menor, divórcio, falência) → futuro.
+**Budget guard** `INFOSIMPLES_MONTHLY_BUDGET_CENTS` (default 5000), POST 402 se estouraria. **Relatório PDF:** `POST .../certidoes/report` → `DealAttachment category:"relatorio_certidoes"`. **Dashboard `/settings/certidoes`:** gasto/budget, sucesso, p50/p95, erros.
+
+**Gaps:** CNIB (sem endpoint Infosimples), ITR, TJMG/TJPR/TJES cível, IPTU Vitória/ES + Campo Grande — `portalUrl` manual. Casos especiais (estrangeiro, espólio, menor, divórcio, falência) → futuro.
 
 ### Serasa Experian (2026-05)
 

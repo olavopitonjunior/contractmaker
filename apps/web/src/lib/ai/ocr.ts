@@ -318,7 +318,7 @@ const FICHA_RESUMO_INSTRUCTIONS = `- ficha_resumo: documento mestre/dossie/ficha
       }
     ],
     "imoveis": [
-      { "rua": "...", "numero": "...", "bairro": "...", "cidade": "...", "uf": "...", "cep": "...", "matricula": "...", "cartorio": "...", "inscricao_iptu": "...", "sql": "...", "descricao": "..." }
+      { "rua": "...", "numero": "...", "bairro": "...", "cidade": "...", "uf": "...", "cep": "...", "matricula": "...", "cartorio": "...", "inscricao_iptu": "...", "inscricao_municipal": "...", "sql": "...", "descricao": "..." }
     ]
   }`;
 
@@ -332,7 +332,7 @@ Campos esperados por categoria:
 - cpf: nome_completo, cpf_numero (11 digitos), data_nascimento, situacao_cadastral
 - cnh: nome_completo, cpf_numero (11 digitos), rg_numero, data_nascimento (YYYY-MM-DD), naturalidade, filiacao_mae, filiacao_pai, categoria, data_emissao, data_validade, registro_cnh, conjuge_nome (opcional, se aparecer), conjuge_cpf (opcional)
 - matricula: matricula_numero, cartorio, endereco_completo, bairro, cidade, uf, cep, proprietario_nome, area_total, onus_existentes, descricao_imovel
-- iptu: inscricao_iptu, endereco, bairro, cidade, uf, valor_venal, ano_referencia, debitos_pendentes
+- iptu: inscricao_iptu, inscricao_municipal, sql (Setor-Quadra-Lote, SP), endereco, bairro, cidade, uf, valor_venal, ano_referencia, debitos_pendentes
 - escritura: vendedor_nome, comprador_nome, valor_transacao, data_lavratura, cartorio, endereco_imovel, matricula_referenciada
 - procuracao: outorgante_nome, outorgante_cpf, outorgado_nome, outorgado_cpf, poderes_resumo, data_lavratura, prazo_validade
 - comprovante_residencia: titular_nome, endereco_completo, bairro, cidade, uf, cep, emissor (ex: concessionaria de energia, agua, telefone)
@@ -729,7 +729,7 @@ Use as mesmas regras e campos do prompt single-doc:
 - cpf: nome_completo, cpf_numero (11 digitos), data_nascimento, situacao_cadastral
 - cnh: nome_completo, cpf_numero, rg_numero, data_nascimento, naturalidade, filiacao_mae, filiacao_pai, categoria, data_emissao, data_validade, registro_cnh, conjuge_nome (opcional), conjuge_cpf (opcional)
 - matricula: matricula_numero, cartorio, endereco_completo, bairro, cidade, uf, cep, proprietario_nome, area_total, onus_existentes, descricao_imovel
-- iptu: inscricao_iptu, endereco, bairro, cidade, uf, valor_venal, ano_referencia, debitos_pendentes
+- iptu: inscricao_iptu, inscricao_municipal, sql (Setor-Quadra-Lote, SP), endereco, bairro, cidade, uf, valor_venal, ano_referencia, debitos_pendentes
 - escritura: vendedor_nome, comprador_nome, valor_transacao, data_lavratura, cartorio, endereco_imovel, matricula_referenciada
 - procuracao: outorgante_nome, outorgante_cpf, outorgado_nome, outorgado_cpf, poderes_resumo, data_lavratura, prazo_validade
 - comprovante_residencia: titular_nome, endereco_completo, bairro, cidade, uf, cep, emissor

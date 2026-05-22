@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { callInfosimples } from "@/lib/certidoes/infosimples";
+import { checkOnrAuth } from "@/lib/certidoes/onr-auth";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -134,9 +135,20 @@ export async function GET() {
     };
   }
 
+  // --- 3. ONR/ARISP (credenciais do portal de Registradores) ---
+  // Env-based (não há endpoint admin de status). Indica se matrícula + pesquisa
+  // de bens estão habilitadas.
+  const onrAuth = await checkOnrAuth();
+  const onrStatus = {
+    active: onrAuth.active,
+    mode: onrAuth.mode,
+    ...(onrAuth.error ? { error: onrAuth.error } : {}),
+  };
+
   return NextResponse.json({
     infosimples: infosimplesStatus,
     govbr: govbrStatus,
+    onr: onrStatus,
     checkedAt: new Date().toISOString(),
   });
 }

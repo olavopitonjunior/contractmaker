@@ -15,6 +15,7 @@ export type EndpointCategory =
   | "protesto"
   | "municipal"
   | "federal"
+  | "registro"    // Registro de imóveis: matrícula ONR/ARISP, ONR Mapa, CCIR rural
   | "cadastro"    // Phase B: Cartão CNPJ, CPF situation — informational dumps
   | "fgts"        // Phase B: CRF FGTS (Caixa) — labor-adjacent regulatory
   | "score"       // Serasa: Score de crédito (0-1000)
@@ -48,6 +49,15 @@ export interface EndpointInfo {
   description?: string;
   /** F.II-γ: endpoint só dispara se checkGovBrAuth() retornar active=true */
   requiresGovBrAuth?: boolean;
+  /**
+   * ONR/ARISP: endpoint usa as credenciais do portal de Registradores (login/
+   * senha ou certificado A1) — separadas do INFOSIMPLES_TOKEN — e debita o
+   * SALDO do portal ONR. Só dispara se checkOnrAuth() retornar active=true;
+   * caso contrário o planner emite SkippedJob orientando configurar em Settings.
+   * As credenciais são injetadas centralmente em callInfosimples (nunca no
+   * requestPayload persistido).
+   */
+  requiresOnrAuth?: boolean;
   /**
    * J.1 (Phase J, 2026-04-18) — override de `CATEGORIES_REQUIRING_PDF`:
    * quando `false`, endpoint é tratado como informativo (resposta é JSON,
@@ -301,6 +311,31 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["imovel"],
     category: "municipal",
     description: "Certidao Negativa de Debitos de IPTU da Prefeitura de Sao Paulo (exige SQL)",
+    portalUrl: "https://prefeitura.sp.gov.br/web/fazenda/w/servicos/certidoes/2407",
+  },
+  "pref/sp/sao-paulo/debitos-iptu": {
+    id: "pref/sp/sao-paulo/debitos-iptu",
+    label: "Débitos IPTU São Paulo",
+    costCents: 4,
+    scope: "municipal",
+    uf: "SP",
+    appliesTo: ["imovel"],
+    category: "municipal",
+    emitsPdf: false,
+    description: "Consulta de débitos de IPTU da Prefeitura de São Paulo por SQL — informativo (valores em aberto).",
+    portalUrl: "https://prefeitura.sp.gov.br/web/fazenda",
+  },
+  "pref/sp/sao-paulo/dados-imovel": {
+    id: "pref/sp/sao-paulo/dados-imovel",
+    label: "Dados Cadastrais / Valor Venal SP",
+    costCents: 4,
+    scope: "municipal",
+    uf: "SP",
+    appliesTo: ["imovel"],
+    category: "municipal",
+    emitsPdf: false,
+    description: "Dados cadastrais e valor venal do imóvel na Prefeitura de São Paulo (exige SQL) — informativo.",
+    portalUrl: "https://prefeitura.sp.gov.br/web/fazenda",
   },
 
   // --- Municipal RJ ---
@@ -323,6 +358,90 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     appliesTo: ["imovel"],
     category: "municipal",
     description: "Certidao Negativa de Debitos Municipais do Rio de Janeiro (exige inscricao municipal)",
+  },
+  "pref/rj/rio-janeiro/iptu": {
+    id: "pref/rj/rio-janeiro/iptu",
+    label: "IPTU Rio de Janeiro (dados/guia)",
+    costCents: 4,
+    scope: "municipal",
+    uf: "RJ",
+    appliesTo: ["imovel"],
+    category: "municipal",
+    emitsPdf: false,
+    description: "Consulta de IPTU da Prefeitura do Rio de Janeiro por inscrição municipal — informativo (dados/guia).",
+  },
+
+  // --- Municipal — demais capitais cobertas (Phase L, 2026-05-22) ---
+  // Belo Horizonte
+  "pref/mg/belo-horizonte/cndiptu": {
+    id: "pref/mg/belo-horizonte/cndiptu",
+    label: "CND IPTU Belo Horizonte",
+    costCents: 8,
+    scope: "municipal",
+    uf: "MG",
+    appliesTo: ["imovel"],
+    category: "municipal",
+    description: "Certidão Negativa de Débitos de IPTU da Prefeitura de Belo Horizonte (exige índice cadastral).",
+    portalUrl: "https://prefeitura.pbh.gov.br/fazenda",
+  },
+  "pref/mg/belo-horizonte/cnd": {
+    id: "pref/mg/belo-horizonte/cnd",
+    label: "CND Municipal Belo Horizonte",
+    costCents: 8,
+    scope: "municipal",
+    uf: "MG",
+    appliesTo: ["imovel"],
+    category: "municipal",
+    description: "Certidão Negativa de Débitos Municipais da Prefeitura de Belo Horizonte.",
+    portalUrl: "https://prefeitura.pbh.gov.br/fazenda",
+  },
+  // Porto Alegre — fecha o gap histórico de IPTU POA
+  "pref/rs/porto-alegre/cnd": {
+    id: "pref/rs/porto-alegre/cnd",
+    label: "CND Municipal Porto Alegre",
+    costCents: 4,
+    scope: "municipal",
+    uf: "RS",
+    appliesTo: ["imovel"],
+    category: "municipal",
+    description: "Certidão Negativa de Débitos Municipais (inclui IPTU) da Prefeitura de Porto Alegre.",
+    portalUrl: "https://prefeitura.poa.br/smf/iptu",
+  },
+  // Curitiba
+  "pref/pr/curitiba/cnd": {
+    id: "pref/pr/curitiba/cnd",
+    label: "CND Municipal Curitiba",
+    costCents: 8,
+    scope: "municipal",
+    uf: "PR",
+    appliesTo: ["imovel"],
+    category: "municipal",
+    description: "Certidão Negativa de Débitos Municipais (inclui IPTU) da Prefeitura de Curitiba.",
+    portalUrl: "https://www.curitiba.pr.gov.br/",
+  },
+  // Florianópolis
+  "pref/sc/florianopolis/cnd": {
+    id: "pref/sc/florianopolis/cnd",
+    label: "CND Municipal Florianópolis",
+    costCents: 4,
+    scope: "municipal",
+    uf: "SC",
+    appliesTo: ["imovel"],
+    category: "municipal",
+    description: "Certidão Negativa de Débitos Municipais (inclui IPTU) da Prefeitura de Florianópolis.",
+    portalUrl: "https://www.pmf.sc.gov.br/",
+  },
+  // Cuiabá
+  "pref/mt/cuiaba/cnd": {
+    id: "pref/mt/cuiaba/cnd",
+    label: "CND Municipal Cuiabá",
+    costCents: 4,
+    scope: "municipal",
+    uf: "MT",
+    appliesTo: ["imovel"],
+    category: "municipal",
+    description: "Certidão Negativa de Débitos Municipais (inclui IPTU) da Prefeitura de Cuiabá.",
+    portalUrl: "https://cuiaba.mt.gov.br/",
   },
 
   // ============================================================
@@ -537,6 +656,11 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
       "Certificado de Cadastro de Imóvel Rural — INCRA/SNCR. Obrigatório apenas para imóveis rurais.",
     portalUrl: "https://sncr.serpro.gov.br/sncr-web/public/buscaPublica.jsf",
   },
+  // ONR/ARISP — Matrícula (Visualização de Inteiro Teor). Two-step real:
+  // `registradores/matric-pedido` (1º passo) → `registradores/matric-download`
+  // (2º passo, busca o PDF da matrícula já gerada). Usa SALDO do portal ONR e
+  // credenciais próprias (requiresOnrAuth). Slug `matric-obter` legado NÃO
+  // existia na Infosimples — corrigido para `matric-download`.
   "registradores/matric-pedido": {
     id: "registradores/matric-pedido",
     label: "Matrícula ONR (pedido)",
@@ -544,22 +668,56 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     twoStep: true,
     scope: "federal",
     appliesTo: ["imovel"],
-    category: "civel",
+    category: "registro",
+    requiresOnrAuth: true,
     description:
-      "Pedido de Certidão de Inteiro Teor da Matrícula via ONR (Operador Nacional de Registro) — 1º passo (até 5 dias úteis).",
+      "Pedido de Visualização de Inteiro Teor da Matrícula via ONR/ARISP (Registradores) — 1º passo. Debita o saldo do portal ONR (imediato a 5 dias úteis).",
     expectedWaitMinutes: 5 * 24 * 60, // 5 dias úteis
     portalUrl: "https://www.registradores.org.br/",
   },
-  "registradores/matric-obter": {
-    id: "registradores/matric-obter",
-    label: "Matrícula ONR (obter)",
+  "registradores/matric-download": {
+    id: "registradores/matric-download",
+    label: "Matrícula ONR (download)",
     costCents: 4,
     initialStatus: "awaiting_portal",
     scope: "federal",
     appliesTo: ["imovel"],
-    category: "civel",
+    category: "registro",
+    requiresOnrAuth: true,
     description:
-      "Obtenção da Certidão de Matrícula emitida pelo ONR — 2º passo (automático via cron).",
+      "Download da Matrícula (inteiro teor) já gerada no portal ONR/ARISP — 2º passo (automático via cron).",
+    portalUrl: "https://www.registradores.org.br/",
+  },
+  // Lista de pedidos de matrícula já gerados na conta ONR — NÃO consome saldo
+  // do portal. Útil para reconciliar pedidos e localizar PDFs avulsos.
+  "registradores/matric-lista": {
+    id: "registradores/matric-lista",
+    label: "Matrícula ONR (lista de pedidos)",
+    costCents: 4,
+    scope: "federal",
+    appliesTo: ["imovel"],
+    category: "registro",
+    requiresOnrAuth: true,
+    emitsPdf: false,
+    description:
+      "Lista de pedidos de matrícula já gerados na conta ONR/ARISP — consulta informativa, não consome saldo do portal.",
+    portalUrl: "https://www.registradores.org.br/",
+  },
+  // ONR Mapa do Registro de Imóveis — pesquisa de bens NACIONAL por CPF/CNPJ
+  // (diligência patrimonial / KYC). Substitui o `registradores-previa-bens`
+  // (descontinuado e SP-only). Informativo: retorna lista de imóveis (cartório,
+  // matrícula, última atualização), sem certidão/PDF.
+  "onr/mapa-registro-imoveis": {
+    id: "onr/mapa-registro-imoveis",
+    label: "ONR — Pesquisa de Bens (Mapa do Registro)",
+    costCents: 6,
+    scope: "federal",
+    appliesTo: ["pessoa"],
+    category: "registro",
+    requiresOnrAuth: true,
+    emitsPdf: false,
+    description:
+      "Pesquisa nacional de imóveis em nome de CPF/CNPJ no Mapa do Registro de Imóveis (ONR). Diligência patrimonial — retorna cartório, matrícula e data da última atualização. Debita saldo do portal ONR.",
     portalUrl: "https://www.registradores.org.br/",
   },
 

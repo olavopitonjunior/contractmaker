@@ -127,6 +127,72 @@ const TJRJ_TIPOS: Array<{ tipo_certidao: string; label: string }> = [
   { tipo_certidao: "execucao-fiscal", label: "Execução Fiscal" },
 ];
 
+/**
+ * Phase L (2026-05-22) — Roteamento municipal por `UF|cidade-normalizada` →
+ * endpoint(s) de IPTU/CND municipal cobertos pela Infosimples. Cada spec
+ * declara o identificador exigido (`sql` em SP, `inscricao_municipal` nas
+ * demais) e o nome do parâmetro enviado à Infosimples.
+ *
+ * NOTA QA: os nomes de parâmetro (`paramName`) são best-guess a partir das
+ * docs públicas e DEVEM ser confirmados logado no precificador Infosimples
+ * (verificação E2E passo 2). Endpoints `extraOnly` só entram via picker
+ * (expandAll) para não inflar o custo do plano padrão.
+ */
+interface MunicipalEndpointSpec {
+  endpoint: string;
+  requiresField: "sql" | "inscricao_municipal";
+  paramName: string;
+  extraOnly?: boolean;
+}
+const MUNICIPAL_BY_KEY: Record<string, MunicipalEndpointSpec[]> = {
+  "SP|sao paulo": [
+    { endpoint: "pref/sp/sao-paulo/iptu", requiresField: "sql", paramName: "sql" },
+    { endpoint: "pref/sp/sao-paulo/debitos-iptu", requiresField: "sql", paramName: "sql", extraOnly: true },
+    { endpoint: "pref/sp/sao-paulo/dados-imovel", requiresField: "sql", paramName: "sql", extraOnly: true },
+  ],
+  "RJ|rio de janeiro": [
+    { endpoint: "pref/rj/rio-janeiro/cert-trib", requiresField: "inscricao_municipal", paramName: "inscricao" },
+    { endpoint: "pref/rj/rio-janeiro/cnd", requiresField: "inscricao_municipal", paramName: "inscricao", extraOnly: true },
+    { endpoint: "pref/rj/rio-janeiro/iptu", requiresField: "inscricao_municipal", paramName: "inscricao", extraOnly: true },
+  ],
+  "MG|belo horizonte": [
+    { endpoint: "pref/mg/belo-horizonte/cndiptu", requiresField: "inscricao_municipal", paramName: "indice_cadastral" },
+    { endpoint: "pref/mg/belo-horizonte/cnd", requiresField: "inscricao_municipal", paramName: "indice_cadastral", extraOnly: true },
+  ],
+  "RS|porto alegre": [
+    { endpoint: "pref/rs/porto-alegre/cnd", requiresField: "inscricao_municipal", paramName: "inscricao" },
+  ],
+  "PR|curitiba": [
+    { endpoint: "pref/pr/curitiba/cnd", requiresField: "inscricao_municipal", paramName: "indicacao_fiscal" },
+  ],
+  "SC|florianopolis": [
+    { endpoint: "pref/sc/florianopolis/cnd", requiresField: "inscricao_municipal", paramName: "inscricao" },
+  ],
+  "MT|cuiaba": [
+    { endpoint: "pref/mt/cuiaba/cnd", requiresField: "inscricao_municipal", paramName: "inscricao" },
+  ],
+};
+
+/** Normaliza cidade para a chave de roteamento municipal (sem acento, lower). */
+function normalizeCidade(s: string | undefined | null): string {
+  return (s ?? "")
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .toLowerCase()
+    .trim();
+}
+
+/** Heurística de imóvel rural: flag explícita ou presença de código rural. */
+function isImovelRural(imovel: Imovel): boolean {
+  const t = (imovel.tipo_imovel ?? "").toLowerCase();
+  return (
+    imovel.rural === true ||
+    t.includes("rural") ||
+    !!(imovel.codigo_incra && String(imovel.codigo_incra).trim()) ||
+    !!(imovel.nirf && String(imovel.nirf).trim())
+  );
+}
+
 // ---- deal shape helpers (mirror of DadosContrato) -----------------
 
 interface Parte {
@@ -153,6 +219,12 @@ interface Imovel {
   inscricao_iptu?: string;
   sql?: string;
   inscricao_municipal?: string;
+  // Phase L — registro de imóveis (ONR) + CCIR rural
+  cartorio?: string;
+  tipo_imovel?: string; // "urbano" | "rural" | livre
+  rural?: boolean;
+  codigo_incra?: string;
+  nirf?: string;
 }
 
 interface DealDataLike {
@@ -267,6 +339,12 @@ export interface PlannerOptions {
    * razão clara para o usuário renovar auth em Settings.
    */
   govBrActive?: boolean;
+  /**
+   * Phase L — resultado do pre-flight ONR/ARISP (checkOnrAuth). Se `true`,
+   * endpoints com `requiresOnrAuth` (matrícula, pesquisa de bens) disparam.
+   * Se ausente, viram SkippedJob orientando configurar credenciais ONR.
+   */
+  onrActive?: boolean;
 }
 
 export function planCertidoesForDeal(
@@ -281,6 +359,7 @@ export function planCertidoesForDeal(
   const email = isValidEmail(dealEmail) ? dealEmail.trim() : DEFAULT_EMAIL;
   const expandAll = options?.expandAll === true;
   const govBrActive = options?.govBrActive === true;
+  const onrActive = options?.onrActive === true;
 
   const pessoas: Array<{ kind: TargetKind; index: number; parte: Parte }> = [];
   (data.vendedores ?? []).forEach((p, i) =>
@@ -635,13 +714,161 @@ export function planCertidoesForDeal(
         );
       }
     }
+
+    // ---- Pesquisa de bens ONR (Phase L) — diligência patrimonial nacional ----
+    // `onr/mapa-registro-imoveis` localiza imóveis em nome do CPF/CNPJ. Custo no
+    // saldo do portal ONR → picker-only (expandAll) para não inflar o plano
+    // padrão. Gated por onrActive (credenciais ONR configuradas).
+    if (expandAll && (cpf || cnpj)) {
+      const ep = "onr/mapa-registro-imoveis";
+      if (onrActive) {
+        jobs.push(
+          buildJob(ep, kind, index, label, cnpj ? { cnpj } : { cpf: cpf! })
+        );
+      } else {
+        skipped.push(
+          buildSkip(
+            ep,
+            kind,
+            index,
+            label,
+            "onr",
+            "Pesquisa de bens ONR requer credenciais ONR/ARISP. Configure em Settings → Certidões → ONR."
+          )
+        );
+      }
+    }
   }
 
-  // ---- Imóveis: REMOVIDOS em Phase F.II-α ----
-  // Decisão 2026-04-16: não há certidões de imóvel neste momento (IPTU SP/RJ,
-  // CND Municipal RJ removidos). CENPROT foi remapeado para pessoa (acima).
-  // Endpoints permanecem no catálogo para futura re-ativação — planner só não
-  // dispara mais. Users com imóvel no form não verão skips de IPTU.
+  // ---- Imóveis (Phase L, 2026-05-22 — trilha reativada) ----
+  // IPTU/CND municipal (por município coberto), matrícula ONR (two-step) e CCIR
+  // (rural). Auto-dispara quando o imóvel tem os identificadores; sem eles emite
+  // SkippedJob com missingFields para o fluxo "Completar campos".
+  (data.imoveis ?? []).forEach((imovel, index) => {
+    const kind: TargetKind = "imovel";
+    const imUf = uf(imovel);
+    const cidadeNorm = normalizeCidade(imovel.cidade);
+    const label =
+      [imovel.rua, imovel.cidade].filter(Boolean).join(", ") ||
+      `Imóvel ${index + 1}`;
+
+    // --- Municipal (IPTU / CND) ---
+    const munKey = `${imUf}|${cidadeNorm}`;
+    const munSpecs = MUNICIPAL_BY_KEY[munKey];
+    if (munSpecs) {
+      for (const spec of munSpecs) {
+        if (spec.extraOnly && !expandAll) continue;
+        const idValue =
+          spec.requiresField === "sql"
+            ? imovel.sql
+            : imovel.inscricao_municipal || imovel.inscricao_iptu;
+        if (!idValue || !String(idValue).trim()) {
+          skipped.push(
+            buildSkip(
+              spec.endpoint,
+              kind,
+              index,
+              label,
+              spec.requiresField,
+              spec.requiresField === "sql"
+                ? "IPTU São Paulo exige o SQL (Setor-Quadra-Lote) do imóvel"
+                : "Certidão municipal exige a inscrição municipal/imobiliária do imóvel"
+            )
+          );
+        } else {
+          jobs.push(
+            buildJob(spec.endpoint, kind, index, label, {
+              [spec.paramName]: String(idValue).trim(),
+            })
+          );
+        }
+      }
+    } else if (imUf && imovel.cidade) {
+      // Município sem cobertura Infosimples → pendência manual com portal.
+      skipped.push(
+        buildSkip(
+          "pref/municipal-manual",
+          kind,
+          index,
+          label,
+          "cobertura",
+          `IPTU/CND municipal de ${imovel.cidade}/${imUf} sem cobertura Infosimples — extrair manualmente no portal da prefeitura`
+        )
+      );
+    }
+
+    // --- Matrícula ONR (two-step) ---
+    {
+      const ep = "registradores/matric-pedido";
+      const matricula = (imovel.matricula || "").trim();
+      const cartorio = (imovel.cartorio || "").trim();
+      if (!matricula) {
+        skipped.push(
+          buildSkip(
+            ep,
+            kind,
+            index,
+            label,
+            "matricula",
+            "Matrícula ONR exige o número da matrícula do imóvel"
+          )
+        );
+      } else if (!onrActive) {
+        skipped.push(
+          buildSkip(
+            ep,
+            kind,
+            index,
+            label,
+            "onr",
+            "Matrícula ONR requer credenciais ONR/ARISP. Configure em Settings → Certidões → ONR."
+          )
+        );
+      } else if (!cartorio && !(imUf && imovel.cidade)) {
+        skipped.push(
+          buildSkip(
+            ep,
+            kind,
+            index,
+            label,
+            "cartorio",
+            "Matrícula ONR exige o cartório (ou município + UF) do registro"
+          )
+        );
+      } else {
+        jobs.push(
+          buildJob(ep, kind, index, label, {
+            matricula,
+            finalidade: DEFAULT_FINALIDADE,
+            email,
+            ...(cartorio ? { cartorio } : {}),
+            ...(imovel.cidade ? { municipio: imovel.cidade } : {}),
+            ...(imUf ? { uf: imUf } : {}),
+          })
+        );
+      }
+    }
+
+    // --- CCIR (rural) ---
+    if (isImovelRural(imovel)) {
+      const ep = "sncr/ccir";
+      const codigo = (imovel.codigo_incra || imovel.nirf || "").toString().trim();
+      if (!codigo) {
+        skipped.push(
+          buildSkip(
+            ep,
+            kind,
+            index,
+            label,
+            "codigo_incra",
+            "CCIR exige o código do imóvel rural (INCRA/SNCR ou NIRF)"
+          )
+        );
+      } else {
+        jobs.push(buildJob(ep, kind, index, label, { codigo_imovel: codigo }));
+      }
+    }
+  });
 
   // ---- TJ estadual por parte (segue UF da parte, ou todas com expandAll) ----
   for (const { kind, index, parte } of pessoas) {
@@ -975,6 +1202,24 @@ function buildMissingFieldsForSkip(
           label: `Matrícula — ${partyLabel}`,
           type: "text",
           placeholder: "000000",
+        },
+      ];
+    case "cartorio":
+      return [
+        {
+          path: `${basePath}.cartorio`,
+          label: `Cartório de Registro de Imóveis — ${partyLabel}`,
+          type: "text",
+          placeholder: "Ex.: 1º RI da Comarca",
+        },
+      ];
+    case "codigo_incra":
+      return [
+        {
+          path: `${basePath}.codigo_incra`,
+          label: `Código do imóvel rural (INCRA/NIRF) — ${partyLabel}`,
+          type: "text",
+          placeholder: "000.000.000.000-0",
         },
       ];
     case "cidade":
