@@ -186,25 +186,27 @@ Export PDF: `/api/contracts/[id]/export` carrega preset default da org → Puppe
 
 ## Certidões (Infosimples + Serasa)
 
-Disparo manual no Deal → aba Certidões. Pipeline: client gera `batchId` UUID → `POST /api/deals/:id/certidoes` retorna 202 em <500ms e dispara `runBatch(batchId)` fire-and-forget → `pLimit(5)` com `Promise.allSettled` → cada job chama `callInfosimples`, normaliza, baixa PDF de `site_receipts[0]`, cria `DealAttachment { source: "infosimples" }` → client polla 2s.
+Disparo manual no Deal → aba Certidões. `POST /api/deals/:id/certidoes` 202 + dispara `runBatch` fire-and-forget → `pLimit(5)` → cada job: `callInfosimples`, normaliza, baixa PDF de `site_receipts[0]`, cria `DealAttachment { source:"infosimples" }`. Front: `useCertidoesBatch` polla enquanto há job ativo.
 
-**Two-step (TJSP/TJRJ):** `pedido-*` retorna 200 → job vira `awaiting_portal` com `expectedReadyAt = now+1h (TJSP) / +24h (TJRJ)` → cron `/api/cron/certidoes/poll-portal` (`*/5min` em `vercel.json`) sweeps com `expectedReadyAt < now`. `MAX_AGE = 14 dias` → `failed: "Timeout portal"`.
+**Two-step (TJSP/TJRJ/TJMS/TRF3/ONR):** `pedido-*` 200 → `awaiting_portal` (grava `pedido_data`) → cron `poll-portal` chama o `obter` via `buildObterArgs` (e-SAJ exige `pedido_data`+cpf; TRF3 `numero_certidao`). `pollPortalJob::decideObterOutcome`: conta/integração → falha já; transitório → 3×; senão reagenda até `maxPortalWaitMs` por portal (TJSP **7d**, TJRJ 14d) → `failed_permanent`+`portalUrl`.
 
 **Schema:** `CertidaoJob { dealId, batchId, endpoint, label, targetKind, targetIndex, requestPayload, status, resultCode, resultData, attachmentId, errorMessage, latencyMs, costCents, expectedReadyAt, retryCount, nextRetryAt, maxRetries (3), missingFields[], portalUrl }`.
 
-**Estados** (`outcome-classifier.ts::classifyOutcome`) — `success`/`informativo`/`api_error`(retry 30s/2min/10min)/`portal_unavailable`(615/665/666, retry 10min/30min/2h)/`rate_limited`(668)/`data_missing`(606/612/613, `missingFields[]` + "Completar campos")/`data_invalid`(614, EditPartyDialog)/`failed_permanent`(retries esgotados, `portalUrl`)/`skipped`(pré-dispatch). Ver [[certidoes_estados_ricos]].
+**Estados** (`outcome-classifier.ts::classifyOutcome`) — `success`/`informativo`/`api_error`/`portal_unavailable`(615/665/666)/`rate_limited`(668)/`data_missing`(606/612/613, `missingFields[]`)/`data_invalid`(614, EditPartyDialog)/`failed_permanent`(esgotado, `portalUrl`)/`duplicate_pending`(620)/`skipped`. Backoffs/retry em [[certidoes_retry_backoffs]] e [[certidoes_estados_ricos]].
 
-**Anti-falso-negativo:** categoria que exige PDF sem `site_receipts[0]` é sempre `failed`. **Billing honesto:** respeita `resp.header.billable === false`. Ver [[certidoes_falso_negativo]].
+**Anti-falso-negativo:** categoria que exige PDF sem `site_receipts[0]` → sempre `failed`; **billing** respeita `header.billable===false`. Ver [[certidoes_falso_negativo]].
 
-**Planner** (`planner.ts`) percorre vendedores/compradores/imóveis. PF sem `data_nascimento` bloqueia PGFN/TJSP/Antecedentes PF. Comarca TJRJ via `comarcas-rj.ts` (fallback "Capital").
+**Planner** (`planner.ts`): vendedores/compradores/imóveis. PF sem `data_nascimento` bloqueia PGFN/TJSP/Antecedentes. Comarca TJRJ via `comarcas-rj.ts`.
 
-**Endpoints cobertos:** Federais (PGFN, CNDT, TRF), trabalhistas (CEAT), cíveis (TJSP/TJRJ 2-step, TJRS), protestos CENPROT (SP direto + Nacional IEPTB via GOV.BR p/ todas partes; detalhes SP encadeados). Receita CPF + Antecedentes PF auto em financiamento.
+**Endpoints:** Federais (PGFN/CNDT/TRF), trabalhistas (CEAT), cíveis (TJSP/TJRJ 2-step, TJRS), E-Proc SP (`eproc-lista`), protestos CENPROT (SP + Nacional IEPTB via GOV.BR). Receita CPF + Antecedentes PF auto em financiamento.
 
-**Imóvel (Phase L, trilha reativada):** auto-plano com identificadores. Municipal IPTU/CND em 8 capitais (`pref/*`, SP via `sql`, demais `inscricao_municipal`), ONR/ARISP (matrícula 2-step + `onr/mapa-registro-imoveis`) e CCIR rural — `category="registro"`, `requiresOnrAuth` (`INFOSIMPLES_ONR_*`, saldo ONR próprio), `checkOnrAuth()`→`onrActive`. `pollPortalJob`/`resolveObterEndpoint` destrava ONR/TJMS/Antecedentes. Ver [[project_certidoes_onr_imovel]].
+**Imóvel (Phase L):** IPTU/CND 8 capitais (`pref/*`), ONR/ARISP (matrícula 2-step + pesquisa de bens), CCIR — `category="registro"`, `requiresOnrAuth`/`onrActive` (`INFOSIMPLES_ONR_*`, saldo próprio). Ver [[project_certidoes_onr_imovel]].
 
-**Catálogo** (`endpoints.ts`): `category`, `emitsPdf?`, `portalUrl?`, `expectedWaitMinutes?`, `CATEGORIES_REQUIRING_PDF`. **Normalizers** com fallback chains; 6xx geralmente vira `nao_emitida`.
+**Catálogo** (`endpoints.ts`): `category`/`emitsPdf?`/`portalUrl?`/`expectedWaitMinutes?`/`CATEGORIES_REQUIRING_PDF`. **Normalizers** com fallback; 6xx→`nao_emitida`.
 
-**Budget guard** `INFOSIMPLES_MONTHLY_BUDGET_CENTS` (default 5000), POST 402 se estouraria. **Relatório PDF:** `POST .../certidoes/report` → `DealAttachment category:"relatorio_certidoes"`. **Dashboard `/settings/certidoes`:** gasto/budget, sucesso, p50/p95, erros.
+**Budget guard** `INFOSIMPLES_MONTHLY_BUDGET_CENTS` (5000): POST 402 + o **cron** checa antes de cada chamada + **circuit breaker** (603 → para). **Relatório:** `POST .../certidoes/report`.
+
+**Fluxo de problemas + UX (2026-05):** falha terminal → sino + cron `problem-digest` (e-mail); painel `/settings/certidoes` (problemas c/ tentativas/JSON/retry + saúde API/crédito). Aba: régua 3 cores (`colorTier`), grupos colapsáveis, IA on-demand, auto-refresh, dialog já-puxadas/status-API, ZIP dedupe+`%PDF`. [[project_certidoes_overhaul_2026_05]].
 
 **Gaps:** CNIB (sem endpoint Infosimples), ITR, TJMG/TJPR/TJES cível, IPTU Vitória/ES + Campo Grande — `portalUrl` manual. Casos especiais (estrangeiro, espólio, menor, divórcio, falência) → futuro.
 
