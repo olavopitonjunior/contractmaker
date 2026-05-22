@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveObterEndpoint } from "../executor";
+import { resolveObterEndpoint, buildObterArgs } from "../executor";
 
 /**
  * Phase L — garante que TODO fluxo two-step resolve o endpoint do 2º passo.
@@ -22,5 +22,67 @@ describe("resolveObterEndpoint — mapeamento two-step", () => {
 
   it("endpoint single-step → null", () => {
     expect(resolveObterEndpoint("receita-federal/pgfn")).toBeNull();
+  });
+});
+
+describe("buildObterArgs — params do 2º passo por portal", () => {
+  const payloadPF = { cpf: "12345678900", nome: "Fulano" };
+  const payloadPJ = { cnpj: "11222333000144" };
+
+  it("TJSP e-SAJ → numero_pedido + pedido_data + cpf", () => {
+    expect(
+      buildObterArgs("tribunal/tjsp/obter-civel", {
+        numeroPedido: "1610335",
+        pedidoData: "22/05/2026",
+        payload: payloadPF,
+      })
+    ).toEqual({ numero_pedido: "1610335", pedido_data: "22/05/2026", cpf: "12345678900" });
+  });
+
+  it("TJRJ e-SAJ → numero_pedido + pedido_data + cnpj", () => {
+    expect(
+      buildObterArgs("tribunal/tjrj/obter-certidao", {
+        numeroPedido: "ABC",
+        pedidoData: "01/01/2026",
+        payload: payloadPJ,
+      })
+    ).toEqual({ numero_pedido: "ABC", pedido_data: "01/01/2026", cnpj: "11222333000144" });
+  });
+
+  it("TJSP sem pedido_data → omite o campo", () => {
+    expect(
+      buildObterArgs("tribunal/tjsp/obter-civel", {
+        numeroPedido: "X",
+        payload: payloadPF,
+      })
+    ).toEqual({ numero_pedido: "X", cpf: "12345678900" });
+  });
+
+  it("TRF3 → numero_certidao + documento (não numero_pedido)", () => {
+    expect(
+      buildObterArgs("tribunal/trf3/obter-certidao", {
+        numeroPedido: "CERT-9",
+        pedidoData: "22/05/2026",
+        payload: payloadPF,
+      })
+    ).toEqual({ numero_certidao: "CERT-9", cpf: "12345678900" });
+  });
+
+  it("Antecedentes PF → codigo + cpf", () => {
+    expect(
+      buildObterArgs("antecedentes-criminais/pf/val", {
+        numeroPedido: "COD1",
+        payload: payloadPF,
+      })
+    ).toEqual({ codigo: "COD1", cpf: "12345678900" });
+  });
+
+  it("default (ONR matrícula) → só numero_pedido", () => {
+    expect(
+      buildObterArgs("registradores/matric-download", {
+        numeroPedido: "M-1",
+        payload: payloadPF,
+      })
+    ).toEqual({ numero_pedido: "M-1" });
   });
 });

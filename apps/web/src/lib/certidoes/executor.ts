@@ -76,7 +76,11 @@ function computeAdaptiveRetryDelta(
   const twoHoursMs = 2 * 60 * 60_000;
   const fortyEightHoursMs = 48 * 60 * 60_000;
   if (endpoint.includes("/tjsp/")) {
-    return ageMs < twoHoursMs ? 30 * 60_000 : 2 * 60 * 60_000;
+    // TJSP emite em até 5 dias úteis (e-SAJ) — poll agressivo na 1ª 2h (caso
+    // saia rápido), depois espaçado p/ não custar/martelar por dias.
+    if (ageMs < twoHoursMs) return 30 * 60_000; // 30min
+    if (ageMs < fortyEightHoursMs) return 6 * 60 * 60_000; // 6h
+    return 24 * 60 * 60_000; // 24h
   }
   if (endpoint.includes("/tjrj/")) {
     return ageMs < fortyEightHoursMs ? 6 * 60 * 60_000 : 24 * 60 * 60_000;
@@ -115,7 +119,7 @@ function computeInitialExpectedReadyAt(endpoint: string): Date {
  * próprio (TJSP costuma sair em min/horas; TJRJ pode levar dias úteis).
  */
 function maxPortalWaitMs(endpoint: string): number {
-  if (endpoint.includes("/tjsp/")) return 12 * 60 * 60_000; // 12h
+  if (endpoint.includes("/tjsp/")) return 7 * 24 * 60 * 60_000; // ~5 dias úteis (e-SAJ) + folga
   if (endpoint.includes("/tjrj/")) return 14 * 24 * 60 * 60_000; // ~10 dias úteis
   if (endpoint.includes("/tjms/")) return 3 * 24 * 60 * 60_000; // 3 dias
   if (endpoint.includes("/trf3/")) return 2 * 24 * 60 * 60_000; // 2 dias
@@ -140,6 +144,47 @@ export function resolveObterEndpoint(pedidoEndpoint: string): string | null {
   if (pedidoEndpoint === "antecedentes-criminais/pf/emit")
     return "antecedentes-criminais/pf/val";
   return null;
+}
+
+/** DD/MM/YYYY (formato e-SAJ) — usado p/ `pedido_data` no obter. */
+export function formatDateBR(d: Date): string {
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${dd}/${mm}/${d.getFullYear()}`;
+}
+
+/**
+ * Monta os params do 2º passo (obter) por portal — pura, testável.
+ *   - TRF3: { numero_certidao, cpf|cnpj } (doc exige o documento).
+ *   - Antecedentes PF: { codigo, cpf } p/ validar o código emitido.
+ *   - e-SAJ TJSP/TJRJ: { numero_pedido, pedido_data, cpf|cnpj } — o obter-civel
+ *     exige a DATA do pedido + documento, além do número (doc Infosimples).
+ *   - Demais (ONR matrícula etc.): { numero_pedido }.
+ */
+export function buildObterArgs(
+  obterEndpoint: string,
+  ctx: { numeroPedido: string; pedidoData?: string; payload: Record<string, unknown> }
+): Record<string, unknown> {
+  const { numeroPedido, pedidoData, payload } = ctx;
+  const doc: Record<string, unknown> = payload.cpf
+    ? { cpf: payload.cpf }
+    : payload.cnpj
+    ? { cnpj: payload.cnpj }
+    : {};
+  if (obterEndpoint.includes("/trf3/")) {
+    return { numero_certidao: numeroPedido, ...doc };
+  }
+  if (obterEndpoint.startsWith("antecedentes-criminais/")) {
+    return { codigo: numeroPedido, ...(payload.cpf ? { cpf: payload.cpf } : {}) };
+  }
+  if (obterEndpoint.includes("/tjsp/") || obterEndpoint.includes("/tjrj/")) {
+    return {
+      numero_pedido: numeroPedido,
+      ...(pedidoData ? { pedido_data: pedidoData } : {}),
+      ...doc,
+    };
+  }
+  return { numero_pedido: numeroPedido };
 }
 
 // Memo curto (TTL 60s) do gasto mensal por org — evita refazer o aggregate a
@@ -459,6 +504,16 @@ export async function runSingleJob(
         (d.numero_certidao as string) ??
         (dadosSolic?.protocolo as string) ??
         null;
+      // pedido_data: o obter do e-SAJ (TJSP/TJRJ) exige a DATA do pedido além
+      // do numero_pedido. A resposta do pedido raramente traz, então usamos a
+      // data de submissão (hoje) em DD/MM/YYYY. Guardado no resultData p/ o
+      // pollPortalJob montar os args do obter.
+      const pedidoData =
+        (d.pedido_data as string) ??
+        (d.data_pedido as string) ??
+        (dadosSolic?.data_solicitacao as string) ??
+        (dadosSolic?.data_socilitacao as string) ??
+        formatDateBR(new Date());
       // F4: adaptive initial delay — TJSP 30min (normally ready in 5-15min),
       // TJRJ 6h (up to 8 business days). Previously fixed 1h / 24h.
       const expected = computeInitialExpectedReadyAt(job.endpoint);
@@ -469,7 +524,7 @@ export async function runSingleJob(
           latencyMs,
           resultCode: resp.code,
           resultMessage: resp.code_message,
-          resultData: { numero_pedido: numeroPedido, initial: true },
+          resultData: { numero_pedido: numeroPedido, pedido_data: pedidoData, initial: true },
           expectedReadyAt: expected,
           costCents: info.costCents,
         },
@@ -894,8 +949,9 @@ export async function pollPortalJob(jobId: string): Promise<void> {
   const job = await prisma.certidaoJob.findUnique({ where: { id: jobId } });
   if (!job || job.status !== "awaiting_portal") return;
 
-  const pedidoData = (job.resultData as Record<string, unknown>) ?? {};
-  const numeroPedido = pedidoData.numero_pedido as string | undefined;
+  const stored = (job.resultData as Record<string, unknown>) ?? {};
+  const numeroPedido = stored.numero_pedido as string | undefined;
+  const pedidoDataDate = stored.pedido_data as string | undefined;
   if (!numeroPedido) {
     await prisma.certidaoJob.update({
       where: { id: jobId },
@@ -923,15 +979,11 @@ export async function pollPortalJob(jobId: string): Promise<void> {
   //   - ONR matrícula: { numero_pedido } no download da matrícula gerada
   //   - Antecedentes PF: { codigo, cpf } para validar o código emitido
   const payload = (job.requestPayload as Record<string, unknown>) ?? {};
-  let obterArgs: Record<string, unknown> = { numero_pedido: numeroPedido };
-  if (obterEndpoint.includes("/trf3/")) {
-    obterArgs = { numero_certidao: numeroPedido };
-    if (payload.cpf) obterArgs.cpf = payload.cpf;
-    else if (payload.cnpj) obterArgs.cnpj = payload.cnpj;
-  } else if (obterEndpoint.startsWith("antecedentes-criminais/")) {
-    obterArgs = { codigo: numeroPedido };
-    if (payload.cpf) obterArgs.cpf = payload.cpf;
-  }
+  const obterArgs = buildObterArgs(obterEndpoint, {
+    numeroPedido,
+    pedidoData: pedidoDataDate,
+    payload,
+  });
 
   // Fase 0 — guard de custo/crédito: não chama a API paga se a org está
   // bloqueada (orçamento mensal estourado ou crédito esgotado = 603 recente).

@@ -51,7 +51,6 @@ const TERMINAL = new Set([
   "failed",
   "failed_permanent",
   "skipped",
-  "awaiting_portal",
   "replaced",
   "informativo",
   // J: data_missing / data_invalid são terminais (precisam user action),
@@ -59,6 +58,9 @@ const TERMINAL = new Set([
   // são terminais — cron vai retentar.
   "data_missing",
   "data_invalid",
+  // C (2026-05-22): awaiting_portal NÃO é terminal aqui — mantém o polling
+  // vivo enquanto o cron busca a certidão no portal, pra o card atualizar
+  // sozinho quando sair (limitado pelo hard cap de tempo no startPolling).
 ]);
 
 /**
@@ -101,7 +103,7 @@ export function useCertidoesBatch(dealId: string) {
   }, []);
 
   const startPolling = useCallback(
-    (batchId: string) => {
+    (batchId?: string) => {
       stopPolling();
       startedAtRef.current = Date.now();
       pollingRef.current = setInterval(async () => {
@@ -118,9 +120,20 @@ export function useCertidoesBatch(dealId: string) {
   );
 
   useEffect(() => {
-    fetchJobs();
-    return () => stopPolling();
-  }, [fetchJobs, stopPolling]);
+    let cancelled = false;
+    (async () => {
+      const initial = await fetchJobs();
+      if (cancelled || !initial) return;
+      // C (2026-05-22): se ao abrir já houver job ativo (não-terminal, ex.:
+      // awaiting_portal sendo buscado pelo cron), inicia o polling pra o card
+      // atualizar sozinho quando sair — sem o usuário precisar dar refresh.
+      if (initial.some((j) => !TERMINAL.has(j.status))) startPolling();
+    })();
+    return () => {
+      cancelled = true;
+      stopPolling();
+    };
+  }, [fetchJobs, startPolling, stopPolling]);
 
   const extract = useCallback(
     async (

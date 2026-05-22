@@ -59,22 +59,61 @@ export async function GET(
 
   const zip = new JSZip();
 
+  const folderOf = (att: (typeof deal.attachments)[number]): string => {
+    if (att.category === "relatorio_certidoes") return "";
+    const extracted = att.extractedData as Record<string, unknown> | null;
+    const assignment =
+      (extracted?.assignment as { kind?: string; index?: number }) ?? null;
+    return assignment?.kind
+      ? `${assignment.kind}-${(assignment.index ?? 0) + 1}`
+      : "outros";
+  };
+
+  // Dedupe: re-runs criam DealAttachments NOVOS com o mesmo filename (o job
+  // antigo vira `replaced`, mas o anexo persiste). Sem dedupe, o zip ganha
+  // entradas repetidas no mesmo caminho → leitores acusam "corrompido". Mantém
+  // só o mais recente por (pasta, filename).
+  const byKey = new Map<string, (typeof deal.attachments)[number]>();
   for (const att of deal.attachments) {
+    const key = `${folderOf(att)}/${att.filename}`;
+    const prev = byKey.get(key);
+    if (!prev || att.createdAt > prev.createdAt) byKey.set(key, att);
+  }
+
+  const usedPaths = new Set<string>();
+  for (const att of byKey.values()) {
     try {
-      const buffer = await downloadBufferFromUrl(att.url);
-      // Determine folder: "relatorio" at root, others grouped by kind
-      let folder = "outros";
-      if (att.category === "relatorio_certidoes") {
-        folder = "";
-      } else {
-        const extracted = att.extractedData as Record<string, unknown> | null;
-        const assignment =
-          (extracted?.assignment as { kind?: string; index?: number }) ?? null;
-        if (assignment?.kind) {
-          folder = `${assignment.kind}-${(assignment.index ?? 0) + 1}`;
-        }
+      const raw = await downloadBufferFromUrl(att.url);
+      const buffer = Buffer.from(raw);
+      // Corrupção: alguns anexos baixam conteúdo não-PDF (blob expirado → HTML
+      // de erro) ou vazio. Valida magic bytes %PDF para arquivos .pdf antes de
+      // incluir; inválidos vão pra errors/ em vez de poluir as certidões boas.
+      const expectsPdf =
+        att.filename.toLowerCase().endsWith(".pdf") ||
+        att.category === "relatorio_certidoes";
+      const isPdf =
+        buffer.length > 4 && buffer.subarray(0, 4).toString("latin1") === "%PDF";
+      if (buffer.length === 0 || (expectsPdf && !isPdf)) {
+        zip.file(
+          `errors/${att.filename}.txt`,
+          `Arquivo inválido (${buffer.length} bytes, não é PDF). Baixe pelo card individual ou re-extraia a certidão.`
+        );
+        continue;
       }
-      const filePath = folder ? `${folder}/${att.filename}` : att.filename;
+      const folder = folderOf(att);
+      let filePath = folder ? `${folder}/${att.filename}` : att.filename;
+      // Garante caminho único caso ainda colida após o dedupe.
+      if (usedPaths.has(filePath)) {
+        const dot = att.filename.lastIndexOf(".");
+        const base = dot > 0 ? att.filename.slice(0, dot) : att.filename;
+        const ext = dot > 0 ? att.filename.slice(dot) : "";
+        let n = 2;
+        const mk = (i: number) =>
+          folder ? `${folder}/${base}-${i}${ext}` : `${base}-${i}${ext}`;
+        while (usedPaths.has(mk(n))) n++;
+        filePath = mk(n);
+      }
+      usedPaths.add(filePath);
       zip.file(filePath, buffer);
     } catch (err) {
       console.error("[zip] falha ao baixar attachment", att.id, err);

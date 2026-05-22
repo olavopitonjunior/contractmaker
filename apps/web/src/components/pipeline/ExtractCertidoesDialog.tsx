@@ -132,9 +132,15 @@ export function ExtractCertidoesDialog({
           data.catalogMeta ?? { ufs: [], categories: [] }
         );
         setDiligenciados(data.diligenciados ?? []);
-        // Default: select all auto-plan jobs
+        // Default: marca só vendedores + imóvel (compradores começam
+        // desmarcados — o usuário marca se quiser). Decisão do usuário.
         const initial = new Set<string>(
-          (data.plan?.jobs ?? []).map((j: PlannedJob) => jobKey(j))
+          (data.plan?.jobs ?? [])
+            .filter(
+              (j: PlannedJob) =>
+                j.targetKind === "vendedor" || j.targetKind === "imovel"
+            )
+            .map((j: PlannedJob) => jobKey(j))
         );
         setSelected(initial);
         setExtras([]);

@@ -188,11 +188,13 @@ function statusLabel(row: CertidaoJobRow): string {
   if (status === "pending") return "Pendente · na fila";
   if (status === "fetching") return "Pendente · consultando";
   if (status === "awaiting_portal") {
-    // Subtítulo específico por endpoint — TJSP ~15min, TJRJ ~8d, TJMS ~2d
+    // Previsão real por portal (prazo de emissão do órgão, não do nosso poll).
     const ep = row.endpoint.toLowerCase();
     if (ep.includes("tjrj")) return "Pendente · aguardando portal (até 8 dias úteis)";
     if (ep.includes("tjms")) return "Pendente · aguardando portal (até 48h)";
-    return "Pendente · aguardando portal (até 15 min)";
+    if (ep.includes("tjsp")) return "Pendente · aguardando portal (até 5 dias úteis)";
+    if (ep.includes("registradores")) return "Pendente · aguardando portal (até 5 dias úteis)";
+    return "Pendente · aguardando portal";
   }
   // J.6 (Phase J, 2026-04-18) — estados ricos
   if (status === "api_error") {
@@ -232,7 +234,9 @@ function statusLabel(row: CertidaoJobRow): string {
       ? "previsão até 8 dias úteis"
       : ep.includes("tjms")
       ? "previsão até 48h"
-      : "previsão até 15 min";
+      : ep.includes("tjsp")
+      ? "previsão até 5 dias úteis"
+      : "aguarde o portal";
     return `Pedido já em andamento no portal · ${eta}`;
   }
   if (status === "failed_permanent") {
@@ -264,53 +268,57 @@ function statusLabel(row: CertidaoJobRow): string {
 }
 
 /**
- * When a job succeeded at the transport layer but the portal didn't emit
- * (situacao "nao_emitida" / "indeterminado"), the normalizer attaches a
- * `failureCategory` explaining why. This tint colors the card accordingly so
- * the user can see "needs data" vs "portal down" vs "limit reached" at a
- * glance without opening the detail dialog.
+ * Régua de cores (decisão do usuário 2026-05-22): a cor reflete se a API
+ * FUNCIONOU, não se virou um PDF de certidão.
+ *   🟢 green   = a consulta/API funcionou e retornou (success/informativo —
+ *                inclui negativa, positiva e informativa; badge explica).
+ *   🟡 yellow  = pendente / vai re-tentar (na fila, consultando, aguardando
+ *                portal, duplicado, retry transitório).
+ *   🔴 red     = erro e não saiu / precisa ação (failed, falha permanente,
+ *                falta dado, dados divergentes).
+ *   ⚪ neutral = fora da régua: sem cobertura de API (skipped) / substituído.
  */
-function variantForFailureCategory(cat: FailureCategory | undefined): string | null {
-  switch (cat) {
-    case "missing_input":
-    case "inconsistent_input":
-      return "border-amber-300 bg-amber-50/40";
+export type ColorTier = "green" | "yellow" | "red" | "neutral";
+
+function colorTier(row: CertidaoJobRow): ColorTier {
+  switch (effectiveStatus(row)) {
+    case "success":
+    case "informativo":
+      return "green";
+    case "pending":
+    case "fetching":
+    case "awaiting_portal":
+    case "duplicate_pending":
+    case "api_error":
     case "portal_unavailable":
     case "rate_limited":
-      return "border-blue-300 bg-blue-50/30";
-    case "account_issue":
-      return "border-red-300 bg-red-50";
-    case "genuine_no_data":
-      return "border-green-300 bg-green-50/30";
-    case "unknown":
-    case undefined:
+      return "yellow";
+    case "failed":
+    case "failed_permanent":
+    case "data_missing":
+    case "data_invalid":
+      return "red";
+    case "skipped":
+    case "replaced":
     default:
-      return null;
+      return "neutral";
   }
 }
 
 function statusVariant(row: CertidaoJobRow): string {
-  const r = row.resultData as { situacao?: string; failureCategory?: FailureCategory } | null;
-  const status = effectiveStatus(row);
-  if (status === "failed") return "border-red-300 bg-red-50";
-  if (status === "awaiting_portal") return "border-amber-300 bg-amber-50";
-  if (status === "duplicate_pending") return "border-amber-300 bg-amber-50/60";
-  if (status === "fetching" || status === "pending")
-    return "border-blue-300 bg-blue-50/30";
-  if (status === "skipped") return "border-muted bg-muted/20";
-  if (status === "replaced") return "border-muted bg-muted/10 opacity-60";
-  if (status === "success") {
-    if (r?.situacao === "negativa") return "border-green-300 bg-green-50/30";
-    if (r?.situacao === "aguardando_pdf") return "border-blue-300 bg-blue-50/30";
-    if (r?.situacao === "informativa") return "border-blue-300 bg-blue-50/20";
-    if (r?.situacao === "positiva" || r?.situacao === "positiva_com_efeitos")
-      return "border-amber-300 bg-amber-50";
-    // "nao_emitida" / "indeterminado" — use category-specific tint when available
-    const catVariant = variantForFailureCategory(r?.failureCategory);
-    if (catVariant) return catVariant;
-    return "border-muted bg-background";
+  if (effectiveStatus(row) === "replaced")
+    return "border-muted bg-muted/10 opacity-60";
+  switch (colorTier(row)) {
+    case "green":
+      return "border-green-300 bg-green-50/40";
+    case "yellow":
+      return "border-amber-300 bg-amber-50/50";
+    case "red":
+      return "border-red-300 bg-red-50/50";
+    case "neutral":
+    default:
+      return "border-muted bg-muted/20";
   }
-  return "border-muted bg-muted/20";
 }
 
 /**
@@ -396,6 +404,8 @@ export function CertidoesTab({
     "all" | "success" | "awaiting" | "action" | "failed"
   >("all");
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  // D — Análise IA é on-demand: só monta/roda o painel ao clicar (toggle).
+  const [showAnalysis, setShowAnalysis] = useState(false);
 
   // Base para stats: sempre exclui replaced (comportamento original).
   const visibleJobs = useMemo(
@@ -406,34 +416,6 @@ export function CertidoesTab({
     () => jobs.filter((j) => j.status === "replaced").length,
     [jobs]
   );
-
-  // "Ainda pode sair": jobs aguardando portal OU com retry automático futuro.
-  // Ordenados pelo prazo mais próximo, para o usuário ver de relance o que
-  // ainda está em curso e até quando.
-  const pendingSoon = useMemo(() => {
-    return visibleJobs
-      .filter((j) => {
-        const s = effectiveStatus(j);
-        if (s === "awaiting_portal") return true;
-        if (
-          (s === "api_error" ||
-            s === "portal_unavailable" ||
-            s === "rate_limited") &&
-          j.nextRetryAt
-        )
-          return true;
-        return false;
-      })
-      .map((j) => ({
-        job: j,
-        when: j.expectedReadyAt ?? j.nextRetryAt ?? null,
-      }))
-      .sort((a, b) => {
-        const ta = a.when ? new Date(a.when).getTime() : Infinity;
-        const tb = b.when ? new Date(b.when).getTime() : Infinity;
-        return ta - tb;
-      });
-  }, [visibleJobs]);
 
   // Categoriza um job para o filtro por status.
   const filterBucket = (
@@ -762,10 +744,6 @@ export function CertidoesTab({
       {/* F3: diligenciados section at the top */}
       <DiligentedPersonsSection dealId={dealId} onChange={() => refresh()} />
 
-      {/* F4.7: Painel de Análise IA — findings de cross_check_certidoes
-          com botão "Aplicar Aditamento" que abre o contrato no chat. */}
-      <CertidoesAnalysisPanel dealId={dealId} />
-
       <div className="flex flex-wrap items-center gap-2">
         <Button onClick={() => setDialogOpen(true)} disabled={extracting}>
           <Sparkles className="h-4 w-4 mr-1" />
@@ -869,6 +847,16 @@ export function CertidoesTab({
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+        )}
+        {hasJobs && (
+          <Button
+            variant={showAnalysis ? "default" : "outline"}
+            onClick={() => setShowAnalysis((v) => !v)}
+            title="Roda a análise das certidões e mostra apontamentos"
+          >
+            <Sparkles className="h-4 w-4 mr-1" />
+            Análise IA
+          </Button>
         )}
         {stats.success > 0 && (
           <>
@@ -978,6 +966,9 @@ export function CertidoesTab({
         )}
       </div>
 
+      {/* D — Análise IA on-demand: só monta (e roda) quando o usuário abre. */}
+      {showAnalysis && <CertidoesAnalysisPanel dealId={dealId} />}
+
       {error && (
         <div className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800 flex items-start gap-2">
           <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
@@ -1025,40 +1016,6 @@ export function CertidoesTab({
                 Latência média: {stats.avgLatency}s
               </div>
             )}
-          </CardContent>
-        </Card>
-      )}
-
-      {/* "Ainda pode sair": fixado no topo, ordenado pelo prazo mais próximo,
-          com countdown em destaque. Resolve "não é fácil saber se ainda pode
-          sair alguma por prazo". */}
-      {pendingSoon.length > 0 && (
-        <Card className="border-amber-300 bg-amber-50/40">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm flex items-center gap-1.5 text-amber-800">
-              <CalendarClock className="h-4 w-4" />
-              Ainda pode sair ({pendingSoon.length})
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-1.5 pt-0">
-            {pendingSoon.map(({ job, when }) => {
-              const rel = formatRelativeTo(when);
-              return (
-                <button
-                  key={job.id}
-                  onClick={() => setDetailJob(job)}
-                  className="w-full flex items-center gap-2 rounded border border-amber-200 bg-background/60 px-2.5 py-1.5 text-left text-sm hover:bg-background"
-                >
-                  <Clock className="h-3.5 w-3.5 text-amber-600 shrink-0" />
-                  <span className="flex-1 min-w-0 truncate">{job.label}</span>
-                  {rel && (
-                    <span className="shrink-0 text-xs font-medium text-amber-800">
-                      {rel === "agora" ? "pronto p/ buscar" : rel}
-                    </span>
-                  )}
-                </button>
-              );
-            })}
           </CardContent>
         </Card>
       )}
