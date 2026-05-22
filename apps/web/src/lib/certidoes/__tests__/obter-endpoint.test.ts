@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { resolveObterEndpoint, buildObterArgs } from "../executor";
+import { resolveObterEndpoint, buildObterArgs, pickRecoverableProtocol } from "../executor";
 
 /**
  * Phase L — garante que TODO fluxo two-step resolve o endpoint do 2º passo.
@@ -84,5 +84,55 @@ describe("buildObterArgs — params do 2º passo por portal", () => {
         payload: payloadPF,
       })
     ).toEqual({ numero_pedido: "M-1" });
+  });
+});
+
+describe("pickRecoverableProtocol — recupera protocolo do pedido original (620)", () => {
+  const d = (s: string) => new Date(s);
+
+  it("recupera numero_pedido do MESMO tipo (TJSP tem 4 tipos no mesmo endpoint)", () => {
+    const priors = [
+      { requestPayload: { tipo_certidao: "falencia" }, resultData: { numero_pedido: "FAL-1" }, createdAt: d("2026-05-20") },
+      { requestPayload: { tipo_certidao: "civel" }, resultData: { numero_pedido: "CIV-1", pedido_data: "18/05/2026" }, createdAt: d("2026-05-18") },
+    ];
+    expect(pickRecoverableProtocol("civel", priors)).toEqual({
+      numeroPedido: "CIV-1",
+      pedidoData: "18/05/2026",
+    });
+  });
+
+  it("ignora protocolo de tipo diferente", () => {
+    const priors = [
+      { requestPayload: { tipo_certidao: "falencia" }, resultData: { numero_pedido: "FAL-1" }, createdAt: d("2026-05-20") },
+    ];
+    expect(pickRecoverableProtocol("civel", priors)).toBeNull();
+  });
+
+  it("sem pedido_data no prior → formata o createdAt (DD/MM/YYYY)", () => {
+    const priors = [
+      { requestPayload: { tipo_certidao: "civel" }, resultData: { numero_pedido: "CIV-9" }, createdAt: d("2026-05-21T12:00:00") },
+    ];
+    expect(pickRecoverableProtocol("civel", priors)).toEqual({
+      numeroPedido: "CIV-9",
+      pedidoData: "21/05/2026",
+    });
+  });
+
+  it("currentTipo undefined (endpoint sem tipo) → casa qualquer", () => {
+    const priors = [
+      { requestPayload: {}, resultData: { numero_pedido: "X-1", pedido_data: "01/01/2026" }, createdAt: d("2026-01-01") },
+    ];
+    expect(pickRecoverableProtocol(undefined, priors)).toEqual({
+      numeroPedido: "X-1",
+      pedidoData: "01/01/2026",
+    });
+  });
+
+  it("nenhum prior com numero_pedido → null", () => {
+    const priors = [
+      { requestPayload: { tipo_certidao: "civel" }, resultData: { duplicate_pending: true, numero_pedido: null }, createdAt: d("2026-05-20") },
+      { requestPayload: { tipo_certidao: "civel" }, resultData: null, createdAt: d("2026-05-19") },
+    ];
+    expect(pickRecoverableProtocol("civel", priors)).toBeNull();
   });
 });
