@@ -112,6 +112,10 @@ export function ExtractCertidoesDialog({
   });
   const [diligenciados, setDiligenciados] = useState<DiligentedRow[]>([]);
   const [spend, setSpend] = useState<Spend | null>(null);
+  // E3 — saúde da API por endpoint (do plano): ok | degraded | down.
+  const [apiHealth, setApiHealth] = useState<
+    Record<string, "ok" | "degraded" | "down">
+  >({});
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   // Selection state: user can check/uncheck each job in the plan + the extras
@@ -138,6 +142,7 @@ export function ExtractCertidoesDialog({
         setCatalogMeta(
           data.catalogMeta ?? { ufs: [], categories: [] }
         );
+        setApiHealth(data.apiHealth ?? {});
         setDiligenciados(data.diligenciados ?? []);
         // Default: marca só vendedores + imóvel (compradores começam
         // desmarcados — o usuário marca se quiser). Decisão do usuário.
@@ -439,6 +444,28 @@ export function ExtractCertidoesDialog({
                               className="h-3.5 w-3.5 accent-primary"
                             />
                             <span className="flex-1 truncate">{j.label}</span>
+                            {(() => {
+                              const h = apiHealth[j.endpoint];
+                              if (h === "down" || h === "degraded") {
+                                return (
+                                  <span
+                                    className={`shrink-0 text-[9px] ${
+                                      h === "down"
+                                        ? "text-red-600"
+                                        : "text-amber-600"
+                                    }`}
+                                    title={
+                                      h === "down"
+                                        ? "API instável nas últimas 24h — pode falhar/atrasar"
+                                        : "API com instabilidade recente"
+                                    }
+                                  >
+                                    ● API
+                                  </span>
+                                );
+                              }
+                              return null;
+                            })()}
                             {(() => {
                               const t = extractedStatus[jobKey(j)];
                               if (!t) return null;

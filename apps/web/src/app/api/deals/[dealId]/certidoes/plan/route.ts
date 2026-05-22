@@ -95,12 +95,39 @@ export async function GET(
   );
   const catalog = listAllForPicker();
 
+  // E3 — saúde da API por endpoint (org, últimas 24h): pro dialog avisar se a
+  // fonte está instável ANTES de gastar. "bad" = portal pausado/instável (615/
+  // 66x), conta/crédito (603/604), 5xx, ou status de portal indisponível.
+  const last24 = new Date(Date.now() - 24 * 60 * 60_000);
+  const recentJobs = await prisma.certidaoJob.findMany({
+    where: { orgId: org.id, createdAt: { gte: last24 } },
+    select: { endpoint: true, resultCode: true, status: true },
+  });
+  const agg: Record<string, { total: number; bad: number }> = {};
+  for (const j of recentJobs) {
+    const a = (agg[j.endpoint] ??= { total: 0, bad: 0 });
+    a.total++;
+    const code = j.resultCode ?? 0;
+    const bad =
+      [615, 665, 666, 667, 603, 604].includes(code) ||
+      code >= 500 ||
+      j.status === "portal_unavailable" ||
+      j.status === "rate_limited";
+    if (bad) a.bad++;
+  }
+  const apiHealth: Record<string, "ok" | "degraded" | "down"> = {};
+  for (const [ep, a] of Object.entries(agg)) {
+    const rate = a.total > 0 ? a.bad / a.total : 0;
+    apiHealth[ep] = rate >= 0.5 ? "down" : rate > 0 ? "degraded" : "ok";
+  }
+
   return NextResponse.json({
     plan,
     expandedPlan,
     spend,
     diligenciados: diligenciadosRaw,
     catalog,
+    apiHealth,
     catalogMeta: {
       ufs: listCoveredUfs(),
       categories: listCoveredCategories().map((c) => ({

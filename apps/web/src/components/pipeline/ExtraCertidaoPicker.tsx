@@ -127,7 +127,9 @@ export function ExtraCertidaoPicker({
           <DialogTitle>Adicionar certidões extras</DialogTitle>
           <DialogDescription>
             Selecione certidões adicionais para <strong>{targetLabel}</strong>.
-            Use os filtros para encontrar certidões de outras UFs ou categorias.
+            Filtre por <strong>estado (UF)</strong> e, para municipais (IPTU),
+            busque pelo <strong>município</strong>. As certidões municipais são
+            por cidade — escolha a do município do imóvel.
           </DialogDescription>
         </DialogHeader>
 
@@ -135,7 +137,7 @@ export function ExtraCertidaoPicker({
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Buscar por nome…"
+            placeholder="Buscar por nome ou município…"
             className="h-9 flex-1"
           />
           <NativeSelect
