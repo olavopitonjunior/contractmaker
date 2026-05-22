@@ -21,7 +21,8 @@ Estado Civil: {{this.estado_civil}}<br>
 Profissão: {{this.profissao}}<br>
 RG: nº {{this.rg}}<br>
 CPF: nº {{cpf this.cpf}}<br>
-E-mail: {{this.email}}<br>
+{{#if (existe this.email)}}E-mail: {{this.email}}<br>{{/if}}
+{{#if (existe this.mobile_phone)}}Telefone: {{this.mobile_phone}}<br>{{/if}}
 Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}{{#if this.bairro}}, Bairro: {{this.bairro}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
 </p>
 
@@ -32,7 +33,9 @@ Nome Completo: {{this.conjuge.nome}}<br>
 CPF: {{cpf this.conjuge.cpf}}<br>
 RG: {{this.conjuge.rg}}<br>
 Nacionalidade: {{this.conjuge.nacionalidade}}<br>
-Profissão: {{this.conjuge.profissao}}
+Profissão: {{this.conjuge.profissao}}{{#if (existe this.conjuge.email)}}<br>
+E-mail: {{this.conjuge.email}}{{/if}}{{#if (existe this.conjuge.mobile_phone)}}<br>
+Telefone: {{this.conjuge.mobile_phone}}{{/if}}
 </p>
 {{/if}}
 
@@ -59,7 +62,9 @@ Nome Completo: {{this.representante.nome}}<br>
 CPF: {{cpf this.representante.cpf}}<br>
 Nacionalidade: {{this.representante.nacionalidade}}<br>
 Estado Civil: {{this.representante.estado_civil}}<br>
-Profissão: {{this.representante.profissao}}
+Profissão: {{this.representante.profissao}}{{#if (existe this.representante.email)}}<br>
+E-mail: {{this.representante.email}}{{/if}}{{#if (existe this.representante.mobile_phone)}}<br>
+Telefone: {{this.representante.mobile_phone}}{{/if}}
 </p>
 {{/if}}
 {{/each}}
@@ -76,7 +81,8 @@ Estado Civil: {{this.estado_civil}}<br>
 Profissão: {{this.profissao}}<br>
 RG: nº {{this.rg}}<br>
 CPF: nº {{cpf this.cpf}}<br>
-E-mail: {{this.email}}<br>
+{{#if (existe this.email)}}E-mail: {{this.email}}<br>{{/if}}
+{{#if (existe this.mobile_phone)}}Telefone: {{this.mobile_phone}}<br>{{/if}}
 Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}{{#if this.bairro}}, Bairro: {{this.bairro}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
 </p>
 
@@ -87,7 +93,9 @@ Nome Completo: {{this.conjuge.nome}}<br>
 CPF: {{cpf this.conjuge.cpf}}<br>
 RG: {{this.conjuge.rg}}<br>
 Nacionalidade: {{this.conjuge.nacionalidade}}<br>
-Profissão: {{this.conjuge.profissao}}
+Profissão: {{this.conjuge.profissao}}{{#if (existe this.conjuge.email)}}<br>
+E-mail: {{this.conjuge.email}}{{/if}}{{#if (existe this.conjuge.mobile_phone)}}<br>
+Telefone: {{this.conjuge.mobile_phone}}{{/if}}
 </p>
 {{/if}}
 
@@ -114,7 +122,9 @@ Nome Completo: {{this.representante.nome}}<br>
 CPF: {{cpf this.representante.cpf}}<br>
 Nacionalidade: {{this.representante.nacionalidade}}<br>
 Estado Civil: {{this.representante.estado_civil}}<br>
-Profissão: {{this.representante.profissao}}
+Profissão: {{this.representante.profissao}}{{#if (existe this.representante.email)}}<br>
+E-mail: {{this.representante.email}}{{/if}}{{#if (existe this.representante.mobile_phone)}}<br>
+Telefone: {{this.representante.mobile_phone}}{{/if}}
 </p>
 {{/if}}
 {{/each}}
@@ -134,6 +144,8 @@ CNPJ: nº {{cnpj cnpj}}
 {{#if (existe papel_texto)}}<br>Função: {{papel_texto}}{{/if}}
 {{#if (existe creci)}}<br>CRECI: {{creci}}{{/if}}
 {{#if this.percentual}}<br>Participação: {{this.percentual}}%{{/if}}
+{{#if (existe email)}}<br>E-mail: {{email}}{{/if}}
+{{#if (existe mobile_phone)}}<br>Telefone: {{mobile_phone}}{{/if}}
 </p>
 {{/each}}
 {{else}}
@@ -147,6 +159,7 @@ Imobiliária: {{comissao.imobiliaria_nome}}<br>
 CNPJ: nº {{cnpj comissao.imobiliaria_cnpj}}<br>
 CRECI: {{comissao.creci}}
 {{/if}}
+{{#if (existe comissao.imobiliaria_email)}}<br>E-mail: {{comissao.imobiliaria_email}}{{/if}}
 </p>
 {{/if}}
 
@@ -165,6 +178,7 @@ CRECI: {{comissao.creci}}
 Endereço: {{this.rua}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}, Bairro: {{this.bairro}}, Cidade: {{this.cidade}} - {{this.uf}}, CEP {{cep this.cep}}<br>
 Matrícula: nº {{this.matricula}} do {{this.cartorio}}<br>
 Inscrição IPTU: nº {{this.inscricao_iptu}} junto à Prefeitura Municipal{{#if this.inscricao_municipal}}{{#unless (eq this.inscricao_municipal this.inscricao_iptu)}}<br>Inscrição Municipal: nº {{this.inscricao_municipal}}{{/unless}}{{/if}}<br>
+{{#if (existe this.sql)}}SQL: nº {{this.sql}}<br>{{/if}}
 Descrição: {{this.descricao}}
 </p>
 {{/each}}

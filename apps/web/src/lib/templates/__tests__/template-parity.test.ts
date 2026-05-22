@@ -76,4 +76,34 @@ describe("template parity (A0.1)", () => {
     expect(/<p>\s*,\s*\.?\s*<\/p>/.test(html)).toBe(false);
     expect(html).toMatch(/São Paulo\/SP,\s*19 de maio de 2026\./);
   });
+
+  // Guarda-trilho de fidelidade form→contrato: email/telefone das partes e
+  // corretores + SQL do imóvel coletados no form devem sair no contrato.
+  // (Regressão: esses campos eram coletados mas nunca renderizados.)
+  it.each([
+    ["ccv_a_vista_v2.hbs", previewSampleDataAVista],
+    ["ccv_financiamento_v2.hbs", previewSampleDataFinanciamento],
+  ])("%s: renderiza email, telefone e SQL coletados no form", (file, sample) => {
+    const tpl = readFileSync(templatePath(file), "utf-8");
+    const enriched = enrichContractData(JSON.parse(JSON.stringify(sample)));
+    const html = renderContratoHTML(tpl, enriched as Record<string, unknown>);
+
+    // Email dos titulares PF (vendedor + comprador)
+    expect(html).toContain("joao.silva@example.com");
+    expect(html).toContain("carlos.almeida@example.com");
+    // Email + telefone dos cônjuges
+    expect(html).toContain("maria.santos@example.com");
+    expect(html).toContain("(11) 98888-2222");
+    // Email + telefone do representante da parte PJ
+    expect(html).toContain("ana.ribeiro@example.com");
+    expect(html).toContain("(11) 98888-3333");
+    // Telefone dos titulares PF
+    expect(html).toContain("(11) 98888-1111");
+    expect(html).toContain("(11) 97777-1111");
+    // Email + telefone do corretor (loop de comissionados)
+    expect(html).toContain("roberto.carvalho@example.com");
+    expect(html).toContain("(11) 96666-1111");
+    // SQL do imóvel
+    expect(html).toContain("045.123.0099-1");
+  });
 });
