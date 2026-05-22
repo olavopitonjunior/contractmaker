@@ -232,6 +232,86 @@ describe("normalize — IPTU SP", () => {
   });
 });
 
+describe("normalize — Matrícula ONR (ônus)", () => {
+  it("imóvel com gravames → positiva + lista os ônus no detalhe", () => {
+    const resp = {
+      code: 200,
+      code_message: "ok",
+      data: [
+        {
+          numero_matricula: "12345",
+          cartorio: "1º RI de São Paulo",
+          tipo_certidao: "Inteiro Teor",
+          tem_onus: true,
+          ha_penhora: true,
+          ha_alienacao_fiduciaria: true,
+          ha_indisponibilidade: false,
+          validade_ate: "01/08/2026",
+        },
+      ],
+    };
+    const r = normalize(
+      "registradores/matric-pedido",
+      resp as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).toBe("positiva");
+    expect(r.consta_debito).toBe(true);
+    expect(r.detalhes).toContain("Matrícula 12345");
+    expect(r.detalhes).toContain("penhora");
+    expect(r.detalhes).toContain("alienação fiduciária");
+    expect(r.detalhes).not.toContain("indisponibilidade");
+  });
+
+  it("imóvel livre → negativa + 'sem ônus'", () => {
+    const resp = {
+      code: 200,
+      code_message: "ok",
+      data: [
+        {
+          numero_matricula: "999",
+          cartorio: "2º RI",
+          tem_onus: false,
+          ha_penhora: false,
+          ha_alienacao_fiduciaria: false,
+          ha_indisponibilidade: false,
+        },
+      ],
+    };
+    const r = normalize(
+      "registradores/matric-download",
+      resp as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).toBe("negativa");
+    expect(r.detalhes).toContain("sem ônus");
+  });
+});
+
+describe("normalize — Dados Cadastrais / Valor Venal SP", () => {
+  it("extrai SQL, valor venal e área (informativa)", () => {
+    const resp = {
+      code: 200,
+      code_message: "ok",
+      data: [
+        {
+          numero_contribuinte: "123.456.7890-1",
+          valor_venal: "850.000,00",
+          area_construida: "85",
+          uso: "Residencial",
+        },
+      ],
+    };
+    const r = normalize(
+      "pref/sp/sao-paulo/dados-imovel",
+      resp as unknown as InfosimplesResponse
+    );
+    expect(r.situacao).toBe("informativa");
+    expect(r.detalhes).toContain("SQL 123.456.7890-1");
+    expect(r.detalhes).toContain("Valor venal");
+    expect(r.detalhes).toContain("85 m²");
+    expect(r.detalhes).toContain("Residencial");
+  });
+});
+
 describe("normalize — business errors (6xx)", () => {
   it("code 606 vira nao_emitida, nao crasha", () => {
     const r = normalize(

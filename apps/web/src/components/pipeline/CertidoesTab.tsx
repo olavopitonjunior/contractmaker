@@ -459,10 +459,10 @@ export function CertidoesTab({
   }, [jobs, visibleJobs, showHistory, statusFilter]);
 
   const groups = useMemo(() => {
-    // Phase F.II-α: agrupamento fixo em 3 categorias — Vendedor, Comprador,
-    // Diligência Avulsa. Imóvel removido (não há mais certidões de imóvel).
-    // Jobs com targetKind="imovel" (legacy antes da mudança do planner) caem
-    // no grupo "Outras" defensivo.
+    // Grupos por alvo: Vendedor, Comprador, Imóvel e Diligência avulsa
+    // (fallback). A trilha de imóvel (matrícula/IPTU/CCIR) foi reativada no
+    // Phase L (2026-05-22) — os jobs com targetKind="imovel" voltam a renderizar
+    // num grupo "Imóvel:" próprio (antes eram dropados, resquício do Phase F.II-α).
     const map = new Map<string, { label: string; rows: CertidaoJobRow[] }>();
     vendedores.forEach((v, i) =>
       map.set(`vendedor-${i}`, {
@@ -476,9 +476,13 @@ export function CertidoesTab({
         rows: [],
       })
     );
+    imoveis.forEach((im, i) =>
+      map.set(`imovel-${i}`, {
+        label: `Imóvel: ${imovelLabel(im, i)}`,
+        rows: [],
+      })
+    );
     for (const job of displayJobs) {
-      // F.II-α: drop jobs de imóvel legacy (não aparecem mais na UI)
-      if (job.targetKind === "imovel") continue;
       const key = groupKey(job);
       if (!map.has(key)) {
         // Diligenciados têm groupKey "diligenciado-N" — label amigável
@@ -491,7 +495,7 @@ export function CertidoesTab({
       map.get(key)!.rows.push(job);
     }
     return Array.from(map.entries()).filter(([, g]) => g.rows.length > 0);
-  }, [displayJobs, vendedores, compradores]);
+  }, [displayJobs, vendedores, compradores, imoveis]);
 
   const stats = useMemo(() => {
     const total = visibleJobs.length;

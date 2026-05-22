@@ -45,10 +45,26 @@ function scopeLabel(scope: string): string {
     : scope === "estadual"
     ? "Estadual"
     : scope === "municipal"
-    ? "Municipal"
+    ? "Municipal (por município)"
     : scope === "serasa"
     ? "Serasa Experian"
     : scope;
+}
+
+/**
+ * Deriva o nome do município a partir do id do endpoint municipal
+ * (`pref/<uf>/<municipio>/<slug>`) para sub-agrupar a seção Municipal — assim o
+ * usuário vê as certidões da cidade do imóvel juntas (CND + IPTU + dados).
+ */
+function municipioFromId(id: string): string {
+  const parts = id.split("/");
+  if (parts[0] === "pref" && parts[2]) {
+    return parts[2]
+      .split("-")
+      .map((w) => (w ? w.charAt(0).toUpperCase() + w.slice(1) : w))
+      .join(" ");
+  }
+  return "Outros";
 }
 
 export function ExtraCertidaoPicker({
@@ -120,6 +136,51 @@ export function ExtraCertidaoPicker({
     onOpenChange(false);
   };
 
+  const renderItem = (e: EndpointInfo) => {
+    const isAlready = alreadySelected.has(e.id);
+    const isChecked = selected.has(e.id);
+    return (
+      <div
+        key={e.id}
+        className={`flex items-start gap-2 rounded border p-2 text-sm ${
+          isAlready ? "opacity-50" : "hover:bg-muted/30 cursor-pointer"
+        }`}
+        onClick={() => !isAlready && toggleSelect(e.id)}
+      >
+        <input
+          type="checkbox"
+          checked={isAlready || isChecked}
+          disabled={isAlready}
+          onChange={() => {}}
+          className="mt-0.5 h-4 w-4 accent-primary"
+        />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="font-medium">{e.label}</span>
+            {e.uf && (
+              <Badge variant="outline" className="text-[10px]">
+                {e.uf}
+              </Badge>
+            )}
+            <Badge variant="secondary" className="text-[10px]">
+              R$ {(e.costCents / 100).toFixed(2).replace(".", ",")}
+            </Badge>
+            {isAlready && (
+              <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                já selecionada
+              </Badge>
+            )}
+          </div>
+          {e.description && (
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {e.description}
+            </p>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
@@ -178,50 +239,27 @@ export function ExtraCertidaoPicker({
                   )}
                 </h3>
                 <div className="space-y-1">
-                  {items.map((e) => {
-                    const isAlready = alreadySelected.has(e.id);
-                    const isChecked = selected.has(e.id);
-                    return (
-                      <div
-                        key={e.id}
-                        className={`flex items-start gap-2 rounded border p-2 text-sm ${
-                          isAlready ? "opacity-50" : "hover:bg-muted/30 cursor-pointer"
-                        }`}
-                        onClick={() => !isAlready && toggleSelect(e.id)}
-                      >
-                        <input
-                          type="checkbox"
-                          checked={isAlready || isChecked}
-                          disabled={isAlready}
-                          onChange={() => {}}
-                          className="mt-0.5 h-4 w-4 accent-primary"
-                        />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="font-medium">{e.label}</span>
-                            {e.uf && (
-                              <Badge variant="outline" className="text-[10px]">
-                                {e.uf}
-                              </Badge>
-                            )}
-                            <Badge variant="secondary" className="text-[10px]">
-                              R$ {(e.costCents / 100).toFixed(2).replace(".", ",")}
-                            </Badge>
-                            {isAlready && (
-                              <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                                já selecionada
-                              </Badge>
-                            )}
-                          </div>
-                          {e.description && (
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              {e.description}
+                  {scope === "municipal"
+                    ? Object.entries(
+                        items.reduce<Record<string, EndpointInfo[]>>(
+                          (acc, e) => {
+                            const m = municipioFromId(e.id);
+                            (acc[m] ??= []).push(e);
+                            return acc;
+                          },
+                          {}
+                        )
+                      )
+                        .sort(([a], [b]) => a.localeCompare(b))
+                        .map(([municipio, group]) => (
+                          <div key={municipio} className="space-y-1">
+                            <p className="text-[11px] font-medium text-foreground/70 pl-0.5">
+                              {municipio}
                             </p>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+                            {group.map(renderItem)}
+                          </div>
+                        ))
+                    : items.map(renderItem)}
                 </div>
               </div>
             );

@@ -537,12 +537,51 @@ function matriculaOnrExtractor(resp: InfosimplesResponse): NormalizedResult {
   if (matricula) parts.push(`Matrícula ${matricula}`);
   if (cartorio) parts.push(cartorio);
   if (tipo) parts.push(tipo);
+  // Surfacing dos gravames — é o dado central da diligência. Antes o card só
+  // mostrava "positiva/negativa"; agora detalha quais ônus constam.
+  const gravames: string[] = [];
+  if (penhora === true) gravames.push("penhora");
+  if (alienacao === true) gravames.push("alienação fiduciária");
+  if (indisp === true) gravames.push("indisponibilidade");
+  if (temOnus === true && gravames.length === 0) gravames.push("ônus registrado");
+  if (temQualquerOnus) parts.push(`⚠️ Ônus: ${gravames.join(", ")}`);
+  else if (semOnus) parts.push("sem ônus");
   return {
     situacao,
     validade: asString(d.validade_ate) ?? null,
     emissao: asString(d.data_emissao) ?? null,
     detalhes: parts.join(" · ") || null,
     consta_debito: temQualquerOnus,
+    raw: d,
+  };
+}
+
+/**
+ * Phase L+ — Dados Cadastrais / Valor Venal SP (`pref/sp/sao-paulo/dados-imovel`).
+ * Antes caía no `iptuExtractor` genérico (só negativa/positiva). Aqui é
+ * informativo: expõe SQL, valor venal, área e uso do imóvel na Prefeitura SP.
+ * Shape defensivo — campos ausentes não quebram a normalização.
+ */
+function dadosImovelSpExtractor(resp: InfosimplesResponse): NormalizedResult {
+  const d = getFirst<Record<string, unknown>>(resp) ?? {};
+  const inscricao =
+    asString(d.numero_contribuinte) ?? asString(d.sql) ?? asString(d.inscricao);
+  const valorVenal =
+    asString(d.valor_venal) ?? asString(d.valor_venal_imovel) ?? asString(d.valor_venal_referencia);
+  const area =
+    asString(d.area_construida) ?? asString(d.area_terreno) ?? asString(d.area);
+  const uso = asString(d.uso) ?? asString(d.tipo_uso) ?? asString(d.tipo_imovel);
+  const parts: string[] = [];
+  if (inscricao) parts.push(`SQL ${inscricao}`);
+  if (valorVenal) parts.push(`Valor venal R$ ${valorVenal}`);
+  if (area) parts.push(`${area} m²`);
+  if (uso) parts.push(uso);
+  return {
+    situacao: "informativa",
+    validade: null,
+    emissao: asString(d.data_consulta) ?? asString(d.data_emissao) ?? null,
+    detalhes: parts.join(" · ") || "Dados cadastrais do imóvel",
+    consta_debito: false,
     raw: d,
   };
 }
@@ -614,7 +653,7 @@ const EXTRACTORS: Record<string, Extractor> = {
   "cenprot-sp/protestos": cenprotSpExtractor,
   "pref/sp/sao-paulo/iptu": iptuExtractor,
   "pref/sp/sao-paulo/debitos-iptu": iptuExtractor,
-  "pref/sp/sao-paulo/dados-imovel": iptuExtractor,
+  "pref/sp/sao-paulo/dados-imovel": dadosImovelSpExtractor,
   "pref/rj/rio-janeiro/cert-trib": iptuExtractor,
   "pref/rj/rio-janeiro/cnd": iptuExtractor,
   "pref/rj/rio-janeiro/iptu": iptuExtractor,

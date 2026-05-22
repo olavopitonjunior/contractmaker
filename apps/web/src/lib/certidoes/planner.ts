@@ -133,10 +133,16 @@ const TJRJ_TIPOS: Array<{ tipo_certidao: string; label: string }> = [
  * declara o identificador exigido (`sql` em SP, `inscricao_municipal` nas
  * demais) e o nome do parâmetro enviado à Infosimples.
  *
- * NOTA QA: os nomes de parâmetro (`paramName`) são best-guess a partir das
- * docs públicas e DEVEM ser confirmados logado no precificador Infosimples
- * (verificação E2E passo 2). Endpoints `extraOnly` só entram via picker
- * (expandAll) para não inflar o custo do plano padrão.
+ * NOTA QA (verificação 2026-05-22 via páginas públicas infosimples.com/consultas):
+ *   - SP `sql` ✅ confirmado; RJ `inscricao` ✅ confirmado.
+ *   - BH `cndiptu`: a doc lista `identificador` (+ `data_inicio`/`data_fim`), NÃO
+ *     `indice_cadastral` — provável mismatch, precisa ajuste + range de datas.
+ *   - Curitiba `cnd`: a página pública lista `cpf`/`cnpj` (CND por contribuinte,
+ *     não por imóvel) — revisar se é property-based mesmo.
+ *   - POA/Floripa/Cuiabá: NÃO verificados (doc pública não expõe os params).
+ * Os params não-confirmados DEVEM ser validados logado no precificador
+ * Infosimples antes de confiar (risco 606/612). Endpoints `extraOnly` só entram
+ * via picker (expandAll) para não inflar o custo do plano padrão.
  */
 interface MunicipalEndpointSpec {
   endpoint: string;
