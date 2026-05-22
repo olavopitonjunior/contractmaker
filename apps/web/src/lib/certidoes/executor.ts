@@ -187,6 +187,61 @@ export function buildObterArgs(
   return { numero_pedido: numeroPedido };
 }
 
+/**
+ * Recuperação de protocolo (puro, testável). Quando o e-SAJ recusa um novo
+ * pedido com 620 "já existe pedido", o pedido ORIGINAL continua no portal — e
+ * o `numero_pedido` dele costuma estar na base, num job anterior da MESMA
+ * parte+tipo. Acha o primeiro (mais recente) com `numero_pedido` e tipo
+ * compatível pra a gente buscar via obter em vez de só marcar duplicado.
+ *
+ * `priors` deve vir ordenado por createdAt DESC. `currentTipo` é o
+ * `tipo_certidao` do job atual — TJSP/TJRJ têm 4 tipos no mesmo endpoint, então
+ * NÃO pode pegar o protocolo de outro tipo (Cível ≠ Falência). Sem tipo no
+ * atual (endpoints sem tipo_certidao), casa qualquer.
+ */
+export function pickRecoverableProtocol(
+  currentTipo: unknown,
+  priors: Array<{ requestPayload: unknown; resultData: unknown; createdAt: Date }>
+): { numeroPedido: string; pedidoData: string } | null {
+  for (const j of priors) {
+    const pTipo = (j.requestPayload as Record<string, unknown> | null)?.tipo_certidao;
+    if (currentTipo != null && pTipo !== currentTipo) continue;
+    const rd = j.resultData as Record<string, unknown> | null;
+    const np = rd?.numero_pedido;
+    if (typeof np === "string" && np.length > 0) {
+      const pd = (rd?.pedido_data as string) || formatDateBR(j.createdAt);
+      return { numeroPedido: np, pedidoData: pd };
+    }
+  }
+  return null;
+}
+
+async function recoverOriginalProtocol(job: {
+  id: string;
+  dealId: string | null;
+  endpoint: string;
+  targetKind: string;
+  targetIndex: number;
+  requestPayload: unknown;
+}): Promise<{ numeroPedido: string; pedidoData: string } | null> {
+  if (!job.dealId) return null;
+  const priors = await prisma.certidaoJob.findMany({
+    where: {
+      dealId: job.dealId,
+      endpoint: job.endpoint,
+      targetKind: job.targetKind,
+      targetIndex: job.targetIndex,
+      id: { not: job.id },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 30,
+    select: { requestPayload: true, resultData: true, createdAt: true },
+  });
+  const currentTipo = (job.requestPayload as Record<string, unknown> | null)
+    ?.tipo_certidao;
+  return pickRecoverableProtocol(currentTipo, priors);
+}
+
 // Memo curto (TTL 60s) do gasto mensal por org — evita refazer o aggregate a
 // cada job numa varredura de cron (50+ jobs). Escopo de processo.
 const _spendMemo = new Map<string, { exceeded: boolean; ts: number }>();
@@ -552,8 +607,43 @@ export async function runSingleJob(
       .filter(Boolean)
       .join(" ");
     if (isPedido && resp.code === 620 && isPedidoDuplicado(duplicadoMsg)) {
-      const expected = computeInitialExpectedReadyAt(job.endpoint);
       const billable = resp.header?.billable;
+      const expected = computeInitialExpectedReadyAt(job.endpoint);
+      const cost = billable === false ? 0 : info.costCents;
+      // RECUPERAÇÃO: o 620 confirma que o pedido JÁ existe no e-SAJ. Se temos o
+      // `numero_pedido` do pedido ORIGINAL (mesma parte+tipo) na base, dá pra
+      // BUSCAR a certidão via obter (cron) em vez de só marcar duplicado.
+      // Resolve o TJSP travado (pedido pendente no portal + jobs antigos failed).
+      const recovered = await recoverOriginalProtocol(job);
+      if (recovered) {
+        await prisma.certidaoJob.update({
+          where: { id: jobId },
+          data: {
+            status: "awaiting_portal",
+            latencyMs,
+            resultCode: resp.code,
+            resultMessage: resp.code_message,
+            resultData: {
+              numero_pedido: recovered.numeroPedido,
+              pedido_data: recovered.pedidoData,
+              recovered: true,
+            },
+            expectedReadyAt: expected,
+            costCents: cost,
+            portalUrl: info.portalUrl ?? null,
+          },
+        });
+        logTransition(jobId, "fetching", "awaiting_portal", "620 duplicado — protocolo original recuperado p/ obter", {
+          endpoint: job.endpoint,
+          resultCode: resp.code,
+          numero_pedido: recovered.numeroPedido,
+          expectedReadyAt: expected,
+          latencyMs,
+        });
+        return;
+      }
+      // Sem protocolo recuperável → estado neutro `duplicate_pending` + ETA (em
+      // vez de failed_permanent vermelho). NÃO é varrido pelo cron poll-portal.
       await prisma.certidaoJob.update({
         where: { id: jobId },
         data: {
@@ -566,16 +656,16 @@ export async function runSingleJob(
           errorMessage:
             "Já existe um pedido deste tipo em andamento no portal. A certidão será emitida pela tentativa original — acompanhe no portal se não aparecer.",
           expectedReadyAt: expected,
-          costCents: billable === false ? 0 : info.costCents,
+          costCents: cost,
           portalUrl: info.portalUrl ?? null,
         },
       });
-      logTransition(jobId, "fetching", "duplicate_pending", "pedido duplicado no portal", {
+      logTransition(jobId, "fetching", "duplicate_pending", "pedido duplicado no portal (sem protocolo recuperável)", {
         endpoint: job.endpoint,
         resultCode: resp.code,
         expectedReadyAt: expected,
         latencyMs,
-        costCents: billable === false ? 0 : info.costCents,
+        costCents: cost,
       });
       await checkBatchCompletion(job.batchId);
       return;
