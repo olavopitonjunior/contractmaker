@@ -61,6 +61,12 @@ interface ExtractCertidoesDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   dealId: string;
+  /**
+   * E2 — cor da régua do job vivo por chave (endpoint|kind|index): green=já
+   * emitida, yellow=em andamento, red=falhou. Permite marcar o que já foi
+   * puxado e oferecer "selecionar só as que faltaram".
+   */
+  extractedStatus?: Record<string, "green" | "yellow" | "red" | "neutral">;
   onConfirm: (jobs?: JobSelection[]) => Promise<void> | void;
 }
 
@@ -94,6 +100,7 @@ export function ExtractCertidoesDialog({
   open,
   onOpenChange,
   dealId,
+  extractedStatus = {},
   onConfirm,
 }: ExtractCertidoesDialogProps) {
   const [plan, setPlan] = useState<ExtractionPlan | null>(null);
@@ -226,6 +233,20 @@ export function ExtractCertidoesDialog({
   };
 
   const clearAll = () => setSelected(new Set());
+
+  // E2 — marca só as que ainda não saíram (não emitidas nem em andamento):
+  // ignora as que já estão green/yellow no estado vivo.
+  const selectMissing = () => {
+    const next = new Set<string>();
+    const consider = (j: PlannedJob) => {
+      const t = extractedStatus[jobKey(j)];
+      if (t !== "green" && t !== "yellow") next.add(jobKey(j));
+    };
+    plan?.jobs.forEach(consider);
+    extras.forEach(consider);
+    setSelected(next);
+  };
+  const hasExtracted = Object.keys(extractedStatus).length > 0;
 
   const handleAddExtras = (endpointIds: string[]) => {
     if (!pickerFor || !expandedPlan) return;
@@ -372,6 +393,11 @@ export function ExtractCertidoesDialog({
                 <Button size="sm" variant="ghost" onClick={clearAll}>
                   Desmarcar
                 </Button>
+                {hasExtracted && (
+                  <Button size="sm" variant="ghost" onClick={selectMissing}>
+                    Só faltantes
+                  </Button>
+                )}
                 <div className="flex-1" />
                 <div className="text-xs text-muted-foreground">
                   {selectedCount} de {plan.jobs.length + extras.length} marcadas
@@ -413,6 +439,22 @@ export function ExtractCertidoesDialog({
                               className="h-3.5 w-3.5 accent-primary"
                             />
                             <span className="flex-1 truncate">{j.label}</span>
+                            {(() => {
+                              const t = extractedStatus[jobKey(j)];
+                              if (!t) return null;
+                              const map = {
+                                green: ["✓ emitida", "border-green-500 text-green-700"],
+                                yellow: ["⏳ em andamento", "border-amber-500 text-amber-700"],
+                                red: ["✗ falhou", "border-red-500 text-red-700"],
+                                neutral: ["—", "text-muted-foreground"],
+                              } as const;
+                              const [txt, cls] = map[t];
+                              return (
+                                <Badge variant="outline" className={`text-[9px] ${cls}`}>
+                                  {txt}
+                                </Badge>
+                              );
+                            })()}
                             {isExtra && (
                               <Badge variant="outline" className="text-[9px]">
                                 extra
@@ -441,22 +483,54 @@ export function ExtractCertidoesDialog({
                   </div>
                 ))}
 
-                {plan.skipped.length > 0 && (
-                  <div className="rounded border border-amber-200 bg-amber-50/40 p-3">
-                    <h4 className="text-xs font-medium mb-1 flex items-center gap-1.5">
-                      <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
-                      Pulando por falta de dados ({plan.skipped.length})
-                    </h4>
-                    <ul className="text-[11px] space-y-0.5 text-muted-foreground">
-                      {plan.skipped.map((s, i) => (
-                        <li key={i}>
-                          <strong className="text-foreground">{s.label}</strong>:{" "}
-                          {s.reason}
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                )}
+                {(() => {
+                  // E4 — separa: (a) sem integração/API (não há endpoint p/ a
+                  // praça → extrair no portal) vs (b) falta dado do formulário
+                  // (endpoint existe, falta cpf/data_nascimento/sql → completar).
+                  const isNoApi = (s: SkippedJob) =>
+                    s.missingField === "cobertura" ||
+                    /cobertura|sem integra|portal oficial|n[ãa]o emite|sem cobertura/i.test(
+                      s.reason
+                    );
+                  const noApi = plan.skipped.filter(isNoApi);
+                  const missingData = plan.skipped.filter((s) => !isNoApi(s));
+                  return (
+                    <>
+                      {missingData.length > 0 && (
+                        <div className="rounded border border-amber-200 bg-amber-50/40 p-3">
+                          <h4 className="text-xs font-medium mb-1 flex items-center gap-1.5">
+                            <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
+                            Faltam dados do formulário ({missingData.length})
+                          </h4>
+                          <ul className="text-[11px] space-y-0.5 text-muted-foreground">
+                            {missingData.map((s, i) => (
+                              <li key={i}>
+                                <strong className="text-foreground">{s.label}</strong>:{" "}
+                                {s.reason}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {noApi.length > 0 && (
+                        <div className="rounded border border-muted bg-muted/20 p-3">
+                          <h4 className="text-xs font-medium mb-1 flex items-center gap-1.5">
+                            <AlertCircle className="h-3.5 w-3.5 text-muted-foreground" />
+                            Sem cobertura de API — extrair no portal ({noApi.length})
+                          </h4>
+                          <ul className="text-[11px] space-y-0.5 text-muted-foreground">
+                            {noApi.map((s, i) => (
+                              <li key={i}>
+                                <strong className="text-foreground">{s.label}</strong>:{" "}
+                                {s.reason}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
 
               <div className="shrink-0 rounded-md border bg-muted/20 p-3 text-sm flex items-center gap-3">
