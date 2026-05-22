@@ -24,6 +24,8 @@ import {
   Eye,
   LifeBuoy,
   Info,
+  ChevronRight,
+  ChevronDown,
 } from "lucide-react";
 import {
   DropdownMenu,
@@ -406,6 +408,8 @@ export function CertidoesTab({
   const [bulkDeleting, setBulkDeleting] = useState(false);
   // D — Análise IA é on-demand: só monta/roda o painel ao clicar (toggle).
   const [showAnalysis, setShowAnalysis] = useState(false);
+  // B3 — grupos por parte recolhíveis/expansíveis (key colapsada = recolhida).
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
   // Base para stats: sempre exclui replaced (comportamento original).
   const visibleJobs = useMemo(
@@ -416,6 +420,16 @@ export function CertidoesTab({
     () => jobs.filter((j) => j.status === "replaced").length,
     [jobs]
   );
+
+  // E2 — mapa (endpoint|kind|index) → cor da régua do job vivo, pra o dialog de
+  // extração marcar o que já foi puxado e oferecer "selecionar só faltantes".
+  const extractedStatus = useMemo(() => {
+    const m: Record<string, ColorTier> = {};
+    for (const j of visibleJobs) {
+      m[`${j.endpoint}|${j.targetKind}|${j.targetIndex}`] = colorTier(j);
+    }
+    return m;
+  }, [visibleJobs]);
 
   // Categoriza um job para o filtro por status.
   const filterBucket = (
@@ -742,7 +756,24 @@ export function CertidoesTab({
   return (
     <div className="space-y-4">
       {/* F3: diligenciados section at the top */}
-      <DiligentedPersonsSection dealId={dealId} onChange={() => refresh()} />
+      <DiligentedPersonsSection
+        dealId={dealId}
+        parties={[
+          ...vendedores.map((v) => ({
+            kind: "vendedor",
+            label: v.nome || v.razao_social || "Vendedor",
+          })),
+          ...compradores.map((c) => ({
+            kind: "comprador",
+            label: c.nome || c.razao_social || "Comprador",
+          })),
+          ...imoveis.map((im, i) => ({
+            kind: "imovel",
+            label: imovelLabel(im, i),
+          })),
+        ]}
+        onChange={() => refresh()}
+      />
 
       <div className="flex flex-wrap items-center gap-2">
         <Button onClick={() => setDialogOpen(true)} disabled={extracting}>
@@ -1068,11 +1099,47 @@ export function CertidoesTab({
       )}
 
       <div className="space-y-4">
-        {groups.map(([key, group]) => (
+        {groups.map(([key, group]) => {
+          const collapsed = collapsedGroups.has(key);
+          // Mini resumo por cor (régua) pra ver o grupo de relance recolhido.
+          const tally = { green: 0, yellow: 0, red: 0, neutral: 0 };
+          for (const r of group.rows) tally[colorTier(r)]++;
+          return (
           <Card key={key}>
-            <CardHeader>
-              <CardTitle className="text-sm">{group.label}</CardTitle>
-            </CardHeader>
+            <button
+              type="button"
+              onClick={() =>
+                setCollapsedGroups((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(key)) next.delete(key);
+                  else next.add(key);
+                  return next;
+                })
+              }
+              className="w-full flex items-center gap-2 px-6 py-4 text-left hover:bg-muted/30 rounded-t-lg"
+            >
+              {collapsed ? (
+                <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+              ) : (
+                <ChevronDown className="h-4 w-4 text-muted-foreground shrink-0" />
+              )}
+              <span className="text-sm font-semibold flex-1">{group.label}</span>
+              <span className="flex items-center gap-2 text-xs tabular-nums">
+                {tally.green > 0 && (
+                  <span className="text-green-700">{tally.green}✓</span>
+                )}
+                {tally.yellow > 0 && (
+                  <span className="text-amber-700">{tally.yellow}⏳</span>
+                )}
+                {tally.red > 0 && (
+                  <span className="text-red-700">{tally.red}✗</span>
+                )}
+                {tally.neutral > 0 && (
+                  <span className="text-muted-foreground">{tally.neutral}—</span>
+                )}
+              </span>
+            </button>
+            {!collapsed && (
             <CardContent className="space-y-2 pt-0">
               {group.rows.map((row) => {
                 const resultData = row.resultData as
@@ -1355,14 +1422,17 @@ export function CertidoesTab({
                 );
               })}
             </CardContent>
+            )}
           </Card>
-        ))}
+          );
+        })}
       </div>
 
       <ExtractCertidoesDialog
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         dealId={dealId}
+        extractedStatus={extractedStatus}
         onConfirm={handleExtract}
       />
 

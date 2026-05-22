@@ -24,8 +24,20 @@ export interface DiligentedPersonRow {
 
 interface Props {
   dealId: string;
+  /**
+   * B1 — partes cadastradas do negócio (vendedores/compradores/imóvel) que são
+   * consultadas. Exibidas como roster read-only no topo da seção, junto das
+   * pessoas adicionadas manualmente abaixo.
+   */
+  parties?: Array<{ kind: string; label: string; sub?: string }>;
   onChange?: () => void;
 }
+
+const KIND_LABEL: Record<string, string> = {
+  vendedor: "Vendedor",
+  comprador: "Comprador",
+  imovel: "Imóvel",
+};
 
 const RELACAO_LABELS: Record<string, string> = {
   socio: "Sócio",
@@ -45,7 +57,7 @@ function formatDoc(p: DiligentedPersonRow): string {
   return "—";
 }
 
-export function DiligentedPersonsSection({ dealId, onChange }: Props) {
+export function DiligentedPersonsSection({ dealId, parties = [], onChange }: Props) {
   const [items, setItems] = useState<DiligentedPersonRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -92,7 +104,7 @@ export function DiligentedPersonsSection({ dealId, onChange }: Props) {
     }
   };
 
-  if (loading && items.length === 0) return null;
+  if (loading && items.length === 0 && parties.length === 0) return null;
 
   return (
     <>
@@ -127,8 +139,36 @@ export function DiligentedPersonsSection({ dealId, onChange }: Props) {
             </Button>
           </div>
         </CardHeader>
-        {expanded && items.length > 0 && (
+        {expanded && (parties.length > 0 || items.length > 0) && (
           <CardContent className="space-y-2 pt-0">
+            {parties.length > 0 && (
+              <div className="space-y-1">
+                <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide">
+                  Partes do negócio (consultadas)
+                </p>
+                {parties.map((p, i) => (
+                  <div
+                    key={`${p.kind}-${i}`}
+                    className="flex items-center gap-2 rounded border bg-muted/20 p-2 text-sm"
+                  >
+                    <Badge variant="secondary" className="text-[10px] shrink-0">
+                      {KIND_LABEL[p.kind] ?? p.kind}
+                    </Badge>
+                    <span className="font-medium truncate flex-1">{p.label}</span>
+                    {p.sub && (
+                      <span className="text-xs text-muted-foreground truncate">
+                        {p.sub}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {items.length > 0 && parties.length > 0 && (
+              <p className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide pt-1">
+                Adicionadas
+              </p>
+            )}
             {items.map((p) => (
               <div
                 key={p.id}
@@ -171,7 +211,7 @@ export function DiligentedPersonsSection({ dealId, onChange }: Props) {
             ))}
           </CardContent>
         )}
-        {expanded && items.length === 0 && (
+        {expanded && items.length === 0 && parties.length === 0 && (
           <CardContent className="pt-0 pb-3">
             <p className="text-xs text-muted-foreground">
               Use esta seção para adicionar pessoas externas ao contrato
