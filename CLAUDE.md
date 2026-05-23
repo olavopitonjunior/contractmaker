@@ -192,19 +192,19 @@ Disparo manual no Deal → aba Certidões. `POST /api/deals/:id/certidoes` 202 +
 
 **Schema:** `CertidaoJob { dealId, batchId, endpoint, label, targetKind, targetIndex, requestPayload, status, resultCode, resultData, attachmentId, errorMessage, latencyMs, costCents, expectedReadyAt, retryCount, nextRetryAt, maxRetries (3), missingFields[], portalUrl }`.
 
-**Estados** (`outcome-classifier.ts::classifyOutcome`) — `success`/`informativo`/`api_error`/`portal_unavailable`(615/665/666)/`rate_limited`(668)/`data_missing`(606/612/613, `missingFields[]`)/`data_invalid`(614, EditPartyDialog)/`failed_permanent`(esgotado, `portalUrl`)/`duplicate_pending`(620)/`skipped`. Backoffs em [[certidoes_retry_backoffs]], [[certidoes_estados_ricos]].
+**Estados** (`outcome-classifier.ts::classifyOutcome`) — `success`/`informativo`/`api_error`/`portal_unavailable`(615/665/666)/`rate_limited`(668)/`data_missing`(606/612/613, `missingFields[]`)/`data_invalid`(614)/`failed_permanent`(esgotado, `portalUrl`)/`duplicate_pending`(620)/`skipped`. Backoffs em [[certidoes_retry_backoffs]], [[certidoes_estados_ricos]].
 
 **Anti-falso-negativo:** exige-PDF sem `site_receipts[0]` → `failed`; billing respeita `header.billable===false`. [[certidoes_falso_negativo]].
 
-**Planner** (`planner.ts`): vendedores/compradores/imóveis. PF sem `data_nascimento` bloqueia PGFN/TJSP/Antecedentes. Comarca TJRJ: `comarcas-rj.ts`.
+**Planner** (`planner.ts`): vendedores/compradores/imóveis. PF sem `data_nascimento` bloqueia PGFN/TJSP/Antecedentes.
 
-**Endpoints:** Federais (PGFN/CNDT/TRF), trabalhistas (CEAT), cíveis (TJSP/TJRJ 2-step, TJRS), E-Proc SP (`eproc-lista`), protestos CENPROT (SP + Nacional IEPTB via GOV.BR). Receita CPF + Antecedentes PF auto em financiamento.
+**Endpoints:** Federais (PGFN/CNDT/TRF), trabalhistas (CEAT), cíveis (TJSP/TJRJ 2-step, TJRS), E-Proc SP, protestos CENPROT (SP + Nacional, GOV.BR). Antecedentes PF auto em financiamento.
 
-**Imóvel (Phase L):** IPTU/CND 8 capitais (`pref/*`), ONR/ARISP (matrícula 2-step + pesquisa bens), CCIR — `category="registro"`, `requiresOnrAuth`/`onrActive` (`INFOSIMPLES_ONR_*`, saldo próprio). Ver [[project_certidoes_onr_imovel]].
+**Imóvel (Phase L):** matrícula ONR/ARISP 2-step (`requiresOnrAuth`/`onrActive`, `INFOSIMPLES_ONR_*`, saldo próprio; normalizer expõe ônus), IPTU/CND municipal por `UF|cidade` (`MUNICIPAL_BY_KEY`; SP `sql`/RJ `inscricao` ok, BH `identificador`+datas), CCIR. Renderizam no grupo "Imóvel:". **Curitiba** = CND por contribuinte → pessoa (`MUNICIPAL_PESSOA_BY_KEY`). Ver [[project_certidoes_onr_imovel]].
 
-**Catálogo** (`endpoints.ts`): `category`/`emitsPdf?`/`portalUrl?`/`expectedWaitMinutes?`/`CATEGORIES_REQUIRING_PDF`. **Normalizers**; 6xx→`nao_emitida`.
+**Catálogo** (`endpoints.ts`): `category`/`emitsPdf?`/`portalUrl?`/`CATEGORIES_REQUIRING_PDF`. Normalizers; 6xx→`nao_emitida`.
 
-**Budget guard** `INFOSIMPLES_MONTHLY_BUDGET_CENTS` (5000): POST 402 + o **cron** checa antes de cada chamada + **circuit breaker** (603 → para). **Relatório:** `POST .../certidoes/report`.
+**Budget guard** `INFOSIMPLES_MONTHLY_BUDGET_CENTS` (5000): POST 402 + o **cron** checa antes de cada chamada + **circuit breaker** (603 → para).
 
 **Fluxo de problemas + UX (2026-05):** falha terminal → sino + cron `problem-digest` (e-mail); painel `/settings/certidoes` (problemas c/ tentativas/JSON/retry + saúde API/crédito). Aba: régua 3 cores (`colorTier`), grupos colapsáveis, IA on-demand, auto-refresh, dialog já-puxadas/status-API, ZIP dedupe+`%PDF`. [[project_certidoes_overhaul_2026_05]].
 
