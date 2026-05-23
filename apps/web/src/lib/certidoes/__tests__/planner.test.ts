@@ -257,6 +257,27 @@ describe("planCertidoesForDeal — dados faltando", () => {
     expect(skip).toBeDefined();
   });
 
+  it("parte de Curitiba dispara CND municipal por contribuinte (cpf)", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [
+        {
+          tipo_pessoa: "fisica",
+          nome: "Fulano PR",
+          cpf: "11144477735",
+          uf: "PR",
+          cidade: "Curitiba",
+          data_nascimento: "1980-01-01",
+        },
+      ],
+      compradores: [],
+      imoveis: [],
+    });
+    const cwb = plan.jobs.find((j) => j.endpoint === "pref/pr/curitiba/cnd");
+    expect(cwb).toBeDefined();
+    expect(cwb?.targetKind).toBe("vendedor");
+    expect(cwb?.requestPayload.cpf).toBe("11144477735");
+  });
+
   it("matrícula ONR dispara com onrActive + matrícula presente", () => {
     const plan = planCertidoesForDeal(
       {
@@ -671,5 +692,103 @@ describe("Phase K — antecedentes-criminais-pf em financiamento", () => {
     );
     expect(skip).toBeDefined();
     expect(skip?.reason).toContain("nome_mae");
+  });
+});
+
+describe("Dependentes do vendedor (cônjuge / procurador / representante)", () => {
+  const VENDEDOR_CASADO = {
+    tipo_pessoa: "fisica" as const,
+    nome: "Janser Pinheiro",
+    cpf: "52998224725",
+    data_nascimento: "1980-05-14",
+    uf: "SP",
+    cidade: "Indaiatuba",
+    conjuge: {
+      nome: "Priscila Pinheiro",
+      cpf: "11144477735",
+      data_nascimento: "1982-03-10",
+      nome_mae: "Joana",
+      endereco_igual_ao_titular: true,
+    },
+    procurador: {
+      nome: "Dr. Advogado",
+      cpf: "39053344705",
+    },
+  };
+
+  it("vendedor casado gera jobs conjuge_vendedor (CPF do cônjuge, herda UF do titular)", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [VENDEDOR_CASADO],
+      compradores: [],
+      imoveis: [],
+    });
+    const conj = plan.jobs.filter((j) => j.targetKind === "conjuge_vendedor");
+    expect(conj.length).toBeGreaterThan(0);
+    // targetIndex aponta para o vendedor titular (0)
+    expect(conj.every((j) => j.targetIndex === 0)).toBe(true);
+    const cpfJob = conj.find((j) => j.endpoint === "receita-federal/cpf");
+    expect(cpfJob?.requestPayload.cpf).toBe("11144477735");
+    // TJSP do cônjuge dispara porque herdou UF=SP do titular
+    const tjsp = conj.filter((j) => j.endpoint === "tribunal/tjsp/pedido-civel");
+    expect(tjsp.length).toBe(4);
+  });
+
+  it("procurador sem data_nascimento vira skip nos endpoints que a exigem", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [VENDEDOR_CASADO],
+      compradores: [],
+      imoveis: [],
+    });
+    const procJobs = plan.jobs.filter((j) => j.targetKind === "procurador_vendedor");
+    const procSkips = plan.skipped.filter(
+      (s) => s.targetKind === "procurador_vendedor"
+    );
+    // CNDT (não exige nascimento) deve sair; TJSP/PGFN/Receita-CPF viram skip.
+    expect(procJobs.some((j) => j.endpoint === "tribunal/tst/cndt")).toBe(true);
+    expect(
+      procSkips.some((s) => s.endpoint === "tribunal/tjsp/pedido-civel")
+    ).toBe(true);
+    // basePath do skip aponta para vendedores.0.procurador
+    const skip = procSkips.find((s) => s.missingFields.length > 0);
+    if (skip) {
+      expect(skip.missingFields[0].path).toContain("vendedores.0.procurador");
+    }
+  });
+
+  it("COMPRADOR casado NÃO gera dependentes (decisão do usuário)", () => {
+    // Vendedor SEM cônjuge; comprador COM cônjuge+procurador. Nenhum dependente
+    // deve ser gerado (só vendedores enumeram dependentes).
+    const plan = planCertidoesForDeal({
+      vendedores: [VENDEDOR_PF_SP],
+      compradores: [VENDEDOR_CASADO],
+      imoveis: [],
+    });
+    expect(plan.jobs.some((j) => j.targetKind === "conjuge_vendedor")).toBe(false);
+    expect(plan.jobs.some((j) => j.targetKind === "procurador_vendedor")).toBe(false);
+    expect(
+      plan.jobs.some((j) => String(j.targetKind).includes("comprador") && j.targetKind !== "comprador")
+    ).toBe(false);
+  });
+
+  it("vendedor PJ gera representante_vendedor PF (herda UF da empresa)", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [
+        {
+          ...PESSOA_JURIDICA,
+          representante: {
+            nome: "Sócio Assinante",
+            cpf: "11144477735",
+            data_nascimento: "1975-01-20",
+            nome_mae: "Maria",
+          },
+        } as any,
+      ],
+      compradores: [],
+      imoveis: [],
+    });
+    const rep = plan.jobs.filter((j) => j.targetKind === "representante_vendedor");
+    expect(rep.length).toBeGreaterThan(0);
+    const cpfJob = rep.find((j) => j.endpoint === "receita-federal/cpf");
+    expect(cpfJob?.requestPayload.cpf).toBe("11144477735");
   });
 });

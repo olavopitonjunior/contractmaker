@@ -415,8 +415,8 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     scope: "municipal",
     uf: "PR",
     // CND de Curitiba é POR CONTRIBUINTE (cpf/cnpj), não por imóvel (doc
-    // pública 2026-05-22) → appliesTo pessoa. Falta wiring na trilha de pessoa
-    // para auto-disparar; hoje só selecionável no picker.
+    // pública 2026-05-22) → appliesTo pessoa. Auto-dispara na trilha de pessoa
+    // p/ partes de Curitiba (MUNICIPAL_PESSOA_BY_KEY no planner).
     appliesTo: ["pessoa"],
     category: "municipal",
     description: "Certidão Negativa de Débitos Municipais de Curitiba — emitida por contribuinte (CPF/CNPJ), não por imóvel.",
