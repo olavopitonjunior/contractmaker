@@ -135,20 +135,34 @@ const TJRJ_TIPOS: Array<{ tipo_certidao: string; label: string }> = [
  *
  * NOTA QA (verificação 2026-05-22 via páginas públicas infosimples.com/consultas):
  *   - SP `sql` ✅ confirmado; RJ `inscricao` ✅ confirmado.
- *   - BH `cndiptu`: a doc lista `identificador` (+ `data_inicio`/`data_fim`), NÃO
- *     `indice_cadastral` — provável mismatch, precisa ajuste + range de datas.
- *   - Curitiba `cnd`: a página pública lista `cpf`/`cnpj` (CND por contribuinte,
- *     não por imóvel) — revisar se é property-based mesmo.
- *   - POA/Floripa/Cuiabá: NÃO verificados (doc pública não expõe os params).
- * Os params não-confirmados DEVEM ser validados logado no precificador
- * Infosimples antes de confiar (risco 606/612). Endpoints `extraOnly` só entram
- * via picker (expandAll) para não inflar o custo do plano padrão.
+ *   - BH ✅ CORRIGIDO: param é `identificador` (+ `data_inicio`/`data_fim`); a
+ *     janela de datas é best-guess (ano corrente) — confirmar a semântica logado.
+ *   - Curitiba ✅ REMOVIDO da trilha de imóvel: é CND por contribuinte (cpf/cnpj),
+ *     não por imóvel. Reclassificado appliesTo:["pessoa"] no catálogo.
+ *   - POA/Floripa/Cuiabá: `inscricao` é best-guess, NÃO verificado (doc pública
+ *     não expõe os params) — validar logado antes de confiar (risco 606/612).
+ * Endpoints `extraOnly` só entram via picker (expandAll) p/ não inflar o custo.
  */
 interface MunicipalEndpointSpec {
   endpoint: string;
   requiresField: "sql" | "inscricao_municipal";
   paramName: string;
   extraOnly?: boolean;
+  /** Args estáticos extras exigidos pelo endpoint (ex.: BH exige data_inicio/data_fim). */
+  extraArgs?: () => Record<string, unknown>;
+}
+
+/** DD/MM/YYYY de uma data (formato aceito pela Infosimples). */
+function formatDateBr(d: Date): string {
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${dd}/${mm}/${d.getFullYear()}`;
+}
+
+/** BH cndiptu/cnd exigem intervalo de datas. Janela do ano corrente. */
+function bhDateRange(): Record<string, unknown> {
+  const now = new Date();
+  return { data_inicio: `01/01/${now.getFullYear()}`, data_fim: formatDateBr(now) };
 }
 const MUNICIPAL_BY_KEY: Record<string, MunicipalEndpointSpec[]> = {
   "SP|sao paulo": [
@@ -161,16 +175,20 @@ const MUNICIPAL_BY_KEY: Record<string, MunicipalEndpointSpec[]> = {
     { endpoint: "pref/rj/rio-janeiro/cnd", requiresField: "inscricao_municipal", paramName: "inscricao", extraOnly: true },
     { endpoint: "pref/rj/rio-janeiro/iptu", requiresField: "inscricao_municipal", paramName: "inscricao", extraOnly: true },
   ],
+  // BH: o identificador do imóvel vai no param `identificador` (não
+  // `indice_cadastral`) e a consulta exige um intervalo de datas (verificado na
+  // doc pública 2026-05-22). A janela é best-guess (ano corrente) — confirmar.
   "MG|belo horizonte": [
-    { endpoint: "pref/mg/belo-horizonte/cndiptu", requiresField: "inscricao_municipal", paramName: "indice_cadastral" },
-    { endpoint: "pref/mg/belo-horizonte/cnd", requiresField: "inscricao_municipal", paramName: "indice_cadastral", extraOnly: true },
+    { endpoint: "pref/mg/belo-horizonte/cndiptu", requiresField: "inscricao_municipal", paramName: "identificador", extraArgs: bhDateRange },
+    { endpoint: "pref/mg/belo-horizonte/cnd", requiresField: "inscricao_municipal", paramName: "identificador", extraOnly: true, extraArgs: bhDateRange },
   ],
   "RS|porto alegre": [
     { endpoint: "pref/rs/porto-alegre/cnd", requiresField: "inscricao_municipal", paramName: "inscricao" },
   ],
-  "PR|curitiba": [
-    { endpoint: "pref/pr/curitiba/cnd", requiresField: "inscricao_municipal", paramName: "indicacao_fiscal" },
-  ],
+  // Curitiba `pref/pr/curitiba/cnd` é CND POR CONTRIBUINTE (cpf/cnpj), não por
+  // imóvel (doc pública 2026-05-22) — removido da trilha de imóvel pra não
+  // disparar com param errado. Reclassificado p/ appliesTo:["pessoa"] no
+  // catálogo; precisa de wiring na trilha de pessoa pra voltar a disparar.
   "SC|florianopolis": [
     { endpoint: "pref/sc/florianopolis/cnd", requiresField: "inscricao_municipal", paramName: "inscricao" },
   ],
@@ -785,6 +803,7 @@ export function planCertidoesForDeal(
           jobs.push(
             buildJob(spec.endpoint, kind, index, label, {
               [spec.paramName]: String(idValue).trim(),
+              ...(spec.extraArgs ? spec.extraArgs() : {}),
             })
           );
         }
