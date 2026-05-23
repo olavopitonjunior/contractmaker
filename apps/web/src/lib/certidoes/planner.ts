@@ -137,8 +137,8 @@ const TJRJ_TIPOS: Array<{ tipo_certidao: string; label: string }> = [
  *   - SP `sql` ✅ confirmado; RJ `inscricao` ✅ confirmado.
  *   - BH ✅ CORRIGIDO: param é `identificador` (+ `data_inicio`/`data_fim`); a
  *     janela de datas é best-guess (ano corrente) — confirmar a semântica logado.
- *   - Curitiba ✅ REMOVIDO da trilha de imóvel: é CND por contribuinte (cpf/cnpj),
- *     não por imóvel. Reclassificado appliesTo:["pessoa"] no catálogo.
+ *   - Curitiba ✅ é CND por contribuinte (cpf/cnpj), não por imóvel: fora da
+ *     trilha de imóvel, agora dispara na trilha de pessoa (MUNICIPAL_PESSOA_BY_KEY).
  *   - POA/Floripa/Cuiabá: `inscricao` é best-guess, NÃO verificado (doc pública
  *     não expõe os params) — validar logado antes de confiar (risco 606/612).
  * Endpoints `extraOnly` só entram via picker (expandAll) p/ não inflar o custo.
@@ -186,15 +186,23 @@ const MUNICIPAL_BY_KEY: Record<string, MunicipalEndpointSpec[]> = {
     { endpoint: "pref/rs/porto-alegre/cnd", requiresField: "inscricao_municipal", paramName: "inscricao" },
   ],
   // Curitiba `pref/pr/curitiba/cnd` é CND POR CONTRIBUINTE (cpf/cnpj), não por
-  // imóvel (doc pública 2026-05-22) — removido da trilha de imóvel pra não
-  // disparar com param errado. Reclassificado p/ appliesTo:["pessoa"] no
-  // catálogo; precisa de wiring na trilha de pessoa pra voltar a disparar.
+  // imóvel (doc pública 2026-05-22) — fora da trilha de imóvel; agora dispara na
+  // trilha de pessoa via MUNICIPAL_PESSOA_BY_KEY (parte de Curitiba).
   "SC|florianopolis": [
     { endpoint: "pref/sc/florianopolis/cnd", requiresField: "inscricao_municipal", paramName: "inscricao" },
   ],
   "MT|cuiaba": [
     { endpoint: "pref/mt/cuiaba/cnd", requiresField: "inscricao_municipal", paramName: "inscricao" },
   ],
+};
+
+/**
+ * CND municipal emitida POR CONTRIBUINTE (cpf/cnpj), não por imóvel — ex.:
+ * Curitiba. Roteada por `UF|cidade-normalizada` da PARTE: dispara quando a parte
+ * é daquele município (ou todas em expandAll, via picker). Args = só cpf/cnpj.
+ */
+const MUNICIPAL_PESSOA_BY_KEY: Record<string, string[]> = {
+  "PR|curitiba": ["pref/pr/curitiba/cnd"],
 };
 
 /** Normaliza cidade para a chave de roteamento municipal (sem acento, lower). */
@@ -219,6 +227,16 @@ function isImovelRural(imovel: Imovel): boolean {
 
 // ---- deal shape helpers (mirror of DadosContrato) -----------------
 
+interface Dependente {
+  nome?: string;
+  cpf?: string;
+  data_nascimento?: string;
+  nome_mae?: string;
+  uf?: string;
+  cidade?: string;
+  endereco_igual_ao_titular?: boolean;
+}
+
 interface Parte {
   tipo_pessoa?: "fisica" | "juridica";
   nome?: string;
@@ -233,6 +251,10 @@ interface Parte {
   email?: string;
   uf?: string;
   cidade?: string;
+  // Dependentes do vendedor — diligenciados junto por padrão (2026-05-22).
+  conjuge?: Dependente;
+  procurador?: Dependente;
+  representante?: Dependente; // PF que assina por vendedor PJ
 }
 
 interface Imovel {
@@ -346,6 +368,60 @@ function diligenciadoToParte(d: DiligentedPersonInput): Parte {
   };
 }
 
+/** Dependente tem documento útil (CPF) ou ao menos um nome p/ diligenciar. */
+function hasIdentity(d: Dependente | undefined): d is Dependente {
+  return !!d && !!((d.cpf && d.cpf.trim()) || (d.nome && d.nome.trim()));
+}
+
+/**
+ * Converte um dependente do vendedor (cônjuge/procurador/representante) numa
+ * `Parte` PF para o planner. Herda UF/cidade do titular quando o dependente
+ * não tem endereço próprio (cônjuge com `endereco_igual_ao_titular`, ou
+ * representante de PJ que mora "na" empresa). Procurador costuma não ter
+ * data_nascimento → endpoints que a exigem (TJSP/PGFN/Receita CPF) caem em
+ * SkippedJob "complete os dados", comportamento esperado.
+ */
+function dependenteToParte(dep: Dependente, titular: Parte): Parte {
+  const usarEnderecoTitular = dep.endereco_igual_ao_titular !== false;
+  const uf = (dep.uf && dep.uf.trim()) || (usarEnderecoTitular ? titular.uf : undefined) || titular.uf;
+  const cidade =
+    (dep.cidade && dep.cidade.trim()) ||
+    (usarEnderecoTitular ? titular.cidade : undefined) ||
+    titular.cidade;
+  return {
+    tipo_pessoa: "fisica",
+    nome: dep.nome,
+    cpf: dep.cpf,
+    data_nascimento: dep.data_nascimento || undefined,
+    nome_mae: dep.nome_mae || undefined,
+    uf,
+    cidade,
+  };
+}
+
+/**
+ * Enumera os dependentes diligenciáveis de um vendedor: cônjuge e procurador
+ * (sempre que tiverem identidade) e, para vendedor PJ, o representante PF que
+ * assina. `index` é o índice do vendedor titular (compartilhado no targetIndex
+ * para agrupar na UI). Compradores NÃO chamam isto (decisão do usuário).
+ */
+function dependentesDoVendedor(
+  vendedor: Parte,
+  index: number
+): Array<{ kind: TargetKind; index: number; parte: Parte }> {
+  const out: Array<{ kind: TargetKind; index: number; parte: Parte }> = [];
+  if (hasIdentity(vendedor.conjuge)) {
+    out.push({ kind: "conjuge_vendedor", index, parte: dependenteToParte(vendedor.conjuge, vendedor) });
+  }
+  if (hasIdentity(vendedor.procurador)) {
+    out.push({ kind: "procurador_vendedor", index, parte: dependenteToParte(vendedor.procurador, vendedor) });
+  }
+  if (vendedor.tipo_pessoa === "juridica" && hasIdentity(vendedor.representante)) {
+    out.push({ kind: "representante_vendedor", index, parte: dependenteToParte(vendedor.representante, vendedor) });
+  }
+  return out;
+}
+
 /**
  * F1/F2: options for the planner.
  *   - `expandAll`: when true, generate jobs for endpoints in ALL UFs (not just
@@ -386,9 +462,16 @@ export function planCertidoesForDeal(
   const onrActive = options?.onrActive === true;
 
   const pessoas: Array<{ kind: TargetKind; index: number; parte: Parte }> = [];
-  (data.vendedores ?? []).forEach((p, i) =>
-    pessoas.push({ kind: "vendedor", index: i, parte: p })
-  );
+  (data.vendedores ?? []).forEach((p, i) => {
+    pessoas.push({ kind: "vendedor", index: i, parte: p });
+    // Dependentes do VENDEDOR são sempre diligenciados junto (decisão do
+    // usuário 2026-05-22): cônjuge, procurador e — para vendedor PJ — o
+    // representante PF que assina. Compradores e seus dependentes NÃO entram
+    // por padrão (gerar à toa queima crédito Infosimples).
+    for (const dep of dependentesDoVendedor(p, i)) {
+      pessoas.push(dep);
+    }
+  });
   (data.compradores ?? []).forEach((p, i) =>
     pessoas.push({ kind: "comprador", index: i, parte: p })
   );
@@ -685,6 +768,26 @@ export function planCertidoesForDeal(
           "CND Estadual exige UF da parte"
         )
       );
+    }
+
+    // ---- CND Municipal por contribuinte (Phase L+) — ex.: Curitiba ----
+    // Alguns municípios emitem a CND municipal por CPF/CNPJ (não por imóvel).
+    // Dispara quando a parte é daquele município (UF|cidade), ou todas em
+    // expandAll (picker). Sem cidade casada, não dispara nada (sem ruído).
+    {
+      const munPessoaKey = `${partyUf}|${normalizeCidade(parte.cidade)}`;
+      const munPessoaEps = expandAll
+        ? Array.from(new Set(Object.values(MUNICIPAL_PESSOA_BY_KEY).flat()))
+        : MUNICIPAL_PESSOA_BY_KEY[munPessoaKey] ?? [];
+      for (const ep of munPessoaEps) {
+        if (isPJ && !cnpj) {
+          skipped.push(buildSkip(ep, kind, index, label, "cnpj", "CNPJ invalido"));
+        } else if (!isPJ && !cpf) {
+          skipped.push(buildSkip(ep, kind, index, label, "cpf", "CPF invalido"));
+        } else {
+          jobs.push(buildJob(ep, kind, index, label, isPJ ? { cnpj } : { cpf }));
+        }
+      }
     }
 
     // ---- PJ-only: Cartão CNPJ + CRF FGTS (Phase B) ----
@@ -1165,6 +1268,12 @@ function buildSkip(
       ? `imoveis.${index}`
       : kind === "diligenciado"
       ? `diligenciados.${index}`
+      : kind === "conjuge_vendedor"
+      ? `vendedores.${index}.conjuge`
+      : kind === "procurador_vendedor"
+      ? `vendedores.${index}.procurador`
+      : kind === "representante_vendedor"
+      ? `vendedores.${index}.representante`
       : `${kind}es.${index}`;
   const missingFields: MissingField[] = buildMissingFieldsForSkip(
     missingField,
