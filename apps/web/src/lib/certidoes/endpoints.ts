@@ -414,9 +414,12 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     costCents: 8,
     scope: "municipal",
     uf: "PR",
-    appliesTo: ["imovel"],
+    // CND de Curitiba é POR CONTRIBUINTE (cpf/cnpj), não por imóvel (doc
+    // pública 2026-05-22) → appliesTo pessoa. Falta wiring na trilha de pessoa
+    // para auto-disparar; hoje só selecionável no picker.
+    appliesTo: ["pessoa"],
     category: "municipal",
-    description: "Certidão Negativa de Débitos Municipais (inclui IPTU) da Prefeitura de Curitiba.",
+    description: "Certidão Negativa de Débitos Municipais de Curitiba — emitida por contribuinte (CPF/CNPJ), não por imóvel.",
     portalUrl: "https://www.curitiba.pr.gov.br/",
   },
   // Florianópolis

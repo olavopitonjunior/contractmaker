@@ -226,6 +226,37 @@ describe("planCertidoesForDeal — dados faltando", () => {
     expect(skip).toBeDefined();
   });
 
+  it("imóvel BH usa param `identificador` + intervalo de datas (não indice_cadastral)", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [VENDEDOR_PF_SP],
+      compradores: [],
+      imoveis: [
+        { rua: "Rua W", cidade: "Belo Horizonte", uf: "MG", inscricao_municipal: "55555" },
+      ],
+    });
+    const bh = plan.jobs.find((j) => j.endpoint === "pref/mg/belo-horizonte/cndiptu");
+    expect(bh).toBeDefined();
+    expect(bh?.requestPayload.identificador).toBe("55555");
+    expect(bh?.requestPayload.indice_cadastral).toBeUndefined();
+    expect(typeof bh?.requestPayload.data_inicio).toBe("string");
+    expect(typeof bh?.requestPayload.data_fim).toBe("string");
+  });
+
+  it("imóvel em Curitiba → sem cobertura na trilha de imóvel (CND é por contribuinte)", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [VENDEDOR_PF_SP],
+      compradores: [],
+      imoveis: [
+        { rua: "Rua K", cidade: "Curitiba", uf: "PR", inscricao_municipal: "123" },
+      ],
+    });
+    expect(
+      plan.jobs.find((j) => j.endpoint === "pref/pr/curitiba/cnd")
+    ).toBeUndefined();
+    const skip = plan.skipped.find((s) => s.endpoint === "pref/municipal-manual");
+    expect(skip).toBeDefined();
+  });
+
   it("matrícula ONR dispara com onrActive + matrícula presente", () => {
     const plan = planCertidoesForDeal(
       {
