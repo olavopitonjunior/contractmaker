@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
-import { Inter, Merriweather, Tinos } from "next/font/google";
+import { Inter, Merriweather, Tinos, Source_Serif_4 } from "next/font/google";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CookieBanner } from "@/components/legal/CookieBanner";
+import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
 // Inter: default UI font and one of the contract presets (modern sans).
@@ -29,9 +30,23 @@ const tinos = Tinos({
   display: "swap",
 });
 
+// Source Serif 4: editorial display serif for the app shell (headings,
+// brand). Exposed as --font-source-serif → --font-display in the DS.
+// NOTE: distinct from the contract-document serifs (Tinos/Merriweather),
+// which must stay untouched.
+const sourceSerif = Source_Serif_4({
+  subsets: ["latin"],
+  weight: ["400", "600", "700"],
+  variable: "--font-source-serif",
+  display: "swap",
+});
+
 export const metadata: Metadata = {
-  title: "Contractmaker",
-  description: "Plataforma de gestao de vendas e contratos imobiliarios",
+  title: {
+    default: "imobpro.ai",
+    template: "%s · imobpro.ai",
+  },
+  description: "Plataforma de gestão de vendas e contratos imobiliários",
 };
 
 export default function RootLayout({
@@ -42,14 +57,17 @@ export default function RootLayout({
   return (
     <html
       lang="pt-BR"
-      className={`${inter.variable} ${merriweather.variable} ${tinos.variable}`}
+      suppressHydrationWarning
+      className={`${inter.variable} ${merriweather.variable} ${tinos.variable} ${sourceSerif.variable}`}
     >
       <body>
-        <TooltipProvider>
-          {children}
-          <CookieBanner />
-          <Toaster richColors position="bottom-right" />
-        </TooltipProvider>
+        <ThemeProvider>
+          <TooltipProvider>
+            {children}
+            <CookieBanner />
+            <Toaster richColors position="bottom-right" />
+          </TooltipProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

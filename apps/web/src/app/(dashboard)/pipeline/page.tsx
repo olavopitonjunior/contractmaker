@@ -20,6 +20,15 @@ import {
   Sparkles,
 } from "lucide-react";
 
+/** Extrai o nome do 1º comprador do dataJson do form (best-effort, null-safe). */
+function extractClientName(dataJson: unknown): string | null {
+  if (!dataJson || typeof dataJson !== "object") return null;
+  const compradores = (dataJson as { compradores?: unknown }).compradores;
+  if (!Array.isArray(compradores) || compradores.length === 0) return null;
+  const nome = (compradores[0] as { nome?: unknown })?.nome;
+  return typeof nome === "string" && nome.trim() ? nome.trim() : null;
+}
+
 export default async function PipelinePage() {
   const session = await auth();
   if (!session?.user) return null;
@@ -51,6 +60,7 @@ export default async function PipelinePage() {
                   token: true,
                   createdAt: true,
                   completedAt: true,
+                  dataJson: true,
                 },
               },
               contracts: {
@@ -89,6 +99,21 @@ export default async function PipelinePage() {
   const conversionRate =
     allDeals.length > 0 ? Math.round((concludedDeals / allDeals.length) * 100) : 0;
 
+  // Microcopy V1: deltas e médias derivados (sem query extra)
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const dealsToday = allDeals.filter(
+    (d) => d.createdAt.getTime() >= startOfToday.getTime()
+  ).length;
+  const dealsWithValue = allDeals.filter((d) => (d.value || 0) > 0).length;
+  const ticketMedio = dealsWithValue > 0 ? totalValue / dealsWithValue : 0;
+  const fmtBRLShort = (v: number) =>
+    v >= 1_000_000
+      ? `R$ ${(v / 1_000_000).toFixed(1)}M`
+      : v >= 1000
+        ? `R$ ${(v / 1000).toFixed(0)}k`
+        : `R$ ${v.toFixed(0)}`;
+
   const stages = pipeline.stages.map((stage) => ({
     id: stage.id,
     name: stage.name,
@@ -98,6 +123,7 @@ export default async function PipelinePage() {
       title: deal.title,
       value: deal.value,
       createdAt: deal.createdAt.toISOString(),
+      clientName: extractClientName(deal.form?.dataJson),
       formStatus: deal.form?.status || null,
       formToken: deal.form?.token || null,
       hasContract: deal.contracts.length > 0,
@@ -115,7 +141,9 @@ export default async function PipelinePage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Pipeline de Vendas</h1>
+        <h1 className="font-display text-2xl font-semibold tracking-tight">
+          Pipeline de Vendas
+        </h1>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button size="sm">
@@ -171,42 +199,63 @@ export default async function PipelinePage() {
         </DropdownMenu>
       </div>
 
-      {/* Metrics */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      {/* Metrics — KPI cards V1 (ícone em chip + número + microcopy).
+          Largura controlada p/ não esticar: compactos e alinhados à esquerda. */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:max-w-4xl">
         <Card>
           <CardContent className="flex items-center gap-4 p-4">
             <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
               <BarChart3 className="h-5 w-5 text-primary" />
             </div>
-            <div>
-              <p className="text-2xl font-bold">{activeDeals}</p>
-              <p className="text-xs text-muted-foreground">Negócios ativos</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="flex items-center gap-4 p-4">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-green-500/10">
-              <DollarSign className="h-5 w-5 text-green-600" />
-            </div>
-            <div>
-              <p className="text-2xl font-bold">
-                {totalValue >= 1_000_000
-                  ? `R$ ${(totalValue / 1_000_000).toFixed(1)}M`
-                  : `R$ ${(totalValue / 1000).toFixed(0)}k`}
+            <div className="min-w-0">
+              <p className="text-2xl font-bold tabular-nums">{activeDeals}</p>
+              <p className="text-xs text-muted-foreground">
+                Negócios ativos
+                {dealsToday > 0 && (
+                  <span className="ml-1.5 font-medium text-success">
+                    +{dealsToday} hoje
+                  </span>
+                )}
               </p>
-              <p className="text-xs text-muted-foreground">Valor total</p>
             </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="flex items-center gap-4 p-4">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-blue-500/10">
-              <TrendingUp className="h-5 w-5 text-blue-600" />
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-success/10">
+              <DollarSign className="h-5 w-5 text-success" />
             </div>
-            <div>
-              <p className="text-2xl font-bold">{conversionRate}%</p>
-              <p className="text-xs text-muted-foreground">Taxa de conversão</p>
+            <div className="min-w-0">
+              <p className="text-2xl font-bold tabular-nums">
+                {fmtBRLShort(totalValue)}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Valor em pipeline
+                {ticketMedio > 0 && (
+                  <span className="ml-1.5">
+                    · Ticket médio {fmtBRLShort(ticketMedio)}
+                  </span>
+                )}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center gap-4 p-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-info/10">
+              <TrendingUp className="h-5 w-5 text-info" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-2xl font-bold tabular-nums">{conversionRate}%</p>
+              <p className="text-xs text-muted-foreground">
+                Taxa de conversão
+                {concludedDeals > 0 && (
+                  <span className="ml-1.5">
+                    · {concludedDeals}{" "}
+                    {concludedDeals === 1 ? "fechamento" : "fechamentos"}
+                  </span>
+                )}
+              </p>
             </div>
           </CardContent>
         </Card>

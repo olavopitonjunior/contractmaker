@@ -10,6 +10,7 @@ import {
   Home,
   Link2,
   XOctagon,
+  Check,
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
@@ -20,6 +21,7 @@ export interface DealCard {
   title: string;
   value: number | null;
   createdAt: string;
+  clientName: string | null;
   formStatus: string | null;
   formToken: string | null;
   hasContract: boolean;
@@ -65,6 +67,13 @@ export function KanbanCard({ deal, isOverlay }: KanbanCardProps) {
 
   const isLost = !!deal.lostAt;
 
+  // Separa o código do imóvel ("Cód: 20477 ...") do restante do título.
+  const codeMatch = deal.title.match(/^c[oó]d\.?\s*:?\s*(\d+)\s*[-–—]?\s*/i);
+  const dealCode = codeMatch?.[1] ?? null;
+  const displayTitle = dealCode
+    ? deal.title.slice(codeMatch![0].length).trim() || deal.title
+    : deal.title;
+
   return (
     <div
       ref={setNodeRef}
@@ -87,7 +96,7 @@ export function KanbanCard({ deal, isOverlay }: KanbanCardProps) {
               <div className="flex items-center gap-1.5">
                 <Home className="h-3.5 w-3.5 text-muted-foreground" />
                 <span className="text-[11px] text-muted-foreground font-medium">
-                  Imóvel
+                  Imóvel{dealCode && ` #${dealCode}`}
                 </span>
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
@@ -110,8 +119,15 @@ export function KanbanCard({ deal, isOverlay }: KanbanCardProps) {
               </div>
             </div>
 
-            {/* Title */}
-            <p className="font-medium text-sm leading-snug">{deal.title}</p>
+            {/* Title + cliente */}
+            <div className="space-y-0.5">
+              <p className="font-medium text-sm leading-snug">{displayTitle}</p>
+              {deal.clientName && (
+                <p className="text-[11px] text-muted-foreground leading-tight">
+                  Cliente: {deal.clientName}
+                </p>
+              )}
+            </div>
 
             {/* Lost banner — substitui timeline quando perdido */}
             {isLost ? (
@@ -147,7 +163,7 @@ export function KanbanCard({ deal, isOverlay }: KanbanCardProps) {
             {/* Value + badges */}
             <div className="flex items-center justify-between">
               {deal.value != null && deal.value > 0 ? (
-                <span className="text-sm font-semibold text-primary">
+                <span className="text-sm font-semibold text-primary tabular-nums">
                   R${" "}
                   {deal.value.toLocaleString("pt-BR", {
                     minimumFractionDigits: 0,
@@ -158,16 +174,17 @@ export function KanbanCard({ deal, isOverlay }: KanbanCardProps) {
               )}
 
               <div className="flex items-center gap-1">
-                {deal.formStatus && (
-                  <Badge
-                    variant={
-                      deal.formStatus === "completo" ? "default" : "secondary"
-                    }
-                    className="text-[10px] h-5 px-1.5"
-                  >
-                    {deal.formStatus}
-                  </Badge>
-                )}
+                {deal.formStatus &&
+                  (deal.formStatus === "completo" ? (
+                    <Badge className="h-5 gap-0.5 border-success/20 bg-success/10 px-1.5 text-[10px] text-success hover:bg-success/10">
+                      <Check className="h-3 w-3" />
+                      Completo
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary" className="h-5 px-1.5 text-[10px]">
+                      {deal.formStatus}
+                    </Badge>
+                  ))}
                 {deal.hasContract && (
                   <Badge variant="outline" className="text-[10px] h-5 px-1.5">
                     <FileText className="h-3 w-3 mr-0.5" />

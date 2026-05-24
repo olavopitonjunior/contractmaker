@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 export const metadata = {
-  title: "Política de Privacidade — Contractmaker",
+  title: "Política de Privacidade",
   robots: { index: true, follow: true },
 };
 

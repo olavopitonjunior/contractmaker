@@ -280,14 +280,14 @@ export function ContractEditorPage({
     <div className="space-y-4">
       {/* Approved banner */}
       {isApproved && (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-green-200 bg-green-50 p-4 text-green-800">
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-success/30 bg-success/10 p-4 text-success">
           <div className="flex items-center gap-3">
             <Lock className="h-5 w-5 shrink-0" />
             <div>
               <p className="font-medium text-sm">
-                Contrato aprovado - edição bloqueada
+                Contrato aprovado — edição bloqueada
               </p>
-              <p className="text-xs text-green-600">
+              <p className="text-xs text-success/80">
                 Pronto para envio à assinatura ou export PDF/DOCX.
               </p>
             </div>
@@ -311,14 +311,20 @@ export function ContractEditorPage({
         </Button>
         <Separator orientation="vertical" className="h-6 hidden sm:block" />
         <div className="flex-1 min-w-0">
-          <h1 className="text-lg font-semibold truncate">
+          <h1 className="font-display text-lg font-semibold tracking-tight truncate">
             {contract.templateName}
           </h1>
           <div className="flex items-center gap-2 mt-0.5">
-            <Badge variant="outline">v{contract.version}</Badge>
+            <Badge variant="outline" className="tabular-nums">
+              v{contract.version}
+            </Badge>
             <Badge
-              variant={isApproved ? "default" : "secondary"}
-              className={isApproved ? "bg-green-600" : ""}
+              variant={isApproved ? "default" : "outline"}
+              className={
+                isApproved
+                  ? "bg-success text-success-foreground hover:bg-success"
+                  : "border-warning/30 bg-warning/10 text-warning"
+              }
             >
               {isApproved && <ShieldCheck className="h-3 w-3 mr-1" />}
               {status}

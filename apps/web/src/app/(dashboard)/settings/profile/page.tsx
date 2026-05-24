@@ -6,7 +6,7 @@ import { ProfileClient } from "@/components/settings/ProfileClient";
 export const dynamic = "force-dynamic";
 
 export const metadata = {
-  title: "Meu perfil — Contractmaker",
+  title: "Meu perfil",
 };
 
 export default async function SettingsProfilePage() {

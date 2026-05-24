@@ -32,10 +32,15 @@ export function KanbanColumn({ id, name, color, deals, isLost }: KanbanColumnPro
         <div className="flex items-center justify-between mt-3">
           <div className="flex items-center gap-2">
             {isLost && <XOctagon className="h-4 w-4 text-red-500" />}
-            <h3 className={cn("font-semibold text-sm", isLost && "text-red-700 dark:text-red-400")}>
+            <h3
+              className={cn(
+                "text-xs font-semibold uppercase tracking-wide",
+                isLost && "text-red-700 dark:text-red-400"
+              )}
+            >
               {name}
             </h3>
-            <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-foreground/10 px-1.5 text-[11px] font-medium">
+            <span className="flex h-5 min-w-[20px] items-center justify-center rounded-full bg-foreground/10 px-1.5 text-[11px] font-medium tabular-nums">
               {deals.length}
             </span>
           </div>

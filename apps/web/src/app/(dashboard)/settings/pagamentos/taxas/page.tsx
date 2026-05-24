@@ -139,7 +139,7 @@ export default function TaxasPage() {
             </CardHeader>
             <CardContent className="space-y-3">
               <div>
-                <Label htmlFor="pf">Percentual para Contractmaker</Label>
+                <Label htmlFor="pf">Percentual para a plataforma</Label>
                 <div className="flex items-center gap-2">
                   <Input
                     id="pf"

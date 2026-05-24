@@ -8,7 +8,7 @@ import { ArrowLeft } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 export const metadata = {
-  title: "Nova conta bancária — Contractmaker",
+  title: "Nova conta bancária",
 };
 
 export default async function NovaContaPage() {

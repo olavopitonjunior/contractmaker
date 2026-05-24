@@ -1,0 +1,8 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="imobpro.ai">
+  <!-- Símbolo imobpro.ai (rascunho): nó hexagonal + 'i' (informação/imobpro), teal #115E59.
+       Mark único, flat, 1 cor, escalável a 16px. Iterar no Figma/nanobanana. -->
+  <path d="M32 5 L55.4 18.5 V45.5 L32 59 L8.6 45.5 V18.5 Z"
+        stroke="#115E59" stroke-width="4" stroke-linejoin="round" fill="none"/>
+  <circle cx="32" cy="22.5" r="3.4" fill="#115E59"/>
+  <rect x="29" y="29.5" width="6" height="18.5" rx="3" fill="#115E59"/>
+</svg>

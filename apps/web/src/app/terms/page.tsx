@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 export const metadata = {
-  title: "Termos de Uso — Contractmaker",
+  title: "Termos de Uso",
   robots: { index: true, follow: true },
 };
 

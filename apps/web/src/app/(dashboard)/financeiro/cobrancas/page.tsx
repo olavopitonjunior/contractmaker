@@ -1,6 +1,6 @@
 import { ChargesList } from "@/components/financeiro/ChargesList";
 
-export const metadata = { title: "Cobranças — Contractmaker" };
+export const metadata = { title: "Cobranças" };
 export const dynamic = "force-dynamic";
 
 export default function CobrancasPage() {

@@ -3,71 +3,132 @@
 @tailwind utilities;
 
 @layer base {
+  /* ============================================================
+   * DESIGN SYSTEM — imobpro.ai (editorial jurídico)
+   * Arquitetura em 3 camadas:
+   *   1. Base DS        → :root (semânticos + status + tipografia + radius)
+   *   2. Brand imobpro  → valores default do :root (off-white + teal/bordô)
+   *   3. Tenant override→ [data-tenant] sobrescreve --primary/--brand-* (white-label)
+   * Paleta: paper #F7F5F0 · teal-800 #115E59 · bordô #7C2D3A · ink #1A1A1A · taupe #6F6657
+   * ============================================================ */
   :root {
-    --background: 40 33% 94%;
-    --foreground: 0 0% 11%;
+    /* — Superfícies — */
+    --background: 40 30% 96%;          /* paper #F7F5F0 */
+    --foreground: 0 0% 10%;            /* ink #1A1A1A */
     --card: 0 0% 100%;
-    --card-foreground: 0 0% 11%;
+    --card-foreground: 0 0% 10%;
     --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 11%;
-    --primary: 27 92% 44%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 30 14% 90%;
-    --secondary-foreground: 0 0% 11%;
-    --muted: 30 14% 90%;
-    --muted-foreground: 0 0% 37%;
-    --accent: 30 14% 90%;
-    --accent-foreground: 0 0% 11%;
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 100%;
-    --border: 30 14% 88%;
-    --input: 30 14% 88%;
-    --ring: 27 92% 44%;
-    --radius: 0.75rem;
-    --chart-1: 27 92% 44%;
-    --chart-2: 173 58% 39%;
-    --chart-3: 197 37% 24%;
-    --chart-4: 43 74% 66%;
-    --chart-5: 12 76% 61%;
-    --sidebar-background: 0 0% 100%;
-    --sidebar-foreground: 0 0% 11%;
-    --sidebar-primary: 27 92% 44%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 30 14% 95%;
-    --sidebar-accent-foreground: 0 0% 11%;
-    --sidebar-border: 30 14% 88%;
-    --sidebar-ring: 27 92% 44%;
+    --popover-foreground: 0 0% 10%;
+
+    /* — Marca primária (teal-800, confiança/legal) — */
+    --primary: 176 69% 22%;            /* #115E59 */
+    --primary-foreground: 40 30% 97%;
+
+    /* — Neutros quentes — */
+    --secondary: 40 18% 92%;
+    --secondary-foreground: 0 0% 14%;
+    --muted: 40 18% 92%;
+    --muted-foreground: 38 12% 39%;    /* taupe #6F6657 */
+    --accent: 40 18% 92%;              /* shadcn accent = hover neutro (NÃO o bordô) */
+    --accent-foreground: 0 0% 14%;
+
+    /* — Acento de marca (bordô) p/ CTAs críticos — token aditivo, opt-in — */
+    --brand-accent: 350 47% 33%;       /* #7C2D3A */
+    --brand-accent-foreground: 40 30% 97%;
+
+    /* — Status semânticos (consistentes em todo o domínio) — */
+    --destructive: 0 72% 45%;
+    --destructive-foreground: 40 30% 97%;
+    --success: 152 55% 30%;
+    --success-foreground: 40 30% 97%;
+    --warning: 38 88% 45%;
+    --warning-foreground: 0 0% 10%;
+    --info: 200 75% 35%;
+    --info-foreground: 40 30% 97%;
+
+    /* — Linhas / foco / raio — */
+    --border: 38 16% 87%;
+    --input: 38 16% 87%;
+    --ring: 176 69% 22%;
+    --radius: 0.5rem;                  /* mais sóbrio que o 0.75 anterior */
+
+    /* — Charts coerentes com a marca — */
+    --chart-1: 176 69% 26%;            /* teal */
+    --chart-2: 350 47% 42%;            /* bordô */
+    --chart-3: 38 80% 50%;             /* âmbar */
+    --chart-4: 38 22% 55%;             /* taupe claro */
+    --chart-5: 192 55% 24%;            /* teal profundo */
+
+    /* — Sidebar (levemente mais quente que o card) — */
+    --sidebar-background: 42 24% 97%;
+    --sidebar-foreground: 0 0% 14%;
+    --sidebar-primary: 176 69% 22%;
+    --sidebar-primary-foreground: 40 30% 97%;
+    --sidebar-accent: 40 22% 93%;
+    --sidebar-accent-foreground: 176 69% 18%;
+    --sidebar-border: 38 16% 87%;
+    --sidebar-ring: 176 69% 22%;
+
+    /* — Tipografia (display serifado + corpo Inter) — */
+    --font-display: var(--font-source-serif), Georgia, "Times New Roman", serif;
+    --font-body: var(--font-inter), "Segoe UI", system-ui, sans-serif;
   }
 
   .dark {
-    --background: 0 0% 7%;
-    --foreground: 0 0% 95%;
-    --card: 0 0% 10%;
-    --card-foreground: 0 0% 95%;
-    --popover: 0 0% 10%;
-    --popover-foreground: 0 0% 95%;
-    --primary: 27 92% 50%;
-    --primary-foreground: 0 0% 100%;
-    --secondary: 0 0% 15%;
-    --secondary-foreground: 0 0% 95%;
-    --muted: 0 0% 15%;
-    --muted-foreground: 0 0% 64%;
-    --accent: 0 0% 15%;
-    --accent-foreground: 0 0% 95%;
-    --destructive: 0 62% 50%;
-    --destructive-foreground: 0 0% 95%;
-    --border: 0 0% 18%;
-    --input: 0 0% 18%;
-    --ring: 27 92% 50%;
-    --sidebar-background: 0 0% 5%;
-    --sidebar-foreground: 0 0% 95%;
-    --sidebar-primary: 27 92% 50%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 0 0% 12%;
-    --sidebar-accent-foreground: 0 0% 95%;
-    --sidebar-border: 0 0% 18%;
-    --sidebar-ring: 27 92% 50%;
+    --background: 30 9% 9%;            /* warm near-black */
+    --foreground: 40 18% 92%;
+    --card: 30 8% 12%;
+    --card-foreground: 40 18% 92%;
+    --popover: 30 8% 12%;
+    --popover-foreground: 40 18% 92%;
+
+    --primary: 174 58% 44%;            /* teal mais claro p/ contraste no escuro */
+    --primary-foreground: 30 10% 8%;
+
+    --secondary: 30 6% 18%;
+    --secondary-foreground: 40 18% 92%;
+    --muted: 30 6% 18%;
+    --muted-foreground: 40 8% 62%;
+    --accent: 30 6% 18%;
+    --accent-foreground: 40 18% 92%;
+
+    --brand-accent: 350 55% 56%;
+    --brand-accent-foreground: 30 10% 8%;
+
+    --destructive: 0 62% 52%;
+    --destructive-foreground: 40 18% 95%;
+    --success: 152 48% 46%;
+    --success-foreground: 30 10% 8%;
+    --warning: 38 88% 56%;
+    --warning-foreground: 30 10% 8%;
+    --info: 200 72% 56%;
+    --info-foreground: 30 10% 8%;
+
+    --border: 30 6% 22%;
+    --input: 30 6% 22%;
+    --ring: 174 58% 44%;
+
+    --chart-1: 174 58% 46%;
+    --chart-2: 350 55% 58%;
+    --chart-3: 38 80% 58%;
+    --chart-4: 38 22% 60%;
+    --chart-5: 192 50% 48%;
+
+    --sidebar-background: 30 9% 7%;
+    --sidebar-foreground: 40 18% 92%;
+    --sidebar-primary: 174 58% 44%;
+    --sidebar-primary-foreground: 30 10% 8%;
+    --sidebar-accent: 30 7% 14%;
+    --sidebar-accent-foreground: 40 18% 92%;
+    --sidebar-border: 30 6% 22%;
+    --sidebar-ring: 174 58% 44%;
   }
+
+  /* CAMADA 3 — Tenant override (white-label). Servido no layout via
+   * <html data-tenant style="--primary:...; --brand-accent:..."> a partir
+   * de campos de marca no Organization. Placeholder documentando o contrato;
+   * a injeção real entra na fase multitenant. Mesma técnica do [data-chat-panel]. */
+  /* [data-tenant="acme"] { --primary: 215 80% 40%; --brand-accent: 28 90% 50%; } */
 }
 
 @layer base {
@@ -77,31 +138,31 @@
 
   body {
     @apply bg-background text-foreground;
-    font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+    font-family: var(--font-body, "Inter", "Segoe UI", system-ui, sans-serif);
   }
 
-  /* Chat panel — paleta Lovable-style escopada ao Sheet do chat.
-     Resto do app continua warm beige + laranja queimado. Sobrescreve
-     as CSS vars principais (background/foreground/primary/etc.) só
-     dentro do data-chat-panel, sem vazar pro restante do app. */
+  /* Chat panel — escopo próprio do Sheet do chat, agora RECONCILIADO com a
+     marca imobpro.ai (papel quente + teal) em vez do violet "Lovable" antigo.
+     Mantém uma superfície levemente mais clara que o app pra dar profundidade,
+     e preserva os tokens semânticos por tipo de ferramenta (--chat-tool-*). */
   [data-chat-panel] {
-    --background: 220 17% 99%;      /* off-white #FCFCFD */
-    --foreground: 222 47% 11%;       /* slate-900 */
+    --background: 40 30% 97%;        /* papel um tom acima do app */
+    --foreground: 0 0% 10%;          /* ink */
     --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
+    --card-foreground: 0 0% 10%;
     --popover: 0 0% 100%;
-    --popover-foreground: 222 47% 11%;
-    --primary: 262 83% 58%;          /* violet-600 */
-    --primary-foreground: 0 0% 100%;
-    --secondary: 210 40% 96%;        /* slate-100 */
-    --secondary-foreground: 222 47% 11%;
-    --muted: 210 40% 96%;            /* slate-100 */
-    --muted-foreground: 215 16% 47%; /* slate-500 */
-    --accent: 210 40% 96%;           /* slate-100 */
-    --accent-foreground: 222 47% 11%;
-    --border: 214 32% 91%;           /* slate-200 */
-    --input: 214 32% 91%;
-    --ring: 262 83% 58%;             /* violet-600 */
+    --popover-foreground: 0 0% 10%;
+    --primary: 176 69% 22%;          /* teal-800 (marca) */
+    --primary-foreground: 40 30% 97%;
+    --secondary: 40 18% 93%;
+    --secondary-foreground: 0 0% 14%;
+    --muted: 40 18% 93%;
+    --muted-foreground: 38 12% 39%;  /* taupe */
+    --accent: 40 18% 93%;
+    --accent-foreground: 0 0% 14%;
+    --border: 38 16% 88%;
+    --input: 38 16% 88%;
+    --ring: 176 69% 22%;             /* teal */
 
     /* Tokens semânticos pros tool kinds — KIND_CLASSES em event-icons.ts
        referencia esses como `bg-[hsl(var(--chat-tool-kb-bg))]` etc. */
@@ -124,23 +185,23 @@
 
   .dark [data-chat-panel],
   [data-chat-panel].dark {
-    --background: 222 47% 8%;          /* slate-950ish */
-    --foreground: 210 40% 98%;
-    --card: 222 47% 11%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222 47% 11%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 262 83% 65%;            /* violet-500 */
-    --primary-foreground: 222 47% 8%;
-    --secondary: 217 33% 17%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217 33% 17%;
-    --muted-foreground: 215 20% 65%;
-    --accent: 217 33% 17%;
-    --accent-foreground: 210 40% 98%;
-    --border: 217 33% 22%;
-    --input: 217 33% 22%;
-    --ring: 262 83% 65%;
+    --background: 30 9% 10%;           /* warm dark (marca) */
+    --foreground: 40 18% 92%;
+    --card: 30 8% 13%;
+    --card-foreground: 40 18% 92%;
+    --popover: 30 8% 13%;
+    --popover-foreground: 40 18% 92%;
+    --primary: 174 58% 44%;            /* teal claro p/ dark */
+    --primary-foreground: 30 10% 8%;
+    --secondary: 30 6% 18%;
+    --secondary-foreground: 40 18% 92%;
+    --muted: 30 6% 18%;
+    --muted-foreground: 40 8% 62%;
+    --accent: 30 6% 18%;
+    --accent-foreground: 40 18% 92%;
+    --border: 30 6% 22%;
+    --input: 30 6% 22%;
+    --ring: 174 58% 44%;
 
     --chat-tool-kb-bg: 217 91% 18%;
     --chat-tool-kb-fg: 213 96% 78%;

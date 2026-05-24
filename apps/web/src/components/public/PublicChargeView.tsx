@@ -394,7 +394,7 @@ export function PublicChargeView({ initialToken }: { initialToken: string }) {
       <footer className="text-center py-6 text-xs text-muted-foreground">
         <div className="flex items-center justify-center gap-2">
           <ShieldCheck className="h-3 w-3" />
-          Processado com segurança pelo Contractmaker + Asaas
+          Processado com segurança pela imobpro.ai + Asaas
         </div>
       </footer>
     </div>

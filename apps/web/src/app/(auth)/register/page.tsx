@@ -6,25 +6,26 @@ import {
   Sparkles,
   ShieldCheck,
 } from "lucide-react";
+import { BrandWordmark } from "@/components/layout/brand-mark";
 
 export const metadata = {
-  title: "Acesso por convite — Contractmaker",
+  title: "Acesso por convite",
 };
 
 export default function RegisterPage() {
   return (
     <div className="flex min-h-screen">
-      <div className="hidden lg:flex lg:w-[58%] relative bg-gradient-to-br from-orange-600 via-orange-500 to-amber-500 text-white">
+      <div className="hidden lg:flex lg:w-[58%] relative bg-gradient-to-br from-teal-900 via-teal-800 to-teal-700 text-white">
         <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTTAgMCBMNjAgNjAiIHN0cm9rZT0icmdiYSgyNTUsMjU1LDI1NSwwLjA1KSIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCBmaWxsPSJ1cmwoI2cpIiB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIi8+PC9zdmc+')] opacity-30" />
         <div className="relative z-10 flex flex-col justify-center px-16 xl:px-24">
-          <div className="flex items-center gap-3 mb-12">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/20 backdrop-blur-sm text-white font-bold text-lg">
-              CM
-            </div>
-            <span className="text-xl font-semibold">Contractmaker</span>
-          </div>
+          <BrandWordmark
+            className="mb-12"
+            markClassName="h-11 w-11 text-white"
+            textClassName="text-xl text-white"
+            accentClassName="text-white/75"
+          />
 
-          <h1 className="text-4xl xl:text-5xl font-bold leading-tight mb-6">
+          <h1 className="font-display text-4xl xl:text-5xl font-bold leading-tight mb-6">
             Acesso é por convite
           </h1>
           <p className="text-lg text-white/80 mb-10 max-w-lg">
@@ -51,12 +52,10 @@ export default function RegisterPage() {
 
       <div className="flex w-full lg:w-[42%] items-center justify-center bg-background p-4 sm:p-8 lg:p-12">
         <div className="w-full max-w-md text-center">
-          <div className="lg:hidden flex items-center justify-center gap-3 mb-10">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold">
-              CM
-            </div>
-            <span className="text-lg font-semibold">Contractmaker</span>
-          </div>
+          <BrandWordmark
+            className="lg:hidden justify-center mb-10"
+            markClassName="text-primary"
+          />
 
           <div className="flex justify-center mb-6">
             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
