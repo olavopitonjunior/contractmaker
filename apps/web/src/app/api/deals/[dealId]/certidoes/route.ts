@@ -322,6 +322,18 @@ export async function POST(
     "duplicate_pending",
     "replaced",
   ];
+  // Endpoints "equivalentes" para fins de supersede: a migração TJSP trocou
+  // `pedido-civel` (legado cível-only) por `pedido-certidao`. Um novo lote com
+  // pedido-certidao deve aposentar as linhas terminais antigas de pedido-civel
+  // do MESMO alvo (e vice-versa), senão deals legados acumulam 2 famílias de
+  // linhas TJSP. Para os demais endpoints, supersede só o próprio.
+  const TJSP_PEDIDO_GROUP = [
+    "tribunal/tjsp/pedido-certidao",
+    "tribunal/tjsp/pedido-civel",
+  ];
+  const supersedeEndpointsFor = (endpoint: string): string[] =>
+    TJSP_PEDIDO_GROUP.includes(endpoint) ? TJSP_PEDIDO_GROUP : [endpoint];
+
   const supersedeTargets = [
     ...new Map(
       [...effectiveJobs, ...effectiveSkipped].map((j) => [
@@ -338,7 +350,7 @@ export async function POST(
       prisma.certidaoJob.updateMany({
         where: {
           dealId: params.dealId,
-          endpoint: t.endpoint,
+          endpoint: { in: supersedeEndpointsFor(t.endpoint) },
           targetKind: t.targetKind,
           targetIndex: t.targetIndex,
           status: { in: TERMINAL_REPLACEABLE },
