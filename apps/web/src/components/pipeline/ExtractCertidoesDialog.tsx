@@ -53,9 +53,26 @@ interface Spend {
 
 export interface JobSelection {
   endpoint: string;
-  targetKind: "vendedor" | "comprador" | "imovel" | "diligenciado";
+  targetKind:
+    | "vendedor"
+    | "comprador"
+    | "imovel"
+    | "diligenciado"
+    | "conjuge_vendedor"
+    | "procurador_vendedor"
+    | "representante_vendedor";
   targetIndex: number;
 }
+
+// Vendedor + seus dependentes entram MARCADOS por padrão (sempre necessários).
+// Comprador e imóvel: imóvel marcado, comprador desmarcado (decisão do usuário).
+const DEFAULT_SELECTED_KINDS = new Set([
+  "vendedor",
+  "imovel",
+  "conjuge_vendedor",
+  "procurador_vendedor",
+  "representante_vendedor",
+]);
 
 interface ExtractCertidoesDialogProps {
   open: boolean;
@@ -92,6 +109,12 @@ function groupLabel(kind: string, index: number, labelMap: Record<string, string
       ? "Imóvel"
       : kind === "diligenciado"
       ? "Diligenciado"
+      : kind === "conjuge_vendedor"
+      ? "Cônjuge do Vendedor"
+      : kind === "procurador_vendedor"
+      ? "Procurador do Vendedor"
+      : kind === "representante_vendedor"
+      ? "Representante do Vendedor"
       : kind;
   return `${kindLabel} ${index + 1}`;
 }
@@ -144,14 +167,12 @@ export function ExtractCertidoesDialog({
         );
         setApiHealth(data.apiHealth ?? {});
         setDiligenciados(data.diligenciados ?? []);
-        // Default: marca só vendedores + imóvel (compradores começam
-        // desmarcados — o usuário marca se quiser). Decisão do usuário.
+        // Default: marca vendedores + seus dependentes (cônjuge/procurador/
+        // representante) + imóvel. Compradores começam desmarcados — o usuário
+        // marca se quiser. Decisão do usuário 2026-05-22.
         const initial = new Set<string>(
           (data.plan?.jobs ?? [])
-            .filter(
-              (j: PlannedJob) =>
-                j.targetKind === "vendedor" || j.targetKind === "imovel"
-            )
+            .filter((j: PlannedJob) => DEFAULT_SELECTED_KINDS.has(j.targetKind))
             .map((j: PlannedJob) => jobKey(j))
         );
         setSelected(initial);

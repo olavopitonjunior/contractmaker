@@ -52,15 +52,34 @@ import {
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
+interface Dependente {
+  nome?: string;
+  cpf?: string;
+}
+
 interface CertidoesTabProps {
   dealId: string;
-  vendedores: Array<{ nome?: string; razao_social?: string }>;
+  vendedores: Array<{
+    nome?: string;
+    razao_social?: string;
+    tipo_pessoa?: string;
+    // Dependentes do vendedor — diligenciados junto (cônjuge/procurador/
+    // representante). Usados para rotular os grupos de certidões.
+    conjuge?: Dependente;
+    procurador?: Dependente;
+    representante?: Dependente;
+  }>;
   compradores: Array<{ nome?: string; razao_social?: string }>;
   imoveis: Array<{
     rua?: string;
     numero?: string;
     cidade?: string;
   }>;
+}
+
+/** Identidade útil de dependente: tem CPF ou ao menos nome. */
+function hasDependente(d: Dependente | undefined): d is Dependente {
+  return !!d && !!((d.cpf && d.cpf.trim()) || (d.nome && d.nome.trim()));
 }
 
 function imovelLabel(im: {
@@ -464,12 +483,31 @@ export function CertidoesTab({
     // Phase L (2026-05-22) — os jobs com targetKind="imovel" voltam a renderizar
     // num grupo "Imóvel:" próprio (antes eram dropados, resquício do Phase F.II-α).
     const map = new Map<string, { label: string; rows: CertidaoJobRow[] }>();
-    vendedores.forEach((v, i) =>
-      map.set(`vendedor-${i}`, {
-        label: `Vendedor: ${v.nome || v.razao_social || `Parte ${i + 1}`}`,
-        rows: [],
-      })
-    );
+    vendedores.forEach((v, i) => {
+      const vLabel = v.nome || v.razao_social || `Parte ${i + 1}`;
+      map.set(`vendedor-${i}`, { label: `Vendedor: ${vLabel}`, rows: [] });
+      // Dependentes do vendedor (cônjuge/procurador/representante) ganham grupo
+      // próprio, rotulado com o titular para contexto. Grupos sem jobs são
+      // filtrados no final.
+      if (hasDependente(v.conjuge)) {
+        map.set(`conjuge_vendedor-${i}`, {
+          label: `Cônjuge de ${vLabel}: ${v.conjuge.nome || "—"}`,
+          rows: [],
+        });
+      }
+      if (hasDependente(v.procurador)) {
+        map.set(`procurador_vendedor-${i}`, {
+          label: `Procurador de ${vLabel}: ${v.procurador.nome || "—"}`,
+          rows: [],
+        });
+      }
+      if (hasDependente(v.representante)) {
+        map.set(`representante_vendedor-${i}`, {
+          label: `Representante de ${vLabel}: ${v.representante.nome || "—"}`,
+          rows: [],
+        });
+      }
+    });
     compradores.forEach((c, i) =>
       map.set(`comprador-${i}`, {
         label: `Comprador: ${c.nome || c.razao_social || `Parte ${i + 1}`}`,
@@ -485,11 +523,20 @@ export function CertidoesTab({
     for (const job of displayJobs) {
       const key = groupKey(job);
       if (!map.has(key)) {
-        // Diligenciados têm groupKey "diligenciado-N" — label amigável
+        // Diligenciados têm groupKey "diligenciado-N" — label amigável.
+        // Dependentes do vendedor sem pré-seed (dado removido do form depois
+        // do job criado) recebem rótulo legível em vez do enum cru.
+        const n = job.targetIndex + 1;
         const label =
           job.targetKind === "diligenciado"
-            ? `Diligência avulsa #${job.targetIndex + 1}`
-            : `${job.targetKind} ${job.targetIndex + 1}`;
+            ? `Diligência avulsa #${n}`
+            : job.targetKind === "conjuge_vendedor"
+            ? `Cônjuge do Vendedor ${n}`
+            : job.targetKind === "procurador_vendedor"
+            ? `Procurador do Vendedor ${n}`
+            : job.targetKind === "representante_vendedor"
+            ? `Representante do Vendedor ${n}`
+            : `${job.targetKind} ${n}`;
         map.set(key, { label, rows: [] });
       }
       map.get(key)!.rows.push(job);

@@ -135,6 +135,11 @@ function maxPortalWaitMs(endpoint: string): number {
  * matrícula, TJMS e Antecedentes PF caíam em null e ficavam presos.
  */
 export function resolveObterEndpoint(pedidoEndpoint: string): string | null {
+  // Fluxo genérico multi-modelo (Cível-Geral SAJ SGC + Falências) usa o par
+  // pedido-certidao/obter-certidao. Precede o catch genérico /tjsp/ (que mapeia
+  // o legado pedido-civel → obter-civel).
+  if (pedidoEndpoint === "tribunal/tjsp/pedido-certidao")
+    return "tribunal/tjsp/obter-certidao";
   if (pedidoEndpoint.includes("/tjsp/")) return "tribunal/tjsp/obter-civel";
   if (pedidoEndpoint.includes("/tjrj/")) return "tribunal/tjrj/obter-certidao";
   if (pedidoEndpoint.includes("/trf3/")) return "tribunal/trf3/obter-certidao";
@@ -268,15 +273,20 @@ async function isOrgInfosimplesBlocked(
     _spendMemo.set(orgId, { exceeded, ts: Date.now() });
   }
   if (exceeded) return { blocked: true, reason: "budget" };
-  const recent603 = await prisma.certidaoJob.findFirst({
+  // 603/604 recentes sinalizam crédito/token esgotado → para de martelar a API.
+  // EXCEÇÃO: o 604 do throttle de e-mail do e-SAJ (pedido-certidao) é transitório
+  // e NÃO deve tripar o breaker (senão um lote TJSP bloqueia toda a org). Por
+  // isso buscamos alguns candidatos e filtramos a mensagem em JS.
+  const recentCreditCandidates = await prisma.certidaoJob.findFirst({
     where: {
       orgId,
       resultCode: { in: [603, 604] },
       finishedAt: { gte: new Date(Date.now() - 30 * 60_000) },
+      NOT: { resultMessage: { contains: "mesmo email", mode: "insensitive" } },
     },
     select: { id: true },
   });
-  if (recent603) return { blocked: true, reason: "credit" };
+  if (recentCreditCandidates) return { blocked: true, reason: "credit" };
   return { blocked: false };
 }
 
@@ -675,7 +685,11 @@ export async function runSingleJob(
     const normalized = normalize(job.endpoint, resp);
     let attachmentId: string | null = null;
     const receipt = resp.site_receipts?.[0];
-    if (receipt && resp.code === 200) {
+    // Endpoints informativos (emitsPdf:false — ex.: receita-federal/cpf, Cartão
+    // CNPJ, CRF FGTS) às vezes vêm com um site_receipts[] que NÃO é PDF de
+    // certidão (página/print). Anexar isso gerava "erro no PDF" no viewer.
+    // Só baixamos quando o endpoint emite PDF de verdade.
+    if (receipt && resp.code === 200 && info.emitsPdf !== false) {
       attachmentId = await downloadAndAttach(
         dealId,
         job.endpoint,
@@ -1191,7 +1205,7 @@ export async function pollPortalJob(jobId: string): Promise<void> {
     const normalized = normalize(obterEndpoint, resp);
     let attachmentId: string | null = null;
     const receipt = resp.site_receipts?.[0];
-    if (receipt && resp.code === 200) {
+    if (receipt && resp.code === 200 && obterInfo.emitsPdf !== false) {
       attachmentId = await downloadAndAttach(
         job.dealId,
         obterEndpoint,
@@ -1344,6 +1358,16 @@ async function downloadAndAttach(
   if (!dealId) return null;
   try {
     const { buffer, contentType } = await downloadReceipt(receiptUrl);
+    // Defesa em profundidade: o site_receipts às vezes devolve HTML de erro
+    // (portal fora, sessão expirada) em vez do PDF. Servir isso como
+    // application/pdf quebra o viewer ("erro no PDF"). Validamos o magic.
+    const isPdf = buffer.subarray(0, 5).toString("latin1") === "%PDF-";
+    if (!isPdf) {
+      console.error(
+        `[certidoes] comprovante de ${endpoint} não é PDF (magic inválido) — não anexado`
+      );
+      return null;
+    }
     const safeName = `${endpoint.replace(/[^a-z0-9]/gi, "_")}_${Date.now()}.pdf`;
     const bucket = process.env.S3_BUCKET;
     const key = `deal-certidoes/${dealId}/${safeName}`;
@@ -1353,11 +1377,20 @@ async function downloadAndAttach(
       body: buffer,
       contentType,
     });
-    // Persist assignment so DocumentsTab groups certidao attachments by part/imovel
-    const assignmentKind =
-      targetKind === "vendedor" || targetKind === "comprador" || targetKind === "imovel"
-        ? targetKind
-        : "outro";
+    // Persist assignment so DocumentsTab groups certidao attachments by part/imovel.
+    // Os dependentes do vendedor (cônjuge/procurador/representante) são mapeados
+    // para os kinds que o DocumentsTab/DealDetail já reconhecem (conjuge_vendedor,
+    // representante_vendedor) — assim o PDF da certidão do cônjuge agrupa sob o
+    // vendedor titular. procurador_vendedor segue o mesmo padrão.
+    const ASSIGNABLE_KINDS = new Set([
+      "vendedor",
+      "comprador",
+      "imovel",
+      "conjuge_vendedor",
+      "procurador_vendedor",
+      "representante_vendedor",
+    ]);
+    const assignmentKind = ASSIGNABLE_KINDS.has(targetKind) ? targetKind : "outro";
     const attachment = await prisma.dealAttachment.create({
       data: {
         dealId,

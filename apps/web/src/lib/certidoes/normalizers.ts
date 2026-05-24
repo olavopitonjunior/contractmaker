@@ -646,6 +646,8 @@ const EXTRACTORS: Record<string, Extractor> = {
   "tribunal/trt4/ceat": ceatExtractor,
   "tribunal/tjsp/pedido-civel": tjExtractor,
   "tribunal/tjsp/obter-civel": tjExtractor,
+  "tribunal/tjsp/pedido-certidao": tjExtractor,
+  "tribunal/tjsp/obter-certidao": tjExtractor,
   "tribunal/tjrj/pedido-cert": tjExtractor,
   "tribunal/tjrj/obter-certidao": tjExtractor,
   "tribunal/tjrs/primeiro-grau": tjExtractor,

@@ -83,7 +83,15 @@ const extractSchema = z.object({
     .array(
       z.object({
         endpoint: z.string(),
-        targetKind: z.enum(["vendedor", "comprador", "imovel", "diligenciado"]),
+        targetKind: z.enum([
+          "vendedor",
+          "comprador",
+          "imovel",
+          "diligenciado",
+          "conjuge_vendedor",
+          "procurador_vendedor",
+          "representante_vendedor",
+        ]),
         targetIndex: z.number().int().min(0),
       })
     )

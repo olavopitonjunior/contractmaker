@@ -139,7 +139,14 @@ export function useCertidoesBatch(dealId: string) {
     async (
       jobs?: Array<{
         endpoint: string;
-        targetKind: "vendedor" | "comprador" | "imovel" | "diligenciado";
+        targetKind:
+          | "vendedor"
+          | "comprador"
+          | "imovel"
+          | "diligenciado"
+          | "conjuge_vendedor"
+          | "procurador_vendedor"
+          | "representante_vendedor";
         targetIndex: number;
       }>
     ) => {

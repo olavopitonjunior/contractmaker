@@ -196,6 +196,36 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     category: "civel",
     description: "Obtencao da Certidao Civel do TJSP — 2o passo (automatico via cron)",
   },
+  // Fluxo genérico multi-modelo (2026-05-23) — substitui o pedido-civel (que era
+  // cível-only e ignorava tipo_certidao). `modelo` é numérico: 4 = Cível em Geral
+  // (SAJ SGC, engloba cíveis+família+execuções fiscais), 1 = Falências/Concordatas/
+  // Recuperações. Exige `rg` para PF. Ver memória certidoes_tjsp_pedido_civel_only.
+  "tribunal/tjsp/pedido-certidao": {
+    id: "tribunal/tjsp/pedido-certidao",
+    label: "TJSP Certidão de Distribuição (pedido)",
+    costCents: 6,
+    twoStep: true,
+    scope: "estadual",
+    uf: "SP",
+    appliesTo: ["pessoa"],
+    category: "civel",
+    description:
+      "Cadastro de pedido de certidão de distribuição do TJSP (modelo selecionável) — 1o passo",
+    expectedWaitMinutes: 15,
+    portalUrl: "https://esaj.tjsp.jus.br/esaj?servico=810000",
+  },
+  "tribunal/tjsp/obter-certidao": {
+    id: "tribunal/tjsp/obter-certidao",
+    label: "TJSP Certidão de Distribuição (obter)",
+    costCents: 4,
+    initialStatus: "awaiting_portal",
+    scope: "estadual",
+    uf: "SP",
+    appliesTo: ["pessoa"],
+    category: "civel",
+    description:
+      "Obtenção da certidão de distribuição do TJSP — 2o passo (automático via cron)",
+  },
   // H.14 (Phase H, 2026-04-18) — placeholder para E-Proc SP 1ª/2ª instâncias.
   // Infosimples não emite; SkippedJob + externalLink abre portal oficial.
   // Entry no catálogo é necessária para CertidoesTab renderizar o card.

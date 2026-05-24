@@ -105,21 +105,26 @@ const TRF_INDIVIDUAL_TIPOS: Array<{ tipo_certidao: string; label: string }> = [
 ];
 
 /**
- * Phase F.II-γ — múltiplos `tipo_certidao` do TJSP e TJRJ que cobrem os
- * distribuidores exigidos em transação imobiliária (cível, família, falência,
- * execução fiscal). Cada um é uma chamada separada.
+ * TJSP (migração 2026-05-23): o endpoint legado `tjsp/pedido-civel` é cível-only
+ * (ignora `tipo_certidao`, devolve só "Ações Cíveis em Geral" do eproc). A
+ * cobertura real vem do `tjsp/pedido-certidao` genérico, cujo `modelo` é um
+ * NÚMERO (confirmado por sondagem na API + form e-SAJ):
+ *   - modelo 4 = "Certidão de Distribuição Cível em Geral - SAJ SGC"
+ *     (engloba cíveis + família + execuções fiscais — não há certidão online
+ *      separada de família/execução-fiscal; são presenciais)
+ *   - modelo 1 = "Cert Dist - Falências, Concordatas e Recuperações"
+ * `pedido-certidao` EXIGE `rg` para PF (erro 606 sem). PJ usa cnpj+razao_social.
+ * Ver memória certidoes_tjsp_pedido_civel_only.
  */
-// I.1 (Phase I, 2026-04-18) — Infosimples TJSP pedido-civel rejeitava
-// "familia-sucessoes" retornando code 606 em 16/16 jobs no QA 2026-04-18.
-// Docs oficiais mostram os valores canônicos: civel, familia, falencia,
-// execucao-fiscal (familia sem hífen composto).
-const TJSP_TIPOS: Array<{ tipo_certidao: string; label: string }> = [
-  { tipo_certidao: "civel", label: "Cível" },
-  { tipo_certidao: "familia", label: "Família e Sucessões" },
-  { tipo_certidao: "falencia", label: "Falência / Concordata / Rec. Judicial" },
-  { tipo_certidao: "execucao-fiscal", label: "Execução Fiscal" },
+const TJSP_MODELOS: Array<{ modelo: number; label: string }> = [
+  { modelo: 4, label: "Cível em Geral (SAJ SGC)" },
+  { modelo: 1, label: "Falências, Concordatas e Recuperações" },
 ];
 
+/**
+ * Phase F.II-γ — TJRJ ainda dispara multi-tipo (não verificado se também é
+ * cível-only; manter até confirmar no portal TJRJ).
+ */
 const TJRJ_TIPOS: Array<{ tipo_certidao: string; label: string }> = [
   { tipo_certidao: "civel", label: "Cível" },
   { tipo_certidao: "familia", label: "Família e Sucessões" },
@@ -230,6 +235,7 @@ function isImovelRural(imovel: Imovel): boolean {
 interface Dependente {
   nome?: string;
   cpf?: string;
+  rg?: string;
   data_nascimento?: string;
   nome_mae?: string;
   uf?: string;
@@ -248,6 +254,7 @@ interface Parte {
   // para alguns tipos (código 606 "parâmetros obrigatórios" em 100% dos jobs PF
   // sem esse campo). OCR do RG traz `filiacao`/`mae` quando disponível.
   nome_mae?: string;
+  rg?: string;
   email?: string;
   uf?: string;
   cidade?: string;
@@ -392,6 +399,7 @@ function dependenteToParte(dep: Dependente, titular: Parte): Parte {
     tipo_pessoa: "fisica",
     nome: dep.nome,
     cpf: dep.cpf,
+    rg: dep.rg || undefined,
     data_nascimento: dep.data_nascimento || undefined,
     nome_mae: dep.nome_mae || undefined,
     uf,
@@ -1011,71 +1019,104 @@ export function planCertidoesForDeal(
     const tjShouldRS = expandAll || partyUf === "RS";
 
     if (tjShouldSP) {
-      const ep = "tribunal/tjsp/pedido-civel";
+      // Migração 2026-05-23 — Certidão de Distribuição via `pedido-certidao`
+      // (modelo numérico). modelo 4 = Cível em Geral SAJ SGC (engloba cíveis +
+      // família + execuções fiscais), modelo 1 = Falências/Concordatas/Recuperações.
+      //   - PJ: cnpj + razao_social (sem rg).
+      //   - PF COM rg: 2 pedidos (modelo 4 + 1).
+      //   - PF SEM rg: pedido-certidao não pode emitir (606 exige rg). Fallback
+      //     para o legado `pedido-civel` (eproc, cível-only, dispensa rg) para não
+      //     regredir a cobertura cível, + skip pedindo o RG para a certidão completa.
+      // Auth GOV.BR é injetada centralmente em callInfosimples (não aqui).
+      const epCert = "tribunal/tjsp/pedido-certidao";
+      const epCivel = "tribunal/tjsp/pedido-civel";
+      const partyRg = (parte.rg || "").trim();
       if ((!isPJ && !cpf) || (isPJ && !cnpj)) {
         skipped.push(
-          buildSkip(ep, kind, index, label, isPJ ? "cnpj" : "cpf", "documento invalido")
+          buildSkip(epCert, kind, index, label, isPJ ? "cnpj" : "cpf", "documento invalido")
         );
-      } else if (!isPJ && !parte.data_nascimento) {
-        // H.3 — TJSP exige data_nascimento para PF (code 606). Sem ela,
-        // skip explícito ao invés de disparar e falhar em 100% dos jobs.
-        skipped.push(
-          buildSkip(
-            ep,
-            kind,
-            index,
-            label,
-            "data_nascimento",
-            "TJSP exige data de nascimento — complete os dados da parte"
-          )
-        );
+      } else if (isPJ) {
+        for (const m of TJSP_MODELOS) {
+          jobs.push(
+            buildJob(epCert, kind, index, `${label} - ${m.label}`, {
+              modelo: m.modelo,
+              cnpj: cnpj!,
+              razao_social: label,
+              email_envio: email,
+            })
+          );
+        }
+      } else if (partyRg) {
+        const dob = normalizeDate(parte.data_nascimento);
+        for (const m of TJSP_MODELOS) {
+          const base: Record<string, unknown> = {
+            modelo: m.modelo,
+            cpf: cpf!,
+            rg: partyRg,
+            nome_completo: label,
+            email_envio: email,
+          };
+          if (dob) base.birthdate = dob;
+          if (parte.nome_mae) base.nome_mae = parte.nome_mae;
+          jobs.push(buildJob(epCert, kind, index, `${label} - ${m.label}`, base));
+        }
       } else {
-        // Phase F.II-γ — multi-tipo: uma chamada por tipo_certidao (cível,
-        // família, falência, execução fiscal) para cobrir os 4 distribuidores
-        // exigidos em transação imobiliária (Comunicado SPI nº 37 - 10 anos).
-        //
-        // I.4 (2026-05-11) — incluir municipio/uf/pais também para PF.
-        // I.7 (2026-05-11) — autenticação GOV.BR (login_cpf/login_senha) é
-        // injetada centralmente em callInfosimples a partir das env vars
-        // INFOSIMPLES_GOVBR_CPF/PASSWORD. NÃO injetar aqui pra evitar gravar
-        // credenciais no requestPayload do DB (sanitizePayload removeria
-        // mas é mais seguro nunca tocá-las fora do callInfosimples).
-        const partyMunicipio = (parte.cidade || "").trim();
-        for (const t of TJSP_TIPOS) {
+        // PF sem RG → fallback cível legado (precisa de data_nascimento) + skip RG.
+        if (!parte.data_nascimento) {
+          skipped.push(
+            buildSkip(
+              epCivel,
+              kind,
+              index,
+              label,
+              "data_nascimento",
+              "TJSP exige data de nascimento — complete os dados da parte"
+            )
+          );
+        } else {
+          const partyMunicipio = (parte.cidade || "").trim();
           const base: Record<string, unknown> = {
             email,
             finalidade: DEFAULT_FINALIDADE,
             instancia: 1,
-            tipo_certidao: t.tipo_certidao,
+            tipo_certidao: "civel",
             pais: "Brasil",
             ...(partyUf ? { uf: partyUf } : {}),
             ...(partyMunicipio ? { municipio: partyMunicipio } : {}),
-            ...(isPJ
-              ? { cnpj: cnpj!, razao_social: label }
-              : { cpf: cpf!, nome: label }),
+            cpf: cpf!,
+            nome: label,
           };
-          // H.3 — adicionar campos de identificação quando disponíveis
-          if (!isPJ) {
-            const dob = normalizeDate(parte.data_nascimento);
-            if (dob) base.data_nascimento = dob;
-            if (parte.nome_mae) base.nome_mae = parte.nome_mae;
-          }
-          jobs.push(buildJob(ep, kind, index, `${label} - ${t.label}`, base));
+          const dob = normalizeDate(parte.data_nascimento);
+          if (dob) base.data_nascimento = dob;
+          if (parte.nome_mae) base.nome_mae = parte.nome_mae;
+          jobs.push(
+            buildJob(epCivel, kind, index, `${label} - Cível (Ações Cíveis em Geral)`, base)
+          );
         }
-
-        // E-Proc SP — lista de processos eletrônicos (1ª/2ª instância) via
-        // tribunal/tjsp/eproc-lista. Consulta informativa (sem PDF) por
-        // CPF/CNPJ; complementa a certidão cível (pedido-civel acima).
-        jobs.push(
-          buildJob(
-            "tribunal/tjsp/eproc-lista",
+        // Sugere completar o RG para destravar a Certidão de Distribuição
+        // completa (Cível-Geral SAJ SGC + Falências) via pedido-certidao.
+        skipped.push(
+          buildSkip(
+            epCert,
             kind,
             index,
-            `${label} - E-Proc`,
-            isPJ ? { cnpj: cnpj! } : { cpf: cpf! }
+            label,
+            "rg",
+            "Adicione o RG da parte para emitir a Certidão de Distribuição completa (Cível-Geral SAJ SGC + Falências)"
           )
         );
       }
+
+      // E-Proc SP — lista de processos eletrônicos (1ª/2ª instância), sempre.
+      jobs.push(
+        buildJob(
+          "tribunal/tjsp/eproc-lista",
+          kind,
+          index,
+          `${label} - E-Proc`,
+          isPJ ? { cnpj: cnpj! } : { cpf: cpf! }
+        )
+      );
     }
     if (tjShouldRJ) {
       const ep = "tribunal/tjrj/pedido-cert";
@@ -1309,6 +1350,15 @@ function buildMissingFieldsForSkip(
           label: `Data de nascimento — ${partyLabel}`,
           type: "date",
           placeholder: "AAAA-MM-DD",
+        },
+      ];
+    case "rg":
+      return [
+        {
+          path: `${basePath}.rg`,
+          label: `RG — ${partyLabel}`,
+          type: "text",
+          placeholder: "00.000.000-0",
         },
       ];
     case "sql":

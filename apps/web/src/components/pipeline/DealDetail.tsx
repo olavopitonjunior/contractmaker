@@ -56,6 +56,9 @@ type Parte = {
     email?: string;
     incluir_como_signatario?: boolean;
   };
+  // Dependentes do vendedor diligenciados junto nas certidões (2026-05-22).
+  procurador?: { nome?: string; cpf?: string };
+  representante?: { nome?: string; cpf?: string };
 };
 
 type Imovel = {

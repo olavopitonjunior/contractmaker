@@ -84,18 +84,14 @@ describe("planCertidoesForDeal — dados completos (PF SP + PF RJ + imovel SP)",
     expect(trt2).toHaveLength(0);
   });
 
-  it("vendedora SP recebe TJSP pedido-civel multi-tipo (4 chamadas Phase F.II-γ)", () => {
+  it("vendedora SP recebe UM TJSP pedido-civel (interim 2026-05-22 — endpoint é cível-only)", () => {
     const tjsp = plan.jobs.filter(
       (j) => j.targetKind === "vendedor" && j.endpoint === "tribunal/tjsp/pedido-civel"
     );
-    // Phase F.II-γ: 4 tipos (cível, família, falência, execução fiscal)
-    // I.1 (Phase I, 2026-04-18): "familia-sucessoes" → "familia" (Infosimples
-    // rejeitava valor com hífen composto com code 606).
-    expect(tjsp).toHaveLength(4);
-    const tipos = new Set(tjsp.map((j) => j.requestPayload.tipo_certidao));
-    expect(tipos).toEqual(
-      new Set(["civel", "familia", "falencia", "execucao-fiscal"])
-    );
+    // pedido-civel ignora tipo_certidao no input e sempre devolve "Ações Cíveis
+    // em Geral" — disparar 4 tipos gerava 4 PDFs idênticos. Reduzido a 1.
+    expect(tjsp).toHaveLength(1);
+    expect(tjsp[0].requestPayload.tipo_certidao).toBe("civel");
   });
 
   it("comprador RJ recebe TJRJ pedido-cert multi-tipo (4 chamadas) com comarca derivada", () => {
@@ -340,11 +336,22 @@ describe("planCertidoesForDeal — pessoa juridica", () => {
     expect(digital?.requestPayload.cnpj_raiz).toBe("11222333");
   });
 
-  it("PJ em SP recebe TJSP com razao_social + pais", () => {
-    const tjsp = plan.jobs.find((j) => j.endpoint === "tribunal/tjsp/pedido-civel");
-    expect(tjsp).toBeDefined();
-    expect(tjsp?.requestPayload.razao_social).toBe("ACME Imobiliaria LTDA");
-    expect(tjsp?.requestPayload.pais).toBe("Brasil");
+  it("PJ em SP recebe TJSP pedido-certidao modelo 4 (Cível-Geral) + 1 (Falências)", () => {
+    const tjsp = plan.jobs.filter(
+      (j) => j.endpoint === "tribunal/tjsp/pedido-certidao" && j.targetKind === "vendedor"
+    );
+    expect(tjsp).toHaveLength(2);
+    const modelos = new Set(tjsp.map((j) => j.requestPayload.modelo));
+    expect(modelos).toEqual(new Set([4, 1]));
+    tjsp.forEach((j) => {
+      expect(j.requestPayload.cnpj).toBe("11222333000181");
+      expect(j.requestPayload.razao_social).toBe("ACME Imobiliaria LTDA");
+      expect(j.requestPayload.email_envio).toBeTruthy();
+    });
+    // PJ não usa pedido-civel
+    expect(
+      plan.jobs.some((j) => j.endpoint === "tribunal/tjsp/pedido-civel")
+    ).toBe(false);
   });
 });
 
@@ -728,9 +735,10 @@ describe("Dependentes do vendedor (cônjuge / procurador / representante)", () =
     expect(conj.every((j) => j.targetIndex === 0)).toBe(true);
     const cpfJob = conj.find((j) => j.endpoint === "receita-federal/cpf");
     expect(cpfJob?.requestPayload.cpf).toBe("11144477735");
-    // TJSP do cônjuge dispara porque herdou UF=SP do titular
+    // TJSP do cônjuge dispara porque herdou UF=SP do titular (1 pedido cível
+    // após o interim 2026-05-22 — pedido-civel é cível-only).
     const tjsp = conj.filter((j) => j.endpoint === "tribunal/tjsp/pedido-civel");
-    expect(tjsp.length).toBe(4);
+    expect(tjsp.length).toBe(1);
   });
 
   it("procurador sem data_nascimento vira skip nos endpoints que a exigem", () => {
@@ -790,5 +798,48 @@ describe("Dependentes do vendedor (cônjuge / procurador / representante)", () =
     expect(rep.length).toBeGreaterThan(0);
     const cpfJob = rep.find((j) => j.endpoint === "receita-federal/cpf");
     expect(cpfJob?.requestPayload.cpf).toBe("11144477735");
+  });
+});
+
+describe("TJSP migração pedido-certidao (modelo numérico) — 2026-05-23", () => {
+  const VENDEDOR_PF_SP_COM_RG = {
+    tipo_pessoa: "fisica" as const,
+    nome: "Maria Com RG",
+    cpf: "52998224725",
+    rg: "12.345.678-9",
+    data_nascimento: "1980-05-14",
+    uf: "SP",
+    cidade: "Sao Paulo",
+  };
+
+  it("PF SP COM rg → 2 pedido-certidao (modelo 4 + 1), sem pedido-civel", () => {
+    const plan = planCertidoesForDeal({ vendedores: [VENDEDOR_PF_SP_COM_RG], compradores: [], imoveis: [] });
+    const cert = plan.jobs.filter((j) => j.endpoint === "tribunal/tjsp/pedido-certidao");
+    expect(cert).toHaveLength(2);
+    expect(new Set(cert.map((j) => j.requestPayload.modelo))).toEqual(new Set([4, 1]));
+    cert.forEach((j) => {
+      expect(j.requestPayload.rg).toBe("12.345.678-9");
+      expect(j.requestPayload.cpf).toBe("52998224725");
+      expect(j.requestPayload.nome_completo).toBe("Maria Com RG");
+      expect(j.requestPayload.email_envio).toBeTruthy();
+    });
+    expect(plan.jobs.some((j) => j.endpoint === "tribunal/tjsp/pedido-civel")).toBe(false);
+  });
+
+  it("PF SP SEM rg (com data_nascimento) → fallback pedido-civel + skip pedido-certidao(rg)", () => {
+    const plan = planCertidoesForDeal({ vendedores: [VENDEDOR_PF_SP], compradores: [], imoveis: [] });
+    const civel = plan.jobs.filter((j) => j.endpoint === "tribunal/tjsp/pedido-civel");
+    expect(civel).toHaveLength(1);
+    expect(civel[0].requestPayload.tipo_certidao).toBe("civel");
+    const rgSkip = plan.skipped.find(
+      (s) => s.endpoint === "tribunal/tjsp/pedido-certidao" && s.missingField === "rg"
+    );
+    expect(rgSkip).toBeDefined();
+    expect(rgSkip?.missingFields[0].path).toBe("vendedores.0.rg");
+  });
+
+  it("eproc-lista continua disparando independente do caminho", () => {
+    const plan = planCertidoesForDeal({ vendedores: [VENDEDOR_PF_SP_COM_RG], compradores: [], imoveis: [] });
+    expect(plan.jobs.some((j) => j.endpoint === "tribunal/tjsp/eproc-lista")).toBe(true);
   });
 });

@@ -1,4 +1,13 @@
-export type TargetKind = "vendedor" | "comprador" | "imovel" | "diligenciado";
+export type TargetKind =
+  | "vendedor"
+  | "comprador"
+  | "imovel"
+  | "diligenciado"
+  // Dependentes do VENDEDOR — sempre diligenciados junto (decisão do usuário
+  // 2026-05-22). targetIndex referencia o índice do vendedor titular.
+  | "conjuge_vendedor"
+  | "procurador_vendedor"
+  | "representante_vendedor";
 
 export type JobStatus =
   | "pending"

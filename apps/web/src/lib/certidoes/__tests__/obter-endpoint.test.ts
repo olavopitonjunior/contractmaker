@@ -8,6 +8,7 @@ import { resolveObterEndpoint, buildObterArgs, pickRecoverableProtocol } from ".
  */
 describe("resolveObterEndpoint — mapeamento two-step", () => {
   const cases: Array<[string, string]> = [
+    ["tribunal/tjsp/pedido-certidao", "tribunal/tjsp/obter-certidao"],
     ["tribunal/tjsp/pedido-civel", "tribunal/tjsp/obter-civel"],
     ["tribunal/tjrj/pedido-cert", "tribunal/tjrj/obter-certidao"],
     ["tribunal/trf3/certidao-distr", "tribunal/trf3/obter-certidao"],
@@ -37,6 +38,16 @@ describe("buildObterArgs — params do 2º passo por portal", () => {
         payload: payloadPF,
       })
     ).toEqual({ numero_pedido: "1610335", pedido_data: "22/05/2026", cpf: "12345678900" });
+  });
+
+  it("TJSP obter-certidao → numero_pedido + pedido_data + cpf (mesmo shape do obter-civel)", () => {
+    expect(
+      buildObterArgs("tribunal/tjsp/obter-certidao", {
+        numeroPedido: "96931058",
+        pedidoData: "23/05/2026",
+        payload: payloadPF,
+      })
+    ).toEqual({ numero_pedido: "96931058", pedido_data: "23/05/2026", cpf: "12345678900" });
   });
 
   it("TJRJ e-SAJ → numero_pedido + pedido_data + cnpj", () => {

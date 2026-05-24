@@ -113,11 +113,28 @@ const MESSAGE_HEURISTICS: Array<{
   { match: /nada consta|n[aã]o encontrado|nenhum registro|n[aã]o h[aá]/i, category: "genuine_no_data" },
 ];
 
+/**
+ * e-SAJ `pedido-certidao` recusa com code 604 quando o MESMO e-mail é usado em
+ * pedidos repetidos num intervalo curto ("Não é possível utilizar o mesmo email
+ * múltiplas vezes... Aguarde, ou tente novamente com outro email"). Isso é
+ * TRANSITÓRIO (rate-limit de e-mail), NÃO esgotamento de crédito/token. Sem
+ * discriminar, cairia em `account_issue` → tripava o circuit-breaker de crédito
+ * (isOrgInfosimplesBlocked) e bloqueava toda a org por 30min. Gate por mensagem.
+ */
+export function isEmailThrottle(message: string | null | undefined): boolean {
+  if (!message) return false;
+  return /mesmo\s+email\s+m[uú]ltiplas\s+vezes|tente\s+novamente\s+com\s+outro\s+email/i.test(
+    message
+  );
+}
+
 export function mapInfosimplesCodeToCategory(
   code: number,
   codeMessage?: string | null
 ): FailureCategory {
   if (code === 200) return "unknown"; // shouldn't be called for success
+  // 604 do throttle de e-mail (e-SAJ pedido-certidao) é transitório, não conta.
+  if (code === 604 && isEmailThrottle(codeMessage)) return "rate_limited";
   if (code in CODE_MAP) return CODE_MAP[code];
 
   // Message heuristics fire for unmapped codes
