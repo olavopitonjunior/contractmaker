@@ -72,7 +72,7 @@ export function AuditLogTable() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Registro de atividade</h1>
+        <h1 className="font-display tracking-tight text-2xl font-semibold">Registro de atividade</h1>
         <div className="text-sm text-muted-foreground">
           {total} evento{total !== 1 ? "s" : ""}
         </div>

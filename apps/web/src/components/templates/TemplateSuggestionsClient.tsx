@@ -136,7 +136,7 @@ export function TemplateSuggestionsClient({ template, initialSuggestions }: Prop
               {template.name}
             </Link>
           </Button>
-          <h1 className="text-2xl font-semibold">Sugestões do template</h1>
+          <h1 className="font-display tracking-tight text-2xl font-semibold">Sugestões do template</h1>
           <div className="flex items-center gap-2 mt-1">
             <Badge variant="outline">v{template.version}</Badge>
             {template.modalidade && (

@@ -139,7 +139,7 @@ export function KnowledgeBaseClient({
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Base de Conhecimento</h1>
+        <h1 className="font-display tracking-tight text-2xl font-semibold">Base de Conhecimento</h1>
         <p className="text-sm text-muted-foreground mt-1">
           Legislação, modelos, regras e glossário que o agente consulta via RAG antes de
           responder ou editar cláusulas.

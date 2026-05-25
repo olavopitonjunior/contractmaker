@@ -49,7 +49,7 @@ export default async function IntentsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold flex items-center gap-2">
+      <h1 className="font-display tracking-tight text-2xl font-semibold flex items-center gap-2">
         <ShieldAlert className="h-6 w-6" />
         Intents (aprovação de ações via API)
       </h1>

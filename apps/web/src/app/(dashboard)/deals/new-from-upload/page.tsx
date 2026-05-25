@@ -81,7 +81,7 @@ export default function NewDealFromUploadPage() {
             Voltar ao pipeline
           </Link>
         </Button>
-        <h1 className="text-2xl font-semibold">Cadastro rápido com upload</h1>
+        <h1 className="font-display tracking-tight text-2xl font-semibold">Cadastro rápido com upload</h1>
         <p className="text-sm text-muted-foreground mt-1">
           Suba um contrato de compra e venda já pronto (PDF ou DOCX). O sistema
           converte para Google Docs, extrai os dados das partes e do imóvel, e

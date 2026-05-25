@@ -53,7 +53,7 @@ export default async function AIRunsPage({
 
   return (
     <div className="mx-auto max-w-6xl p-6">
-      <div className="mb-1 text-2xl font-semibold">Execuções de IA (AgentRun)</div>
+      <div className="mb-1 font-display text-2xl font-semibold tracking-tight">Execuções de IA (AgentRun)</div>
       <p className="mb-6 text-sm text-gray-500">
         Log determinístico de cada turn do chat — o que foi efetivamente aplicado ao documento,
         para análise de funcionamento, output e treino dos agentes.

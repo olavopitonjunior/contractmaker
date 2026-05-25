@@ -167,7 +167,7 @@ export function PublicChargeView({ initialToken }: { initialToken: string }) {
     return (
       <div className="min-h-screen flex items-center justify-center p-4 bg-muted">
         <div className="max-w-md text-center space-y-3">
-          <h1 className="text-2xl font-semibold">Link inválido</h1>
+          <h1 className="font-display tracking-tight text-2xl font-semibold">Link inválido</h1>
           <p className="text-sm text-muted-foreground">
             Este link de pagamento não existe ou expirou.
           </p>

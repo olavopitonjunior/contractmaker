@@ -63,7 +63,7 @@ export default function RegisterPage() {
             </div>
           </div>
 
-          <h2 className="text-2xl font-bold mb-2">Cadastro fechado</h2>
+          <h2 className="font-display tracking-tight text-2xl font-bold mb-2">Cadastro fechado</h2>
           <p className="text-muted-foreground mb-8">
             Esta plataforma só permite acesso por convite. Peça a um administrador
             que envie um convite para o seu email — assim que aprovado, você

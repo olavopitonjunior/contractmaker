@@ -424,7 +424,7 @@ export function DealDetail({ deal }: DealDetailProps) {
         </Button>
         <Separator orientation="vertical" className="h-6" />
         <div>
-          <h1 className="text-2xl font-semibold">{deal.title}</h1>
+          <h1 className="font-display tracking-tight text-2xl font-semibold">{deal.title}</h1>
           <div className="flex items-center gap-2 mt-1">
             <Badge
               style={{ backgroundColor: deal.stage.color || undefined }}

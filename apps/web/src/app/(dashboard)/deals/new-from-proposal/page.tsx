@@ -79,7 +79,7 @@ export default function NewDealFromProposalPage() {
             Voltar ao pipeline
           </Link>
         </Button>
-        <h1 className="text-2xl font-semibold">Cadastro com proposta</h1>
+        <h1 className="font-display tracking-tight text-2xl font-semibold">Cadastro com proposta</h1>
         <p className="text-sm text-muted-foreground mt-1">
           Suba uma proposta já preenchida (PDF) com dados das partes,
           valores, parcelas e comissão. O sistema lê tudo e abre o formulário

@@ -183,7 +183,7 @@ export default async function CertidoesSettingsPage() {
             Configurações
           </Link>
         </Button>
-        <h1 className="text-2xl font-semibold">Certidões — Qualidade & Custos</h1>
+        <h1 className="font-display text-2xl font-semibold tracking-tight">Certidões — Qualidade & Custos</h1>
       </div>
 
       {/* Phase F.II-γ — status da autenticação GOV.BR (conta Infosimples) */}

@@ -140,7 +140,7 @@ export function CustomerDetail({ customerId }: { customerId: string }) {
         <CardContent className="p-4 space-y-3">
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div>
-              <h1 className="text-2xl font-semibold">{customer.name}</h1>
+              <h1 className="font-display tracking-tight text-2xl font-semibold">{customer.name}</h1>
               <div className="flex items-center gap-2 mt-1 flex-wrap">
                 <Badge variant="outline" className="text-xs">
                   {originLabel}

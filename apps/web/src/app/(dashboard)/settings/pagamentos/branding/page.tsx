@@ -93,7 +93,7 @@ export default function BrandingPage() {
   return (
     <div className="max-w-2xl space-y-4">
       <div>
-        <h1 className="text-2xl font-semibold">Aparência da cobrança pública</h1>
+        <h1 className="font-display text-2xl font-semibold tracking-tight">Aparência da cobrança pública</h1>
         <p className="text-sm text-muted-foreground">
           Personalize a página de pagamento que o cliente vê em /pay/[token].
         </p>

@@ -169,7 +169,7 @@ export function SignaturesClient() {
               Configurações
             </Link>
           </Button>
-          <h1 className="text-2xl font-semibold flex items-center gap-2">
+          <h1 className="font-display tracking-tight text-2xl font-semibold flex items-center gap-2">
             <FileSignature className="h-6 w-6 text-primary" />
             Assinaturas eletrônicas
           </h1>

@@ -97,7 +97,7 @@ export default async function ContractAuditPage({ params, searchParams }: PagePr
         >
           ← Voltar ao contrato
         </Link>
-        <h1 className="text-2xl font-bold mt-2">Auditoria de IA — Time travel</h1>
+        <h1 className="font-display tracking-tight text-2xl font-bold mt-2">Auditoria de IA — Time travel</h1>
         <p className="text-sm text-muted-foreground mt-1">
           Cada turn do orchestrator multi-agente foi salvo como checkpoint no
           PostgresSaver. Use isto pra investigar o que aconteceu, replay debug
