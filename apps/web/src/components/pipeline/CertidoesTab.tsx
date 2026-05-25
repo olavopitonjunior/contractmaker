@@ -331,11 +331,11 @@ function statusVariant(row: CertidaoJobRow): string {
     return "border-muted bg-muted/10 opacity-60";
   switch (colorTier(row)) {
     case "green":
-      return "border-green-300 bg-green-50/40";
+      return "border-success/30 bg-success/5";
     case "yellow":
-      return "border-amber-300 bg-amber-50/50";
+      return "border-warning/30 bg-warning/5";
     case "red":
-      return "border-red-300 bg-red-50/50";
+      return "border-destructive/30 bg-destructive/5";
     case "neutral":
     default:
       return "border-muted bg-muted/20";
@@ -1177,13 +1177,13 @@ export function CertidoesTab({
               <span className="text-sm font-semibold flex-1">{group.label}</span>
               <span className="flex items-center gap-2 text-xs tabular-nums">
                 {tally.green > 0 && (
-                  <span className="text-green-700">{tally.green}✓</span>
+                  <span className="text-success">{tally.green}✓</span>
                 )}
                 {tally.yellow > 0 && (
-                  <span className="text-amber-700">{tally.yellow}⏳</span>
+                  <span className="text-warning">{tally.yellow}⏳</span>
                 )}
                 {tally.red > 0 && (
-                  <span className="text-red-700">{tally.red}✗</span>
+                  <span className="text-destructive">{tally.red}✗</span>
                 )}
                 {tally.neutral > 0 && (
                   <span className="text-muted-foreground">{tally.neutral}—</span>
