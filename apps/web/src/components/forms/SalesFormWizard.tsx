@@ -86,21 +86,18 @@ function SaveStatusBadge({
   const config = {
     saving: {
       label: "Salvando...",
-      className:
-        "bg-yellow-100 text-yellow-800 border-yellow-200 dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-800",
-      dotClass: "bg-yellow-500 animate-pulse",
+      className: "border-warning/30 bg-warning/10 text-warning",
+      dotClass: "bg-warning animate-pulse",
     },
     saved: {
       label: "Salvo",
-      className:
-        "bg-green-100 text-green-800 border-green-200 dark:bg-green-900/30 dark:text-green-400 dark:border-green-800",
-      dotClass: "bg-green-500",
+      className: "border-success/30 bg-success/10 text-success",
+      dotClass: "bg-success",
     },
     error: {
       label: "Erro ao salvar",
-      className:
-        "bg-red-100 text-red-800 border-red-200 dark:bg-red-900/30 dark:text-red-400 dark:border-red-800",
-      dotClass: "bg-red-500",
+      className: "border-destructive/30 bg-destructive/10 text-destructive",
+      dotClass: "bg-destructive",
     },
   };
 
@@ -181,7 +178,7 @@ function StepIndicator({
               "bg-primary border-primary text-primary-foreground hover:bg-primary/90",
             current: "bg-primary/10 border-primary text-primary",
             "pending-warning":
-              "bg-amber-50 border-amber-400 text-amber-700 hover:bg-amber-100 dark:bg-amber-950/60 dark:border-amber-600 dark:text-amber-300",
+              "bg-warning/10 border-warning text-warning hover:bg-warning/20",
             untouched:
               "bg-background border-border text-muted-foreground hover:bg-muted hover:border-muted-foreground/30",
           }[state];
@@ -191,7 +188,7 @@ function StepIndicator({
             : isCompleted
               ? "text-foreground"
               : isPending
-                ? "text-amber-700 dark:text-amber-300 font-medium"
+                ? "text-warning font-medium"
                 : "text-muted-foreground";
 
           return (
