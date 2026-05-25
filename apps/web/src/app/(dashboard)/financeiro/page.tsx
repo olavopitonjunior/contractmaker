@@ -172,7 +172,7 @@ export default async function FinanceiroPage({
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div className="flex items-start gap-4 flex-wrap">
           <div>
-            <h1 className="text-2xl font-semibold flex items-center gap-2">
+            <h1 className="font-display text-2xl font-semibold tracking-tight flex items-center gap-2">
               <Wallet className="h-6 w-6" />
               Financeiro
             </h1>

@@ -1,6 +1,6 @@
 import { ChargeDetail } from "@/components/financeiro/ChargeDetail";
 
-export const metadata = { title: "Detalhe da cobrança — Contractmaker" };
+export const metadata = { title: "Detalhe da cobrança" };
 export const dynamic = "force-dynamic";
 
 export default async function ChargeDetailPage({

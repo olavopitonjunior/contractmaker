@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db/prisma";
 import { Plus } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/layout/page-header";
 import { TemplatesListClient } from "@/components/templates/TemplatesListClient";
 
 export default async function TemplatesPage({
@@ -37,21 +38,17 @@ export default async function TemplatesPage({
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold">Templates de Contrato</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Cada modalidade tem um template marcado como padrão. Esse é usado
-            automaticamente na criação de novos contratos.
-          </p>
-        </div>
+      <PageHeader
+        title="Templates de Contrato"
+        description="Cada modalidade tem um template marcado como padrão. Esse é usado automaticamente na criação de novos contratos."
+      >
         <Button size="sm" asChild>
           <Link href="/templates/new">
             <Plus className="mr-1.5 h-4 w-4" />
             Novo Template
           </Link>
         </Button>
-      </div>
+      </PageHeader>
 
       <TemplatesListClient
         templates={templates.map((t) => ({

@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
 
       await sendEmail({
         to: email,
-        subject: "Redefinir sua senha — Contractmaker",
+        subject: "Redefinir sua senha — imobpro.ai",
         react: PasswordResetEmail({ resetUrl, expiresInMinutes }) as any,
       });
     } catch (err) {

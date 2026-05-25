@@ -6,6 +6,7 @@ import { Separator } from "@/components/ui/separator";
 import { Input } from "@/components/ui/input";
 import { Search } from "lucide-react";
 import { NotificationsBell } from "@/components/layout/NotificationsBell";
+import { ThemeToggle } from "@/components/layout/theme-toggle";
 
 const BREADCRUMB_MAP: Record<string, string> = {
   "/pipeline": "Pipeline de Vendas",
@@ -43,6 +44,7 @@ export function DashboardHeader() {
             className="pl-9 w-[200px] lg:w-[260px] h-9 text-sm"
           />
         </div>
+        <ThemeToggle />
         <NotificationsBell />
       </div>
     </header>

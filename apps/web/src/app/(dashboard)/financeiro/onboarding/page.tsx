@@ -5,7 +5,7 @@ import { OnboardingWizard } from "@/components/financeiro/onboarding/OnboardingW
 
 export const dynamic = "force-dynamic";
 export const metadata = {
-  title: "Onboarding financeiro — Contractmaker",
+  title: "Onboarding financeiro",
 };
 
 /**

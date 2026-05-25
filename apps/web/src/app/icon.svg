@@ -1,0 +1,6 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="imobpro.ai">
+  <!-- Hexágono preenchido teal-800 (#115E59) + "i" em papel — favicon imobpro.ai -->
+  <path d="M32 3 L57 17.5 V46.5 L32 61 L7 46.5 V17.5 Z" fill="#115E59"/>
+  <circle cx="32" cy="22" r="3.6" fill="#F7F5F0"/>
+  <rect x="28.7" y="29.5" width="6.6" height="19.5" rx="3.3" fill="#F7F5F0"/>
+</svg>

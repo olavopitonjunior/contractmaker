@@ -16,6 +16,7 @@ import {
   Eye,
   EyeOff,
 } from "lucide-react";
+import { BrandWordmark } from "@/components/layout/brand-mark";
 
 interface TokenInfo {
   valid: boolean;
@@ -143,12 +144,7 @@ function ResetPasswordContent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-4 sm:p-8">
       <div className="w-full max-w-md">
-        <div className="flex items-center gap-3 mb-10">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold">
-            CM
-          </div>
-          <span className="text-lg font-semibold">Contractmaker</span>
-        </div>
+        <BrandWordmark className="mb-10" markClassName="text-primary" />
 
         <h2 className="text-2xl font-bold mb-1">
           {isWelcome ? "Bem-vindo!" : "Redefinir senha"}

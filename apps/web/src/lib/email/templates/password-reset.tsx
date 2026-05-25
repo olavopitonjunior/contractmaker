@@ -12,7 +12,7 @@ export function PasswordResetEmail({
     <EmailLayout title="Redefinir sua senha">
       <h1 style={{ fontSize: 20, margin: "0 0 16px 0" }}>Redefinir senha</h1>
       <p style={{ fontSize: 14, lineHeight: 1.6 }}>
-        Recebemos um pedido para redefinir a senha da sua conta no Contractmaker.
+        Recebemos um pedido para redefinir a senha da sua conta no imobpro.ai.
         Clique no botão abaixo para escolher uma nova senha.
       </p>
       <div style={{ margin: "24px 0" }}>
@@ -42,7 +42,7 @@ export function WelcomeSetPasswordEmail({
       </h1>
       <p style={{ fontSize: 14, lineHeight: 1.6 }}>
         {inviterName} te adicionou à organização <strong>{orgName}</strong> no
-        Contractmaker. Para começar, defina sua senha de acesso.
+        imobpro.ai. Para começar, defina sua senha de acesso.
       </p>
       <div style={{ margin: "24px 0" }}>
         <ActionButton href={setupUrl} label="Definir minha senha" />

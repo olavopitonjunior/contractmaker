@@ -2,6 +2,7 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { PageHeader } from "@/components/layout/page-header";
 import Link from "next/link";
 
 export default async function ContractsPage() {
@@ -25,7 +26,7 @@ export default async function ContractsPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold">Contratos</h1>
+      <PageHeader title="Contratos" />
 
       {contracts.length === 0 ? (
         <Card>

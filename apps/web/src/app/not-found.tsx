@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Home, ArrowLeft } from "lucide-react";
 
 export const metadata = {
-  title: "Página não encontrada — Contractmaker",
+  title: "Página não encontrada",
 };
 
 export default function NotFound() {

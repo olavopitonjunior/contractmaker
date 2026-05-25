@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useState } from "react";
+import Link from "next/link";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -16,6 +17,7 @@ import {
   ArrowRight,
   CheckCircle2,
 } from "lucide-react";
+import { BrandWordmark } from "@/components/layout/brand-mark";
 
 export default function LoginPage() {
   return (
@@ -88,21 +90,21 @@ function LoginContent() {
   return (
     <div className="flex min-h-screen">
       {/* Hero - Left Side */}
-      <div className="hidden lg:flex lg:w-[58%] relative bg-gradient-to-br from-orange-600 via-orange-500 to-amber-500 text-white">
+      <div className="hidden lg:flex lg:w-[58%] relative bg-gradient-to-br from-teal-900 via-teal-800 to-teal-700 text-white">
         <div className="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+PGRlZnM+PHBhdHRlcm4gaWQ9ImciIHdpZHRoPSI2MCIgaGVpZ2h0PSI2MCIgcGF0dGVyblVuaXRzPSJ1c2VyU3BhY2VPblVzZSI+PHBhdGggZD0iTTAgMCBMNjAgNjAiIHN0cm9rZT0icmdiYSgyNTUsMjU1LDI1NSwwLjA1KSIgc3Ryb2tlLXdpZHRoPSIxIi8+PC9wYXR0ZXJuPjwvZGVmcz48cmVjdCBmaWxsPSJ1cmwoI2cpIiB3aWR0aD0iMTAwJSIgaGVpZ2h0PSIxMDAlIi8+PC9zdmc+')] opacity-30" />
         <div className="relative z-10 flex flex-col justify-center px-16 xl:px-24">
-          <div className="flex items-center gap-3 mb-12">
-            <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-white/20 backdrop-blur-sm text-white font-bold text-lg">
-              CM
-            </div>
-            <span className="text-xl font-semibold">Contractmaker</span>
-          </div>
+          <BrandWordmark
+            className="mb-12"
+            markClassName="h-11 w-11 text-white"
+            textClassName="text-xl text-white"
+            accentClassName="text-white/75"
+          />
 
-          <h1 className="text-4xl xl:text-5xl font-bold leading-tight mb-6">
-            Gestao inteligente de contratos imobiliarios
+          <h1 className="font-display text-4xl xl:text-5xl font-bold leading-tight mb-6">
+            Gestão inteligente de contratos imobiliários
           </h1>
           <p className="text-lg text-white/80 mb-10 max-w-lg">
-            Crie formularios, acompanhe negocios e gere contratos com inteligencia artificial.
+            Crie formulários, acompanhe negócios e gere contratos com inteligência artificial.
           </p>
 
           <div className="space-y-5">
@@ -134,12 +136,7 @@ function LoginContent() {
       {/* Form - Right Side */}
       <div className="flex w-full lg:w-[42%] items-center justify-center bg-background p-4 sm:p-8 lg:p-12">
         <div className="w-full max-w-md">
-          <div className="lg:hidden flex items-center gap-3 mb-10">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground font-bold">
-              CM
-            </div>
-            <span className="text-lg font-semibold">Contractmaker</span>
-          </div>
+          <BrandWordmark className="lg:hidden mb-10" markClassName="text-primary" />
 
           <h2 className="text-2xl font-bold mb-1">Bem-vindo de volta</h2>
           <p className="text-muted-foreground mb-6">
@@ -219,7 +216,15 @@ function LoginContent() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="password">Senha</Label>
+                  <div className="flex items-center justify-between">
+                    <Label htmlFor="password">Senha</Label>
+                    <Link
+                      href="/forgot-password"
+                      className="text-xs font-medium text-primary hover:underline"
+                    >
+                      Esqueci minha senha
+                    </Link>
+                  </div>
                   <div className="relative">
                     <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                     <Input

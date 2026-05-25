@@ -3,7 +3,7 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { OperacoesClient } from "@/components/settings/OperacoesClient";
 
 export const dynamic = "force-dynamic";
-export const metadata = { title: "Operações — Contractmaker" };
+export const metadata = { title: "Operações" };
 
 export default async function OperacoesPage() {
   const session = await auth();

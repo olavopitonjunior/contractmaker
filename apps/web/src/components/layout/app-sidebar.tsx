@@ -15,6 +15,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { BrandWordmark } from "@/components/layout/brand-mark";
 import {
   LayoutDashboard,
   BookOpen,
@@ -76,11 +77,11 @@ export function AppSidebar({ user }: AppSidebarProps) {
   return (
     <Sidebar>
       <SidebarHeader className="border-b px-4 py-3">
-        <Link href="/pipeline" className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
-            CM
-          </div>
-          <span className="font-semibold text-lg">Contractmaker</span>
+        <Link href="/pipeline" className="block">
+          <BrandWordmark markClassName="text-primary" />
+          <span className="mt-0.5 block pl-10 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
+            Legaltech Solutions
+          </span>
         </Link>
       </SidebarHeader>
 
