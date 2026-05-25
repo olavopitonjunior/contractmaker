@@ -138,6 +138,24 @@ model PlatformConfigHistory {
   @@index([createdAt])
 }
 
+// White-label por tenant (Fase 1a). Cores em hex; o render injeta como CSS vars
+// HSL no `[data-tenant]` (ver globals.css + lib/tenant/branding.ts). poweredBy
+// controla o selo "Powered by imobpro.ai" no rodapé de páginas públicas.
+model BrandingSettings {
+  id             String       @id @default(cuid())
+  orgId          String       @unique
+  org            Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  logoUrl        String?
+  faviconUrl     String?
+  primaryColor   String? // hex, ex: #115E59
+  secondaryColor String? // hex (mapeado pra --brand-accent)
+  emailHeader    String?      @db.Text
+  emailFooter    String?      @db.Text
+  poweredBy      Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+}
+
 model Account {
   id                String  @id @default(cuid())
   userId            String
@@ -182,12 +200,17 @@ model Organization {
   id                   String   @id @default(cuid())
   name                 String
   slug                 String   @unique
+  // White-label (Fase 1a): subdomínio `{subdomain}.imobpro.ia.br` e domínio
+  // custom futuro. Resolução por host no middleware → x-org-subdomain.
+  subdomain            String?  @unique
+  customDomain         String?  @unique
   // Conta Asaas selecionada pelo admin como destino default de novas cobranças
   // e fonte das telas financeiras quando o user não passa hint explícito.
   activeAsaasAccountId String?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
+  brandingSettings    BrandingSettings?
   members             OrgMembership[]
   invitations         OrgInvitation[]
   pipelines           Pipeline[]

@@ -224,7 +224,11 @@ export async function requireAuth(
     }
   }
 
-  const org = await getUserOrg(effectiveActor.effectiveUserId);
+  // Fase 1a: o middleware injeta x-org-subdomain quando o request chega por um
+  // subdomínio de tenant. Resolve a org por esse hint (validando membership);
+  // sem hint (apex/API), cai no comportamento legado (primeira membership).
+  const subdomainHint = req.headers.get("x-org-subdomain");
+  const org = await getUserOrg(effectiveActor.effectiveUserId, { subdomainHint });
   if (!org) {
     return {
       ok: false,
