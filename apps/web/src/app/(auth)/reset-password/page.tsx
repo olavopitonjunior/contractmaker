@@ -111,7 +111,7 @@ function ResetPasswordContent() {
         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-destructive/10 text-destructive mb-4">
           <AlertTriangle className="h-6 w-6" />
         </div>
-        <h2 className="text-2xl font-bold mb-2">Link inválido ou expirado</h2>
+        <h2 className="font-display tracking-tight text-2xl font-bold mb-2">Link inválido ou expirado</h2>
         <p className="text-muted-foreground mb-6 text-center">
           O link de recuperação não é válido ou já foi usado. Solicite um novo
           link de redefinição.
@@ -133,7 +133,7 @@ function ResetPasswordContent() {
         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 mb-4">
           <CheckCircle2 className="h-6 w-6" />
         </div>
-        <h2 className="text-2xl font-bold mb-2">Senha definida</h2>
+        <h2 className="font-display tracking-tight text-2xl font-bold mb-2">Senha definida</h2>
         <p className="text-muted-foreground">Entrando na sua conta…</p>
       </Centered>
     );
@@ -146,7 +146,7 @@ function ResetPasswordContent() {
       <div className="w-full max-w-md">
         <BrandWordmark className="mb-10" markClassName="text-primary" />
 
-        <h2 className="text-2xl font-bold mb-1">
+        <h2 className="font-display tracking-tight text-2xl font-bold mb-1">
           {isWelcome ? "Bem-vindo!" : "Redefinir senha"}
         </h2>
         <p className="text-muted-foreground mb-2">

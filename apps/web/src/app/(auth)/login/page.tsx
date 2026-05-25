@@ -138,7 +138,7 @@ function LoginContent() {
         <div className="w-full max-w-md">
           <BrandWordmark className="lg:hidden mb-10" markClassName="text-primary" />
 
-          <h2 className="text-2xl font-bold mb-1">Bem-vindo de volta</h2>
+          <h2 className="font-display tracking-tight text-2xl font-bold mb-1">Bem-vindo de volta</h2>
           <p className="text-muted-foreground mb-6">
             Entre na sua conta para continuar
           </p>

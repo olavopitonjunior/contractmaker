@@ -49,7 +49,7 @@ export default function ForgotPasswordPage() {
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 mb-4">
                 <CheckCircle2 className="h-6 w-6" />
               </div>
-              <h2 className="text-2xl font-bold mb-2">Verifique seu email</h2>
+              <h2 className="font-display tracking-tight text-2xl font-bold mb-2">Verifique seu email</h2>
               <p className="text-muted-foreground">
                 Se o email <strong>{email}</strong> estiver cadastrado, você
                 receberá um link de recuperação em instantes.
@@ -72,7 +72,7 @@ export default function ForgotPasswordPage() {
           </div>
         ) : (
           <>
-            <h2 className="text-2xl font-bold mb-1">Esqueci minha senha</h2>
+            <h2 className="font-display tracking-tight text-2xl font-bold mb-1">Esqueci minha senha</h2>
             <p className="text-muted-foreground mb-8">
               Digite seu email e enviaremos um link para redefinir sua senha.
             </p>

@@ -61,7 +61,7 @@ export default function RelatoriosPage() {
   return (
     <div className="space-y-4">
       <div>
-        <h1 className="text-2xl font-semibold">Relatórios</h1>
+        <h1 className="font-display tracking-tight text-2xl font-semibold">Relatórios</h1>
         <p className="text-sm text-muted-foreground">
           Análise de recebíveis, envelhecimento, fluxo de caixa e inadimplência.
         </p>

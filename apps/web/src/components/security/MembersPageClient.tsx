@@ -218,7 +218,7 @@ export function MembersPageClient() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Membros</h1>
+          <h1 className="font-display tracking-tight text-2xl font-semibold">Membros</h1>
           <p className="text-sm text-muted-foreground">
             Gerencie quem tem acesso à organização e com que permissões.
           </p>

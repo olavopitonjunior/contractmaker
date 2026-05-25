@@ -25,7 +25,7 @@ export default async function NewTemplatePage({
               Templates
             </Link>
           </Button>
-          <h1 className="text-2xl font-semibold">Novo Template</h1>
+          <h1 className="font-display tracking-tight text-2xl font-semibold">Novo Template</h1>
         </div>
 
         <p className="text-sm text-muted-foreground">
@@ -72,7 +72,7 @@ export default async function NewTemplatePage({
               Voltar
             </Link>
           </Button>
-          <h1 className="text-2xl font-semibold">Importar Google Doc</h1>
+          <h1 className="font-display tracking-tight text-2xl font-semibold">Importar Google Doc</h1>
         </div>
         <ImportGoogleDocForm />
       </div>

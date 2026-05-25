@@ -189,7 +189,7 @@ export function DocumentStylesClient({ initialStyles }: Props) {
             Configurações
           </Link>
         </Button>
-        <h1 className="text-2xl font-semibold flex items-center gap-2">
+        <h1 className="font-display tracking-tight text-2xl font-semibold flex items-center gap-2">
           <Palette className="h-6 w-6 text-primary" />
           Estilos de Documento
         </h1>

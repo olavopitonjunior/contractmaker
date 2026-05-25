@@ -165,7 +165,7 @@ export function OperacoesClient() {
               <ArrowLeft className="h-4 w-4 mr-1" /> Configurações
             </Link>
           </Button>
-          <h1 className="text-2xl font-semibold flex items-center gap-2">
+          <h1 className="font-display tracking-tight text-2xl font-semibold flex items-center gap-2">
             <Activity className="h-6 w-6 text-primary" />
             Observabilidade de operações
           </h1>

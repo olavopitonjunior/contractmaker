@@ -196,7 +196,7 @@ export function AdhocCertidoesClient({ endpoints }: Props) {
   return (
     <div className="space-y-6 p-6 max-w-5xl mx-auto">
       <div>
-        <h1 className="text-2xl font-semibold">Diligência avulsa</h1>
+        <h1 className="font-display tracking-tight text-2xl font-semibold">Diligência avulsa</h1>
         <p className="text-muted-foreground mt-1 text-sm">
           Consulte certidões para um CPF ou CNPJ sem precisar criar um
           negócio. Útil para diligenciar sócios, fiadores, testemunhas ou

@@ -57,7 +57,7 @@ export function SecurityPageClient() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Segurança</h1>
+          <h1 className="font-display tracking-tight text-2xl font-semibold">Segurança</h1>
           <p className="text-sm text-muted-foreground">
             Proteja sua conta com autenticação em duas etapas e revise atividade recente.
           </p>

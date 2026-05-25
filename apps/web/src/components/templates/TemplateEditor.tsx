@@ -144,7 +144,7 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
             Templates
           </Link>
         </Button>
-        <h1 className="text-2xl font-semibold">
+        <h1 className="font-display tracking-tight text-2xl font-semibold">
           {mode === "create" ? "Novo Template" : `Editar: ${template?.name}`}
         </h1>
       </div>

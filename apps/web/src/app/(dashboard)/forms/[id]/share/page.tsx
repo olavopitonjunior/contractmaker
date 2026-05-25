@@ -34,7 +34,7 @@ export default async function ShareFormByPartyPage({
             Voltar aos formulários
           </Link>
         </Button>
-        <h1 className="text-2xl font-semibold">Compartilhar por parte</h1>
+        <h1 className="font-display tracking-tight text-2xl font-semibold">Compartilhar por parte</h1>
         <p className="text-sm text-muted-foreground mt-1">
           Gere links isolados pra vendedor e comprador preencherem só os
           próprios dados. Cada parte recebe um link distinto e não acessa

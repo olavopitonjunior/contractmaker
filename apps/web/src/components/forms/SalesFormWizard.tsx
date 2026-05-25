@@ -620,7 +620,7 @@ export function SalesFormWizard({
             />
           </svg>
         </div>
-        <h2 className="text-2xl font-semibold text-foreground mb-2">
+        <h2 className="font-display tracking-tight text-2xl font-semibold text-foreground mb-2">
           Formulário Concluído!
         </h2>
         <p className="text-muted-foreground max-w-md mb-6">
