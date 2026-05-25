@@ -1,6 +1,7 @@
 "use client";
 
 import { SalesFormWizard } from "@/components/forms/SalesFormWizard";
+import { BrandMark } from "@/components/layout/brand-mark";
 
 interface SubtokenFormClientProps {
   subtoken: string;
@@ -30,11 +31,9 @@ export function SubtokenFormClient({
       <header className="border-b bg-card px-6 py-4 shrink-0">
         <div className="mx-auto max-w-4xl flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
-              CM
-            </div>
+            <BrandMark className="h-8 w-8 text-primary" />
             <div>
-              <h1 className="text-lg font-semibold leading-tight">
+              <h1 className="font-display text-lg font-semibold tracking-tight leading-tight">
                 Preencha seus dados como {roleLabel}
               </h1>
               {formTitle && (

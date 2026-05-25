@@ -1,6 +1,7 @@
 "use client";
 
 import { SalesFormWizard } from "@/components/forms/SalesFormWizard";
+import { BrandMark } from "@/components/layout/brand-mark";
 
 interface FormPageClientProps {
   token: string;
@@ -21,10 +22,15 @@ export function FormPageClient({
     <div className="min-h-screen bg-background flex flex-col">
       <header className="border-b bg-card px-6 py-4 shrink-0">
         <div className="mx-auto max-w-4xl flex items-center gap-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
-            CM
+          <BrandMark className="h-8 w-8 text-primary" />
+          <div>
+            <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground leading-none">
+              imobpro<span className="text-brand-accent">.ai</span>
+            </p>
+            <h1 className="font-display text-lg font-semibold tracking-tight leading-tight">
+              Formulário de Venda
+            </h1>
           </div>
-          <h1 className="text-lg font-semibold">Formulário de Venda</h1>
         </div>
       </header>
       <main className="flex-1 mx-auto w-full max-w-4xl p-6 pb-16">
