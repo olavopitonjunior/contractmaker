@@ -367,7 +367,7 @@ export default function SplitRecipientsClient() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Destinatários de split</h1>
+          <h1 className="font-display text-2xl font-semibold tracking-tight">Destinatários de split</h1>
           <p className="text-sm text-muted-foreground">
             Cadastre beneficiários que podem receber repasse em cobranças. Eles
             podem ter conta Asaas (split nativo, instantâneo) ou só PIX em outro

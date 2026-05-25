@@ -115,7 +115,7 @@ export default function TaxasPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Taxas e descontos</h1>
+          <h1 className="font-display text-2xl font-semibold tracking-tight">Taxas e descontos</h1>
           <p className="text-sm text-muted-foreground">
             Configure platform fee, overprice, descontos, multa e juros.
           </p>

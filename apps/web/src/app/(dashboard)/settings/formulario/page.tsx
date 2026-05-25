@@ -32,7 +32,7 @@ export default async function FormularioSettingsPage() {
             Voltar para Configurações
           </Link>
         </Button>
-        <h1 className="text-2xl font-semibold">Formulário público</h1>
+        <h1 className="font-display text-2xl font-semibold tracking-tight">Formulário público</h1>
         <p className="text-sm text-muted-foreground mt-1">
           Defina quais campos do formulário <code>/f/[token]</code> são
           obrigatórios. Pequenos negócios podem usar Mínimo; cartórios e

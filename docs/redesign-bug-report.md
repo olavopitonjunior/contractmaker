@@ -30,7 +30,9 @@ pagamento.
 
 ## Bugs funcionais
 
-_(nenhum confirmado ainda — preencher durante QA /chrome)_
+| # | Superfície | Sintoma | Sev | Status |
+|---|---|---|---|---|
+| B1 | Build / `lib/certidoes` | `master` com build quebrado: `planner.ts` usava `TargetKind` `conjuge_vendedor`/`procurador_vendedor`/`representante_vendedor` mas `types.ts` **commitado** não os declarava. `tsc` local passava (working tree tinha o fix não-commitado), mas `next build` falhava — os **2 últimos deploys de produção do master erraram** e prod ficou no build anterior (`0a18d5af`). Descoberto ao subir o preview do redesign. | 🔴 | **Resolvido 2026-05-23** — commit `48ccc1dc` no master commita o conjunto de certidões pendente (type-clean). |
 
 ---
 

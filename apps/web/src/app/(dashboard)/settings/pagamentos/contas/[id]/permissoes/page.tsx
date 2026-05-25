@@ -38,7 +38,7 @@ export default async function PermissoesPage({
             Voltar
           </Link>
         </Button>
-        <h1 className="text-2xl font-semibold">
+        <h1 className="font-display text-2xl font-semibold tracking-tight">
           Permissões — {account.label ?? `Conta ${account.id.slice(0, 8)}`}
         </h1>
         <p className="text-sm text-muted-foreground">

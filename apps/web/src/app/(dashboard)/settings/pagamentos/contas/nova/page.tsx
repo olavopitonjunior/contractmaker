@@ -32,7 +32,7 @@ export default async function NovaContaPage() {
             Voltar
           </Link>
         </Button>
-        <h1 className="text-2xl font-semibold">Nova conta bancária Asaas</h1>
+        <h1 className="font-display text-2xl font-semibold tracking-tight">Nova conta bancária Asaas</h1>
         <p className="text-sm text-muted-foreground">
           Preencha os dados de KYC. A conta passa por análise da Asaas (~1 dia
           útil em produção). Depois de aprovada, você pode torná-la a ativa

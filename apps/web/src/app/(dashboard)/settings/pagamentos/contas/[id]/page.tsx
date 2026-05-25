@@ -82,7 +82,7 @@ export default async function ContaDetailPage({
             Voltar
           </Link>
         </Button>
-        <h1 className="text-2xl font-semibold flex items-center gap-2 flex-wrap">
+        <h1 className="font-display text-2xl font-semibold tracking-tight flex items-center gap-2 flex-wrap">
           {account.label ?? `Conta ${account.id.slice(0, 8)}`}
           {isActive && <Badge variant="default">ATIVA</Badge>}
           {account.archivedAt && <Badge variant="outline">ARQUIVADA</Badge>}
