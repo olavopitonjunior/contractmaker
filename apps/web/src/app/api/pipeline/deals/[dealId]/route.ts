@@ -39,6 +39,11 @@ const updateDealSchema = z.object({
   position: z.number().optional(),
   title: z.string().optional(),
   value: z.number().optional(),
+  // Datas-marco manuais — preenchidas quando o card é arrastado pro stage e a
+  // etapa NÃO foi feita no sistema (sem envelope/charge). ISO datetime.
+  contractSignedAt: z.string().datetime().optional(),
+  chargeIssuedAt: z.string().datetime().optional(),
+  commissionPaidAt: z.string().datetime().optional(),
 });
 
 export async function PATCH(
@@ -49,6 +54,10 @@ export async function PATCH(
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const org = await getUserOrg(session.user.id);
+  if (!org) {
+    return NextResponse.json({ error: "No organization" }, { status: 400 });
+  }
 
   const body = await req.json();
   const parsed = updateDealSchema.safeParse(body);
@@ -56,10 +65,50 @@ export async function PATCH(
     return NextResponse.json({ error: parsed.error.message }, { status: 400 });
   }
 
+  // Cross-org guard — esta rota grava datas-marco, então valida ownership.
+  const existing = await prisma.deal.findUnique({
+    where: { id: params.dealId },
+    include: {
+      stage: { select: { name: true } },
+      form: { select: { orgId: true } },
+      pipeline: { select: { orgId: true } },
+    },
+  });
+  if (!existing) {
+    return NextResponse.json({ error: "Deal not found" }, { status: 404 });
+  }
+  const dealOrgId = existing.form?.orgId ?? existing.pipeline.orgId;
+  if (dealOrgId !== org.id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  const { contractSignedAt, chargeIssuedAt, commissionPaidAt, ...rest } = parsed.data;
+  const data: Record<string, unknown> = { ...rest };
+  if (contractSignedAt) data.contractSignedAt = new Date(contractSignedAt);
+  if (chargeIssuedAt) data.chargeIssuedAt = new Date(chargeIssuedAt);
+  if (commissionPaidAt) data.commissionPaidAt = new Date(commissionPaidAt);
+
   const deal = await prisma.deal.update({
     where: { id: params.dealId },
-    data: parsed.data,
+    data,
     include: { stage: true },
+  });
+
+  const milestoneDate = contractSignedAt || chargeIssuedAt || commissionPaidAt;
+  await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
+    action: "DEAL_STAGE_CHANGE",
+    result: "SUCCESS",
+    resource: deal.id,
+    resourceType: "Deal",
+    metadata: {
+      kind: milestoneDate ? "manual_milestone_date" : "drag",
+      fromStage: existing.stage.name,
+      toStage: deal.stage.name,
+      ...(contractSignedAt ? { contractSignedAt } : {}),
+      ...(chargeIssuedAt ? { chargeIssuedAt } : {}),
+      ...(commissionPaidAt ? { commissionPaidAt } : {}),
+      ...(parsed.data.title !== undefined ? { changedTitle: true } : {}),
+    },
   });
 
   return NextResponse.json(deal);

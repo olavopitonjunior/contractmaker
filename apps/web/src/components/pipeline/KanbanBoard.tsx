@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   DndContext,
   DragOverlay,
@@ -14,6 +14,42 @@ import {
 } from "@dnd-kit/core";
 import { KanbanColumn } from "./KanbanColumn";
 import { KanbanCard, type DealCard } from "./KanbanCard";
+import { MilestoneDateDialog } from "./MilestoneDateDialog";
+
+/**
+ * Stages que fixam uma data-marco. `cardKey` = campo da derivada no card (pra
+ * detectar se já existe data, ex. assinatura feita no sistema); `apiField` =
+ * coluna manual enviada no PATCH; `label` = texto do diálogo.
+ */
+const MILESTONE_FIELDS: Record<
+  string,
+  { cardKey: keyof DealCard; apiField: string; label: string }
+> = {
+  "Contrato assinado": {
+    cardKey: "contractSignedAt",
+    apiField: "contractSignedAt",
+    label: "assinatura do contrato",
+  },
+  "Cobrança emitida": {
+    cardKey: "chargeCreatedAt",
+    apiField: "chargeIssuedAt",
+    label: "emissão da cobrança",
+  },
+  "Comissão paga": {
+    cardKey: "commissionPaidAt",
+    apiField: "commissionPaidAt",
+    label: "pagamento da comissão",
+  },
+};
+
+interface PendingMilestoneMove {
+  dealId: string;
+  targetStageId: string;
+  apiField: string;
+  label: string;
+  /** Estado do board antes do move otimista — restaurado se o usuário cancela. */
+  snapshot: Stage[];
+}
 
 interface Stage {
   id: string;
@@ -29,8 +65,26 @@ interface KanbanBoardProps {
 export function KanbanBoard({ stages: initialStages }: KanbanBoardProps) {
   const [stages, setStages] = useState(initialStages);
   const [activeCard, setActiveCard] = useState<DealCard | null>(null);
+  const [pendingMove, setPendingMove] = useState<PendingMilestoneMove | null>(null);
+  const router = useRouter();
   const searchParams = useSearchParams();
   const highlightId = searchParams.get("highlight");
+
+  // Sincroniza com novos dados do servidor (após router.refresh) sem descartar
+  // moves otimistas pendentes.
+  useEffect(() => setStages(initialStages), [initialStages]);
+
+  async function persistStageChange(
+    dealId: string,
+    targetStageId: string,
+    extra?: Record<string, string>
+  ) {
+    await fetch(`/api/pipeline/deals/${dealId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ stageId: targetStageId, ...extra }),
+    });
+  }
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 5 } })
@@ -69,16 +123,28 @@ export function KanbanBoard({ stages: initialStages }: KanbanBoardProps) {
     const dealId = active.id as string;
     const targetStageId = over.id as string;
 
-    // Find current stage
+    // Find current stage + card
     let sourceStageId = "";
+    let dealCard: DealCard | undefined;
     for (const stage of stages) {
-      if (stage.deals.find((d) => d.id === dealId)) {
+      const found = stage.deals.find((d) => d.id === dealId);
+      if (found) {
         sourceStageId = stage.id;
+        dealCard = found;
         break;
       }
     }
 
     if (sourceStageId === targetStageId) return;
+
+    const targetStage = stages.find((s) => s.id === targetStageId);
+    const milestone = targetStage ? MILESTONE_FIELDS[targetStage.name] : undefined;
+    // Pede a data só quando a etapa NÃO foi feita no sistema (data-marco nula).
+    const needsDate =
+      !!milestone && dealCard ? !dealCard[milestone.cardKey] : false;
+
+    // Snapshot para reverter caso o usuário cancele o diálogo de data.
+    const snapshot = stages;
 
     // Optimistic update
     setStages((prev) => {
@@ -88,24 +154,47 @@ export function KanbanBoard({ stages: initialStages }: KanbanBoardProps) {
       }));
 
       const sourceStage = newStages.find((s) => s.id === sourceStageId);
-      const targetStage = newStages.find((s) => s.id === targetStageId);
-      if (!sourceStage || !targetStage) return prev;
+      const target = newStages.find((s) => s.id === targetStageId);
+      if (!sourceStage || !target) return prev;
 
       const dealIndex = sourceStage.deals.findIndex((d) => d.id === dealId);
       if (dealIndex === -1) return prev;
 
       const [deal] = sourceStage.deals.splice(dealIndex, 1);
-      targetStage.deals.push(deal);
+      target.deals.push(deal);
 
       return newStages;
     });
 
-    // Persist to API
-    await fetch(`/api/pipeline/deals/${dealId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ stageId: targetStageId }),
+    if (milestone && needsDate) {
+      // Adia o PATCH até o usuário informar a data no diálogo.
+      setPendingMove({
+        dealId,
+        targetStageId,
+        apiField: milestone.apiField,
+        label: milestone.label,
+        snapshot,
+      });
+      return;
+    }
+
+    await persistStageChange(dealId, targetStageId);
+  }
+
+  async function handleMilestoneConfirm(isoDate: string) {
+    const move = pendingMove;
+    setPendingMove(null);
+    if (!move) return;
+    await persistStageChange(move.dealId, move.targetStageId, {
+      [move.apiField]: isoDate,
     });
+    // Atualiza os marcos derivados (dots da timeline) no próximo render server.
+    router.refresh();
+  }
+
+  function handleMilestoneCancel() {
+    if (pendingMove) setStages(pendingMove.snapshot);
+    setPendingMove(null);
   }
 
   return (
@@ -152,6 +241,12 @@ export function KanbanBoard({ stages: initialStages }: KanbanBoardProps) {
       <DragOverlay>
         {activeCard ? <KanbanCard deal={activeCard} isOverlay /> : null}
       </DragOverlay>
+      <MilestoneDateDialog
+        open={!!pendingMove}
+        milestoneLabel={pendingMove?.label ?? ""}
+        onConfirm={handleMilestoneConfirm}
+        onCancel={handleMilestoneCancel}
+      />
     </DndContext>
   );
 }

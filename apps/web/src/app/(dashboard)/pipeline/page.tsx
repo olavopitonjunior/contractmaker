@@ -129,8 +129,14 @@ export default async function PipelinePage() {
       hasContract: deal.contracts.length > 0,
       formOpenedAt: deal.form?.createdAt?.toISOString() ?? null,
       formCompletedAt: deal.form?.completedAt?.toISOString() ?? null,
-      contractSignedAt: deal.envelopes[0]?.closedAt?.toISOString() ?? null,
-      chargeCreatedAt: deal.commissionCharges[0]?.createdAt.toISOString() ?? null,
+      contractSignedAt:
+        deal.envelopes[0]?.closedAt?.toISOString() ??
+        deal.contractSignedAt?.toISOString() ??
+        null,
+      chargeCreatedAt:
+        deal.commissionCharges[0]?.createdAt.toISOString() ??
+        deal.chargeIssuedAt?.toISOString() ??
+        null,
       commissionPaidAt: deal.commissionPaidAt?.toISOString() ?? null,
       lostAt: deal.lostAt?.toISOString() ?? null,
       lostReason: deal.lostReason ?? null,

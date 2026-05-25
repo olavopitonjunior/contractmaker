@@ -1,13 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot } from "lucide-react";
+import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot, Pencil, Check, X } from "lucide-react";
+import { SendAttachmentEnvelopeDialog } from "@/components/pipeline/SendAttachmentEnvelopeDialog";
+import { AddDocumentsCard } from "@/components/pipeline/AddDocumentsCard";
 import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
 import { cn } from "@/lib/utils";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
@@ -82,6 +85,8 @@ interface DealDetailProps {
     value: number | null;
     createdAt: Date;
     commissionPaidAt: Date | null;
+    contractSignedAt: Date | null;
+    chargeIssuedAt: Date | null;
     lostAt: Date | null;
     lostReason: string | null;
     stage: { name: string; color: string | null };
@@ -154,6 +159,41 @@ export function DealDetail({ deal }: DealDetailProps) {
   const [markLostDialogOpen, setMarkLostDialogOpen] = useState(false);
   const [markingPaid, setMarkingPaid] = useState(false);
   const [reopening, setReopening] = useState(false);
+  // Edição inline do título do negócio (lápis ao lado do <h1>). Reflete no
+  // card do Kanban na próxima navegação (server data) via router.refresh().
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(deal.title);
+  const [savingTitle, setSavingTitle] = useState(false);
+  useEffect(() => setTitleDraft(deal.title), [deal.title]);
+
+  async function handleSaveTitle() {
+    const next = titleDraft.trim();
+    if (!next || next === deal.title) {
+      setEditingTitle(false);
+      setTitleDraft(deal.title);
+      return;
+    }
+    setSavingTitle(true);
+    try {
+      const res = await fetch(`/api/deals/${deal.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: next }),
+      });
+      if (!res.ok) {
+        const d = await res.json().catch(() => null);
+        toast.error(d?.error || "Falha ao renomear o negócio");
+        return;
+      }
+      toast.success("Título atualizado");
+      setEditingTitle(false);
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro de rede");
+    } finally {
+      setSavingTitle(false);
+    }
+  }
 
   const stageName = deal.stage.name;
   const isLost = stageName === "Negócio perdido";
@@ -424,7 +464,66 @@ export function DealDetail({ deal }: DealDetailProps) {
         </Button>
         <Separator orientation="vertical" className="h-6" />
         <div>
-          <h1 className="font-display tracking-tight text-2xl font-semibold">{deal.title}</h1>
+          {editingTitle ? (
+            <div className="flex items-center gap-1.5">
+              <Input
+                autoFocus
+                value={titleDraft}
+                disabled={savingTitle}
+                onChange={(e) => setTitleDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleSaveTitle();
+                  } else if (e.key === "Escape") {
+                    e.preventDefault();
+                    setTitleDraft(deal.title);
+                    setEditingTitle(false);
+                  }
+                }}
+                className="h-9 w-[min(70vw,420px)] text-lg font-semibold"
+              />
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 text-success"
+                onClick={handleSaveTitle}
+                disabled={savingTitle}
+                aria-label="Salvar título"
+              >
+                <Check className="h-4 w-4" />
+              </Button>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-8 w-8 text-muted-foreground"
+                onClick={() => {
+                  setTitleDraft(deal.title);
+                  setEditingTitle(false);
+                }}
+                disabled={savingTitle}
+                aria-label="Cancelar edição"
+              >
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          ) : (
+            <div className="group flex items-center gap-1.5">
+              <h1 className="font-display tracking-tight text-2xl font-semibold">{deal.title}</h1>
+              <Button
+                size="icon"
+                variant="ghost"
+                className="h-7 w-7 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                onClick={() => {
+                  setTitleDraft(deal.title);
+                  setEditingTitle(true);
+                }}
+                aria-label="Editar título"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
           <div className="flex items-center gap-2 mt-1">
             <Badge
               style={{ backgroundColor: deal.stage.color || undefined }}
@@ -568,8 +667,8 @@ export function DealDetail({ deal }: DealDetailProps) {
           currentStageName={deal.stage.name}
           formOpenedAt={deal.form?.createdAt ?? null}
           formCompletedAt={deal.form?.completedAt ?? null}
-          contractSignedAt={deal.envelopes[0]?.closedAt ?? null}
-          chargeCreatedAt={deal.commissionCharges[0]?.createdAt ?? null}
+          contractSignedAt={deal.envelopes[0]?.closedAt ?? deal.contractSignedAt ?? null}
+          chargeCreatedAt={deal.commissionCharges[0]?.createdAt ?? deal.chargeIssuedAt ?? null}
           commissionPaidAt={deal.commissionPaidAt}
         />
       )}
@@ -1211,6 +1310,9 @@ function DocumentsTab({
   onRequestRemoveDealAttachment?: (attachmentId: string) => void;
 }) {
   const router = useRouter();
+  // OCR seletivo: ids em voo mostram spinner. Diálogo de assinatura por card.
+  const [extractingIds, setExtractingIds] = useState<Set<string>>(new Set());
+  const [signAttachmentId, setSignAttachmentId] = useState<string | null>(null);
   // Set para identificar quais cards são DealAttachment (têm rota DELETE
   // /api/deals/[dealId]/attachments/[id]). FormAttachments têm sua rota
   // própria mas não é exposto remoção daqui (só dentro do form público).
@@ -1240,23 +1342,36 @@ function DocumentsTab({
   const manualFallback = fallbackAttachments.filter(
     (att) => att.source !== "infosimples" && !certidaoIds.has(att.id)
   );
+  // Docs manuais (upload do usuário) elegíveis a OCR/aplicar/assinatura — não
+  // certidões nem Infosimples (auto-classificados). PDFs daqui também podem ir
+  // pra assinatura.
+  const ocrEligibleIds = new Set(manualFallback.map((a) => a.id));
+  // PDFs da pasta (manuais) disponíveis pra envio de assinatura via diálogo.
+  const signablePdfs = manualFallback
+    .filter((a) => a.mime === "application/pdf")
+    .map((a) => ({ id: a.id, filename: a.filename, mime: a.mime, category: a.category }));
+  const partySuggestions = [
+    ...vendedores.map((v, i) => ({
+      sourceKind: "vendedor" as const,
+      sourceIndex: i,
+      name: v.nome || v.razao_social || `Vendedor ${i + 1}`,
+      email: v.email ?? null,
+      documentation: v.cpf || v.cnpj || null,
+    })),
+    ...compradores.map((c, i) => ({
+      sourceKind: "comprador" as const,
+      sourceIndex: i,
+      name: c.nome || c.razao_social || `Comprador ${i + 1}`,
+      email: c.email ?? null,
+      documentation: c.cpf || c.cnpj || null,
+    })),
+  ].filter((p) => p.name);
 
   const hasAnyContent =
     hasFormAttachments ||
     certidaoAttachments.length > 0 ||
     infosimplesAttachments.length > 0 ||
     manualFallback.length > 0;
-
-  if (!hasAnyContent) {
-    return (
-      <Card>
-        <CardContent className="py-10 text-center text-muted-foreground text-sm">
-          Nenhum documento anexado. Os documentos enviados durante o preenchimento do
-          formulário e as certidões extraídas aparecem aqui organizados.
-        </CardContent>
-      </Card>
-    );
-  }
 
   const groups: Record<DocGroupKind, DocumentCardData[]> = {
     vendedor: [],
@@ -1388,16 +1503,32 @@ function DocumentsTab({
       (extracted?.fields as Record<string, unknown> | null) ??
       (formExtracted?.fields as Record<string, unknown> | null) ??
       null;
+    // Status do OCR seletivo: em voo → spinner; com fields → pronto; sem fields
+    // mas OCR-ável (PDF/imagem) → aguardando (mostra "Extrair com IA"); senão
+    // (tipo não-OCR-ável) → só armazenado (pronto, sem botão de IA).
+    const ocrable = att.mime === "application/pdf" || att.mime.startsWith("image/");
+    const status: DocumentCardData["status"] = extractingIds.has(att.id)
+      ? "extracting"
+      : fields
+        ? "ready"
+        : ocrable
+          ? "awaiting"
+          : "ready";
     const card: DocumentCardData = {
       id: att.id,
       filename: att.filename,
       mime: att.mime,
       fileUrl: `/api/deals/${dealId}/attachments/${att.id}/file`,
-      status: "ready",
+      status,
       category: att.category,
       fields,
-      confidence: null,
+      confidence:
+        typeof extracted?.confidence === "number"
+          ? (extracted.confidence as number)
+          : null,
       assignment,
+      applied: extracted?.applied === true,
+      extractingSince: extractingIds.has(att.id) ? Date.now() : null,
     };
     groups[groupKindOf(assignment.kind)].push(card);
   }
@@ -1448,6 +1579,53 @@ function DocumentsTab({
     }
   };
 
+  // OCR seletivo sob demanda num DealAttachment manual. Persiste em
+  // extractedData.fields; router.refresh re-renderiza com os campos.
+  const handleExtract = async (id: string) => {
+    setExtractingIds((prev) => new Set(prev).add(id));
+    try {
+      const res = await fetch(`/api/deals/${dealId}/attachments/${id}/extract`, {
+        method: "POST",
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast.error(d?.error || "Falha na leitura por IA");
+        return;
+      }
+      toast.success("Documento lido pela IA");
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro de rede");
+    } finally {
+      setExtractingIds((prev) => {
+        const n = new Set(prev);
+        n.delete(id);
+        return n;
+      });
+    }
+  };
+
+  // Aplica os campos extraídos no negócio (autofill). Usa o assignment já
+  // persistido no anexo (o usuário ajusta via "Mover para…" antes).
+  const handleApplyFields = async (id: string) => {
+    try {
+      const res = await fetch(`/api/deals/${dealId}/attachments/${id}/apply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast.error(d?.error || "Falha ao aplicar aos campos");
+        return;
+      }
+      toast.success(`${d?.filled ?? 0} campo(s) preenchido(s) no negócio`);
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro de rede");
+    }
+  };
+
   // reassignable: mostra o seletor "Mover para…" (só faz sentido em
   // DealAttachment, que tem rota PATCH autenticada). Certidões ficam de fora
   // (são auto-classificadas pelo executor).
@@ -1455,6 +1633,8 @@ function DocumentsTab({
     const isDealAttachment = dealAttachmentIds.has(doc.id);
     const canRemove = isDealAttachment && !!onRequestRemoveDealAttachment;
     const canReassign = reassignable && isDealAttachment;
+    // OCR/aplicar/assinatura só pra docs manuais do deal (não certidões/Infosimples).
+    const isOcrEligible = ocrEligibleIds.has(doc.id);
     return (
       <DocumentCard
         key={doc.id}
@@ -1463,12 +1643,27 @@ function DocumentsTab({
         onAssignmentChange={canReassign ? handleReassign : undefined}
         readOnly={!canRemove}
         onRemove={canRemove ? (id) => onRequestRemoveDealAttachment(id) : undefined}
+        onExtract={isOcrEligible ? handleExtract : undefined}
+        onRetry={isOcrEligible ? handleExtract : undefined}
+        onApply={isOcrEligible ? handleApplyFields : undefined}
+        onSendToSignature={
+          isOcrEligible ? (id) => setSignAttachmentId(id) : undefined
+        }
       />
     );
   };
 
   return (
     <div className="space-y-5">
+      <AddDocumentsCard dealId={dealId} onUploaded={() => router.refresh()} />
+
+      {!hasAnyContent && (
+        <p className="rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
+          Nenhum documento ainda. Suba arquivos acima (qualquer tipo) para
+          armazenar, ler com a IA ou enviar para assinatura.
+        </p>
+      )}
+
       {/* Certidões: bloco próprio, subdividido por parte/imóvel (+ Gerais). */}
       {certidaoSubGroups.length > 0 && (
         <Card>
@@ -1515,6 +1710,21 @@ function DocumentsTab({
           </Card>
         );
       })}
+
+      <SendAttachmentEnvelopeDialog
+        open={!!signAttachmentId}
+        onOpenChange={(o) => {
+          if (!o) setSignAttachmentId(null);
+        }}
+        dealId={dealId}
+        attachments={signablePdfs}
+        partySuggestions={partySuggestions}
+        preselectAttachmentId={signAttachmentId ?? undefined}
+        onSent={() => {
+          setSignAttachmentId(null);
+          router.refresh();
+        }}
+      />
     </div>
   );
 }
