@@ -97,7 +97,7 @@ export default function ClientesPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-semibold">Clientes</h1>
+          <h1 className="font-display text-2xl font-semibold tracking-tight">Clientes</h1>
           <p className="text-sm text-muted-foreground">
             {total} cliente{total !== 1 ? "s" : ""} cadastrado{total !== 1 ? "s" : ""}
           </p>

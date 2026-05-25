@@ -131,7 +131,7 @@ export default function ConciliacaoPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-semibold">Conciliação bancária</h1>
+          <h1 className="font-display text-2xl font-semibold tracking-tight">Conciliação bancária</h1>
           <p className="text-sm text-muted-foreground">
             Cruze o extrato Asaas com suas cobranças locais.
           </p>
