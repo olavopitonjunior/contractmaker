@@ -152,6 +152,7 @@ export type AuditAction =
   | "ENVELOPE_RESEND"
   | "CLICKSIGN_WEBHOOK_RECEIVED"
   | "CLICKSIGN_WEBHOOK_REJECTED"
+  | "CLICKSIGN_WEBHOOK_PROCESSED"
   // ActionIntent (HITL para Bearer high-risk)
   | "INTENT_CREATED"
   | "INTENT_APPROVED"
@@ -161,7 +162,8 @@ export type AuditAction =
   | "INTENT_TAMPERED";
 
 export interface AuditContext {
-  orgId: string;
+  // Nullable (Fase 0c): eventos pré-resolução de tenant gravam orgId=null.
+  orgId: string | null;
   userId?: string | null;
   ipAddress?: string | null;
   userAgent?: string | null;

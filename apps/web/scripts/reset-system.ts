@@ -67,7 +67,13 @@ async function counts(orgId: string) {
 }
 
 async function main() {
-  const orgId = process.env.SHARED_ORG_ID || "cmnt1ldo4000111bw4yo517k0";
+  // Multitenant (Fase 0c): sem default de org — exige --org-id explícito.
+  const orgIdx = process.argv.indexOf("--org-id");
+  const orgId = orgIdx >= 0 ? process.argv[orgIdx + 1] : undefined;
+  if (!orgId) {
+    console.error("❌ --org-id <orgId> é obrigatório (multitenant — sem default de org)");
+    process.exit(1);
+  }
   const dbUrl = process.env.DATABASE_URL?.replace(/:[^:@]+@/, ":***@");
 
   console.log("================================================");

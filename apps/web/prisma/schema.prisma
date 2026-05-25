@@ -1433,7 +1433,10 @@ model OperationChallenge {
 // Audit log imutável — append-only.
 model AuditLog {
   id           String   @id @default(cuid())
-  orgId        String
+  // Nullable (Fase 0c): eventos pré-resolução de tenant (ex.: webhook ClickSign
+  // antes de identificar o envelope) gravam orgId=null em vez de cair no
+  // SHARED_ORG_ID. Pós-resolução usa o orgId real.
+  orgId        String?
   userId       String?
   action       String
   resource     String?
@@ -1444,8 +1447,8 @@ model AuditLog {
   userAgent    String?  @db.Text
   createdAt    DateTime @default(now())
 
-  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  user User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  org  Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([orgId, action, createdAt])
   @@index([userId, createdAt])

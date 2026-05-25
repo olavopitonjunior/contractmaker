@@ -17,7 +17,7 @@
  *   --email     (obrigatório)
  *   --name      (opcional; se ausente, herda do invitation pendente, se houver)
  *   --role      member|admin|finance|sales|viewer  (default: member)
- *   --org-id    (opcional; default: env SHARED_ORG_ID)
+ *   --org-id    (obrigatório; multitenant — sem default de org)
  *   --password  (opcional; default: gerada e impressa)
  *   --dry-run   (mostra o que faria sem gravar)
  *
@@ -51,8 +51,8 @@ function parseArgs(argv: string[]): Args {
   if (!ROLE_VALUES.includes(role)) {
     throw new Error(`--role inválido: ${role}. Use: ${ROLE_VALUES.join(", ")}`);
   }
-  const orgId = get("--org-id") ?? process.env.SHARED_ORG_ID;
-  if (!orgId) throw new Error("--org-id ausente e SHARED_ORG_ID não setado");
+  const orgId = get("--org-id");
+  if (!orgId) throw new Error("--org-id é obrigatório (multitenant: sem default de org)");
   return {
     email,
     name: get("--name"),
