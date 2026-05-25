@@ -15,6 +15,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:isolation": "vitest run --config vitest.isolation.config.ts",
     "gen:openapi": "tsx scripts/generate-openapi.ts"
   },
   "dependencies": {
