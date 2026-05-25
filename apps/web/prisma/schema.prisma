@@ -1994,10 +1994,15 @@ model EnvelopeSigner {
   // IDs dos requirements (auth + sign) criados via POST /requirements.
   // Guardamos pra poder remover/alterar depois sem refazer GET.
   requirementIds String[]
-  // sourceKind: vendedor | comprador | testemunha | corretora.
+  // sourceKind: vendedor | comprador | testemunha | corretora | outro.
   // sourceIndex aponta o array em dataJson (sempre 0 para corretora).
   sourceKind     String
   sourceIndex    Int
+  // Qualificação ClickSign ("Assina como": buyer/seller/witness/party/...).
+  // Persistido pra exibir na aba Assinaturas e re-criar requirement em add.
+  role           String?
+  // Ordem de assinatura (group ClickSign v3). Null = paralelo (sem ordem).
+  signingGroup   Int?
   name           String
   email          String
   // CPF limpo (11 dígitos) ou CNPJ (14 dígitos) sem máscara.

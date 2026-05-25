@@ -31,6 +31,9 @@ import { SendEnvelopeDialog } from "./SendEnvelopeDialog";
 import { SendAttachmentEnvelopeDialog } from "./SendAttachmentEnvelopeDialog";
 import { EditEnvelopeDialog } from "./EditEnvelopeDialog";
 import { EditSignerDialog } from "./EditSignerDialog";
+import { AddSignerDialog } from "./AddSignerDialog";
+import { clicksignRoleLabel } from "@/lib/clicksign/roles";
+import { UserPlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface PartyLite {
@@ -204,6 +207,28 @@ function AttachmentEnvelopesSection({
 }) {
   const { envelopes, loading, refetch } = useDealEnvelopePolling(dealId);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+
+  // "Atualizar" pulla cada envelope avulso ativo direto da ClickSign antes do
+  // refetch — resolve status stale quando o webhook não chegou.
+  const handleSyncAndRefetch = async () => {
+    setSyncing(true);
+    try {
+      const active = envelopes.filter(
+        (e) => e.source === "attachment" && (e.status === "running" || e.status === "draft")
+      );
+      await Promise.allSettled(
+        active.map((env) =>
+          fetch(`/api/deals/${dealId}/envelopes/${env.id}/sync`, { method: "POST" })
+        )
+      );
+      await refetch();
+    } catch {
+      await refetch();
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   const partySuggestions = useMemo(() => {
     return [
@@ -240,8 +265,14 @@ function AttachmentEnvelopesSection({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="ghost" onClick={refetch} title="Atualizar">
-            <RefreshCw className="h-3.5 w-3.5" />
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={handleSyncAndRefetch}
+            title="Sincronizar com ClickSign e atualizar"
+            disabled={syncing}
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", syncing && "animate-spin")} />
           </Button>
           <Button
             size="sm"
@@ -270,10 +301,10 @@ function AttachmentEnvelopesSection({
           </p>
         ) : (
           attachmentEnvelopes.map((env) => (
-            <AttachmentEnvelopeRow
+            <EnvelopeCard
               key={env.id}
               envelope={env}
-              dealId={dealId}
+              basePath={`/api/deals/${dealId}/envelopes/${env.id}`}
               onChange={refetch}
             />
           ))
@@ -289,104 +320,6 @@ function AttachmentEnvelopesSection({
         onSent={refetch}
       />
     </Card>
-  );
-}
-
-function AttachmentEnvelopeRow({
-  envelope,
-  dealId,
-  onChange,
-}: {
-  envelope: ReturnType<typeof useDealEnvelopePolling>["envelopes"][number];
-  dealId: string;
-  onChange: () => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const signedCount = envelope.signers.filter((s) => s.status === "signed").length;
-  const totalActive = envelope.signers.filter((s) => s.status !== "removed").length;
-  const canCancel = envelope.status === "draft" || envelope.status === "running";
-
-  const handleCancel = async () => {
-    if (
-      !confirm(
-        "Cancelar este envelope? Os signatários não conseguirão mais assinar."
-      )
-    )
-      return;
-    setBusy(true);
-    try {
-      const res = await fetch(
-        `/api/deals/${dealId}/envelopes/${envelope.id}`,
-        { method: "DELETE" }
-      );
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `HTTP ${res.status}`);
-      }
-      toast.success("Envelope cancelado");
-      onChange();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao cancelar");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <div className="rounded-md border">
-      <div className="flex items-center justify-between gap-2 px-3 py-2 border-b bg-muted/30">
-        <div className="min-w-0">
-          <p className="text-sm font-medium truncate">
-            {envelope.subjectLabel || envelope.name}
-          </p>
-          <p className="text-[11px] text-muted-foreground">
-            {STATUS_LABEL[envelope.status]} · {signedCount}/{totalActive} assinaram
-          </p>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Badge variant={STATUS_VARIANT[envelope.status]} className="text-[10px]">
-            {STATUS_LABEL[envelope.status]}
-          </Badge>
-          {envelope.signedDocumentUrl && envelope.status === "closed" && (
-            <Button size="sm" variant="ghost" asChild>
-              <a
-                href={envelope.signedDocumentUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <Download className="h-3.5 w-3.5 mr-1" />
-                PDF assinado
-              </a>
-            </Button>
-          )}
-          {canCancel && (
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={handleCancel}
-              disabled={busy}
-            >
-              <XCircle className="h-3.5 w-3.5" />
-            </Button>
-          )}
-        </div>
-      </div>
-      <div className="px-3 py-2 space-y-1 text-xs">
-        {envelope.signers.map((s) => (
-          <div
-            key={s.id}
-            className="flex items-center justify-between gap-2"
-          >
-            <span className="truncate">
-              {s.name} <span className="text-muted-foreground">({s.email})</span>
-            </span>
-            <Badge variant="outline" className="text-[9px]">
-              {SIGNER_STATUS_LABEL[s.status]}
-            </Badge>
-          </div>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -501,7 +434,7 @@ function ContractEnvelopesSection({
             <EnvelopeCard
               key={env.id}
               envelope={env}
-              contractId={contract.id}
+              basePath={`/api/contracts/${contract.id}/envelopes/${env.id}`}
               onChange={refetch}
             />
           ))
@@ -526,15 +459,18 @@ function ContractEnvelopesSection({
 
 function EnvelopeCard({
   envelope,
-  contractId,
+  basePath,
   onChange,
 }: {
   envelope: EnvelopeRow;
-  contractId: string;
+  /** Base do envelope: `/api/contracts/{id}/envelopes/{eid}` ou
+   *  `/api/deals/{dealId}/envelopes/{eid}`. */
+  basePath: string;
   onChange: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
 
   const canEdit = envelope.status === "draft" || envelope.status === "running";
 
@@ -543,10 +479,7 @@ function EnvelopeCard({
       return;
     setBusy(true);
     try {
-      const res = await fetch(
-        `/api/contracts/${contractId}/envelopes/${envelope.id}`,
-        { method: "DELETE" }
-      );
+      const res = await fetch(basePath, { method: "DELETE" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `HTTP ${res.status}`);
@@ -621,13 +554,25 @@ function EnvelopeCard({
               key={signer.id}
               signer={signer}
               envelope={envelope}
-              contractId={contractId}
+              basePath={basePath}
               onChange={onChange}
             />
           ))}
       </div>
 
       <div className="px-3 py-2 border-t flex items-center justify-end gap-2">
+        {canEdit && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 text-xs"
+            onClick={() => setAddOpen(true)}
+            disabled={busy}
+          >
+            <UserPlus className="h-3 w-3 mr-1" />
+            Adicionar assinante
+          </Button>
+        )}
         {envelope.signedDocumentUrl && (
           <Button
             asChild
@@ -674,9 +619,15 @@ function EnvelopeCard({
       <EditEnvelopeDialog
         open={editOpen}
         onOpenChange={setEditOpen}
-        contractId={contractId}
+        basePath={basePath}
         envelope={envelope}
         onSaved={onChange}
+      />
+      <AddSignerDialog
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        basePath={basePath}
+        onAdded={onChange}
       />
     </div>
   );
@@ -685,12 +636,12 @@ function EnvelopeCard({
 function SignerRow({
   signer,
   envelope,
-  contractId,
+  basePath,
   onChange,
 }: {
   signer: EnvelopeSignerRow;
   envelope: EnvelopeRow;
-  contractId: string;
+  basePath: string;
   onChange: () => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -699,14 +650,11 @@ function SignerRow({
   const handleResend = async () => {
     setBusy(true);
     try {
-      const res = await fetch(
-        `/api/contracts/${contractId}/envelopes/${envelope.id}/signers/${signer.id}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ action: "resend" }),
-        }
-      );
+      const res = await fetch(`${basePath}/signers/${signer.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "resend" }),
+      });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
       toast.success("Notificação reenviada");
@@ -722,10 +670,9 @@ function SignerRow({
     if (!confirm(`Remover ${signer.name} deste envelope?`)) return;
     setBusy(true);
     try {
-      const res = await fetch(
-        `/api/contracts/${contractId}/envelopes/${envelope.id}/signers/${signer.id}`,
-        { method: "DELETE" }
-      );
+      const res = await fetch(`${basePath}/signers/${signer.id}`, {
+        method: "DELETE",
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || `HTTP ${res.status}`);
@@ -773,10 +720,15 @@ function SignerRow({
       <div className="flex items-center gap-2 min-w-0">
         {signerStatusIcon(signer.status)}
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            {signer.signingGroup != null && (
+              <Badge variant="secondary" className="text-[10px] h-5">
+                {signer.signingGroup}º
+              </Badge>
+            )}
             <span className="font-medium truncate">{signer.name}</span>
-            <Badge variant="outline" className="text-xs h-5 capitalize">
-              {signer.sourceKind}
+            <Badge variant="outline" className="text-xs h-5">
+              {clicksignRoleLabel(signer.role) ?? signer.sourceKind}
             </Badge>
           </div>
           <div className="text-xs text-muted-foreground truncate">
@@ -840,8 +792,7 @@ function SignerRow({
       <EditSignerDialog
         open={editOpen}
         onOpenChange={setEditOpen}
-        contractId={contractId}
-        envelopeId={envelope.id}
+        basePath={basePath}
         signer={signer}
         onSaved={onChange}
       />

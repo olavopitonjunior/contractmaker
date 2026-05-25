@@ -54,6 +54,8 @@ export interface SignerRoleOverride {
   sourceIndex: number;
   subKind?: "titular" | "conjuge";
   role: ClicksignRole;
+  /** Grupo de ordem (ClickSign v3). Null/omitido = paralelo. */
+  group?: number | null;
 }
 
 interface SendEnvelopeInput {
@@ -74,6 +76,10 @@ export interface EnvelopeSignerInput {
    *  avulsos digitados manualmente, default = "outro" / index 0. */
   sourceKind?: string;
   sourceIndex?: number;
+  /** Qualificação ClickSign escolhida na UI ("Assina como"). */
+  role?: ClicksignRole;
+  /** Grupo de ordem de assinatura. Null/omitido = paralelo. */
+  group?: number | null;
 }
 
 interface SendEnvelopeForAttachmentInput {
@@ -168,6 +174,20 @@ async function createEnvelopeFromBuffer(input: {
     console.error("[clicksign] falha ao fazer upload do snapshot:", err);
   }
 
+  // Resolve role + grupo de ordem por signer: precedência role explícito do
+  // input → override por (sourceKind,sourceIndex) → default por sourceKind.
+  // Persistimos no row pra exibir na aba Assinaturas e re-criar requirement.
+  const resolveRoleGroup = (s: EnvelopeSignerInput) => {
+    const override = input.signerRoles?.find(
+      (r) =>
+        r.sourceKind === s.sourceKind && r.sourceIndex === (s.sourceIndex ?? 0)
+    );
+    const role: ClicksignRole =
+      s.role ?? override?.role ?? defaultRoleForSourceKind(s.sourceKind ?? "outro");
+    const group = s.group ?? override?.group ?? null;
+    return { role, group };
+  };
+
   // 2. Cria row local com status=draft.
   const envelope = await prisma.envelope.create({
     data: {
@@ -182,16 +202,21 @@ async function createEnvelopeFromBuffer(input: {
       documentUrl,
       deadlineAt,
       signers: {
-        create: signers.map((s) => ({
-          sourceKind: s.sourceKind ?? "outro",
-          sourceIndex: s.sourceIndex ?? 0,
-          name: s.name,
-          email: s.email,
-          documentation: s.documentation ?? null,
-          phone: s.phone ?? null,
-          authMethod,
-          status: "pending",
-        })),
+        create: signers.map((s) => {
+          const { role, group } = resolveRoleGroup(s);
+          return {
+            sourceKind: s.sourceKind ?? "outro",
+            sourceIndex: s.sourceIndex ?? 0,
+            role,
+            signingGroup: group,
+            name: s.name,
+            email: s.email,
+            documentation: s.documentation ?? null,
+            phone: s.phone ?? null,
+            authMethod,
+            status: "pending",
+          };
+        }),
       },
     },
     include: { signers: true },
@@ -225,6 +250,7 @@ async function createEnvelopeFromBuffer(input: {
         documentation: localSigner.documentation ?? undefined,
         phoneNumber: localSigner.phone ?? undefined,
         hasDocumentation: Boolean(localSigner.documentation),
+        group: localSigner.signingGroup ?? undefined,
       });
       const signerId = pickResourceId(signerResp);
       if (!signerId) throw new Error("Resposta sem id de signer");
@@ -236,17 +262,10 @@ async function createEnvelopeFromBuffer(input: {
         action: "provide_evidence",
         auth: authMethod,
       });
-      // Role: usuário pode customizar no popup via select. Override match
-      // canônico por (sourceKind, sourceIndex). Fallback pro default por
-      // sourceKind quando não há override (backward compat com callers
-      // antigos como sendEnvelopeForAttachment).
-      const override = input.signerRoles?.find(
-        (r) =>
-          r.sourceKind === localSigner.sourceKind &&
-          r.sourceIndex === localSigner.sourceIndex
-      );
+      // Role já resolvido e persistido no row (input → override → default).
       const role: ClicksignRole =
-        override?.role ?? defaultRoleForSourceKind(localSigner.sourceKind);
+        (localSigner.role as ClicksignRole | null) ??
+        defaultRoleForSourceKind(localSigner.sourceKind);
       const signReq = await addRequirement({
         envelopeId: clicksignEnvelopeId,
         documentClicksignId,
