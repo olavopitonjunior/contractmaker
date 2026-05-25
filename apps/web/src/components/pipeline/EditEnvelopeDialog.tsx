@@ -19,7 +19,9 @@ import type { EnvelopeRow } from "@/hooks/useEnvelopePolling";
 interface EditEnvelopeDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  contractId: string;
+  /** Base do envelope, ex: `/api/contracts/{id}/envelopes/{eid}` ou
+   *  `/api/deals/{dealId}/envelopes/{eid}`. Serve contrato e documento. */
+  basePath: string;
   envelope: EnvelopeRow;
   onSaved: () => void;
 }
@@ -36,7 +38,7 @@ function toLocalInputValue(iso: string | null): string {
 export function EditEnvelopeDialog({
   open,
   onOpenChange,
-  contractId,
+  basePath,
   envelope,
   onSaved,
 }: EditEnvelopeDialogProps) {
@@ -84,14 +86,11 @@ export function EditEnvelopeDialog({
         return;
       }
 
-      const res = await fetch(
-        `/api/contracts/${contractId}/envelopes/${envelope.id}`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(body),
-        }
-      );
+      const res = await fetch(basePath, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
       const respBody = await res.json().catch(() => ({}));
       if (!res.ok) {
         throw new Error(respBody.error || `HTTP ${res.status}`);

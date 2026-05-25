@@ -14,14 +14,14 @@ async function loadSigner(
   envelopeId: string,
   signerId: string,
   orgId: string,
-  contractId: string
+  dealId: string
 ) {
   const signer = await prisma.envelopeSigner.findFirst({
     where: { id: signerId, envelopeId },
     include: { envelope: true },
   });
   if (!signer || signer.envelope.orgId !== orgId) return null;
-  if (signer.envelope.contractId !== contractId) return null;
+  if (signer.envelope.dealId !== dealId) return null;
   return signer;
 }
 
@@ -44,7 +44,7 @@ const patchSchema = z.discriminatedUnion("action", [
 
 export async function PATCH(
   req: NextRequest,
-  { params }: { params: { id: string; envelopeId: string; signerId: string } }
+  { params }: { params: { dealId: string; envelopeId: string; signerId: string } }
 ) {
   const authResult = await requireAuth(req);
   if (!authResult.ok) return authResult.response;
@@ -59,7 +59,7 @@ export async function PATCH(
     params.envelopeId,
     params.signerId,
     ctx.orgId,
-    params.id
+    params.dealId
   );
   if (!signer) {
     return NextResponse.json({ error: "Signatário não encontrado" }, { status: 404 });
@@ -78,7 +78,7 @@ export async function PATCH(
 
 export async function DELETE(
   req: NextRequest,
-  { params }: { params: { id: string; envelopeId: string; signerId: string } }
+  { params }: { params: { dealId: string; envelopeId: string; signerId: string } }
 ) {
   const authResult = await requireAuth(req);
   if (!authResult.ok) return authResult.response;
@@ -88,7 +88,7 @@ export async function DELETE(
     params.envelopeId,
     params.signerId,
     ctx.orgId,
-    params.id
+    params.dealId
   );
   if (!signer) {
     return NextResponse.json({ error: "Signatário não encontrado" }, { status: 404 });

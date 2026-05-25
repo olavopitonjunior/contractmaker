@@ -19,11 +19,13 @@ const addSchema = z.object({
   group: z.number().int().min(1).optional(),
 });
 
+/** POST /api/deals/[dealId]/envelopes/[envelopeId]/signers — adiciona
+ *  signatário a um envelope avulso (documento da pasta). */
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string; envelopeId: string } }
+  { params }: { params: { dealId: string; envelopeId: string } }
 ) {
-  const authResult = await requireAuth(req);
+  const authResult = await requireAuth(req, { scope: "signatures:rw" });
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
 
@@ -36,9 +38,9 @@ export async function POST(
   }
 
   const envelope = await prisma.envelope.findFirst({
-    where: { id: params.envelopeId, orgId: ctx.orgId },
+    where: { id: params.envelopeId, dealId: params.dealId, orgId: ctx.orgId },
   });
-  if (!envelope || envelope.contractId !== params.id) {
+  if (!envelope) {
     return NextResponse.json({ error: "Envelope não encontrado" }, { status: 404 });
   }
 

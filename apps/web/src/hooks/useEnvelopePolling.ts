@@ -5,8 +5,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 export interface EnvelopeSignerRow {
   id: string;
   clicksignId: string | null;
-  sourceKind: "vendedor" | "comprador" | "testemunha" | "corretora";
+  sourceKind: "vendedor" | "comprador" | "testemunha" | "corretora" | "outro" | string;
   sourceIndex: number;
+  /** Qualificação ClickSign ("Assina como"). */
+  role: string | null;
+  /** Grupo de ordem de assinatura (null = paralelo). */
+  signingGroup: number | null;
   name: string;
   email: string;
   documentation: string | null;

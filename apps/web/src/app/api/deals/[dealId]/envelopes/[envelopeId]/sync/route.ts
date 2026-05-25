@@ -8,23 +8,21 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 /**
- * POST /api/contracts/[id]/envelopes/[envelopeId]/sync
+ * POST /api/deals/[dealId]/envelopes/[envelopeId]/sync
  *
- * Pulla o estado atual do envelope direto da ClickSign API e reconcilia com o
- * DB local — sem esperar webhook nem cron diário. Lógica em
- * `lib/clicksign/sync.ts` (compartilhada com a rota de deal). `?debug=1`
- * retorna shapes crus pra QA.
+ * Igual ao sync de contrato, mas escopado por deal — serve envelopes avulsos
+ * (source="attachment") da pasta Documentos. Lógica em `lib/clicksign/sync.ts`.
  */
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string; envelopeId: string } }
+  { params }: { params: { dealId: string; envelopeId: string } }
 ) {
   const authResult = await requireAuth(req, { scope: "signatures:rw" });
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
 
   const envelope = await prisma.envelope.findFirst({
-    where: { id: params.envelopeId, contractId: params.id, orgId: ctx.orgId },
+    where: { id: params.envelopeId, dealId: params.dealId, orgId: ctx.orgId },
     include: { signers: true },
   });
   if (!envelope) {
@@ -47,7 +45,7 @@ export async function POST(
       );
     }
     const msg = err instanceof Error ? err.message : String(err);
-    console.error("[envelope sync] erro:", msg);
+    console.error("[deal envelope sync] erro:", msg);
     return NextResponse.json({ error: msg || "Erro interno" }, { status: 500 });
   }
 }

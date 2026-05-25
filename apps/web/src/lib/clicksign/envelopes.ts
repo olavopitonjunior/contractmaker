@@ -1,5 +1,10 @@
 import { clicksignRequest } from "./client";
 import type { ClicksignResponse, AuthMethod } from "./types";
+import type { ClicksignRole } from "./roles";
+
+// Re-export pra não quebrar imports existentes (`import { type ClicksignRole }
+// from "./envelopes"`). Fonte canônica do tipo + labels agora é `./roles`.
+export type { ClicksignRole };
 
 interface CreateEnvelopeInput {
   name: string;
@@ -57,6 +62,10 @@ interface AddSignerInput {
   hasDocumentation?: boolean;
   birthday?: string; // YYYY-MM-DD
   refusable?: boolean;
+  /** Ordem de assinatura (ClickSign v3): signatários do grupo N só são
+   *  notificados depois que todos do grupo N-1 assinam. Omitir = todos no
+   *  mesmo grupo (assinam em paralelo). */
+  group?: number;
 }
 
 /**
@@ -88,6 +97,7 @@ export async function addSigner(input: AddSignerInput) {
   }
   if (input.phoneNumber) attributes.phone_number = input.phoneNumber;
   if (input.birthday) attributes.birthday = input.birthday;
+  if (typeof input.group === "number") attributes.group = input.group;
 
   return clicksignRequest<ClicksignResponse>({
     method: "POST",
@@ -115,17 +125,10 @@ export async function removeSigner(envelopeId: string, signerId: string) {
  *   - Imobiliária   → "realestate"
  *   - Testemunha    → "witness"
  *   - Anuente       → "consenting"
- *   - Representante → "attorney"
+ *   - Advogado      → "attorney"
+ *   - Interessado   → "party"
+ * (tipo e labels em `./roles`)
  */
-export type ClicksignRole =
-  | "sign"
-  | "buyer"
-  | "seller"
-  | "intervening"
-  | "realestate"
-  | "witness"
-  | "consenting"
-  | "attorney";
 
 interface AddRequirementInput {
   envelopeId: string;

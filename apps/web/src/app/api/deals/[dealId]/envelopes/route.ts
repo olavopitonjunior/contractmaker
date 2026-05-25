@@ -8,6 +8,7 @@ import {
   MissingEmailsError,
 } from "@/lib/clicksign/executor";
 import { ClicksignError } from "@/lib/clicksign/client";
+import type { ClicksignRole } from "@/lib/clicksign/roles";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -19,6 +20,10 @@ const signerSchema = z.object({
   phone: z.string().optional().nullable(),
   sourceKind: z.string().optional(),
   sourceIndex: z.number().int().nonnegative().optional(),
+  // Qualificação ("Assina como") escolhida no dialog.
+  role: z.string().optional(),
+  // Grupo de ordem de assinatura (ClickSign v3). Omitido = paralelo.
+  group: z.number().int().min(1).optional().nullable(),
 });
 
 const sendSchema = z.object({
@@ -125,6 +130,8 @@ export async function POST(
         phone: s.phone ?? null,
         sourceKind: s.sourceKind,
         sourceIndex: s.sourceIndex,
+        role: s.role as ClicksignRole | undefined,
+        group: s.group ?? null,
       })),
     });
     return NextResponse.json({ envelope }, { status: 201 });

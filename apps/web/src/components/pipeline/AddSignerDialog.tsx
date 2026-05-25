@@ -13,17 +13,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Save } from "lucide-react";
-import type { EnvelopeSignerRow } from "@/hooks/useEnvelopePolling";
+import { NativeSelect } from "@/components/forms/NativeSelect";
+import { UserPlus } from "lucide-react";
+import { CLICKSIGN_ROLE_OPTIONS, type ClicksignRole } from "@/lib/clicksign/roles";
 
-interface EditSignerDialogProps {
+interface AddSignerDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Base do envelope (`/api/.../envelopes/{eid}`); o signer é
-   *  `${basePath}/signers/${signer.id}`. Serve contrato e documento. */
+  /** Base do envelope (`/api/.../envelopes/{eid}`); POST em `${basePath}/signers`. */
   basePath: string;
-  signer: EnvelopeSignerRow;
-  onSaved: () => void;
+  onAdded: () => void;
 }
 
 function maskCpfCnpj(raw: string): string {
@@ -41,72 +40,63 @@ function maskCpfCnpj(raw: string): string {
     .replace(/(\d{4})(\d)/, "$1-$2");
 }
 
-export function EditSignerDialog({
+export function AddSignerDialog({
   open,
   onOpenChange,
   basePath,
-  signer,
-  onSaved,
-}: EditSignerDialogProps) {
-  const [name, setName] = useState(signer.name);
-  const [email, setEmail] = useState(signer.email);
-  const [documentation, setDocumentation] = useState(signer.documentation || "");
+  onAdded,
+}: AddSignerDialogProps) {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [documentation, setDocumentation] = useState("");
+  const [role, setRole] = useState<ClicksignRole>("sign");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     if (open) {
-      setName(signer.name);
-      setEmail(signer.email);
-      setDocumentation(signer.documentation || "");
+      setName("");
+      setEmail("");
+      setDocumentation("");
+      setRole("sign");
       setSubmitting(false);
     }
-  }, [open, signer]);
+  }, [open]);
 
   const handleSubmit = async () => {
-    if (!name.trim() || name.trim().length < 2) {
+    if (name.trim().length < 2) {
       toast.error("Nome inválido");
       return;
     }
-    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
       toast.error("E-mail inválido");
       return;
     }
-
     const docDigits = documentation.replace(/\D/g, "");
     if (docDigits && docDigits.length !== 11 && docDigits.length !== 14) {
       toast.error("CPF deve ter 11 dígitos ou CNPJ 14");
       return;
     }
-
     setSubmitting(true);
     try {
-      const body: Record<string, unknown> = { action: "update" };
-      if (name.trim() !== signer.name) body.name = name.trim();
-      if (email.trim() !== signer.email) body.email = email.trim();
-      if (docDigits !== (signer.documentation || "")) {
-        body.documentation = docDigits;
-      }
-
-      if (Object.keys(body).length === 1) {
-        toast.info("Nenhuma alteração");
-        onOpenChange(false);
-        return;
-      }
-
-      const res = await fetch(`${basePath}/signers/${signer.id}`, {
-        method: "PATCH",
+      const res = await fetch(`${basePath}/signers`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          name: name.trim(),
+          email: email.trim(),
+          documentation: docDigits || undefined,
+          role,
+          sourceKind: "outro",
+          sourceIndex: 0,
+        }),
       });
-      const respBody = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(respBody.error || `HTTP ${res.status}`);
-      }
-      toast.success("Signatário atualizado");
-      onSaved();
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(body.error || `HTTP ${res.status}`);
+      toast.success("Signatário adicionado (custo: R$ 1,50)");
+      onAdded();
       onOpenChange(false);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao salvar");
+      toast.error(err instanceof Error ? err.message : "Erro ao adicionar");
     } finally {
       setSubmitting(false);
     }
@@ -116,43 +106,50 @@ export function EditSignerDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Editar signatário</DialogTitle>
+          <DialogTitle>Adicionar signatário</DialogTitle>
           <DialogDescription>
-            Atualiza os dados na Clicksign e reflette no banco. Use quando o
-            e-mail estiver errado ou faltar CPF.
+            Inclui um novo signatário no envelope. Custo adicional de R$ 1,50.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3 py-2">
           <div className="space-y-1.5">
-            <Label htmlFor="signer-name">Nome</Label>
+            <Label htmlFor="add-signer-name">Nome</Label>
             <Input
-              id="signer-name"
+              id="add-signer-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               disabled={submitting}
+              placeholder="Nome completo"
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="signer-email">E-mail</Label>
+            <Label htmlFor="add-signer-email">E-mail</Label>
             <Input
-              id="signer-email"
+              id="add-signer-email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               disabled={submitting}
+              placeholder="email@exemplo.com"
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="signer-doc">CPF/CNPJ (opcional)</Label>
+            <Label htmlFor="add-signer-doc">CPF/CNPJ (opcional)</Label>
             <Input
-              id="signer-doc"
+              id="add-signer-doc"
               value={maskCpfCnpj(documentation)}
-              onChange={(e) =>
-                setDocumentation(e.target.value.replace(/\D/g, ""))
-              }
+              onChange={(e) => setDocumentation(e.target.value.replace(/\D/g, ""))}
               placeholder="000.000.000-00"
               disabled={submitting}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Assina como</Label>
+            <NativeSelect
+              value={role}
+              onChange={(v) => setRole(v as ClicksignRole)}
+              options={CLICKSIGN_ROLE_OPTIONS}
             />
           </div>
         </div>
@@ -166,8 +163,8 @@ export function EditSignerDialog({
             Cancelar
           </Button>
           <Button onClick={handleSubmit} disabled={submitting}>
-            <Save className="h-4 w-4 mr-2" />
-            {submitting ? "Salvando..." : "Salvar"}
+            <UserPlus className="h-4 w-4 mr-2" />
+            {submitting ? "Adicionando..." : "Adicionar"}
           </Button>
         </DialogFooter>
       </DialogContent>

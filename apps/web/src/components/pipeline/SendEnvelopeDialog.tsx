@@ -13,8 +13,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { AlertTriangle, Plus, Send, Trash2, Wallet } from "lucide-react";
+import { AlertTriangle, ArrowDown, ArrowUp, Plus, Send, Trash2, Wallet } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { CLICKSIGN_ROLE_OPTIONS, type ClicksignRole } from "@/lib/clicksign/roles";
 
 interface Conjuge {
   nome?: string;
@@ -79,28 +80,8 @@ interface SendEnvelopeDialogProps {
 type RowKind = "vendedor" | "comprador" | "testemunha" | "corretora";
 type SubKind = "titular" | "conjuge";
 
-/** Role ClickSign v3 — define a "qualificação" do signatário no PDF assinado.
- *  Espelha o enum em `lib/clicksign/envelopes.ts::ClicksignRole`. */
-type ClicksignRole =
-  | "sign"
-  | "buyer"
-  | "seller"
-  | "intervening"
-  | "realestate"
-  | "witness"
-  | "consenting"
-  | "attorney";
-
-const ROLE_OPTIONS: Array<{ value: ClicksignRole; label: string }> = [
-  { value: "buyer", label: "Comprador" },
-  { value: "seller", label: "Vendedor" },
-  { value: "intervening", label: "Intermediador" },
-  { value: "realestate", label: "Imobiliária" },
-  { value: "witness", label: "Testemunha" },
-  { value: "consenting", label: "Anuente" },
-  { value: "attorney", label: "Representante" },
-  { value: "sign", label: "Assinante" },
-];
+// Role ClickSign + opções do dropdown vêm de `lib/clicksign/roles` (fonte única).
+const ROLE_OPTIONS = CLICKSIGN_ROLE_OPTIONS;
 
 function defaultRoleFor(
   sourceKind: RowKind,
@@ -318,6 +299,7 @@ export function SendEnvelopeDialog({
   onSent,
 }: SendEnvelopeDialogProps) {
   const [submitting, setSubmitting] = useState(false);
+  const [orderEnabled, setOrderEnabled] = useState(false);
   const [rows, setRows] = useState<EditableRow[]>(() =>
     buildInitialRows(vendedores, compradores, testemunhas, comissao)
   );
@@ -328,6 +310,7 @@ export function SendEnvelopeDialog({
     if (open) {
       setRows(buildInitialRows(vendedores, compradores, testemunhas, comissao));
       setSubmitting(false);
+      setOrderEnabled(false);
     }
   }, [open, vendedores, compradores, testemunhas, comissao]);
 
@@ -335,6 +318,27 @@ export function SendEnvelopeDialog({
     () => rows.filter((r) => r.includeInEnvelope),
     [rows]
   );
+
+  // Reordena assinantes incluídos (ordem de assinatura). Troca a posição do
+  // row com o vizinho INCLUÍDO no array `rows` — a ordem dos grupos sai daí.
+  const moveIncluded = (rowId: string, dir: -1 | 1) => {
+    setRows((prev) => {
+      const includedIdxs = prev
+        .map((r, i) => ({ r, i }))
+        .filter((x) => x.r.includeInEnvelope)
+        .map((x) => x.i);
+      const pos = includedIdxs.findIndex((i) => prev[i].rowId === rowId);
+      const targetPos = pos + dir;
+      if (pos < 0 || targetPos < 0 || targetPos >= includedIdxs.length) {
+        return prev;
+      }
+      const a = includedIdxs[pos];
+      const b = includedIdxs[targetPos];
+      const copy = [...prev];
+      [copy[a], copy[b]] = [copy[b], copy[a]];
+      return copy;
+    });
+  };
 
   // Validação: cada row incluído precisa de nome >= 2 chars e email válido.
   const validationError = useMemo(() => {
@@ -471,11 +475,14 @@ export function SendEnvelopeDialog({
       // 2) POST /envelopes — executor re-lê contract.dataJson agora atualizado.
       // Mandamos signerRoles pra o executor sobrescrever o default por
       // sourceKind quando o usuário escolheu role custom no select.
-      const signerRoles = includedRows.map((r) => ({
+      // Ordem ON: grupo = posição do row entre os incluídos (1-based). OFF:
+      // sem grupo (paralelo). includedRows já segue a ordem do array `rows`.
+      const signerRoles = includedRows.map((r, idx) => ({
         sourceKind: r.sourceKind,
         sourceIndex: r.sourceIndex,
         subKind: r.subKind,
         role: r.clicksignRole,
+        group: orderEnabled ? idx + 1 : undefined,
       }));
       const res = await fetch(`/api/contracts/${contractId}/envelopes`, {
         method: "POST",
@@ -565,6 +572,61 @@ export function SendEnvelopeDialog({
             onAdd={addTestemunha}
             addLabel="Adicionar Assinante"
           />
+
+          {/* Ordem de assinatura */}
+          <section className="space-y-2">
+            <label className="flex items-center gap-2 text-sm cursor-pointer rounded-md border bg-muted/30 px-3 py-2">
+              <input
+                type="checkbox"
+                checked={orderEnabled}
+                onChange={(e) => setOrderEnabled(e.target.checked)}
+                className="h-4 w-4 rounded border-input accent-primary"
+              />
+              <span className="font-medium">Assinar em ordem</span>
+              <span className="text-xs text-muted-foreground">
+                Cada signatário só é notificado depois que o anterior assina.
+              </span>
+            </label>
+            {orderEnabled && includedRows.length > 0 && (
+              <div className="rounded-md border divide-y">
+                {includedRows.map((r, idx) => (
+                  <div
+                    key={r.rowId}
+                    className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm"
+                  >
+                    <span className="truncate">
+                      <span className="text-muted-foreground mr-1.5">{idx + 1}º</span>
+                      {labelFor(r)}
+                    </span>
+                    <div className="flex items-center gap-1 shrink-0">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 w-6 p-0"
+                        disabled={idx === 0}
+                        onClick={() => moveIncluded(r.rowId, -1)}
+                        title="Subir"
+                      >
+                        <ArrowUp className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="h-6 w-6 p-0"
+                        disabled={idx === includedRows.length - 1}
+                        onClick={() => moveIncluded(r.rowId, 1)}
+                        title="Descer"
+                      >
+                        <ArrowDown className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
 
           {showApprovedWarning && (
             <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
