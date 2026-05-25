@@ -34,18 +34,28 @@ interface ChargeRow {
   createdAt: string;
 }
 
+// Cores via tokens semânticos do DS (dark-safe + on-brand) em vez de
+// classes Tailwind cruas. success=recebida, warning=pendente/risco,
+// info=confirmada, destructive=vencida/chargeback, muted=encerrada/neutra.
+const SEMANTIC = {
+  success: "border-success/30 bg-success/10 text-success",
+  warning: "border-warning/30 bg-warning/10 text-warning",
+  info: "border-info/30 bg-info/10 text-info",
+  danger: "border-destructive/30 bg-destructive/10 text-destructive",
+  muted: "border-transparent bg-muted text-muted-foreground",
+} as const;
 const STATUS_LABEL: Record<string, { text: string; color: string }> = {
-  PENDING: { text: "Aguardando", color: "bg-amber-100 text-amber-900 border-amber-300" },
-  CONFIRMED: { text: "Confirmada", color: "bg-blue-100 text-blue-900 border-blue-300" },
-  RECEIVED: { text: "Recebida", color: "bg-green-100 text-green-900 border-green-300" },
-  RECEIVED_IN_CASH: { text: "Dinheiro", color: "bg-green-50 text-green-800 border-green-200" },
-  OVERDUE: { text: "Vencida", color: "bg-red-100 text-red-900 border-red-300" },
-  REFUNDED: { text: "Estornada", color: "bg-gray-100 text-gray-700" },
-  REFUND_PENDING: { text: "Estorno em andamento", color: "bg-amber-50 text-amber-800" },
-  CANCELLED: { text: "Cancelada", color: "bg-gray-100 text-gray-700" },
-  CHARGEBACK: { text: "Chargeback", color: "bg-red-100 text-red-900 border-red-300" },
-  DUNNING: { text: "Em negativação", color: "bg-orange-100 text-orange-900" },
-  RISK_ANALYSIS: { text: "Análise de risco", color: "bg-amber-100 text-amber-900" },
+  PENDING: { text: "Aguardando", color: SEMANTIC.warning },
+  CONFIRMED: { text: "Confirmada", color: SEMANTIC.info },
+  RECEIVED: { text: "Recebida", color: SEMANTIC.success },
+  RECEIVED_IN_CASH: { text: "Dinheiro", color: SEMANTIC.success },
+  OVERDUE: { text: "Vencida", color: SEMANTIC.danger },
+  REFUNDED: { text: "Estornada", color: SEMANTIC.muted },
+  REFUND_PENDING: { text: "Estorno em andamento", color: SEMANTIC.warning },
+  CANCELLED: { text: "Cancelada", color: SEMANTIC.muted },
+  CHARGEBACK: { text: "Chargeback", color: SEMANTIC.danger },
+  DUNNING: { text: "Em negativação", color: SEMANTIC.warning },
+  RISK_ANALYSIS: { text: "Análise de risco", color: SEMANTIC.warning },
 };
 
 function fmtBRL(v: number) {
