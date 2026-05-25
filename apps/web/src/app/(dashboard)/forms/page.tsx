@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Plus, ExternalLink } from "lucide-react";
+import { PageHeader } from "@/components/layout/page-header";
 import { FormsActions } from "@/components/forms/FormsActions";
 
 export default async function FormsPage() {
@@ -22,15 +23,14 @@ export default async function FormsPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Formulários</h1>
+      <PageHeader title="Formulários">
         <Button asChild>
           <Link href="/forms/new">
             <Plus className="mr-2 h-4 w-4" />
             Novo Formulário
           </Link>
         </Button>
-      </div>
+      </PageHeader>
 
       {forms.length === 0 ? (
         <Card>
