@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Plus, Pencil } from "lucide-react";
+import { PageHeader } from "@/components/layout/page-header";
 import { ClauseEditor } from "./ClauseEditor";
 
 const GROUP_LABELS: Record<string, string> = {
@@ -76,18 +77,20 @@ export function ClausesPageClient({ clauses }: ClausesPageClientProps) {
 
   return (
     <div className="space-y-8">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Biblioteca de Cláusulas</h1>
+      <PageHeader
+        title="Biblioteca de Cláusulas"
+        description="Banco padronizado (G1–G6) + cláusulas base, usadas pelo agente e na montagem dos contratos."
+      >
         <Button size="sm" onClick={handleCreate}>
           <Plus className="mr-1.5 h-4 w-4" />
           Nova Cláusula
         </Button>
-      </div>
+      </PageHeader>
 
       {/* Variable Clauses */}
       {Object.keys(groupedVariable).length > 0 && (
         <div className="space-y-6">
-          <h2 className="text-lg font-semibold text-primary">
+          <h2 className="font-display text-lg font-semibold text-primary tracking-tight">
             Banco de Cláusulas Padronizadas
           </h2>
 
@@ -101,7 +104,7 @@ export function ClausesPageClient({ clauses }: ClausesPageClientProps) {
                 </h3>
                 <div className="grid gap-3 md:grid-cols-2">
                   {items.map((clause) => (
-                    <Card key={clause.id} className="group relative">
+                    <Card key={clause.id} className="group relative transition-colors hover:border-primary/30">
                       <CardHeader className="pb-2">
                         <div className="flex items-center justify-between">
                           <CardTitle className="text-sm">{clause.title}</CardTitle>
@@ -157,7 +160,7 @@ export function ClausesPageClient({ clauses }: ClausesPageClientProps) {
       {/* Fixed/Legacy Clauses */}
       {Object.keys(groupedFixed).length > 0 && (
         <div className="space-y-6">
-          <h2 className="text-lg font-semibold text-muted-foreground">
+          <h2 className="font-display text-lg font-semibold text-muted-foreground tracking-tight">
             Cláusulas Base
           </h2>
 
@@ -166,7 +169,7 @@ export function ClausesPageClient({ clauses }: ClausesPageClientProps) {
               <h3 className="text-base font-medium capitalize">{category}</h3>
               <div className="grid gap-3 md:grid-cols-2">
                 {items.map((clause) => (
-                  <Card key={clause.id} className="group relative">
+                  <Card key={clause.id} className="group relative transition-colors hover:border-primary/30">
                     <CardHeader className="pb-2">
                       <div className="flex items-center justify-between">
                         <CardTitle className="text-sm">{clause.title}</CardTitle>
