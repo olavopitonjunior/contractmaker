@@ -287,8 +287,15 @@ model Deal {
   position         Int       @default(0)
   // SLA pós-assinatura — datas terminais do funil.
   // commissionPaidAt: setado pelo botão "Marcar comissão paga" no DealDetail.
+  // contractSignedAt / chargeIssuedAt: overrides MANUAIS preenchidos quando o
+  // card é arrastado pro stage e a etapa NÃO foi feita no sistema (sem envelope
+  // ClickSign fechado / sem CommissionCharge). Quando feito no sistema, a data
+  // vem derivada de Envelope.closedAt / CommissionCharge.createdAt e estas
+  // colunas ficam nulas. A timeline usa "fonte automática ?? coluna manual".
   // lostAt + lostReason: terminal alternativo via mark-lost (qualquer stage).
   commissionPaidAt DateTime?
+  contractSignedAt DateTime?
+  chargeIssuedAt   DateTime?
   lostAt           DateTime?
   lostReason       String?
   // Serasa (2026-05) — registro de consentimento LGPD por deal pra consultas

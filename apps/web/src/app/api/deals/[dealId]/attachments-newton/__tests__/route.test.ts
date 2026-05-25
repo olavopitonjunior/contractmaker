@@ -45,13 +45,31 @@ describe("POST /api/deals/[dealId]/attachments-newton", () => {
     expect(res.status).toBe(401);
   });
 
-  it("400 mime invalido", async () => {
+  it("400 mime malformado (sem barra tipo/subtipo)", async () => {
     mockAuth.mockResolvedValue(createMockSession() as never);
     const res = await POST(
-      makeReq({ ...validBody, mime: "application/zip" }),
+      makeReq({ ...validBody, mime: "notamime" }),
       { params: { dealId: "d1" } }
     );
     expect(res.status).toBe(400);
+  });
+
+  it("aceita qualquer tipo de arquivo bem-formado (ex: zip) — armazenamento", async () => {
+    mockAuth.mockResolvedValue(createMockSession() as never);
+    mockPrisma.deal.findUnique.mockResolvedValue(baseDeal as never);
+    mockPrisma.dealAttachment.create.mockResolvedValue({
+      id: "att-zip",
+      filename: "doc.zip",
+      mime: "application/zip",
+      url: "https://blob/fake.zip",
+      category: null,
+      createdAt: new Date(),
+    } as never);
+    const res = await POST(
+      makeReq({ ...validBody, filename: "doc.zip", mime: "application/zip" }),
+      { params: { dealId: "d1" } }
+    );
+    expect(res.status).toBe(201);
   });
 
   it("404 deal inexistente", async () => {

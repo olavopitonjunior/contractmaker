@@ -39,6 +39,9 @@ interface SendAttachmentEnvelopeDialogProps {
   attachments: AttachmentPick[];
   /** Vendedores/compradores extraídos do dataJson — vira chips de auto-fill. */
   partySuggestions: PartySuggestion[];
+  /** Pré-seleciona este anexo (PDF) ao abrir — usado quando aberto a partir
+   *  do botão "Enviar para assinatura" de um card específico. */
+  preselectAttachmentId?: string;
   onSent: () => void;
 }
 
@@ -70,6 +73,7 @@ export function SendAttachmentEnvelopeDialog({
   dealId,
   attachments,
   partySuggestions,
+  preselectAttachmentId,
   onSent,
 }: SendAttachmentEnvelopeDialogProps) {
   const pdfAttachments = useMemo(
@@ -88,14 +92,19 @@ export function SendAttachmentEnvelopeDialog({
 
   useEffect(() => {
     if (!open) return;
-    // Pre-seleciona o primeiro PDF disponível.
-    if (pdfAttachments.length > 0 && !attachmentId) {
+    // Pré-seleciona o anexo pedido (card específico) ou o primeiro PDF.
+    if (
+      preselectAttachmentId &&
+      pdfAttachments.some((a) => a.id === preselectAttachmentId)
+    ) {
+      setAttachmentId(preselectAttachmentId);
+    } else if (pdfAttachments.length > 0 && !attachmentId) {
       setAttachmentId(pdfAttachments[0].id);
     }
     if (signers.length === 0) {
       setSigners([newSignerDraft()]);
     }
-  }, [open, pdfAttachments, attachmentId, signers.length]);
+  }, [open, pdfAttachments, attachmentId, signers.length, preselectAttachmentId]);
 
   function updateSigner(id: string, patch: Partial<SignerDraft>) {
     setSigners((prev) =>

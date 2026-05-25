@@ -1,6 +1,6 @@
 "use client";
 
-import { FileText, Loader2, AlertCircle, X, CheckCircle2, RefreshCw, ExternalLink, Download, Sparkles } from "lucide-react";
+import { FileText, Loader2, AlertCircle, X, CheckCircle2, RefreshCw, ExternalLink, Download, Sparkles, Wand2, FileSignature } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,6 +46,16 @@ interface DocumentCardProps {
    * status "awaiting". Caller faz POST /attachments/[id]/extract.
    */
   onExtract?: (id: string) => void;
+  /**
+   * Aplica os campos extraídos no negócio (autofill). Quando presente e o doc
+   * está "ready" com fields + assignment definido, mostra "Aplicar aos campos".
+   */
+  onApply?: (id: string) => void;
+  /**
+   * Envia o documento (PDF) pra assinatura. Quando presente e o doc é PDF,
+   * mostra "Enviar para assinatura". Caller abre o SendAttachmentEnvelopeDialog.
+   */
+  onSendToSignature?: (id: string) => void;
   readOnly?: boolean;
 }
 
@@ -82,6 +92,8 @@ export function DocumentCard({
   onRemove,
   onRetry,
   onExtract,
+  onApply,
+  onSendToSignature,
   readOnly = false,
 }: DocumentCardProps) {
   const isImage = doc.mime.startsWith("image/");
@@ -281,7 +293,7 @@ export function DocumentCard({
         )}
 
         {doc.status === "ready" && (
-          <div className="mt-1 flex gap-1">
+          <div className="mt-1 flex flex-wrap gap-1">
             <Button
               type="button"
               size="sm"
@@ -308,6 +320,34 @@ export function DocumentCard({
                 Baixar
               </a>
             </Button>
+            {!readOnly &&
+              onApply &&
+              doc.fields &&
+              doc.assignment.kind !== "outro" &&
+              !doc.applied && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-2 text-[11px]"
+                  onClick={() => onApply(doc.id)}
+                >
+                  <Wand2 className="h-3 w-3 mr-1" />
+                  Aplicar aos campos do negócio
+                </Button>
+              )}
+            {!readOnly && onSendToSignature && doc.mime === "application/pdf" && (
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 px-2 text-[11px]"
+                onClick={() => onSendToSignature(doc.id)}
+              >
+                <FileSignature className="h-3 w-3 mr-1" />
+                Enviar para assinatura
+              </Button>
+            )}
           </div>
         )}
       </div>

@@ -15,17 +15,16 @@ export const runtime = "nodejs";
 export const maxDuration = 30;
 
 const MAX_BYTES = 10 * 1024 * 1024;
-const ALLOWED_MIMES = [
-  "image/jpeg",
-  "image/png",
-  "image/webp",
-  "image/gif",
-  "application/pdf",
-];
+
+// Armazenamento aceita QUALQUER tipo de documento (não só imagem/PDF) — a pasta
+// do deal guarda contratos avulsos, planilhas, etc. OCR (PDF/imagem) e assinatura
+// (PDF) gateiam o tipo nas suas próprias rotas/UI. Mantemos o cap de 10MB e a
+// sanitização do filename. Validamos só o SHAPE do mime (`tipo/subtipo`).
+const MIME_SHAPE = /^[\w.+-]+\/[\w.+-]+$/;
 
 const bodySchema = z.object({
   filename: z.string().min(1).max(255),
-  mime: z.enum(ALLOWED_MIMES as unknown as [string, ...string[]]),
+  mime: z.string().min(1).max(255).regex(MIME_SHAPE, "mime inválido"),
   base64Data: z.string().min(1),
   category: z.string().optional(),
 });
