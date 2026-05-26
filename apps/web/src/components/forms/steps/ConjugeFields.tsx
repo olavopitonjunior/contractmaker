@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { UFSelect } from "@/components/forms/UFSelect";
+import { NativeSelect } from "@/components/forms/NativeSelect";
 
 function FieldError({ error }: { error?: { message?: string } }) {
   if (!error?.message) return null;
@@ -94,6 +95,19 @@ export function ConjugeFields({ form, index, prefix, listKey }: ConjugeFieldsPro
           <Input
             {...form.register(`${prefix}.conjuge.data_nascimento`)}
             type="date"
+          />
+        </FormField>
+        <FormField label="Sexo do Cônjuge">
+          <NativeSelect
+            value={form.watch(`${prefix}.conjuge.sexo`) || ""}
+            onChange={(v) =>
+              form.setValue(`${prefix}.conjuge.sexo`, v, { shouldDirty: true })
+            }
+            options={[
+              { value: "", label: "Não informado" },
+              { value: "M", label: "Masculino" },
+              { value: "F", label: "Feminino" },
+            ]}
           />
         </FormField>
         <FormField label="Nome da Mãe do Cônjuge" className="md:col-span-2">
