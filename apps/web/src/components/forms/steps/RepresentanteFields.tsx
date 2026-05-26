@@ -69,6 +69,19 @@ export function RepresentanteFields({ form, prefix }: RepresentanteFieldsProps) 
           type="date"
         />
       </FormField>
+      <FormField label="Sexo">
+        <NativeSelect
+          value={form.watch(`${prefix}.representante.sexo`) || ""}
+          onChange={(v) =>
+            form.setValue(`${prefix}.representante.sexo`, v, { shouldDirty: true })
+          }
+          options={[
+            { value: "", label: "Não informado" },
+            { value: "M", label: "Masculino" },
+            { value: "F", label: "Feminino" },
+          ]}
+        />
+      </FormField>
       <FormField label="Nome da Mãe" className="md:col-span-2">
         <Input
           {...form.register(`${prefix}.representante.nome_mae`)}

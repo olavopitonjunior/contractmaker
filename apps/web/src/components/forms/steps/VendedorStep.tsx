@@ -309,6 +309,19 @@ function PessoaFisicaFields({
             <FormField label="RG do Procurador">
               <Input {...form.register(`${prefix}.procurador.rg`)} placeholder="RG" />
             </FormField>
+            <FormField label="Sexo do Procurador">
+              <NativeSelect
+                value={form.watch(`${prefix}.procurador.sexo`) || ""}
+                onChange={(v) =>
+                  form.setValue(`${prefix}.procurador.sexo`, v, { shouldDirty: true })
+                }
+                options={[
+                  { value: "", label: "Não informado" },
+                  { value: "M", label: "Masculino" },
+                  { value: "F", label: "Feminino" },
+                ]}
+              />
+            </FormField>
             <FormField label="Endereço do Procurador" className="md:col-span-2">
               <Input
                 {...form.register(`${prefix}.procurador.endereco`)}
