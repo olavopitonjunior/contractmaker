@@ -121,6 +121,17 @@ vi.mock("@/lib/db/prisma", () => {
       upsert: vi.fn(),
       delete: vi.fn(),
     },
+    platformConfig: {
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
+    orgFinancialSettings: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
+    asaasAccount: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      findFirst: vi.fn().mockResolvedValue(null),
+    },
     deal: {
       groupBy: vi.fn().mockResolvedValue([]),
       findMany: vi.fn().mockResolvedValue([]),

@@ -4,6 +4,7 @@ import { audit } from "@/lib/security/audit";
 import { AsaasError } from "@/lib/asaas/errors";
 import { upsertCustomer } from "@/lib/asaas/customers";
 import { getAccountWithApiKey } from "@/lib/asaas/account";
+import { resolvePlatformFee } from "@/lib/asaas/platform-fee";
 import {
   createPayment,
   getPixQrCode,
@@ -150,18 +151,10 @@ export async function runCreateCommissionCharge(
 
   // Build payload — settings agora são per-conta. Fallback pra org-level
   // mantido durante migração (settings antigas com accountId=null).
-  const feesSettings =
-    (await prisma.orgFinancialSettings.findUnique({
-      where: { accountId: account.id },
-    })) ??
-    (await prisma.orgFinancialSettings.findFirst({
-      where: { orgId: input.orgId, accountId: null },
-    }));
-  const platformFeePercent = feesSettings?.platformFeePercent ?? 0;
-  const platformWalletId =
-    feesSettings?.platformFeeWalletId ??
-    process.env.PLATFORM_WALLET_ID ??
-    undefined;
+  // Fase 1d: markup global (PlatformConfig) com override per-org (OrgFinancialSettings).
+  const { platformFeePercent, platformWalletId: resolvedPlatformWalletId } =
+    await resolvePlatformFee(input.orgId, account.id);
+  const platformWalletId = resolvedPlatformWalletId ?? undefined;
 
   let payer;
   let value;
@@ -503,18 +496,10 @@ export async function buildChargePreview(args: {
     };
   }
 
-  const feesSettings =
-    (await prisma.orgFinancialSettings.findUnique({
-      where: { accountId: account.id },
-    })) ??
-    (await prisma.orgFinancialSettings.findFirst({
-      where: { orgId: args.orgId, accountId: null },
-    }));
-  const platformFeePercent = feesSettings?.platformFeePercent ?? 0;
-  const platformWalletId =
-    feesSettings?.platformFeeWalletId ??
-    process.env.PLATFORM_WALLET_ID ??
-    undefined;
+  // Fase 1d: markup global (PlatformConfig) com override per-org (OrgFinancialSettings).
+  const { platformFeePercent, platformWalletId: resolvedPlatformWalletId } =
+    await resolvePlatformFee(args.orgId, account.id);
+  const platformWalletId = resolvedPlatformWalletId ?? undefined;
 
   const data = contract.dataJson as unknown as DadosContratoLite;
   let payer;

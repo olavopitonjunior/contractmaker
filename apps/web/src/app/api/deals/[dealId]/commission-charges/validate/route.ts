@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
+import { resolvePlatformFee } from "@/lib/asaas/platform-fee";
 import {
   validatePayer,
   validateCharge,
@@ -101,14 +102,9 @@ export async function POST(
     requireCapability: "view",
   });
   const account = resolved?.account ?? null;
-  const settings = account
-    ? (await prisma.orgFinancialSettings.findUnique({
-        where: { accountId: account.id },
-      })) ??
-      (await prisma.orgFinancialSettings.findFirst({
-        where: { orgId: ctx.orgId, accountId: null },
-      }))
-    : null;
+  // Fase 1d: markup global (PlatformConfig) + override per-org. Mantém validate
+  // consistente com a criação da cobrança (charges-action / nova).
+  const platformFee = await resolvePlatformFee(ctx.orgId, account?.id ?? null);
 
   const results: Record<string, ValidationResult> = {};
 
@@ -125,9 +121,8 @@ export async function POST(
     results.splits = validateSplits({
       customSplits: parsed.data.splits?.customSplits,
       display: parsed.data.splits?.display,
-      platformFeePercent: settings?.platformFeePercent ?? 0,
-      platformWalletId:
-        settings?.platformFeeWalletId ?? process.env.PLATFORM_WALLET_ID ?? null,
+      platformFeePercent: platformFee.platformFeePercent,
+      platformWalletId: platformFee.platformWalletId,
       orgWalletId: account?.walletId,
     });
   }

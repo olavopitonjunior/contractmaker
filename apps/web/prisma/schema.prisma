@@ -1553,6 +1553,10 @@ model AsaasAccount {
   asaasId                String    @unique
   walletId               String    @unique
   accountNumber          String?
+  // White-label Asaas (Fase 1d): id da AsaasAccount-mãe da plataforma quando
+  // esta é uma subconta-filha. null = é a própria conta-mãe ou conta legada
+  // independente. Marca a hierarquia; o markup global vem de PlatformConfig.
+  parentAccountId        String?
   apiKeyEncrypted        String    @db.Text
   apiKeyIvBase64         String
   apiKeyTagBase64        String
