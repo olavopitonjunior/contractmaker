@@ -597,7 +597,10 @@ describe("Phase F.II-γ — CENPROT Nacional com pre-flight GOV.BR", () => {
     expect(nacional).toBeDefined();
   });
 
-  it("parte SP dispara nacional E cenprot-sp local (2026-05-21: nacional p/ todos)", () => {
+  it("parte SP com GOV.BR: dispara só o nacional (cenprot-sp suprimido por redundância)", () => {
+    // Redesign 2026-05-26: quando o CENPROT Nacional (ieptb/protestos) dispara,
+    // o cenprot-sp/protestos é redundante (Nacional cobre SP + detalhes-sp
+    // encadeado) → suprimido. Sem GOV.BR, o SP-direto volta (teste abaixo).
     const plan = planCertidoesForDeal(
       { vendedores: [VENDEDOR_PF_SP], compradores: [], imoveis: [] },
       undefined,
@@ -605,7 +608,7 @@ describe("Phase F.II-γ — CENPROT Nacional com pre-flight GOV.BR", () => {
       { govBrActive: true }
     );
     expect(plan.jobs.find((j) => j.endpoint === "ieptb/protestos")).toBeDefined();
-    expect(plan.jobs.find((j) => j.endpoint === "cenprot-sp/protestos")).toBeDefined();
+    expect(plan.jobs.find((j) => j.endpoint === "cenprot-sp/protestos")).toBeUndefined();
   });
 
   it("govBrActive=false + parte SP também gera SkippedJob nacional (gate vale p/ todos)", () => {
@@ -955,7 +958,7 @@ describe("Redesign 2026-05-26 — regiões (imóvel + endereço) e camadas (tier
     expect(comp.every((j) => j.tier === "opcional")).toBe(true);
   });
 
-  it("IPTU/municipal do imóvel → tier opcional, region imovel", () => {
+  it("IPTU/municipal do imóvel → tier imovel, region imovel", () => {
     const plan = planCertidoesForDeal({
       vendedores: [VENDEDOR_PF_SP],
       compradores: [],
@@ -963,7 +966,7 @@ describe("Redesign 2026-05-26 — regiões (imóvel + endereço) e camadas (tier
     });
     const iptu = plan.jobs.filter((j) => j.targetKind === "imovel");
     expect(iptu.length).toBeGreaterThan(0);
-    expect(iptu.every((j) => j.tier === "opcional")).toBe(true);
+    expect(iptu.every((j) => j.tier === "imovel")).toBe(true);
     expect(iptu.every((j) => j.region?.kind === "imovel")).toBe(true);
   });
 

@@ -538,7 +538,7 @@ const PESQUISA_ENDPOINTS = new Set<string>(["onr/mapa-registro-imoveis"]);
  */
 function tierForJob(kind: TargetKind, endpoint: string): JobTier {
   if (PESQUISA_ENDPOINTS.has(endpoint) || endpoint.startsWith("serasa/")) return "pesquisa";
-  if (kind === "imovel") return "opcional"; // IPTU/municipal, matrícula ONR, CCIR
+  if (kind === "imovel") return "imovel"; // IPTU/municipal, matrícula ONR (visualização), CCIR
   if (VENDEDOR_SIDE_KINDS.has(kind)) return "padrao";
   // comprador, diligenciado (outras pessoas)
   return "opcional";
@@ -1006,8 +1006,12 @@ export function planCertidoesForDeal(
     // cobertura Infosimples sem GOV.BR).
     // H.4 (Phase H, 2026-04-18): adicionado `uf: "SP"` no payload — portal
     // CENPROT exige location hint; sem ele, code 612/605 em ~75% dos casos.
+    // CENPROT-SP é REDUNDANTE com o CENPROT Nacional (ieptb/protestos) quando
+    // este dispara (govBrActive) — o Nacional cobre SP e o detalhamento de
+    // cartórios SP é encadeado via ieptb/protestos-detalhes-sp. Então só dispara
+    // o SP-direto quando o Nacional NÃO está disponível (sem GOV.BR).
     const hasSpRegion = regionByUf.has("SP") || partyUf === "SP";
-    if ((expandAll || hasSpRegion) && (cpf || cnpj)) {
+    if ((expandAll || hasSpRegion) && (cpf || cnpj) && !govBrActive) {
       const region = regionByUf.get("SP") ?? makeRegion("outro", "SP");
       pushRegional(
         buildJob("cenprot-sp/protestos", kind, index, label, {

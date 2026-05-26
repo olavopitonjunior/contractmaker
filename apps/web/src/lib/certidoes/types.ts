@@ -54,10 +54,12 @@ export interface NormalizedResult {
  * Camada de seleção na popup de disparo (redesign 2026-05-26):
  *   - "padrao": certidões dos vendedores (+ dependentes), nas regiões do imóvel
  *     e do endereço deles. Marcado por padrão.
- *   - "opcional": compradores, ONR matrícula, IPTU/municipal, pessoas extras.
+ *   - "imovel": certidões do IMÓVEL (matrícula/visualização ONR, IPTU/municipal,
+ *     CCIR). Seção própria, desmarcada.
+ *   - "opcional": compradores e pessoas adicionadas manualmente.
  *   - "pesquisa": Pesquisa de Bens (ONR) e certidões menos comuns (extras).
  */
-export type JobTier = "padrao" | "opcional" | "pesquisa";
+export type JobTier = "padrao" | "imovel" | "opcional" | "pesquisa";
 
 /**
  * Região à qual um job pertence — usada pela UI pra sub-agrupar dentro do
