@@ -162,10 +162,12 @@ export function ExtractCertidoesDialog({
   const [addingLocal, setAddingLocal] = useState(false);
   const [pickerFor, setPickerFor] = useState<{ kind: string; index: number; label: string } | null>(null);
   // Seções colapsáveis
+  // Padrão + Imóvel abertas (o que costuma ser revisado); Opcional (compradores)
+  // e Pesquisa colapsadas por padrão pra reduzir o scroll — abrem em 1 clique.
   const [openSections, setOpenSections] = useState<Record<Tier, boolean>>({
     padrao: true,
     imovel: true,
-    opcional: true,
+    opcional: false,
     pesquisa: false,
   });
 
@@ -375,7 +377,17 @@ export function ExtractCertidoesDialog({
     : null;
 
   // ---- renderers ----------------------------------------------------------
-  const renderJobRow = (j: PlannedJob) => {
+  // Remove o nome da pessoa/imóvel do rótulo (já está no cabeçalho do grupo).
+  const stripLabel = (label: string, name?: string) =>
+    name ? label.replace(` - ${name}`, "") : label;
+  // Nome da pessoa/imóvel do grupo (para esconder no rótulo das linhas).
+  const targetPersonName = (kind: string, idx: number): string | undefined => {
+    const gl = groupLabel(kind, idx, targetLabels);
+    const i = gl.indexOf(": ");
+    return i >= 0 ? gl.slice(i + 2).trim() : undefined;
+  };
+
+  const renderJobRow = (j: PlannedJob, stripName?: string) => {
     const isSelected = selected.has(jobKey(j));
     const isExtra = extras.some((e) => jobKey(e) === jobKey(j));
     const h = apiHealth[j.endpoint];
@@ -399,7 +411,7 @@ export function ExtractCertidoesDialog({
           onChange={() => toggleJob(j)}
           className="h-3.5 w-3.5 shrink-0 accent-primary"
         />
-        <span className="flex-1 truncate min-w-0">{j.label}</span>
+        <span className="flex-1 truncate min-w-0">{stripLabel(j.label, stripName)}</span>
         <span className="flex items-center gap-1.5 shrink-0">
           {(h === "down" || h === "degraded") && (
             <span
@@ -444,14 +456,14 @@ export function ExtractCertidoesDialog({
   const skipIsNoApi = (s: SkippedJob) =>
     s.missingField === "cobertura" ||
     /cobertura|sem integra|portal oficial|sem cobertura/i.test(s.reason);
-  const renderSkipRow = (s: SkippedJob, i: number) => (
+  const renderSkipRow = (s: SkippedJob, stripName?: string) => (
     <div
-      key={`skip-${s.endpoint}-${s.targetKind}-${s.targetIndex}-${i}`}
+      key={`skip-${s.endpoint}-${s.targetKind}-${s.targetIndex}`}
       className="flex items-center gap-2 text-xs rounded px-2 py-1 opacity-70"
       title={s.reason}
     >
       <input type="checkbox" disabled className="h-3.5 w-3.5 shrink-0" />
-      <span className="flex-1 truncate min-w-0 text-muted-foreground">{s.label}</span>
+      <span className="flex-1 truncate min-w-0 text-muted-foreground">{stripLabel(s.label, stripName)}</span>
       <span className="flex items-center gap-1.5 shrink-0">
         <Badge
           variant="outline"
@@ -494,6 +506,7 @@ export function ExtractCertidoesDialog({
               (REGION_ORDER[a[1][0].region?.kind ?? "outro"] ?? 9) -
               (REGION_ORDER[b[1][0].region?.kind ?? "outro"] ?? 9)
           );
+          const pName = targetPersonName(kind, idx);
           return (
             <div key={tKey} className="rounded border">
               <div className="bg-muted/30 px-3 py-1.5 border-b text-xs font-semibold">
@@ -506,11 +519,11 @@ export function ExtractCertidoesDialog({
                       <MapPin className="h-3 w-3" />
                       {regionHeader(rJobs[0].region)}
                     </div>
-                    <div className="space-y-0.5">{rJobs.map(renderJobRow)}</div>
+                    <div className="space-y-0.5">{rJobs.map((j) => renderJobRow(j, pName))}</div>
                   </div>
                 ))}
                 {tSkips.length > 0 && (
-                  <div className="space-y-0.5">{tSkips.map(renderSkipRow)}</div>
+                  <div className="space-y-0.5">{tSkips.map((s) => renderSkipRow(s, pName))}</div>
                 )}
               </div>
             </div>
@@ -590,8 +603,8 @@ export function ExtractCertidoesDialog({
                 )}
               </div>
               <div className="p-2 space-y-0.5">
-                {tJobs.map(renderJobRow)}
-                {tSkips.map(renderSkipRow)}
+                {tJobs.map((j) => renderJobRow(j, targetPersonName(kind, idx)))}
+                {tSkips.map((s) => renderSkipRow(s, targetPersonName(kind, idx)))}
               </div>
             </div>
           );
@@ -612,6 +625,7 @@ export function ExtractCertidoesDialog({
     children: ReactNode;
   }) => {
     const jobs = byTier[tier];
+    const tierSkips = skipsByTier[tier];
     const tierSelected = jobs.filter((j) => selected.has(jobKey(j))).length;
     const isOpen = openSections[tier];
     return (
@@ -627,6 +641,9 @@ export function ExtractCertidoesDialog({
           </button>
           <span className="text-[11px] text-muted-foreground">
             {tierSelected}/{jobs.length}
+            {tierSkips.length > 0 && (
+              <span className="text-amber-600"> · {tierSkips.length} c/ pendência</span>
+            )}
           </span>
           <div className="flex-1" />
           <div className="flex items-center gap-1">
@@ -652,7 +669,7 @@ export function ExtractCertidoesDialog({
             <DialogTitle>Emitir certidões</DialogTitle>
             <DialogDescription>
               O <strong>padrão</strong> (certidões dos vendedores nas regiões do imóvel e do endereço deles) já
-              vem marcado. Compradores, ONR e IPTU são opcionais.
+              vem marcado. Imóvel, compradores e pesquisas são opções — abra cada seção para incluir.
             </DialogDescription>
           </DialogHeader>
 
