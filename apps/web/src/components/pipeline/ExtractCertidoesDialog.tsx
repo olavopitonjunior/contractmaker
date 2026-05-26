@@ -54,6 +54,8 @@ interface SkippedJob {
   targetIndex: number;
   reason: string;
   missingField: string;
+  tier?: Tier;
+  region?: JobRegion;
 }
 
 interface ExtractionPlan {
@@ -349,6 +351,24 @@ export function ExtractCertidoesDialog({
     return out;
   }, [allJobs]);
 
+  // Skips (não selecionáveis) por camada — pra mostrar Matrícula/IPTU/Bens como
+  // opções com "falta X / indisponível" dentro da própria seção, não só no fim.
+  const skipsByTier = useMemo(() => {
+    const out: Record<Tier, SkippedJob[]> = { padrao: [], opcional: [], pesquisa: [] };
+    for (const s of plan?.skipped ?? []) out[(s.tier ?? "opcional") as Tier].push(s);
+    return out;
+  }, [plan]);
+
+  const anyMissingData = useMemo(
+    () =>
+      (plan?.skipped ?? []).some(
+        (s) =>
+          s.missingField !== "cobertura" &&
+          !/cobertura|sem integra|portal oficial|sem cobertura/i.test(s.reason)
+      ),
+    [plan]
+  );
+
   const formUrl = formToken
     ? `${typeof window !== "undefined" ? window.location.origin : ""}/f/${formToken}`
     : null;
@@ -419,20 +439,47 @@ export function ExtractCertidoesDialog({
     );
   };
 
-  // Padrão: por alvo → por região.
+  // Linha de SKIP (opção indisponível): mostra o que falta / por que não roda.
+  const skipIsNoApi = (s: SkippedJob) =>
+    s.missingField === "cobertura" ||
+    /cobertura|sem integra|portal oficial|sem cobertura/i.test(s.reason);
+  const renderSkipRow = (s: SkippedJob, i: number) => (
+    <div
+      key={`skip-${s.endpoint}-${s.targetKind}-${s.targetIndex}-${i}`}
+      className="flex items-center gap-2 text-xs rounded px-2 py-1 opacity-70"
+      title={s.reason}
+    >
+      <input type="checkbox" disabled className="h-3.5 w-3.5 shrink-0" />
+      <span className="flex-1 truncate min-w-0 text-muted-foreground">{s.label}</span>
+      <span className="flex items-center gap-1.5 shrink-0">
+        <Badge
+          variant="outline"
+          className={`text-[9px] ${
+            skipIsNoApi(s) ? "text-muted-foreground" : "border-amber-400 text-amber-600"
+          }`}
+        >
+          {skipIsNoApi(s) ? "no portal" : "faltam dados"}
+        </Badge>
+      </span>
+    </div>
+  );
+
+  // Padrão: por alvo → por região (+ skips do alvo como "faltam dados").
   const renderPadrao = () => {
     const jobs = byTier.padrao;
-    if (jobs.length === 0)
+    const skips = skipsByTier.padrao;
+    if (jobs.length === 0 && skips.length === 0)
       return <p className="text-xs text-muted-foreground px-1 py-2">Nenhuma certidão padrão para este negócio.</p>;
-    const targets = new Map<string, PlannedJob[]>();
-    for (const j of jobs) {
-      const k = `${j.targetKind}-${j.targetIndex}`;
-      if (!targets.has(k)) targets.set(k, []);
-      targets.get(k)!.push(j);
-    }
+    const targets = new Map<string, { jobs: PlannedJob[]; skips: SkippedJob[] }>();
+    const ensure = (k: string) => {
+      if (!targets.has(k)) targets.set(k, { jobs: [], skips: [] });
+      return targets.get(k)!;
+    };
+    for (const j of jobs) ensure(`${j.targetKind}-${j.targetIndex}`).jobs.push(j);
+    for (const s of skips) ensure(`${s.targetKind}-${s.targetIndex}`).skips.push(s);
     return (
       <div className="space-y-2">
-        {Array.from(targets.entries()).map(([tKey, tJobs]) => {
+        {Array.from(targets.entries()).map(([tKey, { jobs: tJobs, skips: tSkips }]) => {
           const [kind, idxStr] = tKey.split("-");
           const idx = Number(idxStr);
           const regions = new Map<string, PlannedJob[]>();
@@ -461,6 +508,9 @@ export function ExtractCertidoesDialog({
                     <div className="space-y-0.5">{rJobs.map(renderJobRow)}</div>
                   </div>
                 ))}
+                {tSkips.length > 0 && (
+                  <div className="space-y-0.5">{tSkips.map(renderSkipRow)}</div>
+                )}
               </div>
             </div>
           );
@@ -502,19 +552,24 @@ export function ExtractCertidoesDialog({
     );
   };
 
-  // Opcional / Pesquisa: por alvo, com botão "+ Adicionar outras" (picker).
-  const renderByTarget = (jobs: PlannedJob[], opts: { picker?: boolean } = {}) => {
-    if (jobs.length === 0)
+  // Opcional / Pesquisa: por alvo (jobs + skips), com botão "+ Adicionar outras".
+  const renderByTarget = (
+    jobs: PlannedJob[],
+    skips: SkippedJob[],
+    opts: { picker?: boolean } = {}
+  ) => {
+    if (jobs.length === 0 && skips.length === 0)
       return <p className="text-xs text-muted-foreground px-1 py-2">Nada aqui.</p>;
-    const targets = new Map<string, PlannedJob[]>();
-    for (const j of jobs) {
-      const k = `${j.targetKind}-${j.targetIndex}`;
-      if (!targets.has(k)) targets.set(k, []);
-      targets.get(k)!.push(j);
-    }
+    const targets = new Map<string, { jobs: PlannedJob[]; skips: SkippedJob[] }>();
+    const ensure = (k: string) => {
+      if (!targets.has(k)) targets.set(k, { jobs: [], skips: [] });
+      return targets.get(k)!;
+    };
+    for (const j of jobs) ensure(`${j.targetKind}-${j.targetIndex}`).jobs.push(j);
+    for (const s of skips) ensure(`${s.targetKind}-${s.targetIndex}`).skips.push(s);
     return (
       <div className="space-y-2">
-        {Array.from(targets.entries()).map(([tKey, tJobs]) => {
+        {Array.from(targets.entries()).map(([tKey, { jobs: tJobs, skips: tSkips }]) => {
           const [kind, idxStr] = tKey.split("-");
           const idx = Number(idxStr);
           return (
@@ -533,7 +588,10 @@ export function ExtractCertidoesDialog({
                   </Button>
                 )}
               </div>
-              <div className="p-2 space-y-0.5">{tJobs.map(renderJobRow)}</div>
+              <div className="p-2 space-y-0.5">
+                {tJobs.map(renderJobRow)}
+                {tSkips.map(renderSkipRow)}
+              </div>
             </div>
           );
         })}
@@ -612,10 +670,21 @@ export function ExtractCertidoesDialog({
                     Só as que faltaram
                   </Button>
                 )}
+                {anyMissingData && formUrl && (
+                  <a
+                    href={formUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-blue-600 hover:underline"
+                    title="Abre o formulário do negócio em nova aba para completar os dados que faltam"
+                  >
+                    <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
+                    Completar dados no formulário
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                )}
                 <div className="flex-1" />
-                <div className="text-xs text-muted-foreground">
-                  {selectedCount} marcada(s)
-                </div>
+                <div className="text-xs text-muted-foreground">{selectedCount} marcada(s)</div>
               </div>
 
               <div className="flex-1 overflow-y-auto min-h-0 space-y-3 pr-1">
@@ -632,7 +701,7 @@ export function ExtractCertidoesDialog({
                   title="Opcional"
                   desc="Compradores, registro do imóvel (ONR/matrícula), IPTU e tributos municipais."
                 >
-                  {renderByTarget(byTier.opcional, { picker: true })}
+                  {renderByTarget(byTier.opcional, skipsByTier.opcional, { picker: true })}
                   {onAddPerson && (
                     <Button
                       size="sm"
@@ -651,7 +720,7 @@ export function ExtractCertidoesDialog({
                   title="Pesquisa adicional"
                   desc="Pesquisa de Bens (ONR) e certidões menos comuns."
                 >
-                  {renderByTarget(byTier.pesquisa, { picker: true })}
+                  {renderByTarget(byTier.pesquisa, skipsByTier.pesquisa, { picker: true })}
                 </Section>
 
                 {/* Em breve — Serasa */}
@@ -668,61 +737,6 @@ export function ExtractCertidoesDialog({
                   </p>
                 </div>
 
-                {/* Pendências */}
-                {(() => {
-                  const isNoApi = (s: SkippedJob) =>
-                    s.missingField === "cobertura" ||
-                    /cobertura|sem integra|portal oficial|n[ãa]o emite|sem cobertura/i.test(s.reason);
-                  const noApi = plan.skipped.filter(isNoApi);
-                  const missingData = plan.skipped.filter((s) => !isNoApi(s));
-                  return (
-                    <>
-                      {missingData.length > 0 && (
-                        <div className="rounded border border-amber-200 bg-amber-50/40 p-3">
-                          <div className="flex flex-wrap items-center gap-2 mb-1">
-                            <h4 className="text-xs font-medium flex items-center gap-1.5">
-                              <AlertCircle className="h-3.5 w-3.5 text-amber-600" />
-                              Faltam dados do formulário ({missingData.length})
-                            </h4>
-                            {formUrl && (
-                              <a
-                                href={formUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="inline-flex items-center gap-1 text-[11px] text-blue-600 hover:underline"
-                              >
-                                Completar no formulário
-                                <ExternalLink className="h-3 w-3" />
-                              </a>
-                            )}
-                          </div>
-                          <ul className="text-[11px] space-y-0.5 text-muted-foreground">
-                            {missingData.map((s, i) => (
-                              <li key={i}>
-                                <strong className="text-foreground">{s.label}</strong>: {s.reason}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                      {noApi.length > 0 && (
-                        <div className="rounded border border-muted bg-muted/20 p-3">
-                          <h4 className="text-xs font-medium mb-1 flex items-center gap-1.5">
-                            <AlertCircle className="h-3.5 w-3.5 text-muted-foreground" />
-                            Sem cobertura de API — extrair no portal ({noApi.length})
-                          </h4>
-                          <ul className="text-[11px] space-y-0.5 text-muted-foreground">
-                            {noApi.map((s, i) => (
-                              <li key={i}>
-                                <strong className="text-foreground">{s.label}</strong>: {s.reason}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                      )}
-                    </>
-                  );
-                })()}
               </div>
 
               <div className="shrink-0 rounded-md border bg-muted/20 p-3 text-sm flex flex-wrap items-center gap-x-3 gap-y-1">

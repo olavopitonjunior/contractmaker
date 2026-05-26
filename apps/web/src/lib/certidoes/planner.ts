@@ -1048,9 +1048,11 @@ export function planCertidoesForDeal(
 
     // ---- Pesquisa de bens ONR (Phase L) — diligência patrimonial nacional ----
     // `onr/mapa-registro-imoveis` localiza imóveis em nome do CPF/CNPJ. Custo no
-    // saldo do portal ONR → picker-only (expandAll) para não inflar o plano
-    // padrão. Gated por onrActive (credenciais ONR configuradas).
-    if (expandAll && (cpf || cnpj)) {
+    // saldo do portal ONR. Camada "pesquisa" (NÃO marcada por padrão) → aparece
+    // como opção opt-in na seção "Pesquisa adicional", sem inflar o custo padrão.
+    // Restrito ao lado vendedor (diligência patrimonial dos vendedores). Quando
+    // não há credencial ONR, vira skip explicando como habilitar.
+    if ((cpf || cnpj) && VENDEDOR_SIDE_KINDS.has(kind)) {
       const ep = "onr/mapa-registro-imoveis";
       if (onrActive) {
         jobs.push(
