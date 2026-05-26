@@ -192,8 +192,6 @@ CLÁUSULA 3ª — DA BASE LEGAL
   },
 ];
 
-const SHARED_ORG_ID = process.env.SHARED_ORG_ID ?? "cmnt1ldo4000111bw4yo517k0";
-
 async function main() {
   const argOrg = process.argv.find((a) => a.startsWith("--org="))?.split("=")[1];
   const orgs = argOrg

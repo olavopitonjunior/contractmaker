@@ -120,8 +120,23 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
 });
 
-// Helper to get current user's org
-export async function getUserOrg(userId: string) {
+// Helper to get current user's org.
+// Fase 1a: com subdomainHint (vindo do header x-org-subdomain via middleware),
+// resolve a org pelo subdomínio E valida que o user é membro dela — se não for,
+// retorna null (sem acesso àquele tenant). Sem hint (apex), mantém o
+// comportamento legado: primeira membership.
+export async function getUserOrg(
+  userId: string,
+  opts?: { subdomainHint?: string | null }
+) {
+  const subdomain = opts?.subdomainHint;
+  if (subdomain) {
+    const scoped = await prisma.orgMembership.findFirst({
+      where: { userId, org: { subdomain } },
+      include: { org: true },
+    });
+    return scoped?.org ?? null;
+  }
   const membership = await prisma.orgMembership.findFirst({
     where: { userId },
     include: { org: true },

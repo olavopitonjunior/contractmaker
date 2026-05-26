@@ -87,6 +87,73 @@ model User {
 
   // Newton — pedidos de cobrança de informação criados pela negociadora
   newtonRequests NewtonRequest[]
+
+  // Multitenant Fase 0a — identidade de plataforma (super-admin)
+  platformRole PlatformRole?
+}
+
+// ============================================================
+// Multitenant Fase 0a — Plataforma (super-admin + config global)
+// ============================================================
+
+// Identidade cross-tenant separada de OrgMembership. Quem tem PlatformRole
+// é staff da plataforma (Olavo + ops), NÃO membro de uma org específica.
+// Verificação centralizada em lib/security/rbac/platform.ts::requirePlatformRole.
+model PlatformRole {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role      String // "super_admin" | "support" | "billing"
+  scope     String[] @default([]) // ex: ["impersonate", "configure_taxes", "audit_query"]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([role])
+}
+
+// Singleton (1 linha, garantida por singletonKey @unique). Taxas/markup globais
+// que o super-admin administra. Mudanças versionadas em PlatformConfigHistory.
+// asaasParentAccountId fica nullable até a Fase 1d ligar a conta-mãe.
+model PlatformConfig {
+  id                        String   @id @default(cuid())
+  singletonKey              String   @unique @default("singleton")
+  asaasParentAccountId      String?
+  defaultPlatformFeePercent Decimal  @default(0) @db.Decimal(5, 2)
+  defaultBoletoFeeCents     Int      @default(0)
+  defaultPixFeeCents        Int      @default(0)
+  defaultCardFeePercent     Decimal  @default(0) @db.Decimal(5, 2)
+  defaultPayLinkExpiryDays  Int      @default(30)
+  updatedBy                 String?
+  createdAt                 DateTime @default(now())
+  updatedAt                 DateTime @updatedAt
+}
+
+model PlatformConfigHistory {
+  id             String   @id @default(cuid())
+  configSnapshot Json
+  changedBy      String?
+  changeReason   String?
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// White-label por tenant (Fase 1a). Cores em hex; o render injeta como CSS vars
+// HSL no `[data-tenant]` (ver globals.css + lib/tenant/branding.ts). poweredBy
+// controla o selo "Powered by imobpro.ai" no rodapé de páginas públicas.
+model BrandingSettings {
+  id             String       @id @default(cuid())
+  orgId          String       @unique
+  org            Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  logoUrl        String?
+  faviconUrl     String?
+  primaryColor   String? // hex, ex: #115E59
+  secondaryColor String? // hex (mapeado pra --brand-accent)
+  emailHeader    String?      @db.Text
+  emailFooter    String?      @db.Text
+  poweredBy      Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 }
 
 model Account {
@@ -133,12 +200,17 @@ model Organization {
   id                   String   @id @default(cuid())
   name                 String
   slug                 String   @unique
+  // White-label (Fase 1a): subdomínio `{subdomain}.imobpro.ia.br` e domínio
+  // custom futuro. Resolução por host no middleware → x-org-subdomain.
+  subdomain            String?  @unique
+  customDomain         String?  @unique
   // Conta Asaas selecionada pelo admin como destino default de novas cobranças
   // e fonte das telas financeiras quando o user não passa hint explícito.
   activeAsaasAccountId String?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
+  brandingSettings    BrandingSettings?
   members             OrgMembership[]
   invitations         OrgInvitation[]
   pipelines           Pipeline[]
@@ -392,50 +464,50 @@ model DealAttachment {
 }
 
 model CertidaoJob {
-  id              String    @id @default(cuid())
+  id                String    @id @default(cuid())
   // Phase C — dealId nullable para suportar consultas ad-hoc (diligência
   // de CPF/CNPJ não arrolado em Deal). Ad-hoc jobs têm orgId obrigatório.
-  dealId          String?
-  orgId           String?
-  userId          String?
-  batchId         String
-  provider        String    @default("infosimples")
-  endpoint        String
-  label           String
-  targetKind      String
-  targetIndex     Int
-  requestPayload  Json
-  status          String    @default("pending")
-  resultCode      Int?
-  resultMessage   String?
-  resultData      Json?
-  attachmentId    String?
-  errorMessage    String?
-  latencyMs       Int?
-  costCents       Int?
-  startedAt       DateTime?
-  finishedAt      DateTime?
-  expectedReadyAt DateTime?
-  retryCount      Int       @default(0)
+  dealId            String?
+  orgId             String?
+  userId            String?
+  batchId           String
+  provider          String    @default("infosimples")
+  endpoint          String
+  label             String
+  targetKind        String
+  targetIndex       Int
+  requestPayload    Json
+  status            String    @default("pending")
+  resultCode        Int?
+  resultMessage     String?
+  resultData        Json?
+  attachmentId      String?
+  errorMessage      String?
+  latencyMs         Int?
+  costCents         Int?
+  startedAt         DateTime?
+  finishedAt        DateTime?
+  expectedReadyAt   DateTime?
+  retryCount        Int       @default(0)
   // J.2 (Phase J, 2026-04-18) — retry automático inteligente por categoria.
   // nextRetryAt setado pelo classifyOutcome() com backoff específico
   // (api_error 30s/2min/10min, portal_unavailable 10min/30min/2h, etc).
   // Cron /api/cron/certidoes/poll-portal sweeps jobs com nextRetryAt < now.
-  nextRetryAt     DateTime?
-  maxRetries      Int       @default(3)
+  nextRetryAt       DateTime?
+  maxRetries        Int       @default(3)
   // missingFields popula quando status=data_missing para UX direcionar o
   // usuário ao campo específico que precisa preencher.
   // @default([]) é obrigatório — sem ele, Prisma migrate deploy derruba o
   // DEFAULT no Postgres e quebra inserts (que omitem a coluna).
-  missingFields   String[]  @default([])
+  missingFields     String[]  @default([])
   // Copia do portalUrl do endpoint no instante do job — cached para UI
   // renderizar CTA "Abrir portal oficial" sem re-consultar catálogo.
-  portalUrl       String?
+  portalUrl         String?
   // Marca quando o problema (falha terminal) já entrou no e-mail resumo diário
   // (cron problem-digest). Evita reavisar a mesma falha. Null = ainda não
   // incluído no digest.
   problemNotifiedAt DateTime?
-  createdAt       DateTime  @default(now())
+  createdAt         DateTime  @default(now())
 
   deal         Deal?                 @relation(fields: [dealId], references: [id], onDelete: Cascade)
   organization Organization?         @relation("certidaoJobOrg", fields: [orgId], references: [id], onDelete: Cascade)
@@ -1384,7 +1456,10 @@ model OperationChallenge {
 // Audit log imutável — append-only.
 model AuditLog {
   id           String   @id @default(cuid())
-  orgId        String
+  // Nullable (Fase 0c): eventos pré-resolução de tenant (ex.: webhook ClickSign
+  // antes de identificar o envelope) gravam orgId=null em vez de cair no
+  // SHARED_ORG_ID. Pós-resolução usa o orgId real.
+  orgId        String?
   userId       String?
   action       String
   resource     String?
@@ -1395,8 +1470,8 @@ model AuditLog {
   userAgent    String?  @db.Text
   createdAt    DateTime @default(now())
 
-  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  user User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
+  org  Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([orgId, action, createdAt])
   @@index([userId, createdAt])
