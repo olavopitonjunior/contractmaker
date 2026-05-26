@@ -28,7 +28,7 @@ import {
 import { ExtraCertidaoPicker, type CatalogMeta } from "./ExtraCertidaoPicker";
 import type { EndpointInfo } from "@/lib/certidoes/endpoints";
 
-type Tier = "padrao" | "opcional" | "pesquisa";
+type Tier = "padrao" | "imovel" | "opcional" | "pesquisa";
 
 interface JobRegion {
   kind: "nacional" | "imovel" | "endereco" | "outro";
@@ -164,6 +164,7 @@ export function ExtractCertidoesDialog({
   // Seções colapsáveis
   const [openSections, setOpenSections] = useState<Record<Tier, boolean>>({
     padrao: true,
+    imovel: true,
     opcional: true,
     pesquisa: false,
   });
@@ -346,7 +347,7 @@ export function ExtractCertidoesDialog({
 
   // Agrupa jobs de um tier por alvo (kind-index) e, no padrão, por região.
   const byTier = useMemo(() => {
-    const out: Record<Tier, PlannedJob[]> = { padrao: [], opcional: [], pesquisa: [] };
+    const out: Record<Tier, PlannedJob[]> = { padrao: [], imovel: [], opcional: [], pesquisa: [] };
     for (const j of allJobs) out[(j.tier ?? "opcional") as Tier].push(j);
     return out;
   }, [allJobs]);
@@ -354,7 +355,7 @@ export function ExtractCertidoesDialog({
   // Skips (não selecionáveis) por camada — pra mostrar Matrícula/IPTU/Bens como
   // opções com "falta X / indisponível" dentro da própria seção, não só no fim.
   const skipsByTier = useMemo(() => {
-    const out: Record<Tier, SkippedJob[]> = { padrao: [], opcional: [], pesquisa: [] };
+    const out: Record<Tier, SkippedJob[]> = { padrao: [], imovel: [], opcional: [], pesquisa: [] };
     for (const s of plan?.skipped ?? []) out[(s.tier ?? "opcional") as Tier].push(s);
     return out;
   }, [plan]);
@@ -697,9 +698,17 @@ export function ExtractCertidoesDialog({
                 </Section>
 
                 <Section
+                  tier="imovel"
+                  title="Imóvel"
+                  desc="Matrícula (visualização ONR), IPTU e tributos municipais do imóvel, CCIR."
+                >
+                  {renderByTarget(byTier.imovel, skipsByTier.imovel, { picker: true })}
+                </Section>
+
+                <Section
                   tier="opcional"
-                  title="Opcional"
-                  desc="Compradores, registro do imóvel (ONR/matrícula), IPTU e tributos municipais."
+                  title="Opcional — outras pessoas"
+                  desc="Compradores e pessoas adicionadas manualmente."
                 >
                   {renderByTarget(byTier.opcional, skipsByTier.opcional, { picker: true })}
                   {onAddPerson && (
