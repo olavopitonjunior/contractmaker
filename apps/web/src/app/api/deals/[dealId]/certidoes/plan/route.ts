@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { planCertidoesForDeal } from "@/lib/certidoes/planner";
-import { getMonthlySpend } from "@/lib/certidoes/executor";
+import { getMonthlySpend, observedPriceByEndpoint } from "@/lib/certidoes/executor";
+import type { ExtractionPlan } from "@/lib/certidoes/types";
 import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
 import { checkOnrAuth } from "@/lib/certidoes/onr-auth";
 import {
@@ -41,7 +42,7 @@ export async function GET(
 
   const deal = await prisma.deal.findUnique({
     where: { id: params.dealId },
-    include: { form: { select: { orgId: true, dataJson: true } } },
+    include: { form: { select: { orgId: true, dataJson: true, token: true } } },
   });
   if (!deal) return NextResponse.json({ error: "Deal not found" }, { status: 404 });
   if (deal.form && deal.form.orgId !== org.id) {
@@ -70,28 +71,58 @@ export async function GET(
 
   const { searchParams } = new URL(req.url);
   const full = searchParams.get("full") === "1";
+  const formToken = deal.form?.token ?? null;
+
+  // Locais extras ("+ Adicionar outro local"): `extraRegions=UF|cidade;UF|cidade`.
+  const extraRegions = (searchParams.get("extraRegions") || "")
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((pair) => {
+      const [uf, cidade] = pair.split("|");
+      return { uf: (uf || "").trim(), cidade: (cidade || "").trim() || undefined };
+    })
+    .filter((r) => r.uf);
 
   // Pre-flight de auth para refletir no plano quais endpoints gated disparam
   // (CENPROT nacional → GOV.BR; matrícula/pesquisa de bens → ONR). Cacheados.
   const [govbr, onr] = await Promise.all([checkGovBrAuth(), checkOnrAuth()]);
 
-  const plan = planCertidoesForDeal(dealData as any, undefined, diligenciados, {
-    govBrActive: govbr.active,
-    onrActive: onr.active,
-  });
+  // Estimativa de custo observada (header.price real por endpoint); fallback no
+  // costCents do catálogo. Aplica nos jobs do plano antes de devolver.
+  const observed = await observedPriceByEndpoint(org.id);
+  const applyObservedPrices = (p: ExtractionPlan): ExtractionPlan => {
+    let total = 0;
+    for (const j of p.jobs) {
+      j.costCents = observed[j.endpoint] ?? j.costCents;
+      total += j.costCents;
+    }
+    p.totalCostCents = total;
+    return p;
+  };
+
+  const plan = applyObservedPrices(
+    planCertidoesForDeal(dealData as any, undefined, diligenciados, {
+      govBrActive: govbr.active,
+      onrActive: onr.active,
+      extraRegions,
+    })
+  );
   const spend = await getMonthlySpend(org.id);
 
   if (!full) {
-    return NextResponse.json({ plan, spend, diligenciados: diligenciadosRaw });
+    return NextResponse.json({ plan, spend, diligenciados: diligenciadosRaw, formToken });
   }
 
   // F1/F2: include the full catalog and the expanded plan so the picker can
   // render the "+ Adicionar outras" affordance with accurate payload data.
-  const expandedPlan = planCertidoesForDeal(
-    dealData as any,
-    undefined,
-    diligenciados,
-    { expandAll: true, govBrActive: govbr.active, onrActive: onr.active }
+  const expandedPlan = applyObservedPrices(
+    planCertidoesForDeal(dealData as any, undefined, diligenciados, {
+      expandAll: true,
+      govBrActive: govbr.active,
+      onrActive: onr.active,
+      extraRegions,
+    })
   );
   const catalog = listAllForPicker();
 
@@ -125,6 +156,7 @@ export async function GET(
     plan,
     expandedPlan,
     spend,
+    formToken,
     diligenciados: diligenciadosRaw,
     catalog,
     apiHealth,
