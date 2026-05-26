@@ -1,0 +1,53 @@
+name: CI
+
+# Gate de qualidade pra todo PR + push em master.
+# Fase 0 do multitenant adiciona o job `isolation` (tenant-isolation.test.ts
+# contra Neon staging branch) — ver docs/kickoff-multitenant-fase0.md.
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+
+# Cancela runs antigos do mesmo PR/branch quando chega push novo.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-test:
+    name: typecheck + unit
+    runs-on: ubuntu-latest
+    # Dummy DATABASE_URL: os unit tests mockam o Prisma (src/__tests__/setup.ts),
+    # mas `prisma generate`/`validate` e a instanciação do client preferem ver a var.
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
+      ANTHROPIC_API_KEY: test-key
+      AUTH_SECRET: test-secret
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # Vercel usa `npm install` (workspaces npm; lockfiles pnpm não são usados pelo npm).
+      - name: Install deps
+        run: npm install
+
+      # Tipos do client Prisma são pré-requisito do typecheck e dos imports nos testes.
+      - name: Prisma generate
+        run: npm run prisma:generate -w apps/web
+
+      - name: Prisma schema validate
+        run: npm run prisma:validate -w apps/web
+
+      - name: Typecheck
+        run: npm run typecheck -w apps/web
+
+      - name: Unit tests
+        run: npm run test -w apps/web
