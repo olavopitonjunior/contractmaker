@@ -690,12 +690,15 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     portalUrl: "https://sncr.serpro.gov.br/sncr-web/public/buscaPublica.jsf",
   },
   // ONR/ARISP — Matrícula (Visualização de Inteiro Teor). Two-step real:
-  // `registradores/matric-pedido` (1º passo) → `registradores/matric-download`
+  // `registradores/matric/pedido` (1º passo) → `registradores/matric/download`
   // (2º passo, busca o PDF da matrícula já gerada). Usa SALDO do portal ONR e
-  // credenciais próprias (requiresOnrAuth). Slug `matric-obter` legado NÃO
-  // existia na Infosimples — corrigido para `matric-download`.
-  "registradores/matric-pedido": {
-    id: "registradores/matric-pedido",
+  // credenciais próprias (requiresOnrAuth).
+  // SLUGS (2026-05-25): a API v2 usa BARRA no caminho (`matric/pedido`), não
+  // hífen. Probe ao vivo: `registradores/matric-pedido` → 602 ("serviço não é
+  // válido"); `registradores/matric/pedido` → 606 (válido, só faltam params).
+  // O hífen quebrou a trilha ONR desde sempre — corrigido para barra.
+  "registradores/matric/pedido": {
+    id: "registradores/matric/pedido",
     label: "Matrícula ONR (pedido)",
     costCents: 10,
     twoStep: true,
@@ -708,8 +711,8 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     expectedWaitMinutes: 5 * 24 * 60, // 5 dias úteis
     portalUrl: "https://www.registradores.org.br/",
   },
-  "registradores/matric-download": {
-    id: "registradores/matric-download",
+  "registradores/matric/download": {
+    id: "registradores/matric/download",
     label: "Matrícula ONR (download)",
     costCents: 4,
     initialStatus: "awaiting_portal",
@@ -723,8 +726,8 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
   },
   // Lista de pedidos de matrícula já gerados na conta ONR — NÃO consome saldo
   // do portal. Útil para reconciliar pedidos e localizar PDFs avulsos.
-  "registradores/matric-lista": {
-    id: "registradores/matric-lista",
+  "registradores/matric/lista": {
+    id: "registradores/matric/lista",
     label: "Matrícula ONR (lista de pedidos)",
     costCents: 4,
     scope: "federal",

@@ -128,6 +128,28 @@ export function isEmailThrottle(message: string | null | undefined): boolean {
   );
 }
 
+/**
+ * Infosimples retorna code 603 em DOIS cenários muito diferentes:
+ *   1. "A conta está sem saldo" / "limite de uso" — esgotamento de CRÉDITO da
+ *      conta, afeta TODAS as consultas → deve tripar o circuit breaker da org.
+ *   2. "Consulta 'X' não habilitada para a sua conta" / "O token não tem
+ *      autorização de acesso ao serviço" — falta habilitar AQUELE endpoint
+ *      específico (formulário em api.infosimples.com/habilitar/...). NÃO é
+ *      problema de saldo: as outras consultas seguem funcionando.
+ *
+ * Sem distinguir, um endpoint não-habilitado (ex.: `ieptb/protestos`) retornava
+ * 603 em todo lote e tripava `isOrgInfosimplesBlocked`, bloqueando TODAS as
+ * certidões da org por 30min. Este gate por mensagem isola o caso (2) para que
+ * só o (1) trave a org. O job não-habilitado ainda falha (account_issue →
+ * failed_permanent com a mensagem orientando habilitar).
+ */
+export function isEndpointNotEnabled(message: string | null | undefined): boolean {
+  if (!message) return false;
+  return /n[ãa]o\s+habilitada|n[ãa]o\s+tem\s+autoriza[çc][ãa]o\s+de\s+acesso\s+ao\s+servi[çc]o|\/habilitar\//i.test(
+    message
+  );
+}
+
 export function mapInfosimplesCodeToCategory(
   code: number,
   codeMessage?: string | null

@@ -13,7 +13,7 @@ describe("resolveObterEndpoint — mapeamento two-step", () => {
     ["tribunal/tjrj/pedido-cert", "tribunal/tjrj/obter-certidao"],
     ["tribunal/trf3/certidao-distr", "tribunal/trf3/obter-certidao"],
     ["tribunal/tjms/pedido-cert", "tribunal/tjms/obter-certidao"],
-    ["registradores/matric-pedido", "registradores/matric-download"],
+    ["registradores/matric/pedido", "registradores/matric/download"],
     ["antecedentes-criminais/pf/emit", "antecedentes-criminais/pf/val"],
   ];
 
@@ -90,7 +90,7 @@ describe("buildObterArgs — params do 2º passo por portal", () => {
 
   it("default (ONR matrícula) → só numero_pedido", () => {
     expect(
-      buildObterArgs("registradores/matric-download", {
+      buildObterArgs("registradores/matric/download", {
         numeroPedido: "M-1",
         payload: payloadPF,
       })

@@ -3,7 +3,34 @@ import {
   isProtestoNadaConsta,
   isPedidoDuplicado,
   decideObterOutcome,
+  isEndpointNotEnabled,
 } from "../error-codes";
+
+describe("isEndpointNotEnabled (603 endpoint-específico ≠ crédito da conta)", () => {
+  it("detecta 'consulta não habilitada para a sua conta'", () => {
+    expect(
+      isEndpointNotEnabled(
+        "Consulta 'ieptb/protestos' não habilitada para a sua conta. Para habilitar, preencha o formulário em https://api.infosimples.com/habilitar/ieptb%2Fprotestos"
+      )
+    ).toBe(true);
+  });
+  it("detecta 'não tem autorização de acesso ao serviço'", () => {
+    expect(
+      isEndpointNotEnabled(
+        "O token informado não tem autorização de acesso ao serviço."
+      )
+    ).toBe(true);
+  });
+  it("NÃO casa com 'conta está sem saldo' (crédito real → deve tripar breaker)", () => {
+    expect(
+      isEndpointNotEnabled("A conta está sem saldo. Adicione saldo para usar a API.")
+    ).toBe(false);
+  });
+  it("vazio/null → false", () => {
+    expect(isEndpointNotEnabled(null)).toBe(false);
+    expect(isEndpointNotEnabled("")).toBe(false);
+  });
+});
 
 describe("isProtestoNadaConsta", () => {
   it("casa 'não constam protestos' em endpoint de protesto", () => {

@@ -80,6 +80,8 @@ const FIELD_MAP_PERSON: Record<string, string> = {
   cpf_numero: "cpf",
   data_nascimento: "data_nascimento",
   naturalidade: "naturalidade",
+  // OCR de RG/CNH traz o sexo — exigido pelo TJSP pedido-certidao (genero).
+  sexo: "sexo",
   // OCR retorna `filiacao_mae` em RG/CNH; schema do form usa `nome_mae`.
   // Exigido por TJSP pedido-cível (code 606), PGFN PF, Antecedentes PF.
   filiacao_mae: "nome_mae",

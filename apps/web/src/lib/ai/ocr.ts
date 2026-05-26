@@ -328,9 +328,9 @@ const COMBINED_PROMPT = `Voce e um especialista em documentos brasileiros. Anali
 Categorias validas: "rg", "cpf", "cnh", "matricula", "iptu", "escritura", "procuracao", "comprovante_residencia", "certidao_casamento", "ficha_resumo", "outro".
 
 Campos esperados por categoria:
-- rg: nome_completo, rg_numero, orgao_expedidor, data_nascimento (YYYY-MM-DD), naturalidade, filiacao_mae, filiacao_pai, conjuge_nome (opcional, se aparecer no documento como qualificacao "casado(a) com X" ou em averbacao), conjuge_cpf (opcional)
+- rg: nome_completo, rg_numero, orgao_expedidor, data_nascimento (YYYY-MM-DD), sexo ("M" ou "F", se aparecer), naturalidade, filiacao_mae, filiacao_pai, conjuge_nome (opcional, se aparecer no documento como qualificacao "casado(a) com X" ou em averbacao), conjuge_cpf (opcional)
 - cpf: nome_completo, cpf_numero (11 digitos), data_nascimento, situacao_cadastral
-- cnh: nome_completo, cpf_numero (11 digitos), rg_numero, data_nascimento (YYYY-MM-DD), naturalidade, filiacao_mae, filiacao_pai, categoria, data_emissao, data_validade, registro_cnh, conjuge_nome (opcional, se aparecer), conjuge_cpf (opcional)
+- cnh: nome_completo, cpf_numero (11 digitos), rg_numero, data_nascimento (YYYY-MM-DD), sexo ("M" ou "F", se aparecer), naturalidade, filiacao_mae, filiacao_pai, categoria, data_emissao, data_validade, registro_cnh, conjuge_nome (opcional, se aparecer), conjuge_cpf (opcional)
 - matricula: matricula_numero, cartorio, endereco_completo, bairro, cidade, uf, cep, proprietario_nome, area_total, onus_existentes, descricao_imovel
 - iptu: inscricao_iptu, inscricao_municipal, sql (Setor-Quadra-Lote, SP), endereco, bairro, cidade, uf, valor_venal, ano_referencia, debitos_pendentes
 - escritura: vendedor_nome, comprador_nome, valor_transacao, data_lavratura, cartorio, endereco_imovel, matricula_referenciada
@@ -725,9 +725,9 @@ const BATCH_PROMPT = `Voce e um especialista em documentos brasileiros. Analise 
 Categorias validas: "rg", "cpf", "cnh", "matricula", "iptu", "escritura", "procuracao", "comprovante_residencia", "certidao_casamento", "ficha_resumo", "outro".
 
 Use as mesmas regras e campos do prompt single-doc:
-- rg: nome_completo, rg_numero, orgao_expedidor, data_nascimento (YYYY-MM-DD), naturalidade, filiacao_mae, filiacao_pai, conjuge_nome (opcional), conjuge_cpf (opcional)
+- rg: nome_completo, rg_numero, orgao_expedidor, data_nascimento (YYYY-MM-DD), sexo ("M" ou "F", se aparecer), naturalidade, filiacao_mae, filiacao_pai, conjuge_nome (opcional), conjuge_cpf (opcional)
 - cpf: nome_completo, cpf_numero (11 digitos), data_nascimento, situacao_cadastral
-- cnh: nome_completo, cpf_numero, rg_numero, data_nascimento, naturalidade, filiacao_mae, filiacao_pai, categoria, data_emissao, data_validade, registro_cnh, conjuge_nome (opcional), conjuge_cpf (opcional)
+- cnh: nome_completo, cpf_numero, rg_numero, data_nascimento, sexo ("M" ou "F", se aparecer), naturalidade, filiacao_mae, filiacao_pai, categoria, data_emissao, data_validade, registro_cnh, conjuge_nome (opcional), conjuge_cpf (opcional)
 - matricula: matricula_numero, cartorio, endereco_completo, bairro, cidade, uf, cep, proprietario_nome, area_total, onus_existentes, descricao_imovel
 - iptu: inscricao_iptu, inscricao_municipal, sql (Setor-Quadra-Lote, SP), endereco, bairro, cidade, uf, valor_venal, ano_referencia, debitos_pendentes
 - escritura: vendedor_nome, comprador_nome, valor_transacao, data_lavratura, cartorio, endereco_imovel, matricula_referenciada

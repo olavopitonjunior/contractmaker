@@ -93,16 +93,35 @@ const TRF_UF_MAP: Partial<Record<string, string>> = {
 };
 
 /**
- * TRFs individuais 1/2/4/5/6 — `tipo_certidao` é obrigatório (per doc TRF6),
- * com valores `CIVEL`/`CRIMINAL`/`ELEITORAL`. Disparamos `CIVEL` + `CRIMINAL`
- * por pessoa (2 chamadas). `ELEITORAL` não interessa em transação imobiliária.
- * TRF3 é exceção: usa `tipo` numérico (1=Cível) e endpoint 2-step
+ * TRFs individuais 1/2/4/5/6 — `tipo_certidao` é obrigatório. Disparamos Cível +
+ * Criminal por pessoa (2 chamadas). `ELEITORAL` não interessa em transação
+ * imobiliária. TRF3 é exceção: usa `tipo` numérico (1=Cível) e endpoint 2-step
  * `certidao-distr` — tratado em branch separado.
+ *
+ * ATENÇÃO — o valor de `tipo_certidao` varia por TRF:
+ *   - TRF5 usa NUMÉRICO `"1"`(Cível)/`"2"`(Criminal). Evidência ao vivo
+ *     (2026-05-25): enviar `"CIVEL"` retorna code 607 *"O campo 'tipo_certidao'
+ *     informado é inválido. Informe os valores '1' ou '2'."*.
+ *   - TRF2/TRF4/TRF6 seguem em `CIVEL`/`CRIMINAL` (default) — sem evidência de
+ *     que mudaram; reavaliar no próximo lote real se aparecer 607.
+ * `TRF_TIPOS_BY_ENDPOINT` permite o esquema por endpoint; o resto cai no default.
  */
 const TRF_INDIVIDUAL_TIPOS: Array<{ tipo_certidao: string; label: string }> = [
   { tipo_certidao: "CIVEL", label: "Cível" },
   { tipo_certidao: "CRIMINAL", label: "Criminal" },
 ];
+
+const TRF5_TIPOS_NUMERICOS: Array<{ tipo_certidao: string; label: string }> = [
+  { tipo_certidao: "1", label: "Cível" },
+  { tipo_certidao: "2", label: "Criminal" },
+];
+
+const TRF_TIPOS_BY_ENDPOINT: Record<
+  string,
+  Array<{ tipo_certidao: string; label: string }>
+> = {
+  "tribunal/trf5/certidao": TRF5_TIPOS_NUMERICOS,
+};
 
 /**
  * TJSP (migração 2026-05-23): o endpoint legado `tjsp/pedido-civel` é cível-only
@@ -238,6 +257,7 @@ interface Dependente {
   rg?: string;
   data_nascimento?: string;
   nome_mae?: string;
+  sexo?: string;
   uf?: string;
   cidade?: string;
   endereco_igual_ao_titular?: boolean;
@@ -254,6 +274,9 @@ interface Parte {
   // para alguns tipos (código 606 "parâmetros obrigatórios" em 100% dos jobs PF
   // sem esse campo). OCR do RG traz `filiacao`/`mae` quando disponível.
   nome_mae?: string;
+  // 2026-05-25 — sexo da parte (TJSP pedido-certidao exige `genero` p/ PF).
+  // Valores livres ("M"/"F"/"masculino"/...); normalizado em normalizeSexo.
+  sexo?: string;
   rg?: string;
   email?: string;
   uf?: string;
@@ -345,6 +368,25 @@ function uf(p: Parte | Imovel | undefined): string {
   return (p?.uf || "").trim().toUpperCase();
 }
 
+/**
+ * Mapeia o `sexo` da parte (form/OCR) para o valor `genero` exigido pelo TJSP
+ * `pedido-certidao` para PF (modelo 1/2/4/5/6). Aceita entradas livres
+ * ("M"/"F"/"masculino"/"feminino").
+ *
+ * ⚠️ O valor EXATO aceito pela Infosimples não está na doc pública. Hipótese:
+ * MASCULINO/FEMININO (padrão e-SAJ). Confirmar no 1º lote QA real — se a API
+ * recusar, trocar SÓ AQUI (candidatos alternativos: "M"/"F" ou "1"/"2").
+ * Retorna null quando ausente/ambíguo → o planner faz skip pedindo o dado
+ * (zero crédito desperdiçado), em vez de disparar e tomar 606.
+ */
+function sexoToGenero(sexo: string | undefined | null): string | null {
+  const s = (sexo || "").trim().toLowerCase();
+  if (!s) return null;
+  if (s.startsWith("m")) return "MASCULINO"; // m, masc, masculino
+  if (s.startsWith("f")) return "FEMININO"; // f, fem, feminino
+  return null;
+}
+
 // -------------------------------------------------------------------
 
 /**
@@ -402,6 +444,7 @@ function dependenteToParte(dep: Dependente, titular: Parte): Parte {
     rg: dep.rg || undefined,
     data_nascimento: dep.data_nascimento || undefined,
     nome_mae: dep.nome_mae || undefined,
+    sexo: dep.sexo || undefined,
     uf,
     cidade,
   };
@@ -675,8 +718,10 @@ export function planCertidoesForDeal(
           })
         );
       } else {
-        // TRFs 1/2/4/5/6: loop CIVEL + CRIMINAL.
-        for (const t of TRF_INDIVIDUAL_TIPOS) {
+        // TRFs 1/2/4/5/6: loop Cível + Criminal. O esquema de tipo_certidao
+        // varia por TRF (TRF5 = numérico "1"/"2"; demais = CIVEL/CRIMINAL).
+        const tipos = TRF_TIPOS_BY_ENDPOINT[ep] ?? TRF_INDIVIDUAL_TIPOS;
+        for (const t of tipos) {
           jobs.push(
             buildJob(ep, kind, index, `${label} - ${t.label}`, {
               tipo_certidao: t.tipo_certidao,
@@ -935,7 +980,7 @@ export function planCertidoesForDeal(
 
     // --- Matrícula ONR (two-step) ---
     {
-      const ep = "registradores/matric-pedido";
+      const ep = "registradores/matric/pedido";
       const matricula = (imovel.matricula || "").trim();
       const cartorio = (imovel.cartorio || "").trim();
       if (!matricula) {
@@ -1046,14 +1091,29 @@ export function planCertidoesForDeal(
             })
           );
         }
+      } else if (partyRg && !sexoToGenero(parte.sexo)) {
+        // PF com RG mas SEM sexo → pedido-certidao exige `genero` (606 sem).
+        // Skip pedindo o dado em vez de disparar e queimar a chamada.
+        skipped.push(
+          buildSkip(
+            epCert,
+            kind,
+            index,
+            label,
+            "sexo",
+            "TJSP exige o sexo da parte — complete o cadastro"
+          )
+        );
       } else if (partyRg) {
         const dob = normalizeDate(parte.data_nascimento);
+        const genero = sexoToGenero(parte.sexo)!;
         for (const m of TJSP_MODELOS) {
           const base: Record<string, unknown> = {
             modelo: m.modelo,
             cpf: cpf!,
             rg: partyRg,
             nome_completo: label,
+            genero,
             email_envio: email,
           };
           if (dob) base.birthdate = dob;

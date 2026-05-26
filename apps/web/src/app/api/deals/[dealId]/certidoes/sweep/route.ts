@@ -42,7 +42,8 @@ export async function POST(
 
   return NextResponse.json({
     promoted: result.promoted,
+    requeued: result.requeued,
     failed: result.failed,
-    swept: result.promoted + result.failed,
+    swept: result.promoted + result.requeued + result.failed,
   });
 }

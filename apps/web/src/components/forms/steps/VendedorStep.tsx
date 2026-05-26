@@ -201,6 +201,18 @@ function PessoaFisicaFields({
           />
         </FormField>
 
+        <FormField label="Sexo">
+          <NativeSelect
+            value={form.watch(`${prefix}.sexo`) || ""}
+            onChange={(v) => form.setValue(`${prefix}.sexo`, v, { shouldDirty: true })}
+            options={[
+              { value: "", label: "Não informado" },
+              { value: "M", label: "Masculino" },
+              { value: "F", label: "Feminino" },
+            ]}
+          />
+        </FormField>
+
         <FormField label="Nome da Mãe" className="md:col-span-2">
           <Input
             {...form.register(`${prefix}.nome_mae`)}

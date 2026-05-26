@@ -126,9 +126,9 @@ describe("planCertidoesForDeal — dados completos (PF SP + PF RJ + imovel SP)",
 
   it("matrícula ONR vira skip quando onrActive não está setado", () => {
     // sem onrActive (default), o pedido de matrícula é pulado com razão ONR.
-    const job = plan.jobs.find((j) => j.endpoint === "registradores/matric-pedido");
+    const job = plan.jobs.find((j) => j.endpoint === "registradores/matric/pedido");
     const skip = plan.skipped.find(
-      (s) => s.endpoint === "registradores/matric-pedido"
+      (s) => s.endpoint === "registradores/matric/pedido"
     );
     expect(job).toBeUndefined();
     expect(skip).toBeDefined();
@@ -287,7 +287,7 @@ describe("planCertidoesForDeal — dados faltando", () => {
       undefined,
       { onrActive: true }
     );
-    const matric = plan.jobs.find((j) => j.endpoint === "registradores/matric-pedido");
+    const matric = plan.jobs.find((j) => j.endpoint === "registradores/matric/pedido");
     expect(matric).toBeDefined();
     expect(matric?.requestPayload.matricula).toBe("54321");
   });
@@ -521,6 +521,20 @@ describe("Phase J — TRF unificada + TRF individual no plano default", () => {
     expect(trf6).toHaveLength(2);
     expect(new Set(trf6.map((j) => j.requestPayload.tipo_certidao))).toEqual(
       new Set(["CIVEL", "CRIMINAL"])
+    );
+  });
+
+  it("parte PE dispara TRF5 com tipo_certidao NUMÉRICO '1'/'2' (não CIVEL/CRIMINAL)", () => {
+    // 2026-05-25 — TRF5 exige tipo_certidao numérico (code 607 com CIVEL).
+    const plan = planCertidoesForDeal({
+      vendedores: [{ ...VENDEDOR_PF_SP, uf: "PE", cidade: "Recife" }],
+      compradores: [],
+      imoveis: [],
+    });
+    const trf5 = plan.jobs.filter((j) => j.endpoint === "tribunal/trf5/certidao");
+    expect(trf5).toHaveLength(2);
+    expect(new Set(trf5.map((j) => j.requestPayload.tipo_certidao))).toEqual(
+      new Set(["1", "2"])
     );
   });
 });
@@ -808,11 +822,12 @@ describe("TJSP migração pedido-certidao (modelo numérico) — 2026-05-23", ()
     cpf: "52998224725",
     rg: "12.345.678-9",
     data_nascimento: "1980-05-14",
+    sexo: "F",
     uf: "SP",
     cidade: "Sao Paulo",
   };
 
-  it("PF SP COM rg → 2 pedido-certidao (modelo 4 + 1), sem pedido-civel", () => {
+  it("PF SP COM rg + sexo → 2 pedido-certidao (modelo 4 + 1) com genero, sem pedido-civel", () => {
     const plan = planCertidoesForDeal({ vendedores: [VENDEDOR_PF_SP_COM_RG], compradores: [], imoveis: [] });
     const cert = plan.jobs.filter((j) => j.endpoint === "tribunal/tjsp/pedido-certidao");
     expect(cert).toHaveLength(2);
@@ -821,9 +836,22 @@ describe("TJSP migração pedido-certidao (modelo numérico) — 2026-05-23", ()
       expect(j.requestPayload.rg).toBe("12.345.678-9");
       expect(j.requestPayload.cpf).toBe("52998224725");
       expect(j.requestPayload.nome_completo).toBe("Maria Com RG");
+      expect(j.requestPayload.genero).toBe("FEMININO");
       expect(j.requestPayload.email_envio).toBeTruthy();
     });
     expect(plan.jobs.some((j) => j.endpoint === "tribunal/tjsp/pedido-civel")).toBe(false);
+  });
+
+  it("PF SP COM rg SEM sexo → skip pedido-certidao(sexo), sem disparar", () => {
+    const semSexo = { ...VENDEDOR_PF_SP_COM_RG, sexo: undefined };
+    const plan = planCertidoesForDeal({ vendedores: [semSexo], compradores: [], imoveis: [] });
+    expect(
+      plan.jobs.some((j) => j.endpoint === "tribunal/tjsp/pedido-certidao")
+    ).toBe(false);
+    const sexoSkip = plan.skipped.find(
+      (s) => s.endpoint === "tribunal/tjsp/pedido-certidao" && s.missingField === "sexo"
+    );
+    expect(sexoSkip).toBeDefined();
   });
 
   it("PF SP SEM rg (com data_nascimento) → fallback pedido-civel + skip pedido-certidao(rg)", () => {
