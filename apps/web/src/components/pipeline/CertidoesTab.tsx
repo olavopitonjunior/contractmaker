@@ -42,6 +42,7 @@ import { SerasaConsentDialog } from "./SerasaConsentDialog";
 import { ComplementDadosForm } from "./ComplementDadosForm";
 import { ShareCertidoesDialog } from "./ShareCertidoesDialog";
 import { DiligentedPersonsSection } from "./DiligentedPersonsSection";
+import { DiligentedPersonDialog } from "./DiligentedPersonDialog";
 import { CertidoesAnalysisPanel } from "./CertidoesAnalysisPanel";
 import { EditPartyDialog } from "./EditPartyDialog";
 import {
@@ -402,6 +403,10 @@ export function CertidoesTab({
     refresh,
   } = useCertidoesBatch(dealId);
   const [dialogOpen, setDialogOpen] = useState(false);
+  // "+ Adicionar outras pessoas" dentro da popup de certidões. Ao criar, remonta
+  // a popup (certKey) pra o plano recarregar com a nova pessoa.
+  const [addPersonOpen, setAddPersonOpen] = useState(false);
+  const [certKey, setCertKey] = useState(0);
   const [generatingReport, setGeneratingReport] = useState(false);
   const [extracting, setExtracting] = useState(false);
   const [shareOpen, setShareOpen] = useState(false);
@@ -1480,11 +1485,23 @@ export function CertidoesTab({
       </div>
 
       <ExtractCertidoesDialog
+        key={certKey}
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         dealId={dealId}
         extractedStatus={extractedStatus}
         onConfirm={handleExtract}
+        onAddPerson={() => setAddPersonOpen(true)}
+      />
+
+      <DiligentedPersonDialog
+        dealId={dealId}
+        open={addPersonOpen}
+        onOpenChange={setAddPersonOpen}
+        onCreated={() => {
+          setAddPersonOpen(false);
+          setCertKey((k) => k + 1); // remonta a popup → recarrega o plano
+        }}
       />
 
       <SerasaConsentDialog

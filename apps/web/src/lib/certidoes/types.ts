@@ -50,6 +50,28 @@ export interface NormalizedResult {
   raw?: unknown;
 }
 
+/**
+ * Camada de seleção na popup de disparo (redesign 2026-05-26):
+ *   - "padrao": certidões dos vendedores (+ dependentes), nas regiões do imóvel
+ *     e do endereço deles. Marcado por padrão.
+ *   - "opcional": compradores, ONR matrícula, IPTU/municipal, pessoas extras.
+ *   - "pesquisa": Pesquisa de Bens (ONR) e certidões menos comuns (extras).
+ */
+export type JobTier = "padrao" | "opcional" | "pesquisa";
+
+/**
+ * Região à qual um job pertence — usada pela UI pra sub-agrupar dentro do
+ * Padrão (Nacional / Região do imóvel / Região do endereço do vendedor). Como
+ * o slug do endpoint já codifica a corte (trf5, CEAT por UF) e o requestPayload
+ * raramente carrega `uf`, a região é decidida e tagueada NA ORIGEM (planner).
+ */
+export interface JobRegion {
+  kind: "nacional" | "imovel" | "endereco" | "outro";
+  uf?: string;
+  cidade?: string;
+  label: string;
+}
+
 export interface PlannedJob {
   endpoint: string;
   label: string;
@@ -58,6 +80,10 @@ export interface PlannedJob {
   requestPayload: Record<string, unknown>;
   costCents: number;
   linkedLabel?: string; // For two-step flows (pedido -> obter), reference the sibling
+  /** Camada de seleção (default marca só "padrao"). Aditivo — ver JobTier. */
+  tier?: JobTier;
+  /** Região do job pra sub-agrupar na UI. Aditivo — ver JobRegion. */
+  region?: JobRegion;
 }
 
 /**
@@ -90,6 +116,9 @@ export interface SkippedJob {
    * "Abrir portal oficial" que abre em nova aba.
    */
   externalLink?: string;
+  /** Camada/região (espelha PlannedJob) pra UI agrupar skips junto dos jobs. */
+  tier?: JobTier;
+  region?: JobRegion;
 }
 
 export interface ExtractionPlan {
@@ -107,6 +136,13 @@ export interface InfosimplesResponse {
   errors?: string[];
   header?: {
     billable?: boolean;
+    /**
+     * Preço REAL cobrado pela Infosimples nesta chamada, em BRL (ex.: 0.2 =
+     * R$0,20). Varia por consulta e é específico da conta. O executor grava
+     * `Math.round(price*100)` como costCents real do job (corrige orçamento +
+     * histórico vs. a estimativa estática do catálogo). 2026-05-26.
+     */
+    price?: number;
     [key: string]: unknown;
   };
 }
