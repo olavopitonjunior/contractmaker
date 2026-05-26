@@ -106,6 +106,13 @@ export function classifyOutcome(
   const category = normalized.failureCategory ?? null;
   const billable = resp.header?.billable;
   const portalUrl = info.portalUrl ?? null;
+  // 2026-05-26 — preço REAL cobrado (header.price em BRL) vira o custo do job;
+  // fallback na estimativa estática do catálogo quando ausente. Corrige
+  // orçamento/histórico e alimenta a estimativa observada do /plan.
+  const chargedCostCents =
+    typeof resp.header?.price === "number" && resp.header.price > 0
+      ? Math.round(resp.header.price * 100)
+      : info.costCents;
   // I.7 (2026-05-11) — Infosimples retorna detalhe específico do erro no
   // array `errors[]`. O normalizer já consolidou tudo em `normalized.detalhes`
   // (errors[] + code_message). Usa esse texto rico como errorMessage em vez
@@ -119,7 +126,7 @@ export function classifyOutcome(
         status: "informativo",
         errorMessage: null,
         failureCategory: null,
-        costCents: billable === false ? 0 : info.costCents,
+        costCents: billable === false ? 0 : chargedCostCents,
         nextRetryAt: null,
         missingFields: [],
         portalUrl,
@@ -156,7 +163,7 @@ export function classifyOutcome(
       status: "success",
       errorMessage: null,
       failureCategory: null,
-      costCents: billable === false ? 0 : info.costCents,
+      costCents: billable === false ? 0 : chargedCostCents,
       nextRetryAt: null,
       missingFields: [],
       portalUrl,
@@ -180,7 +187,7 @@ export function classifyOutcome(
       status: "success",
       errorMessage: null,
       failureCategory: null,
-      costCents: billable === false ? 0 : info.costCents,
+      costCents: billable === false ? 0 : chargedCostCents,
       nextRetryAt: null,
       missingFields: [],
       portalUrl,
@@ -315,7 +322,7 @@ export function classifyOutcome(
         status: "success",
         errorMessage: null,
         failureCategory: null,
-        costCents: billable === false ? 0 : info.costCents,
+        costCents: billable === false ? 0 : chargedCostCents,
         nextRetryAt: null,
         missingFields: [],
         portalUrl,

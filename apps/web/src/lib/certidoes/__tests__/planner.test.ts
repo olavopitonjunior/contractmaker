@@ -238,19 +238,25 @@ describe("planCertidoesForDeal — dados faltando", () => {
     expect(typeof bh?.requestPayload.data_fim).toBe("string");
   });
 
-  it("imóvel em Curitiba → sem cobertura na trilha de imóvel (CND é por contribuinte)", () => {
+  it("imóvel em Curitiba → trilha de imóvel sem cobertura (skip manual), mas CND por contribuinte do vendedor dispara pela REGIÃO DO IMÓVEL", () => {
     const plan = planCertidoesForDeal({
-      vendedores: [VENDEDOR_PF_SP],
+      vendedores: [VENDEDOR_PF_SP], // endereço SP
       compradores: [],
       imoveis: [
         { rua: "Rua K", cidade: "Curitiba", uf: "PR", inscricao_municipal: "123" },
       ],
     });
-    expect(
-      plan.jobs.find((j) => j.endpoint === "pref/pr/curitiba/cnd")
-    ).toBeUndefined();
+    // Trilha de imóvel: Curitiba não tem certidão por-imóvel → skip manual.
     const skip = plan.skipped.find((s) => s.endpoint === "pref/municipal-manual");
     expect(skip).toBeDefined();
+    // Redesign 2026-05-26: vendedor (SP) recebe a CND-por-contribuinte de
+    // Curitiba porque o IMÓVEL está em Curitiba — região do imóvel, tier padrão.
+    const cnd = plan.jobs.find((j) => j.endpoint === "pref/pr/curitiba/cnd");
+    expect(cnd).toBeDefined();
+    expect(cnd?.targetKind).toBe("vendedor");
+    expect(cnd?.region?.kind).toBe("imovel");
+    expect(cnd?.region?.uf).toBe("PR");
+    expect(cnd?.tier).toBe("padrao");
   });
 
   it("parte de Curitiba dispara CND municipal por contribuinte (cpf)", () => {
@@ -292,25 +298,39 @@ describe("planCertidoesForDeal — dados faltando", () => {
     expect(matric?.requestPayload.matricula).toBe("54321");
   });
 
-  it("pesquisa de bens ONR (mapa) só com expandAll + onrActive", () => {
+  it("pesquisa de bens ONR (mapa): aparece para vendedor com onrActive (tier pesquisa, sem expandAll); skip sem credencial", () => {
     const base = {
       vendedores: [VENDEDOR_PF_SP],
       compradores: [],
       imoveis: [],
     };
-    // sem expandAll → não aparece
+    // Redesign 2026-05-26: não depende mais de expandAll — aparece no plano
+    // padrão como opção da camada "pesquisa" (desmarcada na UI) quando onrActive.
     const auto = planCertidoesForDeal(base, undefined, undefined, { onrActive: true });
+    const bens = auto.jobs.find((j) => j.endpoint === "onr/mapa-registro-imoveis");
+    expect(bens).toBeDefined();
+    expect(bens?.tier).toBe("pesquisa");
+    expect(bens?.targetKind).toBe("vendedor");
+    // sem credencial ONR → vira skip (não some)
+    const semOnr = planCertidoesForDeal(base, undefined, undefined, { onrActive: false });
     expect(
-      auto.jobs.find((j) => j.endpoint === "onr/mapa-registro-imoveis")
+      semOnr.jobs.find((j) => j.endpoint === "onr/mapa-registro-imoveis")
     ).toBeUndefined();
-    // com expandAll + onrActive → aparece
-    const full = planCertidoesForDeal(base, undefined, undefined, {
-      expandAll: true,
-      onrActive: true,
-    });
     expect(
-      full.jobs.find((j) => j.endpoint === "onr/mapa-registro-imoveis")
+      semOnr.skipped.find((s) => s.endpoint === "onr/mapa-registro-imoveis")
     ).toBeDefined();
+    // comprador NÃO recebe pesquisa de bens
+    const comp = planCertidoesForDeal(
+      { vendedores: [VENDEDOR_PF_SP], compradores: [VENDEDOR_PF_SP], imoveis: [] },
+      undefined,
+      undefined,
+      { onrActive: true }
+    );
+    expect(
+      comp.jobs.find(
+        (j) => j.endpoint === "onr/mapa-registro-imoveis" && j.targetKind === "comprador"
+      )
+    ).toBeUndefined();
   });
 });
 
@@ -577,7 +597,10 @@ describe("Phase F.II-γ — CENPROT Nacional com pre-flight GOV.BR", () => {
     expect(nacional).toBeDefined();
   });
 
-  it("parte SP dispara nacional E cenprot-sp local (2026-05-21: nacional p/ todos)", () => {
+  it("parte SP com GOV.BR: dispara só o nacional (cenprot-sp suprimido por redundância)", () => {
+    // Redesign 2026-05-26: quando o CENPROT Nacional (ieptb/protestos) dispara,
+    // o cenprot-sp/protestos é redundante (Nacional cobre SP + detalhes-sp
+    // encadeado) → suprimido. Sem GOV.BR, o SP-direto volta (teste abaixo).
     const plan = planCertidoesForDeal(
       { vendedores: [VENDEDOR_PF_SP], compradores: [], imoveis: [] },
       undefined,
@@ -585,7 +608,7 @@ describe("Phase F.II-γ — CENPROT Nacional com pre-flight GOV.BR", () => {
       { govBrActive: true }
     );
     expect(plan.jobs.find((j) => j.endpoint === "ieptb/protestos")).toBeDefined();
-    expect(plan.jobs.find((j) => j.endpoint === "cenprot-sp/protestos")).toBeDefined();
+    expect(plan.jobs.find((j) => j.endpoint === "cenprot-sp/protestos")).toBeUndefined();
   });
 
   it("govBrActive=false + parte SP também gera SkippedJob nacional (gate vale p/ todos)", () => {
@@ -869,5 +892,106 @@ describe("TJSP migração pedido-certidao (modelo numérico) — 2026-05-23", ()
   it("eproc-lista continua disparando independente do caminho", () => {
     const plan = planCertidoesForDeal({ vendedores: [VENDEDOR_PF_SP_COM_RG], compradores: [], imoveis: [] });
     expect(plan.jobs.some((j) => j.endpoint === "tribunal/tjsp/eproc-lista")).toBe(true);
+  });
+});
+
+describe("Redesign 2026-05-26 — regiões (imóvel + endereço) e camadas (tier)", () => {
+  const VENDEDOR_RJ = {
+    tipo_pessoa: "fisica" as const,
+    nome: "Joao do Rio",
+    cpf: "52998224725",
+    rg: "11.222.333-4",
+    sexo: "M",
+    data_nascimento: "1975-03-10",
+    nome_mae: "Mae do Joao",
+    uf: "RJ",
+    cidade: "Rio de Janeiro",
+  };
+  const IMOVEL_SP = { rua: "Rua A", cidade: "Sao Paulo", uf: "SP", inscricao_municipal: "1" };
+
+  it("vendedor RJ + imóvel SP → certidões regionais nas DUAS regiões (SP e RJ), tier padrão", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [VENDEDOR_RJ],
+      compradores: [],
+      imoveis: [IMOVEL_SP],
+    });
+    const vend = plan.jobs.filter((j) => j.targetKind === "vendedor");
+    const regionUfs = new Set(
+      vend.filter((j) => j.region?.kind !== "nacional").map((j) => j.region?.uf)
+    );
+    expect(regionUfs.has("SP")).toBe(true);
+    expect(regionUfs.has("RJ")).toBe(true);
+    // TRF de cada região: SP→trf3, RJ→trf2.
+    expect(vend.some((j) => j.endpoint === "tribunal/trf3/certidao-distr" && j.region?.uf === "SP")).toBe(true);
+    expect(vend.some((j) => j.endpoint === "tribunal/trf2/certidao" && j.region?.uf === "RJ")).toBe(true);
+    // TJ de cada região: TJSP (SP) e TJRJ (RJ).
+    expect(vend.some((j) => j.endpoint.includes("/tjsp/") && j.region?.uf === "SP")).toBe(true);
+    expect(vend.some((j) => j.endpoint.includes("/tjrj/") && j.region?.uf === "RJ")).toBe(true);
+    // Todos os jobs de vendedor são tier "padrao".
+    expect(vend.every((j) => j.tier === "padrao")).toBe(true);
+    // Federais aparecem uma vez, region nacional.
+    const cndt = vend.filter((j) => j.endpoint === "tribunal/tst/cndt");
+    expect(cndt).toHaveLength(1);
+    expect(cndt[0].region?.kind).toBe("nacional");
+  });
+
+  it("dedup: vendedor SP + imóvel SP → não duplica certidões regionais", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [VENDEDOR_PF_SP],
+      compradores: [],
+      imoveis: [IMOVEL_SP],
+    });
+    const trf3 = plan.jobs.filter(
+      (j) => j.targetKind === "vendedor" && j.endpoint === "tribunal/trf3/certidao-distr"
+    );
+    expect(trf3).toHaveLength(1);
+  });
+
+  it("comprador → tier opcional", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [VENDEDOR_PF_SP],
+      compradores: [VENDEDOR_RJ],
+      imoveis: [IMOVEL_SP],
+    });
+    const comp = plan.jobs.filter((j) => j.targetKind === "comprador");
+    expect(comp.length).toBeGreaterThan(0);
+    expect(comp.every((j) => j.tier === "opcional")).toBe(true);
+  });
+
+  it("IPTU/municipal do imóvel → tier imovel, region imovel", () => {
+    const plan = planCertidoesForDeal({
+      vendedores: [VENDEDOR_PF_SP],
+      compradores: [],
+      imoveis: [{ rua: "R", cidade: "Sao Paulo", uf: "SP", sql: "123.456.0789-0" }],
+    });
+    const iptu = plan.jobs.filter((j) => j.targetKind === "imovel");
+    expect(iptu.length).toBeGreaterThan(0);
+    expect(iptu.every((j) => j.tier === "imovel")).toBe(true);
+    expect(iptu.every((j) => j.region?.kind === "imovel")).toBe(true);
+  });
+
+  it("Pesquisa de Bens (onr/mapa) → tier pesquisa (expandAll + onrActive)", () => {
+    const plan = planCertidoesForDeal(
+      { vendedores: [VENDEDOR_PF_SP], compradores: [], imoveis: [] },
+      undefined,
+      [],
+      { expandAll: true, onrActive: true }
+    );
+    const bens = plan.jobs.filter((j) => j.endpoint === "onr/mapa-registro-imoveis");
+    expect(bens.length).toBeGreaterThan(0);
+    expect(bens.every((j) => j.tier === "pesquisa")).toBe(true);
+  });
+
+  it("extraRegions adiciona praça extra ao lado vendedor", () => {
+    const plan = planCertidoesForDeal(
+      { vendedores: [VENDEDOR_PF_SP], compradores: [], imoveis: [] },
+      undefined,
+      [],
+      { extraRegions: [{ uf: "RJ", cidade: "Rio de Janeiro" }] }
+    );
+    const vend = plan.jobs.filter((j) => j.targetKind === "vendedor");
+    // Sem imóvel, regiões = endereço (SP) + extra (RJ).
+    expect(vend.some((j) => j.endpoint.includes("/tjrj/"))).toBe(true);
+    expect(vend.some((j) => j.region?.uf === "RJ")).toBe(true);
   });
 });

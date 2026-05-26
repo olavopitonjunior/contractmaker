@@ -496,6 +496,96 @@ export interface PlannerOptions {
    * Se ausente, viram SkippedJob orientando configurar credenciais ONR.
    */
   onrActive?: boolean;
+  /**
+   * Redesign 2026-05-26 — locais extras (UF/cidade) que o usuário adicionou na
+   * popup ("+ Adicionar outro local"). Entram no conjunto de regiões padrão do
+   * lado vendedor (certidões regionais disparam também nessas praças).
+   */
+  extraRegions?: Array<{ uf?: string; cidade?: string }>;
+}
+
+// ---- Redesign 2026-05-26: regiões + camadas (tier) -------------------------
+
+import type { JobTier, JobRegion } from "./types";
+
+const VENDEDOR_SIDE_KINDS = new Set<TargetKind>([
+  "vendedor",
+  "conjuge_vendedor",
+  "procurador_vendedor",
+  "representante_vendedor",
+]);
+
+/** Endpoints FEDERAIS (cobertura nacional) — region = "nacional", não regional. */
+const FEDERAL_ENDPOINTS = new Set<string>([
+  "receita-federal/cpf",
+  "receita-federal/cnpj",
+  "receita-federal/pgfn",
+  "tribunal/tst/cndt",
+  "tribunal/trf/cert-unificada",
+  "caixa/regularidade",
+  "antecedentes-criminais/pf/emit",
+  "ieptb/protestos", // CENPROT Nacional
+]);
+
+/** Pesquisa de bens / patrimonial — camada "pesquisa". */
+const PESQUISA_ENDPOINTS = new Set<string>(["onr/mapa-registro-imoveis"]);
+
+/**
+ * Camada de seleção de um job. Regra: vendedores (+ dependentes) = "padrao";
+ * compradores e pessoas adicionadas manualmente (diligenciado) = "opcional";
+ * jobs de imóvel/registro (IPTU/ONR matrícula) = "opcional"; pesquisa de bens
+ * e extras = "pesquisa".
+ */
+function tierForJob(kind: TargetKind, endpoint: string): JobTier {
+  if (PESQUISA_ENDPOINTS.has(endpoint) || endpoint.startsWith("serasa/")) return "pesquisa";
+  if (kind === "imovel") return "imovel"; // IPTU/municipal, matrícula ONR (visualização), CCIR
+  if (VENDEDOR_SIDE_KINDS.has(kind)) return "padrao";
+  // comprador, diligenciado (outras pessoas)
+  return "opcional";
+}
+
+/** Monta uma JobRegion a partir de uf/cidade. */
+function makeRegion(
+  kind: JobRegion["kind"],
+  uf: string | undefined,
+  cidade?: string | null
+): JobRegion {
+  const u = (uf || "").trim().toUpperCase();
+  const c = (cidade || "").trim();
+  return { kind, uf: u || undefined, cidade: c || undefined, label: c ? `${c}/${u}` : u };
+}
+
+/**
+ * Regiões padrão de uma pessoa. Para o lado VENDEDOR: a região de cada imóvel
+ * (+ locais extras pedidos) E a região do endereço da própria parte — dedupe
+ * por UF|cidade (se vendedor mora na mesma praça do imóvel, vira uma só). Para
+ * comprador/diligenciado: só a própria região. Imóvel-region vem primeiro
+ * (vence o dedupe → rótulo "Região do imóvel").
+ */
+function computeRegionsForPerson(
+  kind: TargetKind,
+  parte: Parte,
+  imoveis: Imovel[],
+  extraRegions: Array<{ uf?: string; cidade?: string }>
+): JobRegion[] {
+  const out: JobRegion[] = [];
+  const seen = new Set<string>();
+  const add = (rkind: JobRegion["kind"], ufv?: string, cidade?: string | null) => {
+    const r = makeRegion(rkind, ufv, cidade);
+    if (!r.uf) return;
+    const key = `${r.uf}|${normalizeCidade(r.cidade)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(r);
+  };
+  if (VENDEDOR_SIDE_KINDS.has(kind)) {
+    for (const im of imoveis) add("imovel", im.uf, im.cidade);
+    for (const ex of extraRegions) add("outro", ex.uf, ex.cidade);
+    add("endereco", parte.uf, parte.cidade);
+  } else {
+    add("endereco", parte.uf, parte.cidade);
+  }
+  return out;
 }
 
 export function planCertidoesForDeal(
@@ -511,6 +601,8 @@ export function planCertidoesForDeal(
   const expandAll = options?.expandAll === true;
   const govBrActive = options?.govBrActive === true;
   const onrActive = options?.onrActive === true;
+  const extraRegions = options?.extraRegions ?? [];
+  const imoveis = (data.imoveis ?? []) as Imovel[];
 
   const pessoas: Array<{ kind: TargetKind; index: number; parte: Parte }> = [];
   (data.vendedores ?? []).forEach((p, i) => {
@@ -542,6 +634,35 @@ export function planCertidoesForDeal(
     const cpf = normalizeCpf(parte.cpf);
     const cnpj = normalizeCnpj(parte.cnpj);
     const partyUf = uf(parte);
+
+    // Redesign 2026-05-26 — conjunto de regiões PADRÃO da pessoa. Lado vendedor
+    // = região do(s) imóvel(eis) + locais extras + endereço da parte; comprador/
+    // diligenciado = só a própria. Endpoints regionais (TJ/TRF/CEAT/dívida/
+    // CENPROT-SP/municipal-pessoa) disparam por região; cada job ganha `region`.
+    // `regionalDispatched` deduplica por endpoint+UF (UF-scoped) para não repetir
+    // quando vendedor e imóvel compartilham a UF.
+    const personRegions = computeRegionsForPerson(kind, parte, imoveis, extraRegions);
+    const regionByUf = new Map<string, JobRegion>();
+    for (const r of personRegions) if (r.uf && !regionByUf.has(r.uf)) regionByUf.set(r.uf, r);
+    // UFs a disparar nos endpoints regionais: em expandAll mantém o comportamento
+    // legado (todas as UFs cobertas, por endpoint); senão, as UFs das regiões.
+    const personRegionUfs = Array.from(regionByUf.keys());
+    const regionFor = (ufv: string): JobRegion =>
+      regionByUf.get(ufv) ?? makeRegion("outro", ufv);
+    const regionalDispatched = new Set<string>();
+    const pushRegional = (j: PlannedJob, dedupKey: string, region: JobRegion) => {
+      if (regionalDispatched.has(dedupKey)) return;
+      regionalDispatched.add(dedupKey);
+      j.region = region;
+      jobs.push(j);
+    };
+    // UFs dos endpoints regionais no plano padrão (não-expandAll). Fallback pro
+    // partyUf quando a pessoa não tem nenhuma região derivável.
+    const regionalUfs = personRegionUfs.length
+      ? personRegionUfs
+      : partyUf
+      ? [partyUf]
+      : [];
 
     // ---- CPF situação cadastral (Phase K, Mapeamento 2.1.5) ----
     // Filtro inicial obrigatório para toda PF. CPF irregular bloqueia
@@ -697,40 +818,46 @@ export function planCertidoesForDeal(
     // disparamos 2 chamadas (Cível + Criminal) por pessoa.
     // TRF3 (SP/MS) é exceção: 2-step com `tipo` numérico — só dispara Cível
     // (`tipo: 1`) por enquanto; cron `poll-portal` busca o PDF no 2o passo.
-    if (partyUf && TRF_UF_MAP[partyUf]) {
-      const ep = TRF_UF_MAP[partyUf]!;
-      const isTrf3 = ep === "tribunal/trf3/certidao-distr";
-      if (isPJ && !cnpj) {
-        skipped.push(buildSkip(ep, kind, index, label, "cnpj", "CNPJ invalido"));
-      } else if (!isPJ && !cpf) {
-        skipped.push(buildSkip(ep, kind, index, label, "cpf", "CPF invalido"));
-      } else if (isTrf3) {
-        // TRF3: 1 chamada Cível (default). Criminal TRF3 fica como backlog
-        // — precisa rodar `tipo: 2` em chamada separada, também 2-step.
-        // Per doc TRF3 certidao-distr: cpf/cnpj e nome/razao_social são MUTUAMENTE
-        // EXCLUSIVOS (code 607 quando ambos). Preferimos cpf/cnpj — Infosimples
-        // resolve o nome via base interna.
-        jobs.push(
-          buildJob(ep, kind, index, label, {
-            tipo: 1,
-            email,
-            ...(isPJ ? { cnpj } : { cpf }),
-          })
-        );
-      } else {
-        // TRFs 1/2/4/5/6: loop Cível + Criminal. O esquema de tipo_certidao
-        // varia por TRF (TRF5 = numérico "1"/"2"; demais = CIVEL/CRIMINAL).
-        const tipos = TRF_TIPOS_BY_ENDPOINT[ep] ?? TRF_INDIVIDUAL_TIPOS;
-        for (const t of tipos) {
-          jobs.push(
-            buildJob(ep, kind, index, `${label} - ${t.label}`, {
-              tipo_certidao: t.tipo_certidao,
+    // Redesign: dispara o TRF individual em cada região (UF) do conjunto padrão
+    // — dedup por endpoint (o slug já representa a corte, que cobre várias UFs).
+    {
+      const trfUfs = expandAll ? (partyUf ? [partyUf] : []) : regionalUfs;
+      for (const ufv of trfUfs) {
+        const ep = TRF_UF_MAP[ufv];
+        if (!ep) continue;
+        const region = regionFor(ufv);
+        const isTrf3 = ep === "tribunal/trf3/certidao-distr";
+        if (isPJ && !cnpj) {
+          skipped.push(buildSkip(ep, kind, index, label, "cnpj", "CNPJ invalido"));
+        } else if (!isPJ && !cpf) {
+          skipped.push(buildSkip(ep, kind, index, label, "cpf", "CPF invalido"));
+        } else if (isTrf3) {
+          // TRF3: 1 chamada Cível (default). Per doc, cpf/cnpj e nome/razao_social
+          // são MUTUAMENTE EXCLUSIVOS (607 quando ambos) — preferimos cpf/cnpj.
+          pushRegional(
+            buildJob(ep, kind, index, label, {
+              tipo: 1,
               email,
-              ...(isPJ
-                ? { cnpj, razao_social: label }
-                : { cpf, nome: label }),
-            })
+              ...(isPJ ? { cnpj } : { cpf }),
+            }),
+            ep,
+            region
           );
+        } else {
+          // TRFs 1/2/4/5/6: Cível + Criminal. tipo_certidao varia por TRF
+          // (TRF5 = numérico "1"/"2"; demais = CIVEL/CRIMINAL).
+          const tipos = TRF_TIPOS_BY_ENDPOINT[ep] ?? TRF_INDIVIDUAL_TIPOS;
+          for (const t of tipos) {
+            pushRegional(
+              buildJob(ep, kind, index, `${label} - ${t.label}`, {
+                tipo_certidao: t.tipo_certidao,
+                email,
+                ...(isPJ ? { cnpj, razao_social: label } : { cpf, nome: label }),
+              }),
+              `${ep}|${t.tipo_certidao}`,
+              region
+            );
+          }
         }
       }
     }
@@ -741,14 +868,27 @@ export function planCertidoesForDeal(
     // comportamento anterior para partes sem UF declarada).
     const ceatUfsToDispatch: string[] = expandAll
       ? Object.keys(CEAT_ENDPOINT_BY_UF)
-      : partyUf && CEAT_ENDPOINT_BY_UF[partyUf]
-      ? [partyUf]
-      : !partyUf
-      ? ["SP"]
-      : [];
+      : regionalUfs.length
+      ? regionalUfs
+      : ["SP"]; // fallback histórico p/ parte sem UF
 
     for (const targetUf of ceatUfsToDispatch) {
+      const region = regionFor(targetUf);
       const endpointsList = CEAT_ENDPOINT_BY_UF[targetUf] ?? [];
+      // UF sem cobertura CEAT → skip explicativo (pendência manual no relatório).
+      if (!expandAll && endpointsList.length === 0) {
+        skipped.push(
+          buildSkip(
+            "tribunal/trt-manual",
+            kind,
+            index,
+            label,
+            "cobertura",
+            `TRT da UF ${targetUf} sem cobertura Infosimples — extrair manualmente no portal do TRT da região`
+          )
+        );
+        continue;
+      }
       for (const ep of endpointsList) {
         // TRT2 digital é o único que aceita cnpj_raiz (truncado 8 dígitos).
         if (ep === "tribunal/trt2/ceat-digital") {
@@ -756,12 +896,12 @@ export function planCertidoesForDeal(
             if (!cnpj) {
               skipped.push(buildSkip(ep, kind, index, label, "cnpj", "CNPJ invalido"));
             } else {
-              jobs.push(buildJob(ep, kind, index, label, { cnpj_raiz: cnpj.slice(0, 8) }));
+              pushRegional(buildJob(ep, kind, index, label, { cnpj_raiz: cnpj.slice(0, 8) }), ep, region);
             }
           } else if (!cpf) {
             skipped.push(buildSkip(ep, kind, index, label, "cpf", "CPF invalido"));
           } else {
-            jobs.push(buildJob(ep, kind, index, label, { cpf }));
+            pushRegional(buildJob(ep, kind, index, label, { cpf }), ep, region);
           }
           continue;
         }
@@ -771,67 +911,58 @@ export function planCertidoesForDeal(
         } else if (!isPJ && !cpf) {
           skipped.push(buildSkip(ep, kind, index, label, "cpf", "CPF invalido"));
         } else {
-          jobs.push(
+          pushRegional(
             buildJob(ep, kind, index, label, {
               nome: label,
               ...(isPJ ? { cnpj } : { cpf }),
-            })
+            }),
+            ep,
+            region
           );
         }
       }
     }
 
-    // Se a UF da parte não tem cobertura CEAT na Infosimples, registrar skip
-    // explicativo (relatório de due diligence lista como pendência manual).
-    if (!expandAll && partyUf && !CEAT_ENDPOINT_BY_UF[partyUf]) {
-      skipped.push(
-        buildSkip(
-          "tribunal/trt-manual",
-          kind,
-          index,
-          label,
-          "cobertura",
-          `TRT da UF ${partyUf} sem cobertura Infosimples — extrair manualmente no portal do TRT da região`
-        )
-      );
-    }
-
     // ---- CND Estadual / Dívida Ativa PGE (Phase B) ----
     // Unificado via sefaz/certidao-debitos; SP usa endpoint dedicado.
-    if (partyUf) {
-      const stateEp = stateDebtEndpointForUf(partyUf);
-      if (isPJ && !cnpj) {
-        skipped.push(buildSkip(stateEp, kind, index, label, "cnpj", "CNPJ invalido"));
-      } else if (!isPJ && !cpf) {
-        skipped.push(buildSkip(stateEp, kind, index, label, "cpf", "CPF invalido"));
-      } else {
-        const args: Record<string, unknown> = isPJ ? { cnpj } : { cpf };
-        // SEFAZ unificada exige UF; SP-específico não precisa.
-        if (stateEp === "sefaz/certidao-debitos") args.uf = partyUf;
-        jobs.push(buildJob(stateEp, kind, index, label, args));
+    {
+      const debtUfs = expandAll ? (partyUf ? [partyUf] : []) : regionalUfs;
+      if (debtUfs.length === 0 && !expandAll) {
+        skipped.push(
+          buildSkip(
+            "sefaz/certidao-debitos",
+            kind,
+            index,
+            label,
+            "uf",
+            "CND Estadual exige UF da parte"
+          )
+        );
       }
-    } else if (!expandAll) {
-      skipped.push(
-        buildSkip(
-          "sefaz/certidao-debitos",
-          kind,
-          index,
-          label,
-          "uf",
-          "CND Estadual exige UF da parte"
-        )
-      );
+      for (const ufv of debtUfs) {
+        const stateEp = stateDebtEndpointForUf(ufv);
+        const region = regionFor(ufv);
+        if (isPJ && !cnpj) {
+          skipped.push(buildSkip(stateEp, kind, index, label, "cnpj", "CNPJ invalido"));
+        } else if (!isPJ && !cpf) {
+          skipped.push(buildSkip(stateEp, kind, index, label, "cpf", "CPF invalido"));
+        } else {
+          const args: Record<string, unknown> = isPJ ? { cnpj } : { cpf };
+          // SEFAZ unificada exige UF; SP-específico não precisa.
+          if (stateEp === "sefaz/certidao-debitos") args.uf = ufv;
+          pushRegional(buildJob(stateEp, kind, index, label, args), `${stateEp}|${ufv}`, region);
+        }
+      }
     }
 
     // ---- CND Municipal por contribuinte (Phase L+) — ex.: Curitiba ----
     // Alguns municípios emitem a CND municipal por CPF/CNPJ (não por imóvel).
     // Dispara quando a parte é daquele município (UF|cidade), ou todas em
     // expandAll (picker). Sem cidade casada, não dispara nada (sem ruído).
-    {
-      const munPessoaKey = `${partyUf}|${normalizeCidade(parte.cidade)}`;
-      const munPessoaEps = expandAll
-        ? Array.from(new Set(Object.values(MUNICIPAL_PESSOA_BY_KEY).flat()))
-        : MUNICIPAL_PESSOA_BY_KEY[munPessoaKey] ?? [];
+    if (expandAll) {
+      const munPessoaEps = Array.from(
+        new Set(Object.values(MUNICIPAL_PESSOA_BY_KEY).flat())
+      );
       for (const ep of munPessoaEps) {
         if (isPJ && !cnpj) {
           skipped.push(buildSkip(ep, kind, index, label, "cnpj", "CNPJ invalido"));
@@ -839,6 +970,26 @@ export function planCertidoesForDeal(
           skipped.push(buildSkip(ep, kind, index, label, "cpf", "CPF invalido"));
         } else {
           jobs.push(buildJob(ep, kind, index, label, isPJ ? { cnpj } : { cpf }));
+        }
+      }
+    } else {
+      // Por região (UF|cidade): CND municipal por contribuinte só existe em
+      // algumas praças (ex.: Curitiba). dedup por endpoint+uf+cidade.
+      for (const r of personRegions) {
+        const munPessoaKey = `${r.uf}|${normalizeCidade(r.cidade)}`;
+        const munPessoaEps = MUNICIPAL_PESSOA_BY_KEY[munPessoaKey] ?? [];
+        for (const ep of munPessoaEps) {
+          if (isPJ && !cnpj) {
+            skipped.push(buildSkip(ep, kind, index, label, "cnpj", "CNPJ invalido"));
+          } else if (!isPJ && !cpf) {
+            skipped.push(buildSkip(ep, kind, index, label, "cpf", "CPF invalido"));
+          } else {
+            pushRegional(
+              buildJob(ep, kind, index, label, isPJ ? { cnpj } : { cpf }),
+              `${ep}|${r.uf}|${normalizeCidade(r.cidade)}`,
+              r
+            );
+          }
         }
       }
     }
@@ -855,16 +1006,20 @@ export function planCertidoesForDeal(
     // cobertura Infosimples sem GOV.BR).
     // H.4 (Phase H, 2026-04-18): adicionado `uf: "SP"` no payload — portal
     // CENPROT exige location hint; sem ele, code 612/605 em ~75% dos casos.
-    const cenprotShould = expandAll || partyUf === "SP";
-    if (cenprotShould && (cpf || cnpj)) {
-      jobs.push(
-        buildJob(
-          "cenprot-sp/protestos",
-          kind,
-          index,
-          label,
-          { uf: "SP", ...(cnpj ? { cnpj } : { cpf: cpf! }) }
-        )
+    // CENPROT-SP é REDUNDANTE com o CENPROT Nacional (ieptb/protestos) quando
+    // este dispara (govBrActive) — o Nacional cobre SP e o detalhamento de
+    // cartórios SP é encadeado via ieptb/protestos-detalhes-sp. Então só dispara
+    // o SP-direto quando o Nacional NÃO está disponível (sem GOV.BR).
+    const hasSpRegion = regionByUf.has("SP") || partyUf === "SP";
+    if ((expandAll || hasSpRegion) && (cpf || cnpj) && !govBrActive) {
+      const region = regionByUf.get("SP") ?? makeRegion("outro", "SP");
+      pushRegional(
+        buildJob("cenprot-sp/protestos", kind, index, label, {
+          uf: "SP",
+          ...(cnpj ? { cnpj } : { cpf: cpf! }),
+        }),
+        "cenprot-sp/protestos",
+        region
       );
     }
 
@@ -897,9 +1052,11 @@ export function planCertidoesForDeal(
 
     // ---- Pesquisa de bens ONR (Phase L) — diligência patrimonial nacional ----
     // `onr/mapa-registro-imoveis` localiza imóveis em nome do CPF/CNPJ. Custo no
-    // saldo do portal ONR → picker-only (expandAll) para não inflar o plano
-    // padrão. Gated por onrActive (credenciais ONR configuradas).
-    if (expandAll && (cpf || cnpj)) {
+    // saldo do portal ONR. Camada "pesquisa" (NÃO marcada por padrão) → aparece
+    // como opção opt-in na seção "Pesquisa adicional", sem inflar o custo padrão.
+    // Restrito ao lado vendedor (diligência patrimonial dos vendedores). Quando
+    // não há credencial ONR, vira skip explicando como habilitar.
+    if ((cpf || cnpj) && VENDEDOR_SIDE_KINDS.has(kind)) {
       const ep = "onr/mapa-registro-imoveis";
       if (onrActive) {
         jobs.push(
@@ -1059,9 +1216,25 @@ export function planCertidoesForDeal(
     const cpf = normalizeCpf(parte.cpf);
     const cnpj = normalizeCnpj(parte.cnpj);
 
-    const tjShouldSP = expandAll || partyUf === "SP";
-    const tjShouldRJ = expandAll || partyUf === "RJ";
-    const tjShouldRS = expandAll || partyUf === "RS";
+    // Redesign 2026-05-26 — TJ estadual segue o conjunto de regiões padrão
+    // (imóvel + endereço do vendedor), não só a UF da parte. Cada job de TJ
+    // ganha `region`; o tier é aplicado no pós-processamento.
+    const tjRegions = computeRegionsForPerson(kind, parte, imoveis, extraRegions);
+    const tjRegionByUf = new Map<string, JobRegion>();
+    for (const r of tjRegions) if (r.uf && !tjRegionByUf.has(r.uf)) tjRegionByUf.set(r.uf, r);
+    const tjRegionFor = (ufv: string): JobRegion =>
+      tjRegionByUf.get(ufv) ?? makeRegion("outro", ufv);
+    const tjRegionUfs = tjRegionByUf.size
+      ? Array.from(tjRegionByUf.keys())
+      : partyUf
+      ? [partyUf]
+      : [];
+    const tjBefore = jobs.length;
+    const tjSkipBefore = skipped.length;
+
+    const tjShouldSP = expandAll || tjRegionByUf.has("SP");
+    const tjShouldRJ = expandAll || tjRegionByUf.has("RJ");
+    const tjShouldRS = expandAll || tjRegionByUf.has("RS");
 
     if (tjShouldSP) {
       // Migração 2026-05-23 — Certidão de Distribuição via `pedido-certidao`
@@ -1134,14 +1307,16 @@ export function planCertidoesForDeal(
             )
           );
         } else {
-          const partyMunicipio = (parte.cidade || "").trim();
+          // TJSP: usa a região SP (pode vir do imóvel, não só do endereço).
+          const spRegion = tjRegionFor("SP");
+          const partyMunicipio = (spRegion.cidade || parte.cidade || "").trim();
           const base: Record<string, unknown> = {
             email,
             finalidade: DEFAULT_FINALIDADE,
             instancia: 1,
             tipo_certidao: "civel",
             pais: "Brasil",
-            ...(partyUf ? { uf: partyUf } : {}),
+            uf: "SP",
             ...(partyMunicipio ? { municipio: partyMunicipio } : {}),
             cpf: cpf!,
             nome: label,
@@ -1185,8 +1360,10 @@ export function planCertidoesForDeal(
           buildSkip(ep, kind, index, label, isPJ ? "cnpj" : "cpf", "documento invalido")
         );
       } else {
-        // Phase F.II-γ — multi-tipo TJRJ: cível, família, falência, execução fiscal
-        const cidade = (parte.cidade || "").trim();
+        // Phase F.II-γ — multi-tipo TJRJ: cível, família, falência, execução fiscal.
+        // Comarca segue a região RJ (pode vir do imóvel, não só do endereço).
+        const rjRegion = tjRegionFor("RJ");
+        const cidade = (rjRegion.cidade || parte.cidade || "").trim();
         const comarca = comarcaForCidade(cidade);
         for (const t of TJRJ_TIPOS) {
           const base: Record<string, unknown> = {
@@ -1232,9 +1409,7 @@ export function planCertidoesForDeal(
     // dispara todas as UFs da tabela.
     const additionalUfsToTry: string[] = expandAll
       ? Object.keys(CIVIL_ENDPOINT_BY_UF)
-      : partyUf && partyUf in CIVIL_ENDPOINT_BY_UF
-      ? [partyUf]
-      : [];
+      : tjRegionUfs.filter((u) => u in CIVIL_ENDPOINT_BY_UF);
 
     for (const tjUf of additionalUfsToTry) {
       const ep = CIVIL_ENDPOINT_BY_UF[tjUf];
@@ -1292,6 +1467,26 @@ export function planCertidoesForDeal(
         )
       );
     }
+
+    // Tagueia `region` nos jobs/skips de TJ desta iteração pela UF da corte
+    // (o slug codifica a corte). Fallback: região do partyUf / "outro".
+    const tjUfForEndpoint = (ep: string): string | null => {
+      if (ep.includes("/tjsp/")) return "SP";
+      if (ep.includes("/tjrj/")) return "RJ";
+      if (ep.includes("/tjrs/")) return "RS";
+      for (const [u, e] of Object.entries(CIVIL_ENDPOINT_BY_UF)) if (e === ep) return u;
+      return null;
+    };
+    for (let i = tjBefore; i < jobs.length; i++) {
+      if (jobs[i].region) continue;
+      const u = tjUfForEndpoint(jobs[i].endpoint);
+      jobs[i].region = u ? tjRegionFor(u) : makeRegion("outro", partyUf);
+    }
+    for (let i = tjSkipBefore; i < skipped.length; i++) {
+      if (skipped[i].region) continue;
+      const u = tjUfForEndpoint(skipped[i].endpoint);
+      skipped[i].region = u ? tjRegionFor(u) : makeRegion("outro", partyUf);
+    }
   }
 
   // ---- Serasa Experian (score + restritivos) ----
@@ -1330,6 +1525,21 @@ export function planCertidoesForDeal(
       }
     }
   }
+
+  // ---- Pós-processamento: tier (todos) + região default (federais/imóvel) ----
+  const imovelRegionForIndex = (idx: number): JobRegion => {
+    const im = imoveis[idx];
+    return makeRegion("imovel", im?.uf, im?.cidade);
+  };
+  const applyTierRegion = (j: PlannedJob | SkippedJob) => {
+    j.tier = tierForJob(j.targetKind, j.endpoint);
+    if (!j.region) {
+      if (j.targetKind === "imovel") j.region = imovelRegionForIndex(j.targetIndex);
+      else j.region = { kind: "nacional", label: "Nacional" }; // federais/pesquisa pessoa
+    }
+  };
+  jobs.forEach(applyTierRegion);
+  skipped.forEach(applyTierRegion);
 
   const totalCostCents = jobs.reduce((acc, j) => acc + j.costCents, 0);
   return { jobs, skipped, totalCostCents };

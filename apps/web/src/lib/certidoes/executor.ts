@@ -1626,6 +1626,31 @@ export async function getMonthlySpend(orgId: string): Promise<{
 }
 
 /**
+ * Redesign 2026-05-26 — preço REAL observado por endpoint (header.price gravado
+ * em `costCents`), pegando o mais recente com custo > 0 nos últimos 90 dias.
+ * Usado pela rota /plan como estimativa pré-disparo, que converge pro preço real
+ * conforme os lotes rodam. O caller faz fallback na estimativa estática do
+ * catálogo (`endpoints.ts costCents`) para endpoints ainda sem dado observado.
+ */
+export async function observedPriceByEndpoint(
+  orgId: string
+): Promise<Record<string, number>> {
+  const since = new Date(Date.now() - 90 * 24 * 60 * 60_000);
+  const rows = await prisma.certidaoJob.findMany({
+    where: { orgId, createdAt: { gte: since }, costCents: { gt: 0 } },
+    select: { endpoint: true, costCents: true },
+    orderBy: { createdAt: "desc" },
+  });
+  const map: Record<string, number> = {};
+  for (const r of rows) {
+    if (map[r.endpoint] == null && r.costCents != null) {
+      map[r.endpoint] = r.costCents;
+    }
+  }
+  return map;
+}
+
+/**
  * Budget guard generalizado por provider.
  *
  * - `infosimples` → INFOSIMPLES_MONTHLY_BUDGET_CENTS (default R$ 200)
