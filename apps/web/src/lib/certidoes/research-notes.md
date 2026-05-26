@@ -40,7 +40,7 @@ necessário.
 Resolvido nesta fase (ver memória `project_certidoes_onr_imovel`):
 - **Trilha de imóvel reativada** no planner (auto-plano com identificadores).
 - **IPTU/CND municipal em 8 capitais** (`pref/*`): SP, RJ, BH, Porto Alegre (fecha gap histórico), Curitiba, Florianópolis, Cuiabá. Vitória/ES + Campo Grande sem cobertura → skip manual.
-- **ONR/ARISP**: matrícula 2-step (`registradores/matric-pedido`→`matric-download`, slug `matric-obter` legado estava ERRADO), `matric-lista`, `onr/mapa-registro-imoveis` (pesquisa de bens nacional — substitui `registradores-previa-bens` descontinuado). Credenciais ONR próprias (`INFOSIMPLES_ONR_*`), debitam saldo do portal ONR.
+- **ONR/ARISP**: matrícula 2-step (`registradores/matric/pedido`→`matric/download`; a API v2 usa BARRA no caminho — slugs em hífen `matric-pedido` dão 602 "serviço não é válido", corrigido 2026-05-25), `matric/lista`, `onr/mapa-registro-imoveis` (pesquisa de bens nacional — substitui `registradores-previa-bens` descontinuado; este usa hífen e está correto). Credenciais ONR próprias (`INFOSIMPLES_ONR_*`), debitam saldo do portal ONR.
 - **CCIR** (`sncr/ccir`) para imóvel rural.
 - **Two-step genérico** (`resolveObterEndpoint`): destrava ONR matrícula, TJMS e Antecedentes PF — antes presos em `awaiting_portal` (só tjsp/tjrj/trf3 eram mapeados).
 - **CNIB** confirmado SEM endpoint Infosimples (API ONR só p/ cartórios) — fica manual.

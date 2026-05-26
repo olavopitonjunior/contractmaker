@@ -13,6 +13,8 @@ import {
   isPedidoDuplicado,
   mapInfosimplesCodeToCategory,
   decideObterOutcome,
+  isEmailThrottle,
+  isEndpointNotEnabled,
 } from "./error-codes";
 import type { InfosimplesResponse, JobStatus, Situacao, TargetKind } from "./types";
 import { emitNotification } from "@/lib/notifications/emit";
@@ -144,8 +146,8 @@ export function resolveObterEndpoint(pedidoEndpoint: string): string | null {
   if (pedidoEndpoint.includes("/tjrj/")) return "tribunal/tjrj/obter-certidao";
   if (pedidoEndpoint.includes("/trf3/")) return "tribunal/trf3/obter-certidao";
   if (pedidoEndpoint.includes("/tjms/")) return "tribunal/tjms/obter-certidao";
-  if (pedidoEndpoint === "registradores/matric-pedido")
-    return "registradores/matric-download";
+  if (pedidoEndpoint === "registradores/matric/pedido")
+    return "registradores/matric/download";
   if (pedidoEndpoint === "antecedentes-criminais/pf/emit")
     return "antecedentes-criminais/pf/val";
   return null;
@@ -274,19 +276,27 @@ async function isOrgInfosimplesBlocked(
   }
   if (exceeded) return { blocked: true, reason: "budget" };
   // 603/604 recentes sinalizam crédito/token esgotado → para de martelar a API.
-  // EXCEÇÃO: o 604 do throttle de e-mail do e-SAJ (pedido-certidao) é transitório
-  // e NÃO deve tripar o breaker (senão um lote TJSP bloqueia toda a org). Por
-  // isso buscamos alguns candidatos e filtramos a mensagem em JS.
-  const recentCreditCandidates = await prisma.certidaoJob.findFirst({
+  // EXCEÇÕES que NÃO são esgotamento de crédito e portanto NÃO devem tripar o
+  // breaker da org (senão um único endpoint problemático bloqueia tudo):
+  //   - 604 throttle de e-mail do e-SAJ (pedido-certidao) — transitório.
+  //   - 603 "consulta não habilitada / sem autorização ao serviço" — falta
+  //     habilitar AQUELE endpoint (ex.: ieptb/protestos), as demais consultas
+  //     seguem OK. Ver isEndpointNotEnabled.
+  // Buscamos alguns candidatos recentes e filtramos a mensagem em JS (mais
+  // robusto que NOT encadeado no Prisma).
+  const recentCreditCandidates = await prisma.certidaoJob.findMany({
     where: {
       orgId,
       resultCode: { in: [603, 604] },
       finishedAt: { gte: new Date(Date.now() - 30 * 60_000) },
-      NOT: { resultMessage: { contains: "mesmo email", mode: "insensitive" } },
     },
-    select: { id: true },
+    select: { resultMessage: true },
+    take: 20,
   });
-  if (recentCreditCandidates) return { blocked: true, reason: "credit" };
+  const genuineCredit = recentCreditCandidates.some(
+    (c) => !isEmailThrottle(c.resultMessage) && !isEndpointNotEnabled(c.resultMessage)
+  );
+  if (genuineCredit) return { blocked: true, reason: "credit" };
   return { blocked: false };
 }
 
@@ -1358,15 +1368,38 @@ async function downloadAndAttach(
   if (!dealId) return null;
   try {
     const { buffer, contentType } = await downloadReceipt(receiptUrl);
-    // Defesa em profundidade: o site_receipts às vezes devolve HTML de erro
-    // (portal fora, sessão expirada) em vez do PDF. Servir isso como
-    // application/pdf quebra o viewer ("erro no PDF"). Validamos o magic.
-    const isPdf = buffer.subarray(0, 5).toString("latin1") === "%PDF-";
+    // Validamos a natureza do conteúdo pelo magic + content-type:
+    //   - PDF (%PDF-): anexa direto.
+    //   - HTML: certidões "digitais" (ex.: CEAT TRT2 ceat-digital) são
+    //     entregues como página HTML, não PDF — renderiza pra PDF e anexa.
+    //     O gate de `situacao` terminal (outcome-classifier) já garante que
+    //     só chegamos aqui com resultado válido (não uma página de erro de
+    //     portal fora/sessão expirada, que não produz situacao terminal).
+    //   - Qualquer outra coisa: rejeita (servir HTML de erro como PDF quebra
+    //     o viewer com "erro no PDF").
+    const head = buffer.subarray(0, 64).toString("latin1").trimStart().toLowerCase();
+    const isPdf = head.startsWith("%pdf-");
+    const isHtml = /text\/html/i.test(contentType) || head.startsWith("<");
+    let finalBuffer = buffer;
+    let finalContentType = contentType;
     if (!isPdf) {
-      console.error(
-        `[certidoes] comprovante de ${endpoint} não é PDF (magic inválido) — não anexado`
-      );
-      return null;
+      if (isHtml) {
+        try {
+          finalBuffer = await exportPdfToBuffer(buffer.toString("utf-8"));
+          finalContentType = "application/pdf";
+        } catch (err) {
+          console.error(
+            `[certidoes] falha ao converter HTML→PDF do comprovante de ${endpoint}`,
+            err
+          );
+          return null;
+        }
+      } else {
+        console.error(
+          `[certidoes] comprovante de ${endpoint} não é PDF nem HTML (magic inválido) — não anexado`
+        );
+        return null;
+      }
     }
     const safeName = `${endpoint.replace(/[^a-z0-9]/gi, "_")}_${Date.now()}.pdf`;
     const bucket = process.env.S3_BUCKET;
@@ -1374,8 +1407,8 @@ async function downloadAndAttach(
     const url = await uploadBufferToStorage({
       bucket,
       key,
-      body: buffer,
-      contentType,
+      body: finalBuffer,
+      contentType: finalContentType,
     });
     // Persist assignment so DocumentsTab groups certidao attachments by part/imovel.
     // Os dependentes do vendedor (cônjuge/procurador/representante) são mapeados
@@ -1395,7 +1428,7 @@ async function downloadAndAttach(
       data: {
         dealId,
         filename: safeName,
-        mime: contentType,
+        mime: finalContentType,
         url,
         category: "certidao",
         source: "infosimples",
@@ -1427,12 +1460,26 @@ async function downloadAndAttach(
  * Runs hourly via cron. Also exposed via /api/deals/:id/certidoes/sweep for
  * per-deal manual sweeps.
  *
- * Returns `{ promoted, failed }` counts.
+ * Re-enqueue (2026-05-25): em vez de falhar TODO zombie, devolve pra `pending`
+ * os que ainda podem ser re-tentados — lotes grandes estouram o `maxDuration`
+ * e deixam jobs nunca despachados (`pending`) ou interrompidos (`fetching`).
+ * Tetos distintos por economia de crédito:
+ *   - `pending` (NUNCA chamou a API → custo zero): re-enfileira até
+ *     `STALE_REQUEUE_MAX_PENDING` vezes.
+ *   - `fetching` (PODE ter sido cobrado pela Infosimples antes do container
+ *     morrer): teto estrito `STALE_REQUEUE_MAX_FETCHING` pra não duplicar
+ *     cobrança. Esgotado → failed_permanent.
+ * O re-run dos re-enfileirados é feito pelo cron poll-portal (Task 4).
+ *
+ * Returns `{ promoted, requeued, failed }` counts.
  */
+const STALE_REQUEUE_MAX_PENDING = 3;
+const STALE_REQUEUE_MAX_FETCHING = 1;
+
 export async function sweepStaleJobs(options: {
   dealId?: string;
   staleAfterMs?: number;
-} = {}): Promise<{ promoted: number; failed: number }> {
+} = {}): Promise<{ promoted: number; requeued: number; failed: number }> {
   const staleAfter = options.staleAfterMs ?? 15 * 60_000; // 15 min default
   const cutoff = new Date(Date.now() - staleAfter);
 
@@ -1448,13 +1495,15 @@ export async function sweepStaleJobs(options: {
     select: {
       id: true,
       batchId: true,
+      status: true,
+      retryCount: true,
       resultCode: true,
       resultData: true,
       attachmentId: true,
     },
   });
 
-  if (stale.length === 0) return { promoted: 0, failed: 0 };
+  if (stale.length === 0) return { promoted: 0, requeued: 0, failed: 0 };
 
   const TERMINAL_SITUACOES = new Set([
     "negativa",
@@ -1470,6 +1519,7 @@ export async function sweepStaleJobs(options: {
   ]);
 
   const toPromote: string[] = [];
+  const toRequeue: string[] = [];
   const toFail: string[] = [];
 
   for (const job of stale) {
@@ -1481,6 +1531,15 @@ export async function sweepStaleJobs(options: {
       TERMINAL_SITUACOES.has(data.situacao);
     if (hasValidResult) {
       toPromote.push(job.id);
+      continue;
+    }
+    // Sem resultado válido — decide re-enfileirar vs falhar pelo teto do estado.
+    const cap =
+      job.status === "pending"
+        ? STALE_REQUEUE_MAX_PENDING
+        : STALE_REQUEUE_MAX_FETCHING;
+    if ((job.retryCount ?? 0) < cap) {
+      toRequeue.push(job.id);
     } else {
       toFail.push(job.id);
     }
@@ -1498,25 +1557,54 @@ export async function sweepStaleJobs(options: {
     });
   }
 
-  if (toFail.length > 0) {
+  if (toRequeue.length > 0) {
+    // Volta pra `pending` + incrementa retryCount (teto/contador). startedAt
+    // zerado pra o sweeper futuro medir a nova tentativa. O cron poll-portal
+    // (Task 4) roda esses via runSingleJob; o budget guard por chamada segue
+    // valendo, então re-tentar nunca fura o orçamento da org.
     await prisma.certidaoJob.updateMany({
-      where: { id: { in: toFail } },
+      where: { id: { in: toRequeue } },
       data: {
-        status: "failed",
-        finishedAt: now,
-        errorMessage:
-          "Timeout — container reciclado antes de concluir a consulta. Clique em tentar novamente.",
+        status: "pending",
+        retryCount: { increment: 1 },
+        startedAt: null,
+        nextRetryAt: null,
+        errorMessage: null,
       },
     });
   }
 
-  // F4: check batch completion for every unique batch touched by the sweep
-  const touchedBatchIds = Array.from(new Set(stale.map((j) => j.batchId)));
+  if (toFail.length > 0) {
+    await prisma.certidaoJob.updateMany({
+      where: { id: { in: toFail } },
+      data: {
+        status: "failed_permanent",
+        finishedAt: now,
+        errorMessage:
+          "Timeout — container reciclado e tentativas esgotadas. Clique em tentar novamente.",
+      },
+    });
+  }
+
+  // F4: check batch completion for every unique batch touched by the sweep.
+  // Só os que chegaram a estado terminal (promote/fail) — re-enfileirados ainda
+  // estão em voo, não devem disparar "lote completo".
+  const touchedBatchIds = Array.from(
+    new Set(
+      stale
+        .filter((j) => !toRequeue.includes(j.id))
+        .map((j) => j.batchId)
+    )
+  );
   for (const batchId of touchedBatchIds) {
     await checkBatchCompletion(batchId);
   }
 
-  return { promoted: toPromote.length, failed: toFail.length };
+  return {
+    promoted: toPromote.length,
+    requeued: toRequeue.length,
+    failed: toFail.length,
+  };
 }
 
 /**

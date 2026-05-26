@@ -92,6 +92,34 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Task 4: roda os jobs re-enfileirados pelo sweeper (zombies de lote grande
+  // que estourou o maxDuration). Filtro `retryCount > 0` + `startedAt null` +
+  // `nextRetryAt null` pega SÓ os re-enfileirados — jobs frescos de um lote em
+  // andamento têm retryCount 0 e ficam de fora (não dá pra rodar 2x). runBatch
+  // do dispatch e Task 3 já terminaram seus jobs antes daqui.
+  const requeuedJobs = await prisma.certidaoJob.findMany({
+    where: {
+      status: "pending",
+      retryCount: { gt: 0 },
+      startedAt: null,
+      nextRetryAt: null,
+    },
+    orderBy: { createdAt: "asc" },
+    take: 30,
+    select: { id: true, dealId: true },
+  });
+  let requeueSuccess = 0;
+  let requeueFailed = 0;
+  for (const job of requeuedJobs) {
+    try {
+      await runSingleJob(job.id, job.dealId);
+      requeueSuccess++;
+    } catch (err) {
+      requeueFailed++;
+      console.error("[cron] requeued job run failed", job.id, err);
+    }
+  }
+
   return NextResponse.json({
     portal: {
       polled: portalJobs.length,
@@ -104,5 +132,10 @@ export async function GET(req: NextRequest) {
       failed: retryFailed,
     },
     sweep: sweepResult,
+    requeue: {
+      scheduled: requeuedJobs.length,
+      success: requeueSuccess,
+      failed: requeueFailed,
+    },
   });
 }

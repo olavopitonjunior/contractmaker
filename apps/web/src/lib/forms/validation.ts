@@ -25,6 +25,9 @@ const pessoaFisicaSchema = z.object({
   data_nascimento: z.string().optional().default(""),
   // H.3 (Phase H, 2026-04-18) — exigido pelo TJSP pedido-cível (code 606 sem)
   nome_mae: z.string().optional().default(""),
+  // 2026-05-25 — sexo exigido pelo TJSP pedido-certidao p/ PF (code 606
+  // "O parâmetro 'genero' não pode ser vazio"). Opcional: ausência vira skip.
+  sexo: z.string().optional().default(""),
   email: z.string().email("Email invalido").optional().or(z.literal("")),
   mobile_phone: z.string().optional().default(""),
   endereco: z.string().optional().default(""),
@@ -45,6 +48,7 @@ const pessoaFisicaSchema = z.object({
     // Espelha campos pessoais do titular — exigidos por TJSP/PGFN/Antecedentes PF
     data_nascimento: z.string().optional().default(""),
     nome_mae: z.string().optional().default(""),
+    sexo: z.string().optional().default(""),
     naturalidade: z.string().optional().default(""),
     email: z.string().email("Email invalido").optional().or(z.literal("")),
     mobile_phone: z.string().optional().default(""),
@@ -66,6 +70,7 @@ const pessoaFisicaSchema = z.object({
     nome: z.string().optional().default(""),
     cpf: z.string().optional().default(""),
     rg: z.string().optional().default(""),
+    sexo: z.string().optional().default(""),
     endereco: z.string().optional().default(""),
     numero: z.string().optional().default(""),
     cidade: z.string().optional().default(""),
@@ -96,6 +101,7 @@ const pessoaJuridicaSchema = z.object({
     rg: z.string().optional().default(""),
     data_nascimento: z.string().optional().default(""),
     nome_mae: z.string().optional().default(""),
+    sexo: z.string().optional().default(""),
     naturalidade: z.string().optional().default(""),
     email: z.string().email("Email invalido").optional().or(z.literal("")),
     mobile_phone: z.string().optional().default(""),

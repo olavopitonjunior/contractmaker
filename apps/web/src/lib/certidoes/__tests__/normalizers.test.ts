@@ -251,7 +251,7 @@ describe("normalize — Matrícula ONR (ônus)", () => {
       ],
     };
     const r = normalize(
-      "registradores/matric-pedido",
+      "registradores/matric/pedido",
       resp as unknown as InfosimplesResponse
     );
     expect(r.situacao).toBe("positiva");
@@ -278,7 +278,7 @@ describe("normalize — Matrícula ONR (ônus)", () => {
       ],
     };
     const r = normalize(
-      "registradores/matric-download",
+      "registradores/matric/download",
       resp as unknown as InfosimplesResponse
     );
     expect(r.situacao).toBe("negativa");
@@ -642,7 +642,7 @@ describe("Phase K — registradores/matric (ONR)", () => {
   it("Sem ônus → negativa", async () => {
     const fixture = await import("../__fixtures__/matricula-onr-negativa.json");
     const r = normalize(
-      "registradores/matric-download",
+      "registradores/matric/download",
       fixture.default as unknown as InfosimplesResponse
     );
     expect(r.situacao).toBe("negativa");
@@ -663,7 +663,7 @@ describe("Phase K — registradores/matric (ONR)", () => {
       ],
     };
     const r = normalize(
-      "registradores/matric-download",
+      "registradores/matric/download",
       resp as unknown as InfosimplesResponse
     );
     expect(r.situacao).toBe("positiva");
