@@ -298,25 +298,39 @@ describe("planCertidoesForDeal — dados faltando", () => {
     expect(matric?.requestPayload.matricula).toBe("54321");
   });
 
-  it("pesquisa de bens ONR (mapa) só com expandAll + onrActive", () => {
+  it("pesquisa de bens ONR (mapa): aparece para vendedor com onrActive (tier pesquisa, sem expandAll); skip sem credencial", () => {
     const base = {
       vendedores: [VENDEDOR_PF_SP],
       compradores: [],
       imoveis: [],
     };
-    // sem expandAll → não aparece
+    // Redesign 2026-05-26: não depende mais de expandAll — aparece no plano
+    // padrão como opção da camada "pesquisa" (desmarcada na UI) quando onrActive.
     const auto = planCertidoesForDeal(base, undefined, undefined, { onrActive: true });
+    const bens = auto.jobs.find((j) => j.endpoint === "onr/mapa-registro-imoveis");
+    expect(bens).toBeDefined();
+    expect(bens?.tier).toBe("pesquisa");
+    expect(bens?.targetKind).toBe("vendedor");
+    // sem credencial ONR → vira skip (não some)
+    const semOnr = planCertidoesForDeal(base, undefined, undefined, { onrActive: false });
     expect(
-      auto.jobs.find((j) => j.endpoint === "onr/mapa-registro-imoveis")
+      semOnr.jobs.find((j) => j.endpoint === "onr/mapa-registro-imoveis")
     ).toBeUndefined();
-    // com expandAll + onrActive → aparece
-    const full = planCertidoesForDeal(base, undefined, undefined, {
-      expandAll: true,
-      onrActive: true,
-    });
     expect(
-      full.jobs.find((j) => j.endpoint === "onr/mapa-registro-imoveis")
+      semOnr.skipped.find((s) => s.endpoint === "onr/mapa-registro-imoveis")
     ).toBeDefined();
+    // comprador NÃO recebe pesquisa de bens
+    const comp = planCertidoesForDeal(
+      { vendedores: [VENDEDOR_PF_SP], compradores: [VENDEDOR_PF_SP], imoveis: [] },
+      undefined,
+      undefined,
+      { onrActive: true }
+    );
+    expect(
+      comp.jobs.find(
+        (j) => j.endpoint === "onr/mapa-registro-imoveis" && j.targetKind === "comprador"
+      )
+    ).toBeUndefined();
   });
 });
 
