@@ -255,6 +255,32 @@ export function isProtestoNadaConsta(
 }
 
 /**
+ * Endpoints INFORMATIVOS (`emitsPdf: false`, ex.: `tribunal/tjsp/eproc-lista`)
+ * sinalizam "sem processos / nenhum resultado" como erro 6xx (tipicamente 612
+ * "Nenhum Resultado Encontrado. (A consulta não retornou dados...)") em vez de
+ * code 200 + lista vazia. Como esses endpoints NÃO emitem PDF de certidão, isso
+ * é uma negativa informativa legítima ("nada consta"), não uma falha de dado.
+ *
+ * Sem tratamento, 612 ∈ CODE_MAP → `missing_input` → `failed_permanent`
+ * (vermelho "use o portal"), apresentando um resultado LIMPO como falha — o
+ * mesmo problema do protesto. O caller (classifyOutcome) exige adicionalmente
+ * `info.emitsPdf === false` para não mascarar 612 legítimo (CPF inválido) em
+ * endpoints que emitem certidão. NÃO casa com "inválido"/"indisponível"/
+ * "fetch failed" — esses seguem como falha/retry.
+ */
+export function isSemResultadoInformativo(
+  message: string | null | undefined
+): boolean {
+  if (!message) return false;
+  if (/inv[aá]lid[oa]|indispon[ií]vel|fora do ar|timeout|fetch failed/i.test(message)) {
+    return false;
+  }
+  return /nenhum\s+resultado\s+encontrado|n[ãa]o\s+retornou\s+dados|nenhum\s+processo\s+encontrado|nada\s+consta/i.test(
+    message
+  );
+}
+
+/**
  * Portais two-step (e-SAJ TJSP/TJRJ) recusam um pedido com code 620 quando JÁ
  * EXISTE um pedido do mesmo tipo em processamento (ex.: o usuário re-disparou
  * a certidão enquanto a tentativa anterior ainda rodava). A resposta NÃO traz
