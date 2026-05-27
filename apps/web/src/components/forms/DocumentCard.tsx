@@ -57,6 +57,9 @@ interface DocumentCardProps {
    */
   onSendToSignature?: (id: string) => void;
   readOnly?: boolean;
+  /** Em voo (ex.: copiando o doc do formulário pro negócio) — desabilita as
+   *  ações de mover/assinar e mostra spinner. */
+  busy?: boolean;
 }
 
 function statusLabel(status: DocumentCardStatus): string {
@@ -95,6 +98,7 @@ export function DocumentCard({
   onApply,
   onSendToSignature,
   readOnly = false,
+  busy = false,
 }: DocumentCardProps) {
   const isImage = doc.mime.startsWith("image/");
   const fieldEntries = doc.fields
@@ -282,13 +286,20 @@ export function DocumentCard({
         )}
 
         {!readOnly && doc.status === "ready" && onAssignmentChange && (
-          <div className="mt-1">
+          <div className="mt-1 flex items-center gap-1.5">
+            <span className="shrink-0 text-[11px] text-muted-foreground">
+              Mover para:
+            </span>
             <NativeSelect
               value={encodeAssignment(doc.assignment)}
               onChange={(val) => onAssignmentChange(doc.id, val)}
               options={assignmentOptions}
               className="h-8 text-xs"
+              disabled={busy}
             />
+            {busy && (
+              <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-muted-foreground" />
+            )}
           </div>
         )}
 
@@ -343,10 +354,26 @@ export function DocumentCard({
                 variant="outline"
                 className="h-7 px-2 text-[11px]"
                 onClick={() => onSendToSignature(doc.id)}
+                disabled={busy}
               >
-                <FileSignature className="h-3 w-3 mr-1" />
+                {busy ? (
+                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                ) : (
+                  <FileSignature className="h-3 w-3 mr-1" />
+                )}
                 Enviar para assinatura
               </Button>
+            )}
+            {/* Não-PDF: assinatura digital (ClickSign) só aceita PDF. Em vez de
+                sumir silenciosamente, mostra o motivo. */}
+            {!readOnly && onSendToSignature && doc.mime !== "application/pdf" && (
+              <span
+                className="inline-flex items-center h-7 px-2 text-[11px] text-muted-foreground"
+                title="A assinatura digital aceita apenas PDF. Converta este arquivo para PDF para enviá-lo."
+              >
+                <FileSignature className="h-3 w-3 mr-1" />
+                Assinatura: só PDF
+              </span>
             )}
           </div>
         )}

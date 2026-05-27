@@ -176,11 +176,19 @@ export async function addSignerToEnvelope(
   envelope: Envelope,
   data: AddSignerData
 ): Promise<ActionResult<Signer>> {
-  if (envelope.status !== "draft" && envelope.status !== "running") {
+  // ClickSign v3 só aceita ADICIONAR signatário enquanto o envelope está
+  // `draft`. Depois de ativado (`running`), a API rejeita ("envelope não está
+  // no status draft") — antes esse erro cru vazava pro usuário como 502. Para
+  // novo signatário exigimos draft e devolvemos orientação acionável.
+  // (Editar/remover signatário existente em `running` segue em editSignerAction.)
+  if (envelope.status !== "draft") {
     return {
       ok: false,
-      status: 400,
-      error: "Envelope não permite adicionar signatários neste estado",
+      status: 409,
+      error:
+        envelope.status === "running"
+          ? "Este envelope já foi enviado para assinatura e não aceita novos signatários. Cancele o envio e reenvie incluindo a nova pessoa (testemunha, cônjuge etc.)."
+          : "Envelope não permite adicionar signatários neste estado",
     };
   }
 
@@ -242,8 +250,10 @@ export async function addSignerToEnvelope(
         data: {
           clicksignId: signerId,
           requirementIds: reqIds,
-          status: envelope.status === "running" ? "notified" : "pending",
-          notifiedAt: envelope.status === "running" ? new Date() : null,
+          // Envelope garantidamente `draft` aqui (guard acima) — signatário
+          // só é notificado quando o envelope for ativado.
+          status: "pending",
+          notifiedAt: null,
         },
       });
     } catch (err) {
