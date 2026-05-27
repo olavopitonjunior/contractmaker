@@ -3,6 +3,8 @@
 > **Tipo:** cronograma de implementação fase-a-fase com eng-weeks + paralelismo identificado.
 > **Status:** derivado do PRD aprovado em [`docs/prd-multitenant-600.md`](./prd-multitenant-600.md) — 2026-05-16.
 > **Premissa:** 1 eng senior dedicado em modo serial OU 2 engs em paralelo. Buffer 20% incluído nas projeções.
+>
+> **✅ ATUALIZAÇÃO 2026-05-27 — Fase 0 + Fase 1 IMPLEMENTADAS e verificadas contra a Neon staging** (1050 testes, typecheck limpo). Fase 0 + 1a + 1d mergeados em `redesign/fase-b`; 1e (PR #45) e 1f/1b/1c (PR #46) abertos. 1b/1c gated em aprovações externas (Google OAuth / ClickSign WL) pro E2E. **Próximo = Fase 2 (observability).** Handoff completo: [`docs/kickoff-multitenant-fase2.md`](./kickoff-multitenant-fase2.md).
 
 ## Visão executiva
 
