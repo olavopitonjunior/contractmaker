@@ -1,0 +1,179 @@
+import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { randomBytes } from "node:crypto";
+import bcrypt from "bcryptjs";
+import { auth } from "@/lib/auth/auth";
+import { prisma } from "@/lib/db/prisma";
+import {
+  requirePlatformRole,
+  PlatformRoleRequiredError,
+} from "@/lib/security/rbac/platform";
+import { subdomainSchema } from "@/lib/tenant/subdomain";
+import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+// 7 stages canônicos (espelha scripts/migrate-pipeline-stages.ts).
+const DEFAULT_STAGES: { name: string; color: string; position: number }[] = [
+  { name: "Formulário", color: "#6366f1", position: 0 },
+  { name: "Confecção de Contrato", color: "#f59e0b", position: 1 },
+  { name: "Enviado para assinatura", color: "#3b82f6", position: 2 },
+  { name: "Contrato assinado", color: "#0ea5e9", position: 3 },
+  { name: "Cobrança emitida", color: "#a855f7", position: 4 },
+  { name: "Comissão paga", color: "#22c55e", position: 5 },
+  { name: "Negócio perdido", color: "#ef4444", position: 6 },
+];
+
+const createOrgSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  subdomain: subdomainSchema,
+  ownerEmail: z.string().email().toLowerCase().trim(),
+  ownerName: z.string().trim().min(2).max(120).optional(),
+});
+
+async function gate(userId: string, role: "support" | "super_admin") {
+  try {
+    await requirePlatformRole(userId, role);
+    return null;
+  } catch (err) {
+    if (err instanceof PlatformRoleRequiredError) {
+      return NextResponse.json(
+        { error: err.code, requiredRole: err.requiredRole },
+        { status: err.status }
+      );
+    }
+    throw err;
+  }
+}
+
+/** GET /api/admin/orgs — lista tenants + KPIs. Gated (support+). */
+export async function GET() {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const denied = await gate(session.user.id, "support");
+  if (denied) return denied;
+
+  const orgs = await prisma.organization.findMany({
+    orderBy: { createdAt: "desc" },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      subdomain: true,
+      createdAt: true,
+      _count: { select: { members: true, pipelines: true, asaasAccounts: true } },
+    },
+  });
+
+  return NextResponse.json({
+    orgs: orgs.map((o) => ({
+      id: o.id,
+      name: o.name,
+      slug: o.slug,
+      subdomain: o.subdomain,
+      createdAt: o.createdAt,
+      members: o._count.members,
+      pipelines: o._count.pipelines,
+      asaasAccounts: o._count.asaasAccounts,
+    })),
+  });
+}
+
+/** POST /api/admin/orgs — cria tenant (admin-led). Gated (super_admin). */
+export async function POST(req: NextRequest) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const denied = await gate(session.user.id, "super_admin");
+  if (denied) return denied;
+
+  const parsed = createOrgSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Validação falhou", issues: parsed.error.flatten() },
+      { status: 400 }
+    );
+  }
+  const { name, subdomain, ownerEmail, ownerName } = parsed.data;
+
+  // Unicidade de subdomínio (a constraint @unique também protege, mas damos 409 claro).
+  const subTaken = await prisma.organization.findUnique({ where: { subdomain } });
+  if (subTaken) {
+    return NextResponse.json(
+      { error: "SUBDOMAIN_TAKEN", message: `Subdomínio "${subdomain}" já está em uso` },
+      { status: 409 }
+    );
+  }
+
+  const existingUser = await prisma.user.findUnique({
+    where: { email: ownerEmail },
+    select: { id: true },
+  });
+  // Senha temporária só pra owner novo (entregue por canal seguro — Resend pode estar sandbox).
+  const tempPassword = existingUser ? null : `${randomBytes(9).toString("base64url")}!7`;
+  const slug = subdomain; // subdomínio é único e url-safe → serve de slug
+
+  const result = await prisma.$transaction(async (tx) => {
+    const org = await tx.organization.create({
+      data: { name, slug, subdomain },
+    });
+
+    const ownerId =
+      existingUser?.id ??
+      (
+        await tx.user.create({
+          data: {
+            email: ownerEmail,
+            name: ownerName ?? null,
+            passwordHash: await bcrypt.hash(tempPassword!, 10),
+            emailVerified: new Date(),
+          },
+          select: { id: true },
+        })
+      ).id;
+
+    await tx.orgMembership.create({
+      data: { userId: ownerId, orgId: org.id, role: "owner" },
+    });
+
+    const pipeline = await tx.pipeline.create({
+      data: { orgId: org.id, name: "Pipeline Principal" },
+    });
+    await tx.pipelineStage.createMany({
+      data: DEFAULT_STAGES.map((s) => ({
+        pipelineId: pipeline.id,
+        name: s.name,
+        color: s.color,
+        position: s.position,
+      })),
+    });
+
+    await tx.brandingSettings.create({ data: { orgId: org.id } });
+
+    return { org, ownerId };
+  });
+
+  await audit(
+    extractAuditContextFromRequest(req, result.org.id, session.user.id),
+    {
+      action: "ORG_CREATED",
+      result: "SUCCESS",
+      resourceType: "Organization",
+      resource: result.org.id,
+      metadata: { name, subdomain, ownerEmail, ownerCreated: !existingUser },
+    }
+  );
+
+  return NextResponse.json(
+    {
+      ok: true,
+      org: { id: result.org.id, name, slug, subdomain },
+      owner: { email: ownerEmail, userId: result.ownerId, tempPassword },
+    },
+    { status: 201 }
+  );
+}

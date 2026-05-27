@@ -159,7 +159,11 @@ export type AuditAction =
   | "INTENT_REJECTED"
   | "INTENT_EXECUTED"
   | "INTENT_EXPIRED"
-  | "INTENT_TAMPERED";
+  | "INTENT_TAMPERED"
+  // Multitenant — plataforma / super-admin (Fase 1e)
+  | "ORG_CREATED"
+  | "IMPERSONATION_STARTED"
+  | "IMPERSONATION_ENDED";
 
 export interface AuditContext {
   // Nullable (Fase 0c): eventos pré-resolução de tenant gravam orgId=null.

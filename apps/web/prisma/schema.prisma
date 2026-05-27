@@ -156,6 +156,22 @@ model BrandingSettings {
   updatedAt      DateTime     @updatedAt
 }
 
+// Impersonação de tenant pelo super-admin (Fase 1e). Campos planos (sem FK) —
+// consultados por adminUserId + orgId + janela ativa (endedAt null, endsAt futuro).
+// Toda ação durante a sessão grava AuditLog.impersonatedBy = adminUserId.
+model TenantImpersonationSession {
+  id          String    @id @default(cuid())
+  adminUserId String
+  orgId       String
+  reason      String
+  startedAt   DateTime  @default(now())
+  endsAt      DateTime
+  endedAt     DateTime?
+
+  @@index([adminUserId, endedAt])
+  @@index([orgId, startedAt])
+}
+
 model Account {
   id                String  @id @default(cuid())
   userId            String

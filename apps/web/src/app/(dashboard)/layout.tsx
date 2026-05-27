@@ -1,8 +1,9 @@
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
+import { headers, cookies } from "next/headers";
 import type { CSSProperties } from "react";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { getTenantBranding } from "@/lib/tenant/branding";
+import { ImpersonationBanner } from "@/components/admin/ImpersonationBanner";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { DashboardHeader } from "@/components/layout/dashboard-header";
@@ -32,12 +33,17 @@ export default async function DashboardLayout({
         } as CSSProperties)
       : undefined;
 
+  // Impersonação (Fase 1e): banner de aviso quando o cookie de impersonação
+  // está presente (a resolução real da org acontece em requireAuth/API).
+  const impersonateOrgId = cookies().get("mt_impersonate")?.value;
+
   return (
     <div
       className="contents"
       data-tenant={org?.subdomain ?? org?.id ?? undefined}
       style={tenantStyle}
     >
+      {impersonateOrgId && <ImpersonationBanner orgId={impersonateOrgId} />}
       <SidebarProvider>
         <a
           href="#main-content"

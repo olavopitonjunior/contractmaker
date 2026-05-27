@@ -56,6 +56,12 @@ export interface AuthContext {
    * "como quem está agindo". `undefined` quando não há delegação ativa.
    */
   delegatedFromUserId?: string;
+  /**
+   * Quando um super-admin está impersonando um tenant (Fase 1e), guarda o
+   * userId do admin. `orgId`/`orgName` apontam pra org impersonada. null/undefined
+   * quando não há impersonação ativa.
+   */
+  impersonatedBy?: string;
 }
 
 export type AuthResult =
@@ -65,6 +71,16 @@ export type AuthResult =
 export interface RequireAuthOptions {
   /** Escopo Bearer obrigatório. Session sempre passa. */
   scope?: string;
+}
+
+/** Lê um cookie do header `cookie` cru (sem depender de next/headers). */
+function parseCookie(header: string | null, name: string): string | null {
+  if (!header) return null;
+  for (const part of header.split(";")) {
+    const [k, ...v] = part.trim().split("=");
+    if (k === name) return decodeURIComponent(v.join("="));
+  }
+  return null;
 }
 
 function extractIpAddress(req: Request): string | null {
@@ -239,6 +255,41 @@ export async function requireAuth(
     };
   }
 
+  // Impersonação (Fase 1e): se houver cookie de impersonação numa sessão UI,
+  // valida super_admin + sessão ativa e troca a org efetiva pra impersonada.
+  // Só faz lookup quando o cookie existe → zero overhead no fluxo normal.
+  let effectiveOrgId = org.id;
+  let effectiveOrgName = org.name;
+  let impersonatedBy: string | undefined;
+  const impCookie = parseCookie(req.headers.get("cookie"), "mt_impersonate");
+  if (impCookie && ident.via === "session") {
+    const pr = await prisma.platformRole.findUnique({
+      where: { userId: effectiveActor.effectiveUserId },
+    });
+    if (pr?.role === "super_admin") {
+      const activeSession = await prisma.tenantImpersonationSession.findFirst({
+        where: {
+          adminUserId: effectiveActor.effectiveUserId,
+          orgId: impCookie,
+          endedAt: null,
+          endsAt: { gt: new Date() },
+        },
+        orderBy: { startedAt: "desc" },
+      });
+      if (activeSession) {
+        const target = await prisma.organization.findUnique({
+          where: { id: impCookie },
+          select: { id: true, name: true },
+        });
+        if (target) {
+          effectiveOrgId = target.id;
+          effectiveOrgName = target.name;
+          impersonatedBy = effectiveActor.effectiveUserId;
+        }
+      }
+    }
+  }
+
   // Email/name: para session vêm direto do ident; para bearer fazemos lookup
   // leve (1 query) para preservar compatibilidade com callers que usam nome.
   let userEmail = "";
@@ -264,13 +315,14 @@ export async function requireAuth(
       userId: effectiveActor.effectiveUserId,
       userEmail,
       userName,
-      orgId: org.id,
-      orgName: org.name,
+      orgId: effectiveOrgId,
+      orgName: effectiveOrgName,
       ipAddress: extractIpAddress(req),
       userAgent: req.headers.get("user-agent"),
       via: ident.via,
       actor: effectiveActor,
       delegatedFromUserId,
+      impersonatedBy,
     },
   };
 }
