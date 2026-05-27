@@ -13,6 +13,8 @@ interface AuditRow {
   result: "SUCCESS" | "FAILURE" | "DENIED";
   resource: string | null;
   resourceType: string | null;
+  entityId: string | null;
+  impersonatedBy: string | null;
   metadata: Record<string, unknown> | null;
   ipAddress: string | null;
   userAgent: string | null;
@@ -31,7 +33,7 @@ export function AuditLogTable() {
   const [total, setTotal] = useState(0);
   const [offset, setOffset] = useState(0);
   const limit = 50;
-  const [filter, setFilter] = useState({ action: "", result: "" });
+  const [filter, setFilter] = useState({ action: "", result: "", q: "", resourceType: "" });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -45,6 +47,8 @@ export function AuditLogTable() {
       params.set("limit", String(limit));
       if (filter.action) params.set("action", filter.action);
       if (filter.result) params.set("result", filter.result);
+      if (filter.q) params.set("q", filter.q);
+      if (filter.resourceType) params.set("resourceType", filter.resourceType);
 
       const res = await fetch(`/api/security/audit-log?${params}`, {
         credentials: "include",
@@ -65,16 +69,31 @@ export function AuditLogTable() {
   }
 
   useEffect(() => {
-    load();
+    const t = setTimeout(load, filter.q || filter.resourceType ? 350 : 0);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [offset, filter.action, filter.result]);
+  }, [offset, filter.action, filter.result, filter.q, filter.resourceType]);
+
+  function exportCsv() {
+    const params = new URLSearchParams();
+    if (filter.action) params.set("action", filter.action);
+    if (filter.result) params.set("result", filter.result);
+    if (filter.q) params.set("q", filter.q);
+    if (filter.resourceType) params.set("resourceType", filter.resourceType);
+    window.open(`/api/security/audit-log/export?${params}`, "_blank");
+  }
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="font-display tracking-tight text-2xl font-semibold">Registro de atividade</h1>
-        <div className="text-sm text-muted-foreground">
-          {total} evento{total !== 1 ? "s" : ""}
+        <div className="flex items-center gap-3">
+          <div className="text-sm text-muted-foreground">
+            {total} evento{total !== 1 ? "s" : ""}
+          </div>
+          <Button variant="outline" size="sm" onClick={exportCsv}>
+            Exportar CSV
+          </Button>
         </div>
       </div>
 
@@ -83,6 +102,30 @@ export function AuditLogTable() {
           <CardTitle className="text-sm">Filtros</CardTitle>
         </CardHeader>
         <CardContent className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <div className="md:col-span-3">
+            <Label htmlFor="f-q">Busca (ação / recurso / tipo)</Label>
+            <Input
+              id="f-q"
+              placeholder="texto livre…"
+              value={filter.q}
+              onChange={(e) => {
+                setOffset(0);
+                setFilter((f) => ({ ...f, q: e.target.value }));
+              }}
+            />
+          </div>
+          <div>
+            <Label htmlFor="f-restype">Tipo de recurso</Label>
+            <Input
+              id="f-restype"
+              placeholder="ex: Contract, Envelope"
+              value={filter.resourceType}
+              onChange={(e) => {
+                setOffset(0);
+                setFilter((f) => ({ ...f, resourceType: e.target.value }));
+              }}
+            />
+          </div>
           <div>
             <Label htmlFor="f-action">Ação</Label>
             <Input
@@ -115,7 +158,7 @@ export function AuditLogTable() {
               variant="outline"
               size="sm"
               onClick={() => {
-                setFilter({ action: "", result: "" });
+                setFilter({ action: "", result: "", q: "", resourceType: "" });
                 setOffset(0);
               }}
             >
@@ -193,6 +236,11 @@ export function AuditLogTable() {
                       <pre className="text-xs overflow-x-auto bg-background p-2 rounded border">
                         {JSON.stringify(r.metadata, null, 2)}
                       </pre>
+                      {r.impersonatedBy && (
+                        <div className="mt-2 text-xs font-medium text-amber-700">
+                          ⚠ Ação sob impersonação (super-admin: {r.impersonatedBy})
+                        </div>
+                      )}
                       {r.userAgent && (
                         <div className="text-xs text-muted-foreground mt-2">
                           UA: {r.userAgent}

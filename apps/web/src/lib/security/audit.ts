@@ -163,7 +163,10 @@ export type AuditAction =
   // Multitenant — plataforma / super-admin (Fase 1e)
   | "ORG_CREATED"
   | "IMPERSONATION_STARTED"
-  | "IMPERSONATION_ENDED";
+  | "IMPERSONATION_ENDED"
+  | "AUDIT_LOG_EXPORTED"
+  | "GOOGLE_CONNECTION_UPDATED"
+  | "CLICKSIGN_ACCOUNT_UPDATED";
 
 export interface AuditContext {
   // Nullable (Fase 0c): eventos pré-resolução de tenant gravam orgId=null.
@@ -171,6 +174,9 @@ export interface AuditContext {
   userId?: string | null;
   ipAddress?: string | null;
   userAgent?: string | null;
+  // Fase 1f: quando o request roda sob impersonação (super-admin), o caller
+  // pode passar isto (de AuthContext.impersonatedBy) pra carimbar o log.
+  impersonatedBy?: string | null;
 }
 
 export interface AuditEntry {
@@ -179,6 +185,9 @@ export interface AuditEntry {
   resource?: string;
   resourceType?: string;
   metadata?: Record<string, unknown>;
+  // Fase 1f
+  entityId?: string;
+  impersonatedBy?: string;
 }
 
 /**
@@ -199,6 +208,9 @@ export async function audit(
         resource: entry.resource ?? null,
         resourceType: entry.resourceType ?? null,
         metadata: (entry.metadata as object) ?? undefined,
+        entityId: entry.entityId ?? null,
+        // Fase 1f: super-admin agindo como tenant (vem de AuthContext.impersonatedBy).
+        impersonatedBy: entry.impersonatedBy ?? ctx.impersonatedBy ?? null,
         ipAddress: ctx.ipAddress ?? null,
         userAgent: ctx.userAgent ? ctx.userAgent.slice(0, 1000) : null,
       },

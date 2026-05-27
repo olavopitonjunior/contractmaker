@@ -172,6 +172,45 @@ model TenantImpersonationSession {
   @@index([orgId, startedAt])
 }
 
+// Conexão Google per-org (Fase 1b). Aditivo: quando ACTIVE, getDriveClientForOrg
+// usa o OAuth do tenant; senão cai no Service Account global (legado). Refresh
+// token em 3 colunas AES-256-GCM (mesmo padrão de AsaasAccount).
+model GoogleConnection {
+  id                     String    @id @default(cuid())
+  orgId                  String    @unique
+  connectionType         String    @default("personal_oauth") // workspace_dwd | personal_oauth
+  refreshTokenCiphertext String?   @db.Text
+  refreshTokenIv         String?
+  refreshTokenTag        String?
+  driveRootFolderId      String?
+  scopes                 String[]  @default([])
+  status                 String    @default("ACTIVE") // ACTIVE | EXPIRED | REVOKED | NEEDS_CONSENT
+  workspaceDomain        String?
+  adminUserEmail         String?
+  lastRefreshAt          DateTime?
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+}
+
+// Conta ClickSign per-org (Fase 1c). Aditivo: mode "white_label" usa a chave
+// própria do tenant; "platform_pool" (default) cai na CLICKSIGN_API_KEY global.
+// Chaves em 3 colunas AES-256-GCM.
+model ClickSignAccount {
+  id                   String   @id @default(cuid())
+  orgId                String   @unique
+  mode                 String   @default("platform_pool") // white_label | platform_pool
+  whiteLabelId         String?
+  apiKeyCiphertext     String?  @db.Text
+  apiKeyIv             String?
+  apiKeyTag            String?
+  hmacSecretCiphertext String?  @db.Text
+  hmacSecretIv         String?
+  hmacSecretTag        String?
+  status               String   @default("ACTIVE") // PROVISIONING | ACTIVE | SUSPENDED | ERROR
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
 model Account {
   id                String  @id @default(cuid())
   userId            String
@@ -1471,26 +1510,32 @@ model OperationChallenge {
 
 // Audit log imutável — append-only.
 model AuditLog {
-  id           String   @id @default(cuid())
+  id             String   @id @default(cuid())
   // Nullable (Fase 0c): eventos pré-resolução de tenant (ex.: webhook ClickSign
   // antes de identificar o envelope) gravam orgId=null em vez de cair no
   // SHARED_ORG_ID. Pós-resolução usa o orgId real.
-  orgId        String?
-  userId       String?
-  action       String
-  resource     String?
-  resourceType String?
-  result       String // SUCCESS | FAILURE | DENIED
-  metadata     Json?
-  ipAddress    String?
-  userAgent    String?  @db.Text
-  createdAt    DateTime @default(now())
+  orgId          String?
+  userId         String?
+  action         String
+  resource       String?
+  resourceType   String?
+  result         String // SUCCESS | FAILURE | DENIED
+  metadata       Json?
+  // Fase 1f: drill-down explícito (id da entidade quando `resource` é textual) +
+  // impersonatedBy (super-admin agindo como o tenant — ver Fase 1e).
+  entityId       String?
+  impersonatedBy String?
+  ipAddress      String?
+  userAgent      String?  @db.Text
+  createdAt      DateTime @default(now())
 
   org  Organization? @relation(fields: [orgId], references: [id], onDelete: Cascade)
   user User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([orgId, action, createdAt])
   @@index([userId, createdAt])
+  @@index([orgId, resourceType, createdAt])
+  @@index([orgId, impersonatedBy, createdAt])
 }
 
 // Dispositivos confiáveis — fingerprint + cookie assinado.
