@@ -2,11 +2,10 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ChevronLeft, ChevronRight, Receipt } from "lucide-react";
 import { NovaDespesaDialog } from "@/components/locacao/NovaDespesaDialog";
+import { DespesasTable, type DespesaRow } from "@/components/locacao/DespesasTable";
 
 export const dynamic = "force-dynamic";
 
@@ -18,21 +17,6 @@ const MES_LABEL = [
   "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
   "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
 ];
-
-const TYPE_LABEL: Record<string, string> = {
-  iptu: "IPTU",
-  condominio: "Condomínio",
-  seguro_incendio: "Seguro incêndio",
-  seguro_fianca: "Seguro fiança",
-  juros: "Juros",
-  multa: "Multa",
-  honorarios: "Honorários",
-  atualizacao_monetaria: "Atualização monet.",
-  custas: "Custas",
-  moratorios: "Moratórios",
-  taxa_locacao: "Taxa de locação",
-  outro: "Outro",
-};
 
 export default async function LocacaoDespesasPage({
   searchParams,
@@ -91,6 +75,19 @@ export default async function LocacaoDespesasPage({
       : c.id.slice(0, 8),
   }));
 
+  const rows: DespesaRow[] = expenses.map((e) => ({
+    id: e.id,
+    dueDate: e.dueDate.toISOString(),
+    type: e.type,
+    parcelaLabel: e.parcelaTotal > 1 ? `${e.parcelaN}/${e.parcelaTotal}` : "",
+    endereco:
+      `${e.leaseContract?.property?.rua ?? "—"} ${e.leaseContract?.property?.numero ?? ""}`.trim(),
+    fluxo: `${e.debitoDe} → ${e.creditoPara}`,
+    valor: e.valor,
+    status: e.status,
+    isOverdue: e.status === "pendente" && e.dueDate < now,
+  }));
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -121,68 +118,17 @@ export default async function LocacaoDespesasPage({
         </Button>
       </div>
 
-      {expenses.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <Receipt className="mx-auto h-10 w-10 text-muted-foreground" />
-            <p className="mt-3 text-sm text-muted-foreground">
-              Sem despesas em {MES_LABEL[m - 1]}/{y}.
-              {contractOptions.length === 0 && (
-                <> Cadastre primeiro um contrato pra poder lançar despesas.</>
-              )}
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <Card>
-          <CardContent className="p-0">
-            <ul className="divide-y">
-              {expenses.map((e) => (
-                <li
-                  key={e.id}
-                  className="grid grid-cols-12 items-center gap-3 px-4 py-3 text-sm hover:bg-muted/30"
-                >
-                  <div className="col-span-2">
-                    <div className="font-medium">
-                      {e.dueDate.toLocaleDateString("pt-BR")}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {MES_LABEL[e.dueDate.getMonth()].slice(0, 3)}
-                    </div>
-                  </div>
-                  <div className="col-span-5">
-                    <div className="font-medium">
-                      {TYPE_LABEL[e.type] ?? e.type}
-                      {e.parcelaTotal > 1 ? ` · ${e.parcelaN}/${e.parcelaTotal}` : ""}
-                    </div>
-                    <div className="text-xs text-muted-foreground">
-                      {e.leaseContract?.property?.rua ?? "—"}{" "}
-                      {e.leaseContract?.property?.numero ?? ""} ·{" "}
-                      {e.debitoDe} → {e.creditoPara}
-                    </div>
-                  </div>
-                  <div className="col-span-3 text-right font-semibold">{fmtBRL(e.valor)}</div>
-                  <div className="col-span-2 text-right">
-                    <Badge
-                      variant={
-                        e.status === "pago"
-                          ? "default"
-                          : e.status === "cancelado"
-                            ? "outline"
-                            : e.dueDate < now
-                              ? "destructive"
-                              : "secondary"
-                      }
-                    >
-                      {e.status}
-                    </Badge>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      )}
+      <DespesasTable
+        data={rows}
+        emptyState={{
+          icon: <Receipt className="h-10 w-10" />,
+          title: `Sem despesas em ${MES_LABEL[m - 1]}/${y}`,
+          description:
+            contractOptions.length === 0
+              ? "Cadastre primeiro um contrato pra poder lançar despesas."
+              : 'Use o botão "Nova despesa" pra registrar.',
+        }}
+      />
     </div>
   );
 }

@@ -2,11 +2,12 @@ import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, AlertCircle, Building2, User } from "lucide-react";
 import { LeaseHeaderActions } from "@/components/locacao/LeaseHeaderActions";
 import { NovaCobrancaExtraDialog } from "@/components/locacao/NovaCobrancaExtraDialog";
+import { LeaseSection, Field } from "@/components/locacao/lease-detail/LeaseSection";
 
 export const dynamic = "force-dynamic";
 
@@ -56,14 +57,8 @@ export default async function LeaseContractDetailPage({ params }: Params) {
       tenants: { include: { tenant: { select: { id: true, nome: true, cpfCnpj: true } } } },
       angariadores: { include: { party: { select: { nome: true } } } },
       guarantee: true,
-      rentCharges: {
-        orderBy: { dueDate: "desc" },
-        take: 12,
-      },
-      expenses: {
-        orderBy: { dueDate: "desc" },
-        take: 12,
-      },
+      rentCharges: { orderBy: { dueDate: "desc" }, take: 12 },
+      expenses: { orderBy: { dueDate: "desc" }, take: 12 },
       checklists: true,
       debtAgreements: true,
       insurancePolicies: true,
@@ -104,12 +99,12 @@ export default async function LeaseContractDetailPage({ params }: Params) {
         Voltar para contratos
       </Link>
 
-      {/* Header (espelha Superlógica §4.2) */}
       <Card className={lc.status === "rescisao" ? "border-destructive" : ""}>
         <CardContent className="flex flex-wrap items-start justify-between gap-3 py-4">
           <div>
             <h2 className="text-2xl font-semibold">
-              Contrato de Locação {lc.finalidade !== "residencial" ? `(${lc.finalidade})` : "Residencial"}
+              Contrato de Locação{" "}
+              {lc.finalidade !== "residencial" ? `(${lc.finalidade})` : "Residencial"}
             </h2>
             <p className="text-sm text-muted-foreground">
               De {lc.vigenciaInicio?.toLocaleDateString("pt-BR") ?? "—"} a{" "}
@@ -126,7 +121,6 @@ export default async function LeaseContractDetailPage({ params }: Params) {
         </CardContent>
       </Card>
 
-      {/* Alertas */}
       {(cobrancasVencidas > 0 || repassesPendentes > 0 || checklistsPendentes > 0) && (
         <div className="flex flex-wrap gap-2">
           {cobrancasVencidas > 0 && (
@@ -147,121 +141,138 @@ export default async function LeaseContractDetailPage({ params }: Params) {
         </div>
       )}
 
-      {/* Bloco principal: Contrato + Partes */}
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Contrato</CardTitle>
-          </CardHeader>
-          <CardContent className="grid grid-cols-2 gap-3 text-sm">
-            <Field
-              label="Imóvel"
-              value={
-                lc.property ? (
-                  <Link href={`/locacao/imoveis/${lc.propertyId}`} className="text-primary hover:underline">
-                    <Building2 className="mr-1 inline h-3.5 w-3.5" />
-                    {endereco}
-                  </Link>
-                ) : (
-                  "—"
-                )
-              }
-              className="col-span-2"
-            />
-            <Field label="Aluguel" value={`${fmtBRL(lc.valorAluguel)} (${lc.regimeCobranca === "mes_vencido" ? "mês vencido" : "mês a vencer"})`} />
-            <Field label="Encargos" value={fmtBRL(lc.valorEncargos)} />
-            <Field label="Taxa adm" value={`${lc.taxaAdminPercent}%`} />
-            <Field label="Índice reajuste" value={lc.indiceReajuste} />
-            <Field label="Regime IR" value={REGIME_IR_LABEL[lc.regimeIr] ?? lc.regimeIr} />
-            <Field label="Emite NFS-e" value={lc.emitirNfse ? "Sim" : "Não"} />
-            <Field
-              label="Repasse"
-              value={`Dia ${lc.repasseDia ?? "—"} (${lc.repasseTipo.replace(/_/g, " ")})`}
-            />
-            <Field
-              label="Repasse garantido"
-              value={`${REPASSE_GARANTIDO_LABEL[lc.repasseGarantido]}${
-                lc.repasseGarantidoMeses ? ` (${lc.repasseGarantidoMeses} meses)` : ""
-              }`}
-            />
+          <CardContent className="space-y-3 py-4">
+            <h3 className="text-base font-semibold">Contrato</h3>
+            <div className="grid grid-cols-2 gap-3 text-sm">
+              <Field
+                label="Imóvel"
+                value={
+                  lc.property ? (
+                    <Link
+                      href={`/locacao/imoveis/${lc.propertyId}`}
+                      className="text-primary hover:underline"
+                    >
+                      <Building2 className="mr-1 inline h-3.5 w-3.5" />
+                      {endereco}
+                    </Link>
+                  ) : (
+                    "—"
+                  )
+                }
+                className="col-span-2"
+              />
+              <Field
+                label="Aluguel"
+                value={`${fmtBRL(lc.valorAluguel)} (${
+                  lc.regimeCobranca === "mes_vencido" ? "mês vencido" : "mês a vencer"
+                })`}
+              />
+              <Field label="Encargos" value={fmtBRL(lc.valorEncargos)} />
+              <Field label="Taxa adm" value={`${lc.taxaAdminPercent}%`} />
+              <Field label="Índice reajuste" value={lc.indiceReajuste} />
+              <Field label="Regime IR" value={REGIME_IR_LABEL[lc.regimeIr] ?? lc.regimeIr} />
+              <Field label="Emite NFS-e" value={lc.emitirNfse ? "Sim" : "Não"} />
+              <Field
+                label="Repasse"
+                value={`Dia ${lc.repasseDia ?? "—"} (${lc.repasseTipo.replace(/_/g, " ")})`}
+              />
+              <Field
+                label="Repasse garantido"
+                value={`${REPASSE_GARANTIDO_LABEL[lc.repasseGarantido]}${
+                  lc.repasseGarantidoMeses ? ` (${lc.repasseGarantidoMeses} meses)` : ""
+                }`}
+              />
+            </div>
           </CardContent>
         </Card>
 
         <Card>
-          <CardHeader>
-            <CardTitle className="text-base">Partes</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <div>
-              <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
-                Locadores ({lc.property?.ownerships.length ?? 0})
-              </div>
-              {lc.property?.ownerships.length ? (
-                <ul className="space-y-0.5">
-                  {lc.property.ownerships.map((o) => (
-                    <li key={o.id} className="flex items-center justify-between">
-                      <span>{o.owner.nome}</span>
-                      <Badge variant="outline">{o.percentual}%</Badge>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-xs text-muted-foreground">Nenhum proprietário cadastrado no imóvel.</p>
-              )}
-            </div>
-            <div>
-              <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
-                Locatários ({lc.tenants.length})
-              </div>
-              {lc.tenants.length ? (
-                <ul className="space-y-0.5">
-                  {lc.tenants.map((t) => (
-                    <li key={t.id} className="flex items-center justify-between">
-                      <span>
-                        <User className="mr-1 inline h-3.5 w-3.5" />
-                        {t.tenant.nome}
-                      </span>
-                      <Badge variant="outline">{t.tipo}</Badge>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-xs text-muted-foreground">Nenhum inquilino vinculado.</p>
-              )}
-            </div>
-            {lc.angariadores.length > 0 && (
+          <CardContent className="space-y-3 py-4">
+            <h3 className="text-base font-semibold">Partes</h3>
+            <div className="space-y-3 text-sm">
               <div>
                 <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
-                  Angariadores ({lc.angariadores.length})
+                  Locadores ({lc.property?.ownerships.length ?? 0})
                 </div>
-                <ul className="space-y-0.5">
-                  {lc.angariadores.map((a) => (
-                    <li key={a.id}>
-                      {a.party.nome} —{" "}
-                      {a.formaComissao === "percentual"
-                        ? `${a.percentual}%`
-                        : fmtBRL(a.valorFixo ?? 0)}{" "}
-                      por {a.mesesComissao ?? "todo o contrato"} mes(es)
-                    </li>
-                  ))}
-                </ul>
+                {lc.property?.ownerships.length ? (
+                  <ul className="space-y-0.5">
+                    {lc.property.ownerships.map((o) => (
+                      <li key={o.id} className="flex items-center justify-between">
+                        <span>{o.owner.nome}</span>
+                        <Badge variant="outline">{o.percentual}%</Badge>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Nenhum proprietário cadastrado no imóvel.
+                  </p>
+                )}
               </div>
-            )}
+              <div>
+                <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
+                  Locatários ({lc.tenants.length})
+                </div>
+                {lc.tenants.length ? (
+                  <ul className="space-y-0.5">
+                    {lc.tenants.map((t) => (
+                      <li key={t.id} className="flex items-center justify-between">
+                        <span>
+                          <User className="mr-1 inline h-3.5 w-3.5" />
+                          {t.tenant.nome}
+                        </span>
+                        <Badge variant="outline">{t.tipo}</Badge>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-xs text-muted-foreground">Nenhum inquilino vinculado.</p>
+                )}
+              </div>
+              {lc.angariadores.length > 0 && (
+                <div>
+                  <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
+                    Angariadores ({lc.angariadores.length})
+                  </div>
+                  <ul className="space-y-0.5">
+                    {lc.angariadores.map((a) => (
+                      <li key={a.id}>
+                        {a.party.nome} —{" "}
+                        {a.formaComissao === "percentual"
+                          ? `${a.percentual}%`
+                          : fmtBRL(a.valorFixo ?? 0)}{" "}
+                        por {a.mesesComissao ?? "todo o contrato"} mes(es)
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Seções operacionais (collapsible via details/summary nativo) */}
-      <CollapsibleSection title={`Cobranças (${lc.rentCharges.length})`} defaultOpen={lc.rentCharges.length > 0}>
+      <LeaseSection
+        id="cobrancas"
+        title={`Cobranças (${lc.rentCharges.length})`}
+        defaultOpen={lc.rentCharges.length > 0}
+      >
         <div className="mb-2 flex justify-end">
           <NovaCobrancaExtraDialog leaseContractId={lc.id} />
         </div>
         {lc.rentCharges.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nenhuma cobrança ainda. Materializadas mensalmente pelo cron.</p>
+          <p className="text-sm text-muted-foreground">
+            Nenhuma cobrança ainda. Materializadas mensalmente pelo cron.
+          </p>
         ) : (
           <ul className="divide-y">
             {lc.rentCharges.map((c) => (
-              <li key={c.id} className="grid grid-cols-12 items-center gap-3 py-2 text-sm">
+              <li
+                key={c.id}
+                className="grid grid-cols-12 items-center gap-3 py-2 text-sm"
+              >
                 <span className="col-span-2 font-medium">{c.competencia}</span>
                 <span className="col-span-3 text-muted-foreground">
                   {c.dueDate.toLocaleDateString("pt-BR")}
@@ -271,27 +282,40 @@ export default async function LeaseContractDetailPage({ params }: Params) {
                   {fmtBRL(c.valorBase + c.encargos + c.multa + c.juros)}
                 </span>
                 <span className="col-span-2 text-right">
-                  <Badge variant={c.status === "atrasada" ? "destructive" : "outline"}>{c.status}</Badge>
+                  <Badge variant={c.status === "atrasada" ? "destructive" : "outline"}>
+                    {c.status}
+                  </Badge>
                 </span>
               </li>
             ))}
           </ul>
         )}
-      </CollapsibleSection>
+      </LeaseSection>
 
-      <CollapsibleSection title={`Despesas (${lc.expenses.length})`} defaultOpen={lc.expenses.length > 0}>
+      <LeaseSection
+        id="despesas"
+        title={`Despesas (${lc.expenses.length})`}
+        defaultOpen={lc.expenses.length > 0}
+      >
         {lc.expenses.length === 0 ? (
           <p className="text-sm text-muted-foreground">Sem despesas lançadas.</p>
         ) : (
           <ul className="divide-y">
             {lc.expenses.map((e) => (
-              <li key={e.id} className="grid grid-cols-12 items-center gap-3 py-2 text-sm">
+              <li
+                key={e.id}
+                className="grid grid-cols-12 items-center gap-3 py-2 text-sm"
+              >
                 <span className="col-span-3">{e.type}</span>
-                <span className="col-span-2">{e.parcelaTotal > 1 ? `${e.parcelaN}/${e.parcelaTotal}` : ""}</span>
+                <span className="col-span-2">
+                  {e.parcelaTotal > 1 ? `${e.parcelaN}/${e.parcelaTotal}` : ""}
+                </span>
                 <span className="col-span-3 text-muted-foreground">
                   {e.dueDate.toLocaleDateString("pt-BR")} · {e.debitoDe} → {e.creditoPara}
                 </span>
-                <span className="col-span-2 text-right font-medium">{fmtBRL(e.valor)}</span>
+                <span className="col-span-2 text-right font-medium">
+                  {fmtBRL(e.valor)}
+                </span>
                 <span className="col-span-2 text-right">
                   <Badge variant="outline">{e.status}</Badge>
                 </span>
@@ -299,9 +323,9 @@ export default async function LeaseContractDetailPage({ params }: Params) {
             ))}
           </ul>
         )}
-      </CollapsibleSection>
+      </LeaseSection>
 
-      <CollapsibleSection title={`Checklists (${lc.checklists.length})`}>
+      <LeaseSection id="checklists" title={`Checklists (${lc.checklists.length})`}>
         {lc.checklists.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nenhum checklist criado.</p>
         ) : (
@@ -314,9 +338,10 @@ export default async function LeaseContractDetailPage({ params }: Params) {
             ))}
           </ul>
         )}
-      </CollapsibleSection>
+      </LeaseSection>
 
-      <CollapsibleSection
+      <LeaseSection
+        id="garantia"
         title={`Garantia${lc.guarantee ? ` · ${lc.guarantee.tipo}` : ""}`}
       >
         {!lc.guarantee ? (
@@ -326,15 +351,20 @@ export default async function LeaseContractDetailPage({ params }: Params) {
             <Field label="Tipo" value={lc.guarantee.tipo} />
             <Field label="Provider" value={lc.guarantee.provider} />
             <Field label="Status" value={lc.guarantee.status} />
-            <Field label="Cobertura" value={lc.guarantee.coberturaMeses ? `${lc.guarantee.coberturaMeses} meses` : "—"} />
+            <Field
+              label="Cobertura"
+              value={
+                lc.guarantee.coberturaMeses ? `${lc.guarantee.coberturaMeses} meses` : "—"
+              }
+            />
             {lc.guarantee.caucaoSubtipo && (
               <Field label="Subtipo caução" value={lc.guarantee.caucaoSubtipo} />
             )}
           </div>
         )}
-      </CollapsibleSection>
+      </LeaseSection>
 
-      <CollapsibleSection title={`Apólices de seguro (${lc.insurancePolicies.length})`}>
+      <LeaseSection id="seguros" title={`Apólices de seguro (${lc.insurancePolicies.length})`}>
         {lc.insurancePolicies.length === 0 ? (
           <p className="text-sm text-muted-foreground">Sem seguro contratado.</p>
         ) : (
@@ -352,9 +382,12 @@ export default async function LeaseContractDetailPage({ params }: Params) {
             ))}
           </ul>
         )}
-      </CollapsibleSection>
+      </LeaseSection>
 
-      <CollapsibleSection title={`Acordos de dívida (${lc.debtAgreements.length})`}>
+      <LeaseSection
+        id="acordos"
+        title={`Acordos de dívida (${lc.debtAgreements.length})`}
+      >
         {lc.debtAgreements.length === 0 ? (
           <p className="text-sm text-muted-foreground">Sem acordo ativo.</p>
         ) : (
@@ -365,14 +398,16 @@ export default async function LeaseContractDetailPage({ params }: Params) {
                   {fmtBRL(da.valorTotal)} em {da.parcelas}x · 1ª venc.{" "}
                   {da.primeiraDataDue.toLocaleDateString("pt-BR")}
                 </span>
-                <Badge variant={da.status === "quebrado" ? "destructive" : "outline"}>{da.status}</Badge>
+                <Badge variant={da.status === "quebrado" ? "destructive" : "outline"}>
+                  {da.status}
+                </Badge>
               </li>
             ))}
           </ul>
         )}
-      </CollapsibleSection>
+      </LeaseSection>
 
-      <CollapsibleSection title={`Manutenções (${lc.maintenances.length})`}>
+      <LeaseSection id="manutencoes" title={`Manutenções (${lc.maintenances.length})`}>
         {lc.maintenances.length === 0 ? (
           <p className="text-sm text-muted-foreground">Sem manutenção registrada.</p>
         ) : (
@@ -387,47 +422,7 @@ export default async function LeaseContractDetailPage({ params }: Params) {
             ))}
           </ul>
         )}
-      </CollapsibleSection>
+      </LeaseSection>
     </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  className,
-}: {
-  label: string;
-  value: React.ReactNode | string | null | undefined;
-  className?: string;
-}) {
-  return (
-    <div className={className}>
-      <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
-      <div className="text-sm font-medium">{value || "—"}</div>
-    </div>
-  );
-}
-
-function CollapsibleSection({
-  title,
-  children,
-  defaultOpen = false,
-}: {
-  title: string;
-  children: React.ReactNode;
-  defaultOpen?: boolean;
-}) {
-  return (
-    <details
-      open={defaultOpen}
-      className="rounded-md border bg-card transition-colors open:bg-card hover:border-foreground/20"
-    >
-      <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-sm font-medium">
-        {title}
-        <span className="text-muted-foreground transition-transform">▾</span>
-      </summary>
-      <div className="border-t px-4 py-3">{children}</div>
-    </details>
   );
 }
