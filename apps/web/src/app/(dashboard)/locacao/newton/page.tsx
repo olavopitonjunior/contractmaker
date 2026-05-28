@@ -1,47 +1,131 @@
 import { redirect } from "next/navigation";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Bell, MessageSquare } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
-export default async function LocacaoNewtonInboxPage() {
+const STATUS_TONE: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
+  open: "default",
+  chasing: "secondary",
+  awaiting_reply: "secondary",
+  fulfilled: "outline",
+  cancelled: "outline",
+};
+
+interface TimelineEvent {
+  at: string;
+  actor: string;
+  type: string;
+  note?: string;
+}
+
+export default async function LocacaoNewtonInboxPage({
+  searchParams,
+}: {
+  searchParams?: Promise<{ status?: string }>;
+}) {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
   const org = await getUserOrg(session.user.id);
   if (!org) redirect("/");
 
+  const params = (await searchParams) ?? {};
+  const status = params.status;
+
   const requests = await prisma.newtonRequest.findMany({
-    where: { orgId: org.id, status: { in: ["open", "chasing", "awaiting_reply"] } },
-    orderBy: { updatedAt: "desc" },
-    take: 50,
+    where: {
+      orgId: org.id,
+      ...(status
+        ? { status }
+        : { status: { in: ["open", "chasing", "awaiting_reply"] } }),
+    },
+    orderBy: [{ priority: "desc" }, { updatedAt: "desc" }],
+    take: 100,
   });
 
+  const counts = await prisma.newtonRequest.groupBy({
+    by: ["status"],
+    where: { orgId: org.id },
+    _count: { _all: true },
+  });
+  const countMap = Object.fromEntries(counts.map((c) => [c.status, c._count._all]));
+
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>Newton — pedidos abertos ({requests.length})</CardTitle>
-      </CardHeader>
-      <CardContent>
-        {requests.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nenhum pedido aberto.</p>
-        ) : (
-          <ul className="divide-y">
-            {requests.map((r) => (
-              <li key={r.id} className="flex items-center justify-between py-2 text-sm">
-                <div>
-                  <div className="font-medium">{r.ask}</div>
-                  <div className="text-xs text-muted-foreground">
-                    {r.targetLabel ?? r.targetRef} · {r.priority}
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-2xl font-semibold">Newton — Inbox</h2>
+        <p className="text-sm text-muted-foreground">
+          Pedidos abertos para Newton operar no WhatsApp. Régua de cobrança, docs pendentes,
+          agendamentos.
+        </p>
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {(["open", "chasing", "awaiting_reply", "fulfilled", "cancelled"] as const).map((s) => (
+          <Badge key={s} variant={status === s ? "default" : "outline"}>
+            {s} ({countMap[s] ?? 0})
+          </Badge>
+        ))}
+      </div>
+
+      {requests.length === 0 ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <Bell className="mx-auto h-10 w-10 text-muted-foreground" />
+            <p className="mt-3 text-sm text-muted-foreground">
+              Nenhum pedido. Newton recebe pedidos via{" "}
+              <code className="text-xs">POST /api/newton/requests</code> ou dunningExecutor.
+            </p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-2">
+          {requests.map((r) => {
+            const events = Array.isArray(r.eventsJson)
+              ? (r.eventsJson as unknown as TimelineEvent[])
+              : [];
+            const lastEvent = events[events.length - 1];
+            return (
+              <Card key={r.id} className={r.priority === "high" ? "border-destructive/40" : ""}>
+                <CardContent className="space-y-2 py-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1">
+                      <div className="font-medium text-sm">{r.ask}</div>
+                      <div className="mt-0.5 text-xs text-muted-foreground">
+                        <MessageSquare className="mr-1 inline h-3 w-3" />
+                        {r.targetType === "contact" ? "Contato" : "Grupo"} ·{" "}
+                        {r.targetLabel ?? r.targetRef ?? "—"} · criado{" "}
+                        {r.createdAt.toLocaleDateString("pt-BR")}
+                      </div>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <Badge variant={STATUS_TONE[r.status] ?? "outline"}>{r.status}</Badge>
+                      {r.priority === "high" && (
+                        <Badge variant="destructive" className="text-[10px]">
+                          alta
+                        </Badge>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <Badge variant="outline">{r.status}</Badge>
-              </li>
-            ))}
-          </ul>
-        )}
-      </CardContent>
-    </Card>
+                  {lastEvent && (
+                    <div className="rounded-md bg-muted/40 px-3 py-2 text-xs">
+                      <div className="font-medium">
+                        {lastEvent.actor} · {lastEvent.type}
+                      </div>
+                      {lastEvent.note && (
+                        <div className="mt-0.5 text-muted-foreground">{lastEvent.note}</div>
+                      )}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+    </div>
   );
 }
