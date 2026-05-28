@@ -64,17 +64,64 @@ Org-scoped, `cuid()`, índices `(orgId, …)`. Campos ilustrativos (refinar na m
 - **`Inspection`** (vistoria): `orgId, propertyId, leaseContractId?, tipo(entrada|saida|contra), tipoImovel, checklistJson, ambientes[](fotos,audio,descricaoIa,estado), comparacaoJson?, laudoPdfUrl, qrToken, envelopeId?(ClickSign), executorId`.
 - **Fase 2/3:** `OpenFinanceConsent`, `WhatsAppConversation`/`WhatsAppMessage`, `DimobExport`, `RentReceipt`/`OwnerStatement`.
 
+**Entidades Superlógica-parity (28/05) — agregadas à Fase 1:**
+- **`PropertyOwnership`** (A1) — N:N owner↔property com `percentual` e `tipo` (3 valores).
+- **`LeaseTenant`** (A2) — N:N tenant↔lease com `tipo` (`titular | solidario`).
+- **`LeaseAngariador`** (A11) — corretor captador com comissão recorrente sobre aluguel: `{partyId, formaComissao(percentual|valor_fixo), percentual?, valorFixo?, mesesComissao Int?}` (null = "todo o contrato").
+- **`Expense`** (A17 + D2) — despesa operacional first-class: `{type(iptu|condominio|seguro_incendio|seguro_fianca|juros|multa|honorarios|atualizacao_monetaria|custas|moratorios|taxa_locacao|outro), valor, dueDate, parcelaN, parcelaTotal, debitoDe(locatario|proprietario), creditoPara(proprietario|imobiliaria|fornecedor), rentChargeId?, fornecedorId?, status, paidAt}`.
+- **`ChecklistTemplate` + `Checklist`** — modelos reusáveis ("Entrada", "Renovação", "Rescisão") + instância por contrato com `itensJson` (titulo, status, responsavel, concluidoAt). Status: `pendente | em_andamento | aguardando_aprovacao | concluido`.
+- **`DebtAgreement`** — acordo de dívida (parcelamento de inadimplência): `{valorTotal, componentesJson(aluguel,multa,juros,honorarios,custas,atualizacao), parcelas, primeiraDataDue, status}`. Parcelas viram `RentCharge` com `kind="acordo"`.
+- **`InsurancePolicy`** — apólice (seguro_incendio | seguro_fianca | conteudo | rd): `{seguradora, apoliceNumero, vigenciaInicio/Fim, premioMensal, responsavelPagamento(imobiliaria|locatario|proprietario, A14), coberturaJson, status, pdfUrl}`. Index `(orgId, vigenciaFim, status)` p/ dashboard "Seguros vencidos".
+- **`Maintenance`** — solicitação de reparo: `{tipo, descricao, fornecedorId?, status(solicitada|em_andamento|concluida|cancelada), custoEstimado, custoFinal, debitoDe, expenseId?}`.
+
+**Alterações em entidades da Fase 1 (delta Superlógica):**
+- `LeaseContract` ganha campos fiscais/operacionais (§4.4) + relações `tenants[]`, `angariadores[]`, `expenses[]`, `checklists[]`, `debtAgreements[]`, `insurancePolicies[]`, `maintenances[]`; remove `tenantId` 1:1.
+- `Property` ganha `tipoDimob`, ampliação de `kind`; remove `ownerId` 1:1 (vira `ownerships[]`).
+- `RentCharge` ganha `kind` (`aluguel | acordo | extra | encargo`) + `debtAgreementId?` + status `repassada` (A18).
+- `Guarantee` amplia `tipo` (7) + `caucaoSubtipo?`.
+- `AsaasTransfer` ganha `nfseRequerida/nfseEmitida/nfseNumero/nfseUrl` (A16).
+
 ### 4.1 Discriminadores & DadosContrato
 Novos `schemaType`: `locacao_residencial_v1`, `locacao_comercial_v1`, `locacao_temporada_v1`, `locacao_btr_v1`. Novos Zod schemas em `lib/forms/validation-locacao.ts` (espelhando `validation.ts`): `locador[]`, `locatario[]`, `imovel`(ref `Property`), `aluguel{valor,encargos,reajuste,vigencia,diaVencimento}`, `garantia{tipo,…}`, `vistoria_ref`. **Aditivo** — não toca `dadosContratoSchema` de venda.
+
+Enums ampliados após achados Superlógica live:
+- **`Guarantee.tipo`** (A3, 7 valores): `caucionante | caucao | cessao_fiduciaria | fiador | seguro_fianca | titulo_capitalizacao | sem_garantia`.
+- **`Guarantee.caucaoSubtipo`** (A4, quando `tipo=caucao`): `valor | veiculo | carta_fianca | imovel | outros`.
+- **`Property.kind`** (A6, ~45 valores): Casa, Apartamento, Apt Duplex/Triplex, Cobertura, Garden, Loft, Studio, Kitnet, Penthouse, Flat, Sobrado, Casa em condomínio, Casa Assobradada, Casa comercial, Galpão, Sala comercial, Loja, Salão, Pavilhão, Box/Garagem, Conjunto, Andar corporativo, Edícula, Bangalô, Barracão, Chácara, Sítio, Rancho, Fazenda, Haras, Pousada, Hotel, Resort, Quiosque, Ponto, Ilha, Laje, Escritório, Consultório, Prédio, Terreno, Village, Outro.
+- **`Property.tipoDimob`** (A15): `urbano | rural`.
 
 ### 4.2 Pipeline & Deal
 `Deal.kind String @default("venda")` + `Pipeline.kind` + **pipeline de locação separado por org** (workspace dedicado, alinhado ao design — não estende o pipeline de venda). Auto-promote reusa o padrão `*-action.ts` com guard de ordem linear.
 
-### 4.3 Stages de locação (dois planos)
-- **(a) Esteira** = Kanban pré-contrato, 8 stages: `Lead → Visita agendada → Proposta → Análise de Crédito → Aprovação → Em Assinatura → Vistoria de entrada → Chaves entregues`. Gatilhos: proposta aceita, crédito aprovado, envelope ClickSign ativado/close, laudo assinado.
+### 4.3 Stages de locação — 6 stages (D1, sem lead management)
+- **(a) Esteira** = Kanban pré-contrato, **6 stages**: `Análise de Crédito → Aprovação → Confecção de Contrato → Em Assinatura → Vistoria de Entrada → Chaves Entregues`. Lead/Visita/Proposta ficam **fora do Kanban** (diretriz do usuário, 28/05): captação de imóvel em `/locacao/imoveis` e qualificação por WhatsApp via Newton. Gatilhos (padrão `*-action.ts`):
+  - **Análise → Aprovação:** `CreditAnalysis.status="aprovado"` ou `"aprovado_com_garantia"`
+  - **Aprovação → Confecção:** operador clica "Confeccionar contrato" (sem auto)
+  - **Confecção → Em Assinatura:** `Envelope (source=contract)` ativado no ClickSign
+  - **Em Assinatura → Vistoria:** webhook ClickSign `close`
+  - **Vistoria → Chaves:** `Inspection.status="laudo_gerado"` + envelope do laudo assinado
+  - **Chaves → LeaseContract:** operador clica "Entregar chaves" → cria `LeaseContract status=ativo` + 1ª `RentCharge` da competência via rent-scheduler
 - **(b) Contratos ativos** = lifecycle pós-assinatura em `LeaseContract.status` (`ativo|renovacao|rescisao|encerrado`), **fora** do Kanban.
 
 SLA por etapa reusa o padrão de marcos do `Deal`.
+
+### 4.4 Configurações fiscais e operacionais do `LeaseContract` (achados Superlógica live A7-A13)
+A inspeção do form HTML do wizard "Novo contrato" do Superlógica (28/05) expôs configurações por contrato que o spec inicial não cobria — todas críticas pra cálculo de repasse, DIMOB e UX comercial:
+
+- **`regimeIr`** (A7) — retenção de IR sobre aluguel: `nao_retem | retem_sem_controle | retem_imobiliaria | retem_inquilino`. Afeta o cálculo do líquido repassado e o código no TXT DIMOB.
+- **`repasseGarantido`** (A8) — produto premium: imobiliária paga proprietário mesmo se inquilino não pagar. `nao | alguns_meses | todo_contrato` + `repasseGarantidoMeses Int?` + `repasseGarantidoEscopo` (`boleto | aluguel | aluguel_ir | garantidos`). **Diferente de `Guarantee`** (que protege contra inadimplência); isto é garantia COMERCIAL da imobiliária.
+- **`repasseTipo`** (A9) — `dias_uteis_apos | dias_corridos_apos | dia_fixo` + `repasseDia Int`.
+- **`regimeCobranca`** (A10) — `mes_vencido | mes_a_vencer`. Define quando emitir o boleto: D-1 da competência ou D+30.
+- **`isencaoMultaMeses Int?`** (A12) — janela inicial sem multa rescisória.
+- **`enderecoCobrancaTipo`** (A13) — `imovel | locatario | outro` + `enderecoCobrancaJson?` override.
+- **`emitirNfse Boolean`** (A16) — gera NFS-e por repasse (ver §7.5).
+- **`finalidade`** (A5) — `residencial | nao_residencial | comercial | industria | temporada | por_encomenda | mista`.
+
+### 4.5 Múltiplos proprietários e múltiplos locatários (achados A1, A2)
+Confirmado em prod (contrato real com 4 proprietários × 25% + 2 locatários solidários):
+- **`PropertyOwnership`** N:N (substitui `Property.ownerId` 1:1): `{propertyId, ownerId, percentual Float, tipo: "proprietario_principal" | "proprietario" | "beneficiario"}`. Soma de `percentual` por `propertyId` = 100 (refine Zod).
+- **`LeaseTenant`** N:N (substitui `LeaseContract.tenantId` 1:1): `{leaseContractId, tenantId, tipo: "titular" | "solidario"}`. Múltiplos locatários respondem solidariamente pela dívida (Lei 8.245 art.2).
+- Repasse divide proporcionalmente entre proprietários por `percentual`; cada beneficiário pode ter wallet Asaas própria (split nativo) ou `pix_external`.
 
 ---
 
@@ -91,6 +138,11 @@ SLA por etapa reusa o padrão de marcos do `Deal`.
 - **6.3 Repasse ao proprietário.** `AsaasTransfer` (com `scheduledDate`) disparado no `RentCharge` pago (webhook) — deduz taxa admin, IRRF, encargos. `DualApproval` acima de `dualApprovalCapCents`. Split nativo (asaas_wallet) quando o proprietário tem wallet Asaas; `pix_external` (transfer pós-pagamento) caso contrário — ambos já em `splitDispatcher.ts`. Backing do `RepasseCard`.
 - **6.4 Conciliação.** `BankReconciliation` auto-match por `externalReference` (já existe) p/ Asaas; **multi-banco via Open Finance** (Fase 2) reusa consentimento OF da análise de crédito.
 - **6.5 DIMOB & informe.** Gerador anual TXT IN RFB 1.115/2010 + cron anual. Informe de rendimentos por proprietário. Botão "1 clique" no design.
+- **6.6 Despesas operacionais (`Expense`, A17/D2).** Entidade first-class — base da contabilidade do contrato. `type` (12 valores) + parcelamento (`parcelaN/Total`) + `debitoDe/creditoPara` definem quem paga e quem recebe. Quando `rentChargeId` setado, a despesa aparece NO boleto do locatário; quando débito é do proprietário/imobiliária, deduz no repasse (§6.3). Sem essa entidade, o ledger do contrato fica incompleto (IPTU parcelado 10x, condomínio variável, taxa de locação à vista, etc.). Endpoints CRUD em `/api/locacao/expenses/...`.
+- **6.7 Acordos de dívida (`DebtAgreement`).** Parcelamento de inadimplência: aluguel atrasado + multa + juros + honorários + atualização monetária + custas processuais (breakdown em `componentesJson`). Cada parcela vira `RentCharge { kind:"acordo", debtAgreementId }` — entra na cobrança Asaas normalmente. Status: `ativo | concluido | quebrado | cancelado`. Quebrado = inadimplência no próprio acordo, dispara ação extra-judicial.
+- **6.8 Apólices de seguro (`InsurancePolicy`, A14).** Apólice ativa por contrato ou imóvel; tipos: `seguro_incendio`, `seguro_fianca`, `conteudo`, `rd`. Vencimento em `vigenciaFim` alimenta dashboard "Seguros vencidos / Próx. 60d". `responsavelPagamento` (`imobiliaria | locatario | proprietario`) define quem é cobrado pelo prêmio (cria `Expense` recorrente se `imobiliaria`/`locatario`; gestão direta se `proprietario`).
+- **6.9 Manutenções (`Maintenance`).** Solicitação de reparo no imóvel: tipo, descrição, fornecedor, status, custo. Quando `debitoDe` setado e `status="concluida"`, cria `Expense` vinculada (`expenseId`). Lista no detalhe do imóvel e do contrato.
+- **6.10 Angariador (`LeaseAngariador`, A11).** Corretor captador recebe comissão recorrente sobre aluguel: `formaComissao` (percentual ou valor fixo) × `mesesComissao` (1-12 ou todo o contrato). Cada `RentCharge` paga gera split adicional pro angariador (via `splitJson`); deduz do repasse ao proprietário. Modelado como entidade própria (não array em `comissionados[]`) porque tem ciclo de vida distinto (pode mudar/encerrar antes do contrato).
 
 ---
 
@@ -99,6 +151,13 @@ SLA por etapa reusa o padrão de marcos do `Deal`.
 - Geração reusa `contract-generation.ts` → `renderContratoHTML` → `uploadHtmlAsGoogleDoc` → `googleApplyStylePreset`. Novos `enrichContractData` bridges p/ campos de locação.
 - ClickSign: estender `EnvelopeSigner.sourceKind` + `lib/clicksign/roles.ts` com `locador|locatario|fiador|garantidora`. Aditivos (troca de fiador/garantia/prazo) = `Contract.kind="addendum"`. Laudo de vistoria = `Envelope source="attachment"`.
 - **Timeline compartilhada:** `RentalProgressTimeline` do design exige **parametrizar os nós** de `components/pipeline/DealProgressTimeline.tsx` (hoje hardcoded p/ venda) em `NodeDef[]`/preset (venda + locação) — refactor compartilhado, não uma flag `variant`.
+
+### 7.5 NFS-e por repasse (A16)
+O Superlógica tem aba "Notas fiscais" no módulo de Repasses — cada repasse ao proprietário pode requerer NFS-e (Nota Fiscal de Serviço Eletrônica) emitida pela imobiliária, distinta do DIMOB anual. Adicionar campos a `AsaasTransfer` (ou wrapper `Repasse`):
+- `nfseRequerida Boolean` (deriva de `LeaseContract.emitirNfse` no momento do repasse)
+- `nfseEmitida Boolean`
+- `nfseNumero String?` / `nfseUrl String?` (PDF da NF emitida pelo município)
+- Endpoint `POST /api/locacao/transfers/[id]/nfse` dispara emissão (provider varia por município — São Paulo via SOAWebservices, etc.; cada município tem um provider municipal). Falha → `notification` ao gestor, repasse não é bloqueado.
 
 ---
 
@@ -129,6 +188,16 @@ PWA offline-first (Next/Tailwind; sem app nativo até Fase 3). Captura foto/víd
 - **Portais.** Proprietário (`/portal/owner`) e inquilino (`/portal/tenant`) — PWA, rotas autenticadas escopadas (novo guard `requirePortalScope`): carteira/extrato/repasse/antecipação/informe IR (proprietário); contrato/boletos/PIX/recibos/chamados (inquilino). Reusa shell público (`/f/[token]`, `/pay/[token]`) + branding tenant.
 - **11a. Newton — WhatsApp-first (externo, autônomo).** Opera o canal WhatsApp com inquilino/proprietário (qualificação, cobrança, pedir docs) via API token. Estende o existente (`api-token.ts`, `NewtonRequestsTab.tsx`, crons `newton-requests`): **kinds tipados** de locação no `NewtonRequest` (`cobrar_aluguel`, `pedir_doc_renda`, `consentir_open_finance`(F2), `agendar_visita`, `agendar_vistoria`, `confirmar_renovacao`) reusando `status`/`events[]`; **inbox org-wide `/newton`** (rota nova). Guardrails p/ inquilino/proprietário: prompt restrito, sem tools de edição, budget de tokens por sessão (`budget.ts`).
 - **11b. Chat in-app — editor de contrato (inline).** `ChatPanel`+`agent.ts`. Recebe as **novas tools** (em `AGENT_TOOLS[]` + `tool-handlers.ts`; writes registram política em `sentinel/policy-engine.ts`): `query_credit` (subtools birô/OF), `simulate_guarantee`, `calculate_readjustment` (IGPM/IPCA), `simulate_termination` (multa proporcional art.4 Lei 8.245), `generate_dimob`, `trigger_dunning`, `create_addendum`, `generate_income_report`, `describe_inspection_media`, `suggest_rent_price`. Reusa expert-context, modos Fast/Plan, AIUsage.
+- **11c. Newton-executor — HITL via `ActionIntent` (D3, diretriz "Newton executa ações").** Newton não só enfileira pedidos (§11a) — também **executa ações** com escopo por papel via `OrgMembership.role`/`CustomRole.scopeRestrictions`. Infra existente (`lib/api/intents.ts`, `lib/api/intent-executors/index.ts`, `auth-or-bearer.ts`) é estendida com 3 executors novos:
+
+  | Ação | Endpoint | Executor (`lib/api/intent-executors/`) | HITL? | PERMISSION |
+  |---|---|---|---|---|
+  | Cobrar aluguel atrasado (régua) | `POST /api/locacao/rent-charges/[id]/remind` | `dunning.ts` | **Não** (régua auto) | `RENT_REMIND` |
+  | Pedir docs (renda/RG/comprov.) | `POST /api/newton/requests {kind:"pedir_doc_renda"}` | (existe — só tipar kind) | Não | `NEWTON_REQUEST_CREATE` |
+  | Agendar visita/vistoria | `POST /api/locacao/inspections` | `schedule-inspection.ts` | HITL se conflito agenda | `INSPECTION_CREATE` |
+  | Lançar despesa (OCR Gemini foto IPTU) | `POST /api/locacao/expenses {ocrPhotoUrl}` | `create-expense.ts` | **HITL** (operador confirma OCR) | `EXPENSE_CREATE` |
+
+  Escopo por papel: **Newton-as-tenant** = só `RENT_REMIND`/`NEWTON_REQUEST_CREATE` (responde inquilino); **Newton-as-owner** = leitura de extratos + `RENT_REMIND` indireto; **Newton-as-operator** = tudo acima com HITL nos writes. Token Bearer carrega `actorRole`; cada executor chama `requireScope(actor, PERM)` antes de rodar. Falha → `ActionIntent.status="rejected"` + audit.
 
 ---
 
@@ -153,7 +222,7 @@ Rotas concretas alinhadas ao PR #48. `agente`: Newton (N) ou chat in-app (C).
 | Jornada (PRD §6) | Superfície / rota (design) | Entidade(s) | Endpoint(s) `/api/...` | Agente | Stage / evento |
 |---|---|---|---|---|---|
 | Captação do imóvel | `/locacao/imoveis`, `/locacao/imoveis/[id]` | `Property`, `Envelope`(captação) | `POST/GET/PATCH /api/locacao/properties[...]`; OCR matrícula | C (`suggest_rent_price`, descrição) | `Property.status` |
-| Esteira lead→chaves | `/locacao/esteira` (Kanban) | `Deal(kind=locacao)`, `PipelineStage` | `/api/pipeline/...` + auto-transition actions | N (qualificar/agendar) | Esteira 0–7 |
+| Esteira crédito→chaves | `/locacao/esteira` (Kanban 6 stages) | `Deal(kind=locacao)`, `PipelineStage` | `/api/pipeline/...` + auto-transition actions | N (qualificar/agendar) | Esteira 0–5 |
 | Análise de crédito | `CreditDecisionCard` | `CreditAnalysis`, `Guarantee` | `POST /api/locacao/credit-analysis`; `GET .../[id]` | C (`query_credit`, `simulate_guarantee`) | `Análise → Aprovação`; `CREDIT_*` |
 | Geração de contrato | editor Google Docs + `ChatPanel` + `SendEnvelopeDialog` | `Contract`, `Envelope`, `EnvelopeSigner` | `contract-generation`; `POST /api/contracts/[id]/envelopes` | C (montar/editar) | `Em Assinatura`; `ENVELOPE_*` |
 | Vistoria | `/vistoria/[os]` (PWA) | `Inspection`, `Envelope(attachment)` | `POST/PATCH /api/locacao/inspections[...]` | C (`describe_inspection_media`) | `Vistoria → Chaves`; `INSPECTION_*` |
@@ -171,7 +240,7 @@ Rotas concretas alinhadas ao PR #48. `agente`: Newton (N) ou chat in-app (C).
 | Componente (design) | Entidade | Campos que a tela consome | Enum de status (badge) |
 |---|---|---|---|
 | `PropertyCard` / `/locacao/imoveis` | `Property` | `kind`, `rua`/`numero`/`bairro`/`cidade`/`uf`/`cep`, `fotos[]`, `descricaoIa`, `valorAluguelSugerido`, `area`, `matricula` | `status`: `disponivel\|anunciado\|em_negociacao\|locado\|manutencao\|fora_catalogo` |
-| `RentalKanbanCard` / `/locacao/esteira` | `Deal(kind=locacao)` + `Property` + `Tenant` | título, `Property` endereço, `Tenant.nome`, `aluguel.valor` (dataJson) | stage da Esteira (8 stages, §4.3) |
+| `RentalKanbanCard` / `/locacao/esteira` | `Deal(kind=locacao)` + `Property` + `Tenant` | título, `Property` endereço, `Tenant.nome`, `aluguel.valor` (dataJson) | stage da Esteira (**6 stages**, §4.3) |
 | `CreditDecisionCard` | `CreditAnalysis` | `scoreBureau`, `scoreInterno`, `decisionJson`, `shapJson` (bullets explicáveis, F2) | `status`: `pendente\|aprovado\|aprovado_com_garantia\|analise_manual\|recusado` |
 | `GuaranteeMenu` | `Guarantee` | `tipo`, `provider`, `coberturaMeses`, `custoJson` | `status`: `pendente\|ativa\|acionada\|encerrada\|recusada` |
 | `RentLedgerTable` | `RentCharge` | `competencia` (YYYY-MM), `dueDate`, `valorBase`, `encargos`, `multa`, `juros`, `paidAt` | `status`: `pendente\|emitida\|paga\|atrasada\|cancelada\|repassada` |
@@ -182,6 +251,29 @@ Rotas concretas alinhadas ao PR #48. `agente`: Newton (N) ou chat in-app (C).
 | `RentalProgressTimeline` | — (componente) | nós parametrizados `NodeDef[]` — **refactor compartilhado** de `DealProgressTimeline.tsx` (§7) | — |
 
 Notas de binding: valores monetários são `Float` (reais, não centavos) — formatar com `Intl`/helper `moeda`. `LeaseContract.indiceReajuste`: `IGPM\|IPCA\|outro`. `LeaseContract.status`: `rascunho\|assinatura\|ativo\|renovacao\|rescisao\|encerrado` (lifecycle pós-contrato, fora do Kanban).
+
+### 14.2 Mapa Superlógica → Contractmaker (paridade UI/UX)
+
+| Superlógica | Contractmaker | Notas |
+|---|---|---|
+| Dashboard `/imobiliaria` (cards de cobranças/garantias/seguros/checklist/reajuste/vencimentos/repasses/despesas) | `/locacao` (§17.5) | Cards equivalentes, queries agregadas por orgId |
+| Sidebar: Contratos · Receitas · Despesas · Financeiro · Owli · Apps · Empresa | Sidebar global + sub-nav `/locacao/*` (D4) | Não duplicamos `/financeiro` — Locação é lente |
+| `/imobiliaria/contratos/index` (lista) | `/locacao/contratos` (lifecycle ativo) + `/locacao/esteira` (Kanban pré-contrato) | Split entre Kanban e lista, alinhado ao design (PR #48) |
+| `/imobiliaria/contratos/id/{id}` (detalhe c/ seções colapsáveis) | `/locacao/contratos/[id]` | Espelha: Contrato + Repasses + Despesas + Cobranças + Checklists + Vistorias + Envelopes + Manutenções + Acordos + Seguros + Reajuste |
+| `/imobiliaria/imoveis/index` + detalhe | `/locacao/imoveis` + `/locacao/imoveis/[id]` | `Property` + `PropertyOwnership` |
+| `/imobiliaria/pessoas` (dashboard) | Pessoas unificadas venda+locação — decisão Fase 1.5 | Reaproveitar `Lead`/`PropertyOwner`/`Tenant` |
+| `/imobiliaria/despesas/index` | `/locacao/despesas` | `Expense` |
+| `/imobiliaria/repasses/index` | `/locacao/repasses` (lente sobre `AsaasTransfer`) | NFS-e (§7.5), simular, agrupado |
+| `/imobiliaria/seguroincendio` | `/locacao/imoveis` + `InsurancePolicy` | Aba dedicada à apólice |
+| `/imobiliaria/checklists/pendentes` | `/locacao/contratos?checklists=pendentes` | Filtro no listing + sino do dashboard |
+| `/imobiliaria/contratos/reajuste` | `/locacao/contratos?reajuste=mes` + chat in-app tool `calculate_readjustment` | Índices via API automática |
+| Owli (app mobile locatário) | `/portal/tenant` (PWA) | Não duplicamos app nativo |
+| PJ Bank (split + boletos) | Asaas (já temos split nativo + Asaas Account multi-conta) | Não trocar |
+| Sistema de Filiais multi-CNPJ | `Organization` (1 filial = 1 org) | Não criar `Branch` |
+| Acordos (dropdown na cobrança) | `DebtAgreement` (§6.7) + parcelas `RentCharge.kind="acordo"` | Modelado |
+| "Cobrança extra" (botão no contrato) | `RentCharge.kind="extra"` ou `Expense.type="taxa_locacao"` (A17) | Ambos suportados |
+| Documentos (Espelho/Etiqueta/Endereçamento) | `/api/contracts/[id]/export` (já existe p/ venda) | Reusar com template locação |
+| Wizard "Novo contrato" passo 3 (garantia 7 tipos) | `Guarantee.tipo` enum 7 valores + `caucaoSubtipo` | A3/A4 |
 
 ---
 
@@ -204,3 +296,19 @@ Decision engine interno→DMN; score externo→modelo próprio; exposição do a
 3. **Mapa §14** revisado lado-a-lado com o protótipo (PR #48) — toda tela tem backend e vice-versa.
 4. **Spike Fase 1** (branch): migration aditiva `Property`+`LeaseContract`+`RentCharge` + 1 template sincronizado + 1 `RentCharge` gerado pelo scheduler criando cobrança Asaas em sandbox/QA, provando recorrência interna ↔ banking end-to-end. Validar via `/chrome` + screenshot.
 5. `CLAUDE.md` ≤ 40k (hook `check-claude-md-size.mjs`).
+
+### 17.5 Dashboard operacional `/locacao` — cards & queries
+Espelho do Superlógica §3 (renomeando contextualmente). Endpoint `GET /api/locacao/dashboard` retorna agregado por orgId, cacheável 60s no Upstash.
+
+| Card | Query (agregada) |
+|---|---|
+| **Cobranças do mês** | `RentCharge` da competência: `% paid` (count paid / count total), liquidadas, a vencer, atrasadas |
+| **Garantias vencidas** | `Guarantee.coberturaMeses` expirando no mês / próx. 60d / sem garantia |
+| **Seguros vencidos** | `InsurancePolicy.vigenciaFim` no mês / vencidos / próx. 60d / imóveis sem apólice ativa |
+| **Taxa adm** | média + total mensal de `LeaseContract.taxaAdminPercent * valorAluguel` |
+| **Checklists pendentes** | `Checklist.status IN ('pendente','aguardando_aprovacao')` count |
+| **Reajuste** | `LeaseContract.dataProximoReajuste` no mês corrente |
+| **Vencimentos** | `LeaseContract.vigenciaFim` no mês corrente (renovação) |
+| **Repasses** | `RentCharge.status="paga"` sem `repasseTransferId` setado — hoje/atrasados |
+| **Despesas** | `Expense.status="pendente"` com `dueDate ≤ hoje` / atrasadas |
+| **Repasse garantido** (A8) | `LeaseContract.repasseGarantido != "nao"` ativos — alerta gestor sobre exposição |

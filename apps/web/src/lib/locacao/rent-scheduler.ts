@@ -72,11 +72,14 @@ export async function materializeRentChargesForCompetencia(
     const { valorBase, encargos } = rentAmountFor(lease);
     const dueDate = dueDateFor(competencia, lease.diaVencimento);
     try {
+      // Unique key inclui `kind` (Superlógica delta): permite RentCharge de
+      // mesma competência com kinds distintos (aluguel + acordo + extra).
       const res = await prisma.rentCharge.upsert({
         where: {
-          leaseContractId_competencia: {
+          leaseContractId_competencia_kind: {
             leaseContractId: lease.id,
             competencia,
+            kind: "aluguel",
           },
         },
         // update vazio: idempotente — uma vez criado, o scheduler não mexe
@@ -85,6 +88,7 @@ export async function materializeRentChargesForCompetencia(
         create: {
           orgId: lease.orgId,
           leaseContractId: lease.id,
+          kind: "aluguel",
           competencia,
           dueDate,
           valorBase,
