@@ -186,29 +186,15 @@ Export PDF: `/api/contracts/[id]/export` carrega preset default da org → Puppe
 
 ## Certidões (Infosimples + Serasa)
 
-Disparo manual no Deal → aba Certidões. `POST /api/deals/:id/certidoes` 202 + dispara `runBatch` fire-and-forget → `pLimit(5)` → cada job: `callInfosimples`, normaliza, baixa PDF de `site_receipts[0]`, cria `DealAttachment { source:"infosimples" }`. Front: `useCertidoesBatch` polla enquanto há job ativo.
+Disparo manual no Deal → aba Certidões. `POST /api/deals/:id/certidoes` 202 + `runBatch` (`waitUntil`, `pLimit(5)`): cada job `callInfosimples`→normaliza→PDF de `site_receipts[0]` (HTML→PDF via `exportPdfToBuffer` p/ receipts HTML, ex. CEAT digital)→`DealAttachment`. **Two-step (TJSP/TJRJ/TJMS/TRF3/ONR):** `pedido-*`→`awaiting_portal`→cron `poll-portal` (`decideObterOutcome`; TJSP 7d/TJRJ 14d; 620→`duplicate_pending`). Sweeper re-enfileira zombies (teto pending 3/fetching 1); cron Task 4 os roda. `PlannedJob`/`SkippedJob` têm `tier`(padrao|imovel|opcional|pesquisa)+`region`(nacional|imovel|endereco|outro), aditivos.
 
-**Two-step (TJSP/TJRJ/TJMS/TRF3/ONR):** `pedido-*` 200 → `awaiting_portal` (grava `pedido_data`) → cron `poll-portal` chama o `obter` via `buildObterArgs` (e-SAJ exige `pedido_data`+cpf; TRF3 `numero_certidao`). `pollPortalJob::decideObterOutcome`: conta/integração → falha já; transitório → 3×; senão reagenda até `maxPortalWaitMs` por portal (TJSP **7d**, TJRJ 14d) → `failed_permanent`+`portalUrl`. **620 "já existe"** → `recoverOriginalProtocol` recupera o protocolo do pedido original (parte+tipo) → `awaiting_portal`; senão `duplicate_pending`.
+**Planner regiões/camadas (redesign 2026-05-26, [[project_certidoes_fix_2026_05_25]]):** vendedor(+deps) dispara os endpoints REGIONAIS (TJ/TRF-individual/CEAT/dívida-estadual/CENPROT-SP/CND-municipal-pessoa) em CADA região de {imóvel ∪ endereço}, dedupe por UF; federais 1× (nacional); comprador só na própria UF. CENPROT-SP suprimido quando o Nacional (`ieptb/protestos`, gov.br) dispara. TJSP `pedido-certidao` exige `genero` (campo `sexo` opt-in no form/OCR→MASCULINO/FEMININO, senão skip)+`rg`. `extraRegions`=+outro local.
 
-**Schema:** `CertidaoJob { dealId, batchId, endpoint, label, targetKind, targetIndex, requestPayload, status, resultCode, resultData, attachmentId, errorMessage, latencyMs, costCents, expectedReadyAt, retryCount, nextRetryAt, maxRetries (3), missingFields[], portalUrl }`.
+**Estados** (`outcome-classifier.ts`): 12 status (success…data_missing(606/612/613)/data_invalid(614)/failed_permanent/duplicate_pending(620)/skipped) — [[certidoes_estados_ricos]][[certidoes_retry_backoffs]]. **Custo REAL:** grava `header.price`(BRL→cents) em `costCents`; `observedPriceByEndpoint` alimenta a estimativa do `/plan`. Anti-falso-negativo: 200 sem PDF→retry; `billable===false`→0 [[certidoes_falso_negativo]].
 
-**Estados** (`outcome-classifier.ts::classifyOutcome`) — `success`/`informativo`/`api_error`/`portal_unavailable`(615/665/666)/`rate_limited`(668)/`data_missing`(606/612/613, `missingFields[]`)/`data_invalid`(614)/`failed_permanent`(esgotado, `portalUrl`)/`duplicate_pending`(620)/`skipped`. Backoffs em [[certidoes_retry_backoffs]], [[certidoes_estados_ricos]].
+**Endpoints/ONR (`endpoints.ts`, Phase L):** Federais, CEAT, cíveis(TJSP/TJRJ/TJRS), E-Proc, CENPROT(SP+Nacional); TRF5 `tipo_certidao` "1"/"2". Matrícula ONR 2-step — slug **BARRA** `registradores/matric/pedido` (hífen=602); IPTU/CND municipal `MUNICIPAL_BY_KEY` por `UF|cidade`; Pesquisa de Bens `onr/mapa-registro-imoveis`. Gated `onrActive`/`govBrActive`; 603 "não habilitada" NÃO tripa breaker (`isEndpointNotEnabled`). [[project_certidoes_onr_imovel]].
 
-**Anti-falso-negativo:** exige-PDF sem `site_receipts[0]` → `failed`; billing respeita `header.billable===false`. [[certidoes_falso_negativo]].
-
-**Planner** (`planner.ts`): vendedores/compradores/imóveis. PF sem `data_nascimento` bloqueia PGFN/TJSP/Antecedentes.
-
-**Endpoints:** Federais (PGFN/CNDT/TRF), trabalhistas (CEAT), cíveis (TJSP/TJRJ 2-step, TJRS), E-Proc SP, protestos CENPROT (SP + Nacional, GOV.BR). Antecedentes PF auto em financiamento.
-
-**Imóvel (Phase L):** matrícula ONR/ARISP 2-step (`requiresOnrAuth`/`onrActive`, `INFOSIMPLES_ONR_*`, saldo próprio; normalizer expõe ônus), IPTU/CND municipal por `UF|cidade` (`MUNICIPAL_BY_KEY`; SP `sql`/RJ `inscricao` ok, BH `identificador`+datas), CCIR. Renderizam no grupo "Imóvel:". **Curitiba** = CND por contribuinte → pessoa (`MUNICIPAL_PESSOA_BY_KEY`). Ver [[project_certidoes_onr_imovel]].
-
-**Catálogo** (`endpoints.ts`): `category`/`emitsPdf?`/`portalUrl?`/`CATEGORIES_REQUIRING_PDF`. Normalizers; 6xx→`nao_emitida`.
-
-**Budget guard** `INFOSIMPLES_MONTHLY_BUDGET_CENTS` (5000): POST 402 + o **cron** checa antes de cada chamada + **circuit breaker** (603 → para).
-
-**Fluxo de problemas + UX (2026-05):** falha terminal → sino + cron `problem-digest` (e-mail); painel `/settings/certidoes` (problemas c/ tentativas/JSON/retry + saúde API/crédito). Aba: régua 3 cores (`colorTier`), grupos colapsáveis, IA on-demand, auto-refresh, dialog já-puxadas/status-API, ZIP dedupe+`%PDF`. [[project_certidoes_overhaul_2026_05]].
-
-**Gaps:** CNIB (sem endpoint Infosimples), ITR, TJMG/TJPR/TJES cível, IPTU Vitória/ES + Campo Grande — `portalUrl` manual. Casos especiais (estrangeiro, espólio, menor) → futuro.
+**Popup `ExtractCertidoesDialog`:** 4 seções (Padrão p/ região/Imóvel/Opcional/Pesquisa)+Serasa "Em breve"; só Padrão marcado; skips inline; link `/f/[token]`; dados de `GET /plan?full=1`. **Budget** `INFOSIMPLES_MONTHLY_BUDGET_CENTS`(30000): 402+cron+circuit breaker. Problemas→`/settings/certidoes` [[project_certidoes_overhaul_2026_05]]. **Gaps:** CNIB/ITR/TJMG/PR/ES cível/IPTU Vitória/CG→portal manual.
 
 ### Serasa Experian (2026-05)
 
@@ -310,6 +296,10 @@ Todos com auth + cross-org guard via `deal.pipeline.orgId` + audit + bloqueio qu
 - **GDocs mode** (`googleDocId` set): `drive.files.export` nativo, ignora preset
 - Puppeteer requer Vercel Pro (timeout 60s)
 
+## Locação (em construção — specs)
+
+Módulo de aluguéis (recorrente) sobre a base de venda. Aditivo — não altera shapes de venda. Specs: arquitetura [`docs/locacao/spec.md`](docs/locacao/spec.md) (entidades novas `Property`/`LeaseContract`/`RentCharge`/`CreditAnalysis`/`Guarantee`/`Inspection`, recorrência via cron `rent/generate` → `CommissionCharge{kind:"aluguel"}` + repasse Asaas Split, `Deal.kind="locacao"`, schemaTypes locação) + UI/UX [`docs/redesign-locacao-spec.md`](docs/redesign-locacao-spec.md) (PR #48). Dois agentes: Newton (WhatsApp externo) ≠ chat in-app (editor).
+
 ## Schemas críticos
 
 Não-óbvios (enums e structure: ver `prisma/schema.prisma`):
@@ -336,4 +326,4 @@ Não-óbvios (enums e structure: ver `prisma/schema.prisma`):
 - **Auto-promote stage não é retroativo:** webhook ClickSign close OU charge antes da migration = deal fica em stage anterior. Drag-drop manual
 - **Split Asaas:** rejeita wallet própria, duplicatas, max 10. Sandbox rejeita docs de identidade via API — usar `approveSandboxAccount`
 - **Forms públicos não requerem auth** — qualquer um com o link pode editar
-- **Operacionais em memória** (ver `MEMORY.md`): OAuth Testing 7d, `printf` single quotes pra envs Vercel, `vercel env pull \n`, normalizers de provedor mudam de shape, Chrome MCP + Google auth, Resend sandbox, auto-mode vs prod DB, Handlebars helper shadowing (`{{this.X}}`), date parse timezone drift
+- **Operacionais em memória** (ver `MEMORY.md`): OAuth Testing 7d, `printf` single quotes pra envs Vercel, `vercel env pull \n`, normalizers mudam de shape, Chrome MCP + Google auth, Resend sandbox, auto-mode vs prod DB, Handlebars `{{this.X}}` shadowing, date parse timezone drift, Windows/PowerShell

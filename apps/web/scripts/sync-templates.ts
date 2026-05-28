@@ -25,10 +25,12 @@ const SEED = process.argv.includes("--seed");
 const UPDATE_METADATA = process.argv.includes("--update-metadata");
 
 interface TemplateFile {
-  modalidade: "a_vista" | "financiamento";
+  modalidade: "a_vista" | "financiamento" | "locacao";
   filename: string;
   canonicalName: string;
   canonicalDescription: string;
+  // schemaType da row criada no --seed (default compra_venda_v2 p/ venda).
+  schemaType?: string;
 }
 
 const TEMPLATES: TemplateFile[] = [
@@ -45,6 +47,14 @@ const TEMPLATES: TemplateFile[] = [
     canonicalName: "CCV - Financiamento Imobiliário",
     canonicalDescription:
       "Instrumento particular de compromisso de venda e compra - modalidade financiamento imobiliário",
+  },
+  {
+    modalidade: "locacao",
+    filename: "locacao_residencial_v2.hbs",
+    canonicalName: "Locação Residencial",
+    canonicalDescription:
+      "Instrumento particular de contrato de locação residencial - Lei nº 8.245/91",
+    schemaType: "locacao_residencial_v1",
   },
 ];
 
@@ -126,7 +136,7 @@ async function main() {
                 modalidade: t.modalidade,
                 isDefault: true,
                 status: "active",
-                schemaType: "compra_venda_v2",
+                schemaType: t.schemaType ?? "compra_venda_v2",
                 version: "2.0.0",
                 engine: "handlebars",
               },

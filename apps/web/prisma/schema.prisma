@@ -266,6 +266,16 @@ model Organization {
 
   // Newton — registro de grupos WhatsApp observados (p/ auto-link + candidatos)
   whatsappGroups WhatsappGroup[]
+
+  // Locação — módulo de administração de aluguéis (docs/locacao/spec.md)
+  propertyOwners  PropertyOwner[]
+  tenants         Tenant[]
+  properties      Property[]
+  leaseContracts  LeaseContract[]
+  rentCharges     RentCharge[]
+  guarantees      Guarantee[]
+  inspections     Inspection[]
+  creditAnalyses  CreditAnalysis[]
 }
 
 model OrgMembership {
@@ -327,6 +337,10 @@ model Pipeline {
   id        String   @id @default(cuid())
   orgId     String
   name      String   @default("Pipeline Principal")
+  // Locação (aditivo): "venda" (default, retrocompat) | "locacao". Separa o
+  // workspace recorrente do transacional — pipeline de locação tem stages
+  // próprios (Esteira pré-contrato). Ver docs/locacao/spec.md §4.2.
+  kind      String   @default("venda")
   createdAt DateTime @default(now())
 
   org    Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
@@ -356,6 +370,9 @@ model Deal {
   title            String
   value            Float?
   dataJson         Json?
+  // Locação (aditivo): "venda" (default) | "locacao". Discrimina a natureza
+  // do negócio sem quebrar deals existentes. Ver docs/locacao/spec.md §4.2.
+  kind             String    @default("venda")
   position         Int       @default(0)
   // SLA pós-assinatura — datas terminais do funil.
   // commissionPaidAt: setado pelo botão "Marcar comissão paga" no DealDetail.
@@ -2233,4 +2250,241 @@ model ApiUsage {
   @@index([orgId, createdAt])
   @@index([tokenId, createdAt])
   @@index([path, createdAt])
+}
+
+// ============================================
+// LOCAÇÃO — administração de aluguéis (docs/locacao/spec.md)
+// ============================================
+// Aditivo. Entidades org-scoped (orgId direto + índices compostos). Links a
+// models existentes (Contract, CommissionCharge, AsaasTransfer, Deal, Envelope)
+// são scalar IDs SEM FK — mantém a migration contida; FKs podem ser adicionadas
+// depois. Relações reais só entre entidades novas + Organization.
+
+// Proprietário (cadastro unificado PF/PJ). Dados bancários p/ repasse.
+model PropertyOwner {
+  id                    String   @id @default(cuid())
+  orgId                 String
+  tipoPessoa            String   @default("fisica") // fisica | juridica
+  nome                  String
+  cpfCnpj               String
+  email                 String?
+  phone                 String?
+  // Repasse
+  pixKey                String?
+  pixKeyType            String? // CPF|CNPJ|EMAIL|PHONE|EVP
+  bankName              String?
+  bankBranch            String?
+  bankAccount           String?
+  bankAccountType       String? // corrente|poupanca
+  // Split nativo Asaas quando o proprietário tem wallet própria.
+  asaasWalletId         String?
+  // Preferências
+  canalPreferido        String?  @default("whatsapp") // whatsapp|email|sms
+  repasseDia            Int?
+  antecipacaoHabilitada Boolean  @default(false)
+  dataJson              Json?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  org        Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  properties Property[]
+
+  @@unique([orgId, cpfCnpj])
+  @@index([orgId])
+}
+
+// Inquilino (cadastro unificado PF/PJ). Ficha reutilizável entre locações.
+model Tenant {
+  id         String   @id @default(cuid())
+  orgId      String
+  tipoPessoa String   @default("fisica") // fisica | juridica
+  nome       String
+  cpfCnpj    String
+  email      String?
+  phone      String?
+  dataJson   Json? // ficha (cônjuge, renda declarada, endereço, etc)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  org            Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  leaseContracts LeaseContract[]
+  creditAnalyses CreditAnalysis[]
+
+  @@unique([orgId, cpfCnpj])
+  @@index([orgId])
+}
+
+// Imóvel — entidade primária com ciclo de vida próprio (status ortogonal ao
+// funil de negócio). Substitui o uso inline de `imoveis[]` do DadosContrato.
+model Property {
+  id                   String   @id @default(cuid())
+  orgId                String
+  ownerId              String?
+  kind                 String   @default("apartamento") // apartamento|casa|comercial_sala|loja|galpao|terreno|temporada
+  status               String   @default("disponivel") // disponivel|anunciado|em_negociacao|locado|manutencao|fora_catalogo
+  // Endereço estruturado
+  rua                  String?
+  numero               String?
+  complemento          String?
+  bairro               String?
+  cidade               String?
+  uf                   String?
+  cep                  String?
+  // Registro
+  matricula            String?
+  cartorio             String?
+  inscricaoIptu        String?
+  area                 Float?
+  atributos            Json? // quartos/vagas/mobiliado — específico por kind
+  fotos                String[] @default([])
+  descricaoIa          String?  @db.Text
+  valorAluguelSugerido Float?
+  // Envelope (ClickSign) da autorização de captação — scalar, sem FK.
+  captacaoEnvelopeId   String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  org            Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  owner          PropertyOwner?  @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  leaseContracts LeaseContract[]
+  inspections    Inspection[]
+
+  @@index([orgId, status])
+  @@index([ownerId])
+}
+
+// Contrato de locação ATIVO (distinto do `Contract`/Google Doc, que é o
+// instrumento assinado). Carrega o ciclo de vida recorrente.
+model LeaseContract {
+  id               String    @id @default(cuid())
+  orgId            String
+  propertyId       String
+  tenantId         String
+  // Instrumento assinado + Deal de origem — scalar, sem FK.
+  contractId       String?
+  dealId           String?
+  status           String    @default("rascunho") // rascunho|assinatura|ativo|renovacao|rescisao|encerrado
+  valorAluguel     Float
+  valorEncargos    Float     @default(0) // iptu/condominio embutidos
+  diaVencimento    Int       @default(10)
+  indiceReajuste   String    @default("IGPM") // IGPM|IPCA|outro
+  vigenciaInicio   DateTime?
+  vigenciaFim      DateTime?
+  taxaAdminPercent Float     @default(10)
+  repasseDia       Int?
+  repasseSplitJson Json?
+  dataJson         Json?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  property    Property     @relation(fields: [propertyId], references: [id])
+  tenant      Tenant       @relation(fields: [tenantId], references: [id])
+  guarantee   Guarantee?
+  rentCharges RentCharge[]
+  inspections Inspection[]
+
+  @@index([orgId, status])
+  @@index([propertyId])
+  @@index([tenantId])
+}
+
+// Cobrança mensal de aluguel — materializada pelo cron `rent/generate`.
+// `commissionChargeId` aponta pro CommissionCharge{kind:"aluguel"} (Asaas).
+model RentCharge {
+  id                 String    @id @default(cuid())
+  orgId              String
+  leaseContractId    String
+  competencia        String // YYYY-MM
+  dueDate            DateTime
+  valorBase          Float
+  encargos           Float     @default(0)
+  multa              Float     @default(0)
+  juros              Float     @default(0)
+  status             String    @default("pendente") // pendente|emitida|paga|atrasada|cancelada|repassada
+  // Links a Asaas — scalar, sem FK.
+  commissionChargeId String?
+  repasseTransferId  String?
+  paidAt             DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  org           Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  leaseContract LeaseContract @relation(fields: [leaseContractId], references: [id], onDelete: Cascade)
+
+  @@unique([leaseContractId, competencia])
+  @@index([orgId, competencia])
+  @@index([orgId, status])
+}
+
+// Garantia locatícia (1:1 com LeaseContract). Fase 1 via parceiros.
+model Guarantee {
+  id              String   @id @default(cuid())
+  orgId           String
+  leaseContractId String   @unique
+  tipo            String // fiador|caucao|seguro_fianca|garantia_digital|propria
+  provider        String? // credpago|garantti|creditas|porto|...
+  status          String   @default("pendente") // pendente|ativa|acionada|encerrada|recusada
+  coberturaMeses  Int?
+  custoJson       Json?
+  externalRef     String?
+  fiadorPartyJson Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  org           Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  leaseContract LeaseContract @relation(fields: [leaseContractId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+}
+
+// Análise de crédito do inquilino. Versionada por tentativa. shapJson p/ F2.
+model CreditAnalysis {
+  id                   String   @id @default(cuid())
+  orgId                String
+  tenantId             String
+  leaseDealId          String? // Deal de locação — scalar
+  status               String   @default("pendente") // pendente|aprovado|aprovado_com_garantia|analise_manual|recusado
+  scoreBureau          Int?
+  scoreInterno         Int?
+  decisionJson         Json?
+  shapJson             Json?
+  openFinanceConsentId String?
+  biometriaJson        Json?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  org    Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+  @@index([tenantId])
+}
+
+// Vistoria (entrada/saída/contra). Laudo PDF + QR + assinatura ClickSign.
+model Inspection {
+  id              String   @id @default(cuid())
+  orgId           String
+  propertyId      String
+  leaseContractId String?
+  tipo            String // entrada|saida|contra
+  tipoImovel      String?
+  status          String   @default("rascunho") // rascunho|em_campo|laudo_gerado|assinatura|concluida
+  checklistJson   Json?
+  ambientesJson   Json? // [{ambiente,fotos[],audio,descricaoIa,estado}]
+  comparacaoJson  Json?
+  laudoPdfUrl     String?
+  qrToken         String?  @unique
+  // Envelope (ClickSign) do laudo — scalar, sem FK.
+  envelopeId      String?
+  executorId      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  org           Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  property      Property       @relation(fields: [propertyId], references: [id])
+  leaseContract LeaseContract? @relation(fields: [leaseContractId], references: [id], onDelete: SetNull)
+
+  @@index([orgId, status])
+  @@index([propertyId])
 }
