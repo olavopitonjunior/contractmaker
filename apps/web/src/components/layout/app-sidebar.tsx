@@ -23,6 +23,7 @@ import {
   Settings,
   LogOut,
   Wallet,
+  Building2,
 } from "lucide-react";
 
 const navItems = [
@@ -30,6 +31,11 @@ const navItems = [
     title: "Pipeline",
     url: "/pipeline",
     icon: LayoutDashboard,
+  },
+  {
+    title: "Locação",
+    url: "/locacao",
+    icon: Building2,
   },
   {
     title: "Cláusulas",
