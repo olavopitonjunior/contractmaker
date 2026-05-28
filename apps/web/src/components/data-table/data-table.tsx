@@ -32,6 +32,8 @@ interface DataTableProps<TData, TValue> {
   /** Coluna alvo do filtro de texto principal (filtro tipo "search"). */
   filterColumn?: string;
   filterPlaceholder?: string;
+  /** Habilita checkbox column pra row selection (necessário pra bulkActions). */
+  enableSelection?: boolean;
   /** Slot pra ações em massa (aparece quando há rows selecionadas). */
   bulkActions?: (selectedRows: TData[]) => ReactNode;
   /** Mostrado quando data.length === 0 e sem filtros aplicados. */
@@ -54,6 +56,7 @@ export function DataTable<TData, TValue>({
   data,
   filterColumn,
   filterPlaceholder = "Filtrar...",
+  enableSelection = false,
   bulkActions,
   emptyState,
   mobileCardRenderer,
@@ -65,9 +68,39 @@ export function DataTable<TData, TValue>({
   const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
   const [rowSelection, setRowSelection] = useState({});
 
+  // Adiciona checkbox column quando enableSelection.
+  const finalColumns: ColumnDef<TData, TValue>[] = enableSelection
+    ? [
+        {
+          id: "_select",
+          header: ({ table }) => (
+            <input
+              type="checkbox"
+              checked={table.getIsAllPageRowsSelected()}
+              onChange={(e) => table.toggleAllPageRowsSelected(e.target.checked)}
+              aria-label="Selecionar todos"
+              className="rounded border-input"
+            />
+          ),
+          cell: ({ row }) => (
+            <input
+              type="checkbox"
+              checked={row.getIsSelected()}
+              onChange={(e) => row.toggleSelected(e.target.checked)}
+              aria-label="Selecionar linha"
+              onClick={(e) => e.stopPropagation()}
+              className="rounded border-input"
+            />
+          ),
+          enableSorting: false,
+        } as ColumnDef<TData, TValue>,
+        ...columns,
+      ]
+    : columns;
+
   const table = useReactTable({
     data,
-    columns,
+    columns: finalColumns,
     onSortingChange: setSorting,
     onColumnFiltersChange: setColumnFilters,
     getCoreRowModel: getCoreRowModel(),

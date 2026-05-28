@@ -407,6 +407,28 @@ export default async function LeaseContractDetailPage({ params }: Params) {
         )}
       </LeaseSection>
 
+      <LeaseSection id="reajustes" title="Reajustes">
+        <p className="text-sm text-muted-foreground">
+          {lc.dataProximoReajuste ? (
+            <>
+              Próximo reajuste previsto em{" "}
+              <strong>{lc.dataProximoReajuste.toLocaleDateString("pt-BR")}</strong>. Índice base:{" "}
+              <strong>{lc.indiceReajuste}</strong>.
+            </>
+          ) : (
+            <>Sem data de próximo reajuste cadastrada.</>
+          )}
+        </p>
+        <div className="mt-3">
+          <Link
+            href={`/locacao/contratos/${lc.id}/reajustes`}
+            className="text-sm text-primary hover:underline"
+          >
+            Ver histórico e aplicar reajuste →
+          </Link>
+        </div>
+      </LeaseSection>
+
       <LeaseSection id="manutencoes" title={`Manutenções (${lc.maintenances.length})`}>
         {lc.maintenances.length === 0 ? (
           <p className="text-sm text-muted-foreground">Sem manutenção registrada.</p>

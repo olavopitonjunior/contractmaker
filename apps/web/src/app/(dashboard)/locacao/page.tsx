@@ -48,6 +48,8 @@ export default async function LocacaoDashboardPage() {
   const startOfNextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
 
+  const in60d = new Date(now.getTime() + 60 * 24 * 3600_000);
+
   const [
     cobrancasMonth,
     cobrancasPaid,
@@ -58,6 +60,12 @@ export default async function LocacaoDashboardPage() {
     leasesActive,
     insuranceExpiring,
     repasseGarantidoActive,
+    // Novos cards F2.1:
+    garantiasMes,
+    garantias60d,
+    leasesSemGarantia,
+    reajustesMes,
+    leasesSemTaxa,
   ] = await Promise.all([
     prisma.rentCharge.count({ where: { orgId: org.id, competencia } }),
     prisma.rentCharge.count({ where: { orgId: org.id, competencia, status: "paga" } }),
@@ -84,11 +92,43 @@ export default async function LocacaoDashboardPage() {
       where: {
         orgId: org.id,
         status: "ativa",
-        vigenciaFim: { lte: new Date(now.getTime() + 60 * 24 * 3600_000), gte: now },
+        vigenciaFim: { lte: in60d, gte: now },
       },
     }),
     prisma.leaseContract.count({
       where: { orgId: org.id, status: "ativo", repasseGarantido: { not: "nao" } },
+    }),
+    // Garantias: ativas com leaseContract.vigenciaFim no mês corrente
+    prisma.guarantee.count({
+      where: {
+        orgId: org.id,
+        status: "ativa",
+        leaseContract: { vigenciaFim: { gte: startOfMonth, lt: startOfNextMonth } },
+      },
+    }),
+    // Garantias: ativas com leaseContract.vigenciaFim nos próximos 60d
+    prisma.guarantee.count({
+      where: {
+        orgId: org.id,
+        status: "ativa",
+        leaseContract: { vigenciaFim: { lte: in60d, gte: now } },
+      },
+    }),
+    // Contratos ativos sem garantia
+    prisma.leaseContract.count({
+      where: { orgId: org.id, status: "ativo", guarantee: null },
+    }),
+    // Reajustes do mês: dataProximoReajuste neste mês corrente
+    prisma.leaseContract.count({
+      where: {
+        orgId: org.id,
+        status: "ativo",
+        dataProximoReajuste: { gte: startOfMonth, lt: startOfNextMonth },
+      },
+    }),
+    // Contratos sem taxa de locação configurada
+    prisma.leaseContract.count({
+      where: { orgId: org.id, status: "ativo", taxaAdminPercent: { lte: 0 } },
     }),
   ]);
 
@@ -193,16 +233,62 @@ export default async function LocacaoDashboardPage() {
         </CardContent>
       </Card>
 
-      <Card className="md:col-span-2 xl:col-span-4">
+      <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
-            <Calendar className="h-4 w-4" /> Próximos passos
+            <ShieldCheck className="h-4 w-4" /> Garantias vencendo
           </CardTitle>
         </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
-          Esta é a Fase 1 do workspace de Locação. Cada cartão acima virará uma rota
-          contextual com listagem detalhada e ações em lote — em sincronia com o
-          spec de design (PR #48).
+        <CardContent>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div>
+              <div className="text-xl font-semibold">{garantiasMes}</div>
+              <div className="text-[10px] uppercase text-muted-foreground">no mês</div>
+            </div>
+            <div>
+              <div className="text-xl font-semibold">{garantias60d}</div>
+              <div className="text-[10px] uppercase text-muted-foreground">60d</div>
+            </div>
+            <div>
+              <div className="text-xl font-semibold">{leasesSemGarantia}</div>
+              <div className="text-[10px] uppercase text-muted-foreground">sem</div>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <TrendingUp className="h-4 w-4" /> Reajustes no mês
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-2xl font-semibold">{reajustesMes}</div>
+          <div className="text-xs text-muted-foreground">
+            {reajustesMes > 0 ? "contratos a reajustar" : "sem reajuste pendente"}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2 text-base">
+            <AlertTriangle className="h-4 w-4" /> Contratos sem taxa
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center gap-2">
+            <span className="text-2xl font-semibold">{leasesSemTaxa}</span>
+            {leasesSemTaxa > 0 ? (
+              <Badge variant="destructive">
+                <AlertTriangle className="mr-1 h-3 w-3" /> revisar
+              </Badge>
+            ) : null}
+          </div>
+          <div className="text-xs text-muted-foreground">
+            taxaAdminPercent ≤ 0 (contrato sem fee)
+          </div>
         </CardContent>
       </Card>
     </div>

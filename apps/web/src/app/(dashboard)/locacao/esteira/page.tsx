@@ -4,7 +4,7 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { NovoDealLocacaoDialog } from "@/components/locacao/NovoDealLocacaoDialog";
+import { NovoContratoWizard } from "@/components/locacao/NovoContratoWizard";
 import { KanbanDealCard } from "@/components/locacao/KanbanDealCard";
 
 export const dynamic = "force-dynamic";
@@ -86,7 +86,7 @@ export default async function LocacaoEsteiraPage() {
             Kanban com {pipeline.stages.length} stages · {totalDeals} deals em andamento. Lead/Visita/Proposta ficam fora (decisão D1).
           </p>
         </div>
-        <NovoDealLocacaoDialog properties={propertyOptions} tenants={tenantOptions} />
+        <NovoContratoWizard properties={propertyOptions} tenants={tenantOptions} />
       </div>
 
       <div className="grid auto-cols-[280px] grid-flow-col gap-3 overflow-x-auto pb-3">

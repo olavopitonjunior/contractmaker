@@ -5,6 +5,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/data-table/data-table";
 import { fmtBRL, fmtDate } from "@/components/data-table/columns-helpers";
 import { Badge } from "@/components/ui/badge";
+import { BulkActions } from "@/components/locacao/BulkActions";
 
 export interface DespesaRow {
   id: string;
@@ -85,6 +86,24 @@ export function DespesasTable({ data, emptyState }: Props) {
       filterColumn="type"
       filterPlaceholder="Filtrar por tipo..."
       emptyState={emptyState}
+      enableSelection
+      bulkActions={(rows) => (
+        <BulkActions
+          endpoint="/api/locacao/expenses/bulk"
+          ids={rows.map((r) => r.id)}
+          actions={[
+            { key: "liquidar", label: "Liquidar selecionadas" },
+            { key: "estornar", label: "Estornar liquidação" },
+            { key: "marcar_pendente", label: "Marcar como pendente" },
+            {
+              key: "cancelar",
+              label: "Cancelar selecionadas",
+              destructive: true,
+              confirm: `Cancelar ${rows.length} despesa(s)?`,
+            },
+          ]}
+        />
+      )}
       mobileCardRenderer={(row) => (
         <div key={row.id} className="rounded-md border bg-card p-3">
           <div className="flex items-start justify-between gap-2">

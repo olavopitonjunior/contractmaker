@@ -6,6 +6,7 @@ import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/data-table/data-table";
 import { fmtBRL, fmtDate } from "@/components/data-table/columns-helpers";
 import { Badge } from "@/components/ui/badge";
+import { BulkActions } from "@/components/locacao/BulkActions";
 
 export interface CobrancaRow {
   id: string;
@@ -86,6 +87,26 @@ export function CobrancasTable({ data, emptyState }: Props) {
       filterColumn="inquilino"
       filterPlaceholder="Filtrar por inquilino..."
       emptyState={emptyState}
+      enableSelection
+      bulkActions={(rows) => (
+        <BulkActions
+          endpoint="/api/locacao/rent-charges/bulk"
+          ids={rows.map((r) => r.id)}
+          actions={[
+            {
+              key: "cobrar",
+              label: "Cobrar (régua Newton)",
+              confirm: `Disparar régua de cobrança para ${rows.length} cobrança(s)?`,
+            },
+            {
+              key: "cancelar",
+              label: "Cancelar selecionadas",
+              destructive: true,
+              confirm: `Cancelar ${rows.length} cobrança(s)?`,
+            },
+          ]}
+        />
+      )}
       mobileCardRenderer={(row) => (
         <Link
           key={row.id}

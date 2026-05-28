@@ -286,6 +286,7 @@ model Organization {
   debtAgreements     DebtAgreement[]
   insurancePolicies  InsurancePolicy[]
   maintenances       Maintenance[]
+  leaseReadjustments LeaseReadjustment[]
 }
 
 model OrgMembership {
@@ -2435,8 +2436,13 @@ model LeaseContract {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  org               Organization      @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  property          Property          @relation(fields: [propertyId], references: [id])
+  // Reajuste (F2): data prevista do próximo reajuste — alimenta o card
+  // "Reajustes do mês" no dashboard e o cron `rent/readjust`. Default: 12 meses
+  // após `vigenciaInicio` (calculado pelo app na criação).
+  dataProximoReajuste DateTime?
+
+  org               Organization        @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  property          Property            @relation(fields: [propertyId], references: [id])
   tenants           LeaseTenant[]
   angariadores      LeaseAngariador[]
   guarantee         Guarantee?
@@ -2447,9 +2453,11 @@ model LeaseContract {
   debtAgreements    DebtAgreement[]
   insurancePolicies InsurancePolicy[]
   maintenances      Maintenance[]
+  readjustments     LeaseReadjustment[]
 
   @@index([orgId, status])
   @@index([propertyId])
+  @@index([orgId, dataProximoReajuste])
 }
 
 // Cobrança mensal de aluguel — materializada pelo cron `rent/generate`.
@@ -2772,4 +2780,32 @@ model Maintenance {
 
   @@index([orgId, status])
   @@index([propertyId, status])
+}
+
+// LeaseReadjustment (Fase 2) — histórico de reajustes do contrato.
+// Fluxo: cron mensal busca contratos com `dataProximoReajuste` no mês,
+// calcula via API IGPM/IPCA (FGV/IBGE), cria row em status "proposto"
+// → gestor aprova/recusa → cria nova `LeaseReadjustment status="aplicado"`
+// e atualiza `LeaseContract.valorAluguel` + `dataProximoReajuste` (+12 meses).
+model LeaseReadjustment {
+  id                 String   @id @default(cuid())
+  orgId              String
+  leaseContractId    String
+  dataReajuste       DateTime
+  indice             String // IGPM | IPCA | IGP-DI | outro
+  percentualAplicado Float
+  valorAnterior      Float
+  valorNovo          Float
+  observacao         String?  @db.Text
+  status             String   @default("proposto") // proposto | aprovado | aplicado | recusado
+  propostoEm         DateTime @default(now())
+  aprovadoEm         DateTime?
+  aprovadoPor        String? // userId
+  createdAt          DateTime @default(now())
+
+  org           Organization  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  leaseContract LeaseContract @relation(fields: [leaseContractId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, status])
+  @@index([leaseContractId, dataReajuste])
 }

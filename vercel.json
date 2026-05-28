@@ -60,6 +60,10 @@
     {
       "path": "/api/cron/rent/generate",
       "schedule": "0 0 1 * *"
+    },
+    {
+      "path": "/api/cron/rent/readjust",
+      "schedule": "0 1 1 * *"
     }
   ]
 }
