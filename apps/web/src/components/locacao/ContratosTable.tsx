@@ -104,6 +104,20 @@ export function ContratosTable({ data, emptyState }: Props) {
       data={data}
       filterColumn="endereco"
       filterPlaceholder="Filtrar por imóvel ou inquilino..."
+      advancedFilters={[
+        {
+          column: "status",
+          label: "Status",
+          options: [
+            { value: "rascunho", label: "Rascunho" },
+            { value: "assinatura", label: "Em assinatura" },
+            { value: "ativo", label: "Ativo" },
+            { value: "renovacao", label: "Renovação" },
+            { value: "rescisao", label: "Rescisão" },
+            { value: "encerrado", label: "Encerrado" },
+          ],
+        },
+      ]}
       emptyState={emptyState}
       mobileCardRenderer={(row) => (
         <Link

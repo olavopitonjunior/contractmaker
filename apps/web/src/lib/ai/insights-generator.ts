@@ -223,6 +223,20 @@ export async function generateInsights(args: {
   context: InsightContext;
   contextId?: string;
 }): Promise<AIInsight[]> {
+  // F3.7 gate: org pode desabilitar global ou por contexto.
+  const ac = await prisma.agentConfig.findUnique({
+    where: { orgId: args.orgId },
+    select: { aiInsightsConfig: true },
+  });
+  const cfg = ac?.aiInsightsConfig as
+    | { enabled?: boolean; contexts?: Record<string, boolean> }
+    | null
+    | undefined;
+  if (cfg) {
+    if (cfg.enabled === false) return [];
+    if (cfg.contexts && cfg.contexts[args.context] === false) return [];
+  }
+
   const snapshot = await buildSnapshot(args.context, {
     orgId: args.orgId,
     contextId: args.contextId,

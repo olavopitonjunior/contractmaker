@@ -14,6 +14,7 @@ const SUB_NAV = [
   { label: "Despesas", href: "/locacao/despesas" },
   { label: "Vistorias", href: "/locacao/vistorias" },
   { label: "Pessoas", href: "/locacao/pessoas" },
+  { label: "Seguros", href: "/locacao/seguros" },
   { label: "Newton", href: "/locacao/newton" },
 ];
 

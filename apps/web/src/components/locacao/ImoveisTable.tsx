@@ -223,6 +223,26 @@ export function ImoveisTable({ data, emptyState }: Props) {
         data={data}
         filterColumn="endereco"
         filterPlaceholder="Filtrar por endereço..."
+        advancedFilters={[
+          {
+            column: "status",
+            label: "Status",
+            options: STATUS_OPTIONS.map((s) => ({ value: s, label: STATUS_LABEL[s] })),
+          },
+          {
+            column: "kind",
+            label: "Tipo",
+            options: [
+              { value: "apartamento", label: "Apartamento" },
+              { value: "casa", label: "Casa" },
+              { value: "comercial", label: "Comercial" },
+              { value: "sala", label: "Sala" },
+              { value: "kitnet", label: "Kitnet" },
+              { value: "terreno", label: "Terreno" },
+              { value: "outro", label: "Outro" },
+            ],
+          },
+        ]}
         enableSelection
         bulkActions={(rows) => {
           const ids = rows.map((r) => r.id);

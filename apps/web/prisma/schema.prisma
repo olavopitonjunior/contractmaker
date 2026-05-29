@@ -1093,6 +1093,9 @@ model AgentConfig {
   temperature  Float    @default(0.3)
   maxTokens    Int      @default(4096)
   systemPrompt String   @db.Text
+  // F3.7 — toggle por contexto e config global de AI Insights.
+  // Shape: { enabled: bool, contexts: { dashboard: bool, contract: bool, property: bool, cashflow: bool } }
+  aiInsightsConfig Json?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 

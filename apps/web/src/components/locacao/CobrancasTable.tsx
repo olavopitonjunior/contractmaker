@@ -86,6 +86,29 @@ export function CobrancasTable({ data, emptyState }: Props) {
       data={data}
       filterColumn="inquilino"
       filterPlaceholder="Filtrar por inquilino..."
+      advancedFilters={[
+        {
+          column: "status",
+          label: "Status",
+          options: [
+            { value: "pendente", label: "Pendente" },
+            { value: "emitida", label: "Emitida" },
+            { value: "paga", label: "Paga" },
+            { value: "atrasada", label: "Atrasada" },
+            { value: "cancelada", label: "Cancelada" },
+            { value: "repassada", label: "Repassada" },
+          ],
+        },
+        {
+          column: "kind",
+          label: "Tipo",
+          options: [
+            { value: "aluguel", label: "Aluguel" },
+            { value: "extra", label: "Extra" },
+            { value: "rescisao", label: "Rescisão" },
+          ],
+        },
+      ]}
       emptyState={emptyState}
       enableSelection
       bulkActions={(rows) => (

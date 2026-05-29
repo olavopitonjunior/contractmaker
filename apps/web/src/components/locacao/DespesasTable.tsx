@@ -83,8 +83,24 @@ export function DespesasTable({ data, emptyState }: Props) {
     <DataTable
       columns={columns}
       data={data}
-      filterColumn="type"
-      filterPlaceholder="Filtrar por tipo..."
+      filterColumn="endereco"
+      filterPlaceholder="Filtrar por imóvel..."
+      advancedFilters={[
+        {
+          column: "status",
+          label: "Status",
+          options: [
+            { value: "pendente", label: "Pendente" },
+            { value: "pago", label: "Pago" },
+            { value: "cancelado", label: "Cancelado" },
+          ],
+        },
+        {
+          column: "type",
+          label: "Tipo",
+          options: Object.entries(TYPE_LABEL).map(([value, label]) => ({ value, label })),
+        },
+      ]}
       emptyState={emptyState}
       enableSelection
       bulkActions={(rows) => (

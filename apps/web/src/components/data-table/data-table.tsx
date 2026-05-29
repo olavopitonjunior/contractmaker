@@ -23,8 +23,22 @@ import {
 } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ChevronLeft, ChevronRight, ArrowUpDown, Search } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { ChevronLeft, ChevronRight, ArrowUpDown, Search, X } from "lucide-react";
 import { EmptyState } from "./empty-state";
+
+export interface AdvancedFilter {
+  /** Coluna do TanStack a aplicar `setFilterValue` */
+  column: string;
+  label: string;
+  options: Array<{ value: string; label: string }>;
+}
 
 interface DataTableProps<TData, TValue> {
   columns: ColumnDef<TData, TValue>[];
@@ -36,6 +50,8 @@ interface DataTableProps<TData, TValue> {
   enableSelection?: boolean;
   /** Slot pra ações em massa (aparece quando há rows selecionadas). */
   bulkActions?: (selectedRows: TData[]) => ReactNode;
+  /** Filtros declarativos por coluna (Select com opções). Aparecem inline na toolbar. */
+  advancedFilters?: AdvancedFilter[];
   /** Mostrado quando data.length === 0 e sem filtros aplicados. */
   emptyState?: {
     icon?: ReactNode;
@@ -58,6 +74,7 @@ export function DataTable<TData, TValue>({
   filterPlaceholder = "Filtrar...",
   enableSelection = false,
   bulkActions,
+  advancedFilters,
   emptyState,
   mobileCardRenderer,
   pageSize = 25,
@@ -125,9 +142,9 @@ export function DataTable<TData, TValue>({
 
   return (
     <div className={className}>
-      {/* Toolbar: filtro + ações em massa */}
-      {(filterColumn || bulkActions) && (
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+      {/* Toolbar: filtro + filtros avançados + ações em massa */}
+      {(filterColumn || advancedFilters?.length || bulkActions) && (
+        <div className="mb-3 flex flex-wrap items-center gap-2">
           {filterColumn && (
             <div className="relative max-w-sm flex-1">
               <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -141,14 +158,55 @@ export function DataTable<TData, TValue>({
               />
             </div>
           )}
-          {bulkActions && selectedRows.length > 0 && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">
-                {selectedRows.length} selecionado(s)
-              </span>
-              {bulkActions(selectedRows)}
-            </div>
+          {advancedFilters?.map((f) => {
+            const current = (table.getColumn(f.column)?.getFilterValue() as string) ?? "__all";
+            return (
+              <Select
+                key={f.column}
+                value={current}
+                onValueChange={(v) =>
+                  table
+                    .getColumn(f.column)
+                    ?.setFilterValue(v === "__all" ? undefined : v)
+                }
+              >
+                <SelectTrigger className="h-9 w-auto min-w-[140px]">
+                  <SelectValue placeholder={f.label} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__all">{f.label}: todos</SelectItem>
+                  {f.options.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            );
+          })}
+          {(columnFilters.length > 0 || Boolean(filterColumn && table.getColumn(filterColumn)?.getFilterValue())) && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setColumnFilters([]);
+              }}
+              className="h-9 text-xs"
+            >
+              <X className="mr-1 h-3 w-3" />
+              Limpar
+            </Button>
           )}
+          <div className="ml-auto flex items-center gap-2">
+            {bulkActions && selectedRows.length > 0 && (
+              <>
+                <span className="text-xs text-muted-foreground">
+                  {selectedRows.length} selecionado(s)
+                </span>
+                {bulkActions(selectedRows)}
+              </>
+            )}
+          </div>
         </div>
       )}
 
