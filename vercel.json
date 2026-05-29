@@ -64,6 +64,14 @@
     {
       "path": "/api/cron/rent/readjust",
       "schedule": "0 1 1 * *"
+    },
+    {
+      "path": "/api/cron/locacao/newton/check-readjustments",
+      "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/locacao/newton/check-late-payments",
+      "schedule": "0 8 * * *"
     }
   ]
 }

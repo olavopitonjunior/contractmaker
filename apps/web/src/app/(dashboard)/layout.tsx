@@ -6,6 +6,7 @@ import { getTenantBranding } from "@/lib/tenant/branding";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { DashboardHeader } from "@/components/layout/dashboard-header";
+import { AIAssistButton } from "@/components/ai-assist/AIAssistButton";
 
 export default async function DashboardLayout({
   children,
@@ -52,6 +53,7 @@ export default async function DashboardLayout({
             {children}
           </main>
         </SidebarInset>
+        <AIAssistButton />
       </SidebarProvider>
     </div>
   );

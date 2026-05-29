@@ -8,6 +8,7 @@ import { ArrowLeft, AlertCircle, Building2, User } from "lucide-react";
 import { LeaseHeaderActions } from "@/components/locacao/LeaseHeaderActions";
 import { NovaCobrancaExtraDialog } from "@/components/locacao/NovaCobrancaExtraDialog";
 import { LeaseSection, Field } from "@/components/locacao/lease-detail/LeaseSection";
+import { AIInsightsCard } from "@/components/ai-assist/InsightsCard";
 
 export const dynamic = "force-dynamic";
 
@@ -120,6 +121,8 @@ export default async function LeaseContractDetailPage({ params }: Params) {
           </div>
         </CardContent>
       </Card>
+
+      <AIInsightsCard context="contract" contextId={lc.id} />
 
       {(cobrancasVencidas > 0 || repassesPendentes > 0 || checklistsPendentes > 0) && (
         <div className="flex flex-wrap gap-2">

@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { prisma } from "@/lib/db/prisma";
 import { competenciaFor } from "@/lib/locacao/rent-scheduler";
+import { AIInsightsCard } from "@/components/ai-assist/InsightsCard";
 
 export const dynamic = "force-dynamic";
 
@@ -139,7 +140,9 @@ export default async function LocacaoDashboardPage() {
   const percentRecebido = cobrancasMonth > 0 ? (cobrancasPaid / cobrancasMonth) * 100 : 0;
 
   return (
-    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+    <div className="space-y-4">
+      <AIInsightsCard context="dashboard" />
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
       <Card className="md:col-span-2">
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
@@ -291,6 +294,7 @@ export default async function LocacaoDashboardPage() {
           </div>
         </CardContent>
       </Card>
+      </div>
     </div>
   );
 }

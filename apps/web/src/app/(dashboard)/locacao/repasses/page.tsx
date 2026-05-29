@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Send } from "lucide-react";
 import { RealizarRepasseButton } from "@/components/locacao/RealizarRepasseButton";
+import { AIInsightsCard } from "@/components/ai-assist/InsightsCard";
 
 export const dynamic = "force-dynamic";
 
@@ -70,6 +71,8 @@ export default async function LocacaoRepassesPage() {
           <strong>{fmtBRL(totalGeral)}</strong>
         </p>
       </div>
+
+      <AIInsightsCard context="cashflow" title="Insights de fluxo de caixa" />
 
       {pendentes.length === 0 ? (
         <Card>

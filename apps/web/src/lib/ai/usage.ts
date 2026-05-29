@@ -75,7 +75,9 @@ export type AIOperation =
   | "clause_generate"
   | "doc_analysis"
   | "extract_ccv_doc"
-  | "voice_extract";
+  | "voice_extract"
+  | "insights"
+  | "assistant_chat";
 
 export interface RecordUsageParams {
   orgId: string;

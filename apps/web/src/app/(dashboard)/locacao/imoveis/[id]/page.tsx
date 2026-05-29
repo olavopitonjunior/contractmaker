@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, MapPin, Building2 } from "lucide-react";
+import { AIInsightsCard } from "@/components/ai-assist/InsightsCard";
 
 export const dynamic = "force-dynamic";
 
@@ -78,6 +79,8 @@ export default async function PropertyDetailPage({ params }: Params) {
         </div>
         <Badge variant="outline">{property.status}</Badge>
       </div>
+
+      <AIInsightsCard context="property" contextId={property.id} />
 
       <div className="grid gap-4 md:grid-cols-2">
         <Card>
