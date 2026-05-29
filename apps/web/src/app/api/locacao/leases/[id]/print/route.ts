@@ -161,6 +161,10 @@ export async function GET(req: NextRequest, { params }: Params) {
             status: lease.guarantee.status,
           }
         : null,
+      clausulasAdicionais:
+        ((lease.dataJson ?? {}) as {
+          clausulasAdicionais?: Array<{ titulo: string; conteudo: string }>;
+        }).clausulasAdicionais ?? [],
       dataEmissao: today,
     });
   } else {

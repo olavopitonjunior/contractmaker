@@ -9,6 +9,7 @@ import { LeaseHeaderActions } from "@/components/locacao/LeaseHeaderActions";
 import { NovaCobrancaExtraDialog } from "@/components/locacao/NovaCobrancaExtraDialog";
 import { LeaseSection, Field } from "@/components/locacao/lease-detail/LeaseSection";
 import { AIInsightsCard } from "@/components/ai-assist/InsightsCard";
+import { ClausulasAdicionaisEditor } from "@/components/locacao/ClausulasAdicionaisEditor";
 
 export const dynamic = "force-dynamic";
 
@@ -408,6 +409,29 @@ export default async function LeaseContractDetailPage({ params }: Params) {
             ))}
           </ul>
         )}
+      </LeaseSection>
+
+      <LeaseSection
+        id="clausulas-adicionais"
+        title={`Cláusulas adicionais (${
+          (((lc.dataJson ?? {}) as { clausulasAdicionais?: Array<unknown> }).clausulasAdicionais ?? [])
+            .length
+        })`}
+      >
+        <ClausulasAdicionaisEditor
+          leaseId={lc.id}
+          initialClausulas={
+            (
+              ((lc.dataJson ?? {}) as {
+                clausulasAdicionais?: Array<{ id?: string; titulo: string; conteudo: string }>;
+              }).clausulasAdicionais ?? []
+            ).map((c) => ({
+              id: c.id,
+              titulo: c.titulo,
+              conteudo: c.conteudo,
+            }))
+          }
+        />
       </LeaseSection>
 
       <LeaseSection id="reajustes" title="Reajustes">

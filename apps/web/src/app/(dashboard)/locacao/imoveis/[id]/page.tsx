@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, MapPin, Building2 } from "lucide-react";
 import { AIInsightsCard } from "@/components/ai-assist/InsightsCard";
+import { ExtratoImovelCard } from "@/components/locacao/ExtratoImovelCard";
 
 export const dynamic = "force-dynamic";
 
@@ -173,6 +174,8 @@ export default async function PropertyDetailPage({ params }: Params) {
             )}
           </CardContent>
         </Card>
+
+        <ExtratoImovelCard propertyId={property.id} orgId={org.id} />
 
         <Card className="md:col-span-2">
           <CardHeader>

@@ -5,6 +5,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Send } from "lucide-react";
 import { RealizarRepasseButton } from "@/components/locacao/RealizarRepasseButton";
+import { SimularRepasseButton } from "@/components/locacao/SimularRepasseButton";
 import { AIInsightsCard } from "@/components/ai-assist/InsightsCard";
 
 export const dynamic = "force-dynamic";
@@ -99,6 +100,7 @@ export default async function LocacaoRepassesPage() {
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant="outline">{g.items.length}</Badge>
+                    <SimularRepasseButton rentChargeIds={g.items.map((rc) => rc.id)} />
                     <RealizarRepasseButton
                       rentChargeIds={g.items.map((rc) => rc.id)}
                       label={g.items.length > 1 ? "Repasse agrupado" : "Realizar"}

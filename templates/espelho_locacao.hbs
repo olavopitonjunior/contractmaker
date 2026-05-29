@@ -62,6 +62,16 @@
     <p style="font-size: 10pt;">Tipo: <strong>{{garantia.tipo}}</strong>{{#if garantia.provider}} · Provider: {{garantia.provider}}{{/if}} · Status: {{garantia.status}}</p>
   {{/if}}
 
+  {{#if clausulasAdicionais.length}}
+    <h2 style="font-size: 13pt; margin: 20px 0 8px; border-bottom: 1px solid #ddd; padding-bottom: 4px;">Cláusulas adicionais</h2>
+    {{#each clausulasAdicionais}}
+      <div style="font-size: 10pt; margin: 12px 0;">
+        <div style="font-weight: 600; margin-bottom: 4px;">{{this.titulo}}</div>
+        <div style="white-space: pre-wrap;">{{this.conteudo}}</div>
+      </div>
+    {{/each}}
+  {{/if}}
+
   <footer style="margin-top: 32px; padding-top: 12px; border-top: 1px solid #eee; font-size: 8pt; color: #888;">
     Documento gerado por imobpro.ai · {{dataEmissao}}
   </footer>

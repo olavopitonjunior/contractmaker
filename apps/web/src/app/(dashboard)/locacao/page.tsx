@@ -25,6 +25,7 @@ import {
 import { prisma } from "@/lib/db/prisma";
 import { competenciaFor } from "@/lib/locacao/rent-scheduler";
 import { AIInsightsCard } from "@/components/ai-assist/InsightsCard";
+import { SegmentedBar } from "@/components/locacao/SegmentedBar";
 
 export const dynamic = "force-dynamic";
 
@@ -150,10 +151,19 @@ export default async function LocacaoDashboardPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          <ProgressBar value={percentRecebido} />
-          <div className="text-xs text-muted-foreground">
-            {cobrancasPaid} pagas · {cobrancasMonth - cobrancasPaid - cobrancasLate} a vencer · {cobrancasLate} atrasadas
-          </div>
+          <SegmentedBar
+            height="h-3"
+            segments={[
+              { value: cobrancasPaid, color: "bg-emerald-500", label: "pagas" },
+              {
+                value: Math.max(0, cobrancasMonth - cobrancasPaid - cobrancasLate),
+                color: "bg-amber-400",
+                label: "a vencer",
+              },
+              { value: cobrancasLate, color: "bg-red-500", label: "atrasadas" },
+            ]}
+            showLegend
+          />
           <div className="text-sm font-semibold">{percentRecebido.toFixed(1)}% recebido</div>
         </CardContent>
       </Card>
