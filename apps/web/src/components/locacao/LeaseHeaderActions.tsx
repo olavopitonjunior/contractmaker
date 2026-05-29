@@ -146,14 +146,30 @@ export function LeaseHeaderActions({ leaseId, templates }: Props) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={() => toast.info("Espelho — em breve")}>
+          <DropdownMenuItem
+            onSelect={() => window.open(`/api/locacao/leases/${leaseId}/print?kind=espelho`, "_blank")}
+          >
             Espelho do contrato
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => toast.info("Contrato em PDF — em breve")}>
+          <DropdownMenuItem
+            onSelect={() => window.open(`/api/locacao/leases/${leaseId}/print?kind=contrato`, "_blank")}
+          >
             Contrato (PDF)
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => toast.info("Recibo — em breve")}>
-            Recibo
+          <DropdownMenuItem
+            onSelect={() => {
+              const competencia = window.prompt("Competência do recibo (YYYY-MM):");
+              if (competencia && /^\d{4}-\d{2}$/.test(competencia)) {
+                window.open(
+                  `/api/locacao/leases/${leaseId}/print?kind=recibo&competencia=${competencia}`,
+                  "_blank"
+                );
+              } else if (competencia) {
+                toast.error("Formato inválido. Use YYYY-MM (ex: 2026-05)");
+              }
+            }}
+          >
+            Recibo (por competência)
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
