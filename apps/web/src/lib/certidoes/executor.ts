@@ -290,12 +290,17 @@ async function isOrgInfosimplesBlocked(
       resultCode: { in: [603, 604] },
       finishedAt: { gte: new Date(Date.now() - 30 * 60_000) },
     },
-    select: { resultMessage: true },
+    select: { resultMessage: true, errorMessage: true },
     take: 20,
   });
-  const genuineCredit = recentCreditCandidates.some(
-    (c) => !isEmailThrottle(c.resultMessage) && !isEndpointNotEnabled(c.resultMessage)
-  );
+  const genuineCredit = recentCreditCandidates.some((c) => {
+    // A razão ESPECÍFICA (throttle de e-mail do e-SAJ, endpoint não-habilitado)
+    // costuma estar nos `errors[]` → gravados em errorMessage, não no
+    // resultMessage genérico (code_message). Checa o texto combinado pra não
+    // tripar o breaker de crédito por causa de um 604 transitório de e-mail.
+    const msg = [c.resultMessage, c.errorMessage].filter(Boolean).join(" ");
+    return !isEmailThrottle(msg) && !isEndpointNotEnabled(msg);
+  });
   if (genuineCredit) return { blocked: true, reason: "credit" };
   return { blocked: false };
 }

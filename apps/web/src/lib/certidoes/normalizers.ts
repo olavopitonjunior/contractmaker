@@ -709,7 +709,18 @@ export function normalize(
   resp: InfosimplesResponse
 ): NormalizedResult {
   if (resp.code !== 200) {
-    const category = mapInfosimplesCodeToCategory(resp.code, resp.code_message);
+    // I.10 (2026-06-01) — a Infosimples às vezes põe a razão GENÉRICA em
+    // `code_message` ("A consulta não foi validada antes de pesquisar a fonte
+    // de origem.") e a razão ESPECÍFICA só no array `errors[]` (ex.: 604 do
+    // e-SAJ pedido-certidao → "Não é possível utilizar o mesmo email múltiplas
+    // vezes..."). Classificar só pelo code_message fazia o 604 throttle cair em
+    // account_issue (failed_permanent) E tripar o circuit-breaker de crédito da
+    // org (isOrgInfosimplesBlocked), bloqueando o lote inteiro com "Crédito
+    // esgotado" enganoso. Passa o texto combinado pro mapeador discriminar.
+    const combinedMessage =
+      [resp.code_message, ...(resp.errors ?? [])].filter(Boolean).join(" ") ||
+      null;
+    const category = mapInfosimplesCodeToCategory(resp.code, combinedMessage);
     // H.1 (Phase H, 2026-04-18): code 602 ("URL inválida") foi remapeado
     // de genuine_no_data → integration_error em error-codes.ts para evitar
     // falso-negativo em TRF3/PGE-SP (endpoint depreciado retornava "negativa"
