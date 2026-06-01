@@ -18,6 +18,7 @@ import {
 } from "./error-codes";
 import type { InfosimplesResponse, JobStatus, Situacao, TargetKind } from "./types";
 import { emitNotification } from "@/lib/notifications/emit";
+import { classifyJobBucket, missingFieldHint } from "./health-monitor";
 
 /**
  * Phase G.1 — audit log helper (fire-and-forget). Registra transições de
@@ -326,6 +327,113 @@ async function reportCertidaoProblem(
   });
 }
 
+type BatchHealthJob = {
+  id: string;
+  status: string;
+  resultCode: number | null;
+  errorMessage: string | null;
+  resultData: unknown;
+  retryCount: number | null;
+  missingFields: string[];
+  label: string;
+  endpoint: string;
+  userId: string | null;
+  orgId: string | null;
+  dealId: string | null;
+  deal: { id: string; title: string | null; form: { orgId: string } | null } | null;
+};
+
+/**
+ * Fase A (2026-06-01) — ações automáticas SEGURAS ao fim de um lote (chamado
+ * de checkBatchCompletion quando todos os jobs estão terminais):
+ *
+ *   (cap.2) Auto-retry de `failed` transitório: exceção de timeout/portal que o
+ *   catch grava como `failed` TERMINAL (poll-portal só varre api_error/
+ *   portal_unavailable/rate_limited, então esses nunca retentam). Re-arma pro
+ *   status retryável correspondente + nextRetryAt, com cap por retryCount e
+ *   guard de orçamento (isOrgInfosimplesBlocked) — nunca queima crédito nem
+ *   entra em loop. NÃO chama runSingleJob (evita recursão): deixa o poll-portal
+ *   pegar.
+ *
+ *   (cap.3) Notifica o operador sobre `dado_faltante`: UMA notificação por lote
+ *   (dedupe atômico por (type, batchId)) listando parte + campo a corrigir.
+ *
+ * Retorna quantos jobs foram re-armados (se >0, o lote não é mais terminal e a
+ * notificação de conclusão é adiada). Best-effort: nunca lança.
+ */
+async function runBatchHealthActions(
+  batchId: string,
+  jobs: BatchHealthJob[]
+): Promise<number> {
+  let rearmed = 0;
+  try {
+    const first = jobs[0];
+    const orgId = first?.deal?.form?.orgId ?? first?.orgId ?? null;
+    const dealId = first?.deal?.id ?? first?.dealId ?? null;
+
+    // (cap.2) Auto-retry de falhas transitórias — só fora de bloqueio de orçamento.
+    const RETRY_CAP = 2;
+    const blocked = orgId
+      ? await isOrgInfosimplesBlocked(orgId)
+      : { blocked: true as const };
+    if (!blocked.blocked) {
+      for (const j of jobs) {
+        if (
+          classifyJobBucket(j) !== "failed_retryable" ||
+          (j.retryCount ?? 0) >= RETRY_CAP
+        ) {
+          continue;
+        }
+        const cat = (j.resultData as { failureCategory?: string } | null)
+          ?.failureCategory;
+        const nextStatus =
+          cat === "provider_timeout" ? "api_error" : "portal_unavailable";
+        await prisma.certidaoJob.update({
+          where: { id: j.id },
+          data: {
+            status: nextStatus,
+            nextRetryAt: new Date(Date.now() + 2 * 60_000),
+            retryCount: { increment: 1 },
+            finishedAt: null,
+          },
+        });
+        rearmed++;
+        logTransition(j.id, "failed", nextStatus, "health-monitor: re-arma falha transitória", {
+          endpoint: j.endpoint,
+          retryCount: (j.retryCount ?? 0) + 1,
+        });
+      }
+    }
+
+    // (cap.3) Notifica operador sobre dado-faltante (1 por lote, deduped).
+    if (orgId && dealId) {
+      const faltantes = jobs.filter((j) => classifyJobBucket(j) === "dado_faltante");
+      if (faltantes.length > 0) {
+        const detalhe = faltantes
+          .slice(0, 5)
+          .map((j) => `${j.label} (${missingFieldHint(j)})`)
+          .join("; ");
+        await emitNotification({
+          orgId,
+          userId: first?.userId ?? null,
+          type: "certidao_data_missing",
+          title: `${faltantes.length} certidão(ões) precisam de dados`,
+          body: `Corrija os dados da parte e re-dispare: ${detalhe}`,
+          linkUrl: `/deals/${dealId}`,
+          metadata: { batchId, count: faltantes.length },
+          batchId,
+        });
+      }
+    }
+  } catch (err) {
+    console.error(
+      "[runBatchHealthActions] failed:",
+      err instanceof Error ? err.message : String(err)
+    );
+  }
+  return rearmed;
+}
+
 /**
  * F4 — Emits a `certidao_batch_complete` notification when ALL non-replaced
  * jobs in a batch reach a terminal state. Uses `metadata.batchId` for
@@ -337,16 +445,6 @@ async function reportCertidaoProblem(
  */
 async function checkBatchCompletion(batchId: string): Promise<void> {
   try {
-    // Idempotency: skip if already notified
-    const existing = await prisma.notification.findFirst({
-      where: {
-        type: "certidao_batch_complete",
-        metadata: { path: ["batchId"], equals: batchId },
-      },
-      select: { id: true },
-    });
-    if (existing) return;
-
     const jobs = await prisma.certidaoJob.findMany({
       where: { batchId, status: { not: "replaced" } },
       include: {
@@ -366,6 +464,26 @@ async function checkBatchCompletion(batchId: string): Promise<void> {
       (j) => !TERMINAL_FOR_NOTIFICATION.has(j.status)
     ).length;
     if (pendingCount > 0) return;
+
+    // Fase A (2026-06-01) — monitor de saúde event-driven: roda quando o lote
+    // fica TODO terminal. Auto-retry de falhas transitórias (`failed` que o
+    // poll-portal não cobre) + aviso ao operador sobre dado-faltante. Tem
+    // idempotência própria (dedupe por batch na notificação; cap por retryCount
+    // no re-arm), por isso NÃO usa a notificação certidao_batch_complete como
+    // guarda. Se re-armou algum job, o lote deixou de ser terminal → adia a
+    // notificação de conclusão (sai e reavalia quando o retry terminar).
+    const rearmed = await runBatchHealthActions(batchId, jobs);
+    if (rearmed > 0) return;
+
+    // Idempotency da notificação de conclusão: skip se já emitida.
+    const existing = await prisma.notification.findFirst({
+      where: {
+        type: "certidao_batch_complete",
+        metadata: { path: ["batchId"], equals: batchId },
+      },
+      select: { id: true },
+    });
+    if (existing) return;
 
     // All terminal — emit the notification.
     // Phase C: jobs podem ser deal-scoped (first.deal não-null) ou ad-hoc
