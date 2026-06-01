@@ -746,6 +746,7 @@ export async function runSingleJob(
       attachmentId,
       retryAttempts: job.retryCount ?? 0,
       maxRetries: job.maxRetries ?? 3,
+      jobId, // jitter determinístico do retry de email-throttle (TJSP)
     });
 
     await prisma.certidaoJob.update({
