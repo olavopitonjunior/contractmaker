@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { classifyOutcome, parseMissingFields } from "../outcome-classifier";
 import type { EndpointInfo } from "../endpoints";
 import type { InfosimplesResponse, NormalizedResult } from "../types";
@@ -422,5 +422,110 @@ describe("classifyOutcome — Phase J", () => {
     const out = classifyOutcome(resp, norm, cenprotEndpoint, opts);
     expect(out.status).not.toBe("success");
     expect(out.status).toBe("portal_unavailable");
+  });
+});
+
+describe("classifyOutcome — TJSP email throttle (604) — espaçar retries", () => {
+  const tjspPedido: EndpointInfo = {
+    id: "tribunal/tjsp/pedido-certidao",
+    label: "TJSP Pedido",
+    costCents: 6,
+    scope: "estadual",
+    uf: "SP",
+    appliesTo: ["pessoa"],
+    category: "civel",
+    portalUrl: "https://esaj.tjsp.jus.br/",
+  };
+  const EMAIL_THROTTLE =
+    "Não é possível utilizar o mesmo email múltiplas vezes num intervalo curto de tempo. Aguarde, ou tente novamente com outro email.";
+  const resp604 = {
+    code: 604,
+    code_message: "A consulta não foi validada antes de pesquisar a fonte de origem.",
+    data: [],
+  } as unknown as InfosimplesResponse;
+  const normEmail = (): NormalizedResult => ({
+    ...normEmpty,
+    situacao: "nao_emitida",
+    failureCategory: "rate_limited",
+    detalhes: EMAIL_THROTTLE,
+  });
+
+  it("attempt 0 → rate_limited, backoff longo (10min base + jitter ≤15min), custo 0", () => {
+    const out = classifyOutcome(resp604, normEmail(), tjspPedido, {
+      attachmentId: null,
+      retryAttempts: 0,
+      maxRetries: 3,
+      jobId: "abc",
+    });
+    expect(out.status).toBe("rate_limited");
+    expect(out.costCents).toBe(0);
+    const delta = out.nextRetryAt!.getTime() - Date.now();
+    expect(delta).toBeGreaterThanOrEqual(10 * 60_000 - 1000);
+    expect(delta).toBeLessThan(25 * 60_000 + 2000);
+  });
+
+  it("attempt 2 NÃO vira failed_permanent (bug antigo: genérico só tinha 2 intervalos)", () => {
+    const out = classifyOutcome(resp604, normEmail(), tjspPedido, {
+      attachmentId: null,
+      retryAttempts: 2,
+      maxRetries: 3,
+      jobId: "abc",
+    });
+    expect(out.status).toBe("rate_limited");
+    expect(out.nextRetryAt).toBeInstanceOf(Date);
+  });
+
+  it("attempt 5 (esgota os 5 intervalos) → failed_permanent rate_limited", () => {
+    const out = classifyOutcome(resp604, normEmail(), tjspPedido, {
+      attachmentId: null,
+      retryAttempts: 5,
+      maxRetries: 3,
+      jobId: "abc",
+    });
+    expect(out.status).toBe("failed_permanent");
+    expect(out.failureCategory).toBe("rate_limited");
+  });
+
+  it("rate_limited NÃO-email continua genérico (~30min) e esgota em attempt 2", () => {
+    const normGen: NormalizedResult = {
+      ...normEmpty,
+      situacao: "nao_emitida",
+      failureCategory: "rate_limited",
+      detalhes: "Limite de consultas atingido.",
+    };
+    const respQuota = { code: 668, code_message: "quota", data: [] } as unknown as InfosimplesResponse;
+    const a0 = classifyOutcome(respQuota, normGen, tjspPedido, {
+      attachmentId: null,
+      retryAttempts: 0,
+      maxRetries: 3,
+      jobId: "abc",
+    });
+    expect(a0.status).toBe("rate_limited");
+    expect(a0.nextRetryAt!.getTime() - Date.now()).toBeGreaterThanOrEqual(30 * 60_000 - 1000);
+    const a2 = classifyOutcome(respQuota, normGen, tjspPedido, {
+      attachmentId: null,
+      retryAttempts: 2,
+      maxRetries: 3,
+      jobId: "abc",
+    });
+    expect(a2.status).toBe("failed_permanent");
+  });
+
+  it("jitter determinístico: jobIds diferentes → offsets diferentes; sem jobId → base exata", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 5, 1, 12, 0, 0));
+    const mk = (jobId?: string) =>
+      classifyOutcome(resp604, normEmail(), tjspPedido, {
+        attachmentId: null,
+        retryAttempts: 0,
+        maxRetries: 3,
+        jobId,
+      }).nextRetryAt!.getTime();
+    const a = mk("job-A");
+    const b = mk("job-B");
+    expect(a).not.toBe(b); // pedidos diferentes não recolidem no mesmo instante
+    expect(mk(undefined)).toBe(Date.now() + 10 * 60_000); // sem jobId = sem jitter
+    expect(mk("job-A")).toBe(a); // determinístico (sem Math.random)
+    vi.useRealTimers();
   });
 });

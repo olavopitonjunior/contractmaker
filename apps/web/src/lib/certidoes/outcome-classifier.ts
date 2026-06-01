@@ -24,7 +24,11 @@ import type {
 } from "./types";
 import type { EndpointInfo } from "./endpoints";
 import { CATEGORIES_REQUIRING_PDF } from "./endpoints";
-import { isProtestoNadaConsta, isSemResultadoInformativo } from "./error-codes";
+import {
+  isProtestoNadaConsta,
+  isSemResultadoInformativo,
+  isEmailThrottle,
+} from "./error-codes";
 
 export type RichStatus =
   | "queued"
@@ -59,7 +63,27 @@ const BACKOFF_MS: Record<string, number[]> = {
   api_error: [30_000, 2 * 60_000, 10 * 60_000], // 30s / 2min / 10min
   portal_unavailable: [10 * 60_000, 30 * 60_000, 2 * 60 * 60_000], // 10min / 30min / 2h
   rate_limited: [30 * 60_000, 60 * 60_000], // 30min / 1h
+  // 2026-06-01 — throttle de e-mail do e-SAJ (TJSP pedido-certidao, code 604
+  // "mesmo email múltiplas vezes"): vários pedidos do mesmo deal usam o MESMO
+  // email e colidem. Precisa de janela MAIS LONGA e MAIS tentativas que o
+  // rate_limited genérico, e os retries dos ~6 pedidos têm que ser ESPALHADOS
+  // (jitter por jobId) pra não recolidirem no mesmo tick de cron.
+  rate_limited_email: [10 * 60_000, 20 * 60_000, 40 * 60_000, 90 * 60_000, 3 * 60 * 60_000],
 };
+
+// Espalhamento determinístico (sem Math.random) do retry de email-throttle:
+// hash FNV-1a do jobId → offset 0..spanMs. Mantém o job A sempre deslocado do
+// job B em todos os rounds, evitando que os pedidos TJSP do mesmo email caiam
+// no mesmo tick de cron e recolidam no e-SAJ.
+function jitterMs(jobId: string | undefined, spanMs: number): number {
+  if (!jobId) return 0;
+  let h = 2166136261;
+  for (let i = 0; i < jobId.length; i++) {
+    h ^= jobId.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) % spanMs;
+}
 
 /**
  * Parse do code_message da Infosimples para extrair quais campos faltam.
@@ -100,6 +124,7 @@ export function classifyOutcome(
     attachmentId: string | null;
     retryAttempts: number;
     maxRetries: number;
+    jobId?: string;
   }
 ): ClassifiedOutcome {
   const situacao = normalized.situacao as Situacao | undefined;
@@ -255,14 +280,21 @@ export function classifyOutcome(
         missingFields: parseMissingFields(effectiveErrorMessage),
         portalUrl,
       };
-    case "rate_limited":
+    case "rate_limited": {
+      // 604 throttle de e-mail do e-SAJ usa backoff dedicado (mais longo +
+      // mais tentativas + jitter). Demais rate_limited (quota de portal etc.)
+      // seguem o backoff genérico.
+      const backoffKey = isEmailThrottle(effectiveErrorMessage)
+        ? "rate_limited_email"
+        : "rate_limited";
       return planRetry(
         "rate_limited",
         effectiveErrorMessage,
-        "rate_limited",
+        backoffKey,
         opts,
         portalUrl
       );
+    }
     case "portal_unavailable":
       return planRetry(
         "portal_unavailable",
@@ -366,12 +398,19 @@ function planRetry(
   status: RichStatus,
   message: string | null,
   backoffKey: keyof typeof BACKOFF_MS,
-  opts: { retryAttempts: number; maxRetries: number },
+  opts: { retryAttempts: number; maxRetries: number; jobId?: string },
   portalUrl: string | null
 ): ClassifiedOutcome {
   const backoffs = BACKOFF_MS[backoffKey] ?? [];
   const attempt = opts.retryAttempts;
-  const hasMore = attempt < opts.maxRetries && attempt < backoffs.length;
+  // Email-throttle precisa de mais tentativas que o maxRetries default (3) —
+  // o teto efetivo passa a ser o tamanho do array de backoff (5). Só pra essa
+  // chave; as demais respeitam opts.maxRetries.
+  const cap =
+    backoffKey === "rate_limited_email"
+      ? Math.max(opts.maxRetries, backoffs.length)
+      : opts.maxRetries;
+  const hasMore = attempt < cap && attempt < backoffs.length;
   if (!hasMore) {
     return {
       status: "failed_permanent",
@@ -389,7 +428,13 @@ function planRetry(
       portalUrl,
     };
   }
-  const delayMs = backoffs[attempt] ?? backoffs[backoffs.length - 1];
+  const baseDelay = backoffs[attempt] ?? backoffs[backoffs.length - 1];
+  // Jitter só pro email-throttle: espalha os ~6 pedidos TJSP do mesmo email em
+  // até 15min pra não recolidirem no mesmo tick de cron (que processa todos os
+  // nextRetryAt vencidos juntos).
+  const delayMs =
+    baseDelay +
+    (backoffKey === "rate_limited_email" ? jitterMs(opts.jobId, 15 * 60_000) : 0);
   return {
     status,
     errorMessage: message ?? null,
