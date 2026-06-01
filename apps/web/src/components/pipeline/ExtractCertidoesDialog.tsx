@@ -260,8 +260,14 @@ export function ExtractCertidoesDialog({
   };
 
   const selectMissing = () => {
+    // "Só as que faltaram" reseleciona apenas o que NÃO saiu (não-verde/amarelo)
+    // DENTRO do escopo padrão — mesmo conjunto que vem marcado por default
+    // (vendedores nas regiões do imóvel/endereço). Tiers opt-in (Imóvel/ONR,
+    // comprador, Pesquisa de Bens) NÃO entram aqui: o usuário inclui abrindo a
+    // seção. Antes varria todos os tiers e arrastava ONR/comprador sem opt-in.
     const next = new Set<string>();
     for (const j of allJobs) {
+      if ((j.tier ?? "opcional") !== "padrao") continue;
       const t = extractedStatus[jobKey(j)];
       if (t !== "green" && t !== "yellow") next.add(jobKey(j));
     }
