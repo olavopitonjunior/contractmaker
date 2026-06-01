@@ -239,6 +239,25 @@ export async function requireAuth(
     };
   }
 
+  // Heartbeat de acesso (só UI humana via session). Mantém OrgMembership.lastActiveAt
+  // fresco para alimentar "último acesso" e limpar o label "convite pendente". O WHERE
+  // condicional faz o throttle (escreve no máx. ~1x/5min por membro), sem leitura extra.
+  // Fire-and-forget: roda antes do handler responder, então não sofre o cancelamento
+  // pós-response do Vercel.
+  if (ident.via === "session") {
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+    prisma.orgMembership
+      .updateMany({
+        where: {
+          userId: effectiveActor.effectiveUserId,
+          orgId: org.id,
+          OR: [{ lastActiveAt: null }, { lastActiveAt: { lt: fiveMinAgo } }],
+        },
+        data: { lastActiveAt: new Date() },
+      })
+      .catch(() => {});
+  }
+
   // Email/name: para session vêm direto do ident; para bearer fazemos lookup
   // leve (1 query) para preservar compatibilidade com callers que usam nome.
   let userEmail = "";

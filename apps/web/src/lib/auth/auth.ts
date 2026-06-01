@@ -108,6 +108,15 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
+        // Marca o acesso no login: limpa o label "convite pendente" (derivado de
+        // lastActiveAt === null) e registra o último acesso. Fire-and-forget —
+        // nunca bloqueia/quebra o login. Cobre credentials e magic link.
+        prisma.orgMembership
+          .updateMany({
+            where: { userId: user.id },
+            data: { lastActiveAt: new Date() },
+          })
+          .catch(() => {});
       }
       return token;
     },
