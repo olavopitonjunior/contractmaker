@@ -9,6 +9,7 @@ import {
   STEP_LABELS,
   STEP_REQUIRED_FIELDS_LEGACY,
 } from "@/lib/forms/validation";
+import { collectPartyFormatIssues } from "@/lib/forms/field-formats";
 import { toast } from "sonner";
 import { useAutoSave } from "@/hooks/use-auto-save";
 import { DocumentosStep } from "@/components/forms/steps/DocumentosStep";
@@ -507,6 +508,39 @@ export function SalesFormWizard({
             toast.error(
               `Preencha os campos obrigatórios da etapa ${i + 1} antes de avançar.`,
             );
+            setCurrentStep(i);
+            window.scrollTo({ top: 0, behavior: "smooth" });
+            return false;
+          }
+        }
+
+        // Regras de FORMATO (2026-06-01): bloqueia o avanço quando um campo
+        // PREENCHIDO tem formato inválido (CPF/CNPJ checksum, nome+sobrenome,
+        // nome da mãe, data de nascimento, CEP/UF/telefone). Campo vazio não
+        // bloqueia. Mesma função do servidor (collectPartyFormatIssues) — regra
+        // única nos dois lados. form.trigger é no-op sem zodResolver, então a
+        // checagem é manual (igual ao non-empty acima).
+        const formatList =
+          trueIndex === 1 ? "vendedores" : trueIndex === 2 ? "compradores" : null;
+        if (formatList) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const parties = (form.getValues(formatList as any) as any[]) ?? [];
+          let firstInvalid: string | null = null;
+          let firstMessage = "";
+          parties.forEach((parte, pIdx) => {
+            for (const issue of collectPartyFormatIssues(parte)) {
+              const path = `${formatList}.${pIdx}.${issue.path}`;
+              if (!firstInvalid) {
+                firstInvalid = path;
+                firstMessage = issue.message;
+              }
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              form.setError(path as any, { type: "format", message: issue.message });
+            }
+          });
+          if (firstInvalid) {
+            setFailedTriggerCount((n) => n + 1);
+            toast.error(firstMessage);
             setCurrentStep(i);
             window.scrollTo({ top: 0, behavior: "smooth" });
             return false;
