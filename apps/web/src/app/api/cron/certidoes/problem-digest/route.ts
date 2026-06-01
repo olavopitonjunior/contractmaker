@@ -1,6 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { sendEmail } from "@/lib/email/client";
+import { classifyJobBucket, type HealthBucket } from "@/lib/certidoes/health-monitor";
+
+// Rótulos PT-BR + ordem de prioridade dos buckets no resumo do digest.
+const BUCKET_LABEL: Partial<Record<HealthBucket, string>> = {
+  dado_faltante: "dado faltante (corrigir cadastro)",
+  credito: "crédito/orçamento",
+  config_endpoint: "endpoint não habilitado",
+  codigo_suspeito: "possível bug (revisar)",
+  failed_retryable: "falha transitória (re-tentando)",
+  indisponivel: "portal indisponível (extração manual)",
+  outro: "outro",
+};
+
+/** Resumo "X dado-faltante · Y crédito · …" por ordem de relevância. */
+function bucketSummary(jobs: Array<Parameters<typeof classifyJobBucket>[0]>): string {
+  const counts = new Map<HealthBucket, number>();
+  for (const j of jobs) {
+    const b = classifyJobBucket(j);
+    if (b === "ok" || b === "em_voo") continue;
+    counts.set(b, (counts.get(b) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([b, n]) => `${n} ${BUCKET_LABEL[b] ?? b}`)
+    .join(" · ");
+}
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,6 +67,8 @@ export async function GET(req: NextRequest) {
       retryCount: true,
       maxRetries: true,
       resultCode: true,
+      status: true,
+      resultData: true,
     },
     take: 500,
   });
@@ -74,8 +102,9 @@ export async function GET(req: NextRequest) {
         (j) =>
           `• ${j.label} — ${j.endpoint} (cód ${j.resultCode ?? "-"}, ${j.retryCount}/${j.maxRetries} tentativas): ${j.errorMessage ?? "falha"}\n  ${baseUrl}/deals/${j.dealId}`
       );
-      const text = `${orgJobs.length} certidão(ões) com problema não resolvido:\n\n${lines.join("\n\n")}\n\nPainel: ${baseUrl}/settings/certidoes`;
-      const html = `<p><strong>${orgJobs.length} certidão(ões) com problema não resolvido.</strong></p><ul>${orgJobs
+      const resumo = bucketSummary(orgJobs);
+      const text = `${orgJobs.length} certidão(ões) com problema não resolvido.\nResumo: ${resumo}\n\n${lines.join("\n\n")}\n\nPainel: ${baseUrl}/settings/certidoes`;
+      const html = `<p><strong>${orgJobs.length} certidão(ões) com problema não resolvido.</strong></p><p>Resumo: ${resumo}</p><ul>${orgJobs
         .slice(0, 50)
         .map(
           (j) =>
