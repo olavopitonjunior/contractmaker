@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { collectPartyFormatIssues } from "@/lib/forms/field-formats";
 
 // ========= Shared schemas =========
 
@@ -397,6 +398,22 @@ export const dadosContratoSchema = step1Schema
     };
     data.vendedores.forEach((p, i) => checkParte("vendedores", i, p));
     data.compradores.forEach((p, i) => checkParte("compradores", i, p));
+
+    // Regras de FORMATO (2026-06-01): valida campos preenchidos (CPF/CNPJ
+    // checksum, nome+sobrenome, nome da mãe, data de nascimento, CEP/UF/telefone)
+    // de cada parte e sub-parte (cônjuge/procurador/representante). Campo vazio
+    // não bloqueia. Mesma função usada no wizard do cliente — regra única.
+    const checkFormats = (list: "vendedores" | "compradores", idx: number, parte: unknown) => {
+      for (const issue of collectPartyFormatIssues(parte as Record<string, unknown>)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: issue.message,
+          path: [list, idx, ...issue.path.split(".")],
+        });
+      }
+    };
+    data.vendedores.forEach((p, i) => checkFormats("vendedores", i, p));
+    data.compradores.forEach((p, i) => checkFormats("compradores", i, p));
 
     // Multi-corretora: soma de percentuais ≤ 100 (apenas quando há
     // comissionados explícitos; campos planos imobiliaria_* não têm percentual)

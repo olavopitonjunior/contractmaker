@@ -10,6 +10,7 @@ import { UFSelect } from "@/components/forms/UFSelect";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import { ConjugeFields } from "@/components/forms/steps/ConjugeFields";
 import { RepresentanteFields } from "@/components/forms/steps/RepresentanteFields";
+import { maskCPF, maskCNPJ, maskCEP, maskTelefone } from "@/lib/forms/field-formats";
 
 interface CompradorStepProps {
   form: UseFormReturn<any>;
@@ -99,7 +100,15 @@ function PessoaFisicaFields({
         </FormField>
 
         <FormField label="CPF">
-          <Input {...form.register(`${prefix}.cpf`)} placeholder="000.000.000-00" />
+          <Input
+            {...form.register(`${prefix}.cpf`, {
+              onChange: (e) =>
+                form.setValue(`${prefix}.cpf`, maskCPF(e.target.value), { shouldDirty: true }),
+            })}
+            inputMode="numeric"
+            placeholder="000.000.000-00"
+          />
+          <FieldError error={(form.formState.errors?.compradores as any)?.[index]?.cpf} />
         </FormField>
 
         <FormField label="Data de Nascimento">
@@ -108,6 +117,7 @@ function PessoaFisicaFields({
             type="date"
             placeholder="YYYY-MM-DD"
           />
+          <FieldError error={(form.formState.errors?.compradores as any)?.[index]?.data_nascimento} />
         </FormField>
 
         <FormField label="Sexo">
@@ -127,6 +137,7 @@ function PessoaFisicaFields({
             {...form.register(`${prefix}.nome_mae`)}
             placeholder="Nome completo da mãe (exigido pela certidão cível TJSP)"
           />
+          <FieldError error={(form.formState.errors?.compradores as any)?.[index]?.nome_mae} />
         </FormField>
 
         <FormField label="Email">
@@ -139,10 +150,17 @@ function PessoaFisicaFields({
 
         <FormField label="Celular (com DDD)">
           <Input
-            {...form.register(`${prefix}.mobile_phone`)}
+            {...form.register(`${prefix}.mobile_phone`, {
+              onChange: (e) =>
+                form.setValue(`${prefix}.mobile_phone`, maskTelefone(e.target.value), {
+                  shouldDirty: true,
+                }),
+            })}
             type="tel"
+            inputMode="numeric"
             placeholder="(11) 99999-9999"
           />
+          <FieldError error={(form.formState.errors?.compradores as any)?.[index]?.mobile_phone} />
         </FormField>
       </div>
 
@@ -178,7 +196,14 @@ function PessoaFisicaFields({
         </FormField>
 
         <FormField label="CEP">
-          <Input {...form.register(`${prefix}.cep`)} placeholder="00000-000" />
+          <Input
+            {...form.register(`${prefix}.cep`, {
+              onChange: (e) =>
+                form.setValue(`${prefix}.cep`, maskCEP(e.target.value), { shouldDirty: true }),
+            })}
+            inputMode="numeric"
+            placeholder="00000-000"
+          />
         </FormField>
       </div>
 
@@ -330,7 +355,14 @@ function PessoaJuridicaFields({
         </FormField>
 
         <FormField label="CNPJ">
-          <Input {...form.register(`${prefix}.cnpj`)} placeholder="00.000.000/0000-00" />
+          <Input
+            {...form.register(`${prefix}.cnpj`, {
+              onChange: (e) =>
+                form.setValue(`${prefix}.cnpj`, maskCNPJ(e.target.value), { shouldDirty: true }),
+            })}
+            inputMode="numeric"
+            placeholder="00.000.000/0000-00"
+          />
         </FormField>
 
         <FormField label="Logradouro" className="md:col-span-2">
@@ -361,7 +393,14 @@ function PessoaJuridicaFields({
         </FormField>
 
         <FormField label="CEP">
-          <Input {...form.register(`${prefix}.cep`)} placeholder="00000-000" />
+          <Input
+            {...form.register(`${prefix}.cep`, {
+              onChange: (e) =>
+                form.setValue(`${prefix}.cep`, maskCEP(e.target.value), { shouldDirty: true }),
+            })}
+            inputMode="numeric"
+            placeholder="00000-000"
+          />
         </FormField>
       </div>
 
