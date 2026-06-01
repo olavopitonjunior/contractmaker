@@ -786,4 +786,25 @@ describe("CENPROT 'não constam protestos' (6xx sem PDF)", () => {
     expect(r.situacao).not.toBe("negativa");
     expect(r.failureCategory).toBe("missing_input");
   });
+
+  // I.10 (2026-06-01) — regressão: e-SAJ pedido-certidao retorna 604 com
+  // code_message GENÉRICO ("A consulta não foi validada...") e a razão real do
+  // throttle de e-mail SÓ no array errors[]. Classificar pelo code_message
+  // fazia o 604 cair em account_issue (failed_permanent) E tripar o
+  // circuit-breaker de crédito da org. Tem que ser rate_limited (transitório).
+  it("TJSP 604 throttle de e-mail (razão só em errors[]) → rate_limited, não account_issue", () => {
+    const resp = {
+      code: 604,
+      code_message: "A consulta não foi validada antes de pesquisar a fonte de origem.",
+      errors: [
+        "Não é possível utilizar o mesmo email múltiplas vezes num intervalo curto de tempo. Aguarde, ou tente novamente com outro email.",
+      ],
+      data: [],
+    };
+    const r = normalize(
+      "tribunal/tjsp/pedido-certidao",
+      resp as unknown as InfosimplesResponse
+    );
+    expect(r.failureCategory).toBe("rate_limited");
+  });
 });
