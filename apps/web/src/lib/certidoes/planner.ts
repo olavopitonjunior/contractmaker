@@ -373,17 +373,16 @@ function uf(p: Parte | Imovel | undefined): string {
  * `pedido-certidao` para PF (modelo 1/2/4/5/6). Aceita entradas livres
  * ("M"/"F"/"masculino"/"feminino").
  *
- * ⚠️ O valor EXATO aceito pela Infosimples não está na doc pública. Hipótese:
- * MASCULINO/FEMININO (padrão e-SAJ). Confirmar no 1º lote QA real — se a API
- * recusar, trocar SÓ AQUI (candidatos alternativos: "M"/"F" ou "1"/"2").
- * Retorna null quando ausente/ambíguo → o planner faz skip pedindo o dado
- * (zero crédito desperdiçado), em vez de disparar e tomar 606.
+ * Valor aceito pela Infosimples: "M"/"F" (confirmado no 1º lote QA real
+ * 2026-06-01 — "MASCULINO"/"FEMININO" tomava 606 "o parâmetro 'genero' deve
+ * ter os valores 'M' ou 'F'"). Retorna null quando ausente/ambíguo → o planner
+ * faz skip pedindo o dado (zero crédito desperdiçado), em vez de tomar 606.
  */
 function sexoToGenero(sexo: string | undefined | null): string | null {
   const s = (sexo || "").trim().toLowerCase();
   if (!s) return null;
-  if (s.startsWith("m")) return "MASCULINO"; // m, masc, masculino
-  if (s.startsWith("f")) return "FEMININO"; // f, fem, feminino
+  if (s.startsWith("m")) return "M"; // m, masc, masculino
+  if (s.startsWith("f")) return "F"; // f, fem, feminino
   return null;
 }
 

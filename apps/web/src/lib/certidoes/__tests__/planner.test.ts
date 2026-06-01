@@ -859,7 +859,7 @@ describe("TJSP migração pedido-certidao (modelo numérico) — 2026-05-23", ()
       expect(j.requestPayload.rg).toBe("12.345.678-9");
       expect(j.requestPayload.cpf).toBe("52998224725");
       expect(j.requestPayload.nome_completo).toBe("Maria Com RG");
-      expect(j.requestPayload.genero).toBe("FEMININO");
+      expect(j.requestPayload.genero).toBe("F");
       expect(j.requestPayload.email_envio).toBeTruthy();
     });
     expect(plan.jobs.some((j) => j.endpoint === "tribunal/tjsp/pedido-civel")).toBe(false);
