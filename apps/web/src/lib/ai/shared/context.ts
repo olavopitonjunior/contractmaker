@@ -12,6 +12,7 @@ export async function loadContext(contractId: string, orgId: string): Promise<Ag
     where: { id: contractId },
     include: {
       template: true,
+      deal: { select: { kind: true } },
       clauses: {
         where: { isActive: true },
         include: {
@@ -48,6 +49,7 @@ export async function loadContext(contractId: string, orgId: string): Promise<Ag
       : null,
     templateModalidade: contract.template?.modalidade || "a_vista",
     templateName: contract.template?.name ?? "Contrato importado",
+    dealKind: contract.deal?.kind ?? "venda",
     activeClauses: contract.clauses.map((cc) => ({
       id: cc.id,
       clauseId: cc.knowledgeItem.id,

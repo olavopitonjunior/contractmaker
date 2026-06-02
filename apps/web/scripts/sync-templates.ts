@@ -25,7 +25,7 @@ const SEED = process.argv.includes("--seed");
 const UPDATE_METADATA = process.argv.includes("--update-metadata");
 
 interface TemplateFile {
-  modalidade: "a_vista" | "financiamento" | "locacao";
+  modalidade: "a_vista" | "financiamento" | "locacao" | "locacao_comercial";
   filename: string;
   canonicalName: string;
   canonicalDescription: string;
@@ -55,6 +55,14 @@ const TEMPLATES: TemplateFile[] = [
     canonicalDescription:
       "Instrumento particular de contrato de locação residencial - Lei nº 8.245/91",
     schemaType: "locacao_residencial_v1",
+  },
+  {
+    modalidade: "locacao_comercial",
+    filename: "locacao_comercial_v2.hbs",
+    canonicalName: "Locação Comercial",
+    canonicalDescription:
+      "Instrumento particular de contrato de locação não residencial (comercial) - Lei nº 8.245/91",
+    schemaType: "locacao_comercial_v1",
   },
 ];
 

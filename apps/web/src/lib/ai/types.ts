@@ -8,6 +8,8 @@ export interface AgentContext {
   templateSource: string | null;
   templateModalidade?: string;
   templateName?: string;
+  /** "venda" | "locacao" — discrimina o domínio do agente (prompts/contexto). */
+  dealKind?: string;
   activeClauses: { id: string; clauseId: string; title: string; category: string; position: number; isActive: boolean }[];
   /** Quando setado, o conteúdo do contrato vive em um Google Doc; tools de
    *  edição roteiam via Docs API em vez de mutar `htmlContent`. */

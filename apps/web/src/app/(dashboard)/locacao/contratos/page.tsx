@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { Card, CardContent } from "@/components/ui/card";
 import { FileText, TrendingUp, TrendingDown, Calendar, AlertTriangle } from "lucide-react";
 import { ContratosTable, type ContratoRow } from "@/components/locacao/ContratosTable";
+import { NovoFormularioLocacaoDialog } from "@/components/locacao/NovoFormularioLocacaoDialog";
 
 export const dynamic = "force-dynamic";
 
@@ -94,11 +95,14 @@ export default async function LocacaoContratosPage() {
 
   return (
     <div className="space-y-4">
-      <div>
-        <h2 className="text-2xl font-semibold">Contratos de Locação</h2>
-        <p className="text-sm text-muted-foreground">
-          {contracts.length} no total · {ativos} ativos · {renovacao} em renovação · {rescisao} em rescisão.
-        </p>
+      <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div>
+          <h2 className="text-2xl font-semibold">Contratos de Locação</h2>
+          <p className="text-sm text-muted-foreground">
+            {contracts.length} no total · {ativos} ativos · {renovacao} em renovação · {rescisao} em rescisão.
+          </p>
+        </div>
+        <NovoFormularioLocacaoDialog />
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">

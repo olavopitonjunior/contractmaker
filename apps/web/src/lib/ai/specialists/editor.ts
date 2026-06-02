@@ -17,7 +17,7 @@ import { AGENT_TOOLS } from "../tools";
 import { SONNET_MODEL } from "../shared/anthropic-client";
 import { runSpecialist, type ToolUseGuard } from "../shared/specialist-runner";
 import { applyPolicy } from "../sentinel/middleware";
-import { EDITOR_SYSTEM_PROMPT } from "./prompts";
+import { pickSpecialistPrompt } from "./prompts-locacao";
 import { ROUTER_REGEXES } from "../orchestrator/routing";
 import type { OrchestratorState, SpecialistOutput } from "../orchestrator/state";
 
@@ -72,7 +72,7 @@ export async function runEditor(state: OrchestratorState): Promise<SpecialistOut
   return runSpecialist({
     agentName: "editor",
     model: SONNET_MODEL,
-    systemPrompt: EDITOR_SYSTEM_PROMPT,
+    systemPrompt: pickSpecialistPrompt("editor", state.contractContext),
     tools,
     maxIterations: 3,
     userPrompt,

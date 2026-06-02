@@ -124,6 +124,47 @@ const garantiaSchema = z.object({
   fiador: parteLocacaoSchema.optional(),
 });
 
+// ============================================================================
+// Config fiscal/operacional (A7-A16) — preenchida pelo OPERADOR no diálogo de
+// criação do form, não pelo cliente. Espelha os campos que o wizard interno
+// (NovoContratoWizard / api/locacao/contracts/wizard) já coleta e que dirigem
+// repasse/DIMOB/cobrança — NÃO entram no texto do contrato (template), mas
+// alimentam o LeaseContract (ver createLeaseContractFromDataJson).
+// ============================================================================
+const fiscalSchema = z.object({
+  taxa_admin_percent: z.number().min(0).max(100).optional().default(10),
+  regime_ir: z
+    .enum(["nao_retem", "retem_sem_controle", "retem_imobiliaria", "retem_inquilino"])
+    .optional()
+    .default("nao_retem"),
+  regime_cobranca: z.enum(["mes_vencido", "mes_a_vencer"]).optional().default("mes_a_vencer"),
+  isencao_multa_meses: z.number().int().min(0).optional().default(0),
+  emitir_nfse: z.boolean().optional().default(false),
+  repasse_garantido: z
+    .enum(["nao", "alguns_meses", "todo_contrato"])
+    .optional()
+    .default("nao"),
+  repasse_garantido_meses: z.number().int().min(0).optional(),
+});
+
+// Angariador (A11) — corretor captador com comissão recorrente sobre o aluguel.
+// `meses_comissao` null/0 = todo o contrato.
+const angariadorSchema = z.object({
+  party_id: z.string().optional(),
+  nome: z.string().min(2, "Nome do angariador obrigatório"),
+  forma_comissao: z.enum(["percentual", "valor_fixo"]).optional().default("percentual"),
+  percentual: z.number().min(0).max(100).optional(),
+  valor_fixo: z.number().min(0).optional(),
+  meses_comissao: z.number().int().min(0).optional(),
+});
+
+// Comissão da imobiliária — taxa de locação cobrada à vista (1º aluguel) +
+// angariadores. Base dos boletos de comissão (ver aba Cobrança do deal).
+const comissaoSchema = z.object({
+  taxa_locacao_percent: z.number().min(0).max(100).optional().default(0),
+  angariadores: z.array(angariadorSchema).optional().default([]),
+});
+
 export const dadosLocacaoSchema = z
   .object({
     locadores: z.array(parteLocacaoSchema).min(1, "Mínimo 1 locador"),
@@ -149,6 +190,9 @@ export const dadosLocacaoSchema = z
         multa_rescisoria_meses: z.number().default(3),
       })
       .default({}),
+    // Operador-only (não renderizadas no template): config fiscal + comissão.
+    fiscal: fiscalSchema.optional(),
+    comissao: comissaoSchema.optional(),
   })
   .superRefine((data, ctx) => {
     // Caução limitada a 3 aluguéis (art. 38 §2º Lei 8.245/91).
@@ -185,11 +229,119 @@ export type DadosLocacaoForm = z.infer<typeof dadosLocacaoSchema>;
 
 export const LOCACAO_SCHEMA_TYPE = "locacao_residencial_v1" as const;
 
+// Passos do wizard PÚBLICO (client-facing) — a config fiscal/comissão é do
+// operador (diálogo de criação), não aparece aqui.
 export const LOCACAO_STEP_LABELS = [
   "Locador(es)",
   "Locatário(s)",
   "Imóvel",
   "Aluguel e Reajuste",
   "Garantia",
-  "Config e Assinatura",
+  "Confirmação e Assinatura",
 ] as const;
+
+// ============================================================================
+// Locação COMERCIAL (schemaType "locacao_comercial_v1"). Reusa os sub-schemas
+// do residencial; diferenças: destinação/ramo de atividade do ponto, finalidade
+// comercial por default, cláusula de ação renovatória (art. 51-57 Lei 8.245).
+// A caução em dinheiro segue limitada a 3 aluguéis (art. 38 §2º vale p/ ambos).
+// ============================================================================
+const imovelComercialSchema = imovelLocacaoSchema.extend({
+  kind: z
+    .enum(["comercial_sala", "loja", "galpao", "terreno", "casa", "apartamento", "temporada"])
+    .optional()
+    .default("comercial_sala"),
+  // Destinação do ponto comercial (ramo de atividade do locatário).
+  destinacao: z.string().optional().default(""),
+});
+
+export const dadosLocacaoComercialSchema = z
+  .object({
+    locadores: z.array(parteLocacaoSchema).min(1, "Mínimo 1 locador"),
+    locatarios: z.array(parteLocacaoSchema).min(1, "Mínimo 1 locatário"),
+    imovel: imovelComercialSchema,
+    aluguel: aluguelSchema,
+    garantia: garantiaSchema.optional(),
+    vistoria_ref: z.string().optional(),
+    foro: z.string().optional().default(""),
+    assinatura: z
+      .object({
+        cidade: z.string().optional().default(""),
+        uf: z.string().optional().default(""),
+        data: z.string().optional().default(""),
+      })
+      .optional(),
+    config: z
+      .object({
+        multa_atraso_percent: z.number().default(2),
+        juros_mensais_atraso: z.number().default(1),
+        multa_rescisoria_meses: z.number().default(3),
+      })
+      .default({}),
+    fiscal: fiscalSchema.optional(),
+    comissao: comissaoSchema.optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.garantia?.tipo === "caucao") {
+      const meses = data.garantia.caucao_meses ?? 0;
+      if (meses > 3) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Caução limitada a 3 aluguéis (art. 38 §2º da Lei 8.245/91).",
+          path: ["garantia", "caucao_meses"],
+        });
+      }
+    }
+    if (data.garantia?.tipo === "fiador") {
+      const fiador = data.garantia.fiador;
+      const nome =
+        fiador?.tipo_pessoa === "fisica"
+          ? fiador.nome
+          : fiador?.tipo_pessoa === "juridica"
+            ? fiador.razao_social
+            : "";
+      if (!nome || nome.trim().length < 2) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Garantia por fiador exige o nome do fiador.",
+          path: ["garantia", "fiador"],
+        });
+      }
+    }
+  });
+
+export type DadosLocacaoComercialForm = z.infer<typeof dadosLocacaoComercialSchema>;
+
+export const LOCACAO_COMERCIAL_SCHEMA_TYPE = "locacao_comercial_v1" as const;
+
+export const LOCACAO_COMERCIAL_STEP_LABELS = [
+  "Locador(es)",
+  "Locatário(s)",
+  "Imóvel e Destinação",
+  "Aluguel e Reajuste",
+  "Garantia",
+  "Confirmação e Assinatura",
+] as const;
+
+// Discriminadores de locação aceitos no fluxo público + helpers de seleção.
+export const LOCACAO_SCHEMA_TYPES = [
+  LOCACAO_SCHEMA_TYPE,
+  LOCACAO_COMERCIAL_SCHEMA_TYPE,
+] as const;
+export type LocacaoSchemaType = (typeof LOCACAO_SCHEMA_TYPES)[number];
+
+export function isLocacaoSchemaType(v: unknown): v is LocacaoSchemaType {
+  return typeof v === "string" && (LOCACAO_SCHEMA_TYPES as readonly string[]).includes(v);
+}
+
+export function schemaForLocacaoType(schemaType: string) {
+  return schemaType === LOCACAO_COMERCIAL_SCHEMA_TYPE
+    ? dadosLocacaoComercialSchema
+    : dadosLocacaoSchema;
+}
+
+export function stepLabelsForLocacaoType(schemaType: string) {
+  return schemaType === LOCACAO_COMERCIAL_SCHEMA_TYPE
+    ? LOCACAO_COMERCIAL_STEP_LABELS
+    : LOCACAO_STEP_LABELS;
+}

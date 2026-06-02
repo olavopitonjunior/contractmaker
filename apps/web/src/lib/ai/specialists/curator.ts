@@ -15,7 +15,7 @@ import { AGENT_TOOLS } from "../tools";
 import { HAIKU_MODEL } from "../shared/anthropic-client";
 import { runSpecialist, type ToolUseGuard } from "../shared/specialist-runner";
 import { applyPolicy } from "../sentinel/middleware";
-import { CURATOR_SYSTEM_PROMPT } from "./prompts";
+import { pickSpecialistPrompt } from "./prompts-locacao";
 import type { OrchestratorState, SpecialistOutput } from "../orchestrator/state";
 
 const CURATOR_TOOL_NAMES = new Set([
@@ -46,7 +46,7 @@ export async function runCurator(state: OrchestratorState): Promise<SpecialistOu
   return runSpecialist({
     agentName: "curator",
     model: HAIKU_MODEL,
-    systemPrompt: CURATOR_SYSTEM_PROMPT,
+    systemPrompt: pickSpecialistPrompt("curator", state.contractContext),
     tools: CURATOR_TOOLS,
     maxIterations: 2,
     userPrompt,

@@ -15,7 +15,7 @@
 import { AGENT_TOOLS } from "../tools";
 import { HAIKU_MODEL } from "../shared/anthropic-client";
 import { runSpecialist } from "../shared/specialist-runner";
-import { LEGAL_SYSTEM_PROMPT } from "./prompts";
+import { pickSpecialistPrompt } from "./prompts-locacao";
 import type { OrchestratorState, SpecialistOutput } from "../orchestrator/state";
 
 const LEGAL_TOOL_NAMES = new Set([
@@ -49,7 +49,7 @@ export async function runLegal(state: OrchestratorState): Promise<SpecialistOutp
   return runSpecialist({
     agentName: "legal",
     model: HAIKU_MODEL,
-    systemPrompt: LEGAL_SYSTEM_PROMPT,
+    systemPrompt: pickSpecialistPrompt("legal", state.contractContext),
     tools: LEGAL_TOOLS,
     maxIterations: 2,
     userPrompt,

@@ -343,6 +343,12 @@ REGRAS:
 7. Cite legislação ou padrões da organização quando especialistas trouxeram evidência. Não invente.
 8. Foque no contrato desta sessão. Não compare com outros contratos sem evidência ancorada.`;
 
+// Variante de locação — mesma disciplina de ledger/síntese, domínio Lei 8.245/91.
+const AGGREGATOR_SYSTEM_PROMPT_LOCACAO = AGGREGATOR_SYSTEM_PROMPT.replace(
+  "contratos imobiliários brasileiros",
+  "contratos de locação de imóveis no Brasil (Lei nº 8.245/91)"
+);
+
 async function aggregatorNode(state: GraphState): Promise<Partial<GraphState>> {
   const events: AgentEvent[] = [
     { type: "agent_started", agent: "orchestrator", model: state.mode === "fast" ? HAIKU_MODEL : SONNET_MODEL },
@@ -356,10 +362,13 @@ async function aggregatorNode(state: GraphState): Promise<Partial<GraphState>> {
 
   // Cache_control ephemeral via cast — SDK 0.30 ainda não tem o tipo;
   // mesma técnica usada em agent.ts:507-513.
+  const isLocacao =
+    state.contractContext?.dealKind === "locacao" ||
+    (state.contractContext?.templateModalidade ?? "").startsWith("locacao");
   const systemBlocks = [
     {
       type: "text" as const,
-      text: AGGREGATOR_SYSTEM_PROMPT,
+      text: isLocacao ? AGGREGATOR_SYSTEM_PROMPT_LOCACAO : AGGREGATOR_SYSTEM_PROMPT,
       cache_control: { type: "ephemeral" as const },
     },
   ] as unknown as Anthropic.TextBlockParam[];

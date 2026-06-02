@@ -10,7 +10,9 @@ import {
 } from "@/lib/google/replace-placeholders";
 import { watchFile } from "@/lib/google/watch";
 import { deriveDealMetadata } from "@/lib/contracts/derive-deal-metadata";
-import { selectTemplateForDeal } from "@/lib/contracts/template-category";
+import { selectTemplateForDeal, selectLocacaoTemplate } from "@/lib/contracts/template-category";
+import { enrichLocacaoData } from "@/lib/locacao/enrich";
+import { createLeaseContractFromDataJson } from "@/lib/locacao/create-lease-contract";
 import {
   MOMENTO_TEXTO,
   MEIO_PAGAMENTO_TEXTO,
@@ -1021,6 +1023,192 @@ export async function generateContractForDeal(
   // impede que um contrato juridicamente inválido seja aprovado/enviado.
   void analyzeContractDataValidity(contract.id, dataJson).catch((err) => {
     console.error("[contract-generation] analyzeContractDataValidity falhou:", err);
+  });
+
+  return { contractId: contract.id, version: contract.version, googleDocUrl };
+}
+
+/**
+ * Gera o contrato de LOCAÇÃO para um deal. Espelha generateContractForDeal mas
+ * troca dois pontos: seleção de template (selectLocacaoTemplate por schemaType)
+ * e enrich (enrichLocacaoData). Reusa o pipeline de Google Doc (upload do HTML
+ * renderizado + watch + share + style). Depois faz upsert do LeaseContract e
+ * liga LeaseContract.contractId ao Contract recém-criado. Pula as análises
+ * sales-específicas (certidões/validade de cônjuge); mantém o render linter.
+ */
+export async function generateLocacaoContractForDeal(
+  dealId: string,
+  userId: string,
+  orgId: string
+): Promise<GenerateResult> {
+  const deal = await prisma.deal.findUniqueOrThrow({
+    where: { id: dealId },
+    include: { form: true },
+  });
+
+  const dataJson = deal.form
+    ? (deal.form.dataJson as Record<string, unknown>)
+    : (deal.dataJson as Record<string, unknown>) || {};
+  const schemaType = deal.form?.schemaType ?? "locacao_residencial_v1";
+
+  const selection = await selectLocacaoTemplate(orgId, schemaType);
+  if (!selection) {
+    throw new Error(
+      "Nenhum template de locação ativo. Rode sync-templates.ts --apply --seed."
+    );
+  }
+  const template = selection.template;
+
+  const enrichedData = enrichLocacaoData(dataJson);
+  const htmlContent = renderContratoHTML(template.handlebarsSource, enrichedData);
+
+  const agg = await prisma.contract.aggregate({
+    where: { dealId: deal.id },
+    _max: { version: true },
+  });
+  const nextVersion = (agg._max.version ?? 0) + 1;
+
+  const contract = await prisma.$transaction(async (tx) => {
+    await tx.contract.updateMany({
+      where: { dealId: deal.id, isLatest: true },
+      data: { isLatest: false },
+    });
+    return tx.contract.create({
+      data: {
+        dealId: deal.id,
+        templateId: template.id,
+        userId,
+        version: nextVersion,
+        dataJson: enrichedData as any,
+        htmlContent,
+        status: "rascunho",
+        isLatest: true,
+      },
+    });
+  });
+
+  // Google Doc (engine handlebars): sobe o HTML renderizado + watch + share +
+  // style. Mesmo fluxo da venda; falha não bloqueia a criação do contrato.
+  let googleDocUrl: string | undefined;
+  if (isGoogleDocsFeatureEnabled()) {
+    try {
+      const numeroContrato = `${contract.id.slice(-8).toUpperCase()}-v${contract.version}`;
+      const docName = `Locação ${contract.id} — v${contract.version}`;
+      const htmlForUpload = htmlContent
+        .replace(/\{\{\s*contrato\.numero\s*\}\}/g, numeroContrato)
+        .replace(/\{\{\s*contrato\.id\s*\}\}/g, contract.id)
+        .replace(/\{\{\s*contrato\.versao\s*\}\}/g, String(contract.version));
+      const created = await uploadHtmlAsGoogleDoc({ htmlContent: htmlForUpload, name: docName });
+
+      let watchData: {
+        googleWatchChannel?: string;
+        googleWatchResource?: string;
+        googleWatchExpires?: Date;
+      } = {};
+      const webhookBase = process.env.NEXTAUTH_URL || process.env.PUBLIC_APP_URL;
+      const watchToken = process.env.GOOGLE_WATCH_TOKEN?.trim();
+      if (webhookBase && watchToken) {
+        try {
+          const watch = await watchFile({
+            fileId: created.docId,
+            webhookUrl: `${webhookBase.replace(/\/$/, "")}/api/webhooks/google-drive`,
+            token: watchToken,
+          });
+          watchData = {
+            googleWatchChannel: watch.channelId,
+            googleWatchResource: watch.resourceId,
+            googleWatchExpires: new Date(watch.expiration),
+          };
+        } catch (err) {
+          console.error("[locacao-generation] Falha ao registrar watch Drive:", err);
+        }
+      }
+
+      await prisma.contract.update({
+        where: { id: contract.id },
+        data: {
+          googleDocId: created.docId,
+          googleDocUrl: created.webViewLink,
+          googleDocStatus: "draft",
+          ...watchData,
+        },
+      });
+      googleDocUrl = created.webViewLink;
+
+      try {
+        await shareDocWithOrgMembers(created.docId, orgId);
+      } catch (shareErr) {
+        console.error("[locacao-generation] Falha ao compartilhar com org members:", shareErr);
+      }
+
+      try {
+        const defaultStyle = await prisma.documentStyle.findFirst({
+          where: { orgId, isDefault: true },
+        });
+        if (defaultStyle) {
+          const { googleApplyStylePreset } = await import("@/lib/ai/google-tool-handlers");
+          await googleApplyStylePreset(created.docId, {
+            fontFamily: defaultStyle.fontFamily,
+            fontSizeBase: defaultStyle.fontSizeBase,
+            lineHeight: defaultStyle.lineHeight,
+            colorPrimary: defaultStyle.colorPrimary,
+            marginTopMm: defaultStyle.marginTopMm,
+            marginBottomMm: defaultStyle.marginBottomMm,
+            marginLeftMm: defaultStyle.marginLeftMm,
+            marginRightMm: defaultStyle.marginRightMm,
+          });
+        }
+      } catch (styleErr) {
+        console.error("[locacao-generation] Falha ao aplicar DocumentStyle:", styleErr);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      console.error("[locacao-generation] Falha ao criar Google Doc:", err);
+      try {
+        await prisma.contract.update({
+          where: { id: contract.id },
+          data: { googleDocStatus: `error: ${msg.slice(0, 500)}` },
+        });
+      } catch {
+        // diagnóstico best-effort
+      }
+    }
+  }
+
+  // Upsert do LeaseContract + liga o instrumento (Google Doc) recém-criado.
+  try {
+    await createLeaseContractFromDataJson({
+      orgId,
+      deal: { id: deal.id },
+      dataJson,
+      contractId: contract.id,
+    });
+  } catch (err) {
+    console.error("[locacao-generation] Falha ao upsert LeaseContract:", err);
+  }
+
+  // Move o deal pro stage "Confecção de Contrato" do pipeline DE LOCAÇÃO.
+  const { title: derivedTitle, value: derivedValue } = deriveDealMetadata(dataJson, {
+    formTitle: deal.form?.title,
+    fallbackTitle: deal.title,
+  });
+  const pipeline = await prisma.pipeline.findFirst({
+    where: { orgId, kind: "locacao" },
+    include: { stages: { orderBy: { position: "asc" } } },
+  });
+  const confeccaoStage = pipeline?.stages.find((s) => s.name === "Confecção de Contrato");
+  await prisma.deal.update({
+    where: { id: deal.id },
+    data: {
+      title: derivedTitle,
+      value: derivedValue ?? deal.value,
+      ...(confeccaoStage ? { stageId: confeccaoStage.id } : {}),
+    },
+  });
+
+  // Render linter (genérico) — materializa findings como ContractComment.
+  void analyzeRenderQualityForContract(contract.id, htmlContent).catch((err) => {
+    console.error("[locacao-generation] analyzeRenderQualityForContract falhou:", err);
   });
 
   return { contractId: contract.id, version: contract.version, googleDocUrl };
