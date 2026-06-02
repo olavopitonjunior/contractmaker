@@ -6,7 +6,7 @@ Plataforma de gestão de vendas e contratos imobiliários. Esteira: Lead/form p�
 
 **Produção:** [imobpro.ia.br](https://imobpro.ia.br) (custom domain registro.br, Vercel `prj_tkIfHl9chuVwZkNtHLAl5QXY2YOB`).
 
-**Staging:** [staging.imobpro.ia.br](https://staging.imobpro.ia.br) (Vercel project `contractmaker-staging`, branch git `staging`, Neon branch `staging`). Flag `STAGING_MODE=true` ativa gates: 18 crons OFF por default (toggle runtime em `/settings/staging-crons`), Asaas sandbox, ClickSign cap R$30/mês com `[STAGING]` prefix, Newton WhatsApp desabilitado, Resend sandbox redireciona emails externos pro owner, Haiku 4.5 em tudo, Voyage fallback ILIKE. Workflow: feature → `staging` → smoke test → PR pra `master` com label `staging-smoke-passed`. Detalhes em [docs/staging-workflow.md](docs/staging-workflow.md).
+**Staging:** [staging.imobpro.ia.br](https://staging.imobpro.ia.br) (Vercel `contractmaker-staging`, branch+Neon `staging`). Flag `STAGING_MODE=true` ativa gates (18 crons OFF, Asaas sandbox, ClickSign cap R$30/mês `[STAGING]`, Newton off, Resend sandbox→owner, Haiku 4.5, Voyage fallback ILIKE). Workflow: feature → `staging` → smoke → PR pra `master` (label `staging-smoke-passed`). Detalhes em [docs/staging-workflow.md](docs/staging-workflow.md).
 
 **Single-tenant compartilhado:** `SHARED_ORG_ID=cmnt1ldo4000111bw4yo517k0`. Signup novo via `/api/auth/register` → `OrgMembership { role: "member" }`. Olavo (`olavo.piton@gmail.com`) e `admin@contractmaker.com` são owners. Schema continua multitenant.
 
@@ -300,7 +300,7 @@ Todos com auth + cross-org guard via `deal.pipeline.orgId` + audit + bloqueio qu
 
 ## Locação (em construção — specs)
 
-Módulo de aluguéis (recorrente) sobre a base de venda. Aditivo — não altera shapes de venda. Specs: arquitetura [`docs/locacao/spec.md`](docs/locacao/spec.md) (entidades novas `Property`/`LeaseContract`/`RentCharge`/`CreditAnalysis`/`Guarantee`/`Inspection`, recorrência via cron `rent/generate` → `CommissionCharge{kind:"aluguel"}` + repasse Asaas Split, `Deal.kind="locacao"`, schemaTypes locação) + UI/UX [`docs/redesign-locacao-spec.md`](docs/redesign-locacao-spec.md) (PR #48). Dois agentes: Newton (WhatsApp externo) ≠ chat in-app (editor).
+Módulo de aluguéis (recorrente) sobre a base de venda, aditivo. Specs: [`docs/locacao/spec.md`](docs/locacao/spec.md) (entidades `Property`/`LeaseContract`/`RentCharge`/`CreditAnalysis`/`Guarantee`/`Inspection`, recorrência cron `rent/generate` → `CommissionCharge{kind:"aluguel"}` + repasse Asaas Split, `Deal.kind="locacao"`) + UI/UX [`docs/redesign-locacao-spec.md`](docs/redesign-locacao-spec.md) (PR #48). Newton (WhatsApp) ≠ chat in-app.
 
 ## Schemas críticos
 
@@ -312,20 +312,19 @@ Não-óbvios (enums e structure: ver `prisma/schema.prisma`):
 - **`splitJson`:** `{ splits, external, display? }`. `display` é UI-only — Asaas não vê
 - **`comissao.comissionados[]`** canônico com `papel`. Fallback `imobiliaria_*` sintetizado por `deriveComissionados` quando array vazio
 - **`SplitRecipient.pendingFields`** não-vazio → `active: false` + `splitDispatcher` skip FAILED. Magic link via `completionToken/Exp` (JWT-HMAC 7d)
-- **Multi-account schema:** `AsaasAccount.orgId` NÃO mais @unique (N contas/org). `OrgFinancialSettings.accountId @unique`. `AsaasCustomer @@unique([accountId, cpfCnpj])`. `CommissionCharge.accountId` (FK Restrict) persistido na criação — trocar conta ativa NÃO afeta cobranças emitidas. Owner bypassa `AsaasAccountPermission`. RBAC org-level: `ACCOUNT_CREATE/ACTIVATE/ARCHIVE/PERMISSIONS_MANAGE`
+- **Multi-account schema:** `AsaasAccount.orgId` não-@unique (N contas/org). `OrgFinancialSettings.accountId @unique`. `AsaasCustomer @@unique([accountId, cpfCnpj])`. `CommissionCharge.accountId` (FK Restrict) persistido na criação — trocar conta ativa NÃO afeta cobranças emitidas. Owner bypassa `AsaasAccountPermission`. RBAC: `ACCOUNT_CREATE/ACTIVATE/ARCHIVE/PERMISSIONS_MANAGE`
 
-**Audit actions:** lista canônica em `lib/audit/actions.ts` — prefixos `DEAL_*`, `FORM_*`, `ATTACHMENT_*`, `CONTRACT_*`, `ENVELOPE_*`, `CERTIDAO_*`, `KYC_*`, `CHARGE_*`, `TRANSFER_*`, `INTENT_*`, `CLICKSIGN_*`, `SPLIT_RECIPIENT_*`, `ACCOUNT_*`.
+**Audit actions:** lista canônica em `lib/audit/actions.ts` (prefixos `DEAL_*`/`FORM_*`/`ATTACHMENT_*`/`CONTRACT_*`/`ENVELOPE_*`/`CERTIDAO_*`/`KYC_*`/`CHARGE_*`/`TRANSFER_*`/`CLICKSIGN_*`/`SPLIT_RECIPIENT_*`/`ACCOUNT_*`).
 
 ## Gotchas
 
 - **Radix DropdownMenu + asChild** envolvendo function component sem forwardRef pode falhar a recalcular position em `side="top"` — usar links diretos
 - **pgvector** exige Neon Standard+. Inserts/queries via `$executeRawUnsafe`/`$queryRawUnsafe` com `<=>`
 - **`VOYAGE_API_KEY` opcional:** sem ele, `query_knowledge_base` e `find_similar_contracts` caem em fallback ILIKE/fingerprint
-- **Análise passiva** envia `htmlContent` atual no body — server usa `params.htmlOverride` pra ver estado live
 - **Upload de imagens** `/api/contracts/[id]/images`: 5MB max, JPEG/PNG/WebP. Requer `BLOB_READ_WRITE_TOKEN`
 - **Cron certidões** requer Vercel Pro. Sem ele, `awaiting_portal` fica eterno. Schedule `*/5min` em `vercel.json`
 - **Prisma migrations** rodam via `prisma migrate deploy` no build. Mudanças em dados (rename, backfills) → migration SQL plain idempotente
 - **Auto-promote stage não é retroativo:** webhook ClickSign close OU charge antes da migration = deal fica em stage anterior. Drag-drop manual
 - **Split Asaas:** rejeita wallet própria, duplicatas, max 10. Sandbox rejeita docs de identidade via API — usar `approveSandboxAccount`
 - **Forms públicos não requerem auth** — qualquer um com o link pode editar
-- **Operacionais em memória** (ver `MEMORY.md`): OAuth Testing 7d, `printf` single quotes pra envs Vercel, `vercel env pull \n`, normalizers mudam de shape, Chrome MCP + Google auth, Resend sandbox, auto-mode vs prod DB, Handlebars `{{this.X}}` shadowing, date parse timezone drift, Windows/PowerShell
+- **Operacionais em memória** (ver `MEMORY.md`): OAuth Testing 7d, `printf` single quotes envs Vercel, `vercel env pull \n`, Chrome MCP + Google auth, Resend sandbox, Handlebars `{{this.X}}` shadowing, date parse timezone, Windows/PowerShell
