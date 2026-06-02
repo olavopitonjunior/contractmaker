@@ -10,6 +10,12 @@ import {
   STEP_REQUIRED_FIELDS_LEGACY,
 } from "@/lib/forms/validation";
 import { collectPartyFormatIssues } from "@/lib/forms/field-formats";
+import {
+  effectiveRequiredPaths,
+  findMissingRequired,
+  isValueEmpty,
+  getByPath,
+} from "@/lib/forms/party-required";
 import { toast } from "sonner";
 import { useAutoSave } from "@/hooks/use-auto-save";
 import { DocumentosStep } from "@/components/forms/steps/DocumentosStep";
@@ -123,11 +129,17 @@ interface StepIndicatorProps {
   stepLabels: readonly string[];
   visitedSteps: ReadonlySet<number>;
   /**
-   * Computa estado de cada step para destacar "pending-warning" — visitado
-   * mas com required fields ainda não preenchidos. Recebe cursor virtual
-   * (0..N-1), não trueIndex.
+   * Quando true (forms `?prefilled=1`), todos os steps são avaliados pra
+   * pendências de cara — não só os visitados. Permite revisar uma proposta
+   * extraída vendo de imediato onde faltam dados.
    */
-  stepHasErrors: (stepIndex: number) => boolean;
+  proactive: boolean;
+  /**
+   * Reflete se um step VIRTUAL (cursor 0..N-1) tem campos obrigatórios ainda
+   * vazios. Value-driven (não baseado em erros), então atualiza sozinho
+   * conforme o usuário preenche. Recebe cursor virtual, não trueIndex.
+   */
+  stepHasPending: (stepIndex: number) => boolean;
   onStepClick: (target: number) => void;
 }
 
@@ -136,7 +148,8 @@ function StepIndicator({
   totalSteps,
   stepLabels,
   visitedSteps,
-  stepHasErrors,
+  proactive,
+  stepHasPending,
   onStepClick,
 }: StepIndicatorProps) {
   // Keyboard: ←/→ navegam para vizinhos. Hold Shift+arrow não pula validation —
@@ -153,10 +166,12 @@ function StepIndicator({
 
   function getState(index: number): StepState {
     if (index === currentStep) return "current";
-    if (index < currentStep) return "completed";
-    if (visitedSteps.has(index) && stepHasErrors(index)) {
+    // Pendência tem prioridade sobre "completed": um step já passado mas com
+    // campo obrigatório vazio deve continuar sinalizado em âmbar na revisão.
+    if ((visitedSteps.has(index) || proactive) && stepHasPending(index)) {
       return "pending-warning";
     }
+    if (index < currentStep) return "completed";
     return "untouched";
   }
 
@@ -446,6 +461,20 @@ export function SalesFormWizard({
     requiredFieldsByStep ?? STEP_REQUIRED_FIELDS_LEGACY;
   const currentRequiredFields = effectiveRequiredFields[currentTrueIndex] ?? [];
 
+  // Leitura reativa de um path a partir dos valores observados (useWatch),
+  // pra que stepper/bolha de pendências recalculem a cada digitação.
+  const readValue = (path: string): unknown => getByPath(watchedData, path);
+
+  // Required fields da etapa atual remapeados pelo tipo_pessoa vivo (PJ não
+  // tem cpf/estado_civil/rg — vira cnpj/razão social ou é dispensado).
+  const currentEffectiveRequired = effectiveRequiredPaths(
+    currentRequiredFields,
+    readValue,
+  );
+  const currentMissingCount = currentEffectiveRequired.filter((p) =>
+    isValueEmpty(readValue(p)),
+  ).length;
+
   /**
    * Navega para o step target. Pra forward (target > current), revalida cada
    * step intermediário; primeiro fail interrompe e pousa o usuário no step
@@ -463,7 +492,15 @@ export function SalesFormWizard({
     if (target > currentStep) {
       for (let i = currentStep; i < target; i++) {
         const trueIndex = visibleStepIndexes[i] ?? i;
-        const stepFields = effectiveRequiredFields[trueIndex] ?? [];
+        const rawStepFields = effectiveRequiredFields[trueIndex] ?? [];
+        // Remapeia pelo tipo_pessoa vivo: PJ não tem cpf/estado_civil/rg, então
+        // exigi-los geraria pendência fantasma (campo nem renderiza). Vira
+        // cnpj/razão social ou é dispensado. eslint: getValues tipado solto.
+        const stepFields = effectiveRequiredPaths(
+          rawStepFields,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          (p) => form.getValues(p as any),
+        );
         // Marca step como visited antes de validar — quem visita primeiro
         // gera o sinal de "pendência conhecida" se faltar coisa.
         setVisitedSteps((prev) => {
@@ -482,12 +519,7 @@ export function SalesFormWizard({
           for (const path of stepFields) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const raw = form.getValues(path as any) as unknown;
-            const isEmpty =
-              raw === undefined ||
-              raw === null ||
-              raw === "" ||
-              (Array.isArray(raw) && raw.length === 0);
-            if (isEmpty) {
+            if (isValueEmpty(raw)) {
               if (!firstMissing) firstMissing = path;
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
               form.setError(path as any, {
@@ -564,35 +596,16 @@ export function SalesFormWizard({
   const goToPrev = () => validateAndNavigate(currentStep - 1);
 
   /**
-   * Reflete em tempo real se um step VIRTUAL (cursor) tem required fields
-   * com erro. Resolve trueIndex via visibleStepIndexes pra lookup correto.
-   * Step "current" pode estar pendente mas não é highlight (já é foco).
-   * Step "completed" também pode estar pendente se o user voltou e
-   * apagou algo — re-marcação correta exige reagir a errors.
+   * Reflete em tempo real se um step VIRTUAL (cursor) tem campos obrigatórios
+   * ainda vazios. Value-driven (lê watchedData via readValue), não baseado em
+   * erros do RHF — então some sozinho conforme o usuário preenche, sem depender
+   * de um "Próximo" pra re-marcar. Ciente de tipo_pessoa (PJ ≠ PF).
    */
-  const stepHasErrors = (stepIndex: number): boolean => {
+  const stepHasPending = (stepIndex: number): boolean => {
     const trueIndex = visibleStepIndexes[stepIndex] ?? stepIndex;
     const paths = effectiveRequiredFields[trueIndex] ?? [];
     if (paths.length === 0) return false;
-    const errors = form.formState.errors as Record<string, unknown>;
-    for (const path of paths) {
-      const parts = path.split(".");
-      let cur: unknown = errors;
-      for (const part of parts) {
-        if (cur == null || typeof cur !== "object") {
-          cur = undefined;
-          break;
-        }
-        cur = (cur as Record<string, unknown>)[part];
-      }
-      if (cur && typeof cur === "object") {
-        const maybeMsg = (cur as { message?: unknown }).message;
-        if (typeof maybeMsg === "string" || Object.keys(cur).length > 0) {
-          return true;
-        }
-      }
-    }
-    return false;
+    return findMissingRequired(paths, readValue).length > 0;
   };
 
   const handleFinalize = async () => {
@@ -741,7 +754,8 @@ export function SalesFormWizard({
           totalSteps={TOTAL_STEPS}
           stepLabels={visibleStepIndexes.map((i) => STEP_LABELS[i])}
           visitedSteps={visitedSteps}
-          stepHasErrors={stepHasErrors}
+          proactive={Boolean(prefilled)}
+          stepHasPending={stepHasPending}
           onStepClick={(target) => {
             void validateAndNavigate(target);
           }}
@@ -750,10 +764,12 @@ export function SalesFormWizard({
         <Separator />
       </div>
 
-      {/* Sticky bolha de pendências — substitui toast genérico de "Preencha os campos" */}
+      {/* Sticky bolha de pendências — value-driven (some conforme preenche).
+          Proativa em forms ?prefilled=1; senão só após um "Próximo" com falha. */}
       <RequiredFieldMarker
-        requiredFields={currentRequiredFields}
-        errors={form.formState.errors}
+        missing={currentMissingCount}
+        total={currentEffectiveRequired.length}
+        visible={Boolean(prefilled) || failedTriggerCount > 0}
         trigger={failedTriggerCount}
       />
 
@@ -811,10 +827,10 @@ export function SalesFormWizard({
                 className={`h-2 rounded-full transition-all ${
                   i === currentStep
                     ? "w-5 bg-primary"
-                    : i < currentStep
-                      ? "w-2 bg-primary/50"
-                      : visitedSteps.has(i) && stepHasErrors(i)
-                        ? "w-2 bg-amber-400"
+                    : (visitedSteps.has(i) || prefilled) && stepHasPending(i)
+                      ? "w-2 bg-amber-400"
+                      : i < currentStep
+                        ? "w-2 bg-primary/50"
                         : "w-2 bg-border"
                 }`}
                 aria-label={`Ir para etapa ${i + 1}: ${STEP_LABELS[visibleStepIndexes[i] ?? i]}`}
