@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { sendEmail } from "@/lib/email/client";
 import { classifyJobBucket, type HealthBucket } from "@/lib/certidoes/health-monitor";
+import { isCronAllowedInStaging } from "@/lib/env/staging";
 
 // Rótulos PT-BR + ordem de prioridade dos buckets no resumo do digest.
 const BUCKET_LABEL: Partial<Record<HealthBucket, string>> = {
