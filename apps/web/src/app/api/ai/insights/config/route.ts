@@ -18,9 +18,9 @@ const configSchema = z.object({
   contexts: contextsSchema,
 });
 
-export type AiInsightsConfig = z.infer<typeof configSchema>;
+type AiInsightsConfig = z.infer<typeof configSchema>;
 
-export const DEFAULT_CONFIG: AiInsightsConfig = {
+const DEFAULT_CONFIG: AiInsightsConfig = {
   enabled: true,
   contexts: { dashboard: true, contract: true, property: true, cashflow: true },
 };
