@@ -20,6 +20,7 @@ interface NativeSelectProps {
   placeholder?: string;
   className?: string;
   id?: string;
+  disabled?: boolean;
 }
 
 function isGrouped(
@@ -35,12 +36,14 @@ export function NativeSelect({
   placeholder,
   className,
   id,
+  disabled = false,
 }: NativeSelectProps) {
   const grouped = isGrouped(options);
   return (
     <select
       id={id}
       value={value ?? ""}
+      disabled={disabled}
       onChange={(e) => onChange(e.target.value)}
       className={cn(
         "h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs outline-none transition-[color,box-shadow]",

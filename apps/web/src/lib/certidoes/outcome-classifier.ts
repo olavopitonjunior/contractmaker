@@ -24,7 +24,11 @@ import type {
 } from "./types";
 import type { EndpointInfo } from "./endpoints";
 import { CATEGORIES_REQUIRING_PDF } from "./endpoints";
-import { isProtestoNadaConsta, isEmailThrottle } from "./error-codes";
+import {
+  isProtestoNadaConsta,
+  isSemResultadoInformativo,
+  isEmailThrottle,
+} from "./error-codes";
 
 export type RichStatus =
   | "queued"
@@ -203,6 +207,27 @@ export function classifyOutcome(
   if (
     isProtestoNadaConsta(info.id, protestoMsg) ||
     isProtestoNadaConsta(info.id, effectiveErrorMessage)
+  ) {
+    return {
+      status: "success",
+      errorMessage: null,
+      failureCategory: null,
+      costCents: billable === false ? 0 : chargedCostCents,
+      nextRetryAt: null,
+      missingFields: [],
+      portalUrl,
+    };
+  }
+
+  // Endpoints informativos (emitsPdf:false, ex. tribunal/tjsp/eproc-lista)
+  // sinalizam "sem processos" como 6xx (612 "Nenhum Resultado Encontrado").
+  // Como não emitem PDF, é negativa informativa legítima — fecha como success
+  // (verde "nada consta") em vez de missing_input → failed_permanent (vermelho).
+  // Gated em emitsPdf===false + mensagem de ausência — ver isSemResultadoInformativo.
+  if (
+    info.emitsPdf === false &&
+    (isSemResultadoInformativo(protestoMsg) ||
+      isSemResultadoInformativo(effectiveErrorMessage))
   ) {
     return {
       status: "success",

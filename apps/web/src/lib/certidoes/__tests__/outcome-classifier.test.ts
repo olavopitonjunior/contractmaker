@@ -71,6 +71,46 @@ describe("classifyOutcome — Phase J", () => {
     expect(out.costCents).toBe(4);
   });
 
+  it("eproc-lista 612 'Nenhum Resultado' → success (informativo sem PDF, não failed_permanent)", () => {
+    const eprocLista: EndpointInfo = {
+      id: "tribunal/tjsp/eproc-lista",
+      label: "E-Proc SP",
+      costCents: 6,
+      scope: "estadual",
+      uf: "SP",
+      appliesTo: ["pessoa"],
+      category: "civel",
+      emitsPdf: false,
+      portalUrl: "https://esaj.tjsp.jus.br/",
+    };
+    const resp = {
+      code: 612,
+      code_message:
+        "Nenhum Resultado Encontrado. (A consulta não retornou dados no site ou aplicativo de origem no qual a automação foi executada.)",
+      data: [],
+      header: { billable: false },
+    } as unknown as InfosimplesResponse;
+    const out = classifyOutcome(resp, normEmpty, eprocLista, opts);
+    expect(out.status).toBe("success");
+    expect(out.failureCategory).toBeNull();
+  });
+
+  it("612 'CPF inválido' em endpoint que EMITE PDF não é mascarado como success", () => {
+    const resp = {
+      code: 612,
+      code_message: "O número de CPF informado é inválido.",
+      data: [],
+      header: { billable: true },
+    } as unknown as InfosimplesResponse;
+    const norm: NormalizedResult = {
+      ...normEmpty,
+      detalhes: "O número de CPF informado é inválido.",
+      failureCategory: "missing_input" as const,
+    };
+    const out = classifyOutcome(resp, norm, baseEndpoint, opts);
+    expect(out.status).not.toBe("success");
+  });
+
   it("code 606 → data_missing + missingFields", () => {
     const resp = {
       code: 606,

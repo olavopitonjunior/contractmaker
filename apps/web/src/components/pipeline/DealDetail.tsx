@@ -1313,6 +1313,13 @@ function DocumentsTab({
   // OCR seletivo: ids em voo mostram spinner. Diálogo de assinatura por card.
   const [extractingIds, setExtractingIds] = useState<Set<string>>(new Set());
   const [signAttachmentId, setSignAttachmentId] = useState<string | null>(null);
+  // Cópia sob demanda de FormAttachment → DealAttachment (mover/assinar).
+  const [promotingIds, setPromotingIds] = useState<Set<string>>(new Set());
+  // PDFs recém-copiados do form, disponíveis no diálogo de assinatura ANTES do
+  // router.refresh re-hidratar signablePdfs (evita dropdown vazio no preselect).
+  const [extraSignable, setExtraSignable] = useState<
+    Array<{ id: string; filename: string; mime: string; category: string | null }>
+  >([]);
   // Set para identificar quais cards são DealAttachment (têm rota DELETE
   // /api/deals/[dealId]/attachments/[id]). FormAttachments têm sua rota
   // própria mas não é exposto remoção daqui (só dentro do form público).
@@ -1579,6 +1586,67 @@ function DocumentsTab({
     }
   };
 
+  // Documentos vindos do formulário existem como FormAttachment. Para mover ou
+  // enviar para assinatura, primeiro os copiamos (idempotente) para um
+  // DealAttachment — daí toda a maquinaria existente (PATCH assignment, diálogo
+  // de assinatura) passa a funcionar. Retorna o DealAttachment criado/existente.
+  const promoteFormAttachment = async (
+    formAttId: string
+  ): Promise<{
+    id: string;
+    filename: string;
+    mime: string;
+    category: string | null;
+  } | null> => {
+    setPromotingIds((prev) => new Set(prev).add(formAttId));
+    try {
+      const res = await fetch(`/api/deals/${dealId}/attachments/from-form`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ formAttachmentId: formAttId }),
+      });
+      const d = await res.json().catch(() => null);
+      if (!res.ok) {
+        toast.error(d?.error || "Falha ao trazer documento do formulário");
+        return null;
+      }
+      return d.attachment as {
+        id: string;
+        filename: string;
+        mime: string;
+        category: string | null;
+      };
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro de rede");
+      return null;
+    } finally {
+      setPromotingIds((prev) => {
+        const n = new Set(prev);
+        n.delete(formAttId);
+        return n;
+      });
+    }
+  };
+
+  // "Mover para…" num doc do formulário: copia → DealAttachment, depois reusa o
+  // handleReassign (PATCH assignment + router.refresh).
+  const handleReassignFormDoc = async (formAttId: string, value: string) => {
+    const att = await promoteFormAttachment(formAttId);
+    if (att) await handleReassign(att.id, value);
+  };
+
+  // "Enviar para assinatura" num doc do formulário: copia → DealAttachment e
+  // abre o diálogo já com o novo anexo disponível (extraSignable cobre o gap
+  // até o router.refresh).
+  const handleSendFormDoc = async (formAttId: string) => {
+    const att = await promoteFormAttachment(formAttId);
+    if (!att) return;
+    setExtraSignable((prev) =>
+      prev.some((p) => p.id === att.id) ? prev : [...prev, att]
+    );
+    setSignAttachmentId(att.id);
+  };
+
   // OCR seletivo sob demanda num DealAttachment manual. Persiste em
   // extractedData.fields; router.refresh re-renderiza com os campos.
   const handleExtract = async (id: string) => {
@@ -1626,29 +1694,45 @@ function DocumentsTab({
     }
   };
 
-  // reassignable: mostra o seletor "Mover para…" (só faz sentido em
-  // DealAttachment, que tem rota PATCH autenticada). Certidões ficam de fora
-  // (são auto-classificadas pelo executor).
+  // reassignable: mostra o seletor "Mover para…". Em DealAttachment usa a rota
+  // PATCH direta; em FormAttachment (doc do formulário) copia sob demanda antes.
+  // Certidões ficam de fora (auto-classificadas pelo executor).
   const renderDocCard = (doc: DocumentCardData, reassignable = false) => {
     const isDealAttachment = dealAttachmentIds.has(doc.id);
+    // Docs do formulário ainda não copiados: fileUrl aponta pra /api/forms/.
+    const isFormAttachment = doc.fileUrl.includes("/api/forms/");
     const canRemove = isDealAttachment && !!onRequestRemoveDealAttachment;
     const canReassign = reassignable && isDealAttachment;
-    // OCR/aplicar/assinatura só pra docs manuais do deal (não certidões/Infosimples).
+    // OCR/aplicar só pra docs manuais do deal (não certidões/Infosimples).
     const isOcrEligible = ocrEligibleIds.has(doc.id);
+    // Mover/assinar valem pra DealAttachment manual E pra docs do formulário
+    // (estes via cópia sob demanda → DealAttachment).
+    const showMove = canReassign || (reassignable && isFormAttachment);
+    const onMove = canReassign
+      ? handleReassign
+      : reassignable && isFormAttachment
+        ? handleReassignFormDoc
+        : undefined;
+    const onSend = isOcrEligible
+      ? (id: string) => setSignAttachmentId(id)
+      : isFormAttachment
+        ? handleSendFormDoc
+        : undefined;
     return (
       <DocumentCard
         key={doc.id}
         doc={doc}
-        assignmentOptions={canReassign ? assignmentOptions : []}
-        onAssignmentChange={canReassign ? handleReassign : undefined}
-        readOnly={!canRemove}
+        assignmentOptions={showMove ? assignmentOptions : []}
+        onAssignmentChange={onMove}
+        // Form attachments não têm X aqui (removidos no form), mas precisam de
+        // readOnly=false pra exibir mover/assinar.
+        readOnly={!(canRemove || isFormAttachment)}
         onRemove={canRemove ? (id) => onRequestRemoveDealAttachment(id) : undefined}
         onExtract={isOcrEligible ? handleExtract : undefined}
         onRetry={isOcrEligible ? handleExtract : undefined}
         onApply={isOcrEligible ? handleApplyFields : undefined}
-        onSendToSignature={
-          isOcrEligible ? (id) => setSignAttachmentId(id) : undefined
-        }
+        onSendToSignature={onSend}
+        busy={promotingIds.has(doc.id)}
       />
     );
   };
@@ -1717,11 +1801,17 @@ function DocumentsTab({
           if (!o) setSignAttachmentId(null);
         }}
         dealId={dealId}
-        attachments={signablePdfs}
+        attachments={[
+          ...signablePdfs,
+          ...extraSignable.filter(
+            (e) => !signablePdfs.some((s) => s.id === e.id)
+          ),
+        ]}
         partySuggestions={partySuggestions}
         preselectAttachmentId={signAttachmentId ?? undefined}
         onSent={() => {
           setSignAttachmentId(null);
+          setExtraSignable([]);
           router.refresh();
         }}
       />
