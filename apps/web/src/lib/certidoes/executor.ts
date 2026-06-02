@@ -55,9 +55,21 @@ function logTransition(
 // F4 — terminal states for a job. `awaiting_portal` is NOT terminal for
 // notification purposes (user will get notified when it completes in the
 // portal poller). Replaced jobs are ignored entirely.
+// 2026-06-02 — o set ANTES só tinha {success, failed, skipped}. Como a maioria
+// dos lotes reais termina em failed_permanent/data_missing/data_invalid/
+// informativo/duplicate_pending, o pendingCount nunca zerava e o
+// checkBatchCompletion (e o monitor da Fase A pendurado nele) NUNCA rodava —
+// 0 certidao_batch_complete em 6 dias. Inclui todos os estados terminais de
+// verdade. Não-terminais (retry/poll em voo): queued, fetching, awaiting_portal,
+// api_error, portal_unavailable, rate_limited. `replaced` é filtrado na query.
 const TERMINAL_FOR_NOTIFICATION = new Set<string>([
   "success",
+  "informativo",
   "failed",
+  "failed_permanent",
+  "data_missing",
+  "data_invalid",
+  "duplicate_pending",
   "skipped",
 ]);
 
