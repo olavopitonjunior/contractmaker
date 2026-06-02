@@ -19,6 +19,7 @@ import {
   getMonthlyBudgetCents,
 } from "./costs";
 import type { AuthMethod } from "./types";
+import { STAGING_MODE } from "@/lib/env/staging";
 
 export class EnvelopeBudgetError extends Error {
   constructor(
@@ -136,7 +137,7 @@ async function createEnvelopeFromBuffer(input: {
     contractId,
     attachmentId,
     source,
-    name,
+    name: rawName,
     authMethod,
     deadlineAt,
     signers,
@@ -148,6 +149,10 @@ async function createEnvelopeFromBuffer(input: {
   if (signers.length === 0) {
     throw new Error("Nenhum signatário válido encontrado");
   }
+
+  // Prefixo [STAGING] no nome do envelope deixa claro pra signatário em caso
+  // de vazamento + facilita identificar/filtrar no dashboard ClickSign.
+  const name = STAGING_MODE ? `[STAGING] ${rawName}` : rawName;
 
   const planCost = envelopeCostCents(signers.map(() => authMethod));
   const budget = getMonthlyBudgetCents();

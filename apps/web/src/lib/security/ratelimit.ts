@@ -96,10 +96,11 @@ async function getUpstashLimiter(cfg: RateLimitConfig) {
       url: process.env.UPSTASH_REDIS_REST_URL,
       token: process.env.UPSTASH_REDIS_REST_TOKEN,
     });
+    const envPrefix = process.env.REDIS_KEY_PREFIX ?? "";
     const limiter = new Ratelimit({
       redis,
       limiter: Ratelimit.slidingWindow(cfg.limit, cfg.window),
-      prefix: "cm-ratelimit",
+      prefix: `${envPrefix}cm-ratelimit`,
     });
     _upstashLimiters[key] = limiter as any;
     return _upstashLimiters[key];

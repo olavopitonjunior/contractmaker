@@ -1,0 +1,41 @@
+name: Staging CI
+
+on:
+  push:
+    branches: [staging]
+  pull_request:
+    branches: [staging]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Typecheck + tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Prisma generate (no engine)
+        working-directory: apps/web
+        run: pnpm prisma generate --no-engine
+
+      - name: Type check
+        working-directory: apps/web
+        run: pnpm typecheck
+
+      - name: Tests
+        working-directory: apps/web
+        run: pnpm test

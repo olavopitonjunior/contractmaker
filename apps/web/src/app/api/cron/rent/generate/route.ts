@@ -3,6 +3,7 @@ import {
   competenciaFor,
   materializeRentChargesForCompetencia,
 } from "@/lib/locacao/rent-scheduler";
+import { isCronAllowedInStaging } from "@/lib/env/staging";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -30,6 +31,9 @@ export async function GET(req: NextRequest) {
     if (authHeader !== `Bearer ${cronSecret}`) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+  }
+  if (!(await isCronAllowedInStaging("/api/cron/rent/generate"))) {
+    return NextResponse.json({ skipped: "staging-disabled", path: "/api/cron/rent/generate" });
   }
 
   const override = req.nextUrl.searchParams.get("competencia");

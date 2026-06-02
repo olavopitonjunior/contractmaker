@@ -4,6 +4,7 @@ import {
   calculateReadjustment,
   type Indice,
 } from "@/lib/locacao/readjustment-calculator";
+import { isCronAllowedInStaging } from "@/lib/env/staging";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,6 +29,9 @@ export async function GET(req: NextRequest) {
     if (authHeader !== `Bearer ${cronSecret}`) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+  }
+  if (!(await isCronAllowedInStaging("/api/cron/rent/readjust"))) {
+    return NextResponse.json({ skipped: "staging-disabled", path: "/api/cron/rent/readjust" });
   }
 
   const now = new Date();

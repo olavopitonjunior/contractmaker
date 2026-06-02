@@ -83,8 +83,16 @@ function buildSegments(pathname: string): Segment[] {
 export function DashboardHeader() {
   const pathname = usePathname();
   const segments = buildSegments(pathname);
+  const isStaging = process.env.NEXT_PUBLIC_STAGING_MODE === "true";
 
   return (
+    <>
+      {isStaging && (
+        <div className="flex items-center justify-center gap-2 bg-amber-400 px-4 py-1.5 text-xs font-medium text-amber-950">
+          <span aria-hidden>⚠️</span>
+          Ambiente de homologação — dados podem ser apagados a qualquer momento. Não use com clientes reais.
+        </div>
+      )}
     <header className="flex h-14 items-center gap-4 border-b bg-background px-4 sm:px-6">
       <SidebarTrigger className="-ml-2" />
       <Separator orientation="vertical" className="h-6" />
@@ -122,5 +130,6 @@ export function DashboardHeader() {
         <NotificationsBell />
       </div>
     </header>
+    </>
   );
 }

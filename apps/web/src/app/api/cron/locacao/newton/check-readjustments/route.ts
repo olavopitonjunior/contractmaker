@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { suggestReadjustmentExecutor } from "@/lib/locacao/executors/suggest-readjustment";
+import { isCronAllowedInStaging } from "@/lib/env/staging";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,6 +22,9 @@ export async function GET(req: NextRequest) {
     if (authHeader !== `Bearer ${cronSecret}`) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+  }
+  if (!(await isCronAllowedInStaging("/api/cron/locacao/newton/check-readjustments"))) {
+    return NextResponse.json({ skipped: "staging-disabled", path: "/api/cron/locacao/newton/check-readjustments" });
   }
 
   const now = new Date();

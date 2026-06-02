@@ -47,7 +47,8 @@ export function hashSnapshot(snapshot: unknown): string {
 }
 
 export function cacheKey(context: string, id: string, hash: string): string {
-  return `insights:${context}:${id}:${hash}`;
+  const prefix = process.env.REDIS_KEY_PREFIX ?? "";
+  return `${prefix}insights:${context}:${id}:${hash}`;
 }
 
 export async function getCached(key: string): Promise<AIInsight[] | null> {

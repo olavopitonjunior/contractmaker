@@ -4,7 +4,9 @@
 
 Plataforma de gestão de vendas e contratos imobiliários. Esteira: Lead/form público → Kanban → contrato (template **ou** upload) → editor Google Docs embedado → assinatura ClickSign → PDF assinado de volta na pasta. Pagadoria integrada com Asaas. Due diligence via Infosimples.
 
-**Produção:** [imobpro.ia.br](https://imobpro.ia.br) (custom domain registro.br, Vercel `prj_tkIfHl9chuVwZkNtHLAl5QXY2YOB`). **Sem homologação** — E2E direto contra prod.
+**Produção:** [imobpro.ia.br](https://imobpro.ia.br) (custom domain registro.br, Vercel `prj_tkIfHl9chuVwZkNtHLAl5QXY2YOB`).
+
+**Staging:** [staging.imobpro.ia.br](https://staging.imobpro.ia.br) (Vercel project `contractmaker-staging`, branch git `staging`, Neon branch `staging`). Flag `STAGING_MODE=true` ativa gates: 18 crons OFF por default (toggle runtime em `/settings/staging-crons`), Asaas sandbox, ClickSign cap R$30/mês com `[STAGING]` prefix, Newton WhatsApp desabilitado, Resend sandbox redireciona emails externos pro owner, Haiku 4.5 em tudo, Voyage fallback ILIKE. Workflow: feature → `staging` → smoke test → PR pra `master` com label `staging-smoke-passed`. Detalhes em [docs/staging-workflow.md](docs/staging-workflow.md).
 
 **Single-tenant compartilhado:** `SHARED_ORG_ID=cmnt1ldo4000111bw4yo517k0`. Signup novo via `/api/auth/register` → `OrgMembership { role: "member" }`. Olavo (`olavo.piton@gmail.com`) e `admin@contractmaker.com` são owners. Schema continua multitenant.
 

@@ -1102,6 +1102,15 @@ model AgentConfig {
   org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 }
 
+// CronToggle (Fase staging B) — controle runtime de quais crons rodam em staging.
+// Em prod existe mas é ignorada (gate só consulta se STAGING_MODE=true).
+model CronToggle {
+  path      String   @id
+  enabled   Boolean  @default(false)
+  updatedAt DateTime @default(now()) @updatedAt
+  updatedBy String?
+}
+
 // ============================================
 // CONTRACT CHANGE LOG
 // ============================================
