@@ -85,8 +85,8 @@ async function main() {
     data: {
       orgId: org.id,
       nome: "Maria Silva (demo)",
-      cpfCnpj: "***.***.***-99",
-      tipo: "proprietario",
+      cpfCnpj: "999.999.999-99",
+      tipoPessoa: "fisica",
       email: "maria@staging.imobpro.ia.br",
     },
   });
@@ -94,16 +94,16 @@ async function main() {
     data: {
       orgId: org.id,
       nome: "João Souza (demo)",
-      cpfCnpj: "***.***.***-88",
-      tipo: "proprietario",
+      cpfCnpj: "888.888.888-88",
+      tipoPessoa: "fisica",
       email: "joao@staging.imobpro.ia.br",
     },
   });
-  // Fornecedores
+  // Fornecedores: tipoPessoa=juridica + dataJson.role pra distinguir
   await prisma.propertyOwner.createMany({
     data: [
-      { orgId: org.id, nome: "Fornecedor Elétrica Demo", cpfCnpj: "**.***.***/0001-99", tipo: "fornecedor" },
-      { orgId: org.id, nome: "Fornecedor Hidráulica Demo", cpfCnpj: "**.***.***/0001-88", tipo: "fornecedor" },
+      { orgId: org.id, nome: "Fornecedor Elétrica Demo", cpfCnpj: "99.999.999/0001-99", tipoPessoa: "juridica", dataJson: { role: "fornecedor" } },
+      { orgId: org.id, nome: "Fornecedor Hidráulica Demo", cpfCnpj: "88.888.888/0001-88", tipoPessoa: "juridica", dataJson: { role: "fornecedor" } },
     ],
   });
   console.log(`[seed-staging] 2 owners + 2 fornecedores`);
@@ -186,7 +186,7 @@ async function main() {
         repasseTipo: "mes_a_vencer",
         repasseGarantido: "nao",
         emitirNfse: false,
-        tenants: { create: { tenantId: tenants[i].id, tipo: "titular" } },
+        tenants: { create: { orgId: org.id, tenantId: tenants[i].id, tipo: "titular" } },
       },
     });
     leases.push(lease);
