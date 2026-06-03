@@ -75,7 +75,10 @@ const onlyDigits = (s: string | undefined | null): string | undefined => {
 };
 
 const partyName = (p: Parte): string => {
-  return (p.nome ?? p.razao_social ?? "").trim();
+  // `||` (não `??`): PJ guarda `nome: ""` (string vazia) + `razao_social`. Com
+  // `??` o "" não cai pro razao_social → nome vazio → a PJ era DESCARTADA dos
+  // signers sem nem entrar em `missing` (sumia silenciosa do envelope). (fix 2026-06-03)
+  return (p.nome || p.razao_social || "").trim();
 };
 
 const partyDoc = (p: Parte): string | undefined => {

@@ -12,6 +12,36 @@ import {
 const reader = (values: Record<string, unknown>) => (p: string) =>
   getByPath(values, p);
 
+describe("effectiveRequiredPaths — expansão por parte (todas, não só índice 0)", () => {
+  it("expande vendedores.0.X para todos os índices existentes, com remap PJ", () => {
+    const get = reader({
+      vendedores: [{ tipo_pessoa: "fisica" }, { tipo_pessoa: "juridica" }],
+    });
+    const r = effectiveRequiredPaths(
+      ["vendedores", "vendedores.0.cpf", "vendedores.0.email"],
+      get,
+    );
+    expect(r).toContain("vendedores.0.cpf"); // PF índice 0
+    expect(r).toContain("vendedores.0.email");
+    expect(r).toContain("vendedores.1.cnpj"); // PJ índice 1: cpf→cnpj
+    expect(r).toContain("vendedores.1.email"); // e-mail vale p/ a PJ também
+    expect(r).not.toContain("vendedores.1.cpf"); // identidade remapeada
+  });
+
+  it("uma só parte → comportamento idêntico ao anterior (só índice 0)", () => {
+    const get = reader({ vendedores: [{ tipo_pessoa: "fisica" }] });
+    expect(effectiveRequiredPaths(["vendedores.0.email"], get)).toEqual([
+      "vendedores.0.email",
+    ]);
+  });
+
+  it("lista ausente → mantém a garantia do índice 0", () => {
+    expect(
+      effectiveRequiredPaths(["vendedores.0.email"], () => undefined),
+    ).toEqual(["vendedores.0.email"]);
+  });
+});
+
 describe("findCertidaoRecommendations (guarda híbrida, não-bloqueante)", () => {
   it("PF com campos de certidão vazios → recomenda rg/nascimento/nome_mae/sexo", () => {
     const get = reader({

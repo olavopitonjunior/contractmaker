@@ -1289,8 +1289,10 @@ export function planCertidoesForDeal(
               modelo: m.modelo,
               cnpj: cnpj!,
               razao_social: label,
-              // e-mail distinto por pedido → evita 604 throttle do e-SAJ
-              email_envio: aliasEmail(email, emailToken(cnpj, "tjsp", m.modelo)),
+              // e-mail distinto por pedido → evita 604 throttle do e-SAJ.
+              // kind+index no token: a MESMA pessoa em 2 papéis (ex.: PF vendedora
+              // que também é representante de PJ) não compartilha alias.
+              email_envio: aliasEmail(email, emailToken(cnpj, "tjsp", m.modelo, kind, index)),
             })
           );
         }
@@ -1317,8 +1319,9 @@ export function planCertidoesForDeal(
             rg: partyRg,
             nome_completo: label,
             genero,
-            // e-mail distinto por pedido → evita 604 throttle do e-SAJ
-            email_envio: aliasEmail(email, emailToken(cpf, "tjsp", m.modelo)),
+            // e-mail distinto por pedido → evita 604 throttle do e-SAJ.
+            // kind+index no token: mesma pessoa em 2 papéis não compartilha alias.
+            email_envio: aliasEmail(email, emailToken(cpf, "tjsp", m.modelo, kind, index)),
           };
           if (dob) base.birthdate = dob;
           if (parte.nome_mae) base.nome_mae = parte.nome_mae;
@@ -1343,7 +1346,7 @@ export function planCertidoesForDeal(
           const partyMunicipio = (spRegion.cidade || parte.cidade || "").trim();
           const base: Record<string, unknown> = {
             // e-mail distinto por pedido → evita 604 throttle do e-SAJ
-            email: aliasEmail(email, emailToken(cpf, "tjspcivel")),
+            email: aliasEmail(email, emailToken(cpf, "tjspcivel", kind, index)),
             finalidade: DEFAULT_FINALIDADE,
             instancia: 1,
             tipo_certidao: "civel",
