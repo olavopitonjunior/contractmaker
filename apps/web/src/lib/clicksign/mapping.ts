@@ -8,6 +8,13 @@ interface Conjuge {
   incluir_como_signatario?: boolean;
 }
 
+interface Representante {
+  nome?: string;
+  cpf?: string;
+  email?: string;
+  telefone?: string;
+}
+
 interface Parte {
   tipo_pessoa?: "fisica" | "juridica";
   nome?: string;
@@ -17,6 +24,8 @@ interface Parte {
   email?: string;
   telefone?: string;
   conjuge?: Conjuge;
+  // PJ: quem assina pela empresa é o representante (pessoa física com CPF).
+  representante?: Representante;
 }
 
 interface Testemunha {
@@ -96,9 +105,16 @@ export function dealDataToSigners(
 
   const collect = (sourceKind: SourceKind, partes: Parte[] | undefined) => {
     (partes ?? []).forEach((p, idx) => {
-      const name = partyName(p);
+      // 2026-06-03 — Parte PJ assina pelo REPRESENTANTE (pessoa física com CPF),
+      // não pela empresa: a ClickSign rejeita CNPJ como documentação de signer e
+      // juridicamente quem firma é o representante. Para PJ, o titular vira o
+      // representante (nome/e-mail/CPF dele); PF segue como antes.
+      const isPJ = p.tipo_pessoa === "juridica";
+      const rep = p.representante;
+      const name = isPJ ? (rep?.nome || "").trim() || partyName(p) : partyName(p);
+      const email = ((isPJ ? rep?.email ?? p.email : p.email) ?? "").trim();
+      const documentation = isPJ ? onlyDigits(rep?.cpf) : partyDoc(p);
       if (name) {
-        const email = (p.email ?? "").trim();
         if (!email) {
           missing.push({ sourceKind, sourceIndex: idx, name });
         } else {
@@ -107,8 +123,8 @@ export function dealDataToSigners(
             sourceIndex: idx,
             name,
             email,
-            documentation: partyDoc(p),
-            phone: onlyDigits(p.telefone),
+            documentation,
+            phone: onlyDigits(isPJ ? rep?.telefone ?? p.telefone : p.telefone),
             authMethod,
           });
         }

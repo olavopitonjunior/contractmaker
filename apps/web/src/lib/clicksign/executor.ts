@@ -439,11 +439,29 @@ export async function sendEnvelopeForAttachment(
   const orgId = attachment.deal.pipeline.orgId;
   if (!orgId) throw new Error("Deal sem organização vinculada");
 
-  // Bloqueia múltiplos envelopes ativos pro mesmo attachment.
+  // 2026-06-03 — Limpa drafts ÓRFÃOS (row local status=draft que nunca chegou a
+  // virar envelope na ClickSign — `clicksignId=null`; tipicamente um timeout no
+  // meio do fluxo de createEnvelopeFromBuffer). Sem isso, um draft preso BLOQUEIA
+  // qualquer reenvio do documento pra sempre (bug visto no deal Walter Santos).
+  await prisma.envelope.updateMany({
+    where: { attachmentId: attachment.id, status: "draft", clicksignId: null },
+    data: {
+      status: "failed",
+      lastError: "Draft órfão (nunca enviado à ClickSign) — limpo automaticamente",
+      canceledAt: new Date(),
+    },
+  });
+
+  // Bloqueia só envelopes GENUINAMENTE ativos pro mesmo attachment: rodando, ou
+  // draft real já criado na ClickSign (clicksignId presente). Drafts órfãos já
+  // foram limpos acima.
   const existingActive = await prisma.envelope.findFirst({
     where: {
       attachmentId: attachment.id,
-      status: { in: ["draft", "running"] },
+      OR: [
+        { status: "running" },
+        { status: "draft", clicksignId: { not: null } },
+      ],
     },
   });
   if (existingActive) {

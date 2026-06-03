@@ -38,7 +38,9 @@ describe("dealDataToSigners", () => {
     expect(v0.authMethod).toBe("email");
 
     expect(c0.sourceKind).toBe("comprador");
-    expect(c0.documentation).toBe("12345678000190");
+    // PJ sem representante → não manda o CNPJ como documentação (ClickSign
+    // rejeita CNPJ de signatário; quem assina é o representante). (2026-06-03)
+    expect(c0.documentation).toBeUndefined();
 
     expect(result.missing[0]).toEqual({
       sourceKind: "vendedor",
@@ -55,9 +57,36 @@ describe("dealDataToSigners", () => {
     expect(result.missing).toHaveLength(0);
   });
 
-  // Regressão 2026-06-03: PJ guarda `nome: ""` (string vazia) + `razao_social`.
-  // Com `??` o "" não caía pro razao_social → a PJ sumia dos signers E do missing.
-  it("PJ com nome:'' usa razao_social (não some) — com email vira signer", () => {
+  // 2026-06-03: PJ assina pelo REPRESENTANTE (pessoa física c/ CPF), não a
+  // empresa — a ClickSign rejeita CNPJ como documentação de signatário.
+  it("PJ com representante → signatário é o representante (nome/email/CPF dele)", () => {
+    const result = dealDataToSigners({
+      vendedores: [
+        {
+          tipo_pessoa: "juridica",
+          razao_social: "ND FILMES LTDA",
+          cnpj: "54.353.121/0001-46",
+          email: "contato@ndfilmes.com",
+          representante: {
+            nome: "Mateus Miranda Vieira",
+            cpf: "213.114.408-36",
+            email: "mateus@ndfilmes.com",
+          },
+        },
+      ],
+    });
+    expect(result.signers).toHaveLength(1);
+    expect(result.signers[0]).toMatchObject({
+      sourceKind: "vendedor",
+      name: "Mateus Miranda Vieira",
+      email: "mateus@ndfilmes.com",
+      documentation: "21311440836", // CPF do representante, NUNCA o CNPJ
+    });
+  });
+
+  // Regressão 2026-06-03: PJ com `nome: ""` + razao_social não some (fix `||`);
+  // sem representante, vira signer com razao_social mas SEM CNPJ na documentação.
+  it("PJ sem representante: usa razao_social e NÃO manda CNPJ como documentação", () => {
     const result = dealDataToSigners({
       vendedores: [
         {
@@ -73,8 +102,8 @@ describe("dealDataToSigners", () => {
     expect(result.signers[0]).toMatchObject({
       sourceKind: "vendedor",
       name: "ND FILMES LTDA",
-      documentation: "54353121000146",
     });
+    expect(result.signers[0].documentation).toBeUndefined(); // nunca o CNPJ
   });
 
   it("PJ com nome:'' e SEM email entra em missing (não some silenciosa)", () => {
