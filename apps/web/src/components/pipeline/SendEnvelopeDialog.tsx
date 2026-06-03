@@ -24,6 +24,12 @@ interface Conjuge {
   incluir_como_signatario?: boolean;
 }
 
+interface Representante {
+  nome?: string;
+  cpf?: string;
+  email?: string;
+}
+
 interface Parte {
   tipo_pessoa?: string;
   nome?: string;
@@ -32,6 +38,8 @@ interface Parte {
   cnpj?: string;
   email?: string;
   conjuge?: Conjuge;
+  // PJ: quem assina pela empresa é o representante (pessoa física com CPF).
+  representante?: Representante;
 }
 
 interface Testemunha {
@@ -166,14 +174,29 @@ function buildInitialRows(
     partes: Parte[]
   ) => {
     partes.forEach((p, idx) => {
+      // 2026-06-03 — Parte PJ: quem assina é o REPRESENTANTE (pessoa física com
+      // CPF), não a empresa. A ClickSign rejeita o CNPJ como documentação de
+      // signatário; e juridicamente é o representante que firma. Pré-preenche o
+      // titular com nome/e-mail/CPF do representante quando a parte é juridica.
+      const isPJ = p.tipo_pessoa === "juridica";
+      const rep = p.representante;
+      const titularName = isPJ
+        ? (rep?.nome ?? "").trim() || partyName(p)
+        : partyName(p);
+      const titularEmail = (
+        (isPJ ? rep?.email ?? p.email : p.email) ?? ""
+      ).trim();
+      const titularDoc = isPJ
+        ? (rep?.cpf ?? "").replace(/\D/g, "") // CPF do representante, nunca o CNPJ
+        : partyDoc(p);
       rows.push({
         rowId: `${sourceKind}-${idx}`,
         sourceKind,
         sourceIndex: idx,
         subKind: "titular",
-        name: partyName(p),
-        email: (p.email ?? "").trim(),
-        documentation: partyDoc(p),
+        name: titularName,
+        email: titularEmail,
+        documentation: titularDoc,
         includeInEnvelope: true,
         isOptional: false,
         addedDuringDialog: false,
