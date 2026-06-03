@@ -135,3 +135,56 @@ export function findMissingRequired(
     isValueEmpty(getValue(p)),
   );
 }
+
+// -------------------------------------------------------------------
+// Guarda HÍBRIDA de completude (2026-06-02): além da obrigatoriedade dura do
+// preset (que cobre o mínimo de assinatura — nome/cpf/email do titular), o
+// wizard mostra uma RECOMENDAÇÃO não-bloqueante destes campos PF, necessários
+// pras certidões. Sem eles, endpoints específicos falham ou viram SkippedJob:
+//   - rg   + sexo  → TJSP pedido-certidao (606 sem)
+//   - data_nascimento → TJSP / PGFN / Receita CPF
+//   - nome_mae → TJSP (alguns modelos, 606)
+// PJ não usa (campos PF-only — ver PF_ONLY_PARTY_FIELDS).
+// -------------------------------------------------------------------
+export const CERTIDAO_RECOMMENDED_PARTY_FIELDS = [
+  "rg",
+  "data_nascimento",
+  "nome_mae",
+  "sexo",
+] as const;
+
+export const CERTIDAO_FIELD_LABELS: Record<string, string> = {
+  rg: "RG",
+  data_nascimento: "Data de nascimento",
+  nome_mae: "Nome da mãe",
+  sexo: "Sexo",
+};
+
+export interface CertidaoRecommendation {
+  list: "vendedores" | "compradores";
+  idx: number;
+  field: string;
+}
+
+/**
+ * Recomendações (não-bloqueantes) de campos de certidão vazios para as partes
+ * PF de uma lista. PJ é ignorado. NÃO entra na obrigatoriedade do preset —
+ * alimenta apenas o aviso informativo do wizard.
+ */
+export function findCertidaoRecommendations(
+  list: "vendedores" | "compradores",
+  count: number,
+  getValue: (path: string) => unknown,
+): CertidaoRecommendation[] {
+  const out: CertidaoRecommendation[] = [];
+  for (let idx = 0; idx < count; idx++) {
+    const isPJ = getValue(`${list}.${idx}.tipo_pessoa`) === "juridica";
+    if (isPJ) continue;
+    for (const field of CERTIDAO_RECOMMENDED_PARTY_FIELDS) {
+      if (isValueEmpty(getValue(`${list}.${idx}.${field}`))) {
+        out.push({ list, idx, field });
+      }
+    }
+  }
+  return out;
+}

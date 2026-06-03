@@ -1203,14 +1203,26 @@ export async function pollPortalJob(jobId: string): Promise<void> {
   const numeroPedido = stored.numero_pedido as string | undefined;
   const pedidoDataDate = stored.pedido_data as string | undefined;
   if (!numeroPedido) {
+    // Defensivo: o pedido two-step não gravou protocolo (campo do portal não
+    // casou com a extração). Antes virava o terminal legado `failed` — beco sem
+    // saída, sem CTA. Vira `failed_permanent` + portalUrl pra dar ao operador o
+    // caminho manual. (fix 2026-06-02; ver também o emit de antecedentes, que
+    // deixou de ser two-step.)
     await prisma.certidaoJob.update({
       where: { id: jobId },
       data: {
-        status: "failed",
+        status: "failed_permanent",
         finishedAt: new Date(),
-        errorMessage: "numero_pedido ausente no job pedido",
+        errorMessage:
+          "Protocolo do pedido não retornado pelo portal — emita pelo portal oficial",
+        portalUrl: job.portalUrl ?? null,
       },
     });
+    logTransition(jobId, "awaiting_portal", "failed_permanent", "protocolo ausente no pedido two-step", {
+      endpoint: job.endpoint,
+    });
+    await reportCertidaoProblem(job, "protocolo do pedido não retornado pelo portal");
+    await checkBatchCompletion(job.batchId);
     return;
   }
 

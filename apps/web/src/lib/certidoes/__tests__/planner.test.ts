@@ -154,6 +154,38 @@ describe("planCertidoesForDeal — dados completos (PF SP + PF RJ + imovel SP)",
   });
 });
 
+describe("planCertidoesForDeal — TJSP e-mail distinto por pedido (anti-604)", () => {
+  // PF SP COM rg + sexo → pedido-certidao em 2 modelos (4 + 1). Cada pedido
+  // precisa de um email_envio ÚNICO senão o e-SAJ recusa com 604 "mesmo email".
+  const plan = planCertidoesForDeal({
+    vendedores: [{ ...VENDEDOR_PF_SP, rg: "12345678", sexo: "F" }],
+    compradores: [],
+    imoveis: [],
+  });
+
+  it("gera 2 pedidos pedido-certidao para a PF com RG", () => {
+    const cert = plan.jobs.filter(
+      (j) =>
+        j.endpoint === "tribunal/tjsp/pedido-certidao" &&
+        j.targetKind === "vendedor"
+    );
+    expect(cert.length).toBe(2);
+  });
+
+  it("os 2 pedidos têm email_envio DISTINTO e em formato plus-alias", () => {
+    const cert = plan.jobs.filter(
+      (j) =>
+        j.endpoint === "tribunal/tjsp/pedido-certidao" &&
+        j.targetKind === "vendedor"
+    );
+    const emails = cert.map((j) => j.requestPayload.email_envio as string);
+    expect(new Set(emails).size).toBe(emails.length); // todos distintos
+    emails.forEach((e) => {
+      expect(e).toMatch(/^[^@\s]+\+[a-z0-9]+@[^@\s]+$/i); // local+token@dominio
+    });
+  });
+});
+
 describe("planCertidoesForDeal — dados faltando", () => {
   it("PF sem data_nascimento -> PGFN vai para skipped", () => {
     const plan = planCertidoesForDeal({

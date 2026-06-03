@@ -129,6 +129,46 @@ export function isEmailThrottle(message: string | null | undefined): boolean {
 }
 
 /**
+ * 2026-06-02 — Alguns códigos mapeados como "dado" (notadamente o 609) chegam,
+ * na prática, com uma mensagem que é INDISPONIBILIDADE TRANSITÓRIA do portal
+ * ("Tentativas de consultar o site ou aplicativo de origem excedidas", "site
+ * indisponível", "sobrecarregado", "instabilidade na fonte"). Sem distinguir,
+ * o 609 caía em inconsistent_input → data_invalid ("corrija os dados") SEM
+ * retry, quando o correto é portal_unavailable (retry automático). Este gate é
+ * aplicado ANTES do CODE_MAP em mapInfosimplesCodeToCategory.
+ *
+ * NÃO casa com erros de dado genuínos ("não conferem com o CPF", "parâmetros
+ * obrigatórios", "CPF inválido") — esses continuam missing/inconsistent_input.
+ */
+export function isPortalUnavailableMessage(
+  message: string | null | undefined
+): boolean {
+  if (!message) return false;
+  return /tentativas\s+de\s+consultar.*(excedidas|esgotadas)|site\s+ou\s+aplicativo\s+de\s+origem.*(indispon[ií]vel|sobrecarregad|fora\s+do\s+ar)|sobrecarregad[oa]|inst[aá]vel|instabilidade\s+na\s+fonte|api\s+foi\s+pausada/i.test(
+    message
+  );
+}
+
+/**
+ * 2026-06-02 — Receita Federal / PGFN responde 611 "As informações disponíveis
+ * na Receita Federal sobre o contribuinte ... são insuficientes para emitir a
+ * certidão pela Internet." Isso NÃO é erro nosso nem "nada consta": é a própria
+ * RFB recusando a emissão ONLINE (situação cadastral não-regular / pendência que
+ * exige balcão). O JSON cru confirma: data=[], sem PDF, billable=true, e o mesmo
+ * payload emite normalmente para outros CPFs. Tratar como NÃO-EMISSÃO → portal
+ * oficial (failed_permanent + portalUrl), nunca como data_invalid ("corrija os
+ * dados"). Gate na frase específica da RFB.
+ */
+export function isReceitaCertidaoNaoEmitida(
+  message: string | null | undefined
+): boolean {
+  if (!message) return false;
+  return /insuficientes?\s+para\s+emitir\s+a\s+certid[ãa]o\s+pela\s+internet/i.test(
+    message
+  );
+}
+
+/**
  * Infosimples retorna code 603 em DOIS cenários muito diferentes:
  *   1. "A conta está sem saldo" / "limite de uso" — esgotamento de CRÉDITO da
  *      conta, afeta TODAS as consultas → deve tripar o circuit breaker da org.
@@ -157,6 +197,10 @@ export function mapInfosimplesCodeToCategory(
   if (code === 200) return "unknown"; // shouldn't be called for success
   // 604 do throttle de e-mail (e-SAJ pedido-certidao) é transitório, não conta.
   if (code === 604 && isEmailThrottle(codeMessage)) return "rate_limited";
+  // Indisponibilidade de portal pela MENSAGEM, antes do CODE_MAP: pega o 609
+  // "tentativas excedidas" (e similares) que o catálogo mapeia como dado, mas
+  // que é transitório e deve dar retry. Ver isPortalUnavailableMessage.
+  if (isPortalUnavailableMessage(codeMessage)) return "portal_unavailable";
   if (code in CODE_MAP) return CODE_MAP[code];
 
   // Message heuristics fire for unmapped codes
