@@ -28,6 +28,7 @@ import {
   isProtestoNadaConsta,
   isSemResultadoInformativo,
   isEmailThrottle,
+  isReceitaCertidaoNaoEmitida,
 } from "./error-codes";
 
 export type RichStatus =
@@ -233,6 +234,33 @@ export function classifyOutcome(
       status: "success",
       errorMessage: null,
       failureCategory: null,
+      costCents: billable === false ? 0 : chargedCostCents,
+      nextRetryAt: null,
+      missingFields: [],
+      portalUrl,
+    };
+  }
+
+  // Receita Federal / PGFN "informações insuficientes para emitir a certidão
+  // pela Internet" (tipicamente 611): NÃO é erro nosso nem "nada consta" — é a
+  // RFB recusando a emissão ONLINE (situação cadastral/pendência). Tratar como
+  // NÃO-EMISSÃO terminal → portal oficial. Custo honesto (RFB cobra: respeita
+  // billable). Sem isto, caía em inconsistent_input → data_invalid ("corrija os
+  // dados"), enganoso pois não há dado nosso a corrigir. Decisão 2026-06-02.
+  if (
+    (info.id.includes("pgfn") || info.id.includes("receita")) &&
+    (isReceitaCertidaoNaoEmitida(effectiveErrorMessage) ||
+      isReceitaCertidaoNaoEmitida(resp.code_message))
+  ) {
+    return {
+      status: "failed_permanent",
+      errorMessage:
+        "A Receita Federal não emite esta certidão pela Internet para este contribuinte (situação cadastral ou pendência). Emita no portal oficial.",
+      // provedor/condição da fonte — não é bug nosso (integração) nem dado do
+      // form a corrigir (inconsistent_input). genuine_no_data fica no grupo
+      // "provedor" do FAILURE_GROUP; aqui só alimenta analytics (retornamos
+      // failed_permanent direto, sem passar pelo switch de categoria).
+      failureCategory: "genuine_no_data",
       costCents: billable === false ? 0 : chargedCostCents,
       nextRetryAt: null,
       missingFields: [],

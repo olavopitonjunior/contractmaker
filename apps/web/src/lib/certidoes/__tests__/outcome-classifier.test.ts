@@ -423,6 +423,49 @@ describe("classifyOutcome — Phase J", () => {
     expect(out.status).not.toBe("success");
     expect(out.status).toBe("portal_unavailable");
   });
+
+  // 2026-06-02 — Receita/PGFN 611 "insuficientes para emitir pela Internet":
+  // RFB não emite ONLINE (não é erro nosso, provado por payload idêntico que
+  // emite p/ outros CPFs). Vira não-emissão terminal → portal, NÃO data_invalid.
+  const pgfnEndpoint: EndpointInfo = {
+    id: "receita-federal/pgfn",
+    label: "CND Federal + Divida Ativa",
+    costCents: 4,
+    scope: "federal",
+    appliesTo: ["pessoa"],
+    category: "federal",
+    portalUrl: "https://servicos.receitafederal.gov.br/servico/certidoes",
+  };
+
+  it("PGFN 611 'insuficientes para emitir pela Internet' → failed_permanent + portal (não data_invalid)", () => {
+    const resp = {
+      code: 611,
+      code_message:
+        "Os dados estão incompletos no site ou aplicativo de origem e não puderam ser retornados.",
+      errors: [
+        "As informações disponíveis na Receita Federal sobre o contribuinte 302.326.708-11 são insuficientes para emitir a certidão pela Internet.",
+      ],
+      data: [],
+      header: { billable: true },
+    } as unknown as InfosimplesResponse;
+    // normalizer real consolida errors[] + code_message em detalhes
+    const norm = {
+      ...normEmpty,
+      situacao: "nao_emitida" as const,
+      failureCategory: "inconsistent_input" as const,
+      detalhes:
+        "As informações disponíveis na Receita Federal sobre o contribuinte 302.326.708-11 são insuficientes para emitir a certidão pela Internet. (Os dados estão incompletos no site ou aplicativo de origem e não puderam ser retornados.)",
+    };
+    const out = classifyOutcome(resp, norm, pgfnEndpoint, opts);
+    expect(out.status).toBe("failed_permanent");
+    expect(out.status).not.toBe("data_invalid");
+    expect(out.portalUrl).toBe(
+      "https://servicos.receitafederal.gov.br/servico/certidoes"
+    );
+    expect(out.errorMessage).toMatch(/não emite/i);
+    expect(out.nextRetryAt).toBeNull();
+    expect(out.costCents).toBe(4); // RFB cobrou (billable) — custo honesto
+  });
 });
 
 describe("classifyOutcome — TJSP email throttle (604) — espaçar retries", () => {

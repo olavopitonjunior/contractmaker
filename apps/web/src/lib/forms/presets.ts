@@ -46,12 +46,18 @@ const PRESET_MINIMO: readonly (readonly string[])[] = [
 
 // Padrão para orgs novas: + endereço completo das partes + estado_civil + email.
 // A regra "cônjuge obrigatório se casado" vem do superRefine, não daqui.
+// 2026-06-02 — `email` do titular passou a ser OBRIGATÓRIO (hard): é o que a
+// ClickSign exige por signatário (sem e-mail, dealDataToSigners joga a parte em
+// `missing` e ela não assina). Os campos de certidão (rg/nascimento/nome_mae/
+// sexo) seguem como RECOMENDAÇÃO não-bloqueante — ver
+// CERTIDAO_RECOMMENDED_PARTY_FIELDS em party-required.ts (guarda híbrida).
 const PRESET_PADRAO: readonly (readonly string[])[] = [
   [],
   [
     "vendedores",
     "vendedores.0.cpf",
     "vendedores.0.estado_civil",
+    "vendedores.0.email",
     "vendedores.0.endereco",
     "vendedores.0.cidade",
     "vendedores.0.uf",
@@ -60,6 +66,7 @@ const PRESET_PADRAO: readonly (readonly string[])[] = [
     "compradores",
     "compradores.0.cpf",
     "compradores.0.estado_civil",
+    "compradores.0.email",
     "compradores.0.endereco",
     "compradores.0.cidade",
     "compradores.0.uf",
@@ -70,8 +77,11 @@ const PRESET_PADRAO: readonly (readonly string[])[] = [
   [],
 ] as const;
 
-// Completo: + RG, data_nascimento, nome_mae, naturalidade.
+// Completo: + RG, data_nascimento, nome_mae, sexo, naturalidade.
 // Necessários por TJSP/PGFN/Antecedentes PF (Phase H 2026-04-18).
+// 2026-06-02 — `sexo` adicionado: TJSP pedido-certidao exige `genero` p/ PF
+// (606 sem); sem ele a Certidão de Distribuição vira SkippedJob "complete o
+// sexo". Ver sexoToGenero/planner.ts.
 const PRESET_COMPLETO: readonly (readonly string[])[] = [
   [],
   [
@@ -80,6 +90,7 @@ const PRESET_COMPLETO: readonly (readonly string[])[] = [
     "vendedores.0.rg",
     "vendedores.0.data_nascimento",
     "vendedores.0.nome_mae",
+    "vendedores.0.sexo",
     "vendedores.0.estado_civil",
     "vendedores.0.profissao",
     "vendedores.0.email",
@@ -94,6 +105,7 @@ const PRESET_COMPLETO: readonly (readonly string[])[] = [
     "compradores.0.rg",
     "compradores.0.data_nascimento",
     "compradores.0.nome_mae",
+    "compradores.0.sexo",
     "compradores.0.estado_civil",
     "compradores.0.profissao",
     "compradores.0.email",

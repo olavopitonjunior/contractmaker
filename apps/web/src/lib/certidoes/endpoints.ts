@@ -658,7 +658,12 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     id: "antecedentes-criminais/pf/emit",
     label: "Antecedentes Criminais (PF)",
     costCents: 6,
-    twoStep: true,
+    // NÃO é two-step: o `emit` a 200 já devolve o resultado (nada_consta/
+    // resultado/data_emissao + PDF em site_receipts) — o extractor lê direto
+    // (normalizers.ts antecedentesPfExtractor). Marcar twoStep fazia o 200 cair
+    // no fluxo de pedido (espera `numero_pedido`, que o emit NÃO retorna) →
+    // pollPortalJob morria em status:"failed". O `val` é só validação de código,
+    // dispensável para obter a certidão. (fix 2026-06-02)
     scope: "federal",
     appliesTo: ["pessoa"],
     category: "civel",

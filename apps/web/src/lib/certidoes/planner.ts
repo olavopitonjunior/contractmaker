@@ -332,6 +332,36 @@ function isValidEmail(e: string | undefined | null): e is string {
   return typeof e === "string" && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e.trim());
 }
 
+/**
+ * 2026-06-02 — e-SAJ (TJSP `pedido-certidao`) recusa com code 604 "mesmo email
+ * múltiplas vezes num intervalo curto" quando vários pedidos do mesmo lote usam
+ * o MESMO `email_envio`. Cada PF/PJ gera 2 pedidos (modelo 4 + 1), e com várias
+ * partes isso colide. Solução: dar um `email_envio` ÚNICO por pedido via
+ * plus-alias (`local+token@dominio`). O e-SAJ valida só a entregabilidade (MX),
+ * e o plus-alias preserva o MX (entrega na mesma caixa do operador → não toma
+ * 608), mas o servidor vê endereços distintos → sem 604. Token determinístico
+ * (sem Math.random) por (documento, contexto, modelo) mantém estável entre
+ * re-planejamentos. Ver docs/certidoes-known-issues.md (TJSP).
+ */
+function emailToken(...parts: Array<string | number | undefined | null>): string {
+  const s = parts.filter((p) => p !== undefined && p !== null && p !== "").join("|");
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
+
+function aliasEmail(base: string, token: string): string {
+  const at = base.indexOf("@");
+  const safe = token.replace(/[^a-z0-9]/gi, "").slice(0, 24).toLowerCase();
+  if (at < 0 || !safe) return base;
+  const local = base.slice(0, at).split("+")[0]; // descarta +alias pré-existente
+  const domain = base.slice(at + 1);
+  return `${local}+${safe}@${domain}`;
+}
+
 function onlyDigits(s: string | undefined | null): string {
   return typeof s === "string" ? s.replace(/\D/g, "") : "";
 }
@@ -1259,7 +1289,8 @@ export function planCertidoesForDeal(
               modelo: m.modelo,
               cnpj: cnpj!,
               razao_social: label,
-              email_envio: email,
+              // e-mail distinto por pedido → evita 604 throttle do e-SAJ
+              email_envio: aliasEmail(email, emailToken(cnpj, "tjsp", m.modelo)),
             })
           );
         }
@@ -1286,7 +1317,8 @@ export function planCertidoesForDeal(
             rg: partyRg,
             nome_completo: label,
             genero,
-            email_envio: email,
+            // e-mail distinto por pedido → evita 604 throttle do e-SAJ
+            email_envio: aliasEmail(email, emailToken(cpf, "tjsp", m.modelo)),
           };
           if (dob) base.birthdate = dob;
           if (parte.nome_mae) base.nome_mae = parte.nome_mae;
@@ -1310,7 +1342,8 @@ export function planCertidoesForDeal(
           const spRegion = tjRegionFor("SP");
           const partyMunicipio = (spRegion.cidade || parte.cidade || "").trim();
           const base: Record<string, unknown> = {
-            email,
+            // e-mail distinto por pedido → evita 604 throttle do e-SAJ
+            email: aliasEmail(email, emailToken(cpf, "tjspcivel")),
             finalidade: DEFAULT_FINALIDADE,
             instancia: 1,
             tipo_certidao: "civel",

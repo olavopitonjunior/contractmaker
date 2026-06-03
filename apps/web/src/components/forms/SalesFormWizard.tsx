@@ -13,6 +13,8 @@ import { collectPartyFormatIssues } from "@/lib/forms/field-formats";
 import {
   effectiveRequiredPaths,
   findMissingRequired,
+  findCertidaoRecommendations,
+  CERTIDAO_FIELD_LABELS,
   isValueEmpty,
   getByPath,
 } from "@/lib/forms/party-required";
@@ -475,6 +477,33 @@ export function SalesFormWizard({
     isValueEmpty(readValue(p)),
   ).length;
 
+  // Guarda HÍBRIDA: nas etapas de parte (1=vendedor, 2=comprador), recomenda
+  // (sem bloquear) os campos PF que as certidões precisam. O preset já cobre o
+  // mínimo de assinatura (email/cpf); aqui é só aviso pra não travar TJSP/
+  // Receita/Antecedentes depois. Agrupado por parte.
+  const certRecoList: "vendedores" | "compradores" | null =
+    currentTrueIndex === 1
+      ? "vendedores"
+      : currentTrueIndex === 2
+        ? "compradores"
+        : null;
+  const certRecommendations = certRecoList
+    ? findCertidaoRecommendations(
+        certRecoList,
+        ((readValue(certRecoList) as unknown[]) ?? []).length,
+        readValue,
+      )
+    : [];
+  const certRecoByParty = new Map<number, string[]>();
+  for (const r of certRecommendations) {
+    const arr = certRecoByParty.get(r.idx) ?? [];
+    arr.push(CERTIDAO_FIELD_LABELS[r.field] ?? r.field);
+    certRecoByParty.set(r.idx, arr);
+  }
+  const certRecoPartyLabel =
+    certRecoList === "vendedores" ? "Vendedor" : "Comprador";
+  const certRecoMultiple = ((readValue(certRecoList ?? "") as unknown[]) ?? []).length > 1;
+
   /**
    * Navega para o step target. Pra forward (target > current), revalida cada
    * step intermediário; primeiro fail interrompe e pousa o usuário no step
@@ -772,6 +801,34 @@ export function SalesFormWizard({
         visible={Boolean(prefilled) || failedTriggerCount > 0}
         trigger={failedTriggerCount}
       />
+
+      {/* Recomendação NÃO-bloqueante de campos de certidão (guarda híbrida).
+          Não impede finalizar — só avisa que sem eles as certidões do TJSP/
+          Receita/Antecedentes podem não ser emitidas. */}
+      {certRecoByParty.size > 0 && (
+        <div className="mb-4 rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 dark:border-sky-800 dark:bg-sky-950/40">
+          <p className="text-sm font-medium text-sky-900 dark:text-sky-200">
+            Recomendado para as certidões
+          </p>
+          <p className="mt-0.5 text-xs text-sky-800/80 dark:text-sky-300/80">
+            Não é obrigatório para gerar o contrato, mas sem estes dados algumas
+            certidões (TJSP, Receita Federal, Antecedentes) não podem ser
+            emitidas:
+          </p>
+          <ul className="mt-2 space-y-0.5 text-xs text-sky-900 dark:text-sky-200">
+            {Array.from(certRecoByParty.entries()).map(([idx, fields]) => (
+              <li key={idx}>
+                {certRecoMultiple ? (
+                  <span className="font-medium">
+                    {certRecoPartyLabel} {idx + 1}:{" "}
+                  </span>
+                ) : null}
+                {fields.join(", ")}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {/* Voice input — só nos steps que têm schema mapeado em voice-extract.ts */}
       {STEPS_WITH_VOICE.has(currentTrueIndex) && (
