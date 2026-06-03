@@ -184,6 +184,23 @@ describe("planCertidoesForDeal — TJSP e-mail distinto por pedido (anti-604)", 
       expect(e).toMatch(/^[^@\s]+\+[a-z0-9]+@[^@\s]+$/i); // local+token@dominio
     });
   });
+
+  // Edge-case 2026-06-03: a MESMA pessoa (mesmo CPF) em índices/papéis distintos
+  // (ex.: PF vendedora que também representa uma PJ) não pode compartilhar alias
+  // — o token inclui targetKind+índice. Aqui simulamos o mesmo CPF em 2 índices.
+  it("mesmo CPF em índices diferentes → aliases TODOS distintos (sem colisão)", () => {
+    const dup = { ...VENDEDOR_PF_SP, rg: "12345678", sexo: "F" };
+    const p = planCertidoesForDeal({
+      vendedores: [dup, dup],
+      compradores: [],
+      imoveis: [],
+    });
+    const emails = p.jobs
+      .filter((j) => j.endpoint === "tribunal/tjsp/pedido-certidao")
+      .map((j) => j.requestPayload.email_envio as string);
+    expect(emails.length).toBe(4); // 2 partes × 2 modelos
+    expect(new Set(emails).size).toBe(4); // todos distintos, apesar do mesmo CPF
+  });
 });
 
 describe("planCertidoesForDeal — dados faltando", () => {

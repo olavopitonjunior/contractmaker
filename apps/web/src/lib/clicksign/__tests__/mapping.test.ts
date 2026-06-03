@@ -55,6 +55,46 @@ describe("dealDataToSigners", () => {
     expect(result.missing).toHaveLength(0);
   });
 
+  // Regressão 2026-06-03: PJ guarda `nome: ""` (string vazia) + `razao_social`.
+  // Com `??` o "" não caía pro razao_social → a PJ sumia dos signers E do missing.
+  it("PJ com nome:'' usa razao_social (não some) — com email vira signer", () => {
+    const result = dealDataToSigners({
+      vendedores: [
+        {
+          tipo_pessoa: "juridica",
+          nome: "",
+          razao_social: "ND FILMES LTDA",
+          cnpj: "54.353.121/0001-46",
+          email: "contato@ndfilmes.com",
+        },
+      ],
+    });
+    expect(result.signers).toHaveLength(1);
+    expect(result.signers[0]).toMatchObject({
+      sourceKind: "vendedor",
+      name: "ND FILMES LTDA",
+      documentation: "54353121000146",
+    });
+  });
+
+  it("PJ com nome:'' e SEM email entra em missing (não some silenciosa)", () => {
+    const result = dealDataToSigners({
+      vendedores: [
+        {
+          tipo_pessoa: "juridica",
+          nome: "",
+          razao_social: "ND FILMES LTDA",
+          cnpj: "54.353.121/0001-46",
+          email: "",
+        },
+      ],
+    });
+    expect(result.signers).toHaveLength(0);
+    expect(result.missing).toEqual([
+      { sourceKind: "vendedor", sourceIndex: 0, name: "ND FILMES LTDA" },
+    ]);
+  });
+
   it("aceita data vazia sem crash", () => {
     expect(dealDataToSigners(null).signers).toHaveLength(0);
     expect(dealDataToSigners(undefined).signers).toHaveLength(0);

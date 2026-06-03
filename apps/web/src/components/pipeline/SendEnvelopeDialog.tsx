@@ -128,7 +128,9 @@ const COST_PER_SIGNER_CENTS = 150;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function partyName(p: Parte): string {
-  return (p.nome ?? p.razao_social ?? "").trim();
+  // `||` (não `??`): PJ com `nome: ""` + `razao_social` — o "" não cairia pro
+  // razao_social com `??`, sumindo a PJ da lista de signatários. (fix 2026-06-03)
+  return (p.nome || p.razao_social || "").trim();
 }
 
 function partyDoc(p: Parte): string {
