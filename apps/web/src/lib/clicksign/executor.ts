@@ -12,7 +12,7 @@ import {
   type ClicksignRole,
 } from "./envelopes";
 import { ClicksignError } from "./client";
-import { dealDataToSigners } from "./mapping";
+import { dealDataToSigners, leaseDataToSigners } from "./mapping";
 import {
   CLICKSIGN_COST_CENTS,
   envelopeCostCents,
@@ -51,7 +51,14 @@ export class MissingEmailsError extends Error {
  *  subKind). Fallback pro defaultRoleForSourceKind quando signer não
  *  tem override. */
 export interface SignerRoleOverride {
-  sourceKind: "vendedor" | "comprador" | "testemunha" | "corretora";
+  sourceKind:
+    | "vendedor"
+    | "comprador"
+    | "testemunha"
+    | "corretora"
+    | "locador"
+    | "locatario"
+    | "fiador";
   sourceIndex: number;
   subKind?: "titular" | "conjuge";
   role: ClicksignRole;
@@ -343,7 +350,7 @@ export async function sendEnvelopeForContract(input: SendEnvelopeInput) {
   const contract = await prisma.contract.findUnique({
     where: { id: input.contractId },
     include: {
-      deal: { include: { pipeline: { select: { orgId: true } } } },
+      deal: { include: { pipeline: { select: { orgId: true, kind: true } } } },
     },
   });
   if (!contract) throw new Error("Contrato não encontrado");
@@ -367,7 +374,12 @@ export async function sendEnvelopeForContract(input: SendEnvelopeInput) {
 
   const dataSource =
     (contract.dataJson as Record<string, unknown> | null) ?? null;
-  const { signers, missing } = dealDataToSigners(dataSource, authMethod);
+  // Roteia o mapeamento de signatários por tipo de pipeline: locação usa as
+  // partes locador/locatário/fiador; venda mantém vendedor/comprador/etc.
+  const { signers, missing } =
+    contract.deal?.pipeline?.kind === "locacao"
+      ? leaseDataToSigners(dataSource, authMethod)
+      : dealDataToSigners(dataSource, authMethod);
   if (missing.length > 0) throw new MissingEmailsError(missing);
 
   const { buffer: pdfBuffer, filename } = await generateContractPdfBuffer(
@@ -536,6 +548,14 @@ function defaultRoleForSourceKind(sourceKind: string): ClicksignRole {
       return "witness";
     case "corretora":
       return "intervening";
+    // Locação — usar só qualificações já existentes no enum ClicksignRole
+    // (role desconhecido → 422 na ClickSign).
+    case "locador":
+      return "party";
+    case "locatario":
+      return "party";
+    case "fiador":
+      return "consenting";
     default:
       return "sign";
   }

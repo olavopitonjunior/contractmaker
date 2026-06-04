@@ -242,6 +242,12 @@ OCR_WORKER_CONCURRENCY=2
 OCR_WORKER_MAX_PER_RUN=20
 OCR_WORKER_PACE_MS=500
 
+# Módulo único de locação simplificado (form → contrato → assinatura).
+# Esconde as superfícies de administração e enxuga a navegação. As duas
+# precisam estar setadas; NEXT_PUBLIC_* é inlined no build (exige redeploy).
+LOCACAO_SIMPLIFIED_MODE=true
+NEXT_PUBLIC_LOCACAO_SIMPLIFIED_MODE=true
+
 # Observability
 SENTRY_DSN=<staging passo 11>
 SENTRY_ENVIRONMENT=staging

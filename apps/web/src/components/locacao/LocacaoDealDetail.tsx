@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ContractEditorPage } from "@/components/contracts/ContractEditorPage";
 import { AddDocumentsCard } from "@/components/pipeline/AddDocumentsCard";
+import { LeaseSignaturesTab } from "@/components/locacao/LeaseSignaturesTab";
 import { Field } from "@/components/locacao/lease-detail/LeaseSection";
 import { FileText, ExternalLink, ShieldCheck, ClipboardCheck, Umbrella, Receipt } from "lucide-react";
 import { toast } from "sonner";
@@ -46,12 +47,15 @@ interface LocacaoDealDetailProps {
   contract: ContractProp | null;
   versions: VersionsProp;
   lease: LeaseProp | null;
+  /** Modo simplificado (LOCACAO_SIMPLIFIED_MODE): mostra só Contrato,
+   *  Documentos e Assinaturas; esconde as abas de administração. */
+  simplified?: boolean;
 }
 
 const BRL = (v: number) =>
   v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
-export function LocacaoDealDetail({ deal, contract, versions, lease }: LocacaoDealDetailProps) {
+export function LocacaoDealDetail({ deal, contract, versions, lease, simplified = false }: LocacaoDealDetailProps) {
   const router = useRouter();
   const [tab, setTab] = useState("contrato");
   const [activating, setActivating] = useState(false);
@@ -99,10 +103,11 @@ export function LocacaoDealDetail({ deal, contract, versions, lease }: LocacaoDe
         <TabsList className="flex-wrap">
           <TabsTrigger value="contrato">Contrato</TabsTrigger>
           <TabsTrigger value="documentos">Documentos</TabsTrigger>
-          <TabsTrigger value="garantias">Garantias</TabsTrigger>
-          <TabsTrigger value="vistoria">Vistoria</TabsTrigger>
-          <TabsTrigger value="seguros">Seguros</TabsTrigger>
-          <TabsTrigger value="cobranca">Cobrança</TabsTrigger>
+          <TabsTrigger value="assinaturas">Assinaturas</TabsTrigger>
+          {!simplified && <TabsTrigger value="garantias">Garantias</TabsTrigger>}
+          {!simplified && <TabsTrigger value="vistoria">Vistoria</TabsTrigger>}
+          {!simplified && <TabsTrigger value="seguros">Seguros</TabsTrigger>}
+          {!simplified && <TabsTrigger value="cobranca">Cobrança</TabsTrigger>}
         </TabsList>
 
         {/* CONTRATO — editor Google Docs + agente de IA (especializado em locação) */}
@@ -161,6 +166,22 @@ export function LocacaoDealDetail({ deal, contract, versions, lease }: LocacaoDe
             </CardContent>
           </Card>
           <AddDocumentsCard dealId={deal.id} onUploaded={() => router.refresh()} />
+        </TabsContent>
+
+        {/* ASSINATURAS — envia o contrato aprovado pra ClickSign (igual venda) */}
+        <TabsContent value="assinaturas" className="mt-4">
+          {contract ? (
+            <LeaseSignaturesTab
+              contractId={contract.id}
+              contractStatus={contract.status}
+            />
+          ) : (
+            <Card>
+              <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                Gere o contrato primeiro para habilitar o envio para assinatura.
+              </CardContent>
+            </Card>
+          )}
         </TabsContent>
 
         {/* GARANTIAS */}

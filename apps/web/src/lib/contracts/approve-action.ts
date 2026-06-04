@@ -207,8 +207,15 @@ export async function runContractApproval(
       },
     });
     if (deal?.pipeline) {
+      // Nome do stage de assinatura difere por tipo de pipeline: venda usa
+      // "Enviado para assinatura", locação usa "Em Assinatura". Fallback p/
+      // venda quando kind ausente — não regride o fluxo existente.
+      const assinaturaStageName =
+        deal.pipeline.kind === "locacao"
+          ? "Em Assinatura"
+          : "Enviado para assinatura";
       const assinaturaStage = deal.pipeline.stages.find(
-        (s) => s.name === "Enviado para assinatura"
+        (s) => s.name === assinaturaStageName
       );
       if (assinaturaStage) {
         await prisma.deal.update({

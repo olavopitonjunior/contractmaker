@@ -11,6 +11,16 @@ export const VERCEL_ENV = process.env.VERCEL_ENV;
 export const ENV_LABEL = STAGING_MODE ? "STAGING" : "PROD";
 
 /**
+ * Modo "módulo único de locação simplificado" — usado em staging pra exercitar
+ * só o fluxo form → contrato → assinatura, escondendo as superfícies de
+ * administração (imóveis, cobranças, repasses, vistorias, seguros, etc.).
+ * Server-side; o espelho client é `NEXT_PUBLIC_LOCACAO_SIMPLIFIED_MODE`
+ * (ver lib/env/flags.ts). Compute-once no boot.
+ */
+export const LOCACAO_SIMPLIFIED_MODE =
+  process.env.LOCACAO_SIMPLIFIED_MODE === "true";
+
+/**
  * Allowlist default de crons que podem rodar em staging (apenas DB-only,
  * sem custo externo). Crons sensíveis (Asaas transfer, certidões portal,
  * cobrança recorrente) ficam OFF e só ligam via UI runtime.

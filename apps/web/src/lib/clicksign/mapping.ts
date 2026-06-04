@@ -197,3 +197,128 @@ export function dealDataToSigners(
 export function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
+
+// ============================================================================
+// Locação — mapeamento de signatários (locador / locatário / fiador).
+//
+// Separado de `dealDataToSigners` (venda) de propósito: a estrutura do dataJson
+// de locação é diferente (telefone em `mobile_phone`; PJ assina pelo
+// `representante`, não pela razão social) e o roteamento é por `pipeline.kind`
+// no executor. Ver apps/web/src/lib/forms/validation-locacao.ts.
+// ============================================================================
+
+interface LeaseRepresentante {
+  nome?: string;
+  cpf?: string;
+  email?: string;
+  mobile_phone?: string;
+}
+
+interface LeaseParte {
+  tipo_pessoa?: "fisica" | "juridica";
+  nome?: string;
+  razao_social?: string;
+  cpf?: string;
+  cnpj?: string;
+  email?: string;
+  mobile_phone?: string;
+  telefone?: string;
+  representante?: LeaseRepresentante;
+  incluir_como_signatario?: boolean;
+}
+
+interface LeaseData {
+  locadores?: LeaseParte[];
+  locatarios?: LeaseParte[];
+  garantia?: { tipo?: string; fiador?: LeaseParte };
+}
+
+/**
+ * Resolve o signatário real de uma parte de locação. Em PJ, quem assina é o
+ * representante legal (a PJ titular não tem CPF/e-mail próprios pra assinar),
+ * então extraímos nome/e-mail/CPF dele; o CNPJ vira fallback de documentação.
+ */
+function resolveLeaseSigner(p: LeaseParte): {
+  name: string;
+  email: string;
+  documentation?: string;
+  phone?: string;
+} {
+  if (p.tipo_pessoa === "juridica") {
+    const rep = p.representante ?? {};
+    return {
+      name: (rep.nome ?? "").trim(),
+      email: (rep.email ?? "").trim(),
+      documentation: onlyDigits(rep.cpf) ?? onlyDigits(p.cnpj),
+      phone: onlyDigits(rep.mobile_phone),
+    };
+  }
+  return {
+    name: (p.nome ?? "").trim(),
+    email: (p.email ?? "").trim(),
+    documentation: onlyDigits(p.cpf),
+    phone: onlyDigits(p.mobile_phone ?? p.telefone),
+  };
+}
+
+export function leaseDataToSigners(
+  dataJson: unknown,
+  authMethod: AuthMethod = "email"
+): MappingResult {
+  const data = (dataJson as LeaseData) || {};
+  const signers: SignerInput[] = [];
+  const missing: MissingEmailEntry[] = [];
+
+  const collect = (sourceKind: SourceKind, partes: LeaseParte[] | undefined) => {
+    (partes ?? []).forEach((p, idx) => {
+      // Locador/locatário entram por default (incluir_como_signatario default
+      // `true` no schema); só saem quando explicitamente marcado `false`.
+      if (p.incluir_como_signatario === false) return;
+      const { name, email, documentation, phone } = resolveLeaseSigner(p);
+      if (!name) return;
+      if (!email) {
+        missing.push({ sourceKind, sourceIndex: idx, name });
+        return;
+      }
+      signers.push({
+        sourceKind,
+        sourceIndex: idx,
+        name,
+        email,
+        documentation,
+        phone,
+        authMethod,
+      });
+    });
+  };
+
+  collect("locador", data.locadores);
+  collect("locatario", data.locatarios);
+
+  // Fiador — só quando a garantia escolhida é "fiador". Bloqueia (missing) se
+  // não tiver e-mail, já que a garantia exige a assinatura dele.
+  const garantia = data.garantia;
+  if (garantia?.tipo === "fiador" && garantia.fiador) {
+    const f = garantia.fiador;
+    if (f.incluir_como_signatario !== false) {
+      const { name, email, documentation, phone } = resolveLeaseSigner(f);
+      if (name) {
+        if (!email) {
+          missing.push({ sourceKind: "fiador", sourceIndex: 0, name });
+        } else {
+          signers.push({
+            sourceKind: "fiador",
+            sourceIndex: 0,
+            name,
+            email,
+            documentation,
+            phone,
+            authMethod,
+          });
+        }
+      }
+    }
+  }
+
+  return { signers, missing };
+}

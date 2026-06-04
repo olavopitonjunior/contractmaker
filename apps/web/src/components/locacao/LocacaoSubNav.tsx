@@ -3,8 +3,11 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { LOCACAO_SIMPLIFIED_MODE } from "@/lib/env/flags";
 
-const SUB_NAV = [
+type SubNavItem = { label: string; href: string; exact?: boolean };
+
+const FULL_SUB_NAV: SubNavItem[] = [
   { label: "Dashboard", href: "/locacao", exact: true },
   { label: "Imóveis", href: "/locacao/imoveis" },
   { label: "Esteira", href: "/locacao/esteira" },
@@ -17,6 +20,15 @@ const SUB_NAV = [
   { label: "Seguros", href: "/locacao/seguros" },
   { label: "Newton", href: "/locacao/newton" },
 ];
+
+// Modo simplificado: só a esteira (fluxo form → contrato → assinatura).
+const SIMPLIFIED_SUB_NAV: SubNavItem[] = [
+  { label: "Esteira", href: "/locacao/esteira" },
+];
+
+const SUB_NAV: SubNavItem[] = LOCACAO_SIMPLIFIED_MODE
+  ? SIMPLIFIED_SUB_NAV
+  : FULL_SUB_NAV;
 
 /**
  * Sub-nav horizontal scrollable — mobile-first.

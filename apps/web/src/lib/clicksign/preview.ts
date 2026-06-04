@@ -1,5 +1,5 @@
 import { prisma } from "@/lib/db/prisma";
-import { dealDataToSigners } from "@/lib/clicksign/mapping";
+import { dealDataToSigners, leaseDataToSigners } from "@/lib/clicksign/mapping";
 import { envelopeCostCents, getMonthlyBudgetCents } from "@/lib/clicksign/costs";
 import { getMonthlySpendCents } from "@/lib/clicksign/executor";
 import type { AuthMethod } from "@/lib/clicksign/types";
@@ -39,7 +39,12 @@ export async function buildEnvelopeSendPreview(args: {
 
   const contract = await prisma.contract.findFirst({
     where: { id: args.contractId, deal: { pipeline: { orgId: args.orgId } } },
-    select: { id: true, status: true, dataJson: true },
+    select: {
+      id: true,
+      status: true,
+      dataJson: true,
+      deal: { select: { pipeline: { select: { kind: true } } } },
+    },
   });
   if (!contract) {
     return { error: "Contrato não encontrado", status: 404 };
@@ -53,7 +58,10 @@ export async function buildEnvelopeSendPreview(args: {
 
   const dataSource =
     (contract.dataJson as Record<string, unknown> | null) ?? null;
-  const { signers, missing } = dealDataToSigners(dataSource, authMethod);
+  const { signers, missing } =
+    contract.deal?.pipeline?.kind === "locacao"
+      ? leaseDataToSigners(dataSource, authMethod)
+      : dealDataToSigners(dataSource, authMethod);
   if (missing.length > 0) {
     return {
       error: `Partes sem e-mail: ${missing.map((m) => m.name).join(", ")}`,
