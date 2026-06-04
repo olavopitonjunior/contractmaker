@@ -23,12 +23,19 @@ interface LocacaoFormWizardProps {
   schemaType: string;
 }
 
-// Required mínimo por step (cursor 0..5) — non-empty check manual (igual ao
-// SalesFormWizard, já que não usamos zodResolver). A validação completa roda no
-// servidor no finalize (schemaForLocacaoType) e retorna validationIssues.
+// Steps de partes (locador/locatário) — validados de forma CIENTE de
+// `tipo_pessoa`: PJ qualifica por `razao_social` (não tem campo `nome`). Sem
+// isso, uma parte Pessoa Jurídica trava o avanço com "campo obrigatório"
+// fantasma (não há campo `nome` na tela pra preencher).
+const PARTY_STEP: Record<number, { list: "locadores" | "locatarios"; label: string }> = {
+  0: { list: "locadores", label: "locador" },
+  1: { list: "locatarios", label: "locatário" },
+};
+
+// Required mínimo dos demais steps (non-empty check manual, já que não usamos
+// zodResolver). A validação completa roda no servidor no finalize
+// (schemaForLocacaoType) e retorna validationIssues.
 const STEP_REQUIRED: Record<number, string[]> = {
-  0: ["locadores.0.nome"],
-  1: ["locatarios.0.nome"],
   2: ["imovel.descricao"],
   3: ["aluguel.valor"],
 };
@@ -93,6 +100,25 @@ export function LocacaoFormWizard({ token, initialData, schemaType }: LocacaoFor
   const isLastStep = currentStep === TOTAL - 1;
 
   const validateStep = (step: number): boolean => {
+    // Steps de partes: exige nome (PF) ou razão social (PJ) de CADA parte.
+    const partyStep = PARTY_STEP[step];
+    if (partyStep) {
+      const parties =
+        (form.getValues(partyStep.list as never) as unknown as Array<Record<string, unknown>>) ??
+        [];
+      for (const p of parties) {
+        const pj = p?.tipo_pessoa === "juridica";
+        const name = pj ? p?.razao_social : p?.nome;
+        if (!name || String(name).trim() === "") {
+          toast.error(
+            `Preencha ${pj ? "a razão social" : "o nome"} do ${partyStep.label} antes de avançar.`,
+          );
+          return false;
+        }
+      }
+      return true;
+    }
+
     const required = STEP_REQUIRED[step] ?? [];
     for (const path of required) {
       const raw = form.getValues(path as never) as unknown;
