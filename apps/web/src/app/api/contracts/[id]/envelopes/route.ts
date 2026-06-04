@@ -21,7 +21,15 @@ const sendSchema = z.object({
   signerRoles: z
     .array(
       z.object({
-        sourceKind: z.enum(["vendedor", "comprador", "testemunha", "corretora"]),
+        sourceKind: z.enum([
+          "vendedor",
+          "comprador",
+          "testemunha",
+          "corretora",
+          "locador",
+          "locatario",
+          "fiador",
+        ]),
         sourceIndex: z.number().int().nonnegative(),
         subKind: z.enum(["titular", "conjuge"]).optional(),
         role: z.enum([
@@ -33,6 +41,7 @@ const sendSchema = z.object({
           "witness",
           "consenting",
           "attorney",
+          "party",
         ]),
       })
     )

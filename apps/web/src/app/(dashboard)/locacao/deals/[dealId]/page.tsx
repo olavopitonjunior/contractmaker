@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { LocacaoDealDetail } from "@/components/locacao/LocacaoDealDetail";
+import { LOCACAO_SIMPLIFIED_MODE } from "@/lib/env/staging";
 import type { AgentEvent } from "@/lib/ai/types";
 
 export const dynamic = "force-dynamic";
@@ -114,6 +115,7 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
         status: v.status,
         isLatest: v.isLatest,
       }))}
+      simplified={LOCACAO_SIMPLIFIED_MODE}
       lease={
         lease
           ? {

@@ -21,7 +21,12 @@ export type SourceKind =
   | "vendedor"
   | "comprador"
   | "testemunha"
-  | "corretora";
+  | "corretora"
+  // Locação (aditivo) — partes do contrato de aluguel. DB guarda string livre,
+  // então adicionar valores aqui é seguro (nenhuma query filtra por valor).
+  | "locador"
+  | "locatario"
+  | "fiador";
 
 export interface SignerInput {
   sourceKind: SourceKind;
