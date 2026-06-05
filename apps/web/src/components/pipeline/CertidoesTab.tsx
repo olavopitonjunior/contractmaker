@@ -250,8 +250,18 @@ function statusLabel(row: CertidaoJobRow): string {
       : "Faltam dados da parte — complete para emitir";
   }
   if (status === "data_invalid") {
-    return row.errorMessage
-      ? `Dados divergentes · ${row.errorMessage}`
+    const msg = row.errorMessage ?? "";
+    // Divergência de DATA DE NASCIMENTO (tipicamente Receita/PGFN 608): o portal
+    // exige a data cadastrada e recusa a que mandamos. Mensagem orientada à ação
+    // com o valor divergente em destaque, em vez da frase crua do órgão.
+    if (/nascimento|birthdate/i.test(msg) && /diverg|diferente|n[ãa]o\s+confere/i.test(msg)) {
+      const data = msg.match(/\b\d{2}\/\d{2}\/\d{4}\b/)?.[0];
+      return data
+        ? `A data de nascimento ${data} não confere com a base oficial — confira o cadastro da parte`
+        : "A data de nascimento não confere com a base oficial — confira o cadastro da parte";
+    }
+    return msg
+      ? `Dados divergentes · ${msg}`
       : "Dados divergentes — portal não reconheceu";
   }
   if (status === "informativo") {
@@ -664,6 +674,7 @@ export function CertidoesTab({
       if (result) {
         const dispatched = result.jobCount ?? 0;
         const inProg = result.skippedInProgress?.length ?? 0;
+        const unmatched = result.unmatched?.length ?? 0;
         if (dispatched > 0 && inProg > 0) {
           toast.success(
             `Iniciando ${dispatched} certidão(ões) · ${inProg} já aguardando o tribunal`
@@ -673,6 +684,13 @@ export function CertidoesTab({
         } else if (inProg > 0) {
           toast.info(
             `${inProg} certidão(ões) já em andamento — aguarde a conclusão`
+          );
+        }
+        // Seleções que o plano atual não constrói (endpoint indisponível/gated):
+        // foram ignoradas, não recusam mais o lote inteiro.
+        if (unmatched > 0) {
+          toast.info(
+            `${unmatched} certidão(ões) indisponíveis no plano atual foram ignoradas`
           );
         }
       }
@@ -1489,10 +1507,11 @@ export function CertidoesTab({
                               size="sm"
                               variant="ghost"
                               onClick={() => setEditingPartyJob(row)}
-                              className="h-7 px-2"
-                              title="Editar dados da parte e reenviar"
+                              className="h-7 px-2 gap-1 text-amber-700 hover:bg-amber-50"
+                              title="Corrigir os dados da parte e reenviar a certidão"
                             >
                               <AlertTriangle className="h-3 w-3" />
+                              <span className="text-xs">Corrigir</span>
                             </Button>
                           );
                         })()}

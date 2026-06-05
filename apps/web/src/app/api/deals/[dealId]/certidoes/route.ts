@@ -197,6 +197,12 @@ export async function POST(
   // (endpoint, kind, index) triples and intersect.
   let effectiveJobs = plan.jobs;
   let effectiveSkipped = plan.skipped;
+  // Seleções pedidas que o planner atual não produz (endpoint depreciado/gated,
+  // ex.: ONR 602, CENPROT sem gov.br). Antes a rota recusava o LOTE INTEIRO com
+  // 400 quando havia qualquer unmatched — o que travava "Retentar erros"/"Só as
+  // que faltaram" sempre que sobrava 1 job velho. Agora despachamos o que casa e
+  // reportamos o resto como aviso. (2026-06-05)
+  let unmatchedSelections: NonNullable<typeof selectedJobs> = [];
   if (selectedJobs) {
     const requestedKeys = new Set(
       selectedJobs.map((s) => `${s.endpoint}|${s.targetKind}|${s.targetIndex}`)
@@ -208,26 +214,16 @@ export async function POST(
       requestedKeys.has(`${s.endpoint}|${s.targetKind}|${s.targetIndex}`)
     );
 
-    // Detect selections that matched neither a job nor a skipped — the user
-    // asked for something the planner cannot build (e.g. wrong target kind
-    // for the endpoint, or a PJ-only endpoint applied to a PF). Return 400
-    // with the specific unmatched tuples so the UI can surface per-row errors.
+    // Seleções que não casaram com NENHUM job nem skip do plano atual — o
+    // planner não consegue construí-las (endpoint depreciado/gated, target
+    // inválido). Não recusamos o lote: removemos do despacho e reportamos.
     const matchedKeys = new Set([
       ...effectiveJobs.map((j) => `${j.endpoint}|${j.targetKind}|${j.targetIndex}`),
       ...effectiveSkipped.map((s) => `${s.endpoint}|${s.targetKind}|${s.targetIndex}`),
     ]);
-    const unmatched = selectedJobs.filter(
+    unmatchedSelections = selectedJobs.filter(
       (s) => !matchedKeys.has(`${s.endpoint}|${s.targetKind}|${s.targetIndex}`)
     );
-    if (unmatched.length > 0) {
-      return NextResponse.json(
-        {
-          error: `${unmatched.length} seleção(ões) não podem ser extraídas (endpoint ou target inválido).`,
-          unmatched,
-        },
-        { status: 400 }
-      );
-    }
   }
 
   // ---- Trava POR ALVO (substitui a antiga trava de deal inteiro) ----
@@ -295,7 +291,11 @@ export async function POST(
     }
     return NextResponse.json(
       {
-        error: "Nenhuma certidao disponivel para extrair",
+        error:
+          unmatchedSelections.length > 0
+            ? "As certidões selecionadas não estão mais disponíveis no plano atual (endpoint indisponível). Atualize e tente de novo."
+            : "Nenhuma certidao disponivel para extrair",
+        unmatched: unmatchedSelections,
         plan,
       },
       { status: 400 }
@@ -504,6 +504,9 @@ export async function POST(
       // Alvos não redisparados por já estarem em andamento (UI mostra
       // "X disparadas · Y aguardando o tribunal" em vez de erro global).
       skippedInProgress,
+      // Seleções que o planner atual não constrói (endpoint depreciado/gated) —
+      // ignoradas, não rejeitam o lote.
+      unmatched: unmatchedSelections,
       totalCostCents,
     },
     { status: 202 }
