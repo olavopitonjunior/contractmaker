@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useCertidoesBatch, type CertidaoJobRow } from "@/hooks/useCertidoesBatch";
 import { ExtractCertidoesDialog, type JobSelection } from "./ExtractCertidoesDialog";
+import { isInProgressBlocking, isRetryableError } from "@/lib/certidoes/lifecycle";
 import { CertidaoDetailDialog } from "./CertidaoDetailDialog";
 import { SerasaConsentDialog } from "./SerasaConsentDialog";
 import { ComplementDadosForm } from "./ComplementDadosForm";
@@ -206,6 +207,12 @@ function effectiveStatus(row: CertidaoJobRow): CertidaoJobRow["status"] {
 function statusLabel(row: CertidaoJobRow): string {
   const r = row.resultData as { situacao?: string; detalhes?: string } | null;
   const status = effectiveStatus(row);
+  // "Sem saldo" (account_issue / 603) tem precedência: antes caía em
+  // failed_permanent → "use o portal oficial", enganoso. É só recarregar e
+  // retentar. (2026-06-05)
+  if (getFailureCategory(row) === "account_issue") {
+    return "Sem saldo na conta Infosimples — recarregue para emitir/retentar";
+  }
   if (status === "failed") return row.errorMessage || "Erro";
   if (status === "pending") return "Pendente · na fila";
   if (status === "fetching") return "Pendente · consultando";
@@ -447,13 +454,52 @@ export function CertidoesTab({
 
   // E2 — mapa (endpoint|kind|index) → cor da régua do job vivo, pra o dialog de
   // extração marcar o que já foi puxado e oferecer "selecionar só faltantes".
+  // Agrega pelo ATENDIMENTO MAIS RECENTE por alvo (max createdAt): antes era
+  // last-write-wins na ordem da lista, então um zumbi `awaiting_portal` (amarelo)
+  // escondia um erro mais novo (vermelho) e o "Só as que faltaram" pulava o alvo
+  // (bug do TJSP, 2026-06-05).
   const extractedStatus = useMemo(() => {
-    const m: Record<string, ColorTier> = {};
+    const latest: Record<string, CertidaoJobRow> = {};
     for (const j of visibleJobs) {
-      m[`${j.endpoint}|${j.targetKind}|${j.targetIndex}`] = colorTier(j);
+      const k = `${j.endpoint}|${j.targetKind}|${j.targetIndex}`;
+      const cur = latest[k];
+      if (
+        !cur ||
+        new Date(j.createdAt).getTime() > new Date(cur.createdAt).getTime()
+      ) {
+        latest[k] = j;
+      }
     }
+    const m: Record<string, ColorTier> = {};
+    for (const k of Object.keys(latest)) m[k] = colorTier(latest[k]);
     return m;
   }, [visibleJobs]);
+
+  // Alvos GENUINAMENTE em andamento (qualquer tentativa bloqueante: pending/
+  // fetching recente ou awaiting_portal com protocolo). O dialog usa isto pra
+  // travar o checkbox e o "Só as que faltaram" pra não re-pedir o que aguarda o
+  // tribunal. Espelha a trava por alvo do backend.
+  const inProgressKeys = useMemo(() => {
+    const s = new Set<string>();
+    for (const j of visibleJobs) {
+      if (isInProgressBlocking(j)) {
+        s.add(`${j.endpoint}|${j.targetKind}|${j.targetIndex}`);
+      }
+    }
+    return s;
+  }, [visibleJobs]);
+
+  // Há algum alvo com erro de SALDO (account_issue)? Banner org-wide no topo.
+  const hasAccountIssue = useMemo(
+    () => visibleJobs.some((j) => getFailureCategory(j) === "account_issue"),
+    [visibleJobs]
+  );
+
+  // Alvos com erro retentável (pra o botão "Retentar erros" de 1 clique).
+  const retryableErrorJobs = useMemo(
+    () => visibleJobs.filter((j) => isRetryableError(j)),
+    [visibleJobs]
+  );
 
   // Categoriza um job para o filtro por status.
   const filterBucket = (
@@ -616,11 +662,36 @@ export function CertidoesTab({
         return;
       }
       if (result) {
-        toast.success(`Iniciando ${result.jobCount} certidões…`);
+        const dispatched = result.jobCount ?? 0;
+        const inProg = result.skippedInProgress?.length ?? 0;
+        if (dispatched > 0 && inProg > 0) {
+          toast.success(
+            `Iniciando ${dispatched} certidão(ões) · ${inProg} já aguardando o tribunal`
+          );
+        } else if (dispatched > 0) {
+          toast.success(`Iniciando ${dispatched} certidões…`);
+        } else if (inProg > 0) {
+          toast.info(
+            `${inProg} certidão(ões) já em andamento — aguarde a conclusão`
+          );
+        }
       }
     } finally {
       setExtracting(false);
     }
+  };
+
+  // "Retentar erros" — re-dispara de uma vez todos os alvos com erro retentável
+  // (sem saldo, instabilidade, divergência, falha). O backend pula sozinho os
+  // que estiverem em andamento (skippedInProgress), então é seguro mandar tudo.
+  const handleRetryErrors = async () => {
+    if (extracting || retryableErrorJobs.length === 0) return;
+    const sel: JobSelection[] = retryableErrorJobs.map((j) => ({
+      endpoint: j.endpoint,
+      targetKind: j.targetKind as JobSelection["targetKind"],
+      targetIndex: j.targetIndex,
+    }));
+    await handleExtract(sel);
   };
 
   const handleReport = async () => {
@@ -842,6 +913,18 @@ export function CertidoesTab({
             Atualizar
           </Button>
         )}
+        {retryableErrorJobs.length > 0 && (
+          <Button
+            variant="outline"
+            onClick={handleRetryErrors}
+            disabled={extracting}
+            className="border-amber-300 text-amber-700 hover:bg-amber-50"
+            title="Re-dispara de uma vez todos os alvos com erro (sem saldo, instabilidade, divergência). Os que estiverem em andamento são pulados automaticamente."
+          >
+            <RefreshCw className="h-4 w-4 mr-1" />
+            Retentar erros ({retryableErrorJobs.length})
+          </Button>
+        )}
         {(stats.stuck > 0 || stats.ghostPromotable > 0) && (
           <Button
             variant="outline"
@@ -1055,6 +1138,19 @@ export function CertidoesTab({
 
       {/* D — Análise IA on-demand: só monta (e roda) quando o usuário abre. */}
       {showAnalysis && <CertidoesAnalysisPanel dealId={dealId} />}
+
+      {hasAccountIssue && (
+        <div className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
+          <Wallet className="h-4 w-4 mt-0.5 shrink-0" />
+          <span>
+            <strong>Conta Infosimples sem saldo.</strong> As certidões marcadas
+            como &quot;sem saldo&quot; falharam por falta de crédito (não é erro
+            dos dados). Recarregue no painel da Infosimples e use{" "}
+            <strong>Retentar erros</strong> — o re-disparo sem saldo é gratuito e
+            não emite nada.
+          </span>
+        </div>
+      )}
 
       {error && (
         <div className="rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800 flex items-start gap-2">
@@ -1490,6 +1586,7 @@ export function CertidoesTab({
         onOpenChange={setDialogOpen}
         dealId={dealId}
         extractedStatus={extractedStatus}
+        inProgressKeys={inProgressKeys}
         onConfirm={handleExtract}
         onAddPerson={() => setAddPersonOpen(true)}
       />

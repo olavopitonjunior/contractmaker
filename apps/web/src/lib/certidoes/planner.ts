@@ -876,13 +876,22 @@ export function planCertidoesForDeal(
           // TRFs 1/2/4/5/6: Cível + Criminal. tipo_certidao varia por TRF
           // (TRF5 = numérico "1"/"2"; demais = CIVEL/CRIMINAL).
           const tipos = TRF_TIPOS_BY_ENDPOINT[ep] ?? TRF_INDIVIDUAL_TIPOS;
+          // TRF5 (e demais TRFs individuais) exigem `birthdate` quando o CPF é
+          // usado para PF — sem ela o portal recusa com 606 "O parâmetro
+          // 'birthdate' deve ser preenchido quando o campo 'CPF' for usado".
+          // Antes o handler montava só cpf+nome (ao contrário de Receita/PGFN/
+          // TJSP), então a certidão acusava "faltam dados" mesmo com a data no
+          // formulário. Anexa quando a PF tem `data_nascimento`. (fix 2026-06-05)
+          const trfBirthdate = !isPJ ? normalizeDate(parte.data_nascimento) : null;
           for (const t of tipos) {
+            const trfArgs: Record<string, unknown> = {
+              tipo_certidao: t.tipo_certidao,
+              email,
+              ...(isPJ ? { cnpj, razao_social: label } : { cpf, nome: label }),
+            };
+            if (trfBirthdate) trfArgs.birthdate = trfBirthdate;
             pushRegional(
-              buildJob(ep, kind, index, `${label} - ${t.label}`, {
-                tipo_certidao: t.tipo_certidao,
-                email,
-                ...(isPJ ? { cnpj, razao_social: label } : { cpf, nome: label }),
-              }),
+              buildJob(ep, kind, index, `${label} - ${t.label}`, trfArgs),
               `${ep}|${t.tipo_certidao}`,
               region
             );

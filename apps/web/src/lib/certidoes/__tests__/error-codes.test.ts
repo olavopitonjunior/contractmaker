@@ -6,8 +6,42 @@ import {
   isEndpointNotEnabled,
   isPortalUnavailableMessage,
   isReceitaCertidaoNaoEmitida,
+  isDataDivergente,
   mapInfosimplesCodeToCategory,
 } from "../error-codes";
+
+describe("isDataDivergente + 608 divergência → inconsistent_input (não missing)", () => {
+  it("casa 'divergente da constante na base' (Receita CPF 608 real)", () => {
+    expect(
+      isDataDivergente(
+        "Data de nascimento informada 20/09/1972 está divergente da constante na base de dados da Secretaria da Receita Federal do Brasil."
+      )
+    ).toBe(true);
+  });
+  it("casa 'diferente da cadastrada' (PGFN 608 real)", () => {
+    expect(
+      isDataDivergente("Data de nascimento informada é diferente da cadastrada.")
+    ).toBe(true);
+  });
+  it("NÃO casa 'parâmetros obrigatórios não foram enviados' (606 = realmente falta)", () => {
+    expect(
+      isDataDivergente("Parâmetros obrigatórios não foram enviados.")
+    ).toBe(false);
+  });
+  it("608 com mensagem de divergência → inconsistent_input (data_invalid), NÃO missing_input", () => {
+    expect(
+      mapInfosimplesCodeToCategory(
+        608,
+        "Os parâmetros foram recusados. Data de nascimento informada é diferente da cadastrada."
+      )
+    ).toBe("inconsistent_input");
+  });
+  it("608 sem divergência segue missing_input (CODE_MAP)", () => {
+    expect(mapInfosimplesCodeToCategory(608, "Os parâmetros foram recusados.")).toBe(
+      "missing_input"
+    );
+  });
+});
 
 describe("isEndpointNotEnabled (603 endpoint-específico ≠ crédito da conta)", () => {
   it("detecta 'consulta não habilitada para a sua conta'", () => {

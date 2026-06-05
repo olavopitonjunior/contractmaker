@@ -203,6 +203,36 @@ describe("planCertidoesForDeal — TJSP e-mail distinto por pedido (anti-604)", 
   });
 });
 
+describe("planCertidoesForDeal — TRF individual (TRF5) envia birthdate (fix 2026-06-05)", () => {
+  // Vendedor PF em PE → TRF5 (AL/CE/PB/PE/RN/SE). O endpoint exige `birthdate`
+  // com CPF (606 "O parâmetro 'birthdate' deve ser preenchido quando o campo
+  // 'CPF' for usado"). Antes o handler montava só cpf+nome → certidão acusava
+  // "faltam dados" mesmo com a data no formulário.
+  const plan = planCertidoesForDeal({
+    vendedores: [
+      {
+        tipo_pessoa: "fisica" as const,
+        nome: "Jose da Silva",
+        cpf: "52998224725",
+        data_nascimento: "1975-03-08",
+        uf: "PE",
+        cidade: "Recife",
+      },
+    ],
+    compradores: [],
+    imoveis: [],
+  });
+
+  it("os jobs TRF5 (Cível + Criminal) incluem birthdate normalizado", () => {
+    const trf5 = plan.jobs.filter((j) => j.endpoint === "tribunal/trf5/certidao");
+    expect(trf5.length).toBe(2);
+    trf5.forEach((j) => {
+      expect(j.requestPayload.cpf).toBe("52998224725");
+      expect(j.requestPayload.birthdate).toBe("1975-03-08");
+    });
+  });
+});
+
 describe("planCertidoesForDeal — dados faltando", () => {
   it("PF sem data_nascimento -> PGFN vai para skipped", () => {
     const plan = planCertidoesForDeal({

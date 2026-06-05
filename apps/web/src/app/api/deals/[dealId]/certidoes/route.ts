@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db/prisma";
 import { planCertidoesForDeal } from "@/lib/certidoes/planner";
 import { runBatch, getMonthlySpend, getMonthlySpendByProvider } from "@/lib/certidoes/executor";
 import { endpointInfo } from "@/lib/certidoes/endpoints";
+import { isInProgressBlocking } from "@/lib/certidoes/lifecycle";
 import { sanitizePayload } from "@/lib/certidoes/infosimples";
 import { sanitizeSerasaPayload } from "@/lib/serasa/sanitize";
 import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
@@ -130,26 +131,11 @@ export async function POST(
   }
   const { batchId, jobs: selectedJobs } = parsed.data;
 
-  // Idempotency guard: reject if there's already an active batch for this deal
-  // in the last 30 minutes. Prevents double-click double-charge.
-  const activeBatch = await prisma.certidaoJob.findFirst({
-    where: {
-      dealId: params.dealId,
-      status: { in: ["pending", "fetching"] },
-      createdAt: { gte: new Date(Date.now() - 30 * 60_000) },
-    },
-    select: { batchId: true },
-  });
-  if (activeBatch) {
-    return NextResponse.json(
-      {
-        error:
-          "Ja existe uma extracao em andamento para este negocio. Aguarde a conclusao ou use o botao de recuperar travadas.",
-        activeBatchId: activeBatch.batchId,
-      },
-      { status: 409 }
-    );
-  }
+  // A trava de "extração em andamento" passou a ser POR ALVO (endpoint+parte),
+  // não mais por deal inteiro — ver a partição toDispatch/skippedInProgress
+  // logo após montar effectiveJobs. Erro/instabilidade são retentáveis na hora;
+  // só o alvo genuinamente em andamento (pending/fetching recente ou
+  // awaiting_portal com protocolo) bloqueia um novo disparo do MESMO alvo.
 
   // Budget guard (per-org, per-provider). Verificamos ambos os budgets aqui
   // porque o batch pode misturar Infosimples e Serasa; cap separado evita que
@@ -244,7 +230,69 @@ export async function POST(
     }
   }
 
+  // ---- Trava POR ALVO (substitui a antiga trava de deal inteiro) ----
+  // Equivalência TJSP: pedido-certidao e pedido-civel são o mesmo alvo lógico.
+  const TJSP_PEDIDO_GROUP = [
+    "tribunal/tjsp/pedido-certidao",
+    "tribunal/tjsp/pedido-civel",
+  ];
+  const supersedeEndpointsFor = (endpoint: string): string[] =>
+    TJSP_PEDIDO_GROUP.includes(endpoint) ? TJSP_PEDIDO_GROUP : [endpoint];
+
+  // Jobs candidatos a "em andamento" deste deal; isInProgressBlocking filtra
+  // pending/fetching recente e awaiting_portal saudável (com protocolo), sem
+  // travar zumbis nem estados terminais (erros são retentáveis).
+  const activeCandidates = await prisma.certidaoJob.findMany({
+    where: {
+      dealId: params.dealId,
+      status: { in: ["pending", "fetching", "awaiting_portal"] },
+    },
+    select: {
+      endpoint: true,
+      targetKind: true,
+      targetIndex: true,
+      status: true,
+      retryCount: true,
+      maxRetries: true,
+      createdAt: true,
+      resultData: true,
+    },
+  });
+  const inProgress = activeCandidates.filter((j) => isInProgressBlocking(j));
+  const isTargetBlocked = (t: {
+    endpoint: string;
+    targetKind: string;
+    targetIndex: number;
+  }) =>
+    inProgress.some(
+      (p) =>
+        p.targetKind === t.targetKind &&
+        p.targetIndex === t.targetIndex &&
+        supersedeEndpointsFor(t.endpoint).includes(p.endpoint)
+    );
+
+  // Pula (sem redisparar) os alvos genuinamente em andamento; despacha o resto.
+  const skippedInProgress = effectiveJobs.filter(isTargetBlocked).map((j) => ({
+    endpoint: j.endpoint,
+    targetKind: j.targetKind,
+    targetIndex: j.targetIndex,
+    label: j.label,
+  }));
+  effectiveJobs = effectiveJobs.filter((j) => !isTargetBlocked(j));
+
   if (effectiveJobs.length === 0 && effectiveSkipped.length === 0) {
+    // Nada a despachar. Se foi porque tudo selecionado já está em andamento,
+    // devolve 409 claro (não é erro do usuário — é só aguardar o tribunal).
+    if (skippedInProgress.length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            "As certidões selecionadas já estão em andamento (aguardando o tribunal). Aguarde a conclusão — não é preciso pedir de novo.",
+          skippedInProgress,
+        },
+        { status: 409 }
+      );
+    }
     return NextResponse.json(
       {
         error: "Nenhuma certidao disponivel para extrair",
@@ -322,18 +370,10 @@ export async function POST(
     "duplicate_pending",
     "replaced",
   ];
-  // Endpoints "equivalentes" para fins de supersede: a migração TJSP trocou
-  // `pedido-civel` (legado cível-only) por `pedido-certidao`. Um novo lote com
-  // pedido-certidao deve aposentar as linhas terminais antigas de pedido-civel
-  // do MESMO alvo (e vice-versa), senão deals legados acumulam 2 famílias de
-  // linhas TJSP. Para os demais endpoints, supersede só o próprio.
-  const TJSP_PEDIDO_GROUP = [
-    "tribunal/tjsp/pedido-certidao",
-    "tribunal/tjsp/pedido-civel",
-  ];
-  const supersedeEndpointsFor = (endpoint: string): string[] =>
-    TJSP_PEDIDO_GROUP.includes(endpoint) ? TJSP_PEDIDO_GROUP : [endpoint];
-
+  // `supersedeEndpointsFor`/`TJSP_PEDIDO_GROUP` definidos acima (partição por
+  // alvo). Reaproveitamos a mesma equivalência para o supersede: um novo lote
+  // com pedido-certidao aposenta as linhas terminais antigas de pedido-civel do
+  // MESMO alvo (e vice-versa), senão deals legados acumulam 2 famílias TJSP.
   const supersedeTargets = [
     ...new Map(
       [...effectiveJobs, ...effectiveSkipped].map((j) => [
@@ -461,6 +501,9 @@ export async function POST(
       batchId,
       jobCount: effectiveJobs.length,
       skipped: effectiveSkipped,
+      // Alvos não redisparados por já estarem em andamento (UI mostra
+      // "X disparadas · Y aguardando o tribunal" em vez de erro global).
+      skippedInProgress,
       totalCostCents,
     },
     { status: 202 }

@@ -190,6 +190,25 @@ export function isEndpointNotEnabled(message: string | null | undefined): boolea
   );
 }
 
+/**
+ * 2026-06-05 — Receita Federal / PGFN respondem code 608 ("Os parâmetros foram
+ * recusados pelo site ou aplicativo de origem") com o detalhe específico no
+ * `errors[]`: "Data de nascimento informada DD/MM/AAAA está divergente da
+ * constante na base de dados da RFB" ou "Data de nascimento informada é
+ * diferente da cadastrada". O catálogo (CODE_MAP) mapeia 608 → missing_input,
+ * então a UI dizia "faltam dados: data de nascimento" — enganoso, pois o dado
+ * FOI enviado, só não confere com a base oficial. Este gate (aplicado ANTES do
+ * CODE_MAP) reclassifica para inconsistent_input → data_invalid ("dados
+ * divergentes — confira o cadastro"). Casa apenas frases de DIVERGÊNCIA, não
+ * "parâmetros obrigatórios" (esses continuam missing_input).
+ */
+export function isDataDivergente(message: string | null | undefined): boolean {
+  if (!message) return false;
+  return /diverg[eê]nte|diferente\s+da\s+cadastrada|n[ãa]o\s+(confere|corresponde|bate|combina)/i.test(
+    message
+  );
+}
+
 export function mapInfosimplesCodeToCategory(
   code: number,
   codeMessage?: string | null
@@ -201,6 +220,13 @@ export function mapInfosimplesCodeToCategory(
   // "tentativas excedidas" (e similares) que o catálogo mapeia como dado, mas
   // que é transitório e deve dar retry. Ver isPortalUnavailableMessage.
   if (isPortalUnavailableMessage(codeMessage)) return "portal_unavailable";
+  // DIVERGÊNCIA de dado pela MENSAGEM, antes do CODE_MAP: 608 vem fixo como
+  // missing_input no catálogo, mas a Receita/PGFN o usa para "Data de nascimento
+  // ... divergente da base da RFB" / "diferente da cadastrada" — o dado FOI
+  // enviado, só não confere. Sem isto a UI dizia "faltam dados: data de
+  // nascimento" (data_missing) em vez de "dados divergentes" (data_invalid).
+  // Ver isDataDivergente. (fix 2026-06-05)
+  if (isDataDivergente(codeMessage)) return "inconsistent_input";
   if (code in CODE_MAP) return CODE_MAP[code];
 
   // Message heuristics fire for unmapped codes
