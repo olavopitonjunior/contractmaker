@@ -92,6 +92,12 @@ interface ExtractCertidoesDialogProps {
    * yellow=em andamento, red=falhou. Marca o que já saiu.
    */
   extractedStatus?: Record<string, "green" | "yellow" | "red" | "neutral">;
+  /**
+   * Chaves (endpoint|kind|index) de alvos GENUINAMENTE em andamento (aguardando
+   * o tribunal / em despacho). Travam o checkbox e ficam de fora do "Só as que
+   * faltaram" — não se re-pede o que ainda vai voltar. Erros NÃO entram aqui.
+   */
+  inProgressKeys?: Set<string>;
   onConfirm: (jobs?: JobSelection[]) => Promise<void> | void;
   /** Abre o cadastro de "outras pessoas" (DiligentedPersonDialog) no parent. */
   onAddPerson?: () => void;
@@ -143,6 +149,7 @@ export function ExtractCertidoesDialog({
   onOpenChange,
   dealId,
   extractedStatus = {},
+  inProgressKeys,
   onConfirm,
   onAddPerson,
 }: ExtractCertidoesDialogProps) {
@@ -189,7 +196,12 @@ export function ExtractCertidoesDialog({
         // endereço). Opcional (comprador/ONR/IPTU) e pesquisa nascem desmarcados.
         const initial = new Set<string>(
           (data.plan?.jobs ?? [])
-            .filter((j: PlannedJob) => j.tier === "padrao")
+            // Não pré-marca alvos em andamento (aguardando o tribunal): o
+            // checkbox fica travado e fora da contagem/custo.
+            .filter(
+              (j: PlannedJob) =>
+                j.tier === "padrao" && !inProgressKeys?.has(jobKey(j))
+            )
             .map((j: PlannedJob) => jobKey(j))
         );
         setSelected((prev) => {
@@ -260,16 +272,22 @@ export function ExtractCertidoesDialog({
   };
 
   const selectMissing = () => {
-    // "Só as que faltaram" reseleciona apenas o que NÃO saiu (não-verde/amarelo)
-    // DENTRO do escopo padrão — mesmo conjunto que vem marcado por default
-    // (vendedores nas regiões do imóvel/endereço). Tiers opt-in (Imóvel/ONR,
-    // comprador, Pesquisa de Bens) NÃO entram aqui: o usuário inclui abrindo a
-    // seção. Antes varria todos os tiers e arrastava ONR/comprador sem opt-in.
+    // "Só as que faltaram" reseleciona o que NÃO saiu (não-verde) e não está
+    // genuinamente em andamento, DENTRO do escopo padrão. Tiers opt-in (Imóvel/
+    // ONR, comprador, Pesquisa de Bens) NÃO entram aqui: o usuário inclui
+    // abrindo a seção.
+    // Mudança 2026-06-05: inclui agora os ERROS amarelos-retentáveis
+    // (instabilidade/limite) — antes "amarelo" era excluído em bloco, deixando
+    // de fora falhas transitórias. O que fica de fora é só o que está
+    // realmente em andamento (inProgressKeys: aguardando o tribunal / em
+    // despacho), espelhando a trava por alvo do backend.
     const next = new Set<string>();
     for (const j of allJobs) {
       if ((j.tier ?? "opcional") !== "padrao") continue;
-      const t = extractedStatus[jobKey(j)];
-      if (t !== "green" && t !== "yellow") next.add(jobKey(j));
+      const key = jobKey(j);
+      if (inProgressKeys?.has(key)) continue; // em andamento → não re-pedir
+      const t = extractedStatus[key];
+      if (t !== "green") next.add(key);
     }
     setSelected(next);
   };
@@ -398,6 +416,9 @@ export function ExtractCertidoesDialog({
     const isExtra = extras.some((e) => jobKey(e) === jobKey(j));
     const h = apiHealth[j.endpoint];
     const t = extractedStatus[jobKey(j)];
+    // Alvo genuinamente em andamento (aguardando o tribunal): trava o checkbox
+    // — não dá pra re-pedir até voltar. Erros NÃO entram aqui (são retentáveis).
+    const locked = inProgressKeys?.has(jobKey(j)) ?? false;
     const statusMap = {
       green: ["✓ emitida", "border-green-500 text-green-700"],
       yellow: ["⏳ em andamento", "border-amber-500 text-amber-700"],
@@ -407,13 +428,15 @@ export function ExtractCertidoesDialog({
     return (
       <label
         key={jobKey(j)}
-        className={`flex items-center gap-2 text-xs cursor-pointer rounded px-2 py-1 hover:bg-muted/30 ${
-          isExtra ? "bg-blue-50/30 border border-blue-200" : ""
-        }`}
+        title={locked ? "Aguardando o tribunal — não é preciso pedir de novo" : undefined}
+        className={`flex items-center gap-2 text-xs rounded px-2 py-1 ${
+          locked ? "cursor-default opacity-70" : "cursor-pointer hover:bg-muted/30"
+        } ${isExtra ? "bg-blue-50/30 border border-blue-200" : ""}`}
       >
         <input
           type="checkbox"
-          checked={isSelected}
+          checked={isSelected && !locked}
+          disabled={locked}
           onChange={() => toggleJob(j)}
           className="h-3.5 w-3.5 shrink-0 accent-primary"
         />
