@@ -84,4 +84,55 @@ describe("template locação residencial + enrich", () => {
     expect(html).toContain("São Paulo/SP");
     expect(html).toMatch(/de maio de 2026/);
   });
+
+  it("foro sem preenchimento usa o fallback 'comarca de localização do imóvel'", () => {
+    expect(html).toContain("comarca de localização do imóvel");
+  });
+});
+
+describe("enrich locação: tipo do imóvel e foro (correções QA 2026-06-06)", () => {
+  const base = dadosLocacaoSchema.parse({
+    locadores: [{ tipo_pessoa: "fisica", nome: "Loc", cpf: "12345678901" }],
+    locatarios: [{ tipo_pessoa: "fisica", nome: "Lct", cpf: "98765432100" }],
+    imovel: {
+      kind: "comercial_sala",
+      rua: "Rua Augusta",
+      numero: "1200",
+      cidade: "São Paulo",
+      uf: "SP",
+      cep: "01304001",
+      descricao: "Loja com vitrine.",
+    },
+    aluguel: {
+      valor: 8000,
+      dia_vencimento: 5,
+      indice_reajuste: "IPCA",
+      vigencia_inicio: "2026-08-01",
+      vigencia_meses: 60,
+      meio_pagamento: "boleto",
+    },
+    garantia: { tipo: "seguro_fianca" },
+    assinatura: { cidade: "São Paulo", uf: "SP", data: "2026-06-06" },
+    foro: "São Paulo",
+  });
+
+  it("mapeia kind do enum para rótulo legível (comercial_sala → sala comercial)", () => {
+    const enriched = enrichLocacaoData(base as Record<string, unknown>);
+    const imovel = enriched.imovel as Record<string, unknown>;
+    expect(imovel.tipo_texto).toBe("sala comercial");
+  });
+
+  it("propaga o foro eleito para config.foro_texto", () => {
+    const enriched = enrichLocacaoData(base as Record<string, unknown>);
+    const config = enriched.config as Record<string, unknown>;
+    expect(config.foro_texto).toBe("São Paulo");
+  });
+
+  it("renderiza o tipo legível e o foro eleito no contrato (não o slug nem o fallback)", () => {
+    const html = renderContratoHTML(loadTemplate(), enrichLocacaoData(base as Record<string, unknown>));
+    expect(html).toContain("o imóvel de tipo sala comercial");
+    expect(html).not.toContain("comercial_sala");
+    expect(html).toContain("comarca de São Paulo");
+    expect(html).not.toContain("comarca de localização do imóvel");
+  });
 });

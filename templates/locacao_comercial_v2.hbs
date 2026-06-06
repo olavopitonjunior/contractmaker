@@ -87,7 +87,7 @@ Endereço: {{garantia.fiador.endereco}}, nº {{garantia.fiador.numero}}, Cidade:
 <p>As partes acima qualificadas têm, entre si, justo e contratado o presente Contrato de Locação para fins NÃO RESIDENCIAIS (comerciais), regido pela Lei nº 8.245, de 18 de outubro de 1991, e pelas cláusulas e condições seguintes:</p>
 
 <h2>CLÁUSULA 1ª — DO OBJETO E DA DESTINAÇÃO</h2>
-<p>1.1. O(s) LOCADOR(ES) dá(ão) em locação ao(s) LOCATÁRIO(S) o imóvel de tipo {{imovel.kind}}, situado em {{imovel.rua}}, nº {{imovel.numero}}{{#if imovel.complemento}}, {{imovel.complemento}}{{/if}}{{#if imovel.bairro}}, Bairro {{imovel.bairro}}{{/if}}, {{imovel.cidade}}-{{imovel.uf}}, CEP {{cep imovel.cep}}{{#if imovel.matricula}}, objeto da matrícula nº {{imovel.matricula}}{{#if imovel.cartorio}} do {{imovel.cartorio}}{{/if}}{{/if}}.</p>
+<p>1.1. O(s) LOCADOR(ES) dá(ão) em locação ao(s) LOCATÁRIO(S) o imóvel de tipo {{#if (existe imovel.tipo_texto)}}{{imovel.tipo_texto}}{{else}}{{imovel.kind}}{{/if}}, situado em {{imovel.rua}}, nº {{imovel.numero}}{{#if imovel.complemento}}, {{imovel.complemento}}{{/if}}{{#if imovel.bairro}}, Bairro {{imovel.bairro}}{{/if}}, {{imovel.cidade}}-{{imovel.uf}}, CEP {{cep imovel.cep}}{{#if imovel.matricula}}, objeto da matrícula nº {{imovel.matricula}}{{#if imovel.cartorio}} do {{imovel.cartorio}}{{/if}}{{/if}}.</p>
 <p>1.2. Descrição: {{imovel.descricao}}</p>
 <p>1.3. O imóvel destina-se exclusivamente ao exercício da atividade de {{#if (existe imovel.destinacao)}}{{imovel.destinacao}}{{else}}fins comerciais{{/if}} pelo(s) LOCATÁRIO(S), vedada a alteração da destinação, a cessão, a sublocação ou o empréstimo, total ou parcial, sem autorização prévia e escrita do(s) LOCADOR(ES), observado o art. 13 da Lei nº 8.245/91.</p>
 
@@ -140,7 +140,7 @@ Endereço: {{garantia.fiador.endereco}}, nº {{garantia.fiador.numero}}, Cidade:
 <p>10.2. Na devolução do imóvel antes do prazo, a multa será reduzida proporcionalmente ao período de cumprimento do contrato, nos termos do art. 4º da Lei nº 8.245/91.</p>
 
 <h2>CLÁUSULA 11ª — DO FORO</h2>
-<p>11.1. As partes elegem o foro da comarca de localização do imóvel para dirimir as questões oriundas deste contrato, com renúncia a qualquer outro, por mais privilegiado que seja.</p>
+<p>11.1. As partes elegem o foro da comarca {{#if (existe config.foro_texto)}}de {{config.foro_texto}}{{else}}de localização do imóvel{{/if}} para dirimir as questões oriundas deste contrato, com renúncia a qualquer outro, por mais privilegiado que seja.</p>
 
 <p>E, por estarem assim justas e contratadas, firmam o presente instrumento em via eletrônica, para que produza seus efeitos legais.</p>
 

@@ -9,6 +9,19 @@ const MEIO_PAGAMENTO_ALUGUEL_TEXTO: Record<string, string> = {
   qualquer: "",
 };
 
+// Rótulo legível do tipo do imóvel (evita slug cru tipo "comercial_sala" no
+// corpo do contrato). Em minúsculas pois entra no meio da frase ("o imóvel de
+// tipo sala comercial, situado em…"). Fallback troca "_" por espaço.
+const TIPO_IMOVEL_TEXTO: Record<string, string> = {
+  apartamento: "apartamento",
+  casa: "casa",
+  comercial_sala: "sala comercial",
+  loja: "loja",
+  galpao: "galpão",
+  terreno: "terreno",
+  temporada: "imóvel de temporada",
+};
+
 // Parse YYYY-MM-DD âncora ao meio-dia local (estável em UTC-3).
 function parseLocalDate(raw: string): Date | null {
   const s = raw.trim();
@@ -68,6 +81,22 @@ export function enrichLocacaoData(
     const meio = typeof aluguel.meio_pagamento === "string" ? aluguel.meio_pagamento : "pix";
     const txt = MEIO_PAGAMENTO_ALUGUEL_TEXTO[meio] ?? "";
     if (txt) config.meio_pagamento_texto = txt;
+  }
+
+  // Rótulo legível do tipo do imóvel (kind é um enum/slug do form).
+  const kind = typeof imovel.kind === "string" ? imovel.kind : "";
+  if (kind && (imovel.tipo_texto == null || imovel.tipo_texto === "")) {
+    imovel.tipo_texto = TIPO_IMOVEL_TEXTO[kind] ?? kind.replace(/_/g, " ");
+    enriched.imovel = imovel;
+  }
+
+  // Foro eleito (campo "Foro (comarca)" do form, top-level). Vazio => o template
+  // mantém o fallback "comarca de localização do imóvel".
+  if (config.foro_texto == null || config.foro_texto === "") {
+    const foro =
+      (typeof enriched.foro === "string" && enriched.foro.trim()) ||
+      (typeof config.foro === "string" ? (config.foro as string).trim() : "");
+    if (foro) config.foro_texto = foro;
   }
 
   // Vigência início/fim em texto longo PT-BR a partir de início + meses.

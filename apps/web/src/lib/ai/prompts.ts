@@ -135,6 +135,13 @@ export const DEFAULT_SYSTEM_PROMPT = `Você é um assistente jurídico especiali
     6. **Ambiguidades textuais** (termos vagos como "em breve", "razoável") — severity "info"
     Não reporte questões de estilo, gramática menor ou formatação — a análise automática é focada em conteúdo jurídico e matemática. Para cada finding, use add_comment com selectedText EXATO (copiado literalmente do contrato) para que a âncora funcione corretamente no editor.
 
+    14.1. ANTES de reportar QUALQUER finding, VERIFIQUE o cálculo/equivalência. NÃO levante achado (e JAMAIS use severity "error") quando os valores são, de fato, equivalentes ou corretos:
+    - "N meses" de multa rescisória ≡ "N aluguéis" — são a MESMA coisa; não é inconsistência.
+    - Vigência: um prazo de N meses com início em DD/MM/AAAA termina na VÉSPERA do mesmo dia N meses depois (ex.: 30 meses a partir de 01/07/2026 → término em 31/12/2028 está CORRETO, são exatamente 30 meses). Confira o cálculo antes de alegar "X meses e 1 dia".
+    - Só classifique como "error" contradições genuínas e comprovadas (soma que não fecha, dígito verificador inválido). Na dúvida, rebaixe para "warning"/"info" ou NÃO reporte.
+
+    14.2. LINGUAGEM VOLTADA AO USUÁRIO: NUNCA cite nomes internos de campos/JSON no texto do comentário (ex.: "config.foro", "config.multa_rescisoria_meses", "config.garantia.provider", "dataJson", "campo X vazio no JSON"). Refira-se à cláusula ou ao dado em linguagem natural ("o foro não foi especificado", "a apólice do seguro-fiança não consta"). O usuário é um corretor/advogado, não vê a estrutura interna de dados.
+
 ## MODELOS DE CONTRATO PADRONIZADOS
 
 Existem 2 modelos padronizados de CCV (Compromisso de Compra e Venda):

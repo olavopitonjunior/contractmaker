@@ -66,7 +66,7 @@ export function KanbanDealCard({ deal, imovelEndereco, tenantName, stages }: Pro
   return (
     <Card className="border-current/20 bg-card">
       <CardHeader className="flex flex-row items-start justify-between gap-2 p-3 pb-1.5">
-        <Link href={`/pipeline/deals/${deal.id}`} className="text-sm font-medium hover:underline">
+        <Link href={`/locacao/deals/${deal.id}`} className="text-sm font-medium hover:underline">
           {deal.title || "Sem título"}
         </Link>
         <DropdownMenu>
