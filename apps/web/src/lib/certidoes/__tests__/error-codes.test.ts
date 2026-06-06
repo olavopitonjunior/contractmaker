@@ -23,6 +23,19 @@ describe("isDataDivergente + 608 divergência → inconsistent_input (não missi
       isDataDivergente("Data de nascimento informada é diferente da cadastrada.")
     ).toBe(true);
   });
+  it("casa 'não coincidem' (TRF5 608 real — cruza com a Receita)", () => {
+    expect(
+      isDataDivergente(
+        "Data de nascimento preenchida e data de nascimento consultada na receita federal não coincidem."
+      )
+    ).toBe(true);
+    expect(
+      mapInfosimplesCodeToCategory(
+        608,
+        "Data de nascimento preenchida e ... na receita federal não coincidem."
+      )
+    ).toBe("inconsistent_input");
+  });
   it("NÃO casa 'parâmetros obrigatórios não foram enviados' (606 = realmente falta)", () => {
     expect(
       isDataDivergente("Parâmetros obrigatórios não foram enviados.")

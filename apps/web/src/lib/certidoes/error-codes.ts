@@ -201,10 +201,16 @@ export function isEndpointNotEnabled(message: string | null | undefined): boolea
  * CODE_MAP) reclassifica para inconsistent_input → data_invalid ("dados
  * divergentes — confira o cadastro"). Casa apenas frases de DIVERGÊNCIA, não
  * "parâmetros obrigatórios" (esses continuam missing_input).
+ *
+ * 2026-06-05 (b): o TRF5 também cruza a data contra a Receita e usa outra frase
+ * — "Data de nascimento preenchida e ... na receita federal não COINCIDEM". Sem
+ * cobrir "não coincide(m)", a MESMA divergência (ex.: cônjuge Dalice) ficava
+ * certa na Receita ("dados divergentes") e errada no TRF5 (failed_permanent
+ * "use o portal"). Adicionado ao gate.
  */
 export function isDataDivergente(message: string | null | undefined): boolean {
   if (!message) return false;
-  return /diverg[eê]nte|diferente\s+da\s+cadastrada|n[ãa]o\s+(confere|corresponde|bate|combina)/i.test(
+  return /diverg[eê]nte|diferente\s+da\s+cadastrada|n[ãa]o\s+(confere|corresponde|bate|combina|coincidem?)/i.test(
     message
   );
 }
