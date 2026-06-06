@@ -132,6 +132,7 @@ async function handleProposePlan(
     tool?: string;
     input?: Record<string, unknown>;
     description?: string;
+    dependsOn?: unknown;
   };
   type PersistedStep = {
     id: string;
@@ -139,7 +140,8 @@ async function handleProposePlan(
     tool: string;
     input: Record<string, unknown>;
     description: string;
-    status: "pending" | "approved" | "rejected" | "executed" | "failed";
+    dependsOn?: string[];
+    status: "pending" | "approved" | "rejected" | "executed" | "failed" | "skipped";
     result?: { success: boolean; summary: string };
   };
 
@@ -156,6 +158,20 @@ async function handleProposePlan(
           : `${r.tool ?? "?"}`,
       status: "pending",
     };
+  });
+
+  // Resolve dependsOn (índices 0-based informados pelo LLM) → IDs reais dos
+  // steps. Ignora auto-referência e índices fora do range. Guarda-trilho do
+  // execute-plan: um step cuja dependência falhar é pulado (não roda com
+  // premissa falsa — ver bug add_comment afirmando inserção que falhou).
+  rawSteps.forEach((s: unknown, idx: number) => {
+    const raw = ((s ?? {}) as RawStep).dependsOn;
+    if (!Array.isArray(raw)) return;
+    const depIds = raw
+      .map((d) => (typeof d === "number" ? d : Number(d)))
+      .filter((d) => Number.isInteger(d) && d >= 0 && d < steps.length && d !== idx)
+      .map((d) => steps[d].id);
+    if (depIds.length > 0) steps[idx].dependsOn = Array.from(new Set(depIds));
   });
 
   // Pré-validação anti-slug em write steps que dependem de knowledgeItemId.

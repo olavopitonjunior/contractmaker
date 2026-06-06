@@ -173,6 +173,7 @@ export function PlanCard({ contractId, planId, steps, onExecuted }: PlanCardProp
                 "h-1.5 w-1.5 rounded-full",
                 status === "executed" && "bg-emerald-500",
                 status === "failed" && "bg-destructive",
+                status === "skipped" && "bg-amber-400/70",
                 status === "rejected" && "bg-muted-foreground/30",
                 (status === "pending" || status === "approved") &&
                   "bg-muted-foreground/40 ring-1 ring-muted-foreground/40 ring-offset-0"
@@ -267,6 +268,8 @@ export function PlanCard({ contractId, planId, steps, onExecuted }: PlanCardProp
                       <XCircle className="h-4 w-4 mt-0.5 shrink-0 text-destructive" />
                     ) : state.status === "rejected" ? (
                       <Circle className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground/50" />
+                    ) : state.status === "skipped" ? (
+                      <Circle className="h-4 w-4 mt-0.5 shrink-0 text-amber-500" />
                     ) : (
                       <Loader2 className="h-4 w-4 mt-0.5 shrink-0 animate-spin text-muted-foreground" />
                     )}
@@ -275,6 +278,7 @@ export function PlanCard({ contractId, planId, steps, onExecuted }: PlanCardProp
                       className={cn(
                         "flex-1 text-xs leading-snug cursor-pointer min-w-0",
                         state.status === "rejected" && "line-through text-muted-foreground/60",
+                        state.status === "skipped" && "line-through text-amber-700/70 dark:text-amber-400/70",
                         !isPending && "cursor-default"
                       )}
                     >

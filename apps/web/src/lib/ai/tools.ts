@@ -470,6 +470,12 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
                 description:
                   "Frase curta em PT-BR mostrada no PlanCard. Ex: 'Validar contrato completo', 'Substituir R$ 80.000 por R$ 90.000 na cláusula segunda'.",
               },
+              dependsOn: {
+                type: "array",
+                items: { type: "integer" },
+                description:
+                  "OPCIONAL. Índices (0-based, na ordem desta lista) dos steps anteriores cujo SUCESSO este step pressupõe. Se uma dependência falhar na execução, o sistema PULA este step em vez de rodá-lo com premissa falsa. Use SEMPRE que o texto/efeito deste step afirmar ou depender do resultado de outro — ex.: um add_comment que diz 'a cláusula inserida acima' deve depender do índice do insert_clause correspondente.",
+              },
             },
             required: ["type", "tool", "input", "description"],
           },

@@ -1,0 +1,257 @@
+/**
+ * Seed do banco de cláusulas de LOCAÇÃO (KnowledgeItem category="clause").
+ *
+ * Contexto (bug #6 do QA de locação 2026-06-06): a base de cláusulas não tinha
+ * NENHUMA cláusula de locação, então `insert_clause` / auto-resolve (Voyage ou
+ * ILIKE) nunca encontrava nada para pedidos como "vistoria de entrada", e o
+ * ciclo de padronização (propose_*) ficava sem matéria-prima. Este seed insere
+ * um conjunto curado de cláusulas da Lei nº 8.245/91 com títulos/tags ricos em
+ * palavras-chave (para o fallback ILIKE) e embeddings Voyage quando disponível.
+ *
+ * Locação não usa os grupos G1..G6 (sistema de venda) — usamos `subcategory`
+ * semântica e `tags`. groupCode fica null.
+ *
+ * Uso:
+ *   npx tsx scripts/seed-locacao-clauses.ts                 # dry-run
+ *   npx tsx scripts/seed-locacao-clauses.ts --apply         # persiste
+ *   npx tsx scripts/seed-locacao-clauses.ts --apply --orgId=<id>
+ *
+ * Env:
+ *   DATABASE_URL  — Prisma (passe a URL de staging inline pra mirar staging)
+ *   VOYAGE_API_KEY — opcional; se presente, gera embeddings (senão, ILIKE)
+ *   SHARED_ORG_ID  — fallback de orgId quando --orgId não é passado
+ *
+ * Idempotente: pula/atualiza cláusula já existente por (orgId, title).
+ */
+import { PrismaClient } from "@prisma/client";
+
+const prisma = new PrismaClient();
+
+const APPLY = process.argv.includes("--apply");
+const ORG_ARG = process.argv.find((a) => a.startsWith("--orgId="));
+
+interface SeedClause {
+  title: string;
+  subcategory: string;
+  content: string;
+  tags: string[];
+  agentNotes: string;
+  isVariable: boolean;
+}
+
+const CLAUSES: SeedClause[] = [
+  {
+    title: "Vistoria de Entrada e Saída do Imóvel",
+    subcategory: "vistoria",
+    content:
+      "O LOCATÁRIO recebe o imóvel no estado descrito no laudo de vistoria de entrada, que integra este contrato como anexo, obrigando-se a restituí-lo, ao término da locação, no mesmo estado em que o recebeu, ressalvado o desgaste natural decorrente do uso normal. A vistoria de saída será realizada na presença das partes, lavrando-se laudo comparativo que servirá de base para apuração de eventuais danos.",
+    tags: ["locacao", "vistoria", "entrada", "saida", "laudo", "conservacao", "estado do imovel"],
+    agentNotes:
+      "Use em qualquer locação (residencial ou comercial). Pressupõe laudo anexo. Não confundir com a cláusula de conservação/benfeitorias.",
+    isVariable: false,
+  },
+  {
+    title: "Benfeitorias — Necessárias, Úteis e Voluptuárias",
+    subcategory: "benfeitorias",
+    content:
+      "As benfeitorias necessárias introduzidas pelo LOCATÁRIO, ainda que não autorizadas, serão indenizáveis e permitem o exercício do direito de retenção. As benfeitorias úteis, desde que autorizadas previamente e por escrito pelo LOCADOR, serão indenizáveis e também permitem retenção. As benfeitorias voluptuárias não serão indenizáveis, podendo ser levantadas pelo LOCATÁRIO ao final da locação, desde que sua retirada não afete a estrutura e a substância do imóvel, nos termos dos arts. 35 e 36 da Lei nº 8.245/91.",
+    tags: ["locacao", "benfeitorias", "indenizacao", "retencao", "reformas", "melhorias"],
+    agentNotes:
+      "Padrão legal da Lei do Inquilinato. As partes podem ajustar a renúncia ao direito de indenização/retenção (art. 35 admite cláusula em contrário).",
+    isVariable: false,
+  },
+  {
+    title: "Multa por Rescisão Antecipada (Proporcional)",
+    subcategory: "rescisao",
+    content:
+      "Em caso de devolução do imóvel pelo LOCATÁRIO antes do término do prazo contratual, será devida multa equivalente a {{config.multa_rescisoria_meses}} ({{numeroExtenso config.multa_rescisoria_meses}}) aluguéis, calculada de forma proporcional ao período de cumprimento do contrato, nos termos do art. 4º da Lei nº 8.245/91. Fica dispensada a multa na hipótese do parágrafo único do art. 4º (transferência do LOCATÁRIO, por seu empregador, para prestar serviços em localidade diversa), mediante notificação por escrito com 30 (trinta) dias de antecedência.",
+    tags: ["locacao", "rescisao", "multa", "proporcional", "devolucao antecipada", "art 4"],
+    agentNotes:
+      "isVariable: usa config.multa_rescisoria_meses. Sempre proporcional (art. 4º). Inserir a ressalva da transferência por empregador quando aplicável.",
+    isVariable: true,
+  },
+  {
+    title: "Garantia Locatícia — Caução",
+    subcategory: "garantia",
+    content:
+      "A título de caução, o LOCATÁRIO deposita o equivalente a {{garantia.caucao_meses}} ({{numeroExtenso garantia.caucao_meses}}) aluguéis, nos termos do art. 38 da Lei nº 8.245/91, valor que será restituído ao final da locação, deduzidos eventuais débitos de aluguéis, encargos e danos apurados em vistoria. A caução em dinheiro não poderá exceder o equivalente a 3 (três) meses de aluguel.",
+    tags: ["locacao", "garantia", "caucao", "deposito", "art 38"],
+    agentNotes:
+      "isVariable: usa garantia.caucao_meses (máx. 3). Mutuamente exclusiva com fiador/seguro — só uma modalidade de garantia por contrato (art. 37).",
+    isVariable: true,
+  },
+  {
+    title: "Garantia Locatícia — Fiador Solidário",
+    subcategory: "garantia",
+    content:
+      "Em garantia de todas as obrigações deste contrato, o(a) FIADOR(A) qualificado(a) no preâmbulo assume responsabilidade solidária com o LOCATÁRIO, com expressa renúncia ao benefício de ordem previsto nos arts. 827 e 838 do Código Civil, respondendo pelo adimplemento integral até a efetiva devolução das chaves, ainda que a locação se prorrogue por prazo indeterminado, nos termos do art. 39 da Lei nº 8.245/91.",
+    tags: ["locacao", "garantia", "fiador", "fianca", "solidario", "art 39"],
+    agentNotes:
+      "Use quando garantia.tipo = fiador. Exige qualificação do fiador no preâmbulo. Cláusula do art. 39 (responde até a entrega das chaves).",
+    isVariable: false,
+  },
+  {
+    title: "Ação Renovatória (Locação Não Residencial)",
+    subcategory: "renovatoria",
+    content:
+      "Fica assegurado ao LOCATÁRIO o direito à renovação compulsória do contrato, nos termos dos arts. 51 a 57 da Lei nº 8.245/91, desde que, cumulativamente: (i) o contrato a renovar tenha sido celebrado por escrito e com prazo determinado; (ii) o prazo mínimo do contrato ou a soma dos prazos ininterruptos dos contratos escritos seja de 5 (cinco) anos; e (iii) o LOCATÁRIO explore o mesmo ramo de atividade pelo prazo mínimo e ininterrupto de 3 (três) anos. A ação renovatória deverá ser proposta no interregno de 1 (um) ano, no máximo, até 6 (seis) meses, no mínimo, anteriores ao término do prazo do contrato em vigor, sob pena de decadência.",
+    tags: ["locacao", "comercial", "nao residencial", "renovatoria", "renovacao", "ponto comercial", "arts 51 57"],
+    agentNotes:
+      "EXCLUSIVA de locação NÃO RESIDENCIAL (comercial). Não inserir em contrato residencial. Atenção aos prazos de decadência (1 ano a 6 meses antes do fim).",
+    isVariable: false,
+  },
+  {
+    title: "Direito de Preferência na Aquisição do Imóvel",
+    subcategory: "preferencia",
+    content:
+      "Em caso de venda, promessa de venda, cessão ou dação em pagamento do imóvel locado, o LOCATÁRIO terá preferência para adquiri-lo, em igualdade de condições com terceiros, devendo o LOCADOR dar-lhe conhecimento do negócio mediante notificação que contenha todas as condições da alienação, nos termos dos arts. 27 a 33 da Lei nº 8.245/91. O LOCATÁRIO poderá exercer seu direito no prazo de 30 (trinta) dias a contar da notificação.",
+    tags: ["locacao", "preferencia", "venda", "aquisicao", "alienacao", "arts 27 33"],
+    agentNotes:
+      "Direito de preferência do inquilino. Para ser oponível a terceiros, o contrato deve estar averbado na matrícula com 30 dias de antecedência (art. 33).",
+    isVariable: false,
+  },
+  {
+    title: "Devolução do Imóvel e Entrega das Chaves",
+    subcategory: "devolucao",
+    content:
+      "Ao término da locação, por qualquer motivo, o LOCATÁRIO obriga-se a devolver o imóvel desocupado de pessoas e bens, em perfeito estado de conservação e limpeza, com todas as suas instalações em funcionamento, mediante entrega das chaves contra recibo. Os aluguéis e encargos serão devidos até a data da efetiva entrega das chaves e da assinatura do termo de vistoria de saída, persistindo a responsabilidade do LOCATÁRIO até então.",
+    tags: ["locacao", "devolucao", "entrega de chaves", "desocupacao", "termino", "recibo"],
+    agentNotes:
+      "Fixa o marco de cessação dos aluguéis (entrega das chaves + vistoria de saída). Combine com a cláusula de vistoria.",
+    isVariable: false,
+  },
+  {
+    title: "Sublocação, Cessão e Empréstimo — Vedação",
+    subcategory: "uso",
+    content:
+      "É vedada ao LOCATÁRIO a sublocação total ou parcial, a cessão da locação e o empréstimo do imóvel, ainda que a título gratuito, sem o consentimento prévio e por escrito do LOCADOR, nos termos do art. 13 da Lei nº 8.245/91. A infração a esta cláusula constitui motivo de rescisão de pleno direito do contrato.",
+    tags: ["locacao", "sublocacao", "cessao", "emprestimo", "vedacao", "art 13"],
+    agentNotes:
+      "Padrão. O imóvel destina-se ao uso exclusivo do LOCATÁRIO. Infração = rescisão.",
+    isVariable: false,
+  },
+  {
+    title: "Reajuste Anual do Aluguel",
+    subcategory: "reajuste",
+    content:
+      "O valor do aluguel será reajustado a cada 12 (doze) meses, ou na menor periodicidade permitida em lei, pela variação acumulada do índice {{aluguel.indice_reajuste}} no período, ou, na sua extinção, por outro índice oficial que vier a substituí-lo. Persistindo a locação por prazo indeterminado, o reajuste continuará a ser aplicado nas mesmas bases.",
+    tags: ["locacao", "reajuste", "correcao", "indice", "igpm", "ipca", "anual"],
+    agentNotes:
+      "isVariable: usa aluguel.indice_reajuste. Periodicidade mínima legal é anual (Lei 9.069/95 / Lei 10.192/01).",
+    isVariable: true,
+  },
+];
+
+const VOYAGE_KEY = process.env.VOYAGE_API_KEY;
+
+async function embedVoyage(text: string): Promise<number[] | null> {
+  if (!VOYAGE_KEY) return null;
+  try {
+    const res = await fetch("https://api.voyageai.com/v1/embeddings", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${VOYAGE_KEY}`,
+      },
+      body: JSON.stringify({ model: "voyage-law-2", input: [text], input_type: "document" }),
+    });
+    if (!res.ok) {
+      console.warn(`  [voyage] HTTP ${res.status} — pulando embedding`);
+      return null;
+    }
+    const json = (await res.json()) as { data?: Array<{ embedding?: number[] }> };
+    const vec = json.data?.[0]?.embedding;
+    return Array.isArray(vec) && vec.length === 1024 ? vec : null;
+  } catch (e) {
+    console.warn(`  [voyage] erro: ${e instanceof Error ? e.message : String(e)}`);
+    return null;
+  }
+}
+
+async function resolveOrgId(): Promise<string | null> {
+  if (ORG_ARG) return ORG_ARG.split("=")[1];
+  if (process.env.SHARED_ORG_ID) return process.env.SHARED_ORG_ID;
+  // Fallback: org dona dos templates de locação (auto-mira o ambiente certo).
+  const tmpl = await prisma.contractTemplate.findFirst({
+    where: { modalidade: { in: ["locacao", "locacao_comercial"] } },
+    select: { orgId: true },
+  });
+  return tmpl?.orgId ?? null;
+}
+
+async function main() {
+  console.log(`[seed-locacao-clauses] ${APPLY ? "APPLY" : "DRY RUN"}`);
+  const orgId = await resolveOrgId();
+  if (!orgId) {
+    console.error(
+      "[seed-locacao-clauses] orgId não resolvido. Passe --orgId=<id> ou SHARED_ORG_ID, ou garanta que existam templates de locação."
+    );
+    process.exit(1);
+  }
+  console.log(`[seed-locacao-clauses] org=${orgId} · voyage=${VOYAGE_KEY ? "ON" : "OFF (ILIKE)"}`);
+
+  let created = 0;
+  let skipped = 0;
+  let embedded = 0;
+
+  for (const c of CLAUSES) {
+    const existing = await prisma.knowledgeItem.findFirst({
+      where: { orgId, category: "clause", title: c.title },
+      select: { id: true },
+    });
+    if (existing) {
+      console.log(`= já existe: ${c.title}`);
+      skipped++;
+      continue;
+    }
+    console.log(`${APPLY ? "+" : "·"} ${c.title} [${c.subcategory}]`);
+    if (!APPLY) {
+      created++;
+      continue;
+    }
+    const item = await prisma.knowledgeItem.create({
+      data: {
+        orgId,
+        category: "clause",
+        title: c.title,
+        content: c.content,
+        chunkIndex: 0,
+        chunkTotal: 1,
+        tags: ["locacao", ...c.tags.filter((t) => t !== "locacao")],
+        source: "seed_locacao_v1",
+        agentNotes: c.agentNotes,
+        groupCode: null,
+        subcategory: c.subcategory,
+        isVariable: c.isVariable,
+        status: "approved",
+        usageCount: 0,
+      },
+      select: { id: true },
+    });
+    created++;
+    // Embedding Voyage (best-effort) — vital quando o ambiente TEM Voyage, pois
+    // a busca vetorial filtra `embedding IS NOT NULL` (sem embedding a cláusula
+    // ficaria invisível ao auto-resolve). Sem Voyage, o app usa ILIKE.
+    const vec = await embedVoyage(`${c.title}\n${c.content}`);
+    if (vec) {
+      await prisma.$executeRawUnsafe(
+        `UPDATE "KnowledgeItem" SET embedding = $1::vector WHERE id = $2`,
+        `[${vec.join(",")}]`,
+        item.id
+      );
+      embedded++;
+    }
+  }
+
+  console.log(
+    `\n[seed-locacao-clauses] ${APPLY ? "criadas" : "seriam criadas"}: ${created}, já existentes: ${skipped}, com embedding: ${embedded}`
+  );
+  if (!APPLY) console.log("[seed-locacao-clauses] rode com --apply para persistir.");
+}
+
+main()
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  })
+  .finally(() => prisma.$disconnect());
