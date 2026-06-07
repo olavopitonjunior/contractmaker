@@ -134,7 +134,7 @@ export default async function LocacaoContratosPage() {
           icon: <FileText className="h-10 w-10" />,
           title: "Nenhum contrato",
           description:
-            'Contratos são criados ao mover um deal pra "Chaves Entregues" na Esteira.',
+            'Contratos de administração são criados quando um negócio chega em "ADM" no Pipeline de Locação.',
         }}
       />
     </div>

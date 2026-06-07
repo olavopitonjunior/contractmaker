@@ -329,23 +329,32 @@ export async function runCreateCommissionCharge(
       },
     });
 
-    // Auto-promove deal pra "Cobrança emitida". Não retrocede se já passou —
-    // criação de cobrança extra pra um deal em "Comissão paga" mantém stage.
+    // Auto-promove deal pra "Cobrança emitida" (venda) / "Cobrança Gerada"
+    // (locação). Não retrocede se já passou — criação de cobrança extra pra um
+    // deal em stage terminal mantém o stage. Mapas por `pipeline.kind` com
+    // fallback "venda" (kind null/legado) — não regride o fluxo de venda.
     let stageMovedTo: string | null = null;
     {
       const dealWithStage = await prisma.deal.findUnique({
         where: { id: deal.id },
         include: { stage: true, pipeline: { include: { stages: true } } },
       });
+      const kind = dealWithStage?.pipeline.kind ?? "venda";
+      const cobrancaStageName =
+        kind === "locacao" ? "Cobrança Gerada" : "Cobrança emitida";
+      const linearOrderByKind: Record<string, readonly string[]> = {
+        venda: [
+          "Formulário",
+          "Confecção de Contrato",
+          "Enviado para assinatura",
+          "Contrato assinado",
+        ],
+        locacao: ["Em contrato", "Assinado"],
+      };
       const cobrancaStage = dealWithStage?.pipeline.stages.find(
-        (s) => s.name === "Cobrança emitida"
+        (s) => s.name === cobrancaStageName
       );
-      const linearOrder = [
-        "Formulário",
-        "Confecção de Contrato",
-        "Enviado para assinatura",
-        "Contrato assinado",
-      ];
+      const linearOrder = linearOrderByKind[kind] ?? linearOrderByKind.venda;
       if (
         dealWithStage &&
         cobrancaStage &&

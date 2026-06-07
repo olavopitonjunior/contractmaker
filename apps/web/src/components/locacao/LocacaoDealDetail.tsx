@@ -95,7 +95,7 @@ export function LocacaoDealDetail({ deal, contract, versions, lease, simplified 
           <p className="text-sm text-muted-foreground">Negócio de locação</p>
         </div>
         <Button variant="outline" asChild>
-          <a href="/locacao/esteira">Voltar à esteira</a>
+          <a href="/pipeline/locacao">Voltar ao pipeline</a>
         </Button>
       </div>
 

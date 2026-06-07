@@ -1187,7 +1187,7 @@ export async function generateLocacaoContractForDeal(
     console.error("[locacao-generation] Falha ao upsert LeaseContract:", err);
   }
 
-  // Move o deal pro stage "Confecção de Contrato" do pipeline DE LOCAÇÃO.
+  // Move o deal pro stage "Em contrato" do pipeline DE LOCAÇÃO (esteira comercial).
   const { title: derivedTitle, value: derivedValue } = deriveDealMetadata(dataJson, {
     formTitle: deal.form?.title,
     fallbackTitle: deal.title,
@@ -1196,7 +1196,7 @@ export async function generateLocacaoContractForDeal(
     where: { orgId, kind: "locacao" },
     include: { stages: { orderBy: { position: "asc" } } },
   });
-  const confeccaoStage = pipeline?.stages.find((s) => s.name === "Confecção de Contrato");
+  const confeccaoStage = pipeline?.stages.find((s) => s.name === "Em contrato");
   await prisma.deal.update({
     where: { id: deal.id },
     data: {

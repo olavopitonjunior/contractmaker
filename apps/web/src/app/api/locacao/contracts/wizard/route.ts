@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
     }),
     prisma.pipeline.findFirst({
       where: { orgId: ctx.orgId, kind: "locacao" },
-      include: { stages: { orderBy: { position: "asc" }, take: 1 } },
+      include: { stages: { orderBy: { position: "asc" } } },
     }),
   ]);
 
@@ -83,7 +83,8 @@ export async function POST(req: NextRequest) {
       { status: 412 }
     );
   }
-  const firstStage = pipeline.stages[0];
+  const firstStage =
+    pipeline.stages.find((s) => s.name === "Formulário") ?? pipeline.stages[0];
 
   const enderecoFmt = [property.rua, property.numero, property.bairro]
     .filter(Boolean)

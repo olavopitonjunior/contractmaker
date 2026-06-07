@@ -19,8 +19,8 @@ import { ThemeToggle } from "@/components/layout/theme-toggle";
 // Label custom pra rotas top-level e algumas conhecidas. Slugs (ids cuid) e
 // segmentos não mapeados caem no fallback "capitalizar".
 const LABEL_MAP: Record<string, string> = {
-  pipeline: "Pipeline de Vendas",
-  locacao: "Locação",
+  pipeline: "Pipeline",
+  locacao: "ADM Locação",
   imoveis: "Imóveis",
   esteira: "Esteira",
   contratos: "Contratos",
@@ -70,12 +70,20 @@ function capitalize(s: string): string {
 
 function buildSegments(pathname: string): Segment[] {
   const parts = pathname.split("/").filter(Boolean);
+  const root = parts[0];
   return parts.map((slug, idx) => {
     const href = "/" + parts.slice(0, idx + 1).join("/");
     const isId = isIdLike(slug);
-    const label = isId
-      ? "Detalhe"
-      : LABEL_MAP[slug.toLowerCase()] ?? capitalize(slug);
+    // O segmento "locacao" é ambíguo: sob /pipeline é a esteira comercial
+    // ("Locação"); sob /locacao é o módulo administrativo ("ADM Locação").
+    let label: string;
+    if (isId) {
+      label = "Detalhe";
+    } else if (slug === "locacao") {
+      label = root === "pipeline" ? "Locação" : "ADM Locação";
+    } else {
+      label = LABEL_MAP[slug.toLowerCase()] ?? capitalize(slug);
+    }
     return { label, href, isLast: idx === parts.length - 1, isId };
   });
 }

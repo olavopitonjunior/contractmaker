@@ -23,8 +23,8 @@ const novoDealLocacaoSchema = z.object({
  *    com property/tenant/aluguel.
  * 2. Deal kind="locacao" no primeiro stage do pipeline.
  *
- * Não cria LeaseContract ainda — isso é o produto final quando o deal chega
- * em "Chaves Entregues". Aqui é só o início da Esteira.
+ * Não cria LeaseContract ainda — a administração começa quando o deal chega
+ * em "ADM" (stage terminal do Pipeline de Locação). Aqui é só o início.
  */
 export async function POST(req: NextRequest) {
   const ctx = await ensureLocacaoAccess(PERMISSION.LEASE_CREATE);
@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
     }),
     prisma.pipeline.findFirst({
       where: { orgId: ctx.orgId, kind: "locacao" },
-      include: { stages: { orderBy: { position: "asc" }, take: 1 } },
+      include: { stages: { orderBy: { position: "asc" } } },
     }),
   ]);
   if (!property) return NextResponse.json({ error: "Imóvel não encontrado" }, { status: 422 });
@@ -58,7 +58,10 @@ export async function POST(req: NextRequest) {
       { status: 412 }
     );
   }
-  const firstStage = pipeline.stages[0];
+  // Deal nasce em "Formulário" (não em "Em Aprovação", o 1º stage manual).
+  // Fallback p/ o 1º stage se "Formulário" não existir.
+  const firstStage =
+    pipeline.stages.find((s) => s.name === "Formulário") ?? pipeline.stages[0];
 
   const enderecoFmt = [property.rua, property.numero, property.bairro]
     .filter(Boolean)

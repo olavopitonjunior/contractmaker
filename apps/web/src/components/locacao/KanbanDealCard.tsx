@@ -13,7 +13,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Building2, User, MoreHorizontal } from "lucide-react";
+import { Building2, User, MoreHorizontal, ArrowUpRight } from "lucide-react";
 
 interface StageOption {
   id: string;
@@ -27,6 +27,8 @@ interface Props {
     value: number | null;
     stageId: string;
   };
+  /** Nome do stage atual — usado pra exibir o CTA de handoff no stage "ADM". */
+  currentStageName?: string;
   imovelEndereco?: string | null;
   tenantName?: string | null;
   stages: StageOption[];
@@ -37,10 +39,17 @@ function fmtBRL(v: number | null): string {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
-export function KanbanDealCard({ deal, imovelEndereco, tenantName, stages }: Props) {
+export function KanbanDealCard({
+  deal,
+  currentStageName,
+  imovelEndereco,
+  tenantName,
+  stages,
+}: Props) {
   const router = useRouter();
   const [moving, setMoving] = useState(false);
   const otherStages = stages.filter((s) => s.id !== deal.stageId);
+  const isAdmStage = currentStageName === "ADM";
 
   async function moveToStage(stageId: string, stageName: string) {
     setMoving(true);
@@ -102,6 +111,14 @@ export function KanbanDealCard({ deal, imovelEndereco, tenantName, stages }: Pro
         )}
         {deal.value != null && (
           <div className="pt-1 text-sm font-semibold text-foreground">{fmtBRL(deal.value)}</div>
+        )}
+        {isAdmStage && (
+          <Link
+            href={`/locacao/deals/${deal.id}`}
+            className="mt-1 inline-flex items-center gap-1 rounded-md bg-green-600/10 px-2 py-1 text-xs font-medium text-green-700 transition-colors hover:bg-green-600/20 dark:text-green-400"
+          >
+            <ArrowUpRight className="h-3 w-3 shrink-0" /> Abrir administração
+          </Link>
         )}
       </CardContent>
     </Card>

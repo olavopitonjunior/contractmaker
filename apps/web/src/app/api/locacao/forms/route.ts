@@ -62,7 +62,7 @@ export async function POST(req: NextRequest) {
 
   const pipeline = await prisma.pipeline.findFirst({
     where: { orgId: ctx.orgId, kind: "locacao" },
-    include: { stages: { orderBy: { position: "asc" }, take: 1 } },
+    include: { stages: { orderBy: { position: "asc" } } },
   });
   if (!pipeline || pipeline.stages.length === 0) {
     return NextResponse.json(
@@ -70,7 +70,11 @@ export async function POST(req: NextRequest) {
       { status: 412 }
     );
   }
-  const firstStage = pipeline.stages[0];
+  // Deal nasce no stage "Formulário" (link público sendo preenchido). "Em
+  // Aprovação" (1º stage) fica como coluna manual pré-formulário. Fallback p/
+  // o 1º stage se "Formulário" não existir.
+  const firstStage =
+    pipeline.stages.find((s) => s.name === "Formulário") ?? pipeline.stages[0];
 
   const result = await prisma.$transaction(async (tx) => {
     const form = await tx.salesForm.create({

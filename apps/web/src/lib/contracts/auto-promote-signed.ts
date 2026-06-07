@@ -5,14 +5,15 @@ import { audit } from "@/lib/security/audit";
 // com fallback "venda" (kind null/legado) — não regride o fluxo de venda.
 const LINEAR_ORDER_BY_KIND: Record<string, readonly string[]> = {
   venda: ["Formulário", "Confecção de Contrato", "Enviado para assinatura"],
-  locacao: ["Confecção de Contrato", "Em Assinatura"],
+  locacao: ["Formulário", "Em contrato"],
 };
 
 const TARGET_STAGE_BY_KIND: Record<string, string> = {
   venda: "Contrato assinado",
-  // Locação não tem stage "assinado": ao fechar o envelope, a esteira avança
-  // para a vistoria de entrada (próximo passo do ciclo de locação).
-  locacao: "Vistoria de Entrada",
+  // Locação (esteira comercial): ao fechar o envelope, o deal avança para
+  // "Assinado". A administração (vistoria/cobrança/etc.) é o próximo passo,
+  // representado pelo stage terminal "ADM" (handoff manual).
+  locacao: "Assinado",
 };
 
 export type AutoPromoteResult =

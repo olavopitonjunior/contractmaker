@@ -92,8 +92,8 @@ export function NovoDealLocacaoDialog({ properties, tenants }: Props) {
         <DialogHeader>
           <DialogTitle>Novo Deal de Locação</DialogTitle>
           <DialogDescription>
-            Cria um deal no primeiro stage da Esteira (Análise de Crédito). O contrato em si vira
-            <code className="mx-1 text-xs">LeaseContract</code> quando o deal chega em &quot;Chaves Entregues&quot;.
+            Cria um deal no Pipeline de Locação (stage &quot;Formulário&quot;). A administração
+            (<code className="mx-1 text-xs">LeaseContract</code>) começa quando o negócio chega em &quot;ADM&quot;.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-3">

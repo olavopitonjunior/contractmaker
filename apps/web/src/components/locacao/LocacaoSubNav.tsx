@@ -10,7 +10,7 @@ type SubNavItem = { label: string; href: string; exact?: boolean };
 const FULL_SUB_NAV: SubNavItem[] = [
   { label: "Dashboard", href: "/locacao", exact: true },
   { label: "Imóveis", href: "/locacao/imoveis" },
-  { label: "Esteira", href: "/locacao/esteira" },
+  { label: "Esteira", href: "/pipeline/locacao" },
   { label: "Contratos", href: "/locacao/contratos" },
   { label: "Cobranças", href: "/locacao/cobrancas" },
   { label: "Repasses", href: "/locacao/repasses" },
@@ -23,7 +23,7 @@ const FULL_SUB_NAV: SubNavItem[] = [
 
 // Modo simplificado: só a esteira (fluxo form → contrato → assinatura).
 const SIMPLIFIED_SUB_NAV: SubNavItem[] = [
-  { label: "Esteira", href: "/locacao/esteira" },
+  { label: "Esteira", href: "/pipeline/locacao" },
 ];
 
 const SUB_NAV: SubNavItem[] = LOCACAO_SIMPLIFIED_MODE

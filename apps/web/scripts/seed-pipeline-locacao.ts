@@ -1,7 +1,8 @@
 // scripts/seed-pipeline-locacao.ts
-// Cria 1 Pipeline kind="locacao" por org com os 6 stages da Esteira (D1):
-// Análise de Crédito → Aprovação → Confecção de Contrato → Em Assinatura →
-// Vistoria de Entrada → Chaves Entregues.
+// Cria 1 Pipeline kind="locacao" por org com os 6 stages do Pipeline de Locação
+// (esteira COMERCIAL, sob /pipeline/locacao):
+// Em Aprovação → Formulário → Em contrato → Assinado → Cobrança Gerada → ADM.
+// "ADM" é o stage terminal: o negócio graduou do comercial para a administração.
 // Idempotente: detecta pipeline kind="locacao" já existente por org.
 //
 // Uso:
@@ -22,12 +23,12 @@ interface StageSeed {
 }
 
 const STAGES: StageSeed[] = [
-  { name: "Análise de Crédito", position: 0, color: "indigo" },
-  { name: "Aprovação", position: 1, color: "amber" },
-  { name: "Confecção de Contrato", position: 2, color: "yellow" },
-  { name: "Em Assinatura", position: 3, color: "blue" },
-  { name: "Vistoria de Entrada", position: 4, color: "sky" },
-  { name: "Chaves Entregues", position: 5, color: "green" },
+  { name: "Em Aprovação", position: 0, color: "indigo" },
+  { name: "Formulário", position: 1, color: "amber" },
+  { name: "Em contrato", position: 2, color: "yellow" },
+  { name: "Assinado", position: 3, color: "blue" },
+  { name: "Cobrança Gerada", position: 4, color: "purple" },
+  { name: "ADM", position: 5, color: "green" },
 ];
 
 async function main() {
@@ -56,7 +57,7 @@ async function main() {
       const pipeline = await prisma.pipeline.create({
         data: {
           orgId: org.id,
-          name: "Esteira de Locação",
+          name: "Pipeline de Locação",
           kind: "locacao",
           stages: {
             create: STAGES.map((s) => ({

@@ -38,7 +38,7 @@ const TYPE_LABEL: Record<SearchResult["type"], string> = {
 
 const QUICK_ACTIONS = [
   { label: "Ir para Dashboard de Locação", href: "/locacao", icon: LayoutDashboard },
-  { label: "Ir para Esteira", href: "/locacao/esteira", icon: ClipboardList },
+  { label: "Ir para Pipeline de Locação", href: "/pipeline/locacao", icon: ClipboardList },
   { label: "Ir para Contratos", href: "/locacao/contratos", icon: FileText },
   { label: "Ir para Imóveis", href: "/locacao/imoveis", icon: Building2 },
   { label: "Ir para Cobranças", href: "/locacao/cobrancas", icon: Wallet },

@@ -498,7 +498,7 @@ export function NovoContratoWizard({ properties, tenants }: Props) {
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">
-                Após criar, o contrato entra no primeiro stage da Esteira (Análise de Crédito) e
+                Após criar, o negócio entra no Pipeline de Locação (stage &quot;Formulário&quot;) e
                 pode ser editado a qualquer momento na ficha do contrato.
               </p>
             </div>
