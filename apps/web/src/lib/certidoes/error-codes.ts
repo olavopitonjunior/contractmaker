@@ -150,6 +150,21 @@ export function isPortalUnavailableMessage(
 }
 
 /**
+ * 2026-06-08 — Mensagem amigável e acionável para indisponibilidade da fonte
+ * oficial (615 "API pausada / instabilidade na fonte", "site indisponível").
+ * O texto cru do provedor ("A API foi pausada temporariamente...") parece erro
+ * técnico/genérico e confunde o operador, que pensa ser erro de dado do cliente.
+ * Esta mensagem deixa explícito que é a FONTE OFICIAL fora do ar (não bug nosso
+ * nem dado errado), com a saída (retry automático / portal oficial). Usada no
+ * classifier nos estados portal_unavailable e failed_permanent (retries
+ * esgotados). `label` é o nome do endpoint (ex.: "CENPROT Nacional (Protestos)").
+ */
+export function friendlySourceUnavailableMessage(label?: string | null): string {
+  const prefix = label ? `${label}: ` : "";
+  return `${prefix}a fonte oficial está temporariamente indisponível (instabilidade no provedor). Nova tentativa automática agendada; se persistir, emita no portal oficial.`;
+}
+
+/**
  * 2026-06-02 — Receita Federal / PGFN responde 611 "As informações disponíveis
  * na Receita Federal sobre o contribuinte ... são insuficientes para emitir a
  * certidão pela Internet." Isso NÃO é erro nosso nem "nada consta": é a própria

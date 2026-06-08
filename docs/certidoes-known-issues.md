@@ -44,6 +44,14 @@ quando a fonte está instável. TRF5 usa `tipo_certidao` NUMÉRICO ("1" Cível /
 
 ---
 
+## TRF5 e endpoints que exigem PDF — código **600** "erro inesperado"
+
+| Sintoma | Causa | Tratamento / Prevenção |
+|---|---|---|
+| **600** "Um erro inesperado ocorreu e será analisado" (`billable:false`) | erro da fonte/Infosimples — NÃO é "nada consta" | `genuine_no_data` em endpoint de `CATEGORIES_REQUIRING_PDF` (cível/trabalhista/protesto/federal…) com `attachmentId:null` → `portal_unavailable` (retry); esgotado → `failed_permanent`+portal. **Fix 2026-06-08:** mensagem ao usuário usa `friendlySourceUnavailableMessage` (fonte indisponível) em vez do texto cru. Para endpoints informativos (sem PDF obrigatório), 600 segue o fluxo antigo (1 retry profilático → success negativa). |
+
+---
+
 ## Receita Federal / PGFN — `receita-federal/cpf`, `receita-federal/pgfn` (608 / 611)
 
 A Receita exige **CPF + data de nascimento JUNTOS** e cruza a data contra o
@@ -73,7 +81,7 @@ processamento nosso.
 
 | Sintoma | Causa | Tratamento / Prevenção |
 |---|---|---|
-| **615** "A API foi pausada temporariamente… instabilidade na fonte" | instabilidade da fonte gov.br | `portal_unavailable` → retry; esgotado → `failed_permanent`+portal. |
+| **615** "A API foi pausada temporariamente… instabilidade na fonte" | instabilidade da fonte gov.br (fonte oficial FORA DO AR, não bug nosso nem dado errado) | `portal_unavailable` → retry; esgotado → `failed_permanent`+portal. **Fix 2026-06-08:** (a) `ieptb/protestos` (Nacional) ganhou `portalUrl` (`site.cenprot.org.br`) — era o único endpoint propenso a 615 SEM CTA de portal manual; (b) `friendlySourceUnavailableMessage` troca o texto técnico cru ("API foi pausada…") por "<endpoint>: a fonte oficial está temporariamente indisponível…". Re-disparar SÓ quando a fonte voltar (re-disparo na fonte caída re-falha). |
 | **603** "consulta não habilitada para a sua conta" | endpoint não habilitado (≠ saldo) | `isEndpointNotEnabled` evita tripar o breaker de crédito da org; vira `account_issue`/`failed_permanent` orientando habilitar. |
 | **603** "O token não tem autorização… verifique se não possui limite de uso" em **TODOS** os endpoints | é **saldo zerado da conta Infosimples** (a razão real "A conta está sem saldo" vem no `errors[]`, não no `code_message` genérico) | `account_issue` → tripa o breaker de crédito. **Saldo Infosimples ≠ budget interno do app** (`INFOSIMPLES_MONTHLY_BUDGET_CENTS`): o app pode mostrar gasto baixo e a carteira pré-paga estar zerada. Fix = recarregar no painel Infosimples. UI mostra banner "Conta sem saldo". Re-disparo sem saldo é grátis (não cobra) e inútil. |
 | 6xx "não constam protestos" | negativa legítima sem PDF | `isProtestoNadaConsta` → success "nada consta" (exceção consciente ao anti-falso-negativo, gated na mensagem + endpoint). |
@@ -117,3 +125,4 @@ processamento nosso.
 - **608 data divergente** (Receita/PGFN): re-rodar NÃO resolve — confira a data de nascimento da parte (CTA "Corrigir") ou a RFB está desatualizada.
 - PGFN 611: NÃO reprocessar — encaminhar ao portal RFB (não emite online).
 - "Conta sem saldo" (603 em massa): recarregar no painel Infosimples antes de retentar.
+- CENPROT 615 / TRF5 600 (fonte fora do ar): esperar a fonte voltar antes de re-disparar; re-disparo na fonte caída só re-falha (agora já vem com CTA de portal + mensagem clara). `failed_permanent` (retryCount=3) não aceita retry — re-disparar via "Só as que faltaram" (novo lote).
