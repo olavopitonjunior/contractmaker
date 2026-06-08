@@ -29,6 +29,8 @@ import {
   isSemResultadoInformativo,
   isEmailThrottle,
   isReceitaCertidaoNaoEmitida,
+  isPortalUnavailableMessage,
+  friendlySourceUnavailableMessage,
 } from "./error-codes";
 
 export type RichStatus =
@@ -323,14 +325,22 @@ export function classifyOutcome(
         portalUrl
       );
     }
-    case "portal_unavailable":
+    case "portal_unavailable": {
+      // 615 "site indisponível" / "API pausada / instabilidade na fonte": troca
+      // o texto técnico cru do provedor por uma mensagem clara de FONTE OFICIAL
+      // fora do ar (não erro de dado). Vale no transitório e no failed_permanent
+      // (planRetry reusa `message` ao esgotar retries).
+      const portalMsg = isPortalUnavailableMessage(effectiveErrorMessage)
+        ? friendlySourceUnavailableMessage(info.label)
+        : effectiveErrorMessage;
       return planRetry(
         "portal_unavailable",
-        effectiveErrorMessage,
+        portalMsg,
         "portal_unavailable",
         opts,
         portalUrl
       );
+    }
     case "provider_timeout":
       return planRetry(
         "api_error",
@@ -380,9 +390,11 @@ export function classifyOutcome(
           ? false
           : CATEGORIES_REQUIRING_PDF.has(info.category);
       if (requiresPdf && opts.attachmentId === null) {
+        // 600 "Um erro inesperado ocorreu" em endpoint que exige PDF (ex.: TRF5):
+        // é falha da fonte, não "nada consta". Mensagem clara de fonte indisponível.
         return planRetry(
           "portal_unavailable",
-          effectiveErrorMessage,
+          friendlySourceUnavailableMessage(info.label),
           "portal_unavailable",
           opts,
           portalUrl

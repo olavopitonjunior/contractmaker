@@ -23,6 +23,16 @@ const informativeEndpoint: EndpointInfo = {
   category: "cadastro",
 };
 
+const cenprotNacionalEndpoint: EndpointInfo = {
+  id: "ieptb/protestos",
+  label: "CENPROT Nacional (Protestos)",
+  costCents: 6,
+  scope: "federal",
+  appliesTo: ["pessoa"],
+  category: "protesto",
+  portalUrl: "https://site.cenprot.org.br/",
+};
+
 const normEmpty: NormalizedResult = {
   situacao: "indeterminado",
   validade: null,
@@ -229,6 +239,49 @@ describe("classifyOutcome — Phase J", () => {
     const delta = out.nextRetryAt!.getTime() - Date.now();
     expect(delta).toBeGreaterThan(9 * 60_000);
     expect(delta).toBeLessThan(11 * 60_000);
+  });
+
+  it("CENPROT 615 'API pausada/instabilidade' → mensagem amigável (não texto cru)", () => {
+    const resp = {
+      code: 615,
+      code_message: "O site ou aplicativo de origem parece estar indisponível.",
+      data: [],
+    } as unknown as InfosimplesResponse;
+    const norm = {
+      ...normEmpty,
+      situacao: "nao_emitida" as const,
+      detalhes:
+        "A API foi pausada temporariamente. O motivo mais provável para isso ter sido feito é instabilidade na fonte de origem.",
+      failureCategory: "portal_unavailable" as const,
+    };
+    const out = classifyOutcome(resp, norm, cenprotNacionalEndpoint, opts);
+    expect(out.status).toBe("portal_unavailable");
+    expect(out.errorMessage).toContain("CENPROT Nacional (Protestos)");
+    expect(out.errorMessage).toMatch(/fonte oficial.*indispon[ií]vel/i);
+    expect(out.errorMessage).not.toMatch(/API foi pausada/i);
+  });
+
+  it("CENPROT 615 com retries esgotados → failed_permanent COM portalUrl + msg clara", () => {
+    const resp = {
+      code: 615,
+      code_message: "O site ou aplicativo de origem parece estar indisponível.",
+      data: [],
+    } as unknown as InfosimplesResponse;
+    const norm = {
+      ...normEmpty,
+      situacao: "nao_emitida" as const,
+      detalhes:
+        "A API foi pausada temporariamente. Instabilidade na fonte de origem.",
+      failureCategory: "portal_unavailable" as const,
+    };
+    const out = classifyOutcome(resp, norm, cenprotNacionalEndpoint, {
+      ...opts,
+      retryAttempts: 3,
+    });
+    expect(out.status).toBe("failed_permanent");
+    // O gap corrigido: CENPROT agora oferece CTA de portal manual.
+    expect(out.portalUrl).toBe("https://site.cenprot.org.br/");
+    expect(out.errorMessage).toMatch(/fonte oficial.*indispon[ií]vel/i);
   });
 
   it("code 602 → failed_permanent (endpoint depreciado)", () => {

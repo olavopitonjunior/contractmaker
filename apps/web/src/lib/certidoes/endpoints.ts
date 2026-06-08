@@ -876,6 +876,10 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     requiresGovBrAuth: true,
     description:
       "Consulta nacional de protestos (IEPTB/CENPROT) para PF e PJ em todas as UFs. Os detalhes dos cartorios de SP sao obtidos automaticamente via ieptb/protestos-detalhes-sp. Requer sessao GOV.BR ativa na conta Infosimples.",
+    // CTA de extração manual quando a fonte nacional fica fora do ar (615
+    // "API pausada / instabilidade na fonte"). Era o único endpoint propenso a
+    // 615 sem portalUrl, deixando o failed_permanent sem botão "Abrir portal".
+    portalUrl: "https://site.cenprot.org.br/",
   },
   // Follow-up síncrono do nacional: detalhes dos cartórios SP via campo
   // `obter_detalhes` da resposta de `ieptb/protestos`. Encadeado pelo
@@ -891,6 +895,7 @@ export const ENDPOINTS: Record<string, EndpointInfo> = {
     internalOnly: true,
     description:
       "Detalhes dos cartorios de SP obtidos via campo obter_detalhes da consulta nacional IEPTB. Disparado automaticamente como follow-up de ieptb/protestos.",
+    portalUrl: "https://site.cenprot.org.br/",
   },
 
   // --- Serasa Experian ---

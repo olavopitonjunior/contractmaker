@@ -5,6 +5,7 @@ import {
   decideObterOutcome,
   isEndpointNotEnabled,
   isPortalUnavailableMessage,
+  friendlySourceUnavailableMessage,
   isReceitaCertidaoNaoEmitida,
   isDataDivergente,
   mapInfosimplesCodeToCategory,
@@ -188,6 +189,24 @@ describe("isPortalUnavailableMessage (609 'tentativas excedidas' é portal, não
   it("vazio/null → false", () => {
     expect(isPortalUnavailableMessage(null)).toBe(false);
     expect(isPortalUnavailableMessage("")).toBe(false);
+  });
+});
+
+describe("friendlySourceUnavailableMessage — texto claro de fonte fora do ar", () => {
+  it("inclui o label do endpoint e a saída (portal oficial)", () => {
+    const msg = friendlySourceUnavailableMessage("CENPROT Nacional (Protestos)");
+    expect(msg).toContain("CENPROT Nacional (Protestos)");
+    expect(msg).toMatch(/fonte oficial.*indispon[ií]vel/i);
+    expect(msg).toMatch(/portal oficial/i);
+  });
+  it("não vaza o texto técnico cru do provedor", () => {
+    const msg = friendlySourceUnavailableMessage("CENPROT Nacional (Protestos)");
+    expect(msg).not.toMatch(/API foi pausada/i);
+  });
+  it("funciona sem label", () => {
+    const msg = friendlySourceUnavailableMessage();
+    expect(msg).toMatch(/fonte oficial/i);
+    expect(msg.startsWith(":")).toBe(false);
   });
 });
 
