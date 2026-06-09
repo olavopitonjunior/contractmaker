@@ -111,6 +111,21 @@ export function ImovelLocacaoStep({
               placeholder="0"
             />
           </FormField>
+          <FormField label="Vagas de garagem">
+            <Input
+              {...form.register("imovel.vagas_garagem", { valueAsNumber: true })}
+              type="number"
+              min={0}
+              inputMode="numeric"
+              placeholder="0"
+            />
+          </FormField>
+          <FormField label="Condomínio / edifício">
+            <Input
+              {...form.register("imovel.condominio_nome")}
+              placeholder="Ex.: Condomínio Edifício Central"
+            />
+          </FormField>
         </div>
 
         <FormField label="Descrição do imóvel *">

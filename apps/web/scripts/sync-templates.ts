@@ -50,18 +50,18 @@ const TEMPLATES: TemplateFile[] = [
   },
   {
     modalidade: "locacao",
-    filename: "locacao_residencial_v2.hbs",
+    filename: "locacao_residencial_v3.hbs",
     canonicalName: "Locação Residencial",
     canonicalDescription:
-      "Instrumento particular de contrato de locação residencial - Lei nº 8.245/91",
+      "Instrumento particular de contrato de locação residencial com administração - Lei nº 8.245/91",
     schemaType: "locacao_residencial_v1",
   },
   {
     modalidade: "locacao_comercial",
-    filename: "locacao_comercial_v2.hbs",
+    filename: "locacao_comercial_v3.hbs",
     canonicalName: "Locação Comercial",
     canonicalDescription:
-      "Instrumento particular de contrato de locação não residencial (comercial) - Lei nº 8.245/91",
+      "Instrumento particular de contrato de locação não residencial (comercial) com administração - Lei nº 8.245/91",
     schemaType: "locacao_comercial_v1",
   },
 ];

@@ -52,6 +52,26 @@ export function AluguelStep({ form }: { form: UseFormReturn<any> }) {
               placeholder="0,00"
             />
           </FormField>
+          <FormField label="IPTU mensal de referência (R$)">
+            <Input
+              {...form.register("aluguel.iptu_mensal", { valueAsNumber: true })}
+              type="number"
+              min={0}
+              step="0.01"
+              inputMode="decimal"
+              placeholder="0,00"
+            />
+          </FormField>
+          <FormField label="Condomínio mensal de referência (R$)">
+            <Input
+              {...form.register("aluguel.condominio_mensal", { valueAsNumber: true })}
+              type="number"
+              min={0}
+              step="0.01"
+              inputMode="decimal"
+              placeholder="0,00"
+            />
+          </FormField>
           <FormField label="Dia de vencimento">
             <NativeSelect
               value={String(form.watch("aluguel.dia_vencimento") || 10)}

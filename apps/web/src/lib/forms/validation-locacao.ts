@@ -87,6 +87,9 @@ const imovelLocacaoSchema = z.object({
   cartorio: z.string().optional().default(""),
   inscricao_iptu: z.string().optional().default(""),
   area: z.number().optional().default(0),
+  // Detalhes do prédio/condomínio (cláusula DO IMÓVEL do template v3).
+  vagas_garagem: z.number().int().min(0).optional(),
+  condominio_nome: z.string().optional().default(""),
   descricao: z.string().min(10, "Descreva o imóvel com ao menos 10 caracteres"),
 });
 
@@ -102,6 +105,10 @@ const aluguelSchema = z.object({
   taxa_admin_percent: z.number().optional().default(10),
   // Forma de pagamento preferida do aluguel mensal.
   meio_pagamento: z.enum(["pix", "boleto", "qualquer"]).optional().default("pix"),
+  // Valores de referência lançados no mesmo boleto pela administradora
+  // (cláusula de encargos do template v3) — informativos, não somam no valor.
+  iptu_mensal: z.number().min(0).optional(),
+  condominio_mensal: z.number().min(0).optional(),
 });
 
 // Garantia locatícia (art. 37 Lei 8.245). Fiador só quando tipo="fiador".
@@ -112,15 +119,20 @@ const garantiaSchema = z.object({
       "caucao",
       "seguro_fianca",
       "garantia_digital",
+      "titulo_capitalizacao",
       "propria",
       "sem_garantia",
     ])
     .optional()
     .default("caucao"),
+  // Subscritora do título / seguradora / provedora da garantia digital.
   provider: z.string().optional().default(""),
   cobertura_meses: z.number().optional().default(0),
   // Caução: nº de aluguéis depositados (art. 38 §2º — máx 3).
   caucao_meses: z.number().optional().default(0),
+  // Título de capitalização caucionado (art. 37, II): valor nominal + proposta.
+  titulo_valor: z.number().min(0).optional(),
+  titulo_proposta: z.string().optional().default(""),
   fiador: parteLocacaoSchema.optional(),
 });
 
@@ -182,10 +194,11 @@ export const dadosLocacaoSchema = z
         data: z.string().optional().default(""),
       })
       .optional(),
-    // Multa/juros por atraso — Lei 8.245 padrão 2% + 1%/mês.
+    // Multa/juros por atraso — modelo padrão da casa: 10% + 1%/mês (a Lei
+    // 8.245/91 não impõe o teto de 2%, que é do CDC/condomínio).
     config: z
       .object({
-        multa_atraso_percent: z.number().default(2),
+        multa_atraso_percent: z.number().default(10),
         juros_mensais_atraso: z.number().default(1),
         multa_rescisoria_meses: z.number().default(3),
       })
@@ -273,7 +286,7 @@ export const dadosLocacaoComercialSchema = z
       .optional(),
     config: z
       .object({
-        multa_atraso_percent: z.number().default(2),
+        multa_atraso_percent: z.number().default(10),
         juros_mensais_atraso: z.number().default(1),
         multa_rescisoria_meses: z.number().default(3),
       })

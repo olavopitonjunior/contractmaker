@@ -41,16 +41,41 @@ function formatLongPtBr(dt: Date): string {
   }).format(dt);
 }
 
+export interface EnrichLocacaoContext {
+  // Imobiliária que administra a locação (cláusula de pagamento do template
+  // v3). Vem da Organization na geração; sem nome o template cai no fallback
+  // "à PARTE LOCADORA ou a quem esta indicar".
+  administradora?: {
+    nome?: string;
+    creci?: string;
+    endereco?: string;
+  };
+}
+
 export function enrichLocacaoData(
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  ctx?: EnrichLocacaoContext
 ): Record<string, unknown> {
   const enriched = { ...data };
   const config = ((enriched.config as Record<string, unknown>) || {}) as Record<string, unknown>;
 
-  // Defaults legais (caso venham de import/agente sem passar pelo Zod).
-  if (config.multa_atraso_percent == null) config.multa_atraso_percent = 2;
+  // Defaults da casa (caso venham de import/agente sem passar pelo Zod).
+  // Multa de atraso 10% — padrão do modelo NNI; Lei 8.245/91 não impõe 2%.
+  if (config.multa_atraso_percent == null) config.multa_atraso_percent = 10;
   if (config.juros_mensais_atraso == null) config.juros_mensais_atraso = 1;
   if (config.multa_rescisoria_meses == null) config.multa_rescisoria_meses = 3;
+
+  // Administradora da locação — idempotente: dataJson já preenchido vence.
+  const adm = ctx?.administradora;
+  if (adm?.nome && (config.administradora_nome == null || config.administradora_nome === "")) {
+    config.administradora_nome = adm.nome;
+    if (adm.creci && (config.administradora_creci == null || config.administradora_creci === "")) {
+      config.administradora_creci = adm.creci;
+    }
+    if (adm.endereco && (config.administradora_endereco == null || config.administradora_endereco === "")) {
+      config.administradora_endereco = adm.endereco;
+    }
+  }
 
   const aluguel = ((enriched.aluguel as Record<string, unknown>) || {}) as Record<string, unknown>;
   const imovel = (enriched.imovel as Record<string, unknown> | undefined) || {};

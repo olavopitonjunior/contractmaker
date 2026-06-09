@@ -93,6 +93,23 @@ export const propertyCreateSchema = z.object({
 export const propertyUpdateSchema = propertyCreateSchema.partial();
 
 // ============================================================================
+// Garantia — labels PT-BR (Guarantee.tipo é String livre no Prisma; união do
+// enum do form público com os tipos extras do wizard ADM)
+// ============================================================================
+
+export const GARANTIA_TIPO_LABELS: Record<string, string> = {
+  caucionante: "Caucionante",
+  caucao: "Caução",
+  cessao_fiduciaria: "Cessão fiduciária",
+  fiador: "Fiador",
+  seguro_fianca: "Seguro-fiança",
+  garantia_digital: "Garantia locatícia (digital)",
+  titulo_capitalizacao: "Título de capitalização",
+  propria: "Garantia própria",
+  sem_garantia: "Não possui garantia",
+};
+
+// ============================================================================
 // PropertyOwnership (refine: soma dos % por propriedade = 100)
 // ============================================================================
 
