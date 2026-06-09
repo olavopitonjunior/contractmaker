@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { FEATURE } from "@/lib/modules/catalog";
 import { ensureLocacaoAccess, isRouteError, parseJsonBody } from "@/lib/locacao/route-helpers";
 import { simulateRepasse, type ChargeInput } from "@/lib/locacao/repasse-simulator";
 
@@ -20,7 +21,7 @@ const simularSchema = z.object({
  * clicar em "Realizar repasse".
  */
 export async function POST(req: NextRequest) {
-  const ctx = await ensureLocacaoAccess(PERMISSION.RENT_VIEW);
+  const ctx = await ensureLocacaoAccess(PERMISSION.RENT_VIEW, FEATURE.LOCACAO_REPASSES);
   if (isRouteError(ctx)) return ctx;
 
   const parsed = await parseJsonBody(req, simularSchema);

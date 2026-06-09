@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { detectLatePaymentExecutor } from "@/lib/locacao/executors/detect-late-payment";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
+import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
+import { MODULE } from "@/lib/modules/catalog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,8 +40,18 @@ export async function GET(req: NextRequest) {
     select: { id: true, orgId: true },
   });
 
+  // Só processa orgs com o módulo "locacao" habilitado (gating por tenant).
+  const distinctOrgIds = [...new Set(charges.map((c) => c.orgId))];
+  const locacaoOrgs = new Set<string>();
+  for (const orgId of distinctOrgIds) {
+    if (isModuleEnabled(await getOrgModules(orgId), MODULE.LOCACAO)) {
+      locacaoOrgs.add(orgId);
+    }
+  }
+
   const orgsWithUsers = new Map<string, string>();
   for (const c of charges) {
+    if (!locacaoOrgs.has(c.orgId)) continue;
     if (orgsWithUsers.has(c.orgId)) continue;
     const m = await prisma.orgMembership.findFirst({
       where: { orgId: c.orgId, role: "owner" },
@@ -51,6 +63,10 @@ export async function GET(req: NextRequest) {
   let triggered = 0;
   let skipped = 0;
   for (const c of charges) {
+    if (!locacaoOrgs.has(c.orgId)) {
+      skipped++;
+      continue;
+    }
     const userId = orgsWithUsers.get(c.orgId);
     if (!userId) {
       skipped++;

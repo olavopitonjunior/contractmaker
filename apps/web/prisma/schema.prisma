@@ -287,6 +287,44 @@ model Organization {
   insurancePolicies  InsurancePolicy[]
   maintenances       Maintenance[]
   leaseReadjustments LeaseReadjustment[]
+
+  // Modularização — entitlements de módulos (Vendas/Locação) por tenant
+  orgModules OrgModule[]
+}
+
+/// Entitlement de módulo por tenant. `module` é validado contra lib/modules/catalog.ts
+/// (isValidModule) em runtime — nunca FK. Defaults das sub-funções moram no catálogo
+/// (código), não aqui: `featureFlags` guarda apenas OVERRIDES; chave ausente => default
+/// do catálogo (ver lib/modules/read.ts). Evita Json default drift.
+model OrgModule {
+  id           String   @id @default(cuid())
+  orgId        String
+  module       String // "vendas" | "locacao"
+  enabled      Boolean  @default(true)
+  featureFlags Json     @default("{}")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, module])
+  @@index([orgId])
+}
+
+/// Sessão de impersonação de tenant por staff de plataforma (super_admin).
+/// Standalone (sem FK) — auditoria de "super-admin agiu como org X". Portado do
+/// painel /admin/orgs (feat/mt-1e-admin-orgs).
+model TenantImpersonationSession {
+  id          String    @id @default(cuid())
+  adminUserId String
+  orgId       String
+  reason      String
+  startedAt   DateTime  @default(now())
+  endsAt      DateTime
+  endedAt     DateTime?
+
+  @@index([adminUserId, endedAt])
+  @@index([orgId, startedAt])
 }
 
 model OrgMembership {

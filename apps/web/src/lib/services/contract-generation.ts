@@ -11,6 +11,9 @@ import {
 import { watchFile } from "@/lib/google/watch";
 import { deriveDealMetadata } from "@/lib/contracts/derive-deal-metadata";
 import { selectTemplateForDeal, selectLocacaoTemplate } from "@/lib/contracts/template-category";
+import { getPipelineByKind } from "@/lib/modules/resolve";
+import { assertModuleEnabled } from "@/lib/modules/guard";
+import { MODULE } from "@/lib/modules/catalog";
 import { enrichLocacaoData } from "@/lib/locacao/enrich";
 import { createLeaseContractFromDataJson } from "@/lib/locacao/create-lease-contract";
 import {
@@ -721,6 +724,8 @@ export async function generateContractForDeal(
   userId: string,
   orgId: string
 ): Promise<GenerateResult> {
+  await assertModuleEnabled(orgId, MODULE.VENDAS);
+
   const deal = await prisma.deal.findUniqueOrThrow({
     where: { id: dealId },
     include: { form: true },
@@ -948,8 +953,7 @@ export async function generateContractForDeal(
   );
 
   // Move deal to "Confeccao de Contrato" stage and sync title/value
-  const pipeline = await prisma.pipeline.findFirst({
-    where: { orgId },
+  const pipeline = await getPipelineByKind(orgId, MODULE.VENDAS, {
     include: { stages: { orderBy: { position: "asc" } } },
   });
 
@@ -1041,6 +1045,8 @@ export async function generateLocacaoContractForDeal(
   userId: string,
   orgId: string
 ): Promise<GenerateResult> {
+  await assertModuleEnabled(orgId, MODULE.LOCACAO);
+
   const deal = await prisma.deal.findUniqueOrThrow({
     where: { id: dealId },
     include: { form: true },

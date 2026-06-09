@@ -7,8 +7,17 @@ import { generateLocacaoContractForDeal } from "@/lib/services/contract-generati
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
 import { schemaForLocacaoType } from "@/lib/forms/validation-locacao";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
+import { MODULE } from "@/lib/modules/catalog";
 
 export const dynamic = "force-dynamic";
+
+// Rota PÚBLICA (sem auth) — não passa pelo seam ensureLocacaoAccess. O gating de
+// módulo é feito aqui após resolver a org pelo token: se a org desabilitou o
+// módulo de locação, o link público responde "indisponível" (não 403 cru).
+async function locacaoEnabled(orgId: string): Promise<boolean> {
+  return isModuleEnabled(await getOrgModules(orgId), MODULE.LOCACAO);
+}
 
 // GET público — busca o form de locação por token.
 export async function GET(
@@ -17,6 +26,9 @@ export async function GET(
 ) {
   const form = await prisma.salesForm.findUnique({ where: { token: params.token } });
   if (!form) return NextResponse.json({ error: "Form not found" }, { status: 404 });
+  if (!(await locacaoEnabled(form.orgId))) {
+    return NextResponse.json({ error: "Formulário indisponível" }, { status: 404 });
+  }
   return NextResponse.json({
     id: form.id,
     token: form.token,
@@ -40,6 +52,9 @@ export async function PATCH(
 
   const form = await prisma.salesForm.findUnique({ where: { token: params.token } });
   if (!form) return NextResponse.json({ error: "Form not found" }, { status: 404 });
+  if (!(await locacaoEnabled(form.orgId))) {
+    return NextResponse.json({ error: "Formulário indisponível" }, { status: 404 });
+  }
 
   const currentData = (form.dataJson as Record<string, unknown>) || {};
   const mergeOutcome = deepMergeAtPaths(

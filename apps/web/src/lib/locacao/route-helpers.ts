@@ -1,11 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { getEffectivePermissions, can } from "@/lib/security/rbac/check";
-import { PermissionKey } from "@/lib/security/rbac/permissions";
+import { PERMISSION, PermissionKey } from "@/lib/security/rbac/permissions";
+import { assertModuleEnabled, assertFeatureEnabled, ModuleDisabledError } from "@/lib/modules/guard";
+import { MODULE, FEATURE, type FeatureKey } from "@/lib/modules/catalog";
+
+// Mapa permission → sub-função do catálogo. Quando a rota não passa `feature`
+// explícito, a sub-função é derivada da permission (que já codifica o subdomínio).
+// Permissions ausentes aqui gateiam só no nível do MÓDULO (locacao). contratos/
+// pessoas são default-on e ficam no gate de módulo; os toggles finos relevantes
+// (cobranças/repasses/despesas/vistorias/seguros — default-off) estão mapeados.
+// Override explícito quando o mapa seria ambíguo (ex.: RENT_VIEW em repasses/simular).
+const PERMISSION_FEATURE: Partial<Record<PermissionKey, FeatureKey>> = {
+  [PERMISSION.RENT_VIEW]: FEATURE.LOCACAO_COBRANCAS,
+  [PERMISSION.RENT_GENERATE]: FEATURE.LOCACAO_COBRANCAS,
+  [PERMISSION.RENT_REMIND]: FEATURE.LOCACAO_COBRANCAS,
+  [PERMISSION.RENT_MARK_REPASSED]: FEATURE.LOCACAO_REPASSES,
+  [PERMISSION.EXPENSE_VIEW]: FEATURE.LOCACAO_DESPESAS,
+  [PERMISSION.EXPENSE_CREATE]: FEATURE.LOCACAO_DESPESAS,
+  [PERMISSION.EXPENSE_EDIT]: FEATURE.LOCACAO_DESPESAS,
+  [PERMISSION.EXPENSE_DELETE]: FEATURE.LOCACAO_DESPESAS,
+  [PERMISSION.INSPECTION_VIEW]: FEATURE.LOCACAO_VISTORIAS,
+  [PERMISSION.INSPECTION_CREATE]: FEATURE.LOCACAO_VISTORIAS,
+  [PERMISSION.CHECKLIST_VIEW]: FEATURE.LOCACAO_VISTORIAS,
+  [PERMISSION.CHECKLIST_MANAGE]: FEATURE.LOCACAO_VISTORIAS,
+  [PERMISSION.INSURANCE_VIEW]: FEATURE.LOCACAO_SEGUROS,
+  [PERMISSION.INSURANCE_MANAGE]: FEATURE.LOCACAO_SEGUROS,
+};
 
 // Helpers compartilhados pelos endpoints /api/locacao/*.
-// Padrão: auth → org → permission. Org-scope é embutido nas queries Prisma
-// (toda entidade nova tem orgId direto — não passa via `pipeline.orgId`).
+// Padrão: auth → org → módulo/feature habilitado → permission. Org-scope é
+// embutido nas queries Prisma (toda entidade nova tem orgId direto — não passa
+// via `pipeline.orgId`). Este é o SEAM ÚNICO de gating do módulo locação:
+// 28 das 29 rotas /api/locacao/* passam por aqui (exceção: form público por token).
 
 export interface RouteContext {
   userId: string;
@@ -20,7 +47,8 @@ export type RouteResult = RouteContext | NextResponse;
  * pronto pra usar, ou uma `NextResponse` de erro (401/403/404) já pronta.
  */
 export async function ensureLocacaoAccess(
-  permission: PermissionKey
+  permission: PermissionKey,
+  feature?: FeatureKey
 ): Promise<RouteResult> {
   const session = await auth();
   if (!session?.user?.id) {
@@ -29,6 +57,22 @@ export async function ensureLocacaoAccess(
   const org = await getUserOrg(session.user.id);
   if (!org) {
     return NextResponse.json({ error: "Sem organização ativa" }, { status: 404 });
+  }
+  // Gating de módulo/sub-função por tenant. Sub-função (feature) implica módulo.
+  // `feature` explícito tem prioridade; senão deriva da permission (PERMISSION_FEATURE);
+  // sem mapeamento, gateia só no nível do módulo.
+  const effectiveFeature = feature ?? PERMISSION_FEATURE[permission];
+  try {
+    if (effectiveFeature) {
+      await assertFeatureEnabled(org.id, effectiveFeature);
+    } else {
+      await assertModuleEnabled(org.id, MODULE.LOCACAO);
+    }
+  } catch (e) {
+    if (e instanceof ModuleDisabledError) {
+      return NextResponse.json({ error: e.code }, { status: e.status });
+    }
+    throw e;
   }
   const permissions = await getEffectivePermissions(session.user.id, org.id);
   if (!permissions || !can(permissions, permission)) {

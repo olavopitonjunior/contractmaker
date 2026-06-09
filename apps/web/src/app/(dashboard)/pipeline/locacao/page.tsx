@@ -1,6 +1,8 @@
 import { redirect } from "next/navigation";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
+import { MODULE } from "@/lib/modules/catalog";
 import { Card, CardContent } from "@/components/ui/card";
 import { KanbanBoard } from "@/components/pipeline/KanbanBoard";
 import { NovoContratoWizard } from "@/components/locacao/NovoContratoWizard";
@@ -42,6 +44,10 @@ export default async function PipelineLocacaoPage() {
   if (!session?.user?.id) redirect("/login");
   const org = await getUserOrg(session.user.id);
   if (!org) redirect("/");
+
+  // Guard de módulo: org sem locação habilitada não acessa o pipeline de locação.
+  const modules = await getOrgModules(org.id);
+  if (!isModuleEnabled(modules, MODULE.LOCACAO)) redirect("/pipeline");
 
   const pipeline = await prisma.pipeline.findFirst({
     where: { orgId: org.id, kind: "locacao" },

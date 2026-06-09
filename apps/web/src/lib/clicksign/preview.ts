@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/db/prisma";
 import { dealDataToSigners, leaseDataToSigners } from "@/lib/clicksign/mapping";
+import { moduleForDealKind } from "@/lib/modules/resolve";
+import { MODULE } from "@/lib/modules/catalog";
 import { envelopeCostCents, getMonthlyBudgetCents } from "@/lib/clicksign/costs";
 import { getMonthlySpendCents } from "@/lib/clicksign/executor";
 import type { AuthMethod } from "@/lib/clicksign/types";
@@ -59,7 +61,7 @@ export async function buildEnvelopeSendPreview(args: {
   const dataSource =
     (contract.dataJson as Record<string, unknown> | null) ?? null;
   const { signers, missing } =
-    contract.deal?.pipeline?.kind === "locacao"
+    moduleForDealKind(contract.deal?.pipeline?.kind) === MODULE.LOCACAO
       ? leaseDataToSigners(dataSource, authMethod)
       : dealDataToSigners(dataSource, authMethod);
   if (missing.length > 0) {

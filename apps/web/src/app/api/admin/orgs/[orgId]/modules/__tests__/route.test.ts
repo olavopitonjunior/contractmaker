@@ -1,0 +1,69 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { auth } from "@/lib/auth/auth";
+import { prisma } from "@/lib/db/prisma";
+import { PATCH } from "../route";
+
+const authMock = auth as unknown as ReturnType<typeof vi.fn>;
+const platformFindUnique = prisma.platformRole.findUnique as unknown as ReturnType<typeof vi.fn>;
+const orgFindUnique = prisma.organization.findUnique as unknown as ReturnType<typeof vi.fn>;
+const orgModuleUpsert = prisma.orgModule.upsert as unknown as ReturnType<typeof vi.fn>;
+
+function patchReq(body: unknown): Request {
+  return new Request("http://localhost/api/admin/orgs/org1/modules", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(body),
+  });
+}
+
+const params = { params: { orgId: "org1" } };
+
+describe("PATCH /api/admin/orgs/[orgId]/modules", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    platformFindUnique.mockResolvedValue(null);
+    orgFindUnique.mockResolvedValue({ id: "org1" });
+  });
+
+  it("401 sem sessão", async () => {
+    authMock.mockResolvedValue(null);
+    const res = await PATCH(patchReq({ module: "locacao" }) as never, params);
+    expect(res.status).toBe(401);
+  });
+
+  it("403 quando não é super_admin (sem PlatformRole)", async () => {
+    authMock.mockResolvedValue({ user: { id: "u1" } });
+    platformFindUnique.mockResolvedValue(null);
+    const res = await PATCH(patchReq({ module: "locacao", enabled: false }) as never, params);
+    expect(res.status).toBe(403);
+    expect(orgModuleUpsert).not.toHaveBeenCalled();
+  });
+
+  it("400 para módulo inválido (super_admin)", async () => {
+    authMock.mockResolvedValue({ user: { id: "u1" } });
+    platformFindUnique.mockResolvedValue({ role: "super_admin", scope: [] });
+    const res = await PATCH(patchReq({ module: "financeiro" }) as never, params);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toBe("INVALID_MODULE");
+  });
+
+  it("upsert com merge de flags válidas; ignora flag de outro módulo", async () => {
+    authMock.mockResolvedValue({ user: { id: "u1" } });
+    platformFindUnique.mockResolvedValue({ role: "super_admin", scope: [] });
+    const res = await PATCH(
+      patchReq({
+        module: "locacao",
+        enabled: true,
+        featureFlags: { "locacao.cobrancas": true, "vendas.certidoes": true },
+      }) as never,
+      params
+    );
+    expect(res.status).toBe(200);
+    expect(orgModuleUpsert).toHaveBeenCalledTimes(1);
+    const arg = orgModuleUpsert.mock.calls[0][0];
+    // só a flag do próprio módulo sobrevive à sanitização
+    expect(arg.update.featureFlags).toEqual({ "locacao.cobrancas": true });
+    expect(arg.update.enabled).toBe(true);
+  });
+});
