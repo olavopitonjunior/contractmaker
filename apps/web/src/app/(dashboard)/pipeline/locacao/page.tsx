@@ -2,22 +2,40 @@ import { redirect } from "next/navigation";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { KanbanBoard } from "@/components/pipeline/KanbanBoard";
 import { NovoContratoWizard } from "@/components/locacao/NovoContratoWizard";
 import { NovoFormularioLocacaoDialog } from "@/components/locacao/NovoFormularioLocacaoDialog";
-import { KanbanDealCard } from "@/components/locacao/KanbanDealCard";
+import { BarChart3, DollarSign, Building2 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
-// Cores por stage (esteira COMERCIAL de locação).
-const STAGE_COLOR: Record<string, string> = {
-  "Em Aprovação": "bg-indigo-50 dark:bg-indigo-950/30 border-indigo-200 dark:border-indigo-800",
-  "Formulário": "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800",
-  "Em contrato": "bg-yellow-50 dark:bg-yellow-950/30 border-yellow-200 dark:border-yellow-800",
-  "Assinado": "bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800",
-  "Cobrança Gerada": "bg-purple-50 dark:bg-purple-950/30 border-purple-200 dark:border-purple-800",
-  "ADM": "bg-green-50 dark:bg-green-950/30 border-green-200 dark:border-green-800",
+/**
+ * Os stages de locação guardam a cor como nome ("indigo", "amber"…); o board
+ * espera um valor CSS/hex pra barra superior da coluna. Mesma paleta de vendas.
+ */
+const STAGE_COLOR_HEX: Record<string, string> = {
+  indigo: "#6366f1",
+  amber: "#f59e0b",
+  yellow: "#eab308",
+  blue: "#3b82f6",
+  sky: "#0ea5e9",
+  purple: "#a855f7",
+  green: "#22c55e",
+  red: "#ef4444",
 };
+
+/** Extrai o nome do 1º locatário do dataJson do form (best-effort, null-safe). */
+function extractTenantName(dataJson: unknown): string | null {
+  if (!dataJson || typeof dataJson !== "object") return null;
+  const locatarios = (dataJson as { locatario?: unknown }).locatario;
+  if (!Array.isArray(locatarios) || locatarios.length === 0) return null;
+  const first = locatarios[0] as { nome?: unknown; razao_social?: unknown };
+  const nome =
+    (typeof first?.nome === "string" && first.nome.trim()) ||
+    (typeof first?.razao_social === "string" && first.razao_social.trim()) ||
+    null;
+  return nome || null;
+}
 
 export default async function PipelineLocacaoPage() {
   const session = await auth();
@@ -35,7 +53,31 @@ export default async function PipelineLocacaoPage() {
             where: { kind: "locacao" },
             orderBy: { createdAt: "desc" },
             include: {
-              form: { select: { dataJson: true } },
+              form: {
+                select: {
+                  id: true,
+                  status: true,
+                  token: true,
+                  createdAt: true,
+                  completedAt: true,
+                  dataJson: true,
+                },
+              },
+              contracts: {
+                where: { isLatest: true },
+                select: { id: true, version: true },
+              },
+              envelopes: {
+                where: { source: "contract", status: "closed" },
+                select: { closedAt: true },
+                orderBy: { closedAt: "desc" },
+                take: 1,
+              },
+              commissionCharges: {
+                select: { createdAt: true },
+                orderBy: { createdAt: "asc" },
+                take: 1,
+              },
             },
           },
         },
@@ -48,15 +90,67 @@ export default async function PipelineLocacaoPage() {
       <Card>
         <CardContent className="py-12 text-center">
           <p className="text-sm text-muted-foreground">
-            Pipeline de locação não inicializada. Rode <code className="mx-1 rounded bg-muted px-1.5 py-0.5">pnpm tsx apps/web/scripts/seed-pipeline-locacao.ts --apply --orgId={org.id}</code> para criar os 6 stages.
+            Pipeline de locação não inicializada. Rode{" "}
+            <code className="mx-1 rounded bg-muted px-1.5 py-0.5">
+              pnpm tsx apps/web/scripts/seed-pipeline-locacao.ts --apply --orgId={org.id}
+            </code>{" "}
+            para criar os 6 stages.
           </p>
         </CardContent>
       </Card>
     );
   }
 
-  const totalDeals = pipeline.stages.reduce((acc, s) => acc + s.deals.length, 0);
+  const allDeals = pipeline.stages.flatMap((s) => s.deals);
+  const admStage = pipeline.stages.find((s) => s.name === "ADM");
+  const graduatedDeals = admStage?.deals.length ?? 0;
+  const activeDeals = allDeals.length - graduatedDeals;
+  const totalValue = allDeals.reduce((sum, d) => sum + (d.value || 0), 0);
 
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const dealsToday = allDeals.filter(
+    (d) => d.createdAt.getTime() >= startOfToday.getTime()
+  ).length;
+  const dealsWithValue = allDeals.filter((d) => (d.value || 0) > 0).length;
+  const ticketMedio = dealsWithValue > 0 ? totalValue / dealsWithValue : 0;
+  const fmtBRLShort = (v: number) =>
+    v >= 1_000_000
+      ? `R$ ${(v / 1_000_000).toFixed(1)}M`
+      : v >= 1000
+        ? `R$ ${(v / 1000).toFixed(0)}k`
+        : `R$ ${v.toFixed(0)}`;
+
+  const stages = pipeline.stages.map((stage) => ({
+    id: stage.id,
+    name: stage.name,
+    color: STAGE_COLOR_HEX[stage.color ?? ""] ?? stage.color ?? "#6366f1",
+    deals: stage.deals.map((deal) => ({
+      id: deal.id,
+      title: deal.title,
+      value: deal.value,
+      createdAt: deal.createdAt.toISOString(),
+      clientName: extractTenantName(deal.form?.dataJson),
+      formStatus: deal.form?.status || null,
+      formToken: deal.form?.token || null,
+      hasContract: deal.contracts.length > 0,
+      formOpenedAt: deal.form?.createdAt?.toISOString() ?? null,
+      formCompletedAt: deal.form?.completedAt?.toISOString() ?? null,
+      contractSignedAt:
+        deal.envelopes[0]?.closedAt?.toISOString() ??
+        deal.contractSignedAt?.toISOString() ??
+        null,
+      chargeCreatedAt:
+        deal.commissionCharges[0]?.createdAt.toISOString() ??
+        deal.chargeIssuedAt?.toISOString() ??
+        null,
+      commissionPaidAt: deal.commissionPaidAt?.toISOString() ?? null,
+      lostAt: deal.lostAt?.toISOString() ?? null,
+      lostReason: deal.lostReason ?? null,
+    })),
+  }));
+
+  // CTAs de criação (locação tem fluxos próprios: form público + wizard).
   const [properties, tenants] = await Promise.all([
     prisma.property.findMany({
       where: { orgId: org.id, status: { in: ["disponivel", "anunciado", "em_negociacao"] } },
@@ -78,66 +172,85 @@ export default async function PipelineLocacaoPage() {
   const tenantOptions = tenants.map((t) => ({ id: t.id, label: `${t.nome} (${t.cpfCnpj})` }));
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="text-2xl font-semibold">Pipeline de Locação</h2>
-          <p className="text-sm text-muted-foreground">
-            Esteira comercial · {pipeline.stages.length} stages · {totalDeals} negócios em andamento. O stage final &quot;ADM&quot; gradua o negócio para a administração.
-          </p>
-        </div>
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between gap-3">
+        <h1 className="font-display text-2xl font-semibold tracking-tight">
+          Pipeline de Locação
+        </h1>
         <div className="flex items-center gap-2">
           <NovoFormularioLocacaoDialog />
           <NovoContratoWizard properties={propertyOptions} tenants={tenantOptions} />
         </div>
       </div>
 
-      <div className="grid auto-cols-[280px] grid-flow-col gap-3 overflow-x-auto pb-3">
-        {pipeline.stages.map((stage) => (
-          <div key={stage.id} className={`flex flex-col rounded-md border ${STAGE_COLOR[stage.name] ?? "bg-muted/30"}`}>
-            <div className="flex items-center justify-between border-b border-current/20 px-3 py-2">
-              <div className="font-medium text-sm">{stage.name}</div>
-              <Badge variant="secondary">{stage.deals.length}</Badge>
+      {/* Metrics — KPI cards (mesmo layout de vendas) */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3 sm:max-w-4xl">
+        <Card>
+          <CardContent className="flex items-center gap-4 p-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+              <BarChart3 className="h-5 w-5 text-primary" />
             </div>
-            <div className="flex-1 space-y-2 p-2">
-              {stage.deals.length === 0 ? (
-                <div className="rounded border border-dashed border-current/20 p-4 text-center text-xs text-muted-foreground">
-                  Nenhum negócio
-                </div>
-              ) : (
-                stage.deals.map((deal) => {
-                  const data = (deal.form?.dataJson ?? {}) as Record<string, unknown>;
-                  const locatarios = Array.isArray(data.locatario)
-                    ? (data.locatario as Array<{ nome?: string; razao_social?: string }>)
-                    : [];
-                  const tenantName = locatarios[0]?.nome ?? locatarios[0]?.razao_social ?? null;
-                  const imovel = data.imovel as
-                    | { rua?: string; numero?: string; cidade?: string }
-                    | undefined;
-                  const imovelEndereco = imovel
-                    ? `${imovel.rua ?? ""} ${imovel.numero ?? ""}`.trim() || null
-                    : null;
-                  return (
-                    <KanbanDealCard
-                      key={deal.id}
-                      deal={{
-                        id: deal.id,
-                        title: deal.title,
-                        value: deal.value,
-                        stageId: stage.id,
-                      }}
-                      currentStageName={stage.name}
-                      imovelEndereco={imovelEndereco}
-                      tenantName={tenantName}
-                      stages={pipeline.stages.map((s) => ({ id: s.id, name: s.name }))}
-                    />
-                  );
-                })
-              )}
+            <div className="min-w-0">
+              <p className="text-2xl font-bold tabular-nums">{activeDeals}</p>
+              <p className="text-xs text-muted-foreground">
+                Negócios ativos
+                {dealsToday > 0 && (
+                  <span className="ml-1.5 font-medium text-success">
+                    +{dealsToday} hoje
+                  </span>
+                )}
+              </p>
             </div>
-          </div>
-        ))}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center gap-4 p-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-success/10">
+              <DollarSign className="h-5 w-5 text-success" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-2xl font-bold tabular-nums">
+                {fmtBRLShort(totalValue)}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Valor em pipeline
+                {ticketMedio > 0 && (
+                  <span className="ml-1.5">
+                    · Ticket médio {fmtBRLShort(ticketMedio)}
+                  </span>
+                )}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="flex items-center gap-4 p-4">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-info/10">
+              <Building2 className="h-5 w-5 text-info" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-2xl font-bold tabular-nums">{graduatedDeals}</p>
+              <p className="text-xs text-muted-foreground">
+                Graduados p/ ADM
+                {activeDeals > 0 && (
+                  <span className="ml-1.5">· {activeDeals} em andamento</span>
+                )}
+              </p>
+            </div>
+          </CardContent>
+        </Card>
       </div>
+
+      {/* Kanban — mesmo board de vendas, config de locação */}
+      <KanbanBoard
+        stages={stages}
+        config={{
+          basePath: "/locacao/deals",
+          timelineKind: "locacao",
+          milestoneFields: {},
+        }}
+      />
     </div>
   );
 }

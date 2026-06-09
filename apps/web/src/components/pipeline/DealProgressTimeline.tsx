@@ -1,6 +1,15 @@
 "use client";
 
-import { FileText, CheckCircle2, Send, PenLine, Receipt, Wallet } from "lucide-react";
+import {
+  FileText,
+  CheckCircle2,
+  Send,
+  PenLine,
+  Receipt,
+  Wallet,
+  ClipboardCheck,
+  Building2,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
   Tooltip,
@@ -11,7 +20,12 @@ import {
 
 type DateLike = Date | string | null | undefined;
 
+/** Esteira de vendas (default) ou de locação — muda o conjunto de nós e ordem de stages. */
+export type PipelineKind = "venda" | "locacao";
+
 interface Props {
+  /** Esteira que define os nós da timeline. Default "venda". */
+  kind?: PipelineKind;
   /** Nome da stage atual no pipeline. Usado pra destacar a posição. */
   currentStageName?: string | null;
   formOpenedAt: DateLike;
@@ -27,15 +41,77 @@ interface Props {
   className?: string;
 }
 
+/** De qual prop de data o nó deriva seu carimbo (null = sem data, só posição). */
+type DateProp =
+  | "formOpenedAt"
+  | "formCompletedAt"
+  | "contractSignedAt"
+  | "chargeCreatedAt"
+  | "commissionPaidAt"
+  | null;
+
+interface NodeBlueprint {
+  key: string;
+  label: string;
+  shortLabel: string;
+  Icon: typeof FileText;
+  dateProp: DateProp;
+}
+
 interface NodeDef {
   key: string;
   label: string;
   shortLabel: string;
   Icon: typeof FileText;
   date: Date | null;
-  /** Stages do pipeline que mapeiam pra "este node já foi atingido". */
-  reachedAtStages: readonly string[];
 }
+
+/**
+ * Configuração por esteira: ordem dos stages do pipeline (índice ⇒ posição na
+ * timeline) e os nós exibidos. O nó na posição `i` é considerado "atingido"
+ * quando o índice do stage atual ≥ `i`, ou quando há data carimbada.
+ */
+const PIPELINE_CONFIG: Record<
+  PipelineKind,
+  { stageOrder: readonly string[]; nodes: readonly NodeBlueprint[] }
+> = {
+  venda: {
+    stageOrder: [
+      "Formulário",
+      "Confecção de Contrato",
+      "Enviado para assinatura",
+      "Contrato assinado",
+      "Cobrança emitida",
+      "Comissão paga",
+    ],
+    nodes: [
+      { key: "form_open", label: "Form aberto", shortLabel: "Form", Icon: FileText, dateProp: "formOpenedAt" },
+      { key: "form_done", label: "Form completo", shortLabel: "Conf", Icon: CheckCircle2, dateProp: "formCompletedAt" },
+      { key: "envio", label: "Enviado p/ assinatura", shortLabel: "Envio", Icon: Send, dateProp: null },
+      { key: "signed", label: "Contrato assinado", shortLabel: "Sign", Icon: PenLine, dateProp: "contractSignedAt" },
+      { key: "charge", label: "Cobrança gerada", shortLabel: "Cobr", Icon: Receipt, dateProp: "chargeCreatedAt" },
+      { key: "paid", label: "Comissão paga", shortLabel: "Pago", Icon: Wallet, dateProp: "commissionPaidAt" },
+    ],
+  },
+  locacao: {
+    stageOrder: [
+      "Em Aprovação",
+      "Formulário",
+      "Em contrato",
+      "Assinado",
+      "Cobrança Gerada",
+      "ADM",
+    ],
+    nodes: [
+      { key: "aprovacao", label: "Em aprovação", shortLabel: "Aprov", Icon: ClipboardCheck, dateProp: null },
+      { key: "form", label: "Formulário", shortLabel: "Form", Icon: FileText, dateProp: "formOpenedAt" },
+      { key: "contrato", label: "Em contrato", shortLabel: "Contr", Icon: PenLine, dateProp: "formCompletedAt" },
+      { key: "assinado", label: "Assinado", shortLabel: "Sign", Icon: CheckCircle2, dateProp: "contractSignedAt" },
+      { key: "cobranca", label: "Cobrança gerada", shortLabel: "Cobr", Icon: Receipt, dateProp: "chargeCreatedAt" },
+      { key: "adm", label: "Administração", shortLabel: "ADM", Icon: Building2, dateProp: "commissionPaidAt" },
+    ],
+  },
+};
 
 function toDate(d: DateLike): Date | null {
   if (!d) return null;
@@ -60,22 +136,9 @@ function formatLong(d: Date | null): string {
   });
 }
 
-const STAGE_ORDER = [
-  "Formulário",
-  "Confecção de Contrato",
-  "Enviado para assinatura",
-  "Contrato assinado",
-  "Cobrança emitida",
-  "Comissão paga",
-] as const;
-
-function stageIndex(name: string | null | undefined): number {
-  if (!name) return -1;
-  return STAGE_ORDER.indexOf(name as (typeof STAGE_ORDER)[number]);
-}
-
 export function DealProgressTimeline(props: Props) {
   const {
+    kind = "venda",
     currentStageName,
     formOpenedAt,
     formCompletedAt,
@@ -86,63 +149,29 @@ export function DealProgressTimeline(props: Props) {
     className,
   } = props;
 
-  const currentIdx = stageIndex(currentStageName);
+  const config = PIPELINE_CONFIG[kind];
+  const currentIdx = config.stageOrder.indexOf(currentStageName ?? "");
 
-  const nodes: NodeDef[] = [
-    {
-      key: "form_open",
-      label: "Form aberto",
-      shortLabel: "Form",
-      Icon: FileText,
-      date: toDate(formOpenedAt),
-      reachedAtStages: STAGE_ORDER,
-    },
-    {
-      key: "form_done",
-      label: "Form completo",
-      shortLabel: "Conf",
-      Icon: CheckCircle2,
-      date: toDate(formCompletedAt),
-      reachedAtStages: STAGE_ORDER.slice(1),
-    },
-    {
-      key: "envio",
-      label: "Enviado p/ assinatura",
-      shortLabel: "Envio",
-      Icon: Send,
-      date: null,
-      reachedAtStages: STAGE_ORDER.slice(2),
-    },
-    {
-      key: "signed",
-      label: "Contrato assinado",
-      shortLabel: "Sign",
-      Icon: PenLine,
-      date: toDate(contractSignedAt),
-      reachedAtStages: STAGE_ORDER.slice(3),
-    },
-    {
-      key: "charge",
-      label: "Cobrança gerada",
-      shortLabel: "Cobr",
-      Icon: Receipt,
-      date: toDate(chargeCreatedAt),
-      reachedAtStages: STAGE_ORDER.slice(4),
-    },
-    {
-      key: "paid",
-      label: "Comissão paga",
-      shortLabel: "Pago",
-      Icon: Wallet,
-      date: toDate(commissionPaidAt),
-      reachedAtStages: STAGE_ORDER.slice(5),
-    },
-  ];
+  const dateByProp: Record<NonNullable<DateProp>, Date | null> = {
+    formOpenedAt: toDate(formOpenedAt),
+    formCompletedAt: toDate(formCompletedAt),
+    contractSignedAt: toDate(contractSignedAt),
+    chargeCreatedAt: toDate(chargeCreatedAt),
+    commissionPaidAt: toDate(commissionPaidAt),
+  };
+
+  const nodes: NodeDef[] = config.nodes.map((n) => ({
+    key: n.key,
+    label: n.label,
+    shortLabel: n.shortLabel,
+    Icon: n.Icon,
+    date: n.dateProp ? dateByProp[n.dateProp] : null,
+  }));
 
   const states = nodes.map((n, idx): "reached" | "current" | "future" => {
     if (idx === currentIdx) return "current";
-    const reachedByStage =
-      currentIdx >= 0 && n.reachedAtStages.includes(STAGE_ORDER[currentIdx]);
+    // Nó atingido quando o stage atual está nele ou além, ou já há data carimbada.
+    const reachedByStage = currentIdx >= 0 && currentIdx >= idx;
     const reachedByDate = n.date !== null;
     if (reachedByStage || reachedByDate) return "reached";
     return "future";

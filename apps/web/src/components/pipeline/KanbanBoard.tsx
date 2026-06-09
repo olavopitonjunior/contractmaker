@@ -13,7 +13,12 @@ import {
   type DragStartEvent,
 } from "@dnd-kit/core";
 import { KanbanColumn } from "./KanbanColumn";
-import { KanbanCard, type DealCard } from "./KanbanCard";
+import {
+  KanbanCard,
+  type DealCard,
+  type KanbanCardConfig,
+  DEFAULT_CARD_CONFIG,
+} from "./KanbanCard";
 import { MilestoneDateDialog } from "./MilestoneDateDialog";
 
 /**
@@ -21,10 +26,12 @@ import { MilestoneDateDialog } from "./MilestoneDateDialog";
  * detectar se já existe data, ex. assinatura feita no sistema); `apiField` =
  * coluna manual enviada no PATCH; `label` = texto do diálogo.
  */
-const MILESTONE_FIELDS: Record<
+export type MilestoneFields = Record<
   string,
   { cardKey: keyof DealCard; apiField: string; label: string }
-> = {
+>;
+
+const VENDA_MILESTONE_FIELDS: MilestoneFields = {
   "Contrato assinado": {
     cardKey: "contractSignedAt",
     apiField: "contractSignedAt",
@@ -40,6 +47,20 @@ const MILESTONE_FIELDS: Record<
     apiField: "commissionPaidAt",
     label: "pagamento da comissão",
   },
+};
+
+/** Config completa do board por esteira (card + stage perdido + marcos de data). */
+export interface KanbanBoardConfig extends KanbanCardConfig {
+  /** Nome do stage terminal "perdido" (renderizado separado). undefined = sem coluna de perdidos. */
+  lostStageName?: string;
+  /** Stages que pedem data-marco ao receber um card via drag. */
+  milestoneFields: MilestoneFields;
+}
+
+const DEFAULT_BOARD_CONFIG: KanbanBoardConfig = {
+  ...DEFAULT_CARD_CONFIG,
+  lostStageName: "Negócio perdido",
+  milestoneFields: VENDA_MILESTONE_FIELDS,
 };
 
 interface PendingMilestoneMove {
@@ -60,9 +81,13 @@ interface Stage {
 
 interface KanbanBoardProps {
   stages: Stage[];
+  config?: KanbanBoardConfig;
 }
 
-export function KanbanBoard({ stages: initialStages }: KanbanBoardProps) {
+export function KanbanBoard({
+  stages: initialStages,
+  config = DEFAULT_BOARD_CONFIG,
+}: KanbanBoardProps) {
   const [stages, setStages] = useState(initialStages);
   const [activeCard, setActiveCard] = useState<DealCard | null>(null);
   const [pendingMove, setPendingMove] = useState<PendingMilestoneMove | null>(null);
@@ -138,7 +163,9 @@ export function KanbanBoard({ stages: initialStages }: KanbanBoardProps) {
     if (sourceStageId === targetStageId) return;
 
     const targetStage = stages.find((s) => s.id === targetStageId);
-    const milestone = targetStage ? MILESTONE_FIELDS[targetStage.name] : undefined;
+    const milestone = targetStage
+      ? config.milestoneFields[targetStage.name]
+      : undefined;
     // Pede a data só quando a etapa NÃO foi feita no sistema (data-marco nula).
     const needsDate =
       !!milestone && dealCard ? !dealCard[milestone.cardKey] : false;
@@ -206,7 +233,7 @@ export function KanbanBoard({ stages: initialStages }: KanbanBoardProps) {
     >
       <div className="flex gap-4 overflow-x-auto pb-4">
         {stages
-          .filter((s) => s.name !== "Negócio perdido")
+          .filter((s) => s.name !== config.lostStageName)
           .map((stage) => (
             <KanbanColumn
               key={stage.id}
@@ -214,32 +241,37 @@ export function KanbanBoard({ stages: initialStages }: KanbanBoardProps) {
               name={stage.name}
               color={stage.color}
               deals={stage.deals}
+              config={config}
             />
           ))}
-        {stages.find((s) => s.name === "Negócio perdido") && (
-          <>
-            <div
-              aria-hidden
-              className="self-stretch border-l border-muted mx-1"
-            />
-            {(() => {
-              const lost = stages.find((s) => s.name === "Negócio perdido")!;
-              return (
-                <KanbanColumn
-                  key={lost.id}
-                  id={lost.id}
-                  name={lost.name}
-                  color={lost.color}
-                  deals={lost.deals}
-                  isLost
-                />
-              );
-            })()}
-          </>
-        )}
+        {config.lostStageName &&
+          stages.find((s) => s.name === config.lostStageName) && (
+            <>
+              <div
+                aria-hidden
+                className="self-stretch border-l border-muted mx-1"
+              />
+              {(() => {
+                const lost = stages.find((s) => s.name === config.lostStageName)!;
+                return (
+                  <KanbanColumn
+                    key={lost.id}
+                    id={lost.id}
+                    name={lost.name}
+                    color={lost.color}
+                    deals={lost.deals}
+                    isLost
+                    config={config}
+                  />
+                );
+              })()}
+            </>
+          )}
       </div>
       <DragOverlay>
-        {activeCard ? <KanbanCard deal={activeCard} isOverlay /> : null}
+        {activeCard ? (
+          <KanbanCard deal={activeCard} isOverlay config={config} />
+        ) : null}
       </DragOverlay>
       <MilestoneDateDialog
         open={!!pendingMove}

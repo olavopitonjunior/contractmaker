@@ -14,7 +14,26 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
-import { DealProgressTimeline } from "@/components/pipeline/DealProgressTimeline";
+import {
+  DealProgressTimeline,
+  type PipelineKind,
+} from "@/components/pipeline/DealProgressTimeline";
+
+/**
+ * Config que adapta o card por esteira. Default = vendas (mantém comportamento
+ * atual). Locação injeta basePath + timelineKind próprios.
+ */
+export interface KanbanCardConfig {
+  /** Base do link de detalhe do deal. Default "/deals". */
+  basePath: string;
+  /** Esteira que define os nós da timeline. Default "venda". */
+  timelineKind: PipelineKind;
+}
+
+export const DEFAULT_CARD_CONFIG: KanbanCardConfig = {
+  basePath: "/deals",
+  timelineKind: "venda",
+};
 
 export interface DealCard {
   id: string;
@@ -38,6 +57,9 @@ export interface DealCard {
 interface KanbanCardProps {
   deal: DealCard;
   isOverlay?: boolean;
+  /** Nome do stage da coluna — destaca o nó atual da timeline. */
+  currentStageName?: string | null;
+  config?: KanbanCardConfig;
 }
 
 function formatShort(iso: string | null): string {
@@ -46,7 +68,12 @@ function formatShort(iso: string | null): string {
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 }
 
-export function KanbanCard({ deal, isOverlay }: KanbanCardProps) {
+export function KanbanCard({
+  deal,
+  isOverlay,
+  currentStageName = null,
+  config = DEFAULT_CARD_CONFIG,
+}: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: deal.id,
   });
@@ -82,7 +109,7 @@ export function KanbanCard({ deal, isOverlay }: KanbanCardProps) {
       data-deal-id={deal.id}
       className={cn("rounded-md transition-all", isDragging && "opacity-40")}
     >
-      <Link href={`/deals/${deal.id}`}>
+      <Link href={`${config.basePath}/${deal.id}`}>
         <Card
           className={cn(
             "cursor-grab active:cursor-grabbing hover:shadow-md hover:border-primary/30 transition-all",
@@ -151,7 +178,8 @@ export function KanbanCard({ deal, isOverlay }: KanbanCardProps) {
               /* Timeline compacta — 6 stages + marcos SLA */
               <DealProgressTimeline
                 variant="compact"
-                currentStageName={null}
+                kind={config.timelineKind}
+                currentStageName={currentStageName}
                 formOpenedAt={deal.formOpenedAt}
                 formCompletedAt={deal.formCompletedAt}
                 contractSignedAt={deal.contractSignedAt}
