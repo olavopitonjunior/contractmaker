@@ -74,7 +74,9 @@ export function NovaVistoriaDialog({
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error ?? `HTTP ${res.status}`);
+        // `error` pode vir como objeto (ex.: detalhes Zod) — evita toast "[object Object]".
+        const msg = typeof data?.error === "string" ? data.error : `HTTP ${res.status}`;
+        throw new Error(msg);
       }
       toast.success(form.scheduledFor ? "Vistoria agendada" : "Vistoria criada");
       setOpen(false);
