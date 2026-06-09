@@ -13,29 +13,29 @@ jobs:
   test:
     name: Typecheck + tests
     runs-on: ubuntu-latest
+    # Repo é npm-workspaces (root package.json `workspaces`, sem pnpm-workspace.yaml).
+    # Espelha ci.yml (master) — usa npm, não pnpm. Antes o job tentava `cache: pnpm`
+    # + `pnpm install --frozen-lockfile` e falhava por não haver pnpm-lock.yaml na raiz.
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
+      ANTHROPIC_API_KEY: test-key
+      AUTH_SECRET: test-secret
     steps:
       - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
 
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
+          cache: npm
 
       - name: Install
-        run: pnpm install --frozen-lockfile
+        run: npm install
 
-      - name: Prisma generate (no engine)
-        working-directory: apps/web
-        run: pnpm prisma generate --no-engine
+      - name: Prisma generate
+        run: npm run prisma:generate -w apps/web
 
       - name: Type check
-        working-directory: apps/web
-        run: pnpm typecheck
+        run: npm run typecheck -w apps/web
 
       - name: Tests
-        working-directory: apps/web
-        run: pnpm test
+        run: npm run test -w apps/web
