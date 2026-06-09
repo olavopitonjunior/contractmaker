@@ -29,7 +29,7 @@ const STAGE_COLOR_HEX: Record<string, string> = {
 /** Extrai o nome do 1º locatário do dataJson do form (best-effort, null-safe). */
 function extractTenantName(dataJson: unknown): string | null {
   if (!dataJson || typeof dataJson !== "object") return null;
-  const locatarios = (dataJson as { locatario?: unknown }).locatario;
+  const locatarios = (dataJson as { locatarios?: unknown }).locatarios;
   if (!Array.isArray(locatarios) || locatarios.length === 0) return null;
   const first = locatarios[0] as { nome?: unknown; razao_social?: unknown };
   const nome =

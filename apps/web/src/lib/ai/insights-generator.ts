@@ -252,7 +252,13 @@ export async function generateInsights(args: {
     return heuristicFallback(args.context, snapshot);
   }
 
-  const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  // timeout/maxRetries explícitos: insights não devem pendurar a request (o
+  // default do SDK é minutos). Em falha cai no catch → heuristicFallback.
+  const client = new Anthropic({
+    apiKey: process.env.ANTHROPIC_API_KEY,
+    timeout: 15_000,
+    maxRetries: 1,
+  });
   const startedAt = Date.now();
   try {
     const resp = await client.messages.create({
