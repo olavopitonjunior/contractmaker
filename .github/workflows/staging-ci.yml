@@ -20,6 +20,8 @@ jobs:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
       ANTHROPIC_API_KEY: test-key
       AUTH_SECRET: test-secret
+      # tsc --noEmit estoura a heap padrão (~2GB) neste projeto no runner.
+      NODE_OPTIONS: --max-old-space-size=4096
     steps:
       - uses: actions/checkout@v4
 
