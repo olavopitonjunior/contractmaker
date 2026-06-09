@@ -73,6 +73,11 @@ export type AuditAction =
   // Taxas / config
   | "FEES_UPDATED"
   | "BRANDING_UPDATED"
+  // Plataforma / multitenant (super-admin)
+  | "ORG_CREATED"
+  | "ORG_MODULES_UPDATED"
+  | "IMPERSONATION_STARTED"
+  | "IMPERSONATION_ENDED"
   // Split de pagamento (recipients)
   | "SPLIT_RECIPIENT_CREATED"
   | "SPLIT_RECIPIENT_UPDATED"

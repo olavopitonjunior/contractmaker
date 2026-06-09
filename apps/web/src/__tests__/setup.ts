@@ -111,6 +111,8 @@ vi.mock("@/lib/db/prisma", () => {
     orgMembership: {
       findFirst: vi.fn(),
       findMany: vi.fn().mockResolvedValue([]),
+      // requireAuth (context.ts) atualiza lastActiveAt em fire-and-forget.
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     auditLog: {
       create: vi.fn().mockResolvedValue({}),
@@ -164,6 +166,18 @@ vi.mock("@/lib/db/prisma", () => {
     notification: {
       create: vi.fn().mockResolvedValue({}),
       findMany: vi.fn().mockResolvedValue([]),
+    },
+    organization: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn(),
+    },
+    orgModule: {
+      findMany: vi.fn().mockResolvedValue([]),
+      findUnique: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn().mockResolvedValue({}),
+      createMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     pipeline: {
       findFirst: vi.fn(),

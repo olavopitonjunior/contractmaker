@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { BrandWordmark } from "@/components/layout/brand-mark";
-import { LOCACAO_SIMPLIFIED_MODE } from "@/lib/env/flags";
+import { MODULE, FEATURE, isValidModule } from "@/lib/modules/catalog";
 import {
   LayoutDashboard,
   BookOpen,
@@ -33,17 +33,43 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-type SubItem = { title: string; url: string; exact?: boolean };
-type NavSimple = { kind: "item"; title: string; url: string; icon: LucideIcon };
+/** Chave de módulo OU sub-função que gateia a visibilidade do item na sidebar. */
+type Requires = string;
+type SubItem = { title: string; url: string; exact?: boolean; requires?: Requires };
+type NavSimple = {
+  kind: "item";
+  title: string;
+  url: string;
+  icon: LucideIcon;
+  requires?: Requires;
+};
 type NavGroup = {
   kind: "group";
   title: string;
   icon: LucideIcon;
-  /** Rótulo "Em Breve" exibido ao lado do grupo (módulo ainda não liberado). */
-  comingSoon?: boolean;
+  /** Gate de módulo/feature do grupo inteiro (além do filtro por sub-item). */
+  requires?: Requires;
   items: SubItem[];
 };
 type NavEntry = NavSimple | NavGroup;
+
+/** View serializável dos entitlements (vinda do server via props). */
+type ModulesView = {
+  enabled: Record<string, boolean>;
+  features: Record<string, boolean>;
+} | null;
+
+/**
+ * `requires` ausente => sempre visível (itens compartilhados). `modules` null
+ * (sem org) => fail-open. Module key vs feature key distinguidos por isValidModule.
+ */
+function requiresEnabled(modules: ModulesView, requires?: Requires): boolean {
+  if (!requires) return true;
+  if (!modules) return true;
+  return isValidModule(requires)
+    ? modules.enabled[requires] === true
+    : modules.features[requires] === true;
+}
 
 const NAV: NavEntry[] = [
   {
@@ -51,26 +77,27 @@ const NAV: NavEntry[] = [
     title: "Pipeline",
     icon: LayoutDashboard,
     items: [
-      { title: "Vendas", url: "/pipeline", exact: true },
-      { title: "Locação", url: "/pipeline/locacao" },
+      { title: "Vendas", url: "/pipeline", exact: true, requires: FEATURE.VENDAS_PIPELINE },
+      { title: "Locação", url: "/pipeline/locacao", requires: FEATURE.LOCACAO_PIPELINE },
     ],
   },
   {
     kind: "group",
     title: "ADM Locação",
     icon: Building2,
-    // Em staging (modo simplificado) o admin de locação ainda não é o foco.
-    comingSoon: LOCACAO_SIMPLIFIED_MODE,
+    // Grupo inteiro só aparece se a org tem o módulo locação habilitado;
+    // cada sub-item é filtrado pela respectiva sub-função.
+    requires: MODULE.LOCACAO,
     items: [
       { title: "Dashboard", url: "/locacao", exact: true },
       { title: "Imóveis", url: "/locacao/imoveis" },
-      { title: "Contratos", url: "/locacao/contratos" },
-      { title: "Cobranças", url: "/locacao/cobrancas" },
-      { title: "Repasses", url: "/locacao/repasses" },
-      { title: "Despesas", url: "/locacao/despesas" },
-      { title: "Vistorias", url: "/locacao/vistorias" },
-      { title: "Pessoas", url: "/locacao/pessoas" },
-      { title: "Seguros", url: "/locacao/seguros" },
+      { title: "Contratos", url: "/locacao/contratos", requires: FEATURE.LOCACAO_CONTRATOS },
+      { title: "Cobranças", url: "/locacao/cobrancas", requires: FEATURE.LOCACAO_COBRANCAS },
+      { title: "Repasses", url: "/locacao/repasses", requires: FEATURE.LOCACAO_REPASSES },
+      { title: "Despesas", url: "/locacao/despesas", requires: FEATURE.LOCACAO_DESPESAS },
+      { title: "Vistorias", url: "/locacao/vistorias", requires: FEATURE.LOCACAO_VISTORIAS },
+      { title: "Pessoas", url: "/locacao/pessoas", requires: FEATURE.LOCACAO_PESSOAS },
+      { title: "Seguros", url: "/locacao/seguros", requires: FEATURE.LOCACAO_SEGUROS },
       { title: "Newton", url: "/locacao/newton" },
     ],
   },
@@ -126,6 +153,7 @@ interface AppSidebarProps {
     name?: string | null;
     image?: string | null;
   };
+  modules?: ModulesView;
 }
 
 function isItemActive(pathname: string, item: SubItem): boolean {
@@ -134,10 +162,22 @@ function isItemActive(pathname: string, item: SubItem): boolean {
     : pathname === item.url || pathname.startsWith(item.url + "/");
 }
 
-export function AppSidebar({ user }: AppSidebarProps) {
+export function AppSidebar({ user, modules = null }: AppSidebarProps) {
   const pathname = usePathname();
   // Override manual de abertura por grupo; quando indefinido, deriva da rota ativa.
   const [openOverride, setOpenOverride] = useState<Record<string, boolean>>({});
+
+  // Filtra a navegação pelos entitlements da org: itens com `requires` só
+  // aparecem se o módulo/sub-função estiver habilitado; grupos somem se não
+  // sobrar nenhum filho visível.
+  const visibleNav = NAV.flatMap((entry): NavEntry[] => {
+    if (entry.kind === "item") {
+      return requiresEnabled(modules, entry.requires) ? [entry] : [];
+    }
+    if (!requiresEnabled(modules, entry.requires)) return [];
+    const items = entry.items.filter((it) => requiresEnabled(modules, it.requires));
+    return items.length > 0 ? [{ ...entry, items }] : [];
+  });
 
   const initials = user.name
     ? user.name
@@ -164,7 +204,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
           <SidebarGroupLabel>Menu</SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {NAV.map((entry) => {
+              {visibleNav.map((entry) => {
                 if (entry.kind === "item") {
                   return (
                     <SidebarMenuItem key={entry.url}>
@@ -199,15 +239,10 @@ export function AppSidebar({ user }: AppSidebarProps) {
                     >
                       <entry.icon className="h-4 w-4" />
                       <span>{entry.title}</span>
-                      {entry.comingSoon && (
-                        <span className="ml-auto rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                          Em breve
-                        </span>
-                      )}
                       <ChevronRight
-                        className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
-                          entry.comingSoon ? "ml-1" : "ml-auto"
-                        } ${isOpen ? "rotate-90" : ""}`}
+                        className={`ml-auto h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
+                          isOpen ? "rotate-90" : ""
+                        }`}
                       />
                     </SidebarMenuButton>
                     {isOpen && (

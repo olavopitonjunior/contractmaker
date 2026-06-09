@@ -3,6 +3,7 @@ import { headers } from "next/headers";
 import type { CSSProperties } from "react";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { getTenantBranding } from "@/lib/tenant/branding";
+import { getOrgModules } from "@/lib/modules/read";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { DashboardHeader } from "@/components/layout/dashboard-header";
@@ -25,6 +26,8 @@ export default async function DashboardLayout({
   const subdomainHint = headers().get("x-org-subdomain");
   const org = await getUserOrg(session.user.id, { subdomainHint });
   const branding = org ? await getTenantBranding(org.id) : null;
+  // Entitlements de módulos da org → filtram a navegação na sidebar.
+  const modules = org ? await getOrgModules(org.id) : null;
   const tenantStyle: CSSProperties | undefined =
     branding && (branding.primaryHsl || branding.accentHsl)
       ? ({
@@ -46,7 +49,7 @@ export default async function DashboardLayout({
         >
           Pular para o conteúdo
         </a>
-        <AppSidebar user={session.user} />
+        <AppSidebar user={session.user} modules={modules} />
         <SidebarInset>
           <DashboardHeader />
           <main id="main-content" tabIndex={-1} className="flex-1 p-4 sm:p-6">

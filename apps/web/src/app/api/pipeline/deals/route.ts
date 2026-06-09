@@ -9,6 +9,9 @@ import {
 import { withIdempotency } from "@/lib/api/idempotency";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
+import { getPipelineByKind } from "@/lib/modules/resolve";
+import { assertModuleEnabled, ModuleDisabledError } from "@/lib/modules/guard";
+import { MODULE } from "@/lib/modules/catalog";
 
 const createDealSchema = z.object({
   formId: z.string().optional(),
@@ -19,6 +22,15 @@ const createDealSchema = z.object({
 export async function POST(req: NextRequest) {
   const auth = await requireApiAuth(req, { scope: "deals:rw" });
   if (isAuthFailure(auth)) return authFailureResponse(auth);
+
+  try {
+    await assertModuleEnabled(auth.org.id, MODULE.VENDAS);
+  } catch (e) {
+    if (e instanceof ModuleDisabledError) {
+      return NextResponse.json({ error: e.code }, { status: e.status });
+    }
+    throw e;
+  }
 
   const body = await req.json();
   const parsed = createDealSchema.safeParse(body);
@@ -34,8 +46,7 @@ export async function POST(req: NextRequest) {
     method: "POST",
     path: "/api/pipeline/deals",
     handler: async (): Promise<{ status: number; body: unknown }> => {
-      const pipeline = await prisma.pipeline.findFirst({
-        where: { orgId: auth.org.id },
+      const pipeline = await getPipelineByKind(auth.org.id, MODULE.VENDAS, {
         include: { stages: { orderBy: { position: "asc" } } },
       });
 
@@ -108,9 +119,16 @@ export async function GET(req: NextRequest) {
   const auth = await requireApiAuth(req, { scope: "deals:rw" });
   if (isAuthFailure(auth)) return authFailureResponse(auth);
 
-  const pipeline = await prisma.pipeline.findFirst({
-    where: { orgId: auth.org.id },
-  });
+  try {
+    await assertModuleEnabled(auth.org.id, MODULE.VENDAS);
+  } catch (e) {
+    if (e instanceof ModuleDisabledError) {
+      return NextResponse.json({ error: e.code }, { status: e.status });
+    }
+    throw e;
+  }
+
+  const pipeline = await getPipelineByKind(auth.org.id, MODULE.VENDAS);
   if (!pipeline) return NextResponse.json([]);
 
   const deals = await prisma.deal.findMany({

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { suggestReadjustmentExecutor } from "@/lib/locacao/executors/suggest-readjustment";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
+import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
+import { MODULE } from "@/lib/modules/catalog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,9 +40,19 @@ export async function GET(req: NextRequest) {
     select: { id: true, orgId: true },
   });
 
+  // Só processa orgs com o módulo "locacao" habilitado (gating por tenant).
+  const distinctOrgIds = [...new Set(leases.map((lc) => lc.orgId))];
+  const locacaoOrgs = new Set<string>();
+  for (const orgId of distinctOrgIds) {
+    if (isModuleEnabled(await getOrgModules(orgId), MODULE.LOCACAO)) {
+      locacaoOrgs.add(orgId);
+    }
+  }
+
   // Pega 1 user owner por org (executor precisa de userId pra audit).
   const orgsWithUsers = new Map<string, string>();
   for (const lc of leases) {
+    if (!locacaoOrgs.has(lc.orgId)) continue;
     if (orgsWithUsers.has(lc.orgId)) continue;
     const m = await prisma.orgMembership.findFirst({
       where: { orgId: lc.orgId, role: "owner" },
@@ -52,6 +64,10 @@ export async function GET(req: NextRequest) {
   let triggered = 0;
   let skipped = 0;
   for (const lc of leases) {
+    if (!locacaoOrgs.has(lc.orgId)) {
+      skipped++;
+      continue;
+    }
     const userId = orgsWithUsers.get(lc.orgId);
     if (!userId) {
       skipped++;

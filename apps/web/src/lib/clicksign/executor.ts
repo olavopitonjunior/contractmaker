@@ -13,6 +13,8 @@ import {
 } from "./envelopes";
 import { ClicksignError } from "./client";
 import { dealDataToSigners, leaseDataToSigners } from "./mapping";
+import { moduleForDealKind } from "@/lib/modules/resolve";
+import { MODULE } from "@/lib/modules/catalog";
 import {
   CLICKSIGN_COST_CENTS,
   envelopeCostCents,
@@ -377,7 +379,7 @@ export async function sendEnvelopeForContract(input: SendEnvelopeInput) {
   // Roteia o mapeamento de signatários por tipo de pipeline: locação usa as
   // partes locador/locatário/fiador; venda mantém vendedor/comprador/etc.
   const { signers, missing } =
-    contract.deal?.pipeline?.kind === "locacao"
+    moduleForDealKind(contract.deal?.pipeline?.kind) === MODULE.LOCACAO
       ? leaseDataToSigners(dataSource, authMethod)
       : dealDataToSigners(dataSource, authMethod);
   if (missing.length > 0) throw new MissingEmailsError(missing);
