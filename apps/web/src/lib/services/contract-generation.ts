@@ -1065,7 +1065,22 @@ export async function generateLocacaoContractForDeal(
   }
   const template = selection.template;
 
-  const enrichedData = enrichLocacaoData(dataJson);
+  // Administradora nomeada na cláusula de pagamento: só quando a org tem CRECI
+  // cadastrado (sinal de cadastro completo); senão o template usa o fallback
+  // "à PARTE LOCADORA ou a quem esta indicar".
+  const org = await prisma.organization.findUnique({
+    where: { id: orgId },
+    select: { name: true, legalName: true, creci: true, legalAddress: true },
+  });
+  const administradora = org?.creci
+    ? {
+        nome: org.legalName ?? org.name,
+        creci: org.creci,
+        endereco: org.legalAddress ?? undefined,
+      }
+    : undefined;
+
+  const enrichedData = enrichLocacaoData(dataJson, { administradora });
   const htmlContent = renderContratoHTML(template.handlebarsSource, enrichedData);
 
   const agg = await prisma.contract.aggregate({

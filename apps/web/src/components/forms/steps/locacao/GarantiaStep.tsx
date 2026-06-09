@@ -17,6 +17,7 @@ const TIPO_OPTIONS = [
   { value: "fiador", label: "Fiador" },
   { value: "seguro_fianca", label: "Seguro-fiança" },
   { value: "garantia_digital", label: "Garantia locatícia (digital)" },
+  { value: "titulo_capitalizacao", label: "Título de capitalização" },
   { value: "sem_garantia", label: "Sem garantia" },
 ];
 
@@ -55,6 +56,30 @@ export function GarantiaStep({ form }: { form: UseFormReturn<any> }) {
             />
             <FieldError error={(form.formState.errors?.garantia as any)?.caucao_meses} />
           </FormField>
+        )}
+
+        {tipo === "titulo_capitalizacao" && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <FormField label="Subscritora">
+              <Input
+                {...form.register("garantia.provider")}
+                placeholder="Ex.: Porto Seguro Capitalização S.A."
+              />
+            </FormField>
+            <FormField label="Valor nominal do título (R$)">
+              <Input
+                {...form.register("garantia.titulo_valor", { valueAsNumber: true })}
+                type="number"
+                min={0}
+                step="0.01"
+                inputMode="decimal"
+                placeholder="15000"
+              />
+            </FormField>
+            <FormField label="Nº da proposta/formulário">
+              <Input {...form.register("garantia.titulo_proposta")} placeholder="Ex.: 1234567-001" />
+            </FormField>
+          </div>
         )}
 
         {(tipo === "seguro_fianca" || tipo === "garantia_digital") && (

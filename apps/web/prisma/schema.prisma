@@ -200,6 +200,13 @@ model Organization {
   id                   String   @id @default(cuid())
   name                 String
   slug                 String   @unique
+  // Dados cadastrais da imobiliária — ADMINISTRADORA nomeada nos contratos de
+  // locação (cláusula de pagamento). Só entra no contrato quando `creci` está
+  // preenchido; sem ele o template usa o fallback genérico.
+  legalName            String?
+  cnpj                 String?
+  creci                String?
+  legalAddress         String?
   // White-label (Fase 1a): subdomínio `{subdomain}.imobpro.ia.br` e domínio
   // custom futuro. Resolução por host no middleware → x-org-subdomain.
   subdomain            String?  @unique

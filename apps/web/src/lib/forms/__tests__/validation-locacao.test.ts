@@ -14,8 +14,26 @@ describe("dadosLocacaoSchema", () => {
     expect(parsed.aluguel.dia_vencimento).toBe(10);
     expect(parsed.aluguel.indice_reajuste).toBe("IGPM");
     expect(parsed.aluguel.taxa_admin_percent).toBe(10);
-    expect(parsed.config?.multa_atraso_percent).toBe(2);
+    expect(parsed.config?.multa_atraso_percent).toBe(10);
     expect(parsed.config?.juros_mensais_atraso).toBe(1);
+  });
+
+  it("aceita garantia por título de capitalização com valor e proposta", () => {
+    const res = dadosLocacaoSchema.safeParse({
+      ...baseValid,
+      garantia: {
+        tipo: "titulo_capitalizacao",
+        provider: "Porto Seguro Capitalização S.A.",
+        titulo_valor: 15000,
+        titulo_proposta: "1234567-001",
+      },
+    });
+    expect(res.success).toBe(true);
+    if (res.success) {
+      expect(res.data.garantia?.tipo).toBe("titulo_capitalizacao");
+      expect(res.data.garantia?.titulo_valor).toBe(15000);
+      expect(res.data.garantia?.titulo_proposta).toBe("1234567-001");
+    }
   });
 
   it("exige ao menos 1 locador e 1 locatário", () => {

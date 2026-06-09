@@ -11,6 +11,7 @@ import { ContractEditorPage } from "@/components/contracts/ContractEditorPage";
 import { AddDocumentsCard } from "@/components/pipeline/AddDocumentsCard";
 import { LeaseSignaturesTab } from "@/components/locacao/LeaseSignaturesTab";
 import { Field } from "@/components/locacao/lease-detail/LeaseSection";
+import { GARANTIA_TIPO_LABELS } from "@/lib/locacao/validators";
 import { FileText, ExternalLink, ShieldCheck, ClipboardCheck, Umbrella, Receipt } from "lucide-react";
 import { toast } from "sonner";
 
@@ -195,7 +196,10 @@ export function LocacaoDealDetail({ deal, contract, versions, lease, simplified 
             <CardContent>
               {lease?.guarantee ? (
                 <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-                  <Field label="Tipo" value={lease.guarantee.tipo} />
+                  <Field
+                    label="Tipo"
+                    value={GARANTIA_TIPO_LABELS[lease.guarantee.tipo] ?? lease.guarantee.tipo}
+                  />
                   <Field label="Status" value={lease.guarantee.status} />
                   <Field label="Provedor" value={lease.guarantee.provider} />
                 </div>
