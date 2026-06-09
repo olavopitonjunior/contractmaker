@@ -15,7 +15,19 @@ export interface AIInsight {
 }
 
 const TTL_MS = 30 * 60 * 1000;
+// Timeout curto para chamadas Redis: o Upstash usa fetch sem timeout, então um
+// endpoint inacessível (ex.: staging com redisConnected:false) penduraria a
+// request inteira. Com o race, cache indisponível vira cache-miss/no-op.
+const REDIS_TIMEOUT_MS = 2000;
 const memCache = new Map<string, InsightCacheEntry>();
+
+/** Resolve `null` (timeout) em vez de pendurar quando o Redis não responde. */
+function withTimeout<T>(p: Promise<T>): Promise<T | null> {
+  return Promise.race([
+    p,
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), REDIS_TIMEOUT_MS)),
+  ]);
+}
 
 let _redis: { get: (k: string) => Promise<string | null>; set: (k: string, v: string, opts: { ex: number }) => Promise<unknown> } | null | undefined;
 
@@ -61,7 +73,7 @@ export async function getCached(key: string): Promise<AIInsight[] | null> {
   const redis = await getRedis();
   if (!redis) return null;
   try {
-    const raw = await redis.get(key);
+    const raw = await withTimeout(redis.get(key));
     if (!raw) return null;
     const parsed = typeof raw === "string" ? JSON.parse(raw) : raw;
     return parsed as AIInsight[];
@@ -75,7 +87,7 @@ export async function setCached(key: string, insights: AIInsight[]): Promise<voi
   const redis = await getRedis();
   if (!redis) return;
   try {
-    await redis.set(key, JSON.stringify(insights), { ex: Math.floor(TTL_MS / 1000) });
+    await withTimeout(redis.set(key, JSON.stringify(insights), { ex: Math.floor(TTL_MS / 1000) }));
   } catch {
     // silent
   }

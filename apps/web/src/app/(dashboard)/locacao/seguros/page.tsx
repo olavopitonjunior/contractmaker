@@ -28,6 +28,17 @@ const STATUS_TONE: Record<string, "default" | "secondary" | "outline" | "destruc
   pendente: "secondary",
 };
 
+/**
+ * Status efetivo: reconcilia o status armazenado com a vigência. Uma apólice cujo
+ * `vigenciaFim` já passou está vencida na prática (salvo cancelada), independente
+ * do `status` no banco. Mantém contagens (ativas/vencidas) e badge coerentes.
+ */
+function effectiveStatus(p: { status: string; vigenciaFim: Date }, now: Date): string {
+  if (p.status === "cancelada") return "cancelada";
+  if (p.vigenciaFim < now) return "vencida";
+  return p.status;
+}
+
 export default async function SegurosPage() {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
@@ -52,9 +63,9 @@ export default async function SegurosPage() {
     take: 500,
   });
 
-  const ativas = policies.filter((p) => p.status === "ativa");
+  const ativas = policies.filter((p) => effectiveStatus(p, now) === "ativa");
   const vencendo = ativas.filter((p) => p.vigenciaFim <= in60d && p.vigenciaFim >= now);
-  const vencidas = policies.filter((p) => p.status === "vencida" || p.vigenciaFim < now);
+  const vencidas = policies.filter((p) => effectiveStatus(p, now) === "vencida");
   const premioMensalSoma = ativas.reduce((acc, p) => acc + (p.premioMensal ?? 0), 0);
 
   return (
@@ -179,9 +190,12 @@ export default async function SegurosPage() {
                             </td>
                             <td className="p-3 text-right">{fmtBRL(p.premioMensal)}</td>
                             <td className="p-3">
-                              <Badge variant={STATUS_TONE[p.status] ?? "outline"}>
-                                {p.status}
-                              </Badge>
+                              {(() => {
+                                const eff = effectiveStatus(p, now);
+                                return (
+                                  <Badge variant={STATUS_TONE[eff] ?? "outline"}>{eff}</Badge>
+                                );
+                              })()}
                             </td>
                           </tr>
                         );

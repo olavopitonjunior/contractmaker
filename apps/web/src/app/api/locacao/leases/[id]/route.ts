@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit, type AuditAction } from "@/lib/security/audit";
 import { ensureLocacaoAccess, isRouteError, parseJsonBody } from "@/lib/locacao/route-helpers";
+import { materializeLeaseParties } from "@/lib/locacao/materialize-parties";
 
 export const dynamic = "force-dynamic";
 
@@ -27,7 +28,7 @@ export async function PATCH(req: NextRequest, { params }: Params) {
 
   const existing = await prisma.leaseContract.findFirst({
     where: { id, orgId: ctx.orgId },
-    select: { id: true, status: true },
+    select: { id: true, status: true, propertyId: true },
   });
   if (!existing) {
     return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
@@ -47,10 +48,27 @@ export async function PATCH(req: NextRequest, { params }: Params) {
   }
 
   const { metadata, ...updateData } = parsed.data;
-  const lease = await prisma.leaseContract.update({
-    where: { id },
-    data: updateData,
-  });
+
+  // "Criar administração": ao ativar (rascunho→ativo), normaliza as partes do
+  // dataJson em PropertyOwner/Tenant/joins e marca o imóvel como locado. Tudo
+  // numa transação — se a materialização falhar, a ativação não acontece pela
+  // metade.
+  const activating = existing.status !== "ativo" && updateData.status === "ativo";
+  let lease;
+  if (activating) {
+    lease = await prisma.$transaction(async (tx) => {
+      await materializeLeaseParties({ orgId: ctx.orgId, leaseContractId: id }, tx);
+      if (existing.propertyId) {
+        await tx.property.update({
+          where: { id: existing.propertyId },
+          data: { status: "locado" },
+        });
+      }
+      return tx.leaseContract.update({ where: { id }, data: updateData });
+    });
+  } else {
+    lease = await prisma.leaseContract.update({ where: { id }, data: updateData });
+  }
 
   let action: AuditAction = "LEASE_UPDATE";
   if (parsed.data.status === "rescisao") action = "LEASE_TERMINATE";

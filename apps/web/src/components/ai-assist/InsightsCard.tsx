@@ -48,10 +48,16 @@ export function AIInsightsCard({
     let cancelled = false;
     setLoading(true);
     setError(null);
+    // Timeout client-side: se o servidor pendurar (ex.: Redis/Upstash inacessível
+    // sem timeout, modelo lento), o skeleton resolveria pra sempre. Aborta em 12s
+    // → cai no .catch → mostra "Insights indisponíveis" em vez de skeleton eterno.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12_000);
     fetch("/api/ai/insights", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ context, contextId }),
+      signal: controller.signal,
     })
       .then(async (res) => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -66,9 +72,12 @@ export function AIInsightsCard({
           setError(err instanceof Error ? err.message : "Erro");
           setLoading(false);
         }
-      });
+      })
+      .finally(() => clearTimeout(timer));
     return () => {
       cancelled = true;
+      clearTimeout(timer);
+      controller.abort();
     };
   }, [context, contextId]);
 
