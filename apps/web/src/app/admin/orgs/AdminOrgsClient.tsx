@@ -49,7 +49,13 @@ export function AdminOrgsClient({
       const res = await fetch("/api/admin/orgs", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ ...form, modules: selected }),
+        // ownerName é opcional no schema (min 2) — string vazia falha a validação;
+        // omite quando em branco para cair no optional/undefined.
+        body: JSON.stringify({
+          ...form,
+          ownerName: form.ownerName.trim() || undefined,
+          modules: selected,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
