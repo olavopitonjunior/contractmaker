@@ -5,8 +5,7 @@ import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
 import { MODULE } from "@/lib/modules/catalog";
 import { Card, CardContent } from "@/components/ui/card";
 import { KanbanBoard } from "@/components/pipeline/KanbanBoard";
-import { NovoContratoWizard } from "@/components/locacao/NovoContratoWizard";
-import { NovoFormularioLocacaoDialog } from "@/components/locacao/NovoFormularioLocacaoDialog";
+import { NovoNegocioLocacaoDropdown } from "@/components/locacao/NovoNegocioLocacaoDropdown";
 import { BarChart3, DollarSign, Building2 } from "lucide-react";
 
 export const dynamic = "force-dynamic";
@@ -186,10 +185,10 @@ export default async function PipelineLocacaoPage() {
         <h1 className="font-display text-2xl font-semibold tracking-tight">
           Pipeline de Locação
         </h1>
-        <div className="flex items-center gap-2">
-          <NovoFormularioLocacaoDialog />
-          <NovoContratoWizard properties={propertyOptions} tenants={tenantOptions} />
-        </div>
+        <NovoNegocioLocacaoDropdown
+          properties={propertyOptions}
+          tenants={tenantOptions}
+        />
       </div>
 
       {/* Metrics — KPI cards (mesmo layout de vendas) */}

@@ -28,13 +28,28 @@ const REGIME_COBRANCA = [
   { value: "mes_vencido", label: "Mês vencido" },
 ];
 
+interface NovoFormularioLocacaoDialogProps {
+  /** Modo controlado (dropdown "Novo negócio") — esconde o trigger próprio. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
 /**
  * Diálogo do OPERADOR: cria um formulário público de locação. Coleta a
  * finalidade + a config fiscal/comissão (que NÃO é preenchida pelo cliente) e
  * gera o link /f/[token] pra enviar ao locador/locatário.
  */
-export function NovoFormularioLocacaoDialog() {
-  const [open, setOpen] = useState(false);
+export function NovoFormularioLocacaoDialog({
+  open: controlledOpen,
+  onOpenChange,
+}: NovoFormularioLocacaoDialogProps = {}) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : uncontrolledOpen;
+  const setOpen = (o: boolean) => {
+    if (isControlled) onOpenChange?.(o);
+    else setUncontrolledOpen(o);
+  };
   const [submitting, setSubmitting] = useState(false);
   const [link, setLink] = useState<string | null>(null);
   const [dealId, setDealId] = useState<string | null>(null);
@@ -102,11 +117,13 @@ export function NovoFormularioLocacaoDialog() {
         if (!o) reset();
       }}
     >
-      <DialogTrigger asChild>
-        <Button>
-          <Plus className="h-4 w-4 mr-1.5" /> Novo formulário de locação
-        </Button>
-      </DialogTrigger>
+      {!isControlled && (
+        <DialogTrigger asChild>
+          <Button>
+            <Plus className="h-4 w-4 mr-1.5" /> Novo formulário de locação
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Novo formulário de locação</DialogTitle>
