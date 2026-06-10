@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
 import { TemplatesListClient } from "@/components/templates/TemplatesListClient";
+import { UploadModeloDialog } from "@/components/templates/UploadModeloDialog";
 
 export default async function TemplatesPage({
   searchParams,
@@ -42,6 +43,7 @@ export default async function TemplatesPage({
         title="Templates de Contrato"
         description="Cada modalidade tem um template marcado como padrão. Esse é usado automaticamente na criação de novos contratos."
       >
+        <UploadModeloDialog />
         <Button size="sm" asChild>
           <Link href="/templates/new">
             <Plus className="mr-1.5 h-4 w-4" />

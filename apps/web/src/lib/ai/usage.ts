@@ -77,7 +77,10 @@ export type AIOperation =
   | "extract_ccv_doc"
   | "voice_extract"
   | "insights"
-  | "assistant_chat";
+  | "assistant_chat"
+  // Ingestão DOCX→template (engine google_docs): pass de IA que insere
+  // {{placeholders}} no Doc-modelo da imobiliária.
+  | "template_placeholder_insertion";
 
 export interface RecordUsageParams {
   orgId: string;
