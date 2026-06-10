@@ -12,6 +12,8 @@ import {
 } from "@/lib/forms/validation-locacao";
 import { PrivacyConsent } from "@/components/legal/PrivacyConsent";
 import { LocacaoParteStep } from "@/components/forms/steps/locacao/_PartyFields";
+import { DocumentosStep } from "@/components/forms/steps/DocumentosStep";
+import { locacaoDocAdapter } from "@/components/forms/steps/locacao/locacao-doc-adapter";
 import { ImovelLocacaoStep } from "@/components/forms/steps/locacao/ImovelLocacaoStep";
 import { AluguelStep } from "@/components/forms/steps/locacao/AluguelStep";
 import { GarantiaStep } from "@/components/forms/steps/locacao/GarantiaStep";
@@ -27,17 +29,19 @@ interface LocacaoFormWizardProps {
 // `tipo_pessoa`: PJ qualifica por `razao_social` (não tem campo `nome`). Sem
 // isso, uma parte Pessoa Jurídica trava o avanço com "campo obrigatório"
 // fantasma (não há campo `nome` na tela pra preencher).
+// Índices acompanham LOCACAO_STEP_LABELS — etapa 0 é "Documentos" (sem
+// validação, igual venda), partes começam em 1.
 const PARTY_STEP: Record<number, { list: "locadores" | "locatarios"; label: string }> = {
-  0: { list: "locadores", label: "locador" },
-  1: { list: "locatarios", label: "locatário" },
+  1: { list: "locadores", label: "locador" },
+  2: { list: "locatarios", label: "locatário" },
 };
 
 // Required mínimo dos demais steps (non-empty check manual, já que não usamos
 // zodResolver). A validação completa roda no servidor no finalize
 // (schemaForLocacaoType) e retorna validationIssues.
 const STEP_REQUIRED: Record<number, string[]> = {
-  2: ["imovel.descricao"],
-  3: ["aluguel.valor"],
+  3: ["imovel.descricao"],
+  4: ["aluguel.valor"],
 };
 
 function defaultValues(comercial: boolean): Record<string, unknown> {
@@ -201,20 +205,22 @@ export function LocacaoFormWizard({ token, initialData, schemaType }: LocacaoFor
 
   const steps = comercial
     ? [
-        <LocacaoParteStep key="s0" form={form} listKey="locadores" singular="Locador" />,
-        <LocacaoParteStep key="s1" form={form} listKey="locatarios" singular="Locatário" />,
-        <ImovelLocacaoStep key="s2" form={form} comercial />,
-        <AluguelStep key="s3" form={form} />,
-        <GarantiaStep key="s4" form={form} />,
-        <ConfirmacaoStep key="s5" form={form} />,
+        <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} />,
+        <LocacaoParteStep key="s1" form={form} listKey="locadores" singular="Locador" />,
+        <LocacaoParteStep key="s2" form={form} listKey="locatarios" singular="Locatário" />,
+        <ImovelLocacaoStep key="s3" form={form} comercial />,
+        <AluguelStep key="s4" form={form} />,
+        <GarantiaStep key="s5" form={form} />,
+        <ConfirmacaoStep key="s6" form={form} />,
       ]
     : [
-        <LocacaoParteStep key="s0" form={form} listKey="locadores" singular="Locador" />,
-        <LocacaoParteStep key="s1" form={form} listKey="locatarios" singular="Locatário" />,
-        <ImovelLocacaoStep key="s2" form={form} />,
-        <AluguelStep key="s3" form={form} />,
-        <GarantiaStep key="s4" form={form} />,
-        <ConfirmacaoStep key="s5" form={form} />,
+        <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} />,
+        <LocacaoParteStep key="s1" form={form} listKey="locadores" singular="Locador" />,
+        <LocacaoParteStep key="s2" form={form} listKey="locatarios" singular="Locatário" />,
+        <ImovelLocacaoStep key="s3" form={form} />,
+        <AluguelStep key="s4" form={form} />,
+        <GarantiaStep key="s5" form={form} />,
+        <ConfirmacaoStep key="s6" form={form} />,
       ];
 
   return (
