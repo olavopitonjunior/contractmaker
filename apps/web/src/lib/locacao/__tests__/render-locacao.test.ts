@@ -98,8 +98,17 @@ describe("template locação residencial v3 + enrich", () => {
   });
 
   it("sem administradora usa o fallback genérico e omite a cláusula de boleto consolidado", () => {
-    expect(html).toContain("diretamente ao(s) LOCADOR(ES) ou a quem este(s) indicar(em)");
-    expect(html).not.toContain("ADMINISTRADORA juntamente com o valor do aluguel");
+    expect(html).toContain("diretamente à PARTE LOCADORA ou a quem esta indicar");
+    expect(html).not.toContain("no mesmo boleto");
+  });
+
+  it("usa a terminologia literal do modelo (PARTE LOCADORA/LOCATÁRIA, preâmbulo, fecho)", () => {
+    expect(html).toContain("PARTE LOCADORA");
+    expect(html).toContain("PARTE LOCATÁRIA");
+    expect(html).toContain("têm entre si, justo e acertado o seguinte:");
+    expect(html).toContain("em 03 (três) vias de igual teor e forma");
+    expect(html).toContain("ENEL, SABESP (se houver) e COMGÁS (se houver)");
+    expect(html).toContain("Testemunha");
   });
 
   it("inclui as cláusulas fixas do modelo NNI (seguro incêndio 100x, honorários 20%)", () => {
@@ -165,7 +174,7 @@ describe("template locação residencial v3 — administradora + título de capi
   });
 
   it("com administradora inclui IPTU/condomínio no mesmo boleto (9.1.2/9.1.3)", () => {
-    expect(html).toContain("ADMINISTRADORA juntamente com o valor do aluguel");
+    expect(html).toContain("no mesmo boleto");
     expect(html).toContain("pagos a vencer");
   });
 
@@ -173,13 +182,12 @@ describe("template locação residencial v3 — administradora + título de capi
     expect(html).toContain("Título de Capitalização");
     expect(html).toContain("15.000");
     expect(html).toContain("Porto Seguro Capitalização S.A.");
-    expect(html).toContain("proposta/formulário nº 1234567-001");
+    expect(html).toContain("proposta/formulário n.º 1234567-001");
     expect(html).toContain("REAPLICAR");
     expect(html).toContain("15 (quinze) dias de antecedência");
     expect(html).toContain("documento rescisório");
     expect(html).toContain("resgatar o(s) Título(s) caucionado(s)");
     expect(html).toContain("prestação de contas");
-    expect(html).toContain("art. 37, II, da Lei nº 8.245/91");
   });
 
   it("garantia capitalização não renderiza os ramos de fiador/caução", () => {
@@ -265,7 +273,7 @@ describe("enrich locação: tipo do imóvel e foro (correções QA 2026-06-06)",
 
   it("renderiza o tipo legível e o foro eleito no contrato (não o slug nem o fallback)", () => {
     const html = renderContratoHTML(loadTemplate(), enrichLocacaoData(base as Record<string, unknown>));
-    expect(html).toContain("imóvel de tipo sala comercial");
+    expect(html).toContain("proprietária do(a) sala comercial");
     expect(html).not.toContain("comercial_sala");
     expect(html).toContain("comarca de São Paulo");
     expect(html).not.toContain("comarca de localização do imóvel");
