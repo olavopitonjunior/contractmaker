@@ -174,10 +174,22 @@ export function formatDateBR(d: Date): string {
 }
 
 /**
+ * A Infosimples valida `pedido_data` como ISO (YYYY-MM-DD); DD/MM/YYYY (que a
+ * gente persiste/exibe e o e-SAJ usa) volta 607 com errors[] "pedido_data
+ * possui um valor inválido" — confirmado em prod 2026-06-09 (deal cmpypeb95,
+ * 4 jobs TJSP presos em awaiting_portal). Normaliza na hora da chamada pra
+ * cobrir tanto jobs antigos (DB com DD/MM/YYYY) quanto novos.
+ */
+export function normalizePedidoData(s: string): string {
+  const m = s.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : s.trim();
+}
+
+/**
  * Monta os params do 2º passo (obter) por portal — pura, testável.
  *   - TRF3: { numero_certidao, cpf|cnpj } (doc exige o documento).
  *   - Antecedentes PF: { codigo, cpf } p/ validar o código emitido.
- *   - e-SAJ TJSP/TJRJ: { numero_pedido, pedido_data, cpf|cnpj } — o obter-civel
+ *   - e-SAJ TJSP/TJRJ: { numero_pedido, pedido_data, cpf|cnpj } — o obter
  *     exige a DATA do pedido + documento, além do número (doc Infosimples).
  *   - Demais (ONR matrícula etc.): { numero_pedido }.
  */
@@ -185,7 +197,10 @@ export function buildObterArgs(
   obterEndpoint: string,
   ctx: { numeroPedido: string; pedidoData?: string; payload: Record<string, unknown> }
 ): Record<string, unknown> {
-  const { numeroPedido, pedidoData, payload } = ctx;
+  const { pedidoData, payload } = ctx;
+  // TRF3 devolve numero_certidao com espaço à esquerda (" 2026/0000…") — trim
+  // antes de reenviar, senão o portal não localiza o pedido.
+  const numeroPedido = ctx.numeroPedido.trim();
   const doc: Record<string, unknown> = payload.cpf
     ? { cpf: payload.cpf }
     : payload.cnpj
@@ -200,7 +215,7 @@ export function buildObterArgs(
   if (obterEndpoint.includes("/tjsp/") || obterEndpoint.includes("/tjrj/")) {
     return {
       numero_pedido: numeroPedido,
-      ...(pedidoData ? { pedido_data: pedidoData } : {}),
+      ...(pedidoData ? { pedido_data: normalizePedidoData(pedidoData) } : {}),
       ...doc,
     };
   }
