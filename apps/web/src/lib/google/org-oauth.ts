@@ -35,26 +35,34 @@ export interface ResolvedOwnerAuth {
 // token. Invalidado em disconnect/revoke.
 const orgClientCache = new Map<string, { client: OAuth2Client; email: string }>();
 
-function buildOAuthClient(): OAuth2Client {
-  const clientId = envTrim("GOOGLE_OAUTH_CLIENT_ID");
-  const clientSecret = envTrim("GOOGLE_OAUTH_CLIENT_SECRET");
+// O fluxo de conexão POR ORG usa um OAuth client tipo "Web application"
+// (redirect URIs do app cadastradas). O client global legado é tipo
+// "Desktop" (oauth-bootstrap via loopback) e NÃO aceita redirect web — por
+// isso envs separadas, com fallback pro legado se as web não existirem.
+// Refresh tokens são vinculados ao client que os emitiu: tokens de org são
+// emitidos e renovados SEMPRE pelo client web.
+function webClientCredentials(): { clientId: string; clientSecret: string } {
+  const clientId =
+    envTrim("GOOGLE_WEB_OAUTH_CLIENT_ID") ?? envTrim("GOOGLE_OAUTH_CLIENT_ID");
+  const clientSecret =
+    envTrim("GOOGLE_WEB_OAUTH_CLIENT_SECRET") ??
+    envTrim("GOOGLE_OAUTH_CLIENT_SECRET");
   if (!clientId || !clientSecret) {
     throw new Error(
-      "GOOGLE_OAUTH_CLIENT_ID/GOOGLE_OAUTH_CLIENT_SECRET não configurados."
+      "GOOGLE_WEB_OAUTH_CLIENT_ID/SECRET (ou GOOGLE_OAUTH_CLIENT_*) não configurados."
     );
   }
+  return { clientId, clientSecret };
+}
+
+function buildOAuthClient(): OAuth2Client {
+  const { clientId, clientSecret } = webClientCredentials();
   return new google.auth.OAuth2({ clientId, clientSecret });
 }
 
 /** OAuth client pro fluxo connect/callback (com redirect URI). */
 export function buildOrgConnectClient(redirectUri: string): OAuth2Client {
-  const clientId = envTrim("GOOGLE_OAUTH_CLIENT_ID");
-  const clientSecret = envTrim("GOOGLE_OAUTH_CLIENT_SECRET");
-  if (!clientId || !clientSecret) {
-    throw new Error(
-      "GOOGLE_OAUTH_CLIENT_ID/GOOGLE_OAUTH_CLIENT_SECRET não configurados."
-    );
-  }
+  const { clientId, clientSecret } = webClientCredentials();
   return new google.auth.OAuth2({ clientId, clientSecret, redirectUri });
 }
 
