@@ -25,6 +25,7 @@ retry), `normalizers.ts` (extração por endpoint), `executor.ts` (dispatch + po
 | **608** "preencher com email válido" | e-SAJ valida MX do `email_envio`; domínio morto recusado | usar e-mail real do operador (`dealEmail`); `DEFAULT_EMAIL` configurável com MX vivo. Plus-alias preserva o MX. |
 | **620** "já existe pedido em andamento" | re-disparo enquanto o pedido original processa | `isPedidoDuplicado` → `duplicate_pending` (neutro + ETA) OU recupera o protocolo original p/ obter. ATENÇÃO: 620 também é erro de 2FA GOV.BR — gate é a MENSAGEM, não o código. |
 | **607** throttle e-mail (variante) | igual ao 604 | mesmo tratamento do 604 (plus-alias). |
+| **607** no `obter-certidao` "Parâmetro(s) inválido(s).: cnpj, cpf, numero_pedido, pedido_data" em TODO poll | a Infosimples valida `pedido_data` como **ISO (YYYY-MM-DD)**; o app persistia/enviava DD/MM/YYYY (`formatDateBR`). O `code_message` do 607 lista TODOS os params do endpoint — a causa real só vem em `errors[]` ("pedido_data possui um valor inválido"). | **Fix 2026-06-09 (#66):** `normalizePedidoData` em `buildObterArgs` converte DD/MM/YYYY → ISO na hora da chamada (cobre jobs antigos do DB e novos). Reproduzido com chamada real: 607 → 200 + certidão. Mesma lição do 604: diagnosticar pelo `errors[]`, não pelo `code_message`. |
 
 `modelo` é NÚMERO: **4** = Cível-Geral SAJ SGC (engloba cível+família+exec. fiscal),
 **1** = Falências/Concordatas/Recuperações. `pedido-civel` legado é cível-only.
@@ -41,6 +42,8 @@ retry), `normalizers.ts` (extração por endpoint), `executor.ts` (dispatch + po
 
 TRF3 é two-step (`pedido` → `obter-certidao`); fica em `awaiting_portal` com 615
 quando a fonte está instável. TRF5 usa `tipo_certidao` NUMÉRICO ("1" Cível / "2" Criminal).
+O TRF3 devolve `numero_certidao` com ESPAÇO à esquerda (" 2026/000…") — `buildObterArgs`
+faz `trim()` antes de reenviar (#66), senão o portal não localiza o pedido.
 
 ---
 
@@ -48,7 +51,7 @@ quando a fonte está instável. TRF5 usa `tipo_certidao` NUMÉRICO ("1" Cível /
 
 | Sintoma | Causa | Tratamento / Prevenção |
 |---|---|---|
-| **600** "Um erro inesperado ocorreu e será analisado" (`billable:false`) | erro da fonte/Infosimples — NÃO é "nada consta" | `genuine_no_data` em endpoint de `CATEGORIES_REQUIRING_PDF` (cível/trabalhista/protesto/federal…) com `attachmentId:null` → `portal_unavailable` (retry); esgotado → `failed_permanent`+portal. **Fix 2026-06-08:** mensagem ao usuário usa `friendlySourceUnavailableMessage` (fonte indisponível) em vez do texto cru. Para endpoints informativos (sem PDF obrigatório), 600 segue o fluxo antigo (1 retry profilático → success negativa). |
+| **600** "Um erro inesperado ocorreu e será analisado" (`billable:false`) | erro da fonte/Infosimples — NÃO é "nada consta" | `genuine_no_data` em endpoint de `CATEGORIES_REQUIRING_PDF` (cível/trabalhista/protesto/federal…) com `attachmentId:null` → `portal_unavailable` (retry); esgotado → `failed_permanent`+portal. **Fix 2026-06-08:** mensagem ao usuário usa `friendlySourceUnavailableMessage` (fonte indisponível) em vez do texto cru. **Fix 2026-06-10 (#67):** endpoints informativos (`emitsPdf:false`, ex. eproc-lista) só fecham como "success negativa" com **evidência textual de ausência** ("nada consta"/"nenhum resultado"/"não encontrado" — 612/601); 600 sem evidência faz retry até esgotar → `failed_permanent` (antes virava "Negativa · nada consta" pra consulta que nunca rodou). Ao esgotar, `terminalizeRetryMessage` troca "Nova tentativa automática agendada" por "Tentativas automáticas esgotadas" (a promessa de retry era falsa no estado terminal). |
 
 ---
 
@@ -109,6 +112,14 @@ processamento nosso.
 - **"Retentar erros"** (botão na aba): 1 clique re-dispara todos os alvos com
   erro retentável (`isRetryableError`: failed/failed_permanent/data_*/portal_
   unavailable/rate_limited/success-sem-PDF). O backend pula os em andamento.
+  **#67 (2026-06-10):** success-sem-PDF só conta quando o endpoint EMITE PDF —
+  `emitsPdf:false` (eproc-lista, trf/cert-unificada) nunca anexa por design e
+  inflava a contagem pra sempre, re-disparando consultas saudáveis.
+- **Diligenciado é tier "padrao"** (#66, 2026-06-09): pessoa/PJ adicionada
+  manualmente nasce PRÉ-MARCADA no ExtractCertidoesDialog e entra no "Só as que
+  faltaram". Antes era "opcional" (desmarcada em seção colapsada) e o lote saía
+  sem ela — e o "Só as que faltaram" SUBSTITUI a seleção inteira, desmarcando
+  até seleção manual prévia. Comprador continua "opcional" (opt-in).
 - **Unmatched tolerante.** Se uma seleção não casa com o planner atual (endpoint
   depreciado/gated — ONR 602, CENPROT sem gov.br), a rota despacha o que casa e
   reporta `unmatched` (toast "N indisponíveis ignoradas"). Antes recusava o LOTE
