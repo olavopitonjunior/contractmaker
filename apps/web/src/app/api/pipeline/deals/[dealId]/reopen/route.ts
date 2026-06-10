@@ -88,6 +88,7 @@ export async function POST(
     where: { id: deal.id },
     data: {
       stageId: targetStage.id,
+      stageEnteredAt: new Date(),
       lostAt: null,
       lostReason: null,
     },

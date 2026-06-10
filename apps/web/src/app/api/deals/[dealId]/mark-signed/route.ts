@@ -68,7 +68,11 @@ export async function POST(
 
   await prisma.deal.update({
     where: { id: deal.id },
-    data: { stageId: targetStage.id, commissionPaidAt: new Date() },
+    data: {
+      stageId: targetStage.id,
+      stageEnteredAt: new Date(),
+      commissionPaidAt: new Date(),
+    },
   });
 
   await audit(

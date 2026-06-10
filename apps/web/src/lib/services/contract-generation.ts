@@ -969,7 +969,9 @@ export async function generateContractForDeal(
     data: {
       title: derivedTitle,
       value: derivedValue ?? deal.value,
-      ...(confeccaoStage ? { stageId: confeccaoStage.id } : {}),
+      ...(confeccaoStage
+        ? { stageId: confeccaoStage.id, stageEnteredAt: new Date() }
+        : {}),
     },
   });
 
@@ -1228,7 +1230,9 @@ export async function generateLocacaoContractForDeal(
     data: {
       title: derivedTitle,
       value: derivedValue ?? deal.value,
-      ...(confeccaoStage ? { stageId: confeccaoStage.id } : {}),
+      ...(confeccaoStage
+        ? { stageId: confeccaoStage.id, stageEnteredAt: new Date() }
+        : {}),
     },
   });
 

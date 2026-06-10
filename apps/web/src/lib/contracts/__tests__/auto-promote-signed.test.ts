@@ -74,7 +74,7 @@ describe("autoPromoteDealOnContractSigned", () => {
     });
     expect(mockDealUpdate).toHaveBeenCalledWith({
       where: { id: "deal-1" },
-      data: { stageId: "s-sign" },
+      data: { stageId: "s-sign", stageEnteredAt: expect.any(Date) },
     });
   });
 

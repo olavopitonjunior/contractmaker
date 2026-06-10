@@ -443,6 +443,10 @@ model Deal {
   chargeIssuedAt   DateTime?
   lostAt           DateTime?
   lostReason       String?
+  // Aging por stage: quando o deal ENTROU no stage atual. Atualizado em todo
+  // ponto que muda stageId (drag, auto-promotes, mark-lost/reopen, geração).
+  // Null em deals pré-migração sem backfill exato — UI cai pra createdAt.
+  stageEnteredAt   DateTime? @default(now())
   // Serasa (2026-05) — registro de consentimento LGPD por deal pra consultas
   // restritas (score, restritivos, vínculos). Shape: { serasaConsent: { at,
   // by, baseLegal } }. Sem o campo populado, POST /certidoes retorna 412

@@ -209,7 +209,7 @@ export async function DELETE(
     }
     await prisma.deal.update({
       where: { id: params.dealId },
-      data: { stageId: archived.id },
+      data: { stageId: archived.id, stageEnteredAt: new Date() },
     });
     await audit(
       extractAuditContextFromRequest(

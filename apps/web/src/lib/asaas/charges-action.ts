@@ -362,7 +362,7 @@ export async function runCreateCommissionCharge(
       ) {
         await prisma.deal.update({
           where: { id: dealWithStage.id },
-          data: { stageId: cobrancaStage.id },
+          data: { stageId: cobrancaStage.id, stageEnteredAt: new Date() },
         });
         stageMovedTo = cobrancaStage.id;
       }
