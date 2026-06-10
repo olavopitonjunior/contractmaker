@@ -31,6 +31,7 @@ import {
   isReceitaCertidaoNaoEmitida,
   isPortalUnavailableMessage,
   friendlySourceUnavailableMessage,
+  terminalizeRetryMessage,
 } from "./error-codes";
 
 export type RichStatus =
@@ -478,8 +479,11 @@ function planRetry(
   if (!hasMore) {
     return {
       status: "failed_permanent",
+      // terminalizeRetryMessage: a mensagem amigável de instabilidade promete
+      // "Nova tentativa automática agendada" — falso aqui (estado terminal).
       errorMessage:
-        message ?? "Falhas consecutivas esgotaram as tentativas automáticas",
+        terminalizeRetryMessage(message) ??
+        "Falhas consecutivas esgotaram as tentativas automáticas",
       failureCategory:
         backoffKey === "api_error"
           ? "provider_timeout"

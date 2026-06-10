@@ -158,6 +158,14 @@ describe("classifyOutcome — Phase J", () => {
     });
     expect(exhausted.status).toBe("failed_permanent");
     expect(exhausted.portalUrl).toBe("https://esaj.tjsp.jus.br/");
+    // Mensagem terminal honesta: não pode prometer "Nova tentativa automática
+    // agendada" num estado sem retry (terminalizeRetryMessage).
+    expect(exhausted.errorMessage).not.toMatch(
+      /nova tentativa autom[áa]tica agendada/i
+    );
+    expect(exhausted.errorMessage).toMatch(
+      /tentativas autom[áa]ticas esgotadas/i
+    );
   });
 
   it("eproc-lista 601 'não encontrado' (evidência explícita) continua fechando como success negativa", () => {
