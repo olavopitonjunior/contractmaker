@@ -7,7 +7,7 @@ import {
   authFailureResponse,
 } from "@/lib/api/require-auth";
 import { requireApproval } from "@/lib/api/intents";
-import { planCertidoesForDeal } from "@/lib/certidoes/planner";
+import { planCertidoesForDeal, diligentedPersonToInput } from "@/lib/certidoes/planner";
 import { getMonthlySpend } from "@/lib/certidoes/executor";
 import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
 
@@ -91,16 +91,7 @@ export async function POST(
     where: { dealId: params.dealId },
     orderBy: { createdAt: "asc" },
   });
-  const diligenciados = diligenciadosRaw.map((d) => ({
-    id: d.id,
-    tipoPessoa: d.tipoPessoa as "fisica" | "juridica",
-    nome: d.nome,
-    cpf: d.cpf,
-    cnpj: d.cnpj,
-    dataNascimento: d.dataNascimento,
-    uf: d.uf,
-    cidade: d.cidade,
-  }));
+  const diligenciados = diligenciadosRaw.map(diligentedPersonToInput);
   const govbr = await checkGovBrAuth();
   const plan = planCertidoesForDeal(dealData as never, undefined, diligenciados, {
     expandAll: false,

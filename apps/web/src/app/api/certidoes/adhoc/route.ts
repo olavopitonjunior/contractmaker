@@ -39,6 +39,10 @@ const targetSchema = z.object({
   cpf: z.string().optional().nullable(),
   cnpj: z.string().optional().nullable(),
   dataNascimento: z.string().optional().nullable(),
+  // PF — destravam TJSP (rg+sexo) e antecedentes (nomeMae).
+  rg: z.string().optional().nullable(),
+  nomeMae: z.string().optional().nullable(),
+  sexo: z.string().optional().nullable(),
   uf: z.string().length(2).optional().nullable(),
   cidade: z.string().optional().nullable(),
 });
@@ -90,6 +94,9 @@ export async function POST(req: NextRequest) {
         cpf: target.cpf,
         cnpj: target.cnpj,
         dataNascimento: target.dataNascimento,
+        rg: target.rg,
+        nomeMae: target.nomeMae,
+        sexo: target.sexo,
         uf: target.uf,
         cidade: target.cidade,
       },

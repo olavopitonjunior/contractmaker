@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import { planCertidoesForDeal } from "@/lib/certidoes/planner";
+import { planCertidoesForDeal, diligentedPersonToInput } from "@/lib/certidoes/planner";
 import { runBatch, getMonthlySpend, getMonthlySpendByProvider } from "@/lib/certidoes/executor";
 import { endpointInfo } from "@/lib/certidoes/endpoints";
 import { isInProgressBlocking } from "@/lib/certidoes/lifecycle";
@@ -158,16 +158,7 @@ export async function POST(
     where: { dealId: params.dealId },
     orderBy: { createdAt: "asc" },
   });
-  const diligenciados = diligenciadosRaw.map((d) => ({
-    id: d.id,
-    tipoPessoa: d.tipoPessoa as "fisica" | "juridica",
-    nome: d.nome,
-    cpf: d.cpf,
-    cnpj: d.cnpj,
-    dataNascimento: d.dataNascimento,
-    uf: d.uf,
-    cidade: d.cidade,
-  }));
+  const diligenciados = diligenciadosRaw.map(diligentedPersonToInput);
 
   // Phase F.II-γ — pre-flight GOV.BR (cached 5min) para decidir se endpoints
   // `requiresGovBrAuth` (CENPROT nacional) disparam ou viram SkippedJob.

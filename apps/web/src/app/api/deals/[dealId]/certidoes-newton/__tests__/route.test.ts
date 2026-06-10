@@ -10,6 +10,7 @@ vi.mock("@/lib/certidoes/planner", () => ({
     jobs: [{ endpoint: "x", label: "Test", costCents: 100, targetKind: "vendedor", targetIndex: 0 }],
     skipped: [],
   })),
+  diligentedPersonToInput: vi.fn((d) => d),
 }));
 vi.mock("@/lib/certidoes/executor", () => ({
   getMonthlySpend: vi.fn(async () => ({
