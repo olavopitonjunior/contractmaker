@@ -84,6 +84,32 @@ describe("isRetryableError — alvos que o usuário pode re-disparar", () => {
     );
   });
 
+  it("sucesso sem PDF em endpoint informativo (emitsPdf=false) NÃO é retentável", () => {
+    // eproc-lista nunca anexa PDF por design — sem o gate, inflava o
+    // "Retentar erros" pra sempre (deal cmpypeb95, 2026-06-10).
+    expect(
+      isRetryableError(
+        {
+          status: "success",
+          attachmentId: null,
+          endpoint: "tribunal/tjsp/eproc-lista",
+        },
+        NOW
+      )
+    ).toBe(false);
+    // endpoint que emite PDF continua retentável quando success sem anexo
+    expect(
+      isRetryableError(
+        {
+          status: "success",
+          attachmentId: null,
+          endpoint: "receita-federal/pgfn",
+        },
+        NOW
+      )
+    ).toBe(true);
+  });
+
   it("em andamento NÃO é retentável (não re-pedir o que aguarda o tribunal)", () => {
     expect(
       isRetryableError(
