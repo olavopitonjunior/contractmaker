@@ -19,6 +19,9 @@ import { catalogForModalidade, requiredTokens, isKnownToken } from "./placeholde
 export interface InsertedToken {
   token: string;
   trecho: string;
+  /** Em blocos multi-parágrafo: parágrafos do trecho que NÃO puderam ser
+   *  removidos com segurança (ambíguos no doc) e ficaram pra revisão manual. */
+  leftoverParagraphs?: string[];
 }
 
 export interface SkippedToken {
@@ -67,9 +70,10 @@ REGRAS:
 1. Responda APENAS JSON válido: { "mapeamentos": [ { "trecho_literal": "...", "token": "..." } ] }
 2. trecho_literal deve ser CÓPIA EXATA, caractere a caractere, de um trecho do documento — e deve ser ÚNICO no documento. Se o valor aparece mais de uma vez (ex. um nome repetido), inclua contexto ao redor até o trecho ficar único; nesse caso o trecho inteiro será substituído pelo token, então só faça isso quando o contexto INTEIRO corresponder ao conteúdo do token.
 3. Use SOMENTE tokens do catálogo. Não invente.
-4. Tokens [composed] cobrem blocos inteiros (ex.: a qualificação completa das partes no preâmbulo, a cláusula de garantia inteira, o bloco de assinaturas) — mapeie o bloco INTEIRO de texto correspondente.
-5. NÃO mapeie texto fixo do contrato (cláusulas padrão que não variam por negócio).
-6. Se não encontrar correspondência pra um token, simplesmente não o inclua.
+4. Tokens [composed] cobrem blocos inteiros (ex.: a qualificação completa das partes no preâmbulo, a cláusula de garantia inteira, o bloco de assinaturas) — mapeie o bloco INTEIRO de texto correspondente. Blocos multi-parágrafo são aceitos (preserve as quebras de linha do documento no trecho_literal).
+5. Pra tokens de qualificação de partes (locadores/locatários, vendedores/compradores), o trecho_literal deve cobrir APENAS a qualificação em si (do nome ao último dado), SEM os rótulos fixos ao redor ("como LOCADORA e doravante nomeada PARTE LOCADORA,"). Se os dois lados usam o MESMO texto de exemplo, mapeie ambos mesmo assim — o sistema substitui o que for unívoco e deixa o ambíguo pra revisão humana.
+6. NÃO mapeie texto fixo do contrato (cláusulas padrão que não variam por negócio).
+7. Se não encontrar correspondência pra um token, simplesmente não o inclua.
 
 DOCUMENTO:
 ${docText.slice(0, 24000)}`;
@@ -147,23 +151,77 @@ export async function insertPlaceholdersWithAI(input: {
       continue;
     }
     if (seenTokens.has(token)) continue;
-    const count = countOccurrences(docText, trecho);
-    if (count === 0) {
+
+    // replaceAllText do Docs NÃO atravessa quebras de parágrafo — trechos
+    // multi-parágrafo (clausula_garantia, assinaturas) são tratados parágrafo
+    // a parágrafo: o 1º vira {{token}} e os demais são esvaziados, cada um
+    // sob a mesma regra de unicidade (count===1). Parágrafo ambíguo no meio
+    // (ex. linhas de assinatura repetidas) fica no doc e vai pro relatório.
+    const paragraphs = trecho
+      .split(/\n+/)
+      .map((p) => p.trim())
+      .filter((p) => p.length > 0);
+
+    if (paragraphs.length <= 1) {
+      const count = countOccurrences(docText, trecho);
+      if (count === 0) {
+        skippedAmbiguous.push({ token, trecho, reason: "not-found" });
+        continue;
+      }
+      if (count > 1) {
+        skippedAmbiguous.push({ token, trecho, reason: "ambiguous" });
+        continue;
+      }
+      seenTokens.add(token);
+      inserted.push({ token, trecho });
+      requests.push({
+        replaceAllText: {
+          containsText: { text: trecho, matchCase: true },
+          replaceText: `{{${token}}}`,
+        },
+      });
+      continue;
+    }
+
+    const first = paragraphs[0];
+    const firstCount = countOccurrences(docText, first);
+    if (firstCount === 0) {
       skippedAmbiguous.push({ token, trecho, reason: "not-found" });
       continue;
     }
-    if (count > 1) {
+    if (firstCount > 1) {
       skippedAmbiguous.push({ token, trecho, reason: "ambiguous" });
       continue;
     }
+
+    const leftover: string[] = [];
+    const restRequests: object[] = [];
+    for (const par of paragraphs.slice(1)) {
+      if (countOccurrences(docText, par) === 1) {
+        restRequests.push({
+          replaceAllText: {
+            containsText: { text: par, matchCase: true },
+            replaceText: "",
+          },
+        });
+      } else {
+        leftover.push(par);
+      }
+    }
+
     seenTokens.add(token);
-    inserted.push({ token, trecho });
+    inserted.push({
+      token,
+      trecho,
+      ...(leftover.length > 0 ? { leftoverParagraphs: leftover } : {}),
+    });
     requests.push({
       replaceAllText: {
-        containsText: { text: trecho, matchCase: true },
+        containsText: { text: first, matchCase: true },
         replaceText: `{{${token}}}`,
       },
     });
+    requests.push(...restRequests);
   }
 
   if (requests.length > 0) {

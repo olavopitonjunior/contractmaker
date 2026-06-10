@@ -5,6 +5,16 @@ import { useRouter } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import {
   CheckCircle2,
@@ -48,6 +58,7 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
   const [activating, setActivating] = useState(false);
   const [status, setStatus] = useState(template.status);
   const [isDefault, setIsDefault] = useState(template.isDefault);
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const revalidate = useCallback(async () => {
     setValidating(true);
@@ -93,16 +104,42 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
   async function activate() {
     const missing = validation?.missingRequired ?? [];
     if (missing.length > 0) {
-      const ok = window.confirm(
-        `Tokens obrigatórios ausentes: ${missing.join(", ")}.\n\nAtivar mesmo assim? Os campos ausentes não serão preenchidos nos contratos gerados.`
-      );
-      if (!ok) return;
+      // AlertDialog (não window.confirm — dialog nativo bloqueia automação
+      // e destoa da UI).
+      setConfirmOpen(true);
+      return;
     }
     await patchTemplate({ status: "active" }, "Template ativado.");
   }
 
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_380px]">
+      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Ativar com campos obrigatórios ausentes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Os tokens{" "}
+              <code className="rounded bg-muted px-1">
+                {(validation?.missingRequired ?? []).map((t) => `{{${t}}}`).join(", ")}
+              </code>{" "}
+              não estão no documento — esses campos não serão preenchidos nos
+              contratos gerados até você inseri-los no modelo.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Voltar e revisar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmOpen(false);
+                void patchTemplate({ status: "active" }, "Template ativado.");
+              }}
+            >
+              Ativar mesmo assim
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <div className="min-h-[70vh] overflow-hidden rounded-lg border">
         <iframe
           src={template.embedLink}
