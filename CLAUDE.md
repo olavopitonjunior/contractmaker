@@ -188,15 +188,15 @@ Export PDF: `/api/contracts/[id]/export` carrega preset default da org → Puppe
 
 Disparo manual no Deal → aba Certidões. `POST /api/deals/:id/certidoes` 202 + dispara `runBatch` fire-and-forget → `pLimit(5)` → cada job: `callInfosimples`, normaliza, baixa PDF de `site_receipts[0]`, cria `DealAttachment { source:"infosimples" }`. Front: `useCertidoesBatch` polla enquanto há job ativo.
 
-**Two-step (TJSP/TJRJ/TJMS/TRF3/ONR):** `pedido-*` 200 → `awaiting_portal` (grava `pedido_data`) → cron `poll-portal` chama o `obter` via `buildObterArgs` (e-SAJ exige `pedido_data`+cpf; TRF3 `numero_certidao`). `pollPortalJob::decideObterOutcome`: conta/integração → falha já; transitório → 3×; senão reagenda até `maxPortalWaitMs` por portal (TJSP **7d**, TJRJ 14d) → `failed_permanent`+`portalUrl`. **620 "já existe"** → `recoverOriginalProtocol` recupera o protocolo do pedido original (parte+tipo) → `awaiting_portal`; senão `duplicate_pending`.
+**Two-step (TJSP/TJRJ/TJMS/TRF3/ONR):** `pedido-*` 200 → `awaiting_portal` (grava `pedido_data`) → cron `poll-portal` chama o `obter` via `buildObterArgs` (e-SAJ: `pedido_data` **ISO** — `normalizePedidoData`, senão 607; TRF3 `numero_certidao`+`trim`). `pollPortalJob::decideObterOutcome`: conta/integração → falha já; transitório → 3×; senão reagenda até `maxPortalWaitMs` por portal (TJSP **7d**, TJRJ 14d) → `failed_permanent`+`portalUrl`. **620 "já existe"** → `recoverOriginalProtocol` recupera o protocolo do pedido original (parte+tipo) → `awaiting_portal`; senão `duplicate_pending`.
 
 **Schema:** `CertidaoJob { dealId, batchId, endpoint, label, targetKind, targetIndex, requestPayload, status, resultCode, resultData, attachmentId, errorMessage, latencyMs, costCents, expectedReadyAt, retryCount, nextRetryAt, maxRetries (3), missingFields[], portalUrl }`.
 
 **Estados** (`outcome-classifier.ts::classifyOutcome`) — `success`/`informativo`/`api_error`/`portal_unavailable`(615/665/666)/`rate_limited`(668)/`data_missing`(606/612/613, `missingFields[]`)/`data_invalid`(614)/`failed_permanent`(esgotado, `portalUrl`)/`duplicate_pending`(620)/`skipped`. Backoffs em [[certidoes_retry_backoffs]], [[certidoes_estados_ricos]].
 
-**Anti-falso-negativo:** exige-PDF sem `site_receipts[0]` → `failed`; billing respeita `header.billable===false`. [[certidoes_falso_negativo]].
+**Anti-falso-negativo:** exige-PDF sem `site_receipts[0]` → `failed`; negativa informativa exige evidência de ausência (600 cru → retry→falha #67); billing respeita `header.billable===false`. [[certidoes_falso_negativo]].
 
-**Planner** (`planner.ts`): vendedores/compradores/imóveis. PF sem `data_nascimento` bloqueia PGFN/TJSP/Antecedentes.
+**Planner** (`planner.ts`): vendedores/compradores/imóveis + diligenciados (tier **padrao** #66: pré-marcados; comprador segue opcional). PF sem `data_nascimento` bloqueia PGFN/TJSP/Antecedentes.
 
 **Endpoints:** Federais (PGFN/CNDT/TRF), trabalhistas (CEAT), cíveis (TJSP/TJRJ 2-step, TJRS), E-Proc SP, protestos CENPROT (SP + Nacional, GOV.BR). Antecedentes PF auto em financiamento.
 
@@ -206,9 +206,9 @@ Disparo manual no Deal → aba Certidões. `POST /api/deals/:id/certidoes` 202 +
 
 **Budget guard** `INFOSIMPLES_MONTHLY_BUDGET_CENTS` (5000): POST 402 + o **cron** checa antes de cada chamada + **circuit breaker** (603 → para).
 
-**Fluxo de problemas + UX (2026-05):** falha terminal → sino + cron `problem-digest` (e-mail); painel `/settings/certidoes` (problemas c/ tentativas/JSON/retry + saúde API/crédito). Aba: régua 3 cores (`colorTier`), grupos colapsáveis, IA on-demand, auto-refresh, dialog já-puxadas/status-API, ZIP dedupe+`%PDF`. [[project_certidoes_overhaul_2026_05]].
+**Problemas + UX:** falha terminal → sino + digest; painel `/settings/certidoes`; aba com régua 3 cores, IA on-demand, ZIP dedupe+`%PDF`. [[project_certidoes_overhaul_2026_05]]. Mapa por portal: `docs/certidoes-known-issues.md`.
 
-**Gaps:** CNIB (sem endpoint Infosimples), ITR, TJMG/TJPR/TJES cível, IPTU Vitória/ES + Campo Grande — `portalUrl` manual. Casos especiais (estrangeiro, espólio, menor) → futuro.
+**Gaps** (portal manual): CNIB, ITR, TJMG/TJPR/TJES cível, IPTU Vitória/CG.
 
 ### Serasa Experian (2026-05)
 
