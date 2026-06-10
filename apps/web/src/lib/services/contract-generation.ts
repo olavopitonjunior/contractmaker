@@ -4,10 +4,7 @@ import { isGoogleDocsFeatureEnabled } from "@/lib/google/client";
 import { uploadHtmlAsGoogleDoc } from "@/lib/google/upload-rendered-html";
 import { copyContractGoogleDoc } from "@/lib/google/copy-doc";
 import { shareDocWithOrgMembers } from "@/lib/google/share-org";
-import {
-  flattenForPlaceholders,
-  replacePlaceholdersInDoc,
-} from "@/lib/google/replace-placeholders";
+import { replacePlaceholdersInDoc } from "@/lib/google/replace-placeholders";
 import { watchFile } from "@/lib/google/watch";
 import { deriveDealMetadata } from "@/lib/contracts/derive-deal-metadata";
 import { selectTemplateForDeal, selectLocacaoTemplate } from "@/lib/contracts/template-category";
@@ -822,20 +819,37 @@ export async function generateContractForDeal(
         });
         created = { docId: copy.docId, webViewLink: copy.webViewLink };
 
-        const flat = flattenForPlaceholders(enrichedData);
-        flat["contrato_numero"] = numeroContrato;
-        flat["contrato_id"] = contract.id;
-        flat["contrato_versao"] = String(contract.version);
+        // Mapa composto (qualificações narrativas, parcelas) + flat legado.
+        const { buildVendaPlaceholderMap } = await import("@/lib/templates/placeholder-map");
+        const { cleanupOrphanPlaceholders, exportDocAsHtml: exportSnapshot } = await import(
+          "@/lib/google/docs"
+        );
+        const map = buildVendaPlaceholderMap(enrichedData);
+        map["contrato_numero"] = numeroContrato;
+        map["contrato_id"] = contract.id;
+        map["contrato_versao"] = String(contract.version);
         try {
           await replacePlaceholdersInDoc({
             docId: copy.docId,
-            replacements: flat,
+            replacements: map,
           });
+          await cleanupOrphanPlaceholders(copy.docId);
         } catch (replaceErr) {
           console.error(
             "[contract-generation] Falha em replaceAllText:",
             replaceErr
           );
+        }
+
+        // Snapshot real do conteúdo (substitui o stub de htmlContent).
+        try {
+          const snapshot = await exportSnapshot(copy.docId);
+          await prisma.contract.update({
+            where: { id: contract.id },
+            data: { htmlContent: snapshot },
+          });
+        } catch (snapErr) {
+          console.error("[contract-generation] Falha no snapshot exportDocAsHtml:", snapErr);
         }
       } else {
         // Pré-injeta `{{contrato.numero}}` no HTML caso o template tenha esse
@@ -909,28 +923,32 @@ export async function generateContractForDeal(
       // margens) — Drive descarta CSS de classes ao importar HTML, então
       // sem isso o doc nasce com Arial 11pt + margens default. Falha não
       // bloqueia: doc fica funcional, só sem o branding visual.
-      try {
-        const defaultStyle = await prisma.documentStyle.findFirst({
-          where: { orgId, isDefault: true },
-        });
-        if (defaultStyle) {
-          const { googleApplyStylePreset } = await import("@/lib/ai/google-tool-handlers");
-          await googleApplyStylePreset(created.docId, {
-            fontFamily: defaultStyle.fontFamily,
-            fontSizeBase: defaultStyle.fontSizeBase,
-            lineHeight: defaultStyle.lineHeight,
-            colorPrimary: defaultStyle.colorPrimary,
-            marginTopMm: defaultStyle.marginTopMm,
-            marginBottomMm: defaultStyle.marginBottomMm,
-            marginLeftMm: defaultStyle.marginLeftMm,
-            marginRightMm: defaultStyle.marginRightMm,
+      // EXCEÇÃO engine google_docs: o layout vem do modelo da imobiliária;
+      // reaplicar preset sobrescreveria timbrado/fontes do modelo.
+      if (!isGoogleDocsEngine) {
+        try {
+          const defaultStyle = await prisma.documentStyle.findFirst({
+            where: { orgId, isDefault: true },
           });
+          if (defaultStyle) {
+            const { googleApplyStylePreset } = await import("@/lib/ai/google-tool-handlers");
+            await googleApplyStylePreset(created.docId, {
+              fontFamily: defaultStyle.fontFamily,
+              fontSizeBase: defaultStyle.fontSizeBase,
+              lineHeight: defaultStyle.lineHeight,
+              colorPrimary: defaultStyle.colorPrimary,
+              marginTopMm: defaultStyle.marginTopMm,
+              marginBottomMm: defaultStyle.marginBottomMm,
+              marginLeftMm: defaultStyle.marginLeftMm,
+              marginRightMm: defaultStyle.marginRightMm,
+            });
+          }
+        } catch (styleErr) {
+          console.error(
+            "[contract-generation] Falha ao aplicar DocumentStyle default:",
+            styleErr
+          );
         }
-      } catch (styleErr) {
-        console.error(
-          "[contract-generation] Falha ao aplicar DocumentStyle default:",
-          styleErr
-        );
       }
     } catch (err) {
       // Persiste a causa exata da falha no contrato pra diagnóstico — sem
@@ -1083,7 +1101,15 @@ export async function generateLocacaoContractForDeal(
     : undefined;
 
   const enrichedData = enrichLocacaoData(dataJson, { administradora });
-  const htmlContent = renderContratoHTML(template.handlebarsSource, enrichedData);
+
+  // engine="google_docs": o template É um Google Doc (modelo da imobiliária,
+  // layout/timbrado preservados) — copiamos o doc e substituímos placeholders
+  // (campos simples + blocos compostos resolvidos server-side). O htmlContent
+  // inicial é um stub; após criar o doc, o snapshot real vem de exportDocAsHtml.
+  const isLocacaoGoogleDocsEngine = template.engine === "google_docs";
+  const htmlContent = isLocacaoGoogleDocsEngine
+    ? `<p>Contrato gerado a partir do modelo Google Doc (${template.name}).</p>`
+    : renderContratoHTML(template.handlebarsSource, enrichedData);
 
   const agg = await prisma.contract.aggregate({
     where: { dealId: deal.id },
@@ -1110,18 +1136,59 @@ export async function generateLocacaoContractForDeal(
     });
   });
 
-  // Google Doc (engine handlebars): sobe o HTML renderizado + watch + share +
-  // style. Mesmo fluxo da venda; falha não bloqueia a criação do contrato.
+  // Google Doc: engine handlebars sobe o HTML renderizado; engine google_docs
+  // copia o doc-modelo da imobiliária e substitui placeholders. Watch + share
+  // iguais nos dois. Falha não bloqueia a criação do contrato.
   let googleDocUrl: string | undefined;
   if (isGoogleDocsFeatureEnabled()) {
     try {
       const numeroContrato = `${contract.id.slice(-8).toUpperCase()}-v${contract.version}`;
       const docName = `Locação ${contract.id} — v${contract.version}`;
-      const htmlForUpload = htmlContent
-        .replace(/\{\{\s*contrato\.numero\s*\}\}/g, numeroContrato)
-        .replace(/\{\{\s*contrato\.id\s*\}\}/g, contract.id)
-        .replace(/\{\{\s*contrato\.versao\s*\}\}/g, String(contract.version));
-      const created = await uploadHtmlAsGoogleDoc({ htmlContent: htmlForUpload, name: docName, orgId });
+
+      let created: { docId: string; webViewLink: string };
+      if (isLocacaoGoogleDocsEngine) {
+        if (!template.googleTemplateDocId) {
+          throw new Error("Template Google Docs sem googleTemplateDocId associado.");
+        }
+        const { buildLocacaoPlaceholderMap } = await import("@/lib/templates/placeholder-map");
+        const { cleanupOrphanPlaceholders } = await import("@/lib/google/docs");
+
+        const copy = await copyContractGoogleDoc({
+          sourceDocId: template.googleTemplateDocId,
+          name: docName,
+          orgId,
+        });
+        created = { docId: copy.docId, webViewLink: copy.webViewLink };
+
+        const map = buildLocacaoPlaceholderMap(enrichedData);
+        map["contrato_numero"] = numeroContrato;
+        map["contrato_id"] = contract.id;
+        map["contrato_versao"] = String(contract.version);
+        try {
+          await replacePlaceholdersInDoc({ docId: copy.docId, replacements: map });
+          await cleanupOrphanPlaceholders(copy.docId);
+        } catch (replaceErr) {
+          console.error("[locacao-generation] Falha em replaceAllText:", replaceErr);
+        }
+
+        // Snapshot real do conteúdo pro htmlContent (export/diff/memória).
+        try {
+          const { exportDocAsHtml } = await import("@/lib/google/docs");
+          const snapshot = await exportDocAsHtml(copy.docId);
+          await prisma.contract.update({
+            where: { id: contract.id },
+            data: { htmlContent: snapshot },
+          });
+        } catch (snapErr) {
+          console.error("[locacao-generation] Falha no snapshot exportDocAsHtml:", snapErr);
+        }
+      } else {
+        const htmlForUpload = htmlContent
+          .replace(/\{\{\s*contrato\.numero\s*\}\}/g, numeroContrato)
+          .replace(/\{\{\s*contrato\.id\s*\}\}/g, contract.id)
+          .replace(/\{\{\s*contrato\.versao\s*\}\}/g, String(contract.version));
+        created = await uploadHtmlAsGoogleDoc({ htmlContent: htmlForUpload, name: docName, orgId });
+      }
 
       let watchData: {
         googleWatchChannel?: string;
@@ -1164,25 +1231,30 @@ export async function generateLocacaoContractForDeal(
         console.error("[locacao-generation] Falha ao compartilhar com org members:", shareErr);
       }
 
-      try {
-        const defaultStyle = await prisma.documentStyle.findFirst({
-          where: { orgId, isDefault: true },
-        });
-        if (defaultStyle) {
-          const { googleApplyStylePreset } = await import("@/lib/ai/google-tool-handlers");
-          await googleApplyStylePreset(created.docId, {
-            fontFamily: defaultStyle.fontFamily,
-            fontSizeBase: defaultStyle.fontSizeBase,
-            lineHeight: defaultStyle.lineHeight,
-            colorPrimary: defaultStyle.colorPrimary,
-            marginTopMm: defaultStyle.marginTopMm,
-            marginBottomMm: defaultStyle.marginBottomMm,
-            marginLeftMm: defaultStyle.marginLeftMm,
-            marginRightMm: defaultStyle.marginRightMm,
+      // DocumentStyle SÓ no caminho handlebars — em engine google_docs o
+      // layout vem do modelo da imobiliária e reaplicar preset o destruiria
+      // (mesma razão do import de contratos externos).
+      if (!isLocacaoGoogleDocsEngine) {
+        try {
+          const defaultStyle = await prisma.documentStyle.findFirst({
+            where: { orgId, isDefault: true },
           });
+          if (defaultStyle) {
+            const { googleApplyStylePreset } = await import("@/lib/ai/google-tool-handlers");
+            await googleApplyStylePreset(created.docId, {
+              fontFamily: defaultStyle.fontFamily,
+              fontSizeBase: defaultStyle.fontSizeBase,
+              lineHeight: defaultStyle.lineHeight,
+              colorPrimary: defaultStyle.colorPrimary,
+              marginTopMm: defaultStyle.marginTopMm,
+              marginBottomMm: defaultStyle.marginBottomMm,
+              marginLeftMm: defaultStyle.marginLeftMm,
+              marginRightMm: defaultStyle.marginRightMm,
+            });
+          }
+        } catch (styleErr) {
+          console.error("[locacao-generation] Falha ao aplicar DocumentStyle:", styleErr);
         }
-      } catch (styleErr) {
-        console.error("[locacao-generation] Falha ao aplicar DocumentStyle:", styleErr);
       }
     } catch (err) {
       const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);

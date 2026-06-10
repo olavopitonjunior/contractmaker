@@ -102,8 +102,20 @@ async function main() {
     const source = fs.readFileSync(filePath, "utf-8");
     const fileHash = sha(source);
 
+    // Guard multitenant: templates engine="google_docs" são o MODELO da
+    // imobiliária (Doc no Drive do tenant) — o sync de .hbs canônicos NUNCA
+    // pode sobrescrevê-los.
+    const gdocsRows = await prisma.contractTemplate.count({
+      where: { modalidade: t.modalidade, status: "active", engine: "google_docs" },
+    });
+    if (gdocsRows > 0) {
+      console.log(
+        `↷  ${t.filename}: skip de ${gdocsRows} row(s) engine=google_docs (modelo do tenant) em modalidade=${t.modalidade}`
+      );
+    }
+
     const dbRows = await prisma.contractTemplate.findMany({
-      where: { modalidade: t.modalidade, status: "active" },
+      where: { modalidade: t.modalidade, status: "active", engine: "handlebars" },
       select: {
         id: true,
         orgId: true,

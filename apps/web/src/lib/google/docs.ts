@@ -109,27 +109,8 @@ export async function createDocFromTemplate(
   }
 
   // Cleanup de placeholders órfãos: campos opcionais (cônjuge, procurador, etc)
-  // que o dataJson não cobriu. Lê doc, encontra `{{...}}` restantes, faz uma
-  // segunda batch de replaceAllText limpando cada um com string vazia.
-  try {
-    const text = await getDocPlainText(docId);
-    const orphans = Array.from(new Set(text.match(/\{\{[^{}\n]+\}\}/g) || []));
-    if (orphans.length > 0) {
-      await docs.documents.batchUpdate({
-        documentId: docId,
-        requestBody: {
-          requests: orphans.map((orphan) => ({
-            replaceAllText: {
-              containsText: { text: orphan, matchCase: true },
-              replaceText: "",
-            },
-          })),
-        },
-      });
-    }
-  } catch (err) {
-    console.error("[createDocFromTemplate] Falha em cleanup de orphans:", err);
-  }
+  // que o dataJson não cobriu.
+  await cleanupOrphanPlaceholders(docId);
 
   if (input.shareWith && input.shareWith.length > 0) {
     await Promise.all(
@@ -148,6 +129,36 @@ export async function createDocFromTemplate(
   const embedLink = `https://docs.google.com/document/d/${docId}/edit?embedded=true&rm=embedded`;
 
   return { docId, webViewLink, embedLink };
+}
+
+/**
+ * Remove `{{...}}` órfãos do doc (tokens que não receberam valor): lê o texto,
+ * deduplica os restantes e roda uma batch de replaceAllText → "". Best-effort:
+ * nunca lança. Retorna a lista de órfãos removidos (pra relatório/log).
+ */
+export async function cleanupOrphanPlaceholders(docId: string): Promise<string[]> {
+  try {
+    const docs = getDocsClient();
+    const text = await getDocPlainText(docId);
+    const orphans = Array.from(new Set(text.match(/\{\{[^{}\n]+\}\}/g) || []));
+    if (orphans.length > 0) {
+      await docs.documents.batchUpdate({
+        documentId: docId,
+        requestBody: {
+          requests: orphans.map((orphan) => ({
+            replaceAllText: {
+              containsText: { text: orphan, matchCase: true },
+              replaceText: "",
+            },
+          })),
+        },
+      });
+    }
+    return orphans;
+  } catch (err) {
+    console.error("[cleanupOrphanPlaceholders] Falha no cleanup:", err);
+    return [];
+  }
 }
 
 export interface DocPermission {
