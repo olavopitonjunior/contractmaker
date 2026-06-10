@@ -23,6 +23,7 @@ import { SuggestionsToolbar } from "./SuggestionsToolbar";
 import { ShareDialog } from "./ShareDialog";
 import { ApprovalReviewDialog, type ApprovalReviewData } from "./ApprovalReviewDialog";
 import { ExportDialog } from "@/components/export/ExportDialog";
+import { PromoteToTemplateDialog } from "@/components/templates/PromoteToTemplateDialog";
 import { useAutoAnalyze } from "@/hooks/useAutoAnalyze";
 import {
   ArrowLeft,
@@ -445,6 +446,10 @@ export function ContractEditorPage({
           </Button>
 
           <ExportDialog contractId={contract.id} exports={contract.exports} />
+
+          {contract.googleDocId && (
+            <PromoteToTemplateDialog contractId={contract.id} />
+          )}
 
           {!isApproved && (
             <>
