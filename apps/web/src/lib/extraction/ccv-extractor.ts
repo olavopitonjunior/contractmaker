@@ -1,6 +1,9 @@
-import { GoogleGenAI } from "@google/genai";
-import { recordAIUsage } from "@/lib/ai/usage";
 import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
+import {
+  parseExtractionJson,
+  runDocExtraction,
+  type DocExtractionContext,
+} from "./genai-extract";
 
 /**
  * Extrai um JSON parcial no shape de `DadosContratoForm` (lib/forms/validation.ts)
@@ -12,19 +15,10 @@ import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
  * Por que best-effort: extrair contrato é frágil (formatos variam por escritório).
  * Quando falha, devolvemos `{}` e o usuário edita manualmente — o GDoc com o
  * documento original ainda foi criado, então o fluxo principal não trava.
+ *
+ * O encanamento Gemini (client + usage + parse) vive em `genai-extract.ts`,
+ * compartilhado com o extractor de contratos de locação.
  */
-
-let genaiClient: GoogleGenAI | null = null;
-function getGenAI(): GoogleGenAI {
-  if (!genaiClient) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error("GEMINI_API_KEY nao configurada");
-    }
-    genaiClient = new GoogleGenAI({ apiKey });
-  }
-  return genaiClient;
-}
 
 const CCV_EXTRACTION_PROMPT = `Você é especialista em contratos imobiliários brasileiros (CCV — Compromisso de Compra e Venda).
 
@@ -127,16 +121,7 @@ Regras:
 
 Retorne APENAS o JSON.`;
 
-const SUPPORTED_MIMES: ImportableMime[] = [
-  "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-];
-
-export interface CcvExtractionContext {
-  orgId: string;
-  userId?: string | null;
-  contractId?: string | null;
-}
+export type CcvExtractionContext = DocExtractionContext;
 
 /**
  * Roda Gemini 2.5 Flash sobre o CCV e retorna o JSON parsed em shape parcial
@@ -150,75 +135,14 @@ export async function extractCcvDataJson(
   sourceMime: ImportableMime,
   ctx: CcvExtractionContext
 ): Promise<Record<string, unknown>> {
-  if (!SUPPORTED_MIMES.includes(sourceMime)) {
-    return {};
-  }
-
-  const model = process.env.CCV_EXTRACTION_MODEL || "gemini-2.5-flash";
-  const t0 = Date.now();
-
-  let text: string;
-  let usage: { promptTokenCount?: number; candidatesTokenCount?: number } | undefined;
-
-  try {
-    const ai = getGenAI();
-    const response = await ai.models.generateContent({
-      model,
-      contents: [
-        { text: CCV_EXTRACTION_PROMPT },
-        {
-          inlineData: {
-            mimeType: sourceMime,
-            data: buffer.toString("base64"),
-          },
-        },
-      ],
-    });
-    text = response.text ?? "{}";
-    usage = (response as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }).usageMetadata;
-  } catch (err) {
-    recordAIUsage({
-      orgId: ctx.orgId,
-      userId: ctx.userId,
-      contractId: ctx.contractId,
-      provider: "gemini",
-      model,
-      operation: "extract_ccv_doc",
-      promptTokens: 0,
-      latencyMs: Date.now() - t0,
-      success: false,
-      errorMessage: err instanceof Error ? err.message : String(err),
-    });
-    console.error("[ccv-extractor] Gemini falhou:", err);
-    return {};
-  }
-
-  recordAIUsage({
-    orgId: ctx.orgId,
-    userId: ctx.userId,
-    contractId: ctx.contractId,
-    provider: "gemini",
-    model,
+  return runDocExtraction({
+    buffer,
+    sourceMime,
+    prompt: CCV_EXTRACTION_PROMPT,
     operation: "extract_ccv_doc",
-    promptTokens: usage?.promptTokenCount ?? 0,
-    completionTokens: usage?.candidatesTokenCount ?? 0,
-    latencyMs: Date.now() - t0,
-    success: true,
+    ctx,
   });
-
-  return parseCcvJson(text);
 }
 
-/** Tenta parsear o JSON retornado pelo Gemini. Defensivo contra markdown wrap. */
-export function parseCcvJson(raw: string): Record<string, unknown> {
-  const match = raw.match(/\{[\s\S]*\}/);
-  if (!match) return {};
-  try {
-    const parsed = JSON.parse(match[0]);
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : {};
-  } catch {
-    return {};
-  }
-}
+/** Alias mantido pros consumidores existentes (testes/locação). */
+export const parseCcvJson = parseExtractionJson;
