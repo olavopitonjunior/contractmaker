@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { downloadBufferFromUrl } from "@/lib/storage/s3";
+import { resolveFormScope } from "@/lib/forms/resolve-form-scope";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -9,19 +10,20 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: { token: string; id: string } }
 ) {
-  const form = await prisma.salesForm.findUnique({
-    where: { token: params.token },
-    select: { id: true },
-  });
-  if (!form) {
+  const scope = await resolveFormScope(params.token);
+  if (!scope) {
     return NextResponse.json({ error: "Form not found" }, { status: 404 });
   }
 
   const attachment = await prisma.formAttachment.findUnique({
     where: { id: params.id },
   });
-  if (!attachment || attachment.formId !== form.id) {
+  if (!attachment || attachment.formId !== scope.formId) {
     return NextResponse.json({ error: "Attachment not found" }, { status: 404 });
+  }
+  // Subtoken só enxerga os próprios arquivos.
+  if (scope.participantId && attachment.participantId !== scope.participantId) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   if (attachment.url.startsWith("https://")) {

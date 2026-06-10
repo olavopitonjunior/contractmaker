@@ -8,6 +8,15 @@ import {
 } from "@/lib/forms/role-paths";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { emitNotification } from "@/lib/notifications/emit";
+
+const ROLE_LABELS: Record<string, string> = {
+  vendedor: "Vendedor",
+  comprador: "Comprador",
+  locador: "Locador",
+  locatario: "Locatário",
+  fiador: "Fiador",
+};
 
 /**
  * GET /api/forms/participant/[subtoken]
@@ -174,6 +183,21 @@ export async function PATCH(
         metadata: { role, formId: participant.formId },
       },
     );
+
+    // Sino: a parte terminou de preencher — operador não precisa ficar
+    // conferindo o form. batchId=participant.id deduplica re-submissões.
+    const isLocacao = participant.form.schemaType?.startsWith("locacao");
+    void emitNotification({
+      orgId: participant.form.orgId,
+      type: "participant_completed",
+      title: `${ROLE_LABELS[role] ?? role} preencheu os dados`,
+      body: `"${participant.form.title ?? "Formulário"}" — a parte ${
+        ROLE_LABELS[role]?.toLowerCase() ?? role
+      } concluiu a qualificação pelo link exclusivo.`,
+      linkUrl: isLocacao ? undefined : `/forms/${participant.formId}/share`,
+      metadata: { formId: participant.formId, participantId: participant.id, role },
+      batchId: participant.id,
+    });
   }
 
   return NextResponse.json({

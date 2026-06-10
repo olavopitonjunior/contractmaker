@@ -18,6 +18,13 @@ import type { ParticipantRole } from "./participant-token";
 export const ROLE_PATHS: Record<ParticipantRole, readonly string[]> = {
   vendedor: ["vendedores", "imoveis"],
   comprador: ["compradores"],
+  // Locação (dadosLocacaoSchema): locador é quem tem matrícula/IPTU em mãos
+  // (imovel singular); fiador preenche a própria qualificação dentro de
+  // `garantia` (subobjeto fiador). Condições comerciais (aluguel/fiscal/
+  // comissão) ficam EXCLUSIVAS do token principal.
+  locador: ["locadores", "imovel"],
+  locatario: ["locatarios"],
+  fiador: ["garantia"],
 };
 
 /**

@@ -9,15 +9,20 @@ import {
 import { audit } from "@/lib/security/audit";
 
 const bodySchema = z.object({
-  // Quais roles criar/garantir. Default: ambos. Mandar subset é útil
-  // quando o admin quer mandar link só pro vendedor primeiro e gerar do
-  // comprador depois.
+  // Quais roles criar/garantir. Sem `roles`, o default depende do schemaType
+  // do form (venda: vendedor+comprador; locação: locador+locatario). Mandar
+  // subset é útil quando o admin quer mandar link só pra uma parte primeiro.
   roles: z
-    .array(z.enum(["vendedor", "comprador"]))
+    .array(z.enum(["vendedor", "comprador", "locador", "locatario", "fiador"]))
     .min(1)
-    .max(2)
-    .default(["vendedor", "comprador"]),
+    .max(3)
+    .optional(),
 });
+
+// Roles válidos por esteira — vendedor num form de locação (ou vice-versa)
+// criaria um subtoken com pathScope vazio/errado.
+const VENDA_ROLES: readonly ParticipantRole[] = ["vendedor", "comprador"];
+const LOCACAO_ROLES: readonly ParticipantRole[] = ["locador", "locatario", "fiador"];
 
 /**
  * GET /api/forms/[token]/participants
@@ -88,7 +93,7 @@ export async function POST(
 
   const form = await prisma.salesForm.findFirst({
     where: { token: params.token, orgId: ctx.orgId },
-    select: { id: true, token: true },
+    select: { id: true, token: true, schemaType: true },
   });
   if (!form) {
     return NextResponse.json({ error: "Form não encontrado" }, { status: 404 });
@@ -103,7 +108,25 @@ export async function POST(
     );
   }
 
-  const requested = new Set<ParticipantRole>(parsed.data.roles);
+  const isLocacao = form.schemaType?.startsWith("locacao") ?? false;
+  const validRoles = isLocacao ? LOCACAO_ROLES : VENDA_ROLES;
+  const defaultRoles: ParticipantRole[] = isLocacao
+    ? ["locador", "locatario"]
+    : ["vendedor", "comprador"];
+  const requestedRoles = parsed.data.roles ?? defaultRoles;
+  const invalid = requestedRoles.filter(
+    (r) => !validRoles.includes(r as ParticipantRole),
+  );
+  if (invalid.length > 0) {
+    return NextResponse.json(
+      {
+        error: `Role(s) ${invalid.join(", ")} não valem pra um formulário de ${isLocacao ? "locação" : "venda"}`,
+      },
+      { status: 400 },
+    );
+  }
+
+  const requested = new Set<ParticipantRole>(requestedRoles as ParticipantRole[]);
   const existing = await prisma.salesFormParticipant.findMany({
     where: { formId: form.id, role: { in: Array.from(requested) } },
   });

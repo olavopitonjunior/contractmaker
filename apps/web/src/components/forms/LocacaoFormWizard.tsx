@@ -11,6 +11,8 @@ import {
   stepLabelsForLocacaoType,
 } from "@/lib/forms/validation-locacao";
 import { PrivacyConsent } from "@/components/legal/PrivacyConsent";
+import { SharePartyLinkButton } from "@/components/forms/PartyLinksPanel";
+import type { ParticipantRole } from "@/lib/forms/participant-token";
 import { LocacaoParteStep } from "@/components/forms/steps/locacao/_PartyFields";
 import { DocumentosStep } from "@/components/forms/steps/DocumentosStep";
 import { locacaoDocAdapter } from "@/components/forms/steps/locacao/locacao-doc-adapter";
@@ -23,6 +25,14 @@ interface LocacaoFormWizardProps {
   token: string;
   initialData: Record<string, unknown>;
   schemaType: string;
+  /** Subtoken por parte: subset de índices REAIS dos steps visíveis. */
+  stepIndexes?: readonly number[];
+  /** Override do endpoint de auto-save (subtoken usa /api/forms/participant/...). */
+  endpoint?: string;
+  /** Allowlist de chaves top-level (ROLE_PATHS[role]) pro auto-save/finalize. */
+  pathScope?: readonly string[];
+  /** "participant" marca completedAt do participante; não finaliza o form. */
+  finalizeMode?: "main" | "participant";
 }
 
 // Steps de partes (locador/locatário) — validados de forma CIENTE de
@@ -81,10 +91,23 @@ function defaultValues(comercial: boolean): Record<string, unknown> {
   };
 }
 
-export function LocacaoFormWizard({ token, initialData, schemaType }: LocacaoFormWizardProps) {
+export function LocacaoFormWizard({
+  token,
+  initialData,
+  schemaType,
+  stepIndexes,
+  endpoint: endpointProp,
+  pathScope,
+  finalizeMode = "main",
+}: LocacaoFormWizardProps) {
   const comercial = schemaType === LOCACAO_COMERCIAL_SCHEMA_TYPE;
   const stepLabels = stepLabelsForLocacaoType(schemaType);
-  const TOTAL = stepLabels.length;
+  // Cursor virtual (0..N-1) → índice REAL dos 7 steps. Default = todos;
+  // subtoken passa subset (ROLE_STEP_INDEXES) — mesma mecânica do
+  // SalesFormWizard.
+  const visibleStepIndexes: readonly number[] =
+    stepIndexes ?? stepLabels.map((_, i) => i);
+  const TOTAL = visibleStepIndexes.length;
 
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -98,11 +121,31 @@ export function LocacaoFormWizard({ token, initialData, schemaType }: LocacaoFor
   });
 
   const watchedData = useWatch({ control: form.control }) as Record<string, unknown>;
-  const endpoint = `/api/locacao/forms/${token}`;
-  const { status: saveStatus } = useAutoSave(token, watchedData, { endpoint });
+  const endpoint = endpointProp ?? `/api/locacao/forms/${token}`;
+  const { status: saveStatus } = useAutoSave(token, watchedData, {
+    endpoint,
+    pathScope,
+  });
 
   const isLastStep = currentStep === TOTAL - 1;
 
+  // "Pedir para esta pessoa preencher" — papel da etapa atual (índice REAL).
+  // Só na visão do token principal (subtoken já É a visão da parte).
+  const currentTrueIdx = visibleStepIndexes[currentStep] ?? currentStep;
+  const shareRole: ParticipantRole | null =
+    finalizeMode !== "main"
+      ? null
+      : currentTrueIdx === 1
+        ? "locador"
+        : currentTrueIdx === 2
+          ? "locatario"
+          : currentTrueIdx === 5 &&
+              (form.getValues("garantia.tipo" as never) as unknown) === "fiador"
+            ? "fiador"
+            : null;
+
+  // `step` aqui é o índice REAL (PARTY_STEP/STEP_REQUIRED são indexados pelo
+  // schema completo de 7 etapas).
   const validateStep = (step: number): boolean => {
     // Steps de partes: exige nome (PF) ou razão social (PJ) de CADA parte.
     const partyStep = PARTY_STEP[step];
@@ -139,10 +182,10 @@ export function LocacaoFormWizard({ token, initialData, schemaType }: LocacaoFor
 
   const goTo = (target: number) => {
     if (target < 0 || target >= TOTAL) return;
-    // Forward: valida steps intermediários. Backward: livre.
+    // Forward: valida steps intermediários (pelo índice REAL). Backward: livre.
     if (target > currentStep) {
       for (let i = currentStep; i < target; i++) {
-        if (!validateStep(i)) {
+        if (!validateStep(visibleStepIndexes[i] ?? i)) {
           setCurrentStep(i);
           window.scrollTo({ top: 0, behavior: "smooth" });
           return;
@@ -156,10 +199,23 @@ export function LocacaoFormWizard({ token, initialData, schemaType }: LocacaoFor
   const handleFinalize = async () => {
     setIsSubmitting(true);
     try {
+      // Subtoken: PATCH no endpoint do participant com markCompleted —
+      // marca só o completedAt da parte; o form principal continua aberto.
+      const isParticipant = finalizeMode === "participant";
+      const values = form.getValues() as Record<string, unknown>;
+      const dataJson = pathScope
+        ? Object.fromEntries(
+            Object.entries(values).filter(([k]) => pathScope.includes(k)),
+          )
+        : values;
       const res = await fetch(endpoint, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dataJson: form.getValues(), status: "completo" }),
+        body: JSON.stringify(
+          isParticipant
+            ? { dataJson, markCompleted: true }
+            : { dataJson, status: "completo" },
+        ),
       });
       if (res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -181,6 +237,7 @@ export function LocacaoFormWizard({ token, initialData, schemaType }: LocacaoFor
   };
 
   if (isComplete) {
+    const isParticipant = finalizeMode === "participant";
     return (
       <div className="flex flex-col items-center justify-center py-16 px-4 text-center">
         <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30 mb-4">
@@ -189,12 +246,14 @@ export function LocacaoFormWizard({ token, initialData, schemaType }: LocacaoFor
           </svg>
         </div>
         <h2 className="font-display tracking-tight text-2xl font-semibold text-foreground mb-2">
-          Formulário concluído!
+          {isParticipant ? "Seus dados foram salvos!" : "Formulário concluído!"}
         </h2>
         <p className="text-muted-foreground max-w-md mb-6">
-          O contrato de locação foi gerado e está pronto para edição.
+          {isParticipant
+            ? "Obrigado! A imobiliária foi avisada e segue com o contrato."
+            : "O contrato de locação foi gerado e está pronto para edição."}
         </p>
-        {dealId && (
+        {!isParticipant && dealId && (
           <Button asChild>
             <a href={`/locacao/deals/${dealId}`}>Abrir negócio de locação</a>
           </Button>
@@ -230,21 +289,25 @@ export function LocacaoFormWizard({ token, initialData, schemaType }: LocacaoFor
           <div>
             <h2 className="text-xl font-semibold text-foreground">Dados da locação</h2>
             <p className="text-sm text-muted-foreground mt-0.5">
-              Etapa {currentStep + 1} de {TOTAL} &mdash; {stepLabels[currentStep]}
+              Etapa {currentStep + 1} de {TOTAL} &mdash;{" "}
+              {stepLabels[visibleStepIndexes[currentStep] ?? currentStep]}
             </p>
           </div>
-          {saveStatus !== "idle" && (
-            <span className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
-              {saveStatus === "saving" ? "Salvando..." : saveStatus === "saved" ? "Salvo" : "Erro ao salvar"}
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {shareRole && <SharePartyLinkButton formToken={token} role={shareRole} />}
+            {saveStatus !== "idle" && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                {saveStatus === "saving" ? "Salvando..." : saveStatus === "saved" ? "Salvo" : "Erro ao salvar"}
+              </span>
+            )}
+          </div>
         </div>
 
-        {/* Stepper compacto */}
+        {/* Stepper compacto (índices virtuais — subtoken vê só seus steps) */}
         <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-          {stepLabels.map((label, i) => (
+          {visibleStepIndexes.map((trueIdx, i) => (
             <button
-              key={i}
+              key={trueIdx}
               type="button"
               onClick={() => goTo(i)}
               className={`flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium whitespace-nowrap transition-colors ${
@@ -256,14 +319,14 @@ export function LocacaoFormWizard({ token, initialData, schemaType }: LocacaoFor
               }`}
             >
               <span>{i + 1}</span>
-              <span className="hidden sm:inline">{label}</span>
+              <span className="hidden sm:inline">{stepLabels[trueIdx]}</span>
             </button>
           ))}
         </div>
         <Separator />
       </div>
 
-      <div>{steps[currentStep]}</div>
+      <div>{steps[visibleStepIndexes[currentStep] ?? currentStep]}</div>
 
       {isLastStep && (
         <div className="mt-6">

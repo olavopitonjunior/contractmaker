@@ -5,6 +5,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { GARANTIA_TIPO_LABELS } from "@/lib/locacao/validators";
 import { ExternalLink, Home, Receipt, ShieldCheck, User, Users } from "lucide-react";
+import {
+  PartyLinksPanel,
+  type PartyLinksPanelProps,
+} from "@/components/forms/PartyLinksPanel";
 
 interface LocacaoDadosTabProps {
   dataJson: Record<string, unknown>;
@@ -96,6 +100,12 @@ export function LocacaoDadosTab({ dataJson, formToken, formStatus }: LocacaoDado
 
   const isEmpty =
     locadores.length === 0 && locatarios.length === 0 && !enderecoImovel && valorAluguel <= 0;
+
+  const partyRoles: PartyLinksPanelProps["roles"] = [
+    "locador",
+    "locatario",
+    ...(garantia.tipo === "fiador" ? (["fiador"] as const) : []),
+  ];
 
   if (isEmpty) {
     return (
@@ -258,13 +268,16 @@ export function LocacaoDadosTab({ dataJson, formToken, formStatus }: LocacaoDado
       </div>
 
       {formToken && (
-        <div className="flex justify-end">
-          <Button variant="outline" size="sm" asChild>
-            <a href={`/f/${formToken}`} target="_blank" rel="noopener noreferrer">
-              <ExternalLink className="h-4 w-4 mr-1.5" /> Editar no formulário
-            </a>
-          </Button>
-        </div>
+        <>
+          <PartyLinksPanel formToken={formToken} roles={partyRoles} />
+          <div className="flex justify-end">
+            <Button variant="outline" size="sm" asChild>
+              <a href={`/f/${formToken}`} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-4 w-4 mr-1.5" /> Editar no formulário
+              </a>
+            </Button>
+          </div>
+        </>
       )}
     </div>
   );

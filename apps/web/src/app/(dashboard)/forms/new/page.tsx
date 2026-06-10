@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import { Copy, ExternalLink } from "lucide-react";
+import { PartyLinksPanel } from "@/components/forms/PartyLinksPanel";
 
 export default function NewFormPage() {
   const router = useRouter();
@@ -113,6 +114,13 @@ export default function NewFormPage() {
                   </a>
                 </Button>
               </div>
+
+              {createdToken && (
+                <PartyLinksPanel
+                  formToken={createdToken}
+                  roles={["vendedor", "comprador"]}
+                />
+              )}
 
               <Button
                 variant="secondary"

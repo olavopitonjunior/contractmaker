@@ -13,7 +13,22 @@ import { signToken, verifyToken, type VerifyTokenResult } from "@/lib/jwt-hmac";
  * assinatura válida). Sem isso, regenerar exigia invalidar uma window de 7d.
  */
 
-export type ParticipantRole = "vendedor" | "comprador";
+// Venda: vendedor/comprador. Locação: locador/locatario/fiador (validados
+// contra o schemaType do form na criação — POST /participants).
+export type ParticipantRole =
+  | "vendedor"
+  | "comprador"
+  | "locador"
+  | "locatario"
+  | "fiador";
+
+export const PARTICIPANT_ROLES: ReadonlySet<ParticipantRole> = new Set([
+  "vendedor",
+  "comprador",
+  "locador",
+  "locatario",
+  "fiador",
+]);
 
 export interface ParticipantTokenPayload {
   participantId: string;
@@ -47,7 +62,7 @@ export function verifyParticipantToken(
   if (
     typeof p.participantId !== "string" ||
     typeof p.formId !== "string" ||
-    (p.role !== "vendedor" && p.role !== "comprador") ||
+    !PARTICIPANT_ROLES.has(p.role as ParticipantRole) ||
     typeof p.partyIndex !== "number"
   ) {
     return { ok: false, error: "Payload de participant incompleto" };

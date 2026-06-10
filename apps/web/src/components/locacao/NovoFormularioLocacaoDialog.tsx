@@ -14,6 +14,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { NativeSelect } from "@/components/forms/NativeSelect";
+import { PartyLinksPanel } from "@/components/forms/PartyLinksPanel";
 import { Plus, Copy, Check, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 
@@ -52,6 +53,7 @@ export function NovoFormularioLocacaoDialog({
   };
   const [submitting, setSubmitting] = useState(false);
   const [link, setLink] = useState<string | null>(null);
+  const [formToken, setFormToken] = useState<string | null>(null);
   const [dealId, setDealId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -64,6 +66,7 @@ export function NovoFormularioLocacaoDialog({
 
   const reset = () => {
     setLink(null);
+    setFormToken(null);
     setDealId(null);
     setCopied(false);
   };
@@ -93,6 +96,7 @@ export function NovoFormularioLocacaoDialog({
       const data = await res.json();
       const fullUrl = `${window.location.origin}${data.url}`;
       setLink(fullUrl);
+      setFormToken(data.token ?? null);
       setDealId(data.dealId);
     } catch {
       toast.error("Falha ao criar o formulário.");
@@ -200,6 +204,13 @@ export function NovoFormularioLocacaoDialog({
                 {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
               </Button>
             </div>
+            {formToken && (
+              <PartyLinksPanel
+                formToken={formToken}
+                roles={["locador", "locatario"]}
+                compact
+              />
+            )}
           </div>
         )}
 
