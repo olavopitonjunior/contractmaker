@@ -30,6 +30,32 @@ import type { EndpointInfo } from "@/lib/certidoes/endpoints";
 
 type Tier = "padrao" | "imovel" | "opcional" | "pesquisa";
 
+// Redesign 2026-06-10 — a pop-up agrupa por PARTE (não por camada abstrata):
+// Vendedores · Pessoas adicionais · Compradores · Imóvel · Pesquisa de bens.
+// O grupo deriva de targetKind (+ tier pra separar imóvel/pesquisa), então o
+// diligenciado ("Pessoas adicionais") aparece numa seção própria e visível —
+// antes caía no tier "opcional" colapsado e sumia da vista.
+type Group = "vendedores" | "adicionais" | "compradores" | "imovel" | "pesquisa";
+
+const VENDEDOR_KINDS = new Set([
+  "vendedor",
+  "conjuge_vendedor",
+  "procurador_vendedor",
+  "representante_vendedor",
+]);
+
+// Default: Vendedores + Pessoas adicionais (quem o usuário adicionou de propósito)
+// nascem pré-marcados; Compradores/Imóvel/Pesquisa entram via opt-in.
+const DEFAULT_GROUPS: Set<Group> = new Set<Group>(["vendedores", "adicionais"]);
+
+function groupForJob(j: { targetKind: string; tier?: Tier }): Group {
+  if (j.tier === "pesquisa") return "pesquisa";
+  if (j.tier === "imovel" || j.targetKind === "imovel") return "imovel";
+  if (j.targetKind === "diligenciado") return "adicionais";
+  if (VENDEDOR_KINDS.has(j.targetKind)) return "vendedores";
+  return "compradores"; // comprador (e fallback defensivo)
+}
+
 interface JobRegion {
   kind: "nacional" | "imovel" | "endereco" | "outro";
   uf?: string;
@@ -168,13 +194,14 @@ export function ExtractCertidoesDialog({
   const [extraRegions, setExtraRegions] = useState<string[]>([]); // "UF" ou "UF|cidade"
   const [addingLocal, setAddingLocal] = useState(false);
   const [pickerFor, setPickerFor] = useState<{ kind: string; index: number; label: string } | null>(null);
-  // Seções colapsáveis
-  // Padrão + Imóvel abertas (o que costuma ser revisado); Opcional (compradores)
-  // e Pesquisa colapsadas por padrão pra reduzir o scroll — abrem em 1 clique.
-  const [openSections, setOpenSections] = useState<Record<Tier, boolean>>({
-    padrao: true,
-    imovel: true,
-    opcional: false,
+  // Seções colapsáveis por parte. Vendedores + Pessoas adicionais abertas (o que
+  // já vem marcado); Compradores/Imóvel/Pesquisa colapsadas pra reduzir o scroll —
+  // abrem em 1 clique.
+  const [openSections, setOpenSections] = useState<Record<Group, boolean>>({
+    vendedores: true,
+    adicionais: true,
+    compradores: false,
+    imovel: false,
     pesquisa: false,
   });
 
@@ -192,15 +219,15 @@ export function ExtractCertidoesDialog({
         setCatalogMeta(data.catalogMeta ?? { ufs: [], categories: [] });
         setApiHealth(data.apiHealth ?? {});
         setDiligenciados(data.diligenciados ?? []);
-        // Default: marca só o tier "padrao" (vendedores nas regiões do imóvel +
-        // endereço). Opcional (comprador/ONR/IPTU) e pesquisa nascem desmarcados.
+        // Default: marca os grupos Vendedores + Pessoas adicionais (quem o usuário
+        // incluiu de propósito). Compradores/Imóvel/Pesquisa nascem desmarcados.
         const initial = new Set<string>(
           (data.plan?.jobs ?? [])
             // Não pré-marca alvos em andamento (aguardando o tribunal): o
             // checkbox fica travado e fora da contagem/custo.
             .filter(
               (j: PlannedJob) =>
-                j.tier === "padrao" && !inProgressKeys?.has(jobKey(j))
+                DEFAULT_GROUPS.has(groupForJob(j)) && !inProgressKeys?.has(jobKey(j))
             )
             .map((j: PlannedJob) => jobKey(j))
         );
@@ -258,13 +285,14 @@ export function ExtractCertidoesDialog({
     });
   };
 
-  const setTierSelection = (tier: Tier, on: boolean) => {
+  const setGroupSelection = (group: Group, on: boolean) => {
     setSelected((prev) => {
       const next = new Set(prev);
       for (const j of allJobs) {
-        if ((j.tier ?? "opcional") === tier) {
-          if (on) next.add(jobKey(j));
-          else next.delete(jobKey(j));
+        if (groupForJob(j) === group) {
+          // Não marca alvos travados (em andamento) ao "Marcar" o grupo todo.
+          if (on && !inProgressKeys?.has(jobKey(j))) next.add(jobKey(j));
+          else if (!on) next.delete(jobKey(j));
         }
       }
       return next;
@@ -283,7 +311,7 @@ export function ExtractCertidoesDialog({
     // despacho), espelhando a trava por alvo do backend.
     const next = new Set<string>();
     for (const j of allJobs) {
-      if ((j.tier ?? "opcional") !== "padrao") continue;
+      if (!DEFAULT_GROUPS.has(groupForJob(j))) continue; // só Vendedores + Adicionais
       const key = jobKey(j);
       if (inProgressKeys?.has(key)) continue; // em andamento → não re-pedir
       const t = extractedStatus[key];
@@ -371,18 +399,22 @@ export function ExtractCertidoesDialog({
     return map;
   }, [allJobs]);
 
-  // Agrupa jobs de um tier por alvo (kind-index) e, no padrão, por região.
-  const byTier = useMemo(() => {
-    const out: Record<Tier, PlannedJob[]> = { padrao: [], imovel: [], opcional: [], pesquisa: [] };
-    for (const j of allJobs) out[(j.tier ?? "opcional") as Tier].push(j);
+  // Agrupa jobs por PARTE (kind-index) e, dentro de cada parte, por região.
+  const byGroup = useMemo(() => {
+    const out: Record<Group, PlannedJob[]> = {
+      vendedores: [], adicionais: [], compradores: [], imovel: [], pesquisa: [],
+    };
+    for (const j of allJobs) out[groupForJob(j)].push(j);
     return out;
   }, [allJobs]);
 
-  // Skips (não selecionáveis) por camada — pra mostrar Matrícula/IPTU/Bens como
-  // opções com "falta X / indisponível" dentro da própria seção, não só no fim.
-  const skipsByTier = useMemo(() => {
-    const out: Record<Tier, SkippedJob[]> = { padrao: [], imovel: [], opcional: [], pesquisa: [] };
-    for (const s of plan?.skipped ?? []) out[(s.tier ?? "opcional") as Tier].push(s);
+  // Skips (não selecionáveis) por parte — pra mostrar Matrícula/IPTU/Bens e dados
+  // faltantes como opções "falta X / indisponível" dentro da própria seção.
+  const skipsByGroup = useMemo(() => {
+    const out: Record<Group, SkippedJob[]> = {
+      vendedores: [], adicionais: [], compradores: [], imovel: [], pesquisa: [],
+    };
+    for (const s of plan?.skipped ?? []) out[groupForJob(s)].push(s);
     return out;
   }, [plan]);
 
@@ -506,12 +538,15 @@ export function ExtractCertidoesDialog({
     </div>
   );
 
-  // Padrão: por alvo → por região (+ skips do alvo como "faltam dados").
-  const renderPadrao = () => {
-    const jobs = byTier.padrao;
-    const skips = skipsByTier.padrao;
+  // Por alvo → por região (+ skips do alvo como "faltam dados"). Reusado pelos
+  // grupos Vendedores e Pessoas adicionais (ambos diligenciam pessoas por região).
+  const renderPersonRegionGroups = (
+    jobs: PlannedJob[],
+    skips: SkippedJob[],
+    emptyMsg: string
+  ) => {
     if (jobs.length === 0 && skips.length === 0)
-      return <p className="text-xs text-muted-foreground px-1 py-2">Nenhuma certidão padrão para este negócio.</p>;
+      return <p className="text-xs text-muted-foreground px-1 py-2">{emptyMsg}</p>;
     const targets = new Map<string, { jobs: PlannedJob[]; skips: SkippedJob[] }>();
     const ensure = (k: string) => {
       if (!targets.has(k)) targets.set(k, { jobs: [], skips: [] });
@@ -558,42 +593,75 @@ export function ExtractCertidoesDialog({
             </div>
           );
         })}
-        <div className="flex flex-wrap items-center gap-2 px-1">
-          {addingLocal ? (
-            <span className="flex items-center gap-1">
-              <select
-                className="h-7 rounded border bg-background text-xs px-1"
-                defaultValue=""
-                onChange={(e) => addLocal(e.target.value)}
-              >
-                <option value="" disabled>
-                  UF…
-                </option>
-                {UF_OPTIONS.map((uf) => (
-                  <option key={uf} value={uf}>
-                    {uf}
-                  </option>
-                ))}
-              </select>
-              <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setAddingLocal(false)}>
-                Cancelar
-              </Button>
-            </span>
-          ) : (
-            <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setAddingLocal(true)}>
-              <MapPin className="h-3 w-3 mr-1" />
-              Adicionar outro local
-            </Button>
-          )}
-          {extraRegions.length > 0 && (
-            <span className="text-[10px] text-muted-foreground">
-              Locais extras: {extraRegions.join(", ")}
-            </span>
-          )}
-        </div>
       </div>
     );
   };
+
+  // Vendedores: pessoas por região + "Adicionar outro local" (re-planeja com UF extra).
+  const renderVendedores = () => (
+    <div className="space-y-2">
+      {renderPersonRegionGroups(
+        byGroup.vendedores,
+        skipsByGroup.vendedores,
+        "Nenhum vendedor para diligenciar neste negócio."
+      )}
+      <div className="flex flex-wrap items-center gap-2 px-1">
+        {addingLocal ? (
+          <span className="flex items-center gap-1">
+            <select
+              className="h-7 rounded border bg-background text-xs px-1"
+              defaultValue=""
+              onChange={(e) => addLocal(e.target.value)}
+            >
+              <option value="" disabled>
+                UF…
+              </option>
+              {UF_OPTIONS.map((uf) => (
+                <option key={uf} value={uf}>
+                  {uf}
+                </option>
+              ))}
+            </select>
+            <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => setAddingLocal(false)}>
+              Cancelar
+            </Button>
+          </span>
+        ) : (
+          <Button size="sm" variant="outline" className="h-7 px-2 text-xs" onClick={() => setAddingLocal(true)}>
+            <MapPin className="h-3 w-3 mr-1" />
+            Adicionar outro local
+          </Button>
+        )}
+        {extraRegions.length > 0 && (
+          <span className="text-[10px] text-muted-foreground">
+            Locais extras: {extraRegions.join(", ")}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+
+  // Pessoas adicionais (diligenciados): pessoas por região + botão de cadastro.
+  const renderAdicionais = () => (
+    <div className="space-y-2">
+      {renderPersonRegionGroups(
+        byGroup.adicionais,
+        skipsByGroup.adicionais,
+        "Nenhuma pessoa adicional. Inclua sócios, avalistas ou procuradores externos ao contrato."
+      )}
+      {onAddPerson && (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-7 px-2 text-xs"
+          onClick={onAddPerson}
+        >
+          <UserPlus className="h-3 w-3 mr-1" />
+          Adicionar outras pessoas
+        </Button>
+      )}
+    </div>
+  );
 
   // Opcional / Pesquisa: por alvo (jobs + skips), com botão "+ Adicionar outras".
   const renderByTarget = (
@@ -643,43 +711,45 @@ export function ExtractCertidoesDialog({
   };
 
   const Section = ({
-    tier,
+    group,
     title,
     desc,
     children,
   }: {
-    tier: Tier;
+    group: Group;
     title: string;
     desc?: string;
     children: ReactNode;
   }) => {
-    const jobs = byTier[tier];
-    const tierSkips = skipsByTier[tier];
-    const tierSelected = jobs.filter((j) => selected.has(jobKey(j))).length;
-    const isOpen = openSections[tier];
+    const jobs = byGroup[group];
+    const groupSkips = skipsByGroup[group];
+    const groupSelected = jobs.filter((j) => selected.has(jobKey(j))).length;
+    const allSelected = jobs.length > 0 && groupSelected === jobs.length;
+    const isOpen = openSections[group];
     return (
       <div className="rounded-lg border">
         <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-muted/20 rounded-t-lg">
           <button
             type="button"
-            className="flex items-center gap-1.5 text-sm font-semibold min-w-0"
-            onClick={() => setOpenSections((s) => ({ ...s, [tier]: !s[tier] }))}
+            className="flex items-center gap-1.5 text-sm font-semibold min-w-0 uppercase tracking-wide"
+            onClick={() => setOpenSections((s) => ({ ...s, [group]: !s[group] }))}
           >
             {isOpen ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}
             <span className="truncate">{title}</span>
+            {allSelected && <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-green-600" />}
           </button>
-          <span className="text-[11px] text-muted-foreground">
-            {tierSelected}/{jobs.length}
-            {tierSkips.length > 0 && (
-              <span className="text-amber-600"> · {tierSkips.length} c/ pendência</span>
+          <span className="text-[11px] text-muted-foreground tabular-nums">
+            [{groupSelected}/{jobs.length}]
+            {groupSkips.length > 0 && (
+              <span className="text-amber-600"> · {groupSkips.length} c/ pendência</span>
             )}
           </span>
           <div className="flex-1" />
           <div className="flex items-center gap-1">
-            <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" onClick={() => setTierSelection(tier, true)}>
+            <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" onClick={() => setGroupSelection(group, true)}>
               Marcar
             </Button>
-            <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" onClick={() => setTierSelection(tier, false)}>
+            <Button size="sm" variant="ghost" className="h-6 px-2 text-[11px]" onClick={() => setGroupSelection(group, false)}>
               Limpar
             </Button>
           </div>
@@ -697,8 +767,8 @@ export function ExtractCertidoesDialog({
           <DialogHeader>
             <DialogTitle>Emitir certidões</DialogTitle>
             <DialogDescription>
-              O <strong>padrão</strong> (certidões dos vendedores nas regiões do imóvel e do endereço deles) já
-              vem marcado. Imóvel, compradores e pesquisas são opções — abra cada seção para incluir.
+              <strong>Vendedores</strong> e <strong>pessoas adicionais</strong> já vêm marcados. Compradores,
+              imóvel e pesquisa de bens são opções — abra cada seção para incluir.
             </DialogDescription>
           </DialogHeader>
 
@@ -736,46 +806,43 @@ export function ExtractCertidoesDialog({
 
               <div className="flex-1 overflow-y-auto min-h-0 space-y-3 pr-1">
                 <Section
-                  tier="padrao"
-                  title="Padrão — vendedores"
+                  group="vendedores"
+                  title="Vendedores"
                   desc="Certidões dos vendedores (e dependentes) na região do imóvel e na do endereço deles."
                 >
-                  {renderPadrao()}
+                  {renderVendedores()}
                 </Section>
 
                 <Section
-                  tier="imovel"
+                  group="adicionais"
+                  title="Pessoas adicionais"
+                  desc="Pessoas externas ao contrato que você incluiu (sócios, avalistas, procuradores)."
+                >
+                  {renderAdicionais()}
+                </Section>
+
+                <Section
+                  group="compradores"
+                  title="Compradores"
+                  desc="Certidões dos compradores — inclua se quiser diligenciá-los."
+                >
+                  {renderByTarget(byGroup.compradores, skipsByGroup.compradores, { picker: true })}
+                </Section>
+
+                <Section
+                  group="imovel"
                   title="Imóvel"
                   desc="Matrícula (visualização ONR), IPTU e tributos municipais do imóvel, CCIR."
                 >
-                  {renderByTarget(byTier.imovel, skipsByTier.imovel, { picker: true })}
+                  {renderByTarget(byGroup.imovel, skipsByGroup.imovel, { picker: true })}
                 </Section>
 
                 <Section
-                  tier="opcional"
-                  title="Opcional — outras pessoas"
-                  desc="Compradores e pessoas adicionadas manualmente."
-                >
-                  {renderByTarget(byTier.opcional, skipsByTier.opcional, { picker: true })}
-                  {onAddPerson && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="mt-2 h-7 px-2 text-xs"
-                      onClick={onAddPerson}
-                    >
-                      <UserPlus className="h-3 w-3 mr-1" />
-                      Adicionar outras pessoas
-                    </Button>
-                  )}
-                </Section>
-
-                <Section
-                  tier="pesquisa"
-                  title="Pesquisa adicional"
+                  group="pesquisa"
+                  title="Pesquisa de bens"
                   desc="Pesquisa de Bens (ONR) e certidões menos comuns."
                 >
-                  {renderByTarget(byTier.pesquisa, skipsByTier.pesquisa, { picker: true })}
+                  {renderByTarget(byGroup.pesquisa, skipsByGroup.pesquisa, { picker: true })}
                 </Section>
 
                 {/* Em breve — Serasa */}
