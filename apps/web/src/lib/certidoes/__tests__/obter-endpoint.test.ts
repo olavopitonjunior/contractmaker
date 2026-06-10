@@ -30,34 +30,44 @@ describe("buildObterArgs — params do 2º passo por portal", () => {
   const payloadPF = { cpf: "12345678900", nome: "Fulano" };
   const payloadPJ = { cnpj: "11222333000144" };
 
-  it("TJSP e-SAJ → numero_pedido + pedido_data + cpf", () => {
+  it("TJSP e-SAJ → numero_pedido + pedido_data (ISO) + cpf", () => {
     expect(
       buildObterArgs("tribunal/tjsp/obter-civel", {
         numeroPedido: "1610335",
         pedidoData: "22/05/2026",
         payload: payloadPF,
       })
-    ).toEqual({ numero_pedido: "1610335", pedido_data: "22/05/2026", cpf: "12345678900" });
+    ).toEqual({ numero_pedido: "1610335", pedido_data: "2026-05-22", cpf: "12345678900" });
   });
 
-  it("TJSP obter-certidao → numero_pedido + pedido_data + cpf (mesmo shape do obter-civel)", () => {
+  it("TJSP obter-certidao → pedido_data DD/MM/YYYY do DB é normalizada pra ISO (607 'valor inválido' em prod)", () => {
     expect(
       buildObterArgs("tribunal/tjsp/obter-certidao", {
-        numeroPedido: "96931058",
-        pedidoData: "23/05/2026",
+        numeroPedido: "97347688",
+        pedidoData: "08/06/2026",
         payload: payloadPF,
       })
-    ).toEqual({ numero_pedido: "96931058", pedido_data: "23/05/2026", cpf: "12345678900" });
+    ).toEqual({ numero_pedido: "97347688", pedido_data: "2026-06-08", cpf: "12345678900" });
   });
 
-  it("TJRJ e-SAJ → numero_pedido + pedido_data + cnpj", () => {
+  it("TJSP obter-certidao → pedido_data já ISO passa intacta", () => {
+    expect(
+      buildObterArgs("tribunal/tjsp/obter-certidao", {
+        numeroPedido: "97347688",
+        pedidoData: "2026-06-08",
+        payload: payloadPF,
+      })
+    ).toEqual({ numero_pedido: "97347688", pedido_data: "2026-06-08", cpf: "12345678900" });
+  });
+
+  it("TJRJ e-SAJ → numero_pedido + pedido_data (ISO) + cnpj", () => {
     expect(
       buildObterArgs("tribunal/tjrj/obter-certidao", {
         numeroPedido: "ABC",
         pedidoData: "01/01/2026",
         payload: payloadPJ,
       })
-    ).toEqual({ numero_pedido: "ABC", pedido_data: "01/01/2026", cnpj: "11222333000144" });
+    ).toEqual({ numero_pedido: "ABC", pedido_data: "2026-01-01", cnpj: "11222333000144" });
   });
 
   it("TJSP sem pedido_data → omite o campo", () => {
@@ -77,6 +87,15 @@ describe("buildObterArgs — params do 2º passo por portal", () => {
         payload: payloadPF,
       })
     ).toEqual({ numero_certidao: "CERT-9", cpf: "12345678900" });
+  });
+
+  it("TRF3 → numero_certidao com espaço à esquerda (resposta do pedido) é trimado", () => {
+    expect(
+      buildObterArgs("tribunal/trf3/obter-certidao", {
+        numeroPedido: " 2026/000004148618",
+        payload: payloadPF,
+      })
+    ).toEqual({ numero_certidao: "2026/000004148618", cpf: "12345678900" });
   });
 
   it("Antecedentes PF → codigo + cpf", () => {
