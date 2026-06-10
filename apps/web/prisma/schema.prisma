@@ -297,6 +297,36 @@ model Organization {
 
   // Modularização — entitlements de módulos (Vendas/Locação) por tenant
   orgModules OrgModule[]
+
+  // Google Drive da imobiliária (templates/contratos criados na conta do tenant)
+  googleAccount OrgGoogleAccount?
+}
+
+/// Conta Google conectada pela imobiliária (OAuth offline). Os Docs de template
+/// e os contratos gerados passam a ser criados no Drive do TENANT (quota e
+/// privacidade isoladas); a service account global continua recebendo writer
+/// em cada doc pra operar batchUpdate/export/watch. Sem row (ou status !=
+/// connected) o fluxo cai no owner OAuth global — tenants legados não quebram.
+/// Refresh token criptografado com AES-256-GCM (lib/security/crypto.ts), mesmo
+/// padrão da AsaasAccount.
+model OrgGoogleAccount {
+  id                    String    @id @default(cuid())
+  orgId                 String    @unique
+  email                 String
+  refreshTokenEncrypted String    @db.Text
+  refreshTokenIvBase64  String
+  refreshTokenTagBase64 String
+  scopes                String[]  @default([])
+  status                String    @default("connected") // connected | revoked | error
+  lastErrorMessage      String?   @db.Text
+  // Pasta "Contractmaker" criada lazy no Drive da org; docs novos nascem nela.
+  driveFolderId         String?
+  connectedById         String?
+  lastUsedAt            DateTime?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 }
 
 /// Entitlement de módulo por tenant. `module` é validado contra lib/modules/catalog.ts
@@ -853,6 +883,10 @@ model ContractTemplate {
   // (vira "desatualizado" na UI até o próximo POST /preview re-gerar).
   previewSourceHash   String?
   previewUpdatedAt    DateTime?
+  // Relatório do pass de IA na ingestão DOCX→template (engine google_docs):
+  // { inserted, skippedAmbiguous, notMapped, missingRequired, ranAt }.
+  // Persiste após a ativação como histórico da revisão.
+  draftReport         Json?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
 

@@ -1,11 +1,11 @@
 import { Readable } from "stream";
-import {
-  getDriveFolderId,
-  getOwnerDriveClient,
-  getServiceAccountEmail,
-  isOwnerOAuthConfigured,
-} from "./client";
+import { getServiceAccountEmail, isOwnerOAuthConfigured } from "./client";
 import { ensureAnyonePermission } from "./share-org";
+import {
+  withOwnerAuth,
+  getOwnerDriveForAuth,
+  resolveDriveParent,
+} from "./org-oauth";
 
 /**
  * Mime types aceitos pra conversão automática Drive → Google Doc nativo.
@@ -23,8 +23,10 @@ interface UploadInput {
   sourceMime: ImportableMime;
   /** Nome visível do doc no Drive. */
   name: string;
-  /** Pasta no Drive (default: GOOGLE_DRIVE_FOLDER_ID). */
+  /** Pasta no Drive (default: pasta da org conectada ou GOOGLE_DRIVE_FOLDER_ID). */
   parentFolderId?: string;
+  /** Org dona do doc — usa a conta Google conectada da org quando houver. */
+  orgId?: string;
 }
 
 interface UploadOutput {
@@ -66,54 +68,52 @@ export async function uploadFileAsGoogleDoc(
     throw new Error("Arquivo vazio.");
   }
 
-  const drive = getOwnerDriveClient();
+  return withOwnerAuth(input.orgId, async (resolved) => {
+    const drive = getOwnerDriveForAuth(resolved);
 
-  const parents = input.parentFolderId
-    ? [input.parentFolderId]
-    : (() => {
-        const f = getDriveFolderId();
-        return f ? [f] : undefined;
-      })();
+    const parent = input.parentFolderId ?? (await resolveDriveParent(resolved));
+    const parents = parent ? [parent] : undefined;
 
-  const created = await drive.files.create({
-    requestBody: {
-      name: input.name,
-      mimeType: "application/vnd.google-apps.document",
-      ...(parents ? { parents } : {}),
-    },
-    media: {
-      mimeType: input.sourceMime,
-      body: Readable.from(input.buffer),
-    },
-    fields: "id, webViewLink",
-    supportsAllDrives: true,
-  });
+    const created = await drive.files.create({
+      requestBody: {
+        name: input.name,
+        mimeType: "application/vnd.google-apps.document",
+        ...(parents ? { parents } : {}),
+      },
+      media: {
+        mimeType: input.sourceMime,
+        body: Readable.from(input.buffer),
+      },
+      fields: "id, webViewLink",
+      supportsAllDrives: true,
+    });
 
-  const id = created.data.id;
-  if (!id) throw new Error("Drive não retornou id do doc criado.");
+    const id = created.data.id;
+    if (!id) throw new Error("Drive não retornou id do doc criado.");
 
-  const saEmail = getServiceAccountEmail();
-  if (saEmail) {
-    try {
-      await drive.permissions.create({
-        fileId: id,
-        requestBody: { type: "user", role: "writer", emailAddress: saEmail },
-        sendNotificationEmail: false,
-        supportsAllDrives: true,
-      });
-    } catch (err) {
-      console.error("[uploadFileAsGoogleDoc] Falha ao compartilhar com SA:", err);
+    const saEmail = getServiceAccountEmail();
+    if (saEmail) {
+      try {
+        await drive.permissions.create({
+          fileId: id,
+          requestBody: { type: "user", role: "writer", emailAddress: saEmail },
+          sendNotificationEmail: false,
+          supportsAllDrives: true,
+        });
+      } catch (err) {
+        console.error("[uploadFileAsGoogleDoc] Falha ao compartilhar com SA:", err);
+      }
     }
-  }
 
-  await ensureAnyonePermission(id, "writer");
+    await ensureAnyonePermission(id, "writer", input.orgId);
 
-  const webViewLink =
-    created.data.webViewLink || `https://docs.google.com/document/d/${id}/edit`;
+    const webViewLink =
+      created.data.webViewLink || `https://docs.google.com/document/d/${id}/edit`;
 
-  return {
-    docId: id,
-    webViewLink,
-    embedLink: `https://docs.google.com/document/d/${id}/edit?embedded=true&rm=embedded`,
-  };
+    return {
+      docId: id,
+      webViewLink,
+      embedLink: `https://docs.google.com/document/d/${id}/edit?embedded=true&rm=embedded`,
+    };
+  });
 }

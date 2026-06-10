@@ -63,6 +63,7 @@ export async function importContractFromFile(
     buffer: input.buffer,
     sourceMime: input.sourceMime,
     name: docName,
+    orgId: input.orgId,
   });
 
   // 1b. Compartilha com membros da org (writer). Sem isso, usuários não-owner

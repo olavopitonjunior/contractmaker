@@ -113,6 +113,7 @@ export async function POST(
     const uploaded = await uploadHtmlAsGoogleDoc({
       htmlContent: html,
       name: `[PREVIEW] ${template.name} — ${fixtureModalidade}`,
+      orgId: org.id,
     });
     docId = uploaded.docId;
     webViewLink = uploaded.webViewLink;

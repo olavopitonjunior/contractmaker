@@ -44,6 +44,12 @@ const SETTINGS_GROUPS: { title: string; items: SettingsLink[] }[] = [
       { href: "/settings/api-usage", label: "Uso da API", icon: Sparkles },
     ],
   },
+  {
+    title: "Integrações",
+    items: [
+      { href: "/settings/integracoes", label: "Google Drive da imobiliária", icon: KeyRound },
+    ],
+  },
 ];
 
 export default async function SettingsPage() {

@@ -1,10 +1,10 @@
 import { prisma } from "@/lib/db/prisma";
 import {
   envTrim,
-  getOwnerDriveClient,
   getServiceAccountEmail,
   isOwnerOAuthConfigured,
 } from "./client";
+import { resolveOwnerAuth, getOwnerDriveForAuth } from "./org-oauth";
 
 export interface ShareOrgResult {
   shared: string[];
@@ -33,7 +33,8 @@ export interface ShareOrgResult {
  */
 export async function ensureAnyonePermission(
   docId: string,
-  role: "writer" | "reader"
+  role: "writer" | "reader",
+  orgId?: string
 ): Promise<void> {
   if (!isOwnerOAuthConfigured()) {
     console.error(
@@ -42,7 +43,9 @@ export async function ensureAnyonePermission(
     return;
   }
   try {
-    const drive = getOwnerDriveClient();
+    // Permissions são criadas pelo DONO do arquivo: docs criados na conta da
+    // org precisam da credencial da org (a global não tem acesso a eles).
+    const drive = getOwnerDriveForAuth(await resolveOwnerAuth(orgId));
     const existing = await drive.permissions.list({
       fileId: docId,
       fields: "permissions(id, type, role)",
@@ -109,7 +112,11 @@ export async function shareDocWithOrgMembers(
     select: { user: { select: { email: true } } },
   });
 
-  const ownerEmail = envTrim("GOOGLE_OWNER_EMAIL")?.toLowerCase() ?? null;
+  const resolved = await resolveOwnerAuth(orgId);
+  const ownerEmail =
+    (resolved.source === "org"
+      ? resolved.accountEmail?.toLowerCase()
+      : envTrim("GOOGLE_OWNER_EMAIL")?.toLowerCase()) ?? null;
   const saEmail = getServiceAccountEmail()?.toLowerCase() ?? null;
 
   const targets = new Set<string>();
@@ -129,7 +136,7 @@ export async function shareDocWithOrgMembers(
 
   if (targets.size === 0) return result;
 
-  const drive = getOwnerDriveClient();
+  const drive = getOwnerDriveForAuth(resolved);
   const outcomes = await Promise.allSettled(
     Array.from(targets).map(async (email) => {
       await drive.permissions.create({

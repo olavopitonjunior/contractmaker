@@ -61,9 +61,18 @@ export async function POST(
         console.error("[version] Falha ao exportar HTML do GDoc atual:", err);
       }
 
+      // orgId antes da cópia: a credencial de criação pode ser a conta Google
+      // da própria org (multitenant) — e o share usa o mesmo dono.
+      const deal = await prisma.deal.findUnique({
+        where: { id: current.dealId },
+        select: { pipeline: { select: { orgId: true } } },
+      });
+      const orgId = deal?.pipeline?.orgId;
+
       const copy = await copyContractGoogleDoc({
         sourceDocId: current.googleDocId,
         name: `Contrato ${current.id} — v${current.version + 1}`,
+        orgId,
       });
       copiedDocId = copy.docId;
       copiedWebViewLink = copy.webViewLink;
@@ -72,11 +81,6 @@ export async function POST(
       // permissions do source no Drive — novo arquivo nasce só com owner+SA.
       // Falha não bloqueia.
       try {
-        const deal = await prisma.deal.findUnique({
-          where: { id: current.dealId },
-          select: { pipeline: { select: { orgId: true } } },
-        });
-        const orgId = deal?.pipeline?.orgId;
         if (orgId) await shareDocWithOrgMembers(copy.docId, orgId);
       } catch (shareErr) {
         console.error(

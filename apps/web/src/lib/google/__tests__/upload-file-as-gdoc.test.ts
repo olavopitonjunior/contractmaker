@@ -17,6 +17,16 @@ vi.mock("../client", () => ({
   isOwnerOAuthConfigured: mockIsOwnerOAuthConfigured,
 }));
 
+// Seam multitenant: sem orgId os módulos resolvem a credencial global; aqui
+// devolvemos o mesmo drive mockado e o folder do env, preservando os asserts.
+vi.mock("../org-oauth", () => ({
+  withOwnerAuth: (_orgId: string | undefined, fn: (r: unknown) => Promise<unknown>) =>
+    fn({ auth: {}, source: "global" }),
+  resolveOwnerAuth: vi.fn(async () => ({ auth: {}, source: "global" })),
+  getOwnerDriveForAuth: () => mockGetOwnerDriveClient(),
+  resolveDriveParent: vi.fn(async () => mockGetDriveFolderId()),
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockIsOwnerOAuthConfigured.mockReturnValue(true);

@@ -818,6 +818,7 @@ export async function generateContractForDeal(
         const copy = await copyContractGoogleDoc({
           sourceDocId: template.googleTemplateDocId,
           name: docName,
+          orgId,
         });
         created = { docId: copy.docId, webViewLink: copy.webViewLink };
 
@@ -849,6 +850,7 @@ export async function generateContractForDeal(
         const uploaded = await uploadHtmlAsGoogleDoc({
           htmlContent: htmlForUpload,
           name: docName,
+          orgId,
         });
         created = { docId: uploaded.docId, webViewLink: uploaded.webViewLink };
       }
@@ -1119,7 +1121,7 @@ export async function generateLocacaoContractForDeal(
         .replace(/\{\{\s*contrato\.numero\s*\}\}/g, numeroContrato)
         .replace(/\{\{\s*contrato\.id\s*\}\}/g, contract.id)
         .replace(/\{\{\s*contrato\.versao\s*\}\}/g, String(contract.version));
-      const created = await uploadHtmlAsGoogleDoc({ htmlContent: htmlForUpload, name: docName });
+      const created = await uploadHtmlAsGoogleDoc({ htmlContent: htmlForUpload, name: docName, orgId });
 
       let watchData: {
         googleWatchChannel?: string;

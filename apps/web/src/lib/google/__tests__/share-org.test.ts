@@ -23,6 +23,13 @@ vi.mock("../client", () => ({
   envTrim: mockEnvTrim,
 }));
 
+// Seam multitenant: orgs sem conta Google conectada resolvem pra credencial
+// global — devolvemos o mesmo drive mockado dos asserts originais.
+vi.mock("../org-oauth", () => ({
+  resolveOwnerAuth: vi.fn(async () => ({ auth: {}, source: "global" })),
+  getOwnerDriveForAuth: () => mockGetOwnerDriveClient(),
+}));
+
 vi.mock("@/lib/db/prisma", () => ({
   prisma: {
     orgMembership: {

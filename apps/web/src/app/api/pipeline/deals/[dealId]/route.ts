@@ -193,23 +193,9 @@ export async function DELETE(
     .filter((id): id is string => Boolean(id));
   if (docsToTrash.length > 0) {
     try {
-      const { getOwnerDriveClient, isOwnerOAuthConfigured } = await import("@/lib/google/client");
-      if (isOwnerOAuthConfigured()) {
-        const drive = getOwnerDriveClient();
-        for (const docId of docsToTrash) {
-          try {
-            await drive.files.update({
-              fileId: docId,
-              requestBody: { trashed: true },
-              supportsAllDrives: true,
-            });
-          } catch (err) {
-            console.warn(
-              `[deal DELETE] trash falhou para doc ${docId}:`,
-              err instanceof Error ? err.message : err
-            );
-          }
-        }
+      const { trashDriveFile } = await import("@/lib/google/org-oauth");
+      for (const docId of docsToTrash) {
+        await trashDriveFile(docId, org.id);
       }
     } catch (err) {
       console.warn("[deal DELETE] não foi possível mover docs pra lixeira:", err);
