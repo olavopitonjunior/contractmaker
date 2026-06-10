@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { LOST_STAGE_NAME, stageConfigForKind } from "@/lib/pipeline/stage-config";
 
 /**
  * POST /api/pipeline/deals/:dealId/reopen
  *
  * Tira deal de "Negócio perdido" e devolve à stage anterior (lookup no último
  * AuditLog `DEAL_STAGE_CHANGE` com `metadata.kind="lost"`). Se não tiver
- * histórico, fallback pra "Confecção de Contrato".
+ * histórico, fallback por pipeline.kind (REOPEN_FALLBACK_BY_KIND).
  */
 export async function POST(
   req: NextRequest,
@@ -40,10 +41,10 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  if (deal.stage.name !== "Negócio perdido") {
+  if (deal.stage.name !== LOST_STAGE_NAME) {
     return NextResponse.json(
       {
-        error: `Negócio só pode ser reaberto se estiver em "Negócio perdido" (está em "${deal.stage.name}")`,
+        error: `Negócio só pode ser reaberto se estiver em "${LOST_STAGE_NAME}" (está em "${deal.stage.name}")`,
       },
       { status: 400 }
     );
@@ -68,11 +69,12 @@ export async function POST(
           .previousStageId as string | undefined)
       : undefined;
 
+  const { reopenFallback } = stageConfigForKind(deal.pipeline.kind);
   const targetStage =
     (previousStageId
       ? deal.pipeline.stages.find((s) => s.id === previousStageId)
       : null) ??
-    deal.pipeline.stages.find((s) => s.name === "Confecção de Contrato") ??
+    deal.pipeline.stages.find((s) => s.name === reopenFallback) ??
     deal.pipeline.stages[0];
 
   if (!targetStage) {

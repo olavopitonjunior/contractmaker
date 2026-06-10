@@ -109,8 +109,10 @@ export default async function PipelineLocacaoPage() {
 
   const allDeals = pipeline.stages.flatMap((s) => s.deals);
   const admStage = pipeline.stages.find((s) => s.name === "ADM");
+  const lostStage = pipeline.stages.find((s) => s.name === "Negócio perdido");
   const graduatedDeals = admStage?.deals.length ?? 0;
-  const activeDeals = allDeals.length - graduatedDeals;
+  const lostDeals = lostStage?.deals.length ?? 0;
+  const activeDeals = allDeals.length - graduatedDeals - lostDeals;
   const totalValue = allDeals.reduce((sum, d) => sum + (d.value || 0), 0);
 
   const startOfToday = new Date();
@@ -254,7 +256,19 @@ export default async function PipelineLocacaoPage() {
         config={{
           basePath: "/locacao/deals",
           timelineKind: "locacao",
-          milestoneFields: {},
+          lostStageName: "Negócio perdido",
+          milestoneFields: {
+            Assinado: {
+              cardKey: "contractSignedAt",
+              apiField: "contractSignedAt",
+              label: "assinatura do contrato",
+            },
+            "Cobrança Gerada": {
+              cardKey: "chargeCreatedAt",
+              apiField: "chargeIssuedAt",
+              label: "emissão da cobrança",
+            },
+          },
         }}
       />
     </div>

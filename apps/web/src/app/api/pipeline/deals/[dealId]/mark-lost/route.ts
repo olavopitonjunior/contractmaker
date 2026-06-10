@@ -3,15 +3,24 @@ import { z } from "zod";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { LOST_STAGE_NAME, stageConfigForKind } from "@/lib/pipeline/stage-config";
 
 const Body = z.object({
   reason: z.string().min(3).max(500),
   category: z
-    .enum(["desistencia", "imovel_vendido", "financiamento_negado", "outro"])
+    .enum([
+      // venda
+      "desistencia",
+      "imovel_vendido",
+      "financiamento_negado",
+      // locação
+      "imovel_alugado",
+      "garantia_recusada",
+      "credito_reprovado",
+      "outro",
+    ])
     .optional(),
 });
-
-const TERMINAL_STAGES = ["Comissão paga", "Negócio perdido"];
 
 /**
  * POST /api/pipeline/deals/:dealId/mark-lost
@@ -64,7 +73,8 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  if (TERMINAL_STAGES.includes(deal.stage.name)) {
+  const { terminalStages } = stageConfigForKind(deal.pipeline.kind);
+  if (terminalStages.includes(deal.stage.name)) {
     return NextResponse.json(
       {
         error: `Negócio já está em estágio terminal ("${deal.stage.name}") — reabra antes de marcar como perdido`,
@@ -74,11 +84,11 @@ export async function POST(
   }
 
   const targetStage = deal.pipeline.stages.find(
-    (s) => s.name === "Negócio perdido"
+    (s) => s.name === LOST_STAGE_NAME
   );
   if (!targetStage) {
     return NextResponse.json(
-      { error: 'Estágio "Negócio perdido" não encontrado no pipeline' },
+      { error: `Estágio "${LOST_STAGE_NAME}" não encontrado no pipeline` },
       { status: 400 }
     );
   }

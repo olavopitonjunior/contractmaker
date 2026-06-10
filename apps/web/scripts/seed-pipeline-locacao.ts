@@ -29,6 +29,7 @@ const STAGES: StageSeed[] = [
   { name: "Assinado", position: 3, color: "blue" },
   { name: "Cobrança Gerada", position: 4, color: "purple" },
   { name: "ADM", position: 5, color: "green" },
+  { name: "Negócio perdido", position: 6, color: "red" },
 ];
 
 async function main() {
