@@ -31,6 +31,7 @@ import {
   isReceitaCertidaoNaoEmitida,
   isPortalUnavailableMessage,
   friendlySourceUnavailableMessage,
+  terminalizeRetryMessage,
 } from "./error-codes";
 
 export type RichStatus =
@@ -400,8 +401,32 @@ export function classifyOutcome(
           portalUrl
         );
       }
-      // Endpoints informativos / sem PDF obrigatório seguem o fluxo antigo:
-      // 1 retry profilático, depois success negativa
+      // Endpoints informativos / sem PDF obrigatório: só fecham como negativa
+      // quando a resposta TRAZ evidência de ausência ("nada consta", "nenhum
+      // resultado", "não encontrado"). Code 600 "Um erro inesperado ocorreu"
+      // cai nesta categoria pelo CODE_MAP sem evidência nenhuma — fechar como
+      // success exibia "Negativa · nada consta" pra consulta que nunca rodou
+      // (E-Proc ×2, deal cmpypeb95, 2026-06-10). Sem evidência: retry com
+      // backoff até esgotar → failed_permanent honesto + CTA portal.
+      const noDataMsg = [protestoMsg, effectiveErrorMessage]
+        .filter(Boolean)
+        .join(" ");
+      const noDataEvidence =
+        isSemResultadoInformativo(noDataMsg) ||
+        /nada\s+consta|n[ãa]o\s+(foi\s+poss[ií]vel\s+)?encontr|nenhum\s+registro|n[ãa]o\s+h[áa]\s/i.test(
+          noDataMsg
+        );
+      if (!noDataEvidence) {
+        return planRetry(
+          "portal_unavailable",
+          friendlySourceUnavailableMessage(info.label),
+          "portal_unavailable",
+          opts,
+          portalUrl
+        );
+      }
+      // Evidência explícita de "nada consta": 1 retry profilático, depois
+      // success negativa (fluxo de antes, agora gated na evidência).
       if (opts.retryAttempts === 0) {
         return planRetry(
           "portal_unavailable",
@@ -454,8 +479,11 @@ function planRetry(
   if (!hasMore) {
     return {
       status: "failed_permanent",
+      // terminalizeRetryMessage: a mensagem amigável de instabilidade promete
+      // "Nova tentativa automática agendada" — falso aqui (estado terminal).
       errorMessage:
-        message ?? "Falhas consecutivas esgotaram as tentativas automáticas",
+        terminalizeRetryMessage(message) ??
+        "Falhas consecutivas esgotaram as tentativas automáticas",
       failureCategory:
         backoffKey === "api_error"
           ? "provider_timeout"

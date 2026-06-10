@@ -13,8 +13,12 @@
  * é estrutural para aceitar tanto o `CertidaoJob` do Prisma quanto a row da UI.
  */
 
+import { endpointInfo } from "./endpoints";
+
 export interface LifecycleJob {
   status: string;
+  /** Usado pra consultar o catálogo (`emitsPdf`) — opcional por retrocompat. */
+  endpoint?: string | null;
   retryCount?: number | null;
   maxRetries?: number | null;
   createdAt?: Date | string | number | null;
@@ -87,8 +91,15 @@ export function isRetryableError(
 ): boolean {
   if (isInProgressBlocking(job, nowMs)) return false;
   if (RETRYABLE_ERROR_STATUSES.has(job.status)) return true;
-  // sucesso que não anexou PDF — re-baixar/re-emitir
-  if (job.status === "success" && !job.attachmentId) return true;
+  // sucesso que não anexou PDF — re-baixar/re-emitir. Endpoints informativos
+  // (`emitsPdf: false`, ex. eproc-lista) NUNCA anexam por design — sem este
+  // gate eles inflavam o "Retentar erros" pra sempre.
+  if (job.status === "success" && !job.attachmentId) {
+    if (job.endpoint && endpointInfo(job.endpoint).emitsPdf === false) {
+      return false;
+    }
+    return true;
+  }
   return false;
 }
 

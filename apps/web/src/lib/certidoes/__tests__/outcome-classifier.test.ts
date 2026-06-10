@@ -105,6 +105,101 @@ describe("classifyOutcome — Phase J", () => {
     expect(out.failureCategory).toBeNull();
   });
 
+  it("eproc-lista 600 'Um erro inesperado' NÃO vira success negativa — retry até failed_permanent", () => {
+    // Prod 2026-06-10 (deal cmpypeb95): code 600 sem nenhum dado fechava como
+    // success após 1 retry e a UI mostrava "Negativa · nada consta" pra uma
+    // consulta que nunca rodou. Sem evidência de ausência → falha honesta.
+    const eprocLista: EndpointInfo = {
+      id: "tribunal/tjsp/eproc-lista",
+      label: "E-Proc SP",
+      costCents: 6,
+      scope: "estadual",
+      uf: "SP",
+      appliesTo: ["pessoa"],
+      category: "civel",
+      emitsPdf: false,
+      portalUrl: "https://esaj.tjsp.jus.br/",
+    };
+    const resp = {
+      code: 600,
+      code_message: "Um erro inesperado ocorreu e será analisado.",
+      data: [],
+      errors: [],
+      header: { billable: false },
+    } as unknown as InfosimplesResponse;
+
+    // O normalizer real mapeia 600 (CODE_MAP) → genuine_no_data
+    const norm600: NormalizedResult = {
+      ...normEmpty,
+      failureCategory: "genuine_no_data",
+    };
+
+    // Tentativas dentro do backoff → retry transitório (não success)
+    const first = classifyOutcome(resp, norm600, eprocLista, {
+      attachmentId: null,
+      retryAttempts: 0,
+      maxRetries: 3,
+    });
+    expect(first.status).toBe("portal_unavailable");
+    expect(first.nextRetryAt).not.toBeNull();
+
+    const second = classifyOutcome(resp, norm600, eprocLista, {
+      attachmentId: null,
+      retryAttempts: 1,
+      maxRetries: 3,
+    });
+    expect(second.status).toBe("portal_unavailable");
+
+    // Retries esgotados → failed_permanent com CTA portal (nunca "negativa")
+    const exhausted = classifyOutcome(resp, norm600, eprocLista, {
+      attachmentId: null,
+      retryAttempts: 3,
+      maxRetries: 3,
+    });
+    expect(exhausted.status).toBe("failed_permanent");
+    expect(exhausted.portalUrl).toBe("https://esaj.tjsp.jus.br/");
+    // Mensagem terminal honesta: não pode prometer "Nova tentativa automática
+    // agendada" num estado sem retry (terminalizeRetryMessage).
+    expect(exhausted.errorMessage).not.toMatch(
+      /nova tentativa autom[áa]tica agendada/i
+    );
+    expect(exhausted.errorMessage).toMatch(
+      /tentativas autom[áa]ticas esgotadas/i
+    );
+  });
+
+  it("eproc-lista 601 'não encontrado' (evidência explícita) continua fechando como success negativa", () => {
+    const eprocLista: EndpointInfo = {
+      id: "tribunal/tjsp/eproc-lista",
+      label: "E-Proc SP",
+      costCents: 6,
+      scope: "estadual",
+      uf: "SP",
+      appliesTo: ["pessoa"],
+      category: "civel",
+      emitsPdf: false,
+      portalUrl: "https://esaj.tjsp.jus.br/",
+    };
+    const resp = {
+      code: 601,
+      code_message:
+        "Não foi possível encontrar o que você procura na fonte consultada.",
+      data: [],
+      header: { billable: false },
+    } as unknown as InfosimplesResponse;
+    const out = classifyOutcome(
+      resp,
+      { ...normEmpty, failureCategory: "genuine_no_data" },
+      eprocLista,
+      {
+        attachmentId: null,
+        retryAttempts: 1, // já passou do retry profilático
+        maxRetries: 3,
+      }
+    );
+    expect(out.status).toBe("success");
+  });
+
   it("612 'CPF inválido' em endpoint que EMITE PDF não é mascarado como success", () => {
     const resp = {
       code: 612,

@@ -165,6 +165,23 @@ export function friendlySourceUnavailableMessage(label?: string | null): string 
 }
 
 /**
+ * 2026-06-10 — Quando os retries ESGOTAM, a mensagem acima fica falsa ("Nova
+ * tentativa automática agendada" num estado terminal sem retry). O planRetry
+ * reusa a `message` recebida ao virar failed_permanent; este helper troca o
+ * trecho de agendamento pela variante terminal. Mensagens sem o trecho passam
+ * intactas.
+ */
+export function terminalizeRetryMessage(
+  message: string | null
+): string | null {
+  if (!message) return message;
+  return message.replace(
+    /Nova tentativa autom[áa]tica agendada; se persistir, emita no portal oficial\.?/i,
+    "Tentativas automáticas esgotadas — emita no portal oficial."
+  );
+}
+
+/**
  * 2026-06-02 — Receita Federal / PGFN responde 611 "As informações disponíveis
  * na Receita Federal sobre o contribuinte ... são insuficientes para emitir a
  * certidão pela Internet." Isso NÃO é erro nosso nem "nada consta": é a própria

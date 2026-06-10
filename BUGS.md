@@ -15,6 +15,13 @@
 
 ## Bugs Ativos
 
+### [ALTA] Certidoes: E-Proc 600 "erro inesperado" virava "Negativa - nada consta" (falso-positivo) + "Retentar erros" inflado por endpoints sem PDF
+- **Status:** em progresso (fix em PR; 2 rows legadas E-Proc em prod seguem success-600 — re-disparar ou corrigir manualmente)
+- **Encontrado em:** 2026-06-10 (auditoria front vs backend no deal cmpypeb95)
+- **Descricao:** (1) `classifyOutcome` fechava endpoints informativos (`emitsPdf:false`) como "success negativa" apos 1 retry para QUALQUER categoria genuine_no_data — inclusive code 600 "Um erro inesperado ocorreu" (CODE_MAP), que nao traz evidencia nenhuma de ausencia. A UI exibia "Negativa - nada consta" (verde) para consulta que nunca rodou. (2) `isRetryableError` contava "success sem attachment" como retentavel sem checar `emitsPdf` — eproc-lista e trf/cert-unificada NUNCA anexam por design, entao "Retentar erros (9)" nao batia com "Precisa acao (5)" e re-disparava consultas saudaveis.
+- **Impacto:** Risco juridico de afirmar negativa inexistente; contagem do retry errada re-disparando consultas OK (custo desnecessario).
+- **Solucao:** `genuine_no_data` informativo agora exige evidencia textual de ausencia ("nada consta"/"nenhum resultado"/"nao encontrado") para fechar como negativa; sem evidencia -> retry portal_unavailable ate esgotar -> failed_permanent + CTA portal. `isRetryableError` ganha gate `emitsPdf === false` no caminho success-sem-anexo (LifecycleJob.endpoint opcional).
+
 ### [ALTA] Certidoes: diligenciado (tier opcional) ficava fora do lote + obter e-SAJ recusava pedido_data DD/MM/YYYY
 - **Status:** em progresso (fix no PR #66; pendente merge + QA no deal cmpypeb95)
 - **Encontrado em:** 2026-06-09 (deal cmpypeb950007sdha0zb7tveq, prod)

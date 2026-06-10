@@ -251,10 +251,16 @@ function statusLabel(row: CertidaoJobRow): string {
   }
   if (status === "data_invalid") {
     const msg = row.errorMessage ?? "";
-    // Divergência de DATA DE NASCIMENTO (tipicamente Receita/PGFN 608): o portal
-    // exige a data cadastrada e recusa a que mandamos. Mensagem orientada à ação
-    // com o valor divergente em destaque, em vez da frase crua do órgão.
-    if (/nascimento|birthdate/i.test(msg) && /diverg|diferente|n[ãa]o\s+confere/i.test(msg)) {
+    // Divergência ESPECÍFICA de data de nascimento (Receita/PGFN 608 "Data de
+    // nascimento ... diferente da cadastrada"): mensagem orientada à ação com o
+    // valor em destaque. O gate exclui mensagens que citam OUTROS campos
+    // possíveis ("nome, nome da mãe ou data de nascimento" do Antecedentes PF)
+    // — afirmar "é a data" quando pode ser o nome manda corrigir o campo errado.
+    if (
+      /nascimento|birthdate/i.test(msg) &&
+      /diverg|diferente|n[ãa]o\s+confere/i.test(msg) &&
+      !/nome/i.test(msg)
+    ) {
       const data = msg.match(/\b\d{2}\/\d{2}\/\d{4}\b/)?.[0];
       return data
         ? `A data de nascimento ${data} não confere com a base oficial — confira o cadastro da parte`
@@ -279,9 +285,14 @@ function statusLabel(row: CertidaoJobRow): string {
     return `Pedido já em andamento no portal · ${eta}`;
   }
   if (status === "failed_permanent") {
+    // Mostra a RAZÃO real quando existe (timeout interno ≠ fonte fora do ar ≠
+    // recusa do órgão) — o rótulo genérico escondia o motivo e sugeria
+    // indisponibilidade do portal até pra falha nossa. O CTA "portal oficial"
+    // continua vindo do botão de portalUrl.
+    if (row.errorMessage) return row.errorMessage;
     return row.portalUrl
       ? "Indisponível automaticamente — use o portal oficial"
-      : row.errorMessage || "Falha permanente";
+      : "Falha permanente";
   }
   if (status === "skipped") return row.errorMessage || "Pulado — dados faltantes";
   if (status === "replaced") return "Substituído";
