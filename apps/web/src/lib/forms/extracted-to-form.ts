@@ -16,6 +16,14 @@ export type DocumentKind =
   | "conjuge_comprador"
   | "representante_vendedor"
   | "representante_comprador"
+  // Locação (módulo aditivo): Assignment é compartilhado pelo DocumentCard e
+  // pelo PATCH de classificação dos anexos, então os papéis vivem no mesmo
+  // union. O mapeamento de campos de locação fica em extracted-to-form-locacao.
+  | "locador"
+  | "locatario"
+  | "fiador"
+  | "representante_locador"
+  | "representante_locatario"
   | "imovel"
   | "outro";
 

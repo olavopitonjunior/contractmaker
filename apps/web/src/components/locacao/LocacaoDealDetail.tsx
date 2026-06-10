@@ -8,11 +8,26 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ContractEditorPage } from "@/components/contracts/ContractEditorPage";
-import { AddDocumentsCard } from "@/components/pipeline/AddDocumentsCard";
 import { LeaseSignaturesTab } from "@/components/locacao/LeaseSignaturesTab";
+import { LocacaoDealHeaderActions } from "@/components/locacao/LocacaoDealHeaderActions";
+import { LocacaoDadosTab } from "@/components/locacao/LocacaoDadosTab";
+import {
+  LocacaoDocumentsTab,
+  type LocacaoAttachment,
+} from "@/components/locacao/LocacaoDocumentsTab";
+import { DealProgressTimeline } from "@/components/pipeline/DealProgressTimeline";
+import { LostDealBanner } from "@/components/pipeline/LostDealBanner";
 import { Field } from "@/components/locacao/lease-detail/LeaseSection";
 import { GARANTIA_TIPO_LABELS } from "@/lib/locacao/validators";
-import { FileText, ExternalLink, ShieldCheck, ClipboardCheck, Umbrella, Receipt } from "lucide-react";
+import {
+  FileText,
+  ExternalLink,
+  ShieldCheck,
+  ClipboardCheck,
+  Umbrella,
+  Receipt,
+  Building2,
+} from "lucide-react";
 import { toast } from "sonner";
 
 type ContractProp = React.ComponentProps<typeof ContractEditorPage>["contract"];
@@ -36,19 +51,20 @@ interface LocacaoDealDetailProps {
     title: string;
     stageName: string | null;
     formStatus: string | null;
-    attachments: {
-      id: string;
-      filename: string;
-      url: string;
-      mime: string;
-      category: string | null;
-      createdAt: string;
-    }[];
+    formToken: string | null;
+    dataJson: Record<string, unknown>;
+    lostAt: string | null;
+    lostReason: string | null;
+    formOpenedAt: string | null;
+    formCompletedAt: string | null;
+    contractSignedAt: string | null;
+    chargeCreatedAt: string | null;
+    attachments: LocacaoAttachment[];
   };
   contract: ContractProp | null;
   versions: VersionsProp;
   lease: LeaseProp | null;
-  /** Modo simplificado (LOCACAO_SIMPLIFIED_MODE): mostra só Contrato,
+  /** Modo simplificado (LOCACAO_SIMPLIFIED_MODE): mostra só Dados, Contrato,
    *  Documentos e Assinaturas; esconde as abas de administração. */
   simplified?: boolean;
 }
@@ -58,8 +74,20 @@ const BRL = (v: number) =>
 
 export function LocacaoDealDetail({ deal, contract, versions, lease, simplified = false }: LocacaoDealDetailProps) {
   const router = useRouter();
-  const [tab, setTab] = useState("contrato");
+  const [tab, setTab] = useState("dados");
   const [activating, setActivating] = useState(false);
+
+  const isLost = deal.lostAt !== null;
+  const readyForAdm =
+    (deal.stageName === "Assinado" || deal.stageName === "Cobrança Gerada") &&
+    lease !== null &&
+    lease.status !== "ativo";
+
+  const locadores =
+    (deal.dataJson.locadores as { nome?: string; razao_social?: string }[] | undefined) ?? [];
+  const locatarios =
+    (deal.dataJson.locatarios as { nome?: string; razao_social?: string }[] | undefined) ?? [];
+  const garantiaTipo = (deal.dataJson.garantia as { tipo?: string } | undefined)?.tipo;
 
   const criarAdministracao = async () => {
     if (!lease) return;
@@ -86,22 +114,73 @@ export function LocacaoDealDetail({ deal, contract, versions, lease, simplified 
 
   return (
     <div className="space-y-4">
+      {/* Header: título editável + ações (paridade com o DealDetail de vendas) */}
       <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <div className="flex items-center gap-2">
-            <h2 className="text-2xl font-semibold">{deal.title}</h2>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 flex-wrap mb-1">
             {deal.stageName && <Badge variant="secondary">{deal.stageName}</Badge>}
             {lease && <Badge variant="outline">Locação · {lease.status}</Badge>}
           </div>
-          <p className="text-sm text-muted-foreground">Negócio de locação</p>
+          <LocacaoDealHeaderActions
+            dealId={deal.id}
+            title={deal.title}
+            stageName={deal.stageName}
+            formToken={deal.formToken}
+            hasContract={contract !== null}
+            isLost={isLost}
+          />
         </div>
         <Button variant="outline" asChild>
           <a href="/pipeline/locacao">Voltar ao pipeline</a>
         </Button>
       </div>
 
+      {/* Banner de perdido OU timeline SLA */}
+      {isLost && deal.lostAt ? (
+        <LostDealBanner lostAt={deal.lostAt} lostReason={deal.lostReason} />
+      ) : (
+        <DealProgressTimeline
+          kind="locacao"
+          variant="full"
+          currentStageName={deal.stageName}
+          formOpenedAt={deal.formOpenedAt}
+          formCompletedAt={deal.formCompletedAt}
+          contractSignedAt={deal.contractSignedAt}
+          chargeCreatedAt={deal.chargeCreatedAt}
+          commissionPaidAt={null}
+        />
+      )}
+
+      {/* Handoff pra ADM: contrato assinado e administração ainda não criada */}
+      {readyForAdm && !isLost && (
+        <div className="rounded-lg border border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20 px-4 py-3">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div className="flex items-start gap-3">
+              <Building2 className="h-5 w-5 mt-0.5 shrink-0 text-emerald-600" />
+              <div>
+                <p className="font-medium text-emerald-800 dark:text-emerald-300">
+                  Contrato assinado — pronto pra administração
+                </p>
+                <p className="text-sm text-emerald-700/80 dark:text-emerald-400/80">
+                  Criar a administração ativa o contrato e habilita as cobranças
+                  mensais de aluguel.
+                </p>
+              </div>
+            </div>
+            <Button
+              onClick={criarAdministracao}
+              disabled={activating}
+              className="bg-emerald-600 hover:bg-emerald-700"
+            >
+              {activating ? "Criando..." : "Criar administração"}
+            </Button>
+          </div>
+        </div>
+      )}
+
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="flex-wrap">
+          <TabsTrigger value="dados">Dados</TabsTrigger>
           <TabsTrigger value="contrato">Contrato</TabsTrigger>
           <TabsTrigger value="documentos">Documentos</TabsTrigger>
           <TabsTrigger value="assinaturas">Assinaturas</TabsTrigger>
@@ -110,6 +189,15 @@ export function LocacaoDealDetail({ deal, contract, versions, lease, simplified 
           {!simplified && <TabsTrigger value="seguros">Seguros</TabsTrigger>}
           {!simplified && <TabsTrigger value="cobranca">Cobrança</TabsTrigger>}
         </TabsList>
+
+        {/* DADOS — visão do form.dataJson (paridade com a aba Dados de vendas) */}
+        <TabsContent value="dados" className="mt-4">
+          <LocacaoDadosTab
+            dataJson={deal.dataJson}
+            formToken={deal.formToken}
+            formStatus={deal.formStatus}
+          />
+        </TabsContent>
 
         {/* CONTRATO — editor Google Docs + agente de IA (especializado em locação) */}
         <TabsContent value="contrato" className="mt-4">
@@ -123,50 +211,22 @@ export function LocacaoDealDetail({ deal, contract, versions, lease, simplified 
                 <p className="text-sm text-muted-foreground">
                   {deal.formStatus === "completo"
                     ? "A geração falhou — verifique se há um template de locação ativo (sync-templates --apply --seed)."
-                    : "O contrato é gerado quando o cliente finaliza o formulário público."}
+                    : "O contrato é gerado quando o cliente finaliza o formulário público, ou pelo botão \"Gerar contrato\" acima."}
                 </p>
               </CardContent>
             </Card>
           )}
         </TabsContent>
 
-        {/* DOCUMENTOS — pasta do deal (DealAttachment), igual ao de vendas */}
-        <TabsContent value="documentos" className="mt-4 space-y-4">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base">Pasta de documentos ({deal.attachments.length})</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {deal.attachments.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Nenhum documento ainda.</p>
-              ) : (
-                <ul className="divide-y">
-                  {deal.attachments.map((a) => (
-                    <li key={a.id} className="flex items-center justify-between py-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
-                        <span className="truncate text-sm">{a.filename}</span>
-                        {a.category && (
-                          <Badge variant="outline" className="shrink-0 text-[10px]">
-                            {a.category}
-                          </Badge>
-                        )}
-                      </div>
-                      <a
-                        href={a.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm text-primary hover:underline shrink-0"
-                      >
-                        Abrir
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </CardContent>
-          </Card>
-          <AddDocumentsCard dealId={deal.id} onUploaded={() => router.refresh()} />
+        {/* DOCUMENTOS — pasta do deal com classificar/extrair/excluir (paridade vendas) */}
+        <TabsContent value="documentos" className="mt-4">
+          <LocacaoDocumentsTab
+            dealId={deal.id}
+            attachments={deal.attachments}
+            locadores={locadores}
+            locatarios={locatarios}
+            hasFiador={garantiaTipo === "fiador"}
+          />
         </TabsContent>
 
         {/* ASSINATURAS — envia o contrato aprovado pra ClickSign (igual venda) */}

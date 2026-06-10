@@ -1,0 +1,303 @@
+"use client";
+
+import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Input } from "@/components/ui/input";
+import {
+  MarkLostDialog,
+  LOCACAO_LOST_CATEGORIES,
+} from "@/components/pipeline/MarkLostDialog";
+import {
+  Check,
+  Copy,
+  ExternalLink,
+  FileText,
+  Pencil,
+  RotateCcw,
+  Trash2,
+  X,
+  XOctagon,
+} from "lucide-react";
+
+interface LocacaoDealHeaderActionsProps {
+  dealId: string;
+  title: string;
+  stageName: string | null;
+  formToken: string | null;
+  hasContract: boolean;
+  isLost: boolean;
+}
+
+/**
+ * Ações do header do deal de locação — paridade com o header do DealDetail de
+ * vendas (editar título, link do form, gerar/regerar contrato, perdido/reabrir,
+ * excluir). Reusa os endpoints kind-agnósticos de /api/pipeline/deals/[dealId].
+ */
+export function LocacaoDealHeaderActions({
+  dealId,
+  title,
+  stageName,
+  formToken,
+  hasContract,
+  isLost,
+}: LocacaoDealHeaderActionsProps) {
+  const router = useRouter();
+  const [markLostOpen, setMarkLostOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleDraft, setTitleDraft] = useState(title);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const isTerminal = stageName === "ADM" || isLost;
+
+  async function saveTitle() {
+    const trimmed = titleDraft.trim();
+    if (!trimmed || trimmed === title) {
+      setEditingTitle(false);
+      setTitleDraft(title);
+      return;
+    }
+    setBusy("title");
+    try {
+      const res = await fetch(`/api/pipeline/deals/${dealId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: trimmed }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        toast.error(data.error || "Erro ao renomear o negócio");
+        return;
+      }
+      toast.success("Título atualizado");
+      setEditingTitle(false);
+      router.refresh();
+    } catch {
+      toast.error("Erro de conexão");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  function copyFormLink() {
+    if (!formToken) return;
+    navigator.clipboard.writeText(`${window.location.origin}/f/${formToken}`);
+    toast.success("Link do formulário copiado!");
+  }
+
+  async function generateContract() {
+    setBusy("generate");
+    try {
+      const res = await fetch(`/api/pipeline/deals/${dealId}/generate-contract`, {
+        method: "POST",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "Erro ao gerar o contrato");
+        return;
+      }
+      toast.success(
+        hasContract
+          ? `Nova versão v${data.version} gerada`
+          : "Contrato de locação gerado"
+      );
+      router.refresh();
+    } catch {
+      toast.error("Erro de conexão");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function reopen() {
+    setBusy("reopen");
+    try {
+      const res = await fetch(`/api/pipeline/deals/${dealId}/reopen`, {
+        method: "POST",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "Erro ao reabrir o negócio");
+        return;
+      }
+      toast.success(`Negócio reaberto em "${data.stageName}"`);
+      router.refresh();
+    } catch {
+      toast.error("Erro de conexão");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function deleteDeal() {
+    setBusy("delete");
+    try {
+      const res = await fetch(`/api/pipeline/deals/${dealId}?deleteForm=true`, {
+        method: "DELETE",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "Erro ao excluir o negócio");
+        return;
+      }
+      toast.success("Negócio excluído");
+      router.push("/pipeline/locacao");
+      router.refresh();
+    } catch {
+      toast.error("Erro de conexão");
+    } finally {
+      setBusy(null);
+      setDeleteOpen(false);
+    }
+  }
+
+  return (
+    <div className="space-y-1">
+      {/* Título editável */}
+      {editingTitle ? (
+        <div className="flex items-center gap-2">
+          <Input
+            value={titleDraft}
+            onChange={(e) => setTitleDraft(e.target.value)}
+            className="h-9 max-w-md text-lg font-semibold"
+            maxLength={200}
+            autoFocus
+            onKeyDown={(e) => {
+              if (e.key === "Enter") saveTitle();
+              if (e.key === "Escape") {
+                setEditingTitle(false);
+                setTitleDraft(title);
+              }
+            }}
+            disabled={busy === "title"}
+          />
+          <Button size="sm" variant="ghost" onClick={saveTitle} disabled={busy === "title"}>
+            <Check className="h-4 w-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              setEditingTitle(false);
+              setTitleDraft(title);
+            }}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="group flex items-center gap-2 text-left"
+          onClick={() => setEditingTitle(true)}
+          title="Renomear negócio"
+        >
+          <h2 className="text-2xl font-semibold">{title}</h2>
+          <Pencil className="h-4 w-4 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+        </button>
+      )}
+
+      {/* Ações */}
+      <div className="flex gap-2 flex-wrap pt-1.5">
+        {formToken && (
+          <>
+            <Button variant="outline" size="sm" asChild>
+              <a href={`/f/${formToken}`} target="_blank" rel="noopener noreferrer">
+                <ExternalLink className="h-4 w-4 mr-1" />
+                Formulário
+              </a>
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={copyFormLink}
+              title="Copiar link do formulário para compartilhar"
+            >
+              <Copy className="h-4 w-4 mr-1" />
+              Copiar link
+            </Button>
+          </>
+        )}
+        <Button size="sm" onClick={generateContract} disabled={busy === "generate"}>
+          <FileText className="h-4 w-4 mr-1" />
+          {busy === "generate"
+            ? "Gerando..."
+            : hasContract
+              ? "Regerar contrato"
+              : "Gerar contrato"}
+        </Button>
+        {isLost && (
+          <Button size="sm" onClick={reopen} disabled={busy === "reopen"}>
+            <RotateCcw className="h-4 w-4 mr-1" />
+            {busy === "reopen" ? "Reabrindo..." : "Reabrir negócio"}
+          </Button>
+        )}
+        {!isTerminal && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-red-600 border-red-300 hover:bg-red-50 dark:hover:bg-red-950/20"
+            onClick={() => setMarkLostOpen(true)}
+          >
+            <XOctagon className="h-4 w-4 mr-1" />
+            Marcar como perdido
+          </Button>
+        )}
+        <Button
+          size="sm"
+          variant="outline"
+          className="text-destructive border-destructive/40 hover:bg-destructive/10"
+          onClick={() => setDeleteOpen(true)}
+        >
+          <Trash2 className="h-4 w-4 mr-1" />
+          Excluir negócio
+        </Button>
+      </div>
+
+      <MarkLostDialog
+        dealId={dealId}
+        open={markLostOpen}
+        onOpenChange={setMarkLostOpen}
+        categories={LOCACAO_LOST_CATEGORIES}
+      />
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir este negócio de locação?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Exclui o negócio, o formulário, os contratos e os anexos. Envelopes
+              de assinatura em andamento ou concluídos bloqueiam a exclusão.
+              Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy === "delete"}>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={(e) => {
+                e.preventDefault();
+                deleteDeal();
+              }}
+              disabled={busy === "delete"}
+            >
+              {busy === "delete" ? "Excluindo..." : "Excluir"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}

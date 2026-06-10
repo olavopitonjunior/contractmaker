@@ -16,10 +16,31 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
   const deal = await prisma.deal.findUnique({
     where: { id: params.dealId },
     include: {
-      form: { select: { id: true, schemaType: true, status: true } },
+      form: {
+        select: {
+          id: true,
+          schemaType: true,
+          status: true,
+          token: true,
+          dataJson: true,
+          createdAt: true,
+          completedAt: true,
+        },
+      },
       pipeline: { select: { orgId: true } },
       attachments: { orderBy: { createdAt: "desc" } },
       stage: { select: { name: true } },
+      envelopes: {
+        where: { source: "contract", status: "closed" },
+        select: { closedAt: true },
+        orderBy: { closedAt: "desc" },
+        take: 1,
+      },
+      commissionCharges: {
+        select: { createdAt: true },
+        orderBy: { createdAt: "asc" },
+        take: 1,
+      },
     },
   });
 
@@ -98,12 +119,27 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
         title: deal.title,
         stageName: deal.stage?.name ?? null,
         formStatus: deal.form?.status ?? null,
+        formToken: deal.form?.token ?? null,
+        dataJson: (deal.form?.dataJson as Record<string, unknown>) ?? {},
+        lostAt: deal.lostAt?.toISOString() ?? null,
+        lostReason: deal.lostReason ?? null,
+        formOpenedAt: deal.form?.createdAt?.toISOString() ?? null,
+        formCompletedAt: deal.form?.completedAt?.toISOString() ?? null,
+        contractSignedAt:
+          deal.envelopes[0]?.closedAt?.toISOString() ??
+          deal.contractSignedAt?.toISOString() ??
+          null,
+        chargeCreatedAt:
+          deal.commissionCharges[0]?.createdAt.toISOString() ??
+          deal.chargeIssuedAt?.toISOString() ??
+          null,
         attachments: deal.attachments.map((a) => ({
           id: a.id,
           filename: a.filename,
           url: a.url,
           mime: a.mime,
           category: a.category,
+          extractedData: (a.extractedData as Record<string, unknown> | null) ?? null,
           createdAt: a.createdAt.toISOString(),
         })),
       }}
