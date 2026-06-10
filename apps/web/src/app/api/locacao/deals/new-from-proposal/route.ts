@@ -105,8 +105,12 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
+  // Proposta tem locatário identificado → nasce em "Em Aprovação" (análise de
+  // crédito da ficha antes do form). Fallback "Formulário".
   const stage =
-    pipeline.stages.find((s) => s.name === "Formulário") ?? pipeline.stages[0];
+    pipeline.stages.find((s) => s.name === "Em Aprovação") ??
+    pipeline.stages.find((s) => s.name === "Formulário") ??
+    pipeline.stages[0];
 
   // 1. Extração best-effort — falha vira dataJson vazio.
   let extracted: Record<string, unknown> = {};

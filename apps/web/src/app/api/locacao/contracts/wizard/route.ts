@@ -83,8 +83,12 @@ export async function POST(req: NextRequest) {
       { status: 412 }
     );
   }
+  // Inquilino já identificado → deal nasce em "Em Aprovação" (análise de
+  // crédito da ficha). Fallback "Formulário" pra pipelines antigos.
   const firstStage =
-    pipeline.stages.find((s) => s.name === "Formulário") ?? pipeline.stages[0];
+    pipeline.stages.find((s) => s.name === "Em Aprovação") ??
+    pipeline.stages.find((s) => s.name === "Formulário") ??
+    pipeline.stages[0];
 
   const enderecoFmt = [property.rua, property.numero, property.bairro]
     .filter(Boolean)

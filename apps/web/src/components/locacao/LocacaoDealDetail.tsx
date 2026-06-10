@@ -15,6 +15,10 @@ import {
   LocacaoDocumentsTab,
   type LocacaoAttachment,
 } from "@/components/locacao/LocacaoDocumentsTab";
+import {
+  LocacaoCreditAnalysisCard,
+  type SerasaJobSummary,
+} from "@/components/locacao/LocacaoCreditAnalysisCard";
 import { DealProgressTimeline } from "@/components/pipeline/DealProgressTimeline";
 import { LostDealBanner } from "@/components/pipeline/LostDealBanner";
 import { Field } from "@/components/locacao/lease-detail/LeaseSection";
@@ -64,6 +68,10 @@ interface LocacaoDealDetailProps {
   contract: ContractProp | null;
   versions: VersionsProp;
   lease: LeaseProp | null;
+  /** Consentimento LGPD Serasa já registrado no deal. */
+  serasaConsent?: boolean;
+  /** Consultas Serasa do deal (análise de crédito), mais recentes primeiro. */
+  serasaJobs?: SerasaJobSummary[];
   /** Modo simplificado (LOCACAO_SIMPLIFIED_MODE): mostra só Dados, Contrato,
    *  Documentos e Assinaturas; esconde as abas de administração. */
   simplified?: boolean;
@@ -72,12 +80,21 @@ interface LocacaoDealDetailProps {
 const BRL = (v: number) =>
   v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 
-export function LocacaoDealDetail({ deal, contract, versions, lease, simplified = false }: LocacaoDealDetailProps) {
+export function LocacaoDealDetail({
+  deal,
+  contract,
+  versions,
+  lease,
+  serasaConsent = false,
+  serasaJobs = [],
+  simplified = false,
+}: LocacaoDealDetailProps) {
   const router = useRouter();
   const [tab, setTab] = useState("dados");
   const [activating, setActivating] = useState(false);
 
   const isLost = deal.lostAt !== null;
+  const inAprovacao = deal.stageName === "Em Aprovação";
   const readyForAdm =
     (deal.stageName === "Assinado" || deal.stageName === "Cobrança Gerada") &&
     lease !== null &&
@@ -148,6 +165,16 @@ export function LocacaoDealDetail({ deal, contract, versions, lease, simplified 
           contractSignedAt={deal.contractSignedAt}
           chargeCreatedAt={deal.chargeCreatedAt}
           commissionPaidAt={null}
+        />
+      )}
+
+      {/* Análise de crédito — stage "Em Aprovação" (ou histórico de consultas) */}
+      {!isLost && (inAprovacao || serasaJobs.length > 0) && (
+        <LocacaoCreditAnalysisCard
+          dealId={deal.id}
+          stageName={deal.stageName}
+          hasConsent={serasaConsent}
+          jobs={serasaJobs}
         />
       )}
 
