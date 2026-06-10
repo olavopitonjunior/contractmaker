@@ -102,11 +102,23 @@ export function registerHandlebarsHelpers(): void {
     return valorPorExtenso(valor);
   });
 
-  // Numero por extenso SEM o sufixo "reais" (para prazos, percentuais, quantidades)
-  Handlebars.registerHelper('numeroExtenso', (valor: number) => {
+  // Numero por extenso SEM o sufixo "reais" (para prazos, percentuais, quantidades).
+  // 2º arg opcional "f" flexiona pro feminino ("duas vagas", "trezentas e uma
+  // cotas") — default masculino preserva os templates existentes (aditivo).
+  // Antes de "mil" a flexão vale ("duas mil"); antes de milhão/bilhão não
+  // ("dois milhões"), pois o substantivo contado ali é o próprio "milhão".
+  Handlebars.registerHelper('numeroExtenso', (valor: number, ...rest: unknown[]) => {
     if (valor === null || valor === undefined) return '';
-    const full = valorPorExtenso(valor);
-    return full.replace(/\s*reais?$/, '').replace(/\s*real$/, '');
+    // Handlebars sempre injeta o options hash como último argumento.
+    const genero = rest.length > 1 && rest[0] === 'f' ? 'f' : 'm';
+    let out = valorPorExtenso(valor).replace(/\s*reais?$/, '').replace(/\s*real$/, '');
+    if (genero === 'f') {
+      out = out
+        .replace(/\bum\b(?! (?:milh|bilh))/g, 'uma')
+        .replace(/\bdois\b(?! (?:milh|bilh))/g, 'duas')
+        .replace(/\b(duzent|trezent|quatrocent|quinhent|seiscent|setecent|oitocent|novecent)os\b(?! (?:milh|bilh))/g, '$1as');
+    }
+    return out;
   });
 
   // Formata numero no padrao brasileiro (virgula decimal, ponto milhar).

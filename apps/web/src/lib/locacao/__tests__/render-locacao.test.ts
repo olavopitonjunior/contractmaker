@@ -44,6 +44,7 @@ const sample = dadosLocacaoSchema.parse({
     cidade: "São Paulo",
     uf: "SP",
     cep: "01234567",
+    vagas_garagem: 2,
     descricao: "Apartamento de 2 quartos, 1 vaga, no 3º andar.",
   },
   aluguel: {
@@ -104,6 +105,32 @@ describe("template locação residencial v3 + enrich", () => {
   it("inclui as cláusulas fixas do modelo NNI (seguro incêndio 100x, honorários 20%)", () => {
     expect(html).toContain("100 (cem) vezes o valor do aluguel");
     expect(html).toContain("20% (vinte por cento)");
+  });
+
+  it("flexiona vagas de garagem no feminino (duas, não dois)", () => {
+    expect(html).toContain("com 2 (duas) vaga(s) de garagem");
+  });
+});
+
+describe("helper numeroExtenso — flexão de gênero", () => {
+  const render = (tpl: string, data: Record<string, unknown>) =>
+    renderContratoHTML(tpl, data);
+
+  it("default continua masculino (aditivo)", () => {
+    expect(render("{{numeroExtenso n}}", { n: 2 })).toBe("dois");
+    expect(render("{{numeroExtenso n}}", { n: 21 })).toBe("vinte e um");
+  });
+
+  it('"f" flexiona unidades e centenas', () => {
+    expect(render('{{numeroExtenso n "f"}}', { n: 1 })).toBe("uma");
+    expect(render('{{numeroExtenso n "f"}}', { n: 2 })).toBe("duas");
+    expect(render('{{numeroExtenso n "f"}}', { n: 22 })).toBe("vinte e duas");
+    expect(render('{{numeroExtenso n "f"}}', { n: 301 })).toBe("trezentas e uma");
+  });
+
+  it('"f" flexiona antes de mil, mas não antes de milhões', () => {
+    expect(render('{{numeroExtenso n "f"}}', { n: 2000 })).toBe("duas mil");
+    expect(render('{{numeroExtenso n "f"}}', { n: 2000000 })).toBe("dois milhões");
   });
 });
 
