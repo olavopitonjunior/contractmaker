@@ -654,7 +654,9 @@ REGRAS:
 7. No máximo 3 findings por chamada — priorize os mais críticos. Cada finding deve apontar UM problema único e distinto; não fragmente o mesmo problema em múltiplos findings.
 8. message: máximo 2 frases curtas. Vá direto ao ponto, sem prólogo.
 9. Se você já viu este trecho com este tipo de problema antes, NÃO repita — a deduplicação é por (categoria + trecho), não por phrasing.
-10. NUNCA invente valores plausíveis para campos qualificatórios ausentes (profissão, nacionalidade, naturalidade, RG, estado civil, nome da mãe). Se o contrato tem esses campos vazios ou claramente inválidos (ex: "[preencher profissão]"), reporte como finding category="qualification" severity="warning" e suggestedFix="preencher manualmente — não invente". Profissões alucinadas como "economiário" são proibidas.`;
+10. NUNCA invente valores plausíveis para campos qualificatórios ausentes (profissão, nacionalidade, naturalidade, RG, estado civil, nome da mãe). Se o contrato tem esses campos vazios ou claramente inválidos (ex: "[preencher profissão]"), reporte como finding category="qualification" severity="warning" e suggestedFix="preencher manualmente — não invente". Profissões alucinadas como "economiário" são proibidas.
+11. CONVENÇÃO DE VIGÊNCIA: contrato de N meses iniciado no dia D termina na VÉSPERA do mesmo dia D, N meses depois — isso conta como EXATAMENTE N meses (ex.: início 01/07/2026 + 30 meses → término 31/12/2028 está correto). NÃO aponte essa convenção como prazo inconsistente; só reporte prazo se a diferença real exceder a véspera em mais de 1 dia.
+12. O TEXTO do contrato é a fonte de verdade; os DADOS DO CONTRATO (JSON) são metadados que podem estar momentaneamente defasados após uma edição. Divergência texto↔JSON do MESMO campo (valor, índice, foro, datas): no máximo 1 finding severity="warning" category="logic" com suggestedFix="sincronizar os dados estruturados com o texto". NUNCA "error", e NÃO crie o finding espelhado (JSON↔texto) da mesma divergência — se qualquer lado dela já foi apontado, não repita.`;
 
 const MAX_AI_UNRESOLVED_COMMENTS = 50;
 
@@ -675,13 +677,17 @@ export async function runPassiveAnalysis(
     return { findings: [], commentsCreated: 0, modelUsed: "none" };
   }
 
-  const existingUnresolved = await prisma.contractComment.count({
+  const unresolvedComments = await prisma.contractComment.findMany({
     where: {
       contractId: params.contractId,
       authorType: "ai",
       resolved: false,
     },
+    orderBy: { createdAt: "desc" },
+    select: { text: true },
+    take: MAX_AI_UNRESOLVED_COMMENTS,
   });
+  const existingUnresolved = unresolvedComments.length;
   if (existingUnresolved >= MAX_AI_UNRESOLVED_COMMENTS) {
     return {
       findings: [],
@@ -761,6 +767,15 @@ export async function runPassiveAnalysis(
       analysisInput = htmlContent.slice(0, 8000);
     }
 
+    // Comentários pendentes entram no prompt pra regra 9/12 ser aplicável:
+    // sem isso o modelo não tem como saber o que já foi apontado e re-flagra
+    // a mesma divergência com phrasing novo (escapa do dedupeKey).
+    const pendingBlock = unresolvedComments.length
+      ? `\n\n---\n\nPROBLEMAS JÁ APONTADOS (pendentes — NÃO repita nem crie variações/espelhos destes):\n${unresolvedComments
+          .map((c) => `- ${c.text.slice(0, 200)}`)
+          .join("\n")}`
+      : "";
+
     const t0 = Date.now();
     try {
       const response = await anthropic.messages.create({
@@ -771,7 +786,7 @@ export async function runPassiveAnalysis(
         messages: [
           {
             role: "user",
-            content: `DADOS DO CONTRATO (JSON):\n${JSON.stringify(contract.dataJson, null, 2)}\n\n---\n\nHTML DO CONTRATO:\n${analysisInput}`,
+            content: `DADOS DO CONTRATO (JSON):\n${JSON.stringify(contract.dataJson, null, 2)}\n\n---\n\nHTML DO CONTRATO:\n${analysisInput}${pendingBlock}`,
           },
         ],
       });
