@@ -560,16 +560,17 @@ const FEDERAL_ENDPOINTS = new Set<string>([
 const PESQUISA_ENDPOINTS = new Set<string>(["onr/mapa-registro-imoveis"]);
 
 /**
- * Camada de seleção de um job. Regra: vendedores (+ dependentes) = "padrao";
- * compradores e pessoas adicionadas manualmente (diligenciado) = "opcional";
- * jobs de imóvel/registro (IPTU/ONR matrícula) = "opcional"; pesquisa de bens
- * e extras = "pesquisa".
+ * Camada de seleção de um job. Regra: vendedores (+ dependentes) e pessoas
+ * adicionadas manualmente (diligenciado) = "padrao" — quem adiciona um
+ * diligenciado quer diligenciá-lo, então ele nasce pré-marcado e entra no
+ * "Só as que faltaram"; compradores = "opcional"; jobs de imóvel/registro
+ * (IPTU/ONR matrícula) = "opcional"; pesquisa de bens e extras = "pesquisa".
  */
 function tierForJob(kind: TargetKind, endpoint: string): JobTier {
   if (PESQUISA_ENDPOINTS.has(endpoint) || endpoint.startsWith("serasa/")) return "pesquisa";
   if (kind === "imovel") return "imovel"; // IPTU/municipal, matrícula ONR (visualização), CCIR
-  if (VENDEDOR_SIDE_KINDS.has(kind)) return "padrao";
-  // comprador, diligenciado (outras pessoas)
+  if (VENDEDOR_SIDE_KINDS.has(kind) || kind === "diligenciado") return "padrao";
+  // comprador (opt-in via seção Opcional)
   return "opcional";
 }
 

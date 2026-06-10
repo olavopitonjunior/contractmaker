@@ -15,6 +15,13 @@
 
 ## Bugs Ativos
 
+### [ALTA] Certidoes: diligenciado (tier opcional) ficava fora do lote + obter e-SAJ recusava pedido_data DD/MM/YYYY
+- **Status:** em progresso (fix no PR #66; pendente merge + QA no deal cmpypeb95)
+- **Encontrado em:** 2026-06-09 (deal cmpypeb950007sdha0zb7tveq, prod)
+- **Descricao:** (1) PJs avulsas adicionadas como DiligentedPerson nunca viravam CertidaoJob: `tierForJob` dava tier "opcional" a diligenciado -> nasciam desmarcadas em secao colapsada do ExtractCertidoesDialog, e "So as que faltaram" varre apenas tier "padrao" SUBSTITUINDO a selecao inteira (desmarca ate selecao manual previa). (2) 4 pedidos TJSP presos em `awaiting_portal`: o poll do `tribunal/tjsp/obter-certidao` enviava `pedido_data` em DD/MM/YYYY (formato persistido no DB via formatDateBR) e a Infosimples valida como ISO — 607 com `errors[]: "pedido_data possui um valor invalido"` em todo ciclo ate o prazo de 7d. O `code_message` do 607 lista TODOS os params ("cnpj, cpf, numero_pedido, pedido_data") — a causa especifica so aparece em `errors[]` (mesma licao do 604: classificar pelo texto combinado).
+- **Impacto:** Diligenciados (socios PJ, fiadores, terceiros) silenciosamente fora dos lotes; certidoes TJSP two-step nunca baixavam (morriam por "prazo do portal esgotado" apos 7d).
+- **Solucao:** `tierForJob`: diligenciado -> "padrao" (pre-marcado + incluido no "So as que faltaram"); `normalizePedidoData` DD/MM/YYYY -> ISO na hora do obter (cobre jobs antigos do DB); trim no numero_pedido (TRF3 devolve com espaco a esquerda). Reproduzido com chamada real: 607 -> 200 com ISO.
+
 ### [MEDIA] Campos config vazios no template legado v1
 - **Status:** aberto (nao afeta templates v2)
 - **Encontrado em:** 2026-04-10

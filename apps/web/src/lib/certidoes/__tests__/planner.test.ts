@@ -1037,6 +1037,34 @@ describe("Redesign 2026-05-26 — regiões (imóvel + endereço) e camadas (tier
     expect(comp.every((j) => j.tier === "opcional")).toBe(true);
   });
 
+  it("diligenciado (PJ adicionada manualmente) → tier padrão, pré-marcado no lote", () => {
+    const plan = planCertidoesForDeal(
+      { vendedores: [VENDEDOR_PF_SP], compradores: [], imoveis: [IMOVEL_SP] },
+      undefined,
+      [
+        {
+          id: "dlg1",
+          tipoPessoa: "juridica",
+          nome: "DALLAMICO SISTEMAS LTDA",
+          cpf: null,
+          cnpj: "44814110000162",
+          dataNascimento: null,
+          uf: "SP",
+          cidade: "Sao Vicente",
+        },
+      ]
+    );
+    const dlg = plan.jobs.filter((j) => j.targetKind === "diligenciado");
+    expect(dlg.length).toBeGreaterThan(0);
+    // Jobs PJ federais e regionais saem com CNPJ.
+    expect(dlg.some((j) => j.endpoint === "receita-federal/pgfn")).toBe(true);
+    // Pessoa adicionada manualmente = intenção explícita → padrão (pré-marcada,
+    // incluída no "Só as que faltaram"). Pesquisa/Serasa continuam no próprio tier.
+    expect(
+      dlg.filter((j) => j.tier !== "pesquisa").every((j) => j.tier === "padrao")
+    ).toBe(true);
+  });
+
   it("IPTU/municipal do imóvel → tier imovel, region imovel", () => {
     const plan = planCertidoesForDeal({
       vendedores: [VENDEDOR_PF_SP],
