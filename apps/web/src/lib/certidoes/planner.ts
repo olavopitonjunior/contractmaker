@@ -432,6 +432,12 @@ export interface DiligentedPersonInput {
   dataNascimento?: string | null;
   uf?: string | null;
   cidade?: string | null;
+  // 2026-06-10 — campos que destravam certidões de PF avulsa (TJSP pedido-certidao
+  // exige rg+genero; antecedentes exige nome_mae+nascimento). Antes não existiam no
+  // cadastro do diligenciado, então essas certidões caíam em "faltam dados".
+  rg?: string | null;
+  nomeMae?: string | null;
+  sexo?: string | null;
 }
 
 function diligenciadoToParte(d: DiligentedPersonInput): Parte {
@@ -441,6 +447,9 @@ function diligenciadoToParte(d: DiligentedPersonInput): Parte {
     cpf: d.cpf ?? undefined,
     cnpj: d.cnpj ?? undefined,
     data_nascimento: d.dataNascimento ?? undefined,
+    rg: d.rg ?? undefined,
+    nome_mae: d.nomeMae ?? undefined,
+    sexo: d.sexo ?? undefined,
     uf: d.uf ?? undefined,
     cidade: d.cidade ?? undefined,
   };

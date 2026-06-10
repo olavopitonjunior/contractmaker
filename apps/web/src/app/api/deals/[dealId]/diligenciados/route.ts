@@ -48,6 +48,10 @@ const createSchema = z.object({
   cpf: z.string().optional().nullable(),
   cnpj: z.string().optional().nullable(),
   dataNascimento: z.string().optional().nullable(),
+  // PF — destravam TJSP (rg+sexo) e antecedentes (nomeMae+nascimento).
+  rg: z.string().max(40).optional().nullable(),
+  nomeMae: z.string().max(200).optional().nullable(),
+  sexo: z.string().max(20).optional().nullable(),
   uf: z.string().max(2).optional().nullable(),
   cidade: z.string().optional().nullable(),
   relacao: z.string().optional().nullable(),
@@ -88,6 +92,10 @@ export async function POST(
       cpf: sanitize(parsed.data.cpf ?? null),
       cnpj: sanitize(parsed.data.cnpj ?? null),
       dataNascimento: parsed.data.dataNascimento?.trim() || null,
+      // RG aceita letra/dígito-verificador (ex.: "X") → não sanitiza p/ só dígitos.
+      rg: parsed.data.rg?.trim() || null,
+      nomeMae: parsed.data.nomeMae?.trim() || null,
+      sexo: parsed.data.sexo?.trim().toLowerCase() || null,
       uf: parsed.data.uf?.trim().toUpperCase() || null,
       cidade: parsed.data.cidade?.trim() || null,
       relacao: parsed.data.relacao?.trim() || null,

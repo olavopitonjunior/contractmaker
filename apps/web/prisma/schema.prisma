@@ -495,6 +495,9 @@ model DiligentedPerson {
   cpf            String?
   cnpj           String?
   dataNascimento String?
+  rg             String? // PF — exigido pelo TJSP pedido-certidao
+  nomeMae        String? // PF — destrava antecedentes criminais
+  sexo           String? // PF — "masculino" | "feminino" (normalizado p/ M/F no planner)
   uf             String?
   cidade         String?
   relacao        String? // "socio" | "avalista" | "procurador" | "outro"

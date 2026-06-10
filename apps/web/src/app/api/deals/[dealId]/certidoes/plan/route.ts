@@ -65,6 +65,9 @@ export async function GET(
     cpf: d.cpf,
     cnpj: d.cnpj,
     dataNascimento: d.dataNascimento,
+    rg: d.rg,
+    nomeMae: d.nomeMae,
+    sexo: d.sexo,
     uf: d.uf,
     cidade: d.cidade,
   }));
