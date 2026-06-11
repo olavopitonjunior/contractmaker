@@ -7,6 +7,7 @@ import {
 } from "@/lib/locacao/route-helpers";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { withIdempotency } from "@/lib/api/idempotency";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { extractLocacaoContractDataJson } from "@/lib/extraction/locacao-extractor";
 import { getPipelineByKind } from "@/lib/modules/resolve";
@@ -93,120 +94,134 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const pipeline = await getPipelineByKind(ctx.orgId, MODULE.LOCACAO, {
-    include: { stages: { orderBy: { position: "asc" } } },
-  });
-  if (!pipeline || pipeline.stages.length === 0) {
-    return NextResponse.json(
-      {
-        error:
-          "Pipeline de locação não configurado. Rode seed-pipeline-locacao.ts --apply.",
-      },
-      { status: 400 }
-    );
-  }
-  // Proposta tem locatário identificado → nasce em "Em Aprovação" (análise de
-  // crédito da ficha antes do form). Fallback "Formulário".
-  const stage =
-    pipeline.stages.find((s) => s.name === "Em Aprovação") ??
-    pipeline.stages.find((s) => s.name === "Formulário") ??
-    pipeline.stages[0];
+  // Idempotência server-side (mesmo contrato da rota de vendas): duplo clique
+  // ou retry de rede não pode criar 2 deals + 2 forms.
+  const idempotencyKey = req.headers.get("x-idempotency-key");
+  const result = await withIdempotency({
+    userId: ctx.userId,
+    key: idempotencyKey,
+    method: "POST",
+    path: "/api/locacao/deals/new-from-proposal",
+    handler: async (): Promise<{ status: number; body: unknown }> => {
+      const pipeline = await getPipelineByKind(ctx.orgId, MODULE.LOCACAO, {
+        include: { stages: { orderBy: { position: "asc" } } },
+      });
+      if (!pipeline || pipeline.stages.length === 0) {
+        return {
+          status: 400,
+          body: {
+            error:
+              "Pipeline de locação não configurado. Rode seed-pipeline-locacao.ts --apply.",
+          },
+        };
+      }
+      // Proposta tem locatário identificado → nasce em "Em Aprovação" (análise
+      // de crédito da ficha antes do form). Fallback "Formulário".
+      const stage =
+        pipeline.stages.find((s) => s.name === "Em Aprovação") ??
+        pipeline.stages.find((s) => s.name === "Formulário") ??
+        pipeline.stages[0];
 
-  // 1. Extração best-effort — falha vira dataJson vazio.
-  let extracted: Record<string, unknown> = {};
-  let finalidade: "residencial" | "comercial" = finalidadeInput ?? "residencial";
-  try {
-    const result = await extractLocacaoContractDataJson(buffer, mime, {
-      orgId: ctx.orgId,
-      userId: ctx.userId,
-    });
-    extracted = result.dataJson;
-    // Extração com dados vence o default; a escolha explícita do operador
-    // vence quando a extração veio vazia.
-    if (Object.keys(extracted).length > 0) {
-      finalidade = result.finalidade;
-    }
-  } catch (err) {
-    console.error("[locacao/new-from-proposal] extração falhou:", err);
-  }
-  const schemaType =
-    finalidade === "comercial" ? LOCACAO_COMERCIAL_SCHEMA_TYPE : LOCACAO_SCHEMA_TYPE;
+      // 1. Extração best-effort — falha vira dataJson vazio.
+      let extracted: Record<string, unknown> = {};
+      let finalidade: "residencial" | "comercial" = finalidadeInput ?? "residencial";
+      try {
+        const result = await extractLocacaoContractDataJson(buffer, mime, {
+          orgId: ctx.orgId,
+          userId: ctx.userId,
+        });
+        extracted = result.dataJson;
+        // Só a finalidade DETECTADA pelo Gemini vence a escolha do operador —
+        // ausência de finalidade na extração não pode rebaixar "comercial" pro
+        // default residencial.
+        if (result.finalidadeDetected) {
+          finalidade = result.finalidade;
+        }
+      } catch (err) {
+        console.error("[locacao/new-from-proposal] extração falhou:", err);
+      }
+      const schemaType =
+        finalidade === "comercial" ? LOCACAO_COMERCIAL_SCHEMA_TYPE : LOCACAO_SCHEMA_TYPE;
 
-  // 2. SalesForm pré-preenchido + Deal kind=locacao em "Formulário"
-  const form = await prisma.salesForm.create({
-    data: {
-      orgId: ctx.orgId,
-      title,
-      schemaType,
-      dataJson: extracted as Prisma.InputJsonValue,
-      status: "rascunho",
+      // 2. SalesForm pré-preenchido + Deal kind=locacao
+      const form = await prisma.salesForm.create({
+        data: {
+          orgId: ctx.orgId,
+          title,
+          schemaType,
+          dataJson: extracted as Prisma.InputJsonValue,
+          status: "rascunho",
+        },
+      });
+
+      const dealsInStage = await prisma.deal.count({ where: { stageId: stage.id } });
+      const deal = await prisma.deal.create({
+        data: {
+          pipelineId: pipeline.id,
+          stageId: stage.id,
+          userId: ctx.userId,
+          formId: form.id,
+          kind: "locacao",
+          title: title || `Proposta de locação — ${file.name}`,
+          position: dealsInStage,
+        },
+      });
+
+      // 3. Proposta bruta como FormAttachment (visível na etapa 0 do form)
+      const safeName = file.name.replace(/[^\w.\-]+/g, "_");
+      const storageKey = `proposals/${ctx.orgId}/${form.id}/${Date.now()}-${safeName}`;
+      try {
+        const blobUrl = await uploadBufferToStorage({
+          key: storageKey,
+          body: buffer,
+          contentType: mime,
+        });
+        await prisma.formAttachment.create({
+          data: {
+            formId: form.id,
+            filename: file.name,
+            mime,
+            url: blobUrl,
+            category: "proposta_original",
+            status: "ready",
+            extractedData: extracted as Prisma.InputJsonValue,
+          },
+        });
+      } catch (err) {
+        console.error("[locacao/new-from-proposal] Falha ao subir Blob:", err);
+        return {
+          status: 500,
+          body: {
+            error:
+              "Falha ao salvar arquivo no storage. Verifique BLOB_READ_WRITE_TOKEN.",
+            dealId: deal.id,
+            formToken: form.token,
+          },
+        };
+      }
+
+      audit(extractAuditContextFromRequest(req, ctx.orgId, ctx.userId), {
+        action: "FORM_PREFILLED_FROM_PROPOSAL",
+        result: "SUCCESS",
+        resource: form.id,
+        resourceType: "SalesForm",
+        metadata: {
+          dealId: deal.id,
+          formToken: form.token,
+          filename: file.name,
+          mime,
+          sizeBytes: file.size,
+          schemaType,
+          extractedTopKeys: Object.keys(extracted),
+        },
+      });
+
+      return {
+        status: 201,
+        body: { dealId: deal.id, formToken: form.token, formId: form.id },
+      };
     },
   });
 
-  const dealsInStage = await prisma.deal.count({ where: { stageId: stage.id } });
-  const deal = await prisma.deal.create({
-    data: {
-      pipelineId: pipeline.id,
-      stageId: stage.id,
-      userId: ctx.userId,
-      formId: form.id,
-      kind: "locacao",
-      title: title || `Proposta de locação — ${file.name}`,
-      position: dealsInStage,
-    },
-  });
-
-  // 3. Proposta bruta como FormAttachment (visível na etapa 0 do form)
-  const safeName = file.name.replace(/[^\w.\-]+/g, "_");
-  const storageKey = `proposals/${ctx.orgId}/${form.id}/${Date.now()}-${safeName}`;
-  try {
-    const blobUrl = await uploadBufferToStorage({
-      key: storageKey,
-      body: buffer,
-      contentType: mime,
-    });
-    await prisma.formAttachment.create({
-      data: {
-        formId: form.id,
-        filename: file.name,
-        mime,
-        url: blobUrl,
-        category: "proposta_original",
-        status: "ready",
-        extractedData: extracted as Prisma.InputJsonValue,
-      },
-    });
-  } catch (err) {
-    console.error("[locacao/new-from-proposal] Falha ao subir Blob:", err);
-    return NextResponse.json(
-      {
-        error:
-          "Falha ao salvar arquivo no storage. Verifique BLOB_READ_WRITE_TOKEN.",
-        dealId: deal.id,
-        formToken: form.token,
-      },
-      { status: 500 }
-    );
-  }
-
-  audit(extractAuditContextFromRequest(req, ctx.orgId, ctx.userId), {
-    action: "FORM_PREFILLED_FROM_PROPOSAL",
-    result: "SUCCESS",
-    resource: form.id,
-    resourceType: "SalesForm",
-    metadata: {
-      dealId: deal.id,
-      formToken: form.token,
-      filename: file.name,
-      mime,
-      sizeBytes: file.size,
-      schemaType,
-      extractedTopKeys: Object.keys(extracted),
-    },
-  });
-
-  return NextResponse.json(
-    { dealId: deal.id, formToken: form.token, formId: form.id },
-    { status: 201 }
-  );
+  return NextResponse.json(result.body, { status: result.status });
 }

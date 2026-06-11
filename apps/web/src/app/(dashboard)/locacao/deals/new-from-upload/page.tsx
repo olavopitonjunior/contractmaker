@@ -39,9 +39,15 @@ export default function NewLocacaoDealFromUploadPage() {
     if (title.trim()) formData.append("title", title.trim());
     formData.append("targetStage", targetStage);
 
+    const idempotencyKey =
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+
     try {
       const res = await fetch("/api/locacao/deals/import-contract", {
         method: "POST",
+        headers: { "x-idempotency-key": idempotencyKey },
         body: formData,
       });
       const data = await res.json();

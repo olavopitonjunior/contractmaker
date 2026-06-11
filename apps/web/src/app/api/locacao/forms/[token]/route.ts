@@ -114,8 +114,9 @@ export async function PATCH(
       }
 
       // Sino: avisa a equipe que o cliente finalizou o form (paridade com
-      // vendas). batchId=form.id deduplica re-finalizações. Fire-and-forget.
-      void emitNotification({
+      // vendas). batchId=form.id deduplica re-finalizações. waitUntil: void
+      // após o response é cancelado na Vercel.
+      waitUntil(emitNotification({
         orgId: form.orgId,
         type: "form_completed",
         title: "Formulário de locação finalizado",
@@ -123,7 +124,7 @@ export async function PATCH(
         linkUrl: `/locacao/deals/${deal.id}`,
         metadata: { dealId: deal.id, formId: form.id },
         batchId: form.id,
-      });
+      }));
 
       // Copia FormAttachment → DealAttachment (dedupe por URL).
       try {

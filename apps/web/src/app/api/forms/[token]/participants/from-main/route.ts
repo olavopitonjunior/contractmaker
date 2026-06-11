@@ -128,7 +128,29 @@ export async function POST(
     });
   }
 
-  const all = [...existing, ...created];
+  // Renova subtokens vencidos (TTL 7d) — sem isso a rota idempotente devolvia
+  // URL morta pra forms antigos (locação costuma passar de 7 dias) e não há
+  // caminho público de regeneração.
+  const now = Date.now();
+  const all = await Promise.all(
+    [...existing, ...created].map(async (p) => {
+      if (p.tokenExp.getTime() > now) return p;
+      const { token, exp } = signParticipantToken(
+        {
+          participantId: p.id,
+          formId: form.id,
+          role: p.role as ParticipantRole,
+          partyIndex: p.partyIndex,
+        },
+        secret,
+      );
+      return prisma.salesFormParticipant.update({
+        where: { id: p.id },
+        data: { token, tokenExp: exp },
+      });
+    }),
+  );
+
   return NextResponse.json({
     participants: all.map((p) => ({
       id: p.id,

@@ -148,8 +148,8 @@ export async function PATCH(
 
       // Sino: avisa a equipe que o cliente finalizou o form (o corretor não
       // descobre mais só olhando o kanban). batchId=form.id deduplica
-      // re-finalizações. Fire-and-forget.
-      void emitNotification({
+      // re-finalizações. waitUntil: void após o response é cancelado na Vercel.
+      waitUntil(emitNotification({
         orgId: form.orgId,
         type: "form_completed",
         title: "Formulário finalizado pelo cliente",
@@ -157,7 +157,7 @@ export async function PATCH(
         linkUrl: `/deals/${deal.id}`,
         metadata: { dealId: deal.id, formId: form.id },
         batchId: form.id,
-      });
+      }));
 
       try {
         const formAttachments = await prisma.formAttachment.findMany({

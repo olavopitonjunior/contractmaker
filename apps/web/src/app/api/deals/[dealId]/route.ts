@@ -125,7 +125,12 @@ export async function PATCH(
 
   const updated = await prisma.deal.update({
     where: { id: deal.id },
-    data: parsed.data,
+    data: {
+      ...parsed.data,
+      // Aging por stage: qualquer mudança de stage carimba a entrada (mesmo
+      // invariante do PATCH session em /api/pipeline/deals/[dealId]).
+      ...(parsed.data.stageId ? { stageEnteredAt: new Date() } : {}),
+    },
     include: { stage: { select: { id: true, name: true } } },
   });
 

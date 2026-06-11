@@ -49,7 +49,12 @@ export function NovoNegocioLocacaoDropdown({
         <DropdownMenuContent align="end" className="w-72">
           <DropdownMenuItem
             className="flex items-start gap-3 py-2"
-            onSelect={() => setFormDialogOpen(true)}
+            onSelect={(e) => {
+              // preventDefault: o close+restore-focus default do Radix fecha
+              // o Dialog controlado aberto no mesmo tick.
+              e.preventDefault();
+              setFormDialogOpen(true);
+            }}
           >
             <FileText className="h-4 w-4 mt-0.5 shrink-0" />
             <div className="flex flex-col gap-0.5">
@@ -93,7 +98,10 @@ export function NovoNegocioLocacaoDropdown({
           <DropdownMenuItem
             className="flex items-start gap-3 py-2"
             disabled={wizardDisabled}
-            onSelect={() => setWizardOpen(true)}
+            onSelect={(e) => {
+              e.preventDefault();
+              setWizardOpen(true);
+            }}
           >
             <ListChecks className="h-4 w-4 mt-0.5 shrink-0" />
             <div className="flex flex-col gap-0.5">

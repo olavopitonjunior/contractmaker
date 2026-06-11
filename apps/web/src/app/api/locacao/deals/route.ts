@@ -82,11 +82,15 @@ export async function POST(req: NextRequest) {
         schemaType: LOCACAO_SCHEMA_TYPE,
         status: "vinculado",
         dataJson: {
-          locador: property.ownerships.map((o) => ({
+          // Chaves PLURAIS — shape canônico do dadosLocacaoSchema. As versões
+          // singulares quebravam aba Dados/credit-analysis/derive (review 06/10).
+          locadores: property.ownerships.map((o) => ({
             tipo_pessoa: "fisica",
             nome: o.owner.nome,
           })),
-          locatario: [{ tipo_pessoa: "fisica", nome: tenant.nome }],
+          locatarios: [
+            { tipo_pessoa: "fisica", nome: tenant.nome, cpf: tenant.cpfCnpj ?? "" },
+          ],
           imovel: {
             rua: property.rua,
             numero: property.numero,

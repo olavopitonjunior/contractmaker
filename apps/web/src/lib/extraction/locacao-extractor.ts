@@ -106,6 +106,12 @@ export interface LocacaoExtractionResult {
   dataJson: Record<string, unknown>;
   /** Heurística do Gemini pra escolher o schemaType. Default residencial. */
   finalidade: "residencial" | "comercial";
+  /**
+   * true só quando o Gemini retornou `finalidade` explícita e válida. O prompt
+   * manda OMITIR campos incertos — sem essa flag, o default "residencial"
+   * atropelava a escolha explícita do operador no caller.
+   */
+  finalidadeDetected: boolean;
 }
 
 /**
@@ -132,8 +138,10 @@ export function splitFinalidade(
   raw: Record<string, unknown>
 ): LocacaoExtractionResult {
   const { finalidade, ...dataJson } = raw;
+  const detected = finalidade === "comercial" || finalidade === "residencial";
   return {
     dataJson,
     finalidade: finalidade === "comercial" ? "comercial" : "residencial",
+    finalidadeDetected: detected,
   };
 }

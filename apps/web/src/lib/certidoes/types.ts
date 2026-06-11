@@ -7,7 +7,11 @@ export type TargetKind =
   // 2026-05-22). targetIndex referencia o índice do vendedor titular.
   | "conjuge_vendedor"
   | "procurador_vendedor"
-  | "representante_vendedor";
+  | "representante_vendedor"
+  // Locação (análise de crédito Serasa, 2026-06-10). fiador vive em
+  // garantia.fiador (objeto, sem índice).
+  | "locatario"
+  | "fiador";
 
 export type JobStatus =
   | "pending"

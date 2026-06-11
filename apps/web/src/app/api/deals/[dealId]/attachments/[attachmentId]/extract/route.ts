@@ -9,6 +9,7 @@ import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { classifyAndExtract, humanizeOcrError } from "@/lib/ai/ocr";
 import { suggestAssignment } from "@/lib/forms/extracted-to-form";
+import { suggestLocacaoAssignment } from "@/lib/forms/extracted-to-form-locacao";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -105,21 +106,46 @@ export async function POST(
 
   const current = (attachment.extractedData as Record<string, unknown> | null) ?? {};
   const dataJson = (deal.form?.dataJson as Record<string, unknown> | null) ?? {};
-  const snapshot = {
-    vendedores: Array.isArray(dataJson.vendedores)
-      ? (dataJson.vendedores as Array<Record<string, unknown>>)
-      : [],
-    compradores: Array.isArray(dataJson.compradores)
-      ? (dataJson.compradores as Array<Record<string, unknown>>)
-      : [],
-    imoveis: Array.isArray(dataJson.imoveis)
-      ? (dataJson.imoveis as Array<Record<string, unknown>>)
-      : [],
-  };
+  // Sugestão de slot por esteira: deal de locação tem shape próprio
+  // (locadores/locatarios/garantia.fiador) — o suggest de venda devolvia
+  // sempre "outro" e o doc nunca era classificado.
+  const suggested =
+    deal.kind === "locacao"
+      ? suggestLocacaoAssignment(
+          extraction.documentType,
+          extraction.fields,
+          {
+            locadores: Array.isArray(dataJson.locadores)
+              ? (dataJson.locadores as Array<Record<string, unknown>>)
+              : [],
+            locatarios: Array.isArray(dataJson.locatarios)
+              ? (dataJson.locatarios as Array<Record<string, unknown>>)
+              : [],
+            garantia: (dataJson.garantia ?? undefined) as
+              | { tipo?: string; fiador?: Record<string, unknown> }
+              | undefined,
+          },
+          []
+        )
+      : suggestAssignment(
+          extraction.documentType,
+          extraction.fields,
+          {
+            vendedores: Array.isArray(dataJson.vendedores)
+              ? (dataJson.vendedores as Array<Record<string, unknown>>)
+              : [],
+            compradores: Array.isArray(dataJson.compradores)
+              ? (dataJson.compradores as Array<Record<string, unknown>>)
+              : [],
+            imoveis: Array.isArray(dataJson.imoveis)
+              ? (dataJson.imoveis as Array<Record<string, unknown>>)
+              : [],
+          },
+          []
+        );
   // Preserva o assignment manual (usuário pode ter movido via "Mover para…").
   const assignment =
-    (current.assignment as { kind: string; index: number } | undefined) ??
-    suggestAssignment(extraction.documentType, extraction.fields, snapshot, []);
+    (current.assignment as { kind: string; index: number } | undefined) ?? suggested;
 
   const extractedData = {
     ...current,

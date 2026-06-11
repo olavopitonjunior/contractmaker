@@ -6,6 +6,7 @@ import {
 } from "@/lib/locacao/route-helpers";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { withIdempotency } from "@/lib/api/idempotency";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { importContractFromFile } from "@/lib/services/contract-import";
 import { getPipelineByKind } from "@/lib/modules/resolve";
@@ -109,129 +110,142 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const pipeline = await getPipelineByKind(ctx.orgId, MODULE.LOCACAO, {
-    include: { stages: { orderBy: { position: "asc" } } },
-  });
-  if (!pipeline || pipeline.stages.length === 0) {
-    return NextResponse.json(
-      {
-        error:
-          "Pipeline de locação não configurado. Rode seed-pipeline-locacao.ts --apply.",
-      },
-      { status: 400 }
-    );
-  }
-  const stage =
-    pipeline.stages.find((s) => s.name === targetStageName) ??
-    pipeline.stages.find((s) => s.name === "Em contrato") ??
-    pipeline.stages[0];
+  // Idempotência server-side (mesmo contrato da rota de vendas): duplo clique
+  // ou retry de rede não pode criar 2 deals + 2 GDocs.
+  const idempotencyKey = req.headers.get("x-idempotency-key");
+  const result = await withIdempotency({
+    userId: ctx.userId,
+    key: idempotencyKey,
+    method: "POST",
+    path: "/api/locacao/deals/import-contract",
+    handler: async (): Promise<{ status: number; body: unknown }> => {
+      const pipeline = await getPipelineByKind(ctx.orgId, MODULE.LOCACAO, {
+        include: { stages: { orderBy: { position: "asc" } } },
+      });
+      if (!pipeline || pipeline.stages.length === 0) {
+        return {
+          status: 400,
+          body: {
+            error:
+              "Pipeline de locação não configurado. Rode seed-pipeline-locacao.ts --apply.",
+          },
+        };
+      }
+      const stage =
+        pipeline.stages.find((s) => s.name === targetStageName) ??
+        pipeline.stages.find((s) => s.name === "Em contrato") ??
+        pipeline.stages[0];
 
-  // 1. SalesForm vinculado + Deal kind=locacao. O schemaType definitivo
-  //    (residencial/comercial) é corrigido pelo importContractFromFile com a
-  //    finalidade detectada na extração.
-  const form = await prisma.salesForm.create({
-    data: {
-      orgId: ctx.orgId,
-      title,
-      schemaType: LOCACAO_SCHEMA_TYPE,
-      dataJson: {},
-      status: "vinculado",
+      // 1. SalesForm vinculado + Deal kind=locacao. O schemaType definitivo
+      //    (residencial/comercial) é corrigido pelo importContractFromFile com
+      //    a finalidade detectada na extração.
+      const form = await prisma.salesForm.create({
+        data: {
+          orgId: ctx.orgId,
+          title,
+          schemaType: LOCACAO_SCHEMA_TYPE,
+          dataJson: {},
+          status: "vinculado",
+        },
+      });
+
+      const dealsInStage = await prisma.deal.count({ where: { stageId: stage.id } });
+      const deal = await prisma.deal.create({
+        data: {
+          pipelineId: pipeline.id,
+          stageId: stage.id,
+          userId: ctx.userId,
+          formId: form.id,
+          kind: "locacao",
+          title: title || `Contrato de locação importado — ${file.name}`,
+          position: dealsInStage,
+        },
+      });
+
+      // 2. Arquivo bruto pra Blob + DealAttachment de referência
+      const safeName = file.name.replace(/[^\w.\-]+/g, "_");
+      const storageKey = `imports/${ctx.orgId}/${deal.id}/${Date.now()}-${safeName}`;
+      let blobUrl: string;
+      try {
+        blobUrl = await uploadBufferToStorage({
+          key: storageKey,
+          body: buffer,
+          contentType: mime,
+        });
+      } catch (err) {
+        console.error("[locacao/import-contract] Falha ao subir Blob:", err);
+        return {
+          status: 500,
+          body: {
+            error:
+              "Falha ao salvar arquivo no storage. Verifique BLOB_READ_WRITE_TOKEN.",
+          },
+        };
+      }
+      await prisma.dealAttachment.create({
+        data: {
+          dealId: deal.id,
+          filename: file.name,
+          mime,
+          url: blobUrl,
+          category: "contrato_original",
+          source: "upload",
+        },
+      });
+
+      // 3. Pipeline de import (Drive + extração locação + Contract + LeaseContract)
+      let importResult;
+      try {
+        importResult = await importContractFromFile({
+          dealId: deal.id,
+          formId: form.id,
+          orgId: ctx.orgId,
+          userId: ctx.userId,
+          buffer,
+          sourceMime: mime,
+          sourceName: file.name,
+          manualTitle: title,
+          kind: "locacao",
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[locacao/import-contract] importContractFromFile falhou:", err);
+        return {
+          status: 502,
+          body: {
+            error: `Falha ao importar contrato para o Google Docs: ${msg}`,
+            dealId: deal.id,
+          },
+        };
+      }
+
+      await audit(extractAuditContextFromRequest(req, ctx.orgId, ctx.userId), {
+        action: "CONTRACT_IMPORT",
+        result: "SUCCESS",
+        resource: importResult.contractId,
+        resourceType: "Contract",
+        metadata: {
+          dealId: deal.id,
+          formId: form.id,
+          kind: "locacao",
+          googleDocId: importResult.googleDocId,
+          filename: file.name,
+          mime,
+          sizeBytes: file.size,
+          targetStage: targetStageName,
+        },
+      });
+
+      return {
+        status: 201,
+        body: {
+          dealId: deal.id,
+          contractId: importResult.contractId,
+          googleDocUrl: importResult.googleDocUrl,
+        },
+      };
     },
   });
 
-  const dealsInStage = await prisma.deal.count({ where: { stageId: stage.id } });
-  const deal = await prisma.deal.create({
-    data: {
-      pipelineId: pipeline.id,
-      stageId: stage.id,
-      userId: ctx.userId,
-      formId: form.id,
-      kind: "locacao",
-      title: title || `Contrato de locação importado — ${file.name}`,
-      position: dealsInStage,
-    },
-  });
-
-  // 2. Arquivo bruto pra Blob + DealAttachment de referência
-  const safeName = file.name.replace(/[^\w.\-]+/g, "_");
-  const storageKey = `imports/${ctx.orgId}/${deal.id}/${Date.now()}-${safeName}`;
-  let blobUrl: string;
-  try {
-    blobUrl = await uploadBufferToStorage({
-      key: storageKey,
-      body: buffer,
-      contentType: mime,
-    });
-  } catch (err) {
-    console.error("[locacao/import-contract] Falha ao subir Blob:", err);
-    return NextResponse.json(
-      {
-        error:
-          "Falha ao salvar arquivo no storage. Verifique BLOB_READ_WRITE_TOKEN.",
-      },
-      { status: 500 }
-    );
-  }
-  await prisma.dealAttachment.create({
-    data: {
-      dealId: deal.id,
-      filename: file.name,
-      mime,
-      url: blobUrl,
-      category: "contrato_original",
-      source: "upload",
-    },
-  });
-
-  // 3. Pipeline de import (Drive + extração locação + Contract + LeaseContract)
-  let importResult;
-  try {
-    importResult = await importContractFromFile({
-      dealId: deal.id,
-      formId: form.id,
-      orgId: ctx.orgId,
-      userId: ctx.userId,
-      buffer,
-      sourceMime: mime,
-      sourceName: file.name,
-      manualTitle: title,
-      kind: "locacao",
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error("[locacao/import-contract] importContractFromFile falhou:", err);
-    return NextResponse.json(
-      {
-        error: `Falha ao importar contrato para o Google Docs: ${msg}`,
-        dealId: deal.id,
-      },
-      { status: 502 }
-    );
-  }
-
-  await audit(extractAuditContextFromRequest(req, ctx.orgId, ctx.userId), {
-    action: "CONTRACT_IMPORT",
-    result: "SUCCESS",
-    resource: importResult.contractId,
-    resourceType: "Contract",
-    metadata: {
-      dealId: deal.id,
-      formId: form.id,
-      kind: "locacao",
-      googleDocId: importResult.googleDocId,
-      filename: file.name,
-      mime,
-      sizeBytes: file.size,
-      targetStage: targetStageName,
-    },
-  });
-
-  return NextResponse.json(
-    {
-      dealId: deal.id,
-      contractId: importResult.contractId,
-      googleDocUrl: importResult.googleDocUrl,
-    },
-    { status: 201 }
-  );
+  return NextResponse.json(result.body, { status: result.status });
 }

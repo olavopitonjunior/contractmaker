@@ -27,9 +27,24 @@ interface LocacaoCreditAnalysisCardProps {
   jobs: SerasaJobSummary[];
 }
 
-const PENDING_STATUSES = new Set(["pending", "fetching", "queued"]);
+// Inclui os transitórios com retry automático do motor de certidões
+// (api_error/rate_limited/portal_unavailable): sem eles, um rate-limit virava
+// badge vermelho E parava o auto-refresh, deixando o card obsoleto quando o
+// cron completasse o job.
+const PENDING_STATUSES = new Set([
+  "pending",
+  "fetching",
+  "queued",
+  "api_error",
+  "rate_limited",
+  "portal_unavailable",
+]);
+const RETRYING_STATUSES = new Set(["api_error", "rate_limited", "portal_unavailable"]);
 
 function situacaoBadge(situacao: string | null, status: string) {
+  if (RETRYING_STATUSES.has(status)) {
+    return <Badge variant="outline">Tentando de novo…</Badge>;
+  }
   if (PENDING_STATUSES.has(status)) {
     return <Badge variant="outline">Consultando…</Badge>;
   }
