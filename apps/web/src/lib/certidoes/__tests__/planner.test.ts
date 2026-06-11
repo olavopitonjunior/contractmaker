@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { planCertidoesForDeal } from "../planner";
+import { planCertidoesForDeal, diligentedPersonToInput } from "../planner";
 
 const VENDEDOR_PF_SP = {
   tipo_pessoa: "fisica" as const,
@@ -1100,5 +1100,57 @@ describe("Redesign 2026-05-26 — regiões (imóvel + endereço) e camadas (tier
     // Sem imóvel, regiões = endereço (SP) + extra (RJ).
     expect(vend.some((j) => j.endpoint.includes("/tjrj/"))).toBe(true);
     expect(vend.some((j) => j.region?.uf === "RJ")).toBe(true);
+  });
+});
+
+describe("planCertidoesForDeal — diligenciado PF com rg/sexo/nome_mae (fix 2026-06-10)", () => {
+  // Regressão: PF avulsa precisava de rg+sexo+nascimento pra gerar o TJSP
+  // pedido-certidao (senão caía em skip "faltam dados"). diligentedPersonToInput
+  // é a fonte única que carrega esses campos da row do Prisma pro planner —
+  // antes cada rota tinha .map() inline e o dispatch esquecia rg/sexo, então a
+  // certidão aparecia no popup mas era descartada ao emitir.
+  const row = {
+    id: "dp1",
+    tipoPessoa: "fisica",
+    nome: "Joana Avulsa",
+    cpf: "52998224725",
+    cnpj: null,
+    dataNascimento: "1980-05-14",
+    rg: "12345678",
+    nomeMae: "Maria Avulsa",
+    sexo: "feminino", // como o route grava (lowercase) — sexoToGenero normaliza p/ F
+    uf: "SP",
+    cidade: "Sao Paulo",
+  };
+
+  it("diligentedPersonToInput carrega rg/nomeMae/sexo da row do Prisma", () => {
+    const input = diligentedPersonToInput(row);
+    expect(input.rg).toBe("12345678");
+    expect(input.nomeMae).toBe("Maria Avulsa");
+    expect(input.sexo).toBe("feminino");
+  });
+
+  const plan = planCertidoesForDeal(
+    { vendedores: [], compradores: [], imoveis: [] },
+    undefined,
+    [diligentedPersonToInput(row)]
+  );
+
+  it("gera TJSP pedido-certidao para o diligenciado PF (2 modelos), não skip", () => {
+    const cert = plan.jobs.filter(
+      (j) =>
+        j.endpoint === "tribunal/tjsp/pedido-certidao" &&
+        j.targetKind === "diligenciado"
+    );
+    expect(cert.length).toBe(2);
+    // genero normalizado de "feminino" → "F" no payload
+    cert.forEach((j) => expect(j.requestPayload.genero).toBe("F"));
+    // e NÃO deve haver skip de TJSP por "faltam dados" pra esse alvo
+    const skippedTjsp = plan.skipped.filter(
+      (s) =>
+        s.endpoint === "tribunal/tjsp/pedido-certidao" &&
+        s.targetKind === "diligenciado"
+    );
+    expect(skippedTjsp.length).toBe(0);
   });
 });

@@ -432,6 +432,48 @@ export interface DiligentedPersonInput {
   dataNascimento?: string | null;
   uf?: string | null;
   cidade?: string | null;
+  // 2026-06-10 — campos que destravam certidões de PF avulsa (TJSP pedido-certidao
+  // exige rg+genero; antecedentes exige nome_mae+nascimento). Antes não existiam no
+  // cadastro do diligenciado, então essas certidões caíam em "faltam dados".
+  rg?: string | null;
+  nomeMae?: string | null;
+  sexo?: string | null;
+}
+
+/**
+ * Mapeia uma row do model Prisma `DiligentedPerson` pro input do planner.
+ * Fonte ÚNICA usada por TODAS as rotas que re-rodam o plano (preview, dispatch,
+ * complete/poll, Newton) — antes cada rota tinha seu próprio `.map(...)` inline e
+ * elas divergiam (o dispatch esquecia rg/nomeMae/sexo, então PF avulsa aparecia no
+ * popup mas era pulada ao emitir). Tipo do parâmetro é estrutural (sem importar
+ * tipos do Prisma) pra não acoplar o planner ao client do Prisma.
+ */
+export function diligentedPersonToInput(d: {
+  id: string;
+  tipoPessoa: string;
+  nome: string;
+  cpf: string | null;
+  cnpj: string | null;
+  dataNascimento: string | null;
+  rg: string | null;
+  nomeMae: string | null;
+  sexo: string | null;
+  uf: string | null;
+  cidade: string | null;
+}): DiligentedPersonInput {
+  return {
+    id: d.id,
+    tipoPessoa: d.tipoPessoa as "fisica" | "juridica",
+    nome: d.nome,
+    cpf: d.cpf,
+    cnpj: d.cnpj,
+    dataNascimento: d.dataNascimento,
+    rg: d.rg,
+    nomeMae: d.nomeMae,
+    sexo: d.sexo,
+    uf: d.uf,
+    cidade: d.cidade,
+  };
 }
 
 function diligenciadoToParte(d: DiligentedPersonInput): Parte {
@@ -441,6 +483,9 @@ function diligenciadoToParte(d: DiligentedPersonInput): Parte {
     cpf: d.cpf ?? undefined,
     cnpj: d.cnpj ?? undefined,
     data_nascimento: d.dataNascimento ?? undefined,
+    rg: d.rg ?? undefined,
+    nome_mae: d.nomeMae ?? undefined,
+    sexo: d.sexo ?? undefined,
     uf: d.uf ?? undefined,
     cidade: d.cidade ?? undefined,
   };

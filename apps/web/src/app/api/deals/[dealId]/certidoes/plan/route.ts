@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import { planCertidoesForDeal } from "@/lib/certidoes/planner";
+import { planCertidoesForDeal, diligentedPersonToInput } from "@/lib/certidoes/planner";
 import { getMonthlySpend, observedPriceByEndpoint } from "@/lib/certidoes/executor";
 import type { ExtractionPlan } from "@/lib/certidoes/types";
 import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
@@ -58,16 +58,7 @@ export async function GET(
     where: { dealId: params.dealId },
     orderBy: { createdAt: "asc" },
   });
-  const diligenciados = diligenciadosRaw.map((d) => ({
-    id: d.id,
-    tipoPessoa: d.tipoPessoa as "fisica" | "juridica",
-    nome: d.nome,
-    cpf: d.cpf,
-    cnpj: d.cnpj,
-    dataNascimento: d.dataNascimento,
-    uf: d.uf,
-    cidade: d.cidade,
-  }));
+  const diligenciados = diligenciadosRaw.map(diligentedPersonToInput);
 
   const { searchParams } = new URL(req.url);
   const full = searchParams.get("full") === "1";
