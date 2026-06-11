@@ -50,11 +50,19 @@ Analise o documento anexo e extraia os dados em JSON ESTRITO no shape abaixo. Re
       "bairro": "...", "cidade": "...", "uf": "SP", "cep": "00000-000",
       "email": "...",
       "mobile_phone": "...",                  // celular com DDD (apenas dígitos)
-      "conjuge": {
+      "conjuge": {                            // PF casada/união: extraia SEMPRE que o cônjuge for citado
         "nome": "...", "cpf": "...", "rg": "...",
         "nacionalidade": "...", "profissao": "...",
         "email": "...", "mobile_phone": "...",
         "endereco_igual_ao_titular": true
+      },
+      "procurador": {                         // PF representada por procurador ("neste ato representado por", procuração)
+        "nome": "...", "cpf": "...", "rg": "...",
+        "email": "...", "mobile_phone": "..."
+      },
+      "representante": {                      // PJ: pessoa física que assina pela empresa (sócio/administrador/representante legal)
+        "nome": "...", "cpf": "...", "rg": "...",
+        "email": "...", "mobile_phone": "...", "cargo": "..."
       }
     }
   ],
@@ -123,6 +131,9 @@ Regras:
 - **forma_pagamento_preferida**: extrair do contrato apenas se houver menção explícita ("via PIX", "boleto bancário"). Caso contrário use \`qualquer\`.
 - **prazo_dias_apos_marco**: se contrato disser "até X dias após [assinatura|chaves|registro]", extrair X. Caso contrário omita.
 - **mobile_phone**: 10 ou 11 dígitos com DDD, sem máscara (ex: 11987654321).
+- **conjuge**: extraia SEMPRE que a parte PF for casada/união estável E o cônjuge for citado/qualificado no contrato (nome, CPF, etc.). É comum o cônjuge assinar como anuente.
+- **procurador**: quando o contrato disser que a parte PF é "neste ato representada por", "por seu procurador", ou houver menção a procuração/instrumento de mandato, extraia o procurador (nome/CPF/e-mail).
+- **representante** (PJ): quando a parte for pessoa jurídica, extraia a pessoa física que a representa/assina (sócio, administrador, representante legal) com nome/CPF — é ela quem firma o contrato pela empresa.
 - NÃO invente dados. Se algo é ilegível ou ausente, omita.
 
 Retorne APENAS o JSON.`;

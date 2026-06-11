@@ -260,6 +260,9 @@ export async function POST(req: NextRequest) {
           dealId: deal.id,
           contractId: importResult.contractId,
           googleDocUrl: importResult.googleDocUrl,
+          // Token do form pra mandar o operador revisar/completar os dados
+          // extraídos (campos faltantes destacados) antes de gerar/assinar.
+          formToken: form.token,
         },
       };
     },

@@ -72,10 +72,17 @@ const pessoaFisicaSchema = z.object({
     cpf: z.string().optional().default(""),
     rg: z.string().optional().default(""),
     sexo: z.string().optional().default(""),
+    // E-mail/celular do procurador — necessários quando ele assina o contrato
+    // pela parte (subKind="procurador" no envelope ClickSign).
+    email: z.string().email("Email invalido").optional().or(z.literal("")),
+    mobile_phone: z.string().optional().default(""),
     endereco: z.string().optional().default(""),
     numero: z.string().optional().default(""),
     cidade: z.string().optional().default(""),
     uf: z.string().optional().default(""),
+    // Opt-in pra incluir o procurador como signatário ClickSign separado.
+    // Marcado pelo popup de envio (default true quando há procurador no form).
+    incluir_como_signatario: z.boolean().optional().default(false),
   }).optional(),
 });
 

@@ -12,7 +12,7 @@ import { AddDocumentsCard } from "@/components/pipeline/AddDocumentsCard";
 import { LeaseSignaturesTab } from "@/components/locacao/LeaseSignaturesTab";
 import { Field } from "@/components/locacao/lease-detail/LeaseSection";
 import { GARANTIA_TIPO_LABELS } from "@/lib/locacao/validators";
-import { FileText, ExternalLink, ShieldCheck, ClipboardCheck, Umbrella, Receipt } from "lucide-react";
+import { FileText, ExternalLink, ShieldCheck, ClipboardCheck, Umbrella, Receipt, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 
 type ContractProp = React.ComponentProps<typeof ContractEditorPage>["contract"];
@@ -141,16 +141,37 @@ export function LocacaoDealDetail({ deal, contract, versions, lease, simplified 
                 <p className="text-sm text-muted-foreground">Nenhum documento ainda.</p>
               ) : (
                 <ul className="divide-y">
-                  {deal.attachments.map((a) => (
-                    <li key={a.id} className="flex items-center justify-between py-2">
+                  {deal.attachments.map((a) => {
+                    const isSigned =
+                      !!a.category &&
+                      (a.category === "contrato_assinado" ||
+                        a.category === "documento_assinado");
+                    return (
+                    <li
+                      key={a.id}
+                      className={
+                        "flex items-center justify-between py-2" +
+                        (isSigned
+                          ? " -mx-2 rounded-md px-2 ring-1 ring-emerald-500/50 bg-emerald-50/40"
+                          : "")
+                      }
+                    >
                       <div className="flex items-center gap-2 min-w-0">
-                        <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        {isSigned ? (
+                          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                        ) : (
+                          <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        )}
                         <span className="truncate text-sm">{a.filename}</span>
-                        {a.category && (
+                        {isSigned ? (
+                          <Badge className="shrink-0 bg-emerald-600 text-[10px] text-white hover:bg-emerald-600">
+                            Assinado
+                          </Badge>
+                        ) : a.category ? (
                           <Badge variant="outline" className="shrink-0 text-[10px]">
                             {a.category}
                           </Badge>
-                        )}
+                        ) : null}
                       </div>
                       <a
                         href={a.url}
@@ -161,7 +182,8 @@ export function LocacaoDealDetail({ deal, contract, versions, lease, simplified 
                         Abrir
                       </a>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               )}
             </CardContent>

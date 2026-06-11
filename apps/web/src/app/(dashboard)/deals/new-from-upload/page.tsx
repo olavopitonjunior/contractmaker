@@ -63,8 +63,16 @@ export default function NewDealFromUploadPage() {
         return;
       }
 
-      toast.success("Contrato importado! Abrindo no editor...");
-      router.push(`/contracts/${data.contractId}`);
+      // Manda o operador revisar/completar os dados extraídos no formulário
+      // (campos faltantes destacados via ?prefilled=1). O contrato importado é
+      // mantido — o finalize do form NÃO gera um novo (guard server-side).
+      if (data.formToken) {
+        toast.success("Contrato importado! Revise os dados extraídos.");
+        router.push(`/f/${data.formToken}?prefilled=1`);
+      } else {
+        toast.success("Contrato importado! Abrindo no editor...");
+        router.push(`/contracts/${data.contractId}`);
+      }
     } catch (err) {
       console.error(err);
       toast.error("Erro de rede ao enviar o arquivo. Tente novamente.");
@@ -102,12 +110,13 @@ export default function NewDealFromUploadPage() {
             </li>
             <li className="flex items-start gap-2">
               <Sparkles className="h-4 w-4 mt-0.5 shrink-0 text-primary" />
-              IA lê o documento e preenche vendedores, compradores, imóvel e
-              valores na aba "Dados".
+              IA lê o documento e preenche partes (incl. cônjuges e
+              representantes), imóvel e valores.
             </li>
             <li className="flex items-start gap-2">
               <FileSignature className="h-4 w-4 mt-0.5 shrink-0 text-primary" />
-              Você revisa no editor, aprova e envia para assinatura ClickSign.
+              Você é levado ao formulário para revisar/completar os dados
+              faltantes; o contrato importado é mantido.
             </li>
           </ul>
         </CardContent>

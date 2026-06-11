@@ -28,9 +28,18 @@ export type SourceKind =
   | "locatario"
   | "fiador";
 
+// Distingue papéis derivados de uma MESMA parte (vendedor/comprador) dentro do
+// envelope: o titular, o cônjuge, o procurador (PF) ou o representante legal
+// (PJ assina pelo rep, não pela razão social). Usado pra casar o override de
+// "Assina como" vindo da UI com o signer certo. DB não persiste subKind —
+// resolução acontece em memória no momento da criação do envelope.
+export type SubKind = "titular" | "conjuge" | "procurador" | "representante" | "avulso";
+
 export interface SignerInput {
   sourceKind: SourceKind;
   sourceIndex: number;
+  /** Papel derivado da parte (titular/cônjuge/procurador/representante). */
+  subKind?: SubKind;
   name: string;
   email: string;
   documentation?: string;

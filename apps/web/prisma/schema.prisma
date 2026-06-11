@@ -297,6 +297,10 @@ model Organization {
 
   // Modularização — entitlements de módulos (Vendas/Locação) por tenant
   orgModules OrgModule[]
+
+  // Assinatura — cadastro de testemunhas padrão do sistema (auto-preenchem o
+  // envelope ClickSign quando marcadas como padrão).
+  defaultWitnesses DefaultWitness[]
 }
 
 /// Entitlement de módulo por tenant. `module` é validado contra lib/modules/catalog.ts
@@ -2865,4 +2869,23 @@ model LeaseReadjustment {
 
   @@index([orgId, status])
   @@index([leaseContractId, dataReajuste])
+}
+
+// DefaultWitness — cadastro de testemunhas padrão do sistema (por org). Quando
+// `isDefault=true`, a popup de envio de assinatura as injeta pré-marcadas no
+// envelope ClickSign (papel "witness"). Editáveis em /settings/testemunhas.
+model DefaultWitness {
+  id          String   @id @default(cuid())
+  orgId       String
+  nome        String
+  cpf         String?
+  email       String
+  mobilePhone String?
+  isDefault   Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId])
 }

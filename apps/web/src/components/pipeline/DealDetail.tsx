@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot, Pencil, Check, X } from "lucide-react";
+import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot, Pencil, Check, CheckCircle2, X } from "lucide-react";
 import { SendAttachmentEnvelopeDialog } from "@/components/pipeline/SendAttachmentEnvelopeDialog";
 import { AddDocumentsCard } from "@/components/pipeline/AddDocumentsCard";
 import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
@@ -16,6 +16,10 @@ import { cn } from "@/lib/utils";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
 import type { SelectGroup } from "@/components/forms/NativeSelect";
 import type { Assignment, DocumentKind } from "@/lib/forms/extracted-to-form";
+import {
+  buildNegotiationSummary,
+  type SummarySection,
+} from "@/lib/forms/negotiation-summary";
 import { CertidoesTab } from "@/components/pipeline/CertidoesTab";
 import { SignaturesTab } from "@/components/pipeline/SignaturesTab";
 import { NewtonRequestsTab } from "@/components/pipeline/NewtonRequestsTab";
@@ -46,6 +50,7 @@ type Parte = {
   estado_civil?: string;
   profissao?: string;
   email?: string;
+  mobile_phone?: string;
   endereco?: string;
   numero?: string;
   complemento?: string;
@@ -57,11 +62,12 @@ type Parte = {
     nome?: string;
     cpf?: string;
     email?: string;
+    mobile_phone?: string;
     incluir_como_signatario?: boolean;
   };
   // Dependentes do vendedor diligenciados junto nas certidões (2026-05-22).
-  procurador?: { nome?: string; cpf?: string };
-  representante?: { nome?: string; cpf?: string };
+  procurador?: { nome?: string; cpf?: string; email?: string; mobile_phone?: string };
+  representante?: { nome?: string; cpf?: string; email?: string; mobile_phone?: string };
 };
 
 type Imovel = {
@@ -77,6 +83,88 @@ type Imovel = {
   inscricao_iptu?: string;
   descricao?: string;
 };
+
+function entityAddress(p: Parte | Imovel): string {
+  const rua = (p as Parte).endereco || (p as Imovel).rua;
+  const parts = [
+    rua,
+    p.numero && `nº ${p.numero}`,
+    p.complemento,
+    p.bairro && `Bairro: ${p.bairro}`,
+    p.cidade && `${p.cidade}${p.uf ? `/${p.uf}` : ""}`,
+    p.cep && `CEP ${p.cep}`,
+  ].filter(Boolean);
+  return parts.length ? parts.join(", ") : "—";
+}
+
+/** Sub-bloco de pessoa vinculada à parte (cônjuge/procurador/representante). */
+function PartySubPerson({
+  label,
+  person,
+  signs,
+}: {
+  label: string;
+  person: { nome?: string; cpf?: string; email?: string; mobile_phone?: string };
+  signs?: boolean;
+}) {
+  return (
+    <div className="mt-1.5 rounded-md border border-dashed bg-muted/30 px-2 py-1.5">
+      <p className="text-xs font-medium text-foreground/80 flex items-center gap-1.5">
+        {label}
+        {signs && (
+          <span className="text-[10px] font-normal text-emerald-700">• assina</span>
+        )}
+      </p>
+      <p className="text-xs">{person.nome || "—"}</p>
+      <p className="text-[11px] text-muted-foreground">
+        {[
+          person.cpf && `CPF: ${person.cpf}`,
+          person.email,
+          person.mobile_phone,
+        ]
+          .filter(Boolean)
+          .join(" · ") || "Dados incompletos"}
+      </p>
+    </div>
+  );
+}
+
+/** Renderiza uma parte (vendedor/comprador) com todos os vínculos do form:
+ *  celular, dados de PJ, cônjuge, representante e procurador. */
+function PartyDetails({ p }: { p: Parte }) {
+  const isPJ = p.tipo_pessoa === "juridica";
+  return (
+    <div className="space-y-1 text-sm border-b last:border-b-0 pb-2 last:pb-0">
+      <p className="font-medium">{p.nome || p.razao_social || "—"}</p>
+      {isPJ ? (
+        <>{p.cnpj && <p><span className="text-muted-foreground">CNPJ:</span> {p.cnpj}</p>}</>
+      ) : (
+        <>
+          {p.cpf && <p><span className="text-muted-foreground">CPF:</span> {p.cpf}</p>}
+          {p.rg && <p><span className="text-muted-foreground">RG:</span> {p.rg}</p>}
+          {p.estado_civil && <p><span className="text-muted-foreground">Estado civil:</span> {p.estado_civil}</p>}
+          {p.profissao && <p><span className="text-muted-foreground">Profissão:</span> {p.profissao}</p>}
+        </>
+      )}
+      {p.email && <p><span className="text-muted-foreground">E-mail:</span> {p.email}</p>}
+      {p.mobile_phone && <p><span className="text-muted-foreground">Celular:</span> {p.mobile_phone}</p>}
+      <p className="text-muted-foreground text-xs">{entityAddress(p)}</p>
+      {p.representante?.nome && (
+        <PartySubPerson label="Representante (PJ)" person={p.representante} signs />
+      )}
+      {p.conjuge?.nome && (
+        <PartySubPerson
+          label="Cônjuge"
+          person={p.conjuge}
+          signs={p.conjuge.incluir_como_signatario}
+        />
+      )}
+      {p.procurador?.nome && (
+        <PartySubPerson label="Procurador" person={p.procurador} />
+      )}
+    </div>
+  );
+}
 
 interface DealDetailProps {
   deal: {
@@ -439,6 +527,8 @@ export function DealDetail({ deal }: DealDetailProps) {
 
   const formatBRL = (v: number | undefined) =>
     v != null ? `R$ ${v.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}` : "—";
+
+  const negotiationSummary = buildNegotiationSummary(formData);
 
   const formatAddress = (p: Parte | Imovel) => {
     const rua = (p as Parte).endereco || (p as Imovel).rua;
@@ -867,25 +957,7 @@ export function DealDetail({ deal }: DealDetailProps) {
                   </summary>
                   <CardContent className="space-y-3 pt-0">
                     {vendedores.length > 0 ? (
-                      vendedores.map((v, i) => (
-                        <div key={i} className="space-y-1 text-sm border-b last:border-b-0 pb-2 last:pb-0">
-                          <p className="font-medium">{v.nome || v.razao_social || "—"}</p>
-                          {v.tipo_pessoa === "juridica" ? (
-                            <>
-                              {v.cnpj && <p><span className="text-muted-foreground">CNPJ:</span> {v.cnpj}</p>}
-                            </>
-                          ) : (
-                            <>
-                              {v.cpf && <p><span className="text-muted-foreground">CPF:</span> {v.cpf}</p>}
-                              {v.rg && <p><span className="text-muted-foreground">RG:</span> {v.rg}</p>}
-                              {v.estado_civil && <p><span className="text-muted-foreground">Estado civil:</span> {v.estado_civil}</p>}
-                              {v.profissao && <p><span className="text-muted-foreground">Profissão:</span> {v.profissao}</p>}
-                              {v.email && <p><span className="text-muted-foreground">E-mail:</span> {v.email}</p>}
-                            </>
-                          )}
-                          <p className="text-muted-foreground text-xs">{formatAddress(v)}</p>
-                        </div>
-                      ))
+                      vendedores.map((v, i) => <PartyDetails key={i} p={v} />)
                     ) : (
                       <p className="text-sm text-muted-foreground">Não preenchido</p>
                     )}
@@ -903,25 +975,7 @@ export function DealDetail({ deal }: DealDetailProps) {
                   </summary>
                   <CardContent className="space-y-3 pt-0">
                     {compradores.length > 0 ? (
-                      compradores.map((c, i) => (
-                        <div key={i} className="space-y-1 text-sm border-b last:border-b-0 pb-2 last:pb-0">
-                          <p className="font-medium">{c.nome || c.razao_social || "—"}</p>
-                          {c.tipo_pessoa === "juridica" ? (
-                            <>
-                              {c.cnpj && <p><span className="text-muted-foreground">CNPJ:</span> {c.cnpj}</p>}
-                            </>
-                          ) : (
-                            <>
-                              {c.cpf && <p><span className="text-muted-foreground">CPF:</span> {c.cpf}</p>}
-                              {c.rg && <p><span className="text-muted-foreground">RG:</span> {c.rg}</p>}
-                              {c.estado_civil && <p><span className="text-muted-foreground">Estado civil:</span> {c.estado_civil}</p>}
-                              {c.profissao && <p><span className="text-muted-foreground">Profissão:</span> {c.profissao}</p>}
-                              {c.email && <p><span className="text-muted-foreground">E-mail:</span> {c.email}</p>}
-                            </>
-                          )}
-                          <p className="text-muted-foreground text-xs">{formatAddress(c)}</p>
-                        </div>
-                      ))
+                      compradores.map((c, i) => <PartyDetails key={i} p={c} />)
                     ) : (
                       <p className="text-sm text-muted-foreground">Não preenchido</p>
                     )}
@@ -972,6 +1026,98 @@ export function DealDetail({ deal }: DealDetailProps) {
                   </CardContent>
                 </details>
               </Card>
+
+              {(comissao?.comissionados?.length || comissao?.imobiliaria_nome) ? (
+                <Card>
+                  <details open>
+                    <summary className="cursor-pointer list-none">
+                      <CardHeader className="flex flex-row items-center justify-between">
+                        <CardTitle className="text-sm">Comissão / Corretagem</CardTitle>
+                        <span className="text-xs text-muted-foreground">▾ detalhes</span>
+                      </CardHeader>
+                    </summary>
+                    <CardContent className="space-y-3 pt-0">
+                      {((comissao?.comissionados?.length
+                        ? comissao.comissionados
+                        : [{
+                            nome: comissao?.imobiliaria_nome,
+                            cnpj: comissao?.imobiliaria_cnpj,
+                            email: comissao?.imobiliaria_email,
+                            tipo_pessoa: comissao?.corretora_tipo_pessoa,
+                          }]) as Array<{
+                        nome?: string;
+                        cpf?: string;
+                        cnpj?: string;
+                        email?: string;
+                        tipo_pessoa?: string;
+                        percentual?: number;
+                        valor?: number;
+                        papel?: string;
+                      }>).map((c, i) => (
+                        <div key={i} className="space-y-0.5 text-sm border-b last:border-b-0 pb-2 last:pb-0">
+                          <p className="font-medium">{c.nome || "—"}</p>
+                          {c.papel && <p className="text-xs"><span className="text-muted-foreground">Papel:</span> {c.papel}</p>}
+                          {(c.cnpj || c.cpf) && <p className="text-xs"><span className="text-muted-foreground">{c.cnpj ? "CNPJ" : "CPF"}:</span> {c.cnpj || c.cpf}</p>}
+                          {typeof c.percentual === "number" && c.percentual > 0 && <p className="text-xs"><span className="text-muted-foreground">Percentual:</span> {c.percentual}%</p>}
+                          {typeof c.valor === "number" && c.valor > 0 && <p className="text-xs"><span className="text-muted-foreground">Valor:</span> {formatBRL(c.valor)}</p>}
+                          {c.email && <p className="text-xs"><span className="text-muted-foreground">E-mail:</span> {c.email}</p>}
+                        </div>
+                      ))}
+                    </CardContent>
+                  </details>
+                </Card>
+              ) : null}
+
+              {testemunhas.length > 0 ? (
+                <Card>
+                  <details open>
+                    <summary className="cursor-pointer list-none">
+                      <CardHeader className="flex flex-row items-center justify-between">
+                        <CardTitle className="text-sm">Testemunhas</CardTitle>
+                        <span className="text-xs text-muted-foreground">▾ detalhes</span>
+                      </CardHeader>
+                    </summary>
+                    <CardContent className="space-y-2 pt-0">
+                      {testemunhas.map((t, i) => (
+                        <div key={i} className="text-sm border-b last:border-b-0 pb-1.5 last:pb-0">
+                          <p className="font-medium">{t.nome || "—"}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {[t.cpf && `CPF: ${t.cpf}`, t.email].filter(Boolean).join(" · ") || "Dados incompletos"}
+                          </p>
+                        </div>
+                      ))}
+                    </CardContent>
+                  </details>
+                </Card>
+              ) : null}
+
+              {negotiationSummary.length > 0 ? (
+                <Card className="md:col-span-2">
+                  <details open>
+                    <summary className="cursor-pointer list-none">
+                      <CardHeader className="flex flex-row items-center justify-between">
+                        <CardTitle className="text-sm">Resumo da negociação</CardTitle>
+                        <span className="text-xs text-muted-foreground">▾ detalhes</span>
+                      </CardHeader>
+                    </summary>
+                    <CardContent className="grid gap-4 sm:grid-cols-3 pt-0">
+                      {negotiationSummary.map((section: SummarySection) => (
+                        <div key={section.title} className="space-y-1">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                            {section.title}
+                          </p>
+                          {section.rows.map((row, i) => (
+                            <p key={i} className="text-sm">
+                              <span className="text-muted-foreground">{row.label}:</span>{" "}
+                              {row.value}
+                            </p>
+                          ))}
+                        </div>
+                      ))}
+                    </CardContent>
+                  </details>
+                </Card>
+              ) : null}
             </div>
           ) : (
             <Card>
@@ -1223,6 +1369,8 @@ const KIND_LABELS: Record<DocGroupKind, string> = {
 // esteira (Infosimples, Serasa, relatório consolidado). Agrupadas numa seção
 // dedicada na aba Documentos em vez de espalhadas por parte/imóvel.
 const CERTIDAO_CATS = new Set(["certidao", "relatorio_certidoes"]);
+// Documentos assinados (ClickSign) — destacados na pasta pra fácil identificação.
+const SIGNED_CATS = new Set(["contrato_assinado", "documento_assinado"]);
 
 function groupKindOf(kind: DocumentKind): DocGroupKind {
   if (kind === "vendedor" || kind === "conjuge_vendedor" || kind === "representante_vendedor") {
@@ -1718,7 +1866,8 @@ function DocumentsTab({
       : isFormAttachment
         ? handleSendFormDoc
         : undefined;
-    return (
+    const isSigned = !!doc.category && SIGNED_CATS.has(doc.category);
+    const card = (
       <DocumentCard
         key={doc.id}
         doc={doc}
@@ -1734,6 +1883,20 @@ function DocumentsTab({
         onSendToSignature={onSend}
         busy={promotingIds.has(doc.id)}
       />
+    );
+    if (!isSigned) return card;
+    // Documento assinado: destaque verde + selo pra identificação imediata.
+    return (
+      <div
+        key={doc.id}
+        className="relative rounded-lg ring-2 ring-emerald-500/60 bg-emerald-50/40"
+      >
+        <span className="absolute -top-2 left-3 z-10 inline-flex items-center gap-1 rounded-full bg-emerald-600 px-2 py-0.5 text-[10px] font-medium text-white shadow-sm">
+          <CheckCircle2 className="h-3 w-3" />
+          Assinado
+        </span>
+        {card}
+      </div>
     );
   };
 
