@@ -5,7 +5,23 @@ interface Conjuge {
   cpf?: string;
   email?: string;
   telefone?: string;
+  mobile_phone?: string;
   incluir_como_signatario?: boolean;
+}
+
+interface Procurador {
+  nome?: string;
+  cpf?: string;
+  email?: string;
+  mobile_phone?: string;
+  incluir_como_signatario?: boolean;
+}
+
+interface Representante {
+  nome?: string;
+  cpf?: string;
+  email?: string;
+  mobile_phone?: string;
 }
 
 interface Parte {
@@ -16,13 +32,17 @@ interface Parte {
   cnpj?: string;
   email?: string;
   telefone?: string;
+  mobile_phone?: string;
   conjuge?: Conjuge;
+  procurador?: Procurador;
+  representante?: Representante;
 }
 
 interface Testemunha {
   nome?: string;
   cpf?: string;
   email?: string;
+  mobile_phone?: string;
   incluir_como_signatario?: boolean;
 }
 
@@ -32,6 +52,7 @@ interface Comissionado {
   cnpj?: string;
   tipo_pessoa?: "fisica" | "juridica";
   email?: string;
+  mobile_phone?: string;
   incluir_como_signatario?: boolean;
 }
 
@@ -93,6 +114,38 @@ export function dealDataToSigners(
 
   const collect = (sourceKind: SourceKind, partes: Parte[] | undefined) => {
     (partes ?? []).forEach((p, idx) => {
+      if (p.tipo_pessoa === "juridica") {
+        // PJ assina pelo REPRESENTANTE legal (PF). A razão social não tem
+        // CPF/e-mail próprios pra assinar (CNPJ direto dá 422 na ClickSign);
+        // o CNPJ vira fallback de documentação. subKind="representante".
+        const rep = p.representante ?? {};
+        const repName = (rep.nome ?? "").trim();
+        const displayName = repName || partyName(p);
+        const repEmail = (rep.email ?? "").trim();
+        // PJ sem nome identificável OU sem e-mail do representante NÃO some
+        // silenciosa: vai pra `missing` pra o operador completar os dados.
+        if (!displayName || !repEmail) {
+          missing.push({
+            sourceKind,
+            sourceIndex: idx,
+            name: displayName || `Empresa ${idx + 1}`,
+          });
+        } else {
+          signers.push({
+            sourceKind,
+            sourceIndex: idx,
+            subKind: "representante",
+            name: displayName,
+            email: repEmail,
+            documentation: onlyDigits(rep.cpf) ?? onlyDigits(p.cnpj),
+            phone: onlyDigits(rep.mobile_phone),
+            authMethod,
+          });
+        }
+        return; // PJ não tem cônjuge/procurador.
+      }
+
+      // PF titular.
       const name = partyName(p);
       if (name) {
         const email = (p.email ?? "").trim();
@@ -102,10 +155,11 @@ export function dealDataToSigners(
           signers.push({
             sourceKind,
             sourceIndex: idx,
+            subKind: "titular",
             name,
             email,
             documentation: partyDoc(p),
-            phone: onlyDigits(p.telefone),
+            phone: onlyDigits(p.mobile_phone ?? p.telefone),
             authMethod,
           });
         }
@@ -113,23 +167,44 @@ export function dealDataToSigners(
 
       // Cônjuge: opt-in via flag incluir_como_signatario. Não gera entrada
       // em `missing` quando dados faltam — sinal de que não foi escolhido
-      // pra assinar. SourceIndex deslocado em +1000 pra evitar colisão
-      // com partes titulares dentro do mesmo envelope (nenhum schema usa
-      // unique em (sourceKind, sourceIndex), mas mantém leitura clara).
+      // pra assinar. subKind="conjuge" desambigua o override de papel vindo
+      // da UI (mesmo sourceIndex do titular; sem @@unique no schema).
       const conjuge = p.conjuge;
-      if (!conjuge?.incluir_como_signatario) return;
-      const conjugeName = (conjuge.nome ?? "").trim();
-      const conjugeEmail = (conjuge.email ?? "").trim();
-      if (!conjugeName || !conjugeEmail) return;
-      signers.push({
-        sourceKind,
-        sourceIndex: idx + 1000,
-        name: conjugeName,
-        email: conjugeEmail,
-        documentation: onlyDigits(conjuge.cpf),
-        phone: onlyDigits(conjuge.telefone),
-        authMethod,
-      });
+      if (conjuge?.incluir_como_signatario) {
+        const conjugeName = (conjuge.nome ?? "").trim();
+        const conjugeEmail = (conjuge.email ?? "").trim();
+        if (conjugeName && conjugeEmail) {
+          signers.push({
+            sourceKind,
+            sourceIndex: idx,
+            subKind: "conjuge",
+            name: conjugeName,
+            email: conjugeEmail,
+            documentation: onlyDigits(conjuge.cpf),
+            phone: onlyDigits(conjuge.mobile_phone ?? conjuge.telefone),
+            authMethod,
+          });
+        }
+      }
+
+      // Procurador (PF): signatário adicional, opt-in via incluir_como_signatario.
+      const proc = p.procurador;
+      if (proc?.incluir_como_signatario) {
+        const procName = (proc.nome ?? "").trim();
+        const procEmail = (proc.email ?? "").trim();
+        if (procName && procEmail) {
+          signers.push({
+            sourceKind,
+            sourceIndex: idx,
+            subKind: "procurador",
+            name: procName,
+            email: procEmail,
+            documentation: onlyDigits(proc.cpf),
+            phone: onlyDigits(proc.mobile_phone),
+            authMethod,
+          });
+        }
+      }
     });
   };
 
@@ -148,9 +223,11 @@ export function dealDataToSigners(
     signers.push({
       sourceKind: "testemunha",
       sourceIndex: idx,
+      subKind: "titular",
       name,
       email,
       documentation: onlyDigits(t.cpf),
+      phone: onlyDigits(t.mobile_phone),
       authMethod,
     });
   });
@@ -169,9 +246,11 @@ export function dealDataToSigners(
       signers.push({
         sourceKind: "corretora",
         sourceIndex: idx,
+        subKind: "titular",
         name,
         email,
         documentation,
+        phone: onlyDigits(c.mobile_phone),
         authMethod,
       });
     });
@@ -243,6 +322,7 @@ function resolveLeaseSigner(p: LeaseParte): {
   email: string;
   documentation?: string;
   phone?: string;
+  subKind: "titular" | "representante";
 } {
   if (p.tipo_pessoa === "juridica") {
     const rep = p.representante ?? {};
@@ -251,6 +331,7 @@ function resolveLeaseSigner(p: LeaseParte): {
       email: (rep.email ?? "").trim(),
       documentation: onlyDigits(rep.cpf) ?? onlyDigits(p.cnpj),
       phone: onlyDigits(rep.mobile_phone),
+      subKind: "representante",
     };
   }
   return {
@@ -258,6 +339,7 @@ function resolveLeaseSigner(p: LeaseParte): {
     email: (p.email ?? "").trim(),
     documentation: onlyDigits(p.cpf),
     phone: onlyDigits(p.mobile_phone ?? p.telefone),
+    subKind: "titular",
   };
 }
 
@@ -274,7 +356,7 @@ export function leaseDataToSigners(
       // Locador/locatário entram por default (incluir_como_signatario default
       // `true` no schema); só saem quando explicitamente marcado `false`.
       if (p.incluir_como_signatario === false) return;
-      const { name, email, documentation, phone } = resolveLeaseSigner(p);
+      const { name, email, documentation, phone, subKind } = resolveLeaseSigner(p);
       if (!name) return;
       if (!email) {
         missing.push({ sourceKind, sourceIndex: idx, name });
@@ -283,6 +365,7 @@ export function leaseDataToSigners(
       signers.push({
         sourceKind,
         sourceIndex: idx,
+        subKind,
         name,
         email,
         documentation,
@@ -301,7 +384,7 @@ export function leaseDataToSigners(
   if (garantia?.tipo === "fiador" && garantia.fiador) {
     const f = garantia.fiador;
     if (f.incluir_como_signatario !== false) {
-      const { name, email, documentation, phone } = resolveLeaseSigner(f);
+      const { name, email, documentation, phone, subKind } = resolveLeaseSigner(f);
       if (name) {
         if (!email) {
           missing.push({ sourceKind: "fiador", sourceIndex: 0, name });
@@ -309,6 +392,7 @@ export function leaseDataToSigners(
           signers.push({
             sourceKind: "fiador",
             sourceIndex: 0,
+            subKind,
             name,
             email,
             documentation,

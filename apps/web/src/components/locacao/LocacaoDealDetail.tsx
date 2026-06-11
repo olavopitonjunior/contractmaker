@@ -10,9 +10,10 @@ import { Separator } from "@/components/ui/separator";
 import { ContractEditorPage } from "@/components/contracts/ContractEditorPage";
 import { AddDocumentsCard } from "@/components/pipeline/AddDocumentsCard";
 import { LeaseSignaturesTab } from "@/components/locacao/LeaseSignaturesTab";
+import type { LeaseSignerData } from "@/components/locacao/SendLeaseEnvelopeDialog";
 import { Field } from "@/components/locacao/lease-detail/LeaseSection";
 import { GARANTIA_TIPO_LABELS } from "@/lib/locacao/validators";
-import { FileText, ExternalLink, ShieldCheck, ClipboardCheck, Umbrella, Receipt } from "lucide-react";
+import { FileText, ExternalLink, ShieldCheck, ClipboardCheck, Umbrella, Receipt, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 
 type ContractProp = React.ComponentProps<typeof ContractEditorPage>["contract"];
@@ -55,6 +56,130 @@ interface LocacaoDealDetailProps {
 
 const BRL = (v: number) =>
   v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+
+type LeaseFormData = {
+  locadores?: unknown[];
+  locatarios?: unknown[];
+  imovel?: Record<string, unknown>;
+  aluguel?: Record<string, unknown>;
+  garantia?: { tipo?: string; fiador?: unknown } | null;
+};
+
+/** Partes do contrato de locação pra popup de assinatura (locador/locatário/fiador). */
+function extractLeaseSignerData(dataJson: Record<string, unknown> | null): LeaseSignerData {
+  const d = (dataJson ?? {}) as LeaseFormData;
+  return {
+    locadores: (d.locadores as LeaseSignerData["locadores"]) ?? [],
+    locatarios: (d.locatarios as LeaseSignerData["locatarios"]) ?? [],
+    garantia: (d.garantia as LeaseSignerData["garantia"]) ?? null,
+  };
+}
+
+type LeasePartyView = {
+  tipo_pessoa?: string;
+  nome?: string;
+  razao_social?: string;
+  cpf?: string;
+  cnpj?: string;
+  email?: string;
+  mobile_phone?: string;
+  representante?: { nome?: string; cpf?: string; email?: string; mobile_phone?: string };
+};
+
+function LeasePartyCard({ p }: { p: LeasePartyView }) {
+  const isPJ = p.tipo_pessoa === "juridica";
+  return (
+    <div className="space-y-0.5 text-sm border-b last:border-b-0 pb-2 last:pb-0">
+      <p className="font-medium">{p.nome || p.razao_social || "—"}</p>
+      {isPJ
+        ? p.cnpj && <p className="text-xs"><span className="text-muted-foreground">CNPJ:</span> {p.cnpj}</p>
+        : p.cpf && <p className="text-xs"><span className="text-muted-foreground">CPF:</span> {p.cpf}</p>}
+      {p.email && <p className="text-xs"><span className="text-muted-foreground">E-mail:</span> {p.email}</p>}
+      {p.mobile_phone && <p className="text-xs"><span className="text-muted-foreground">Celular:</span> {p.mobile_phone}</p>}
+      {isPJ && p.representante?.nome && (
+        <div className="mt-1 rounded-md border border-dashed bg-muted/30 px-2 py-1.5">
+          <p className="text-xs font-medium text-foreground/80">Representante (assina)</p>
+          <p className="text-xs">{p.representante.nome}</p>
+          <p className="text-[11px] text-muted-foreground">
+            {[p.representante.cpf && `CPF: ${p.representante.cpf}`, p.representante.email, p.representante.mobile_phone].filter(Boolean).join(" · ") || "Dados incompletos"}
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Aba Dados do deal de locação — espelha as partes/imóvel/aluguel/garantia. */
+function LeaseDadosTab({
+  dataJson,
+  lease,
+}: {
+  dataJson: Record<string, unknown> | null;
+  lease: LeaseProp | null;
+}) {
+  const d = (dataJson ?? {}) as {
+    locadores?: LeasePartyView[];
+    locatarios?: LeasePartyView[];
+    imovel?: Record<string, string>;
+    garantia?: { tipo?: string; fiador?: LeasePartyView } | null;
+  };
+  const locadores = d.locadores ?? [];
+  const locatarios = d.locatarios ?? [];
+  const imovel = d.imovel ?? {};
+  const garantia = d.garantia ?? null;
+  const fiador = garantia?.fiador ?? undefined;
+  const endereco = [imovel.rua || imovel.endereco, imovel.numero && `nº ${imovel.numero}`, imovel.bairro, imovel.cidade && `${imovel.cidade}${imovel.uf ? `/${imovel.uf}` : ""}`].filter(Boolean).join(", ");
+
+  if (locadores.length === 0 && locatarios.length === 0 && !lease) {
+    return (
+      <Card>
+        <CardContent className="py-8 text-center text-sm text-muted-foreground">
+          Nenhum dado de formulário vinculado.
+        </CardContent>
+      </Card>
+    );
+  }
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <Card>
+        <CardHeader className="pb-2"><CardTitle className="text-sm">Locador(es)</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          {locadores.length > 0 ? locadores.map((p, i) => <LeasePartyCard key={i} p={p} />) : <p className="text-sm text-muted-foreground">Não preenchido</p>}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader className="pb-2"><CardTitle className="text-sm">Locatário(s)</CardTitle></CardHeader>
+        <CardContent className="space-y-3">
+          {locatarios.length > 0 ? locatarios.map((p, i) => <LeasePartyCard key={i} p={p} />) : <p className="text-sm text-muted-foreground">Não preenchido</p>}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader className="pb-2"><CardTitle className="text-sm">Imóvel</CardTitle></CardHeader>
+        <CardContent className="space-y-1 text-sm">
+          <p className="font-medium">{endereco || "—"}</p>
+          {imovel.matricula && <p className="text-xs"><span className="text-muted-foreground">Matrícula:</span> {imovel.matricula}</p>}
+          {imovel.cartorio && <p className="text-xs"><span className="text-muted-foreground">Cartório:</span> {imovel.cartorio}</p>}
+        </CardContent>
+      </Card>
+      <Card>
+        <CardHeader className="pb-2"><CardTitle className="text-sm">Aluguel & Garantia</CardTitle></CardHeader>
+        <CardContent className="space-y-1 text-sm">
+          {lease && <p><span className="text-muted-foreground">Aluguel:</span> <strong>{BRL(lease.valorAluguel)}</strong></p>}
+          {lease && <p className="text-xs"><span className="text-muted-foreground">Vencimento:</span> dia {lease.diaVencimento}</p>}
+          {lease && <p className="text-xs"><span className="text-muted-foreground">Taxa adm.:</span> {lease.taxaAdminPercent}%</p>}
+          {garantia?.tipo && <p className="text-xs"><span className="text-muted-foreground">Garantia:</span> {GARANTIA_TIPO_LABELS[garantia.tipo] ?? garantia.tipo}</p>}
+          {fiador?.nome && (
+            <div className="mt-1.5 rounded-md border border-dashed bg-muted/30 px-2 py-1.5">
+              <p className="text-xs font-medium text-foreground/80">Fiador (assina)</p>
+              <LeasePartyCard p={fiador} />
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
 
 export function LocacaoDealDetail({ deal, contract, versions, lease, simplified = false }: LocacaoDealDetailProps) {
   const router = useRouter();
@@ -103,6 +228,7 @@ export function LocacaoDealDetail({ deal, contract, versions, lease, simplified 
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList className="flex-wrap">
           <TabsTrigger value="contrato">Contrato</TabsTrigger>
+          <TabsTrigger value="dados">Dados</TabsTrigger>
           <TabsTrigger value="documentos">Documentos</TabsTrigger>
           <TabsTrigger value="assinaturas">Assinaturas</TabsTrigger>
           {!simplified && <TabsTrigger value="garantias">Garantias</TabsTrigger>}
@@ -130,6 +256,11 @@ export function LocacaoDealDetail({ deal, contract, versions, lease, simplified 
           )}
         </TabsContent>
 
+        {/* DADOS — espelho das partes/imóvel/aluguel/garantia do formulário */}
+        <TabsContent value="dados" className="mt-4">
+          <LeaseDadosTab dataJson={contract?.dataJson ?? null} lease={lease} />
+        </TabsContent>
+
         {/* DOCUMENTOS — pasta do deal (DealAttachment), igual ao de vendas */}
         <TabsContent value="documentos" className="mt-4 space-y-4">
           <Card>
@@ -141,16 +272,37 @@ export function LocacaoDealDetail({ deal, contract, versions, lease, simplified 
                 <p className="text-sm text-muted-foreground">Nenhum documento ainda.</p>
               ) : (
                 <ul className="divide-y">
-                  {deal.attachments.map((a) => (
-                    <li key={a.id} className="flex items-center justify-between py-2">
+                  {deal.attachments.map((a) => {
+                    const isSigned =
+                      !!a.category &&
+                      (a.category === "contrato_assinado" ||
+                        a.category === "documento_assinado");
+                    return (
+                    <li
+                      key={a.id}
+                      className={
+                        "flex items-center justify-between py-2" +
+                        (isSigned
+                          ? " -mx-2 rounded-md px-2 ring-1 ring-emerald-500/50 bg-emerald-50/40"
+                          : "")
+                      }
+                    >
                       <div className="flex items-center gap-2 min-w-0">
-                        <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        {isSigned ? (
+                          <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600" />
+                        ) : (
+                          <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        )}
                         <span className="truncate text-sm">{a.filename}</span>
-                        {a.category && (
+                        {isSigned ? (
+                          <Badge className="shrink-0 bg-emerald-600 text-[10px] text-white hover:bg-emerald-600">
+                            Assinado
+                          </Badge>
+                        ) : a.category ? (
                           <Badge variant="outline" className="shrink-0 text-[10px]">
                             {a.category}
                           </Badge>
-                        )}
+                        ) : null}
                       </div>
                       <a
                         href={a.url}
@@ -161,7 +313,8 @@ export function LocacaoDealDetail({ deal, contract, versions, lease, simplified 
                         Abrir
                       </a>
                     </li>
-                  ))}
+                    );
+                  })}
                 </ul>
               )}
             </CardContent>
@@ -175,6 +328,7 @@ export function LocacaoDealDetail({ deal, contract, versions, lease, simplified 
             <LeaseSignaturesTab
               contractId={contract.id}
               contractStatus={contract.status}
+              data={extractLeaseSignerData(contract.dataJson)}
             />
           ) : (
             <Card>

@@ -23,7 +23,13 @@ describe("dealDataToSigners", () => {
           tipo_pessoa: "juridica",
           razao_social: "Imobiliária X Ltda",
           cnpj: "12.345.678/0001-90",
-          email: "contato@imobx.com",
+          // PJ assina pelo representante legal (PF com CPF) — a ClickSign
+          // rejeita CNPJ como documentação de signer.
+          representante: {
+            nome: "Rep Legal",
+            cpf: "111.222.333-44",
+            email: "contato@imobx.com",
+          },
         },
       ],
     };
@@ -38,7 +44,8 @@ describe("dealDataToSigners", () => {
     expect(v0.authMethod).toBe("email");
 
     expect(c0.sourceKind).toBe("comprador");
-    expect(c0.documentation).toBe("12345678000190");
+    expect(c0.subKind).toBe("representante");
+    expect(c0.documentation).toBe("11122233344"); // CPF do representante
 
     expect(result.missing[0]).toEqual({
       sourceKind: "vendedor",
@@ -198,7 +205,10 @@ describe("dealDataToSigners", () => {
       (s) => s.sourceKind === "vendedor" && s.name === "Elenira"
     );
     expect(conjugeVendedor).toBeDefined();
-    expect(conjugeVendedor?.sourceIndex).toBe(1000);
+    // Cônjuge agora usa o MESMO sourceIndex do titular + subKind="conjuge"
+    // (desambigua o override de papel da UI; sem +1000 mágico).
+    expect(conjugeVendedor?.sourceIndex).toBe(0);
+    expect(conjugeVendedor?.subKind).toBe("conjuge");
     expect(conjugeVendedor?.documentation).toBe("55566677788");
   });
 
