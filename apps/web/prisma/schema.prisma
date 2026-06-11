@@ -404,6 +404,12 @@ model CertidaoJob {
   label           String
   targetKind      String
   targetIndex     Int
+  // 2026-06-11 — âncora ESTÁVEL pro alvo "diligenciado". targetIndex é posicional
+  // (ordem de createdAt) e desliza quando uma pessoa do meio é removida, fazendo o
+  // guard de exclusão e o supersede de re-emissão mirarem a pessoa errada. Pra
+  // diligenciado, jobs passam a se ligar à pessoa por id. Null pra partes do
+  // contrato (vendedor/comprador/imóvel) e pra alvos ad-hoc (sem row no banco).
+  diligentedPersonId String?
   requestPayload  Json
   status          String    @default("pending")
   resultCode      Int?
@@ -437,17 +443,19 @@ model CertidaoJob {
   problemNotifiedAt DateTime?
   createdAt       DateTime  @default(now())
 
-  deal         Deal?                 @relation(fields: [dealId], references: [id], onDelete: Cascade)
-  organization Organization?         @relation("certidaoJobOrg", fields: [orgId], references: [id], onDelete: Cascade)
-  user         User?                 @relation("certidaoJobUser", fields: [userId], references: [id], onDelete: SetNull)
-  attachment   DealAttachment?       @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
-  auditLogs    CertidaoJobAuditLog[]
+  deal             Deal?                 @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  organization     Organization?         @relation("certidaoJobOrg", fields: [orgId], references: [id], onDelete: Cascade)
+  user             User?                 @relation("certidaoJobUser", fields: [userId], references: [id], onDelete: SetNull)
+  attachment       DealAttachment?       @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
+  diligentedPerson DiligentedPerson?     @relation(fields: [diligentedPersonId], references: [id], onDelete: SetNull)
+  auditLogs        CertidaoJobAuditLog[]
 
   @@index([dealId, batchId])
   @@index([orgId, batchId])
   @@index([status])
   @@index([status, expectedReadyAt])
   @@index([userId, createdAt])
+  @@index([dealId, diligentedPersonId])
 }
 
 // Phase F.II-β — audit log de transições de status do CertidaoJob. Cada
@@ -505,7 +513,8 @@ model DiligentedPerson {
   createdBy      String?
   createdAt      DateTime @default(now())
 
-  deal Deal @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  deal         Deal          @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  certidaoJobs CertidaoJob[]
 
   @@index([dealId])
 }

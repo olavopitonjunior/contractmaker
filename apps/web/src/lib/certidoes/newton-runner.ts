@@ -97,6 +97,7 @@ export async function runCertidoesBatchInline(
           label: p.label,
           targetKind: p.targetKind,
           targetIndex: p.targetIndex,
+          diligentedPersonId: p.diligentedPersonId ?? null,
           requestPayload: sanitizePayload(p.requestPayload) as object,
           status: info.initialStatus ?? "pending",
           costCents: null,
@@ -120,6 +121,7 @@ export async function runCertidoesBatchInline(
           label: s.label,
           targetKind: s.targetKind,
           targetIndex: s.targetIndex,
+          diligentedPersonId: s.diligentedPersonId ?? null,
           requestPayload: {
             missingField: s.missingField,
             missingFields: s.missingFields,

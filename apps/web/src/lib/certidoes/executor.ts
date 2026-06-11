@@ -995,7 +995,8 @@ export async function runSingleJob(
 async function resolveSerasaConsultado(
   dealId: string | null,
   targetKind: TargetKind,
-  targetIndex: number
+  targetIndex: number,
+  diligentedPersonId: string | null
 ): Promise<SerasaRenderContext["consultado"]> {
   const fallback = {
     tipo: "Pessoa fisica" as const,
@@ -1012,11 +1013,13 @@ async function resolveSerasaConsultado(
   if (!deal) return fallback;
 
   if (targetKind === "diligenciado") {
-    const dilig = await prisma.diligentedPerson.findMany({
-      where: { dealId },
-      orderBy: { createdAt: "asc" },
-    });
-    const row = dilig[targetIndex];
+    // Âncora estável: resolve a pessoa por id (não pela posição, que desliza com
+    // remoções). Fallback posicional só pra jobs legados sem o FK.
+    const row = diligentedPersonId
+      ? await prisma.diligentedPerson.findUnique({ where: { id: diligentedPersonId } })
+      : (await prisma.diligentedPerson.findMany({ where: { dealId }, orderBy: { createdAt: "asc" } }))[
+          targetIndex
+        ];
     if (!row) return fallback;
     return {
       tipo: row.tipoPessoa === "juridica" ? "Pessoa juridica" : "Pessoa fisica",
@@ -1073,7 +1076,7 @@ async function resolveSerasaConsultado(
  * em api_error/rate_limited zera pra retry honesto.
  */
 async function runSerasaJob(
-  job: { id: string; endpoint: string; label: string; targetKind: string; targetIndex: number; requestPayload: unknown; batchId: string; createdAt: Date },
+  job: { id: string; endpoint: string; label: string; targetKind: string; targetIndex: number; diligentedPersonId?: string | null; requestPayload: unknown; batchId: string; createdAt: Date },
   dealId: string | null,
   startedAt: Date
 ): Promise<void> {
@@ -1087,7 +1090,8 @@ async function runSerasaJob(
     const consultado = await resolveSerasaConsultado(
       dealId,
       job.targetKind as TargetKind,
-      job.targetIndex
+      job.targetIndex,
+      job.diligentedPersonId ?? null
     );
 
     // Gera PDF próprio (Serasa não devolve PDF) e anexa como DealAttachment.

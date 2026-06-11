@@ -1631,6 +1631,19 @@ export function planCertidoesForDeal(
   jobs.forEach(applyTierRegion);
   skipped.forEach(applyTierRegion);
 
+  // Âncora estável do diligenciado: carimba o id da pessoa (por targetIndex, que
+  // aqui ainda corresponde à posição no array passado) pra que o executor persista
+  // CertidaoJob.diligentedPersonId. Daí guard de exclusão e supersede deixam de
+  // depender do índice posicional. Partes do contrato/ad-hoc ficam sem id.
+  const stampPersonId = (j: PlannedJob | SkippedJob) => {
+    if (j.targetKind === "diligenciado") {
+      const id = (diligenciados ?? [])[j.targetIndex]?.id;
+      if (id) j.diligentedPersonId = id;
+    }
+  };
+  jobs.forEach(stampPersonId);
+  skipped.forEach(stampPersonId);
+
   const totalCostCents = jobs.reduce((acc, j) => acc + j.costCents, 0);
   return { jobs, skipped, totalCostCents };
 }
