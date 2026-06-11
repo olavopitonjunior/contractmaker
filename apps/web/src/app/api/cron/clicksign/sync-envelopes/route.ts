@@ -4,6 +4,11 @@ import { getEnvelope } from "@/lib/clicksign/envelopes";
 import { ClicksignError } from "@/lib/clicksign/client";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-signed";
+import {
+  completeInspectionOnEnvelopeClosed,
+  revertInspectionOnEnvelopeCanceled,
+  updateInspectionSignedLaudo,
+} from "@/lib/locacao/inspection-signature";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
 
 export const runtime = "nodejs";
@@ -72,12 +77,14 @@ export async function GET(req: NextRequest) {
         const signedUrl = extractSignedUrl(resp);
         if (signedUrl) void downloadSignedPdf(env.id, signedUrl);
         await autoPromoteDealOnContractSigned(env.id);
+        await completeInspectionOnEnvelopeClosed(env.id);
         drifted += 1;
       } else if (remoteStatus === "canceled") {
         await prisma.envelope.update({
           where: { id: env.id },
           data: { status: "canceled", canceledAt: new Date() },
         });
+        await revertInspectionOnEnvelopeCanceled(env.id);
         await prisma.envelopeEvent.create({
           data: {
             envelopeId: env.id,
@@ -139,6 +146,8 @@ async function downloadSignedPdf(envelopeId: string, url: string) {
       where: { id: envelopeId },
       data: { signedDocumentUrl: stored },
     });
+    // Laudo de vistoria: a versão assinada vira o laudoPdfUrl final.
+    await updateInspectionSignedLaudo(envelopeId, stored);
   } catch (err) {
     console.error("[clicksign cron] falha download PDF assinado:", err);
   }

@@ -9,6 +9,11 @@ import {
 } from "./envelopes";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-signed";
+import {
+  completeInspectionOnEnvelopeClosed,
+  revertInspectionOnEnvelopeCanceled,
+  updateInspectionSignedLaudo,
+} from "@/lib/locacao/inspection-signature";
 
 /**
  * Reconcilia o estado de UM envelope com a ClickSign v3 — fonte canônica de
@@ -112,11 +117,13 @@ export async function syncEnvelopeState(
     envelopeUpdated = true;
     const promote = await autoPromoteDealOnContractSigned(envelope.id);
     dealStagePromoted = promote.promoted;
+    await completeInspectionOnEnvelopeClosed(envelope.id);
   } else if (remoteStatus === "canceled" && envelope.status !== "canceled") {
     await prisma.envelope.update({
       where: { id: envelope.id },
       data: { status: "canceled", canceledAt: new Date() },
     });
+    await revertInspectionOnEnvelopeCanceled(envelope.id);
     envelopeUpdated = true;
   } else if (remoteStatus === "closed" && envelope.status === "closed") {
     const promote = await autoPromoteDealOnContractSigned(envelope.id);
@@ -124,6 +131,7 @@ export async function syncEnvelopeState(
       dealStagePromoted = true;
       envelopeUpdated = true;
     }
+    await completeInspectionOnEnvelopeClosed(envelope.id);
   }
 
   if (
@@ -322,6 +330,9 @@ async function downloadSignedPdf(envelopeId: string, url: string) {
       where: { id: envelopeId },
       data: { signedDocumentUrl: stored },
     });
+
+    // Laudo de vistoria: a versão assinada vira o laudoPdfUrl final.
+    await updateInspectionSignedLaudo(envelopeId, stored);
 
     const env = await prisma.envelope.findUnique({
       where: { id: envelopeId },

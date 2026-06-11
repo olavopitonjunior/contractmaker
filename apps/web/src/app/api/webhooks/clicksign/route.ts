@@ -15,6 +15,11 @@ import {
 import { listEnvelopeDocuments } from "@/lib/clicksign/envelopes";
 import type { WebhookPayload } from "@/lib/clicksign/types";
 import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-signed";
+import {
+  completeInspectionOnEnvelopeClosed,
+  revertInspectionOnEnvelopeCanceled,
+  updateInspectionSignedLaudo,
+} from "@/lib/locacao/inspection-signature";
 
 export const runtime = "nodejs";
 
@@ -209,6 +214,8 @@ export async function POST(req: NextRequest) {
       // vinculados a Contract (source="contract"). Helper compartilhado
       // garante mesma lógica em webhook + sync route + cron.
       await autoPromoteDealOnContractSigned(envelope.id);
+      // Laudo de vistoria assinado → Inspection vira "concluida".
+      await completeInspectionOnEnvelopeClosed(envelope.id);
 
       // v3 NÃO traz signed_file_url no payload — tentamos extrair do
       // payload (compat v2) e, se vier null, fazemos lookup via
@@ -226,6 +233,7 @@ export async function POST(req: NextRequest) {
         where: { id: envelope.id },
         data: { status: "canceled", canceledAt: new Date() },
       });
+      await revertInspectionOnEnvelopeCanceled(envelope.id);
       break;
     }
     case "deadline": {
@@ -233,6 +241,7 @@ export async function POST(req: NextRequest) {
         where: { id: envelope.id },
         data: { status: "canceled", canceledAt: new Date() },
       });
+      await revertInspectionOnEnvelopeCanceled(envelope.id);
       break;
     }
     case "add_signer":
@@ -286,6 +295,9 @@ async function downloadSignedPdf(envelopeId: string, url: string) {
       where: { id: envelopeId },
       data: { signedDocumentUrl: stored },
     });
+
+    // Laudo de vistoria: a versão assinada vira o laudoPdfUrl final.
+    await updateInspectionSignedLaudo(envelopeId, stored);
 
     // Espelha o PDF assinado na pasta Documentos do deal pra que o usuário
     // veja e baixe o arquivo final pelo mesmo lugar onde acompanha os outros

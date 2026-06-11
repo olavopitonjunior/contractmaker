@@ -682,4 +682,31 @@ export const inspectionUpdateSchema = z.object({
   executorId: z.string().nullable().optional(),
 });
 
+// Roles ClickSign v3 (espelha lib/clicksign/roles.ts — client-safe lá, Zod aqui).
+const clicksignRoleSchema = z.enum([
+  "sign",
+  "buyer",
+  "seller",
+  "intervening",
+  "realestate",
+  "witness",
+  "consenting",
+  "attorney",
+  "party",
+]);
+
+export const inspectionSendSignatureSchema = z.object({
+  signers: z
+    .array(
+      z.object({
+        name: z.string().min(2),
+        email: z.string().email(),
+        role: clicksignRoleSchema.default("party"),
+        documentation: z.string().optional(),
+      })
+    )
+    .min(1)
+    .max(10),
+});
+
 export { orgScopeSchema };
