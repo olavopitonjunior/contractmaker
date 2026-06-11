@@ -8,8 +8,8 @@ import { ArrowLeft, ClipboardList } from "lucide-react";
 import { LaudoEditor } from "@/components/locacao/inspection/LaudoEditor";
 import type { SignerSuggestion } from "@/components/locacao/inspection/EnviarAssinaturaDialog";
 import type { LaudoAmbiente, LaudoMeta } from "@/lib/locacao/inspection-types";
-import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
-import { FEATURE } from "@/lib/modules/catalog";
+import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
+import { MODULE } from "@/lib/modules/catalog";
 
 export const dynamic = "force-dynamic";
 
@@ -30,12 +30,14 @@ export default async function VistoriaDetailPage({ params }: Params) {
   if (!org) redirect("/");
   const { id } = await params;
 
+  // Editor faz parte da jornada do deal (kanban) — gate só no módulo locação,
+  // independente do toggle ADM locacao.vistorias.
   const modules = await getOrgModules(org.id);
-  if (!isFeatureEnabled(modules, FEATURE.LOCACAO_VISTORIAS)) {
+  if (!isModuleEnabled(modules, MODULE.LOCACAO)) {
     return (
       <Card>
         <CardContent className="py-10 text-center text-sm text-muted-foreground">
-          Recurso de vistorias não habilitado para esta organização.
+          Módulo de locação não habilitado para esta organização.
         </CardContent>
       </Card>
     );
@@ -90,14 +92,14 @@ export default async function VistoriaDetailPage({ params }: Params) {
     <div className="space-y-4">
       <Link
         href={
-          inspection.leaseContract
-            ? `/locacao/contratos/${inspection.leaseContract.id}?tab=vistoria`
+          inspection.leaseContract?.dealId
+            ? `/locacao/deals/${inspection.leaseContract.dealId}?tab=vistoria`
             : "/locacao/vistorias"
         }
         className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
-        {inspection.leaseContract ? "Voltar pro contrato" : "Voltar pra vistorias"}
+        {inspection.leaseContract?.dealId ? "Voltar pro negócio" : "Voltar pra vistorias"}
       </Link>
 
       <Card>
