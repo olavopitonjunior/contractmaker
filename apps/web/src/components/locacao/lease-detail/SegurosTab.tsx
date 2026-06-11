@@ -69,7 +69,9 @@ function fmtBRL(v: number): string {
 }
 
 function fmtDate(iso: string): string {
-  return new Date(iso).toLocaleDateString("pt-BR");
+  // Vigências são date-only (UTC meia-noite) — sem timeZone UTC o display
+  // desliza um dia em UTC-3 (memória feedback_date_parse_timezone).
+  return new Date(iso).toLocaleDateString("pt-BR", { timeZone: "UTC" });
 }
 
 function coberturaResumo(raw: unknown): string | null {
