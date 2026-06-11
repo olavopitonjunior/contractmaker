@@ -7,11 +7,18 @@ import { Button } from "@/components/ui/button";
 import { FileSignature, Loader2, RefreshCw, Send } from "lucide-react";
 import { useEnvelopePolling } from "@/hooks/useEnvelopePolling";
 import { EnvelopeCard } from "@/components/pipeline/SignaturesTab";
+import {
+  SendLeaseEnvelopeDialog,
+  type LeaseSignerData,
+} from "@/components/locacao/SendLeaseEnvelopeDialog";
 import { cn } from "@/lib/utils";
 
 interface LeaseSignaturesTabProps {
   contractId: string;
   contractStatus: string;
+  /** Partes do contrato (locador/locatário/fiador) pra popup de envio. Quando
+   *  ausente, cai no envio direto (deriva do dataJson no servidor). */
+  data?: LeaseSignerData;
 }
 
 /**
@@ -27,10 +34,12 @@ interface LeaseSignaturesTabProps {
 export function LeaseSignaturesTab({
   contractId,
   contractStatus,
+  data,
 }: LeaseSignaturesTabProps) {
   const { envelopes, loading, refetch } = useEnvelopePolling(contractId);
   const [sending, setSending] = useState(false);
   const [syncing, setSyncing] = useState(false);
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   const isApproved = contractStatus === "aprovado";
   const hasActiveOrClosed = envelopes.some(
@@ -106,8 +115,8 @@ export function LeaseSignaturesTab({
             Assinatura eletrônica
           </CardTitle>
           <p className="text-xs text-muted-foreground mt-1">
-            Os signatários (locador, locatário e fiador) são extraídos do
-            contrato automaticamente.
+            Revise os signatários (locador, locatário, fiador e testemunhas) na
+            popup antes de enviar.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -122,7 +131,7 @@ export function LeaseSignaturesTab({
           </Button>
           <Button
             size="sm"
-            onClick={handleSend}
+            onClick={() => (data ? setDialogOpen(true) : handleSend())}
             disabled={!isApproved || hasActiveOrClosed || sending}
             title={
               !isApproved
@@ -170,6 +179,17 @@ export function LeaseSignaturesTab({
           ))
         )}
       </CardContent>
+
+      {data && (
+        <SendLeaseEnvelopeDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          contractId={contractId}
+          contractStatus={contractStatus}
+          data={data}
+          onSent={refetch}
+        />
+      )}
     </Card>
   );
 }
