@@ -7,9 +7,9 @@ export const runtime = "nodejs";
 /**
  * DELETE /api/deals/:dealId/diligenciados/:id
  *
- * Soft-aware delete: if the person has any CertidaoJob with targetKind
- * "diligenciado" and matching targetIndex, refuse the delete to preserve
- * the audit trail. Otherwise hard-delete the row.
+ * Soft-aware delete: if the person has any CertidaoJob linked by
+ * diligentedPersonId (stable anchor; positional targetIndex fallback for legacy
+ * rows), refuse the delete to preserve the audit trail. Otherwise hard-delete.
  */
 export async function DELETE(
   _req: NextRequest,
@@ -35,34 +35,41 @@ export async function DELETE(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Position-based check: diligenciados use the order they were created as
-  // targetIndex (planner uses forEach index). Count persons before this one
-  // to find the index.
-  const all = await prisma.diligentedPerson.findMany({
-    where: { dealId: params.dealId },
-    orderBy: { createdAt: "asc" },
+  // Guard: bloqueia a remoção se a pessoa já tem certidões — preserva o histórico
+  // (os jobs ficariam órfãos). Âncora PRIMÁRIA = diligentedPersonId (estável, não
+  // desliza com remoções). Fallback posicional cobre jobs legados sem o FK
+  // (anteriores ao backfill), via o índice ATUAL da pessoa.
+  let hasJobs = await prisma.certidaoJob.findFirst({
+    where: { dealId: params.dealId, diligentedPersonId: params.id },
     select: { id: true },
   });
-  const idx = all.findIndex((p) => p.id === params.id);
-
-  if (idx >= 0) {
-    const hasJobs = await prisma.certidaoJob.findFirst({
-      where: {
-        dealId: params.dealId,
-        targetKind: "diligenciado",
-        targetIndex: idx,
-      },
+  if (!hasJobs) {
+    const all = await prisma.diligentedPerson.findMany({
+      where: { dealId: params.dealId },
+      orderBy: { createdAt: "asc" },
       select: { id: true },
     });
-    if (hasJobs) {
-      return NextResponse.json(
-        {
-          error:
-            "Esta pessoa já tem certidões extraídas. Não pode ser removida — os jobs ficariam órfãos.",
+    const idx = all.findIndex((p) => p.id === params.id);
+    if (idx >= 0) {
+      hasJobs = await prisma.certidaoJob.findFirst({
+        where: {
+          dealId: params.dealId,
+          targetKind: "diligenciado",
+          targetIndex: idx,
+          diligentedPersonId: null, // só legados sem âncora
         },
-        { status: 409 }
-      );
+        select: { id: true },
+      });
     }
+  }
+  if (hasJobs) {
+    return NextResponse.json(
+      {
+        error:
+          "Esta pessoa já tem certidões extraídas. Não pode ser removida — os jobs ficariam órfãos.",
+      },
+      { status: 409 }
+    );
   }
 
   await prisma.diligentedPerson.delete({ where: { id: params.id } });

@@ -1153,4 +1153,46 @@ describe("planCertidoesForDeal — diligenciado PF com rg/sexo/nome_mae (fix 202
     );
     expect(skippedTjsp.length).toBe(0);
   });
+
+  it("carimba diligentedPersonId (âncora estável) nos jobs do diligenciado", () => {
+    const diligJobs = plan.jobs.filter((j) => j.targetKind === "diligenciado");
+    expect(diligJobs.length).toBeGreaterThan(0);
+    diligJobs.forEach((j) => expect(j.diligentedPersonId).toBe("dp1"));
+  });
+});
+
+describe("planCertidoesForDeal — diligentedPersonId só no diligenciado (fix FK 2026-06-11)", () => {
+  // Vendedor (parte do form) NÃO recebe diligentedPersonId — ancoragem por id é só
+  // pro diligenciado; partes do contrato seguem por targetIndex.
+  const plan = planCertidoesForDeal(
+    { vendedores: [VENDEDOR_PF_SP], compradores: [], imoveis: [] },
+    undefined,
+    [
+      diligentedPersonToInput({
+        id: "pessoaA",
+        tipoPessoa: "juridica",
+        nome: "ACME LTDA",
+        cpf: null,
+        cnpj: "11222333000181",
+        dataNascimento: null,
+        rg: null,
+        nomeMae: null,
+        sexo: null,
+        uf: "SP",
+        cidade: "Sao Paulo",
+      }),
+    ]
+  );
+
+  it("jobs de vendedor não têm diligentedPersonId", () => {
+    const vend = plan.jobs.filter((j) => j.targetKind === "vendedor");
+    expect(vend.length).toBeGreaterThan(0);
+    vend.forEach((j) => expect(j.diligentedPersonId).toBeUndefined());
+  });
+
+  it("jobs do diligenciado carregam o id da pessoa", () => {
+    const dilig = plan.jobs.filter((j) => j.targetKind === "diligenciado");
+    expect(dilig.length).toBeGreaterThan(0);
+    dilig.forEach((j) => expect(j.diligentedPersonId).toBe("pessoaA"));
+  });
 });

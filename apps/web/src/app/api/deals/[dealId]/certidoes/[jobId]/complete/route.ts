@@ -168,6 +168,7 @@ export async function POST(
       label: newPlanned.label,
       targetKind: newPlanned.targetKind,
       targetIndex: newPlanned.targetIndex,
+      diligentedPersonId: newPlanned.diligentedPersonId ?? null,
       requestPayload: sanitizePayload(newPlanned.requestPayload) as object,
       status: info.initialStatus ?? "pending",
       costCents: null,

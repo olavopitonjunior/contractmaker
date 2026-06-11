@@ -365,12 +365,27 @@ export async function POST(
   // alvo). Reaproveitamos a mesma equivalência para o supersede: um novo lote
   // com pedido-certidao aposenta as linhas terminais antigas de pedido-civel do
   // MESMO alvo (e vice-versa), senão deals legados acumulam 2 famílias TJSP.
+  // Diligenciado é deduplicado/superseded por diligentedPersonId (âncora estável),
+  // não por targetIndex — assim a re-emissão não aposenta os jobs da pessoa errada
+  // quando os índices deslizaram por uma remoção anterior. Demais alvos seguem por
+  // targetIndex (vêm do form, estável).
   const supersedeTargets = [
     ...new Map(
-      [...effectiveJobs, ...effectiveSkipped].map((j) => [
-        `${j.endpoint}|${j.targetKind}|${j.targetIndex}`,
-        { endpoint: j.endpoint, targetKind: j.targetKind, targetIndex: j.targetIndex },
-      ])
+      [...effectiveJobs, ...effectiveSkipped].map((j) => {
+        const pid = j.targetKind === "diligenciado" ? j.diligentedPersonId ?? null : null;
+        const key = pid
+          ? `${j.endpoint}|diligenciado|pid:${pid}`
+          : `${j.endpoint}|${j.targetKind}|${j.targetIndex}`;
+        return [
+          key,
+          {
+            endpoint: j.endpoint,
+            targetKind: j.targetKind,
+            targetIndex: j.targetIndex,
+            diligentedPersonId: pid,
+          },
+        ];
+      })
     ).values(),
   ];
 
@@ -382,8 +397,10 @@ export async function POST(
         where: {
           dealId: params.dealId,
           endpoint: { in: supersedeEndpointsFor(t.endpoint) },
-          targetKind: t.targetKind,
-          targetIndex: t.targetIndex,
+          // Diligenciado com âncora → casa por pessoa; resto por índice posicional.
+          ...(t.diligentedPersonId
+            ? { targetKind: "diligenciado", diligentedPersonId: t.diligentedPersonId }
+            : { targetKind: t.targetKind, targetIndex: t.targetIndex }),
           status: { in: TERMINAL_REPLACEABLE },
         },
         data: { status: "replaced" },
@@ -409,6 +426,7 @@ export async function POST(
           label: p.label,
           targetKind: p.targetKind,
           targetIndex: p.targetIndex,
+          diligentedPersonId: p.diligentedPersonId ?? null,
           requestPayload: sanitized as object,
           status: info.initialStatus ?? "pending",
           costCents: null,
@@ -436,6 +454,7 @@ export async function POST(
           label: s.label,
           targetKind: s.targetKind,
           targetIndex: s.targetIndex,
+          diligentedPersonId: s.diligentedPersonId ?? null,
           requestPayload: {
             missingField: s.missingField,
             missingFields: s.missingFields,
