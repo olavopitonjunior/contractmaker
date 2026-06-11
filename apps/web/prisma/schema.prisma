@@ -2604,11 +2604,16 @@ model Guarantee {
   // A4: quando tipo=caucao: valor|veiculo|carta_fianca|imovel|outros
   caucaoSubtipo   String?
   provider        String? // credpago|garantti|creditas|porto|...
-  status          String   @default("pendente") // pendente|ativa|acionada|encerrada|recusada
+  // Lifecycle novo: pendente|em_analise|aprovada|vigente|executada|finalizada.
+  // Rows antigas ainda carregam os legados ativa|acionada|encerrada|recusada (UI mapeia label).
+  status          String   @default("pendente")
   coberturaMeses  Int?
   custoJson       Json?
   externalRef     String?
   fiadorPartyJson Json?
+  dadosJson       Json? // payload por modalidade (caução: banco/conta/data; capitalização: valorTitulo; etc.)
+  documentoPdfUrl String? // termo/apólice/título no Blob
+  historicoJson   Json? // snapshots de garantias substituídas [{snapshot, substituidaEm, motivo}]
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -2667,6 +2672,7 @@ model Inspection {
 
   @@index([orgId, status])
   @@index([propertyId])
+  @@index([envelopeId])
 }
 
 // ============================================
@@ -2843,10 +2849,15 @@ model InsurancePolicy {
   vigenciaFim          DateTime
   premioMensal         Float?
   responsavelPagamento String? // imobiliaria | locatario | proprietario
-  coberturaJson        Json?
-  status               String   @default("ativa") // ativa | vencida | cancelada | pendente
+  coberturaJson        Json? // {coberturaValor, basicas[], adicionais[]} (wizard de contratação)
+  status               String   @default("ativa") // cotacao | em_analise | pendente | ativa | vencida | cancelada
   pdfUrl               String?
+  origem               String   @default("manual") // manual | api (integração futura com seguradora)
+  externalRef          String? // id da cotação/apólice na seguradora (futuro)
+  // Primeira Expense mensal gerada pelo wizard — scalar, sem FK (padrão Maintenance.expenseId).
+  expenseId            String?
   createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
   org           Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
   leaseContract LeaseContract? @relation(fields: [leaseContractId], references: [id], onDelete: SetNull)

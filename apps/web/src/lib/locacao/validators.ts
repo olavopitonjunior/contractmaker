@@ -109,6 +109,116 @@ export const GARANTIA_TIPO_LABELS: Record<string, string> = {
   sem_garantia: "Não possui garantia",
 };
 
+// Lifecycle novo (pendente→em_analise→aprovada→vigente→executada/finalizada) em
+// união com os status legados de rows antigas (ativa|acionada|encerrada|recusada).
+// UI mapeia legado→label novo (ativa→Vigente); sem backfill.
+export const GUARANTEE_STATUSES = [
+  "pendente",
+  "em_analise",
+  "aprovada",
+  "vigente",
+  "executada",
+  "finalizada",
+  // legados
+  "ativa",
+  "acionada",
+  "encerrada",
+  "recusada",
+] as const;
+
+export const GUARANTEE_STATUS_LABELS: Record<string, string> = {
+  pendente: "Pendente",
+  em_analise: "Em análise",
+  aprovada: "Aprovada",
+  vigente: "Vigente",
+  executada: "Executada",
+  finalizada: "Finalizada",
+  ativa: "Vigente",
+  acionada: "Executada",
+  encerrada: "Finalizada",
+  recusada: "Recusada",
+};
+
+const guaranteeBaseFields = {
+  leaseContractId: z.string().min(1),
+  status: z.enum(GUARANTEE_STATUSES).default("pendente"),
+  coberturaMeses: z.number().int().positive().max(60).optional(),
+  externalRef: z.string().optional(),
+  observacoes: z.string().max(2000).optional(),
+  // true quando o contrato já tem garantia: snapshot da atual em historicoJson + sobrescreve.
+  substituir: z.boolean().default(false),
+};
+
+const fiadorPartySchema = z.object({
+  nome: z.string().min(2),
+  cpf: z.string().optional(),
+  rg: z.string().optional(),
+  telefone: z.string().optional(),
+  email: z.string().email().optional(),
+  endereco: z.string().optional(),
+  profissao: z.string().optional(),
+  rendaMensal: z.number().nonnegative().optional(),
+});
+
+// União discriminada por tipo — cada modalidade tem o payload mínimo do benchmark.
+export const guaranteeCreateSchema = z.discriminatedUnion("tipo", [
+  z.object({
+    tipo: z.literal("fiador"),
+    fiador: fiadorPartySchema,
+    ...guaranteeBaseFields,
+  }),
+  z.object({
+    tipo: z.literal("seguro_fianca"),
+    provider: z.string().min(2), // seguradora
+    premioMensal: z.number().nonnegative().optional(),
+    ...guaranteeBaseFields,
+  }),
+  z.object({
+    tipo: z.literal("titulo_capitalizacao"),
+    provider: z.string().min(2), // PortoCap | Icatu | outro
+    valorTitulo: z.number().positive(),
+    ...guaranteeBaseFields,
+  }),
+  z.object({
+    tipo: z.literal("caucao"),
+    caucaoSubtipo: z.enum(["valor", "veiculo", "carta_fianca", "imovel", "outros"]).default("valor"),
+    valorCaucao: z.number().positive().optional(),
+    dadosDeposito: z
+      .object({
+        banco: z.string().optional(),
+        agencia: z.string().optional(),
+        conta: z.string().optional(),
+        dataDeposito: z.coerce.date().optional(),
+      })
+      .optional(),
+    ...guaranteeBaseFields,
+  }),
+  z.object({
+    tipo: z.literal("garantia_digital"),
+    provider: z.string().min(2), // credpago | garantti | creditas | ...
+    taxaMensal: z.number().nonnegative().optional(),
+    ...guaranteeBaseFields,
+  }),
+  z.object({
+    tipo: z.literal("cessao_fiduciaria"),
+    provider: z.string().optional(),
+    valorCedido: z.number().positive().optional(),
+    ...guaranteeBaseFields,
+  }),
+]);
+
+export type GuaranteeCreateInput = z.infer<typeof guaranteeCreateSchema>;
+
+export const guaranteeUpdateSchema = z.object({
+  status: z.enum(GUARANTEE_STATUSES).optional(),
+  provider: z.string().optional(),
+  coberturaMeses: z.number().int().positive().max(60).optional(),
+  externalRef: z.string().optional(),
+  custoJson: z.any().optional(),
+  dadosJson: z.any().optional(),
+  fiadorPartyJson: z.any().optional(),
+});
+
 // ============================================================================
 // PropertyOwnership (refine: soma dos % por propriedade = 100)
 // ============================================================================
@@ -332,6 +442,35 @@ export const INSURANCE_TIPOS = [
   "rd",
 ] as const;
 
+// Lifecycle da contratação manual (API-ready): cotacao → em_analise → pendente →
+// ativa → vencida/cancelada. "ativa" continua o default de rows criadas direto.
+export const INSURANCE_STATUSES = [
+  "cotacao",
+  "em_analise",
+  "pendente",
+  "ativa",
+  "vencida",
+  "cancelada",
+] as const;
+
+export const INSURANCE_STATUS_LABELS: Record<string, string> = {
+  cotacao: "Cotação",
+  em_analise: "Em análise",
+  pendente: "Pendente",
+  ativa: "Ativa",
+  vencida: "Vencida",
+  cancelada: "Cancelada",
+};
+
+// Coberturas do seguro incêndio (benchmark Superlógica/Porto/Tokio).
+export const INSURANCE_COBERTURAS_BASICAS = ["incendio", "raio", "explosao"] as const;
+export const INSURANCE_COBERTURAS_ADICIONAIS = [
+  "vendaval",
+  "danos_eletricos",
+  "responsabilidade_civil",
+  "perda_aluguel",
+] as const;
+
 export const insurancePolicyCreateSchema = z
   .object({
     leaseContractId: z.string().optional(),
@@ -362,6 +501,70 @@ export const insurancePolicyCreateSchema = z
       });
     }
   });
+
+// Wizard de contratação manual (3 steps). Extensão do create: status explícito,
+// cobertura estruturada e geração opcional da despesa mensal (entra no boleto).
+export const insuranceWizardSchema = z
+  .object({
+    leaseContractId: z.string().min(1),
+    tipo: z.enum(INSURANCE_TIPOS).default("seguro_incendio"),
+    seguradora: z.string().min(2),
+    apoliceNumero: z.string().optional(),
+    vigenciaInicio: z.coerce.date(),
+    vigenciaFim: z.coerce.date(),
+    premioMensal: z.number().nonnegative().optional(),
+    responsavelPagamento: z
+      .enum(["imobiliaria", "locatario", "proprietario"])
+      .default("locatario"),
+    status: z.enum(INSURANCE_STATUSES).optional(),
+    coberturaJson: z
+      .object({
+        coberturaValor: z.number().positive().optional(),
+        basicas: z.array(z.enum(INSURANCE_COBERTURAS_BASICAS)).default([...INSURANCE_COBERTURAS_BASICAS]),
+        adicionais: z.array(z.enum(INSURANCE_COBERTURAS_ADICIONAIS)).default([]),
+      })
+      .optional(),
+    gerarDespesa: z.boolean().default(false),
+  })
+  .superRefine((data, ctx) => {
+    if (data.vigenciaFim <= data.vigenciaInicio) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "vigenciaFim deve ser posterior a vigenciaInicio.",
+        path: ["vigenciaFim"],
+      });
+    }
+    if (data.gerarDespesa && (data.premioMensal === undefined || data.premioMensal <= 0)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Gerar despesa mensal exige premioMensal > 0.",
+        path: ["premioMensal"],
+      });
+    }
+    // Expense.debitoDe só aceita locatario|proprietario — prêmio pago pela
+    // imobiliária não vira despesa do contrato.
+    if (data.gerarDespesa && data.responsavelPagamento === "imobiliaria") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Despesa mensal só quando o locatário ou o proprietário paga o prêmio.",
+        path: ["gerarDespesa"],
+      });
+    }
+  });
+
+export type InsuranceWizardInput = z.infer<typeof insuranceWizardSchema>;
+
+export const insurancePolicyUpdateSchema = z.object({
+  status: z.enum(INSURANCE_STATUSES).optional(),
+  seguradora: z.string().min(2).optional(),
+  apoliceNumero: z.string().optional(),
+  vigenciaInicio: z.coerce.date().optional(),
+  vigenciaFim: z.coerce.date().optional(),
+  premioMensal: z.number().nonnegative().optional(),
+  responsavelPagamento: z.enum(["imobiliaria", "locatario", "proprietario"]).optional(),
+  coberturaJson: z.any().optional(),
+  externalRef: z.string().optional(),
+});
 
 // ============================================================================
 // Maintenance
