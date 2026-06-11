@@ -238,6 +238,7 @@ export async function POST(
       endpoint: true,
       targetKind: true,
       targetIndex: true,
+      diligentedPersonId: true,
       status: true,
       retryCount: true,
       maxRetries: true,
@@ -246,17 +247,22 @@ export async function POST(
     },
   });
   const inProgress = activeCandidates.filter((j) => isInProgressBlocking(j));
+  // Mesma âncora do supersede: diligenciado casa por personId (estável); demais
+  // por índice posicional. Sem isso, após uma remoção o índice deslizado podia
+  // travar a re-emissão da pessoa errada (job vivo de outra parte no mesmo índice).
   const isTargetBlocked = (t: {
     endpoint: string;
     targetKind: string;
     targetIndex: number;
+    diligentedPersonId?: string;
   }) =>
-    inProgress.some(
-      (p) =>
-        p.targetKind === t.targetKind &&
-        p.targetIndex === t.targetIndex &&
-        supersedeEndpointsFor(t.endpoint).includes(p.endpoint)
-    );
+    inProgress.some((p) => {
+      if (!supersedeEndpointsFor(t.endpoint).includes(p.endpoint)) return false;
+      if (t.targetKind === "diligenciado" && t.diligentedPersonId) {
+        return p.targetKind === "diligenciado" && p.diligentedPersonId === t.diligentedPersonId;
+      }
+      return p.targetKind === t.targetKind && p.targetIndex === t.targetIndex;
+    });
 
   // Pula (sem redisparar) os alvos genuinamente em andamento; despacha o resto.
   const skippedInProgress = effectiveJobs.filter(isTargetBlocked).map((j) => ({
