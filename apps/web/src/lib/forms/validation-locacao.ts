@@ -245,6 +245,7 @@ export const LOCACAO_SCHEMA_TYPE = "locacao_residencial_v1" as const;
 // Passos do wizard PÚBLICO (client-facing) — a config fiscal/comissão é do
 // operador (diálogo de criação), não aparece aqui.
 export const LOCACAO_STEP_LABELS = [
+  "Documentos",
   "Locador(es)",
   "Locatário(s)",
   "Imóvel",
@@ -328,6 +329,7 @@ export type DadosLocacaoComercialForm = z.infer<typeof dadosLocacaoComercialSche
 export const LOCACAO_COMERCIAL_SCHEMA_TYPE = "locacao_comercial_v1" as const;
 
 export const LOCACAO_COMERCIAL_STEP_LABELS = [
+  "Documentos",
   "Locador(es)",
   "Locatário(s)",
   "Imóvel e Destinação",

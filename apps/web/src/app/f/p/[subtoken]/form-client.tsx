@@ -1,11 +1,15 @@
 "use client";
 
 import { SalesFormWizard } from "@/components/forms/SalesFormWizard";
+import { LocacaoFormWizard } from "@/components/forms/LocacaoFormWizard";
 import { BrandMark } from "@/components/layout/brand-mark";
+import type { ParticipantRole } from "@/lib/forms/participant-token";
 
 interface SubtokenFormClientProps {
   subtoken: string;
-  role: "vendedor" | "comprador";
+  role: ParticipantRole;
+  /** SalesForm.schemaType — locacao_* renderiza o LocacaoFormWizard. */
+  schemaType: string;
   initialData: Record<string, unknown>;
   requiredFieldsByStep: readonly (readonly string[])[];
   stepIndexes: readonly number[];
@@ -14,9 +18,18 @@ interface SubtokenFormClientProps {
   completedAt: string | null;
 }
 
+const ROLE_LABELS: Record<ParticipantRole, string> = {
+  vendedor: "Vendedor(a)",
+  comprador: "Comprador(a)",
+  locador: "Locador(a)",
+  locatario: "Locatário(a)",
+  fiador: "Fiador(a)",
+};
+
 export function SubtokenFormClient({
   subtoken,
   role,
+  schemaType,
   initialData,
   requiredFieldsByStep,
   stepIndexes,
@@ -24,7 +37,9 @@ export function SubtokenFormClient({
   formTitle,
   completedAt,
 }: SubtokenFormClientProps) {
-  const roleLabel = role === "vendedor" ? "Vendedor(a)" : "Comprador(a)";
+  const roleLabel = ROLE_LABELS[role] ?? role;
+  const isLocacao = schemaType.startsWith("locacao");
+  const participantEndpoint = `/api/forms/participant/${subtoken}`;
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -66,15 +81,27 @@ export function SubtokenFormClient({
             link separado e não vê seus dados.
           </div>
         )}
-        <SalesFormWizard
-          token={subtoken}
-          initialData={initialData}
-          requiredFieldsByStep={requiredFieldsByStep}
-          stepIndexes={stepIndexes}
-          endpoint={`/api/forms/participant/${subtoken}`}
-          pathScope={pathScope}
-          finalizeMode="participant"
-        />
+        {isLocacao ? (
+          <LocacaoFormWizard
+            token={subtoken}
+            initialData={initialData}
+            schemaType={schemaType}
+            stepIndexes={stepIndexes}
+            endpoint={participantEndpoint}
+            pathScope={pathScope}
+            finalizeMode="participant"
+          />
+        ) : (
+          <SalesFormWizard
+            token={subtoken}
+            initialData={initialData}
+            requiredFieldsByStep={requiredFieldsByStep}
+            stepIndexes={stepIndexes}
+            endpoint={participantEndpoint}
+            pathScope={pathScope}
+            finalizeMode="participant"
+          />
+        )}
       </main>
     </div>
   );

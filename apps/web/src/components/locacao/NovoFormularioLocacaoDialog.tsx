@@ -14,6 +14,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { NativeSelect } from "@/components/forms/NativeSelect";
+import { PartyLinksPanel } from "@/components/forms/PartyLinksPanel";
 import { Plus, Copy, Check, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 
@@ -28,15 +29,31 @@ const REGIME_COBRANCA = [
   { value: "mes_vencido", label: "Mês vencido" },
 ];
 
+interface NovoFormularioLocacaoDialogProps {
+  /** Modo controlado (dropdown "Novo negócio") — esconde o trigger próprio. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+}
+
 /**
  * Diálogo do OPERADOR: cria um formulário público de locação. Coleta a
  * finalidade + a config fiscal/comissão (que NÃO é preenchida pelo cliente) e
  * gera o link /f/[token] pra enviar ao locador/locatário.
  */
-export function NovoFormularioLocacaoDialog() {
-  const [open, setOpen] = useState(false);
+export function NovoFormularioLocacaoDialog({
+  open: controlledOpen,
+  onOpenChange,
+}: NovoFormularioLocacaoDialogProps = {}) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : uncontrolledOpen;
+  const setOpen = (o: boolean) => {
+    if (isControlled) onOpenChange?.(o);
+    else setUncontrolledOpen(o);
+  };
   const [submitting, setSubmitting] = useState(false);
   const [link, setLink] = useState<string | null>(null);
+  const [formToken, setFormToken] = useState<string | null>(null);
   const [dealId, setDealId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
 
@@ -49,6 +66,7 @@ export function NovoFormularioLocacaoDialog() {
 
   const reset = () => {
     setLink(null);
+    setFormToken(null);
     setDealId(null);
     setCopied(false);
   };
@@ -78,6 +96,7 @@ export function NovoFormularioLocacaoDialog() {
       const data = await res.json();
       const fullUrl = `${window.location.origin}${data.url}`;
       setLink(fullUrl);
+      setFormToken(data.token ?? null);
       setDealId(data.dealId);
     } catch {
       toast.error("Falha ao criar o formulário.");
@@ -102,11 +121,13 @@ export function NovoFormularioLocacaoDialog() {
         if (!o) reset();
       }}
     >
-      <DialogTrigger asChild>
-        <Button>
-          <Plus className="h-4 w-4 mr-1.5" /> Novo formulário de locação
-        </Button>
-      </DialogTrigger>
+      {!isControlled && (
+        <DialogTrigger asChild>
+          <Button>
+            <Plus className="h-4 w-4 mr-1.5" /> Novo formulário de locação
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Novo formulário de locação</DialogTitle>
@@ -183,6 +204,13 @@ export function NovoFormularioLocacaoDialog() {
                 {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
               </Button>
             </div>
+            {formToken && (
+              <PartyLinksPanel
+                formToken={formToken}
+                roles={["locador", "locatario"]}
+                compact
+              />
+            )}
           </div>
         )}
 

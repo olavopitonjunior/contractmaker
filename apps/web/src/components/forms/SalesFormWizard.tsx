@@ -10,6 +10,7 @@ import {
   STEP_REQUIRED_FIELDS_LEGACY,
 } from "@/lib/forms/validation";
 import { collectPartyFormatIssues } from "@/lib/forms/field-formats";
+import { SharePartyLinkButton } from "@/components/forms/PartyLinksPanel";
 import {
   effectiveRequiredPaths,
   findMissingRequired,
@@ -746,7 +747,17 @@ export function SalesFormWizard({
               {STEP_LABELS[currentTrueIndex]}
             </p>
           </div>
-          <SaveStatusBadge status={saveStatus} />
+          <div className="flex items-center gap-2">
+            {/* "Pedir para esta pessoa preencher" — só no token principal,
+                nos steps de parte (1 vendedor / 2 comprador). */}
+            {finalizeMode === "main" && currentTrueIndex === 1 && (
+              <SharePartyLinkButton formToken={token} role="vendedor" />
+            )}
+            {finalizeMode === "main" && currentTrueIndex === 2 && (
+              <SharePartyLinkButton formToken={token} role="comprador" />
+            )}
+            <SaveStatusBadge status={saveStatus} />
+          </div>
         </div>
 
         <StepIndicator

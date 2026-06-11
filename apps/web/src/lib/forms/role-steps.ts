@@ -25,6 +25,14 @@ import type { ParticipantRole } from "./participant-token";
 export const ROLE_STEP_INDEXES: Record<ParticipantRole, readonly number[]> = {
   vendedor: [0, 1, 3],
   comprador: [0, 2],
+  // Locação (LOCACAO_STEP_LABELS, 7 etapas pós etapa-0 Documentos 2026-06-10):
+  //   0 Documentos  1 Locador(es)  2 Locatário(s)  3 Imóvel
+  //   4 Aluguel e Reajuste  5 Garantia  6 Confirmação
+  // Locador vê o imóvel (matrícula/IPTU); fiador vê a Garantia (qualifica-se
+  // dentro dela); aluguel/confirmação ficam pro token principal.
+  locador: [0, 1, 3],
+  locatario: [0, 2],
+  fiador: [0, 5],
 };
 
 /**

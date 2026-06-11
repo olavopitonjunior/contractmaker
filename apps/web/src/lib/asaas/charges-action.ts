@@ -349,7 +349,7 @@ export async function runCreateCommissionCharge(
           "Enviado para assinatura",
           "Contrato assinado",
         ],
-        locacao: ["Em contrato", "Assinado"],
+        locacao: ["Em Aprovação", "Formulário", "Em contrato", "Assinado"],
       };
       const cobrancaStage = dealWithStage?.pipeline.stages.find(
         (s) => s.name === cobrancaStageName
@@ -362,7 +362,7 @@ export async function runCreateCommissionCharge(
       ) {
         await prisma.deal.update({
           where: { id: dealWithStage.id },
-          data: { stageId: cobrancaStage.id },
+          data: { stageId: cobrancaStage.id, stageEnteredAt: new Date() },
         });
         stageMovedTo = cobrancaStage.id;
       }

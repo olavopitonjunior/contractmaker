@@ -9,6 +9,8 @@ import { withIdempotency } from "@/lib/api/idempotency";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
+import { getPipelineByKind } from "@/lib/modules/resolve";
+import { MODULE } from "@/lib/modules/catalog";
 import { importContractFromFile } from "@/lib/services/contract-import";
 import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
 
@@ -136,8 +138,9 @@ export async function POST(req: NextRequest) {
     method: "POST",
     path: "/api/deals/import-contract",
     handler: async (): Promise<{ status: number; body: unknown }> => {
-      const pipeline = await prisma.pipeline.findFirst({
-        where: { orgId: auth.org.id },
+      // SEMPRE por kind — org com pipeline de locação faria findFirst({orgId})
+      // devolver o pipeline errado.
+      const pipeline = await getPipelineByKind(auth.org.id, MODULE.VENDAS, {
         include: { stages: { orderBy: { position: "asc" } } },
       });
       if (!pipeline || pipeline.stages.length === 0) {

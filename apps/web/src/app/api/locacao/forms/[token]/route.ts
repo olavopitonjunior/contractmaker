@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { matchDealGroup } from "@/lib/newton/group-match";
 import { generateLocacaoContractForDeal } from "@/lib/services/contract-generation";
+import { emitNotification } from "@/lib/notifications/emit";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
 import { schemaForLocacaoType } from "@/lib/forms/validation-locacao";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
@@ -111,6 +112,19 @@ export async function PATCH(
       } catch (error) {
         console.error("[locacao] auto-generate contract failed:", error);
       }
+
+      // Sino: avisa a equipe que o cliente finalizou o form (paridade com
+      // vendas). batchId=form.id deduplica re-finalizações. waitUntil: void
+      // após o response é cancelado na Vercel.
+      waitUntil(emitNotification({
+        orgId: form.orgId,
+        type: "form_completed",
+        title: "Formulário de locação finalizado",
+        body: `"${form.title || deal.title}" foi preenchido até o fim — contrato em geração.`,
+        linkUrl: `/locacao/deals/${deal.id}`,
+        metadata: { dealId: deal.id, formId: form.id },
+        batchId: form.id,
+      }));
 
       // Copia FormAttachment → DealAttachment (dedupe por URL).
       try {

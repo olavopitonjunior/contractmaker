@@ -158,7 +158,7 @@ describe("DELETE /api/deals/[dealId] (retrofit Newton)", () => {
     expect(body.mode).toBe("soft");
     expect(mockPrisma.deal.update).toHaveBeenCalledWith({
       where: { id: "d1" },
-      data: { stageId: "stage-arq" },
+      data: { stageId: "stage-arq", stageEnteredAt: expect.any(Date) },
     });
   });
 

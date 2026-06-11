@@ -11,6 +11,8 @@ import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { extractCcvDataJson } from "@/lib/extraction/ccv-extractor";
+import { getPipelineByKind } from "@/lib/modules/resolve";
+import { MODULE } from "@/lib/modules/catalog";
 import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
 
 export const runtime = "nodejs";
@@ -121,8 +123,10 @@ export async function POST(req: NextRequest) {
     method: "POST",
     path: "/api/deals/new-from-proposal",
     handler: async (): Promise<{ status: number; body: unknown }> => {
-      const pipeline = await prisma.pipeline.findFirst({
-        where: { orgId: auth.org.id },
+      // SEMPRE por kind — org com pipeline de locação faria findFirst({orgId})
+      // devolver o pipeline errado e a proposta de venda cairia na esteira de
+      // locação.
+      const pipeline = await getPipelineByKind(auth.org.id, MODULE.VENDAS, {
         include: { stages: { orderBy: { position: "asc" } } },
       });
       if (!pipeline || pipeline.stages.length === 0) {

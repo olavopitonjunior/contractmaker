@@ -222,7 +222,7 @@ export async function runContractApproval(
       if (assinaturaStage) {
         await prisma.deal.update({
           where: { id: deal.id },
-          data: { stageId: assinaturaStage.id },
+          data: { stageId: assinaturaStage.id, stageEnteredAt: new Date() },
         });
       }
     }

@@ -34,6 +34,9 @@ interface Option {
 interface Props {
   properties: Option[];
   tenants: Option[];
+  /** Modo controlado (dropdown "Novo negócio") — esconde o trigger próprio. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 interface FormState {
@@ -103,9 +106,20 @@ const REGIME_IR: Record<string, string> = {
   retem_inquilino: "Retém, inquilino recolhe",
 };
 
-export function NovoContratoWizard({ properties, tenants }: Props) {
+export function NovoContratoWizard({
+  properties,
+  tenants,
+  open: controlledOpen,
+  onOpenChange,
+}: Props) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : uncontrolledOpen;
+  const setOpen = (o: boolean) => {
+    if (isControlled) onOpenChange?.(o);
+    else setUncontrolledOpen(o);
+  };
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<FormState>({
@@ -203,12 +217,14 @@ export function NovoContratoWizard({ properties, tenants }: Props) {
         if (!o) setStep(0);
       }}
     >
-      <DialogTrigger asChild>
-        <Button size="sm" disabled={noPropertyOrTenant}>
-          <Plus className="mr-1 h-4 w-4" />
-          Novo contrato
-        </Button>
-      </DialogTrigger>
+      {!isControlled && (
+        <DialogTrigger asChild>
+          <Button size="sm" disabled={noPropertyOrTenant}>
+            <Plus className="mr-1 h-4 w-4" />
+            Novo contrato
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="sm:max-w-[600px]">
         <DialogHeader>
           <DialogTitle>{STEP_TITLES[step]}</DialogTitle>

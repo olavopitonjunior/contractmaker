@@ -5,7 +5,7 @@ import { audit } from "@/lib/security/audit";
 // com fallback "venda" (kind null/legado) — não regride o fluxo de venda.
 const LINEAR_ORDER_BY_KIND: Record<string, readonly string[]> = {
   venda: ["Formulário", "Confecção de Contrato", "Enviado para assinatura"],
-  locacao: ["Formulário", "Em contrato"],
+  locacao: ["Em Aprovação", "Formulário", "Em contrato"],
 };
 
 const TARGET_STAGE_BY_KIND: Record<string, string> = {
@@ -97,7 +97,7 @@ export async function autoPromoteDealOnContractSigned(
 
     await prisma.deal.update({
       where: { id: deal.id },
-      data: { stageId: targetStage.id },
+      data: { stageId: targetStage.id, stageEnteredAt: new Date() },
     });
 
     await audit(

@@ -87,6 +87,8 @@ export async function PATCH(
   if (contractSignedAt) data.contractSignedAt = new Date(contractSignedAt);
   if (chargeIssuedAt) data.chargeIssuedAt = new Date(chargeIssuedAt);
   if (commissionPaidAt) data.commissionPaidAt = new Date(commissionPaidAt);
+  // Aging por stage: drag pra outro stage carimba a entrada.
+  if (parsed.data.stageId) data.stageEnteredAt = new Date();
 
   const deal = await prisma.deal.update({
     where: { id: params.dealId },

@@ -18,6 +18,11 @@ import {
   DealProgressTimeline,
   type PipelineKind,
 } from "@/components/pipeline/DealProgressTimeline";
+import {
+  AGING_DANGER_DAYS,
+  AGING_WARN_DAYS,
+  isTerminalStageName,
+} from "@/lib/pipeline/stage-config";
 
 /**
  * Config que adapta o card por esteira. Default = vendas (mantém comportamento
@@ -52,6 +57,8 @@ export interface DealCard {
   commissionPaidAt: string | null;
   lostAt: string | null;
   lostReason: string | null;
+  /** Quando o deal entrou no stage atual (aging). Null = usa createdAt. */
+  stageEnteredAt?: string | null;
 }
 
 interface KanbanCardProps {
@@ -82,6 +89,16 @@ export function KanbanCard({
   const hoursAgo = Math.floor(msAgo / 3600000);
   const daysAgo = Math.floor(msAgo / 86400000);
   const timeLabel = daysAgo > 0 ? `${daysAgo}d` : hoursAgo > 0 ? `${hoursAgo}h` : "agora";
+
+  // Aging por stage — badge só quando acionável (≥ warn), pra não poluir
+  // cards saudáveis. Terminais (Comissão paga/ADM/perdido) não envelhecem.
+  const stageEnteredMs = new Date(deal.stageEnteredAt ?? deal.createdAt).getTime();
+  const daysInStage = Math.floor((Date.now() - stageEnteredMs) / 86400000);
+  const showAging =
+    !deal.lostAt &&
+    !isTerminalStageName(currentStageName) &&
+    daysInStage >= AGING_WARN_DAYS;
+  const agingDanger = daysInStage >= AGING_DANGER_DAYS;
 
   function handleCopyFormLink(e: React.MouseEvent) {
     e.preventDefault();
@@ -127,6 +144,19 @@ export function KanbanCard({
                 </span>
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
+                {showAging && (
+                  <span
+                    className={cn(
+                      "inline-flex items-center rounded-full px-1.5 py-px text-[10px] font-medium",
+                      agingDanger
+                        ? "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400"
+                        : "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-400"
+                    )}
+                    title={`Sem mudança de estágio há ${daysInStage} dia(s)`}
+                  >
+                    {daysInStage}d parado
+                  </span>
+                )}
                 {deal.formToken && (
                   <button
                     type="button"

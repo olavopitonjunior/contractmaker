@@ -115,6 +115,8 @@ describe("POST /api/deals/import-contract", () => {
       dealId: "deal-1",
       contractId: "contract-1",
       googleDocUrl: "https://docs/gdoc-1",
+      // Token do form pra revisão dos dados extraídos (frente deal-dados).
+      formToken: "tok-1",
     });
 
     // SalesForm criado com status="vinculado"

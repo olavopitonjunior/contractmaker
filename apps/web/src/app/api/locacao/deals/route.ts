@@ -58,10 +58,12 @@ export async function POST(req: NextRequest) {
       { status: 412 }
     );
   }
-  // Deal nasce em "Formulário" (não em "Em Aprovação", o 1º stage manual).
-  // Fallback p/ o 1º stage se "Formulário" não existir.
+  // Inquilino já identificado → deal nasce em "Em Aprovação" (análise de
+  // crédito da ficha). Fallback "Formulário" pra pipelines antigos.
   const firstStage =
-    pipeline.stages.find((s) => s.name === "Formulário") ?? pipeline.stages[0];
+    pipeline.stages.find((s) => s.name === "Em Aprovação") ??
+    pipeline.stages.find((s) => s.name === "Formulário") ??
+    pipeline.stages[0];
 
   const enderecoFmt = [property.rua, property.numero, property.bairro]
     .filter(Boolean)
@@ -80,11 +82,15 @@ export async function POST(req: NextRequest) {
         schemaType: LOCACAO_SCHEMA_TYPE,
         status: "vinculado",
         dataJson: {
-          locador: property.ownerships.map((o) => ({
+          // Chaves PLURAIS — shape canônico do dadosLocacaoSchema. As versões
+          // singulares quebravam aba Dados/credit-analysis/derive (review 06/10).
+          locadores: property.ownerships.map((o) => ({
             tipo_pessoa: "fisica",
             nome: o.owner.nome,
           })),
-          locatario: [{ tipo_pessoa: "fisica", nome: tenant.nome }],
+          locatarios: [
+            { tipo_pessoa: "fisica", nome: tenant.nome, cpf: tenant.cpfCnpj ?? "" },
+          ],
           imovel: {
             rua: property.rua,
             numero: property.numero,

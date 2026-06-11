@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
     }),
     prisma.tenant.findMany({
       where: { id: { in: d.tenantIds }, orgId: ctx.orgId },
-      select: { id: true, nome: true },
+      select: { id: true, nome: true, cpfCnpj: true },
     }),
     prisma.pipeline.findFirst({
       where: { orgId: ctx.orgId, kind: "locacao" },
@@ -83,8 +83,12 @@ export async function POST(req: NextRequest) {
       { status: 412 }
     );
   }
+  // Inquilino já identificado → deal nasce em "Em Aprovação" (análise de
+  // crédito da ficha). Fallback "Formulário" pra pipelines antigos.
   const firstStage =
-    pipeline.stages.find((s) => s.name === "Formulário") ?? pipeline.stages[0];
+    pipeline.stages.find((s) => s.name === "Em Aprovação") ??
+    pipeline.stages.find((s) => s.name === "Formulário") ??
+    pipeline.stages[0];
 
   const enderecoFmt = [property.rua, property.numero, property.bairro]
     .filter(Boolean)
@@ -104,13 +108,16 @@ export async function POST(req: NextRequest) {
         schemaType: LOCACAO_SCHEMA_TYPE,
         status: "vinculado",
         dataJson: {
-          locador: property.ownerships.map((o) => ({
+          // Chaves PLURAIS — shape canônico do dadosLocacaoSchema. As versões
+          // singulares quebravam aba Dados/credit-analysis/derive (review 06/10).
+          locadores: property.ownerships.map((o) => ({
             tipo_pessoa: "fisica",
             nome: o.owner.nome,
           })),
-          locatario: tenants.map((t, idx) => ({
+          locatarios: tenants.map((t, idx) => ({
             tipo_pessoa: "fisica",
             nome: t.nome,
+            cpf: t.cpfCnpj ?? "",
             tipo: idx === 0 ? "titular" : "solidario",
           })),
           imovel: {

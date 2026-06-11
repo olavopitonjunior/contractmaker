@@ -12,6 +12,7 @@ import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSigna
 import { SendAttachmentEnvelopeDialog } from "@/components/pipeline/SendAttachmentEnvelopeDialog";
 import { AddDocumentsCard } from "@/components/pipeline/AddDocumentsCard";
 import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
+import { LostDealBanner } from "@/components/pipeline/LostDealBanner";
 import { cn } from "@/lib/utils";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
 import type { SelectGroup } from "@/components/forms/NativeSelect";
@@ -726,28 +727,9 @@ export function DealDetail({ deal }: DealDetailProps) {
         </div>
       </div>
 
-      {/* Banner de perdido */}
+      {/* Banner de perdido (compartilhado com locação) */}
       {isLost && deal.lostAt && (
-        <div className="rounded-lg border border-red-300 bg-red-50 dark:bg-red-950/20 px-4 py-3">
-          <div className="flex items-start gap-3">
-            <XOctagon className="h-5 w-5 mt-0.5 shrink-0 text-red-600" />
-            <div className="flex-1">
-              <p className="font-medium text-red-700 dark:text-red-400">
-                Perdido em{" "}
-                {new Date(deal.lostAt).toLocaleDateString("pt-BR", {
-                  day: "2-digit",
-                  month: "2-digit",
-                  year: "numeric",
-                })}
-              </p>
-              {deal.lostReason && (
-                <p className="text-sm text-red-700/80 dark:text-red-400/80 mt-0.5">
-                  {deal.lostReason}
-                </p>
-              )}
-            </div>
-          </div>
-        </div>
+        <LostDealBanner lostAt={deal.lostAt} lostReason={deal.lostReason} />
       )}
 
       {/* Timeline horizontal — 6 stages do funil + datas-marco SLA */}

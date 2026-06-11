@@ -91,6 +91,9 @@ const extractSchema = z.object({
           "conjuge_vendedor",
           "procurador_vendedor",
           "representante_vendedor",
+          // Locação (análise de crédito Serasa) — retry/seleção não pode 400.
+          "locatario",
+          "fiador",
         ]),
         targetIndex: z.number().int().min(0),
       })

@@ -72,7 +72,7 @@ export async function regressDealStageAfterChargeCancel(
 
   await prisma.deal.update({
     where: { id: deal.id },
-    data: { stageId: targetStage.id },
+    data: { stageId: targetStage.id, stageEnteredAt: new Date() },
   });
 
   await audit(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { UseFormReturn } from "react-hook-form";
 import { Upload, Sparkles } from "lucide-react";
 import { toast } from "sonner";
@@ -9,17 +9,24 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
 import type { SelectGroup } from "@/components/forms/NativeSelect";
 import {
-  applyFichaResumo,
-  mapExtractedToForm,
-  suggestAssignment,
   type DocumentKind,
   type FichaResumoData,
   type ProcessedDocHint,
 } from "@/lib/forms/extracted-to-form";
+import {
+  createVendaAdapter,
+  type DocumentosStepAdapter,
+} from "@/components/forms/steps/doc-step-adapter";
 
 interface DocumentosStepProps {
   form: UseFormReturn<any>;
   token: string;
+  /**
+   * Pontos role-shaped (slots, sugestão, autofill). Default = venda
+   * (vendedores/compradores/imoveis); locação injeta o locacaoDocAdapter.
+   * O encanamento de upload/polling é o mesmo pras duas esteiras.
+   */
+  adapter?: DocumentosStepAdapter;
 }
 
 const MAX_FILES = 15;
@@ -281,7 +288,11 @@ function buildAssignmentOptions(
   return groups;
 }
 
-export function DocumentosStep({ form, token }: DocumentosStepProps) {
+export function DocumentosStep({ form, token, adapter: adapterProp }: DocumentosStepProps) {
+  const adapter = useMemo(
+    () => adapterProp ?? createVendaAdapter(buildAssignmentOptions),
+    [adapterProp]
+  );
   const [docs, setDocs] = useState<DocumentCardData[]>([]);
   const [dragging, setDragging] = useState(false);
   const [hydrated, setHydrated] = useState(false);
@@ -306,7 +317,7 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
         const restored: DocumentCardData[] = (data.attachments || []).map((a: any) => {
           const extracted = a.extractedData || {};
           const fields = extracted.fields || null;
-          const assignment = suggestAssignment(a.category, fields || {}, snapshot);
+          const assignment = adapter.suggest(a.category, fields || {}, snapshot);
           // Mapeia status enum do server pro status do card.
           // Server: "awaiting_user" | "queued" | "extracting" | "ready" | "failed"
           // UI:     "awaiting"      | "extracting"             | "ready" | "failed"
@@ -354,7 +365,7 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
       cancelled = true;
     };
 
-  }, [token]);
+  }, [token, adapter]);
 
   // Phase F.I-α + F.II polling — enquanto houver cards em status não-final
   // (uploading/extracting/failed), busca GET /attachments a cada 3s e
@@ -407,7 +418,7 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
                 }));
               const assignment =
                 d.status === "failed"
-                  ? suggestAssignment(a.category, fields, snapshot, siblings)
+                  ? adapter.suggest(a.category, fields, snapshot, siblings)
                   : d.assignment;
               return {
                 ...d,
@@ -443,7 +454,7 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [docs, token, form]);
+  }, [docs, token, form, adapter]);
 
   // Fase E — quando uma ficha-resumo fica ready, auto-aplica os dados no form
   // (cria/preenche slots de vendedores/compradores/cônjuges/representantes/
@@ -452,6 +463,9 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
   // ficha. Idempotente via appliedFichasRef.
   useEffect(() => {
     if (!hydrated) return;
+    // Ficha-resumo declara papéis específicos da esteira; adapter sem
+    // applyFicha (locação) não tem o recurso — docs ficam em "outro".
+    if (!adapter.applyFicha) return;
     const fichaDoc = docs.find(
       (d) =>
         d.status === "ready" &&
@@ -461,7 +475,7 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
     );
     if (!fichaDoc?.fields) return;
     appliedFichasRef.current.add(fichaDoc.id);
-    const filled = applyFichaResumo(
+    const filled = adapter.applyFicha(
       fichaDoc.fields as FichaResumoData,
       form as never,
       { skipIfDirty: true }
@@ -492,7 +506,7 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
           d.category !== "outro" &&
           d.assignment.kind === "outro"
         ) {
-          const newAssignment = suggestAssignment(
+          const newAssignment = adapter.suggest(
             d.category,
             d.fields,
             snapshot,
@@ -508,42 +522,31 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
         return d;
       });
     });
-  }, [docs, form, hydrated]);
+  }, [docs, form, hydrated, adapter]);
 
   const updateDoc = useCallback((id: string, patch: Partial<DocumentCardData>) => {
     setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
   }, []);
 
-  // Ensure the form's vendedores/compradores/imoveis array has at least
-  // `index + 1` entries. Used by both auto-grow (suggestAssignment putting a
-  // doc on a slot that doesn't exist yet) and the manual "+ Novo" action.
-  // For conjuge_* and representante_* kinds, only ensures the parent slot
-  // exists — subobjects are created on first setValue by RHF.
+  // Ensure the slot's backing array has at least `index + 1` entries. Used by
+  // both auto-grow (adapter.suggest putting a doc on a slot that doesn't exist
+  // yet) and the manual "+ Novo" action. Kinds não-array (cônjuge/representante/
+  // fiador/imóvel singular) retornam null no adapter — RHF cria o subobjeto no
+  // primeiro setValue.
   const ensureSlot = useCallback(
     (kind: DocumentKind, index: number) => {
       if (kind === "outro") return;
-      const fieldKey =
-        kind === "imovel"
-          ? "imoveis"
-          : kind === "vendedor" ||
-            kind === "conjuge_vendedor" ||
-            kind === "representante_vendedor"
-          ? "vendedores"
-          : kind === "comprador" ||
-            kind === "conjuge_comprador" ||
-            kind === "representante_comprador"
-          ? "compradores"
-          : null;
-      if (!fieldKey) return;
-      const current = (form.getValues(fieldKey) as any[] | undefined) ?? [];
+      const target = adapter.fieldKeyForKind(kind);
+      if (!target) return;
+      const current = (form.getValues(target.key) as any[] | undefined) ?? [];
       if (current.length > index) return;
       const next = [...current];
       while (next.length <= index) {
-        next.push(fieldKey === "imoveis" ? {} : { tipo_pessoa: "fisica" });
+        next.push({ ...target.emptyItem });
       }
-      form.setValue(fieldKey, next as never, { shouldDirty: true });
+      form.setValue(target.key, next as never, { shouldDirty: true });
     },
-    [form]
+    [form, adapter]
   );
 
   // Applies the OCR result for a single attachment to its card. Runs inside
@@ -565,12 +568,7 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
             fields: d.fields,
             assignment: d.assignment,
           }));
-        const assignment = suggestAssignment(
-          category,
-          fields,
-          snapshot,
-          siblings
-        );
+        const assignment = adapter.suggest(category, fields, snapshot, siblings);
         ensureSlot(assignment.kind, assignment.index);
         return prev.map((d) =>
           d.id === attachmentId
@@ -586,7 +584,7 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
         );
       });
     },
-    [form, ensureSlot]
+    [form, ensureSlot, adapter]
   );
 
   // Single-doc retry — usa novo endpoint /retry que libera lock e reenfileira.
@@ -825,30 +823,21 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
       let index: number;
       if (rawIdx === "new") {
         // "+ Novo X" — append a fresh slot to the form array and assign here.
-        // Apenas titulares (vendedor/comprador/imovel) suportam "novo"; cônjuge
-        // e representante derivam do papel da parte pai.
-        const fieldKey =
-          kind === "imovel"
-            ? "imoveis"
-            : kind === "vendedor"
-            ? "vendedores"
-            : kind === "comprador"
-            ? "compradores"
-            : null;
-        if (!fieldKey) return;
-        const current = (form.getValues(fieldKey) as any[] | undefined) ?? [];
+        // Só kinds com array no adapter suportam "novo"; subobjetos (cônjuge/
+        // representante/fiador) derivam do papel da parte pai.
+        const target = adapter.fieldKeyForKind(kind);
+        if (!target) return;
+        const current = (form.getValues(target.key) as any[] | undefined) ?? [];
         index = current.length;
         ensureSlot(kind, index);
-        toast.success(
-          `${kind === "imovel" ? "Imóvel" : kind === "vendedor" ? "Vendedor" : "Comprador"} ${index + 1} criado`
-        );
+        toast.success(`${adapter.kindLabel(kind)} ${index + 1} criado`);
       } else {
         index = Number(rawIdx) || 0;
         ensureSlot(kind, index);
       }
       updateDoc(id, { assignment: { kind, index }, applied: false });
     },
-    [updateDoc, form, ensureSlot]
+    [updateDoc, form, ensureSlot, adapter]
   );
 
   const handleRemove = useCallback(
@@ -883,7 +872,7 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
     }
     let totalFields = 0;
     for (const doc of readyDocs) {
-      const count = mapExtractedToForm(
+      const count = adapter.apply(
         { category: doc.category, fields: doc.fields || {}, confidence: doc.confidence ?? 0 },
         doc.assignment,
         form as UseFormReturn<Record<string, unknown>>,
@@ -903,10 +892,10 @@ export function DocumentosStep({ form, token }: DocumentosStepProps) {
     toast.success(
       `${readyDocs.length} documento(s) aplicado(s) — ${totalFields} campo(s) preenchido(s)`
     );
-  }, [docs, form, token, updateDoc]);
+  }, [docs, form, token, updateDoc, adapter]);
 
   const snapshot = form.getValues();
-  const assignmentOptions = buildAssignmentOptions(snapshot, docs);
+  const assignmentOptions = adapter.buildOptions(snapshot, docs);
   const readyCount = docs.filter((d) => d.status === "ready").length;
   // Only block "Aplicar aos campos" while files are still UPLOADING. Extractions
   // can take up to 60s per file (Gemini) and one failed extraction should not

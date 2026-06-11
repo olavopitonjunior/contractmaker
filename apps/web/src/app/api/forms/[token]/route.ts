@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { matchDealGroup } from "@/lib/newton/group-match";
 import { generateContractForDeal } from "@/lib/services/contract-generation";
+import { emitNotification } from "@/lib/notifications/emit";
 import { dedupConjuges } from "@/lib/forms/dedup-conjuges";
 import { dadosContratoSchema } from "@/lib/forms/validation";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
@@ -172,6 +173,19 @@ export async function PATCH(
           console.error("Auto-generate contract failed:", error);
         }
       }
+
+      // Sino: avisa a equipe que o cliente finalizou o form (o corretor não
+      // descobre mais só olhando o kanban). batchId=form.id deduplica
+      // re-finalizações. waitUntil: void após o response é cancelado na Vercel.
+      waitUntil(emitNotification({
+        orgId: form.orgId,
+        type: "form_completed",
+        title: "Formulário finalizado pelo cliente",
+        body: `"${form.title || deal.title}" foi preenchido até o fim — contrato em geração.`,
+        linkUrl: `/deals/${deal.id}`,
+        metadata: { dealId: deal.id, formId: form.id },
+        batchId: form.id,
+      }));
 
       try {
         const formAttachments = await prisma.formAttachment.findMany({

@@ -16,6 +16,14 @@ export type DocumentKind =
   | "conjuge_comprador"
   | "representante_vendedor"
   | "representante_comprador"
+  // Locação (módulo aditivo): Assignment é compartilhado pelo DocumentCard e
+  // pelo PATCH de classificação dos anexos, então os papéis vivem no mesmo
+  // union. O mapeamento de campos de locação fica em extracted-to-form-locacao.
+  | "locador"
+  | "locatario"
+  | "fiador"
+  | "representante_locador"
+  | "representante_locatario"
   | "imovel"
   | "outro";
 
@@ -30,7 +38,9 @@ export interface Assignment {
   index: number;
 }
 
-const PERSON_CATEGORIES = new Set([
+// Exportados pro módulo de locação (extracted-to-form-locacao.ts) — mesma
+// classificação de categorias e helpers de sanitização, basePaths diferentes.
+export const PERSON_CATEGORIES = new Set([
   "rg",
   "cpf",
   "cnh",
@@ -38,7 +48,7 @@ const PERSON_CATEGORIES = new Set([
   "comprovante_residencia",
   "certidao_casamento",
 ]);
-const PROPERTY_CATEGORIES = new Set(["matricula", "iptu", "escritura"]);
+export const PROPERTY_CATEGORIES = new Set(["matricula", "iptu", "escritura"]);
 
 const TITULAR_KINDS = new Set<DocumentKind>(["vendedor", "comprador"]);
 const CONJUGE_KINDS = new Set<DocumentKind>([
@@ -73,7 +83,7 @@ function inferEstadoCivilFromRegime(regime: unknown): string | null {
   return null;
 }
 
-const FIELD_MAP_PERSON: Record<string, string> = {
+export const FIELD_MAP_PERSON: Record<string, string> = {
   nome_completo: "nome",
   titular_nome: "nome",
   rg_numero: "rg",
@@ -121,18 +131,18 @@ function onlyDigits(s: unknown): string {
   return typeof s === "string" ? s.replace(/\D/g, "") : "";
 }
 
-function sanitizeCpf(s: unknown): string | null {
+export function sanitizeCpf(s: unknown): string | null {
   const d = onlyDigits(s);
   return d.length === 11 ? d : null;
 }
 
-function sanitizeUf(s: unknown): string | null {
+export function sanitizeUf(s: unknown): string | null {
   if (typeof s !== "string") return null;
   const upper = s.trim().toUpperCase().slice(0, 2);
   return /^[A-Z]{2}$/.test(upper) ? upper : null;
 }
 
-function parseEndereco(value: unknown): { rua?: string; numero?: string } {
+export function parseEndereco(value: unknown): { rua?: string; numero?: string } {
   if (typeof value !== "string" || !value.trim()) return {};
   const match = value.match(/^(.+?),?\s*(\d+[A-Za-z]?)(?:\s*[-,]\s*(.*))?$/);
   if (match) {
@@ -141,7 +151,7 @@ function parseEndereco(value: unknown): { rua?: string; numero?: string } {
   return { rua: value.trim() };
 }
 
-function coerce(field: string, value: unknown): unknown {
+export function coerce(field: string, value: unknown): unknown {
   if (value === null || value === undefined || value === "") return undefined;
   if (field === "cpf") return sanitizeCpf(value);
   if (field === "uf") return sanitizeUf(value);

@@ -11,7 +11,10 @@ import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { applyExtractedToDataJson } from "@/lib/forms/apply-extracted-to-datajson";
 import type { Assignment } from "@/lib/forms/extracted-to-form";
-import { deriveDealMetadata } from "@/lib/contracts/derive-deal-metadata";
+import {
+  deriveDealMetadata,
+  deriveLocacaoDealMetadata,
+} from "@/lib/contracts/derive-deal-metadata";
 
 export const runtime = "nodejs";
 
@@ -56,6 +59,7 @@ export async function POST(
       pipeline: { select: { orgId: true } },
     },
   });
+  const dealKind = deal?.kind === "locacao" ? ("locacao" as const) : ("venda" as const);
   if (!deal) {
     return NextResponse.json({ error: "Deal not found" }, { status: 404 });
   }
@@ -99,10 +103,14 @@ export async function POST(
     deal.form.dataJson as Record<string, unknown> | null,
     { category, fields },
     assignment,
-    { skipIfDirty: true }
+    { skipIfDirty: true, kind: dealKind }
   );
 
-  const { value } = deriveDealMetadata(merged, {
+  // Derive por kind; `?? deal.value` evita zerar o valor existente quando o
+  // dataJson não tem o campo (deriveDealMetadata de venda sobre dataJson de
+  // locação devolvia null e apagava o aluguel do card).
+  const derive = dealKind === "locacao" ? deriveLocacaoDealMetadata : deriveDealMetadata;
+  const { value } = derive(merged, {
     formTitle: deal.form.title,
     fallbackTitle: deal.title,
   });
@@ -114,7 +122,7 @@ export async function POST(
     }),
     prisma.deal.update({
       where: { id: deal.id },
-      data: { value },
+      data: { value: value ?? deal.value },
     }),
     prisma.dealAttachment.update({
       where: { id: attachment.id },

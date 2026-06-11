@@ -6,7 +6,10 @@ import { copyContractGoogleDoc } from "@/lib/google/copy-doc";
 import { shareDocWithOrgMembers } from "@/lib/google/share-org";
 import { replacePlaceholdersInDoc } from "@/lib/google/replace-placeholders";
 import { watchFile } from "@/lib/google/watch";
-import { deriveDealMetadata } from "@/lib/contracts/derive-deal-metadata";
+import {
+  deriveDealMetadata,
+  deriveLocacaoDealMetadata,
+} from "@/lib/contracts/derive-deal-metadata";
 import { selectTemplateForDeal, selectLocacaoTemplate } from "@/lib/contracts/template-category";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { assertModuleEnabled } from "@/lib/modules/guard";
@@ -986,7 +989,9 @@ export async function generateContractForDeal(
     data: {
       title: derivedTitle,
       value: derivedValue ?? deal.value,
-      ...(confeccaoStage ? { stageId: confeccaoStage.id } : {}),
+      ...(confeccaoStage
+        ? { stageId: confeccaoStage.id, stageEnteredAt: new Date() }
+        : {}),
     },
   });
 
@@ -1283,12 +1288,14 @@ export async function generateLocacaoContractForDeal(
   }
 
   // Move o deal pro stage "Em contrato" do pipeline DE LOCAÇÃO (esteira comercial).
-  const { title: derivedTitle, value: derivedValue } = deriveDealMetadata(dataJson, {
+  // deriveLocacaoDealMetadata lê o shape de locação (locadores/locatarios/
+  // imovel singular/aluguel.valor) — a variante de venda deixava o card com
+  // título genérico e "Sem valor".
+  const { title: derivedTitle, value: derivedValue } = deriveLocacaoDealMetadata(dataJson, {
     formTitle: deal.form?.title,
     fallbackTitle: deal.title,
   });
-  const pipeline = await prisma.pipeline.findFirst({
-    where: { orgId, kind: "locacao" },
+  const pipeline = await getPipelineByKind(orgId, MODULE.LOCACAO, {
     include: { stages: { orderBy: { position: "asc" } } },
   });
   const confeccaoStage = pipeline?.stages.find((s) => s.name === "Em contrato");
@@ -1297,7 +1304,9 @@ export async function generateLocacaoContractForDeal(
     data: {
       title: derivedTitle,
       value: derivedValue ?? deal.value,
-      ...(confeccaoStage ? { stageId: confeccaoStage.id } : {}),
+      ...(confeccaoStage
+        ? { stageId: confeccaoStage.id, stageEnteredAt: new Date() }
+        : {}),
     },
   });
 
