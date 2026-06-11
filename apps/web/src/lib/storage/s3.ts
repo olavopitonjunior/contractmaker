@@ -30,7 +30,12 @@ function isServerless(): boolean {
 }
 
 function normalizeKey(key: string): string {
-  return key.replace(/^\/+/, '');
+  const cleaned = key.replace(/^\/+/, '');
+  // Em staging, prefixa "staging/" pra isolar do bucket prod quando token compartilhado.
+  if (process.env.STAGING_MODE === "true" && !cleaned.startsWith("staging/")) {
+    return `staging/${cleaned}`;
+  }
+  return cleaned;
 }
 
 /**

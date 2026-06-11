@@ -56,6 +56,26 @@
     {
       "path": "/api/cron/certidoes/problem-digest",
       "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/cron/rent/generate",
+      "schedule": "0 0 1 * *"
+    },
+    {
+      "path": "/api/cron/rent/readjust",
+      "schedule": "0 1 1 * *"
+    },
+    {
+      "path": "/api/cron/locacao/newton/check-readjustments",
+      "schedule": "0 9 * * *"
+    },
+    {
+      "path": "/api/cron/locacao/newton/check-late-payments",
+      "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/asaas/transfer-dispatch",
+      "schedule": "*/10 * * * *"
     }
   ]
 }

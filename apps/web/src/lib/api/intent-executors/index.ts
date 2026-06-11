@@ -184,4 +184,31 @@ export function ensureIntentExecutorsRegistered(): void {
       actorUserId: ctx.requestedBy,
     });
   });
+
+  // EXPENSE_CREATE_FROM_OCR — Newton recebeu foto de IPTU/condomínio do operador,
+  // rodou Gemini OCR, propôs uma Expense. HITL: operador confirma campos antes
+  // da gravação.
+  registerIntentExecutor("EXPENSE_CREATE_FROM_OCR", async (payload, ctx) => {
+    const { runCreateExpenseFromIntent } = await import(
+      "@/lib/locacao/executors/create-expense"
+    );
+    return runCreateExpenseFromIntent({
+      payload: payload as Record<string, unknown>,
+      orgId: ctx.orgId,
+      userId: ctx.requestedBy,
+    });
+  });
+
+  // INSPECTION_SCHEDULE — Newton negociou janela com inquilino/vistoriador.
+  // HITL quando conflito de agenda foi detectado (executor sinaliza).
+  registerIntentExecutor("INSPECTION_SCHEDULE", async (payload, ctx) => {
+    const { runScheduleInspectionFromIntent } = await import(
+      "@/lib/locacao/executors/schedule-inspection"
+    );
+    return runScheduleInspectionFromIntent({
+      payload: payload as Record<string, unknown>,
+      orgId: ctx.orgId,
+      userId: ctx.requestedBy,
+    });
+  });
 }

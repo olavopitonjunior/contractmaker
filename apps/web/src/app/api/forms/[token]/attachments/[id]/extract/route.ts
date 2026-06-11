@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { downloadBufferFromUrl } from "@/lib/storage/s3";
 import { classifyAndExtract, isRateLimitError, humanizeOcrError } from "@/lib/ai/ocr";
+import { resolveFormScope } from "@/lib/forms/resolve-form-scope";
 import { extractFirstPages } from "@/lib/ai/pdf-utils";
 
 async function fetchBuffer(url: string): Promise<Buffer> {
@@ -79,19 +80,21 @@ export async function POST(
   _req: NextRequest,
   { params }: { params: { token: string; id: string } }
 ) {
-  const form = await prisma.salesForm.findUnique({
-    where: { token: params.token },
-    select: { id: true, orgId: true },
-  });
-  if (!form) {
+  const scope = await resolveFormScope(params.token);
+  if (!scope) {
     return NextResponse.json({ error: "Form not found" }, { status: 404 });
   }
+  const form = { id: scope.formId, orgId: scope.orgId };
 
   const attachment = await prisma.formAttachment.findUnique({
     where: { id: params.id },
   });
   if (!attachment || attachment.formId !== form.id) {
     return NextResponse.json({ error: "Attachment not found" }, { status: 404 });
+  }
+  // Subtoken só extrai os próprios anexos.
+  if (scope.participantId && attachment.participantId !== scope.participantId) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   if (attachment.extractedData) {

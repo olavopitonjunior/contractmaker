@@ -6,10 +6,13 @@ import path from "path";
 vi.unmock("@/lib/render/handlebars");
 
 import { enrichContractData } from "@/lib/services/contract-generation";
+import { enrichLocacaoData } from "@/lib/locacao/enrich";
 import { renderContratoHTML } from "@/lib/render/handlebars";
 import {
   previewSampleDataAVista,
   previewSampleDataFinanciamento,
+  previewSampleDataLocacao,
+  previewSampleDataLocacaoComercial,
 } from "@/lib/templates/preview-sample-data";
 
 /**
@@ -64,6 +67,17 @@ describe("template parity (A0.1)", () => {
     const html = renderContratoHTML(tpl, enriched as Record<string, unknown>);
     const leftover = leftoverMustaches(html);
     expect(leftover, `Variáveis sem fonte no template financiamento: ${leftover.join(", ")}`).toEqual([]);
+  });
+
+  it.each([
+    ["locacao_residencial_v3.hbs", previewSampleDataLocacao],
+    ["locacao_comercial_v3.hbs", previewSampleDataLocacaoComercial],
+  ])("%s: nenhuma variável de template fica sem fonte", (file, sample) => {
+    const tpl = readFileSync(templatePath(file), "utf-8");
+    const enriched = enrichLocacaoData(JSON.parse(JSON.stringify(sample)));
+    const html = renderContratoHTML(tpl, enriched as Record<string, unknown>);
+    const leftover = leftoverMustaches(html);
+    expect(leftover, `Variáveis sem fonte no template ${file}: ${leftover.join(", ")}`).toEqual([]);
   });
 
   it("À Vista: fecho com local E data preenchidos (regressão F1)", () => {

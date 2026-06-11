@@ -18,8 +18,6 @@ import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-si
 
 export const runtime = "nodejs";
 
-const SHARED_ORG_ID = process.env.SHARED_ORG_ID || "cmnt1ldo4000111bw4yo517k0";
-
 /**
  * Coleta os headers que importam pra debugar HMAC + identificação. Não
  * loga `cookie`, `authorization`, etc. — apenas headers ClickSign-specific
@@ -57,8 +55,11 @@ export async function POST(req: NextRequest) {
   // Log SEMPRE — incluindo quando HMAC falha. Isso permite diagnosticar
   // se o ClickSign está realmente mandando, com qual header de
   // assinatura, e se nosso secret bate.
+  // Pré-resolução de tenant: ainda não sabemos qual envelope/org é. orgId=null
+  // (Fase 0c) em vez de cair na org compartilhada legada. Pós-resolução audita
+  // com o orgId real.
   await audit(
-    { orgId: SHARED_ORG_ID, userId: null },
+    { orgId: null, userId: null },
     {
       action: "CLICKSIGN_WEBHOOK_RECEIVED",
       result: "SUCCESS",
@@ -80,7 +81,7 @@ export async function POST(req: NextRequest) {
     const ok = verifyWebhookSignature(rawBody, sigHeader, secret);
     if (!ok) {
       await audit(
-        { orgId: SHARED_ORG_ID, userId: null },
+        { orgId: null, userId: null },
         {
           action: "CLICKSIGN_WEBHOOK_REJECTED",
           result: "DENIED",
@@ -137,6 +138,19 @@ export async function POST(req: NextRequest) {
     // Pode ser um envelope criado fora do nosso sistema; só logamos.
     return NextResponse.json({ ok: true, unknown_envelope: true });
   }
+
+  // Pós-resolução: agora sabemos o tenant. Audita com o orgId real do envelope
+  // (Fase 0c) — antes tudo caía na org compartilhada legada.
+  await audit(
+    { orgId: envelope.orgId, userId: null },
+    {
+      action: "CLICKSIGN_WEBHOOK_PROCESSED",
+      result: "SUCCESS",
+      resourceType: "Envelope",
+      resource: envelope.id,
+      metadata: { eventName, envelopeId: envelope.id, clicksignEnvelopeId, documentKey },
+    }
+  ).catch(() => {});
 
   await prisma.envelopeEvent.create({
     data: {

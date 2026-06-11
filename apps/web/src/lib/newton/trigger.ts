@@ -16,6 +16,7 @@
 const SIDECAR_URL = process.env.NEWTON_SIDECAR_URL;
 const SIDECAR_TOKEN = process.env.NEWTON_SIDECAR_TOKEN;
 const AGENT_ID = process.env.NEWTON_AGENT_ID ?? "main";
+const NEWTON_DISABLED = process.env.NEWTON_DISABLED === "true";
 // Telefone "sistema" usado como caller do turn de gatilho. Precisa existir no
 // registry de contatos do Newton com role que permita escrita (admin/operador).
 const TRIGGER_PHONE = process.env.NEWTON_TRIGGER_PHONE ?? "5511999063228";
@@ -73,6 +74,10 @@ function buildText(a: TriggerArgs): string {
  * esperar nem depender do resultado.
  */
 export async function triggerNewtonForRequest(a: TriggerArgs): Promise<void> {
+  if (NEWTON_DISABLED) {
+    console.log("[newton.trigger] NEWTON_DISABLED=true — pulando dispatch (request=%s)", a.requestId);
+    return;
+  }
   if (!SIDECAR_URL || !SIDECAR_TOKEN) {
     console.warn("[newton.trigger] NEWTON_SIDECAR_URL/TOKEN ausentes — pedido fica para o sweep");
     return;

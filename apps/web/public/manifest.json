@@ -1,0 +1,38 @@
+{
+  "name": "imobpro.ai",
+  "short_name": "imobpro",
+  "description": "Gestão de contratos imobiliários e locação com IA — confecção, assinatura, cobrança e repasse em um único sistema.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#0f766e",
+  "orientation": "portrait-primary",
+  "lang": "pt-BR",
+  "scope": "/",
+  "icons": [
+    {
+      "src": "/brand/imobpro-mark-draft.svg",
+      "type": "image/svg+xml",
+      "sizes": "any",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["business", "productivity", "finance"],
+  "shortcuts": [
+    {
+      "name": "Pipeline de vendas",
+      "url": "/pipeline",
+      "description": "Funil Kanban de negócios"
+    },
+    {
+      "name": "Locação",
+      "url": "/locacao",
+      "description": "Dashboard operacional de aluguéis"
+    },
+    {
+      "name": "Financeiro",
+      "url": "/financeiro",
+      "description": "Cobranças e repasses Asaas"
+    }
+  ]
+}

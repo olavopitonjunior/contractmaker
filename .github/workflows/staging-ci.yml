@@ -1,0 +1,43 @@
+name: Staging CI
+
+on:
+  push:
+    branches: [staging]
+  pull_request:
+    branches: [staging]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Typecheck + tests
+    runs-on: ubuntu-latest
+    # Repo é npm-workspaces (root package.json `workspaces`, sem pnpm-workspace.yaml).
+    # Espelha ci.yml (master) — usa npm, não pnpm. Antes o job tentava `cache: pnpm`
+    # + `pnpm install --frozen-lockfile` e falhava por não haver pnpm-lock.yaml na raiz.
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
+      ANTHROPIC_API_KEY: test-key
+      AUTH_SECRET: test-secret
+      # tsc --noEmit estoura a heap padrão (~2GB) neste projeto no runner.
+      NODE_OPTIONS: --max-old-space-size=4096
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install
+        run: npm install
+
+      - name: Prisma generate
+        run: npm run prisma:generate -w apps/web
+
+      - name: Type check
+        run: npm run typecheck -w apps/web
+
+      - name: Tests
+        run: npm run test -w apps/web

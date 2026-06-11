@@ -1,0 +1,78 @@
+<div style="font-family: 'Source Serif 4', Georgia, serif; color: #111; max-width: 720px; margin: 0 auto;">
+  <header style="border-bottom: 2px solid #0f766e; padding-bottom: 8px; margin-bottom: 16px;">
+    <h1 style="font-size: 20pt; margin: 0;">Espelho de Contrato de Locação</h1>
+    <p style="font-size: 9pt; color: #555; margin: 4px 0 0;">{{nomeOrg}} · Emitido em {{dataEmissao}}</p>
+  </header>
+
+  <table style="width: 100%; font-size: 10pt; border-collapse: collapse;">
+    <tr>
+      <td style="padding: 6px 0; width: 35%; color: #555;">Imóvel</td>
+      <td style="padding: 6px 0; font-weight: 600;">{{enderecoImovel}}</td>
+    </tr>
+    <tr>
+      <td style="padding: 6px 0; color: #555;">Tipo do contrato</td>
+      <td style="padding: 6px 0; font-weight: 600;">{{finalidade}}</td>
+    </tr>
+    <tr>
+      <td style="padding: 6px 0; color: #555;">Status</td>
+      <td style="padding: 6px 0; font-weight: 600;">{{status}}</td>
+    </tr>
+    <tr>
+      <td style="padding: 6px 0; color: #555;">Vigência</td>
+      <td style="padding: 6px 0; font-weight: 600;">{{vigenciaInicio}} a {{vigenciaFim}}</td>
+    </tr>
+    <tr>
+      <td style="padding: 6px 0; color: #555;">Aluguel</td>
+      <td style="padding: 6px 0; font-weight: 600;">{{aluguel}} (vencimento dia {{diaVencimento}})</td>
+    </tr>
+    <tr>
+      <td style="padding: 6px 0; color: #555;">Encargos</td>
+      <td style="padding: 6px 0; font-weight: 600;">{{encargos}}</td>
+    </tr>
+    <tr>
+      <td style="padding: 6px 0; color: #555;">Taxa de administração</td>
+      <td style="padding: 6px 0; font-weight: 600;">{{taxaAdmPercent}}%</td>
+    </tr>
+    <tr>
+      <td style="padding: 6px 0; color: #555;">Índice de reajuste</td>
+      <td style="padding: 6px 0; font-weight: 600;">{{indiceReajuste}}</td>
+    </tr>
+    <tr>
+      <td style="padding: 6px 0; color: #555;">Regime IR</td>
+      <td style="padding: 6px 0; font-weight: 600;">{{regimeIr}}</td>
+    </tr>
+  </table>
+
+  <h2 style="font-size: 13pt; margin: 20px 0 8px; border-bottom: 1px solid #ddd; padding-bottom: 4px;">Locadores</h2>
+  <ul style="font-size: 10pt; padding-left: 20px;">
+    {{#each locadores}}
+      <li>{{this.nome}} — {{this.percentual}}%</li>
+    {{/each}}
+  </ul>
+
+  <h2 style="font-size: 13pt; margin: 20px 0 8px; border-bottom: 1px solid #ddd; padding-bottom: 4px;">Locatários</h2>
+  <ul style="font-size: 10pt; padding-left: 20px;">
+    {{#each locatarios}}
+      <li>{{this.nome}} ({{this.tipo}})</li>
+    {{/each}}
+  </ul>
+
+  {{#if garantia}}
+    <h2 style="font-size: 13pt; margin: 20px 0 8px; border-bottom: 1px solid #ddd; padding-bottom: 4px;">Garantia</h2>
+    <p style="font-size: 10pt;">Tipo: <strong>{{garantia.tipo}}</strong>{{#if garantia.provider}} · Provider: {{garantia.provider}}{{/if}} · Status: {{garantia.status}}</p>
+  {{/if}}
+
+  {{#if clausulasAdicionais.length}}
+    <h2 style="font-size: 13pt; margin: 20px 0 8px; border-bottom: 1px solid #ddd; padding-bottom: 4px;">Cláusulas adicionais</h2>
+    {{#each clausulasAdicionais}}
+      <div style="font-size: 10pt; margin: 12px 0;">
+        <div style="font-weight: 600; margin-bottom: 4px;">{{this.titulo}}</div>
+        <div style="white-space: pre-wrap;">{{this.conteudo}}</div>
+      </div>
+    {{/each}}
+  {{/if}}
+
+  <footer style="margin-top: 32px; padding-top: 12px; border-top: 1px solid #eee; font-size: 8pt; color: #888;">
+    Documento gerado por imobpro.ai · {{dataEmissao}}
+  </footer>
+</div>

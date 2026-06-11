@@ -14,7 +14,31 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
-import { DealProgressTimeline } from "@/components/pipeline/DealProgressTimeline";
+import {
+  DealProgressTimeline,
+  type PipelineKind,
+} from "@/components/pipeline/DealProgressTimeline";
+import {
+  AGING_DANGER_DAYS,
+  AGING_WARN_DAYS,
+  isTerminalStageName,
+} from "@/lib/pipeline/stage-config";
+
+/**
+ * Config que adapta o card por esteira. Default = vendas (mantém comportamento
+ * atual). Locação injeta basePath + timelineKind próprios.
+ */
+export interface KanbanCardConfig {
+  /** Base do link de detalhe do deal. Default "/deals". */
+  basePath: string;
+  /** Esteira que define os nós da timeline. Default "venda". */
+  timelineKind: PipelineKind;
+}
+
+export const DEFAULT_CARD_CONFIG: KanbanCardConfig = {
+  basePath: "/deals",
+  timelineKind: "venda",
+};
 
 export interface DealCard {
   id: string;
@@ -33,11 +57,16 @@ export interface DealCard {
   commissionPaidAt: string | null;
   lostAt: string | null;
   lostReason: string | null;
+  /** Quando o deal entrou no stage atual (aging). Null = usa createdAt. */
+  stageEnteredAt?: string | null;
 }
 
 interface KanbanCardProps {
   deal: DealCard;
   isOverlay?: boolean;
+  /** Nome do stage da coluna — destaca o nó atual da timeline. */
+  currentStageName?: string | null;
+  config?: KanbanCardConfig;
 }
 
 function formatShort(iso: string | null): string {
@@ -46,7 +75,12 @@ function formatShort(iso: string | null): string {
   return d.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
 }
 
-export function KanbanCard({ deal, isOverlay }: KanbanCardProps) {
+export function KanbanCard({
+  deal,
+  isOverlay,
+  currentStageName = null,
+  config = DEFAULT_CARD_CONFIG,
+}: KanbanCardProps) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: deal.id,
   });
@@ -55,6 +89,16 @@ export function KanbanCard({ deal, isOverlay }: KanbanCardProps) {
   const hoursAgo = Math.floor(msAgo / 3600000);
   const daysAgo = Math.floor(msAgo / 86400000);
   const timeLabel = daysAgo > 0 ? `${daysAgo}d` : hoursAgo > 0 ? `${hoursAgo}h` : "agora";
+
+  // Aging por stage — badge só quando acionável (≥ warn), pra não poluir
+  // cards saudáveis. Terminais (Comissão paga/ADM/perdido) não envelhecem.
+  const stageEnteredMs = new Date(deal.stageEnteredAt ?? deal.createdAt).getTime();
+  const daysInStage = Math.floor((Date.now() - stageEnteredMs) / 86400000);
+  const showAging =
+    !deal.lostAt &&
+    !isTerminalStageName(currentStageName) &&
+    daysInStage >= AGING_WARN_DAYS;
+  const agingDanger = daysInStage >= AGING_DANGER_DAYS;
 
   function handleCopyFormLink(e: React.MouseEvent) {
     e.preventDefault();
@@ -82,7 +126,7 @@ export function KanbanCard({ deal, isOverlay }: KanbanCardProps) {
       data-deal-id={deal.id}
       className={cn("rounded-md transition-all", isDragging && "opacity-40")}
     >
-      <Link href={`/deals/${deal.id}`}>
+      <Link href={`${config.basePath}/${deal.id}`}>
         <Card
           className={cn(
             "cursor-grab active:cursor-grabbing hover:shadow-md hover:border-primary/30 transition-all",
@@ -100,6 +144,19 @@ export function KanbanCard({ deal, isOverlay }: KanbanCardProps) {
                 </span>
               </div>
               <div className="flex items-center gap-2 text-muted-foreground">
+                {showAging && (
+                  <span
+                    className={cn(
+                      "inline-flex items-center rounded-full px-1.5 py-px text-[10px] font-medium",
+                      agingDanger
+                        ? "bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400"
+                        : "bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-400"
+                    )}
+                    title={`Sem mudança de estágio há ${daysInStage} dia(s)`}
+                  >
+                    {daysInStage}d parado
+                  </span>
+                )}
                 {deal.formToken && (
                   <button
                     type="button"
@@ -151,7 +208,8 @@ export function KanbanCard({ deal, isOverlay }: KanbanCardProps) {
               /* Timeline compacta — 6 stages + marcos SLA */
               <DealProgressTimeline
                 variant="compact"
-                currentStageName={null}
+                kind={config.timelineKind}
+                currentStageName={currentStageName}
                 formOpenedAt={deal.formOpenedAt}
                 formCompletedAt={deal.formCompletedAt}
                 contractSignedAt={deal.contractSignedAt}

@@ -1,7 +1,11 @@
 "use client";
 
 import { useDroppable } from "@dnd-kit/core";
-import { KanbanCard, type DealCard } from "./KanbanCard";
+import {
+  KanbanCard,
+  type DealCard,
+  type KanbanCardConfig,
+} from "./KanbanCard";
 import { cn } from "@/lib/utils";
 import { Plus, XOctagon } from "lucide-react";
 
@@ -11,9 +15,10 @@ interface KanbanColumnProps {
   color: string;
   deals: DealCard[];
   isLost?: boolean;
+  config?: KanbanCardConfig;
 }
 
-export function KanbanColumn({ id, name, color, deals, isLost }: KanbanColumnProps) {
+export function KanbanColumn({ id, name, color, deals, isLost, config }: KanbanColumnProps) {
   const { setNodeRef, isOver } = useDroppable({ id });
 
   const totalValue = deals.reduce((sum, d) => sum + (d.value || 0), 0);
@@ -55,7 +60,12 @@ export function KanbanColumn({ id, name, color, deals, isLost }: KanbanColumnPro
       {/* Cards area */}
       <div className="px-2 pb-2 space-y-2 flex-1 min-h-[80px]">
         {deals.map((deal) => (
-          <KanbanCard key={deal.id} deal={deal} />
+          <KanbanCard
+            key={deal.id}
+            deal={deal}
+            currentStageName={name}
+            config={config}
+          />
         ))}
 
         {deals.length === 0 && (

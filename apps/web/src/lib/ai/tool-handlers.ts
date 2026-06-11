@@ -132,6 +132,7 @@ async function handleProposePlan(
     tool?: string;
     input?: Record<string, unknown>;
     description?: string;
+    dependsOn?: unknown;
   };
   type PersistedStep = {
     id: string;
@@ -139,7 +140,8 @@ async function handleProposePlan(
     tool: string;
     input: Record<string, unknown>;
     description: string;
-    status: "pending" | "approved" | "rejected" | "executed" | "failed";
+    dependsOn?: string[];
+    status: "pending" | "approved" | "rejected" | "executed" | "failed" | "skipped";
     result?: { success: boolean; summary: string };
   };
 
@@ -156,6 +158,20 @@ async function handleProposePlan(
           : `${r.tool ?? "?"}`,
       status: "pending",
     };
+  });
+
+  // Resolve dependsOn (índices 0-based informados pelo LLM) → IDs reais dos
+  // steps. Ignora auto-referência e índices fora do range. Guarda-trilho do
+  // execute-plan: um step cuja dependência falhar é pulado (não roda com
+  // premissa falsa — ver bug add_comment afirmando inserção que falhou).
+  rawSteps.forEach((s: unknown, idx: number) => {
+    const raw = ((s ?? {}) as RawStep).dependsOn;
+    if (!Array.isArray(raw)) return;
+    const depIds = raw
+      .map((d) => (typeof d === "number" ? d : Number(d)))
+      .filter((d) => Number.isInteger(d) && d >= 0 && d < steps.length && d !== idx)
+      .map((d) => steps[d].id);
+    if (depIds.length > 0) steps[idx].dependsOn = Array.from(new Set(depIds));
   });
 
   // Pré-validação anti-slug em write steps que dependem de knowledgeItemId.
@@ -647,6 +663,20 @@ async function handleProposeTemplateChange(
   };
 }
 
+const KB_STOPWORDS = new Set([
+  "para", "como", "clausula", "sobre", "entre", "pelo", "pela", "uma", "uns",
+  "com", "sem", "dos", "das", "que", "por", "nos", "nas", "este", "esta",
+  "esse", "essa", "novo", "nova", "ser", "aos", "contrato", "imovel",
+]);
+
+/** Remove acentos e baixa caixa — pra casar "Rescisão" com token "rescisao". */
+function kbNormalize(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "");
+}
+
 async function knowledgeBaseKeywordFallback(
   query: string,
   category: string | undefined,
@@ -655,37 +685,82 @@ async function knowledgeBaseKeywordFallback(
   orgId: string,
   reason: string
 ): Promise<Record<string, unknown>> {
-  const rows = await prisma.knowledgeItem.findMany({
+  const baseWhere = {
+    orgId,
+    ...(category ? { category } : {}),
+    ...(groupCode ? { groupCode } : {}),
+  };
+  const select = {
+    id: true,
+    title: true,
+    content: true,
+    category: true,
+    groupCode: true,
+    subcategory: true,
+    agentNotes: true,
+    tags: true,
+    source: true,
+  } as const;
+
+  // Tokeniza a query (sem acento, >=4 chars, sem stopwords) e casa por QUALQUER
+  // token em título/conteúdo/tags — depois ranqueia por nº de tokens batidos.
+  // Antes era substring da query INTEIRA, que falhava com query verbosa
+  // ("cláusula de vistoria de entrada" não casava o título "Vistoria de…").
+  const tokens = Array.from(
+    new Set(
+      kbNormalize(query)
+        .split(/[^a-z0-9]+/)
+        .filter((t) => t.length >= 4 && !KB_STOPWORDS.has(t))
+    )
+  );
+
+  if (tokens.length === 0) {
+    const rows = await prisma.knowledgeItem.findMany({
+      where: {
+        ...baseWhere,
+        OR: [
+          { title: { contains: query, mode: "insensitive" } },
+          { content: { contains: query, mode: "insensitive" } },
+        ],
+      },
+      take: topK,
+      orderBy: { updatedAt: "desc" },
+      select,
+    });
+    return {
+      results: rows.map((r) => ({ ...r, content: r.content.slice(0, 800) })),
+      mode: "keyword_fallback",
+      note: `Busca por palavra-chave (recall inferior). Motivo: ${reason}`,
+    };
+  }
+
+  const candidates = await prisma.knowledgeItem.findMany({
     where: {
-      orgId,
-      ...(category ? { category } : {}),
-      ...(groupCode ? { groupCode } : {}),
-      OR: [
-        { title: { contains: query, mode: "insensitive" } },
-        { content: { contains: query, mode: "insensitive" } },
-      ],
+      ...baseWhere,
+      OR: tokens.flatMap((t) => [
+        { title: { contains: t, mode: "insensitive" as const } },
+        { content: { contains: t, mode: "insensitive" as const } },
+        { tags: { has: t } },
+      ]),
     },
-    take: topK,
-    orderBy: { updatedAt: "desc" },
-    select: {
-      id: true,
-      title: true,
-      content: true,
-      category: true,
-      groupCode: true,
-      subcategory: true,
-      agentNotes: true,
-      tags: true,
-      source: true,
-    },
+    take: 50,
+    select,
   });
+
+  const scored = candidates
+    .map((r) => {
+      const hay = kbNormalize(`${r.title} ${r.content} ${(r.tags ?? []).join(" ")}`);
+      const score = tokens.reduce((n, t) => n + (hay.includes(t) ? 1 : 0), 0);
+      return { r, score };
+    })
+    .filter((s) => s.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK);
+
   return {
-    results: rows.map((r) => ({
-      ...r,
-      content: r.content.slice(0, 800),
-    })),
+    results: scored.map(({ r }) => ({ ...r, content: r.content.slice(0, 800) })),
     mode: "keyword_fallback",
-    note: `Busca por palavra-chave (recall inferior). Motivo: ${reason}`,
+    note: `Busca por palavra-chave tokenizada (recall inferior ao semântico). Motivo: ${reason}`,
   };
 }
 

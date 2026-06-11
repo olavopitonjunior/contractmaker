@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { matchDealGroup } from "@/lib/newton/group-match";
+import { isCronAllowedInStaging } from "@/lib/env/staging";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,6 +27,9 @@ export async function GET(req: NextRequest) {
     if (authHeader !== `Bearer ${cronSecret}`) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+  }
+  if (!(await isCronAllowedInStaging("/api/cron/newton-requests/group-match"))) {
+    return NextResponse.json({ skipped: "staging-disabled", path: "/api/cron/newton-requests/group-match" });
   }
 
   const since = new Date(Date.now() - MAX_AGE_DAYS * 24 * 60 * 60 * 1000);

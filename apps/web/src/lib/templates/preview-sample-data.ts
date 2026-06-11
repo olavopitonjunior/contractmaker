@@ -217,11 +217,136 @@ export const previewSampleDataFinanciamento = {
   },
 };
 
+// Locação residencial — cobre as condicionais do locacao_residencial_v3.hbs:
+// PF + PJ, fiador ausente (garantia = título de capitalização), administradora
+// nomeada, vagas/condomínio, IPTU/condomínio de referência.
+export const previewSampleDataLocacao = {
+  locadores: [
+    {
+      tipo_pessoa: "fisica",
+      nome: "Helena Castro Natrielli",
+      nacionalidade: "Brasileira",
+      estado_civil: "Viúvo(a)",
+      profissao: "Engenheira",
+      rg: "11.222.333-4",
+      cpf: "123.456.789-00",
+      email: "helena.castro@example.com",
+      mobile_phone: "(11) 98888-1111",
+      endereco: "Rua das Acácias",
+      numero: "100",
+      complemento: "Apto 502",
+      bairro: "Vila Mariana",
+      cidade: "São Paulo",
+      uf: "SP",
+      cep: "04101-000",
+    },
+    {
+      tipo_pessoa: "juridica",
+      razao_social: "Patrimonial Castro Ltda",
+      cnpj: "12.345.678/0001-90",
+      endereco: "Rua dos Pinheiros",
+      numero: "200",
+      complemento: "Sala 1010",
+      bairro: "Pinheiros",
+      cidade: "São Paulo",
+      uf: "SP",
+      cep: "05422-000",
+      representante: {
+        nome: "Ana Carolina Ribeiro",
+        cpf: "456.789.012-33",
+      },
+    },
+  ],
+  locatarios: [
+    {
+      tipo_pessoa: "fisica",
+      nome: "Carlos Eduardo Almeida",
+      nacionalidade: "Brasileiro",
+      estado_civil: "Casado(a)",
+      profissao: "Médico",
+      rg: "45.678.901-2",
+      cpf: "567.890.123-44",
+      email: "carlos.almeida@example.com",
+      mobile_phone: "(11) 97777-1111",
+      endereco: "Rua Augusta",
+      numero: "2500",
+      complemento: "Cobertura",
+      bairro: "Cerqueira César",
+      cidade: "São Paulo",
+      uf: "SP",
+      cep: "01412-100",
+    },
+  ],
+  imovel: {
+    kind: "apartamento",
+    rua: "Avenida Brigadeiro Faria Lima",
+    numero: "3500",
+    complemento: "Apto 121",
+    bairro: "Itaim Bibi",
+    cidade: "São Paulo",
+    uf: "SP",
+    cep: "04538-132",
+    matricula: "152.834",
+    cartorio: "5º Cartório de Registro de Imóveis de São Paulo/SP",
+    inscricao_iptu: "112.345.6789-0",
+    area: 142.5,
+    vagas_garagem: 2,
+    condominio_nome: "Condomínio Edifício Faria Lima Square",
+    descricao:
+      "Apartamento residencial composto por 3 dormitórios sendo 1 suíte, sala ampla com 2 ambientes, cozinha americana, lavabo, banheiro social e área de serviço, totalizando 142,50m² de área privativa.",
+  },
+  aluguel: {
+    valor: 8500,
+    encargos: 0,
+    dia_vencimento: 10,
+    indice_reajuste: "IGPM",
+    vigencia_inicio: "2026-07-01",
+    vigencia_meses: 30,
+    meio_pagamento: "boleto",
+    iptu_mensal: 650,
+    condominio_mensal: 1800,
+  },
+  garantia: {
+    tipo: "titulo_capitalizacao",
+    provider: "Porto Seguro Capitalização S.A.",
+    titulo_valor: 25500,
+    titulo_proposta: "1234567-001",
+  },
+  foro: "São Paulo/SP",
+  assinatura: {
+    cidade: "São Paulo",
+    uf: "SP",
+    data: "2026-06-09",
+  },
+  config: {
+    administradora_nome: "Imobiliária Exemplo Negócios Imobiliários Ltda",
+    administradora_creci: "24.342-J/SP",
+    administradora_endereco: "Rua Roque Petrella, 188, Brooklin, CEP 04581-050, São Paulo/SP",
+  },
+};
+
+export const previewSampleDataLocacaoComercial = {
+  ...previewSampleDataLocacao,
+  imovel: {
+    ...previewSampleDataLocacao.imovel,
+    kind: "comercial_sala",
+    destinacao: "comércio varejista de vestuário e acessórios",
+    descricao:
+      "Sala comercial com recepção, 2 ambientes de atendimento, copa e banheiro privativo, totalizando 85m² de área privativa.",
+  },
+};
+
 export function getPreviewSampleData(
-  modalidade: "a_vista" | "financiamento" | string | null | undefined
+  modalidade: "a_vista" | "financiamento" | "locacao" | "locacao_comercial" | string | null | undefined
 ): Record<string, unknown> {
   if (modalidade === "financiamento") {
     return previewSampleDataFinanciamento as Record<string, unknown>;
+  }
+  if (modalidade === "locacao_comercial") {
+    return previewSampleDataLocacaoComercial as Record<string, unknown>;
+  }
+  if (modalidade === "locacao") {
+    return previewSampleDataLocacao as Record<string, unknown>;
   }
   return previewSampleDataAVista as Record<string, unknown>;
 }

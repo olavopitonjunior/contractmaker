@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { processOcrQueue } from "@/lib/ai/ocr-worker";
+import { resolveFormScope } from "@/lib/forms/resolve-form-scope";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -19,20 +20,22 @@ export async function POST(
   _req: NextRequest,
   { params }: { params: { token: string; id: string } }
 ) {
-  const form = await prisma.salesForm.findUnique({
-    where: { token: params.token },
-    select: { id: true, orgId: true },
-  });
-  if (!form) {
+  const scope = await resolveFormScope(params.token);
+  if (!scope) {
     return NextResponse.json({ error: "Form not found" }, { status: 404 });
   }
+  const form = { id: scope.formId };
 
   const attachment = await prisma.formAttachment.findUnique({
     where: { id: params.id },
-    select: { id: true, formId: true, status: true },
+    select: { id: true, formId: true, status: true, participantId: true },
   });
   if (!attachment || attachment.formId !== form.id) {
     return NextResponse.json({ error: "Attachment not found" }, { status: 404 });
+  }
+  // Subtoken só re-extrai os próprios anexos.
+  if (scope.participantId && attachment.participantId !== scope.participantId) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   // Reseta para queued — worker (ou cron) vai pegar. Limpa extractError e

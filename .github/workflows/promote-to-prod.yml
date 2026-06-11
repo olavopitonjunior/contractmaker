@@ -1,0 +1,59 @@
+name: Promote staging → prod
+
+on:
+  pull_request:
+    branches: [master]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  validate:
+    name: Validate (typecheck + tests)
+    runs-on: ubuntu-latest
+    if: github.head_ref == 'staging'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Prisma generate (no engine)
+        working-directory: apps/web
+        run: pnpm prisma generate --no-engine
+
+      - name: Type check
+        working-directory: apps/web
+        run: pnpm typecheck
+
+      - name: Tests
+        working-directory: apps/web
+        run: pnpm test
+
+  require-smoke-label:
+    name: Require staging-smoke-passed
+    runs-on: ubuntu-latest
+    if: github.head_ref == 'staging'
+    steps:
+      - name: Check label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          LABELS=$(gh pr view ${{ github.event.pull_request.number }} --repo ${{ github.repository }} --json labels --jq '.labels[].name')
+          if echo "$LABELS" | grep -q "staging-smoke-passed"; then
+            echo "✓ staging-smoke-passed label present"
+            exit 0
+          fi
+          echo "::error::PR de staging → master precisa do label 'staging-smoke-passed' aplicado manualmente após smoke test em staging.imobpro.ia.br"
+          exit 1

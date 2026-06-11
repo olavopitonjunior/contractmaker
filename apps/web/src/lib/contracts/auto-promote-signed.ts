@@ -1,13 +1,20 @@
 import { prisma } from "@/lib/db/prisma";
 import { audit } from "@/lib/security/audit";
 
-const LINEAR_ORDER = [
-  "Formulário",
-  "Confecção de Contrato",
-  "Enviado para assinatura",
-] as const;
+// Os nomes de stage diferem por tipo de pipeline. Mapas por `pipeline.kind`
+// com fallback "venda" (kind null/legado) — não regride o fluxo de venda.
+const LINEAR_ORDER_BY_KIND: Record<string, readonly string[]> = {
+  venda: ["Formulário", "Confecção de Contrato", "Enviado para assinatura"],
+  locacao: ["Em Aprovação", "Formulário", "Em contrato"],
+};
 
-const TARGET_STAGE_NAME = "Contrato assinado" as const;
+const TARGET_STAGE_BY_KIND: Record<string, string> = {
+  venda: "Contrato assinado",
+  // Locação (esteira comercial): ao fechar o envelope, o deal avança para
+  // "Assinado". A administração (vistoria/cobrança/etc.) é o próximo passo,
+  // representado pelo stage terminal "ADM" (handoff manual).
+  locacao: "Assinado",
+};
 
 export type AutoPromoteResult =
   | { promoted: true; fromStageId: string; toStageId: string }
@@ -58,7 +65,11 @@ export async function autoPromoteDealOnContractSigned(
       include: {
         stage: { select: { id: true, name: true } },
         pipeline: {
-          include: { stages: { select: { id: true, name: true } } },
+          select: {
+            id: true,
+            kind: true,
+            stages: { select: { id: true, name: true } },
+          },
         },
       },
     });
@@ -66,24 +77,27 @@ export async function autoPromoteDealOnContractSigned(
       return { promoted: false, reason: "deal_not_found" };
     }
 
-    const linearOrder: readonly string[] = LINEAR_ORDER;
+    const kind = deal.pipeline.kind ?? "venda";
+    const linearOrder: readonly string[] =
+      LINEAR_ORDER_BY_KIND[kind] ?? LINEAR_ORDER_BY_KIND.venda;
     if (!linearOrder.includes(deal.stage.name)) {
       return { promoted: false, reason: "already_advanced" };
     }
 
+    const targetStageName = TARGET_STAGE_BY_KIND[kind] ?? TARGET_STAGE_BY_KIND.venda;
     const targetStage = deal.pipeline.stages.find(
-      (s) => s.name === TARGET_STAGE_NAME
+      (s) => s.name === targetStageName
     );
     if (!targetStage) {
       console.warn(
-        `[auto-promote-signed] stage "${TARGET_STAGE_NAME}" não encontrada no pipeline ${deal.pipeline.id}`
+        `[auto-promote-signed] stage "${targetStageName}" não encontrada no pipeline ${deal.pipeline.id}`
       );
       return { promoted: false, reason: "stage_missing" };
     }
 
     await prisma.deal.update({
       where: { id: deal.id },
-      data: { stageId: targetStage.id },
+      data: { stageId: targetStage.id, stageEnteredAt: new Date() },
     });
 
     await audit(

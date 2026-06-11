@@ -4,6 +4,7 @@ import {
   applyWebhookToCharge,
   parseWebhookPayload,
 } from "@/lib/asaas/webhook";
+import { isCronAllowedInStaging } from "@/lib/env/staging";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -33,6 +34,9 @@ export async function GET(req: NextRequest) {
     if (authHeader !== `Bearer ${cronSecret}`) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+  }
+  if (!(await isCronAllowedInStaging("/api/cron/webhooks/retry-orphaned"))) {
+    return NextResponse.json({ skipped: "staging-disabled", path: "/api/cron/webhooks/retry-orphaned" });
   }
 
   const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000);

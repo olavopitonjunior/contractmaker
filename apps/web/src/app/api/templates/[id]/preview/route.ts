@@ -8,6 +8,7 @@ import { isGoogleDocsFeatureEnabled } from "@/lib/google/client";
 import { googleApplyStylePreset } from "@/lib/ai/google-tool-handlers";
 import { getPreviewSampleData } from "@/lib/templates/preview-sample-data";
 import { enrichContractData } from "@/lib/services/contract-generation";
+import { enrichLocacaoData } from "@/lib/locacao/enrich";
 
 function sha(s: string): string {
   return createHash("sha256").update(s).digest("hex").slice(0, 16);
@@ -43,8 +44,14 @@ export async function POST(
   }
 
   const body = await req.json().catch(() => ({}));
-  const fixtureModalidade =
-    body?.modalidade === "financiamento" ? "financiamento" : "a_vista";
+  // Locação usa a modalidade do próprio template (sample própria); venda
+  // mantém o toggle a_vista/financiamento do body.
+  const isLocacao = template.modalidade?.startsWith("locacao") ?? false;
+  const fixtureModalidade = isLocacao
+    ? (template.modalidade as string)
+    : body?.modalidade === "financiamento"
+      ? "financiamento"
+      : "a_vista";
   const force: boolean = body?.force === true;
 
   // Templates engine="google_docs" usam o doc original como preview — não
@@ -66,7 +73,9 @@ export async function POST(
   }
 
   const sampleData = getPreviewSampleData(fixtureModalidade);
-  const enriched = enrichContractData(sampleData);
+  const enriched = isLocacao
+    ? enrichLocacaoData(sampleData)
+    : enrichContractData(sampleData);
 
   // Hash combina source + fixture pra detectar tanto edição do template
   // quanto troca da modalidade do preview.
@@ -104,6 +113,7 @@ export async function POST(
     const uploaded = await uploadHtmlAsGoogleDoc({
       htmlContent: html,
       name: `[PREVIEW] ${template.name} — ${fixtureModalidade}`,
+      orgId: org.id,
     });
     docId = uploaded.docId;
     webViewLink = uploaded.webViewLink;

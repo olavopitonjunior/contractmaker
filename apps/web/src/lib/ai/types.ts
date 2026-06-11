@@ -8,6 +8,8 @@ export interface AgentContext {
   templateSource: string | null;
   templateModalidade?: string;
   templateName?: string;
+  /** "venda" | "locacao" — discrimina o domínio do agente (prompts/contexto). */
+  dealKind?: string;
   activeClauses: { id: string; clauseId: string; title: string; category: string; position: number; isActive: boolean }[];
   /** Quando setado, o conteúdo do contrato vive em um Google Doc; tools de
    *  edição roteiam via Docs API em vez de mutar `htmlContent`. */
@@ -122,7 +124,7 @@ export type AgentEvent =
       type: "plan_step_result";
       planId: string;
       stepId: string;
-      status: "executed" | "failed" | "rejected";
+      status: "executed" | "failed" | "rejected" | "skipped";
       summary?: string;
     }
   | {
@@ -170,7 +172,15 @@ export interface PlanStep {
   input: Record<string, unknown>;
   /** Descrição em PT-BR pra mostrar no PlanCard. */
   description: string;
-  status: "pending" | "approved" | "rejected" | "executed" | "failed";
+  /**
+   * IDs de steps anteriores cujo SUCESSO este step pressupõe. Se qualquer
+   * dependência não for executada com sucesso, o execute-plan PULA este step
+   * (status "skipped") em vez de rodá-lo com premissa falsa — ex.: um
+   * add_comment que afirma "a cláusula X inserida acima" não deve gravar nada
+   * se o insert_clause falhou.
+   */
+  dependsOn?: string[];
+  status: "pending" | "approved" | "rejected" | "executed" | "failed" | "skipped";
   /** Populado apos execucao. */
   result?: { success: boolean; summary: string };
 }

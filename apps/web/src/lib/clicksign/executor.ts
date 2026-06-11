@@ -12,13 +12,16 @@ import {
   type ClicksignRole,
 } from "./envelopes";
 import { ClicksignError } from "./client";
-import { dealDataToSigners } from "./mapping";
+import { dealDataToSigners, leaseDataToSigners } from "./mapping";
+import { moduleForDealKind } from "@/lib/modules/resolve";
+import { MODULE } from "@/lib/modules/catalog";
 import {
   CLICKSIGN_COST_CENTS,
   envelopeCostCents,
   getMonthlyBudgetCents,
 } from "./costs";
 import type { AuthMethod } from "./types";
+import { STAGING_MODE } from "@/lib/env/staging";
 
 export class EnvelopeBudgetError extends Error {
   constructor(
@@ -50,9 +53,16 @@ export class MissingEmailsError extends Error {
  *  subKind). Fallback pro defaultRoleForSourceKind quando signer não
  *  tem override. */
 export interface SignerRoleOverride {
-  sourceKind: "vendedor" | "comprador" | "testemunha" | "corretora";
+  sourceKind:
+    | "vendedor"
+    | "comprador"
+    | "testemunha"
+    | "corretora"
+    | "locador"
+    | "locatario"
+    | "fiador";
   sourceIndex: number;
-  subKind?: "titular" | "conjuge";
+  subKind?: "titular" | "conjuge" | "procurador" | "representante" | "avulso";
   role: ClicksignRole;
   /** Grupo de ordem (ClickSign v3). Null/omitido = paralelo. */
   group?: number | null;
@@ -64,6 +74,12 @@ interface SendEnvelopeInput {
   envelopeName?: string;
   deadlineAt?: Date | null;
   signerRoles?: SignerRoleOverride[];
+  /** Lista explícita de signatários vinda da popup de envio. Quando presente,
+   *  é AUTORITATIVA: substitui a derivação de `dataJson` (dealDataToSigners).
+   *  Permite o operador remover qualquer parte (inclusive titular) e adicionar
+   *  avulsos pra ESTE envelope sem mexer no contrato. Sem ela (Newton/bearer,
+   *  locação direta), cai na derivação por dataJson. */
+  signers?: EnvelopeSignerInput[];
 }
 
 /** Signer payload aceito pelo helper interno e pelo fluxo avulso. */
@@ -76,6 +92,9 @@ export interface EnvelopeSignerInput {
    *  avulsos digitados manualmente, default = "outro" / index 0. */
   sourceKind?: string;
   sourceIndex?: number;
+  /** Papel derivado da parte (titular/cônjuge/procurador/representante). Usado
+   *  pra casar o override de "Assina como" e o role default. Não persiste. */
+  subKind?: "titular" | "conjuge" | "procurador" | "representante" | "avulso";
   /** Qualificação ClickSign escolhida na UI ("Assina como"). */
   role?: ClicksignRole;
   /** Grupo de ordem de assinatura. Null/omitido = paralelo. */
@@ -136,7 +155,7 @@ async function createEnvelopeFromBuffer(input: {
     contractId,
     attachmentId,
     source,
-    name,
+    name: rawName,
     authMethod,
     deadlineAt,
     signers,
@@ -148,6 +167,10 @@ async function createEnvelopeFromBuffer(input: {
   if (signers.length === 0) {
     throw new Error("Nenhum signatário válido encontrado");
   }
+
+  // Prefixo [STAGING] no nome do envelope deixa claro pra signatário em caso
+  // de vazamento + facilita identificar/filtrar no dashboard ClickSign.
+  const name = STAGING_MODE ? `[STAGING] ${rawName}` : rawName;
 
   const planCost = envelopeCostCents(signers.map(() => authMethod));
   const budget = getMonthlyBudgetCents();
@@ -178,12 +201,19 @@ async function createEnvelopeFromBuffer(input: {
   // input → override por (sourceKind,sourceIndex) → default por sourceKind.
   // Persistimos no row pra exibir na aba Assinaturas e re-criar requirement.
   const resolveRoleGroup = (s: EnvelopeSignerInput) => {
+    // Match canônico por (sourceKind, sourceIndex, subKind). subKind desambigua
+    // titular/cônjuge/procurador/representante de uma MESMA parte (mesmo
+    // sourceIndex). Quando o override não traz subKind, casa por (kind,index).
     const override = input.signerRoles?.find(
       (r) =>
-        r.sourceKind === s.sourceKind && r.sourceIndex === (s.sourceIndex ?? 0)
+        r.sourceKind === s.sourceKind &&
+        r.sourceIndex === (s.sourceIndex ?? 0) &&
+        (r.subKind == null || r.subKind === (s.subKind ?? "titular"))
     );
     const role: ClicksignRole =
-      s.role ?? override?.role ?? defaultRoleForSourceKind(s.sourceKind ?? "outro");
+      s.role ??
+      override?.role ??
+      defaultRoleForSourceKind(s.sourceKind ?? "outro", s.subKind);
     const group = s.group ?? override?.group ?? null;
     return { role, group };
   };
@@ -338,7 +368,7 @@ export async function sendEnvelopeForContract(input: SendEnvelopeInput) {
   const contract = await prisma.contract.findUnique({
     where: { id: input.contractId },
     include: {
-      deal: { include: { pipeline: { select: { orgId: true } } } },
+      deal: { include: { pipeline: { select: { orgId: true, kind: true } } } },
     },
   });
   if (!contract) throw new Error("Contrato não encontrado");
@@ -360,10 +390,42 @@ export async function sendEnvelopeForContract(input: SendEnvelopeInput) {
     );
   }
 
-  const dataSource =
-    (contract.dataJson as Record<string, unknown> | null) ?? null;
-  const { signers, missing } = dealDataToSigners(dataSource, authMethod);
-  if (missing.length > 0) throw new MissingEmailsError(missing);
+  // Signatários: a popup de envio manda uma lista explícita (autoritativa).
+  // Sem ela (Newton/bearer, locação direta), derivamos do dataJson conforme o
+  // tipo de pipeline (locação: locador/locatário/fiador; venda: vendedor/etc.).
+  let envelopeSigners: EnvelopeSignerInput[];
+  if (input.signers && input.signers.length > 0) {
+    const missingEmail = input.signers
+      .map((s, i) => ({ ...s, idx: i }))
+      .filter((s) => !s.email || !s.email.includes("@"));
+    if (missingEmail.length > 0) {
+      throw new MissingEmailsError(
+        missingEmail.map((m) => ({
+          sourceKind: m.sourceKind ?? "outro",
+          sourceIndex: m.sourceIndex ?? m.idx,
+          name: m.name,
+        }))
+      );
+    }
+    envelopeSigners = input.signers;
+  } else {
+    const dataSource =
+      (contract.dataJson as Record<string, unknown> | null) ?? null;
+    const { signers, missing } =
+      moduleForDealKind(contract.deal?.pipeline?.kind) === MODULE.LOCACAO
+        ? leaseDataToSigners(dataSource, authMethod)
+        : dealDataToSigners(dataSource, authMethod);
+    if (missing.length > 0) throw new MissingEmailsError(missing);
+    envelopeSigners = signers.map((s) => ({
+      name: s.name,
+      email: s.email,
+      documentation: s.documentation,
+      phone: s.phone,
+      sourceKind: s.sourceKind,
+      sourceIndex: s.sourceIndex,
+      subKind: s.subKind,
+    }));
+  }
 
   const { buffer: pdfBuffer, filename } = await generateContractPdfBuffer(
     contract.id
@@ -380,13 +442,16 @@ export async function sendEnvelopeForContract(input: SendEnvelopeInput) {
       `Contrato ${contract.deal?.title || contract.id} (v${contract.version})`,
     authMethod,
     deadlineAt: input.deadlineAt ?? null,
-    signers: signers.map((s) => ({
+    signers: envelopeSigners.map((s) => ({
       name: s.name,
       email: s.email,
       documentation: s.documentation,
       phone: s.phone,
       sourceKind: s.sourceKind,
       sourceIndex: s.sourceIndex,
+      subKind: s.subKind,
+      role: s.role,
+      group: s.group,
     })),
     signerRoles: input.signerRoles,
     pdfBuffer,
@@ -539,7 +604,15 @@ function pickResourceId(resp: unknown): string | null {
 // (POST /requirements com action="provide_evidence", auth=whatsapp), não
 // como canal de comunicação do signer.
 
-function defaultRoleForSourceKind(sourceKind: string): ClicksignRole {
+function defaultRoleForSourceKind(
+  sourceKind: string,
+  subKind?: "titular" | "conjuge" | "procurador" | "representante" | "avulso"
+): ClicksignRole {
+  // Papéis derivados da parte têm qualificação própria, independente do
+  // sourceKind. Representante (PJ) assina NO LUGAR da parte → mantém o papel
+  // da parte (cai no switch abaixo).
+  if (subKind === "conjuge") return "consenting";
+  if (subKind === "procurador") return "attorney";
   switch (sourceKind) {
     case "vendedor":
       return "seller";
@@ -549,6 +622,14 @@ function defaultRoleForSourceKind(sourceKind: string): ClicksignRole {
       return "witness";
     case "corretora":
       return "intervening";
+    // Locação — usar só qualificações já existentes no enum ClicksignRole
+    // (role desconhecido → 422 na ClickSign).
+    case "locador":
+      return "party";
+    case "locatario":
+      return "party";
+    case "fiador":
+      return "consenting";
     default:
       return "sign";
   }

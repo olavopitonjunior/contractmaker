@@ -140,6 +140,7 @@ export default async function PipelinePage() {
       commissionPaidAt: deal.commissionPaidAt?.toISOString() ?? null,
       lostAt: deal.lostAt?.toISOString() ?? null,
       lostReason: deal.lostReason ?? null,
+      stageEnteredAt: deal.stageEnteredAt?.toISOString() ?? null,
     })),
   }));
 

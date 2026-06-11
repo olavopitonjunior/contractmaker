@@ -1,8 +1,8 @@
 /**
  * Script de upgrade idempotente do pipeline existente — renomeia "Assinatura"
  * pra "Enviado para assinatura", funde "Concluído" em "Comissão paga", e
- * insere as 3 novas stages do funil pós-assinatura. Roda contra a DB de prod
- * (single-tenant SHARED_ORG_ID).
+ * insere as 3 novas stages do funil pós-assinatura. Opera sobre os pipelines
+ * existentes na DB-alvo (multitenant: itera por pipeline, sem org hardcoded).
  *
  * Dry-run default; --apply persiste.
  *

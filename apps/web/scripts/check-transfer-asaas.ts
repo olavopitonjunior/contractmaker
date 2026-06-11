@@ -4,14 +4,16 @@ import { decryptSecret } from "../src/lib/security/crypto";
 async function main() {
   const idx = process.argv.indexOf("--asaas-id");
   const id = idx >= 0 ? process.argv[idx + 1] : null;
-  if (!id) {
-    console.error("Use --asaas-id <id>");
+  const orgIdx = process.argv.indexOf("--org-id");
+  const orgId = orgIdx >= 0 ? process.argv[orgIdx + 1] : null;
+  if (!id || !orgId) {
+    console.error("Use --asaas-id <id> --org-id <orgId> (multitenant: sem default de org)");
     process.exit(1);
   }
   const p = new PrismaClient();
   try {
     const account = await p.asaasAccount.findFirst({
-      where: { orgId: "cmnt1ldo4000111bw4yo517k0" },
+      where: { orgId },
     });
     if (!account) throw new Error("AsaasAccount not found");
     const apiKey = decryptSecret({

@@ -5,7 +5,19 @@ import {
   ALL_PERMISSIONS,
 } from "./permissions";
 
-export type RolePreset = "owner" | "admin" | "finance" | "sales" | "viewer" | "custom";
+export type RolePreset =
+  | "owner"
+  | "admin"
+  | "finance"
+  | "sales"
+  | "viewer"
+  | "custom"
+  // Locação (presets):
+  | "gestor_locacao"      // operador do módulo de locação
+  | "gestor_financeiro"   // foca em /financeiro + repasses
+  | "vistoriador"         // só PWA de vistoria
+  | "proprietario"        // portal do proprietário
+  | "inquilino";          // portal do inquilino
 
 export const ROLE_LABELS_PT: Record<RolePreset, string> = {
   owner: "Proprietário",
@@ -14,6 +26,11 @@ export const ROLE_LABELS_PT: Record<RolePreset, string> = {
   sales: "Vendas",
   viewer: "Visualizador",
   custom: "Personalizado",
+  gestor_locacao: "Gestor de Locação",
+  gestor_financeiro: "Gestor Financeiro",
+  vistoriador: "Vistoriador",
+  proprietario: "Proprietário (portal)",
+  inquilino: "Inquilino (portal)",
 };
 
 export const ROLE_DESCRIPTIONS_PT: Record<RolePreset, string> = {
@@ -23,6 +40,11 @@ export const ROLE_DESCRIPTIONS_PT: Record<RolePreset, string> = {
   sales: "Captação + pipeline. Apenas cobranças dos próprios deals no financeiro.",
   viewer: "Leitura global com PII mascarada.",
   custom: "Permissões individualizadas definidas pelo admin.",
+  gestor_locacao: "Operador de locação — imóveis, contratos, vistorias, checklists, cobranças e despesas. Sem ações financeiras de saída.",
+  gestor_financeiro: "Foco em cobranças, repasses, conciliação e relatórios de locação. Sem CRUD de imóveis.",
+  vistoriador: "Apenas vistorias agendadas atribuídas a ele (PWA `/vistoria/[os]`).",
+  proprietario: "Portal do proprietário — leitura de extrato, repasses, informe IR.",
+  inquilino: "Portal do inquilino — contrato, boletos PIX, recibos, chamados.",
 };
 
 function fullAccess(): PermissionMap {
@@ -107,12 +129,110 @@ function viewerAccess(): PermissionMap {
   };
 }
 
+function gestorLocacaoAccess(): PermissionMap {
+  // Operação completa do módulo Locação. Sem ações financeiras de saída
+  // (transferência, dual approval) — isto é do gestor_financeiro/admin.
+  return {
+    [PERMISSION.ORG_SETTINGS_READ]: true,
+    [PERMISSION.KYC_VIEW_STATUS]: true,
+    [PERMISSION.CUSTOMER_VIEW_ALL]: true,
+    [PERMISSION.PROPERTY_VIEW]: true,
+    [PERMISSION.PROPERTY_CREATE]: true,
+    [PERMISSION.PROPERTY_EDIT]: true,
+    [PERMISSION.PROPERTY_OWNERSHIP_MANAGE]: true,
+    [PERMISSION.LEASE_VIEW]: true,
+    [PERMISSION.LEASE_CREATE]: true,
+    [PERMISSION.LEASE_EDIT]: true,
+    [PERMISSION.LEASE_RENEW]: true,
+    [PERMISSION.LEASE_TERMINATE]: true,
+    [PERMISSION.RENT_VIEW]: true,
+    [PERMISSION.RENT_GENERATE]: true,
+    [PERMISSION.RENT_REMIND]: true,
+    [PERMISSION.EXPENSE_VIEW]: true,
+    [PERMISSION.EXPENSE_CREATE]: true,
+    [PERMISSION.EXPENSE_EDIT]: true,
+    [PERMISSION.CHECKLIST_VIEW]: true,
+    [PERMISSION.CHECKLIST_MANAGE]: true,
+    [PERMISSION.CHECKLIST_TEMPLATE_MANAGE]: true,
+    [PERMISSION.DEBT_AGREEMENT_VIEW]: true,
+    [PERMISSION.DEBT_AGREEMENT_CREATE]: true,
+    [PERMISSION.INSURANCE_VIEW]: true,
+    [PERMISSION.INSURANCE_MANAGE]: true,
+    [PERMISSION.INSPECTION_VIEW]: true,
+    [PERMISSION.INSPECTION_CREATE]: true,
+    [PERMISSION.MAINTENANCE_VIEW]: true,
+    [PERMISSION.MAINTENANCE_MANAGE]: true,
+    [PERMISSION.CREDIT_ANALYSIS_VIEW]: true,
+    [PERMISSION.CREDIT_ANALYSIS_DECIDE]: true,
+    [PERMISSION.NEWTON_REQUEST_CREATE]: true,
+    [PERMISSION.NEWTON_REQUEST_VIEW]: true,
+    [PERMISSION.NEWTON_INTENT_APPROVE]: true,
+    [PERMISSION.REPORT_VIEW]: true,
+  };
+}
+
+function gestorFinanceiroAccess(): PermissionMap {
+  // Foca em cobranças/repasses/conciliação/relatórios do módulo Locação +
+  // os equivalentes de venda. Não cria/edita imóveis.
+  const base = financeAccess();
+  return {
+    ...base,
+    [PERMISSION.RENT_VIEW]: true,
+    [PERMISSION.RENT_GENERATE]: true,
+    [PERMISSION.RENT_REMIND]: true,
+    [PERMISSION.RENT_MARK_REPASSED]: true,
+    [PERMISSION.EXPENSE_VIEW]: true,
+    [PERMISSION.EXPENSE_CREATE]: true,
+    [PERMISSION.EXPENSE_EDIT]: true,
+    [PERMISSION.DEBT_AGREEMENT_VIEW]: true,
+    [PERMISSION.DEBT_AGREEMENT_CREATE]: true,
+    [PERMISSION.LEASE_VIEW]: true,
+    [PERMISSION.PROPERTY_VIEW]: true,
+    [PERMISSION.NEWTON_INTENT_APPROVE]: true,
+  };
+}
+
+function vistoriadorAccess(): PermissionMap {
+  // Acesso restrito ao PWA de vistoria. Pode ver os imóveis cuja vistoria
+  // foi atribuída a ele e marcar status. Sem visibilidade financeira.
+  return {
+    [PERMISSION.PROPERTY_VIEW]: true,
+    [PERMISSION.LEASE_VIEW]: true,
+    [PERMISSION.INSPECTION_VIEW]: true,
+    [PERMISSION.INSPECTION_EXECUTE]: true,
+    [PERMISSION.CHECKLIST_VIEW]: true,
+  };
+}
+
+function proprietarioPortalAccess(): PermissionMap {
+  // Portal do proprietário: leitura de extrato + repasses + informe IR.
+  return {
+    [PERMISSION.OWNER_PORTAL_ACCESS]: true,
+    [PERMISSION.LEASE_VIEW]: true,
+    [PERMISSION.RENT_VIEW]: true,
+    [PERMISSION.PROPERTY_VIEW]: true,
+  };
+}
+
+function inquilinoPortalAccess(): PermissionMap {
+  return {
+    [PERMISSION.TENANT_PORTAL_ACCESS]: true,
+    [PERMISSION.LEASE_VIEW]: true,
+    [PERMISSION.RENT_VIEW]: true,
+  };
+}
+
 export const ROLE_PRESETS: Record<Exclude<RolePreset, "custom">, PermissionMap> = {
   owner: fullAccess(),
   admin: adminAccess(),
   finance: financeAccess(),
   sales: salesAccess(),
   viewer: viewerAccess(),
+  gestor_locacao: gestorLocacaoAccess(),
+  gestor_financeiro: gestorFinanceiroAccess(),
+  vistoriador: vistoriadorAccess(),
+  proprietario: proprietarioPortalAccess(),
+  inquilino: inquilinoPortalAccess(),
 };
 
 export function resolvePermissions(

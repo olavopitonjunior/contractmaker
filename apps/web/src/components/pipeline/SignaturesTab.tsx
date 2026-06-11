@@ -457,7 +457,7 @@ function ContractEnvelopesSection({
   );
 }
 
-function EnvelopeCard({
+export function EnvelopeCard({
   envelope,
   basePath,
   onChange,

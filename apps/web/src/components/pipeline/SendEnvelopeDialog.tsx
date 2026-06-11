@@ -13,14 +13,30 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { AlertTriangle, ArrowDown, ArrowUp, Plus, Send, Trash2, Wallet } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Plus,
+  Send,
+  Trash2,
+  Wallet,
+} from "lucide-react";
 import { CLICKSIGN_ROLE_OPTIONS, type ClicksignRole } from "@/lib/clicksign/roles";
 
 interface Conjuge {
   nome?: string;
   cpf?: string;
   email?: string;
+  mobile_phone?: string;
+  incluir_como_signatario?: boolean;
+}
+
+interface Procurador {
+  nome?: string;
+  cpf?: string;
+  email?: string;
+  mobile_phone?: string;
   incluir_como_signatario?: boolean;
 }
 
@@ -28,6 +44,7 @@ interface Representante {
   nome?: string;
   cpf?: string;
   email?: string;
+  mobile_phone?: string;
 }
 
 interface Parte {
@@ -37,8 +54,9 @@ interface Parte {
   cpf?: string;
   cnpj?: string;
   email?: string;
+  mobile_phone?: string;
   conjuge?: Conjuge;
-  // PJ: quem assina pela empresa é o representante (pessoa física com CPF).
+  procurador?: Procurador;
   representante?: Representante;
 }
 
@@ -55,6 +73,7 @@ interface Comissionado {
   cnpj?: string;
   tipo_pessoa?: string;
   email?: string;
+  mobile_phone?: string;
   percentual?: number;
   valor?: number;
   incluir_como_signatario?: boolean;
@@ -67,8 +86,6 @@ interface Corretora {
   imobiliaria_email?: string;
   creci?: string;
   incluir_como_signatario?: boolean;
-  /** Fonte canônica produzida pelo extractor Gemini (CCV import). Quando
-   *  presente com >=1 item, prevalece sobre os campos legados acima. */
   comissionados?: Comissionado[];
 }
 
@@ -85,27 +102,25 @@ interface SendEnvelopeDialogProps {
   onSent: () => void;
 }
 
-type RowKind = "vendedor" | "comprador" | "testemunha" | "corretora";
-type SubKind = "titular" | "conjuge";
+type RowKind = "vendedor" | "comprador" | "corretora" | "testemunha" | "avulso";
+type SubKind = "titular" | "conjuge" | "procurador" | "representante" | "avulso";
 
-// Role ClickSign + opções do dropdown vêm de `lib/clicksign/roles` (fonte única).
 const ROLE_OPTIONS = CLICKSIGN_ROLE_OPTIONS;
+const COST_PER_SIGNER_CENTS = 150;
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function defaultRoleFor(
-  sourceKind: RowKind,
-  subKind: SubKind,
-  isPJ?: boolean
-): ClicksignRole {
+function defaultRoleFor(sourceKind: RowKind, subKind: SubKind): ClicksignRole {
   if (subKind === "conjuge") return "consenting";
+  if (subKind === "procurador") return "attorney";
   switch (sourceKind) {
     case "vendedor":
       return "seller";
     case "comprador":
       return "buyer";
+    case "corretora":
+      return "intervening";
     case "testemunha":
       return "witness";
-    case "corretora":
-      return isPJ === false ? "intervening" : "realestate";
     default:
       return "sign";
   }
@@ -115,35 +130,24 @@ interface EditableRow {
   rowId: string;
   sourceKind: RowKind;
   sourceIndex: number;
-  /** Pra vendedor/comprador: distingue titular vs cônjuge. Cônjuge só
-   *  existe quando a parte titular tem `conjuge.nome` preenchido no form. */
   subKind: SubKind;
   name: string;
   email: string;
   documentation: string;
-  includeInEnvelope: boolean;
-  isOptional: boolean;
-  addedDuringDialog: boolean;
-  /** Para corretora: tipo de pessoa (afeta máscara do documento e label). */
+  phone: string;
+  /** Para corretora/representante: PJ afeta máscara do documento. */
   isPJ?: boolean;
-  /** Qualificação ClickSign — usuário pode mudar o default se o papel
-   *  não bate com o sourceKind (ex: corretor PF como Intermediador,
-   *  Imobiliária PJ como Imobiliária, testemunha como Anuente). */
+  /** Adicionado na popup (não veio do form) — usado no banner de aprovado. */
+  addedDuringDialog: boolean;
   clicksignRole: ClicksignRole;
 }
 
-const COST_PER_SIGNER_CENTS = 150;
-const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
 function partyName(p: Parte): string {
-  // `||` (não `??`): PJ com `nome: ""` + `razao_social` — o "" não cairia pro
-  // razao_social com `??`, sumindo a PJ da lista de signatários. (fix 2026-06-03)
   return (p.nome || p.razao_social || "").trim();
 }
 
-function partyDoc(p: Parte): string {
-  if (p.tipo_pessoa === "juridica") return (p.cnpj ?? "").replace(/\D/g, "");
-  return (p.cpf ?? "").replace(/\D/g, "");
+function onlyDigits(s: string | undefined): string {
+  return (s ?? "").replace(/\D/g, "");
 }
 
 function maskCpfCnpj(raw: string): string {
@@ -161,6 +165,24 @@ function maskCpfCnpj(raw: string): string {
     .replace(/(\d{4})(\d)/, "$1-$2");
 }
 
+function maskPhone(raw: string): string {
+  const d = raw.replace(/\D/g, "").slice(0, 11);
+  if (d.length <= 10) {
+    return d
+      .replace(/^(\d{2})(\d)/, "($1) $2")
+      .replace(/(\d{4})(\d)/, "$1-$2");
+  }
+  return d
+    .replace(/^(\d{2})(\d)/, "($1) $2")
+    .replace(/(\d{5})(\d)/, "$1-$2");
+}
+
+/**
+ * Monta as linhas iniciais a partir das partes do form. TODAS entram como
+ * signatárias por padrão (vendedor/comprador titular, cônjuge, procurador,
+ * representante de PJ) + corretora(s) como intermediador. Testemunhas padrão
+ * do sistema são injetadas separadamente via fetch (não entram aqui).
+ */
 function buildInitialRows(
   vendedores: Parte[],
   compradores: Parte[],
@@ -169,58 +191,70 @@ function buildInitialRows(
 ): EditableRow[] {
   const rows: EditableRow[] = [];
 
-  const pushPartyRows = (
-    sourceKind: "vendedor" | "comprador",
-    partes: Parte[]
-  ) => {
+  const pushPartyRows = (sourceKind: "vendedor" | "comprador", partes: Parte[]) => {
     partes.forEach((p, idx) => {
-      // 2026-06-03 — Parte PJ: quem assina é o REPRESENTANTE (pessoa física com
-      // CPF), não a empresa. A ClickSign rejeita o CNPJ como documentação de
-      // signatário; e juridicamente é o representante que firma. Pré-preenche o
-      // titular com nome/e-mail/CPF do representante quando a parte é juridica.
       const isPJ = p.tipo_pessoa === "juridica";
-      const rep = p.representante;
-      const titularName = isPJ
-        ? (rep?.nome ?? "").trim() || partyName(p)
-        : partyName(p);
-      const titularEmail = (
-        (isPJ ? rep?.email ?? p.email : p.email) ?? ""
-      ).trim();
-      const titularDoc = isPJ
-        ? (rep?.cpf ?? "").replace(/\D/g, "") // CPF do representante, nunca o CNPJ
-        : partyDoc(p);
+      if (isPJ) {
+        // PJ assina pelo representante legal (PF com CPF).
+        const rep = p.representante ?? {};
+        rows.push({
+          rowId: `${sourceKind}-${idx}-rep`,
+          sourceKind,
+          sourceIndex: idx,
+          subKind: "representante",
+          name: (rep.nome || "").trim() || partyName(p),
+          email: (rep.email ?? "").trim(),
+          documentation: onlyDigits(rep.cpf),
+          phone: onlyDigits(rep.mobile_phone),
+          isPJ: true,
+          addedDuringDialog: false,
+          clicksignRole: defaultRoleFor(sourceKind, "representante"),
+        });
+        return;
+      }
+      // PF titular.
       rows.push({
         rowId: `${sourceKind}-${idx}`,
         sourceKind,
         sourceIndex: idx,
         subKind: "titular",
-        name: titularName,
-        email: titularEmail,
-        documentation: titularDoc,
-        includeInEnvelope: true,
-        isOptional: false,
+        name: partyName(p),
+        email: (p.email ?? "").trim(),
+        documentation: onlyDigits(p.cpf),
+        phone: onlyDigits(p.mobile_phone),
         addedDuringDialog: false,
         clicksignRole: defaultRoleFor(sourceKind, "titular"),
       });
-      // Cônjuge só vira linha quando o form trouxe nome explícito —
-      // valor padrão pra estado civil "Solteiro(a)" deixa conjuge vazio.
+      // Cônjuge — só quando o form trouxe nome.
       const conjugeName = (p.conjuge?.nome ?? "").trim();
       if (conjugeName) {
-        const conjugeEmail = (p.conjuge?.email ?? "").trim();
         rows.push({
           rowId: `${sourceKind}-${idx}-conjuge`,
           sourceKind,
           sourceIndex: idx,
           subKind: "conjuge",
           name: conjugeName,
-          email: conjugeEmail,
-          documentation: (p.conjuge?.cpf ?? "").replace(/\D/g, ""),
-          includeInEnvelope:
-            Boolean(p.conjuge?.incluir_como_signatario) ||
-            (conjugeEmail.length > 0 && EMAIL_REGEX.test(conjugeEmail)),
-          isOptional: true,
+          email: (p.conjuge?.email ?? "").trim(),
+          documentation: onlyDigits(p.conjuge?.cpf),
+          phone: onlyDigits(p.conjuge?.mobile_phone),
           addedDuringDialog: false,
           clicksignRole: defaultRoleFor(sourceKind, "conjuge"),
+        });
+      }
+      // Procurador — só quando o form trouxe nome.
+      const procName = (p.procurador?.nome ?? "").trim();
+      if (procName) {
+        rows.push({
+          rowId: `${sourceKind}-${idx}-procurador`,
+          sourceKind,
+          sourceIndex: idx,
+          subKind: "procurador",
+          name: procName,
+          email: (p.procurador?.email ?? "").trim(),
+          documentation: onlyDigits(p.procurador?.cpf),
+          phone: onlyDigits(p.procurador?.mobile_phone),
+          addedDuringDialog: false,
+          clicksignRole: defaultRoleFor(sourceKind, "procurador"),
         });
       }
     });
@@ -228,87 +262,73 @@ function buildInitialRows(
   pushPartyRows("vendedor", vendedores);
   pushPartyRows("comprador", compradores);
 
-  // Corretora: prioriza `comissao.comissionados[]` (canônico, populado pelo
-  // extractor CCV) — pode ter N entradas (corretora + intermediária + sub).
-  // Fallback pro legado `imobiliaria_*` quando o array vazio/ausente, pra
-  // contratos do form Handlebars que não passam pelo extractor.
+  // Corretora(s): canônico `comissionados[]`, fallback legado `imobiliaria_*`.
+  // Entram pré-marcados como intermediador.
   const comissionados = comissao?.comissionados ?? [];
   if (comissionados.length > 0) {
     comissionados.forEach((c, idx) => {
       const isPJ =
         c.tipo_pessoa === "juridica" ||
-        ((c.cnpj ?? "").replace(/\D/g, "").length === 14 &&
-          !(c.cpf ?? "").replace(/\D/g, "").length);
-      const doc = isPJ
-        ? (c.cnpj ?? "").replace(/\D/g, "")
-        : (c.cpf ?? "").replace(/\D/g, "");
-      const email = (c.email ?? "").trim();
+        (onlyDigits(c.cnpj).length === 14 && !onlyDigits(c.cpf).length);
       rows.push({
         rowId: `corretora-${idx}`,
         sourceKind: "corretora",
         sourceIndex: idx,
         subKind: "titular",
         name: (c.nome ?? "").trim(),
-        email,
-        documentation: doc,
-        includeInEnvelope:
-          Boolean(c.incluir_como_signatario) ||
-          (email.length > 0 && EMAIL_REGEX.test(email)),
-        isOptional: true,
-        addedDuringDialog: false,
+        email: (c.email ?? "").trim(),
+        documentation: isPJ ? onlyDigits(c.cnpj) : onlyDigits(c.cpf),
+        phone: onlyDigits(c.mobile_phone),
         isPJ,
-        clicksignRole: defaultRoleFor("corretora", "titular", isPJ),
+        addedDuringDialog: false,
+        clicksignRole: defaultRoleFor("corretora", "titular"),
       });
     });
-  } else {
-    const corrEmail = (comissao?.imobiliaria_email ?? "").trim();
-    const corrName = (comissao?.imobiliaria_nome ?? "").trim();
-    const corrDoc = (comissao?.imobiliaria_cnpj ?? "").replace(/\D/g, "");
+  } else if ((comissao?.imobiliaria_nome ?? "").trim()) {
     const isPJ = comissao?.corretora_tipo_pessoa !== "fisica";
     rows.push({
       rowId: "corretora-0",
       sourceKind: "corretora",
       sourceIndex: 0,
       subKind: "titular",
-      name: corrName,
-      email: corrEmail,
-      documentation: corrDoc,
-      includeInEnvelope:
-        Boolean(comissao?.incluir_como_signatario) ||
-        (corrEmail.length > 0 && EMAIL_REGEX.test(corrEmail)),
-      isOptional: true,
-      addedDuringDialog: false,
+      name: (comissao?.imobiliaria_nome ?? "").trim(),
+      email: (comissao?.imobiliaria_email ?? "").trim(),
+      documentation: onlyDigits(comissao?.imobiliaria_cnpj),
+      phone: "",
       isPJ,
-      clicksignRole: defaultRoleFor("corretora", "titular", isPJ),
+      addedDuringDialog: false,
+      clicksignRole: defaultRoleFor("corretora", "titular"),
     });
   }
 
-  // Testemunhas: começa com o array do form (mín 2 garantido pelo form).
-  // Se vier vazio, garante 2 linhas vazias.
-  const baseTestemunhas =
-    testemunhas && testemunhas.length > 0
-      ? testemunhas
-      : [{ nome: "", cpf: "", email: "" }, { nome: "", cpf: "", email: "" }];
-  baseTestemunhas.forEach((t, idx) => {
-    const email = (t.email ?? "").trim();
+  // Testemunhas NOMEADAS do form (ignora linhas em branco). As testemunhas
+  // padrão do sistema são anexadas depois via fetch (deduplicadas).
+  testemunhas.forEach((t, idx) => {
+    const name = (t.nome ?? "").trim();
+    if (!name) return;
     rows.push({
-      rowId: `testemunha-${idx}`,
+      rowId: `testemunha-form-${idx}`,
       sourceKind: "testemunha",
       sourceIndex: idx,
       subKind: "titular",
-      name: (t.nome ?? "").trim(),
-      email,
-      documentation: (t.cpf ?? "").replace(/\D/g, ""),
-      includeInEnvelope:
-        Boolean(t.incluir_como_signatario) ||
-        (email.length > 0 && EMAIL_REGEX.test(email)),
-      isOptional: true,
+      name,
+      email: (t.email ?? "").trim(),
+      documentation: onlyDigits(t.cpf),
+      phone: "",
       addedDuringDialog: false,
       clicksignRole: defaultRoleFor("testemunha", "titular"),
     });
   });
 
   return rows;
+}
+
+interface DefaultWitness {
+  id: string;
+  nome: string;
+  cpf: string | null;
+  email: string;
+  mobilePhone: string | null;
 }
 
 export function SendEnvelopeDialog({
@@ -325,149 +345,120 @@ export function SendEnvelopeDialog({
 }: SendEnvelopeDialogProps) {
   const [submitting, setSubmitting] = useState(false);
   const [orderEnabled, setOrderEnabled] = useState(false);
-  const [rows, setRows] = useState<EditableRow[]>(() =>
-    buildInitialRows(vendedores, compradores, testemunhas, comissao)
-  );
+  const [step, setStep] = useState<"edit" | "review">("edit");
+  const [rows, setRows] = useState<EditableRow[]>([]);
 
-  // Reset state quando o dialog reabre — pega os dados mais recentes do deal
-  // (caso o usuário tenha editado o form em outra aba).
+  // Reset + carrega partes e testemunhas padrão quando o dialog abre.
   useEffect(() => {
-    if (open) {
-      setRows(buildInitialRows(vendedores, compradores, testemunhas, comissao));
-      setSubmitting(false);
-      setOrderEnabled(false);
-    }
-  }, [open, vendedores, compradores, testemunhas, comissao]);
+    if (!open) return;
+    const base = buildInitialRows(vendedores, compradores, testemunhas, comissao);
+    setRows(base);
+    setSubmitting(false);
+    setOrderEnabled(false);
+    setStep("edit");
 
-  const includedRows = useMemo(
-    () => rows.filter((r) => r.includeInEnvelope),
-    [rows]
-  );
-
-  // Reordena assinantes incluídos (ordem de assinatura). Troca a posição do
-  // row com o vizinho INCLUÍDO no array `rows` — a ordem dos grupos sai daí.
-  const moveIncluded = (rowId: string, dir: -1 | 1) => {
-    setRows((prev) => {
-      const includedIdxs = prev
-        .map((r, i) => ({ r, i }))
-        .filter((x) => x.r.includeInEnvelope)
-        .map((x) => x.i);
-      const pos = includedIdxs.findIndex((i) => prev[i].rowId === rowId);
-      const targetPos = pos + dir;
-      if (pos < 0 || targetPos < 0 || targetPos >= includedIdxs.length) {
-        return prev;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/settings/witnesses?default=1");
+        if (!res.ok) return;
+        const data = await res.json().catch(() => ({}));
+        const witnesses: DefaultWitness[] = data.witnesses ?? [];
+        if (cancelled || witnesses.length === 0) return;
+        // Anexa as testemunhas padrão SEM duplicar as que já vieram do form
+        // (match por e-mail ou CPF) e com sourceIndex contíguo entre testemunhas.
+        setRows((prev) => {
+          const witnessRows = prev.filter((r) => r.sourceKind === "testemunha");
+          const seen = new Set(
+            witnessRows.flatMap((r) =>
+              [r.email.toLowerCase(), r.documentation].filter(Boolean)
+            )
+          );
+          let nextIdx = witnessRows.length;
+          const fresh = witnesses
+            .filter((w) => {
+              const email = (w.email ?? "").toLowerCase();
+              const cpf = onlyDigits(w.cpf ?? "");
+              if (email && seen.has(email)) return false;
+              if (cpf && seen.has(cpf)) return false;
+              return true;
+            })
+            .map((w) => ({
+              rowId: `testemunha-default-${w.id}`,
+              sourceKind: "testemunha" as RowKind,
+              sourceIndex: nextIdx++,
+              subKind: "titular" as SubKind,
+              name: w.nome,
+              email: w.email,
+              documentation: onlyDigits(w.cpf ?? ""),
+              phone: onlyDigits(w.mobilePhone ?? ""),
+              addedDuringDialog: false,
+              clicksignRole: defaultRoleFor("testemunha", "titular"),
+            }));
+          return fresh.length > 0 ? [...prev, ...fresh] : prev;
+        });
+      } catch {
+        /* testemunhas padrão são best-effort */
       }
-      const a = includedIdxs[pos];
-      const b = includedIdxs[targetPos];
-      const copy = [...prev];
-      [copy[a], copy[b]] = [copy[b], copy[a]];
-      return copy;
-    });
-  };
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Só re-inicializa quando o dialog ABRE (lê os props mais recentes nesse
+    // momento). Depender dos arrays de partes resetaria as edições do operador
+    // se o pai re-renderizasse (ex.: polling/refresh) com a popup aberta.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
-  // Validação: cada row incluído precisa de nome >= 2 chars e email válido.
   const validationError = useMemo(() => {
-    if (includedRows.length === 0) return "Inclua ao menos 1 signatário";
-    for (const r of includedRows) {
-      if (r.name.trim().length < 2) {
-        return `Nome ausente em ${labelFor(r)}`;
-      }
-      if (!EMAIL_REGEX.test(r.email.trim())) {
+    if (rows.length === 0) return "Inclua ao menos 1 signatário";
+    for (const r of rows) {
+      if (r.name.trim().length < 2) return `Nome ausente em ${labelFor(r)}`;
+      if (!EMAIL_REGEX.test(r.email.trim()))
         return `E-mail inválido em ${labelFor(r)}`;
-      }
       const docDigits = r.documentation.replace(/\D/g, "");
-      if (docDigits && docDigits.length !== 11 && docDigits.length !== 14) {
+      if (docDigits && docDigits.length !== 11 && docDigits.length !== 14)
         return `CPF/CNPJ inválido em ${labelFor(r)}`;
-      }
     }
     return null;
-  }, [includedRows]);
+  }, [rows]);
 
-  const costCents = includedRows.length * COST_PER_SIGNER_CENTS;
+  const costCents = rows.length * COST_PER_SIGNER_CENTS;
   const showApprovedWarning =
-    contractStatus === "aprovado" &&
-    rows.some((r) => r.addedDuringDialog && r.includeInEnvelope);
+    contractStatus === "aprovado" && rows.some((r) => r.addedDuringDialog);
 
   const updateRow = (rowId: string, patch: Partial<EditableRow>) => {
-    setRows((prev) =>
-      prev.map((r) => (r.rowId === rowId ? { ...r, ...patch } : r))
-    );
+    setRows((prev) => prev.map((r) => (r.rowId === rowId ? { ...r, ...patch } : r)));
   };
 
-  const addCorretor = () => {
-    setRows((prev) => {
-      const existing = prev.filter((r) => r.sourceKind === "corretora");
-      const nextIndex = existing.length;
-      return [
-        ...prev,
-        {
-          rowId: `corretora-${nextIndex}-${Date.now()}`,
-          sourceKind: "corretora",
-          sourceIndex: nextIndex,
-          subKind: "titular",
-          name: "",
-          email: "",
-          documentation: "",
-          includeInEnvelope: true,
-          isOptional: true,
-          addedDuringDialog: true,
-          isPJ: true,
-          clicksignRole: defaultRoleFor("corretora", "titular", true),
-        },
-      ];
-    });
+  const removeRow = (rowId: string) => {
+    setRows((prev) => prev.filter((r) => r.rowId !== rowId));
   };
 
-  const removeCorretor = (rowId: string) => {
-    setRows((prev) => {
-      const filtered = prev.filter((r) => r.rowId !== rowId);
-      let idx = 0;
-      return filtered.map((r) => {
-        if (r.sourceKind !== "corretora") return r;
-        const next = { ...r, sourceIndex: idx };
-        idx++;
-        return next;
-      });
-    });
+  const addAvulso = () => {
+    setRows((prev) => [
+      ...prev,
+      {
+        rowId: `avulso-${prev.length}-${Math.random().toString(36).slice(2, 8)}`,
+        sourceKind: "avulso",
+        sourceIndex: prev.filter((r) => r.sourceKind === "avulso").length,
+        subKind: "avulso",
+        name: "",
+        email: "",
+        documentation: "",
+        phone: "",
+        addedDuringDialog: true,
+        clicksignRole: "sign",
+      },
+    ]);
   };
 
-  const addTestemunha = () => {
-    setRows((prev) => {
-      const existingTestemunhas = prev.filter(
-        (r) => r.sourceKind === "testemunha"
-      );
-      const nextIndex = existingTestemunhas.length;
-      return [
-        ...prev,
-        {
-          rowId: `testemunha-${nextIndex}-${Date.now()}`,
-          sourceKind: "testemunha",
-          sourceIndex: nextIndex,
-          subKind: "titular",
-          name: "",
-          email: "",
-          documentation: "",
-          includeInEnvelope: true,
-          isOptional: true,
-          addedDuringDialog: true,
-          clicksignRole: defaultRoleFor("testemunha", "titular"),
-        },
-      ];
-    });
-  };
-
-  const removeTestemunha = (rowId: string) => {
-    setRows((prev) => {
-      const filtered = prev.filter((r) => r.rowId !== rowId);
-      // Reindexa as testemunhas restantes pra manter sourceIndex contíguo.
-      let testIdx = 0;
-      return filtered.map((r) => {
-        if (r.sourceKind !== "testemunha") return r;
-        const next = { ...r, sourceIndex: testIdx };
-        testIdx++;
-        return next;
-      });
-    });
+  const handleContinue = () => {
+    if (validationError) {
+      toast.error(validationError);
+      return;
+    }
+    setStep("review");
   };
 
   const handleSend = async () => {
@@ -476,9 +467,8 @@ export function SendEnvelopeDialog({
       return;
     }
     setSubmitting(true);
-
     try {
-      // 1) PATCH /signers-data — persiste edições no deal/form/contract.
+      // 1) Persiste edições das partes no deal/form/contract (Dados + re-uso).
       const updates = buildPatchUpdates(rows, vendedores, compradores);
       if (updates.length > 0) {
         const patchRes = await fetch(
@@ -497,22 +487,22 @@ export function SendEnvelopeDialog({
         }
       }
 
-      // 2) POST /envelopes — executor re-lê contract.dataJson agora atualizado.
-      // Mandamos signerRoles pra o executor sobrescrever o default por
-      // sourceKind quando o usuário escolheu role custom no select.
-      // Ordem ON: grupo = posição do row entre os incluídos (1-based). OFF:
-      // sem grupo (paralelo). includedRows já segue a ordem do array `rows`.
-      const signerRoles = includedRows.map((r, idx) => ({
+      // 2) Envia o envelope com a lista EXPLÍCITA de signatários (autoritativa).
+      const signers = rows.map((r, idx) => ({
+        name: r.name.trim(),
+        email: r.email.trim(),
+        documentation: r.documentation.replace(/\D/g, "") || null,
+        phone: r.phone.replace(/\D/g, "") || null,
         sourceKind: r.sourceKind,
         sourceIndex: r.sourceIndex,
         subKind: r.subKind,
         role: r.clicksignRole,
-        group: orderEnabled ? idx + 1 : undefined,
+        group: orderEnabled ? idx + 1 : null,
       }));
       const res = await fetch(`/api/contracts/${contractId}/envelopes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ authMethod: "email", signerRoles }),
+        body: JSON.stringify({ authMethod: "email", signers }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -520,6 +510,7 @@ export function SendEnvelopeDialog({
           toast.error(
             `Faltam e-mails em ${body.missing.length} parte(s). Verifique a lista.`
           );
+          setStep("edit");
           return;
         }
         if (res.status === 402) {
@@ -542,64 +533,41 @@ export function SendEnvelopeDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Enviar para assinatura</DialogTitle>
+          <DialogTitle>
+            {step === "edit" ? "Enviar para assinatura" : "Revisar e enviar"}
+          </DialogTitle>
           <DialogDescription>
-            {contractTitle} — autenticação por token de e-mail. Edite ou
-            complete os dados abaixo se algo estiver faltando.
+            {step === "edit"
+              ? `${contractTitle} — confira os signatários, dados e o papel de cada um. Autenticação por token de e-mail.`
+              : "Confira a lista final de signatários antes de enviar o envelope ClickSign."}
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-5 py-2">
-          <SignerGroup
-            title="Vendedor(es)"
-            description={
-              rows.some(
-                (r) => r.sourceKind === "vendedor" && r.subKind === "conjuge"
-              )
-                ? "Cônjuges são opcionais — marque se devem assinar digitalmente."
-                : undefined
-            }
-            rows={rows.filter((r) => r.sourceKind === "vendedor")}
-            onChange={updateRow}
-          />
+        {step === "edit" ? (
+          <div className="space-y-4 py-1">
+            {rows.map((row) => (
+              <SignerCard
+                key={row.rowId}
+                row={row}
+                onChange={updateRow}
+                onRemove={removeRow}
+              />
+            ))}
 
-          <SignerGroup
-            title="Comprador(es)"
-            description={
-              rows.some(
-                (r) => r.sourceKind === "comprador" && r.subKind === "conjuge"
-              )
-                ? "Cônjuges são opcionais — marque se devem assinar digitalmente."
-                : undefined
-            }
-            rows={rows.filter((r) => r.sourceKind === "comprador")}
-            onChange={updateRow}
-          />
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={addAvulso}
+              className="w-full border-dashed"
+            >
+              <Plus className="h-3.5 w-3.5 mr-1.5" />
+              Adicionar assinante avulso
+            </Button>
 
-          <SignerGroup
-            title="Corretor / Imobiliária"
-            description="Opcional. Marque cada corretor ou imobiliária que deve assinar digitalmente."
-            rows={rows.filter((r) => r.sourceKind === "corretora")}
-            onChange={updateRow}
-            onRemove={removeCorretor}
-            onAdd={addCorretor}
-            addLabel="Adicionar Corretor"
-          />
-
-          <SignerGroup
-            title="Testemunhas"
-            description="Opcional. Marque cada testemunha que deve assinar digitalmente."
-            rows={rows.filter((r) => r.sourceKind === "testemunha")}
-            onChange={updateRow}
-            onRemove={removeTestemunha}
-            onAdd={addTestemunha}
-            addLabel="Adicionar Assinante"
-          />
-
-          {/* Ordem de assinatura */}
-          <section className="space-y-2">
+            {/* Ordem de assinatura */}
             <label className="flex items-center gap-2 text-sm cursor-pointer rounded-md border bg-muted/30 px-3 py-2">
               <input
                 type="checkbox"
@@ -612,230 +580,120 @@ export function SendEnvelopeDialog({
                 Cada signatário só é notificado depois que o anterior assina.
               </span>
             </label>
-            {orderEnabled && includedRows.length > 0 && (
-              <div className="rounded-md border divide-y">
-                {includedRows.map((r, idx) => (
-                  <div
-                    key={r.rowId}
-                    className="flex items-center justify-between gap-2 px-3 py-1.5 text-sm"
-                  >
-                    <span className="truncate">
-                      <span className="text-muted-foreground mr-1.5">{idx + 1}º</span>
-                      {labelFor(r)}
-                    </span>
-                    <div className="flex items-center gap-1 shrink-0">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="h-6 w-6 p-0"
-                        disabled={idx === 0}
-                        onClick={() => moveIncluded(r.rowId, -1)}
-                        title="Subir"
-                      >
-                        <ArrowUp className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="h-6 w-6 p-0"
-                        disabled={idx === includedRows.length - 1}
-                        onClick={() => moveIncluded(r.rowId, 1)}
-                        title="Descer"
-                      >
-                        <ArrowDown className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
+
+            {showApprovedWarning && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
+                <div className="flex items-center gap-2 font-medium text-amber-900 mb-1">
+                  <AlertTriangle className="h-4 w-4" />
+                  Assinante adicionado após aprovação
+                </div>
+                <p className="text-amber-900">
+                  Assinantes adicionados aqui entram no certificado da ClickSign,
+                  mas não aparecem no corpo do PDF do contrato (já congelado pela
+                  aprovação).
+                </p>
               </div>
             )}
-          </section>
 
-          {showApprovedWarning && (
-            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm">
-              <div className="flex items-center gap-2 font-medium text-amber-900 mb-1">
-                <AlertTriangle className="h-4 w-4" />
-                Testemunha adicionada após aprovação
+            {validationError && rows.length > 0 && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                <span>{validationError}</span>
               </div>
-              <p className="text-amber-900">
-                Testemunhas adicionadas aqui vão entrar no certificado da
-                ClickSign, mas não aparecerão no corpo do PDF do contrato (que
-                já está congelado pela aprovação). Para que apareçam no PDF,
-                edite o formulário antes de aprovar e gere uma nova versão.
-              </p>
-            </div>
-          )}
+            )}
 
-          {validationError && includedRows.length > 0 && (
-            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
-              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-              <span>{validationError}</span>
+            <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2">
+              <span className="text-sm text-muted-foreground flex items-center gap-1.5">
+                <Wallet className="h-4 w-4" /> Custo estimado ({rows.length}{" "}
+                signatário{rows.length === 1 ? "" : "s"})
+              </span>
+              <span className="text-sm font-medium">
+                R$ {(costCents / 100).toFixed(2)}
+              </span>
             </div>
-          )}
-
-          <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2">
-            <span className="text-sm text-muted-foreground flex items-center gap-1.5">
-              <Wallet className="h-4 w-4" /> Custo estimado (
-              {includedRows.length} signatário
-              {includedRows.length === 1 ? "" : "s"})
-            </span>
-            <span className="text-sm font-medium">
-              R$ {(costCents / 100).toFixed(2)}
-            </span>
           </div>
-        </div>
+        ) : (
+          <ReviewStep rows={rows} orderEnabled={orderEnabled} costCents={costCents} />
+        )}
 
         <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={submitting}
-          >
-            Cancelar
-          </Button>
-          <Button
-            onClick={handleSend}
-            disabled={submitting || validationError !== null}
-          >
-            <Send className="h-4 w-4 mr-2" />
-            {submitting ? "Enviando..." : "Enviar envelope"}
-          </Button>
+          {step === "edit" ? (
+            <>
+              <Button
+                variant="outline"
+                onClick={() => onOpenChange(false)}
+                disabled={submitting}
+              >
+                Cancelar
+              </Button>
+              <Button onClick={handleContinue} disabled={validationError !== null}>
+                Revisar signatários
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                onClick={() => setStep("edit")}
+                disabled={submitting}
+              >
+                <ArrowLeft className="h-4 w-4 mr-1.5" />
+                Voltar
+              </Button>
+              <Button onClick={handleSend} disabled={submitting}>
+                <Send className="h-4 w-4 mr-2" />
+                {submitting ? "Enviando..." : "Enviar envelope"}
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-function SignerGroup({
-  title,
-  description,
-  rows,
-  onChange,
-  onRemove,
-  onAdd,
-  addLabel,
-}: {
-  title: string;
-  description?: string;
-  rows: EditableRow[];
-  onChange: (rowId: string, patch: Partial<EditableRow>) => void;
-  onRemove?: (rowId: string) => void;
-  onAdd?: () => void;
-  addLabel?: string;
-}) {
-  if (rows.length === 0 && !onAdd) return null;
-
-  return (
-    <section className="space-y-2">
-      <header>
-        <h4 className="text-sm font-semibold text-foreground/90">{title}</h4>
-        {description && (
-          <p className="text-xs text-muted-foreground">{description}</p>
-        )}
-      </header>
-
-      <div className="space-y-3">
-        {rows.map((row) => (
-          <SignerRowEditor
-            key={row.rowId}
-            row={row}
-            onChange={onChange}
-            onRemove={onRemove}
-          />
-        ))}
-      </div>
-
-      {onAdd && (
-        <Button type="button" size="sm" variant="outline" onClick={onAdd}>
-          <Plus className="h-3.5 w-3.5 mr-1.5" />
-          {addLabel ?? "Adicionar"}
-        </Button>
-      )}
-    </section>
-  );
-}
-
-function SignerRowEditor({
+function SignerCard({
   row,
   onChange,
   onRemove,
 }: {
   row: EditableRow;
   onChange: (rowId: string, patch: Partial<EditableRow>) => void;
-  onRemove?: (rowId: string) => void;
+  onRemove: (rowId: string) => void;
 }) {
   const docLabel =
-    row.sourceKind === "corretora" && row.isPJ === false
-      ? "CPF"
-      : row.sourceKind === "corretora"
-        ? "CNPJ"
-        : "CPF / CNPJ";
-
-  // Permite remover testemunhas a partir da 3ª (sourceIndex >= 2) ou
-  // qualquer testemunha adicionada na própria popup.
-  // Pra corretora: a partir da 2ª (sourceIndex >= 1) ou addedDuringDialog —
-  // sempre mantemos pelo menos 1 linha (mesmo vazia, pode ser preenchida).
-  const canRemove =
-    onRemove &&
-    ((row.sourceKind === "testemunha" &&
-      (row.addedDuringDialog || row.sourceIndex >= 2)) ||
-      (row.sourceKind === "corretora" &&
-        (row.addedDuringDialog || row.sourceIndex >= 1)));
+    row.isPJ === true && row.subKind !== "representante" ? "CNPJ" : "CPF";
 
   return (
-    <div
-      className={cn(
-        "rounded-md border p-3 space-y-2",
-        row.includeInEnvelope ? "bg-card" : "bg-muted/30"
-      )}
-    >
+    <div className="rounded-lg border bg-card p-4 space-y-3">
       <div className="flex items-center justify-between gap-3">
-        {row.isOptional ? (
-          <label className="flex items-center gap-2 text-sm font-medium cursor-pointer">
-            <input
-              type="checkbox"
-              checked={row.includeInEnvelope}
-              onChange={(e) =>
-                onChange(row.rowId, { includeInEnvelope: e.target.checked })
-              }
-              className="h-4 w-4 rounded border-input accent-primary"
-            />
-            Incluir como signatário
-          </label>
-        ) : (
-          <span className="text-sm font-medium text-foreground">
+        <div className="flex items-center gap-2 min-w-0">
+          <Badge variant="secondary" className="shrink-0 text-[11px]">
+            {kindLabel(row)}
+          </Badge>
+          <span className="text-sm font-medium text-foreground truncate">
             {labelFor(row)}
           </span>
-        )}
-        {canRemove && (
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-7 text-xs text-destructive hover:text-destructive"
-            onClick={() => onRemove?.(row.rowId)}
-          >
-            <Trash2 className="h-3 w-3 mr-1" />
-            Remover
-          </Button>
-        )}
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-7 text-xs text-destructive hover:text-destructive shrink-0"
+          onClick={() => onRemove(row.rowId)}
+        >
+          <Trash2 className="h-3 w-3 mr-1" />
+          Remover
+        </Button>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div className="space-y-1 md:col-span-2">
-          <Label className="text-xs">Nome</Label>
+          <Label className="text-xs">Nome completo</Label>
           <Input
             value={row.name}
             onChange={(e) => onChange(row.rowId, { name: e.target.value })}
-            placeholder={
-              row.sourceKind === "corretora"
-                ? "Nome do corretor ou razão social"
-                : row.sourceKind === "testemunha"
-                  ? "Nome completo da testemunha"
-                  : "Nome completo"
-            }
+            placeholder="Nome completo"
           />
         </div>
         <div className="space-y-1">
@@ -848,6 +706,16 @@ function SignerRowEditor({
           />
         </div>
         <div className="space-y-1">
+          <Label className="text-xs">Celular</Label>
+          <Input
+            value={maskPhone(row.phone)}
+            onChange={(e) =>
+              onChange(row.rowId, { phone: e.target.value.replace(/\D/g, "") })
+            }
+            placeholder="(11) 90000-0000"
+          />
+        </div>
+        <div className="space-y-1">
           <Label className="text-xs">{docLabel}</Label>
           <Input
             value={maskCpfCnpj(row.documentation)}
@@ -856,10 +724,10 @@ function SignerRowEditor({
                 documentation: e.target.value.replace(/\D/g, ""),
               })
             }
-            placeholder="000.000.000-00"
+            placeholder={docLabel === "CNPJ" ? "00.000.000/0000-00" : "000.000.000-00"}
           />
         </div>
-        <div className="space-y-1 md:col-span-2">
+        <div className="space-y-1">
           <Label className="text-xs">Assina como</Label>
           <select
             value={row.clicksignRole}
@@ -882,134 +750,199 @@ function SignerRowEditor({
   );
 }
 
+function ReviewStep({
+  rows,
+  orderEnabled,
+  costCents,
+}: {
+  rows: EditableRow[];
+  orderEnabled: boolean;
+  costCents: number;
+}) {
+  const roleLabel = (role: ClicksignRole) =>
+    ROLE_OPTIONS.find((o) => o.value === role)?.label ?? role;
+  return (
+    <div className="space-y-3 py-1">
+      <div className="rounded-lg border divide-y">
+        {rows.map((r, idx) => (
+          <div key={r.rowId} className="flex items-start gap-3 px-4 py-3">
+            {orderEnabled && (
+              <span className="text-xs text-muted-foreground mt-0.5 w-5 shrink-0">
+                {idx + 1}º
+              </span>
+            )}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <span className="font-medium text-sm truncate">{r.name}</span>
+                <Badge variant="secondary" className="text-[10px] shrink-0">
+                  {roleLabel(r.clicksignRole)}
+                </Badge>
+              </div>
+              <p className="text-xs text-muted-foreground truncate">
+                {r.email}
+                {r.phone ? ` · ${maskPhone(r.phone)}` : ""}
+                {r.documentation ? ` · ${maskCpfCnpj(r.documentation)}` : ""}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center justify-between rounded-md border bg-muted/30 px-3 py-2">
+        <span className="text-sm text-muted-foreground flex items-center gap-1.5">
+          <Wallet className="h-4 w-4" /> Custo estimado ({rows.length} signatário
+          {rows.length === 1 ? "" : "s"})
+        </span>
+        <span className="text-sm font-medium">
+          R$ {(costCents / 100).toFixed(2)}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+const KIND_LABELS: Record<RowKind, string> = {
+  vendedor: "Vendedor",
+  comprador: "Comprador",
+  corretora: "Corretor",
+  testemunha: "Testemunha",
+  avulso: "Avulso",
+};
+
+function kindLabel(row: EditableRow): string {
+  return KIND_LABELS[row.sourceKind] ?? row.sourceKind;
+}
+
 function labelFor(row: EditableRow): string {
-  const kindLabel = {
-    vendedor: "Vendedor",
-    comprador: "Comprador",
-    testemunha: "Testemunha",
-    corretora: "Corretor/Imobiliária",
-  }[row.sourceKind];
-  if (row.subKind === "conjuge") {
-    return (
-      row.name.trim() ||
-      `Cônjuge de ${kindLabel.toLowerCase()} ${row.sourceIndex + 1}`
-    );
+  if (row.name.trim()) {
+    if (row.subKind === "conjuge") return `${row.name.trim()} (cônjuge)`;
+    if (row.subKind === "procurador") return `${row.name.trim()} (procurador)`;
+    if (row.subKind === "representante") return `${row.name.trim()} (representante)`;
+    return row.name.trim();
   }
-  return row.name.trim() || `${kindLabel} ${row.sourceIndex + 1}`;
+  const base = kindLabel(row);
+  if (row.subKind === "conjuge") return "Cônjuge";
+  if (row.subKind === "procurador") return "Procurador";
+  if (row.subKind === "representante") return "Representante";
+  return `${base} ${row.sourceIndex + 1}`;
 }
 
 /**
- * Constrói lista de updates dot-path para sincronizar `contract.dataJson`
- * com o que foi exibido na popup.
- *
- * Para vendedores/compradores SEMPRE empurra email/nome/CPF — não diff
- * contra o snapshot original. Motivo: a popup é construída a partir de
- * `deal.form.dataJson` (props), mas o executor lê `contract.dataJson` que
- * pode estar STALE (ex: contrato gerado antes do usuário preencher
- * emails). Diff-only deixava contract.dataJson desatualizado e o POST
- * /envelopes retornava "missing emails" mesmo com a popup mostrando tudo
- * preenchido.
- *
- * Testemunhas: sempre substitui o array inteiro (cobre add/remove/edit).
- * Corretora: sempre empurra todos os campos.
+ * Constrói os updates dot-path pra sincronizar `dataJson` (deal/form/contract)
+ * com o que foi editado na popup. Persiste APENAS dados das partes derivadas do
+ * form (titular/cônjuge/procurador/representante + comissionados). Testemunhas
+ * padrão e avulsos NÃO são gravados no deal — só vão na lista de signatários do
+ * envelope (explícita no POST). O envio é autoritativo pela lista, então não
+ * mexemos em flags de inclusão de partes removidas aqui.
  */
 function buildPatchUpdates(
   rows: EditableRow[],
-  _originalVendedores: Parte[],
-  _originalCompradores: Parte[]
+  vendedores: Parte[],
+  compradores: Parte[]
 ): Array<{ path: string; value: unknown }> {
   const updates: Array<{ path: string; value: unknown }> = [];
 
   for (const r of rows) {
-    if (r.sourceKind === "vendedor" || r.sourceKind === "comprador") {
-      const arrName =
-        r.sourceKind === "vendedor" ? "vendedores" : "compradores";
-      const docDigits = r.documentation.replace(/\D/g, "");
+    if (r.sourceKind !== "vendedor" && r.sourceKind !== "comprador") continue;
+    const arr = r.sourceKind === "vendedor" ? "vendedores" : "compradores";
+    const i = r.sourceIndex;
+    const docDigits = r.documentation.replace(/\D/g, "");
+    const phoneDigits = r.phone.replace(/\D/g, "");
 
-      if (r.subKind === "conjuge") {
-        // Cônjuge: nome/cpf/email + flag. PF sempre (cônjuge nunca é PJ).
-        updates.push({
-          path: `${arrName}.${r.sourceIndex}.conjuge.email`,
-          value: r.email.trim(),
-        });
-        updates.push({
-          path: `${arrName}.${r.sourceIndex}.conjuge.nome`,
-          value: r.name.trim(),
-        });
-        if (docDigits.length > 0) {
-          updates.push({
-            path: `${arrName}.${r.sourceIndex}.conjuge.cpf`,
-            value: docDigits,
-          });
-        }
-        updates.push({
-          path: `${arrName}.${r.sourceIndex}.conjuge.incluir_como_signatario`,
-          value: r.includeInEnvelope,
-        });
-        continue;
-      }
-
+    if (r.subKind === "conjuge") {
+      updates.push({ path: `${arr}.${i}.conjuge.nome`, value: r.name.trim() });
+      updates.push({ path: `${arr}.${i}.conjuge.email`, value: r.email.trim() });
+      if (docDigits) updates.push({ path: `${arr}.${i}.conjuge.cpf`, value: docDigits });
+      if (phoneDigits)
+        updates.push({ path: `${arr}.${i}.conjuge.mobile_phone`, value: phoneDigits });
       updates.push({
-        path: `${arrName}.${r.sourceIndex}.email`,
-        value: r.email.trim(),
+        path: `${arr}.${i}.conjuge.incluir_como_signatario`,
+        value: true,
       });
-
-      // Nome — escolhe campo (nome|razao_social) por inferência do CPF/CNPJ
-      // disponível na popup. Quando vazio em ambos, default `nome`.
-      const isPJ = docDigits.length === 14;
-      const nameField = isPJ ? "razao_social" : "nome";
-      updates.push({
-        path: `${arrName}.${r.sourceIndex}.${nameField}`,
-        value: r.name.trim(),
-      });
-
-      if (docDigits.length > 0) {
-        const docField = isPJ ? "cnpj" : "cpf";
-        updates.push({
-          path: `${arrName}.${r.sourceIndex}.${docField}`,
-          value: docDigits,
-        });
-      }
+      continue;
     }
+    if (r.subKind === "procurador") {
+      updates.push({ path: `${arr}.${i}.procurador.nome`, value: r.name.trim() });
+      updates.push({ path: `${arr}.${i}.procurador.email`, value: r.email.trim() });
+      if (docDigits)
+        updates.push({ path: `${arr}.${i}.procurador.cpf`, value: docDigits });
+      if (phoneDigits)
+        updates.push({ path: `${arr}.${i}.procurador.mobile_phone`, value: phoneDigits });
+      updates.push({
+        path: `${arr}.${i}.procurador.incluir_como_signatario`,
+        value: true,
+      });
+      continue;
+    }
+    if (r.subKind === "representante") {
+      updates.push({ path: `${arr}.${i}.representante.nome`, value: r.name.trim() });
+      updates.push({ path: `${arr}.${i}.representante.email`, value: r.email.trim() });
+      if (docDigits)
+        updates.push({ path: `${arr}.${i}.representante.cpf`, value: docDigits });
+      if (phoneDigits)
+        updates.push({
+          path: `${arr}.${i}.representante.mobile_phone`,
+          value: phoneDigits,
+        });
+      continue;
+    }
+    // Titular PF.
+    updates.push({ path: `${arr}.${i}.email`, value: r.email.trim() });
+    if (phoneDigits)
+      updates.push({ path: `${arr}.${i}.mobile_phone`, value: phoneDigits });
+    updates.push({ path: `${arr}.${i}.nome`, value: r.name.trim() });
+    if (docDigits) updates.push({ path: `${arr}.${i}.cpf`, value: docDigits });
   }
 
-  // Corretora: substitui o array `comissao.comissionados` inteiro (cobre
-  // add/remove/edit + flag). NÃO toca nos campos legados `imobiliaria_*` —
-  // templates Handlebars antigos continuam consumindo esses no corpo do PDF
-  // sem regredir. O array é a fonte canônica pro envelope ClickSign.
+  // Corretora: substitui o array `comissao.comissionados` inteiro (cobre edição
+  // de nome/email/celular/doc). Não toca nos campos legados `imobiliaria_*`.
   const corretoraRows = rows
     .filter((r) => r.sourceKind === "corretora")
     .sort((a, b) => a.sourceIndex - b.sourceIndex);
-  updates.push({
-    path: "comissao.comissionados",
-    value: corretoraRows.map((r) => {
-      const docDigits = r.documentation.replace(/\D/g, "");
-      const isPJ =
-        r.isPJ === true || (r.isPJ !== false && docDigits.length === 14);
-      return {
-        nome: r.name.trim(),
-        cpf: isPJ ? "" : docDigits,
-        cnpj: isPJ ? docDigits : "",
-        tipo_pessoa: isPJ ? "juridica" : "fisica",
-        email: r.email.trim(),
-        incluir_como_signatario: r.includeInEnvelope,
-      };
-    }),
-  });
+  if (corretoraRows.length > 0) {
+    updates.push({
+      path: "comissao.comissionados",
+      value: corretoraRows.map((r) => {
+        const docDigits = r.documentation.replace(/\D/g, "");
+        const isPJ = r.isPJ === true || (r.isPJ !== false && docDigits.length === 14);
+        return {
+          nome: r.name.trim(),
+          cpf: isPJ ? "" : docDigits,
+          cnpj: isPJ ? docDigits : "",
+          tipo_pessoa: isPJ ? "juridica" : "fisica",
+          email: r.email.trim(),
+          mobile_phone: r.phone.replace(/\D/g, ""),
+          incluir_como_signatario: true,
+        };
+      }),
+    });
+  }
 
-  // Testemunhas: substitui o array inteiro (cobre add/remove/edit + flag).
-  const testemunhasRows = rows
-    .filter((r) => r.sourceKind === "testemunha")
-    .sort((a, b) => a.sourceIndex - b.sourceIndex);
-  updates.push({
-    path: "testemunhas",
-    value: testemunhasRows.map((t) => ({
-      nome: t.name.trim(),
-      cpf: t.documentation.replace(/\D/g, ""),
-      email: t.email.trim(),
-      incluir_como_signatario: t.includeInEnvelope,
-    })),
-  });
+  // Cônjuge/procurador que existiam no form mas foram REMOVIDOS da popup:
+  // desmarca incluir_como_signatario pra não reaparecerem auto-marcados no
+  // próximo envelope (espelha a intenção do operador no dataJson).
+  const hasRow = (sourceKind: RowKind, idx: number, subKind: SubKind) =>
+    rows.some(
+      (r) => r.sourceKind === sourceKind && r.sourceIndex === idx && r.subKind === subKind
+    );
+  const unsetRemoved = (sourceKind: "vendedor" | "comprador", partes: Parte[]) => {
+    const arr = sourceKind === "vendedor" ? "vendedores" : "compradores";
+    partes.forEach((p, idx) => {
+      if ((p.conjuge?.nome ?? "").trim() && !hasRow(sourceKind, idx, "conjuge")) {
+        updates.push({
+          path: `${arr}.${idx}.conjuge.incluir_como_signatario`,
+          value: false,
+        });
+      }
+      if ((p.procurador?.nome ?? "").trim() && !hasRow(sourceKind, idx, "procurador")) {
+        updates.push({
+          path: `${arr}.${idx}.procurador.incluir_como_signatario`,
+          value: false,
+        });
+      }
+    });
+  };
+  unsetRemoved("vendedor", vendedores);
+  unsetRemoved("comprador", compradores);
 
   return updates;
 }

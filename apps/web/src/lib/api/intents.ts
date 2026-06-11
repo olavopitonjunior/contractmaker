@@ -35,6 +35,11 @@ export const HIGH_RISK_ACTIONS = [
   "CONTRACT_FIELD_UPDATE",
   "DEAL_DELETE_HARD",
   "CERTIDAO_REQUEST",
+  // Locação (docs/locacao/spec.md §11c). EXPENSE_CREATE_FROM_OCR exige HITL
+  // pra operador confirmar o resultado do Gemini antes de virar Expense.
+  // INSPECTION_SCHEDULE entra em HITL quando há conflito de agenda detectado.
+  "EXPENSE_CREATE_FROM_OCR",
+  "INSPECTION_SCHEDULE",
 ] as const;
 
 export type IntentAction = (typeof HIGH_RISK_ACTIONS)[number];

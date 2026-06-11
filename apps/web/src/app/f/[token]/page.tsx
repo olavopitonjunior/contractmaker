@@ -18,15 +18,16 @@ export default async function PublicFormPage({
     notFound();
   }
 
-  // Resolve OrgFormSettings server-side e calcula required fields por step.
-  // Lazy: forms criados antes da migração 20260515120000 não têm row ainda;
-  // null cai no preset "legado" via `resolveAllRequiredFields`.
-  const orgFormSettings = await prisma.orgFormSettings.findUnique({
-    where: { orgId: form.orgId },
-  });
-  const requiredFieldsByStep = resolveAllRequiredFields(orgFormSettings).map(
-    (paths) => Array.from(paths),
-  );
+  // Resolve OrgFormSettings server-side e calcula required fields por step
+  // (preset de venda). Locação tem validação própria no wizard/servidor, então
+  // pula esse cálculo (os steps não batem com o preset de venda).
+  const isLocacao = form.schemaType?.startsWith("locacao");
+  const orgFormSettings = isLocacao
+    ? null
+    : await prisma.orgFormSettings.findUnique({ where: { orgId: form.orgId } });
+  const requiredFieldsByStep = isLocacao
+    ? []
+    : resolveAllRequiredFields(orgFormSettings).map((paths) => Array.from(paths));
 
   // Banner "dados extraídos da proposta" — só quando vier `?prefilled=1` na URL
   // (link de redirect de `/deals/new-from-proposal`) E houver attachment de
@@ -45,6 +46,7 @@ export default async function PublicFormPage({
   return (
     <FormPageClient
       token={form.token}
+      schemaType={form.schemaType}
       initialData={(form.dataJson as Record<string, unknown>) || {}}
       requiredFieldsByStep={requiredFieldsByStep}
       prefilled={isPrefilled}

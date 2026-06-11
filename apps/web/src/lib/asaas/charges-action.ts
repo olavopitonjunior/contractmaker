@@ -4,6 +4,7 @@ import { audit } from "@/lib/security/audit";
 import { AsaasError } from "@/lib/asaas/errors";
 import { upsertCustomer } from "@/lib/asaas/customers";
 import { getAccountWithApiKey } from "@/lib/asaas/account";
+import { resolvePlatformFee } from "@/lib/asaas/platform-fee";
 import {
   createPayment,
   getPixQrCode,
@@ -150,18 +151,10 @@ export async function runCreateCommissionCharge(
 
   // Build payload — settings agora são per-conta. Fallback pra org-level
   // mantido durante migração (settings antigas com accountId=null).
-  const feesSettings =
-    (await prisma.orgFinancialSettings.findUnique({
-      where: { accountId: account.id },
-    })) ??
-    (await prisma.orgFinancialSettings.findFirst({
-      where: { orgId: input.orgId, accountId: null },
-    }));
-  const platformFeePercent = feesSettings?.platformFeePercent ?? 0;
-  const platformWalletId =
-    feesSettings?.platformFeeWalletId ??
-    process.env.PLATFORM_WALLET_ID ??
-    undefined;
+  // Fase 1d: markup global (PlatformConfig) com override per-org (OrgFinancialSettings).
+  const { platformFeePercent, platformWalletId: resolvedPlatformWalletId } =
+    await resolvePlatformFee(input.orgId, account.id);
+  const platformWalletId = resolvedPlatformWalletId ?? undefined;
 
   let payer;
   let value;
@@ -336,23 +329,32 @@ export async function runCreateCommissionCharge(
       },
     });
 
-    // Auto-promove deal pra "Cobrança emitida". Não retrocede se já passou —
-    // criação de cobrança extra pra um deal em "Comissão paga" mantém stage.
+    // Auto-promove deal pra "Cobrança emitida" (venda) / "Cobrança Gerada"
+    // (locação). Não retrocede se já passou — criação de cobrança extra pra um
+    // deal em stage terminal mantém o stage. Mapas por `pipeline.kind` com
+    // fallback "venda" (kind null/legado) — não regride o fluxo de venda.
     let stageMovedTo: string | null = null;
     {
       const dealWithStage = await prisma.deal.findUnique({
         where: { id: deal.id },
         include: { stage: true, pipeline: { include: { stages: true } } },
       });
+      const kind = dealWithStage?.pipeline.kind ?? "venda";
+      const cobrancaStageName =
+        kind === "locacao" ? "Cobrança Gerada" : "Cobrança emitida";
+      const linearOrderByKind: Record<string, readonly string[]> = {
+        venda: [
+          "Formulário",
+          "Confecção de Contrato",
+          "Enviado para assinatura",
+          "Contrato assinado",
+        ],
+        locacao: ["Em Aprovação", "Formulário", "Em contrato", "Assinado"],
+      };
       const cobrancaStage = dealWithStage?.pipeline.stages.find(
-        (s) => s.name === "Cobrança emitida"
+        (s) => s.name === cobrancaStageName
       );
-      const linearOrder = [
-        "Formulário",
-        "Confecção de Contrato",
-        "Enviado para assinatura",
-        "Contrato assinado",
-      ];
+      const linearOrder = linearOrderByKind[kind] ?? linearOrderByKind.venda;
       if (
         dealWithStage &&
         cobrancaStage &&
@@ -360,7 +362,7 @@ export async function runCreateCommissionCharge(
       ) {
         await prisma.deal.update({
           where: { id: dealWithStage.id },
-          data: { stageId: cobrancaStage.id },
+          data: { stageId: cobrancaStage.id, stageEnteredAt: new Date() },
         });
         stageMovedTo = cobrancaStage.id;
       }
@@ -503,18 +505,10 @@ export async function buildChargePreview(args: {
     };
   }
 
-  const feesSettings =
-    (await prisma.orgFinancialSettings.findUnique({
-      where: { accountId: account.id },
-    })) ??
-    (await prisma.orgFinancialSettings.findFirst({
-      where: { orgId: args.orgId, accountId: null },
-    }));
-  const platformFeePercent = feesSettings?.platformFeePercent ?? 0;
-  const platformWalletId =
-    feesSettings?.platformFeeWalletId ??
-    process.env.PLATFORM_WALLET_ID ??
-    undefined;
+  // Fase 1d: markup global (PlatformConfig) com override per-org (OrgFinancialSettings).
+  const { platformFeePercent, platformWalletId: resolvedPlatformWalletId } =
+    await resolvePlatformFee(args.orgId, account.id);
+  const platformWalletId = resolvedPlatformWalletId ?? undefined;
 
   const data = contract.dataJson as unknown as DadosContratoLite;
   let payer;

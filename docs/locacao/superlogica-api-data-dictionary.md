@@ -1,0 +1,2155 @@
+﻿# Superlógica Imobiliárias — Dicionário de dados (campos por endpoint)
+
+> Gerado por sondagem ao vivo (GET) em 2026-05-29, base `apps.superlogica.net/imobiliaria/api/`.
+> **Apenas nomes e tipos de campos** — sem valores reais (PII de clientes preservada). Profundidade ≤ 3.
+
+## `contratos` (status 200)
+
+- `encargos_imoveis` : array
+  - _(item do array)_:
+    - `id_encargos_imoe` : string
+    - `id_imovel_imoe` : string
+    - `nm_categoria_imoe` : string
+    - `id_servicoencargo_imoe` : string
+    - `st_codigoencargo_imoe` : string
+    - `nm_debitoencargo_imoe` : string
+    - `nm_creditoencargo_imoe` : string
+    - `id_fornecedorencargo_imoe` : string
+    - `tx_fracaoencargo_imoe` : string
+    - `nm_formapagamentoencargo_imoe` : string
+    - `nm_tipoencargo_imoe` : string
+    - `nm_parcelasencargo_imoe` : string
+    - `vl_valortotaldoencargo_imoe` : string
+    - `vl_valoravistaencargo_imoe` : string
+    - `fl_lancarencargoautomatico_imoe` : string
+    - `fl_encargoincidenataxa_imoe` : string
+    - `nm_diavencimento_imoe` : string
+    - `st_observacaoencargo_imoe` : string
+    - `fl_responsavelpagamento_imoe` : string
+    - `fl_encargonaoadministrado_imoe` : string
+    - `nm_tagcriacao_imoe` : string
+    - `fl_criardespesareembolso_imoe` : string
+- `id_imovel_imo` : string
+- `st_tipo_imo` : string
+- `st_endereco_imo` : string
+- `st_identificador_imo` : string
+- `st_complemento_imo` : string
+- `st_bairro_imo` : string
+- `st_numero_imo` : string
+- `st_cep_imo` : string
+- `st_cidade_imo` : string
+- `st_estado_imo` : string
+- `st_observacao_imo` : string
+- `st_areatotal_imo` : string
+- `vl_venda_imo` : string
+- `st_condominio_imo` : string
+- `st_tipodimob_imo` : string
+- `nm_meseslocacao_imo` : string
+- `fl_tipoisencao_imo` : string
+- `dt_entrada_imo` : string
+- `id_filial_fil` : string
+- `st_nome_fil` : string
+- `st_razaosocial_fil` : string
+- `id_seguradora_seg` : string
+- `st_nome_seg` : string
+- `st_telefone_seg` : string
+- `st_email_seg` : string
+- `st_responsavel_seg` : string
+- `st_observacao_seg` : string
+- `fl_tiposeguradora_seg` : string
+- `inquilinos` : array
+  - _(item do array)_:
+    - `id_sacado_sac` : string
+    - `st_fantasia_pes` : string
+    - `st_endereco_pes` : string
+    - `st_numero_pes` : string
+    - `st_complemento_pes` : string
+    - `st_cidade_pes` : string
+    - `st_estado_pes` : string
+    - `st_cep_pes` : string
+    - `st_bairro_pes` : string
+    - `st_cnpj_pes` : string
+    - `st_orgao_pes` : string
+    - `dt_expedicaorg_pes` : string
+    - `st_rg_pes` : string
+    - `st_nacionalidade_pes` : string
+    - `st_naturalidade_pes` : string
+    - `st_estadocivil_pes` : string
+    - `st_profissao_pes` : string
+    - `st_email_pes` : string
+    - `st_telefone_pes` : string
+    - `st_celular_pes` : string
+    - `st_nomeresp_pes` : string
+    - `dt_nascimento_pes` : string
+    - `st_sexo_pes` : string
+    - `st_nome_coj` : string
+    - `st_cpf_coj` : string
+    - `fl_statusconvitecartao_pes` : string
+    - `st_razaoempresa_pes` : string
+    - `id_contrato_con` : string
+    - `id_pessoa_pes` : string
+    - `fl_principal_inq` : string
+    - `nm_fracao_inq` : string
+    - `st_nomeinquilino` : string
+    - `st_nomeinquilino_formatado` : string
+- `contratos_reajustes` : array
+  - _(item do array)_:
+    - `id_reajuste_conre` : string
+    - `dt_reajuste_conre` : string
+    - `vl_antigo_conre` : string
+    - `vl_novo_conre` : string
+- `id_contrato_con` : string
+- `id_tipo_con` : string
+- `dt_inicio_con` : string
+- `dt_fim_con` : string
+- `tx_adm_con` : string
+- `vl_aluguel_con` : string
+- `nm_diavencimento_con` : string
+- `id_indicereajuste_con` : string
+- `nm_txjuros_con` : string
+- `nm_txmulta_con` : string
+- `nm_txdesconto_con` : string
+- `tx_locacao_con` : string
+- `id_corretor_con` : string
+- `fl_garantia_con` : string
+- `fl_tipocaucaogarantia_con` : string
+- `st_descricaogarantia_con` : string
+- `st_identificadorgarantia_con` : string
+- `st_observacaogarantia_con` : string
+- `vl_valorgarantia_con` : string
+- `nm_diarepasse_con` : string
+- `nm_mesreajuste_con` : string
+- `dt_rescisao_con` : string
+- `fl_ativo_con` : string
+- `dt_garantiainicio_con` : string
+- `dt_garantiafim_con` : string
+- `fl_garantiaresponsavel_con` : string
+- `nm_garantiaparcelas_con` : string
+- `vl_garantiaparcela_con` : string
+- `dt_seguroincendioinicio_con` : string
+- `dt_seguroincendiofim_con` : string
+- `vl_seguroincendio_con` : string
+- `st_seguroincendiodescricao_con` : string
+- `st_seguroincendioidentificador_con` : string
+- `st_seguroincendioobservacao_con` : string
+- `fl_seguroincendio_con` : string
+- `nm_locacoesimovel_con` : string
+- `id_mensalidade_mens` : string
+- `fl_endcobranca_con` : string
+- `st_cep_con` : string
+- `st_endereco_con` : string
+- `st_numero_con` : string
+- `st_complemento_con` : string
+- `st_bairro_con` : string
+- `st_cidade_con` : string
+- `dt_ultimoreajuste_con` : string
+- `st_estado_con` : string
+- `fl_txadmvalorfixo_con` : string
+- `fl_txlocacaovalorfixo_con` : string
+- `nm_parcelastxlocacao_con` : string
+- `nm_repassegarantido_con` : string
+- `fl_cobrarnosegundoaluguel_con` : string
+- `id_primeiraparcela_con` : string
+- `fl_reterir_con` : string
+- `st_label_mens` : string
+- `fl_emitirnotafiscal_con` : string
+- `id_contabanco_cb` : string
+- `fl_mesvencido_con` : string
+- `fl_diafixorepasse_con` : string
+- `st_clausulas_con` : string
+- `dt_faturamento_con` : string
+- `tx_multacontratual_con` : string
+- `vl_tarifabancariarepasse_con` : string
+- `fl_tarifabancariarepasse_con` : string
+- `id_txbancaria_mens` : string
+- `fl_cobrartxbancaria_con` : string
+- `id_endereco_sen` : string
+- `fl_status_con` : string
+- `fl_tipoentrega_con` : string
+- `fl_suspenso_con` : string
+- `fl_dimob_con` : string
+- `dt_desocupacao_con` : string
+- `st_atividadecomercial_con` : string
+- `fl_txlocacao_con` : string
+- `dt_renovacao_con` : string
+- `fl_irdeduzirtxadm_con` : string
+- `nm_carencia_con` : string
+- `id_seguro_seg` : string
+- `fl_mesfechado_con` : string
+- `dt_cadastro_con` : string
+- `fl_split_con` : string
+- `fl_contratodigital_con` : string
+- `id_arquivo_arq` : string
+- `st_observacaorecisao_con` : string
+- `st_observacao_con` : string
+- `vl_importanciaseguradaincendio_con` : string
+- `vl_premioseguroincendio_con` : string
+- `st_motivopausa_con` : string
+- `dt_ultimapausa_con` : string
+- `nm_parcelasseguroincendio_con` : string
+- `id_seguradorafianca_con` : string
+- `id_forma_pag` : string
+- `fl_locacaodigital_con` : string
+- `dt_previsaodesocupacao_con` : string
+- `dt_sincronizacaofaturamento_con` : string
+- `st_linkpropostaexterna_con` : string
+- `st_propostaexterna_con` : string
+- `nm_mesesisencaomulta_con` : string
+- `dt_ocupacao_con` : string
+- `id_agentecomercial_con` : string
+- `fl_tiporepassegarantido_con` : string
+- `id_contarepasse_con` : string
+- `dt_atualizacao_con` : string
+- `fl_tipoatividade_con` : string
+- `dt_entregachaves_con` : string
+- `fl_responsavelcontrato_con` : string
+- `st_seguroincendioplanocontrato_con` : string
+- `id_gerente_con` : string
+- `fl_motivorescisao_con` : string
+- `id_garantia_grt` : string
+- `st_cotacao_grt` : string
+- `fl_reterjurosemulta_con` : string
+- `fl_multisplit_con` : string
+- `st_outromotivo_con` : string
+- `fl_seguroincendiostatus_con` : string
+- `id_identificadorimportacao_con` : string
+- `fl_irporcentagemlocatario_con` : string
+- `fl_cobrarseguroaluguel_con` : string
+- `dt_notificacaoocupacao_con` : string
+- `dt_notificacaodesocupacao_con` : string
+- `fl_renovacaoautomatica_con` : string
+- `dt_refproporcionalocupacao_con` : string
+- `st_emailgarantia_con` : string
+- `movimentacoes` : array
+- `acesso_geral` : string
+- `codigo_contrato` : string
+- `imovel_formatado` : string
+- `st_imovel_imo` : string
+- `detalhes_contrato` : string
+- `contrato_formatado` : string
+- `nm_garagens_imovel` : string
+- `nm_hobbyboxs_imovel` : string
+- `fl_isencaomulta_con` : string
+- `mes_refproporcionalocupacao` : string
+- `proprietarios_beneficiarios` : array
+  - _(item do array)_:
+    - `st_fantasia_pes` : string
+    - `st_nome_pes` : string
+    - `st_cnpj_pes` : string
+    - `st_orgao_pes` : string
+    - `dt_expedicaorg_pes` : string
+    - `st_rg_pes` : string
+    - `st_nacionalidade_pes` : string
+    - `st_naturalidade_pes` : string
+    - `st_estadocivil_pes` : string
+    - `st_profissao_pes` : string
+    - `st_endereco_pes` : string
+    - `dt_nascimento_pes` : string
+    - `st_numero_pes` : string
+    - `st_bairro_pes` : string
+    - `st_cidade_pes` : string
+    - `st_estado_pes` : string
+    - `st_nomeresp_pes` : string
+    - `st_email_pes` : string
+    - `st_celular_pes` : string
+    - `st_telefone_pes` : string
+    - `fl_descontosimplificadoir_pes` : string
+    - `id_formarecebimento_frp` : string
+    - `st_banco_frp` : string
+    - `st_agenciabanco_frp` : string
+    - `st_conta_frp` : string
+    - `st_tipoconta_frp` : string
+    - `st_nomerecebedor_frp` : string
+    - `st_cnpjrecebedor_frp` : string
+    - `id_pessoa_pes` : string
+    - `id_forma_for` : string
+    - `st_operacao_frp` : string
+    - `vl_tarifabancaria_frp` : string
+    - `dt_diarepasse_frp` : string
+    - `fl_tipochavepix_frp` : string
+    - `st_chavepix_frp` : string
+    - `id_imovel_imo` : string
+    - `nm_fracao_prb` : string
+    - `fl_principal_prb` : string
+    - `fl_proprietario_prb` : string
+    - `id_propsplit_pst` : string
+    - `nm_fracao_rcb` : string
+    - `id_proprietario_pes` : string
+    - `id_usuario_usu` : string
+    - `dt_alteracao_prb` : string
+    - `nome_proprietario_formatado` : string
+- `nome_proprietario` : string
+- `st_seguradorafianca_con` : string
+
+## `repasses` (status 200)
+
+- `proprietarios_beneficiarios` : array
+  - _(item do array)_:
+    - `id_pessoa_pes` : string
+    - `st_nome_pes` : string
+    - `st_fantasia_pes` : string
+    - `id_favorecido_fav` : string
+    - `id_formarecebimento_pes` : string
+    - `nm_dependentes_pes` : string
+    - `st_cnpj_pes` : string
+    - `st_email_pes` : string
+    - `st_banco_pes` : string
+    - `st_agenciabanco_pes` : string
+    - `st_conta_pes` : string
+    - `st_tipoconta_pes` : string
+    - `st_nomerecebedor_pes` : string
+    - `st_cnpjrecebedor_pes` : string
+    - `st_operacao_pes` : string
+    - `fl_descontosimplificadoir_pes` : string
+    - `nm_fracao_prb` : string
+    - `fl_principal_prb` : string
+    - `fl_proprietario_prb` : string
+    - `id_formarecebimento_frp` : string
+    - `id_imovel_imo` : string
+    - `id_proprietario_pes` : string
+- `id_imovel_imo` : string
+- `st_tipo_imo` : string
+- `st_identificador_imo` : string
+- `st_endereco_imo` : string
+- `st_bairro_imo` : string
+- `st_numero_imo` : string
+- `st_cep_imo` : string
+- `st_cidade_imo` : string
+- `st_estado_imo` : string
+- `st_complemento_imo` : string
+- `st_tipodimob_imo` : string
+- `id_contrato_con` : string
+- `id_tipo_con` : string
+- `dt_inicio_con` : string
+- `dt_fim_con` : string
+- `tx_adm_con` : string
+- `vl_aluguel_con` : string
+- `nm_diavencimento_con` : string
+- `id_indicereajuste_con` : string
+- `nm_txjuros_con` : string
+- `nm_txmulta_con` : string
+- `nm_txdesconto_con` : string
+- `tx_locacao_con` : string
+- `id_corretor_con` : string
+- `fl_garantia_con` : string
+- `fl_tipocaucaogarantia_con` : string
+- `st_descricaogarantia_con` : string
+- `st_identificadorgarantia_con` : string
+- `st_observacaogarantia_con` : string
+- `vl_valorgarantia_con` : string
+- `nm_diarepasse_con` : string
+- `nm_mesreajuste_con` : string
+- `dt_rescisao_con` : string
+- `fl_ativo_con` : string
+- `dt_garantiainicio_con` : string
+- `dt_garantiafim_con` : string
+- `fl_garantiaresponsavel_con` : string
+- `nm_garantiaparcelas_con` : string
+- `vl_garantiaparcela_con` : string
+- `dt_seguroincendioinicio_con` : string
+- `dt_seguroincendiofim_con` : string
+- `vl_seguroincendio_con` : string
+- `st_seguroincendiodescricao_con` : string
+- `st_seguroincendioidentificador_con` : string
+- `st_seguroincendioobservacao_con` : string
+- `fl_seguroincendio_con` : string
+- `nm_locacoesimovel_con` : string
+- `id_mensalidade_mens` : string
+- `fl_endcobranca_con` : string
+- `st_cep_con` : string
+- `st_endereco_con` : string
+- `st_numero_con` : string
+- `st_complemento_con` : string
+- `st_bairro_con` : string
+- `st_cidade_con` : string
+- `dt_ultimoreajuste_con` : string
+- `st_estado_con` : string
+- `fl_txadmvalorfixo_con` : string
+- `fl_txlocacaovalorfixo_con` : string
+- `nm_parcelastxlocacao_con` : string
+- `nm_repassegarantido_con` : string
+- `fl_cobrarnosegundoaluguel_con` : string
+- `id_primeiraparcela_con` : string
+- `fl_reterir_con` : string
+- `st_label_mens` : string
+- `fl_emitirnotafiscal_con` : string
+- `id_contabanco_cb` : string
+- `fl_mesvencido_con` : string
+- `fl_diafixorepasse_con` : string
+- `st_clausulas_con` : string
+- `dt_faturamento_con` : string
+- `tx_multacontratual_con` : string
+- `vl_tarifabancariarepasse_con` : string
+- `fl_tarifabancariarepasse_con` : string
+- `id_txbancaria_mens` : string
+- `fl_cobrartxbancaria_con` : string
+- `id_endereco_sen` : string
+- `fl_status_con` : string
+- `fl_tipoentrega_con` : string
+- `fl_suspenso_con` : string
+- `fl_dimob_con` : string
+- `dt_desocupacao_con` : string
+- `st_atividadecomercial_con` : string
+- `fl_txlocacao_con` : string
+- `dt_renovacao_con` : string
+- `fl_irdeduzirtxadm_con` : string
+- `nm_carencia_con` : string
+- `id_seguro_seg` : string
+- `fl_mesfechado_con` : string
+- `dt_cadastro_con` : string
+- `id_filial_fil` : string
+- `fl_split_con` : string
+- `fl_contratodigital_con` : string
+- `id_arquivo_arq` : string
+- `st_observacaorecisao_con` : string
+- `st_observacao_con` : string
+- `vl_importanciaseguradaincendio_con` : string
+- `vl_premioseguroincendio_con` : string
+- `id_seguradora_seg` : string
+- `st_motivopausa_con` : string
+- `dt_ultimapausa_con` : string
+- `nm_parcelasseguroincendio_con` : string
+- `id_seguradorafianca_con` : string
+- `id_forma_pag` : string
+- `fl_locacaodigital_con` : string
+- `dt_previsaodesocupacao_con` : string
+- `dt_sincronizacaofaturamento_con` : string
+- `st_linkpropostaexterna_con` : string
+- `st_propostaexterna_con` : string
+- `nm_mesesisencaomulta_con` : string
+- `dt_ocupacao_con` : string
+- `id_agentecomercial_con` : string
+- `fl_tiporepassegarantido_con` : string
+- `id_contarepasse_con` : string
+- `dt_atualizacao_con` : string
+- `fl_tipoatividade_con` : string
+- `dt_entregachaves_con` : string
+- `fl_responsavelcontrato_con` : string
+- `st_seguroincendioplanocontrato_con` : string
+- `id_gerente_con` : string
+- `fl_motivorescisao_con` : string
+- `id_garantia_grt` : string
+- `st_cotacao_grt` : string
+- `fl_reterjurosemulta_con` : string
+- `fl_multisplit_con` : string
+- `st_outromotivo_con` : string
+- `fl_seguroincendiostatus_con` : string
+- `id_identificadorimportacao_con` : string
+- `fl_irporcentagemlocatario_con` : string
+- `fl_cobrarseguroaluguel_con` : string
+- `dt_notificacaoocupacao_con` : string
+- `dt_notificacaodesocupacao_con` : string
+- `fl_renovacaoautomatica_con` : string
+- `dt_refproporcionalocupacao_con` : string
+- `st_emailgarantia_con` : string
+- `id_repasse_rep` : string
+- `id_recebimento_recb` : string
+- `dt_proc_rep` : string
+- `fl_status_rep` : string
+- `dt_liquidacao_recb` : string
+- `dt_credito_recb` : string
+- `vl_total_recb` : string
+- `st_md5_recb` : string
+- `dt_geracao_recb` : string
+- `dt_competencia_recb` : string
+- `fl_garantido_rep` : string
+- `dt_vencimento_recb` : string
+- `vl_aluguel_rep` : string
+- `dt_repasse_rep` : string
+- `st_label3_recb` : string
+- `st_label_recb` : string
+- `id_acordo_aco` : string
+- `st_observacaoexterna_rep` : string
+- `id_locatario_pes` : string
+- `fl_repassougarantido_rep` : string
+- `dt_notafiscal_rep` : string
+- `id_repasseagrupado_rep` : string
+- `fl_agrupado_rep` : string
+- `fl_split_rep` : string
+- `vl_txadm_rep` : string
+- `id_formapagamento_recb` : string
+- `dt_atualizacao_rep` : string
+- `tx_adm_rep` : string
+- `fl_txadmfixa_rep` : string
+- `fl_spliterro` : string
+- `erros_split` : array
+- `split_indisponivel` : array
+- `fl_splitindisponivel` : string
+- `nome_imovel_formatado` : string
+- `imovel_formatado` : string
+- `dt_pagamento` : string
+
+## `cobrancas` (status 200)
+
+- `id_sacado_sac` : string
+- `st_nomeref_sac` : string
+- `st_nome_sac` : string
+- `st_sincro_sac` : string
+- `dt_desativacao_sac` : string
+- `dt_congelamento_sac` : string
+- `dt_ignorarstatus_sac` : string
+- `nm_anocartaovencimento_sac` : string
+- `nm_mescartaovencimento_sac` : string
+- `nm_cartao_sac` : string
+- `st_telefone_sac` : string
+- `st_email_sac` : string
+- `st_cep_sac` : string
+- `fl_pagamentopref_sac` : string
+- `fl_pessoajuridica_sac` : string
+- `st_banco_sac` : string
+- `st_cgc_sac` : string
+- `st_cartaobandeira_sac` : string
+- `compo_recebimento` : array
+  - _(item do array)_:
+    - `st_descricao_prd` : string
+    - `fl_opcional_prd` : string
+    - `st_mesano_comp` : string
+    - `st_descricao_comp` : string
+    - `st_valor_comp` : string
+    - `id_boleto_comp` : string
+    - `id_sacado_comp` : string
+    - `id_composicao_comp` : string
+    - `nm_quantidade_comp` : string
+    - `id_mensalidade_comp` : string
+    - `st_sincro_comp` : string
+    - `st_sincrosac_comp` : string
+    - `id_produto_prd` : string
+    - `id_boletopmm_comp` : string
+    - `st_complemento_comp` : string
+    - `fl_especial_comp` : string
+    - `id_pgmtindevido_comp` : string
+    - `id_retornoitemduplicado_reti` : string
+    - `st_conta_cont` : string
+    - `id_planoconta_plc` : string
+    - `id_planocliente_plc` : string
+    - `id_vendedor_comp` : string
+    - `id_pedido_ped` : string
+    - `dt_contratacao_comp` : string
+- `id_recebimento_recb` : string
+- `dt_vencimento_recb` : string
+- `id_empresa_emp` : string
+- `dt_recebimento_recb` : string
+- `fl_status_recb` : string
+- `st_observacao_recb` : string
+- `vl_total_recb` : string
+- `vl_emitido_recb` : string
+- `dt_cancelamento_recb` : string
+- `dt_geracao_recb` : string
+- `st_md5_recb` : string
+- `dt_impressao_recb` : string
+- `dt_alteracao_sincro` : string
+- `st_nossonumero_recb` : string
+- `vl_txmulta_recb` : string
+- `vl_txjuros_recb` : string
+- `fl_proratadia_recb` : string
+- `fl_composicao_recb` : string
+- `dt_acordo_recb` : string
+- `nm_remessa_recb` : string
+- `fl_remessastatus_recb` : string
+- `tx_remessamsg_recb` : string
+- `fl_importacao_recb` : string
+- `id_nota_not` : string
+- `st_instrucoes_recb` : string
+- `fl_online_recb` : string
+- `id_conta_cb` : string
+- `id_online_recb` : string
+- `nm_impressoes_recb` : string
+- `id_formapagamento_recb` : string
+- `st_observacaointerna_recb` : string
+- `fl_nossonumerofixo_recb` : string
+- `st_documentoex_recb` : string
+- `dt_liquidacao_recb` : string
+- `fl_protestado_recb` : string
+- `fl_cartao_recb` : string
+- `tx_cartaomensagem_recb` : string
+- `st_label_recb` : string
+- `vl_txdesconto_recb` : string
+- `st_nf_recb` : string
+- `st_observacaoexterna_recb` : string
+- `st_cielotid_recb` : string
+- `fl_cieloforcarpagamento_recb` : string
+- `dt_cieloultimatentativa_recb` : string
+- `id_cheque_pre` : string
+- `id_fechamento_cfe` : string
+- `id_usuario_usu` : string
+- `st_maquina_recb` : string
+- `id_transacao_ctr` : string
+- `id_contaoriginal_cb` : string
+- `id_bandeira_ban` : string
+- `dt_competencia_recb` : string
+- `dt_previsaocredito_recb` : string
+- `id_admcartoes_adc` : string
+- `dt_fechamento_cfe` : string
+- `st_label2_recb` : string
+- `fl_primeiranotificacao_recb` : string
+- `fl_segundanotificacao_recb` : string
+- `fl_terceiranotificacao_recb` : string
+- `fl_acordofrentedecaixa_recb` : string
+- `nm_visto_recb` : string
+- `st_numeroautorizacao_recb` : string
+- `id_lote_recb` : string
+- `id_contrato_mens` : string
+- `id_filial_fil` : string
+- `st_label3_recb` : string
+- `fl_primeiranotificacaosms_recb` : string
+- `fl_segundanotificacaosms_recb` : string
+- `fl_primeiranotificacaocart_recb` : string
+- `fl_segundanotificacaocarta_recb` : string
+- `st_cartaodetalhes_recb` : string
+- `fl_temcomissao_recb` : string
+- `id_forma_frecb` : string
+- `st_label_mens` : string
+- `dt_cartaotransacao_recb` : string
+- `st_errocartao_recb` : string
+- `fl_converterparanota_recb` : string
+- `id_adesao_plc` : string
+- `id_renovacao_plc` : string
+- `st_complementocomposicao_recb` : string
+- `st_tokenfacilitador_recb` : string
+- `st_tokendaconta_recb` : string
+- `st_cielotidcancelamento_recb` : string
+- `vl_taxacobranca_recb` : string
+- `st_hashparcelamento_recb` : string
+- `st_cartaobandeira_recb` : string
+- `fl_despesasvinculadas_recb` : string
+- `fl_quartanotificacao_recb` : string
+- `st_tidconciliacao_recb` : string
+- `id_endereco_sen` : string
+- `fl_motivocancelar_recb` : string
+- `st_idexterno_recb` : string
+- `fl_consultartidtardio_recb` : string
+- `fl_ignorarbloqueioauto_recb` : string
+- `st_numerocartao_recb` : string
+- `nm_parcelacartao_recb` : string
+- `fl_conciliado_recb` : string
+- `fl_tipoentrega_recb` : string
+- `st_codmovimentacaorem_recb` : string
+- `id_contaorigem_recb` : string
+- `fl_contratoprorrogado_recb` : string
+- `st_marcador_recb` : string
+- `id_formaboleto_frecb` : string
+- `st_hashemailpag_recb` : string
+- `st_accesskeycr_recb` : string
+- `fl_remessastatuscr_recb` : string
+- `nm_tentativasenviocr_recb` : string
+- `fl_quintanotificacao_recb` : string
+- `fl_sextanotificacao_recb` : string
+- `fl_terceiranotificacaosms_recb` : string
+- `nm_descontoatedia_recb` : string
+- `fl_txdescontopersonalizada_recb` : string
+- `id_recebimentoantigo_recb` : string
+- `vl_descontocalculado_recb` : string
+- `st_splitdados_recb` : string
+- `fl_geracaonotificada_recb` : string
+- `nm_versaorecebimento_recb` : string
+- `nm_versaorecebimentopjbank_recb` : string
+- `st_motivocanceloutros_recb` : string
+- `dt_alteracao_recb` : string
+- `fl_desconsiderarcontabilidade_recb` : string
+- `id_partidacontabil_pc` : string
+- `id_partidacontabilliquidacao_pc` : string
+- `id_partidacontabilbaixa_pc` : string
+- `dt_vencimentooriginal_recb` : string
+- `dt_pedidoregistropjbank_recb` : string
+- `dt_pedidobaixapjbank_recb` : string
+- `id_operacaosecuritizadora_recb` : string
+- `fl_statussecuritizadora_recb` : string
+- `id_operacaopjbank_recb` : string
+- `st_complementolancignorado_recb` : string
+- `dt_suspensaocancelada_recb` : string
+- `st_pixqrcode_recb` : string
+- `st_codigoerrocartao_recb` : string
+- `st_falhacartao_recb` : string
+- `nm_tentativascartao_recb` : string
+- `nm_conveniopropriopjbank_recb` : string
+- `nm_tagcriacao_recb` : string
+- `nm_tagliquidacao_recb` : string
+- `id_split_recb` : string
+- `ar_nomeformas_calc` : string
+- `vl_valorcreditado_calc` : string
+- `fl_conta_homologada` : string
+- `fl_cofre` : string
+- `st_descricao_cb` : string
+- `tipo_conta` : string
+- `era_cartao` : string
+- `nome_formatado` : string
+- `publickey` : string
+- `link_2via` : string
+- `publickey_json` : string
+- `link_2via_json` : string
+- `comconfirmacaoleitura` : string
+- `acessovistoonline` : string
+- `descontovalorfixo` : string
+- `msgdiasparadesconto` : string
+- `descontoatedia` : string
+- `vl_txdesconto_emp` : string
+- `vl_txjuros_emp` : string
+- `vl_txmulta_emp` : string
+- `tx_bancaria` : string
+- `st_marcador_calc` : string
+- `fl_status_spl` : string
+- `erros_split` : array
+- `split_indisponivel` : array
+
+## `despesas` (status 200)
+
+- `vencimento` : string
+- `competencia` : string
+- `id_despesa` : string
+- `id_lancamento_imodm` : string
+- `id_lancamento_imod` : string
+- `id_produto_prd` : string
+- `vl_valor_imod` : string
+- `st_complemento_imod` : string
+- `id_debito_imod` : string
+- `id_credito_imod` : string
+- `id_proprietariodebito_imod` : string
+- `id_proprietariocredito_imod` : string
+- `id_terceiro_fav` : string
+- `fl_status_imod` : string
+- `dt_fim_imodm` : string
+- `id_recebimento_recb` : string
+- `id_lancamentocredito_imod` : string
+- `st_label_imod` : string
+- `id_repasse_rep` : string
+- `dt_competencia_imod` : string
+- `dt_referencia_imod` : string
+- `dt_lancamento_imod` : string
+- `nm_diavencimento_imodm` : string
+- `id_faturamento_facs` : string
+- `id_acordo_aco` : string
+- `st_codigobarras_mov` : string
+- `dt_liquidacao_mov` : string
+- `fl_status_mov` : string
+- `nm_tipo_imodm` : string
+- `id_despesaorigem_imod` : string
+- `vl_pagtoindevido_imod` : string
+- `id_pagtoindevido_imod` : string
+- `id_contabanco_cb` : string
+- `id_formapagamento_imod` : string
+- `id_mensalidade_mens` : string
+- `dt_liquidacao_imom` : string
+- `fl_conciliado_imod` : string
+- `fl_alterouvalor_imod` : string
+- `id_seguro_seg` : string
+- `fl_cobrartxadm_imod` : string
+- `st_split_imod` : string
+- `id_despesa_desp` : string
+- `id_despesa_despm` : string
+- `id_despesareembolso_imod` : string
+- `fl_repassar_imod` : string
+- `fl_tipo_imod` : string
+- `fl_tipocompetencia` : string
+- `dt_referenciareembolso` : string
+- `fl_despesaproporcional` : string
+- `nm_tagcriacao` : string
+- `nm_tagliquidacao` : string
+- `fl_calcularproporcionalrescisao` : string
+- `st_conta_cont` : string
+- `st_descricao_prd` : string
+- `nome_proprietariodebito` : string
+- `nome_proprietariocredito` : string
+- `id_imovel_imo` : string
+- `st_identificador_imo` : string
+- `st_tipo_imo` : string
+- `st_endereco_imo` : string
+- `st_numero_imo` : string
+- `st_bairro_imo` : string
+- `st_cep_imo` : string
+- `st_complemento_imo` : string
+- `id_contrato_con` : string
+- `nm_locacoesimovel_con` : string
+- `nm_diavencimento_con` : string
+- `fl_despesacaixaexcluida_imod` : string
+- `fl_parcelada` : string
+- `imovel_formatado` : string
+- `detalhes_contrato` : string
+- `fl_agrupado_rep` : string
+- `produto_opcional` : string
+- `id_lanctoprogrealizado_lpr` : string
+- `nome_imovel` : string
+- `dt_recebimento_recb` : string
+- `dt_liquidacao_recb` : string
+- `fl_status_recb` : string
+- `st_label3_recb` : string
+- `dt_vencimento_recb` : string
+- `dt_repasse_rep` : string
+- `repasses` : array
+  - _(item do array)_:
+    - `id_repasse_rep` : string
+    - `fl_status_mov` : string
+    - `dt_liquidacao_mov` : string
+    - `st_nome_pes` : string
+    - `id_recebimento_recb` : string
+    - `fl_status_rep` : string
+- `movimentacoes` : array
+- `tem_composicao_alterada` : string
+- `fl_elegivel_alterar_credito_imobiliaria` : string
+
+## `imoveisdespesa` (status 200)
+
+- `st_identificador_imo` : string
+- `st_tipo_imo` : string
+- `st_endereco_imo` : string
+- `st_numero_imo` : string
+- `st_bairro_imo` : string
+- `st_cep_imo` : string
+- `st_complemento_imo` : string
+- `st_conta_cont` : string
+- `st_descricao_prd` : string
+- `id_produto_prd` : string
+- `nome_proprietariodebito` : string
+- `nome_proprietariocredito` : string
+- `credito_reembolso` : string
+- `id_lancamento_imod` : string
+- `dt_lancamento_imod` : string
+- `st_complemento_imod` : string
+- `id_imovel_imo` : string
+- `fl_status_imod` : string
+- `vl_valor_imod` : string
+- `id_md5parcelamento_imod` : string
+- `id_contrato_con` : string
+- `id_proprietariodebito_imod` : string
+- `fl_cobrartxadm_imod` : string
+- `fl_pagtoantecipado_imod` : string
+- `dt_referencia_imod` : string
+- `id_debito_imod` : string
+- `id_credito_imod` : string
+- `id_lancamentodebito_imod` : string
+- `id_lancamentocredito_imod` : string
+- `id_proprietariocredito_imod` : string
+- `id_terceiro_fav` : string
+- `id_faturamento_comp` : string
+- `id_repasse_rep` : string
+- `id_faturamento_facs` : string
+- `fl_especialfin_imod` : string
+- `fl_especial_imod` : string
+- `id_recebimento_recb` : string
+- `fl_retencao_imod` : string
+- `dt_competencia_imod` : string
+- `st_codigobarras_mov` : string
+- `st_label_imod` : string
+- `id_acordo_aco` : string
+- `id_lancamento_imodm` : string
+- `dt_liquidacao_mov` : string
+- `fl_status_mov` : string
+- `id_pagtoindevido_imod` : string
+- `vl_pagtoindevido_imod` : string
+- `id_despesaorigem_imod` : string
+- `id_formapagamento_imod` : string
+- `id_contabanco_cb` : string
+- `fl_repassar_imod` : string
+- `dt_liquidacao_imom` : string
+- `fl_conciliado_imod` : string
+- `fl_alterouvalor_imod` : string
+- `id_seguro_seg` : string
+- `id_iptulancamento_iil` : string
+- `st_split_imod` : string
+- `id_orcamento_morc` : string
+- `fl_statusdebito_imod` : string
+- `id_previsao_prt` : string
+- `id_despesa_desp` : string
+- `id_despesareembolso_imod` : string
+- `fl_exibir_imod` : string
+- `st_cpfcnpjpagadororiginal_imod` : string
+- `dt_atualizacao_imod` : string
+- `fl_garantida_imod` : string
+- `st_label_recb` : string
+- `st_hashdespesa_imod` : string
+- `fl_tipo_imod` : string
+- `id_propdiferenca_imod` : string
+- `fl_despesaalterada_imod` : string
+- `fl_despesaproporcional_imod` : string
+- `nm_tagcriacao_imod` : string
+- `nm_tagliquidacao_imod` : string
+- `fl_calcularproporcionalrescisao_imod` : string
+- `fl_parcelada_imod` : string
+- `st_hashcomposicaoparcela_imod` : string
+- `fl_despesacaixaexcluida_imod` : string
+- `id_formarecebimento_frp` : string
+- `fl_remessastatus_mov` : string
+- `dt_recebimento_recb` : string
+- `dt_liquidacao_recb` : string
+- `fl_status_recb` : string
+- `st_label3_recb` : string
+- `dt_vencimento_recb` : string
+- `repasses` : array
+  - _(item do array)_:
+    - `id_repasse_rep` : string
+    - `id_despesa_des` : string
+    - `id_item_rei` : string
+    - `id_pessoa_rei` : string
+    - `id_notafiscal_rei` : string
+    - `id_notafiscal2_rei` : string
+    - `fl_emitirnotafiscal_rei` : string
+    - `id_lancamentoindevido_rei` : string
+    - `fl_email_rei` : string
+    - `dt_liquidacao_mov` : string
+    - `fl_status_mov` : string
+    - `id_beneficiarioprop_pes` : string
+    - `fl_emailsplit_rei` : string
+    - `vl_txadm_rei` : string
+    - `fl_sms_rei` : string
+    - `fl_sincronizadocomissao_rei` : string
+    - `id_despesacomissao_rei` : string
+    - `id_despesacomissao2_rei` : string
+    - `st_nome_pes` : string
+    - `id_favorecido_fav` : string
+    - `st_cnpj_pes` : string
+    - `st_endereco_pes` : string
+    - `st_complemento_pes` : string
+    - `st_numero_pes` : string
+    - `st_cidade_pes` : string
+    - `st_estado_pes` : string
+    - `st_cep_pes` : string
+    - `st_bairro_pes` : string
+    - `id_recebimento_recb` : string
+    - `dt_proc_rep` : string
+    - `id_contrato_con` : string
+    - `fl_status_rep` : string
+    - `dt_liquidacao_recb` : string
+    - `dt_credito_recb` : string
+    - `vl_total_recb` : string
+    - `st_md5_recb` : string
+    - `dt_geracao_recb` : string
+    - `dt_competencia_recb` : string
+    - `fl_garantido_rep` : string
+    - `dt_vencimento_recb` : string
+    - `vl_aluguel_rep` : string
+    - `dt_repasse_rep` : string
+    - `st_label3_recb` : string
+    - `st_label_recb` : string
+    - `id_acordo_aco` : string
+    - `st_observacaoexterna_rep` : string
+    - `id_locatario_pes` : string
+    - `fl_repassougarantido_rep` : string
+    - `dt_notafiscal_rep` : string
+    - `id_repasseagrupado_rep` : string
+    - `fl_agrupado_rep` : string
+    - `fl_split_rep` : string
+    - `vl_txadm_rep` : string
+    - `id_formapagamento_recb` : string
+    - `dt_atualizacao_rep` : string
+    - `tx_adm_rep` : string
+    - `fl_txadmfixa_rep` : string
+- `dt_repasse_rep` : string
+- `imovel_formatado` : string
+- `detalhes_contrato` : string
+- `fl_elegivel_alterar_credito_imobiliaria` : string
+- `fl_terceiroexcluido_desp` : string
+- `dt_competencia_aux` : string
+
+## `dimob` (status 200)
+
+- `id_dimob_dlc` : string
+- `id_locatario_pes` : string
+- `id_pessoa_prop` : string
+- `proprietario` : string
+- `cnpj_proprietario` : string
+- `dt_inicio_con` : string
+- `nm_locacoesimovel_con` : string
+- `dt_fim_con` : string
+- `dt_rescisao_con` : string
+- `fl_ativo_con` : string
+- `fl_reterir_con` : string
+- `st_label_mens` : string
+- `id_contrato_con` : string
+- `locatario` : string
+- `id_imovel_imo` : string
+- `st_tipodimob_imo` : string
+- `st_estado_imo` : string
+- `st_cep_imo` : string
+- `st_endereco_imo` : string
+- `st_numero_imo` : string
+- `st_complemento_imo` : string
+- `st_bairro_imo` : string
+- `st_cidade_imo` : string
+- `st_identificador_imo` : string
+- `st_tipo_imo` : string
+- `id_proprietario_pes` : string
+- `nome_proprietario_formatado` : string
+- `st_nomeinquilino_formatado` : string
+- `imovel_formatado` : string
+- `detalhes_contrato` : string
+
+## `seguros` (status 200)
+
+- `id_seguro_seg` : string
+- `id_imovel_imo` : string
+- `id_contrato_con` : string
+- `fl_status_seg` : string
+- `dt_inicio_seg` : string
+- `dt_fim_seg` : string
+- `vl_valorparcela_seg` : string
+- `vl_aluguel_con` : string
+- `vl_cobertura_seg` : string
+- `st_identificador_seg` : string
+- `id_locatario_seg` : string
+- `id_cotacao_seg` : string
+- `id_plano_seg` : string
+- `id_usuario_usu` : string
+- `id_contratacao_seg` : string
+- `id_despesa_seg` : string
+- `fl_motivocancelar_seg` : string
+- `st_cotacao_seg` : string
+- `nm_parcelas_seg` : string
+- `id_ultimoseguro_seg` : string
+- `dt_atualizacao_seg` : string
+- `id_seguros_scot` : string
+- `dt_cancelamento_seg` : string
+- `apolice_numero` : string
+- `st_chaveacessoapolice_seg` : string
+- `fl_vertical_seg` : string
+- `id_seguradora_seg` : string
+- `id_proprietario_seg` : string
+- `fl_tipocontratacao_seg` : string
+- `st_plano_seg` : string
+- `vl_premio_seg` : string
+- `st_observacao_seg` : string
+- `fl_responsavel_seg` : string
+
+## `imoveis` (status 200)
+
+- `id_filial_fil` : string
+- `st_nome_fil` : string
+- `proprietarios_beneficiarios` : array
+  - _(item do array)_:
+    - `pessoas` : array
+    - `st_fantasia_pes` : string
+    - `st_nome_pes` : string
+    - `id_pessoa_pes` : string
+    - `id_formarecebimento_pes` : string
+    - `st_banco_pes` : string
+    - `st_conta_pes` : string
+    - `st_agenciabanco_pes` : string
+    - `st_tipoconta_pes` : string
+    - `st_operacao_pes` : string
+    - `st_nomerecebedor_pes` : string
+    - `st_cnpjrecebedor_pes` : string
+    - `st_cnpj_pes` : string
+    - `id_sacado_sac` : string
+    - `dt_nascimento_pes` : string
+    - `st_email_pes` : string
+    - `st_celular_pes` : string
+    - `dt_diarepasse_pes` : string
+    - `id_imovel_imo` : string
+    - `id_proprietario_pes` : string
+    - `fl_principal_prb` : string
+    - `fl_proprietario_prb` : string
+    - `nm_fracao_prb` : string
+    - `nm_fracao_rcb` : string
+    - `id_formarecebimento_frp` : string
+    - `id_formapagamento` : string
+    - `nome_formatado` : string
+- `contratos` : array
+- `id_imovel_imo` : string
+- `st_identificador_imo` : string
+- `vl_aluguel_imo` : string
+- `vl_condominio_imo` : string
+- `vl_parcelaiptu_imo` : string
+- `st_tipo_imo` : string
+- `st_codigoiptu_imo` : string
+- `nm_parcelasiptu_imo` : string
+- `nm_txiptuproprietario_imo` : string
+- `nm_txiptuinquilino_imo` : string
+- `fl_responsavelcondominio_imo` : string
+- `st_cep_imo` : string
+- `st_endereco_imo` : string
+- `st_bairro_imo` : string
+- `st_complemento_imo` : string
+- `st_cidade_imo` : string
+- `st_estado_imo` : string
+- `st_numero_imo` : string
+- `st_areautil_imo` : string
+- `st_areatotal_imo` : string
+- `nm_quartos_imo` : string
+- `nm_suites_imo` : string
+- `nm_banheiros_imo` : string
+- `nm_salas_imo` : string
+- `nm_varandas_imo` : string
+- `nm_garagens_imo` : string
+- `nm_piscinas_imo` : string
+- `st_codagua_imo` : string
+- `st_codenergia_imo` : string
+- `st_codgas_imo` : string
+- `st_observacao_imo` : string
+- `st_cartorio_imo` : string
+- `st_matriculacartorio_imo` : string
+- `st_administradora_imo` : string
+- `st_condominio_imo` : string
+- `fl_responsaveliptu_imo` : string
+- `fl_responsavelagua_imo` : string
+- `nm_txaguaproprietario_imo` : string
+- `nm_txaguainquilino_imo` : string
+- `tx_locacao_imo` : string
+- `nm_repassegarantido_imo` : string
+- `fl_diafixorepasse_imo` : string
+- `fl_status_imo` : string
+- `tx_adm_imo` : string
+- `fl_txadmvalorfixo_imo` : string
+- `fl_txlocacaovalorfixo_imo` : string
+- `nm_parcelastxlocacao_imo` : string
+- `nm_diarepasse_imo` : string
+- `vl_venda_imo` : string
+- `st_codigosequencial_imo` : string
+- `st_codigocidadedimob_imo` : string
+- `st_tipodimob_imo` : string
+- `st_identificadorimportacao_imo` : string
+- `id_administradora_adm` : string
+- `st_iptugaragem_imo` : string
+- `st_sincrofilial_imo` : string
+- `fl_split_imo` : string
+- `id_foto_imo` : string
+- `st_codigospu_imo` : string
+- `id_gestor_imo` : string
+- `st_txlixo_imo` : string
+- `st_codbombeiro_imo` : string
+- `id_condominio_cond` : string
+- `st_avaliacao_imo` : string
+- `st_detalhes_imo` : string
+- `nm_meseslocacao_imo` : string
+- `tx_anual_imo` : string
+- `st_destinacao_imo` : string
+- `nm_mesesisencaomulta_imo` : string
+- `fl_imoveltombado_imo` : string
+- `fl_tipoisencao_imo` : string
+- `fl_admcondominio_imo` : string
+- `fl_contapessoa_imo` : string
+- `dt_contapessoa_imo` : string
+- `dt_atualizacao_imo` : string
+- `fl_motivorescisao_imo` : string
+- `dt_rescisao_imo` : string
+- `nm_txanualcobrarmes_imo` : string
+- `fl_cobrartxanual_imo` : string
+- `fl_txanualcobrarsemcontrato_imo` : string
+- `fl_txanualcobrarproporcional_imo` : string
+- `dt_entrada_imo` : string
+- `fl_reembolsoiss_imo` : string
+- `st_apelido_imo` : string
+- `vl_txadmvalorminimo_imo` : string
+- `id_integracaoimoveis_imo` : string
+- `st_codigocontribuinte_imo` : string
+- `fl_txanualcobrarvalordomes_imo` : string
+- `fl_ligacaoeletrica_imo` : string
+- `st_uuidassinaturapaybox_imo` : string
+- `fl_ocultarowli_imo` : string
+- `nm_txanualcobrarsobre_imo` : string
+- `nm_txanualnmparcelas_imo` : string
+- `fl_txanualconfigpadrao_imo` : string
+- `fl_segurodesativado_imo` : string
+- `st_cib_imo` : string
+- `inquilinos` : array
+- `st_nome_cond` : string
+- `endereco_formatado` : string
+- `nome_formatado` : string
+- `nome_proprietario` : string
+- `cnpj_proprietario` : string
+- `id_proprietario` : string
+- `nascimento_proprietario` : string
+- `celular_proprietario` : string
+- `email_proprietario` : string
+- `detalhes_formatado` : string
+- `identificador_formatado` : string
+- `id_sacado_sac` : string
+- `nome_inquilino` : string
+- `cnpj_inquilino` : string
+- `id_inquilino` : string
+
+## `proprietarios` (status 200)
+
+- `proprietarios_beneficiarios` : array
+  - _(item do array)_:
+    - `contratos` : array
+      - _(item do array)_:
+    - `id_imovel_imo` : string
+    - `st_identificador_imo` : string
+    - `vl_aluguel_imo` : string
+    - `vl_condominio_imo` : string
+    - `vl_parcelaiptu_imo` : string
+    - `st_tipo_imo` : string
+    - `st_codigoiptu_imo` : string
+    - `nm_parcelasiptu_imo` : string
+    - `nm_txiptuproprietario_imo` : string
+    - `nm_txiptuinquilino_imo` : string
+    - `fl_responsavelcondominio_imo` : string
+    - `st_cep_imo` : string
+    - `st_endereco_imo` : string
+    - `st_bairro_imo` : string
+    - `st_complemento_imo` : string
+    - `st_cidade_imo` : string
+    - `st_estado_imo` : string
+    - `st_numero_imo` : string
+    - `st_areautil_imo` : string
+    - `st_areatotal_imo` : string
+    - `nm_quartos_imo` : string
+    - `nm_suites_imo` : string
+    - `nm_banheiros_imo` : string
+    - `nm_salas_imo` : string
+    - `nm_varandas_imo` : string
+    - `nm_garagens_imo` : string
+    - `nm_piscinas_imo` : string
+    - `st_codagua_imo` : string
+    - `st_codenergia_imo` : string
+    - `st_codgas_imo` : string
+    - `st_observacao_imo` : string
+    - `st_cartorio_imo` : string
+    - `st_matriculacartorio_imo` : string
+    - `st_administradora_imo` : string
+    - `st_condominio_imo` : string
+    - `fl_responsaveliptu_imo` : string
+    - `fl_responsavelagua_imo` : string
+    - `nm_txaguaproprietario_imo` : string
+    - `nm_txaguainquilino_imo` : string
+    - `tx_locacao_imo` : string
+    - `nm_repassegarantido_imo` : string
+    - `fl_diafixorepasse_imo` : string
+    - `fl_status_imo` : string
+    - `tx_adm_imo` : string
+    - `fl_txadmvalorfixo_imo` : string
+    - `fl_txlocacaovalorfixo_imo` : string
+    - `nm_parcelastxlocacao_imo` : string
+    - `nm_diarepasse_imo` : string
+    - `vl_venda_imo` : string
+    - `st_codigosequencial_imo` : string
+    - `st_codigocidadedimob_imo` : string
+    - `st_tipodimob_imo` : string
+    - `st_identificadorimportacao_imo` : string
+    - `id_administradora_adm` : string
+    - `st_iptugaragem_imo` : string
+    - `st_sincrofilial_imo` : string
+    - `id_filial_fil` : string
+    - `fl_split_imo` : string
+    - `id_foto_imo` : string
+    - `st_codigospu_imo` : string
+    - `id_gestor_imo` : string
+    - `st_txlixo_imo` : string
+    - `st_codbombeiro_imo` : string
+    - `id_condominio_cond` : string
+    - `st_avaliacao_imo` : string
+    - `st_detalhes_imo` : string
+    - `nm_meseslocacao_imo` : string
+    - `tx_anual_imo` : string
+    - `st_destinacao_imo` : string
+    - `nm_mesesisencaomulta_imo` : string
+    - `fl_imoveltombado_imo` : string
+    - `fl_tipoisencao_imo` : string
+    - `fl_admcondominio_imo` : string
+    - `fl_contapessoa_imo` : string
+    - `dt_contapessoa_imo` : string
+    - `dt_atualizacao_imo` : string
+    - `fl_motivorescisao_imo` : string
+    - `dt_rescisao_imo` : string
+    - `nm_txanualcobrarmes_imo` : string
+    - `fl_cobrartxanual_imo` : string
+    - `fl_txanualcobrarsemcontrato_imo` : string
+    - `fl_txanualcobrarproporcional_imo` : string
+    - `dt_entrada_imo` : string
+    - `fl_reembolsoiss_imo` : string
+    - `st_apelido_imo` : string
+    - `vl_txadmvalorminimo_imo` : string
+    - `id_integracaoimoveis_imo` : string
+    - `st_codigocontribuinte_imo` : string
+    - `fl_txanualcobrarvalordomes_imo` : string
+    - `fl_ligacaoeletrica_imo` : string
+    - `st_uuidassinaturapaybox_imo` : string
+    - `fl_ocultarowli_imo` : string
+    - `nm_txanualcobrarsobre_imo` : string
+    - `nm_txanualnmparcelas_imo` : string
+    - `fl_txanualconfigpadrao_imo` : string
+    - `fl_segurodesativado_imo` : string
+    - `st_cib_imo` : string
+    - `id_formarecebimento_frp` : string
+    - `id_proprietario_pes` : string
+- `id_pessoa_pes` : string
+- `st_nome_pes` : string
+- `st_cnpj_pes` : string
+- `st_fantasia_pes` : string
+- `st_rg_pes` : string
+- `st_orgao_pes` : string
+- `st_ie_pes` : string
+- `st_inscmunicipal_pes` : string
+- `st_endereco_pes` : string
+- `st_complemento_pes` : string
+- `st_numero_pes` : string
+- `st_cidade_pes` : string
+- `st_estado_pes` : string
+- `st_cep_pes` : string
+- `st_bairro_pes` : string
+- `st_telefone_pes` : string
+- `st_celular_pes` : string
+- `st_email_pes` : string
+- `st_observacao_pes` : string
+- `st_nacionalidade_pes` : string
+- `st_sexo_pes` : string
+- `dt_nascimento_pes` : string
+- `st_estadocivil_pes` : string
+- `st_profissao_pes` : string
+- `st_ramoatividade_pes` : string
+- `st_trabalhocep_pes` : string
+- `st_trabalhoendereco_pes` : string
+- `st_trabalhonumero_pes` : string
+- `st_trabalhocomplemento_pes` : string
+- `st_trabalhobairro_pes` : string
+- `st_trabalhocidade_pes` : string
+- `st_trabalhoestado_pes` : string
+- `st_banco_pes` : string
+- `id_forma_pag` : string
+- `st_agenciabanco_pes` : string
+- `st_conta_pes` : string
+- `id_sacado_sac` : string
+- `id_favorecido_fav` : string
+- `fl_proprietariobeneficiario_pes` : string
+- `fl_locatario_pes` : string
+- `fl_corretor_pes` : string
+- `fl_fiador_pes` : string
+- `st_nomerecebedor_pes` : string
+- `st_cnpjrecebedor_pes` : string
+- `id_formarecebimento_pes` : string
+- `st_identificadorprop_pes` : string
+- `st_identificadorloc_pes` : string
+- `vl_rendamensal_pes` : string
+- `st_nome_coj` : string
+- `st_cpf_coj` : string
+- `st_rg_coj` : string
+- `st_nacionalidade_coj` : string
+- `st_sexo_coj` : string
+- `st_profissao_coj` : string
+- `st_celular_coj` : string
+- `st_email_coj` : string
+- `st_observacao_coj` : string
+- `st_telefone_coj` : string
+- `fl_status_pes` : string
+- `nm_dependentes_pes` : string
+- `st_tipoconta_pes` : string
+- `id_unidade_uni` : string
+- `st_nomeresp_pes` : string
+- `st_cpfresp_pes` : string
+- `st_telefoneresp_pes` : string
+- `st_respcep_pes` : string
+- `st_respendereco_pes` : string
+- `st_respnumero_pes` : string
+- `st_respcomplemento_pes` : string
+- `st_respbairro_pes` : string
+- `st_respcidade_pes` : string
+- `st_respestado_pes` : string
+- `st_respemail_pes` : string
+- `st_rgresp_pes` : string
+- `st_identificadorfiador_pes` : string
+- `st_orgao_coj` : string
+- `dt_expedicaorg_pes` : string
+- `st_operacao_pes` : string
+- `fl_reterissqn_pes` : string
+- `fl_reterinss_pes` : string
+- `fl_reterirrf_pes` : string
+- `fl_reterpis_pes` : string
+- `fl_retercofins_pes` : string
+- `fl_retercontribuicaosocial_pes` : string
+- `st_razaoempresa_pes` : string
+- `st_telefoneempresa_pes` : string
+- `dt_admissaoempresa_pes` : string
+- `fl_naodomiciliado_pes` : string
+- `fl_comprador_pes` : string
+- `fl_vistoriador_pes` : string
+- `st_identificadorcorretor_pes` : string
+- `id_foto_pes` : string
+- `st_creci_pes` : string
+- `vl_txissqn_pes` : string
+- `st_identidadeblockchain_pes` : string
+- `st_fotourl_pes` : string
+- `fl_naonotificar_pes` : string
+- `st_nomemae_pes` : string
+- `st_nomepai_pes` : string
+- `st_naturalidade_pes` : string
+- `fl_statusconvitecartao_pes` : string
+- `vl_tarifabancaria_pes` : string
+- `dt_diarepasse_pes` : string
+- `dt_atualizacao_pes` : string
+- `fl_testemunha_pes` : string
+- `fl_contapessoa_pes` : string
+- `st_pais_pes` : string
+- `fl_gerente_pes` : string
+- `fl_reembolsoiss_pes` : string
+- `fl_recolhimentodarf_pes` : string
+- `id_gestor_ges` : string
+- `vl_saldobloqueado_pes` : string
+- `fl_reembolsarirrf_pes` : string
+- `fl_reembolsarpiscofins_pes` : string
+- `st_chavepix_pes` : string
+- `fl_tipochavepix_pes` : string
+- `fl_descontosimplificadoir_pes` : string
+- `st_codigocontabil_pes` : string
+- `fl_semrenda_pes` : string
+- `fl_vinculoemprego_pes` : string
+- `st_beneficio_pes` : string
+- `vl_outrosrendimentos_pes` : string
+- `st_cnpjempresa_pes` : string
+- `dt_admissaoemprego_pes` : string
+- `st_enviodemonstrativoemail_pes` : string
+- `dt_enviodemonstrativo_pes` : string
+- `dt_enviodemonstrativoinicio_pes` : string
+- `dt_enviodemonstrativofim_pes` : string
+- `nome_formatado` : string
+
+## `locatarios` (status 200)
+
+- `id_pessoa_pes` : string
+- `st_nome_pes` : string
+- `st_cnpj_pes` : string
+- `st_fantasia_pes` : string
+- `st_rg_pes` : string
+- `st_orgao_pes` : string
+- `st_ie_pes` : string
+- `st_inscmunicipal_pes` : string
+- `st_endereco_pes` : string
+- `st_complemento_pes` : string
+- `st_numero_pes` : string
+- `st_cidade_pes` : string
+- `st_estado_pes` : string
+- `st_cep_pes` : string
+- `st_bairro_pes` : string
+- `st_telefone_pes` : string
+- `st_celular_pes` : string
+- `st_email_pes` : string
+- `st_observacao_pes` : string
+- `st_nacionalidade_pes` : string
+- `st_sexo_pes` : string
+- `dt_nascimento_pes` : string
+- `st_estadocivil_pes` : string
+- `st_profissao_pes` : string
+- `st_ramoatividade_pes` : string
+- `st_trabalhocep_pes` : string
+- `st_trabalhoendereco_pes` : string
+- `st_trabalhonumero_pes` : string
+- `st_trabalhocomplemento_pes` : string
+- `st_trabalhobairro_pes` : string
+- `st_trabalhocidade_pes` : string
+- `st_trabalhoestado_pes` : string
+- `st_banco_pes` : string
+- `id_forma_pag` : string
+- `st_agenciabanco_pes` : string
+- `st_conta_pes` : string
+- `id_sacado_sac` : string
+- `id_favorecido_fav` : string
+- `fl_proprietariobeneficiario_pes` : string
+- `fl_locatario_pes` : string
+- `fl_corretor_pes` : string
+- `fl_fiador_pes` : string
+- `st_nomerecebedor_pes` : string
+- `st_cnpjrecebedor_pes` : string
+- `id_formarecebimento_pes` : string
+- `st_identificadorprop_pes` : string
+- `st_identificadorloc_pes` : string
+- `vl_rendamensal_pes` : string
+- `st_nome_coj` : string
+- `st_cpf_coj` : string
+- `st_rg_coj` : string
+- `st_nacionalidade_coj` : string
+- `st_sexo_coj` : string
+- `st_profissao_coj` : string
+- `st_celular_coj` : string
+- `st_email_coj` : string
+- `st_observacao_coj` : string
+- `st_telefone_coj` : string
+- `fl_status_pes` : string
+- `nm_dependentes_pes` : string
+- `st_tipoconta_pes` : string
+- `id_unidade_uni` : string
+- `st_nomeresp_pes` : string
+- `st_cpfresp_pes` : string
+- `st_telefoneresp_pes` : string
+- `st_respcep_pes` : string
+- `st_respendereco_pes` : string
+- `st_respnumero_pes` : string
+- `st_respcomplemento_pes` : string
+- `st_respbairro_pes` : string
+- `st_respcidade_pes` : string
+- `st_respestado_pes` : string
+- `st_respemail_pes` : string
+- `st_rgresp_pes` : string
+- `st_identificadorfiador_pes` : string
+- `st_orgao_coj` : string
+- `dt_expedicaorg_pes` : string
+- `st_operacao_pes` : string
+- `fl_reterissqn_pes` : string
+- `fl_reterinss_pes` : string
+- `fl_reterirrf_pes` : string
+- `fl_reterpis_pes` : string
+- `fl_retercofins_pes` : string
+- `fl_retercontribuicaosocial_pes` : string
+- `st_razaoempresa_pes` : string
+- `st_telefoneempresa_pes` : string
+- `dt_admissaoempresa_pes` : string
+- `fl_naodomiciliado_pes` : string
+- `fl_comprador_pes` : string
+- `fl_vistoriador_pes` : string
+- `st_identificadorcorretor_pes` : string
+- `id_foto_pes` : string
+- `st_creci_pes` : string
+- `vl_txissqn_pes` : string
+- `st_identidadeblockchain_pes` : string
+- `st_fotourl_pes` : string
+- `fl_naonotificar_pes` : string
+- `st_nomemae_pes` : string
+- `st_nomepai_pes` : string
+- `st_naturalidade_pes` : string
+- `fl_statusconvitecartao_pes` : string
+- `vl_tarifabancaria_pes` : string
+- `dt_diarepasse_pes` : string
+- `dt_atualizacao_pes` : string
+- `fl_testemunha_pes` : string
+- `fl_contapessoa_pes` : string
+- `st_pais_pes` : string
+- `fl_gerente_pes` : string
+- `fl_reembolsoiss_pes` : string
+- `fl_recolhimentodarf_pes` : string
+- `id_gestor_ges` : string
+- `vl_saldobloqueado_pes` : string
+- `fl_reembolsarirrf_pes` : string
+- `fl_reembolsarpiscofins_pes` : string
+- `st_chavepix_pes` : string
+- `fl_tipochavepix_pes` : string
+- `fl_descontosimplificadoir_pes` : string
+- `st_codigocontabil_pes` : string
+- `fl_semrenda_pes` : string
+- `fl_vinculoemprego_pes` : string
+- `st_beneficio_pes` : string
+- `vl_outrosrendimentos_pes` : string
+- `st_cnpjempresa_pes` : string
+- `dt_admissaoemprego_pes` : string
+- `st_enviodemonstrativoemail_pes` : string
+- `dt_enviodemonstrativo_pes` : string
+- `dt_enviodemonstrativoinicio_pes` : string
+- `dt_enviodemonstrativofim_pes` : string
+- `nome_formatado` : string
+
+## `fiadores` (status 200)
+
+- `id_pessoa_pes` : string
+- `st_nome_pes` : string
+- `st_cnpj_pes` : string
+- `st_fantasia_pes` : string
+- `st_rg_pes` : string
+- `st_orgao_pes` : string
+- `st_ie_pes` : string
+- `st_inscmunicipal_pes` : string
+- `st_endereco_pes` : string
+- `st_complemento_pes` : string
+- `st_numero_pes` : string
+- `st_cidade_pes` : string
+- `st_estado_pes` : string
+- `st_cep_pes` : string
+- `st_bairro_pes` : string
+- `st_telefone_pes` : string
+- `st_celular_pes` : string
+- `st_email_pes` : string
+- `st_observacao_pes` : string
+- `st_nacionalidade_pes` : string
+- `st_sexo_pes` : string
+- `dt_nascimento_pes` : string
+- `st_estadocivil_pes` : string
+- `st_profissao_pes` : string
+- `st_ramoatividade_pes` : string
+- `st_trabalhocep_pes` : string
+- `st_trabalhoendereco_pes` : string
+- `st_trabalhonumero_pes` : string
+- `st_trabalhocomplemento_pes` : string
+- `st_trabalhobairro_pes` : string
+- `st_trabalhocidade_pes` : string
+- `st_trabalhoestado_pes` : string
+- `st_banco_pes` : string
+- `id_forma_pag` : string
+- `st_agenciabanco_pes` : string
+- `st_conta_pes` : string
+- `id_sacado_sac` : string
+- `id_favorecido_fav` : string
+- `fl_proprietariobeneficiario_pes` : string
+- `fl_locatario_pes` : string
+- `fl_corretor_pes` : string
+- `fl_fiador_pes` : string
+- `st_nomerecebedor_pes` : string
+- `st_cnpjrecebedor_pes` : string
+- `id_formarecebimento_pes` : string
+- `st_identificadorprop_pes` : string
+- `st_identificadorloc_pes` : string
+- `vl_rendamensal_pes` : string
+- `st_nome_coj` : string
+- `st_cpf_coj` : string
+- `st_rg_coj` : string
+- `st_nacionalidade_coj` : string
+- `st_sexo_coj` : string
+- `st_profissao_coj` : string
+- `st_celular_coj` : string
+- `st_email_coj` : string
+- `st_observacao_coj` : string
+- `st_telefone_coj` : string
+- `fl_status_pes` : string
+- `nm_dependentes_pes` : string
+- `st_tipoconta_pes` : string
+- `id_unidade_uni` : string
+- `st_nomeresp_pes` : string
+- `st_cpfresp_pes` : string
+- `st_telefoneresp_pes` : string
+- `st_respcep_pes` : string
+- `st_respendereco_pes` : string
+- `st_respnumero_pes` : string
+- `st_respcomplemento_pes` : string
+- `st_respbairro_pes` : string
+- `st_respcidade_pes` : string
+- `st_respestado_pes` : string
+- `st_respemail_pes` : string
+- `st_rgresp_pes` : string
+- `st_identificadorfiador_pes` : string
+- `st_orgao_coj` : string
+- `dt_expedicaorg_pes` : string
+- `st_operacao_pes` : string
+- `fl_reterissqn_pes` : string
+- `fl_reterinss_pes` : string
+- `fl_reterirrf_pes` : string
+- `fl_reterpis_pes` : string
+- `fl_retercofins_pes` : string
+- `fl_retercontribuicaosocial_pes` : string
+- `st_razaoempresa_pes` : string
+- `st_telefoneempresa_pes` : string
+- `dt_admissaoempresa_pes` : string
+- `fl_naodomiciliado_pes` : string
+- `fl_comprador_pes` : string
+- `fl_vistoriador_pes` : string
+- `st_identificadorcorretor_pes` : string
+- `id_foto_pes` : string
+- `st_creci_pes` : string
+- `vl_txissqn_pes` : string
+- `st_identidadeblockchain_pes` : string
+- `st_fotourl_pes` : string
+- `fl_naonotificar_pes` : string
+- `st_nomemae_pes` : string
+- `st_nomepai_pes` : string
+- `st_naturalidade_pes` : string
+- `fl_statusconvitecartao_pes` : string
+- `vl_tarifabancaria_pes` : string
+- `dt_diarepasse_pes` : string
+- `dt_atualizacao_pes` : string
+- `fl_testemunha_pes` : string
+- `fl_contapessoa_pes` : string
+- `st_pais_pes` : string
+- `fl_gerente_pes` : string
+- `fl_reembolsoiss_pes` : string
+- `fl_recolhimentodarf_pes` : string
+- `id_gestor_ges` : string
+- `vl_saldobloqueado_pes` : string
+- `fl_reembolsarirrf_pes` : string
+- `fl_reembolsarpiscofins_pes` : string
+- `st_chavepix_pes` : string
+- `fl_tipochavepix_pes` : string
+- `fl_descontosimplificadoir_pes` : string
+- `st_codigocontabil_pes` : string
+- `fl_semrenda_pes` : string
+- `fl_vinculoemprego_pes` : string
+- `st_beneficio_pes` : string
+- `vl_outrosrendimentos_pes` : string
+- `st_cnpjempresa_pes` : string
+- `dt_admissaoemprego_pes` : string
+- `st_enviodemonstrativoemail_pes` : string
+- `dt_enviodemonstrativo_pes` : string
+- `dt_enviodemonstrativoinicio_pes` : string
+- `dt_enviodemonstrativofim_pes` : string
+- `contratos` : array
+  - _(item do array)_:
+    - `id_contrato_con` : string
+    - `fl_tipo_fia` : string
+    - `codigo_contrato` : string
+- `nome_formatado` : string
+
+## `corretores` (status 200)
+
+- `id_pessoa_pes` : string
+- `st_nome_pes` : string
+- `st_cnpj_pes` : string
+- `st_fantasia_pes` : string
+- `st_rg_pes` : string
+- `st_orgao_pes` : string
+- `st_ie_pes` : string
+- `st_inscmunicipal_pes` : string
+- `st_endereco_pes` : string
+- `st_complemento_pes` : string
+- `st_numero_pes` : string
+- `st_cidade_pes` : string
+- `st_estado_pes` : string
+- `st_cep_pes` : string
+- `st_bairro_pes` : string
+- `st_telefone_pes` : string
+- `st_celular_pes` : string
+- `st_email_pes` : string
+- `st_observacao_pes` : string
+- `st_nacionalidade_pes` : string
+- `st_sexo_pes` : string
+- `dt_nascimento_pes` : string
+- `st_estadocivil_pes` : string
+- `st_profissao_pes` : string
+- `st_ramoatividade_pes` : string
+- `st_trabalhocep_pes` : string
+- `st_trabalhoendereco_pes` : string
+- `st_trabalhonumero_pes` : string
+- `st_trabalhocomplemento_pes` : string
+- `st_trabalhobairro_pes` : string
+- `st_trabalhocidade_pes` : string
+- `st_trabalhoestado_pes` : string
+- `st_banco_pes` : string
+- `id_forma_pag` : string
+- `st_agenciabanco_pes` : string
+- `st_conta_pes` : string
+- `id_sacado_sac` : string
+- `id_favorecido_fav` : string
+- `fl_proprietariobeneficiario_pes` : string
+- `fl_locatario_pes` : string
+- `fl_corretor_pes` : string
+- `fl_fiador_pes` : string
+- `st_nomerecebedor_pes` : string
+- `st_cnpjrecebedor_pes` : string
+- `id_formarecebimento_pes` : string
+- `st_identificadorprop_pes` : string
+- `st_identificadorloc_pes` : string
+- `vl_rendamensal_pes` : string
+- `st_nome_coj` : string
+- `st_cpf_coj` : string
+- `st_rg_coj` : string
+- `st_nacionalidade_coj` : string
+- `st_sexo_coj` : string
+- `st_profissao_coj` : string
+- `st_celular_coj` : string
+- `st_email_coj` : string
+- `st_observacao_coj` : string
+- `st_telefone_coj` : string
+- `fl_status_pes` : string
+- `nm_dependentes_pes` : string
+- `st_tipoconta_pes` : string
+- `id_unidade_uni` : string
+- `st_nomeresp_pes` : string
+- `st_cpfresp_pes` : string
+- `st_telefoneresp_pes` : string
+- `st_respcep_pes` : string
+- `st_respendereco_pes` : string
+- `st_respnumero_pes` : string
+- `st_respcomplemento_pes` : string
+- `st_respbairro_pes` : string
+- `st_respcidade_pes` : string
+- `st_respestado_pes` : string
+- `st_respemail_pes` : string
+- `st_rgresp_pes` : string
+- `st_identificadorfiador_pes` : string
+- `st_orgao_coj` : string
+- `dt_expedicaorg_pes` : string
+- `st_operacao_pes` : string
+- `fl_reterissqn_pes` : string
+- `fl_reterinss_pes` : string
+- `fl_reterirrf_pes` : string
+- `fl_reterpis_pes` : string
+- `fl_retercofins_pes` : string
+- `fl_retercontribuicaosocial_pes` : string
+- `st_razaoempresa_pes` : string
+- `st_telefoneempresa_pes` : string
+- `dt_admissaoempresa_pes` : string
+- `fl_naodomiciliado_pes` : string
+- `fl_comprador_pes` : string
+- `fl_vistoriador_pes` : string
+- `st_identificadorcorretor_pes` : string
+- `id_foto_pes` : string
+- `st_creci_pes` : string
+- `vl_txissqn_pes` : string
+- `st_identidadeblockchain_pes` : string
+- `st_fotourl_pes` : string
+- `fl_naonotificar_pes` : string
+- `st_nomemae_pes` : string
+- `st_nomepai_pes` : string
+- `st_naturalidade_pes` : string
+- `fl_statusconvitecartao_pes` : string
+- `vl_tarifabancaria_pes` : string
+- `dt_diarepasse_pes` : string
+- `dt_atualizacao_pes` : string
+- `fl_testemunha_pes` : string
+- `fl_contapessoa_pes` : string
+- `st_pais_pes` : string
+- `fl_gerente_pes` : string
+- `fl_reembolsoiss_pes` : string
+- `fl_recolhimentodarf_pes` : string
+- `id_gestor_ges` : string
+- `vl_saldobloqueado_pes` : string
+- `fl_reembolsarirrf_pes` : string
+- `fl_reembolsarpiscofins_pes` : string
+- `st_chavepix_pes` : string
+- `fl_tipochavepix_pes` : string
+- `fl_descontosimplificadoir_pes` : string
+- `st_codigocontabil_pes` : string
+- `fl_semrenda_pes` : string
+- `fl_vinculoemprego_pes` : string
+- `st_beneficio_pes` : string
+- `vl_outrosrendimentos_pes` : string
+- `st_cnpjempresa_pes` : string
+- `dt_admissaoemprego_pes` : string
+- `st_enviodemonstrativoemail_pes` : string
+- `dt_enviodemonstrativo_pes` : string
+- `dt_enviodemonstrativoinicio_pes` : string
+- `dt_enviodemonstrativofim_pes` : string
+- `nome_formatado` : string
+
+## `administradoras` (status 200)
+
+- `id_imovel_imo` : string
+- `nm_imoveis` : string
+- `id_administradora_adm` : string
+- `st_nome_adm` : string
+- `st_email_adm` : string
+- `st_responsavel_adm` : string
+- `st_telefone_adm` : string
+- `st_endereco_adm` : string
+- `st_complemento_adm` : string
+- `st_numero_adm` : string
+- `st_cidade_adm` : string
+- `st_estado_adm` : string
+- `st_cep_adm` : string
+- `st_bairro_adm` : string
+- `st_observacao_adm` : string
+- `fl_status_adm` : string
+- `id_favorecido_fav` : string
+- `id_sacado_sac` : string
+- `st_identificadorimportacao_adm` : string
+- `st_cnpj_adm` : string
+
+## `seguradoras` (status 200)
+
+- `id_seguradora_seg` : string
+- `st_nome_seg` : string
+- `st_telefone_seg` : string
+- `st_email_seg` : string
+- `st_responsavel_seg` : string
+- `st_observacao_seg` : string
+- `fl_tiposeguradora_seg` : string
+
+## `servicos` (status 200)
+
+- `id_produto_prd` : string
+- `fl_cobrartxadm_prd` : string
+- `fl_deduzir_prd` : string
+- `fl_exibirnoextrato_prd` : string
+- `st_descricao_prd` : string
+- `st_conta_cont` : string
+- `fl_incideir_prd` : string
+- `fl_destivado_prd` : string
+- `fl_dimob_prd` : string
+- `id_debito_prd` : string
+- `id_credito_prd` : string
+- `id_fornecedor_prd` : string
+- `fl_garantido_prd` : string
+- `dt_atualizacao_prd` : string
+- `fl_opcional_prd` : string
+- `fl_seguroaluguel_prd` : string
+- `fl_calcularproporcionalrescisao_prd` : string
+- `descricaocontacategoria` : string
+- `fl_natureza_cont` : string
+- `id_planoconta_plc` : string
+- `st_descricao_cont` : string
+- `st_ordenacao_cont` : string
+- `st_contacontabil_cont` : string
+- `nm_codreduzido_cont` : string
+- `st_contacontabildespesa_cont` : string
+- `fl_apenaslancamentoexterno_cont` : string
+- `id_contacontabilcartao_ctc` : string
+- `st_sincro_prd` : string
+- `fl_servico_prd` : string
+- `vl_unitario_prd` : string
+- `st_unidade_prd` : string
+- `vl_aliqicms_prd` : string
+- `vl_aliqipi_prd` : string
+- `vl_baseicms_prd` : string
+- `st_clfiscal_prd` : string
+- `st_sisttrib_prd` : string
+- `fl_insideicms_prd` : string
+- `fl_desativado_prd` : string
+- `id_codigoservico_cse` : string
+- `fl_naotributavel_prd` : string
+- `fl_naturezaop_prd` : string
+- `st_codigobarrasean_prd` : string
+- `st_ncm_prd` : string
+- `st_pesoliquido_prd` : string
+- `st_pesobruto_prd` : string
+- `nm_comprimento_prd` : string
+- `nm_largura_prd` : string
+- `nm_altura_prd` : string
+- `st_observacaoexterna_prd` : string
+- `fl_deduzirissqn_prd` : string
+- `fl_deduzirinss_prd` : string
+- `fl_deduzirirrf_prd` : string
+- `fl_deduzirpis_prd` : string
+- `fl_deduzircofins_prd` : string
+- `fl_deduzircsll_prd` : string
+- `id_regratributacao_rtb` : string
+- `vl_tributosaprox_prd` : string
+- `vl_custounitario_prd` : string
+- `vl_promocional_prd` : string
+- `fl_empromocao_prd` : string
+- `id_tag_tag` : string
+- `st_descricaocompleta_prd` : string
+- `id_condicaopagamento_cpg` : string
+- `fl_aplicardesconto_prd` : string
+- `fl_aplicarencargos_prd` : string
+- `fl_importado_prd` : string
+- `st_cest_prd` : string
+- `st_scriptcarrinho_prd` : string
+- `st_scriptfinalizado_prd` : string
+- `fl_disponibilizarvenda_prd` : string
+- `st_contadesconto_cont` : string
+- `st_descricaodesconto_cont` : string
+- `id_fornecedor_for` : string
+- `nm_qtdminima_prd` : string
+- `nm_qtdmaxima_prd` : string
+- `fl_notafatura_prd` : string
+- `fl_sincronizar_prd` : string
+- `st_resumo_prd` : string
+- `st_urlvideo_prd` : string
+- `nm_diasprocessamento_prd` : string
+- `st_seoslug_prd` : string
+- `st_seotitle_prd` : string
+- `st_seodescription_prd` : string
+- `st_seokeywords_prd` : string
+- `st_seometatags_prd` : string
+- `nm_estoqueatual_prd` : string
+- `nm_estoqueminimo_prd` : string
+- `nm_estoquemaximo_prd` : string
+- `dt_promocaoinicio_prd` : string
+- `dt_promocaofim_prd` : string
+- `id_produtopai_prd` : string
+- `fl_sincronizarsempre_prd` : string
+- `fl_sincronizarestoque_prd` : string
+- `fl_sincronizarpreco_prd` : string
+- `vl_tributosaproxmun_prd` : string
+- `vl_tributosaproxest_prd` : string
+- `vl_tributosaproxfed_prd` : string
+- `st_linkpolitica_prd` : string
+- `st_textourlpolitica_prd` : string
+- `id_produtoespecial_prd` : string
+- `dt_alteracao_prd` : string
+- `id_filial_fil` : string
+- `opcionalativo` : string
+
+## `pessoas` (status 200)
+
+- `id_pessoa_pes` : string
+- `st_nome_pes` : string
+- `st_cnpj_pes` : string
+- `st_fantasia_pes` : string
+- `st_rg_pes` : string
+- `st_orgao_pes` : string
+- `st_ie_pes` : string
+- `st_inscmunicipal_pes` : string
+- `st_endereco_pes` : string
+- `st_complemento_pes` : string
+- `st_numero_pes` : string
+- `st_cidade_pes` : string
+- `st_estado_pes` : string
+- `st_cep_pes` : string
+- `st_bairro_pes` : string
+- `st_telefone_pes` : string
+- `st_celular_pes` : array
+  - _(item do array)_:
+    - `st_celular_pes` : string
+- `st_email_pes` : string
+- `st_observacao_pes` : string
+- `st_nacionalidade_pes` : string
+- `st_sexo_pes` : string
+- `dt_nascimento_pes` : string
+- `st_estadocivil_pes` : string
+- `st_profissao_pes` : string
+- `st_ramoatividade_pes` : string
+- `st_trabalhocep_pes` : string
+- `st_trabalhoendereco_pes` : string
+- `st_trabalhonumero_pes` : string
+- `st_trabalhocomplemento_pes` : string
+- `st_trabalhobairro_pes` : string
+- `st_trabalhocidade_pes` : string
+- `st_trabalhoestado_pes` : string
+- `st_banco_pes` : string
+- `id_forma_pag` : string
+- `st_agenciabanco_pes` : string
+- `st_conta_pes` : string
+- `id_sacado_sac` : string
+- `id_favorecido_fav` : string
+- `fl_proprietariobeneficiario_pes` : string
+- `fl_locatario_pes` : string
+- `fl_corretor_pes` : string
+- `fl_fiador_pes` : string
+- `st_nomerecebedor_pes` : string
+- `st_cnpjrecebedor_pes` : string
+- `id_formarecebimento_pes` : string
+- `st_identificadorprop_pes` : string
+- `st_identificadorloc_pes` : string
+- `vl_rendamensal_pes` : string
+- `st_nome_coj` : string
+- `st_cpf_coj` : string
+- `st_rg_coj` : string
+- `st_nacionalidade_coj` : string
+- `st_sexo_coj` : string
+- `st_profissao_coj` : string
+- `st_celular_coj` : string
+- `st_email_coj` : string
+- `st_observacao_coj` : string
+- `st_telefone_coj` : string
+- `fl_status_pes` : string
+- `nm_dependentes_pes` : string
+- `st_tipoconta_pes` : string
+- `id_unidade_uni` : string
+- `st_nomeresp_pes` : string
+- `st_cpfresp_pes` : string
+- `st_telefoneresp_pes` : string
+- `st_respcep_pes` : string
+- `st_respendereco_pes` : string
+- `st_respnumero_pes` : string
+- `st_respcomplemento_pes` : string
+- `st_respbairro_pes` : string
+- `st_respcidade_pes` : string
+- `st_respestado_pes` : string
+- `st_respemail_pes` : string
+- `st_rgresp_pes` : string
+- `st_identificadorfiador_pes` : string
+- `st_orgao_coj` : string
+- `dt_expedicaorg_pes` : string
+- `st_operacao_pes` : string
+- `fl_reterissqn_pes` : string
+- `fl_reterinss_pes` : string
+- `fl_reterirrf_pes` : string
+- `fl_reterpis_pes` : string
+- `fl_retercofins_pes` : string
+- `fl_retercontribuicaosocial_pes` : string
+- `st_razaoempresa_pes` : string
+- `st_telefoneempresa_pes` : string
+- `dt_admissaoempresa_pes` : string
+- `fl_naodomiciliado_pes` : string
+- `fl_comprador_pes` : string
+- `fl_vistoriador_pes` : string
+- `st_identificadorcorretor_pes` : string
+- `id_foto_pes` : string
+- `st_creci_pes` : string
+- `vl_txissqn_pes` : string
+- `st_identidadeblockchain_pes` : string
+- `st_fotourl_pes` : string
+- `fl_naonotificar_pes` : string
+- `st_nomemae_pes` : string
+- `st_nomepai_pes` : string
+- `st_naturalidade_pes` : string
+- `fl_statusconvitecartao_pes` : string
+- `vl_tarifabancaria_pes` : string
+- `dt_diarepasse_pes` : string
+- `dt_atualizacao_pes` : string
+- `fl_testemunha_pes` : string
+- `fl_contapessoa_pes` : string
+- `st_pais_pes` : string
+- `fl_gerente_pes` : string
+- `fl_reembolsoiss_pes` : string
+- `fl_recolhimentodarf_pes` : string
+- `id_gestor_ges` : string
+- `vl_saldobloqueado_pes` : string
+- `fl_reembolsarirrf_pes` : string
+- `fl_reembolsarpiscofins_pes` : string
+- `st_chavepix_pes` : string
+- `fl_tipochavepix_pes` : string
+- `fl_descontosimplificadoir_pes` : string
+- `st_codigocontabil_pes` : string
+- `fl_semrenda_pes` : string
+- `fl_vinculoemprego_pes` : string
+- `st_beneficio_pes` : string
+- `vl_outrosrendimentos_pes` : string
+- `st_cnpjempresa_pes` : string
+- `dt_admissaoemprego_pes` : string
+- `st_enviodemonstrativoemail_pes` : string
+- `dt_enviodemonstrativo_pes` : string
+- `dt_enviodemonstrativoinicio_pes` : string
+- `dt_enviodemonstrativofim_pes` : string
+- `fl_status_pst` : string
+- `fl_contapessoa_imo` : string
+- `nome_formatado` : string
+- `st_formapagamento` : string
+- `st_banco` : string
+- `st_sexo` : string
+- `st_sexoformatado_coj` : object
+  - `1` : string
+  - `2` : string
+- `st_endereco` : string
+- `st_tipo_chavepix` : string
+
+## `filiais` (status 200)
+
+- `id_filial_fil` : string
+- `st_nome_fil` : string
+- `st_identificador_fil` : string
+- `st_cnpj_fil` : string
+- `st_inscricao_fil` : string
+- `st_inscrestadual_fil` : string
+- `st_cnae_fil` : string
+- `st_endereco_fil` : string
+- `st_cep_fil` : string
+- `st_cidade_fil` : string
+- `st_estado_fil` : string
+- `st_telefone_fil` : string
+- `st_email_fil` : string
+- `st_complemento_fil` : string
+- `fl_optantesimples_fil` : string
+- `tx_arqpfx_cert` : string
+- `dt_validade_cert` : string
+- `st_ambientenfse_fil` : string
+- `st_cidadenfse_fil` : string
+- `fl_desativada_fil` : string
+- `vl_retercontribuicaosocial_fil` : string
+- `vl_txpis_fil` : string
+- `vl_txcontribuicaosocial_fil` : string
+- `vl_txinss_fil` : string
+- `vl_txcofins_fil` : string
+- `vl_reterirrf_fil` : string
+- `vl_txirrf_fil` : string
+- `vl_tributosaprox_fil` : string
+- `fl_regimetrib_fil` : string
+- `fl_incentivocult_fil` : string
+- `vl_txpispraticado_fil` : string
+- `vl_txcofinspraticado_fil` : string
+- `st_responsavel_fil` : string
+- `st_cpf_fil` : string
+- `st_razaosocial_fil` : string
+- `st_numero_fil` : string
+- `st_bairro_fil` : string
+- `fl_txadmmatriz_fil` : string
+
+## `gerentes` (status 200)
+
+_(data vazio nesta base — endpoint existe)_
+
+## `usuarios` (status 200)
+
+- `id_usuario_usu` : string
+- `st_apelido_usu` : string
+- `st_nome_usu` : string
+- `fl_usuariodesativado_usu` : string
+- `st_authtype_usu` : string
+- `id_usuarioqueautorizou_usu` : string
+- `st_apptoken_usu` : string
+- `st_acesso_usu` : string
+- `st_ipsliberados_usu` : string
+- `acesso_programado` : string
+- `st_linksenha_usu` : string
+- `ips_liberados` : string
+- `usuario_grupos` : array
+
+
+---
+
+## Endpoints que exigem parâmetros (não totalmente destravados na base de teste)
+
+### `relatorios` (200 / 500)
+Endpoint de **renderização de relatório**, keyed por `id` de formulário → mapeia pra classe `Relatorios_Forms_<id>`. `id=1..6` → 500 "Class not found". Os ids válidos são específicos do tenant/sistema — confirmar a lista via suporte ou inspecionando a UI. **Não é** endpoint de dados tabulares.
+
+### `inadimplencia` (500 sem parâmetro)
+Retorna 500 "Nenhum locatário informado." sem filtro. Tentativas com `idLocatario` / `INQUILINOS` / `id_locatario_pes` não satisfizeram — o nome do parâmetro (provável array de locatários ou contratos) deve ser confirmado via suporte. **Endpoint existe.**
+
+### `pagamentos` / `movimentacoes` (200, vazio)
+Endpoints válidos (status 200), mas retornaram `data` vazio nesta base com todos os filtros testados (por contrato e por intervalo de datas). Shape a confirmar numa base com movimentação financeira ou via suporte.
+
+### `vistorias` (200, vazio)
+Endpoint válido; sem vistorias cadastradas nesta base — campos não capturáveis aqui.
+
+> **Parâmetros úteis confirmados (entidades):** `itensPorPagina`, `pagina`, `id`, `comStatus` (ativos/finalizados/todos/pendentes/andamento), e nos contratos `comDadosDosProprietarios` / `comDadosDosInquilinos` / `comDadosDosImoveis` (0/1). Datas de entrada em `MM/DD/YYYY`.

@@ -1032,11 +1032,29 @@ async function resolveSerasaConsultado(
   }
 
   const data = (deal.form?.dataJson ?? deal.dataJson) as Record<string, unknown> | null;
+
+  // Locação: fiador vive em garantia.fiador (objeto, sem índice).
+  if (targetKind === "fiador") {
+    const fiador = (data?.garantia as { fiador?: Record<string, unknown> } | undefined)
+      ?.fiador;
+    if (!fiador) return fallback;
+    return {
+      tipo: fiador.tipo_pessoa === "juridica" ? "Pessoa juridica" : "Pessoa fisica",
+      label: ((fiador.nome ?? fiador.razao_social) as string | undefined) ?? "Fiador",
+      documento: ((fiador.cnpj ?? fiador.cpf) as string | undefined) ?? "—",
+      uf: (fiador.uf as string | undefined) ?? undefined,
+      kind: targetKind,
+      index: targetIndex,
+    };
+  }
+
   const listKey =
     targetKind === "vendedor"
       ? "vendedores"
       : targetKind === "comprador"
       ? "compradores"
+      : targetKind === "locatario"
+      ? "locatarios"
       : null;
   if (!listKey || !data) return fallback;
   const list = (data[listKey] as Array<Record<string, unknown>> | undefined) ?? [];
@@ -1114,7 +1132,11 @@ async function runSerasaJob(
         const assignmentKind =
           job.targetKind === "vendedor" ||
           job.targetKind === "comprador" ||
-          job.targetKind === "imovel"
+          job.targetKind === "imovel" ||
+          // Locação: agrupa o PDF Serasa na pasta do locatário/fiador
+          // (DocumentKind já inclui esses papéis).
+          job.targetKind === "locatario" ||
+          job.targetKind === "fiador"
             ? job.targetKind
             : "outro";
         const attachment = await prisma.dealAttachment.create({

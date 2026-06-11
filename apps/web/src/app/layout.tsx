@@ -47,6 +47,26 @@ export const metadata: Metadata = {
     template: "%s · imobpro.ai",
   },
   description: "Plataforma de gestão de vendas e contratos imobiliários",
+  manifest: "/manifest.json",
+  applicationName: "imobpro.ai",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "imobpro.ai",
+  },
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#ffffff" },
+    { media: "(prefers-color-scheme: dark)", color: "#0a0a0a" },
+  ],
+  icons: {
+    icon: "/brand/imobpro-mark-draft.svg",
+    apple: "/brand/imobpro-mark-draft.svg",
+  },
+  viewport: {
+    width: "device-width",
+    initialScale: 1,
+    maximumScale: 5,
+  },
 };
 
 export default function RootLayout({

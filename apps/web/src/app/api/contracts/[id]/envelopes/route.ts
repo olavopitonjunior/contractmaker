@@ -21,9 +21,19 @@ const sendSchema = z.object({
   signerRoles: z
     .array(
       z.object({
-        sourceKind: z.enum(["vendedor", "comprador", "testemunha", "corretora"]),
+        sourceKind: z.enum([
+          "vendedor",
+          "comprador",
+          "testemunha",
+          "corretora",
+          "locador",
+          "locatario",
+          "fiador",
+        ]),
         sourceIndex: z.number().int().nonnegative(),
-        subKind: z.enum(["titular", "conjuge"]).optional(),
+        subKind: z
+          .enum(["titular", "conjuge", "procurador", "representante", "avulso"])
+          .optional(),
         role: z.enum([
           "sign",
           "buyer",
@@ -33,9 +43,48 @@ const sendSchema = z.object({
           "witness",
           "consenting",
           "attorney",
+          "party",
         ]),
       })
     )
+    .optional(),
+  // Lista explícita de signatários (popup de envio). Autoritativa quando
+  // presente: o executor usa esta lista no lugar da derivação por dataJson,
+  // deixando o operador remover/adicionar quem assina ESTE envelope.
+  signers: z
+    .array(
+      z.object({
+        name: z.string().min(1).max(200),
+        email: z.string().email(),
+        // Só dígitos: CPF (11) ou CNPJ (14). Vazio/ausente é aceito.
+        documentation: z
+          .string()
+          .regex(/^(\d{11}|\d{14})$/)
+          .optional()
+          .nullable(),
+        phone: z.string().max(20).optional().nullable(),
+        sourceKind: z.string().max(40).optional(),
+        sourceIndex: z.number().int().nonnegative().optional(),
+        subKind: z
+          .enum(["titular", "conjuge", "procurador", "representante", "avulso"])
+          .optional(),
+        role: z
+          .enum([
+            "sign",
+            "buyer",
+            "seller",
+            "intervening",
+            "realestate",
+            "witness",
+            "consenting",
+            "attorney",
+            "party",
+          ])
+          .optional(),
+        group: z.number().int().positive().optional().nullable(),
+      })
+    )
+    .max(30)
     .optional(),
 });
 
@@ -142,6 +191,11 @@ export async function POST(
       idempotencyKey,
       run: async () => {
         try {
+          // Caminho bearer (Newton): NÃO encaminha `signers` explícitos — o
+          // preview (HITL) foi montado a partir do dataJson, então o envio tem
+          // que derivar dos MESMOS dados pra não divergir do que foi aprovado.
+          // A lista explícita de signatários é exclusiva do caminho de sessão
+          // (popup de envio), que não passa por preview.
           const envelope = await sendEnvelopeForContract({
             contractId: params.id,
             authMethod: parsed.data.authMethod,
@@ -160,7 +214,9 @@ export async function POST(
     return approvalResponse(result);
   }
 
-  // Session: comportamento atual
+  // Session: comportamento atual. Passa signerRoles (papéis "Assina como" +
+  // ordem escolhidos na popup) — sem isso o executor cairia no default por
+  // sourceKind e ignoraria o que o usuário selecionou.
   try {
     const envelope = await sendEnvelopeForContract({
       contractId: params.id,
@@ -169,6 +225,8 @@ export async function POST(
       deadlineAt: parsed.data.deadlineAt
         ? new Date(parsed.data.deadlineAt)
         : null,
+      signerRoles: parsed.data.signerRoles,
+      signers: parsed.data.signers,
     });
     return NextResponse.json({ envelope }, { status: 201 });
   } catch (err) {

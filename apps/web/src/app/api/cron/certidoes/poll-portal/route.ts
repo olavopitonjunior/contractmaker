@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { pollPortalJob, runSingleJob, sweepStaleJobs } from "@/lib/certidoes/executor";
+import { isCronAllowedInStaging } from "@/lib/env/staging";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -23,6 +24,9 @@ export async function GET(req: NextRequest) {
     if (auth !== `Bearer ${secret}`) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+  }
+  if (!(await isCronAllowedInStaging("/api/cron/certidoes/poll-portal"))) {
+    return NextResponse.json({ skipped: "staging-disabled", path: "/api/cron/certidoes/poll-portal" });
   }
 
   const now = new Date();

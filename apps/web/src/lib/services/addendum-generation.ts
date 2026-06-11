@@ -155,6 +155,7 @@ export async function generateAddendumForDeal(
     const uploaded = await uploadHtmlAsGoogleDoc({
       htmlContent: html,
       name: `Aditamento ${aditivoNumero}º - ${input.dealId.slice(-8)}`,
+      orgId,
     });
     googleDocId = uploaded.docId;
     googleDocUrl = uploaded.webViewLink;

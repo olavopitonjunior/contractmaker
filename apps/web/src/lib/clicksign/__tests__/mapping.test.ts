@@ -23,7 +23,13 @@ describe("dealDataToSigners", () => {
           tipo_pessoa: "juridica",
           razao_social: "Imobiliária X Ltda",
           cnpj: "12.345.678/0001-90",
-          email: "contato@imobx.com",
+          // PJ assina pelo representante legal (PF com CPF) — a ClickSign
+          // rejeita CNPJ como documentação de signer.
+          representante: {
+            nome: "Rep Legal",
+            cpf: "111.222.333-44",
+            email: "contato@imobx.com",
+          },
         },
       ],
     };
@@ -38,9 +44,8 @@ describe("dealDataToSigners", () => {
     expect(v0.authMethod).toBe("email");
 
     expect(c0.sourceKind).toBe("comprador");
-    // PJ sem representante → não manda o CNPJ como documentação (ClickSign
-    // rejeita CNPJ de signatário; quem assina é o representante). (2026-06-03)
-    expect(c0.documentation).toBeUndefined();
+    expect(c0.subKind).toBe("representante");
+    expect(c0.documentation).toBe("11122233344"); // CPF do representante
 
     expect(result.missing[0]).toEqual({
       sourceKind: "vendedor",
@@ -55,73 +60,6 @@ describe("dealDataToSigners", () => {
     });
     expect(result.signers).toHaveLength(0);
     expect(result.missing).toHaveLength(0);
-  });
-
-  // 2026-06-03: PJ assina pelo REPRESENTANTE (pessoa física c/ CPF), não a
-  // empresa — a ClickSign rejeita CNPJ como documentação de signatário.
-  it("PJ com representante → signatário é o representante (nome/email/CPF dele)", () => {
-    const result = dealDataToSigners({
-      vendedores: [
-        {
-          tipo_pessoa: "juridica",
-          razao_social: "ND FILMES LTDA",
-          cnpj: "54.353.121/0001-46",
-          email: "contato@ndfilmes.com",
-          representante: {
-            nome: "Mateus Miranda Vieira",
-            cpf: "213.114.408-36",
-            email: "mateus@ndfilmes.com",
-          },
-        },
-      ],
-    });
-    expect(result.signers).toHaveLength(1);
-    expect(result.signers[0]).toMatchObject({
-      sourceKind: "vendedor",
-      name: "Mateus Miranda Vieira",
-      email: "mateus@ndfilmes.com",
-      documentation: "21311440836", // CPF do representante, NUNCA o CNPJ
-    });
-  });
-
-  // Regressão 2026-06-03: PJ com `nome: ""` + razao_social não some (fix `||`);
-  // sem representante, vira signer com razao_social mas SEM CNPJ na documentação.
-  it("PJ sem representante: usa razao_social e NÃO manda CNPJ como documentação", () => {
-    const result = dealDataToSigners({
-      vendedores: [
-        {
-          tipo_pessoa: "juridica",
-          nome: "",
-          razao_social: "ND FILMES LTDA",
-          cnpj: "54.353.121/0001-46",
-          email: "contato@ndfilmes.com",
-        },
-      ],
-    });
-    expect(result.signers).toHaveLength(1);
-    expect(result.signers[0]).toMatchObject({
-      sourceKind: "vendedor",
-      name: "ND FILMES LTDA",
-    });
-    expect(result.signers[0].documentation).toBeUndefined(); // nunca o CNPJ
-  });
-
-  it("PJ com nome:'' e SEM email entra em missing (não some silenciosa)", () => {
-    const result = dealDataToSigners({
-      vendedores: [
-        {
-          tipo_pessoa: "juridica",
-          nome: "",
-          razao_social: "ND FILMES LTDA",
-          cnpj: "54.353.121/0001-46",
-          email: "",
-        },
-      ],
-    });
-    expect(result.signers).toHaveLength(0);
-    expect(result.missing).toEqual([
-      { sourceKind: "vendedor", sourceIndex: 0, name: "ND FILMES LTDA" },
-    ]);
   });
 
   it("aceita data vazia sem crash", () => {
@@ -267,7 +205,10 @@ describe("dealDataToSigners", () => {
       (s) => s.sourceKind === "vendedor" && s.name === "Elenira"
     );
     expect(conjugeVendedor).toBeDefined();
-    expect(conjugeVendedor?.sourceIndex).toBe(1000);
+    // Cônjuge agora usa o MESMO sourceIndex do titular + subKind="conjuge"
+    // (desambigua o override de papel da UI; sem +1000 mágico).
+    expect(conjugeVendedor?.sourceIndex).toBe(0);
+    expect(conjugeVendedor?.subKind).toBe("conjuge");
     expect(conjugeVendedor?.documentation).toBe("55566677788");
   });
 

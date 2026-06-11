@@ -9,6 +9,7 @@ import {
 import { executeToolHandler } from "@/lib/ai/tool-handlers";
 import { assertContractBudget, ContractBudgetExceededError } from "@/lib/ai/budget";
 import type { AgentContext, AgentEvent, PlanStep } from "@/lib/ai/types";
+import { unmetDependencies } from "@/lib/ai/plan-deps";
 import { getDocPlainText } from "@/lib/google/docs";
 
 export const runtime = "nodejs";
@@ -168,6 +169,7 @@ export async function POST(
         let executedCount = 0;
         let failedCount = 0;
         let rejectedCount = 0;
+        let skippedCount = 0;
 
         for (const step of steps) {
           if (step.type !== "write") continue;
@@ -183,6 +185,33 @@ export async function POST(
               status: "rejected",
             });
             continue;
+          }
+
+          // Guarda de dependência: se este step pressupõe o sucesso de outro
+          // (dependsOn) e a dependência NÃO foi executada com sucesso, pula em
+          // vez de rodar com premissa falsa (ex.: add_comment afirmando que uma
+          // cláusula foi inserida quando o insert_clause falhou).
+          {
+            const unmet = unmetDependencies(step, steps);
+            if (unmet.length > 0) {
+              const why = unmet
+                .map((dep) => `"${dep.description}" (${dep.status})`)
+                .join("; ");
+              step.status = "skipped";
+              step.result = {
+                success: false,
+                summary: `Pulado: depende de ${why} que não foi concluído com sucesso.`,
+              };
+              skippedCount++;
+              send({
+                type: "plan_step_result",
+                planId,
+                stepId: step.id,
+                status: "skipped",
+                summary: step.result.summary,
+              });
+              continue;
+            }
           }
 
           // Aplica override de input se o usuario editou o step antes de
@@ -310,6 +339,11 @@ export async function POST(
         }
         if (failedCount > 0) {
           parts.push(`⚠️ ${failedCount} falh${failedCount === 1 ? "ou" : "aram"}.`);
+        }
+        if (skippedCount > 0) {
+          parts.push(
+            `↷ ${skippedCount} ${skippedCount === 1 ? "pulada" : "puladas"} por dependência não concluída.`
+          );
         }
         if (rejectedCount > 0) {
           parts.push(

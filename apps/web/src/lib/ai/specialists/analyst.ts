@@ -14,7 +14,7 @@
 import { AGENT_TOOLS } from "../tools";
 import { HAIKU_MODEL } from "../shared/anthropic-client";
 import { runSpecialist } from "../shared/specialist-runner";
-import { ANALYST_SYSTEM_PROMPT } from "./prompts";
+import { pickSpecialistPrompt } from "./prompts-locacao";
 import type { OrchestratorState, SpecialistOutput } from "../orchestrator/state";
 
 const ANALYST_TOOL_NAMES = new Set([
@@ -37,7 +37,7 @@ export async function runAnalyst(state: OrchestratorState): Promise<SpecialistOu
   return runSpecialist({
     agentName: "analyst",
     model: HAIKU_MODEL,
-    systemPrompt: ANALYST_SYSTEM_PROMPT,
+    systemPrompt: pickSpecialistPrompt("analyst", state.contractContext),
     tools: ANALYST_TOOLS,
     maxIterations: 2,
     userPrompt,

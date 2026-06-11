@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { sendEmail } from "@/lib/email/client";
 import { classifyJobBucket, type HealthBucket } from "@/lib/certidoes/health-monitor";
+import { isCronAllowedInStaging } from "@/lib/env/staging";
 
 // Rótulos PT-BR + ordem de prioridade dos buckets no resumo do digest.
 const BUCKET_LABEL: Partial<Record<HealthBucket, string>> = {
@@ -47,6 +48,9 @@ export async function GET(req: NextRequest) {
     if (auth !== `Bearer ${secret}`) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+  }
+  if (!(await isCronAllowedInStaging("/api/cron/certidoes/problem-digest"))) {
+    return NextResponse.json({ skipped: "staging-disabled", path: "/api/cron/certidoes/problem-digest" });
   }
 
   const since = new Date(Date.now() - 30 * 24 * 60 * 60_000);

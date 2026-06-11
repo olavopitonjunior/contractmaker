@@ -3,6 +3,7 @@ import {
   mapExtractedToForm,
   type Assignment,
 } from "@/lib/forms/extracted-to-form";
+import { mapExtractedToLocacaoForm } from "@/lib/forms/extracted-to-form-locacao";
 
 /**
  * Server-safe autofill: aplica o resultado de OCR de um documento sobre o
@@ -61,7 +62,7 @@ export function applyExtractedToDataJson(
   dataJson: PlainObject | null | undefined,
   extraction: { category: string | null; fields: Record<string, unknown> | null },
   assignment: Assignment,
-  options: { skipIfDirty?: boolean } = {}
+  options: { skipIfDirty?: boolean; kind?: "venda" | "locacao" } = {}
 ): ApplyResult {
   // Clone profundo simples — o input é JSON puro vindo do DB.
   const merged: PlainObject = dataJson
@@ -73,7 +74,11 @@ export function applyExtractedToDataJson(
     setValue: (path: string, value: unknown) => setByPath(merged, path, value),
   } as unknown as UseFormReturn<Record<string, unknown>>;
 
-  const filled = mapExtractedToForm(
+  // Locação tem basePaths próprios (locadores.{i}/locatarios.{i}/garantia.fiador/
+  // imovel singular) — o mapper de venda devolveria filled=0 sempre.
+  const mapper =
+    options.kind === "locacao" ? mapExtractedToLocacaoForm : mapExtractedToForm;
+  const filled = mapper(
     { category: extraction.category, fields: extraction.fields ?? {} },
     assignment,
     formAdapter,

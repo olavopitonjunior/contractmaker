@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { expirePendingIntents } from "@/lib/api/intents";
+import { isCronAllowedInStaging } from "@/lib/env/staging";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,6 +20,9 @@ export async function GET(req: NextRequest) {
     if (authHeader !== `Bearer ${cronSecret}`) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+  }
+  if (!(await isCronAllowedInStaging("/api/cron/intents/expire"))) {
+    return NextResponse.json({ skipped: "staging-disabled", path: "/api/cron/intents/expire" });
   }
 
   const expired = await expirePendingIntents();

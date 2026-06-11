@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { matchDealGroup } from "@/lib/newton/group-match";
 import { generateContractForDeal } from "@/lib/services/contract-generation";
+import { emitNotification } from "@/lib/notifications/emit";
 import { dedupConjuges } from "@/lib/forms/dedup-conjuges";
 import { dadosContratoSchema } from "@/lib/forms/validation";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
@@ -138,12 +139,53 @@ export async function PATCH(
 
     if (deal) {
       dealId = deal.id;
-      try {
-        const result = await generateContractForDeal(deal.id, deal.userId, form.orgId);
-        contractId = result.contractId;
-      } catch (error) {
-        console.error("Auto-generate contract failed:", error);
+      // Guard anti-duplicação: deal IMPORTADO (Contract templateId=null) NÃO
+      // regenera contrato no finalize — o corpo de verdade é o GDoc importado.
+      // Gerar um novo (template-based) rebaixaria o importado a isLatest=false e
+      // confundiria qual é o autoritativo. Aqui só sincronizamos os dados
+      // revisados no contrato importado (reflete na assinatura/Dados/certidões).
+      const importedContract = await prisma.contract.findFirst({
+        where: { dealId: deal.id, templateId: null },
+        orderBy: { version: "desc" },
+        select: { id: true, status: true },
+      });
+      if (importedContract) {
+        // QUALQUER contrato importado bloqueia a geração (não duplicar). A
+        // sincronização do dataJson só roda se NÃO estiver aprovado — o form
+        // público é reabrível por qualquer um com o link, e aprovado é imutável
+        // + congelado no PDF da ClickSign.
+        contractId = importedContract.id;
+        if (importedContract.status !== "aprovado") {
+          try {
+            await prisma.contract.update({
+              where: { id: importedContract.id },
+              data: { dataJson: mergedData as Prisma.InputJsonValue },
+            });
+          } catch (error) {
+            console.error("Sync imported contract dataJson failed:", error);
+          }
+        }
+      } else {
+        try {
+          const result = await generateContractForDeal(deal.id, deal.userId, form.orgId);
+          contractId = result.contractId;
+        } catch (error) {
+          console.error("Auto-generate contract failed:", error);
+        }
       }
+
+      // Sino: avisa a equipe que o cliente finalizou o form (o corretor não
+      // descobre mais só olhando o kanban). batchId=form.id deduplica
+      // re-finalizações. waitUntil: void após o response é cancelado na Vercel.
+      waitUntil(emitNotification({
+        orgId: form.orgId,
+        type: "form_completed",
+        title: "Formulário finalizado pelo cliente",
+        body: `"${form.title || deal.title}" foi preenchido até o fim — contrato em geração.`,
+        linkUrl: `/deals/${deal.id}`,
+        metadata: { dealId: deal.id, formId: form.id },
+        batchId: form.id,
+      }));
 
       try {
         const formAttachments = await prisma.formAttachment.findMany({

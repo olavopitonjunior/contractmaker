@@ -18,11 +18,15 @@ export const runtime = "nodejs";
  * - testemunhas: substituição do array inteiro
  */
 const PATCH_WHITELIST: RegExp[] = [
-  /^vendedores\.\d+\.email$/,
-  /^vendedores\.\d+\.conjuge\.(email|nome|cpf|incluir_como_signatario)$/,
+  /^vendedores\.\d+\.(email|mobile_phone)$/,
+  /^vendedores\.\d+\.conjuge\.(email|nome|cpf|mobile_phone|incluir_como_signatario)$/,
+  /^vendedores\.\d+\.procurador\.(email|nome|cpf|mobile_phone|incluir_como_signatario)$/,
+  /^vendedores\.\d+\.representante\.(email|nome|cpf|mobile_phone)$/,
   /^vendedores\.\d+\.(nome|cpf|cnpj|razao_social)$/,
-  /^compradores\.\d+\.email$/,
-  /^compradores\.\d+\.conjuge\.(email|nome|cpf|incluir_como_signatario)$/,
+  /^compradores\.\d+\.(email|mobile_phone)$/,
+  /^compradores\.\d+\.conjuge\.(email|nome|cpf|mobile_phone|incluir_como_signatario)$/,
+  /^compradores\.\d+\.procurador\.(email|nome|cpf|mobile_phone|incluir_como_signatario)$/,
+  /^compradores\.\d+\.representante\.(email|nome|cpf|mobile_phone)$/,
   /^compradores\.\d+\.(nome|cpf|cnpj|razao_social)$/,
   /^comissao\.(imobiliaria_email|imobiliaria_nome|imobiliaria_cnpj|creci|corretora_tipo_pessoa|incluir_como_signatario)$/,
   /^comissao\.comissionados$/,

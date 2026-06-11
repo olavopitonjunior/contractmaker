@@ -1,0 +1,178 @@
+import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
+import { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/db/prisma";
+import { matchDealGroup } from "@/lib/newton/group-match";
+import { generateLocacaoContractForDeal } from "@/lib/services/contract-generation";
+import { emitNotification } from "@/lib/notifications/emit";
+import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
+import { schemaForLocacaoType } from "@/lib/forms/validation-locacao";
+import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
+import { MODULE } from "@/lib/modules/catalog";
+
+export const dynamic = "force-dynamic";
+
+// Rota PÚBLICA (sem auth) — não passa pelo seam ensureLocacaoAccess. O gating de
+// módulo é feito aqui após resolver a org pelo token: se a org desabilitou o
+// módulo de locação, o link público responde "indisponível" (não 403 cru).
+async function locacaoEnabled(orgId: string): Promise<boolean> {
+  return isModuleEnabled(await getOrgModules(orgId), MODULE.LOCACAO);
+}
+
+// GET público — busca o form de locação por token.
+export async function GET(
+  _req: NextRequest,
+  { params }: { params: { token: string } }
+) {
+  const form = await prisma.salesForm.findUnique({ where: { token: params.token } });
+  if (!form) return NextResponse.json({ error: "Form not found" }, { status: 404 });
+  if (!(await locacaoEnabled(form.orgId))) {
+    return NextResponse.json({ error: "Formulário indisponível" }, { status: 404 });
+  }
+  return NextResponse.json({
+    id: form.id,
+    token: form.token,
+    title: form.title,
+    schemaType: form.schemaType,
+    dataJson: form.dataJson,
+    status: form.status,
+    updatedAt: form.updatedAt,
+  });
+}
+
+// PATCH público — auto-save + finalize. Espelha /api/forms/[token] mas valida
+// com o schema de locação, pula dedupConjuges/socio_pj (venda) e gera o
+// contrato via generateLocacaoContractForDeal. A config fiscal/comissão
+// (operador-only) é preservada pelo deep-merge — o cliente não a envia.
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: { token: string } }
+) {
+  const body = await req.json();
+
+  const form = await prisma.salesForm.findUnique({ where: { token: params.token } });
+  if (!form) return NextResponse.json({ error: "Form not found" }, { status: 404 });
+  if (!(await locacaoEnabled(form.orgId))) {
+    return NextResponse.json({ error: "Formulário indisponível" }, { status: 404 });
+  }
+
+  const currentData = (form.dataJson as Record<string, unknown>) || {};
+  const mergeOutcome = deepMergeAtPaths(
+    currentData,
+    (body.dataJson ?? {}) as Record<string, unknown>
+  );
+  const mergedData = mergeOutcome.merged;
+
+  const previousStatus = form.status;
+  const newStatus = body.status ?? form.status;
+  const isFinalizing = newStatus === "completo" && previousStatus !== "completo";
+
+  // Validação server-side no finalize (form público é burlável). Não bloqueia a
+  // geração — materializa os problemas na resposta pra correção no editor.
+  let validationIssues: Array<{ path: string; message: string }> = [];
+  if (isFinalizing) {
+    const schema = schemaForLocacaoType(form.schemaType);
+    const result = schema.safeParse(mergedData);
+    if (!result.success) {
+      validationIssues = result.error.issues.map((i) => ({
+        path: i.path.join("."),
+        message: i.message,
+      }));
+      console.warn(
+        `[locacao/finalize] form ${form.id} finalizado com ${validationIssues.length} problema(s):`,
+        validationIssues.map((v) => `${v.path}: ${v.message}`).join(" | ")
+      );
+    }
+  }
+
+  const updated = await prisma.salesForm.update({
+    where: { token: params.token },
+    data: {
+      dataJson: mergedData as Prisma.InputJsonValue,
+      title: body.title ?? form.title,
+      status: newStatus,
+      ...(isFinalizing ? { completedAt: new Date() } : {}),
+    },
+  });
+
+  if (typeof body.title === "string" && body.title.trim() && body.title !== form.title) {
+    await prisma.deal.updateMany({ where: { formId: form.id }, data: { title: body.title } });
+  }
+
+  let contractId: string | null = null;
+  let dealId: string | null = null;
+  if (isFinalizing) {
+    const deal = await prisma.deal.findFirst({ where: { formId: form.id } });
+    if (deal) {
+      dealId = deal.id;
+      try {
+        const result = await generateLocacaoContractForDeal(deal.id, deal.userId, form.orgId);
+        contractId = result.contractId;
+      } catch (error) {
+        console.error("[locacao] auto-generate contract failed:", error);
+      }
+
+      // Sino: avisa a equipe que o cliente finalizou o form (paridade com
+      // vendas). batchId=form.id deduplica re-finalizações. waitUntil: void
+      // após o response é cancelado na Vercel.
+      waitUntil(emitNotification({
+        orgId: form.orgId,
+        type: "form_completed",
+        title: "Formulário de locação finalizado",
+        body: `"${form.title || deal.title}" foi preenchido até o fim — contrato em geração.`,
+        linkUrl: `/locacao/deals/${deal.id}`,
+        metadata: { dealId: deal.id, formId: form.id },
+        batchId: form.id,
+      }));
+
+      // Copia FormAttachment → DealAttachment (dedupe por URL).
+      try {
+        const formAttachments = await prisma.formAttachment.findMany({
+          where: { formId: form.id },
+        });
+        if (formAttachments.length > 0) {
+          const existing = await prisma.dealAttachment.findMany({
+            where: { dealId: deal.id },
+            select: { url: true },
+          });
+          const existingUrls = new Set(existing.map((e) => e.url));
+          const newOnes = formAttachments.filter((a) => !existingUrls.has(a.url));
+          if (newOnes.length > 0) {
+            await prisma.dealAttachment.createMany({
+              data: newOnes.map((a) => ({
+                dealId: deal.id,
+                filename: a.filename,
+                mime: a.mime,
+                url: a.url,
+                category: a.category,
+                extractedData: (a.extractedData as Prisma.InputJsonValue) ?? undefined,
+              })),
+            });
+          }
+        }
+      } catch (error) {
+        console.error("[locacao] link form attachments to deal failed:", error);
+      }
+
+      waitUntil(matchDealGroup(deal.id).catch(() => {}));
+    }
+  }
+
+  audit(extractAuditContextFromRequest(req, form.orgId, null), {
+    action: "FORM_UPDATE",
+    result: "SUCCESS",
+    resource: form.id,
+    resourceType: "SalesForm",
+    metadata: { kind: "locacao", finalizing: isFinalizing, contractId, dealId },
+  });
+
+  return NextResponse.json({
+    id: updated.id,
+    status: updated.status,
+    updatedAt: updated.updatedAt,
+    contractId,
+    dealId,
+    validationIssues,
+  });
+}

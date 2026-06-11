@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
+import { isCronAllowedInStaging } from "@/lib/env/staging";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -18,6 +19,9 @@ export async function GET(req: NextRequest) {
     if (auth !== `Bearer ${cronSecret}`) {
       return NextResponse.json({ error: "unauthorized" }, { status: 401 });
     }
+  }
+  if (!(await isCronAllowedInStaging("/api/cron/google-watches/renew"))) {
+    return NextResponse.json({ skipped: "staging-disabled", path: "/api/cron/google-watches/renew" });
   }
 
   const watchToken = process.env.GOOGLE_WATCH_TOKEN?.trim();

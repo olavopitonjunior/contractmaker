@@ -92,27 +92,11 @@ export async function DELETE(
   let trashed = 0;
   if (docsToTrash.length > 0) {
     try {
-      const { getOwnerDriveClient, isOwnerOAuthConfigured } = await import(
-        "@/lib/google/client"
-      );
-      if (isOwnerOAuthConfigured()) {
-        const drive = getOwnerDriveClient();
-        for (const docId of docsToTrash) {
-          try {
-            await drive.files.update({
-              fileId: docId,
-              requestBody: { trashed: true },
-              supportsAllDrives: true,
-            });
-            trashed++;
-            await new Promise((r) => setTimeout(r, 200));
-          } catch (err) {
-            console.warn(
-              `[deal contracts DELETE] trash falhou para ${docId}:`,
-              err instanceof Error ? err.message : err
-            );
-          }
-        }
+      const { trashDriveFile } = await import("@/lib/google/org-oauth");
+      for (const docId of docsToTrash) {
+        const ok = await trashDriveFile(docId, org.id);
+        if (ok) trashed++;
+        await new Promise((r) => setTimeout(r, 200));
       }
     } catch (err) {
       console.warn("[deal contracts DELETE] não foi possível inicializar Drive:", err);

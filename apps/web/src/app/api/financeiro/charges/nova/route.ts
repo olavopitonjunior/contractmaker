@@ -14,6 +14,7 @@ import {
   getAccountWithApiKey,
   resolveAsaasAccount,
 } from "@/lib/asaas/account";
+import { resolvePlatformFee } from "@/lib/asaas/platform-fee";
 import {
   requireAccountCapability,
   AccountCapabilityDeniedError,
@@ -181,14 +182,11 @@ export async function POST(req: NextRequest) {
 
   const { apiKey } = await getAccountWithApiKey(account.id);
 
-  // Carrega platform fee da conta (per-account; fallback p/ legacy org-level)
-  const feeSettings =
-    (await prisma.orgFinancialSettings.findUnique({
-      where: { accountId: account.id },
-    })) ??
-    (await prisma.orgFinancialSettings.findFirst({
-      where: { orgId: ctx.orgId, accountId: null },
-    }));
+  // Fase 1d: markup global (PlatformConfig) + override per-org (OrgFinancialSettings).
+  const { platformFeePercent, platformWalletId } = await resolvePlatformFee(
+    ctx.orgId,
+    account.id
+  );
 
   let asaasSplits;
   let externalSplits: Array<{
@@ -204,8 +202,8 @@ export async function POST(req: NextRequest) {
   try {
     const composed = composeSplits({
       customSplits: parsed.data.customSplits,
-      platformFeePercent: feeSettings?.platformFeePercent ?? 0,
-      platformWalletId: feeSettings?.platformFeeWalletId ?? null,
+      platformFeePercent,
+      platformWalletId,
       orgWalletId: account.walletId,
     });
     asaasSplits = composed.asaasSplits;

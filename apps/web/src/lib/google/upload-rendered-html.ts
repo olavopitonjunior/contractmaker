@@ -1,19 +1,21 @@
-import {
-  getDriveFolderId,
-  getOwnerDriveClient,
-  getServiceAccountEmail,
-  isOwnerOAuthConfigured,
-} from "./client";
+import { getServiceAccountEmail, isOwnerOAuthConfigured } from "./client";
 import { ensureAnyonePermission } from "./share-org";
 import { wrapAsCompleteHtml } from "./template-migration";
+import {
+  withOwnerAuth,
+  getOwnerDriveForAuth,
+  resolveDriveParent,
+} from "./org-oauth";
 
 interface UploadInput {
   /** HTML já renderizado pelo Handlebars com dataJson real do contrato. */
   htmlContent: string;
   /** Nome visível do doc no Drive (ex: "Contrato {id} — v{version}"). */
   name: string;
-  /** Pasta no Drive (default: GOOGLE_DRIVE_FOLDER_ID). */
+  /** Pasta no Drive (default: pasta da org conectada ou GOOGLE_DRIVE_FOLDER_ID). */
   parentFolderId?: string;
+  /** Org dona do doc — usa a conta Google conectada da org quando houver. */
+  orgId?: string;
 }
 
 interface UploadOutput {
@@ -47,56 +49,55 @@ export async function uploadHtmlAsGoogleDoc(
   }
 
   const html = ensureCompleteHtml(input.htmlContent);
-  const drive = getOwnerDriveClient();
 
-  const parents = input.parentFolderId
-    ? [input.parentFolderId]
-    : (() => {
-        const f = getDriveFolderId();
-        return f ? [f] : undefined;
-      })();
+  return withOwnerAuth(input.orgId, async (resolved) => {
+    const drive = getOwnerDriveForAuth(resolved);
 
-  const created = await drive.files.create({
-    requestBody: {
-      name: input.name,
-      mimeType: "application/vnd.google-apps.document",
-      ...(parents ? { parents } : {}),
-    },
-    media: {
-      mimeType: "text/html",
-      body: html,
-    },
-    fields: "id, webViewLink",
-    supportsAllDrives: true,
-  });
+    const parent = input.parentFolderId ?? (await resolveDriveParent(resolved));
+    const parents = parent ? [parent] : undefined;
 
-  const id = created.data.id;
-  if (!id) throw new Error("Drive não retornou id do doc criado.");
+    const created = await drive.files.create({
+      requestBody: {
+        name: input.name,
+        mimeType: "application/vnd.google-apps.document",
+        ...(parents ? { parents } : {}),
+      },
+      media: {
+        mimeType: "text/html",
+        body: html,
+      },
+      fields: "id, webViewLink",
+      supportsAllDrives: true,
+    });
 
-  const saEmail = getServiceAccountEmail();
-  if (saEmail) {
-    try {
-      await drive.permissions.create({
-        fileId: id,
-        requestBody: { type: "user", role: "writer", emailAddress: saEmail },
-        sendNotificationEmail: false,
-        supportsAllDrives: true,
-      });
-    } catch (err) {
-      console.error("[uploadHtmlAsGoogleDoc] Falha ao compartilhar com SA:", err);
+    const id = created.data.id;
+    if (!id) throw new Error("Drive não retornou id do doc criado.");
+
+    const saEmail = getServiceAccountEmail();
+    if (saEmail) {
+      try {
+        await drive.permissions.create({
+          fileId: id,
+          requestBody: { type: "user", role: "writer", emailAddress: saEmail },
+          sendNotificationEmail: false,
+          supportsAllDrives: true,
+        });
+      } catch (err) {
+        console.error("[uploadHtmlAsGoogleDoc] Falha ao compartilhar com SA:", err);
+      }
     }
-  }
 
-  await ensureAnyonePermission(id, "writer");
+    await ensureAnyonePermission(id, "writer", input.orgId);
 
-  const webViewLink =
-    created.data.webViewLink || `https://docs.google.com/document/d/${id}/edit`;
+    const webViewLink =
+      created.data.webViewLink || `https://docs.google.com/document/d/${id}/edit`;
 
-  return {
-    docId: id,
-    webViewLink,
-    embedLink: `https://docs.google.com/document/d/${id}/edit?embedded=true&rm=embedded`,
-  };
+    return {
+      docId: id,
+      webViewLink,
+      embedLink: `https://docs.google.com/document/d/${id}/edit?embedded=true&rm=embedded`,
+    };
+  });
 }
 
 function ensureCompleteHtml(body: string): string {

@@ -151,3 +151,35 @@ export async function selectTemplateForDeal(
   const template = templates.find((t) => t.id === chosenId);
   return template ? { template, category } : null;
 }
+
+// ============================================================================
+// Locação — seleção de template independente da heurística de pagamento de
+// venda. O discriminador é o `schemaType` do form: residencial → modalidade
+// "locacao"; comercial → "locacao_comercial" (modalidades distintas pra que o
+// sync-templates não sobrescreva os dois arquivos). Preferimos isDefault.
+// ============================================================================
+export function modalidadeForLocacaoSchemaType(schemaType: string): string {
+  return schemaType === "locacao_comercial_v1" ? "locacao_comercial" : "locacao";
+}
+
+export async function selectLocacaoTemplate(
+  orgId: string,
+  schemaType: string
+): Promise<{ template: ContractTemplate } | null> {
+  const modalidade = modalidadeForLocacaoSchemaType(schemaType);
+  const { prisma } = await import("@/lib/db/prisma");
+  const active = await prisma.contractTemplate.findMany({
+    where: { orgId, status: "active" },
+  });
+  if (active.length === 0) return null;
+
+  // 1) match exato da modalidade de locação (prefere isDefault)
+  const exact = active.filter((t) => t.modalidade === modalidade);
+  if (exact.length) return { template: exact.find((t) => t.isDefault) ?? exact[0] };
+
+  // 2) fallback: qualquer template de locação ativo (modalidade começa com "locacao")
+  const anyLocacao = active.filter((t) => (t.modalidade ?? "").startsWith("locacao"));
+  if (anyLocacao.length) return { template: anyLocacao.find((t) => t.isDefault) ?? anyLocacao[0] };
+
+  return null;
+}

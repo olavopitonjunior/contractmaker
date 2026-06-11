@@ -23,32 +23,42 @@ import {
 } from "@/components/ui/select";
 import { AlertTriangle, XOctagon } from "lucide-react";
 
-type LostCategory =
-  | "desistencia"
-  | "imovel_vendido"
-  | "financiamento_negado"
-  | "outro";
+export interface LostCategoryOption {
+  value: string;
+  label: string;
+}
 
-const CATEGORY_LABELS: Record<LostCategory, string> = {
-  desistencia: "Cliente desistiu",
-  imovel_vendido: "Imóvel vendido a terceiro",
-  financiamento_negado: "Financiamento negado",
-  outro: "Outro motivo",
-};
+const VENDA_CATEGORIES: LostCategoryOption[] = [
+  { value: "desistencia", label: "Cliente desistiu" },
+  { value: "imovel_vendido", label: "Imóvel vendido a terceiro" },
+  { value: "financiamento_negado", label: "Financiamento negado" },
+  { value: "outro", label: "Outro motivo" },
+];
+
+export const LOCACAO_LOST_CATEGORIES: LostCategoryOption[] = [
+  { value: "desistencia", label: "Cliente desistiu" },
+  { value: "imovel_alugado", label: "Imóvel alugado por outro canal" },
+  { value: "garantia_recusada", label: "Garantia recusada" },
+  { value: "credito_reprovado", label: "Crédito reprovado" },
+  { value: "outro", label: "Outro motivo" },
+];
 
 interface MarkLostDialogProps {
   dealId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Causas exibidas no select. Default: categorias de venda. */
+  categories?: LostCategoryOption[];
 }
 
 export function MarkLostDialog({
   dealId,
   open,
   onOpenChange,
+  categories = VENDA_CATEGORIES,
 }: MarkLostDialogProps) {
   const router = useRouter();
-  const [category, setCategory] = useState<LostCategory>("desistencia");
+  const [category, setCategory] = useState<string>(categories[0]?.value ?? "outro");
   const [reason, setReason] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -70,7 +80,7 @@ export function MarkLostDialog({
     const finalReason =
       reason.trim().length > 0
         ? reason.trim()
-        : CATEGORY_LABELS[category];
+        : categories.find((c) => c.value === category)?.label ?? category;
 
     setSubmitting(true);
     try {
@@ -87,7 +97,7 @@ export function MarkLostDialog({
       toast.success("Negócio marcado como perdido. Você pode reabrir depois.");
       onOpenChange(false);
       setReason("");
-      setCategory("desistencia");
+      setCategory(categories[0]?.value ?? "outro");
       router.refresh();
     } catch {
       toast.error("Erro de conexão");
@@ -115,16 +125,16 @@ export function MarkLostDialog({
             <Label htmlFor="category">Causa</Label>
             <Select
               value={category}
-              onValueChange={(v) => setCategory(v as LostCategory)}
+              onValueChange={setCategory}
               disabled={submitting}
             >
               <SelectTrigger id="category">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {(Object.keys(CATEGORY_LABELS) as LostCategory[]).map((k) => (
-                  <SelectItem key={k} value={k}>
-                    {CATEGORY_LABELS[k]}
+                {categories.map((c) => (
+                  <SelectItem key={c.value} value={c.value}>
+                    {c.label}
                   </SelectItem>
                 ))}
               </SelectContent>

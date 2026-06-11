@@ -4,6 +4,7 @@ import { getEnvelope } from "@/lib/clicksign/envelopes";
 import { ClicksignError } from "@/lib/clicksign/client";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-signed";
+import { isCronAllowedInStaging } from "@/lib/env/staging";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -27,6 +28,9 @@ export async function GET(req: NextRequest) {
     if (auth !== `Bearer ${secret}`) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
+  }
+  if (!(await isCronAllowedInStaging("/api/cron/clicksign/sync-envelopes"))) {
+    return NextResponse.json({ skipped: "staging-disabled", path: "/api/cron/clicksign/sync-envelopes" });
   }
 
   const cutoff = new Date(Date.now() - 2 * 60 * 60 * 1000); // 2h

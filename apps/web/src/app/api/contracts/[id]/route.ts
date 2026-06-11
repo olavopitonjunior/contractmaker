@@ -143,26 +143,10 @@ export async function DELETE(
     );
   }
 
-  // Best-effort: lixeira do Drive
+  // Best-effort: lixeira do Drive (credencial da org dona → fallback global)
   if (contract.googleDocId) {
-    try {
-      const { getOwnerDriveClient, isOwnerOAuthConfigured } = await import(
-        "@/lib/google/client"
-      );
-      if (isOwnerOAuthConfigured()) {
-        const drive = getOwnerDriveClient();
-        await drive.files.update({
-          fileId: contract.googleDocId,
-          requestBody: { trashed: true },
-          supportsAllDrives: true,
-        });
-      }
-    } catch (err) {
-      console.warn(
-        `[contract DELETE] trash falhou para ${contract.googleDocId}:`,
-        err instanceof Error ? err.message : err
-      );
-    }
+    const { trashDriveFile } = await import("@/lib/google/org-oauth");
+    await trashDriveFile(contract.googleDocId, org.id);
   }
 
   // Delete + promote latest em transação atômica

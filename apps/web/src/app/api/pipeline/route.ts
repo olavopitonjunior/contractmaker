@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
-import { prisma } from "@/lib/db/prisma";
+import { getPipelineByKind } from "@/lib/modules/resolve";
+import { assertModuleEnabled, ModuleDisabledError } from "@/lib/modules/guard";
+import { MODULE } from "@/lib/modules/catalog";
 
 export async function GET() {
   const session = await auth();
@@ -13,8 +15,16 @@ export async function GET() {
     return NextResponse.json({ error: "No organization" }, { status: 400 });
   }
 
-  const pipeline = await prisma.pipeline.findFirst({
-    where: { orgId: org.id },
+  try {
+    await assertModuleEnabled(org.id, MODULE.VENDAS);
+  } catch (e) {
+    if (e instanceof ModuleDisabledError) {
+      return NextResponse.json({ error: e.code }, { status: e.status });
+    }
+    throw e;
+  }
+
+  const pipeline = await getPipelineByKind(org.id, MODULE.VENDAS, {
     include: {
       stages: {
         orderBy: { position: "asc" },

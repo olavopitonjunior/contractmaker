@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { processOcrQueue } from "@/lib/ai/ocr-worker";
+import { isCronAllowedInStaging } from "@/lib/env/staging";
 
 export const runtime = "nodejs";
 // Worker precisa de tempo suficiente pra processar 30 docs × 15s = 450s max.
@@ -28,6 +29,9 @@ export async function GET(req: NextRequest) {
     if (authHeader !== `Bearer ${cronSecret}`) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+  }
+  if (!(await isCronAllowedInStaging("/api/cron/ocr-queue"))) {
+    return NextResponse.json({ skipped: "staging-disabled", path: "/api/cron/ocr-queue" });
   }
 
   try {

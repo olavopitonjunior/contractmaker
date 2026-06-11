@@ -25,10 +25,12 @@ const SEED = process.argv.includes("--seed");
 const UPDATE_METADATA = process.argv.includes("--update-metadata");
 
 interface TemplateFile {
-  modalidade: "a_vista" | "financiamento";
+  modalidade: "a_vista" | "financiamento" | "locacao" | "locacao_comercial";
   filename: string;
   canonicalName: string;
   canonicalDescription: string;
+  // schemaType da row criada no --seed (default compra_venda_v2 p/ venda).
+  schemaType?: string;
 }
 
 const TEMPLATES: TemplateFile[] = [
@@ -45,6 +47,22 @@ const TEMPLATES: TemplateFile[] = [
     canonicalName: "CCV - Financiamento Imobiliário",
     canonicalDescription:
       "Instrumento particular de compromisso de venda e compra - modalidade financiamento imobiliário",
+  },
+  {
+    modalidade: "locacao",
+    filename: "locacao_residencial_v3.hbs",
+    canonicalName: "Locação Residencial",
+    canonicalDescription:
+      "Instrumento particular de contrato de locação residencial com administração - Lei nº 8.245/91",
+    schemaType: "locacao_residencial_v1",
+  },
+  {
+    modalidade: "locacao_comercial",
+    filename: "locacao_comercial_v3.hbs",
+    canonicalName: "Locação Comercial",
+    canonicalDescription:
+      "Instrumento particular de contrato de locação não residencial (comercial) com administração - Lei nº 8.245/91",
+    schemaType: "locacao_comercial_v1",
   },
 ];
 
@@ -84,8 +102,20 @@ async function main() {
     const source = fs.readFileSync(filePath, "utf-8");
     const fileHash = sha(source);
 
+    // Guard multitenant: templates engine="google_docs" são o MODELO da
+    // imobiliária (Doc no Drive do tenant) — o sync de .hbs canônicos NUNCA
+    // pode sobrescrevê-los.
+    const gdocsRows = await prisma.contractTemplate.count({
+      where: { modalidade: t.modalidade, status: "active", engine: "google_docs" },
+    });
+    if (gdocsRows > 0) {
+      console.log(
+        `↷  ${t.filename}: skip de ${gdocsRows} row(s) engine=google_docs (modelo do tenant) em modalidade=${t.modalidade}`
+      );
+    }
+
     const dbRows = await prisma.contractTemplate.findMany({
-      where: { modalidade: t.modalidade, status: "active" },
+      where: { modalidade: t.modalidade, status: "active", engine: "handlebars" },
       select: {
         id: true,
         orgId: true,
@@ -126,7 +156,7 @@ async function main() {
                 modalidade: t.modalidade,
                 isDefault: true,
                 status: "active",
-                schemaType: "compra_venda_v2",
+                schemaType: t.schemaType ?? "compra_venda_v2",
                 version: "2.0.0",
                 engine: "handlebars",
               },

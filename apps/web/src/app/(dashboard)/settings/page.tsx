@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
 import { AgentSettings } from "@/components/settings/AgentSettings";
-import { BookOpen, Palette, Lightbulb, ShieldCheck, Sparkles, KeyRound, Users, Split, FileSignature, Wallet, ListChecks, UserRound, type LucideIcon } from "lucide-react";
+import { BookOpen, Palette, Lightbulb, ShieldCheck, Sparkles, KeyRound, Users, UsersRound, Split, FileSignature, Wallet, ListChecks, UserRound, type LucideIcon } from "lucide-react";
 
 type SettingsLink = { href: string; label: string; icon: LucideIcon };
 const SETTINGS_GROUPS: { title: string; items: SettingsLink[] }[] = [
@@ -33,6 +33,7 @@ const SETTINGS_GROUPS: { title: string; items: SettingsLink[] }[] = [
       { href: "/settings/pagamentos/contas", label: "Contas bancárias", icon: Wallet },
       { href: "/settings/pagamentos/split-recipients", label: "Destinatários de split", icon: Split },
       { href: "/settings/signatures", label: "Assinaturas", icon: FileSignature },
+      { href: "/settings/testemunhas", label: "Testemunhas padrão", icon: UsersRound },
     ],
   },
   {
@@ -42,6 +43,12 @@ const SETTINGS_GROUPS: { title: string; items: SettingsLink[] }[] = [
       { href: "/settings/ai-usage", label: "Uso de IA", icon: Sparkles },
       { href: "/settings/api-tokens", label: "API tokens", icon: KeyRound },
       { href: "/settings/api-usage", label: "Uso da API", icon: Sparkles },
+    ],
+  },
+  {
+    title: "Integrações",
+    items: [
+      { href: "/settings/integracoes", label: "Google Drive da imobiliária", icon: KeyRound },
     ],
   },
 ];

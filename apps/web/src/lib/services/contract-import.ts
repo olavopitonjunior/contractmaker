@@ -8,7 +8,15 @@ import { exportDocAsHtml } from "@/lib/google/docs";
 import { watchFile } from "@/lib/google/watch";
 import { shareDocWithOrgMembers } from "@/lib/google/share-org";
 import { extractCcvDataJson } from "@/lib/extraction/ccv-extractor";
-import { deriveDealMetadata } from "@/lib/contracts/derive-deal-metadata";
+import { extractLocacaoContractDataJson } from "@/lib/extraction/locacao-extractor";
+import {
+  deriveDealMetadata,
+  deriveLocacaoDealMetadata,
+} from "@/lib/contracts/derive-deal-metadata";
+import {
+  LOCACAO_COMERCIAL_SCHEMA_TYPE,
+  LOCACAO_SCHEMA_TYPE,
+} from "@/lib/forms/validation-locacao";
 
 export interface ImportContractInput {
   dealId: string;
@@ -21,6 +29,12 @@ export interface ImportContractInput {
   sourceName: string;
   /** Título manual passado pelo usuário no cadastro rápido (opcional). */
   manualTitle?: string | null;
+  /**
+   * Esteira do deal — troca extractor (CCV ↔ contrato de locação), derive de
+   * título/valor e, em locação, faz upsert best-effort do LeaseContract.
+   * Default "venda" (comportamento histórico).
+   */
+  kind?: "venda" | "locacao";
 }
 
 export interface ImportContractResult {
@@ -63,6 +77,7 @@ export async function importContractFromFile(
     buffer: input.buffer,
     sourceMime: input.sourceMime,
     name: docName,
+    orgId: input.orgId,
   });
 
   // 1b. Compartilha com membros da org (writer). Sem isso, usuários não-owner
@@ -109,17 +124,39 @@ export async function importContractFromFile(
     console.error("[contract-import] Falha ao exportar HTML inicial:", err);
   }
 
-  // 4. Extração Gemini (best-effort — falha vira {})
-  const extracted = await extractCcvDataJson(input.buffer, input.sourceMime, {
-    orgId: input.orgId,
-    userId: input.userId,
-    contractId: null,
-  });
+  // 4. Extração Gemini (best-effort — falha vira {}). Locação usa o extractor
+  //    próprio, que também detecta a finalidade (residencial/comercial).
+  const kind = input.kind ?? "venda";
+  let extracted: Record<string, unknown>;
+  let locacaoSchemaType: string | null = null;
+  if (kind === "locacao") {
+    const result = await extractLocacaoContractDataJson(
+      input.buffer,
+      input.sourceMime,
+      { orgId: input.orgId, userId: input.userId, contractId: null }
+    );
+    extracted = result.dataJson;
+    locacaoSchemaType =
+      result.finalidade === "comercial"
+        ? LOCACAO_COMERCIAL_SCHEMA_TYPE
+        : LOCACAO_SCHEMA_TYPE;
+  } else {
+    extracted = await extractCcvDataJson(input.buffer, input.sourceMime, {
+      orgId: input.orgId,
+      userId: input.userId,
+      contractId: null,
+    });
+  }
 
-  // 5. Atualiza SalesForm com dados extraídos (já criado pelo endpoint)
+  // 5. Atualiza SalesForm com dados extraídos (já criado pelo endpoint). Em
+  //    locação a finalidade detectada corrige o schemaType do form.
   await prisma.salesForm.update({
     where: { id: input.formId },
-    data: { dataJson: extracted as object, status: "vinculado" },
+    data: {
+      dataJson: extracted as object,
+      status: "vinculado",
+      ...(locacaoSchemaType ? { schemaType: locacaoSchemaType } : {}),
+    },
   });
 
   // 6. Cria Contract sem templateId
@@ -147,13 +184,11 @@ export async function importContractFromFile(
     where: { id: input.dealId },
     select: { title: true, value: true },
   });
-  const { title: derivedTitle, value: derivedValue } = deriveDealMetadata(
-    extracted,
-    {
-      formTitle: input.manualTitle ?? null,
-      fallbackTitle: deal.title,
-    }
-  );
+  const derive = kind === "locacao" ? deriveLocacaoDealMetadata : deriveDealMetadata;
+  const { title: derivedTitle, value: derivedValue } = derive(extracted, {
+    formTitle: input.manualTitle ?? null,
+    fallbackTitle: deal.title,
+  });
   await prisma.deal.update({
     where: { id: input.dealId },
     data: {
@@ -161,6 +196,25 @@ export async function importContractFromFile(
       value: derivedValue ?? deal.value,
     },
   });
+
+  // 8. Locação: upsert best-effort do LeaseContract a partir da extração —
+  //    extração incompleta NÃO bloqueia o import (usuário completa depois e
+  //    a aba Cobrança/wizard cria a administração).
+  if (kind === "locacao") {
+    try {
+      const { createLeaseContractFromDataJson } = await import(
+        "@/lib/locacao/create-lease-contract"
+      );
+      await createLeaseContractFromDataJson({
+        orgId: input.orgId,
+        deal: { id: input.dealId },
+        dataJson: extracted,
+        contractId: contract.id,
+      });
+    } catch (err) {
+      console.error("[contract-import] Falha ao upsert LeaseContract:", err);
+    }
+  }
 
   return {
     contractId: contract.id,

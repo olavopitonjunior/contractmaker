@@ -9,12 +9,15 @@
     "start": "next start",
     "lint": "next lint",
     "prisma:generate": "prisma generate",
+    "prisma:validate": "prisma validate",
     "prisma:migrate": "prisma migrate dev",
+    "typecheck": "tsc --noEmit",
     "prisma:seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts",
     "db:reset": "prisma migrate reset --force",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:isolation": "vitest run --config vitest.isolation.config.ts",
     "gen:openapi": "tsx scripts/generate-openapi.ts"
   },
   "dependencies": {
@@ -35,6 +38,7 @@
     "@prisma/debug": "^5.18.0",
     "@react-email/render": "^2.0.8",
     "@sparticuz/chromium": "^143.0.4",
+    "@tanstack/react-table": "^8.21.3",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.37.0",
     "@vercel/blob": "^2.3.3",
@@ -42,9 +46,10 @@
     "bcryptjs": "^2.4.3",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
     "date-fns": "^4.1.0",
     "diff": "^9.0.0",
-    "google-auth-library": "^10.6.2",
+    "google-auth-library": "^10.7.0",
     "googleapis": "^171.4.0",
     "handlebars": "^4.7.8",
     "html-to-docx": "^1.8.0",
@@ -65,6 +70,7 @@
     "qrcode": "^1.5.4",
     "radix-ui": "^1.4.3",
     "react": "^18.3.1",
+    "react-day-picker": "^10.0.1",
     "react-dom": "^18.3.1",
     "react-hook-form": "^7.72.1",
     "react-markdown": "^10.1.0",
@@ -105,5 +111,10 @@
   },
   "prisma": {
     "seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts"
+  },
+  "pnpm": {
+    "overrides": {
+      "google-auth-library": "^10.7.0"
+    }
   }
 }

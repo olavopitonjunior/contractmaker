@@ -3,6 +3,7 @@ import { createHash } from "crypto";
 import { Prisma } from "@prisma/client";
 import { put, del } from "@vercel/blob";
 import { prisma } from "@/lib/db/prisma";
+import { resolveFormScope } from "@/lib/forms/resolve-form-scope";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -20,16 +21,18 @@ export async function GET(
   _req: NextRequest,
   { params }: { params: { token: string } }
 ) {
-  const form = await prisma.salesForm.findUnique({
-    where: { token: params.token },
-    select: { id: true },
-  });
-  if (!form) {
+  // Aceita token principal OU subtoken de participante. Subtoken só enxerga
+  // os próprios uploads — vendedor não vê documentos do comprador.
+  const scope = await resolveFormScope(params.token);
+  if (!scope) {
     return NextResponse.json({ error: "Form not found" }, { status: 404 });
   }
 
   const attachments = await prisma.formAttachment.findMany({
-    where: { formId: form.id },
+    where: {
+      formId: scope.formId,
+      ...(scope.participantId ? { participantId: scope.participantId } : {}),
+    },
     orderBy: { createdAt: "asc" },
   });
 
@@ -55,13 +58,11 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { token: string } }
 ) {
-  const form = await prisma.salesForm.findUnique({
-    where: { token: params.token },
-    select: { id: true, orgId: true },
-  });
-  if (!form) {
+  const scope = await resolveFormScope(params.token);
+  if (!scope) {
     return NextResponse.json({ error: "Form not found" }, { status: 404 });
   }
+  const form = { id: scope.formId, orgId: scope.orgId };
 
   const formData = await req.formData();
   const file = formData.get("file");
@@ -135,6 +136,9 @@ export async function POST(
     const attachment = await prisma.formAttachment.create({
       data: {
         formId: form.id,
+        // Upload via subtoken carimba o dono — habilita o filtro por parte
+        // no GET (vendedor não vê docs do comprador). Token principal = null.
+        participantId: scope.participantId,
         filename: file.name,
         mime: file.type,
         url: blob.url,
@@ -184,17 +188,18 @@ export async function PATCH(
     return NextResponse.json({ error: "id obrigatorio" }, { status: 400 });
   }
 
-  const form = await prisma.salesForm.findUnique({
-    where: { token: params.token },
-    select: { id: true },
-  });
-  if (!form) {
+  const scope = await resolveFormScope(params.token);
+  if (!scope) {
     return NextResponse.json({ error: "Form not found" }, { status: 404 });
   }
 
   const attachment = await prisma.formAttachment.findUnique({ where: { id } });
-  if (!attachment || attachment.formId !== form.id) {
+  if (!attachment || attachment.formId !== scope.formId) {
     return NextResponse.json({ error: "Attachment not found" }, { status: 404 });
+  }
+  // Subtoken só mexe nos próprios anexos.
+  if (scope.participantId && attachment.participantId !== scope.participantId) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const body = await req.json().catch(() => ({}));
@@ -227,19 +232,20 @@ export async function DELETE(
     return NextResponse.json({ error: "id obrigatorio" }, { status: 400 });
   }
 
-  const form = await prisma.salesForm.findUnique({
-    where: { token: params.token },
-    select: { id: true },
-  });
-  if (!form) {
+  const scope = await resolveFormScope(params.token);
+  if (!scope) {
     return NextResponse.json({ error: "Form not found" }, { status: 404 });
   }
 
   const attachment = await prisma.formAttachment.findUnique({
     where: { id },
   });
-  if (!attachment || attachment.formId !== form.id) {
+  if (!attachment || attachment.formId !== scope.formId) {
     return NextResponse.json({ error: "Attachment not found" }, { status: 404 });
+  }
+  // Subtoken só exclui os próprios anexos.
+  if (scope.participantId && attachment.participantId !== scope.participantId) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const blobToken = process.env.BLOB_READ_WRITE_TOKEN;

@@ -90,7 +90,9 @@ export function SendAttachmentEnvelopeDialog({
     "email" | "whatsapp" | "selfie" | "icp_brasil"
   >("email");
   const [deadline, setDeadline] = useState<string>("");
-  const [signers, setSigners] = useState<SignerDraft[]>(() => [newSignerDraft()]);
+  // Começa VAZIO — o operador adiciona via chips das partes do deal ou pelo
+  // botão "Adicionar assinante" (evita o card em branco confuso por padrão).
+  const [signers, setSigners] = useState<SignerDraft[]>([]);
   const [orderEnabled, setOrderEnabled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
@@ -104,10 +106,7 @@ export function SendAttachmentEnvelopeDialog({
     } else if (pdfAttachments.length > 0 && !attachmentId) {
       setAttachmentId(pdfAttachments[0].id);
     }
-    if (signers.length === 0) {
-      setSigners([newSignerDraft()]);
-    }
-  }, [open, pdfAttachments, attachmentId, signers.length, preselectAttachmentId]);
+  }, [open, pdfAttachments, attachmentId, preselectAttachmentId]);
 
   function updateSigner(id: string, patch: Partial<SignerDraft>) {
     setSigners((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
