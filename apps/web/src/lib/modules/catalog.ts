@@ -34,6 +34,7 @@ export const FEATURE = {
 
   // Módulo Locação
   LOCACAO_PIPELINE: "locacao.pipeline",
+  LOCACAO_ADM: "locacao.adm",
   LOCACAO_CONTRATOS: "locacao.contratos",
   LOCACAO_COBRANCAS: "locacao.cobrancas",
   LOCACAO_REPASSES: "locacao.repasses",
@@ -74,6 +75,7 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
     label: "Locação",
     features: [
       { key: FEATURE.LOCACAO_PIPELINE, label: "Pipeline de locação", default: true },
+      { key: FEATURE.LOCACAO_ADM, label: "ADM Locação (menu)", default: true },
       { key: FEATURE.LOCACAO_CONTRATOS, label: "ADM — contratos", default: true },
       { key: FEATURE.LOCACAO_COBRANCAS, label: "ADM — cobranças", default: false },
       { key: FEATURE.LOCACAO_REPASSES, label: "ADM — repasses", default: false },
