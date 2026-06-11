@@ -26,10 +26,11 @@ interface LeaseSignaturesTabProps {
  * porém enxuta: o contrato é gerado/editado no Google Docs (aba Contrato), e
  * aqui o operador apenas dispara o envio para a ClickSign após aprovar.
  *
- * O envio é direto (POST /api/contracts/[id]/envelopes), sem dialog de edição
- * de signatários: o executor lê Contract.dataJson e roda `leaseDataToSigners`
- * (locador/locatário/fiador). Reusa EnvelopeCard de SignaturesTab pra exibir o
- * andamento e o hook de polling de envelopes do contrato.
+ * Com `data` (partes do contrato), abre o `SendLeaseEnvelopeDialog` — popup
+ * editável com locador/locatário/fiador + testemunhas padrão + revisão, que
+ * envia a lista EXPLÍCITA de signatários. Sem `data`, cai no envio direto
+ * (POST sem signers → executor deriva via `leaseDataToSigners`). Reusa
+ * EnvelopeCard de SignaturesTab e o hook de polling de envelopes.
  */
 export function LeaseSignaturesTab({
   contractId,

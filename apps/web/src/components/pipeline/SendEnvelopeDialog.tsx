@@ -404,7 +404,11 @@ export function SendEnvelopeDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, vendedores, compradores, testemunhas, comissao]);
+    // Só re-inicializa quando o dialog ABRE (lê os props mais recentes nesse
+    // momento). Depender dos arrays de partes resetaria as edições do operador
+    // se o pai re-renderizasse (ex.: polling/refresh) com a popup aberta.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const validationError = useMemo(() => {
     if (rows.length === 0) return "Inclua ao menos 1 signatário";

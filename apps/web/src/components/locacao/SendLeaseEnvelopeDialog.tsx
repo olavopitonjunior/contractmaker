@@ -210,12 +210,25 @@ export function SendLeaseEnvelopeDialog({
         const body = await res.json().catch(() => ({}));
         const witnesses: DefaultWitness[] = body.witnesses ?? [];
         if (cancelled || witnesses.length === 0) return;
+        // Anexa testemunhas padrão deduplicando contra signatários já presentes
+        // (match por e-mail/CPF) e com sourceIndex contíguo entre testemunhas.
         setRows((prev) => {
-          const start = prev.filter((r) => r.sourceKind === "testemunha").length;
-          let nextIdx = start;
-          return [
-            ...prev,
-            ...witnesses.map((w) => ({
+          const witnessRows = prev.filter((r) => r.sourceKind === "testemunha");
+          const seen = new Set(
+            witnessRows.flatMap((r) =>
+              [r.email.toLowerCase(), r.documentation].filter(Boolean)
+            )
+          );
+          let nextIdx = witnessRows.length;
+          const fresh = witnesses
+            .filter((w) => {
+              const email = (w.email ?? "").toLowerCase();
+              const cpf = onlyDigits(w.cpf ?? "");
+              if (email && seen.has(email)) return false;
+              if (cpf && seen.has(cpf)) return false;
+              return true;
+            })
+            .map((w) => ({
               rowId: `testemunha-default-${w.id}`,
               sourceKind: "testemunha" as RowKind,
               sourceIndex: nextIdx++,
@@ -226,8 +239,8 @@ export function SendLeaseEnvelopeDialog({
               phone: onlyDigits(w.mobilePhone ?? ""),
               addedDuringDialog: false,
               clicksignRole: defaultRoleFor("testemunha"),
-            })),
-          ];
+            }));
+          return fresh.length > 0 ? [...prev, ...fresh] : prev;
         });
       } catch {
         /* best-effort */
@@ -236,7 +249,10 @@ export function SendLeaseEnvelopeDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, data]);
+    // Só re-inicializa ao ABRIR (lê `data` atual nesse momento); depender de
+    // `data` resetaria as edições se o pai re-renderizasse com a popup aberta.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   const validationError = useMemo(() => {
     if (rows.length === 0) return "Inclua ao menos 1 signatário";
