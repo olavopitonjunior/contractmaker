@@ -622,4 +622,64 @@ export const inspectionCreateSchema = z.object({
   executorId: z.string().optional(),
 });
 
+// Laudo (editor web) — shapes TS em lib/locacao/inspection-types.ts.
+const laudoFotoSchema = z.object({
+  url: z.string().url(),
+  legenda: z.string().max(200).optional(),
+  uploadedAt: z.string(),
+});
+
+const laudoItemSchema = z.object({
+  id: z.string().min(1),
+  nome: z.string().min(1).max(120),
+  estado: z.enum(["novo", "bom", "regular", "ruim"]),
+  observacoes: z.string().max(2000).optional(),
+  fotos: z.array(laudoFotoSchema).default([]),
+});
+
+const laudoAmbienteSchema = z.object({
+  id: z.string().min(1),
+  nome: z.string().min(1).max(120),
+  ordem: z.number().int().nonnegative(),
+  observacoes: z.string().max(2000).optional(),
+  fotos: z.array(laudoFotoSchema).default([]),
+  itens: z.array(laudoItemSchema).default([]),
+});
+
+const laudoMedidorSchema = z.object({
+  leitura: z.string().max(40),
+  fotoUrl: z.string().url().optional(),
+});
+
+const laudoMetaSchema = z.object({
+  medidores: z
+    .object({
+      agua: laudoMedidorSchema.optional(),
+      luz: laudoMedidorSchema.optional(),
+      gas: laudoMedidorSchema.optional(),
+    })
+    .default({}),
+  chaves: z
+    .array(z.object({ tipo: z.string().min(1).max(80), quantidade: z.number().int().positive() }))
+    .default([]),
+  mobilia: z
+    .array(
+      z.object({
+        item: z.string().min(1).max(120),
+        quantidade: z.number().int().positive(),
+        estado: z.string().max(40),
+      })
+    )
+    .default([]),
+  observacoesGerais: z.string().max(5000).optional(),
+  prazoContestacaoDias: z.number().int().positive().max(60).optional(),
+});
+
+export const inspectionUpdateSchema = z.object({
+  ambientesJson: z.array(laudoAmbienteSchema).optional(),
+  checklistJson: laudoMetaSchema.optional(),
+  status: z.enum(["rascunho", "em_campo", "laudo_gerado", "assinatura", "concluida"]).optional(),
+  executorId: z.string().nullable().optional(),
+});
+
 export { orgScopeSchema };

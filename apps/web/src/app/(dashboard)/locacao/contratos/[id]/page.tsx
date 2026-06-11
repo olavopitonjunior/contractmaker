@@ -20,6 +20,7 @@ import { LeaseSection, Field } from "@/components/locacao/lease-detail/LeaseSect
 import { LeaseTabsNav, type LeaseTab } from "@/components/locacao/lease-detail/LeaseTabsNav";
 import { SegurosTab } from "@/components/locacao/lease-detail/SegurosTab";
 import { GarantiasTab } from "@/components/locacao/lease-detail/GarantiasTab";
+import { VistoriaTab } from "@/components/locacao/lease-detail/VistoriaTab";
 import { AIInsightsCard } from "@/components/ai-assist/InsightsCard";
 import { ClausulasAdicionaisEditor } from "@/components/locacao/ClausulasAdicionaisEditor";
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
@@ -51,14 +52,6 @@ const REPASSE_GARANTIDO_LABEL: Record<string, string> = {
   nao: "Não",
   alguns_meses: "Por alguns meses",
   todo_contrato: "Por todo o contrato",
-};
-
-const INSPECTION_STATUS_LABEL: Record<string, string> = {
-  rascunho: "Rascunho",
-  em_campo: "Em campo",
-  laudo_gerado: "Laudo gerado",
-  assinatura: "Em assinatura",
-  concluida: "Concluída",
 };
 
 interface Params {
@@ -276,40 +269,19 @@ export default async function LeaseContractDetailPage({ params, searchParams }: 
 
       {tab === "vistoria" &&
         (vistoriasOn ? (
-          <div className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <h3 className="flex items-center gap-2 text-base font-semibold">
-                <ClipboardList className="h-4 w-4" /> Vistorias do contrato
-              </h3>
-              <Button asChild size="sm" variant="outline">
-                <Link href="/locacao/vistorias">Gerenciar vistorias</Link>
-              </Button>
-            </div>
-            {(inspections ?? []).length === 0 ? (
-              <Card>
-                <CardContent className="py-10 text-center text-sm text-muted-foreground">
-                  Nenhuma vistoria deste contrato. Crie pela central de vistorias.
-                </CardContent>
-              </Card>
-            ) : (
-              <Card>
-                <CardContent className="py-2">
-                  <ul className="divide-y text-sm">
-                    {(inspections ?? []).map((i) => (
-                      <li key={i.id} className="flex items-center justify-between py-2">
-                        <span className="capitalize">
-                          {i.tipo} · {i.createdAt.toLocaleDateString("pt-BR")}
-                        </span>
-                        <Badge variant="outline">
-                          {INSPECTION_STATUS_LABEL[i.status] ?? i.status}
-                        </Badge>
-                      </li>
-                    ))}
-                  </ul>
-                </CardContent>
-              </Card>
-            )}
-          </div>
+          <VistoriaTab
+            leaseContractId={lc.id}
+            leaseLabel={`Contrato — ${endereco}`}
+            propertyId={lc.propertyId}
+            propertyLabel={endereco}
+            inspections={(inspections ?? []).map((i) => ({
+              id: i.id,
+              tipo: i.tipo,
+              status: i.status,
+              createdAt: i.createdAt.toISOString(),
+              laudoPdfUrl: i.laudoPdfUrl,
+            }))}
+          />
         ) : (
           featureOffCard
         ))}
