@@ -214,6 +214,10 @@ model Organization {
   // Conta Asaas selecionada pelo admin como destino default de novas cobranças
   // e fonte das telas financeiras quando o user não passa hint explícito.
   activeAsaasAccountId String?
+  // Suspensão administrativa (painel super-admin): quando setado, a org está
+  // suspensa — o guard do dashboard bloqueia acesso e os módulos são desligados
+  // em massa. Reativar limpa o campo e religa os módulos. Aditivo, default null.
+  suspendedAt          DateTime?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -567,6 +571,9 @@ model DealAttachment {
   category      String?
   extractedData Json?
   source        String   @default("manual")
+  // Tamanho do arquivo em bytes — preenchido no upload daqui pra frente (forward
+  // only). Anexos antigos ficam null. Alimenta as métricas de storage por tenant.
+  byteSize      Int?
   createdAt     DateTime @default(now())
 
   deal         Deal          @relation(fields: [dealId], references: [id], onDelete: Cascade)
@@ -1274,6 +1281,9 @@ model FormAttachment {
   // Mensagem humanizada de erro quando status="failed" (já passou por
   // humanizeOcrError). Exposta no GET /attachments para QA/debug.
   extractError        String?
+  // Tamanho do arquivo em bytes — preenchido no upload daqui pra frente (forward
+  // only). Anexos antigos ficam null. Alimenta as métricas de storage por tenant.
+  byteSize            Int?
   createdAt           DateTime  @default(now())
 
   form        SalesForm             @relation(fields: [formId], references: [id], onDelete: Cascade)

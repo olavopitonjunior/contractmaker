@@ -76,6 +76,13 @@ export type AuditAction =
   // Plataforma / multitenant (super-admin)
   | "ORG_CREATED"
   | "ORG_MODULES_UPDATED"
+  | "ORG_SUSPENDED"
+  | "ORG_REACTIVATED"
+  | "ORG_DELETED"
+  | "ORG_BRANDING_UPDATED"
+  | "ORG_FEES_UPDATED"
+  | "PLATFORM_ROLE_GRANTED"
+  | "PLATFORM_ROLE_REVOKED"
   | "IMPERSONATION_STARTED"
   | "IMPERSONATION_ENDED"
   // Split de pagamento (recipients)
