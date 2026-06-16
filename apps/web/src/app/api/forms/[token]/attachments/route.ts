@@ -145,6 +145,7 @@ export async function POST(
         category: cached?.category ?? null,
         extractedData: (cached?.extractedData as Prisma.InputJsonValue) ?? undefined,
         contentHash,
+        byteSize: buffer.byteLength,
         status: initialStatus,
       },
     });

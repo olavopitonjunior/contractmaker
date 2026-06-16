@@ -1,12 +1,32 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 import { toast } from "sonner";
 import { MODULE } from "@/lib/modules/catalog";
+import {
+  KpiCard,
+  RangePicker,
+  rangeToQuery,
+  formatBRL,
+  formatUsd,
+  formatInt,
+  type RangePreset,
+} from "@/components/admin/charts";
+import { Building2, Users, DollarSign, FileSignature, ScrollText } from "lucide-react";
 
 interface OrgRow {
   id: string;
@@ -17,29 +37,73 @@ interface OrgRow {
   members: number;
   pipelines: number;
   asaasAccounts: number;
+  suspended: boolean;
 }
 
-export function AdminOrgsClient({
-  orgs,
-  canCreate,
-}: {
-  orgs: OrgRow[];
-  canCreate: boolean;
-}) {
+interface TenantMetric {
+  orgId: string;
+  name: string;
+  subdomain: string | null;
+  suspended: boolean;
+  modules: string[];
+  members: number;
+  deals: number;
+  dealsValueBRL: number;
+  activeLeases: number;
+  aiCostUsd: number;
+  clicksignCostBRL: number;
+  asaasVolumeBRL: number;
+  certidoesCostBRL: number;
+  apiCalls: number;
+}
+
+interface OverviewResponse {
+  totals: {
+    tenants: number;
+    suspended: number;
+    members: number;
+    deals: number;
+    activeLeases: number;
+    aiCostUsd: number;
+    clicksignCostBRL: number;
+    asaasVolumeBRL: number;
+    certidoesCostBRL: number;
+    certidoes: number;
+    envelopes: number;
+    apiCalls: number;
+  };
+  perTenant: TenantMetric[];
+}
+
+type SortKey =
+  | "name"
+  | "members"
+  | "deals"
+  | "dealsValueBRL"
+  | "aiCostUsd"
+  | "clicksignCostBRL"
+  | "asaasVolumeBRL"
+  | "certidoesCostBRL";
+
+export function AdminOrgsClient({ orgs, canCreate }: { orgs: OrgRow[]; canCreate: boolean }) {
   const router = useRouter();
-  const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+
+  // ── Create org ──
+  const [creating, setCreating] = useState(false);
   const [form, setForm] = useState({ name: "", subdomain: "", ownerEmail: "", ownerName: "" });
   const [modules, setModules] = useState<Record<string, boolean>>({
     [MODULE.VENDAS]: true,
     [MODULE.LOCACAO]: true,
   });
 
+  // ── Impersonation dialog ──
+  const [impersonateOrg, setImpersonateOrg] = useState<OrgRow | null>(null);
+  const [reason, setReason] = useState("");
+
   async function createOrg(e: React.FormEvent) {
     e.preventDefault();
-    const selected = Object.entries(modules)
-      .filter(([, on]) => on)
-      .map(([m]) => m);
+    const selected = Object.entries(modules).filter(([, on]) => on).map(([m]) => m);
     if (selected.length === 0) {
       toast.error("Selecione ao menos um módulo.");
       return;
@@ -49,8 +113,6 @@ export function AdminOrgsClient({
       const res = await fetch("/api/admin/orgs", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        // ownerName é opcional no schema (min 2) — string vazia falha a validação;
-        // omite quando em branco para cair no optional/undefined.
         body: JSON.stringify({
           ...form,
           ownerName: form.ownerName.trim() || undefined,
@@ -76,15 +138,17 @@ export function AdminOrgsClient({
     }
   }
 
-  async function impersonate(orgId: string) {
-    const reason = window.prompt("Motivo da impersonação (auditado):");
-    if (!reason) return;
-    setBusy(orgId);
+  async function confirmImpersonate() {
+    if (!impersonateOrg || reason.trim().length < 3) {
+      toast.error("Informe um motivo (mín. 3 caracteres).");
+      return;
+    }
+    setBusy(impersonateOrg.id);
     try {
-      const res = await fetch(`/api/admin/orgs/${orgId}/impersonate`, {
+      const res = await fetch(`/api/admin/orgs/${impersonateOrg.id}/impersonate`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ reason }),
+        body: JSON.stringify({ reason: reason.trim() }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -99,111 +163,223 @@ export function AdminOrgsClient({
   }
 
   return (
-    <div className="space-y-6">
-      {canCreate && (
-        <div className="rounded-lg border bg-card p-4">
-          {!creating ? (
-            <Button onClick={() => setCreating(true)}>+ Nova organização</Button>
-          ) : (
-            <form onSubmit={createOrg} className="grid gap-3 sm:grid-cols-2">
-              <Input
-                placeholder="Nome da imobiliária"
-                value={form.name}
-                onChange={(e) => setForm({ ...form, name: e.target.value })}
-                required
-              />
-              <Input
-                placeholder="subdomínio (ex: imobiliaria-x)"
-                value={form.subdomain}
-                onChange={(e) => setForm({ ...form, subdomain: e.target.value })}
-                required
-              />
-              <Input
-                type="email"
-                placeholder="email do owner"
-                value={form.ownerEmail}
-                onChange={(e) => setForm({ ...form, ownerEmail: e.target.value })}
-                required
-              />
-              <Input
-                placeholder="nome do owner (opcional)"
-                value={form.ownerName}
-                onChange={(e) => setForm({ ...form, ownerName: e.target.value })}
-              />
-              <div className="flex flex-wrap items-center gap-4 sm:col-span-2">
-                <span className="text-sm text-muted-foreground">Módulos:</span>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={modules[MODULE.VENDAS]}
-                    onChange={(e) =>
-                      setModules((m) => ({ ...m, [MODULE.VENDAS]: e.target.checked }))
-                    }
-                  />
-                  Vendas
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={modules[MODULE.LOCACAO]}
-                    onChange={(e) =>
-                      setModules((m) => ({ ...m, [MODULE.LOCACAO]: e.target.checked }))
-                    }
-                  />
-                  Locação
-                </label>
-              </div>
-              <div className="flex gap-2 sm:col-span-2">
-                <Button type="submit" disabled={busy === "create"}>
-                  {busy === "create" ? "Criando…" : "Criar"}
-                </Button>
-                <Button type="button" variant="ghost" onClick={() => setCreating(false)}>
-                  Cancelar
-                </Button>
-              </div>
-            </form>
-          )}
-        </div>
-      )}
+    <Tabs defaultValue="overview" className="space-y-4">
+      <TabsList>
+        <TabsTrigger value="overview">Visão geral</TabsTrigger>
+        <TabsTrigger value="tenants">Tenants</TabsTrigger>
+      </TabsList>
 
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full text-sm">
-          <thead className="bg-muted/50 text-left text-muted-foreground">
-            <tr>
-              <th className="p-3 font-medium">Nome</th>
-              <th className="p-3 font-medium">Subdomínio</th>
-              <th className="p-3 font-medium">Membros</th>
-              <th className="p-3 font-medium">Contas Asaas</th>
-              <th className="p-3 font-medium"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {orgs.map((o) => (
-              <tr key={o.id} className="border-t">
-                <td className="p-3 font-medium">{o.name}</td>
-                <td className="p-3 text-muted-foreground">{o.subdomain ?? "—"}</td>
-                <td className="p-3">{o.members}</td>
-                <td className="p-3">{o.asaasAccounts}</td>
-                <td className="p-3 text-right">
-                  <div className="flex justify-end gap-2">
-                    <Button size="sm" variant="ghost" asChild>
-                      <Link href={`/admin/orgs/${o.id}/modules`}>Módulos</Link>
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      disabled={busy === o.id}
-                      onClick={() => impersonate(o.id)}
-                    >
-                      {busy === o.id ? "…" : "Impersonar"}
-                    </Button>
-                  </div>
-                </td>
+      <TabsContent value="overview">
+        <SystemOverview />
+      </TabsContent>
+
+      <TabsContent value="tenants" className="space-y-4">
+        {canCreate && (
+          <div className="rounded-lg border bg-card p-4">
+            {!creating ? (
+              <Button onClick={() => setCreating(true)}>+ Nova organização</Button>
+            ) : (
+              <form onSubmit={createOrg} className="grid gap-3 sm:grid-cols-2">
+                <Input placeholder="Nome da imobiliária" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+                <Input placeholder="subdomínio (ex: imobiliaria-x)" value={form.subdomain} onChange={(e) => setForm({ ...form, subdomain: e.target.value })} required />
+                <Input type="email" placeholder="email do owner" value={form.ownerEmail} onChange={(e) => setForm({ ...form, ownerEmail: e.target.value })} required />
+                <Input placeholder="nome do owner (opcional)" value={form.ownerName} onChange={(e) => setForm({ ...form, ownerName: e.target.value })} />
+                <div className="flex flex-wrap items-center gap-4 sm:col-span-2">
+                  <span className="text-sm text-muted-foreground">Módulos:</span>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={modules[MODULE.VENDAS]} onChange={(e) => setModules((m) => ({ ...m, [MODULE.VENDAS]: e.target.checked }))} />
+                    Vendas
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" checked={modules[MODULE.LOCACAO]} onChange={(e) => setModules((m) => ({ ...m, [MODULE.LOCACAO]: e.target.checked }))} />
+                    Locação
+                  </label>
+                </div>
+                <div className="flex gap-2 sm:col-span-2">
+                  <Button type="submit" disabled={busy === "create"}>{busy === "create" ? "Criando…" : "Criar"}</Button>
+                  <Button type="button" variant="ghost" onClick={() => setCreating(false)}>Cancelar</Button>
+                </div>
+              </form>
+            )}
+          </div>
+        )}
+
+        <div className="overflow-x-auto rounded-lg border">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/50 text-left text-muted-foreground">
+              <tr>
+                <th className="p-3 font-medium">Nome</th>
+                <th className="p-3 font-medium">Subdomínio</th>
+                <th className="p-3 font-medium">Membros</th>
+                <th className="p-3 font-medium">Contas Asaas</th>
+                <th className="p-3 font-medium"></th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {orgs.map((o) => (
+                <tr key={o.id} className="border-t">
+                  <td className="p-3 font-medium">
+                    <Link href={`/admin/orgs/${o.id}`} className="hover:underline">{o.name}</Link>
+                    {o.suspended && <Badge variant="destructive" className="ml-2">suspenso</Badge>}
+                  </td>
+                  <td className="p-3 text-muted-foreground">{o.subdomain ?? "—"}</td>
+                  <td className="p-3">{o.members}</td>
+                  <td className="p-3">{o.asaasAccounts}</td>
+                  <td className="p-3 text-right">
+                    <div className="flex justify-end gap-2">
+                      <Button size="sm" variant="ghost" asChild>
+                        <Link href={`/admin/orgs/${o.id}`}>Detalhe</Link>
+                      </Button>
+                      <Button size="sm" variant="ghost" asChild>
+                        <Link href={`/admin/orgs/${o.id}/modules`}>Módulos</Link>
+                      </Button>
+                      <Button size="sm" variant="outline" disabled={busy === o.id} onClick={() => { setImpersonateOrg(o); setReason(""); }}>
+                        Impersonar
+                      </Button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </TabsContent>
+
+      <Dialog open={impersonateOrg != null} onOpenChange={(o) => !o && setImpersonateOrg(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Impersonar {impersonateOrg?.name}</DialogTitle>
+            <DialogDescription>
+              A sessão de impersonação é auditada e expira em 1h. Informe o motivo.
+            </DialogDescription>
+          </DialogHeader>
+          <Input placeholder="Motivo (auditado)" value={reason} onChange={(e) => setReason(e.target.value)} autoFocus />
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setImpersonateOrg(null)}>Cancelar</Button>
+            <Button onClick={confirmImpersonate} disabled={busy === impersonateOrg?.id}>
+              {busy === impersonateOrg?.id ? "…" : "Impersonar"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </Tabs>
+  );
+}
+
+// ── System overview tab ───────────────────────────────────────────────────────
+
+function SystemOverview() {
+  const [preset, setPreset] = useState<RangePreset>("30d");
+  const [data, setData] = useState<OverviewResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [sort, setSort] = useState<{ key: SortKey; dir: "asc" | "desc" }>({ key: "aiCostUsd", dir: "desc" });
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/admin/metrics/overview?${rangeToQuery(preset)}`);
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        setError(d.error ?? "Falha ao carregar métricas");
+        return;
+      }
+      setData(await res.json());
+    } catch {
+      setError("Falha de rede");
+    } finally {
+      setLoading(false);
+    }
+  }, [preset]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const rows = useMemo(() => {
+    if (!data) return [];
+    const sorted = [...data.perTenant].sort((a, b) => {
+      const av = a[sort.key];
+      const bv = b[sort.key];
+      const cmp = typeof av === "string" ? String(av).localeCompare(String(bv)) : (av as number) - (bv as number);
+      return sort.dir === "asc" ? cmp : -cmp;
+    });
+    return sorted;
+  }, [data, sort]);
+
+  function toggleSort(key: SortKey) {
+    setSort((s) => (s.key === key ? { key, dir: s.dir === "asc" ? "desc" : "asc" } : { key, dir: "desc" }));
+  }
+
+  const t = data?.totals;
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-muted-foreground">
+          Uso agregado no período {loading && "· carregando…"}
+        </p>
+        <RangePicker value={preset} onChange={setPreset} />
       </div>
+
+      {error && <p className="text-sm text-destructive">{error}</p>}
+
+      {t && (
+        <>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <KpiCard label="Tenants" value={formatInt(t.tenants)} sub={`${t.suspended} suspenso(s)`} icon={<Building2 className="h-3.5 w-3.5" />} />
+            <KpiCard label="Membros" value={formatInt(t.members)} icon={<Users className="h-3.5 w-3.5" />} />
+            <KpiCard label="Negócios" value={formatInt(t.deals)} sub={`${formatInt(t.activeLeases)} locações ativas`} icon={<ScrollText className="h-3.5 w-3.5" />} />
+            <KpiCard label="Volume Asaas" value={formatBRL(t.asaasVolumeBRL)} icon={<DollarSign className="h-3.5 w-3.5" />} />
+            <KpiCard label="Custo IA" value={formatUsd(t.aiCostUsd)} icon={<DollarSign className="h-3.5 w-3.5" />} />
+            <KpiCard label="Custo ClickSign" value={formatBRL(t.clicksignCostBRL)} sub={`${formatInt(t.envelopes)} envelopes`} icon={<FileSignature className="h-3.5 w-3.5" />} />
+            <KpiCard label="Custo Certidões" value={formatBRL(t.certidoesCostBRL)} sub={`${formatInt(t.certidoes)} consultas`} icon={<DollarSign className="h-3.5 w-3.5" />} />
+            <KpiCard label="Chamadas de API" value={formatInt(t.apiCalls)} icon={<Building2 className="h-3.5 w-3.5" />} />
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/50 text-left text-muted-foreground">
+                <tr>
+                  {([
+                    ["name", "Tenant"],
+                    ["members", "Membros"],
+                    ["deals", "Negócios"],
+                    ["dealsValueBRL", "Valor (R$)"],
+                    ["asaasVolumeBRL", "Asaas (R$)"],
+                    ["aiCostUsd", "IA (US$)"],
+                    ["clicksignCostBRL", "ClickSign (R$)"],
+                    ["certidoesCostBRL", "Certidões (R$)"],
+                  ] as [SortKey, string][]).map(([key, label]) => (
+                    <th key={key} className="cursor-pointer p-3 font-medium hover:text-foreground" onClick={() => toggleSort(key)}>
+                      {label} {sort.key === key ? (sort.dir === "asc" ? "▲" : "▼") : ""}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.orgId} className="border-t hover:bg-muted/30">
+                    <td className="p-3 font-medium">
+                      <Link href={`/admin/orgs/${r.orgId}`} className="hover:underline">{r.name}</Link>
+                      {r.suspended && <Badge variant="destructive" className="ml-2">suspenso</Badge>}
+                      <div className="text-[10px] text-muted-foreground">{r.modules.join(" · ") || "sem módulos"}</div>
+                    </td>
+                    <td className="p-3 tabular-nums">{formatInt(r.members)}</td>
+                    <td className="p-3 tabular-nums">{formatInt(r.deals)}</td>
+                    <td className="p-3 tabular-nums">{formatBRL(r.dealsValueBRL)}</td>
+                    <td className="p-3 tabular-nums">{formatBRL(r.asaasVolumeBRL)}</td>
+                    <td className="p-3 tabular-nums">{formatUsd(r.aiCostUsd)}</td>
+                    <td className="p-3 tabular-nums">{formatBRL(r.clicksignCostBRL)}</td>
+                    <td className="p-3 tabular-nums">{formatBRL(r.certidoesCostBRL)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
     </div>
   );
 }

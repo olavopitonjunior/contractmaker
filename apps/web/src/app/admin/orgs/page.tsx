@@ -27,6 +27,7 @@ export default async function AdminOrgsPage() {
       slug: true,
       subdomain: true,
       createdAt: true,
+      suspendedAt: true,
       _count: { select: { members: true, pipelines: true, asaasAccounts: true } },
     },
   });
@@ -37,13 +38,14 @@ export default async function AdminOrgsPage() {
     slug: o.slug,
     subdomain: o.subdomain,
     createdAt: o.createdAt.toISOString(),
+    suspended: o.suspendedAt != null,
     members: o._count.members,
     pipelines: o._count.pipelines,
     asaasAccounts: o._count.asaasAccounts,
   }));
 
   return (
-    <div className="mx-auto max-w-5xl p-6">
+    <div className="mx-auto max-w-7xl p-6">
       <header className="mb-6">
         <h1 className="font-display text-2xl font-semibold">Organizações</h1>
         <p className="text-sm text-muted-foreground">
