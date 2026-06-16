@@ -23,6 +23,16 @@ const informativeEndpoint: EndpointInfo = {
   category: "cadastro",
 };
 
+const cenprotNacionalEndpoint: EndpointInfo = {
+  id: "ieptb/protestos",
+  label: "CENPROT Nacional (Protestos)",
+  costCents: 6,
+  scope: "federal",
+  appliesTo: ["pessoa"],
+  category: "protesto",
+  portalUrl: "https://site.cenprot.org.br/",
+};
+
 const normEmpty: NormalizedResult = {
   situacao: "indeterminado",
   validade: null,
@@ -93,6 +103,101 @@ describe("classifyOutcome — Phase J", () => {
     const out = classifyOutcome(resp, normEmpty, eprocLista, opts);
     expect(out.status).toBe("success");
     expect(out.failureCategory).toBeNull();
+  });
+
+  it("eproc-lista 600 'Um erro inesperado' NÃO vira success negativa — retry até failed_permanent", () => {
+    // Prod 2026-06-10 (deal cmpypeb95): code 600 sem nenhum dado fechava como
+    // success após 1 retry e a UI mostrava "Negativa · nada consta" pra uma
+    // consulta que nunca rodou. Sem evidência de ausência → falha honesta.
+    const eprocLista: EndpointInfo = {
+      id: "tribunal/tjsp/eproc-lista",
+      label: "E-Proc SP",
+      costCents: 6,
+      scope: "estadual",
+      uf: "SP",
+      appliesTo: ["pessoa"],
+      category: "civel",
+      emitsPdf: false,
+      portalUrl: "https://esaj.tjsp.jus.br/",
+    };
+    const resp = {
+      code: 600,
+      code_message: "Um erro inesperado ocorreu e será analisado.",
+      data: [],
+      errors: [],
+      header: { billable: false },
+    } as unknown as InfosimplesResponse;
+
+    // O normalizer real mapeia 600 (CODE_MAP) → genuine_no_data
+    const norm600: NormalizedResult = {
+      ...normEmpty,
+      failureCategory: "genuine_no_data",
+    };
+
+    // Tentativas dentro do backoff → retry transitório (não success)
+    const first = classifyOutcome(resp, norm600, eprocLista, {
+      attachmentId: null,
+      retryAttempts: 0,
+      maxRetries: 3,
+    });
+    expect(first.status).toBe("portal_unavailable");
+    expect(first.nextRetryAt).not.toBeNull();
+
+    const second = classifyOutcome(resp, norm600, eprocLista, {
+      attachmentId: null,
+      retryAttempts: 1,
+      maxRetries: 3,
+    });
+    expect(second.status).toBe("portal_unavailable");
+
+    // Retries esgotados → failed_permanent com CTA portal (nunca "negativa")
+    const exhausted = classifyOutcome(resp, norm600, eprocLista, {
+      attachmentId: null,
+      retryAttempts: 3,
+      maxRetries: 3,
+    });
+    expect(exhausted.status).toBe("failed_permanent");
+    expect(exhausted.portalUrl).toBe("https://esaj.tjsp.jus.br/");
+    // Mensagem terminal honesta: não pode prometer "Nova tentativa automática
+    // agendada" num estado sem retry (terminalizeRetryMessage).
+    expect(exhausted.errorMessage).not.toMatch(
+      /nova tentativa autom[áa]tica agendada/i
+    );
+    expect(exhausted.errorMessage).toMatch(
+      /tentativas autom[áa]ticas esgotadas/i
+    );
+  });
+
+  it("eproc-lista 601 'não encontrado' (evidência explícita) continua fechando como success negativa", () => {
+    const eprocLista: EndpointInfo = {
+      id: "tribunal/tjsp/eproc-lista",
+      label: "E-Proc SP",
+      costCents: 6,
+      scope: "estadual",
+      uf: "SP",
+      appliesTo: ["pessoa"],
+      category: "civel",
+      emitsPdf: false,
+      portalUrl: "https://esaj.tjsp.jus.br/",
+    };
+    const resp = {
+      code: 601,
+      code_message:
+        "Não foi possível encontrar o que você procura na fonte consultada.",
+      data: [],
+      header: { billable: false },
+    } as unknown as InfosimplesResponse;
+    const out = classifyOutcome(
+      resp,
+      { ...normEmpty, failureCategory: "genuine_no_data" },
+      eprocLista,
+      {
+        attachmentId: null,
+        retryAttempts: 1, // já passou do retry profilático
+        maxRetries: 3,
+      }
+    );
+    expect(out.status).toBe("success");
   });
 
   it("612 'CPF inválido' em endpoint que EMITE PDF não é mascarado como success", () => {
@@ -229,6 +334,49 @@ describe("classifyOutcome — Phase J", () => {
     const delta = out.nextRetryAt!.getTime() - Date.now();
     expect(delta).toBeGreaterThan(9 * 60_000);
     expect(delta).toBeLessThan(11 * 60_000);
+  });
+
+  it("CENPROT 615 'API pausada/instabilidade' → mensagem amigável (não texto cru)", () => {
+    const resp = {
+      code: 615,
+      code_message: "O site ou aplicativo de origem parece estar indisponível.",
+      data: [],
+    } as unknown as InfosimplesResponse;
+    const norm = {
+      ...normEmpty,
+      situacao: "nao_emitida" as const,
+      detalhes:
+        "A API foi pausada temporariamente. O motivo mais provável para isso ter sido feito é instabilidade na fonte de origem.",
+      failureCategory: "portal_unavailable" as const,
+    };
+    const out = classifyOutcome(resp, norm, cenprotNacionalEndpoint, opts);
+    expect(out.status).toBe("portal_unavailable");
+    expect(out.errorMessage).toContain("CENPROT Nacional (Protestos)");
+    expect(out.errorMessage).toMatch(/fonte oficial.*indispon[ií]vel/i);
+    expect(out.errorMessage).not.toMatch(/API foi pausada/i);
+  });
+
+  it("CENPROT 615 com retries esgotados → failed_permanent COM portalUrl + msg clara", () => {
+    const resp = {
+      code: 615,
+      code_message: "O site ou aplicativo de origem parece estar indisponível.",
+      data: [],
+    } as unknown as InfosimplesResponse;
+    const norm = {
+      ...normEmpty,
+      situacao: "nao_emitida" as const,
+      detalhes:
+        "A API foi pausada temporariamente. Instabilidade na fonte de origem.",
+      failureCategory: "portal_unavailable" as const,
+    };
+    const out = classifyOutcome(resp, norm, cenprotNacionalEndpoint, {
+      ...opts,
+      retryAttempts: 3,
+    });
+    expect(out.status).toBe("failed_permanent");
+    // O gap corrigido: CENPROT agora oferece CTA de portal manual.
+    expect(out.portalUrl).toBe("https://site.cenprot.org.br/");
+    expect(out.errorMessage).toMatch(/fonte oficial.*indispon[ií]vel/i);
   });
 
   it("code 602 → failed_permanent (endpoint depreciado)", () => {
@@ -422,6 +570,49 @@ describe("classifyOutcome — Phase J", () => {
     const out = classifyOutcome(resp, norm, cenprotEndpoint, opts);
     expect(out.status).not.toBe("success");
     expect(out.status).toBe("portal_unavailable");
+  });
+
+  // 2026-06-02 — Receita/PGFN 611 "insuficientes para emitir pela Internet":
+  // RFB não emite ONLINE (não é erro nosso, provado por payload idêntico que
+  // emite p/ outros CPFs). Vira não-emissão terminal → portal, NÃO data_invalid.
+  const pgfnEndpoint: EndpointInfo = {
+    id: "receita-federal/pgfn",
+    label: "CND Federal + Divida Ativa",
+    costCents: 4,
+    scope: "federal",
+    appliesTo: ["pessoa"],
+    category: "federal",
+    portalUrl: "https://servicos.receitafederal.gov.br/servico/certidoes",
+  };
+
+  it("PGFN 611 'insuficientes para emitir pela Internet' → failed_permanent + portal (não data_invalid)", () => {
+    const resp = {
+      code: 611,
+      code_message:
+        "Os dados estão incompletos no site ou aplicativo de origem e não puderam ser retornados.",
+      errors: [
+        "As informações disponíveis na Receita Federal sobre o contribuinte 302.326.708-11 são insuficientes para emitir a certidão pela Internet.",
+      ],
+      data: [],
+      header: { billable: true },
+    } as unknown as InfosimplesResponse;
+    // normalizer real consolida errors[] + code_message em detalhes
+    const norm = {
+      ...normEmpty,
+      situacao: "nao_emitida" as const,
+      failureCategory: "inconsistent_input" as const,
+      detalhes:
+        "As informações disponíveis na Receita Federal sobre o contribuinte 302.326.708-11 são insuficientes para emitir a certidão pela Internet. (Os dados estão incompletos no site ou aplicativo de origem e não puderam ser retornados.)",
+    };
+    const out = classifyOutcome(resp, norm, pgfnEndpoint, opts);
+    expect(out.status).toBe("failed_permanent");
+    expect(out.status).not.toBe("data_invalid");
+    expect(out.portalUrl).toBe(
+      "https://servicos.receitafederal.gov.br/servico/certidoes"
+    );
+    expect(out.errorMessage).toMatch(/não emite/i);
+    expect(out.nextRetryAt).toBeNull();
+    expect(out.costCents).toBe(4); // RFB cobrou (billable) — custo honesto
   });
 });
 

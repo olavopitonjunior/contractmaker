@@ -90,10 +90,19 @@ export async function addSigner(input: AddSignerInput) {
     refusable: input.refusable ?? true,
   };
   if (input.documentation) {
-    // ClickSign v3 exige CPF/CNPJ formatado com máscara
-    // ("XXX.XXX.XXX-XX" ou "XX.XXX.XXX/XXXX-XX"). Mandar só dígitos
-    // retorna 422 "documentation não está em um formato válido".
-    attributes.documentation = formatCpfCnpj(input.documentation);
+    const digits = input.documentation.replace(/\D/g, "");
+    if (digits.length === 14) {
+      // 2026-06-03 — ClickSign v3 só aceita CPF no `documentation` do signer
+      // (assinante é pessoa física). Um CNPJ (14 díg.) — caso de parte PJ cujo
+      // signatário deveria ser o representante — retorna 422 "documentation não
+      // está em um formato válido" e TRAVA o envelope inteiro. A PJ assina via
+      // representante (e-mail); quando só temos o CNPJ, omitimos a documentação
+      // em vez de quebrar o envio. (confirmado em teste real no deal Walter Santos)
+      attributes.has_documentation = false;
+    } else {
+      // CPF: ClickSign v3 exige máscara ("XXX.XXX.XXX-XX"); só dígitos → 422.
+      attributes.documentation = formatCpfCnpj(input.documentation);
+    }
   }
   if (input.phoneNumber) attributes.phone_number = input.phoneNumber;
   if (input.birthday) attributes.birthday = input.birthday;

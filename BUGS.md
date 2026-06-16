@@ -87,6 +87,22 @@
 
 ## Bugs Resolvidos
 
+### [ALTA] Certidoes: E-Proc 600 "erro inesperado" virava "Negativa - nada consta" (falso-positivo) + "Retentar erros" inflado por endpoints sem PDF
+- **Status:** resolvido
+- **Encontrado em:** 2026-06-10 (auditoria front vs backend no deal cmpypeb95)
+- **Resolvido em:** 2026-06-10 (PR #67, prod; QA real: "Retentar erros" 9->5 batendo com "Precisa acao", E-Proc re-disparado voltou 612 "Nenhum Resultado" — negativa com evidencia; rows legadas success-600 substituidas por replaced)
+- **Descricao:** (1) `classifyOutcome` fechava endpoints informativos (`emitsPdf:false`) como "success negativa" apos 1 retry para QUALQUER categoria genuine_no_data — inclusive code 600 "Um erro inesperado ocorreu" (CODE_MAP), que nao traz evidencia nenhuma de ausencia. A UI exibia "Negativa - nada consta" (verde) para consulta que nunca rodou. (2) `isRetryableError` contava "success sem attachment" como retentavel sem checar `emitsPdf` — eproc-lista e trf/cert-unificada NUNCA anexam por design, entao "Retentar erros (9)" nao batia com "Precisa acao (5)" e re-disparava consultas saudaveis.
+- **Impacto:** Risco juridico de afirmar negativa inexistente; contagem do retry errada re-disparando consultas OK (custo desnecessario).
+- **Solucao:** `genuine_no_data` informativo agora exige evidencia textual de ausencia ("nada consta"/"nenhum resultado"/"nao encontrado") para fechar como negativa; sem evidencia -> retry portal_unavailable ate esgotar -> failed_permanent + CTA portal. `isRetryableError` ganha gate `emitsPdf === false` no caminho success-sem-anexo (LifecycleJob.endpoint opcional).
+
+### [ALTA] Certidoes: diligenciado (tier opcional) ficava fora do lote + obter e-SAJ recusava pedido_data DD/MM/YYYY
+- **Status:** resolvido
+- **Encontrado em:** 2026-06-09 (deal cmpypeb950007sdha0zb7tveq, prod)
+- **Resolvido em:** 2026-06-10 (PR #66, prod; QA real: 4 TJSP destravaram no ciclo seguinte do cron e baixaram 4 PDFs distintos por pessoa/modelo; PR #67 complementa as mensagens do front — 608 multi-campo, timeout real, variante terminal)
+- **Descricao:** (1) PJs avulsas adicionadas como DiligentedPerson nunca viravam CertidaoJob: `tierForJob` dava tier "opcional" a diligenciado -> nasciam desmarcadas em secao colapsada do ExtractCertidoesDialog, e "So as que faltaram" varre apenas tier "padrao" SUBSTITUINDO a selecao inteira (desmarca ate selecao manual previa). (2) 4 pedidos TJSP presos em `awaiting_portal`: o poll do `tribunal/tjsp/obter-certidao` enviava `pedido_data` em DD/MM/YYYY (formato persistido no DB via formatDateBR) e a Infosimples valida como ISO — 607 com `errors[]: "pedido_data possui um valor invalido"` em todo ciclo ate o prazo de 7d. O `code_message` do 607 lista TODOS os params ("cnpj, cpf, numero_pedido, pedido_data") — a causa especifica so aparece em `errors[]` (mesma licao do 604: classificar pelo texto combinado).
+- **Impacto:** Diligenciados (socios PJ, fiadores, terceiros) silenciosamente fora dos lotes; certidoes TJSP two-step nunca baixavam (morriam por "prazo do portal esgotado" apos 7d).
+- **Solucao:** `tierForJob`: diligenciado -> "padrao" (pre-marcado + incluido no "So as que faltaram"); `normalizePedidoData` DD/MM/YYYY -> ISO na hora do obter (cobre jobs antigos do DB); trim no numero_pedido (TRF3 devolve com espaco a esquerda). Reproduzido com chamada real: 607 -> 200 com ISO.
+
 ### [ALTA] Envio de documento avulso travado: CNPJ rejeitado pela ClickSign + draft orfao bloqueia reenvio
 - **Status:** resolvido
 - **Encontrado em:** 2026-06-02

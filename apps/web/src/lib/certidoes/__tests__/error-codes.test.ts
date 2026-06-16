@@ -4,7 +4,58 @@ import {
   isPedidoDuplicado,
   decideObterOutcome,
   isEndpointNotEnabled,
+  isPortalUnavailableMessage,
+  friendlySourceUnavailableMessage,
+  isReceitaCertidaoNaoEmitida,
+  isDataDivergente,
+  mapInfosimplesCodeToCategory,
 } from "../error-codes";
+
+describe("isDataDivergente + 608 divergência → inconsistent_input (não missing)", () => {
+  it("casa 'divergente da constante na base' (Receita CPF 608 real)", () => {
+    expect(
+      isDataDivergente(
+        "Data de nascimento informada 20/09/1972 está divergente da constante na base de dados da Secretaria da Receita Federal do Brasil."
+      )
+    ).toBe(true);
+  });
+  it("casa 'diferente da cadastrada' (PGFN 608 real)", () => {
+    expect(
+      isDataDivergente("Data de nascimento informada é diferente da cadastrada.")
+    ).toBe(true);
+  });
+  it("casa 'não coincidem' (TRF5 608 real — cruza com a Receita)", () => {
+    expect(
+      isDataDivergente(
+        "Data de nascimento preenchida e data de nascimento consultada na receita federal não coincidem."
+      )
+    ).toBe(true);
+    expect(
+      mapInfosimplesCodeToCategory(
+        608,
+        "Data de nascimento preenchida e ... na receita federal não coincidem."
+      )
+    ).toBe("inconsistent_input");
+  });
+  it("NÃO casa 'parâmetros obrigatórios não foram enviados' (606 = realmente falta)", () => {
+    expect(
+      isDataDivergente("Parâmetros obrigatórios não foram enviados.")
+    ).toBe(false);
+  });
+  it("608 com mensagem de divergência → inconsistent_input (data_invalid), NÃO missing_input", () => {
+    expect(
+      mapInfosimplesCodeToCategory(
+        608,
+        "Os parâmetros foram recusados. Data de nascimento informada é diferente da cadastrada."
+      )
+    ).toBe("inconsistent_input");
+  });
+  it("608 sem divergência segue missing_input (CODE_MAP)", () => {
+    expect(mapInfosimplesCodeToCategory(608, "Os parâmetros foram recusados.")).toBe(
+      "missing_input"
+    );
+  });
+});
 
 describe("isEndpointNotEnabled (603 endpoint-específico ≠ crédito da conta)", () => {
   it("detecta 'consulta não habilitada para a sua conta'", () => {
@@ -95,6 +146,102 @@ describe("isPedidoDuplicado", () => {
 
   it("mensagem vazia → false", () => {
     expect(isPedidoDuplicado(null)).toBe(false);
+  });
+});
+
+describe("isPortalUnavailableMessage (609 'tentativas excedidas' é portal, não dado)", () => {
+  it("casa 'Tentativas de consultar o site ... excedidas' (TRF3/TRT15 hoje)", () => {
+    expect(
+      isPortalUnavailableMessage(
+        "Tentativas de consultar o site ou aplicativo de origem excedidas."
+      )
+    ).toBe(true);
+  });
+  it("casa 'site ou aplicativo de origem ... indisponível / sobrecarregado'", () => {
+    expect(
+      isPortalUnavailableMessage(
+        "O site ou aplicativo de origem está sobrecarregado. Tente novamente em alguns instantes."
+      )
+    ).toBe(true);
+    expect(
+      isPortalUnavailableMessage(
+        "O site ou aplicativo de origem parece estar indisponível."
+      )
+    ).toBe(true);
+  });
+  it("casa 'API foi pausada / instabilidade na fonte' (IEPTB 615)", () => {
+    expect(
+      isPortalUnavailableMessage(
+        "A API foi pausada temporariamente. O motivo mais provável é instabilidade na fonte de origem."
+      )
+    ).toBe(true);
+  });
+  it("NÃO casa erro de dado genuíno (608/606)", () => {
+    expect(
+      isPortalUnavailableMessage(
+        "Dados (nome, nome da mãe ou data de nascimento) não conferem com o CPF informado."
+      )
+    ).toBe(false);
+    expect(
+      isPortalUnavailableMessage("Parâmetros obrigatórios: data_nascimento")
+    ).toBe(false);
+  });
+  it("vazio/null → false", () => {
+    expect(isPortalUnavailableMessage(null)).toBe(false);
+    expect(isPortalUnavailableMessage("")).toBe(false);
+  });
+});
+
+describe("friendlySourceUnavailableMessage — texto claro de fonte fora do ar", () => {
+  it("inclui o label do endpoint e a saída (portal oficial)", () => {
+    const msg = friendlySourceUnavailableMessage("CENPROT Nacional (Protestos)");
+    expect(msg).toContain("CENPROT Nacional (Protestos)");
+    expect(msg).toMatch(/fonte oficial.*indispon[ií]vel/i);
+    expect(msg).toMatch(/portal oficial/i);
+  });
+  it("não vaza o texto técnico cru do provedor", () => {
+    const msg = friendlySourceUnavailableMessage("CENPROT Nacional (Protestos)");
+    expect(msg).not.toMatch(/API foi pausada/i);
+  });
+  it("funciona sem label", () => {
+    const msg = friendlySourceUnavailableMessage();
+    expect(msg).toMatch(/fonte oficial/i);
+    expect(msg.startsWith(":")).toBe(false);
+  });
+});
+
+describe("mapInfosimplesCodeToCategory — 609 com mensagem de portal", () => {
+  it("609 'tentativas excedidas' → portal_unavailable (retry), NÃO inconsistent_input", () => {
+    expect(
+      mapInfosimplesCodeToCategory(
+        609,
+        "Tentativas de consultar o site ou aplicativo de origem excedidas."
+      )
+    ).toBe("portal_unavailable");
+  });
+  it("609 com mensagem de dado real → inconsistent_input (mantém)", () => {
+    expect(
+      mapInfosimplesCodeToCategory(609, "O campo informado foi rejeitado pelo portal")
+    ).toBe("inconsistent_input");
+  });
+});
+
+describe("isReceitaCertidaoNaoEmitida (PGFN 611 = RFB não emite online)", () => {
+  it("casa a frase exata da RFB (job real de hoje)", () => {
+    expect(
+      isReceitaCertidaoNaoEmitida(
+        "As informações disponíveis na Receita Federal sobre o contribuinte 302.326.708-11 são insuficientes para emitir a certidão pela Internet."
+      )
+    ).toBe(true);
+  });
+  it("NÃO casa 'nada consta' nem erro de dado nosso", () => {
+    expect(isReceitaCertidaoNaoEmitida("Nada consta")).toBe(false);
+    expect(
+      isReceitaCertidaoNaoEmitida("Dados não conferem com o CPF informado")
+    ).toBe(false);
+  });
+  it("vazio/null → false", () => {
+    expect(isReceitaCertidaoNaoEmitida(null)).toBe(false);
   });
 });
 

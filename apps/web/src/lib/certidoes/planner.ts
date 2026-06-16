@@ -332,6 +332,36 @@ function isValidEmail(e: string | undefined | null): e is string {
   return typeof e === "string" && /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e.trim());
 }
 
+/**
+ * 2026-06-02 — e-SAJ (TJSP `pedido-certidao`) recusa com code 604 "mesmo email
+ * múltiplas vezes num intervalo curto" quando vários pedidos do mesmo lote usam
+ * o MESMO `email_envio`. Cada PF/PJ gera 2 pedidos (modelo 4 + 1), e com várias
+ * partes isso colide. Solução: dar um `email_envio` ÚNICO por pedido via
+ * plus-alias (`local+token@dominio`). O e-SAJ valida só a entregabilidade (MX),
+ * e o plus-alias preserva o MX (entrega na mesma caixa do operador → não toma
+ * 608), mas o servidor vê endereços distintos → sem 604. Token determinístico
+ * (sem Math.random) por (documento, contexto, modelo) mantém estável entre
+ * re-planejamentos. Ver docs/certidoes-known-issues.md (TJSP).
+ */
+function emailToken(...parts: Array<string | number | undefined | null>): string {
+  const s = parts.filter((p) => p !== undefined && p !== null && p !== "").join("|");
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0).toString(36);
+}
+
+function aliasEmail(base: string, token: string): string {
+  const at = base.indexOf("@");
+  const safe = token.replace(/[^a-z0-9]/gi, "").slice(0, 24).toLowerCase();
+  if (at < 0 || !safe) return base;
+  const local = base.slice(0, at).split("+")[0]; // descarta +alias pré-existente
+  const domain = base.slice(at + 1);
+  return `${local}+${safe}@${domain}`;
+}
+
 function onlyDigits(s: string | undefined | null): string {
   return typeof s === "string" ? s.replace(/\D/g, "") : "";
 }
@@ -402,6 +432,48 @@ export interface DiligentedPersonInput {
   dataNascimento?: string | null;
   uf?: string | null;
   cidade?: string | null;
+  // 2026-06-10 — campos que destravam certidões de PF avulsa (TJSP pedido-certidao
+  // exige rg+genero; antecedentes exige nome_mae+nascimento). Antes não existiam no
+  // cadastro do diligenciado, então essas certidões caíam em "faltam dados".
+  rg?: string | null;
+  nomeMae?: string | null;
+  sexo?: string | null;
+}
+
+/**
+ * Mapeia uma row do model Prisma `DiligentedPerson` pro input do planner.
+ * Fonte ÚNICA usada por TODAS as rotas que re-rodam o plano (preview, dispatch,
+ * complete/poll, Newton) — antes cada rota tinha seu próprio `.map(...)` inline e
+ * elas divergiam (o dispatch esquecia rg/nomeMae/sexo, então PF avulsa aparecia no
+ * popup mas era pulada ao emitir). Tipo do parâmetro é estrutural (sem importar
+ * tipos do Prisma) pra não acoplar o planner ao client do Prisma.
+ */
+export function diligentedPersonToInput(d: {
+  id: string;
+  tipoPessoa: string;
+  nome: string;
+  cpf: string | null;
+  cnpj: string | null;
+  dataNascimento: string | null;
+  rg: string | null;
+  nomeMae: string | null;
+  sexo: string | null;
+  uf: string | null;
+  cidade: string | null;
+}): DiligentedPersonInput {
+  return {
+    id: d.id,
+    tipoPessoa: d.tipoPessoa as "fisica" | "juridica",
+    nome: d.nome,
+    cpf: d.cpf,
+    cnpj: d.cnpj,
+    dataNascimento: d.dataNascimento,
+    rg: d.rg,
+    nomeMae: d.nomeMae,
+    sexo: d.sexo,
+    uf: d.uf,
+    cidade: d.cidade,
+  };
 }
 
 function diligenciadoToParte(d: DiligentedPersonInput): Parte {
@@ -411,6 +483,9 @@ function diligenciadoToParte(d: DiligentedPersonInput): Parte {
     cpf: d.cpf ?? undefined,
     cnpj: d.cnpj ?? undefined,
     data_nascimento: d.dataNascimento ?? undefined,
+    rg: d.rg ?? undefined,
+    nome_mae: d.nomeMae ?? undefined,
+    sexo: d.sexo ?? undefined,
     uf: d.uf ?? undefined,
     cidade: d.cidade ?? undefined,
   };
@@ -847,13 +922,22 @@ export function planCertidoesForDeal(
           // TRFs 1/2/4/5/6: Cível + Criminal. tipo_certidao varia por TRF
           // (TRF5 = numérico "1"/"2"; demais = CIVEL/CRIMINAL).
           const tipos = TRF_TIPOS_BY_ENDPOINT[ep] ?? TRF_INDIVIDUAL_TIPOS;
+          // TRF5 (e demais TRFs individuais) exigem `birthdate` quando o CPF é
+          // usado para PF — sem ela o portal recusa com 606 "O parâmetro
+          // 'birthdate' deve ser preenchido quando o campo 'CPF' for usado".
+          // Antes o handler montava só cpf+nome (ao contrário de Receita/PGFN/
+          // TJSP), então a certidão acusava "faltam dados" mesmo com a data no
+          // formulário. Anexa quando a PF tem `data_nascimento`. (fix 2026-06-05)
+          const trfBirthdate = !isPJ ? normalizeDate(parte.data_nascimento) : null;
           for (const t of tipos) {
+            const trfArgs: Record<string, unknown> = {
+              tipo_certidao: t.tipo_certidao,
+              email,
+              ...(isPJ ? { cnpj, razao_social: label } : { cpf, nome: label }),
+            };
+            if (trfBirthdate) trfArgs.birthdate = trfBirthdate;
             pushRegional(
-              buildJob(ep, kind, index, `${label} - ${t.label}`, {
-                tipo_certidao: t.tipo_certidao,
-                email,
-                ...(isPJ ? { cnpj, razao_social: label } : { cpf, nome: label }),
-              }),
+              buildJob(ep, kind, index, `${label} - ${t.label}`, trfArgs),
               `${ep}|${t.tipo_certidao}`,
               region
             );
@@ -1260,7 +1344,10 @@ export function planCertidoesForDeal(
               modelo: m.modelo,
               cnpj: cnpj!,
               razao_social: label,
-              email_envio: email,
+              // e-mail distinto por pedido → evita 604 throttle do e-SAJ.
+              // kind+index no token: a MESMA pessoa em 2 papéis (ex.: PF vendedora
+              // que também é representante de PJ) não compartilha alias.
+              email_envio: aliasEmail(email, emailToken(cnpj, "tjsp", m.modelo, kind, index)),
             })
           );
         }
@@ -1287,7 +1374,9 @@ export function planCertidoesForDeal(
             rg: partyRg,
             nome_completo: label,
             genero,
-            email_envio: email,
+            // e-mail distinto por pedido → evita 604 throttle do e-SAJ.
+            // kind+index no token: mesma pessoa em 2 papéis não compartilha alias.
+            email_envio: aliasEmail(email, emailToken(cpf, "tjsp", m.modelo, kind, index)),
           };
           if (dob) base.birthdate = dob;
           if (parte.nome_mae) base.nome_mae = parte.nome_mae;
@@ -1311,7 +1400,8 @@ export function planCertidoesForDeal(
           const spRegion = tjRegionFor("SP");
           const partyMunicipio = (spRegion.cidade || parte.cidade || "").trim();
           const base: Record<string, unknown> = {
-            email,
+            // e-mail distinto por pedido → evita 604 throttle do e-SAJ
+            email: aliasEmail(email, emailToken(cpf, "tjspcivel", kind, index)),
             finalidade: DEFAULT_FINALIDADE,
             instancia: 1,
             tipo_certidao: "civel",
@@ -1540,6 +1630,19 @@ export function planCertidoesForDeal(
   };
   jobs.forEach(applyTierRegion);
   skipped.forEach(applyTierRegion);
+
+  // Âncora estável do diligenciado: carimba o id da pessoa (por targetIndex, que
+  // aqui ainda corresponde à posição no array passado) pra que o executor persista
+  // CertidaoJob.diligentedPersonId. Daí guard de exclusão e supersede deixam de
+  // depender do índice posicional. Partes do contrato/ad-hoc ficam sem id.
+  const stampPersonId = (j: PlannedJob | SkippedJob) => {
+    if (j.targetKind === "diligenciado") {
+      const id = (diligenciados ?? [])[j.targetIndex]?.id;
+      if (id) j.diligentedPersonId = id;
+    }
+  };
+  jobs.forEach(stampPersonId);
+  skipped.forEach(stampPersonId);
 
   const totalCostCents = jobs.reduce((acc, j) => acc + j.costCents, 0);
   return { jobs, skipped, totalCostCents };

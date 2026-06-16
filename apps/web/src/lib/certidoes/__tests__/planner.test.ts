@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { planCertidoesForDeal } from "../planner";
+import { planCertidoesForDeal, diligentedPersonToInput } from "../planner";
 
 const VENDEDOR_PF_SP = {
   tipo_pessoa: "fisica" as const,
@@ -151,6 +151,85 @@ describe("planCertidoesForDeal — dados completos (PF SP + PF RJ + imovel SP)",
   it("custo total bate com a soma dos jobs", () => {
     const sum = plan.jobs.reduce((a, j) => a + j.costCents, 0);
     expect(plan.totalCostCents).toBe(sum);
+  });
+});
+
+describe("planCertidoesForDeal — TJSP e-mail distinto por pedido (anti-604)", () => {
+  // PF SP COM rg + sexo → pedido-certidao em 2 modelos (4 + 1). Cada pedido
+  // precisa de um email_envio ÚNICO senão o e-SAJ recusa com 604 "mesmo email".
+  const plan = planCertidoesForDeal({
+    vendedores: [{ ...VENDEDOR_PF_SP, rg: "12345678", sexo: "F" }],
+    compradores: [],
+    imoveis: [],
+  });
+
+  it("gera 2 pedidos pedido-certidao para a PF com RG", () => {
+    const cert = plan.jobs.filter(
+      (j) =>
+        j.endpoint === "tribunal/tjsp/pedido-certidao" &&
+        j.targetKind === "vendedor"
+    );
+    expect(cert.length).toBe(2);
+  });
+
+  it("os 2 pedidos têm email_envio DISTINTO e em formato plus-alias", () => {
+    const cert = plan.jobs.filter(
+      (j) =>
+        j.endpoint === "tribunal/tjsp/pedido-certidao" &&
+        j.targetKind === "vendedor"
+    );
+    const emails = cert.map((j) => j.requestPayload.email_envio as string);
+    expect(new Set(emails).size).toBe(emails.length); // todos distintos
+    emails.forEach((e) => {
+      expect(e).toMatch(/^[^@\s]+\+[a-z0-9]+@[^@\s]+$/i); // local+token@dominio
+    });
+  });
+
+  // Edge-case 2026-06-03: a MESMA pessoa (mesmo CPF) em índices/papéis distintos
+  // (ex.: PF vendedora que também representa uma PJ) não pode compartilhar alias
+  // — o token inclui targetKind+índice. Aqui simulamos o mesmo CPF em 2 índices.
+  it("mesmo CPF em índices diferentes → aliases TODOS distintos (sem colisão)", () => {
+    const dup = { ...VENDEDOR_PF_SP, rg: "12345678", sexo: "F" };
+    const p = planCertidoesForDeal({
+      vendedores: [dup, dup],
+      compradores: [],
+      imoveis: [],
+    });
+    const emails = p.jobs
+      .filter((j) => j.endpoint === "tribunal/tjsp/pedido-certidao")
+      .map((j) => j.requestPayload.email_envio as string);
+    expect(emails.length).toBe(4); // 2 partes × 2 modelos
+    expect(new Set(emails).size).toBe(4); // todos distintos, apesar do mesmo CPF
+  });
+});
+
+describe("planCertidoesForDeal — TRF individual (TRF5) envia birthdate (fix 2026-06-05)", () => {
+  // Vendedor PF em PE → TRF5 (AL/CE/PB/PE/RN/SE). O endpoint exige `birthdate`
+  // com CPF (606 "O parâmetro 'birthdate' deve ser preenchido quando o campo
+  // 'CPF' for usado"). Antes o handler montava só cpf+nome → certidão acusava
+  // "faltam dados" mesmo com a data no formulário.
+  const plan = planCertidoesForDeal({
+    vendedores: [
+      {
+        tipo_pessoa: "fisica" as const,
+        nome: "Jose da Silva",
+        cpf: "52998224725",
+        data_nascimento: "1975-03-08",
+        uf: "PE",
+        cidade: "Recife",
+      },
+    ],
+    compradores: [],
+    imoveis: [],
+  });
+
+  it("os jobs TRF5 (Cível + Criminal) incluem birthdate normalizado", () => {
+    const trf5 = plan.jobs.filter((j) => j.endpoint === "tribunal/trf5/certidao");
+    expect(trf5.length).toBe(2);
+    trf5.forEach((j) => {
+      expect(j.requestPayload.cpf).toBe("52998224725");
+      expect(j.requestPayload.birthdate).toBe("1975-03-08");
+    });
   });
 });
 
@@ -1021,5 +1100,99 @@ describe("Redesign 2026-05-26 — regiões (imóvel + endereço) e camadas (tier
     // Sem imóvel, regiões = endereço (SP) + extra (RJ).
     expect(vend.some((j) => j.endpoint.includes("/tjrj/"))).toBe(true);
     expect(vend.some((j) => j.region?.uf === "RJ")).toBe(true);
+  });
+});
+
+describe("planCertidoesForDeal — diligenciado PF com rg/sexo/nome_mae (fix 2026-06-10)", () => {
+  // Regressão: PF avulsa precisava de rg+sexo+nascimento pra gerar o TJSP
+  // pedido-certidao (senão caía em skip "faltam dados"). diligentedPersonToInput
+  // é a fonte única que carrega esses campos da row do Prisma pro planner —
+  // antes cada rota tinha .map() inline e o dispatch esquecia rg/sexo, então a
+  // certidão aparecia no popup mas era descartada ao emitir.
+  const row = {
+    id: "dp1",
+    tipoPessoa: "fisica",
+    nome: "Joana Avulsa",
+    cpf: "52998224725",
+    cnpj: null,
+    dataNascimento: "1980-05-14",
+    rg: "12345678",
+    nomeMae: "Maria Avulsa",
+    sexo: "feminino", // como o route grava (lowercase) — sexoToGenero normaliza p/ F
+    uf: "SP",
+    cidade: "Sao Paulo",
+  };
+
+  it("diligentedPersonToInput carrega rg/nomeMae/sexo da row do Prisma", () => {
+    const input = diligentedPersonToInput(row);
+    expect(input.rg).toBe("12345678");
+    expect(input.nomeMae).toBe("Maria Avulsa");
+    expect(input.sexo).toBe("feminino");
+  });
+
+  const plan = planCertidoesForDeal(
+    { vendedores: [], compradores: [], imoveis: [] },
+    undefined,
+    [diligentedPersonToInput(row)]
+  );
+
+  it("gera TJSP pedido-certidao para o diligenciado PF (2 modelos), não skip", () => {
+    const cert = plan.jobs.filter(
+      (j) =>
+        j.endpoint === "tribunal/tjsp/pedido-certidao" &&
+        j.targetKind === "diligenciado"
+    );
+    expect(cert.length).toBe(2);
+    // genero normalizado de "feminino" → "F" no payload
+    cert.forEach((j) => expect(j.requestPayload.genero).toBe("F"));
+    // e NÃO deve haver skip de TJSP por "faltam dados" pra esse alvo
+    const skippedTjsp = plan.skipped.filter(
+      (s) =>
+        s.endpoint === "tribunal/tjsp/pedido-certidao" &&
+        s.targetKind === "diligenciado"
+    );
+    expect(skippedTjsp.length).toBe(0);
+  });
+
+  it("carimba diligentedPersonId (âncora estável) nos jobs do diligenciado", () => {
+    const diligJobs = plan.jobs.filter((j) => j.targetKind === "diligenciado");
+    expect(diligJobs.length).toBeGreaterThan(0);
+    diligJobs.forEach((j) => expect(j.diligentedPersonId).toBe("dp1"));
+  });
+});
+
+describe("planCertidoesForDeal — diligentedPersonId só no diligenciado (fix FK 2026-06-11)", () => {
+  // Vendedor (parte do form) NÃO recebe diligentedPersonId — ancoragem por id é só
+  // pro diligenciado; partes do contrato seguem por targetIndex.
+  const plan = planCertidoesForDeal(
+    { vendedores: [VENDEDOR_PF_SP], compradores: [], imoveis: [] },
+    undefined,
+    [
+      diligentedPersonToInput({
+        id: "pessoaA",
+        tipoPessoa: "juridica",
+        nome: "ACME LTDA",
+        cpf: null,
+        cnpj: "11222333000181",
+        dataNascimento: null,
+        rg: null,
+        nomeMae: null,
+        sexo: null,
+        uf: "SP",
+        cidade: "Sao Paulo",
+      }),
+    ]
+  );
+
+  it("jobs de vendedor não têm diligentedPersonId", () => {
+    const vend = plan.jobs.filter((j) => j.targetKind === "vendedor");
+    expect(vend.length).toBeGreaterThan(0);
+    vend.forEach((j) => expect(j.diligentedPersonId).toBeUndefined());
+  });
+
+  it("jobs do diligenciado carregam o id da pessoa", () => {
+    const dilig = plan.jobs.filter((j) => j.targetKind === "diligenciado");
+    expect(dilig.length).toBeGreaterThan(0);
+    dilig.forEach((j) => expect(j.diligentedPersonId).toBe("pessoaA"));
   });
 });

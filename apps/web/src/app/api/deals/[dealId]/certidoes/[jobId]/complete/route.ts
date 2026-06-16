@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import { planCertidoesForDeal } from "@/lib/certidoes/planner";
+import { planCertidoesForDeal, diligentedPersonToInput } from "@/lib/certidoes/planner";
 import { runSingleJob } from "@/lib/certidoes/executor";
 import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
 import { checkOnrAuth } from "@/lib/certidoes/onr-auth";
@@ -119,16 +119,7 @@ export async function POST(
     where: { dealId: params.dealId },
     orderBy: { createdAt: "asc" },
   });
-  const diligenciados = diligenciadosRaw.map((dp) => ({
-    id: dp.id,
-    tipoPessoa: dp.tipoPessoa as "fisica" | "juridica",
-    nome: dp.nome,
-    cpf: dp.cpf,
-    cnpj: dp.cnpj,
-    dataNascimento: dp.dataNascimento,
-    uf: dp.uf,
-    cidade: dp.cidade,
-  }));
+  const diligenciados = diligenciadosRaw.map(diligentedPersonToInput);
   const plan = planCertidoesForDeal(
     merged as any,
     session.user.email ?? undefined,
@@ -177,6 +168,7 @@ export async function POST(
       label: newPlanned.label,
       targetKind: newPlanned.targetKind,
       targetIndex: newPlanned.targetIndex,
+      diligentedPersonId: newPlanned.diligentedPersonId ?? null,
       requestPayload: sanitizePayload(newPlanned.requestPayload) as object,
       status: info.initialStatus ?? "pending",
       costCents: null,

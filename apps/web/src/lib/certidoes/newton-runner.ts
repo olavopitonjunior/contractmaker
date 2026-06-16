@@ -1,6 +1,6 @@
 import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
-import { planCertidoesForDeal } from "@/lib/certidoes/planner";
+import { planCertidoesForDeal, diligentedPersonToInput } from "@/lib/certidoes/planner";
 import { runBatch, getMonthlySpend } from "@/lib/certidoes/executor";
 import { endpointInfo } from "@/lib/certidoes/endpoints";
 import { sanitizePayload } from "@/lib/certidoes/infosimples";
@@ -65,16 +65,7 @@ export async function runCertidoesBatchInline(
     where: { dealId },
     orderBy: { createdAt: "asc" },
   });
-  const diligenciados = diligenciadosRaw.map((d) => ({
-    id: d.id,
-    tipoPessoa: d.tipoPessoa as "fisica" | "juridica",
-    nome: d.nome,
-    cpf: d.cpf,
-    cnpj: d.cnpj,
-    dataNascimento: d.dataNascimento,
-    uf: d.uf,
-    cidade: d.cidade,
-  }));
+  const diligenciados = diligenciadosRaw.map(diligentedPersonToInput);
 
   const govbr = await checkGovBrAuth();
   const plan = planCertidoesForDeal(dealData as never, undefined, diligenciados, {
@@ -106,6 +97,7 @@ export async function runCertidoesBatchInline(
           label: p.label,
           targetKind: p.targetKind,
           targetIndex: p.targetIndex,
+          diligentedPersonId: p.diligentedPersonId ?? null,
           requestPayload: sanitizePayload(p.requestPayload) as object,
           status: info.initialStatus ?? "pending",
           costCents: null,
@@ -129,6 +121,7 @@ export async function runCertidoesBatchInline(
           label: s.label,
           targetKind: s.targetKind,
           targetIndex: s.targetIndex,
+          diligentedPersonId: s.diligentedPersonId ?? null,
           requestPayload: {
             missingField: s.missingField,
             missingFields: s.missingFields,

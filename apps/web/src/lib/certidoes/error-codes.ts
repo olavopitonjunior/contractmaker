@@ -129,6 +129,78 @@ export function isEmailThrottle(message: string | null | undefined): boolean {
 }
 
 /**
+ * 2026-06-02 — Alguns códigos mapeados como "dado" (notadamente o 609) chegam,
+ * na prática, com uma mensagem que é INDISPONIBILIDADE TRANSITÓRIA do portal
+ * ("Tentativas de consultar o site ou aplicativo de origem excedidas", "site
+ * indisponível", "sobrecarregado", "instabilidade na fonte"). Sem distinguir,
+ * o 609 caía em inconsistent_input → data_invalid ("corrija os dados") SEM
+ * retry, quando o correto é portal_unavailable (retry automático). Este gate é
+ * aplicado ANTES do CODE_MAP em mapInfosimplesCodeToCategory.
+ *
+ * NÃO casa com erros de dado genuínos ("não conferem com o CPF", "parâmetros
+ * obrigatórios", "CPF inválido") — esses continuam missing/inconsistent_input.
+ */
+export function isPortalUnavailableMessage(
+  message: string | null | undefined
+): boolean {
+  if (!message) return false;
+  return /tentativas\s+de\s+consultar.*(excedidas|esgotadas)|site\s+ou\s+aplicativo\s+de\s+origem.*(indispon[ií]vel|sobrecarregad|fora\s+do\s+ar)|sobrecarregad[oa]|inst[aá]vel|instabilidade\s+na\s+fonte|api\s+foi\s+pausada/i.test(
+    message
+  );
+}
+
+/**
+ * 2026-06-08 — Mensagem amigável e acionável para indisponibilidade da fonte
+ * oficial (615 "API pausada / instabilidade na fonte", "site indisponível").
+ * O texto cru do provedor ("A API foi pausada temporariamente...") parece erro
+ * técnico/genérico e confunde o operador, que pensa ser erro de dado do cliente.
+ * Esta mensagem deixa explícito que é a FONTE OFICIAL fora do ar (não bug nosso
+ * nem dado errado), com a saída (retry automático / portal oficial). Usada no
+ * classifier nos estados portal_unavailable e failed_permanent (retries
+ * esgotados). `label` é o nome do endpoint (ex.: "CENPROT Nacional (Protestos)").
+ */
+export function friendlySourceUnavailableMessage(label?: string | null): string {
+  const prefix = label ? `${label}: ` : "";
+  return `${prefix}a fonte oficial está temporariamente indisponível (instabilidade no provedor). Nova tentativa automática agendada; se persistir, emita no portal oficial.`;
+}
+
+/**
+ * 2026-06-10 — Quando os retries ESGOTAM, a mensagem acima fica falsa ("Nova
+ * tentativa automática agendada" num estado terminal sem retry). O planRetry
+ * reusa a `message` recebida ao virar failed_permanent; este helper troca o
+ * trecho de agendamento pela variante terminal. Mensagens sem o trecho passam
+ * intactas.
+ */
+export function terminalizeRetryMessage(
+  message: string | null
+): string | null {
+  if (!message) return message;
+  return message.replace(
+    /Nova tentativa autom[áa]tica agendada; se persistir, emita no portal oficial\.?/i,
+    "Tentativas automáticas esgotadas — emita no portal oficial."
+  );
+}
+
+/**
+ * 2026-06-02 — Receita Federal / PGFN responde 611 "As informações disponíveis
+ * na Receita Federal sobre o contribuinte ... são insuficientes para emitir a
+ * certidão pela Internet." Isso NÃO é erro nosso nem "nada consta": é a própria
+ * RFB recusando a emissão ONLINE (situação cadastral não-regular / pendência que
+ * exige balcão). O JSON cru confirma: data=[], sem PDF, billable=true, e o mesmo
+ * payload emite normalmente para outros CPFs. Tratar como NÃO-EMISSÃO → portal
+ * oficial (failed_permanent + portalUrl), nunca como data_invalid ("corrija os
+ * dados"). Gate na frase específica da RFB.
+ */
+export function isReceitaCertidaoNaoEmitida(
+  message: string | null | undefined
+): boolean {
+  if (!message) return false;
+  return /insuficientes?\s+para\s+emitir\s+a\s+certid[ãa]o\s+pela\s+internet/i.test(
+    message
+  );
+}
+
+/**
  * Infosimples retorna code 603 em DOIS cenários muito diferentes:
  *   1. "A conta está sem saldo" / "limite de uso" — esgotamento de CRÉDITO da
  *      conta, afeta TODAS as consultas → deve tripar o circuit breaker da org.
@@ -150,6 +222,31 @@ export function isEndpointNotEnabled(message: string | null | undefined): boolea
   );
 }
 
+/**
+ * 2026-06-05 — Receita Federal / PGFN respondem code 608 ("Os parâmetros foram
+ * recusados pelo site ou aplicativo de origem") com o detalhe específico no
+ * `errors[]`: "Data de nascimento informada DD/MM/AAAA está divergente da
+ * constante na base de dados da RFB" ou "Data de nascimento informada é
+ * diferente da cadastrada". O catálogo (CODE_MAP) mapeia 608 → missing_input,
+ * então a UI dizia "faltam dados: data de nascimento" — enganoso, pois o dado
+ * FOI enviado, só não confere com a base oficial. Este gate (aplicado ANTES do
+ * CODE_MAP) reclassifica para inconsistent_input → data_invalid ("dados
+ * divergentes — confira o cadastro"). Casa apenas frases de DIVERGÊNCIA, não
+ * "parâmetros obrigatórios" (esses continuam missing_input).
+ *
+ * 2026-06-05 (b): o TRF5 também cruza a data contra a Receita e usa outra frase
+ * — "Data de nascimento preenchida e ... na receita federal não COINCIDEM". Sem
+ * cobrir "não coincide(m)", a MESMA divergência (ex.: cônjuge Dalice) ficava
+ * certa na Receita ("dados divergentes") e errada no TRF5 (failed_permanent
+ * "use o portal"). Adicionado ao gate.
+ */
+export function isDataDivergente(message: string | null | undefined): boolean {
+  if (!message) return false;
+  return /diverg[eê]nte|diferente\s+da\s+cadastrada|n[ãa]o\s+(confere|corresponde|bate|combina|coincidem?)/i.test(
+    message
+  );
+}
+
 export function mapInfosimplesCodeToCategory(
   code: number,
   codeMessage?: string | null
@@ -157,6 +254,17 @@ export function mapInfosimplesCodeToCategory(
   if (code === 200) return "unknown"; // shouldn't be called for success
   // 604 do throttle de e-mail (e-SAJ pedido-certidao) é transitório, não conta.
   if (code === 604 && isEmailThrottle(codeMessage)) return "rate_limited";
+  // Indisponibilidade de portal pela MENSAGEM, antes do CODE_MAP: pega o 609
+  // "tentativas excedidas" (e similares) que o catálogo mapeia como dado, mas
+  // que é transitório e deve dar retry. Ver isPortalUnavailableMessage.
+  if (isPortalUnavailableMessage(codeMessage)) return "portal_unavailable";
+  // DIVERGÊNCIA de dado pela MENSAGEM, antes do CODE_MAP: 608 vem fixo como
+  // missing_input no catálogo, mas a Receita/PGFN o usa para "Data de nascimento
+  // ... divergente da base da RFB" / "diferente da cadastrada" — o dado FOI
+  // enviado, só não confere. Sem isto a UI dizia "faltam dados: data de
+  // nascimento" (data_missing) em vez de "dados divergentes" (data_invalid).
+  // Ver isDataDivergente. (fix 2026-06-05)
+  if (isDataDivergente(codeMessage)) return "inconsistent_input";
   if (code in CODE_MAP) return CODE_MAP[code];
 
   // Message heuristics fire for unmapped codes

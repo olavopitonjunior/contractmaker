@@ -25,6 +25,11 @@ export default async function DashboardLayout({
   // custom, nada é sobrescrito → paleta padrão Zimmermann.
   const subdomainHint = headers().get("x-org-subdomain");
   const org = await getUserOrg(session.user.id, { subdomainHint });
+  // Suspensão administrativa (painel super-admin): org suspensa bloqueia todo o
+  // acesso ao dashboard. O painel /admin (fora deste layout) segue acessível.
+  if (org?.suspendedAt) {
+    redirect("/suspenso");
+  }
   const branding = org ? await getTenantBranding(org.id) : null;
   // Entitlements de módulos da org → filtram a navegação na sidebar.
   const modules = org ? await getOrgModules(org.id) : null;

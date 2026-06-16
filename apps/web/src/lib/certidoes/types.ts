@@ -83,6 +83,13 @@ export interface PlannedJob {
   label: string;
   targetKind: TargetKind;
   targetIndex: number;
+  /**
+   * Âncora estável quando targetKind="diligenciado": id da DiligentedPerson.
+   * Persistido em CertidaoJob.diligentedPersonId pra guard de exclusão e supersede
+   * de re-emissão não dependerem do targetIndex posicional (que desliza em remoção).
+   * Undefined pra partes do contrato e alvos ad-hoc.
+   */
+  diligentedPersonId?: string;
   requestPayload: Record<string, unknown>;
   costCents: number;
   linkedLabel?: string; // For two-step flows (pedido -> obter), reference the sibling
@@ -112,6 +119,8 @@ export interface SkippedJob {
   label: string;
   targetKind: TargetKind;
   targetIndex: number;
+  /** Espelha PlannedJob.diligentedPersonId — persistido nos skips também. */
+  diligentedPersonId?: string;
   reason: string;
   missingField: string;
   /** Structured fields that the user must fill to unblock this job */

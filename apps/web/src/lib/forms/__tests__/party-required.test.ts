@@ -5,11 +5,91 @@ import {
   getByPath,
   effectiveRequiredPaths,
   findMissingRequired,
+  findCertidaoRecommendations,
 } from "../party-required";
 
 // Helper: getValue sobre um objeto de valores do form.
 const reader = (values: Record<string, unknown>) => (p: string) =>
   getByPath(values, p);
+
+describe("effectiveRequiredPaths — expansão por parte (todas, não só índice 0)", () => {
+  it("expande vendedores.0.X para todos os índices existentes, com remap PJ", () => {
+    const get = reader({
+      vendedores: [{ tipo_pessoa: "fisica" }, { tipo_pessoa: "juridica" }],
+    });
+    const r = effectiveRequiredPaths(
+      ["vendedores", "vendedores.0.cpf", "vendedores.0.email"],
+      get,
+    );
+    expect(r).toContain("vendedores.0.cpf"); // PF índice 0
+    expect(r).toContain("vendedores.0.email");
+    expect(r).toContain("vendedores.1.cnpj"); // PJ índice 1: cpf→cnpj
+    expect(r).toContain("vendedores.1.email"); // e-mail vale p/ a PJ também
+    expect(r).not.toContain("vendedores.1.cpf"); // identidade remapeada
+  });
+
+  it("uma só parte → comportamento idêntico ao anterior (só índice 0)", () => {
+    const get = reader({ vendedores: [{ tipo_pessoa: "fisica" }] });
+    expect(effectiveRequiredPaths(["vendedores.0.email"], get)).toEqual([
+      "vendedores.0.email",
+    ]);
+  });
+
+  it("lista ausente → mantém a garantia do índice 0", () => {
+    expect(
+      effectiveRequiredPaths(["vendedores.0.email"], () => undefined),
+    ).toEqual(["vendedores.0.email"]);
+  });
+});
+
+describe("findCertidaoRecommendations (guarda híbrida, não-bloqueante)", () => {
+  it("PF com campos de certidão vazios → recomenda rg/nascimento/nome_mae/sexo", () => {
+    const get = reader({
+      vendedores: [{ tipo_pessoa: "fisica", nome: "Maria", cpf: "111" }],
+    });
+    const recs = findCertidaoRecommendations("vendedores", 1, get);
+    expect(recs.map((r) => r.field).sort()).toEqual([
+      "data_nascimento",
+      "nome_mae",
+      "rg",
+      "sexo",
+    ]);
+  });
+
+  it("PF com tudo preenchido → sem recomendações", () => {
+    const get = reader({
+      vendedores: [
+        {
+          tipo_pessoa: "fisica",
+          rg: "123",
+          data_nascimento: "1980-01-01",
+          nome_mae: "Joana",
+          sexo: "F",
+        },
+      ],
+    });
+    expect(findCertidaoRecommendations("vendedores", 1, get)).toEqual([]);
+  });
+
+  it("PJ é ignorada (campos PF-only não se aplicam)", () => {
+    const get = reader({
+      compradores: [{ tipo_pessoa: "juridica", razao_social: "ACME" }],
+    });
+    expect(findCertidaoRecommendations("compradores", 1, get)).toEqual([]);
+  });
+
+  it("múltiplas partes: agrupa por índice só as PF com faltas", () => {
+    const get = reader({
+      vendedores: [
+        { tipo_pessoa: "fisica", rg: "1", data_nascimento: "1980-01-01", nome_mae: "J", sexo: "M" },
+        { tipo_pessoa: "fisica", rg: "", data_nascimento: "", nome_mae: "", sexo: "" },
+      ],
+    });
+    const recs = findCertidaoRecommendations("vendedores", 2, get);
+    expect(recs.every((r) => r.idx === 1)).toBe(true);
+    expect(recs).toHaveLength(4);
+  });
+});
 
 describe("parsePartyPath", () => {
   it("quebra path de campo de parte", () => {

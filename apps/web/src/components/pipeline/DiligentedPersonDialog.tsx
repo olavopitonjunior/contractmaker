@@ -22,11 +22,20 @@ export interface DiligentedPersonInput {
   cpf?: string | null;
   cnpj?: string | null;
   dataNascimento?: string | null;
+  rg?: string | null;
+  nomeMae?: string | null;
+  sexo?: string | null;
   uf?: string | null;
   cidade?: string | null;
   relacao?: string | null;
   notes?: string | null;
 }
+
+const SEXO_OPTIONS = [
+  { value: "", label: "— Selecionar —" },
+  { value: "masculino", label: "Masculino" },
+  { value: "feminino", label: "Feminino" },
+];
 
 interface Props {
   dealId: string;
@@ -67,6 +76,9 @@ export function DiligentedPersonDialog({
   const [cpf, setCpf] = useState("");
   const [cnpj, setCnpj] = useState("");
   const [dataNascimento, setDataNascimento] = useState("");
+  const [rg, setRg] = useState("");
+  const [nomeMae, setNomeMae] = useState("");
+  const [sexo, setSexo] = useState("");
   const [uf, setUf] = useState("");
   const [cidade, setCidade] = useState("");
   const [relacao, setRelacao] = useState("socio");
@@ -79,6 +91,9 @@ export function DiligentedPersonDialog({
     setCpf("");
     setCnpj("");
     setDataNascimento("");
+    setRg("");
+    setNomeMae("");
+    setSexo("");
     setUf("");
     setCidade("");
     setRelacao("socio");
@@ -109,6 +124,9 @@ export function DiligentedPersonDialog({
           cpf: tipoPessoa === "fisica" ? cpf : null,
           cnpj: tipoPessoa === "juridica" ? cnpj : null,
           dataNascimento: dataNascimento || null,
+          rg: tipoPessoa === "fisica" ? rg.trim() || null : null,
+          nomeMae: tipoPessoa === "fisica" ? nomeMae.trim() || null : null,
+          sexo: tipoPessoa === "fisica" ? sexo || null : null,
           uf: uf && uf !== "OUTRO" ? uf : null,
           cidade: cidade.trim() || null,
           relacao: relacao || null,
@@ -179,13 +197,62 @@ export function DiligentedPersonDialog({
                 />
               </div>
               <div>
-                <Label className="text-xs">Data de nascimento (PGFN exige)</Label>
+                <Label className="text-xs">Data de nascimento</Label>
                 <Input
                   type="date"
                   value={dataNascimento}
                   onChange={(e) => setDataNascimento(e.target.value)}
                   className="h-9"
                 />
+                {!dataNascimento && (
+                  <p className="text-[10px] text-amber-600 mt-0.5">
+                    Necessária p/ Receita CPF, PGFN e antecedentes.
+                  </p>
+                )}
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label className="text-xs">RG</Label>
+                  <Input
+                    value={rg}
+                    onChange={(e) => setRg(e.target.value)}
+                    className="h-9"
+                    placeholder="00.000.000-0"
+                  />
+                  {!rg.trim() && (
+                    <p className="text-[10px] text-amber-600 mt-0.5">
+                      Sem RG, a Certidão de Distribuição do TJSP é pulada.
+                    </p>
+                  )}
+                </div>
+                <div>
+                  <Label className="text-xs">Sexo</Label>
+                  <NativeSelect
+                    value={sexo}
+                    onChange={setSexo}
+                    options={SEXO_OPTIONS}
+                    className="h-9"
+                  />
+                  {!sexo && (
+                    <p className="text-[10px] text-amber-600 mt-0.5">
+                      Exigido pelo TJSP (M/F).
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div>
+                <Label className="text-xs">Nome da mãe</Label>
+                <Input
+                  value={nomeMae}
+                  onChange={(e) => setNomeMae(e.target.value)}
+                  className="h-9"
+                  placeholder="Ex: Maria da Silva"
+                />
+                {!nomeMae.trim() && (
+                  <p className="text-[10px] text-amber-600 mt-0.5">
+                    Destrava antecedentes criminais (financiamento).
+                  </p>
+                )}
               </div>
             </>
           ) : (

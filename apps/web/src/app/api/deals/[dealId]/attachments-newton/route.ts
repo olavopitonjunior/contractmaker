@@ -128,6 +128,7 @@ export async function POST(
       mime,
       url: blobUrl,
       category: category ?? null,
+      byteSize: buffer.byteLength,
     },
   });
 

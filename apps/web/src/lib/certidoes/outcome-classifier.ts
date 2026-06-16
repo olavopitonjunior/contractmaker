@@ -28,6 +28,10 @@ import {
   isProtestoNadaConsta,
   isSemResultadoInformativo,
   isEmailThrottle,
+  isReceitaCertidaoNaoEmitida,
+  isPortalUnavailableMessage,
+  friendlySourceUnavailableMessage,
+  terminalizeRetryMessage,
 } from "./error-codes";
 
 export type RichStatus =
@@ -240,6 +244,33 @@ export function classifyOutcome(
     };
   }
 
+  // Receita Federal / PGFN "informações insuficientes para emitir a certidão
+  // pela Internet" (tipicamente 611): NÃO é erro nosso nem "nada consta" — é a
+  // RFB recusando a emissão ONLINE (situação cadastral/pendência). Tratar como
+  // NÃO-EMISSÃO terminal → portal oficial. Custo honesto (RFB cobra: respeita
+  // billable). Sem isto, caía em inconsistent_input → data_invalid ("corrija os
+  // dados"), enganoso pois não há dado nosso a corrigir. Decisão 2026-06-02.
+  if (
+    (info.id.includes("pgfn") || info.id.includes("receita")) &&
+    (isReceitaCertidaoNaoEmitida(effectiveErrorMessage) ||
+      isReceitaCertidaoNaoEmitida(resp.code_message))
+  ) {
+    return {
+      status: "failed_permanent",
+      errorMessage:
+        "A Receita Federal não emite esta certidão pela Internet para este contribuinte (situação cadastral ou pendência). Emita no portal oficial.",
+      // provedor/condição da fonte — não é bug nosso (integração) nem dado do
+      // form a corrigir (inconsistent_input). genuine_no_data fica no grupo
+      // "provedor" do FAILURE_GROUP; aqui só alimenta analytics (retornamos
+      // failed_permanent direto, sem passar pelo switch de categoria).
+      failureCategory: "genuine_no_data",
+      costCents: billable === false ? 0 : chargedCostCents,
+      nextRetryAt: null,
+      missingFields: [],
+      portalUrl,
+    };
+  }
+
   // Falhas (code !== 200) — rotear por categoria
   switch (category) {
     case "missing_input": {
@@ -295,14 +326,22 @@ export function classifyOutcome(
         portalUrl
       );
     }
-    case "portal_unavailable":
+    case "portal_unavailable": {
+      // 615 "site indisponível" / "API pausada / instabilidade na fonte": troca
+      // o texto técnico cru do provedor por uma mensagem clara de FONTE OFICIAL
+      // fora do ar (não erro de dado). Vale no transitório e no failed_permanent
+      // (planRetry reusa `message` ao esgotar retries).
+      const portalMsg = isPortalUnavailableMessage(effectiveErrorMessage)
+        ? friendlySourceUnavailableMessage(info.label)
+        : effectiveErrorMessage;
       return planRetry(
         "portal_unavailable",
-        effectiveErrorMessage,
+        portalMsg,
         "portal_unavailable",
         opts,
         portalUrl
       );
+    }
     case "provider_timeout":
       return planRetry(
         "api_error",
@@ -352,16 +391,42 @@ export function classifyOutcome(
           ? false
           : CATEGORIES_REQUIRING_PDF.has(info.category);
       if (requiresPdf && opts.attachmentId === null) {
+        // 600 "Um erro inesperado ocorreu" em endpoint que exige PDF (ex.: TRF5):
+        // é falha da fonte, não "nada consta". Mensagem clara de fonte indisponível.
         return planRetry(
           "portal_unavailable",
-          effectiveErrorMessage,
+          friendlySourceUnavailableMessage(info.label),
           "portal_unavailable",
           opts,
           portalUrl
         );
       }
-      // Endpoints informativos / sem PDF obrigatório seguem o fluxo antigo:
-      // 1 retry profilático, depois success negativa
+      // Endpoints informativos / sem PDF obrigatório: só fecham como negativa
+      // quando a resposta TRAZ evidência de ausência ("nada consta", "nenhum
+      // resultado", "não encontrado"). Code 600 "Um erro inesperado ocorreu"
+      // cai nesta categoria pelo CODE_MAP sem evidência nenhuma — fechar como
+      // success exibia "Negativa · nada consta" pra consulta que nunca rodou
+      // (E-Proc ×2, deal cmpypeb95, 2026-06-10). Sem evidência: retry com
+      // backoff até esgotar → failed_permanent honesto + CTA portal.
+      const noDataMsg = [protestoMsg, effectiveErrorMessage]
+        .filter(Boolean)
+        .join(" ");
+      const noDataEvidence =
+        isSemResultadoInformativo(noDataMsg) ||
+        /nada\s+consta|n[ãa]o\s+(foi\s+poss[ií]vel\s+)?encontr|nenhum\s+registro|n[ãa]o\s+h[áa]\s/i.test(
+          noDataMsg
+        );
+      if (!noDataEvidence) {
+        return planRetry(
+          "portal_unavailable",
+          friendlySourceUnavailableMessage(info.label),
+          "portal_unavailable",
+          opts,
+          portalUrl
+        );
+      }
+      // Evidência explícita de "nada consta": 1 retry profilático, depois
+      // success negativa (fluxo de antes, agora gated na evidência).
       if (opts.retryAttempts === 0) {
         return planRetry(
           "portal_unavailable",
@@ -414,8 +479,11 @@ function planRetry(
   if (!hasMore) {
     return {
       status: "failed_permanent",
+      // terminalizeRetryMessage: a mensagem amigável de instabilidade promete
+      // "Nova tentativa automática agendada" — falso aqui (estado terminal).
       errorMessage:
-        message ?? "Falhas consecutivas esgotaram as tentativas automáticas",
+        terminalizeRetryMessage(message) ??
+        "Falhas consecutivas esgotaram as tentativas automáticas",
       failureCategory:
         backoffKey === "api_error"
           ? "provider_timeout"

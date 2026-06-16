@@ -84,6 +84,12 @@ export function getByPath(obj: unknown, path: string): unknown {
  * Remapeia a lista de paths obrigatórios conforme o `tipo_pessoa` vivo de cada
  * parte. `getValue(path)` deve devolver o valor atual do form pra aquele path
  * (usado pra ler `<lista>.<idx>.tipo_pessoa`). Resultado é dedupado.
+ *
+ * 2026-06-03 — Expansão por parte: os presets declaram os campos no índice `.0.`
+ * (ex.: `vendedores.0.email`), mas a exigência vale para TODA parte titular —
+ * senão um 2º vendedor (ex.: a PJ co-vendedora) não tem e-mail/documento exigido
+ * e cai em `missing` só na hora de assinar. Paths de índice 0 são expandidos para
+ * todos os índices existentes da lista; cada índice ainda passa pelo remap PJ.
  */
 export function effectiveRequiredPaths(
   paths: readonly string[],
@@ -98,27 +104,44 @@ export function effectiveRequiredPaths(
     }
   };
 
+  // Aplica o remap PJ a UM (list, idx, field) e empurra o path resultante.
+  const pushPartyField = (
+    list: "vendedores" | "compradores",
+    idx: number,
+    field: string,
+  ) => {
+    const base = `${list}.${idx}.${field}`;
+    const isPJ = getValue(`${list}.${idx}.tipo_pessoa`) === "juridica";
+    if (!isPJ) return push(base);
+    // Campo aninhado de parte (ex.: conjuge.nome) — não remapeia, mantém.
+    if (field.includes(".")) return push(base);
+    // PF-only num PJ: simplesmente não é obrigatório.
+    if (PF_ONLY_PARTY_FIELDS.has(field)) return;
+    const remapped = PJ_IDENTITY_REMAP[field];
+    push(`${list}.${idx}.${remapped ?? field}`);
+  };
+
+  // Quantas partes existem na lista (≥1 mantém a garantia do índice 0 mesmo
+  // quando o array ainda não foi lido).
+  const partyCount = (list: string): number => {
+    const arr = getValue(list);
+    return Array.isArray(arr) && arr.length > 0 ? arr.length : 1;
+  };
+
   for (const path of paths) {
     const parsed = parsePartyPath(path);
     if (!parsed) {
       push(path);
       continue;
     }
-    const isPJ =
-      getValue(`${parsed.list}.${parsed.idx}.tipo_pessoa`) === "juridica";
-    if (!isPJ) {
-      push(path);
-      continue;
+    // Índice 0 do preset → expande para todas as partes existentes; índice
+    // explícito não-zero (raro) mantém só aquele.
+    if (parsed.idx === 0) {
+      const n = partyCount(parsed.list);
+      for (let i = 0; i < n; i++) pushPartyField(parsed.list, i, parsed.field);
+    } else {
+      pushPartyField(parsed.list, parsed.idx, parsed.field);
     }
-    // Campo aninhado de parte (ex.: conjuge.nome) — não remapeia, mantém.
-    if (parsed.field.includes(".")) {
-      push(path);
-      continue;
-    }
-    // PF-only num PJ: simplesmente não é obrigatório.
-    if (PF_ONLY_PARTY_FIELDS.has(parsed.field)) continue;
-    const remapped = PJ_IDENTITY_REMAP[parsed.field];
-    push(`${parsed.list}.${parsed.idx}.${remapped ?? parsed.field}`);
   }
   return out;
 }
@@ -134,4 +157,57 @@ export function findMissingRequired(
   return effectiveRequiredPaths(paths, getValue).filter((p) =>
     isValueEmpty(getValue(p)),
   );
+}
+
+// -------------------------------------------------------------------
+// Guarda HÍBRIDA de completude (2026-06-02): além da obrigatoriedade dura do
+// preset (que cobre o mínimo de assinatura — nome/cpf/email do titular), o
+// wizard mostra uma RECOMENDAÇÃO não-bloqueante destes campos PF, necessários
+// pras certidões. Sem eles, endpoints específicos falham ou viram SkippedJob:
+//   - rg   + sexo  → TJSP pedido-certidao (606 sem)
+//   - data_nascimento → TJSP / PGFN / Receita CPF
+//   - nome_mae → TJSP (alguns modelos, 606)
+// PJ não usa (campos PF-only — ver PF_ONLY_PARTY_FIELDS).
+// -------------------------------------------------------------------
+export const CERTIDAO_RECOMMENDED_PARTY_FIELDS = [
+  "rg",
+  "data_nascimento",
+  "nome_mae",
+  "sexo",
+] as const;
+
+export const CERTIDAO_FIELD_LABELS: Record<string, string> = {
+  rg: "RG",
+  data_nascimento: "Data de nascimento",
+  nome_mae: "Nome da mãe",
+  sexo: "Sexo",
+};
+
+export interface CertidaoRecommendation {
+  list: "vendedores" | "compradores";
+  idx: number;
+  field: string;
+}
+
+/**
+ * Recomendações (não-bloqueantes) de campos de certidão vazios para as partes
+ * PF de uma lista. PJ é ignorado. NÃO entra na obrigatoriedade do preset —
+ * alimenta apenas o aviso informativo do wizard.
+ */
+export function findCertidaoRecommendations(
+  list: "vendedores" | "compradores",
+  count: number,
+  getValue: (path: string) => unknown,
+): CertidaoRecommendation[] {
+  const out: CertidaoRecommendation[] = [];
+  for (let idx = 0; idx < count; idx++) {
+    const isPJ = getValue(`${list}.${idx}.tipo_pessoa`) === "juridica";
+    if (isPJ) continue;
+    for (const field of CERTIDAO_RECOMMENDED_PARTY_FIELDS) {
+      if (isValueEmpty(getValue(`${list}.${idx}.${field}`))) {
+        out.push({ list, idx, field });
+      }
+    }
+  }
+  return out;
 }

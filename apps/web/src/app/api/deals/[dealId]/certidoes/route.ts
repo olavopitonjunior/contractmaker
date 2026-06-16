@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import { planCertidoesForDeal } from "@/lib/certidoes/planner";
+import { planCertidoesForDeal, diligentedPersonToInput } from "@/lib/certidoes/planner";
 import { runBatch, getMonthlySpend, getMonthlySpendByProvider } from "@/lib/certidoes/executor";
 import { endpointInfo } from "@/lib/certidoes/endpoints";
+import { isInProgressBlocking } from "@/lib/certidoes/lifecycle";
 import { sanitizePayload } from "@/lib/certidoes/infosimples";
 import { sanitizeSerasaPayload } from "@/lib/serasa/sanitize";
 import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
@@ -133,26 +134,11 @@ export async function POST(
   }
   const { batchId, jobs: selectedJobs } = parsed.data;
 
-  // Idempotency guard: reject if there's already an active batch for this deal
-  // in the last 30 minutes. Prevents double-click double-charge.
-  const activeBatch = await prisma.certidaoJob.findFirst({
-    where: {
-      dealId: params.dealId,
-      status: { in: ["pending", "fetching"] },
-      createdAt: { gte: new Date(Date.now() - 30 * 60_000) },
-    },
-    select: { batchId: true },
-  });
-  if (activeBatch) {
-    return NextResponse.json(
-      {
-        error:
-          "Ja existe uma extracao em andamento para este negocio. Aguarde a conclusao ou use o botao de recuperar travadas.",
-        activeBatchId: activeBatch.batchId,
-      },
-      { status: 409 }
-    );
-  }
+  // A trava de "extração em andamento" passou a ser POR ALVO (endpoint+parte),
+  // não mais por deal inteiro — ver a partição toDispatch/skippedInProgress
+  // logo após montar effectiveJobs. Erro/instabilidade são retentáveis na hora;
+  // só o alvo genuinamente em andamento (pending/fetching recente ou
+  // awaiting_portal com protocolo) bloqueia um novo disparo do MESMO alvo.
 
   // Budget guard (per-org, per-provider). Verificamos ambos os budgets aqui
   // porque o batch pode misturar Infosimples e Serasa; cap separado evita que
@@ -175,16 +161,7 @@ export async function POST(
     where: { dealId: params.dealId },
     orderBy: { createdAt: "asc" },
   });
-  const diligenciados = diligenciadosRaw.map((d) => ({
-    id: d.id,
-    tipoPessoa: d.tipoPessoa as "fisica" | "juridica",
-    nome: d.nome,
-    cpf: d.cpf,
-    cnpj: d.cnpj,
-    dataNascimento: d.dataNascimento,
-    uf: d.uf,
-    cidade: d.cidade,
-  }));
+  const diligenciados = diligenciadosRaw.map(diligentedPersonToInput);
 
   // Phase F.II-γ — pre-flight GOV.BR (cached 5min) para decidir se endpoints
   // `requiresGovBrAuth` (CENPROT nacional) disparam ou viram SkippedJob.
@@ -214,6 +191,12 @@ export async function POST(
   // (endpoint, kind, index) triples and intersect.
   let effectiveJobs = plan.jobs;
   let effectiveSkipped = plan.skipped;
+  // Seleções pedidas que o planner atual não produz (endpoint depreciado/gated,
+  // ex.: ONR 602, CENPROT sem gov.br). Antes a rota recusava o LOTE INTEIRO com
+  // 400 quando havia qualquer unmatched — o que travava "Retentar erros"/"Só as
+  // que faltaram" sempre que sobrava 1 job velho. Agora despachamos o que casa e
+  // reportamos o resto como aviso. (2026-06-05)
+  let unmatchedSelections: NonNullable<typeof selectedJobs> = [];
   if (selectedJobs) {
     const requestedKeys = new Set(
       selectedJobs.map((s) => `${s.endpoint}|${s.targetKind}|${s.targetIndex}`)
@@ -225,32 +208,94 @@ export async function POST(
       requestedKeys.has(`${s.endpoint}|${s.targetKind}|${s.targetIndex}`)
     );
 
-    // Detect selections that matched neither a job nor a skipped — the user
-    // asked for something the planner cannot build (e.g. wrong target kind
-    // for the endpoint, or a PJ-only endpoint applied to a PF). Return 400
-    // with the specific unmatched tuples so the UI can surface per-row errors.
+    // Seleções que não casaram com NENHUM job nem skip do plano atual — o
+    // planner não consegue construí-las (endpoint depreciado/gated, target
+    // inválido). Não recusamos o lote: removemos do despacho e reportamos.
     const matchedKeys = new Set([
       ...effectiveJobs.map((j) => `${j.endpoint}|${j.targetKind}|${j.targetIndex}`),
       ...effectiveSkipped.map((s) => `${s.endpoint}|${s.targetKind}|${s.targetIndex}`),
     ]);
-    const unmatched = selectedJobs.filter(
+    unmatchedSelections = selectedJobs.filter(
       (s) => !matchedKeys.has(`${s.endpoint}|${s.targetKind}|${s.targetIndex}`)
     );
-    if (unmatched.length > 0) {
-      return NextResponse.json(
-        {
-          error: `${unmatched.length} seleção(ões) não podem ser extraídas (endpoint ou target inválido).`,
-          unmatched,
-        },
-        { status: 400 }
-      );
-    }
   }
 
+  // ---- Trava POR ALVO (substitui a antiga trava de deal inteiro) ----
+  // Equivalência TJSP: pedido-certidao e pedido-civel são o mesmo alvo lógico.
+  const TJSP_PEDIDO_GROUP = [
+    "tribunal/tjsp/pedido-certidao",
+    "tribunal/tjsp/pedido-civel",
+  ];
+  const supersedeEndpointsFor = (endpoint: string): string[] =>
+    TJSP_PEDIDO_GROUP.includes(endpoint) ? TJSP_PEDIDO_GROUP : [endpoint];
+
+  // Jobs candidatos a "em andamento" deste deal; isInProgressBlocking filtra
+  // pending/fetching recente e awaiting_portal saudável (com protocolo), sem
+  // travar zumbis nem estados terminais (erros são retentáveis).
+  const activeCandidates = await prisma.certidaoJob.findMany({
+    where: {
+      dealId: params.dealId,
+      status: { in: ["pending", "fetching", "awaiting_portal"] },
+    },
+    select: {
+      endpoint: true,
+      targetKind: true,
+      targetIndex: true,
+      diligentedPersonId: true,
+      status: true,
+      retryCount: true,
+      maxRetries: true,
+      createdAt: true,
+      resultData: true,
+    },
+  });
+  const inProgress = activeCandidates.filter((j) => isInProgressBlocking(j));
+  // Mesma âncora do supersede: diligenciado casa por personId (estável); demais
+  // por índice posicional. Sem isso, após uma remoção o índice deslizado podia
+  // travar a re-emissão da pessoa errada (job vivo de outra parte no mesmo índice).
+  const isTargetBlocked = (t: {
+    endpoint: string;
+    targetKind: string;
+    targetIndex: number;
+    diligentedPersonId?: string;
+  }) =>
+    inProgress.some((p) => {
+      if (!supersedeEndpointsFor(t.endpoint).includes(p.endpoint)) return false;
+      if (t.targetKind === "diligenciado" && t.diligentedPersonId) {
+        return p.targetKind === "diligenciado" && p.diligentedPersonId === t.diligentedPersonId;
+      }
+      return p.targetKind === t.targetKind && p.targetIndex === t.targetIndex;
+    });
+
+  // Pula (sem redisparar) os alvos genuinamente em andamento; despacha o resto.
+  const skippedInProgress = effectiveJobs.filter(isTargetBlocked).map((j) => ({
+    endpoint: j.endpoint,
+    targetKind: j.targetKind,
+    targetIndex: j.targetIndex,
+    label: j.label,
+  }));
+  effectiveJobs = effectiveJobs.filter((j) => !isTargetBlocked(j));
+
   if (effectiveJobs.length === 0 && effectiveSkipped.length === 0) {
+    // Nada a despachar. Se foi porque tudo selecionado já está em andamento,
+    // devolve 409 claro (não é erro do usuário — é só aguardar o tribunal).
+    if (skippedInProgress.length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            "As certidões selecionadas já estão em andamento (aguardando o tribunal). Aguarde a conclusão — não é preciso pedir de novo.",
+          skippedInProgress,
+        },
+        { status: 409 }
+      );
+    }
     return NextResponse.json(
       {
-        error: "Nenhuma certidao disponivel para extrair",
+        error:
+          unmatchedSelections.length > 0
+            ? "As certidões selecionadas não estão mais disponíveis no plano atual (endpoint indisponível). Atualize e tente de novo."
+            : "Nenhuma certidao disponivel para extrair",
+        unmatched: unmatchedSelections,
         plan,
       },
       { status: 400 }
@@ -325,24 +370,31 @@ export async function POST(
     "duplicate_pending",
     "replaced",
   ];
-  // Endpoints "equivalentes" para fins de supersede: a migração TJSP trocou
-  // `pedido-civel` (legado cível-only) por `pedido-certidao`. Um novo lote com
-  // pedido-certidao deve aposentar as linhas terminais antigas de pedido-civel
-  // do MESMO alvo (e vice-versa), senão deals legados acumulam 2 famílias de
-  // linhas TJSP. Para os demais endpoints, supersede só o próprio.
-  const TJSP_PEDIDO_GROUP = [
-    "tribunal/tjsp/pedido-certidao",
-    "tribunal/tjsp/pedido-civel",
-  ];
-  const supersedeEndpointsFor = (endpoint: string): string[] =>
-    TJSP_PEDIDO_GROUP.includes(endpoint) ? TJSP_PEDIDO_GROUP : [endpoint];
-
+  // `supersedeEndpointsFor`/`TJSP_PEDIDO_GROUP` definidos acima (partição por
+  // alvo). Reaproveitamos a mesma equivalência para o supersede: um novo lote
+  // com pedido-certidao aposenta as linhas terminais antigas de pedido-civel do
+  // MESMO alvo (e vice-versa), senão deals legados acumulam 2 famílias TJSP.
+  // Diligenciado é deduplicado/superseded por diligentedPersonId (âncora estável),
+  // não por targetIndex — assim a re-emissão não aposenta os jobs da pessoa errada
+  // quando os índices deslizaram por uma remoção anterior. Demais alvos seguem por
+  // targetIndex (vêm do form, estável).
   const supersedeTargets = [
     ...new Map(
-      [...effectiveJobs, ...effectiveSkipped].map((j) => [
-        `${j.endpoint}|${j.targetKind}|${j.targetIndex}`,
-        { endpoint: j.endpoint, targetKind: j.targetKind, targetIndex: j.targetIndex },
-      ])
+      [...effectiveJobs, ...effectiveSkipped].map((j) => {
+        const pid = j.targetKind === "diligenciado" ? j.diligentedPersonId ?? null : null;
+        const key = pid
+          ? `${j.endpoint}|diligenciado|pid:${pid}`
+          : `${j.endpoint}|${j.targetKind}|${j.targetIndex}`;
+        return [
+          key,
+          {
+            endpoint: j.endpoint,
+            targetKind: j.targetKind,
+            targetIndex: j.targetIndex,
+            diligentedPersonId: pid,
+          },
+        ];
+      })
     ).values(),
   ];
 
@@ -354,8 +406,10 @@ export async function POST(
         where: {
           dealId: params.dealId,
           endpoint: { in: supersedeEndpointsFor(t.endpoint) },
-          targetKind: t.targetKind,
-          targetIndex: t.targetIndex,
+          // Diligenciado com âncora → casa por pessoa; resto por índice posicional.
+          ...(t.diligentedPersonId
+            ? { targetKind: "diligenciado", diligentedPersonId: t.diligentedPersonId }
+            : { targetKind: t.targetKind, targetIndex: t.targetIndex }),
           status: { in: TERMINAL_REPLACEABLE },
         },
         data: { status: "replaced" },
@@ -381,6 +435,7 @@ export async function POST(
           label: p.label,
           targetKind: p.targetKind,
           targetIndex: p.targetIndex,
+          diligentedPersonId: p.diligentedPersonId ?? null,
           requestPayload: sanitized as object,
           status: info.initialStatus ?? "pending",
           costCents: null,
@@ -408,6 +463,7 @@ export async function POST(
           label: s.label,
           targetKind: s.targetKind,
           targetIndex: s.targetIndex,
+          diligentedPersonId: s.diligentedPersonId ?? null,
           requestPayload: {
             missingField: s.missingField,
             missingFields: s.missingFields,
@@ -464,6 +520,12 @@ export async function POST(
       batchId,
       jobCount: effectiveJobs.length,
       skipped: effectiveSkipped,
+      // Alvos não redisparados por já estarem em andamento (UI mostra
+      // "X disparadas · Y aguardando o tribunal" em vez de erro global).
+      skippedInProgress,
+      // Seleções que o planner atual não constrói (endpoint depreciado/gated) —
+      // ignoradas, não rejeitam o lote.
+      unmatched: unmatchedSelections,
       totalCostCents,
     },
     { status: 202 }
