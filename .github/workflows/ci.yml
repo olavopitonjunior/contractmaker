@@ -23,8 +23,14 @@ jobs:
     # mas `prisma generate`/`validate` e a instanciação do client preferem ver a var.
     env:
       DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
+      # O datasource declara `directUrl = env("DIRECT_URL")`; sem essa var o
+      # `prisma validate` falha com P1012. Dummy, igual ao DATABASE_URL.
+      DIRECT_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
       ANTHROPIC_API_KEY: test-key
       AUTH_SECRET: test-secret
+      # tsc --noEmit estoura a heap padrão (~2GB) neste projeto no runner.
+      # Espelha staging-ci.yml.
+      NODE_OPTIONS: --max-old-space-size=4096
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { BrandWordmark } from "@/components/layout/brand-mark";
-import { MODULE, FEATURE, isValidModule } from "@/lib/modules/catalog";
+import { FEATURE, isValidModule } from "@/lib/modules/catalog";
 import {
   LayoutDashboard,
   BookOpen,
@@ -85,9 +85,9 @@ const NAV: NavEntry[] = [
     kind: "group",
     title: "ADM Locação",
     icon: Building2,
-    // Grupo inteiro só aparece se a org tem o módulo locação habilitado;
-    // cada sub-item é filtrado pela respectiva sub-função.
-    requires: MODULE.LOCACAO,
+    // Grupo inteiro gateado pela sub-função "locacao.adm" (false quando o módulo
+    // locação está desabilitado); cada sub-item é filtrado pela respectiva sub-função.
+    requires: FEATURE.LOCACAO_ADM,
     items: [
       { title: "Dashboard", url: "/locacao", exact: true },
       { title: "Imóveis", url: "/locacao/imoveis" },
@@ -115,6 +115,7 @@ const NAV: NavEntry[] = [
     kind: "group",
     title: "Financeiro",
     icon: Wallet,
+    requires: FEATURE.VENDAS_PAGADORIA,
     items: [
       { title: "Cobranças", url: "/financeiro/cobrancas" },
       { title: "Clientes", url: "/financeiro/clientes" },
