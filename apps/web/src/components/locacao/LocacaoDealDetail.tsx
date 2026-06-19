@@ -25,6 +25,7 @@ import { DealProgressTimeline } from "@/components/pipeline/DealProgressTimeline
 import { LostDealBanner } from "@/components/pipeline/LostDealBanner";
 import { Field } from "@/components/locacao/lease-detail/LeaseSection";
 import { SegurosTab, type PolicyView } from "@/components/locacao/lease-detail/SegurosTab";
+import type { FiancaConsolidado } from "@/components/locacao/lease-detail/FiancaComparativoCard";
 import {
   GarantiasTab,
   type GuaranteeView,
@@ -433,6 +434,11 @@ export function LocacaoDealDetail({
               leaseContractId={lease.id}
               valorAluguel={lease.valorAluguel}
               policies={lease.insurancePolicies}
+              fiancaConsolidado={
+                lease.guarantee?.tipo === "seguro_fianca"
+                  ? (lease.guarantee.dadosJson as FiancaConsolidado | null)
+                  : null
+              }
             />
           ) : (
             <SemLeaseCard />

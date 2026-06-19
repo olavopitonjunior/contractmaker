@@ -1593,4 +1593,99 @@ export const tools: Tool[] = [
       return r.body;
     },
   },
+
+  // ───────────── Seguros / fiança (locação) ─────────────
+  {
+    name: "record_insurance_quote",
+    description:
+      "Registra no ImobPro o resultado de seguro de um contrato de locação. ramo='incendio' grava/atualiza a cotação (InsurancePolicy, status 'cotacao'); ramo='fianca' grava a fiança consolidada (Guarantee = fonte-da-verdade, com o comparativo SegurosJá+Alpop em consolidado). Idempotente por externalRef. Precisa do leaseContractId (use get_deal_insurance/get_deal).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        leaseContractId: { type: "string" },
+        ramo: { type: "string", enum: ["incendio", "fianca"] },
+        seguradora: { type: "string", description: "(incendio) nome da seguradora." },
+        provider: { type: "string", description: "(fianca) fonte escolhida (ex: SegurosJá / Alpop)." },
+        status: { type: "string", description: "Status do ramo (incendio: cotacao|ativa|...; fianca: em_analise|aprovada|...)." },
+        premioMensal: { type: "number" },
+        coberturaMeses: { type: "number", description: "(fianca) meses de cobertura." },
+        coberturaJson: { type: "object", description: "(incendio) coberturas/tiers.", additionalProperties: true },
+        consolidado: { type: "object", description: "(fianca) comparativo consolidado SegurosJá+Alpop.", additionalProperties: true },
+        custoJson: { type: "object", description: "(fianca) custo da opção escolhida.", additionalProperties: true },
+        vigenciaInicio: { type: "string", description: "(incendio) ISO date." },
+        vigenciaFim: { type: "string", description: "(incendio) ISO date." },
+        responsavelPagamento: { type: "string", enum: ["imobiliaria", "locatario", "proprietario"] },
+        externalRef: { type: "string", description: "Id da cotação/análise na fonte (idempotência)." },
+      },
+      required: ["dealId", "leaseContractId", "ramo"],
+    },
+    handler: async (args) => {
+      const dealId = String(args.dealId);
+      const { dealId: _omit, ...body } = args as Record<string, unknown>;
+      const r = await callApi({
+        method: "POST",
+        path: `/api/locacao/deals/${encodeURIComponent(dealId)}/insurance-newton`,
+        body,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "get_deal_insurance",
+    description:
+      "Lê os seguros de um contrato de locação: apólices (incêndio/conteúdo) + a garantia de fiança (Guarantee) com o comparativo consolidado. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        leaseContractId: { type: "string" },
+      },
+      required: ["dealId", "leaseContractId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/locacao/deals/${encodeURIComponent(String(args.dealId))}/insurance-newton`,
+        query: { leaseContractId: args.leaseContractId as string },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "record_credit_analysis",
+    description:
+      "Grava no ImobPro a análise de crédito de um pretendente (CreditAnalysis) — veredito do underwriting consolidado SegurosJá/Alpop (Serasa fora de escopo). Uma por pretendente; o veredito de nível-deal é o pior caso entre os pretendentes. Idempotente por (tenant, deal).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string", description: "Deal de locação (contexto + leaseDealId)." },
+        tenantId: { type: "string", description: "Id do pretendente (Tenant) no ImobPro." },
+        status: {
+          type: "string",
+          enum: ["pendente", "aprovado", "aprovado_com_garantia", "analise_manual", "recusado"],
+        },
+        decisionJson: { type: "object", description: "Comparativo consolidado SegurosJá+Alpop.", additionalProperties: true },
+        scoreInterno: { type: "number" },
+        externalRef: { type: "string" },
+      },
+      required: ["dealId", "tenantId", "status"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/locacao/deals/${encodeURIComponent(String(args.dealId))}/insurance-newton`,
+        body: {
+          ramo: "credito",
+          tenantId: args.tenantId,
+          leaseDealId: args.dealId,
+          status: args.status,
+          decisionJson: args.decisionJson,
+          scoreInterno: args.scoreInterno,
+          externalRef: args.externalRef,
+        },
+      });
+      return r.body;
+    },
+  },
 ];
