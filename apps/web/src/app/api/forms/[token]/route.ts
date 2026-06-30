@@ -129,6 +129,27 @@ export async function PATCH(
     });
   }
 
+  // Audita o finalize (paridade com locação, que já emite FORM_UPDATE). Persiste
+  // os validationIssues em metadata — antes só viviam na resposta efêmera e no
+  // console.warn, sumindo quando o cliente fechava a aba. Best-effort.
+  if (isFinalizing) {
+    audit(
+      extractAuditContextFromRequest(req, form.orgId, null),
+      {
+        action: "FORM_UPDATE",
+        result: validationIssues.length > 0 ? "FAILURE" : "SUCCESS",
+        resource: form.id,
+        resourceType: "SalesForm",
+        metadata: {
+          event: "finalize",
+          schemaType: form.schemaType,
+          validationIssueCount: validationIssues.length,
+          validationIssues: validationIssues.slice(0, 50),
+        },
+      },
+    );
+  }
+
   // Auto-generate contract when form is completed
   let contractId: string | null = null;
   let dealId: string | null = null;
@@ -213,6 +234,7 @@ export async function PATCH(
                 // do fallback heurístico cego de resolveKind(category).
                 extractedData:
                   (a.extractedData as Prisma.InputJsonValue) ?? undefined,
+                contentHash: a.contentHash ?? undefined,
               })),
             });
           }

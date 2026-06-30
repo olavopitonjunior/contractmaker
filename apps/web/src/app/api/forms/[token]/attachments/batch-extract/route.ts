@@ -23,7 +23,7 @@ import {
   humanizeOcrError,
   type BatchItem,
 } from "@/lib/ai/ocr";
-import { extractFirstPages } from "@/lib/ai/pdf-utils";
+import { extractFirstPages, OCR_MAX_PAGES } from "@/lib/ai/pdf-utils";
 
 export const runtime = "nodejs";
 // Batch calls can take longer than single — 3 docs × ~30s Gemini + retry buffer.
@@ -197,7 +197,7 @@ export async function POST(
       }
       // Trim multi-page PDFs to first 2 pages to save tokens
       if (att.mime === "application/pdf") {
-        const trimmed = await extractFirstPages(buffer, 2);
+        const trimmed = await extractFirstPages(buffer, OCR_MAX_PAGES);
         if (trimmed.trimmed) buffer = trimmed.buffer;
       }
       prepared.push({

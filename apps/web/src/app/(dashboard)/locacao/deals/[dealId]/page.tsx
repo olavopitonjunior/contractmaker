@@ -141,6 +141,7 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
         dataJson: (deal.form?.dataJson as Record<string, unknown>) ?? {},
         lostAt: deal.lostAt?.toISOString() ?? null,
         lostReason: deal.lostReason ?? null,
+        archivedAt: deal.archivedAt?.toISOString() ?? null,
         formOpenedAt: deal.form?.createdAt?.toISOString() ?? null,
         formCompletedAt: deal.form?.completedAt?.toISOString() ?? null,
         contractSignedAt:

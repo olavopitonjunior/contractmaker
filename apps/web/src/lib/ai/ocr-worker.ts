@@ -6,7 +6,7 @@ import {
   prevalidateForOcr,
 } from "@/lib/ai/ocr";
 import { isRateLimitError } from "@/lib/ai/ocr";
-import { extractFirstPages } from "@/lib/ai/pdf-utils";
+import { extractFirstPages, OCR_MAX_PAGES } from "@/lib/ai/pdf-utils";
 import { downloadBufferFromUrl } from "@/lib/storage/s3";
 
 function sleep(ms: number): Promise<void> {
@@ -249,7 +249,7 @@ export async function processOcrQueue(
         return;
       }
       if (att.mime === "application/pdf") {
-        const trimmed = await extractFirstPages(buffer, 2);
+        const trimmed = await extractFirstPages(buffer, OCR_MAX_PAGES);
         if (trimmed.trimmed) buffer = trimmed.buffer;
       }
 

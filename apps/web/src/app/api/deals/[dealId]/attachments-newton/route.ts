@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { z } from "zod";
-import { put } from "@vercel/blob";
+import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { prisma } from "@/lib/db/prisma";
 import {
   requireApiAuth,
@@ -71,14 +71,6 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!blobToken) {
-    return NextResponse.json(
-      { error: "BLOB_READ_WRITE_TOKEN não configurado" },
-      { status: 503 }
-    );
-  }
-
   // Decodifica base64 → Buffer
   const cleaned = base64Data.replace(/^data:[^;]+;base64,/, "");
   let buffer: Buffer;
@@ -97,22 +89,42 @@ export async function POST(
     );
   }
 
-  // SHA-256 só pra metadata de audit (DealAttachment não tem cache pre-warm
-  // como FormAttachment — FormAttachment.contentHash existe, DealAttachment
-  // não. OCR fluxo separado — ver pipeline F.I-α em /lib/ai/ocr-worker.ts).
+  // SHA-256 persistido (dedupe por conteúdo) + metadata de audit.
   const contentHash = createHash("sha256").update(buffer).digest("hex");
 
+  // Dedupe por conteúdo: mesmo arquivo reenviado pro mesmo deal não duplica
+  // linha nem reuploada. Idempotente (Newton pode reenviar em retry).
+  const existing = await prisma.dealAttachment.findFirst({
+    where: { dealId: deal.id, contentHash },
+  });
+  if (existing) {
+    return NextResponse.json(
+      {
+        id: existing.id,
+        filename: existing.filename,
+        mime: existing.mime,
+        url: existing.url,
+        category: existing.category,
+        createdAt: existing.createdAt,
+        deduped: true,
+      },
+      { status: 200 }
+    );
+  }
+
   const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const pathname = `deal-attachments/${deal.id}/${Date.now()}-${safeName}`;
+  // Path scheme + STAGING_MODE/normalizeKey via helper compartilhado (antes
+  // chamava put() direto, ignorando o prefixo staging/ e divergindo dos demais).
+  const key = `deal-attachments/${deal.id}/${Date.now()}-${safeName}`;
 
   let blobUrl: string;
   try {
-    const blob = await put(pathname, buffer, {
-      access: "public",
+    blobUrl = await uploadBufferToStorage({
+      bucket: process.env.S3_BUCKET,
+      key,
+      body: buffer,
       contentType: mime,
-      token: blobToken,
     });
-    blobUrl = blob.url;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
@@ -129,6 +141,7 @@ export async function POST(
       url: blobUrl,
       category: category ?? null,
       byteSize: buffer.byteLength,
+      contentHash,
     },
   });
 

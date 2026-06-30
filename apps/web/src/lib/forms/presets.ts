@@ -188,6 +188,72 @@ export function resolveAllRequiredFields(
   );
 }
 
+// -------------------------------------------------------------------
+// Allowlist de paths obrigatóveis (validação de `customRequiredPaths`).
+//
+// Um path órfão (campo renomeado, typo do admin) era silenciosamente ignorado
+// por extractCustomPathsForStep → virava "obrigatoriedade fantasma" que nunca
+// dispara. A rota PATCH /api/org/form-settings valida cada path contra esta
+// lista e recusa os desconhecidos. Índices de array são normalizados pra `0`.
+//
+// Acoplado ao schema Zod de validation.ts — renomear um campo lá exige atualizar
+// aqui (mesmo princípio dos presets). Coberto por presets.test.ts.
+// -------------------------------------------------------------------
+
+// Campos escalares de uma parte (vendedor/comprador), formas PF + PJ.
+const PARTY_FIELDS = [
+  "nome", "razao_social", "cnpj", "cpf", "rg", "data_nascimento", "nome_mae",
+  "sexo", "estado_civil", "profissao", "nacionalidade", "email", "mobile_phone",
+  "endereco", "numero", "complemento", "bairro", "cidade", "uf", "cep",
+] as const;
+
+// Sub-pessoas da parte e seus campos requereáveis.
+const PARTY_SUB_FIELDS = ["nome", "cpf", "rg", "data_nascimento", "nome_mae", "sexo", "email", "mobile_phone"] as const;
+const PARTY_SUBS = ["conjuge", "procurador", "representante"] as const;
+
+const IMOVEL_FIELDS = [
+  "rua", "numero", "complemento", "bairro", "cidade", "uf", "cep",
+  "matricula", "cartorio", "inscricao_iptu", "sql", "inscricao_municipal", "descricao",
+] as const;
+
+function buildKnownFormPaths(): Set<string> {
+  const s = new Set<string>();
+  for (const list of ["vendedores", "compradores"] as const) {
+    s.add(list); // path "guarda-chuva" usado pelos presets
+    for (const f of PARTY_FIELDS) s.add(`${list}.0.${f}`);
+    for (const sub of PARTY_SUBS) {
+      for (const f of PARTY_SUB_FIELDS) s.add(`${list}.0.${sub}.${f}`);
+    }
+  }
+  for (const f of IMOVEL_FIELDS) s.add(`imoveis.0.${f}`);
+  for (const f of [
+    "valor_total", "sinal_arras", "recursos_proprios", "fgts", "cessao_consorcio",
+    "alienacao_fiduciaria", "outras_formas", "meio_pagamento", "banco_financiamento",
+  ]) {
+    s.add(`pagamento.${f}`);
+  }
+  for (const f of ["valor", "imobiliaria_nome", "imobiliaria_cnpj", "imobiliaria_email", "creci", "percentual"]) {
+    s.add(`comissao.${f}`);
+  }
+  for (const f of ["modalidade", "status_propriedade", "ocupacao", "foro"]) s.add(f);
+  return s;
+}
+
+const KNOWN_FORM_PATHS = buildKnownFormPaths();
+
+/** Normaliza segmentos numéricos (índices de array) para `0`. */
+function normalizeFormPath(path: string): string {
+  return path
+    .split(".")
+    .map((seg) => (/^\d+$/.test(seg) ? "0" : seg))
+    .join(".");
+}
+
+/** True se o path é um campo conhecido e obrigatóvel do form de venda. */
+export function isKnownFormPath(path: string): boolean {
+  return KNOWN_FORM_PATHS.has(normalizeFormPath(path));
+}
+
 function extractCustomPathsForStep(
   raw: unknown,
   stepIndex: number,

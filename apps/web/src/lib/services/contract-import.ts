@@ -4,7 +4,7 @@ import {
   uploadFileAsGoogleDoc,
   type ImportableMime,
 } from "@/lib/google/upload-file-as-gdoc";
-import { exportDocAsHtml } from "@/lib/google/docs";
+import { exportDocAsHtml, exportDocAsPdf } from "@/lib/google/docs";
 import { watchFile } from "@/lib/google/watch";
 import { shareDocWithOrgMembers } from "@/lib/google/share-org";
 import { extractCcvDataJson } from "@/lib/extraction/ccv-extractor";
@@ -126,13 +126,31 @@ export async function importContractFromFile(
 
   // 4. Extração Gemini (best-effort — falha vira {}). Locação usa o extractor
   //    próprio, que também detecta a finalidade (residencial/comercial).
+  //
+  //    DOCX → PDF antes de extrair: o Gemini suporta DOCX (inlineData) de forma
+  //    irregular e costuma devolver {} silencioso. Como o doc já virou GDoc
+  //    nativo acima, exportamos como PDF (drive.files.export) e extraímos do PDF.
+  //    Falha de export cai pro buffer original (não pior que antes).
+  const DOCX_MIME =
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  let extractionBuffer = input.buffer;
+  let extractionMime: ImportableMime = input.sourceMime;
+  if (input.sourceMime === DOCX_MIME) {
+    try {
+      extractionBuffer = await exportDocAsPdf(uploaded.docId);
+      extractionMime = "application/pdf";
+    } catch (err) {
+      console.error("[contract-import] export DOCX→PDF falhou, usando buffer original:", err);
+    }
+  }
+
   const kind = input.kind ?? "venda";
   let extracted: Record<string, unknown>;
   let locacaoSchemaType: string | null = null;
   if (kind === "locacao") {
     const result = await extractLocacaoContractDataJson(
-      input.buffer,
-      input.sourceMime,
+      extractionBuffer,
+      extractionMime,
       { orgId: input.orgId, userId: input.userId, contractId: null }
     );
     extracted = result.dataJson;
@@ -141,7 +159,7 @@ export async function importContractFromFile(
         ? LOCACAO_COMERCIAL_SCHEMA_TYPE
         : LOCACAO_SCHEMA_TYPE;
   } else {
-    extracted = await extractCcvDataJson(input.buffer, input.sourceMime, {
+    extracted = await extractCcvDataJson(extractionBuffer, extractionMime, {
       orgId: input.orgId,
       userId: input.userId,
       contractId: null,

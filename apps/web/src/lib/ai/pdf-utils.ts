@@ -1,6 +1,15 @@
 import { PDFDocument } from "pdf-lib";
 
 /**
+ * Máximo de páginas enviadas ao Gemini por PDF no OCR. Era fixo em 2 —
+ * agressivo demais p/ matrícula/escritura/procuração (ônus, qualificação e
+ * regime de bens passam da pág. 2). extractFirstPages só trima docs MAIORES que
+ * o limite, então RG/CPF/CNH (1-2 págs) ficam intactos: elevar o teto afeta só
+ * os docs longos que perdiam dados. Cap por env p/ limitar custo de tokens.
+ */
+export const OCR_MAX_PAGES = Number(process.env.OCR_MAX_PAGES ?? "6");
+
+/**
  * Extract only the first N pages of a PDF buffer. Used to reduce token
  * consumption when sending multi-page PDFs (procurações, escrituras) to
  * Gemini — most critical data is on the first 1-2 pages.

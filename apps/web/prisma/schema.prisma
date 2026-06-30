@@ -491,6 +491,11 @@ model Deal {
   // quando o batch inclui endpoints Serasa. Json em vez de model dedicado
   // pra evitar over-engineering — se virar 5+ tipos de consentimento, migrar.
   complianceJson   Json?
+  // Arquivamento explícito (2026-06-30): tira o deal do kanban sem perdê-lo
+  // nem apagar documentos. Paridade com os models de locação que já têm
+  // archivedAt. Independente de stage terminal — o operador arquiva quando
+  // quer "tirar da frente" (perdido/pago ou qualquer outro). null = ativo.
+  archivedAt       DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -511,6 +516,8 @@ model Deal {
 
   // Lead que originou (se veio de conversão Lead -> Deal)
   fromLead Lead?
+
+  @@index([pipelineId, archivedAt])
 }
 
 // Lead — pré-Deal. Newton acumula docs/notes/conversa antes de virar negocio
@@ -574,11 +581,19 @@ model DealAttachment {
   // Tamanho do arquivo em bytes — preenchido no upload daqui pra frente (forward
   // only). Anexos antigos ficam null. Alimenta as métricas de storage por tenant.
   byteSize      Int?
+  // SHA-256 do conteúdo — dedupe por conteúdo (não só por URL exata). Paridade
+  // com LeadAttachment. Forward-only: anexos antigos ficam null (dedupe cai pra
+  // url). Sem @@unique dura — a dedupe é no código (evita 500 em corrida/legado).
+  contentHash   String?
   createdAt     DateTime @default(now())
 
   deal         Deal          @relation(fields: [dealId], references: [id], onDelete: Cascade)
   certidaoJobs CertidaoJob[]
   envelopes    Envelope[]
+
+  @@index([dealId])
+  @@index([dealId, category])
+  @@index([contentHash])
 }
 
 model CertidaoJob {
