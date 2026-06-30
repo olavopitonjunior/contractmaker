@@ -15,6 +15,13 @@
 
 ## Bugs Ativos
 
+### [ALTA] "Falha no upload" ao anexar documentos na pasta do deal (limite 4.5MB da Vercel)
+- **Status:** corrigido no codigo (pendente deploy) — branch worktree-melhorias-ocr-storage-obrigatoriedade
+- **Encontrado em:** 2026-06-30
+- **Descricao:** Anexar documento na aba Documentos do deal falhava com toast generico "<arquivo>: falha no upload" para arquivos medios/grandes. O `AddDocumentsCard` lia o arquivo como base64 (`readAsDataURL`) e enviava dentro de JSON pro `POST /api/deals/[dealId]/attachments-newton` (cap 10MB no cliente). Base64 infla ~33%, entao arquivos a partir de ~3.3MB geram corpo de request > 4.5MB — o limite FIXO de corpo de funcao serverless da Vercel (nao configuravel por next.config/maxDuration). A plataforma rejeita com 413 FUNCTION_PAYLOAD_TOO_LARGE ANTES do handler rodar; a resposta nao e JSON, entao `res.json()` falha e cai no toast generico. Mesma classe do arquivo de 3.9MB do incidente de negocios duplicados (grande demais tanto no import quanto no anexo). Logs da Vercel nao mostram esses POSTs (rejeicao pre-funcao).
+- **Impacto:** ALTO — impossivel anexar PDFs/imagens escaneadas comuns (> ~3.3MB) na pasta do deal.
+- **Solucao:** Upload client-direct pro Vercel Blob (`@vercel/blob/client` `upload()` + rota de handshake `/attachments/blob-upload` com auth/cross-org) — o navegador sobe direto pro Blob, contornando o limite de 4.5MB. Depois `/attachments/finalize` registra o DealAttachment (body so metadados; buffer baixado server-side pra contentHash/dedupe; valida que a URL pertence ao prefixo `deal-attachments/<dealId>/` do Blob). Logica de create+audit+OCR extraida pra `lib/deals/attachments.ts`, compartilhada com o `attachments-newton` (base64, mantido pro Newton Bearer).
+
 ### [ALTA] Negocios duplicados no import de contrato (timeout deixa orfaos + retry recria)
 - **Status:** corrigido no codigo (pendente deploy + migracao) — branch worktree-melhorias-ocr-storage-obrigatoriedade
 - **Encontrado em:** 2026-06-30 (3x "Cod 19503 Igor Imene (PG)" criados 17:39/17:42/17:43)

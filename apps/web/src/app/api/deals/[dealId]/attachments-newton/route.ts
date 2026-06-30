@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHash } from "crypto";
 import { z } from "zod";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { prisma } from "@/lib/db/prisma";
@@ -8,8 +7,13 @@ import {
   isAuthFailure,
   authFailureResponse,
 } from "@/lib/api/require-auth";
-import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
+import {
+  computeContentHash,
+  findDealAttachmentByHash,
+  persistDealDocument,
+} from "@/lib/deals/attachments";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -89,14 +93,10 @@ export async function POST(
     );
   }
 
-  // SHA-256 persistido (dedupe por conteúdo) + metadata de audit.
-  const contentHash = createHash("sha256").update(buffer).digest("hex");
-
-  // Dedupe por conteúdo: mesmo arquivo reenviado pro mesmo deal não duplica
-  // linha nem reuploada. Idempotente (Newton pode reenviar em retry).
-  const existing = await prisma.dealAttachment.findFirst({
-    where: { dealId: deal.id, contentHash },
-  });
+  // Dedupe pré-upload: mesmo arquivo reenviado pro mesmo deal não re-sobe ao
+  // storage nem duplica linha (Newton pode reenviar em retry).
+  const contentHash = computeContentHash(buffer);
+  const existing = await findDealAttachmentByHash(deal.id, contentHash);
   if (existing) {
     return NextResponse.json(
       {
@@ -133,46 +133,22 @@ export async function POST(
     );
   }
 
-  const attachment = await prisma.dealAttachment.create({
-    data: {
-      dealId: deal.id,
-      filename,
-      mime,
-      url: blobUrl,
-      category: category ?? null,
-      byteSize: buffer.byteLength,
-      contentHash,
-    },
+  // Persistência compartilhada (create + audit + OCR de certidão).
+  const { attachment } = await persistDealDocument({
+    dealId: deal.id,
+    buffer,
+    url: blobUrl,
+    filename,
+    mime,
+    category: category ?? null,
+    source: "manual",
+    auditCtx: extractAuditContextFromRequest(
+      req,
+      apiAuth.org.id,
+      apiAuth.actor.effectiveUserId
+    ),
+    auditMetadata: mergeAuditMetadata({}, apiAuth.actor),
   });
-
-  await audit(
-    extractAuditContextFromRequest(req, apiAuth.org.id, apiAuth.actor.effectiveUserId),
-    {
-      action: "ATTACHMENT_UPLOAD",
-      result: "SUCCESS",
-      resource: attachment.id,
-      resourceType: "DealAttachment",
-      metadata: mergeAuditMetadata(
-        { dealId: deal.id, mime, bytes: buffer.length, contentHash },
-        apiAuth.actor
-      ),
-    }
-  );
-
-  // F4 iteração 2026-05-17 — quando a category é certidão ou matrícula anexada,
-  // dispara análise fire-and-forget: OCR estruturado → CertidaoJobLite sintético
-  // → crossCheckCertidoes → ContractComment por finding. Não bloqueia o response.
-  if (
-    attachment.category &&
-    (attachment.category.startsWith("certidao_") || attachment.category === "matricula_anexada")
-  ) {
-    void import("@/lib/services/manual-certidao-analysis").then(
-      ({ analyzeManualCertidaoForDeal }) =>
-        analyzeManualCertidaoForDeal(deal.id, attachment.id).catch((err) => {
-          console.error("[attachments-newton] analyzeManualCertidaoForDeal falhou:", err);
-        })
-    );
-  }
 
   return NextResponse.json(
     {
