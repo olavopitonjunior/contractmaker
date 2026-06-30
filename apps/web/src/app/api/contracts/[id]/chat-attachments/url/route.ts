@@ -6,6 +6,7 @@ import {
   isAuthFailure,
   authFailureResponse,
 } from "@/lib/api/require-auth";
+import { isPrivateHost, safeFetch, SsrfBlockedError } from "@/lib/security/ssrf";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -18,26 +19,6 @@ const schema = z.object({
 const TEXT_CAP = 20_000;
 const MAX_BYTES = 2 * 1024 * 1024; // 2 MB
 const FETCH_TIMEOUT_MS = 10_000;
-
-// SSRF guard — bloqueia ranges privados/loopback/link-local.
-function isPrivateHost(hostname: string): boolean {
-  const h = hostname.toLowerCase();
-  if (h === "localhost" || h.endsWith(".localhost")) return true;
-  // IPv6 loopback / ULA
-  if (h === "::1" || h.startsWith("fc") || h.startsWith("fd")) return true;
-  // IPv4 ranges
-  const m = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (m) {
-    const [, a, b] = m.map(Number);
-    if (a === 10) return true;
-    if (a === 127) return true;
-    if (a === 169 && b === 254) return true;
-    if (a === 172 && b >= 16 && b <= 31) return true;
-    if (a === 192 && b === 168) return true;
-    if (a === 0) return true;
-  }
-  return false;
-}
 
 /**
  * Converte HTML em texto plano de forma minimalista — sem JSDOM/Readability
@@ -124,9 +105,10 @@ export async function POST(
   const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
   let response: Response;
   try {
-    response = await fetch(url, {
+    // safeFetch revalida o host a cada redirect (antes `redirect: "follow"`
+    // deixava um 301 → IMDS furar o guard de host inicial).
+    response = await safeFetch(url, {
       signal: ctrl.signal,
-      redirect: "follow",
       headers: {
         "User-Agent": "ContractmakerBot/1.0 (+https://imobpro.ia.br)",
         Accept: "text/html,application/xhtml+xml,*/*;q=0.5",
@@ -134,6 +116,12 @@ export async function POST(
     });
   } catch (err) {
     clearTimeout(timer);
+    if (err instanceof SsrfBlockedError) {
+      return NextResponse.json(
+        { error: "Host privado/interno bloqueado" },
+        { status: 400 }
+      );
+    }
     return NextResponse.json(
       {
         error:

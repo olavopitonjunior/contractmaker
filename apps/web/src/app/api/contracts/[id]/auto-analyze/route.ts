@@ -24,9 +24,17 @@ export async function POST(
   // devolvemos resposta vazia 200 e o frontend para de chamar.
   const contract = await prisma.contract.findUnique({
     where: { id: params.id },
-    select: { status: true },
+    select: {
+      status: true,
+      deal: { select: { pipeline: { select: { orgId: true } } } },
+    },
   });
-  if (contract?.status === "aprovado") {
+  // Cross-org guard: sem isso qualquer sessão dispara análise passiva (custo
+  // LLM + leitura de conteúdo) em contrato de outra org.
+  if (!contract || contract.deal.pipeline.orgId !== org.id) {
+    return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
+  }
+  if (contract.status === "aprovado") {
     return NextResponse.json({
       findings: [],
       commentsCreated: 0,

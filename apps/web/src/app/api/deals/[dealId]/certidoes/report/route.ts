@@ -28,6 +28,8 @@ export async function POST(
     where: { id: params.dealId },
     include: {
       form: { select: { orgId: true, dataJson: true } },
+      // org via pipeline (form pode ser null em deal formless — IDOR)
+      pipeline: { select: { orgId: true } },
       // Exclui tentativas substituídas (replaced) — o relatório mostra só a
       // tentativa viva de cada alvo, igual à lista consolidada da UI.
       certidaoJobs: {
@@ -37,7 +39,7 @@ export async function POST(
     },
   });
   if (!deal) return NextResponse.json({ error: "Deal not found" }, { status: 404 });
-  if (deal.form && deal.form.orgId !== org.id) {
+  if (deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   if (deal.certidaoJobs.length === 0) {

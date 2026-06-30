@@ -27,10 +27,12 @@ async function authorizeDeal(dealId: string) {
     where: { id: dealId },
     include: {
       form: { select: { orgId: true, dataJson: true } },
+      // org via pipeline (form pode ser null em deal formless — IDOR)
+      pipeline: { select: { orgId: true } },
     },
   });
   if (!deal) return { error: "Deal not found", status: 404 as const };
-  if (deal.form && deal.form.orgId !== org.id) {
+  if (deal.pipeline.orgId !== org.id) {
     return { error: "Forbidden", status: 403 as const };
   }
   return {

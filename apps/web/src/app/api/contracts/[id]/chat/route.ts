@@ -28,8 +28,15 @@ export async function POST(
 
   const contract = await prisma.contract.findUnique({
     where: { id: params.id },
+    include: { deal: { include: { pipeline: { select: { orgId: true } } } } },
   });
   if (!contract) {
+    return NextResponse.json({ error: "Contract not found" }, { status: 404 });
+  }
+
+  // Cross-org guard (vale pra session E bearer): o agente IA lê PII e muta o
+  // doc — antes só bearer era checado, então sessão de outra org tinha IDOR.
+  if (contract.deal.pipeline.orgId !== auth.org.id) {
     return NextResponse.json({ error: "Contract not found" }, { status: 404 });
   }
 

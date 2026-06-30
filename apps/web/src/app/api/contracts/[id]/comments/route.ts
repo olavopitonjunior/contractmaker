@@ -16,6 +16,16 @@ export async function GET(
   const auth = await requireApiAuth(req, { scope: "contracts:rw" });
   if (isAuthFailure(auth)) return authFailureResponse(auth);
 
+  // Cross-org guard: antes o GET listava comentários (análise jurídica, notas
+  // de negociação) de qualquer contrato por ID, sem checar org.
+  const owner = await prisma.contract.findUnique({
+    where: { id: params.id },
+    select: { deal: { select: { pipeline: { select: { orgId: true } } } } },
+  });
+  if (!owner || owner.deal.pipeline.orgId !== auth.org.id) {
+    return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
+  }
+
   const url = new URL(req.url);
   const includeResolved = url.searchParams.get("includeResolved") === "true";
 
@@ -48,11 +58,18 @@ export async function POST(
     return NextResponse.json({ error: "text e selectedText são obrigatórios" }, { status: 400 });
   }
 
-  const contract = await prisma.contract.findUnique({ where: { id: params.id } });
+  const contract = await prisma.contract.findUnique({
+    where: { id: params.id },
+    include: { deal: { select: { pipeline: { select: { orgId: true } } } } },
+  });
   if (!contract) {
     return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
   }
-  // Cross-user guard via Bearer
+  // Cross-org guard (session E bearer): antes só bearer checava dono.
+  if (contract.deal.pipeline.orgId !== auth.org.id) {
+    return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
+  }
+  // Cross-user guard adicional via Bearer
   if (auth.ident.via === "bearer" && contract.userId !== auth.ident.userId) {
     return NextResponse.json(
       { error: "Forbidden", reason: "not the contract owner" },

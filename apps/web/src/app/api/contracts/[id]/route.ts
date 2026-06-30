@@ -41,16 +41,20 @@ export async function PATCH(
   const contract = await prisma.contract.findUnique({
     where: { id: params.id },
     include: {
-      deal: { include: { form: { select: { orgId: true } } } },
+      deal: {
+        include: {
+          form: { select: { orgId: true } },
+          // org via pipeline (form pode ser null em deal formless — IDOR)
+          pipeline: { select: { orgId: true } },
+        },
+      },
     },
   });
   if (!contract) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  if (
-    contract.deal?.form &&
-    contract.deal.form.orgId !== org.id
-  ) {
+  // Deny-by-default: deal/pipeline ausente ou de outra org → 403.
+  if (contract.deal?.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   if (contract.status === "aprovado") {

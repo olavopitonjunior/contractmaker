@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authOrBearer, hasScope } from "@/lib/auth/auth-or-bearer";
+import {
+  requireApiAuth,
+  isAuthFailure,
+  authFailureResponse,
+} from "@/lib/api/require-auth";
 import { prisma } from "@/lib/db/prisma";
 
 /**
@@ -34,16 +38,9 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const ident = await authOrBearer(req);
-  if (!ident) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  if (!hasScope(ident, "contracts:rw")) {
-    return NextResponse.json(
-      { error: "Forbidden", reason: "missing scope contracts:rw" },
-      { status: 403 }
-    );
-  }
+  const auth = await requireApiAuth(req, { scope: "contracts:rw" });
+  if (isAuthFailure(auth)) return authFailureResponse(auth);
+  const ident = auth.ident;
 
   const contract = await prisma.contract.findUnique({
     where: { id: params.id },
@@ -56,6 +53,7 @@ export async function GET(
       updatedAt: true,
       userId: true,
       googleDocId: true,
+      deal: { select: { pipeline: { select: { orgId: true } } } },
       envelopes: {
         orderBy: { createdAt: "desc" },
         take: 1,
@@ -72,8 +70,14 @@ export async function GET(
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
 
-  // Cross-user guard para Bearer: usuário só vê contratos próprios via
-  // bearer token. Session já é guarded por org no fluxo padrão.
+  // Cross-org guard (session E bearer): antes só bearer era checado por dono,
+  // então qualquer sessão de outra org lia o sumário (nomes das partes, valor,
+  // status de assinatura, URL do GDoc) de qualquer contrato.
+  if (contract.deal.pipeline.orgId !== auth.org.id) {
+    return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  // Cross-user guard adicional para Bearer: usuário só vê contratos próprios.
   if (ident.via === "bearer" && contract.userId !== ident.userId) {
     return NextResponse.json(
       { error: "Forbidden", reason: "not the contract owner" },

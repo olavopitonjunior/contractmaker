@@ -9,6 +9,7 @@ import {
 } from "./envelopes";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-signed";
+import { safeFetch } from "@/lib/security/ssrf";
 
 /**
  * Reconcilia o estado de UM envelope com a ClickSign v3 — fonte canônica de
@@ -309,7 +310,9 @@ function extractSignedUrl(resp: unknown): string | null {
 
 async function downloadSignedPdf(envelopeId: string, url: string) {
   try {
-    const res = await fetch(url);
+    // SSRF guard: a URL vem do payload/da API ClickSign. safeFetch revalida o
+    // host (e cada redirect) pra impedir fetch de IMDS/rede interna.
+    const res = await safeFetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
     const stored = await uploadBufferToStorage({

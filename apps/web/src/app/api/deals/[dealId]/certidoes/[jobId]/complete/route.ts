@@ -56,7 +56,11 @@ export async function POST(
     where: { id: params.jobId },
     include: {
       deal: {
-        include: { form: { select: { id: true, orgId: true, dataJson: true } } },
+        include: {
+          form: { select: { id: true, orgId: true, dataJson: true } },
+          // org via pipeline (form pode ser null em deal formless — IDOR)
+          pipeline: { select: { orgId: true } },
+        },
       },
     },
   });
@@ -66,7 +70,7 @@ export async function POST(
   // TypeScript-friendly alias — after the null check above, TS still widens
   // job.deal to nullable on deep access. Capture once as non-null.
   const jobDeal = job.deal;
-  if (jobDeal.form && jobDeal.form.orgId !== org.id) {
+  if (jobDeal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   // Accept: (a) skipped jobs (missing data), (b) success/failed jobs whose
