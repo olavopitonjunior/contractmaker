@@ -15,6 +15,13 @@
 
 ## Bugs Ativos
 
+### [ALTA] Negocios duplicados no import de contrato (timeout deixa orfaos + retry recria)
+- **Status:** corrigido no codigo (pendente deploy + migracao) — branch worktree-melhorias-ocr-storage-obrigatoriedade
+- **Encontrado em:** 2026-06-30 (3x "Cod 19503 Igor Imene (PG)" criados 17:39/17:42/17:43)
+- **Descricao:** No cadastro rapido com upload (`/api/deals/import-contract`), um PDF de ~3.9MB gerou 3 deals identicos em ~4min. So o 3o tinha Contract; os 2 primeiros eram orfaos (Deal+SalesForm+anexo `contrato_original` sem Contract e sem audit `CONTRACT_IMPORT`). O import bem-sucedido levou 59s, colado no `maxDuration=60`. Causa-raiz: `importContractFromFile` (upload Drive + conversao + Gemini) estoura o timeout de 60s em PDFs grandes; a funcao serverless e morta no meio (o `catch` de limpeza nem roda), deixando orfaos. O operador re-sobe o mesmo arquivo achando que falhou, e cada retry cria um deal novo (sem dedup por conteudo).
+- **Impacto:** ALTO — negocios duplicados na esteira; confusao + retrabalho; orfaos sem contrato poluindo o kanban.
+- **Solucao:** (A) `maxDuration` 60->300 nas duas rotas de import (venda + locacao). (B) Dedup por `contentHash` (SHA-256 do arquivo): retry do mesmo arquivo devolve o deal ja importado (idempotente) ou REUSA o orfao de um import que estourou, em vez de criar outro negocio. Pendente: script de limpeza dos 2 orfaos legados em prod (deals `cmr0xphwf...` e `cmr0xm0w9...`).
+
 ### [ALTA] Certidoes duplicadas no download (ZIP) e na pasta do deal
 - **Status:** em progresso (correcao de raiz implementada; pendente deploy + script de limpeza + QA)
 - **Encontrado em:** 2026-06-03 (reincidente)
