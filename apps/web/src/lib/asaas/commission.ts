@@ -335,14 +335,22 @@ export function composeSplits(params: {
   for (const entry of params.customSplits ?? []) {
     const pct = entry.percentualValue ?? 0;
     const fx = entry.fixedValue ?? 0;
+    const ref =
+      entry.recipientType === "asaas_wallet"
+        ? entry.walletId
+        : entry.pixAddressKey;
     if (pct <= 0 && fx <= 0) {
-      const ref =
-        entry.recipientType === "asaas_wallet"
-          ? entry.walletId
-          : entry.pixAddressKey;
       throw new CommissionBuildError(
         "SPLIT_EMPTY_VALUE",
         `Entry de split para ${ref} precisa ter percentualValue > 0 ou fixedValue > 0`
+      );
+    }
+    // percentual + fixed juntos: o cap de 100% só soma percentual, então um
+    // entry com os dois escaparia o teto. Asaas tb não documenta o comportamento.
+    if (pct > 0 && fx > 0) {
+      throw new CommissionBuildError(
+        "SPLIT_MIXED_VALUE",
+        `Entry de split para ${ref} deve usar percentualValue OU fixedValue, não os dois`
       );
     }
 

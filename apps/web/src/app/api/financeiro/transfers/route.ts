@@ -301,6 +301,22 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Claim atômico ANTES de tocar a Asaas: marca executedAt num updateMany com
+  // guard de estado. Sem isso, dois POSTs concorrentes com o mesmo approvalId
+  // passavam o read de executedAt e ambos debitavam de verdade (double-spend).
+  if (approvalId) {
+    const claimed = await prisma.dualApproval.updateMany({
+      where: { id: approvalId, executedAt: null, status: "APPROVED" },
+      data: { executedAt: new Date() },
+    });
+    if (claimed.count === 0) {
+      return NextResponse.json(
+        { error: "APPROVAL_ALREADY_EXECUTED" },
+        { status: 409 }
+      );
+    }
+  }
+
   // Execute transfer
   const { apiKey } = await getAccountWithApiKey(account.id);
 
@@ -352,13 +368,7 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // Mark approval executed
-    if (approvalId) {
-      await prisma.dualApproval.update({
-        where: { id: approvalId },
-        data: { executedAt: new Date() },
-      });
-    }
+    // executedAt já foi marcado no claim atômico acima.
 
     await audit(
       { orgId: ctx.orgId, userId: ctx.userId, ipAddress: ctx.ipAddress, userAgent: ctx.userAgent },
@@ -399,6 +409,18 @@ export async function POST(req: NextRequest) {
         },
       }
     );
+    // Rollback do claim SÓ quando a Asaas rejeitou de forma definitiva (4xx) —
+    // aí nenhum dinheiro se moveu, então liberar o approval pra retry é seguro.
+    // Em erro de rede/ambíguo, NÃO liberamos: melhor um approval preso (resolve
+    // manual) do que arriscar double-spend num retry.
+    if (approvalId && err instanceof AsaasError) {
+      await prisma.dualApproval
+        .updateMany({
+          where: { id: approvalId },
+          data: { executedAt: null },
+        })
+        .catch(() => {});
+    }
     if (err instanceof AsaasError) {
       return NextResponse.json(
         { error: "ASAAS_ERROR", details: err.errors },

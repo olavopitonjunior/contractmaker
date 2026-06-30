@@ -110,14 +110,23 @@ export async function resolveDualApproval(params: {
     return { ok: false, reason: "PAYLOAD_TAMPERED" };
   }
 
-  const updated = await prisma.dualApproval.update({
-    where: { id: approval.id },
+  // Claim atômico do resolve (guard status=PENDING). Dois aprovadores
+  // concorrentes: só um vence; o outro recebe ALREADY_RESOLVED em vez de
+  // sobrescrever o approverId (audit perdia quem realmente agiu).
+  const claimed = await prisma.dualApproval.updateMany({
+    where: { id: approval.id, status: "PENDING" },
     data: {
       status: params.resolution,
       approverId: params.approverId,
       approvalNote: params.note ?? null,
       resolvedAt: new Date(),
     },
+  });
+  if (claimed.count === 0) {
+    return { ok: false, reason: "ALREADY_RESOLVED" };
+  }
+  const updated = await prisma.dualApproval.findUnique({
+    where: { id: approval.id },
   });
   return { ok: true, approval: updated };
 }

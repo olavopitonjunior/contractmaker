@@ -329,6 +329,16 @@ export async function retryFailedTransfer(transferId: string): Promise<{
   }
   const { apiKey } = await getAccountWithApiKey(resolvedAccountId);
 
+  // Claim atômico FAILED → PENDING_DISPATCH antes da Asaas. Dois retries
+  // concorrentes do mesmo transfer enviavam 2 PIX (ambos liam status=FAILED).
+  const claimed = await prisma.asaasTransfer.updateMany({
+    where: { id: transfer.id, status: "FAILED" },
+    data: { status: "PENDING_DISPATCH", failureReason: null },
+  });
+  if (claimed.count === 0) {
+    return { ok: false, reason: "Já está em retry ou não está mais em FAILED" };
+  }
+
   try {
     const asaas = await createTransfer({
       input: {
@@ -363,9 +373,11 @@ export async function retryFailedTransfer(transferId: string): Promise<{
         : err instanceof Error
           ? err.message
           : "Erro desconhecido";
+    // Volta pra FAILED (estava em PENDING_DISPATCH pelo claim) pra permitir
+    // novo retry.
     await prisma.asaasTransfer.update({
       where: { id: transfer.id },
-      data: { failureReason: reason.slice(0, 1000) },
+      data: { status: "FAILED", failureReason: reason.slice(0, 1000) },
     });
     return { ok: false, reason };
   }
