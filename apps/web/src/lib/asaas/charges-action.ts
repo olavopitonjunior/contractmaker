@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
 import { audit } from "@/lib/security/audit";
 import { AsaasError } from "@/lib/asaas/errors";
@@ -416,11 +417,13 @@ export async function runCreateCommissionCharge(
     }
 
     // Régua: notifica owner do deal (e admins/comissionados conforme settings)
-    void notifyChargeEvent({
-      chargeId: charge.id,
-      event: "created",
-      orgId: input.orgId,
-    });
+    waitUntil(
+      notifyChargeEvent({
+        chargeId: charge.id,
+        event: "created",
+        orgId: input.orgId,
+      })
+    );
 
     return {
       status: 200,

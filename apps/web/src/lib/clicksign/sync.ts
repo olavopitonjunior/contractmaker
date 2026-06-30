@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
 import {
   getEnvelope,
@@ -109,7 +110,7 @@ export async function syncEnvelopeState(
       data: { status: "closed", closedAt: new Date() },
     });
     const signedUrl = await resolveSignedUrl(envelope.clicksignId, envResp);
-    if (signedUrl) void downloadSignedPdf(envelope.id, signedUrl);
+    if (signedUrl) waitUntil(downloadSignedPdf(envelope.id, signedUrl));
     envelopeUpdated = true;
     const promote = await autoPromoteDealOnContractSigned(envelope.id);
     dealStagePromoted = promote.promoted;

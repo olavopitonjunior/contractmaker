@@ -130,15 +130,17 @@ export async function POST(
     },
   });
 
-  void audit(
-    { orgId: org.id, userId: session.user.id },
-    {
-      action: "SERASA_VINCULOS_EXPAND",
-      result: "SUCCESS",
-      resource: params.dealId,
-      resourceType: "Deal",
-      metadata: { batchId, jobId: job.id, cpf: cpf.slice(0, 3) + "...." },
-    }
+  waitUntil(
+    audit(
+      { orgId: org.id, userId: session.user.id },
+      {
+        action: "SERASA_VINCULOS_EXPAND",
+        result: "SUCCESS",
+        resource: params.dealId,
+        resourceType: "Deal",
+        metadata: { batchId, jobId: job.id, cpf: cpf.slice(0, 3) + "...." },
+      }
+    )
   );
 
   // Fire-and-forget — UI faz polling do batchId via GET /certidoes.

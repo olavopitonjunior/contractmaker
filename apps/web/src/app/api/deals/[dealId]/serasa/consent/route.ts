@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { z } from "zod";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
@@ -78,15 +79,17 @@ export async function POST(
     },
   });
 
-  void audit(
-    { orgId: org.id, userId },
-    {
-      action: "SERASA_CONSENT_GIVEN",
-      result: "SUCCESS",
-      resource: params.dealId,
-      resourceType: "Deal",
-      metadata: { baseLegal },
-    }
+  waitUntil(
+    audit(
+      { orgId: org.id, userId },
+      {
+        action: "SERASA_CONSENT_GIVEN",
+        result: "SUCCESS",
+        resource: params.dealId,
+        resourceType: "Deal",
+        metadata: { baseLegal },
+      }
+    )
   );
 
   return NextResponse.json({ ok: true, consent });
@@ -112,15 +115,17 @@ export async function DELETE(
         Object.keys(rest).length > 0 ? (rest as Record<string, never>) : undefined,
     },
   });
-  void audit(
-    { orgId: org.id, userId },
-    {
-      action: "SERASA_CONSENT_GIVEN",
-      result: "DENIED",
-      resource: params.dealId,
-      resourceType: "Deal",
-      metadata: { action: "revoked" },
-    }
+  waitUntil(
+    audit(
+      { orgId: org.id, userId },
+      {
+        action: "SERASA_CONSENT_GIVEN",
+        result: "DENIED",
+        resource: params.dealId,
+        resourceType: "Deal",
+        metadata: { action: "revoked" },
+      }
+    )
   );
   return NextResponse.json({ ok: true });
 }

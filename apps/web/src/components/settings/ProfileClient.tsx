@@ -242,7 +242,9 @@ function AddressCard({ initial }: { initial: ProfileInitial }) {
       if (!neighborhood) setNeighborhood(data.bairro ?? "");
       if (!city) setCity(data.localidade ?? "");
       if (!state) setState((data.uf ?? "").toUpperCase());
-    } catch {}
+    } catch (e) {
+      console.warn("[ProfileClient] falha no lookup de CEP", e);
+    }
   }
 
   async function handleSubmit() {

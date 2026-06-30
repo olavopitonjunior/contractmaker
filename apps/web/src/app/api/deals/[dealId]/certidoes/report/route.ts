@@ -144,8 +144,11 @@ export async function POST(
       { status: 500 }
     );
   } finally {
+    // Cleanup best-effort do arquivo temporário (pode já não existir).
     try {
       fs.unlinkSync(tempPath);
-    } catch {}
+    } catch (e) {
+      console.warn("[certidoes/report] falha ao remover temp", e);
+    }
   }
 }

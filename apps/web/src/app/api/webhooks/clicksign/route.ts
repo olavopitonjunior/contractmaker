@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { Prisma } from "@prisma/client";
 import crypto from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
@@ -238,9 +239,9 @@ export async function POST(req: NextRequest) {
       // /api/v3/envelopes/{id}/documents (canônico v3).
       const fromPayload = getSignedDocumentUrlFromPayload(payload);
       if (fromPayload) {
-        void downloadSignedPdf(envelope.id, fromPayload);
+        waitUntil(downloadSignedPdf(envelope.id, fromPayload));
       } else if (envelope.clicksignId) {
-        void resolveAndDownload(envelope.id, envelope.clicksignId);
+        waitUntil(resolveAndDownload(envelope.id, envelope.clicksignId));
       }
       break;
     }

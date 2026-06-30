@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
 import { triggerNewtonForRequest } from "@/lib/newton/trigger";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
@@ -78,17 +79,19 @@ export async function GET(req: NextRequest) {
   });
 
   for (const r of candidates) {
-    void triggerNewtonForRequest({
-      dealId: r.dealId,
-      requestId: r.id,
-      ask: r.ask,
-      targetType: r.targetType,
-      targetRef: r.targetRef,
-      targetLabel: r.targetLabel,
-      // "open" nunca foi cobrado (trigger imediato falhou) → 1ª cobrança;
-      // demais já estão em andamento → re-cobrança.
-      kind: r.status === "open" ? "create" : "remind",
-    });
+    waitUntil(
+      triggerNewtonForRequest({
+        dealId: r.dealId,
+        requestId: r.id,
+        ask: r.ask,
+        targetType: r.targetType,
+        targetRef: r.targetRef,
+        targetLabel: r.targetLabel,
+        // "open" nunca foi cobrado (trigger imediato falhou) → 1ª cobrança;
+        // demais já estão em andamento → re-cobrança.
+        kind: r.status === "open" ? "create" : "remind",
+      })
+    );
   }
 
   return NextResponse.json({ swept: candidates.length, hour });

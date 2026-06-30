@@ -1,3 +1,4 @@
+import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
 import { renderContratoHTML } from "@/lib/render/handlebars";
 import { isGoogleDocsFeatureEnabled } from "@/lib/google/client";
@@ -1032,27 +1033,35 @@ export async function generateContractForDeal(
   // não bloqueia retorno do contrato. Vai pra ContractComment como
   // findings ancorados, severity error/warning. Usuário vê os warnings
   // ao abrir o contrato.
-  void analyzeCertidoesForContract(contract.id, deal.id, orgId).catch((err) => {
-    console.error("[contract-generation] analyzeCertidoesForContract falhou:", err);
-  });
+  // waitUntil: essas análises gateiam o /approve (criam ContractComment
+  // severity=error). `void` após o response era cancelado na Vercel.
+  waitUntil(
+    analyzeCertidoesForContract(contract.id, deal.id, orgId).catch((err) => {
+      console.error("[contract-generation] analyzeCertidoesForContract falhou:", err);
+    })
+  );
 
   // A0.3 — Gate de qualidade de render. Roda o linter determinístico sobre o
   // HTML recém-renderizado e materializa findings como ContractComment. Severity
   // "error" (ex.: local/data em branco, {{var}} não preenchida) é contada pelo
   // /approve e BLOQUEIA a aprovação; "warning" só sinaliza. O agente pode
   // autocorrigir via "Resolver com IA".
-  void analyzeRenderQualityForContract(contract.id, htmlContent).catch((err) => {
-    console.error("[contract-generation] analyzeRenderQualityForContract falhou:", err);
-  });
+  waitUntil(
+    analyzeRenderQualityForContract(contract.id, htmlContent).catch((err) => {
+      console.error("[contract-generation] analyzeRenderQualityForContract falhou:", err);
+    })
+  );
 
   // FU2/FU5 — Gate de validade de DADOS críticos. O finalize do form é
   // leniente (gera rascunho mesmo com lacunas), mas lacunas LEGAIS críticas
   // (cônjuge sem CPF/nome quando a parte é casada) viram ContractComment
   // severity="error" → bloqueiam /approve. Mantém o rascunho navegável mas
   // impede que um contrato juridicamente inválido seja aprovado/enviado.
-  void analyzeContractDataValidity(contract.id, dataJson).catch((err) => {
-    console.error("[contract-generation] analyzeContractDataValidity falhou:", err);
-  });
+  waitUntil(
+    analyzeContractDataValidity(contract.id, dataJson).catch((err) => {
+      console.error("[contract-generation] analyzeContractDataValidity falhou:", err);
+    })
+  );
 
   return { contractId: contract.id, version: contract.version, googleDocUrl };
 }
@@ -1311,9 +1320,11 @@ export async function generateLocacaoContractForDeal(
   });
 
   // Render linter (genérico) — materializa findings como ContractComment.
-  void analyzeRenderQualityForContract(contract.id, htmlContent).catch((err) => {
-    console.error("[locacao-generation] analyzeRenderQualityForContract falhou:", err);
-  });
+  waitUntil(
+    analyzeRenderQualityForContract(contract.id, htmlContent).catch((err) => {
+      console.error("[locacao-generation] analyzeRenderQualityForContract falhou:", err);
+    })
+  );
 
   return { contractId: contract.id, version: contract.version, googleDocUrl };
 }

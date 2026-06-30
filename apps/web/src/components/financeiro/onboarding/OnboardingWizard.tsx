@@ -573,7 +573,9 @@ function DataStep({
       update("address", c.logradouro ?? "");
       update("province", c.bairro ?? "");
       // Não há cidade/UF no schema Asaas — só bairro.
-    } catch {}
+    } catch (e) {
+      console.warn("[OnboardingWizard] falha no lookup de CEP", e);
+    }
   }
 
   async function handleSubmit() {

@@ -492,19 +492,21 @@ export async function POST(
     const serasaCount = effectiveJobs.filter(
       (j) => endpointInfo(j.endpoint).provider === "serasa"
     ).length;
-    void audit(
-      { orgId: org.id, userId },
-      {
-        action: "SERASA_QUERY_DISPATCH",
-        result: "SUCCESS",
-        resource: params.dealId,
-        resourceType: "Deal",
-        metadata: {
-          batchId,
-          serasaJobs: serasaCount,
-          serasaCostCents,
-        },
-      }
+    waitUntil(
+      audit(
+        { orgId: org.id, userId },
+        {
+          action: "SERASA_QUERY_DISPATCH",
+          result: "SUCCESS",
+          resource: params.dealId,
+          resourceType: "Deal",
+          metadata: {
+            batchId,
+            serasaJobs: serasaCount,
+            serasaCostCents,
+          },
+        }
+      )
     );
   }
 
