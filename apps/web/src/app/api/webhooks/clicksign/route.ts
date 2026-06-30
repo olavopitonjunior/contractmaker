@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { Prisma } from "@prisma/client";
 import crypto from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
@@ -15,6 +16,7 @@ import {
 import { listEnvelopeDocuments } from "@/lib/clicksign/envelopes";
 import type { WebhookPayload } from "@/lib/clicksign/types";
 import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-signed";
+import { safeFetch } from "@/lib/security/ssrf";
 
 export const runtime = "nodejs";
 
@@ -73,7 +75,29 @@ export async function POST(req: NextRequest) {
     }
   ).catch(() => {});
 
-  if (secret) {
+  // Fail-closed: sem secret configurado, NÃO processa (antes o bloco HMAC era
+  // pulado e qualquer POST forjava um `close` → auto-promoção de deal + SSRF
+  // no downloadSignedPdf). Espelha o webhook Asaas, que já rejeita sem token.
+  if (!secret) {
+    console.error(
+      "[clicksign webhook] CLICKSIGN_WEBHOOK_SECRET não configurado — rejeitando request"
+    );
+    await audit(
+      { orgId: null, userId: null },
+      {
+        action: "CLICKSIGN_WEBHOOK_REJECTED",
+        result: "DENIED",
+        resourceType: "Webhook",
+        metadata: { reason: "secret not configured", bodyHash },
+      }
+    ).catch(() => {});
+    return NextResponse.json(
+      { error: "Webhook não configurado" },
+      { status: 503 }
+    );
+  }
+
+  {
     const sigHeader =
       req.headers.get("content-hmac") ||
       req.headers.get("x-clicksign-signature") ||
@@ -215,9 +239,9 @@ export async function POST(req: NextRequest) {
       // /api/v3/envelopes/{id}/documents (canônico v3).
       const fromPayload = getSignedDocumentUrlFromPayload(payload);
       if (fromPayload) {
-        void downloadSignedPdf(envelope.id, fromPayload);
+        waitUntil(downloadSignedPdf(envelope.id, fromPayload));
       } else if (envelope.clicksignId) {
-        void resolveAndDownload(envelope.id, envelope.clicksignId);
+        waitUntil(resolveAndDownload(envelope.id, envelope.clicksignId));
       }
       break;
     }
@@ -273,7 +297,9 @@ async function resolveAndDownload(envelopeId: string, clicksignId: string) {
 
 async function downloadSignedPdf(envelopeId: string, url: string) {
   try {
-    const res = await fetch(url);
+    // SSRF guard: `url` vem do payload do webhook. safeFetch revalida o host
+    // (e cada redirect) — sem isso um payload forjava fetch de IMDS/rede interna.
+    const res = await safeFetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
     const stored = await uploadBufferToStorage({

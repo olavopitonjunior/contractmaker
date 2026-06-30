@@ -13,12 +13,16 @@
     "prisma:migrate": "prisma migrate dev",
     "typecheck": "tsc --noEmit",
     "prisma:seed": "ts-node --compiler-options {\"module\":\"CommonJS\"} prisma/seed.ts",
+    "seed:locacao-clauses": "tsx scripts/seed-locacao-clauses.ts",
     "db:reset": "prisma migrate reset --force",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:isolation": "vitest run --config vitest.isolation.config.ts",
-    "gen:openapi": "tsx scripts/generate-openapi.ts"
+    "gen:openapi": "tsx scripts/generate-openapi.ts",
+    "e2e:cy:open": "cypress open",
+    "e2e:cy": "cypress run",
+    "e2e:cy:record": "cypress run --record"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.30.0",
@@ -99,6 +103,7 @@
     "@types/react-dom": "^18.3.0",
     "@vitejs/plugin-react": "^6.0.1",
     "autoprefixer": "^10.4.27",
+    "cypress": "^15.18.0",
     "happy-dom": "^20.8.9",
     "postcss": "^8.5.9",
     "prisma": "^5.18.0",

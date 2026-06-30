@@ -94,6 +94,7 @@ describe("POST /api/contracts/[id]/chat", () => {
     mockPrisma.contract.findUnique.mockResolvedValue({
       id: "test-id",
       status: "aprovado",
+      deal: { pipeline: { orgId: "org-1" } },
     } as never);
     const req = createRequest({ message: "test" });
     const res = await POST(req, { params: { id: "test-id" } });
@@ -113,6 +114,7 @@ describe("POST /api/contracts/[id]/chat", () => {
     mockPrisma.contract.findUnique.mockResolvedValue({
       id: "test-id",
       status: "rascunho",
+      deal: { pipeline: { orgId: "org-1" } },
     } as never);
     mockGetUserOrg.mockResolvedValue(createMockOrg());
     mockStreamAgent.mockImplementation(
@@ -149,6 +151,7 @@ describe("POST /api/contracts/[id]/chat", () => {
     mockPrisma.contract.findUnique.mockResolvedValue({
       id: "contract-99",
       status: "rascunho",
+      deal: { pipeline: { orgId: "org-7" } },
     } as never);
     mockGetUserOrg.mockResolvedValue(createMockOrg({ id: "org-7" }));
     mockStreamAgent.mockImplementation(
@@ -178,6 +181,7 @@ describe("POST /api/contracts/[id]/chat", () => {
     mockPrisma.contract.findUnique.mockResolvedValue({
       id: "test-id",
       status: "rascunho",
+      deal: { pipeline: { orgId: "org-1" } },
     } as never);
     mockStreamAgent.mockImplementation(
       mockGenerator([
@@ -202,6 +206,7 @@ describe("POST /api/contracts/[id]/chat", () => {
     mockPrisma.contract.findUnique.mockResolvedValue({
       id: "test-id",
       status: "rascunho",
+      deal: { pipeline: { orgId: "org-1" } },
     } as never);
     mockGetUserOrg.mockResolvedValue(createMockOrg());
     mockStreamAgent.mockImplementation((async function* () {

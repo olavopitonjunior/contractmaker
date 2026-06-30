@@ -26,12 +26,20 @@ export async function DELETE(
 
   const person = await prisma.diligentedPerson.findUnique({
     where: { id: params.id },
-    include: { deal: { include: { form: { select: { orgId: true } } } } },
+    include: {
+      deal: {
+        include: {
+          form: { select: { orgId: true } },
+          // org via pipeline (form pode ser null em deal formless — IDOR)
+          pipeline: { select: { orgId: true } },
+        },
+      },
+    },
   });
   if (!person || person.dealId !== params.dealId) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  if (person.deal.form && person.deal.form.orgId !== org.id) {
+  if (person.deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

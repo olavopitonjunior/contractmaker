@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
 import { audit } from "@/lib/security/audit";
 import { AsaasError } from "@/lib/asaas/errors";
@@ -268,7 +269,9 @@ export async function runCreateCommissionCharge(
       }
     }
 
-    const charge = await prisma.commissionCharge.create({
+    let charge;
+    try {
+      charge = await prisma.commissionCharge.create({
       data: {
         orgId: input.orgId,
         accountId: account.id,
@@ -327,7 +330,23 @@ export async function runCreateCommissionCharge(
           walletId: account.walletId,
         } as Prisma.InputJsonValue,
       },
-    });
+      });
+    } catch (e) {
+      // P2002 do índice parcial commission_charge_active_contract_key: outra
+      // request criou a cobrança ativa pra este contrato na janela de corrida
+      // entre o findFirst e o create. A cobrança Asaas recém-criada fica órfã
+      // (reconciliar via webhook/sync) — mas não persistimos a duplicata local.
+      if (
+        e instanceof Prisma.PrismaClientKnownRequestError &&
+        e.code === "P2002"
+      ) {
+        return {
+          status: 409,
+          body: { error: "Já existe cobrança ativa para este contrato" },
+        };
+      }
+      throw e;
+    }
 
     // Auto-promove deal pra "Cobrança emitida" (venda) / "Cobrança Gerada"
     // (locação). Não retrocede se já passou — criação de cobrança extra pra um
@@ -398,11 +417,13 @@ export async function runCreateCommissionCharge(
     }
 
     // Régua: notifica owner do deal (e admins/comissionados conforme settings)
-    void notifyChargeEvent({
-      chargeId: charge.id,
-      event: "created",
-      orgId: input.orgId,
-    });
+    waitUntil(
+      notifyChargeEvent({
+        chargeId: charge.id,
+        event: "created",
+        orgId: input.orgId,
+      })
+    );
 
     return {
       status: 200,
@@ -538,7 +559,7 @@ export async function buildChargePreview(args: {
   }
 
   return {
-    summary: `Criar cobrança ${args.billingType} de R$ ${(value / 100).toFixed(2)} para ${payer.papel} (${payer.nome ?? "?"})`,
+    summary: `Criar cobrança ${args.billingType} de ${value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })} para ${payer.papel} (${payer.nome ?? "?"})`,
     details: {
       dealId: deal.id,
       contractId: contract.id,

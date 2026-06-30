@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { createHash } from "crypto";
 import { z } from "zod";
 import { put } from "@vercel/blob";
@@ -153,11 +154,13 @@ export async function POST(
     attachment.category &&
     (attachment.category.startsWith("certidao_") || attachment.category === "matricula_anexada")
   ) {
-    void import("@/lib/services/manual-certidao-analysis").then(
-      ({ analyzeManualCertidaoForDeal }) =>
-        analyzeManualCertidaoForDeal(deal.id, attachment.id).catch((err) => {
-          console.error("[attachments-newton] analyzeManualCertidaoForDeal falhou:", err);
-        })
+    waitUntil(
+      import("@/lib/services/manual-certidao-analysis").then(
+        ({ analyzeManualCertidaoForDeal }) =>
+          analyzeManualCertidaoForDeal(deal.id, attachment.id).catch((err) => {
+            console.error("[attachments-newton] analyzeManualCertidaoForDeal falhou:", err);
+          })
+      )
     );
   }
 

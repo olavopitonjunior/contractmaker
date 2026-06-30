@@ -1,7 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
 
 export const runtime = "nodejs";
+
+/** Comparação constant-time de tokens (evita timing oracle). */
+function tokensMatch(a: string, b: string): boolean {
+  const ab = Buffer.from(a);
+  const bb = Buffer.from(b);
+  if (ab.length !== bb.length) return false;
+  return timingSafeEqual(ab, bb);
+}
 
 /**
  * Webhook do Google Drive: cada `files.watch` registrado posta aqui quando o
@@ -24,8 +33,19 @@ export async function POST(req: NextRequest) {
   const resourceState = req.headers.get("x-goog-resource-state");
   const resourceId = req.headers.get("x-goog-resource-id");
 
+  // Fail-closed: sem GOOGLE_WATCH_TOKEN configurado, rejeita (antes o check era
+  // pulado e qualquer POST com um channelId válido injetava ChangeLog forjado).
   const expectedToken = process.env.GOOGLE_WATCH_TOKEN?.trim();
-  if (expectedToken && channelToken !== expectedToken) {
+  if (!expectedToken) {
+    console.error(
+      "[google-drive webhook] GOOGLE_WATCH_TOKEN não configurado — rejeitando request"
+    );
+    return NextResponse.json(
+      { error: "webhook not configured" },
+      { status: 503 }
+    );
+  }
+  if (!channelToken || !tokensMatch(channelToken, expectedToken)) {
     return NextResponse.json({ error: "invalid token" }, { status: 401 });
   }
 
