@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
 import { AgentSettings } from "@/components/settings/AgentSettings";
-import { BookOpen, Palette, Lightbulb, ShieldCheck, Sparkles, KeyRound, Users, UsersRound, Split, FileSignature, Wallet, ListChecks, UserRound, type LucideIcon } from "lucide-react";
+import { BookOpen, Palette, Lightbulb, ShieldCheck, Sparkles, KeyRound, Users, UsersRound, Split, FileSignature, Wallet, ListChecks, UserRound, Receipt, FileText, type LucideIcon } from "lucide-react";
 
 type SettingsLink = { href: string; label: string; icon: LucideIcon };
 const SETTINGS_GROUPS: { title: string; items: SettingsLink[] }[] = [
@@ -43,6 +43,13 @@ const SETTINGS_GROUPS: { title: string; items: SettingsLink[] }[] = [
       { href: "/settings/ai-usage", label: "Uso de IA", icon: Sparkles },
       { href: "/settings/api-tokens", label: "API tokens", icon: KeyRound },
       { href: "/settings/api-usage", label: "Uso da API", icon: Sparkles },
+    ],
+  },
+  {
+    title: "Fiscal & DIMOB",
+    items: [
+      { href: "/settings/fiscal", label: "Dados fiscais (declarante)", icon: FileText },
+      { href: "/relatorios/dimob", label: "Gerar DIMOB", icon: Receipt },
     ],
   },
   {

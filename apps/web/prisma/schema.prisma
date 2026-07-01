@@ -207,6 +207,13 @@ model Organization {
   cnpj                 String?
   creci                String?
   legalAddress         String?
+  // Dados fiscais do declarante — usados na DIMOB (registro R01). `legalName`,
+  // `cnpj` e `legalAddress` acima também alimentam o R01. Editáveis em
+  // /settings/fiscal. Aditivos, default null.
+  fiscalResponsibleCpf String? // CPF do responsável perante a RFB (R01)
+  fiscalUf             String? // UF do contribuinte (R01)
+  fiscalMunicipioCode  String? // Código do município RFB/IBGE (R01)
+  fiscalMunicipioName  String? // Nome do município (exibição)
   // White-label (Fase 1a): subdomínio `{subdomain}.imobpro.ia.br` e domínio
   // custom futuro. Resolução por host no middleware → x-org-subdomain.
   subdomain            String?  @unique
@@ -271,6 +278,9 @@ model Organization {
 
   // Newton — pedidos de cobrança de informação por negócio
   newtonRequests NewtonRequest[]
+
+  // DIMOB — histórico de arquivos gerados (auditoria + reemissão)
+  dimobExports DimobExport[]
 
   // Newton — vínculo deal ↔ grupo WhatsApp
   dealGroupLinks DealGroupLink[]
@@ -2974,4 +2984,23 @@ model DefaultWitness {
   org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId])
+}
+
+// DIMOB — registro de cada arquivo TXT gerado (auditoria + reemissão anual).
+// Um por geração; a UI mostra o histórico e permite baixar de novo.
+model DimobExport {
+  id                String   @id @default(cuid())
+  orgId             String
+  year              Int // ano-calendário declarado
+  recordCount       Int // total de linhas (R01 + R04...)
+  totalOperacoes    Float // soma dos valores de alienação
+  totalComissao     Float // soma da comissão do declarante
+  contentHash       String // SHA-256 do TXT (dedupe/integridade)
+  fileUrl           String? // storage do TXT gerado (opcional)
+  generatedByUserId String?
+  createdAt         DateTime @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, year])
 }
