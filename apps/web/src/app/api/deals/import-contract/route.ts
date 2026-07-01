@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "crypto";
 import { prisma } from "@/lib/db/prisma";
 import {
   requireApiAuth,
@@ -15,7 +16,12 @@ import { importContractFromFile } from "@/lib/services/contract-import";
 import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// 300s (Vercel Pro): a importação (upload Drive + conversão + Gemini) de PDFs
+// grandes (~4MB escaneados) chegava a 59s e estourava o antigo limite de 60s,
+// matando a função no meio — deixava Deal+SalesForm+anexo órfãos (sem Contract)
+// e o operador re-subia o mesmo arquivo, gerando negócios duplicados. Ver dedup
+// por contentHash abaixo, que reusa o órfão num retry em vez de criar outro.
+export const maxDuration = 300;
 
 const ALLOWED_MIMES: readonly ImportableMime[] = [
   "application/pdf",
@@ -152,63 +158,119 @@ export async function POST(req: NextRequest) {
         pipeline.stages.find((s) => s.name === "Confecção de Contrato") ??
         pipeline.stages[0];
 
-      // 1. SalesForm + Deal
-      const form = await prisma.salesForm.create({
-        data: {
-          orgId: auth.org.id,
-          title,
-          schemaType: "compra_venda_v1",
-          dataJson: {},
-          status: "vinculado",
-        },
-      });
-
-      const dealsInStage = await prisma.deal.count({
-        where: { stageId: stage.id },
-      });
-      const deal = await prisma.deal.create({
-        data: {
-          pipelineId: pipeline.id,
-          stageId: stage.id,
-          userId: auth.actor.effectiveUserId,
-          formId: form.id,
-          title: title || `Contrato importado — ${file.name}`,
-          position: dealsInStage,
-        },
-      });
-
-      // 2. Sobe arquivo bruto pra Blob
-      const safeName = file.name.replace(/[^\w.\-]+/g, "_");
-      const storageKey = `imports/${auth.org.id}/${deal.id}/${Date.now()}-${safeName}`;
-      let blobUrl: string;
-      try {
-        blobUrl = await uploadBufferToStorage({
-          key: storageKey,
-          body: buffer,
-          contentType: mime,
-        });
-      } catch (err) {
-        console.error("[import-contract] Falha ao subir Blob:", err);
-        return {
-          status: 500,
-          body: {
-            error:
-              "Falha ao salvar arquivo no storage. Verifique BLOB_READ_WRITE_TOKEN.",
-          },
-        };
-      }
-
-      // 3. DealAttachment como referência
-      await prisma.dealAttachment.create({
-        data: {
-          dealId: deal.id,
-          filename: file.name,
-          mime,
-          url: blobUrl,
+      // Dedup por conteúdo: se o MESMO arquivo já foi enviado pra um deal deste
+      // pipeline, não cria outro negócio. Cobre dois casos:
+      //   (a) import anterior teve sucesso → retorna o deal existente (idempotente);
+      //   (b) import anterior estourou o timeout e deixou um órfão (Deal/SalesForm
+      //       sem Contract) → REUSA esse deal/form e só retenta a etapa pesada.
+      // Foi exatamente o que gerou os 3 "Cód 19503 Igor Imene" duplicados.
+      const contentHash = createHash("sha256").update(buffer).digest("hex");
+      const prior = await prisma.dealAttachment.findFirst({
+        where: {
+          contentHash,
           category: "contrato_original",
           source: "upload",
+          deal: { pipelineId: pipeline.id },
+        },
+        orderBy: { createdAt: "desc" },
+        include: {
+          deal: {
+            include: {
+              form: { select: { id: true, token: true } },
+              contracts: {
+                where: { isLatest: true },
+                select: { id: true, googleDocUrl: true },
+              },
+            },
+          },
         },
       });
+
+      let deal: { id: string };
+      let form: { id: string; token: string };
+
+      if (prior?.deal?.form) {
+        const priorContract = prior.deal.contracts[0];
+        if (priorContract) {
+          // (a) já importado com sucesso — devolve o mesmo deal.
+          return {
+            status: 200,
+            body: {
+              dealId: prior.deal.id,
+              contractId: priorContract.id,
+              googleDocUrl: priorContract.googleDocUrl,
+              formToken: prior.deal.form.token,
+              deduped: true,
+            },
+          };
+        }
+        // (b) órfão de import anterior — reusa deal+form e retenta o import.
+        deal = { id: prior.deal.id };
+        form = prior.deal.form;
+      } else {
+        // 1. SalesForm + Deal
+        const createdForm = await prisma.salesForm.create({
+          data: {
+            orgId: auth.org.id,
+            title,
+            schemaType: "compra_venda_v1",
+            dataJson: {},
+            status: "vinculado",
+          },
+        });
+
+        const dealsInStage = await prisma.deal.count({
+          where: { stageId: stage.id },
+        });
+        const createdDeal = await prisma.deal.create({
+          data: {
+            pipelineId: pipeline.id,
+            stageId: stage.id,
+            userId: auth.actor.effectiveUserId,
+            formId: createdForm.id,
+            title: title || `Contrato importado — ${file.name}`,
+            position: dealsInStage,
+          },
+        });
+
+        // 2. Sobe arquivo bruto pra Blob
+        const safeName = file.name.replace(/[^\w.\-]+/g, "_");
+        const storageKey = `imports/${auth.org.id}/${createdDeal.id}/${Date.now()}-${safeName}`;
+        let blobUrl: string;
+        try {
+          blobUrl = await uploadBufferToStorage({
+            key: storageKey,
+            body: buffer,
+            contentType: mime,
+          });
+        } catch (err) {
+          console.error("[import-contract] Falha ao subir Blob:", err);
+          return {
+            status: 500,
+            body: {
+              error:
+                "Falha ao salvar arquivo no storage. Verifique BLOB_READ_WRITE_TOKEN.",
+            },
+          };
+        }
+
+        // 3. DealAttachment como referência (com contentHash pra dedup futura)
+        await prisma.dealAttachment.create({
+          data: {
+            dealId: createdDeal.id,
+            filename: file.name,
+            mime,
+            url: blobUrl,
+            category: "contrato_original",
+            source: "upload",
+            byteSize: buffer.byteLength,
+            contentHash,
+          },
+        });
+
+        deal = { id: createdDeal.id };
+        form = { id: createdForm.id, token: createdForm.token };
+      }
 
       // 4. Roda pipeline de import (Drive + extração + Contract)
       let importResult;

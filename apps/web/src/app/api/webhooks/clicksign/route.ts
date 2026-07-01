@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import crypto from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
-import { uploadBufferToStorage } from "@/lib/storage/s3";
+import { persistSignedPdf } from "@/lib/clicksign/signed-pdf";
 import { audit } from "@/lib/security/audit";
 import {
   getDocumentKeyFromPayload,
@@ -18,7 +18,6 @@ import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-si
 import {
   completeInspectionOnEnvelopeClosed,
   revertInspectionOnEnvelopeCanceled,
-  updateInspectionSignedLaudo,
 } from "@/lib/locacao/inspection-signature";
 
 export const runtime = "nodejs";
@@ -281,61 +280,5 @@ async function resolveAndDownload(envelopeId: string, clicksignId: string) {
 }
 
 async function downloadSignedPdf(envelopeId: string, url: string) {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    const stored = await uploadBufferToStorage({
-      bucket: process.env.S3_BUCKET,
-      key: `envelopes/${envelopeId}/signed.pdf`,
-      body: buf,
-      contentType: "application/pdf",
-    });
-    await prisma.envelope.update({
-      where: { id: envelopeId },
-      data: { signedDocumentUrl: stored },
-    });
-
-    // Laudo de vistoria: a versão assinada vira o laudoPdfUrl final.
-    await updateInspectionSignedLaudo(envelopeId, stored);
-
-    // Espelha o PDF assinado na pasta Documentos do deal pra que o usuário
-    // veja e baixe o arquivo final pelo mesmo lugar onde acompanha os outros
-    // anexos da venda. Idempotente: ClickSign pode reentregar `close` —
-    // checamos por url antes de criar.
-    const env = await prisma.envelope.findUnique({
-      where: { id: envelopeId },
-      select: {
-        dealId: true,
-        source: true,
-        name: true,
-        contract: { select: { version: true } },
-      },
-    });
-    if (env?.dealId) {
-      const existing = await prisma.dealAttachment.findFirst({
-        where: { dealId: env.dealId, url: stored },
-        select: { id: true },
-      });
-      if (!existing) {
-        const category =
-          env.source === "attachment" ? "documento_assinado" : "contrato_assinado";
-        const filename = env.contract
-          ? `Contrato assinado v${env.contract.version}.pdf`
-          : `${env.name} (assinado).pdf`;
-        await prisma.dealAttachment.create({
-          data: {
-            dealId: env.dealId,
-            filename,
-            mime: "application/pdf",
-            url: stored,
-            category,
-            source: "clicksign_signed",
-          },
-        });
-      }
-    }
-  } catch (err) {
-    console.error("[clicksign webhook] falha ao baixar PDF assinado:", err);
-  }
+  await persistSignedPdf(envelopeId, url, "[clicksign webhook]");
 }

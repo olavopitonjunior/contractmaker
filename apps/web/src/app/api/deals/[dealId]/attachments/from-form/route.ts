@@ -88,6 +88,7 @@ export async function POST(
       source: "form",
       extractedData:
         (formAtt.extractedData as Prisma.InputJsonValue) ?? undefined,
+      contentHash: formAtt.contentHash ?? undefined,
     },
     select: { id: true, filename: true, mime: true, category: true, url: true },
   });

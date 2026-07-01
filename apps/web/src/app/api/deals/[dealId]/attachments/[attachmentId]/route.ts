@@ -139,20 +139,11 @@ export async function DELETE(
     );
   }
 
-  // Best-effort: remove o blob no Vercel Blob (URLs com domínio public.blob.vercel-storage.com)
-  let blobDeleted = false;
-  if (attachment.url && attachment.url.includes(".public.blob.vercel-storage.com")) {
-    try {
-      const { del } = await import("@vercel/blob");
-      await del(attachment.url);
-      blobDeleted = true;
-    } catch (err) {
-      console.warn(
-        "[attachment DELETE] falha ao remover blob:",
-        err instanceof Error ? err.message : err
-      );
-    }
-  }
+  // Best-effort: remove o objeto de storage despachando por backend (Vercel
+  // Blob / S3 / filesystem). Antes só limpava Vercel Blob — URLs s3://, file://
+  // ficavam órfãs.
+  const { deleteFromStorage } = await import("@/lib/storage/s3");
+  const blobDeleted = await deleteFromStorage(attachment.url);
 
   await prisma.dealAttachment.delete({ where: { id: attachment.id } });
 

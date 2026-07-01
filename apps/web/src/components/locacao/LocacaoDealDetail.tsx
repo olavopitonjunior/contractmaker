@@ -63,6 +63,7 @@ interface LocacaoDealDetailProps {
     dataJson: Record<string, unknown>;
     lostAt: string | null;
     lostReason: string | null;
+    archivedAt: string | null;
     formOpenedAt: string | null;
     formCompletedAt: string | null;
     contractSignedAt: string | null;
@@ -195,6 +196,7 @@ export function LocacaoDealDetail({
             formToken={deal.formToken}
             hasContract={contract !== null}
             isLost={isLost}
+            archivedAt={deal.archivedAt}
           />
         </div>
         <Button variant="outline" asChild>

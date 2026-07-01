@@ -29,9 +29,16 @@ function extractClientName(dataJson: unknown): string | null {
   return typeof nome === "string" && nome.trim() ? nome.trim() : null;
 }
 
-export default async function PipelinePage() {
+export default async function PipelinePage({
+  searchParams,
+}: {
+  searchParams?: { arquivados?: string };
+}) {
   const session = await auth();
   if (!session?.user) return null;
+
+  // ?arquivados=1 mostra também os deals arquivados (recuperação). Default oculta.
+  const includeArchived = searchParams?.arquivados === "1";
 
   const org = await getUserOrg(session.user.id);
   if (!org) {
@@ -51,6 +58,7 @@ export default async function PipelinePage() {
         orderBy: { position: "asc" },
         include: {
           deals: {
+            where: includeArchived ? undefined : { archivedAt: null },
             orderBy: { position: "asc" },
             include: {
               form: {

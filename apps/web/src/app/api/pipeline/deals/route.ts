@@ -131,8 +131,15 @@ export async function GET(req: NextRequest) {
   const pipeline = await getPipelineByKind(auth.org.id, MODULE.VENDAS);
   if (!pipeline) return NextResponse.json([]);
 
+  // Oculta arquivados por padrão; ?includeArchived=true inclui.
+  const includeArchived =
+    new URL(req.url).searchParams.get("includeArchived") === "true";
+
   const deals = await prisma.deal.findMany({
-    where: { pipelineId: pipeline.id },
+    where: {
+      pipelineId: pipeline.id,
+      ...(includeArchived ? {} : { archivedAt: null }),
+    },
     orderBy: { createdAt: "desc" },
     include: {
       stage: true,

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "crypto";
 import { prisma } from "@/lib/db/prisma";
 import {
   ensureLocacaoAccess,
@@ -15,7 +16,10 @@ import { LOCACAO_SCHEMA_TYPE } from "@/lib/forms/validation-locacao";
 import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// 300s (Vercel Pro): import de PDFs grandes (Drive + Gemini) estourava o limite
+// de 60s, deixando órfãos e gerando negócios duplicados em retries. Ver dedup
+// por contentHash abaixo (mesma correção do /api/deals/import-contract).
+export const maxDuration = 300;
 
 // Espelho de /api/deals/import-contract pra LOCAÇÃO (cadastro rápido com
 // upload do contrato pronto → Google Doc → editor).
@@ -136,62 +140,113 @@ export async function POST(req: NextRequest) {
         pipeline.stages.find((s) => s.name === "Em contrato") ??
         pipeline.stages[0];
 
-      // 1. SalesForm vinculado + Deal kind=locacao. O schemaType definitivo
-      //    (residencial/comercial) é corrigido pelo importContractFromFile com
-      //    a finalidade detectada na extração.
-      const form = await prisma.salesForm.create({
-        data: {
-          orgId: ctx.orgId,
-          title,
-          schemaType: LOCACAO_SCHEMA_TYPE,
-          dataJson: {},
-          status: "vinculado",
-        },
-      });
-
-      const dealsInStage = await prisma.deal.count({ where: { stageId: stage.id } });
-      const deal = await prisma.deal.create({
-        data: {
-          pipelineId: pipeline.id,
-          stageId: stage.id,
-          userId: ctx.userId,
-          formId: form.id,
-          kind: "locacao",
-          title: title || `Contrato de locação importado — ${file.name}`,
-          position: dealsInStage,
-        },
-      });
-
-      // 2. Arquivo bruto pra Blob + DealAttachment de referência
-      const safeName = file.name.replace(/[^\w.\-]+/g, "_");
-      const storageKey = `imports/${ctx.orgId}/${deal.id}/${Date.now()}-${safeName}`;
-      let blobUrl: string;
-      try {
-        blobUrl = await uploadBufferToStorage({
-          key: storageKey,
-          body: buffer,
-          contentType: mime,
-        });
-      } catch (err) {
-        console.error("[locacao/import-contract] Falha ao subir Blob:", err);
-        return {
-          status: 500,
-          body: {
-            error:
-              "Falha ao salvar arquivo no storage. Verifique BLOB_READ_WRITE_TOKEN.",
-          },
-        };
-      }
-      await prisma.dealAttachment.create({
-        data: {
-          dealId: deal.id,
-          filename: file.name,
-          mime,
-          url: blobUrl,
+      // Dedup por conteúdo (idem /api/deals/import-contract): retry do mesmo
+      // arquivo não cria outro negócio — devolve o já importado ou reusa o órfão
+      // de um import que estourou o timeout.
+      const contentHash = createHash("sha256").update(buffer).digest("hex");
+      const prior = await prisma.dealAttachment.findFirst({
+        where: {
+          contentHash,
           category: "contrato_original",
           source: "upload",
+          deal: { pipelineId: pipeline.id },
+        },
+        orderBy: { createdAt: "desc" },
+        include: {
+          deal: {
+            include: {
+              form: { select: { id: true, token: true } },
+              contracts: {
+                where: { isLatest: true },
+                select: { id: true, googleDocUrl: true },
+              },
+            },
+          },
         },
       });
+
+      let deal: { id: string };
+      let form: { id: string; token: string };
+
+      if (prior?.deal?.form) {
+        const priorContract = prior.deal.contracts[0];
+        if (priorContract) {
+          return {
+            status: 200,
+            body: {
+              dealId: prior.deal.id,
+              contractId: priorContract.id,
+              googleDocUrl: priorContract.googleDocUrl,
+              formToken: prior.deal.form.token,
+              deduped: true,
+            },
+          };
+        }
+        deal = { id: prior.deal.id };
+        form = prior.deal.form;
+      } else {
+        // 1. SalesForm vinculado + Deal kind=locacao. O schemaType definitivo
+        //    (residencial/comercial) é corrigido pelo importContractFromFile com
+        //    a finalidade detectada na extração.
+        const createdForm = await prisma.salesForm.create({
+          data: {
+            orgId: ctx.orgId,
+            title,
+            schemaType: LOCACAO_SCHEMA_TYPE,
+            dataJson: {},
+            status: "vinculado",
+          },
+        });
+
+        const dealsInStage = await prisma.deal.count({ where: { stageId: stage.id } });
+        const createdDeal = await prisma.deal.create({
+          data: {
+            pipelineId: pipeline.id,
+            stageId: stage.id,
+            userId: ctx.userId,
+            formId: createdForm.id,
+            kind: "locacao",
+            title: title || `Contrato de locação importado — ${file.name}`,
+            position: dealsInStage,
+          },
+        });
+
+        // 2. Arquivo bruto pra Blob + DealAttachment de referência
+        const safeName = file.name.replace(/[^\w.\-]+/g, "_");
+        const storageKey = `imports/${ctx.orgId}/${createdDeal.id}/${Date.now()}-${safeName}`;
+        let blobUrl: string;
+        try {
+          blobUrl = await uploadBufferToStorage({
+            key: storageKey,
+            body: buffer,
+            contentType: mime,
+          });
+        } catch (err) {
+          console.error("[locacao/import-contract] Falha ao subir Blob:", err);
+          return {
+            status: 500,
+            body: {
+              error:
+                "Falha ao salvar arquivo no storage. Verifique BLOB_READ_WRITE_TOKEN.",
+            },
+          };
+        }
+        await prisma.dealAttachment.create({
+          data: {
+            dealId: createdDeal.id,
+            filename: file.name,
+            mime,
+            url: blobUrl,
+            category: "contrato_original",
+            source: "upload",
+            byteSize: buffer.byteLength,
+            contentHash,
+          },
+        });
+
+        deal = { id: createdDeal.id };
+        form = { id: createdForm.id, token: createdForm.token };
+      }
 
       // 3. Pipeline de import (Drive + extração locação + Contract + LeaseContract)
       let importResult;

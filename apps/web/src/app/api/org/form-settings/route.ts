@@ -9,18 +9,24 @@ import {
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
+import { isKnownFormPath } from "@/lib/forms/presets";
 
 const PRESETS = ["legado", "minimo", "padrao", "completo", "custom"] as const;
 
+// 7 etapas → índices válidos 0..6 (era 0..7, que aceitava um step inexistente
+// cujo override nunca casava em resolveRequiredFields → obrigatoriedade fantasma).
 const customRequiredPathItemSchema = z.object({
-  step: z.number().int().min(0).max(7),
+  step: z.number().int().min(0).max(6),
   path: z
     .string()
     .min(1)
     .max(120)
     // Restringe a paths plausíveis do form (letras, dígitos, ., _, -, []).
     // Evita injeção via path malformado em qualquer consumidor futuro.
-    .regex(/^[a-zA-Z0-9_.[\]\-]+$/, "Path inválido"),
+    .regex(/^[a-zA-Z0-9_.[\]\-]+$/, "Path inválido")
+    // Rejeita paths órfãos (campo renomeado/typo): sem isto, viram string morta
+    // que nunca dispara obrigatoriedade. Normaliza índices de array antes de checar.
+    .refine(isKnownFormPath, "Path desconhecido — não corresponde a um campo do formulário"),
 });
 
 const formSettingsPatchSchema = z.object({

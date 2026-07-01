@@ -1,15 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHash } from "crypto";
 import { z } from "zod";
-import { put } from "@vercel/blob";
+import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { prisma } from "@/lib/db/prisma";
 import {
   requireApiAuth,
   isAuthFailure,
   authFailureResponse,
 } from "@/lib/api/require-auth";
-import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
+import {
+  computeContentHash,
+  findDealAttachmentByHash,
+  persistDealDocument,
+} from "@/lib/deals/attachments";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -71,14 +75,6 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
-  if (!blobToken) {
-    return NextResponse.json(
-      { error: "BLOB_READ_WRITE_TOKEN não configurado" },
-      { status: 503 }
-    );
-  }
-
   // Decodifica base64 → Buffer
   const cleaned = base64Data.replace(/^data:[^;]+;base64,/, "");
   let buffer: Buffer;
@@ -97,22 +93,38 @@ export async function POST(
     );
   }
 
-  // SHA-256 só pra metadata de audit (DealAttachment não tem cache pre-warm
-  // como FormAttachment — FormAttachment.contentHash existe, DealAttachment
-  // não. OCR fluxo separado — ver pipeline F.I-α em /lib/ai/ocr-worker.ts).
-  const contentHash = createHash("sha256").update(buffer).digest("hex");
+  // Dedupe pré-upload: mesmo arquivo reenviado pro mesmo deal não re-sobe ao
+  // storage nem duplica linha (Newton pode reenviar em retry).
+  const contentHash = computeContentHash(buffer);
+  const existing = await findDealAttachmentByHash(deal.id, contentHash);
+  if (existing) {
+    return NextResponse.json(
+      {
+        id: existing.id,
+        filename: existing.filename,
+        mime: existing.mime,
+        url: existing.url,
+        category: existing.category,
+        createdAt: existing.createdAt,
+        deduped: true,
+      },
+      { status: 200 }
+    );
+  }
 
   const safeName = filename.replace(/[^a-zA-Z0-9._-]/g, "_");
-  const pathname = `deal-attachments/${deal.id}/${Date.now()}-${safeName}`;
+  // Path scheme + STAGING_MODE/normalizeKey via helper compartilhado (antes
+  // chamava put() direto, ignorando o prefixo staging/ e divergindo dos demais).
+  const key = `deal-attachments/${deal.id}/${Date.now()}-${safeName}`;
 
   let blobUrl: string;
   try {
-    const blob = await put(pathname, buffer, {
-      access: "public",
+    blobUrl = await uploadBufferToStorage({
+      bucket: process.env.S3_BUCKET,
+      key,
+      body: buffer,
       contentType: mime,
-      token: blobToken,
     });
-    blobUrl = blob.url;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
@@ -121,45 +133,22 @@ export async function POST(
     );
   }
 
-  const attachment = await prisma.dealAttachment.create({
-    data: {
-      dealId: deal.id,
-      filename,
-      mime,
-      url: blobUrl,
-      category: category ?? null,
-      byteSize: buffer.byteLength,
-    },
+  // Persistência compartilhada (create + audit + OCR de certidão).
+  const { attachment } = await persistDealDocument({
+    dealId: deal.id,
+    buffer,
+    url: blobUrl,
+    filename,
+    mime,
+    category: category ?? null,
+    source: "manual",
+    auditCtx: extractAuditContextFromRequest(
+      req,
+      apiAuth.org.id,
+      apiAuth.actor.effectiveUserId
+    ),
+    auditMetadata: mergeAuditMetadata({}, apiAuth.actor),
   });
-
-  await audit(
-    extractAuditContextFromRequest(req, apiAuth.org.id, apiAuth.actor.effectiveUserId),
-    {
-      action: "ATTACHMENT_UPLOAD",
-      result: "SUCCESS",
-      resource: attachment.id,
-      resourceType: "DealAttachment",
-      metadata: mergeAuditMetadata(
-        { dealId: deal.id, mime, bytes: buffer.length, contentHash },
-        apiAuth.actor
-      ),
-    }
-  );
-
-  // F4 iteração 2026-05-17 — quando a category é certidão ou matrícula anexada,
-  // dispara análise fire-and-forget: OCR estruturado → CertidaoJobLite sintético
-  // → crossCheckCertidoes → ContractComment por finding. Não bloqueia o response.
-  if (
-    attachment.category &&
-    (attachment.category.startsWith("certidao_") || attachment.category === "matricula_anexada")
-  ) {
-    void import("@/lib/services/manual-certidao-analysis").then(
-      ({ analyzeManualCertidaoForDeal }) =>
-        analyzeManualCertidaoForDeal(deal.id, attachment.id).catch((err) => {
-          console.error("[attachments-newton] analyzeManualCertidaoForDeal falhou:", err);
-        })
-    );
-  }
 
   return NextResponse.json(
     {

@@ -199,3 +199,54 @@ export async function downloadBufferFromUrl(storageUrl: string): Promise<Buffer>
 
   return fs.readFileSync(storageUrl);
 }
+
+/**
+ * Apaga um objeto de storage, despachando por backend (Vercel Blob / S3 /
+ * filesystem). Antes só limpava Vercel Blob nos call-sites — URLs `s3://` e
+ * `file://` ficavam órfãs. Best-effort por design: erros são engolidos e o
+ * caller decide se loga (deleção de arquivo nunca deve derrubar a operação
+ * principal). Retorna true se tentou apagar, false se ignorou (URL externa
+ * que não controlamos / vazia).
+ */
+export async function deleteFromStorage(storageUrl: string | null | undefined): Promise<boolean> {
+  if (!storageUrl) return false;
+  try {
+    // Vercel Blob: URL pública https no domínio do store.
+    if (storageUrl.includes('.blob.vercel-storage.com')) {
+      if (!process.env.BLOB_READ_WRITE_TOKEN) return false;
+      const { del } = await import('@vercel/blob');
+      await del(storageUrl, { token: process.env.BLOB_READ_WRITE_TOKEN });
+      return true;
+    }
+
+    if (storageUrl.startsWith('s3://')) {
+      const client = getS3Client();
+      if (!client) return false;
+      const { DeleteObjectCommand } = require('@aws-sdk/client-s3');
+      const stripped = storageUrl.replace('s3://', '');
+      const [bucket, ...rest] = stripped.split('/');
+      const key = rest.join('/');
+      await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: key }));
+      return true;
+    }
+
+    if (storageUrl.startsWith('file://')) {
+      const filePath = fileURLToPath(storageUrl);
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      return true;
+    }
+
+    // https externa não-Blob (não controlamos) ou path bare legado.
+    if (storageUrl.startsWith('http://') || storageUrl.startsWith('https://')) {
+      return false;
+    }
+    if (fs.existsSync(storageUrl)) {
+      fs.unlinkSync(storageUrl);
+      return true;
+    }
+    return false;
+  } catch (err) {
+    console.error('[storage] deleteFromStorage falhou:', storageUrl, err);
+    return false;
+  }
+}
