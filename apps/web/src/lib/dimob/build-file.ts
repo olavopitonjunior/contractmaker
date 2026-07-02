@@ -30,14 +30,23 @@ function tipoImovelCode(tipo: "urbano" | "rural" | null): string {
   return "";
 }
 
+/** Opções da declaração (retificadora). */
+export interface DimobDeclOptions {
+  retificadora?: boolean;
+  numeroRecibo?: string | null;
+}
+
 /** Valores lógicos do registro R01 (declarante). */
 export function declaranteValues(
   declarante: DimobDeclarante,
-  year: number
+  year: number,
+  opts: DimobDeclOptions = {}
 ): Record<string, DimobValue> {
   return {
     cnpjDeclarante: declarante.cnpj,
     anoCalendario: year,
+    retificadora: opts.retificadora ? 1 : 0,
+    numeroRecibo: opts.retificadora ? (opts.numeroRecibo ?? "").replace(/\D/g, "") : "",
     nomeEmpresarial: declarante.nomeEmpresarial,
     cpfResponsavel: declarante.cpfResponsavel,
     endereco: declarante.endereco,
@@ -152,11 +161,12 @@ export function leaseRecordValues(
 /** Mapeia os agregados para os registros posicionais (R01 + R04 vendas + R02 locação). */
 export function buildDimobRecords(
   agg: DimobSalesAggregate,
-  leaseRecords: DimobLeaseRecord[] = []
+  leaseRecords: DimobLeaseRecord[] = [],
+  opts: DimobDeclOptions = {}
 ): DimobRecordInput[] {
   const { declarante, year } = agg;
   const records: DimobRecordInput[] = [
-    { layout: R01_LAYOUT, values: declaranteValues(declarante, year) },
+    { layout: R01_LAYOUT, values: declaranteValues(declarante, year, opts) },
   ];
   agg.records.forEach((r, i) => {
     records.push({ layout: R04_LAYOUT, values: saleRecordValues(declarante, year, r, i + 1) });
@@ -169,9 +179,10 @@ export function buildDimobRecords(
 
 export function buildDimobFileFromAggregate(
   agg: DimobSalesAggregate,
-  leaseRecords: DimobLeaseRecord[] = []
+  leaseRecords: DimobLeaseRecord[] = [],
+  opts: DimobDeclOptions = {}
 ): DimobBuildResult {
-  const records = buildDimobRecords(agg, leaseRecords);
+  const records = buildDimobRecords(agg, leaseRecords, opts);
   const txt = buildDimobFile(records);
   const totalLocacao = leaseRecords.reduce((a, r) => a + r.totalRendimento, 0);
   return {

@@ -7,6 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -70,6 +72,20 @@ interface ExcludedLease {
   reason: string | null;
 }
 
+interface DimobExportItem {
+  id: string;
+  year: number;
+  recordCount: number;
+  totalOperacoes: number;
+  totalComissao: number;
+  contentHash: string;
+  fileUrl: string | null;
+  retificadora: boolean;
+  numeroRecibo: string | null;
+  createdAt: string;
+  generatedByName: string | null;
+}
+
 interface PreviewResponse {
   year: number;
   declarante: Declarante;
@@ -106,6 +122,9 @@ export function DimobReportClient() {
   const [reconciling, setReconciling] = useState<string | null>(null);
   const [selectedLeases, setSelectedLeases] = useState<Set<string>>(new Set());
   const [bulkExcluding, setBulkExcluding] = useState(false);
+  const [retificadora, setRetificadora] = useState(false);
+  const [numeroRecibo, setNumeroRecibo] = useState("");
+  const [exports, setExports] = useState<DimobExportItem[]>([]);
 
   /** Reconstrói o estado de overrides (vendas + locação) a partir do que veio marcado. */
   const deriveOverrides = (d: PreviewResponse | null): OverrideState => {
@@ -212,9 +231,21 @@ export function DimobReportClient() {
     }
   }
 
+  const loadExports = useCallback(async (y: number) => {
+    try {
+      const res = await fetch(`/api/dimob/exports?year=${y}`);
+      if (!res.ok) return;
+      const j = await res.json();
+      setExports(j.exports ?? []);
+    } catch {
+      /* histórico é best-effort */
+    }
+  }, []);
+
   useEffect(() => {
     void load(year);
-  }, [year, load]);
+    void loadExports(year);
+  }, [year, load, loadExports]);
 
   async function confirmExclude() {
     if (!excludeTarget) return;
@@ -319,9 +350,20 @@ export function DimobReportClient() {
   }
 
   async function generate() {
+    if (retificadora && !numeroRecibo.trim()) {
+      toast.error("Informe o número do recibo da declaração anterior para a retificadora.");
+      return;
+    }
     setGenerating(true);
     try {
-      const res = await fetch(`/api/dimob/generate?year=${year}`, { method: "POST" });
+      const res = await fetch(`/api/dimob/generate?year=${year}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          retificadora,
+          numeroRecibo: retificadora ? numeroRecibo.trim() : undefined,
+        }),
+      });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.error || "Falha ao gerar o arquivo");
@@ -330,10 +372,11 @@ export function DimobReportClient() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `DIMOB_${year}.txt`;
+      a.download = `DIMOB_${year}${retificadora ? "_retificadora" : ""}.txt`;
       a.click();
       URL.revokeObjectURL(url);
       toast.success("Arquivo DIMOB gerado.");
+      void loadExports(year);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha ao gerar");
     } finally {
@@ -367,6 +410,27 @@ export function DimobReportClient() {
               ))}
             </select>
             {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2">
+              <Switch
+                id="dimob-retificadora"
+                checked={retificadora}
+                onCheckedChange={(v) => setRetificadora(Boolean(v))}
+              />
+              <label htmlFor="dimob-retificadora" className="text-sm text-muted-foreground">
+                Retificadora
+              </label>
+            </div>
+            {retificadora && (
+              <Input
+                value={numeroRecibo}
+                onChange={(e) => setNumeroRecibo(e.target.value.replace(/\D/g, ""))}
+                placeholder="Nº do recibo anterior"
+                className="h-9 w-44 font-mono text-sm"
+                inputMode="numeric"
+              />
+            )}
           </div>
           <Button
             onClick={generate}
@@ -624,6 +688,53 @@ export function DimobReportClient() {
           year={year}
           records={data.reviewRecords.map((r) => ({ recordId: r.recordId, title: r.title }))}
         />
+      )}
+
+      {/* Histórico de arquivos gerados (re-download) */}
+      {exports.length > 0 && (
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Arquivos gerados ({exports.length})</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {exports.map((e) => (
+              <div
+                key={e.id}
+                className="flex items-center justify-between gap-3 rounded-md border p-2 text-sm"
+              >
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2 font-medium">
+                    DIMOB {e.year}
+                    {e.retificadora && (
+                      <Badge variant="secondary">
+                        retificadora{e.numeroRecibo ? ` · recibo ${e.numeroRecibo}` : ""}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {new Date(e.createdAt).toLocaleString("pt-BR")} · {e.recordCount} linhas ·{" "}
+                    {e.totalOperacoes.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                    {e.generatedByName ? ` · ${e.generatedByName}` : ""}
+                  </div>
+                  <div className="font-mono text-[10px] text-muted-foreground">
+                    sha256 {e.contentHash.slice(0, 16)}…
+                  </div>
+                </div>
+                {e.fileUrl ? (
+                  <a
+                    href={e.fileUrl}
+                    download={`DIMOB_${e.year}${e.retificadora ? "_retificadora" : ""}.txt`}
+                    className="inline-flex h-8 shrink-0 items-center gap-1 rounded-md border px-3 text-xs font-medium hover:bg-muted"
+                  >
+                    <Download className="h-3.5 w-3.5" /> Baixar
+                  </a>
+                ) : (
+                  <span className="shrink-0 text-xs text-muted-foreground">sem arquivo salvo</span>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
       )}
 
       {/* Selo do leiaute */}

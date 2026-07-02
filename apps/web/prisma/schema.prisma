@@ -3003,6 +3003,8 @@ model DimobExport {
   totalComissao     Float // soma da comissão do declarante
   contentHash       String // SHA-256 do TXT (dedupe/integridade)
   fileUrl           String? // storage do TXT gerado (opcional)
+  retificadora      Boolean  @default(false) // declaração retificadora?
+  numeroRecibo      String? // recibo da declaração anterior (se retificadora)
   generatedByUserId String?
   createdAt         DateTime @default(now())
 

@@ -104,4 +104,20 @@ describe("validateLeaseRecord", () => {
   it("registro válido não gera erro", () => {
     expect(validateLeaseRecord(leaseRecord())).toHaveLength(0);
   });
+
+  it("locador e locatário com mesmo doc geram aviso", () => {
+    const bad = leaseRecord({
+      locatario: { nome: "Igual", cpfCnpj: "39053344705" },
+    });
+    const issues = validateLeaseRecord(bad);
+    expect(issues.some((i) => i.level === "warning" && i.field === "cpfCnpjLocatario")).toBe(true);
+  });
+
+  it("IRRF maior que o aluguel do mês gera aviso", () => {
+    const m = meses();
+    m[0] = { rendimento: 100, comissao: 10, imposto: 200 };
+    const bad = leaseRecord({ meses: m, totalRendimento: 100 });
+    const issues = validateLeaseRecord(bad);
+    expect(issues.some((i) => i.level === "warning" && i.field === "imposto_1")).toBe(true);
+  });
 });

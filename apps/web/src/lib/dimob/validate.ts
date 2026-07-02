@@ -78,6 +78,13 @@ export function validateRecord(r: DimobSaleRecord): DimobIssue[] {
       "Operação com múltiplos vendedores e compradores — revise o rateio de valor/comissão."
     );
   }
+  // Sanidade (FAQ): comprador e vendedor não podem ser a mesma pessoa.
+  if (
+    isValidCpfCnpj(r.comprador.cpfCnpj) &&
+    r.comprador.cpfCnpj === r.vendedor.cpfCnpj
+  ) {
+    push("warning", "cpfCnpjComprador", "Comprador e vendedor com o mesmo CPF/CNPJ — confira as partes.");
+  }
   return issues;
 }
 
@@ -97,6 +104,22 @@ export function validateLeaseRecord(r: DimobLeaseRecord): DimobIssue[] {
   }
   if (!(r.totalRendimento > 0)) {
     push("warning", "rendimento", "Sem aluguel recebido no ano — confirme se deve constar.");
+  }
+  // Sanidade: locador e locatário não podem ser a mesma pessoa.
+  if (
+    isValidCpfCnpj(r.locador.cpfCnpj) &&
+    r.locador.cpfCnpj === r.locatario.cpfCnpj
+  ) {
+    push("warning", "cpfCnpjLocatario", "Locador e locatário com o mesmo CPF/CNPJ — confira as partes.");
+  }
+  // Sanidade: IRRF de um mês não deve superar o aluguel daquele mês.
+  const mesFuraIrrf = r.meses.findIndex((m) => m.imposto > m.rendimento + 0.005);
+  if (mesFuraIrrf >= 0) {
+    push(
+      "warning",
+      `imposto_${mesFuraIrrf + 1}`,
+      `IRRF do mês ${mesFuraIrrf + 1} maior que o aluguel do mês — revise o valor retido.`
+    );
   }
   return issues;
 }

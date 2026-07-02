@@ -7,7 +7,9 @@ import {
   MembershipRequiredError,
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { z } from "zod";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { uploadStringToStorage } from "@/lib/storage/s3";
 import { aggregateSalesForYear } from "@/lib/dimob/aggregate-sales";
 import { aggregateLeasesForYear } from "@/lib/dimob/aggregate-lease";
 import {
@@ -30,6 +32,11 @@ function parseYear(sp: URLSearchParams): number | null {
   if (!Number.isInteger(y) || y < 2000 || y > 2100) return null;
   return y;
 }
+
+const GenerateBody = z.object({
+  retificadora: z.boolean().optional(),
+  numeroRecibo: z.string().trim().max(20).optional(),
+});
 
 /**
  * POST /api/dimob/generate?year=YYYY
@@ -57,6 +64,16 @@ export async function POST(req: NextRequest) {
   const year = parseYear(new URL(req.url).searchParams);
   if (year === null) {
     return NextResponse.json({ error: "Ano inválido" }, { status: 400 });
+  }
+
+  const body = GenerateBody.safeParse(await req.json().catch(() => ({})));
+  const retificadora = body.success ? Boolean(body.data.retificadora) : false;
+  const numeroRecibo = body.success ? body.data.numeroRecibo?.trim() || null : null;
+  if (retificadora && !numeroRecibo) {
+    return NextResponse.json(
+      { error: "Declaração retificadora exige o número do recibo da declaração anterior." },
+      { status: 422 }
+    );
   }
 
   const [aggregate0, leaseAgg0] = await Promise.all([
@@ -88,7 +105,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const built = buildDimobFileFromAggregate(aggregate, leaseRecords);
+  const built = buildDimobFileFromAggregate(aggregate, leaseRecords, {
+    retificadora,
+    numeroRecibo,
+  });
+
+  // Sobe o TXT ao storage para o histórico (re-download). Best-effort: se falhar,
+  // ainda entregamos o download direto e persistimos o export sem fileUrl.
+  let fileUrl: string | null = null;
+  try {
+    fileUrl = await uploadStringToStorage({
+      bucket: process.env.S3_BUCKET,
+      key: `dimob/${ctx.orgId}/DIMOB_${year}_${built.contentHash.slice(0, 12)}.txt`,
+      body: built.txt,
+      contentType: "text/plain; charset=utf-8",
+    });
+  } catch {
+    fileUrl = null;
+  }
 
   await prisma.dimobExport.create({
     data: {
@@ -98,6 +132,9 @@ export async function POST(req: NextRequest) {
       totalOperacoes: built.totalOperacoes,
       totalComissao: built.totalComissao,
       contentHash: built.contentHash,
+      fileUrl,
+      retificadora,
+      numeroRecibo,
       generatedByUserId: ctx.userId,
     },
   });
@@ -113,6 +150,8 @@ export async function POST(req: NextRequest) {
       totalOperacoes: built.totalOperacoes,
       totalComissao: built.totalComissao,
       contentHash: built.contentHash,
+      retificadora,
+      numeroRecibo,
     },
   });
 
