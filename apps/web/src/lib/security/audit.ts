@@ -75,6 +75,7 @@ export type AuditAction =
   | "BRANDING_UPDATED"
   // Plataforma / multitenant (super-admin)
   | "ORG_CREATED"
+  | "ORG_UPDATED"
   | "ORG_MODULES_UPDATED"
   | "ORG_SUSPENDED"
   | "ORG_REACTIVATED"

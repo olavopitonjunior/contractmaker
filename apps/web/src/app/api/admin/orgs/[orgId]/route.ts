@@ -10,6 +10,69 @@ export const dynamic = "force-dynamic";
 
 const deleteSchema = z.object({ confirm: z.string().min(1) });
 
+// Dados cadastrais editáveis pelo super_admin. `.nullish()` permite limpar (null).
+const patchSchema = z.object({
+  legalName: z.string().trim().max(200).nullish(),
+  cnpj: z.string().trim().max(20).nullish(),
+  creci: z.string().trim().max(40).nullish(),
+  legalAddress: z.string().trim().max(300).nullish(),
+});
+
+const PATCHABLE_FIELDS = ["legalName", "cnpj", "creci", "legalAddress"] as const;
+
+/**
+ * PATCH /api/admin/orgs/[orgId] — atualiza dados cadastrais da imobiliária
+ * (super_admin). razão social / CNPJ / CRECI / endereço aparecem na cláusula da
+ * administradora dos contratos de locação. Grava só as chaves presentes no body
+ * (null limpa o campo).
+ */
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: { orgId: string } }
+) {
+  const session = await auth();
+  const g = await requirePlatform(session?.user?.id, "super_admin");
+  if (!g.ok) return g.res;
+
+  const org = await prisma.organization.findUnique({
+    where: { id: params.orgId },
+    select: { id: true },
+  });
+  if (!org) return NextResponse.json({ error: "Org not found" }, { status: 404 });
+
+  const parsed = patchSchema.safeParse(await req.json().catch(() => null));
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Validação falhou", issues: parsed.error.flatten() },
+      { status: 400 }
+    );
+  }
+
+  const data: Record<string, string | null> = {};
+  for (const k of PATCHABLE_FIELDS) {
+    if (k in parsed.data) data[k] = parsed.data[k] ?? null;
+  }
+  if (Object.keys(data).length === 0) {
+    return NextResponse.json({ error: "Nenhum campo para atualizar" }, { status: 400 });
+  }
+
+  const updated = await prisma.organization.update({
+    where: { id: org.id },
+    data,
+    select: { id: true, legalName: true, cnpj: true, creci: true, legalAddress: true },
+  });
+
+  await audit(extractAuditContextFromRequest(req, org.id, session!.user!.id), {
+    action: "ORG_UPDATED",
+    result: "SUCCESS",
+    resourceType: "Organization",
+    resource: org.id,
+    metadata: { fields: Object.keys(data) },
+  });
+
+  return NextResponse.json({ ok: true, org: updated });
+}
+
 /**
  * DELETE /api/admin/orgs/[orgId] — exclusão DESTRUTIVA de tenant (super_admin).
  *
