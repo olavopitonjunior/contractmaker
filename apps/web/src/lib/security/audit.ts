@@ -239,7 +239,10 @@ export type AuditAction =
   | "NEWTON_INTENT_REJECTED"
   // DIMOB / fiscal
   | "FISCAL_SETTINGS_UPDATE"
-  | "DIMOB_GENERATED";
+  | "DIMOB_GENERATED"
+  | "DIMOB_SALE_EXCLUDED"
+  | "DIMOB_SALE_RECONCILED"
+  | "DIMOB_RECONCILED_ALL";
 
 export interface AuditContext {
   // Nullable (Fase 0c): eventos pré-resolução de tenant gravam orgId=null.

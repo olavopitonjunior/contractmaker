@@ -37,6 +37,7 @@ const base: DimobSalesAggregate = {
   year: 2025,
   declarante,
   records: [rec],
+  excluded: [],
   dispensado: false,
 };
 

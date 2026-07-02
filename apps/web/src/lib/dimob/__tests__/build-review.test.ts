@@ -41,7 +41,7 @@ function record(over: Partial<DimobSaleRecord> = {}): DimobSaleRecord {
 }
 
 function agg(over: Partial<DimobSalesAggregate> = {}): DimobSalesAggregate {
-  return { year: 2025, declarante: declaranteOk, records: [record()], dispensado: false, ...over };
+  return { year: 2025, declarante: declaranteOk, records: [record()], excluded: [], dispensado: false, ...over };
 }
 
 describe("buildReviewRecords", () => {

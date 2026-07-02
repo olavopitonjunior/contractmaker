@@ -50,11 +50,15 @@ export async function GET(req: NextRequest) {
   }
 
   const aggregate0 = await aggregateSalesForYear(ctx.orgId, year);
-  const [ov, org] = await Promise.all([
+  const [ov, org, exclusions] = await Promise.all([
     prisma.dimobOverride.findUnique({ where: { orgId_year: { orgId: ctx.orgId, year } } }),
     prisma.organization.findUnique({
       where: { id: ctx.orgId },
       select: { dimobLayoutValidatedVersion: true },
+    }),
+    prisma.dimobExclusion.findMany({
+      where: { orgId: ctx.orgId, year },
+      select: { dealId: true, reason: true },
     }),
   ]);
   const state = (ov?.state as DimobOverrideState) ?? {};
@@ -64,12 +68,37 @@ export async function GET(req: NextRequest) {
   const reviewRecords = buildReviewRecords(aggregate);
   markOverrides(reviewRecords, buildReviewRecords(aggregate0), state);
 
+  // Resumo por deal das vendas excluídas (para a lista de conciliação).
+  const reasonByDeal = new Map(exclusions.map((e) => [e.dealId, e.reason]));
+  const excludedByDeal = new Map<
+    string,
+    { dealId: string; title: string; vendedor: string; comprador: string; valorAlienacao: number; dataOperacao: string; reason: string | null }
+  >();
+  for (const r of aggregate.excluded) {
+    const cur = excludedByDeal.get(r.dealId);
+    if (cur) {
+      cur.valorAlienacao += r.valorAlienacao;
+    } else {
+      excludedByDeal.set(r.dealId, {
+        dealId: r.dealId,
+        title: r.dealTitle,
+        vendedor: r.vendedor.nome,
+        comprador: r.comprador.nome,
+        valorAlienacao: r.valorAlienacao,
+        dataOperacao: r.dataOperacao,
+        reason: reasonByDeal.get(r.dealId) ?? null,
+      });
+    }
+  }
+  const excludedSales = [...excludedByDeal.values()];
+
   return NextResponse.json({
     year,
     declarante: aggregate.declarante,
     dispensado: aggregate.dispensado,
     records: aggregate.records,
     reviewRecords,
+    excludedSales,
     issues,
     hasOverrides: Object.keys(state).length > 0,
     layoutValidated: org?.dimobLayoutValidatedVersion === DIMOB_LAYOUT_VERSION,

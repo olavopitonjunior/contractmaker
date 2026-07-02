@@ -14,6 +14,7 @@ import {
   Code2,
   Undo2,
   Loader2,
+  Trash2,
 } from "lucide-react";
 import { buildColumnRuler } from "@/lib/dimob/decode";
 
@@ -67,6 +68,7 @@ export interface DimobRecordGridProps {
   onCommit?: (recordId: string, fieldKey: string, value: string) => void;
   onReset?: (recordId: string, fieldKey: string) => void;
   onCorrigirOrigem?: (record: ReviewRecord, cell: ReviewCell) => void;
+  onExcludeSale?: (record: ReviewRecord) => void;
 }
 
 function StatusIcon({ status }: { status: CellStatus }) {
@@ -172,6 +174,7 @@ function RecordCard({
   onCommit,
   onReset,
   onCorrigirOrigem,
+  onExcludeSale,
 }: { record: ReviewRecord } & Omit<DimobRecordGridProps, "records">) {
   const [open, setOpen] = useState(record.kind === "R01");
   const [showRaw, setShowRaw] = useState(false);
@@ -189,6 +192,20 @@ function RecordCard({
             {warnings > 0 && <Badge variant="secondary">{warnings} aviso{warnings > 1 ? "s" : ""}</Badge>}
             {errors === 0 && warnings === 0 && (
               <Badge variant="secondary" className="text-emerald-600">ok</Badge>
+            )}
+            {record.kind === "R04" && onExcludeSale && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 px-2 text-xs text-muted-foreground hover:text-destructive"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onExcludeSale(record);
+                }}
+                title="Excluir esta venda da DIMOB"
+              >
+                <Trash2 className="h-3.5 w-3.5" /> Excluir
+              </Button>
             )}
           </div>
         </div>
