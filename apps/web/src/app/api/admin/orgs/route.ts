@@ -10,7 +10,7 @@ import {
 } from "@/lib/security/rbac/platform";
 import { subdomainSchema } from "@/lib/tenant/subdomain";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
-import { MODULE, isValidModule, type ModuleKey } from "@/lib/modules/catalog";
+import { MODULE, MODULE_CATALOG, isValidModule, type ModuleKey } from "@/lib/modules/catalog";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -44,6 +44,12 @@ const createOrgSchema = z.object({
   ownerName: z.string().trim().min(2).max(120).optional(),
   // Módulos habilitados na criação. Default: ambos. Strings inválidas ignoradas.
   modules: z.array(z.string()).optional(),
+  // Dados cadastrais da imobiliária — usados na cláusula da administradora dos
+  // contratos de locação (contract-generation lê creci/legalName/legalAddress).
+  legalName: z.string().trim().max(200).optional(),
+  cnpj: z.string().trim().max(20).optional(),
+  creci: z.string().trim().max(40).optional(),
+  legalAddress: z.string().trim().max(300).optional(),
 });
 
 async function gate(userId: string, role: "support" | "super_admin") {
@@ -112,7 +118,8 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
-  const { name, subdomain, ownerEmail, ownerName } = parsed.data;
+  const { name, subdomain, ownerEmail, ownerName, legalName, cnpj, creci, legalAddress } =
+    parsed.data;
 
   // Módulos a habilitar: filtra inválidos; default = ambos quando não informado.
   const requestedModules = (parsed.data.modules ?? [MODULE.VENDAS, MODULE.LOCACAO]).filter(
@@ -121,6 +128,7 @@ export async function POST(req: NextRequest) {
   const enabledModules =
     requestedModules.length > 0 ? Array.from(new Set(requestedModules)) : [MODULE.VENDAS];
   const locacaoEnabled = enabledModules.includes(MODULE.LOCACAO);
+  const vendasEnabled = enabledModules.includes(MODULE.VENDAS);
 
   // Unicidade de subdomínio (a constraint @unique também protege, mas damos 409 claro).
   const subTaken = await prisma.organization.findUnique({ where: { subdomain } });
@@ -141,7 +149,15 @@ export async function POST(req: NextRequest) {
 
   const result = await prisma.$transaction(async (tx) => {
     const org = await tx.organization.create({
-      data: { name, slug, subdomain },
+      data: {
+        name,
+        slug,
+        subdomain,
+        legalName: legalName ?? undefined,
+        cnpj: cnpj ?? undefined,
+        creci: creci ?? undefined,
+        legalAddress: legalAddress ?? undefined,
+      },
     });
 
     const ownerId =
@@ -162,18 +178,21 @@ export async function POST(req: NextRequest) {
       data: { userId: ownerId, orgId: org.id, role: "owner" },
     });
 
-    // Pipeline de vendas (padrão) — criado sempre, com os 7 stages canônicos.
-    const pipeline = await tx.pipeline.create({
-      data: { orgId: org.id, name: "Pipeline Principal" },
-    });
-    await tx.pipelineStage.createMany({
-      data: DEFAULT_STAGES.map((s) => ({
-        pipelineId: pipeline.id,
-        name: s.name,
-        color: s.color,
-        position: s.position,
-      })),
-    });
+    // Pipeline de vendas (7 stages canônicos) — só quando o módulo Vendas está
+    // habilitado. Um tenant só-locação não deve carregar um funil de vendas órfão.
+    if (vendasEnabled) {
+      const pipeline = await tx.pipeline.create({
+        data: { orgId: org.id, name: "Pipeline Principal" },
+      });
+      await tx.pipelineStage.createMany({
+        data: DEFAULT_STAGES.map((s) => ({
+          pipelineId: pipeline.id,
+          name: s.name,
+          color: s.color,
+          position: s.position,
+        })),
+      });
+    }
 
     // Pipeline de locação (kind="locacao") — só quando o módulo está habilitado.
     if (locacaoEnabled) {
@@ -190,9 +209,16 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    // Entitlements de módulos.
+    // Entitlements de módulos — grava uma row EXPLÍCITA por módulo do catálogo,
+    // com `enabled` refletindo a intenção. Sem isto, um módulo ausente resolveria
+    // para `enabled=true` (fail-open em lib/modules/read.ts) e um tenant
+    // só-locação continuaria com Vendas ligado. Determinístico > fail-open.
     await tx.orgModule.createMany({
-      data: enabledModules.map((m) => ({ orgId: org.id, module: m, enabled: true })),
+      data: MODULE_CATALOG.map((m) => ({
+        orgId: org.id,
+        module: m.key,
+        enabled: enabledModules.includes(m.key),
+      })),
     });
 
     await tx.brandingSettings.create({ data: { orgId: org.id } });

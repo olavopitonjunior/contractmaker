@@ -1,10 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { applyOverrides } from "../apply-overrides";
+import { applyOverrides, applyLeaseOverrides } from "../apply-overrides";
 import type {
   DimobSalesAggregate,
   DimobSaleRecord,
   DimobDeclarante,
 } from "../aggregate-sales";
+import type { DimobLeaseRecord, DimobLeaseMonth } from "../aggregate-lease";
 
 const declarante: DimobDeclarante = {
   cnpj: "",
@@ -81,5 +82,54 @@ describe("applyOverrides", () => {
   it("recordId desconhecido é ignorado", () => {
     const out = applyOverrides(base, { "zzz:9": { nomeComprador: "X" } });
     expect(out.records[0].comprador.nome).toBe("Ana");
+  });
+
+  it("valor com ponto decimal (ex.: IRRF 68.56) não é truncado", () => {
+    const out = applyOverrides(base, { "d1:0": { valorComissao: "68.56" } });
+    expect(out.records[0].valorComissao).toBeCloseTo(68.56, 2);
+  });
+});
+
+function meses(): DimobLeaseMonth[] {
+  return Array.from({ length: 12 }, () => ({ rendimento: 0, comissao: 0, imposto: 0 }));
+}
+
+function leaseRec(): DimobLeaseRecord {
+  const m = meses();
+  m[0] = { rendimento: 3200, comissao: 300, imposto: 68.56 };
+  return {
+    recordId: "lease:L1:0",
+    leaseId: "L1",
+    ownerId: "O1",
+    locador: { nome: "Loc", cpfCnpj: "39053344705", tipoPessoa: "fisica" },
+    locatario: { nome: "Inq", cpfCnpj: "11144477735" },
+    numeroContrato: "1",
+    dataContrato: "2025-01-01",
+    meses: m,
+    totalRendimento: 3200,
+    imovel: { endereco: "R", cep: "01001000", uf: "SP", tipoImovel: "urbano" },
+  };
+}
+
+describe("applyLeaseOverrides", () => {
+  it("estado vazio devolve os registros sem alterar", () => {
+    const recs = [leaseRec()];
+    expect(applyLeaseOverrides(recs, {})).toBe(recs);
+  });
+
+  it("override mensal recalcula o totalRendimento", () => {
+    const out = applyLeaseOverrides([leaseRec()], {
+      "lease:L1:0": { aluguel_1: "4.000,00", imposto_1: "100,00" },
+    });
+    expect(out[0].meses[0].rendimento).toBeCloseTo(4000, 2);
+    expect(out[0].meses[0].imposto).toBeCloseTo(100, 2);
+    expect(out[0].totalRendimento).toBeCloseTo(4000, 2);
+  });
+
+  it("override de doc do locador coage para dígitos", () => {
+    const out = applyLeaseOverrides([leaseRec()], {
+      "lease:L1:0": { cpfCnpjLocador: "390.533.447-05" },
+    });
+    expect(out[0].locador.cpfCnpj).toBe("39053344705");
   });
 });

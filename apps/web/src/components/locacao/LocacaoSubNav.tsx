@@ -18,6 +18,7 @@ const FULL_SUB_NAV: SubNavItem[] = [
   { label: "Vistorias", href: "/locacao/vistorias" },
   { label: "Pessoas", href: "/locacao/pessoas" },
   { label: "Seguros", href: "/locacao/seguros" },
+  { label: "DIMOB", href: "/relatorios/dimob" },
   { label: "Newton", href: "/locacao/newton" },
 ];
 

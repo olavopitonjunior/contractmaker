@@ -11,6 +11,8 @@ import { sanitizeSerasaPayload } from "@/lib/serasa/sanitize";
 import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
 import { checkOnrAuth } from "@/lib/certidoes/onr-auth";
 import { audit } from "@/lib/security/audit";
+import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
+import { FEATURE } from "@/lib/modules/catalog";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -23,6 +25,11 @@ async function authorizeDeal(dealId: string) {
   if (!session?.user) return { error: "Unauthorized", status: 401 as const };
   const org = await getUserOrg(session.user.id);
   if (!org) return { error: "No organization", status: 400 as const };
+  // Certidões = sub-função do módulo Vendas. Tenant só-locação não acessa.
+  const modulesView = await getOrgModules(org.id);
+  if (!isFeatureEnabled(modulesView, FEATURE.VENDAS_CERTIDOES)) {
+    return { error: "MODULE_DISABLED", status: 403 as const };
+  }
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
     include: {

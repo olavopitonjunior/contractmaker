@@ -7,6 +7,8 @@ import { runBatch, getMonthlySpend } from "@/lib/certidoes/executor";
 import { endpointInfo } from "@/lib/certidoes/endpoints";
 import { sanitizePayload } from "@/lib/certidoes/infosimples";
 import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
+import { assertFeatureEnabled, ModuleDisabledError } from "@/lib/modules/guard";
+import { FEATURE } from "@/lib/modules/catalog";
 import { z } from "zod";
 
 export const runtime = "nodejs";
@@ -61,6 +63,17 @@ export async function POST(req: NextRequest) {
   const org = await getUserOrg(session.user.id);
   if (!org) {
     return NextResponse.json({ error: "No organization" }, { status: 400 });
+  }
+
+  // Certidões pertencem ao módulo Vendas (diligência de partes do deal).
+  // Gate por sub-função — tenant só-locação não dispara consultas pagas.
+  try {
+    await assertFeatureEnabled(org.id, FEATURE.VENDAS_CERTIDOES);
+  } catch (e) {
+    if (e instanceof ModuleDisabledError) {
+      return NextResponse.json({ error: e.code }, { status: e.status });
+    }
+    throw e;
   }
 
   const body = await req.json().catch(() => ({}));

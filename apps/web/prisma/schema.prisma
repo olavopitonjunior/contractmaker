@@ -3003,6 +3003,8 @@ model DimobExport {
   totalComissao     Float // soma da comissão do declarante
   contentHash       String // SHA-256 do TXT (dedupe/integridade)
   fileUrl           String? // storage do TXT gerado (opcional)
+  retificadora      Boolean  @default(false) // declaração retificadora?
+  numeroRecibo      String? // recibo da declaração anterior (se retificadora)
   generatedByUserId String?
   createdAt         DateTime @default(now())
 
@@ -3027,13 +3029,15 @@ model DimobOverride {
   @@unique([orgId, year])
 }
 
-// DIMOB — vendas excluídas da declaração por (org, ano). Excluir tira o deal do
-// TXT; "reconciliar" apaga a linha e a venda volta. `reason` é opcional (audit).
+// DIMOB — vendas (dealId) ou locações (leaseId) excluídas da declaração por
+// (org, ano). Excluir tira o registro do TXT; "reconciliar" apaga a linha e volta.
+// XOR dealId|leaseId (validado no app). `reason` é opcional (audit).
 model DimobExclusion {
   id               String   @id @default(cuid())
   orgId            String
   year             Int
-  dealId           String
+  dealId           String?
+  leaseId          String?
   reason           String?
   excludedByUserId String?
   createdAt        DateTime @default(now())
@@ -3041,5 +3045,6 @@ model DimobExclusion {
   org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@unique([orgId, year, dealId])
+  @@unique([orgId, year, leaseId])
   @@index([orgId, year])
 }

@@ -15,15 +15,17 @@ import type {
   DimobSaleRecord,
   DimobDeclarante,
 } from "./aggregate-sales";
+import type { DimobLeaseRecord } from "./aggregate-lease";
 
 export type DimobIssueLevel = "error" | "warning";
 
 export interface DimobIssue {
   level: DimobIssueLevel;
-  scope: "declarante" | "operacao";
+  scope: "declarante" | "operacao" | "locacao";
   field: string;
   message: string;
   dealId?: string;
+  leaseId?: string;
 }
 
 export function validateDeclarante(d: DimobDeclarante): DimobIssue[] {
@@ -76,7 +78,54 @@ export function validateRecord(r: DimobSaleRecord): DimobIssue[] {
       "Operação com múltiplos vendedores e compradores — revise o rateio de valor/comissão."
     );
   }
+  // Sanidade (FAQ): comprador e vendedor não podem ser a mesma pessoa.
+  if (
+    isValidCpfCnpj(r.comprador.cpfCnpj) &&
+    r.comprador.cpfCnpj === r.vendedor.cpfCnpj
+  ) {
+    push("warning", "cpfCnpjComprador", "Comprador e vendedor com o mesmo CPF/CNPJ — confira as partes.");
+  }
   return issues;
+}
+
+/** Validação de um registro R02 (locação). Bloqueia CPF/CNPJ ausente/sintético. */
+export function validateLeaseRecord(r: DimobLeaseRecord): DimobIssue[] {
+  const issues: DimobIssue[] = [];
+  const push = (level: DimobIssueLevel, field: string, message: string) =>
+    issues.push({ level, scope: "locacao", field, message, leaseId: r.leaseId });
+
+  if (!r.locador.nome) push("error", "nomeLocador", "Locador sem nome.");
+  if (!isValidCpfCnpj(r.locador.cpfCnpj)) {
+    push("error", "cpfCnpjLocador", `CPF/CNPJ do locador ausente ou inválido (${r.locador.nome || "sem nome"}).`);
+  }
+  if (!r.locatario.nome) push("error", "nomeLocatario", "Locatário sem nome.");
+  if (!isValidCpfCnpj(r.locatario.cpfCnpj)) {
+    push("error", "cpfCnpjLocatario", "CPF/CNPJ do locatário ausente ou inválido.");
+  }
+  if (!(r.totalRendimento > 0)) {
+    push("warning", "rendimento", "Sem aluguel recebido no ano — confirme se deve constar.");
+  }
+  // Sanidade: locador e locatário não podem ser a mesma pessoa.
+  if (
+    isValidCpfCnpj(r.locador.cpfCnpj) &&
+    r.locador.cpfCnpj === r.locatario.cpfCnpj
+  ) {
+    push("warning", "cpfCnpjLocatario", "Locador e locatário com o mesmo CPF/CNPJ — confira as partes.");
+  }
+  // Sanidade: IRRF de um mês não deve superar o aluguel daquele mês.
+  const mesFuraIrrf = r.meses.findIndex((m) => m.imposto > m.rendimento + 0.005);
+  if (mesFuraIrrf >= 0) {
+    push(
+      "warning",
+      `imposto_${mesFuraIrrf + 1}`,
+      `IRRF do mês ${mesFuraIrrf + 1} maior que o aluguel do mês — revise o valor retido.`
+    );
+  }
+  return issues;
+}
+
+export function validateLeaseRecords(records: DimobLeaseRecord[]): DimobIssue[] {
+  return records.flatMap(validateLeaseRecord);
 }
 
 export function validateAggregate(agg: DimobSalesAggregate): DimobIssue[] {

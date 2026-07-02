@@ -69,7 +69,13 @@ export interface DimobRecordGridProps {
   onReset?: (recordId: string, fieldKey: string) => void;
   onCorrigirOrigem?: (record: ReviewRecord, cell: ReviewCell) => void;
   onExcludeSale?: (record: ReviewRecord) => void;
+  /** recordId a destacar/expandir (deep-link vindo dos findings da IA). */
+  highlightRecordId?: string | null;
 }
+
+/** id do DOM de um card de registro — usado pelo deep-link (scroll/realce). */
+export const dimobRecordDomId = (recordId: string) =>
+  `dimob-rec-${recordId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
 
 function StatusIcon({ status }: { status: CellStatus }) {
   if (status === "error") return <XCircle className="h-4 w-4 text-destructive" />;
@@ -175,13 +181,30 @@ function RecordCard({
   onReset,
   onCorrigirOrigem,
   onExcludeSale,
+  highlightRecordId,
 }: { record: ReviewRecord } & Omit<DimobRecordGridProps, "records">) {
   const [open, setOpen] = useState(record.kind === "R01");
   const [showRaw, setShowRaw] = useState(false);
+  const [flash, setFlash] = useState(false);
   const { errors, warnings } = summarize(record.cells);
 
+  // Deep-link: quando este registro é o alvo, expande, rola e pisca o realce.
+  useEffect(() => {
+    if (highlightRecordId !== record.recordId) return;
+    setOpen(true);
+    setFlash(true);
+    document
+      .getElementById(dimobRecordDomId(record.recordId))
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const t = setTimeout(() => setFlash(false), 2000);
+    return () => clearTimeout(t);
+  }, [highlightRecordId, record.recordId]);
+
   return (
-    <Card>
+    <Card
+      id={dimobRecordDomId(record.recordId)}
+      className={flash ? "ring-2 ring-primary ring-offset-2 transition-shadow" : "transition-shadow"}
+    >
       <CardHeader className="cursor-pointer select-none py-3" onClick={() => setOpen((v) => !v)}>
         <div className="flex items-center gap-2">
           {open ? <ChevronDown className="h-4 w-4 shrink-0" /> : <ChevronRight className="h-4 w-4 shrink-0" />}

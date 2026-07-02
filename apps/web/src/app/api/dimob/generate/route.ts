@@ -7,11 +7,22 @@ import {
   MembershipRequiredError,
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { z } from "zod";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { uploadStringToStorage } from "@/lib/storage/s3";
 import { aggregateSalesForYear } from "@/lib/dimob/aggregate-sales";
-import { validateAggregate, hasBlockingErrors } from "@/lib/dimob/validate";
+import { aggregateLeasesForYear } from "@/lib/dimob/aggregate-lease";
+import {
+  validateAggregate,
+  validateLeaseRecords,
+  hasBlockingErrors,
+} from "@/lib/dimob/validate";
 import { buildDimobFileFromAggregate } from "@/lib/dimob/build-file";
-import { applyOverrides, type DimobOverrideState } from "@/lib/dimob/apply-overrides";
+import {
+  applyOverrides,
+  applyLeaseOverrides,
+  type DimobOverrideState,
+} from "@/lib/dimob/apply-overrides";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -21,6 +32,11 @@ function parseYear(sp: URLSearchParams): number | null {
   if (!Number.isInteger(y) || y < 2000 || y > 2100) return null;
   return y;
 }
+
+const GenerateBody = z.object({
+  retificadora: z.boolean().optional(),
+  numeroRecibo: z.string().trim().max(20).optional(),
+});
 
 /**
  * POST /api/dimob/generate?year=YYYY
@@ -50,20 +66,38 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Ano inválido" }, { status: 400 });
   }
 
-  const aggregate0 = await aggregateSalesForYear(ctx.orgId, year);
-  const ov = await prisma.dimobOverride.findUnique({
-    where: { orgId_year: { orgId: ctx.orgId, year } },
-  });
-  const aggregate = applyOverrides(aggregate0, (ov?.state as DimobOverrideState) ?? null);
-
-  if (aggregate.dispensado) {
+  const body = GenerateBody.safeParse(await req.json().catch(() => ({})));
+  const retificadora = body.success ? Boolean(body.data.retificadora) : false;
+  const numeroRecibo = body.success ? body.data.numeroRecibo?.trim() || null : null;
+  if (retificadora && !numeroRecibo) {
     return NextResponse.json(
-      { error: "Nenhuma operação de venda no ano — DIMOB dispensada (FAQ RFB p6)." },
+      { error: "Declaração retificadora exige o número do recibo da declaração anterior." },
       { status: 422 }
     );
   }
 
-  const issues = validateAggregate(aggregate);
+  const [aggregate0, leaseAgg0] = await Promise.all([
+    aggregateSalesForYear(ctx.orgId, year),
+    aggregateLeasesForYear(ctx.orgId, year),
+  ]);
+  const ov = await prisma.dimobOverride.findUnique({
+    where: { orgId_year: { orgId: ctx.orgId, year } },
+  });
+  const state = (ov?.state as DimobOverrideState) ?? null;
+  const aggregate = applyOverrides(aggregate0, state);
+  const leaseRecords = applyLeaseOverrides(leaseAgg0.records, state);
+
+  if (aggregate.records.length === 0 && leaseRecords.length === 0) {
+    return NextResponse.json(
+      { error: "Nenhuma operação de venda ou locação no ano — DIMOB dispensada (FAQ RFB p6)." },
+      { status: 422 }
+    );
+  }
+
+  const issues = [
+    ...validateAggregate(aggregate),
+    ...validateLeaseRecords(leaseRecords),
+  ];
   if (hasBlockingErrors(issues)) {
     return NextResponse.json(
       { error: "Há pendências obrigatórias que impedem a geração.", issues },
@@ -71,7 +105,24 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const built = buildDimobFileFromAggregate(aggregate);
+  const built = buildDimobFileFromAggregate(aggregate, leaseRecords, {
+    retificadora,
+    numeroRecibo,
+  });
+
+  // Sobe o TXT ao storage para o histórico (re-download). Best-effort: se falhar,
+  // ainda entregamos o download direto e persistimos o export sem fileUrl.
+  let fileUrl: string | null = null;
+  try {
+    fileUrl = await uploadStringToStorage({
+      bucket: process.env.S3_BUCKET,
+      key: `dimob/${ctx.orgId}/DIMOB_${year}_${built.contentHash.slice(0, 12)}.txt`,
+      body: built.txt,
+      contentType: "text/plain; charset=utf-8",
+    });
+  } catch {
+    fileUrl = null;
+  }
 
   await prisma.dimobExport.create({
     data: {
@@ -81,6 +132,9 @@ export async function POST(req: NextRequest) {
       totalOperacoes: built.totalOperacoes,
       totalComissao: built.totalComissao,
       contentHash: built.contentHash,
+      fileUrl,
+      retificadora,
+      numeroRecibo,
       generatedByUserId: ctx.userId,
     },
   });
@@ -96,6 +150,8 @@ export async function POST(req: NextRequest) {
       totalOperacoes: built.totalOperacoes,
       totalComissao: built.totalComissao,
       contentHash: built.contentHash,
+      retificadora,
+      numeroRecibo,
     },
   });
 

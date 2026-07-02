@@ -327,10 +327,12 @@ export async function aggregateSalesForYear(
   });
 
   const exclusions = await prisma.dimobExclusion.findMany({
-    where: { orgId, year },
+    where: { orgId, year, dealId: { not: null } },
     select: { dealId: true },
   });
-  const excludedDealIds = new Set(exclusions.map((e) => e.dealId));
+  const excludedDealIds = new Set(
+    exclusions.map((e) => e.dealId).filter((d): d is string => d != null)
+  );
 
   const allRecords: DimobSaleRecord[] = [];
 
