@@ -44,8 +44,10 @@ const SYSTEM: Record<"review" | "diagnose" | "explain", string> = {
 Recebe registros já decodificados. Aponte SUSPEITAS que validadores automáticos NÃO pegam:
 nome que parece CPF/CNPJ, valor de comissão maior que o valor da venda, data fora do ano-calendário,
 CPF/CNPJ possivelmente trocado entre partes, nomes truncados, UF/CEP incoerentes, operações duplicadas.
-Não repita erros óbvios de campo vazio (já sinalizados). Seja específico e conciso.
-Retorne APENAS um JSON: { "findings": [ { "recordId": "...", "field": "...", "severity": "alta"|"media"|"baixa", "message": "...", "suggestion": "..." } ] }`,
+Não repita erros óbvios de campo vazio (já sinalizados). Seja específico e conciso — no máximo ~15 findings, os mais relevantes.
+Responda SOMENTE o JSON, sem markdown nem cercas de código, sem texto antes ou depois.
+Se não houver nenhuma suspeita, responda exatamente { "findings": [] }.
+Formato: { "findings": [ { "recordId": "...", "field": "...", "severity": "alta"|"media"|"baixa", "message": "...", "suggestion": "..." } ] }`,
   diagnose: `Você é especialista no LEIAUTE do arquivo TXT da DIMOB (programa gerador PGD da Receita).
 Recebe (1) a mensagem de erro do PGD e (2) os registros decodificados com posições.
 Descubra a que linha/campo o erro se refere e CLASSIFIQUE a causa:
@@ -58,6 +60,20 @@ Retorne APENAS um JSON: { "linha": "...", "campo": "...", "classe": "dado"|"leia
 Explique em português claro o que cada campo significa e se os valores parecem coerentes.
 Retorne APENAS um JSON: { "explicacao": "..." }`,
 };
+
+/**
+ * Teto de tokens por modo. `review` produz uma LISTA (potencialmente longa) e
+ * antes estourava 1500 → JSON truncado → parse falhava e voltava {} (o "Revisar
+ * com IA" aparecia como "nenhuma suspeita"). Diagnose/explain são respostas curtas.
+ */
+const MAX_TOKENS: Record<"review" | "diagnose" | "explain", number> = {
+  review: 4096,
+  diagnose: 1500,
+  explain: 1500,
+};
+
+/** Limita quantos registros vão no prompt do review (evita prompt gigante em orgs grandes). */
+const REVIEW_RECORD_CAP = 60;
 
 export async function POST(req: NextRequest) {
   const authResult = await requireAuth(req);
@@ -94,7 +110,9 @@ export async function POST(req: NextRequest) {
   const agg = applyOverrides(agg0, (ov?.state as DimobOverrideState) ?? null);
   const records = buildReviewRecords(agg);
 
-  const payload = recordsForPrompt(records, kind === "explain" ? recordId : undefined);
+  const truncated = kind === "review" && records.length > REVIEW_RECORD_CAP;
+  const promptRecords = truncated ? records.slice(0, REVIEW_RECORD_CAP) : records;
+  const payload = recordsForPrompt(promptRecords, kind === "explain" ? recordId : undefined);
   const userContent =
     kind === "diagnose"
       ? `ERRO DO PGD:\n${pgdError}\n\nREGISTROS:\n${JSON.stringify(payload)}`
@@ -106,7 +124,7 @@ export async function POST(req: NextRequest) {
   try {
     response = await getAnthropicClient().messages.create({
       model: HAIKU_MODEL,
-      max_tokens: 1500,
+      max_tokens: MAX_TOKENS[kind],
       temperature: 0.2,
       system: SYSTEM[kind],
       messages: [{ role: "user", content: userContent }],
@@ -140,6 +158,9 @@ export async function POST(req: NextRequest) {
 
   const text = response.content[0]?.type === "text" ? response.content[0].text : "";
   const result = parseExtractionJson(text);
+  // A IA respondeu texto mas não deu pra extrair JSON válido (ex.: truncado):
+  // sinaliza pro cliente distinguir "falha de parse" de "nenhuma suspeita".
+  const parseError = text.trim().length > 0 && Object.keys(result).length === 0;
 
-  return NextResponse.json({ kind, result });
+  return NextResponse.json({ kind, result, parseError, truncated });
 }

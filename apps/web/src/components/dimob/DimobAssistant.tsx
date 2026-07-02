@@ -32,8 +32,12 @@ async function callAi(body: Record<string, unknown>) {
   });
   const j = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(j.error || "Falha na IA");
-  return j.result ?? null;
+  // Devolve o envelope completo (result + parseError + truncated) para o caller
+  // distinguir "falha de parse da IA" de "nenhum resultado".
+  return j as { result?: unknown; parseError?: boolean; truncated?: boolean };
 }
+
+const AI_PARSE_ERROR_MSG = "A IA não retornou um resultado válido. Tente novamente.";
 
 export function DimobAssistant({
   year,
@@ -57,8 +61,14 @@ export function DimobAssistant({
     setReviewing(true);
     setFindings(null);
     try {
-      const r = await callAi({ kind: "review", year });
-      setFindings(Array.isArray(r?.findings) ? r.findings : []);
+      const j = await callAi({ kind: "review", year });
+      if (j.parseError) {
+        toast.error(AI_PARSE_ERROR_MSG);
+        return;
+      }
+      const r = j.result as { findings?: Finding[] } | null;
+      setFindings(Array.isArray(r?.findings) ? r!.findings! : []);
+      if (j.truncated) toast.warning("Muitas operações — a IA revisou as primeiras 60.");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Falha");
     } finally {
@@ -71,7 +81,12 @@ export function DimobAssistant({
     setDiagnosing(true);
     setDiagnosis(null);
     try {
-      setDiagnosis((await callAi({ kind: "diagnose", year, pgdError })) as Diagnosis);
+      const j = await callAi({ kind: "diagnose", year, pgdError });
+      if (j.parseError) {
+        toast.error(AI_PARSE_ERROR_MSG);
+        return;
+      }
+      setDiagnosis((j.result ?? null) as Diagnosis);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Falha");
     } finally {
@@ -83,7 +98,12 @@ export function DimobAssistant({
     setExplaining(true);
     setExplanation(null);
     try {
-      const r = await callAi({ kind: "explain", year, recordId: explainId });
+      const j = await callAi({ kind: "explain", year, recordId: explainId });
+      if (j.parseError) {
+        toast.error(AI_PARSE_ERROR_MSG);
+        return;
+      }
+      const r = j.result as { explicacao?: string } | null;
       setExplanation(typeof r?.explicacao === "string" ? r.explicacao : "Sem explicação.");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Falha");
