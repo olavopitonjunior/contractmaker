@@ -1,5 +1,6 @@
-import { auth, getUserOrg } from "@/lib/auth/auth";
-import { prisma } from "@/lib/db/prisma";
+import { requireFeaturePage } from "@/lib/modules/page-guard";
+import { getPipelineByKind } from "@/lib/modules/resolve";
+import { FEATURE, MODULE } from "@/lib/modules/catalog";
 import { KanbanBoard } from "@/components/pipeline/KanbanBoard";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -34,25 +35,17 @@ export default async function PipelinePage({
 }: {
   searchParams?: { arquivados?: string };
 }) {
-  const session = await auth();
-  if (!session?.user) return null;
+  // Gate de módulo: tenant só-locação (vendas OFF) é redirecionado pra /locacao.
+  // NÃO usar layout aqui — /pipeline/locacao é filho deste segmento e precisa
+  // continuar acessível pra quem só tem locação.
+  const { orgId } = await requireFeaturePage(FEATURE.VENDAS_PIPELINE, "/locacao");
 
   // ?arquivados=1 mostra também os deals arquivados (recuperação). Default oculta.
   const includeArchived = searchParams?.arquivados === "1";
 
-  const org = await getUserOrg(session.user.id);
-  if (!org) {
-    return (
-      <div className="flex items-center justify-center h-[60vh]">
-        <p className="text-muted-foreground">
-          Nenhuma organizacao encontrada.
-        </p>
-      </div>
-    );
-  }
-
-  const pipeline = await prisma.pipeline.findFirst({
-    where: { orgId: org.id },
+  // Filtra SEMPRE por kind="venda" (getPipelineByKind) — evita o footgun de
+  // findFirst({ orgId }) sem kind, que pegaria o pipeline de locação.
+  const pipeline = await getPipelineByKind(orgId, MODULE.VENDAS, {
     include: {
       stages: {
         orderBy: { position: "asc" },

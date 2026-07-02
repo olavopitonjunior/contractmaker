@@ -8,10 +8,24 @@ import {
 import { withIdempotency } from "@/lib/api/idempotency";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
+import { getPipelineByKind } from "@/lib/modules/resolve";
+import { assertFeatureEnabled, ModuleDisabledError } from "@/lib/modules/guard";
+import { FEATURE, MODULE } from "@/lib/modules/catalog";
 
 export async function POST(request: NextRequest) {
   const auth = await requireApiAuth(request, { scope: "documents:rw" });
   if (isAuthFailure(auth)) return authFailureResponse(auth);
+
+  // Este endpoint cria SalesForm de vendas (schemaType compra_venda_v1).
+  // Gate por sub-função Vendas → Formulário público.
+  try {
+    await assertFeatureEnabled(auth.org.id, FEATURE.VENDAS_FORM_PUBLICO);
+  } catch (e) {
+    if (e instanceof ModuleDisabledError) {
+      return NextResponse.json({ error: e.code }, { status: e.status });
+    }
+    throw e;
+  }
 
   const body = await request.json().catch(() => ({}));
   const idempotencyKey = request.headers.get("x-idempotency-key");
@@ -33,8 +47,9 @@ export async function POST(request: NextRequest) {
       });
 
       let dealId: string | null = null;
-      const pipeline = await prisma.pipeline.findFirst({
-        where: { orgId: auth.org.id },
+      // Form de vendas → pipeline de vendas (kind="venda"). getPipelineByKind
+      // evita pegar o pipeline de locação em orgs com os dois módulos.
+      const pipeline = await getPipelineByKind(auth.org.id, MODULE.VENDAS, {
         include: { stages: { orderBy: { position: "asc" } } },
       });
 

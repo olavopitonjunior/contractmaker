@@ -2,6 +2,8 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
+import { FEATURE } from "@/lib/modules/catalog";
 import {
   listAccessibleAccounts,
   resolveAsaasAccount,
@@ -30,6 +32,11 @@ export default async function FinanceiroLayout({
 
   const org = await getUserOrg(session.user.id);
   if (!org) redirect("/");
+
+  // Gate de módulo: financeiro/pagadoria pertence a Vendas. Tenant só-locação
+  // (feature OFF) é redirecionado pra /locacao — antes de qualquer lookup Asaas.
+  const modules = await getOrgModules(org.id);
+  if (!isFeatureEnabled(modules, FEATURE.VENDAS_PAGADORIA)) redirect("/locacao");
 
   const h = await headers();
   const pathname = h.get("x-pathname") ?? "";
