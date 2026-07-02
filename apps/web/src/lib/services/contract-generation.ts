@@ -25,6 +25,9 @@ import {
   BANCO_FINANCIAMENTO_LABELS,
   PAPEL_LABELS,
 } from "@/lib/forms/payment-labels";
+import { collectPartyFormatIssues } from "@/lib/forms/field-formats";
+import { findMissingRequired, getByPath } from "@/lib/forms/party-required";
+import { resolveAllRequiredFields } from "@/lib/forms/presets";
 
 interface GenerateResult {
   contractId: string;
@@ -1023,6 +1026,7 @@ export async function generateContractForDeal(
             category: att.category || "documento",
             source: "form",
             extractedData: (att.extractedData as object | null) ?? undefined,
+            contentHash: att.contentHash ?? undefined,
           })),
         });
       }
@@ -1329,11 +1333,66 @@ export async function generateLocacaoContractForDeal(
   return { contractId: contract.id, version: contract.version, googleDocUrl };
 }
 
+// Rótulos amigáveis pro último segmento do path obrigatório (mensagem do
+// ContractComment). Fallback: o próprio nome do campo.
+const REQUIRED_FIELD_LABELS: Record<string, string> = {
+  cpf: "CPF",
+  cnpj: "CNPJ",
+  nome: "Nome",
+  razao_social: "Razão social",
+  rg: "RG",
+  data_nascimento: "Data de nascimento",
+  nome_mae: "Nome da mãe",
+  sexo: "Sexo",
+  estado_civil: "Estado civil",
+  profissao: "Profissão",
+  email: "E-mail",
+  endereco: "Endereço",
+  rua: "Logradouro",
+  cidade: "Cidade",
+  uf: "UF",
+  cep: "CEP",
+  matricula: "Matrícula",
+  descricao: "Descrição",
+  valor_total: "Valor total",
+};
+
+// Traduz o path obrigatório em um label legível pra parte/seção
+// (ex.: "vendedores.0.cpf" → "Vendedor 1 — CPF").
+function describeRequiredPath(path: string): { anchor: string; field: string } {
+  const segs = path.split(".");
+  const last = segs[segs.length - 1];
+  const field = REQUIRED_FIELD_LABELS[last] ?? last;
+  if (path === "vendedores") return { anchor: "Vendedores", field: "ao menos 1 vendedor" };
+  if (path === "compradores") return { anchor: "Compradores", field: "ao menos 1 comprador" };
+  const m = /^(vendedores|compradores)\.(\d+)\./.exec(path);
+  if (m) {
+    const label = m[1] === "vendedores" ? "Vendedor" : "Comprador";
+    return { anchor: `${label} ${Number(m[2]) + 1}`, field };
+  }
+  if (path.startsWith("imoveis.")) {
+    const mi = /^imoveis\.(\d+)\./.exec(path);
+    return { anchor: `Imóvel ${mi ? Number(mi[1]) + 1 : 1}`, field };
+  }
+  if (path.startsWith("pagamento.")) return { anchor: "Pagamento", field };
+  return { anchor: field, field };
+}
+
 /**
  * FU2/FU5 — Validação de dados críticos no nível do dataJson (não do texto
  * renderizado). Espelha o superRefine de lib/forms/validation.ts para os itens
- * que são bloqueadores legais e cria ContractComment severity="error"
+ * que são bloqueadores legais/formais e cria ContractComment severity="error"
  * (bloqueia aprovação). Determinístico, fire-and-forget.
+ *
+ * Cobre (todos viram error → travam /approve):
+ *  - cônjuge ausente quando casado(a)/união estável (meação);
+ *  - formato inválido de CPF/CNPJ/nome/CEP/UF/telefone/data (collectPartyFormatIssues);
+ *  - soma de percentuais dos comissionados > 100% e comissão zerada com participação;
+ *  - soma das parcelas divergente do valor_total;
+ *  - campos obrigatórios da org (OrgFormSettings/presets) vazios — SÓ para
+ *    contratos gerados por formulário de VENDA (templateId != null). Contratos
+ *    importados (templateId=null, dados de OCR parciais) e locação são isentos
+ *    do bloco de required-paths; as demais checagens valem para todos.
  */
 async function analyzeContractDataValidity(
   contractId: string,
@@ -1343,7 +1402,13 @@ async function analyzeContractDataValidity(
 
   const contract = await prisma.contract.findUnique({
     where: { id: contractId },
-    select: { status: true },
+    select: {
+      status: true,
+      templateId: true,
+      deal: {
+        select: { kind: true, pipeline: { select: { orgId: true } } },
+      },
+    },
   });
   if (!contract || contract.status === "aprovado") return;
 
@@ -1383,6 +1448,98 @@ async function analyzeContractDataValidity(
   const compradores = (dataJson.compradores as Parte[] | undefined) ?? [];
   vendedores.forEach((v, i) => checkParte(v, `Vendedor ${i + 1} (${v.nome ?? "?"})`));
   compradores.forEach((c, i) => checkParte(c, `Comprador ${i + 1} (${c.nome ?? "?"})`));
+
+  // Formatos (CPF/CNPJ/nome/CEP/UF/telefone/data) — mesma regra única do
+  // superRefine. Campo vazio não bloqueia; preenchido com formato inválido sim.
+  const checkFormats = (p: Parte, label: string) => {
+    for (const fi of collectPartyFormatIssues(p as Record<string, unknown>)) {
+      issues.push({
+        severity: "error",
+        key: `formato:${label}:${fi.path}`,
+        anchor: `${label} — ${fi.path}`,
+        text: `${label}: ${fi.message}. Corrija no formulário.`,
+      });
+    }
+  };
+  vendedores.forEach((v, i) => checkFormats(v, `Vendedor ${i + 1} (${v.nome ?? "?"})`));
+  compradores.forEach((c, i) => checkFormats(c, `Comprador ${i + 1} (${c.nome ?? "?"})`));
+
+  // Comissionados: soma de percentuais ≤ 100% e comissão zerada com participação.
+  const comissao = (dataJson.comissao as
+    | { valor?: number; comissionados?: Array<{ percentual?: number; valor?: number }> }
+    | undefined) ?? {};
+  const comissionados = comissao.comissionados ?? [];
+  if (comissionados.length > 0) {
+    const soma = comissionados.reduce((acc, c) => acc + (c.percentual ?? 0), 0);
+    if (soma > 100) {
+      issues.push({
+        severity: "error",
+        key: "comissionados_soma",
+        anchor: "Comissão — comissionados",
+        text: `Soma dos percentuais dos comissionados é ${soma.toFixed(2)}% (máximo 100%). Ajuste no formulário.`,
+      });
+    }
+    const valorComissao = Number(comissao.valor ?? 0);
+    const temParticipacao = comissionados.some(
+      (c) => (c.percentual ?? 0) > 0 || (c.valor ?? 0) > 0
+    );
+    if (temParticipacao && valorComissao <= 0) {
+      issues.push({
+        severity: "error",
+        key: "comissao_zerada",
+        anchor: "Comissão — valor",
+        text: "Há comissionado com participação informada, mas o valor total da comissão está zerado. Informe o valor da comissão.",
+      });
+    }
+  }
+
+  // Pagamento: soma das parcelas == valor_total (tolerância 0.01), só com ambos > 0.
+  const pagamento = (dataJson.pagamento as
+    | { valor_total?: number; parcelas?: Array<{ valor?: number }> }
+    | undefined) ?? {};
+  const valorTotal = pagamento.valor_total ?? 0;
+  const parcelas = pagamento.parcelas ?? [];
+  const somaParcelas = parcelas.reduce((acc, p) => acc + (Number(p.valor) || 0), 0);
+  if (valorTotal > 0 && somaParcelas > 0 && Math.abs(valorTotal - somaParcelas) > 0.01) {
+    issues.push({
+      severity: "error",
+      key: "parcelas_soma",
+      anchor: "Pagamento — parcelas",
+      text: `Soma das parcelas (R$ ${somaParcelas.toFixed(2)}) difere do valor total (R$ ${valorTotal.toFixed(2)}). Ajuste no formulário.`,
+    });
+  }
+
+  // Campos obrigatórios da org (presets/OrgFormSettings) — SÓ para contratos
+  // gerados por formulário de venda. Importados (templateId=null) e locação são
+  // isentos: o dataJson de OCR é parcial por natureza e locação não usa presets.
+  const isImported = contract.templateId === null;
+  const isLocacao = contract.deal?.kind === "locacao";
+  const orgId = contract.deal?.pipeline?.orgId;
+  if (!isImported && !isLocacao && orgId) {
+    try {
+      const settings = await prisma.orgFormSettings.findUnique({
+        where: { orgId },
+        select: { preset: true, customRequiredPaths: true },
+      });
+      const requiredPaths = resolveAllRequiredFields(settings).flatMap((p) =>
+        Array.from(p)
+      );
+      const missing = findMissingRequired(requiredPaths, (path) =>
+        getByPath(dataJson, path)
+      );
+      for (const path of missing) {
+        const { anchor, field } = describeRequiredPath(path);
+        issues.push({
+          severity: "error",
+          key: `required:${path}`,
+          anchor: `${anchor} — ${field}`,
+          text: `Campo obrigatório ausente: ${anchor} — ${field}. Preencha no formulário antes de aprovar.`,
+        });
+      }
+    } catch (err) {
+      console.error("[analyzeContractDataValidity] required-paths falhou:", err);
+    }
+  }
 
   for (const issue of issues) {
     const dedupeKey = dedupeKeyFor("ai", `data:${issue.key}`, issue.anchor);

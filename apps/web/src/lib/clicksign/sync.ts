@@ -8,9 +8,12 @@ import {
   listEnvelopeRequirements,
   listEnvelopeSigners,
 } from "./envelopes";
-import { uploadBufferToStorage } from "@/lib/storage/s3";
+import { persistSignedPdf } from "@/lib/clicksign/signed-pdf";
 import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-signed";
-import { safeFetch } from "@/lib/security/ssrf";
+import {
+  completeInspectionOnEnvelopeClosed,
+  revertInspectionOnEnvelopeCanceled,
+} from "@/lib/locacao/inspection-signature";
 
 /**
  * Reconcilia o estado de UM envelope com a ClickSign v3 — fonte canônica de
@@ -114,11 +117,13 @@ export async function syncEnvelopeState(
     envelopeUpdated = true;
     const promote = await autoPromoteDealOnContractSigned(envelope.id);
     dealStagePromoted = promote.promoted;
+    await completeInspectionOnEnvelopeClosed(envelope.id);
   } else if (remoteStatus === "canceled" && envelope.status !== "canceled") {
     await prisma.envelope.update({
       where: { id: envelope.id },
       data: { status: "canceled", canceledAt: new Date() },
     });
+    await revertInspectionOnEnvelopeCanceled(envelope.id);
     envelopeUpdated = true;
   } else if (remoteStatus === "closed" && envelope.status === "closed") {
     const promote = await autoPromoteDealOnContractSigned(envelope.id);
@@ -126,6 +131,7 @@ export async function syncEnvelopeState(
       dealStagePromoted = true;
       envelopeUpdated = true;
     }
+    await completeInspectionOnEnvelopeClosed(envelope.id);
   }
 
   if (
@@ -310,58 +316,5 @@ function extractSignedUrl(resp: unknown): string | null {
 }
 
 async function downloadSignedPdf(envelopeId: string, url: string) {
-  try {
-    // SSRF guard: a URL vem do payload/da API ClickSign. safeFetch revalida o
-    // host (e cada redirect) pra impedir fetch de IMDS/rede interna.
-    const res = await safeFetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    const stored = await uploadBufferToStorage({
-      bucket: process.env.S3_BUCKET,
-      key: `envelopes/${envelopeId}/signed.pdf`,
-      body: buf,
-      contentType: "application/pdf",
-    });
-    await prisma.envelope.update({
-      where: { id: envelopeId },
-      data: { signedDocumentUrl: stored },
-    });
-
-    const env = await prisma.envelope.findUnique({
-      where: { id: envelopeId },
-      select: {
-        dealId: true,
-        source: true,
-        name: true,
-        contract: { select: { version: true } },
-      },
-    });
-    if (env?.dealId) {
-      const existing = await prisma.dealAttachment.findFirst({
-        where: { dealId: env.dealId, url: stored },
-        select: { id: true },
-      });
-      if (!existing) {
-        const category =
-          env.source === "attachment"
-            ? "documento_assinado"
-            : "contrato_assinado";
-        const filename = env.contract
-          ? `Contrato assinado v${env.contract.version}.pdf`
-          : `${env.name} (assinado).pdf`;
-        await prisma.dealAttachment.create({
-          data: {
-            dealId: env.dealId,
-            filename,
-            mime: "application/pdf",
-            url: stored,
-            category,
-            source: "clicksign_signed",
-          },
-        });
-      }
-    }
-  } catch (err) {
-    console.error("[envelope sync] falha download PDF assinado:", err);
-  }
+  await persistSignedPdf(envelopeId, url, "[envelope sync]");
 }

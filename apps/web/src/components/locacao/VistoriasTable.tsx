@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import Link from "next/link";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/data-table/data-table";
 import { fmtDate } from "@/components/data-table/columns-helpers";
@@ -40,7 +41,12 @@ const columns: ColumnDef<VistoriaRow>[] = [
     header: "Imóvel",
     cell: ({ row }) => (
       <div>
-        <div className="font-medium">{row.original.endereco}</div>
+        <Link
+          href={`/locacao/vistorias/${row.original.id}`}
+          className="font-medium hover:underline"
+        >
+          {row.original.endereco}
+        </Link>
         <div className="text-xs text-muted-foreground">
           Atualizada em {fmtDate(row.original.updatedAt)}
         </div>

@@ -9,7 +9,10 @@ import { MODULE, FEATURE, type FeatureKey } from "@/lib/modules/catalog";
 // explícito, a sub-função é derivada da permission (que já codifica o subdomínio).
 // Permissions ausentes aqui gateiam só no nível do MÓDULO (locacao). contratos/
 // pessoas são default-on e ficam no gate de módulo; os toggles finos relevantes
-// (cobranças/repasses/despesas/vistorias/seguros — default-off) estão mapeados.
+// (cobranças/repasses/despesas — default-off) estão mapeados.
+// INSURANCE_*/INSPECTION_* gateiam só no módulo: seguros/garantias/vistorias
+// fazem parte da jornada comercial do deal (kanban) — os toggles locacao.seguros/
+// locacao.vistorias valem apenas pro menu/páginas ADM de portfólio.
 // Override explícito quando o mapa seria ambíguo (ex.: RENT_VIEW em repasses/simular).
 const PERMISSION_FEATURE: Partial<Record<PermissionKey, FeatureKey>> = {
   [PERMISSION.RENT_VIEW]: FEATURE.LOCACAO_COBRANCAS,
@@ -20,12 +23,11 @@ const PERMISSION_FEATURE: Partial<Record<PermissionKey, FeatureKey>> = {
   [PERMISSION.EXPENSE_CREATE]: FEATURE.LOCACAO_DESPESAS,
   [PERMISSION.EXPENSE_EDIT]: FEATURE.LOCACAO_DESPESAS,
   [PERMISSION.EXPENSE_DELETE]: FEATURE.LOCACAO_DESPESAS,
-  [PERMISSION.INSPECTION_VIEW]: FEATURE.LOCACAO_VISTORIAS,
-  [PERMISSION.INSPECTION_CREATE]: FEATURE.LOCACAO_VISTORIAS,
   [PERMISSION.CHECKLIST_VIEW]: FEATURE.LOCACAO_VISTORIAS,
   [PERMISSION.CHECKLIST_MANAGE]: FEATURE.LOCACAO_VISTORIAS,
-  [PERMISSION.INSURANCE_VIEW]: FEATURE.LOCACAO_SEGUROS,
-  [PERMISSION.INSURANCE_MANAGE]: FEATURE.LOCACAO_SEGUROS,
+  // Garantia é intrínseca ao contrato (Lei 8.245 art. 37) — gateia em contratos.
+  [PERMISSION.GUARANTEE_VIEW]: FEATURE.LOCACAO_CONTRATOS,
+  [PERMISSION.GUARANTEE_MANAGE]: FEATURE.LOCACAO_CONTRATOS,
 };
 
 // Helpers compartilhados pelos endpoints /api/locacao/*.

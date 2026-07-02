@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot, Pencil, Check, CheckCircle2, X } from "lucide-react";
+import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot, Pencil, Check, CheckCircle2, X, Archive, ArchiveRestore } from "lucide-react";
 import { SendAttachmentEnvelopeDialog } from "@/components/pipeline/SendAttachmentEnvelopeDialog";
 import { AddDocumentsCard } from "@/components/pipeline/AddDocumentsCard";
 import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
@@ -178,6 +178,7 @@ interface DealDetailProps {
     chargeIssuedAt: Date | null;
     lostAt: Date | null;
     lostReason: string | null;
+    archivedAt: Date | null;
     stage: { name: string; color: string | null };
     form: {
       id: string;
@@ -248,6 +249,7 @@ export function DealDetail({ deal }: DealDetailProps) {
   const [markLostDialogOpen, setMarkLostDialogOpen] = useState(false);
   const [markingPaid, setMarkingPaid] = useState(false);
   const [reopening, setReopening] = useState(false);
+  const [archiving, setArchiving] = useState(false);
   // Edição inline do título do negócio (lápis ao lado do <h1>). Reflete no
   // card do Kanban na próxima navegação (server data) via router.refresh().
   const [editingTitle, setEditingTitle] = useState(false);
@@ -307,6 +309,28 @@ export function DealDetail({ deal }: DealDetailProps) {
       toast.error("Erro de conexão");
     } finally {
       setMarkingPaid(false);
+    }
+  }
+
+  async function handleArchive(archived: boolean) {
+    setArchiving(true);
+    try {
+      const res = await fetch(`/api/pipeline/deals/${deal.id}/archive`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        toast.success(archived ? "Negócio arquivado" : "Negócio desarquivado");
+        router.refresh();
+      } else {
+        toast.error(data.error || "Erro ao arquivar negócio");
+      }
+    } catch {
+      toast.error("Erro de conexão");
+    } finally {
+      setArchiving(false);
     }
   }
 
@@ -715,6 +739,24 @@ export function DealDetail({ deal }: DealDetailProps) {
               Excluir contratos
             </Button>
           )}
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => handleArchive(deal.archivedAt === null)}
+            disabled={archiving}
+          >
+            {deal.archivedAt === null ? (
+              <>
+                <Archive className="h-4 w-4 mr-1" />
+                {archiving ? "Arquivando..." : "Arquivar"}
+              </>
+            ) : (
+              <>
+                <ArchiveRestore className="h-4 w-4 mr-1" />
+                {archiving ? "Desarquivando..." : "Desarquivar"}
+              </>
+            )}
+          </Button>
           <Button
             size="sm"
             variant="outline"

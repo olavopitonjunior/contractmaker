@@ -15,6 +15,20 @@
 
 ## Bugs Ativos
 
+### [ALTA] "Falha no upload" ao anexar documentos na pasta do deal (limite 4.5MB da Vercel)
+- **Status:** corrigido no codigo (pendente deploy) — branch worktree-melhorias-ocr-storage-obrigatoriedade
+- **Encontrado em:** 2026-06-30
+- **Descricao:** Anexar documento na aba Documentos do deal falhava com toast generico "<arquivo>: falha no upload" para arquivos medios/grandes. O `AddDocumentsCard` lia o arquivo como base64 (`readAsDataURL`) e enviava dentro de JSON pro `POST /api/deals/[dealId]/attachments-newton` (cap 10MB no cliente). Base64 infla ~33%, entao arquivos a partir de ~3.3MB geram corpo de request > 4.5MB — o limite FIXO de corpo de funcao serverless da Vercel (nao configuravel por next.config/maxDuration). A plataforma rejeita com 413 FUNCTION_PAYLOAD_TOO_LARGE ANTES do handler rodar; a resposta nao e JSON, entao `res.json()` falha e cai no toast generico. Mesma classe do arquivo de 3.9MB do incidente de negocios duplicados (grande demais tanto no import quanto no anexo). Logs da Vercel nao mostram esses POSTs (rejeicao pre-funcao).
+- **Impacto:** ALTO — impossivel anexar PDFs/imagens escaneadas comuns (> ~3.3MB) na pasta do deal.
+- **Solucao:** Upload client-direct pro Vercel Blob (`@vercel/blob/client` `upload()` + rota de handshake `/attachments/blob-upload` com auth/cross-org) — o navegador sobe direto pro Blob, contornando o limite de 4.5MB. Depois `/attachments/finalize` registra o DealAttachment (body so metadados; buffer baixado server-side pra contentHash/dedupe; valida que a URL pertence ao prefixo `deal-attachments/<dealId>/` do Blob). Logica de create+audit+OCR extraida pra `lib/deals/attachments.ts`, compartilhada com o `attachments-newton` (base64, mantido pro Newton Bearer).
+
+### [ALTA] Negocios duplicados no import de contrato (timeout deixa orfaos + retry recria)
+- **Status:** corrigido no codigo (pendente deploy + migracao) — branch worktree-melhorias-ocr-storage-obrigatoriedade
+- **Encontrado em:** 2026-06-30 (3x "Cod 19503 Igor Imene (PG)" criados 17:39/17:42/17:43)
+- **Descricao:** No cadastro rapido com upload (`/api/deals/import-contract`), um PDF de ~3.9MB gerou 3 deals identicos em ~4min. So o 3o tinha Contract; os 2 primeiros eram orfaos (Deal+SalesForm+anexo `contrato_original` sem Contract e sem audit `CONTRACT_IMPORT`). O import bem-sucedido levou 59s, colado no `maxDuration=60`. Causa-raiz: `importContractFromFile` (upload Drive + conversao + Gemini) estoura o timeout de 60s em PDFs grandes; a funcao serverless e morta no meio (o `catch` de limpeza nem roda), deixando orfaos. O operador re-sobe o mesmo arquivo achando que falhou, e cada retry cria um deal novo (sem dedup por conteudo).
+- **Impacto:** ALTO — negocios duplicados na esteira; confusao + retrabalho; orfaos sem contrato poluindo o kanban.
+- **Solucao:** (A) `maxDuration` 60->300 nas duas rotas de import (venda + locacao). (B) Dedup por `contentHash` (SHA-256 do arquivo): retry do mesmo arquivo devolve o deal ja importado (idempotente) ou REUSA o orfao de um import que estourou, em vez de criar outro negocio. Pendente: script de limpeza dos 2 orfaos legados em prod (deals `cmr0xphwf...` e `cmr0xm0w9...`).
+
 ### [ALTA] Certidoes duplicadas no download (ZIP) e na pasta do deal
 - **Status:** em progresso (correcao de raiz implementada; pendente deploy + script de limpeza + QA)
 - **Encontrado em:** 2026-06-03 (reincidente)

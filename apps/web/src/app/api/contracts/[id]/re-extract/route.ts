@@ -3,8 +3,13 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { downloadBufferFromUrl } from "@/lib/storage/s3";
 import { extractCcvDataJson } from "@/lib/extraction/ccv-extractor";
+import { extractLocacaoContractDataJson } from "@/lib/extraction/locacao-extractor";
+import { exportDocAsPdf } from "@/lib/google/docs";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
+
+const DOCX_MIME =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -51,6 +56,7 @@ export async function POST(
       },
     },
   });
+  const dealKind = contract?.deal.kind;
   if (!contract) {
     return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
   }
@@ -93,25 +99,43 @@ export async function POST(
   }
 
   let buffer: Buffer;
-  try {
-    buffer = await downloadBufferFromUrl(sourceAttachment.url);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(
-      { error: `Falha ao baixar documento original: ${msg}` },
-      { status: 502 }
-    );
+  let extractionMime = sourceAttachment.mime as ImportableMime;
+  // DOCX → PDF: o anexo original é DOCX, mas o Gemini extrai DOCX cru de forma
+  // irregular ({} silencioso). O contrato importado já tem um GDoc nativo —
+  // exportamos como PDF e extraímos dele. Fallback pro buffer original em falha.
+  if (sourceAttachment.mime === DOCX_MIME && contract.googleDocId) {
+    try {
+      buffer = await exportDocAsPdf(contract.googleDocId);
+      extractionMime = "application/pdf";
+    } catch (err) {
+      console.error("[re-extract] export DOCX→PDF falhou, baixando original:", err);
+      buffer = await downloadBufferFromUrl(sourceAttachment.url).catch(() => {
+        throw err;
+      });
+    }
+  } else {
+    try {
+      buffer = await downloadBufferFromUrl(sourceAttachment.url);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return NextResponse.json(
+        { error: `Falha ao baixar documento original: ${msg}` },
+        { status: 502 }
+      );
+    }
   }
 
-  const extracted = await extractCcvDataJson(
-    buffer,
-    sourceAttachment.mime as ImportableMime,
-    {
-      orgId: org.id,
-      userId: session.user.id,
-      contractId: contract.id,
-    }
-  );
+  const extractCtx = {
+    orgId: org.id,
+    userId: session.user.id,
+    contractId: contract.id,
+  };
+  // Re-extração respeita a esteira do deal: contrato de locação usa o extractor
+  // de locação (antes sempre usava CCV — re-extrair locação trazia shape errado).
+  const extracted =
+    dealKind === "locacao"
+      ? (await extractLocacaoContractDataJson(buffer, extractionMime, extractCtx)).dataJson
+      : await extractCcvDataJson(buffer, extractionMime, extractCtx);
 
   const fieldsCount = Object.keys(extracted).length;
 

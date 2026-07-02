@@ -145,6 +145,8 @@ function gestorLocacaoAccess(): PermissionMap {
     [PERMISSION.LEASE_EDIT]: true,
     [PERMISSION.LEASE_RENEW]: true,
     [PERMISSION.LEASE_TERMINATE]: true,
+    [PERMISSION.GUARANTEE_VIEW]: true,
+    [PERMISSION.GUARANTEE_MANAGE]: true,
     [PERMISSION.RENT_VIEW]: true,
     [PERMISSION.RENT_GENERATE]: true,
     [PERMISSION.RENT_REMIND]: true,
@@ -187,6 +189,7 @@ function gestorFinanceiroAccess(): PermissionMap {
     [PERMISSION.DEBT_AGREEMENT_VIEW]: true,
     [PERMISSION.DEBT_AGREEMENT_CREATE]: true,
     [PERMISSION.LEASE_VIEW]: true,
+    [PERMISSION.GUARANTEE_VIEW]: true,
     [PERMISSION.PROPERTY_VIEW]: true,
     [PERMISSION.NEWTON_INTENT_APPROVE]: true,
   };
@@ -209,6 +212,7 @@ function proprietarioPortalAccess(): PermissionMap {
   return {
     [PERMISSION.OWNER_PORTAL_ACCESS]: true,
     [PERMISSION.LEASE_VIEW]: true,
+    [PERMISSION.GUARANTEE_VIEW]: true,
     [PERMISSION.RENT_VIEW]: true,
     [PERMISSION.PROPERTY_VIEW]: true,
   };
@@ -218,6 +222,7 @@ function inquilinoPortalAccess(): PermissionMap {
   return {
     [PERMISSION.TENANT_PORTAL_ACCESS]: true,
     [PERMISSION.LEASE_VIEW]: true,
+    [PERMISSION.GUARANTEE_VIEW]: true,
     [PERMISSION.RENT_VIEW]: true,
   };
 }

@@ -38,11 +38,18 @@ function extractTenantName(dataJson: unknown): string | null {
   return nome || null;
 }
 
-export default async function PipelineLocacaoPage() {
+export default async function PipelineLocacaoPage({
+  searchParams,
+}: {
+  searchParams?: { arquivados?: string };
+}) {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
   const org = await getUserOrg(session.user.id);
   if (!org) redirect("/");
+
+  // ?arquivados=1 mostra também os deals arquivados (recuperação). Default oculta.
+  const includeArchived = searchParams?.arquivados === "1";
 
   // Guard de módulo: org sem locação habilitada não acessa o pipeline de locação.
   const modules = await getOrgModules(org.id);
@@ -55,7 +62,9 @@ export default async function PipelineLocacaoPage() {
         orderBy: { position: "asc" },
         include: {
           deals: {
-            where: { kind: "locacao" },
+            where: includeArchived
+              ? { kind: "locacao" }
+              : { kind: "locacao", archivedAt: null },
             orderBy: { createdAt: "desc" },
             include: {
               form: {

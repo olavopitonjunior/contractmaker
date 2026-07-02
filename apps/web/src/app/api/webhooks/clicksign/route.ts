@@ -3,7 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import { Prisma } from "@prisma/client";
 import crypto from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
-import { uploadBufferToStorage } from "@/lib/storage/s3";
+import { persistSignedPdf } from "@/lib/clicksign/signed-pdf";
 import { audit } from "@/lib/security/audit";
 import {
   getDocumentKeyFromPayload,
@@ -16,7 +16,10 @@ import {
 import { listEnvelopeDocuments } from "@/lib/clicksign/envelopes";
 import type { WebhookPayload } from "@/lib/clicksign/types";
 import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-signed";
-import { safeFetch } from "@/lib/security/ssrf";
+import {
+  completeInspectionOnEnvelopeClosed,
+  revertInspectionOnEnvelopeCanceled,
+} from "@/lib/locacao/inspection-signature";
 
 export const runtime = "nodejs";
 
@@ -233,6 +236,8 @@ export async function POST(req: NextRequest) {
       // vinculados a Contract (source="contract"). Helper compartilhado
       // garante mesma lógica em webhook + sync route + cron.
       await autoPromoteDealOnContractSigned(envelope.id);
+      // Laudo de vistoria assinado → Inspection vira "concluida".
+      await completeInspectionOnEnvelopeClosed(envelope.id);
 
       // v3 NÃO traz signed_file_url no payload — tentamos extrair do
       // payload (compat v2) e, se vier null, fazemos lookup via
@@ -250,6 +255,7 @@ export async function POST(req: NextRequest) {
         where: { id: envelope.id },
         data: { status: "canceled", canceledAt: new Date() },
       });
+      await revertInspectionOnEnvelopeCanceled(envelope.id);
       break;
     }
     case "deadline": {
@@ -257,6 +263,7 @@ export async function POST(req: NextRequest) {
         where: { id: envelope.id },
         data: { status: "canceled", canceledAt: new Date() },
       });
+      await revertInspectionOnEnvelopeCanceled(envelope.id);
       break;
     }
     case "add_signer":
@@ -296,60 +303,5 @@ async function resolveAndDownload(envelopeId: string, clicksignId: string) {
 }
 
 async function downloadSignedPdf(envelopeId: string, url: string) {
-  try {
-    // SSRF guard: `url` vem do payload do webhook. safeFetch revalida o host
-    // (e cada redirect) — sem isso um payload forjava fetch de IMDS/rede interna.
-    const res = await safeFetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    const stored = await uploadBufferToStorage({
-      bucket: process.env.S3_BUCKET,
-      key: `envelopes/${envelopeId}/signed.pdf`,
-      body: buf,
-      contentType: "application/pdf",
-    });
-    await prisma.envelope.update({
-      where: { id: envelopeId },
-      data: { signedDocumentUrl: stored },
-    });
-
-    // Espelha o PDF assinado na pasta Documentos do deal pra que o usuário
-    // veja e baixe o arquivo final pelo mesmo lugar onde acompanha os outros
-    // anexos da venda. Idempotente: ClickSign pode reentregar `close` —
-    // checamos por url antes de criar.
-    const env = await prisma.envelope.findUnique({
-      where: { id: envelopeId },
-      select: {
-        dealId: true,
-        source: true,
-        name: true,
-        contract: { select: { version: true } },
-      },
-    });
-    if (env?.dealId) {
-      const existing = await prisma.dealAttachment.findFirst({
-        where: { dealId: env.dealId, url: stored },
-        select: { id: true },
-      });
-      if (!existing) {
-        const category =
-          env.source === "attachment" ? "documento_assinado" : "contrato_assinado";
-        const filename = env.contract
-          ? `Contrato assinado v${env.contract.version}.pdf`
-          : `${env.name} (assinado).pdf`;
-        await prisma.dealAttachment.create({
-          data: {
-            dealId: env.dealId,
-            filename,
-            mime: "application/pdf",
-            url: stored,
-            category,
-            source: "clicksign_signed",
-          },
-        });
-      }
-    }
-  } catch (err) {
-    console.error("[clicksign webhook] falha ao baixar PDF assinado:", err);
-  }
+  await persistSignedPdf(envelopeId, url, "[clicksign webhook]");
 }

@@ -4,7 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { downloadBufferFromUrl } from "@/lib/storage/s3";
 import { classifyAndExtract, isRateLimitError, humanizeOcrError } from "@/lib/ai/ocr";
 import { resolveFormScope } from "@/lib/forms/resolve-form-scope";
-import { extractFirstPages } from "@/lib/ai/pdf-utils";
+import { extractFirstPages, OCR_MAX_PAGES } from "@/lib/ai/pdf-utils";
 
 async function fetchBuffer(url: string): Promise<Buffer> {
   if (url.startsWith("https://") || url.startsWith("http://")) {
@@ -212,7 +212,7 @@ export async function POST(
     // on multi-page documents (procurações, escrituras). Transparent fallback
     // if pdf-lib fails.
     if (attachment.mime === "application/pdf") {
-      const trimmed = await extractFirstPages(buffer, 2);
+      const trimmed = await extractFirstPages(buffer, OCR_MAX_PAGES);
       if (trimmed.trimmed) {
         console.log(
           `[form extract] trimmed PDF ${attachment.id}: ${trimmed.totalPages} → ${trimmed.pagesKept} páginas`

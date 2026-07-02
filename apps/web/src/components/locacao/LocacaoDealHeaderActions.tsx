@@ -20,6 +20,8 @@ import {
   LOCACAO_LOST_CATEGORIES,
 } from "@/components/pipeline/MarkLostDialog";
 import {
+  Archive,
+  ArchiveRestore,
   Check,
   Copy,
   ExternalLink,
@@ -38,6 +40,7 @@ interface LocacaoDealHeaderActionsProps {
   formToken: string | null;
   hasContract: boolean;
   isLost: boolean;
+  archivedAt: string | null;
 }
 
 /**
@@ -52,6 +55,7 @@ export function LocacaoDealHeaderActions({
   formToken,
   hasContract,
   isLost,
+  archivedAt,
 }: LocacaoDealHeaderActionsProps) {
   const router = useRouter();
   const [markLostOpen, setMarkLostOpen] = useState(false);
@@ -133,6 +137,29 @@ export function LocacaoDealHeaderActions({
         return;
       }
       toast.success(`Negócio reaberto em "${data.stageName}"`);
+      router.refresh();
+    } catch {
+      toast.error("Erro de conexão");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function toggleArchive() {
+    const archived = archivedAt === null;
+    setBusy("archive");
+    try {
+      const res = await fetch(`/api/pipeline/deals/${dealId}/archive`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archived }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error || "Erro ao arquivar o negócio");
+        return;
+      }
+      toast.success(archived ? "Negócio arquivado" : "Negócio desarquivado");
       router.refresh();
     } catch {
       toast.error("Erro de conexão");
@@ -255,6 +282,24 @@ export function LocacaoDealHeaderActions({
             Marcar como perdido
           </Button>
         )}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={toggleArchive}
+          disabled={busy === "archive"}
+        >
+          {archivedAt === null ? (
+            <>
+              <Archive className="h-4 w-4 mr-1" />
+              {busy === "archive" ? "Arquivando..." : "Arquivar"}
+            </>
+          ) : (
+            <>
+              <ArchiveRestore className="h-4 w-4 mr-1" />
+              {busy === "archive" ? "Desarquivando..." : "Desarquivar"}
+            </>
+          )}
+        </Button>
         <Button
           size="sm"
           variant="outline"

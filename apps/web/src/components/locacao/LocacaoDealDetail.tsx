@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -23,16 +23,16 @@ import {
 import { DealProgressTimeline } from "@/components/pipeline/DealProgressTimeline";
 import { LostDealBanner } from "@/components/pipeline/LostDealBanner";
 import { Field } from "@/components/locacao/lease-detail/LeaseSection";
-import { GARANTIA_TIPO_LABELS } from "@/lib/locacao/validators";
+import { SegurosTab, type PolicyView } from "@/components/locacao/lease-detail/SegurosTab";
 import {
-  FileText,
-  ExternalLink,
-  ShieldCheck,
-  ClipboardCheck,
-  Umbrella,
-  Receipt,
-  Building2,
-} from "lucide-react";
+  GarantiasTab,
+  type GuaranteeView,
+} from "@/components/locacao/lease-detail/GarantiasTab";
+import {
+  VistoriaTab,
+  type InspectionView,
+} from "@/components/locacao/lease-detail/VistoriaTab";
+import { FileText, ExternalLink, Receipt, Building2 } from "lucide-react";
 import { toast } from "sonner";
 
 type ContractProp = React.ComponentProps<typeof ContractEditorPage>["contract"];
@@ -44,9 +44,12 @@ interface LeaseProp {
   valorAluguel: number;
   taxaAdminPercent: number;
   diaVencimento: number;
-  guarantee: { tipo: string; status: string; provider: string | null } | null;
-  inspections: { id: string; tipo: string; status: string }[];
-  insurancePolicies: { id: string; seguradora: string; status: string }[];
+  propertyId: string;
+  /** Endereço resumido do imóvel (labels do NovaVistoriaDialog/laudo). */
+  propertyLabel: string;
+  guarantee: GuaranteeView | null;
+  inspections: InspectionView[];
+  insurancePolicies: PolicyView[];
   rentCharges: { id: string; competencia: string; valorBase: number; status: string }[];
 }
 
@@ -60,6 +63,7 @@ interface LocacaoDealDetailProps {
     dataJson: Record<string, unknown>;
     lostAt: string | null;
     lostReason: string | null;
+    archivedAt: string | null;
     formOpenedAt: string | null;
     formCompletedAt: string | null;
     contractSignedAt: string | null;
@@ -89,6 +93,18 @@ type LeaseFormData = {
   garantia?: { tipo?: string; fiador?: unknown } | null;
 };
 
+/** Abas Garantias/Vistoria/Seguros antes do LeaseContract existir (stage < Em contrato). */
+function SemLeaseCard() {
+  return (
+    <Card>
+      <CardContent className="py-10 text-center text-sm text-muted-foreground">
+        Disponível após a geração do contrato (o vínculo de locação nasce junto com o
+        instrumento).
+      </CardContent>
+    </Card>
+  );
+}
+
 /** Partes do contrato de locação pra popup de assinatura (locador/locatário/fiador). */
 function extractLeaseSignerData(dataJson: Record<string, unknown> | null): LeaseSignerData {
   const d = (dataJson ?? {}) as LeaseFormData;
@@ -109,7 +125,23 @@ export function LocacaoDealDetail({
   simplified = false,
 }: LocacaoDealDetailProps) {
   const router = useRouter();
-  const [tab, setTab] = useState("dados");
+  // Tab inicial via ?tab= (paridade com o DealDetail de vendas) — permite
+  // deep-link tipo /locacao/deals/[id]?tab=vistoria (back-link do editor de laudo).
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const VALID_TABS = [
+    "dados",
+    "contrato",
+    "documentos",
+    "assinaturas",
+    "garantias",
+    "vistoria",
+    "seguros",
+    "cobranca",
+  ];
+  const [tab, setTab] = useState(
+    tabParam && VALID_TABS.includes(tabParam) ? tabParam : "dados"
+  );
   const [activating, setActivating] = useState(false);
 
   const isLost = deal.lostAt !== null;
@@ -164,6 +196,7 @@ export function LocacaoDealDetail({
             formToken={deal.formToken}
             hasContract={contract !== null}
             isLost={isLost}
+            archivedAt={deal.archivedAt}
           />
         </div>
         <Button variant="outline" asChild>
@@ -230,9 +263,11 @@ export function LocacaoDealDetail({
           <TabsTrigger value="contrato">Contrato</TabsTrigger>
           <TabsTrigger value="documentos">Documentos</TabsTrigger>
           <TabsTrigger value="assinaturas">Assinaturas</TabsTrigger>
-          {!simplified && <TabsTrigger value="garantias">Garantias</TabsTrigger>}
-          {!simplified && <TabsTrigger value="vistoria">Vistoria</TabsTrigger>}
-          {!simplified && <TabsTrigger value="seguros">Seguros</TabsTrigger>}
+          {/* Garantias/Vistoria/Seguros fazem parte da jornada comercial do deal
+              (a superfície ADM está suprimida nesta fase) — sempre visíveis. */}
+          <TabsTrigger value="garantias">Garantias</TabsTrigger>
+          <TabsTrigger value="vistoria">Vistoria</TabsTrigger>
+          <TabsTrigger value="seguros">Seguros</TabsTrigger>
           {!simplified && <TabsTrigger value="cobranca">Cobrança</TabsTrigger>}
         </TabsList>
 
@@ -292,89 +327,45 @@ export function LocacaoDealDetail({
           )}
         </TabsContent>
 
-        {/* GARANTIAS */}
+        {/* GARANTIAS — resumo + contratação/substituição por modalidade */}
         <TabsContent value="garantias" className="mt-4">
-          <Card>
-            <CardHeader className="pb-3 flex flex-row items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                <ShieldCheck className="h-4 w-4" /> Garantia locatícia
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              {lease?.guarantee ? (
-                <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
-                  <Field
-                    label="Tipo"
-                    value={GARANTIA_TIPO_LABELS[lease.guarantee.tipo] ?? lease.guarantee.tipo}
-                  />
-                  <Field label="Status" value={lease.guarantee.status} />
-                  <Field label="Provedor" value={lease.guarantee.provider} />
-                </div>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Nenhuma garantia cadastrada para este contrato.
-                </p>
-              )}
-            </CardContent>
-          </Card>
+          {lease ? (
+            <GarantiasTab
+              leaseContractId={lease.id}
+              valorAluguel={lease.valorAluguel}
+              guarantee={lease.guarantee}
+            />
+          ) : (
+            <SemLeaseCard />
+          )}
         </TabsContent>
 
-        {/* VISTORIA */}
+        {/* VISTORIA — laudos do contrato + editor de confecção */}
         <TabsContent value="vistoria" className="mt-4">
-          <Card>
-            <CardHeader className="pb-3 flex flex-row items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                <ClipboardCheck className="h-4 w-4" /> Vistorias
-              </CardTitle>
-              <Button variant="outline" size="sm" asChild>
-                <a href="/locacao/vistorias">
-                  <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> Gerenciar
-                </a>
-              </Button>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {lease && lease.inspections.length > 0 ? (
-                lease.inspections.map((i) => (
-                  <div key={i.id} className="flex items-center justify-between text-sm">
-                    <span className="capitalize">Vistoria de {i.tipo}</span>
-                    <Badge variant="outline">{i.status}</Badge>
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Nenhuma vistoria. Crie o laudo de entrada antes da entrega das chaves.
-                </p>
-              )}
-            </CardContent>
-          </Card>
+          {lease ? (
+            <VistoriaTab
+              leaseContractId={lease.id}
+              leaseLabel={`Contrato — ${lease.propertyLabel}`}
+              propertyId={lease.propertyId}
+              propertyLabel={lease.propertyLabel}
+              inspections={lease.inspections}
+            />
+          ) : (
+            <SemLeaseCard />
+          )}
         </TabsContent>
 
-        {/* SEGUROS */}
+        {/* SEGUROS — contratação guiada do seguro incêndio + apólices */}
         <TabsContent value="seguros" className="mt-4">
-          <Card>
-            <CardHeader className="pb-3 flex flex-row items-center justify-between">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Umbrella className="h-4 w-4" /> Seguros (incêndio / fiança)
-              </CardTitle>
-              <Button variant="outline" size="sm" asChild>
-                <a href="/locacao/seguros">
-                  <ExternalLink className="h-3.5 w-3.5 mr-1.5" /> Gerenciar
-                </a>
-              </Button>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {lease && lease.insurancePolicies.length > 0 ? (
-                lease.insurancePolicies.map((p) => (
-                  <div key={p.id} className="flex items-center justify-between text-sm">
-                    <span>{p.seguradora}</span>
-                    <Badge variant="outline">{p.status}</Badge>
-                  </div>
-                ))
-              ) : (
-                <p className="text-sm text-muted-foreground">Nenhuma apólice contratada.</p>
-              )}
-            </CardContent>
-          </Card>
+          {lease ? (
+            <SegurosTab
+              leaseContractId={lease.id}
+              valorAluguel={lease.valorAluguel}
+              policies={lease.insurancePolicies}
+            />
+          ) : (
+            <SemLeaseCard />
+          )}
         </TabsContent>
 
         {/* COBRANÇA — comissão + criar administração */}

@@ -92,13 +92,25 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
   const lease = await prisma.leaseContract.findFirst({
     where: { dealId: deal.id, orgId: org.id },
     include: {
-      property: { select: { rua: true, numero: true, cidade: true, uf: true } },
+      property: {
+        select: { id: true, rua: true, numero: true, bairro: true, cidade: true, uf: true },
+      },
       guarantee: true,
-      inspections: { orderBy: { createdAt: "desc" } },
+      inspections: { orderBy: { createdAt: "desc" }, take: 50 },
       insurancePolicies: { orderBy: { createdAt: "desc" } },
       rentCharges: { orderBy: { competencia: "desc" }, take: 12 },
     },
   });
+
+  const propertyLabel = lease
+    ? [
+        [lease.property.rua, lease.property.numero].filter(Boolean).join(", "),
+        lease.property.bairro,
+        [lease.property.cidade, lease.property.uf].filter(Boolean).join("/"),
+      ]
+        .filter(Boolean)
+        .join(" · ") || "Imóvel sem endereço"
+    : "";
 
   const contractProp = contract
     ? {
@@ -141,6 +153,7 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
         dataJson: (deal.form?.dataJson as Record<string, unknown>) ?? {},
         lostAt: deal.lostAt?.toISOString() ?? null,
         lostReason: deal.lostReason ?? null,
+        archivedAt: deal.archivedAt?.toISOString() ?? null,
         formOpenedAt: deal.form?.createdAt?.toISOString() ?? null,
         formCompletedAt: deal.form?.completedAt?.toISOString() ?? null,
         contractSignedAt:
@@ -192,14 +205,44 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
               valorAluguel: lease.valorAluguel,
               taxaAdminPercent: lease.taxaAdminPercent,
               diaVencimento: lease.diaVencimento,
+              propertyId: lease.property.id,
+              propertyLabel,
               guarantee: lease.guarantee
-                ? { tipo: lease.guarantee.tipo, status: lease.guarantee.status, provider: lease.guarantee.provider }
+                ? {
+                    id: lease.guarantee.id,
+                    tipo: lease.guarantee.tipo,
+                    caucaoSubtipo: lease.guarantee.caucaoSubtipo,
+                    provider: lease.guarantee.provider,
+                    status: lease.guarantee.status,
+                    coberturaMeses: lease.guarantee.coberturaMeses,
+                    custoJson: lease.guarantee.custoJson,
+                    dadosJson: lease.guarantee.dadosJson,
+                    fiadorPartyJson: lease.guarantee.fiadorPartyJson,
+                    externalRef: lease.guarantee.externalRef,
+                    documentoPdfUrl: lease.guarantee.documentoPdfUrl,
+                    historicoJson: lease.guarantee.historicoJson,
+                    updatedAt: lease.guarantee.updatedAt.toISOString(),
+                  }
                 : null,
-              inspections: lease.inspections.map((i) => ({ id: i.id, tipo: i.tipo, status: i.status })),
+              inspections: lease.inspections.map((i) => ({
+                id: i.id,
+                tipo: i.tipo,
+                status: i.status,
+                createdAt: i.createdAt.toISOString(),
+                laudoPdfUrl: i.laudoPdfUrl,
+              })),
               insurancePolicies: lease.insurancePolicies.map((p) => ({
                 id: p.id,
+                tipo: p.tipo,
                 seguradora: p.seguradora,
+                apoliceNumero: p.apoliceNumero,
+                vigenciaInicio: p.vigenciaInicio.toISOString(),
+                vigenciaFim: p.vigenciaFim.toISOString(),
+                premioMensal: p.premioMensal,
+                responsavelPagamento: p.responsavelPagamento,
                 status: p.status,
+                pdfUrl: p.pdfUrl,
+                coberturaJson: p.coberturaJson,
               })),
               rentCharges: lease.rentCharges.map((r) => ({
                 id: r.id,

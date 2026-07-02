@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { upload } from "@vercel/blob/client";
 import { Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
@@ -43,20 +44,14 @@ function pLimit(concurrency: number) {
     });
 }
 
-function readAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error ?? new Error("Falha ao ler o arquivo"));
-    reader.readAsDataURL(file);
-  });
-}
-
 /**
  * Card de upload da aba Documentos do deal. Aceita QUALQUER tipo de arquivo
- * (armazenamento) até 10MB. Sobe via JSON base64 pro `attachments-newton`
- * (que aceita sessão), em paralelo limitado. OCR/assinatura são oferecidos
- * depois, por card, conforme o tipo.
+ * (armazenamento) até 10MB. Sobe o arquivo DIRETO pro Vercel Blob
+ * (@vercel/blob/client `upload()` + handshake em `/attachments/blob-upload`),
+ * contornando o limite de 4.5MB de corpo de função serverless da Vercel — antes
+ * o upload base64-JSON falhava com "falha no upload" em arquivos > ~3.3MB. Em
+ * seguida registra o anexo via `/attachments/finalize`. OCR/assinatura são
+ * oferecidos depois, por card, conforme o tipo.
  */
 export function AddDocumentsCard({ dealId, onUploaded }: AddDocumentsCardProps) {
   const [dragging, setDragging] = useState(false);
@@ -83,17 +78,27 @@ export function AddDocumentsCard({ dealId, onUploaded }: AddDocumentsCardProps) 
       const limit = pLimit(UPLOAD_CONCURRENCY);
       let okCount = 0;
 
-      const upload = async (file: File) => {
+      const uploadOne = async (file: File) => {
         try {
-          const base64Data = await readAsBase64(file);
-          const res = await fetch(`/api/deals/${dealId}/attachments-newton`, {
+          const mime = file.type || "application/octet-stream";
+          const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+          // 1. Upload client-direct pro Blob (sem passar bytes pela função →
+          //    sem o limite de 4.5MB). O handshake valida auth/cross-org.
+          const blob = await upload(
+            `deal-attachments/${dealId}/${Date.now()}-${safeName}`,
+            file,
+            {
+              access: "public",
+              contentType: mime,
+              handleUploadUrl: `/api/deals/${dealId}/attachments/blob-upload`,
+            }
+          );
+
+          // 2. Registra o DealAttachment (body só metadados).
+          const res = await fetch(`/api/deals/${dealId}/attachments/finalize`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              filename: file.name,
-              mime: file.type || "application/octet-stream",
-              base64Data,
-            }),
+            body: JSON.stringify({ url: blob.url, filename: file.name, mime }),
           });
           if (!res.ok) {
             const d = await res.json().catch(() => null);
@@ -108,7 +113,7 @@ export function AddDocumentsCard({ dealId, onUploaded }: AddDocumentsCardProps) 
         }
       };
 
-      await Promise.allSettled(valid.map((f) => limit(() => upload(f))));
+      await Promise.allSettled(valid.map((f) => limit(() => uploadOne(f))));
 
       setUploading(false);
       setProgress(null);

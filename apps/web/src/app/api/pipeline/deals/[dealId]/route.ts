@@ -151,8 +151,9 @@ export async function DELETE(
     include: {
       pipeline: { select: { orgId: true } },
       contracts: { select: { id: true, googleDocId: true } },
-      attachments: { select: { id: true } },
+      attachments: { select: { id: true, url: true } },
       certidaoJobs: { select: { id: true } },
+      envelopes: { select: { id: true, documentUrl: true, signedDocumentUrl: true } },
     },
   });
 
@@ -225,6 +226,22 @@ export async function DELETE(
     };
   });
 
+  // Best-effort: apaga os blobs dos anexos e PDFs de envelope APÓS o commit
+  // (se a transação falhar, não removemos arquivos). Antes a deleção do deal
+  // órfãava 100% dos arquivos no Blob/S3. Cada item é isolado em try/catch
+  // dentro de deleteFromStorage.
+  let blobsDeleted = 0;
+  const urlsToDelete = [
+    ...deal.attachments.map((a) => a.url),
+    ...deal.envelopes.flatMap((e) => [e.documentUrl, e.signedDocumentUrl]),
+  ];
+  if (urlsToDelete.length > 0) {
+    const { deleteFromStorage } = await import("@/lib/storage/s3");
+    for (const url of urlsToDelete) {
+      if (await deleteFromStorage(url)) blobsDeleted++;
+    }
+  }
+
   await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
     action: "DEAL_DELETE",
     result: "SUCCESS",
@@ -233,6 +250,7 @@ export async function DELETE(
     metadata: {
       ...counts,
       driveDocsTrashed: docsToTrash.length,
+      blobsDeleted,
       deleteForm,
     },
   });

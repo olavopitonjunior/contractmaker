@@ -3,6 +3,7 @@ import {
   FORM_REQUIRED_PRESETS,
   resolveRequiredFields,
   resolveAllRequiredFields,
+  isKnownFormPath,
 } from "../presets";
 
 // 7 etapas pós merge Posse/Título no Status/Débitos (2026-05-16).
@@ -176,6 +177,32 @@ describe("resolveAllRequiredFields", () => {
     expect(all[2]).toContain("compradores.0.rg");
     expect(all[3]).toContain("imoveis.0.matricula");
     expect(all[5]).toContain("pagamento.valor_total");
+  });
+});
+
+describe("isKnownFormPath", () => {
+  it("aceita campos de parte (PF e PJ), com índice normalizado", () => {
+    expect(isKnownFormPath("vendedores.0.cpf")).toBe(true);
+    expect(isKnownFormPath("vendedores.3.cpf")).toBe(true); // índice qualquer
+    expect(isKnownFormPath("compradores.0.razao_social")).toBe(true);
+    expect(isKnownFormPath("vendedores.0.estado_civil")).toBe(true);
+    expect(isKnownFormPath("vendedores.0.conjuge.nome")).toBe(true);
+  });
+
+  it("aceita o path guarda-chuva e campos de imóvel/pagamento/comissão", () => {
+    expect(isKnownFormPath("vendedores")).toBe(true);
+    expect(isKnownFormPath("compradores")).toBe(true);
+    expect(isKnownFormPath("imoveis.0.matricula")).toBe(true);
+    expect(isKnownFormPath("pagamento.valor_total")).toBe(true);
+    expect(isKnownFormPath("pagamento.sinal_arras")).toBe(true);
+    expect(isKnownFormPath("comissao.valor")).toBe(true);
+  });
+
+  it("rejeita paths órfãos (campo renomeado/typo)", () => {
+    expect(isKnownFormPath("vendedores.0.cpff")).toBe(false);
+    expect(isKnownFormPath("vendedores.0.campo_inexistente")).toBe(false);
+    expect(isKnownFormPath("foo.bar")).toBe(false);
+    expect(isKnownFormPath("imoveis.0.preco")).toBe(false);
   });
 });
 
