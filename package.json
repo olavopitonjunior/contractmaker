@@ -6,28 +6,5 @@
   "workspaces": [
     "apps/web",
     "apps/mcp-server"
-  ],
-  "main": "dist/index.js",
-  "bin": {
-    "contractmaker": "dist/cli.js"
-  },
-  "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/cli.js",
-    "clean": "node -e \"require('fs').rmSync('dist', { recursive: true, force: true });\""
-  },
-  "dependencies": {
-    "ajv": "^8.17.1",
-    "ajv-formats": "^3.0.1",
-    "commander": "^12.1.0",
-    "handlebars": "^4.7.8",
-    "html-to-docx": "^1.8.0",
-    "mammoth": "^1.6.0",
-    "pdf-parse": "^1.1.1",
-    "puppeteer": "^22.12.1"
-  },
-  "devDependencies": {
-    "@types/node": "^20.12.12",
-    "typescript": "^5.5.4"
-  }
+  ]
 }

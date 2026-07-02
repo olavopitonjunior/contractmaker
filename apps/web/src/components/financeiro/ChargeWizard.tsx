@@ -391,7 +391,9 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
           opts.find((a) => a.isActive)?.id ?? opts[0]?.id ?? "";
         // Não sobrescreve se draft já trouxe accountId
         setAccountId((prev) => prev || initial);
-      } catch {}
+      } catch (e) {
+        console.warn("[ChargeWizard] falha ao carregar contas", e);
+      }
     })();
   }, []);
 
@@ -408,7 +410,9 @@ export default function ChargeWizard({ mode, dealId, onCreated, onCancel, onMode
           const data = await res.json();
           setPlatformFeePercent(data.settings?.platformFeePercent ?? 0);
         }
-      } catch {}
+      } catch (e) {
+        console.warn("[ChargeWizard] falha ao carregar settings da conta", e);
+      }
     })();
   }, [accountId]);
 

@@ -32,24 +32,16 @@ export async function GET(
       form: {
         select: { orgId: true, dataJson: true, token: true, status: true },
       },
+      // org via pipeline (form pode ser null em deal formless — IDOR)
+      pipeline: { select: { orgId: true } },
       stage: { select: { id: true, name: true } },
     },
   });
   if (!deal) {
     return NextResponse.json({ error: "Deal not found" }, { status: 404 });
   }
-  if (deal.form && deal.form.orgId !== auth.org.id) {
+  if (deal.pipeline.orgId !== auth.org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
-  // Cross-org guard adicional: deal sem form precisa pertencer a pipeline da org
-  if (!deal.form) {
-    const stageOk = await prisma.pipelineStage.findFirst({
-      where: { id: deal.stageId, pipeline: { orgId: auth.org.id } },
-      select: { id: true },
-    });
-    if (!stageOk) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
   }
 
   const etag = etagFor({ updatedAt: deal.updatedAt });

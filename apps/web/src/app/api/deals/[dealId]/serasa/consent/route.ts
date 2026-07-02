@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { z } from "zod";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
@@ -33,10 +34,14 @@ async function authorizeDeal(dealId: string) {
   if (!org) return { error: "No organization", status: 400 as const };
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
-    include: { form: { select: { orgId: true } } },
+    include: {
+      form: { select: { orgId: true } },
+      // org via pipeline (form pode ser null em deal formless — IDOR)
+      pipeline: { select: { orgId: true } },
+    },
   });
   if (!deal) return { error: "Deal not found", status: 404 as const };
-  if (deal.form && deal.form.orgId !== org.id) {
+  if (deal.pipeline.orgId !== org.id) {
     return { error: "Forbidden", status: 403 as const };
   }
   return { deal, org, userId: session.user.id };
@@ -74,15 +79,17 @@ export async function POST(
     },
   });
 
-  void audit(
-    { orgId: org.id, userId },
-    {
-      action: "SERASA_CONSENT_GIVEN",
-      result: "SUCCESS",
-      resource: params.dealId,
-      resourceType: "Deal",
-      metadata: { baseLegal },
-    }
+  waitUntil(
+    audit(
+      { orgId: org.id, userId },
+      {
+        action: "SERASA_CONSENT_GIVEN",
+        result: "SUCCESS",
+        resource: params.dealId,
+        resourceType: "Deal",
+        metadata: { baseLegal },
+      }
+    )
   );
 
   return NextResponse.json({ ok: true, consent });
@@ -108,15 +115,17 @@ export async function DELETE(
         Object.keys(rest).length > 0 ? (rest as Record<string, never>) : undefined,
     },
   });
-  void audit(
-    { orgId: org.id, userId },
-    {
-      action: "SERASA_CONSENT_GIVEN",
-      result: "DENIED",
-      resource: params.dealId,
-      resourceType: "Deal",
-      metadata: { action: "revoked" },
-    }
+  waitUntil(
+    audit(
+      { orgId: org.id, userId },
+      {
+        action: "SERASA_CONSENT_GIVEN",
+        result: "DENIED",
+        resource: params.dealId,
+        resourceType: "Deal",
+        metadata: { action: "revoked" },
+      }
+    )
   );
   return NextResponse.json({ ok: true });
 }

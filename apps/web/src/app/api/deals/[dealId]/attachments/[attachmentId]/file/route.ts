@@ -20,12 +20,20 @@ export async function GET(
 
   const attachment = await prisma.dealAttachment.findUnique({
     where: { id: params.attachmentId },
-    include: { deal: { include: { form: { select: { orgId: true } } } } },
+    include: {
+      deal: {
+        include: {
+          form: { select: { orgId: true } },
+          // org via pipeline (form pode ser null em deal formless — IDOR)
+          pipeline: { select: { orgId: true } },
+        },
+      },
+    },
   });
   if (!attachment || attachment.dealId !== params.dealId) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  if (attachment.deal.form && attachment.deal.form.orgId !== org.id) {
+  if (attachment.deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

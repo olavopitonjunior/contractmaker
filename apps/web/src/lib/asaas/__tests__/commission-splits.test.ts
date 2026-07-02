@@ -146,6 +146,24 @@ describe("composeSplits — Fase 5 (back-compat: walletId only)", () => {
     );
   });
 
+  it("rejeita entry com percentualValue E fixedValue juntos (S-2)", () => {
+    expectSplitError(
+      () =>
+        composeSplits({
+          orgWalletId: ORG_WALLET,
+          customSplits: [
+            {
+              recipientType: "asaas_wallet",
+              walletId: CORRETORA,
+              percentualValue: 30,
+              fixedValue: 1000,
+            },
+          ],
+        }),
+      "SPLIT_MIXED_VALUE"
+    );
+  });
+
   it("aceita entry com fixedValue sem percentualValue", () => {
     const out = composeSplits({
       orgWalletId: ORG_WALLET,

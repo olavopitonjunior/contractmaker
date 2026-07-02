@@ -1,3 +1,4 @@
+import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
 import { validateContractData } from "@/lib/ai/validators";
 import { createContractMemory } from "@/lib/ai/memory";
@@ -228,27 +229,32 @@ export async function runContractApproval(
     }
   }
 
-  // ContractMemory hook fire-and-forget
-  void createContractMemory(input.contractId)
-    .then((result) => {
-      if (!result.ok) {
-        console.error(
-          "[approve-action] createContractMemory failed:",
-          result.error
-        );
-      }
-    })
-    .catch((err) => {
-      console.error("[approve-action] memory hook crashed:", err);
-    });
+  // ContractMemory hook fire-and-forget. waitUntil: `void` após o response é
+  // cancelado na Vercel — a indexação RAG (embedding) era silenciosamente perdida.
+  waitUntil(
+    createContractMemory(input.contractId)
+      .then((result) => {
+        if (!result.ok) {
+          console.error(
+            "[approve-action] createContractMemory failed:",
+            result.error
+          );
+        }
+      })
+      .catch((err) => {
+        console.error("[approve-action] memory hook crashed:", err);
+      })
+  );
 
   // Curator auto-análise fire-and-forget — dispara Haiku pra olhar
   // contratos similares aprovados e criar ClauseProposal/TemplateSuggestion
   // se padrão recorrente detectado. Falha silenciosa (não bloqueia approve).
   // Sessão fica visível no histórico do chat com title distintivo.
-  void enqueueCuratorAnalysis(input.contractId).catch((err) => {
-    console.error("[approve-action] curator autorun crashed:", err);
-  });
+  waitUntil(
+    enqueueCuratorAnalysis(input.contractId).catch((err) => {
+      console.error("[approve-action] curator autorun crashed:", err);
+    })
+  );
 
   return { status: 200, body: { status: "aprovado" } };
 }

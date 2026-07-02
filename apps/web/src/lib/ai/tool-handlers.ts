@@ -174,6 +174,22 @@ async function handleProposePlan(
     if (depIds.length > 0) steps[idx].dependsOn = Array.from(new Set(depIds));
   });
 
+  // Auto-link determinístico (#1 da auditoria): add_comment quase sempre afirma
+  // o resultado de um write anterior ("inseri a cláusula X acima"). O LLM raramente
+  // declara dependsOn, então o guard de dependência nunca disparava e o comentário
+  // confabulado era persistido mesmo com o insert_clause falho. Ligamos cada
+  // add_comment sem dependsOn explícito ao write imediatamente anterior.
+  steps.forEach((step, idx) => {
+    if (step.tool !== "add_comment") return;
+    if (step.dependsOn && step.dependsOn.length > 0) return;
+    for (let j = idx - 1; j >= 0; j--) {
+      if (steps[j].type === "write") {
+        step.dependsOn = [steps[j].id];
+        break;
+      }
+    }
+  });
+
   // Pré-validação anti-slug em write steps que dependem de knowledgeItemId.
   // Sem isso, o user pode aprovar o PlanCard, execute-plan tenta rodar
   // insert_clause/remove_clause com placeholder, o handler rejeita e a

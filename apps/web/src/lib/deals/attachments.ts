@@ -1,4 +1,5 @@
 import { createHash } from "crypto";
+import { waitUntil } from "@vercel/functions";
 import type { DealAttachment } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { audit, type AuditContext } from "@/lib/security/audit";
@@ -88,17 +89,20 @@ export async function persistDealDocument(
 
   // Quando a category é certidão ou matrícula anexada, dispara análise
   // fire-and-forget (OCR estruturado → crossCheckCertidoes → ContractComment).
-  // Não bloqueia a resposta.
+  // Não bloqueia a resposta. `waitUntil` (não `void`) evita que a Vercel cancele
+  // o fire-and-forget após o response retornar (#76 Fase 3+4).
   if (
     attachment.category &&
     (attachment.category.startsWith("certidao_") ||
       attachment.category === "matricula_anexada")
   ) {
-    void import("@/lib/services/manual-certidao-analysis").then(
-      ({ analyzeManualCertidaoForDeal }) =>
-        analyzeManualCertidaoForDeal(dealId, attachment.id).catch((err) => {
-          console.error("[deal-attachments] analyzeManualCertidaoForDeal falhou:", err);
-        })
+    waitUntil(
+      import("@/lib/services/manual-certidao-analysis").then(
+        ({ analyzeManualCertidaoForDeal }) =>
+          analyzeManualCertidaoForDeal(dealId, attachment.id).catch((err) => {
+            console.error("[deal-attachments] analyzeManualCertidaoForDeal falhou:", err);
+          })
+      )
     );
   }
 

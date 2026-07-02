@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
 import { processOcrQueue } from "@/lib/ai/ocr-worker";
 import { resolveFormScope } from "@/lib/forms/resolve-form-scope";
@@ -50,9 +51,11 @@ export async function POST(
   });
 
   // Dispara worker fire-and-forget — não espera OCR terminar pra responder
-  void processOcrQueue({ formId: form.id }).catch((err) => {
-    console.error("[attachment retry] worker dispatch failed:", err);
-  });
+  waitUntil(
+    processOcrQueue({ formId: form.id }).catch((err) => {
+      console.error("[attachment retry] worker dispatch failed:", err);
+    })
+  );
 
   return NextResponse.json({ ok: true, status: "queued" }, { status: 202 });
 }

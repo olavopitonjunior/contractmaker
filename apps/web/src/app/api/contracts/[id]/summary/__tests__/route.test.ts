@@ -1,15 +1,18 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { GET } from "../route";
-import { auth } from "@/lib/auth/auth";
+import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import { createMockSession } from "@/__tests__/helpers";
+import { createMockSession, createMockOrg } from "@/__tests__/helpers";
 
 const mockAuth = vi.mocked(auth);
+const mockGetUserOrg = vi.mocked(getUserOrg);
 const mockPrisma = vi.mocked(prisma);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // summary passou a usar requireApiAuth → resolve org via getUserOrg.
+  mockGetUserOrg.mockResolvedValue(createMockOrg() as never);
 });
 
 function makeReq(headers: Record<string, string> = {}) {
@@ -23,6 +26,7 @@ const baseContract = {
   version: 1,
   userId: "u1",
   updatedAt: new Date("2026-05-01T10:00:00Z"),
+  deal: { pipeline: { orgId: "org-1" } },
   envelopes: [],
   dataJson: {
     vendedores: [{ nome: "João Silva", cpf: "529.982.247-25" }],

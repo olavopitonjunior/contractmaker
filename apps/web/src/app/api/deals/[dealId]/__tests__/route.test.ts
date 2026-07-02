@@ -39,22 +39,23 @@ describe("GET /api/deals/[dealId] (retrofit Newton)", () => {
       stageId: "s1",
       updatedAt: new Date(),
       form: { orgId: "other-org", dataJson: {}, token: "t", status: "ok" },
+      pipeline: { orgId: "other-org" },
       stage: { id: "s1", name: "Lead" },
     } as never);
     const res = await GET(makeReq(), { params: { dealId: "d1" } });
     expect(res.status).toBe(403);
   });
 
-  it("403 cross-org sem form (via stage.pipeline.orgId)", async () => {
+  it("403 cross-org sem form (via deal.pipeline.orgId)", async () => {
     mockAuth.mockResolvedValue(createMockSession() as never);
     mockPrisma.deal.findUnique.mockResolvedValue({
       id: "d1",
       stageId: "s1",
       updatedAt: new Date(),
       form: null,
+      pipeline: { orgId: "other-org" },
       stage: { id: "s1", name: "Lead" },
     } as never);
-    mockPrisma.pipelineStage.findFirst.mockResolvedValue(null as never);
     const res = await GET(makeReq(), { params: { dealId: "d1" } });
     expect(res.status).toBe(403);
   });
@@ -72,6 +73,7 @@ describe("GET /api/deals/[dealId] (retrofit Newton)", () => {
         token: "tok",
         status: "ok",
       },
+      pipeline: { orgId: "org-1" },
       stage: { id: "s1", name: "Lead" },
     } as never);
 

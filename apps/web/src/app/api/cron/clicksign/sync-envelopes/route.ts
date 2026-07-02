@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
 import { getEnvelope } from "@/lib/clicksign/envelopes";
 import { ClicksignError } from "@/lib/clicksign/client";
@@ -75,7 +76,7 @@ export async function GET(req: NextRequest) {
           },
         });
         const signedUrl = extractSignedUrl(resp);
-        if (signedUrl) void downloadSignedPdf(env.id, signedUrl);
+        if (signedUrl) waitUntil(downloadSignedPdf(env.id, signedUrl));
         await autoPromoteDealOnContractSigned(env.id);
         await completeInspectionOnEnvelopeClosed(env.id);
         drifted += 1;

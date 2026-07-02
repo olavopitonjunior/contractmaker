@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { prisma } from "@/lib/db/prisma";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { updateInspectionSignedLaudo } from "@/lib/locacao/inspection-signature";
+import { safeFetch } from "@/lib/security/ssrf";
 
 /**
  * Baixa o PDF assinado do ClickSign, sobe no storage, grava
@@ -22,7 +23,9 @@ export async function persistSignedPdf(
   logPrefix = "[clicksign]"
 ): Promise<void> {
   try {
-    const res = await fetch(url);
+    // SSRF guard: `url` vem do payload/da API ClickSign. safeFetch revalida o
+    // host (e cada redirect) pra impedir fetch de IMDS/rede interna (#76 Fase 0).
+    const res = await safeFetch(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
     const contentHash = createHash("sha256").update(buf).digest("hex");

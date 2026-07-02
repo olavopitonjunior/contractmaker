@@ -37,9 +37,11 @@ describe("POST /api/contracts/[id]/approve", () => {
 
   it("returns 400 when already approved", async () => {
     mockAuth.mockResolvedValueOnce(createMockSession());
-    mockPrisma.contract.findUnique.mockResolvedValueOnce({
+    mockPrisma.contract.findUnique.mockResolvedValue({
       id: "test-id",
       status: "aprovado",
+      userId: "user-1",
+      deal: { pipeline: { orgId: "org-1" } },
     } as any);
     const res = await POST(createRequest(), { params: { id: "test-id" } });
     expect(res.status).toBe(400);
@@ -47,9 +49,11 @@ describe("POST /api/contracts/[id]/approve", () => {
 
   it("retorna 200 com requiresReview quando há issues e force=false", async () => {
     mockAuth.mockResolvedValueOnce(createMockSession());
-    mockPrisma.contract.findUnique.mockResolvedValueOnce({
+    mockPrisma.contract.findUnique.mockResolvedValue({
       id: "test-id",
       status: "rascunho",
+      userId: "user-1",
+      deal: { pipeline: { orgId: "org-1" } },
       dataJson: {
         vendedores: [
           { nome: "João", cpf: "111.111.111-11", estado_civil: "Solteiro(a)" },
@@ -71,9 +75,11 @@ describe("POST /api/contracts/[id]/approve", () => {
 
   it("returns 200 and approves when only warnings exist", async () => {
     mockAuth.mockResolvedValueOnce(createMockSession());
-    mockPrisma.contract.findUnique.mockResolvedValueOnce({
+    mockPrisma.contract.findUnique.mockResolvedValue({
       id: "test-id",
       status: "rascunho",
+      userId: "user-1",
+      deal: { pipeline: { orgId: "org-1" } },
       dataJson: {
         vendedores: [
           { nome: "João", cpf: "529.982.247-25", estado_civil: "Solteiro(a)" },
@@ -110,9 +116,11 @@ describe("POST /api/contracts/[id]/approve", () => {
     mockAuth.mockResolvedValueOnce(
       createMockSession({ id: "user-1", name: "Admin" })
     );
-    mockPrisma.contract.findUnique.mockResolvedValueOnce({
+    mockPrisma.contract.findUnique.mockResolvedValue({
       id: "test-id",
       status: "rascunho",
+      userId: "user-1",
+      deal: { pipeline: { orgId: "org-1" } },
       dataJson: {
         vendedores: [
           { nome: "João", cpf: "529.982.247-25", estado_civil: "Solteiro(a)" },

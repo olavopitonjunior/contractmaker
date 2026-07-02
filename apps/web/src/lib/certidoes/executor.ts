@@ -7,7 +7,7 @@ import { normalize } from "./normalizers";
 import { normalizeSerasa } from "./serasa-normalizers";
 import { renderSerasaHtml, type SerasaRenderContext } from "./serasa-render";
 import { exportPdfToBuffer } from "@/lib/render/exporter";
-import { endpointInfo } from "./endpoints";
+import { endpointInfo, CATEGORIES_REQUIRING_PDF } from "./endpoints";
 import { classifyOutcome } from "./outcome-classifier";
 import {
   isPedidoDuplicado,
@@ -1271,7 +1271,33 @@ export async function pollPortalJob(jobId: string): Promise<void> {
   // tjsp/tjrj/trf3 eram mapeados — qualquer outro two-step (ONR matrícula,
   // TJMS, Antecedentes PF) caía em null e ficava preso em awaiting_portal.
   const obterEndpoint = resolveObterEndpoint(job.endpoint);
-  if (!obterEndpoint) return;
+  if (!obterEndpoint) {
+    // Sem mapeamento do 2º passo o job nunca progride — antes dava `return` e
+    // ficava preso em awaiting_portal pra sempre. Falha já com portalUrl pra
+    // emissão manual (#6 da auditoria).
+    const portalUrl =
+      job.portalUrl ?? endpointInfo(job.endpoint).portalUrl ?? null;
+    await prisma.certidaoJob.update({
+      where: { id: jobId },
+      data: {
+        status: "failed_permanent",
+        finishedAt: new Date(),
+        errorMessage:
+          "Endpoint do 2º passo (obter) não mapeado — emita pelo portal oficial",
+        portalUrl,
+      },
+    });
+    logTransition(
+      jobId,
+      "awaiting_portal",
+      "failed_permanent",
+      "obter endpoint não mapeado",
+      { endpoint: job.endpoint }
+    );
+    await reportCertidaoProblem(job, "2º passo da certidão não mapeado");
+    await checkBatchCompletion(job.batchId);
+    return;
+  }
 
   const obterInfo = endpointInfo(obterEndpoint);
   const startedAt = new Date();
@@ -1415,6 +1441,68 @@ export async function pollPortalJob(jobId: string): Promise<void> {
       );
     }
 
+    // #5: billing respeita header.billable===false (igual ao branch não-200).
+    const obterCost = resp.header?.billable === false ? 0 : obterInfo.costCents;
+
+    // #2 anti-falso-negativo: num endpoint que DEVE emitir PDF, um 200 sem
+    // anexo NÃO pode virar "success" verde (negativa fantasma sem documento).
+    // Reagenda como portal_unavailable até o prazo; depois failed_permanent —
+    // espelha classifyOutcome do caminho single-step. Cobre situacao=undefined.
+    const requiresPdf =
+      obterInfo.emitsPdf === false
+        ? false
+        : CATEGORIES_REQUIRING_PDF.has(obterInfo.category);
+    if (requiresPdf && attachmentId === null) {
+      const ageMs = startedAt.getTime() - job.createdAt.getTime();
+      const portalUrl = job.portalUrl ?? obterInfo.portalUrl ?? null;
+      const costAcc = (job.costCents ?? 0) + obterCost;
+      if (ageMs > maxPortalWaitMs(job.endpoint)) {
+        await prisma.certidaoJob.update({
+          where: { id: jobId },
+          data: {
+            status: "failed_permanent",
+            finishedAt: new Date(),
+            resultCode: resp.code,
+            resultMessage: resp.code_message,
+            errorMessage:
+              "Portal respondeu mas não anexou o PDF (prazo esgotado)",
+            costCents: costAcc,
+            portalUrl,
+          },
+        });
+        logTransition(
+          jobId,
+          "awaiting_portal",
+          "failed_permanent",
+          "obter 200 sem PDF — prazo esgotado",
+          { endpoint: obterEndpoint, resultCode: resp.code }
+        );
+        await reportCertidaoProblem(job, "portal não anexou o PDF");
+        await checkBatchCompletion(job.batchId);
+      } else {
+        const next = new Date(
+          Date.now() + computeAdaptiveRetryDelta(job.endpoint, job.createdAt)
+        );
+        await prisma.certidaoJob.update({
+          where: { id: jobId },
+          data: {
+            expectedReadyAt: next,
+            resultCode: resp.code,
+            resultMessage: resp.code_message,
+            costCents: costAcc,
+          },
+        });
+        logTransition(
+          jobId,
+          "awaiting_portal",
+          "awaiting_portal",
+          "obter 200 sem PDF — reagendado",
+          { endpoint: obterEndpoint, resultCode: resp.code }
+        );
+      }
+      return;
+    }
+
     const enrichedObterData: Record<string, unknown> = {
       ...(normalized as unknown as Record<string, unknown>),
     };
@@ -1430,7 +1518,7 @@ export async function pollPortalJob(jobId: string): Promise<void> {
         resultMessage: resp.code_message,
         resultData: enrichedObterData as object,
         attachmentId,
-        costCents: (job.costCents ?? 0) + obterInfo.costCents,
+        costCents: (job.costCents ?? 0) + obterCost,
       },
     });
     logTransition(jobId, "awaiting_portal", "success", "portal delivered", {

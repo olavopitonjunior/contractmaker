@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import os from 'os';
 import path from 'path';
 import fs from 'fs';
+import { requireAuth } from '@/lib/auth/context';
 import { prisma } from '@/lib/db/prisma';
 import { exportSchema } from '@/lib/validation/schemas';
 import { renderContratoHTML } from '@/lib/render/handlebars';
@@ -14,6 +15,10 @@ export const maxDuration = 60;
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
+    const authResult = await requireAuth(req);
+    if (!authResult.ok) return authResult.response;
+    const { ctx } = authResult;
+
     const body = await req.json();
     const parsed = exportSchema.safeParse(body);
     if (!parsed.success) {
@@ -32,6 +37,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       },
     });
     if (!contract) {
+      return NextResponse.json({ error: 'Contrato não encontrado' }, { status: 404 });
+    }
+
+    // Cross-org guard: contrato precisa pertencer à org do caller. Sem isso,
+    // qualquer um com o ID exportava o PDF completo (rota era pública).
+    if (contract.deal.pipeline.orgId !== ctx.orgId) {
       return NextResponse.json({ error: 'Contrato não encontrado' }, { status: 404 });
     }
 

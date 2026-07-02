@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
@@ -252,11 +253,16 @@ export async function POST(req: NextRequest) {
     if (parsed.data.billingType === "PIX") {
       try {
         pixQr = await getPixQrCode({ asaasId: payment.id, apiKey });
-      } catch {}
+      } catch (e) {
+        // Best-effort: a cobrança já foi criada; QR pode ser buscado depois.
+        console.warn("[charges/nova] getPixQrCode falhou", e instanceof Error ? e.message : e);
+      }
     } else {
       try {
         bankSlip = await getBankSlipData({ asaasId: payment.id, apiKey });
-      } catch {}
+      } catch (e) {
+        console.warn("[charges/nova] getBankSlipData falhou", e instanceof Error ? e.message : e);
+      }
     }
 
     const charge = await prisma.commissionCharge.create({
@@ -316,11 +322,13 @@ export async function POST(req: NextRequest) {
       }
     );
 
-    void notifyChargeEvent({
-      chargeId: charge.id,
-      event: "created",
-      orgId: ctx.orgId,
-    });
+    waitUntil(
+      notifyChargeEvent({
+        chargeId: charge.id,
+        event: "created",
+        orgId: ctx.orgId,
+      })
+    );
 
     return NextResponse.json({ charge: { id: charge.id } });
   } catch (err) {

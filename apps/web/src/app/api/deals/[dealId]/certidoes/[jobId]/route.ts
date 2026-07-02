@@ -51,14 +51,20 @@ export async function DELETE(
   const job = await prisma.certidaoJob.findUnique({
     where: { id: params.jobId },
     include: {
-      deal: { include: { form: { select: { orgId: true } } } },
+      deal: {
+        include: {
+          form: { select: { orgId: true } },
+          // org via pipeline (form pode ser null em deal formless — IDOR)
+          pipeline: { select: { orgId: true } },
+        },
+      },
       attachment: { select: { id: true, url: true, filename: true } },
     },
   });
   if (!job || job.dealId !== params.dealId || !job.deal) {
     return NextResponse.json({ error: "Job not found" }, { status: 404 });
   }
-  if (job.deal.form && job.deal.form.orgId !== org.id) {
+  if (job.deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

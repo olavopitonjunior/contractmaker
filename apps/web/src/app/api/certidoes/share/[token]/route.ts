@@ -24,12 +24,20 @@ export async function DELETE(
 
   const link = await prisma.certidoesShareLink.findUnique({
     where: { token: params.token },
-    include: { deal: { include: { form: { select: { orgId: true } } } } },
+    include: {
+      deal: {
+        include: {
+          form: { select: { orgId: true } },
+          // org via pipeline (form pode ser null em deal formless — IDOR)
+          pipeline: { select: { orgId: true } },
+        },
+      },
+    },
   });
   if (!link) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  if (link.deal.form && link.deal.form.orgId !== org.id) {
+  if (link.deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
