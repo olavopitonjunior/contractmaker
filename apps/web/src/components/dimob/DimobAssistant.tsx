@@ -42,9 +42,11 @@ const AI_PARSE_ERROR_MSG = "A IA não retornou um resultado válido. Tente novam
 export function DimobAssistant({
   year,
   records,
+  onFindingClick,
 }: {
   year: number;
   records: { recordId: string; title: string }[];
+  onFindingClick?: (recordId: string, field?: string) => void;
 }) {
   const [reviewing, setReviewing] = useState(false);
   const [findings, setFindings] = useState<Finding[] | null>(null);
@@ -135,18 +137,36 @@ export function DimobAssistant({
           )}
           {findings && findings.length > 0 && (
             <div className="space-y-1.5">
-              {findings.map((f, i) => (
-                <div key={i} className="rounded-md border p-2 text-sm">
-                  <div className="flex items-center gap-1.5">
-                    <Badge variant="secondary">{f.severity ?? "?"}</Badge>
-                    <span className="font-medium">{f.field ?? f.recordId}</span>
+              {findings.map((f, i) => {
+                const canJump = Boolean(onFindingClick && f.recordId);
+                return (
+                  <div
+                    key={i}
+                    className={`rounded-md border p-2 text-sm ${canJump ? "cursor-pointer transition-colors hover:bg-muted/60" : ""}`}
+                    role={canJump ? "button" : undefined}
+                    tabIndex={canJump ? 0 : undefined}
+                    onClick={canJump ? () => onFindingClick!(f.recordId!, f.field) : undefined}
+                    onKeyDown={
+                      canJump
+                        ? (e) => {
+                            if (e.key === "Enter" || e.key === " ") onFindingClick!(f.recordId!, f.field);
+                          }
+                        : undefined
+                    }
+                    title={canJump ? "Ir para o registro" : undefined}
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <Badge variant="secondary">{f.severity ?? "?"}</Badge>
+                      <span className="font-medium">{f.field ?? f.recordId}</span>
+                      {canJump && <span className="ml-auto text-xs text-primary">ir para o registro →</span>}
+                    </div>
+                    <p>{f.message}</p>
+                    {f.suggestion && (
+                      <p className="text-xs text-muted-foreground">Sugestão: {f.suggestion}</p>
+                    )}
                   </div>
-                  <p>{f.message}</p>
-                  {f.suggestion && (
-                    <p className="text-xs text-muted-foreground">Sugestão: {f.suggestion}</p>
-                  )}
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>

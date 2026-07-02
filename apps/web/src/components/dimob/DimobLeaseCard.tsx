@@ -112,6 +112,10 @@ function MoneyCell({
   );
 }
 
+/** id do DOM de um card de locação — usado pelo deep-link (scroll/realce). */
+export const dimobLeaseDomId = (recordId: string) =>
+  `dimob-rec-${recordId.replace(/[^a-zA-Z0-9_-]/g, "_")}`;
+
 export interface DimobLeaseCardProps {
   record: LeaseReviewRecord;
   editable?: boolean;
@@ -121,6 +125,7 @@ export interface DimobLeaseCardProps {
   onCommit: (recordId: string, fieldKey: string, value: string) => void;
   onReset: (recordId: string, fieldKey: string) => void;
   onExcludeLease: (record: LeaseReviewRecord) => void;
+  highlightRecordId?: string | null;
 }
 
 export function DimobLeaseCard({
@@ -132,11 +137,24 @@ export function DimobLeaseCard({
   onCommit,
   onReset,
   onExcludeLease,
+  highlightRecordId,
 }: DimobLeaseCardProps) {
   const [open, setOpen] = useState(false);
   const [showRaw, setShowRaw] = useState(false);
+  const [flash, setFlash] = useState(false);
   const errors = record.recordIssues.filter((i) => i.level === "error").length;
   const warnings = record.recordIssues.filter((i) => i.level === "warning").length;
+
+  useEffect(() => {
+    if (highlightRecordId !== record.recordId) return;
+    setOpen(true);
+    setFlash(true);
+    document
+      .getElementById(dimobLeaseDomId(record.recordId))
+      ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    const t = setTimeout(() => setFlash(false), 2000);
+    return () => clearTimeout(t);
+  }, [highlightRecordId, record.recordId]);
 
   const cols: { key: Column; label: string; fieldPrefix: string; overKey: keyof LeaseMonthCell }[] = [
     { key: "aluguel", label: "Aluguel", fieldPrefix: "aluguel", overKey: "aluguelOverridden" },
@@ -145,7 +163,10 @@ export function DimobLeaseCard({
   ];
 
   return (
-    <Card>
+    <Card
+      id={dimobLeaseDomId(record.recordId)}
+      className={flash ? "ring-2 ring-primary ring-offset-2 transition-shadow" : "transition-shadow"}
+    >
       <CardHeader className="py-3">
         <div className="flex items-center gap-2">
           {onToggleSelect && (

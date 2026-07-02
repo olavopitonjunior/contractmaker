@@ -125,6 +125,14 @@ export function DimobReportClient() {
   const [retificadora, setRetificadora] = useState(false);
   const [numeroRecibo, setNumeroRecibo] = useState("");
   const [exports, setExports] = useState<DimobExportItem[]>([]);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+
+  // Deep-link dos findings da IA: destaca o registro (vendas ou locação) alvo.
+  function onFindingClick(recordId: string) {
+    // Reaplica mesmo se já era o alvo (limpa antes p/ o efeito disparar de novo).
+    setHighlightId(null);
+    requestAnimationFrame(() => setHighlightId(recordId));
+  }
 
   /** Reconstrói o estado de overrides (vendas + locação) a partir do que veio marcado. */
   const deriveOverrides = (d: PreviewResponse | null): OverrideState => {
@@ -521,6 +529,7 @@ export function DimobReportClient() {
             records={data.reviewRecords}
             editable
             savingKeys={savingKeys}
+            highlightRecordId={highlightId}
             onCommit={onCommit}
             onReset={onReset}
             onCorrigirOrigem={onCorrigirOrigem}
@@ -566,6 +575,7 @@ export function DimobReportClient() {
               record={r}
               editable
               savingKeys={savingKeys}
+              highlightRecordId={highlightId}
               selected={selectedLeases.has(r.leaseId)}
               onToggleSelect={toggleLease}
               onCommit={onCommit}
@@ -687,6 +697,7 @@ export function DimobReportClient() {
         <DimobAssistant
           year={year}
           records={data.reviewRecords.map((r) => ({ recordId: r.recordId, title: r.title }))}
+          onFindingClick={onFindingClick}
         />
       )}
 
