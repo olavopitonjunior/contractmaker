@@ -36,9 +36,13 @@ export type CommissionSource =
   | "none"; // sem comissão declarada
 
 export interface DimobSaleRecord {
+  /** Chave estável para casar edições/overrides: `{dealId}:{idx do explode}`. */
+  recordId: string;
   dealId: string;
   dealTitle: string;
   contractId: string;
+  /** Origem legível por chave de campo do R04 (para o "de onde veio"). */
+  fieldOrigins: Record<string, string>;
   comprador: DimobParty;
   vendedor: DimobParty;
   /** ISO yyyy-mm-dd da assinatura (data da operação). */
@@ -183,13 +187,39 @@ function buildImovel(data: DadosContratoLite): DimobSaleRecord["imovel"] {
   };
 }
 
+/** Origem legível por campo do R04 (para o drawer "de onde veio"). */
+function buildFieldOrigins(
+  vendIdx: number,
+  compIdx: number,
+  commissionSource: CommissionSource,
+  rateado: boolean
+): Record<string, string> {
+  const rateio = rateado ? " (rateado por parte)" : "";
+  return {
+    cpfCnpjComprador: `dataJson.compradores[${compIdx}]`,
+    nomeComprador: `dataJson.compradores[${compIdx}]`,
+    cpfCnpjVendedor: `dataJson.vendedores[${vendIdx}]`,
+    nomeVendedor: `dataJson.vendedores[${vendIdx}]`,
+    dataContrato: "Envelope.closedAt ?? Deal.contractSignedAt (assinatura do CCV)",
+    valorAlienacao: `dataJson.pagamento.valor_total${rateio}`,
+    valorComissao: `comissão do declarante · fonte: ${commissionSource}${rateio}`,
+    numeroContrato: "dataJson.comissao.numero_contrato",
+    enderecoImovel: "dataJson.imoveis[0]",
+    cepImovel: "dataJson.imoveis[0]",
+    ufImovel: "dataJson.imoveis[0]",
+  };
+}
+
 /**
  * Explode um negócio em 1+ linhas R04 aplicando rateio por parte.
  * Caso comum: 1 vendedor × 1 comprador → 1 linha. N vendedores → N linhas
  * (rateio igual). N compradores (com 1 vendedor) → N linhas.
  */
 function explodeRecords(
-  base: Omit<DimobSaleRecord, "comprador" | "vendedor" | "valorAlienacao" | "valorComissao" | "needsReview">,
+  base: Omit<
+    DimobSaleRecord,
+    "recordId" | "fieldOrigins" | "comprador" | "vendedor" | "valorAlienacao" | "valorComissao" | "needsReview"
+  >,
   vendedores: PartyLike[],
   compradores: PartyLike[],
   valorTotal: number,
@@ -204,10 +234,14 @@ function explodeRecords(
   const n = Math.max(parts.length, 1);
 
   return Array.from({ length: n }, (_, i) => {
-    const vendedor = explodeVendedor ? vendedores[i] : vendedores[0];
-    const comprador = explodeVendedor ? compradores[0] : compradores[i];
+    const vendIdx = explodeVendedor ? i : 0;
+    const compIdx = explodeVendedor ? 0 : i;
+    const vendedor = vendedores[vendIdx];
+    const comprador = compradores[compIdx];
     return {
       ...base,
+      recordId: `${base.dealId}:${i}`,
+      fieldOrigins: buildFieldOrigins(vendIdx, compIdx, base.commissionSource, n > 1),
       comprador: comprador ? toParty(comprador) : { nome: "", cpfCnpj: "" },
       vendedor: vendedor ? toParty(vendedor) : { nome: "", cpfCnpj: "" },
       valorAlienacao: Math.round((valorTotal / n) * 100) / 100,

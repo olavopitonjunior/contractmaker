@@ -214,6 +214,10 @@ model Organization {
   fiscalUf             String? // UF do contribuinte (R01)
   fiscalMunicipioCode  String? // Código do município RFB/IBGE (R01)
   fiscalMunicipioName  String? // Nome do município (exibição)
+  // Selo de validação do leiaute DIMOB: guarda a DIMOB_LAYOUT_VERSION que o
+  // usuário confirmou ter importado sem erro no PGD. Só vale enquanto casar
+  // com a versão atual do layout.ts (senão o banner "provisório" volta).
+  dimobLayoutValidatedVersion String?
   // White-label (Fase 1a): subdomínio `{subdomain}.imobpro.ia.br` e domínio
   // custom futuro. Resolução por host no middleware → x-org-subdomain.
   subdomain            String?  @unique
@@ -280,7 +284,8 @@ model Organization {
   newtonRequests NewtonRequest[]
 
   // DIMOB — histórico de arquivos gerados (auditoria + reemissão)
-  dimobExports DimobExport[]
+  dimobExports   DimobExport[]
+  dimobOverrides DimobOverride[]
 
   // Newton — vínculo deal ↔ grupo WhatsApp
   dealGroupLinks DealGroupLink[]
@@ -3003,4 +3008,20 @@ model DimobExport {
   org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId, year])
+}
+
+// DIMOB — edições do usuário na grade de revisão (overrides por org+ano).
+// state = { [recordId]: { [fieldKey]: valorString } }. Schema-free p/ o leiaute
+// evoluir sem migração (mesmo padrão de CommissionChargeDraft).
+model DimobOverride {
+  id        String   @id @default(cuid())
+  orgId     String
+  year      Int
+  state     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, year])
 }

@@ -81,7 +81,11 @@ export type AIOperation =
   | "assistant_chat"
   // Ingestão DOCX→template (engine google_docs): pass de IA que insere
   // {{placeholders}} no Doc-modelo da imobiliária.
-  | "template_placeholder_insertion";
+  | "template_placeholder_insertion"
+  // DIMOB — copiloto de revisão fiscal (one-shot Haiku)
+  | "dimob_review"
+  | "dimob_diagnose"
+  | "dimob_explain";
 
 export interface RecordUsageParams {
   orgId: string;

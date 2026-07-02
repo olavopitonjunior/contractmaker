@@ -77,9 +77,11 @@ const goodDeclarante: DimobDeclarante = {
 };
 
 const goodRecord: DimobSaleRecord = {
+  recordId: "d1:0",
   dealId: "d1",
   dealTitle: "Venda 1",
   contractId: "c1",
+  fieldOrigins: {},
   comprador: { nome: "Ana Compradora", cpfCnpj: "39053344705" },
   vendedor: { nome: "Beto Vendedor", cpfCnpj: "11144477735" },
   dataOperacao: "2025-06-10",

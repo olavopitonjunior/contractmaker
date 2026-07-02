@@ -11,6 +11,7 @@ import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { aggregateSalesForYear } from "@/lib/dimob/aggregate-sales";
 import { validateAggregate, hasBlockingErrors } from "@/lib/dimob/validate";
 import { buildDimobFileFromAggregate } from "@/lib/dimob/build-file";
+import { applyOverrides, type DimobOverrideState } from "@/lib/dimob/apply-overrides";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -49,7 +50,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Ano inválido" }, { status: 400 });
   }
 
-  const aggregate = await aggregateSalesForYear(ctx.orgId, year);
+  const aggregate0 = await aggregateSalesForYear(ctx.orgId, year);
+  const ov = await prisma.dimobOverride.findUnique({
+    where: { orgId_year: { orgId: ctx.orgId, year } },
+  });
+  const aggregate = applyOverrides(aggregate0, (ov?.state as DimobOverrideState) ?? null);
 
   if (aggregate.dispensado) {
     return NextResponse.json(

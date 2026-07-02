@@ -8,8 +8,12 @@
 
 import { createHash } from "crypto";
 import { R01_LAYOUT, R04_LAYOUT } from "./layout";
-import { buildDimobFile, type DimobRecordInput } from "./txt-writer";
-import type { DimobSalesAggregate } from "./aggregate-sales";
+import { buildDimobFile, type DimobRecordInput, type DimobValue } from "./txt-writer";
+import type {
+  DimobSalesAggregate,
+  DimobDeclarante,
+  DimobSaleRecord,
+} from "./aggregate-sales";
 
 export interface DimobBuildResult {
   txt: string;
@@ -25,48 +29,57 @@ function tipoImovelCode(tipo: "urbano" | "rural" | null): string {
   return "";
 }
 
+/** Valores lógicos do registro R01 (declarante). */
+export function declaranteValues(
+  declarante: DimobDeclarante,
+  year: number
+): Record<string, DimobValue> {
+  return {
+    cnpjDeclarante: declarante.cnpj,
+    anoCalendario: year,
+    nomeEmpresarial: declarante.nomeEmpresarial,
+    cpfResponsavel: declarante.cpfResponsavel,
+    endereco: declarante.endereco,
+    uf: declarante.uf,
+    codigoMunicipio: declarante.codigoMunicipio,
+  };
+}
+
+/** Valores lógicos de um registro R04 (operação de venda). */
+export function saleRecordValues(
+  declarante: DimobDeclarante,
+  year: number,
+  r: DimobSaleRecord,
+  sequencial: number
+): Record<string, DimobValue> {
+  return {
+    cnpjDeclarante: declarante.cnpj,
+    anoCalendario: year,
+    sequencial,
+    cpfCnpjComprador: r.comprador.cpfCnpj,
+    nomeComprador: r.comprador.nome,
+    cpfCnpjVendedor: r.vendedor.cpfCnpj,
+    nomeVendedor: r.vendedor.nome,
+    numeroContrato: r.numeroContrato ?? "",
+    dataContrato: r.dataOperacao,
+    valorAlienacao: r.valorAlienacao,
+    valorComissao: r.valorComissao,
+    tipoImovel: tipoImovelCode(r.imovel.tipoImovel),
+    enderecoImovel: r.imovel.endereco ?? "",
+    cepImovel: r.imovel.cep ?? "",
+    ufImovel: r.imovel.uf ?? "",
+  };
+}
+
 /** Mapeia o agregado para os registros posicionais (R01 + R04...). */
 export function buildDimobRecords(agg: DimobSalesAggregate): DimobRecordInput[] {
   const { declarante, year } = agg;
-
   const records: DimobRecordInput[] = [
-    {
-      layout: R01_LAYOUT,
-      values: {
-        cnpjDeclarante: declarante.cnpj,
-        anoCalendario: year,
-        nomeEmpresarial: declarante.nomeEmpresarial,
-        cpfResponsavel: declarante.cpfResponsavel,
-        endereco: declarante.endereco,
-        uf: declarante.uf,
-        codigoMunicipio: declarante.codigoMunicipio,
-      },
-    },
+    { layout: R01_LAYOUT, values: declaranteValues(declarante, year) },
   ];
-
   agg.records.forEach((r, i) => {
-    records.push({
-      layout: R04_LAYOUT,
-      values: {
-        cnpjDeclarante: declarante.cnpj,
-        anoCalendario: year,
-        sequencial: i + 1,
-        cpfCnpjComprador: r.comprador.cpfCnpj,
-        nomeComprador: r.comprador.nome,
-        cpfCnpjVendedor: r.vendedor.cpfCnpj,
-        nomeVendedor: r.vendedor.nome,
-        numeroContrato: r.numeroContrato ?? "",
-        dataContrato: r.dataOperacao,
-        valorAlienacao: r.valorAlienacao,
-        valorComissao: r.valorComissao,
-        tipoImovel: tipoImovelCode(r.imovel.tipoImovel),
-        enderecoImovel: r.imovel.endereco ?? "",
-        cepImovel: r.imovel.cep ?? "",
-        ufImovel: r.imovel.uf ?? "",
-      },
-    });
+    records.push({ layout: R04_LAYOUT, values: saleRecordValues(declarante, year, r, i + 1) });
   });
-
   return records;
 }
 

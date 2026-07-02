@@ -124,3 +124,11 @@ export const DIMOB_LAYOUTS = {
 
 /** Separador de linha do arquivo DIMOB (CRLF). */
 export const DIMOB_LINE_SEPARATOR = "\r\n";
+
+/**
+ * Versão do leiaute. INCREMENTAR sempre que as posições/tamanhos mudarem
+ * (ex.: após calibrar contra o PGD real). O selo "leiaute validado" da org só
+ * vale enquanto casar com esta versão — se ela mudar, o selo cai e o banner
+ * "provisório" volta automaticamente.
+ */
+export const DIMOB_LAYOUT_VERSION = "2026-07-provisorio-1";
