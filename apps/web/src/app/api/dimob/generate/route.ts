@@ -9,9 +9,18 @@ import {
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { aggregateSalesForYear } from "@/lib/dimob/aggregate-sales";
-import { validateAggregate, hasBlockingErrors } from "@/lib/dimob/validate";
+import { aggregateLeasesForYear } from "@/lib/dimob/aggregate-lease";
+import {
+  validateAggregate,
+  validateLeaseRecords,
+  hasBlockingErrors,
+} from "@/lib/dimob/validate";
 import { buildDimobFileFromAggregate } from "@/lib/dimob/build-file";
-import { applyOverrides, type DimobOverrideState } from "@/lib/dimob/apply-overrides";
+import {
+  applyOverrides,
+  applyLeaseOverrides,
+  type DimobOverrideState,
+} from "@/lib/dimob/apply-overrides";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -50,20 +59,28 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Ano inválido" }, { status: 400 });
   }
 
-  const aggregate0 = await aggregateSalesForYear(ctx.orgId, year);
+  const [aggregate0, leaseAgg0] = await Promise.all([
+    aggregateSalesForYear(ctx.orgId, year),
+    aggregateLeasesForYear(ctx.orgId, year),
+  ]);
   const ov = await prisma.dimobOverride.findUnique({
     where: { orgId_year: { orgId: ctx.orgId, year } },
   });
-  const aggregate = applyOverrides(aggregate0, (ov?.state as DimobOverrideState) ?? null);
+  const state = (ov?.state as DimobOverrideState) ?? null;
+  const aggregate = applyOverrides(aggregate0, state);
+  const leaseRecords = applyLeaseOverrides(leaseAgg0.records, state);
 
-  if (aggregate.dispensado) {
+  if (aggregate.records.length === 0 && leaseRecords.length === 0) {
     return NextResponse.json(
-      { error: "Nenhuma operação de venda no ano — DIMOB dispensada (FAQ RFB p6)." },
+      { error: "Nenhuma operação de venda ou locação no ano — DIMOB dispensada (FAQ RFB p6)." },
       { status: 422 }
     );
   }
 
-  const issues = validateAggregate(aggregate);
+  const issues = [
+    ...validateAggregate(aggregate),
+    ...validateLeaseRecords(leaseRecords),
+  ];
   if (hasBlockingErrors(issues)) {
     return NextResponse.json(
       { error: "Há pendências obrigatórias que impedem a geração.", issues },
@@ -71,7 +88,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const built = buildDimobFileFromAggregate(aggregate);
+  const built = buildDimobFileFromAggregate(aggregate, leaseRecords);
 
   await prisma.dimobExport.create({
     data: {

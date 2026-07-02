@@ -15,15 +15,17 @@ import type {
   DimobSaleRecord,
   DimobDeclarante,
 } from "./aggregate-sales";
+import type { DimobLeaseRecord } from "./aggregate-lease";
 
 export type DimobIssueLevel = "error" | "warning";
 
 export interface DimobIssue {
   level: DimobIssueLevel;
-  scope: "declarante" | "operacao";
+  scope: "declarante" | "operacao" | "locacao";
   field: string;
   message: string;
   dealId?: string;
+  leaseId?: string;
 }
 
 export function validateDeclarante(d: DimobDeclarante): DimobIssue[] {
@@ -77,6 +79,30 @@ export function validateRecord(r: DimobSaleRecord): DimobIssue[] {
     );
   }
   return issues;
+}
+
+/** Validação de um registro R02 (locação). Bloqueia CPF/CNPJ ausente/sintético. */
+export function validateLeaseRecord(r: DimobLeaseRecord): DimobIssue[] {
+  const issues: DimobIssue[] = [];
+  const push = (level: DimobIssueLevel, field: string, message: string) =>
+    issues.push({ level, scope: "locacao", field, message, leaseId: r.leaseId });
+
+  if (!r.locador.nome) push("error", "nomeLocador", "Locador sem nome.");
+  if (!isValidCpfCnpj(r.locador.cpfCnpj)) {
+    push("error", "cpfCnpjLocador", `CPF/CNPJ do locador ausente ou inválido (${r.locador.nome || "sem nome"}).`);
+  }
+  if (!r.locatario.nome) push("error", "nomeLocatario", "Locatário sem nome.");
+  if (!isValidCpfCnpj(r.locatario.cpfCnpj)) {
+    push("error", "cpfCnpjLocatario", "CPF/CNPJ do locatário ausente ou inválido.");
+  }
+  if (!(r.totalRendimento > 0)) {
+    push("warning", "rendimento", "Sem aluguel recebido no ano — confirme se deve constar.");
+  }
+  return issues;
+}
+
+export function validateLeaseRecords(records: DimobLeaseRecord[]): DimobIssue[] {
+  return records.flatMap(validateLeaseRecord);
 }
 
 export function validateAggregate(agg: DimobSalesAggregate): DimobIssue[] {

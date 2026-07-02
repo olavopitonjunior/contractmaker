@@ -3027,13 +3027,15 @@ model DimobOverride {
   @@unique([orgId, year])
 }
 
-// DIMOB — vendas excluídas da declaração por (org, ano). Excluir tira o deal do
-// TXT; "reconciliar" apaga a linha e a venda volta. `reason` é opcional (audit).
+// DIMOB — vendas (dealId) ou locações (leaseId) excluídas da declaração por
+// (org, ano). Excluir tira o registro do TXT; "reconciliar" apaga a linha e volta.
+// XOR dealId|leaseId (validado no app). `reason` é opcional (audit).
 model DimobExclusion {
   id               String   @id @default(cuid())
   orgId            String
   year             Int
-  dealId           String
+  dealId           String?
+  leaseId          String?
   reason           String?
   excludedByUserId String?
   createdAt        DateTime @default(now())
@@ -3041,5 +3043,6 @@ model DimobExclusion {
   org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@unique([orgId, year, dealId])
+  @@unique([orgId, year, leaseId])
   @@index([orgId, year])
 }

@@ -8,9 +8,22 @@ import {
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { aggregateSalesForYear } from "@/lib/dimob/aggregate-sales";
-import { validateAggregate, hasBlockingErrors } from "@/lib/dimob/validate";
-import { buildReviewRecords, markOverrides } from "@/lib/dimob/build-review";
-import { applyOverrides, type DimobOverrideState } from "@/lib/dimob/apply-overrides";
+import { aggregateLeasesForYear } from "@/lib/dimob/aggregate-lease";
+import {
+  validateAggregate,
+  validateLeaseRecords,
+  hasBlockingErrors,
+} from "@/lib/dimob/validate";
+import {
+  buildReviewRecords,
+  markOverrides,
+  buildLeaseReviewRecords,
+} from "@/lib/dimob/build-review";
+import {
+  applyOverrides,
+  applyLeaseOverrides,
+  type DimobOverrideState,
+} from "@/lib/dimob/apply-overrides";
 import { DIMOB_LAYOUT_VERSION } from "@/lib/dimob/layout";
 
 export const runtime = "nodejs";
@@ -49,7 +62,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Ano inválido" }, { status: 400 });
   }
 
-  const aggregate0 = await aggregateSalesForYear(ctx.orgId, year);
+  const [aggregate0, leaseAgg0] = await Promise.all([
+    aggregateSalesForYear(ctx.orgId, year),
+    aggregateLeasesForYear(ctx.orgId, year),
+  ]);
   const [ov, org, exclusions] = await Promise.all([
     prisma.dimobOverride.findUnique({ where: { orgId_year: { orgId: ctx.orgId, year } } }),
     prisma.organization.findUnique({
@@ -58,18 +74,31 @@ export async function GET(req: NextRequest) {
     }),
     prisma.dimobExclusion.findMany({
       where: { orgId: ctx.orgId, year },
-      select: { dealId: true, reason: true },
+      select: { dealId: true, leaseId: true, reason: true },
     }),
   ]);
   const state = (ov?.state as DimobOverrideState) ?? {};
   const aggregate = applyOverrides(aggregate0, state);
-  const issues = validateAggregate(aggregate);
+  const leaseRecords = applyLeaseOverrides(leaseAgg0.records, state);
+  const issues = [
+    ...validateAggregate(aggregate),
+    ...validateLeaseRecords(leaseRecords),
+  ];
 
   const reviewRecords = buildReviewRecords(aggregate);
   markOverrides(reviewRecords, buildReviewRecords(aggregate0), state);
+  const leaseReviewRecords = buildLeaseReviewRecords(
+    aggregate.declarante,
+    year,
+    leaseRecords,
+    state
+  );
 
   // Resumo por deal das vendas excluídas (para a lista de conciliação).
   const reasonByDeal = new Map(exclusions.map((e) => [e.dealId, e.reason]));
+  const reasonByLease = new Map(
+    exclusions.filter((e) => e.leaseId).map((e) => [e.leaseId, e.reason])
+  );
   const excludedByDeal = new Map<
     string,
     { dealId: string; title: string; vendedor: string; comprador: string; valorAlienacao: number; dataOperacao: string; reason: string | null }
@@ -92,16 +121,46 @@ export async function GET(req: NextRequest) {
   }
   const excludedSales = [...excludedByDeal.values()];
 
+  // Resumo por locação excluída (para a lista de conciliação).
+  const excludedByLease = new Map<
+    string,
+    { leaseId: string; locador: string; locatario: string; imovel: string | null; totalRendimento: number; reason: string | null }
+  >();
+  for (const r of leaseAgg0.excluded) {
+    const cur = excludedByLease.get(r.leaseId);
+    if (cur) {
+      cur.totalRendimento += r.totalRendimento;
+    } else {
+      excludedByLease.set(r.leaseId, {
+        leaseId: r.leaseId,
+        locador: r.locador.nome,
+        locatario: r.locatario.nome,
+        imovel: r.imovel.endereco,
+        totalRendimento: r.totalRendimento,
+        reason: reasonByLease.get(r.leaseId) ?? null,
+      });
+    }
+  }
+  const excludedLeases = [...excludedByLease.values()];
+
+  // KPI: proprietários (locadores) distintos que vão gerar R02.
+  const proprietariosNaDimob = new Set(leaseRecords.map((r) => r.locador.cpfCnpj || r.ownerId)).size;
+
+  const dispensado = aggregate.records.length === 0 && leaseRecords.length === 0;
+
   return NextResponse.json({
     year,
     declarante: aggregate.declarante,
-    dispensado: aggregate.dispensado,
+    dispensado,
     records: aggregate.records,
     reviewRecords,
+    leaseReviewRecords,
     excludedSales,
+    excludedLeases,
+    proprietariosNaDimob,
     issues,
     hasOverrides: Object.keys(state).length > 0,
     layoutValidated: org?.dimobLayoutValidatedVersion === DIMOB_LAYOUT_VERSION,
-    canGenerate: !hasBlockingErrors(issues) && !aggregate.dispensado,
+    canGenerate: !hasBlockingErrors(issues) && !dispensado,
   });
 }

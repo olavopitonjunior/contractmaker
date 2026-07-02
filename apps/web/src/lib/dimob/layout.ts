@@ -117,8 +117,45 @@ export const R04_LAYOUT = buildLayout("R04", [
   { key: "reservado2", label: "Reservado", length: 10, type: "reserved" },
 ]);
 
+/** 12 meses × {aluguel, comissão, imposto}, agrupados por mês (padrão do R02). */
+function monthlyLeaseFields(): DimobFieldSpec[] {
+  const out: DimobFieldSpec[] = [];
+  for (let m = 1; m <= 12; m++) {
+    out.push({ key: `aluguel_${m}`, label: `Aluguel mês ${m}`, length: 14, type: "money" });
+    out.push({ key: `comissao_${m}`, label: `Comissão mês ${m}`, length: 14, type: "money" });
+    out.push({ key: `imposto_${m}`, label: `Imposto retido mês ${m}`, length: 14, type: "money" });
+  }
+  return out;
+}
+
+/**
+ * R02 — Locação (aluguéis). Uma linha por LOCADOR (agrega imóveis/contratos do
+ * mesmo locador — FAQ RFB p71/p72). Valores mensais nos 12 meses do ano-calendário.
+ */
+export const R02_LAYOUT = buildLayout("R02", [
+  { key: "tipo", label: "Tipo de registro", length: 3, type: "const", literal: "R02" },
+  { key: "cnpjDeclarante", label: "CNPJ do declarante", length: 14, type: "doc", required: true },
+  { key: "anoCalendario", label: "Ano-calendário", length: 4, type: "year", required: true },
+  { key: "sequencial", label: "Sequencial da locação", length: 5, type: "num", required: true },
+  { key: "cpfCnpjLocador", label: "CPF/CNPJ do locador", length: 14, type: "doc", required: true },
+  { key: "nomeLocador", label: "Nome do locador", length: 60, type: "text", required: true },
+  { key: "cpfCnpjLocatario", label: "CPF/CNPJ do locatário", length: 14, type: "doc", required: true },
+  { key: "nomeLocatario", label: "Nome do locatário", length: 60, type: "text", required: true },
+  { key: "numeroContrato", label: "Número do contrato", length: 6, type: "num" },
+  { key: "dataContrato", label: "Data do contrato", length: 8, type: "date" },
+  ...monthlyLeaseFields(),
+  { key: "tipoImovel", label: "Tipo do imóvel (urbano/rural)", length: 1, type: "num" },
+  { key: "enderecoImovel", label: "Endereço do imóvel", length: 60, type: "text" },
+  { key: "cepImovel", label: "CEP do imóvel", length: 8, type: "num" },
+  { key: "codigoMunicipioImovel", label: "Código do município do imóvel", length: 4, type: "num" },
+  { key: "reservado1", label: "Reservado", length: 20, type: "reserved" },
+  { key: "ufImovel", label: "UF do imóvel", length: 2, type: "text" },
+  { key: "reservado2", label: "Reservado", length: 10, type: "reserved" },
+]);
+
 export const DIMOB_LAYOUTS = {
   R01: R01_LAYOUT,
+  R02: R02_LAYOUT,
   R04: R04_LAYOUT,
 } as const;
 
@@ -131,4 +168,4 @@ export const DIMOB_LINE_SEPARATOR = "\r\n";
  * vale enquanto casar com esta versão — se ela mudar, o selo cai e o banner
  * "provisório" volta automaticamente.
  */
-export const DIMOB_LAYOUT_VERSION = "2026-07-provisorio-1";
+export const DIMOB_LAYOUT_VERSION = "2026-07-provisorio-2-r02";

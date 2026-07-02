@@ -15,8 +15,9 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { AlertTriangle, Download, FileText, Loader2, Trash2, RotateCcw } from "lucide-react";
+import { AlertTriangle, Download, FileText, Loader2, Trash2, RotateCcw, Users } from "lucide-react";
 import { DimobRecordGrid, type ReviewRecord, type ReviewCell } from "./DimobRecordGrid";
+import { DimobLeaseCard, type LeaseReviewRecord } from "./DimobLeaseCard";
 import { DimobAssistant } from "./DimobAssistant";
 
 type OverrideState = Record<string, Record<string, string>>;
@@ -39,10 +40,11 @@ interface DimobRecord {
 }
 interface Issue {
   level: "error" | "warning";
-  scope: "declarante" | "operacao";
+  scope: "declarante" | "operacao" | "locacao";
   field: string;
   message: string;
   dealId?: string;
+  leaseId?: string;
 }
 interface Declarante {
   cnpj: string;
@@ -59,6 +61,14 @@ interface ExcludedSale {
   dataOperacao: string;
   reason: string | null;
 }
+interface ExcludedLease {
+  leaseId: string;
+  locador: string;
+  locatario: string;
+  imovel: string | null;
+  totalRendimento: number;
+  reason: string | null;
+}
 
 interface PreviewResponse {
   year: number;
@@ -66,7 +76,10 @@ interface PreviewResponse {
   dispensado: boolean;
   records: DimobRecord[];
   reviewRecords: ReviewRecord[];
+  leaseReviewRecords: LeaseReviewRecord[];
   excludedSales: ExcludedSale[];
+  excludedLeases: ExcludedLease[];
+  proprietariosNaDimob: number;
   issues: Issue[];
   layoutValidated: boolean;
   canGenerate: boolean;
@@ -85,12 +98,16 @@ export function DimobReportClient() {
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [savingKeys, setSavingKeys] = useState<Set<string>>(new Set());
-  const [excludeTarget, setExcludeTarget] = useState<ReviewRecord | null>(null);
+  const [excludeTarget, setExcludeTarget] = useState<
+    { title: string; dealId?: string; leaseId?: string } | null
+  >(null);
   const [excludeReason, setExcludeReason] = useState("");
   const [excluding, setExcluding] = useState(false);
   const [reconciling, setReconciling] = useState<string | null>(null);
+  const [selectedLeases, setSelectedLeases] = useState<Set<string>>(new Set());
+  const [bulkExcluding, setBulkExcluding] = useState(false);
 
-  /** Reconstrói o estado de overrides a partir das células marcadas. */
+  /** Reconstrói o estado de overrides (vendas + locação) a partir do que veio marcado. */
   const deriveOverrides = (d: PreviewResponse | null): OverrideState => {
     const state: OverrideState = {};
     for (const r of d?.reviewRecords ?? []) {
@@ -98,6 +115,13 @@ export function DimobReportClient() {
         if (c.overridden) {
           (state[r.recordId] ??= {})[c.key] = c.value;
         }
+      }
+    }
+    for (const r of d?.leaseReviewRecords ?? []) {
+      for (const m of r.meses) {
+        if (m.aluguelOverridden) (state[r.recordId] ??= {})[`aluguel_${m.month}`] = String(m.aluguel);
+        if (m.comissaoOverridden) (state[r.recordId] ??= {})[`comissao_${m.month}`] = String(m.comissao);
+        if (m.impostoOverridden) (state[r.recordId] ??= {})[`imposto_${m.month}`] = String(m.imposto);
       }
     }
     return state;
@@ -193,19 +217,24 @@ export function DimobReportClient() {
   }, [year, load]);
 
   async function confirmExclude() {
-    if (!excludeTarget?.dealId) return;
+    if (!excludeTarget) return;
+    const isLease = Boolean(excludeTarget.leaseId);
     setExcluding(true);
     try {
       const res = await fetch(`/api/dimob/exclusions?year=${year}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dealId: excludeTarget.dealId, reason: excludeReason.trim() || undefined }),
+        body: JSON.stringify(
+          isLease
+            ? { leaseId: excludeTarget.leaseId, reason: excludeReason.trim() || undefined }
+            : { dealId: excludeTarget.dealId, reason: excludeReason.trim() || undefined }
+        ),
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.error || "Falha ao excluir");
       }
-      toast.success("Venda excluída da DIMOB.");
+      toast.success(isLease ? "Contrato de locação excluído da DIMOB." : "Venda excluída da DIMOB.");
       setExcludeTarget(null);
       setExcludeReason("");
       await load(year);
@@ -216,21 +245,62 @@ export function DimobReportClient() {
     }
   }
 
-  async function reconcile(dealId: string | "all") {
-    setReconciling(dealId);
+  async function reconcile(target: { dealId?: string; leaseId?: string } | "all") {
+    const key = target === "all" ? "all" : (target.leaseId ?? target.dealId ?? "");
+    setReconciling(key);
     try {
-      const qs = dealId === "all" ? "all=true" : `dealId=${dealId}`;
+      const qs =
+        target === "all"
+          ? "all=true"
+          : target.leaseId
+            ? `leaseId=${target.leaseId}`
+            : `dealId=${target.dealId}`;
       const res = await fetch(`/api/dimob/exclusions?year=${year}&${qs}`, { method: "DELETE" });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
         throw new Error(j.error || "Falha ao reconciliar");
       }
-      toast.success(dealId === "all" ? "Vendas reconciliadas." : "Venda reconciliada.");
+      toast.success(target === "all" ? "Itens reconciliados." : "Item reconciliado.");
       await load(year);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha ao reconciliar");
     } finally {
       setReconciling(null);
+    }
+  }
+
+  function toggleLease(record: LeaseReviewRecord) {
+    setSelectedLeases((s) => {
+      const n = new Set(s);
+      if (n.has(record.leaseId)) n.delete(record.leaseId);
+      else n.add(record.leaseId);
+      return n;
+    });
+  }
+
+  async function bulkExcludeLeases() {
+    const ids = [...selectedLeases];
+    if (ids.length === 0) return;
+    setBulkExcluding(true);
+    try {
+      for (const leaseId of ids) {
+        const res = await fetch(`/api/dimob/exclusions?year=${year}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ leaseId }),
+        });
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(j.error || "Falha ao excluir em lote");
+        }
+      }
+      toast.success(`${ids.length} contrato${ids.length > 1 ? "s" : ""} de locação excluído${ids.length > 1 ? "s" : ""}.`);
+      setSelectedLeases(new Set());
+      await load(year);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Falha ao excluir em lote");
+    } finally {
+      setBulkExcluding(false);
     }
   }
 
@@ -316,8 +386,8 @@ export function DimobReportClient() {
       {data?.dispensado && (
         <Card>
           <CardContent className="py-6 text-sm text-muted-foreground">
-            Nenhuma operação de venda encontrada em {year}. A DIMOB é dispensada quando
-            não há operações no ano-calendário (FAQ RFB p6).
+            Nenhuma operação de venda ou locação encontrada em {year}. A DIMOB é
+            dispensada quando não há operações no ano-calendário (FAQ RFB p6).
           </CardContent>
         </Card>
       )}
@@ -381,7 +451,7 @@ export function DimobReportClient() {
       {data && !data.dispensado && data.reviewRecords.length > 0 && (
         <div className="space-y-2">
           <h2 className="text-sm font-semibold text-muted-foreground">
-            Registros ({data.reviewRecords.length}) — revise e edite campo a campo
+            Declarante + Vendas ({data.reviewRecords.length}) — revise e edite campo a campo
           </h2>
           <DimobRecordGrid
             records={data.reviewRecords}
@@ -392,10 +462,101 @@ export function DimobReportClient() {
             onCorrigirOrigem={onCorrigirOrigem}
             onExcludeSale={(record) => {
               setExcludeReason("");
-              setExcludeTarget(record);
+              setExcludeTarget({ title: record.title, dealId: record.dealId ?? undefined });
             }}
           />
         </div>
+      )}
+
+      {/* Locação (R02) — um card por contrato×locador, tabela mensal editável */}
+      {data && data.leaseReviewRecords.length > 0 && (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <h2 className="flex items-center gap-2 text-sm font-semibold text-muted-foreground">
+              Locação (R02) — {data.leaseReviewRecords.length} contrato
+              {data.leaseReviewRecords.length > 1 ? "s" : ""} · aluguéis mês a mês
+              <Badge variant="secondary" className="gap-1 font-normal">
+                <Users className="h-3 w-3" /> {data.proprietariosNaDimob} proprietário
+                {data.proprietariosNaDimob > 1 ? "s" : ""} na DIMOB
+              </Badge>
+            </h2>
+            {selectedLeases.size > 0 && (
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={bulkExcludeLeases}
+                disabled={bulkExcluding}
+              >
+                {bulkExcluding ? (
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                ) : (
+                  <Trash2 className="mr-1 h-4 w-4" />
+                )}
+                Excluir selecionados ({selectedLeases.size})
+              </Button>
+            )}
+          </div>
+          {data.leaseReviewRecords.map((r) => (
+            <DimobLeaseCard
+              key={r.recordId}
+              record={r}
+              editable
+              savingKeys={savingKeys}
+              selected={selectedLeases.has(r.leaseId)}
+              onToggleSelect={toggleLease}
+              onCommit={onCommit}
+              onReset={onReset}
+              onExcludeLease={(record) => {
+                setExcludeReason("");
+                setExcludeTarget({ title: record.title, leaseId: record.leaseId });
+              }}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Locações excluídas da DIMOB (p/ reconciliar) */}
+      {data && data.excludedLeases.length > 0 && (
+        <Card className="border-amber-200">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">
+              Locações excluídas da DIMOB ({data.excludedLeases.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {data.excludedLeases.map((l) => (
+              <div
+                key={l.leaseId}
+                className="flex items-center justify-between gap-3 rounded-md border p-2 text-sm"
+              >
+                <div className="min-w-0">
+                  <div className="truncate font-medium">
+                    {l.locador || "—"} → {l.locatario || "—"}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {l.imovel ? `${l.imovel} · ` : ""}
+                    {l.totalRendimento.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                    {l.reason ? ` · motivo: ${l.reason}` : ""}
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="shrink-0"
+                  onClick={() => reconcile({ leaseId: l.leaseId })}
+                  disabled={reconciling !== null}
+                >
+                  {reconciling === l.leaseId ? (
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="mr-1 h-4 w-4" />
+                  )}
+                  Reconciliar
+                </Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
       )}
 
       {/* Vendas excluídas da DIMOB (aparece mesmo em dispensa, p/ reconciliar) */}
@@ -441,7 +602,7 @@ export function DimobReportClient() {
                   size="sm"
                   variant="ghost"
                   className="shrink-0"
-                  onClick={() => reconcile(s.dealId)}
+                  onClick={() => reconcile({ dealId: s.dealId })}
                   disabled={reconciling !== null}
                 >
                   {reconciling === s.dealId ? (

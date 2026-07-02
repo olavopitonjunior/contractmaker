@@ -13,6 +13,7 @@ import type {
   DimobDeclarante,
   DimobSaleRecord,
 } from "./aggregate-sales";
+import type { DimobLeaseRecord } from "./aggregate-lease";
 
 export type DimobFieldOverrides = Record<string, string>;
 export type DimobOverrideState = Record<string, DimobFieldOverrides>;
@@ -20,7 +21,14 @@ export type DimobOverrideState = Record<string, DimobFieldOverrides>;
 const digits = (s: string) => (s ?? "").replace(/\D/g, "");
 
 function toNum(s: string): number {
-  const n = Number(String(s ?? "").replace(/\./g, "").replace(",", ".").replace(/[^0-9.-]/g, ""));
+  const cleaned = String(s ?? "").replace(/[^0-9.,-]/g, "");
+  if (!cleaned) return 0;
+  // Com vírgula = formato BR ("1.234,56"): pontos são milhar, vírgula é decimal.
+  // Sem vírgula ("68.56" ou "3200"): o ponto é decimal (valor gerado por String(number)).
+  const normalized = cleaned.includes(",")
+    ? cleaned.replace(/\./g, "").replace(",", ".")
+    : cleaned;
+  const n = Number(normalized);
   return Number.isFinite(n) ? n : 0;
 }
 
@@ -55,6 +63,52 @@ function applyRecord(rec: DimobSaleRecord, ov: DimobFieldOverrides): DimobSaleRe
   if (ov.cepImovel !== undefined) r.imovel.cep = digits(ov.cepImovel) || null;
   if (ov.ufImovel !== undefined) r.imovel.uf = ov.ufImovel.trim().toUpperCase() || null;
   return r;
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Aplica overrides nos registros R02 (locação) por recordId/fieldKey. */
+export function applyLeaseOverrides(
+  records: DimobLeaseRecord[],
+  state: DimobOverrideState | null | undefined
+): DimobLeaseRecord[] {
+  if (!state || Object.keys(state).length === 0) return records;
+  return records.map((r) => {
+    const ov = state[r.recordId];
+    if (!ov) return r;
+    const meses = r.meses.map((mes, idx) => {
+      const m = idx + 1;
+      return {
+        rendimento: ov[`aluguel_${m}`] !== undefined ? toNum(ov[`aluguel_${m}`]) : mes.rendimento,
+        comissao: ov[`comissao_${m}`] !== undefined ? toNum(ov[`comissao_${m}`]) : mes.comissao,
+        imposto: ov[`imposto_${m}`] !== undefined ? toNum(ov[`imposto_${m}`]) : mes.imposto,
+      };
+    });
+    return {
+      ...r,
+      locador: {
+        ...r.locador,
+        nome: ov.nomeLocador ?? r.locador.nome,
+        cpfCnpj: ov.cpfCnpjLocador !== undefined ? digits(ov.cpfCnpjLocador) : r.locador.cpfCnpj,
+      },
+      locatario: {
+        ...r.locatario,
+        nome: ov.nomeLocatario ?? r.locatario.nome,
+        cpfCnpj: ov.cpfCnpjLocatario !== undefined ? digits(ov.cpfCnpjLocatario) : r.locatario.cpfCnpj,
+      },
+      numeroContrato:
+        ov.numeroContrato !== undefined ? digits(ov.numeroContrato) || null : r.numeroContrato,
+      dataContrato: ov.dataContrato ?? r.dataContrato,
+      imovel: {
+        ...r.imovel,
+        endereco: ov.enderecoImovel ?? r.imovel.endereco,
+        cep: ov.cepImovel !== undefined ? digits(ov.cepImovel) || null : r.imovel.cep,
+        uf: ov.ufImovel !== undefined ? ov.ufImovel.trim().toUpperCase() || null : r.imovel.uf,
+      },
+      meses,
+      totalRendimento: round2(meses.reduce((a, x) => a + x.rendimento, 0)),
+    };
+  });
 }
 
 export function applyOverrides(

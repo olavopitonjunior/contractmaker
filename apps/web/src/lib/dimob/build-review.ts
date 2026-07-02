@@ -4,16 +4,23 @@
  * editável consome. Puro e testável.
  */
 
-import { R01_LAYOUT, R04_LAYOUT, type DimobRecordLayout } from "./layout";
+import { R01_LAYOUT, R02_LAYOUT, R04_LAYOUT, type DimobRecordLayout } from "./layout";
 import { decodeRecord, type DecodedCell } from "./decode";
 import type { DimobValue } from "./txt-writer";
-import { declaranteValues, saleRecordValues } from "./build-file";
+import {
+  declaranteValues,
+  saleRecordValues,
+  leaseRecordValues,
+  type OwnerR02,
+} from "./build-file";
 import {
   validateDeclarante,
   validateRecord,
+  validateLeaseRecord,
   type DimobIssue,
 } from "./validate";
-import type { DimobSalesAggregate } from "./aggregate-sales";
+import type { DimobSalesAggregate, DimobDeclarante } from "./aggregate-sales";
+import type { DimobLeaseRecord } from "./aggregate-lease";
 
 /** validate.ts usa alguns nomes de campo diferentes das chaves do layout. */
 const FIELD_ALIAS: Record<string, string> = {
@@ -168,4 +175,100 @@ export function buildReviewRecords(agg: DimobSalesAggregate): ReviewRecord[] {
   });
 
   return out;
+}
+
+// ───────────────────────── Locação (R02) ─────────────────────────
+
+export interface LeaseMonthCell {
+  month: number; // 1..12
+  aluguel: number;
+  comissao: number;
+  imposto: number;
+  aluguelOverridden?: boolean;
+  comissaoOverridden?: boolean;
+  impostoOverridden?: boolean;
+}
+
+export interface LeaseReviewRecord {
+  recordId: string;
+  leaseId: string;
+  kind: "R02";
+  title: string; // locador → locatário
+  locador: { nome: string; cpfCnpj: string; tipoPessoa: string };
+  locatario: { nome: string; cpfCnpj: string };
+  imovel: DimobLeaseRecord["imovel"];
+  numeroContrato: string | null;
+  dataContrato: string | null;
+  meses: LeaseMonthCell[];
+  totais: { aluguel: number; comissao: number; imposto: number };
+  raw: string;
+  recordIssues: DimobIssue[];
+  overridden: boolean;
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+function ownerFromLeaseRecord(r: DimobLeaseRecord): OwnerR02 {
+  return {
+    ownerId: r.ownerId,
+    locador: r.locador,
+    locatario: r.locatario,
+    numeroContrato: r.numeroContrato,
+    dataContrato: r.dataContrato,
+    meses: r.meses,
+    imovel: r.imovel,
+  };
+}
+
+/**
+ * Constrói os registros de revisão de LOCAÇÃO — um card por lease×locador, com a
+ * tabela mensal (Jan–Dez × Aluguel/Comissão/IRRF). `raw` é a linha R02 que ESTE
+ * registro contribui (o TXT final ainda colapsa por locador). Puro.
+ */
+export function buildLeaseReviewRecords(
+  declarante: DimobDeclarante,
+  year: number,
+  records: DimobLeaseRecord[],
+  state: Record<string, Record<string, string>> = {}
+): LeaseReviewRecord[] {
+  return records.map((r, i) => {
+    const ov = state[r.recordId] ?? {};
+    const meses: LeaseMonthCell[] = r.meses.map((m, idx) => {
+      const month = idx + 1;
+      return {
+        month,
+        aluguel: m.rendimento,
+        comissao: m.comissao,
+        imposto: m.imposto,
+        aluguelOverridden: ov[`aluguel_${month}`] !== undefined || undefined,
+        comissaoOverridden: ov[`comissao_${month}`] !== undefined || undefined,
+        impostoOverridden: ov[`imposto_${month}`] !== undefined || undefined,
+      };
+    });
+    const totais = {
+      aluguel: round2(meses.reduce((a, m) => a + m.aluguel, 0)),
+      comissao: round2(meses.reduce((a, m) => a + m.comissao, 0)),
+      imposto: round2(meses.reduce((a, m) => a + m.imposto, 0)),
+    };
+    const raw = decodeRecord(
+      R02_LAYOUT,
+      leaseRecordValues(declarante, year, ownerFromLeaseRecord(r), i + 1)
+    ).raw;
+    return {
+      recordId: r.recordId,
+      leaseId: r.leaseId,
+      kind: "R02" as const,
+      title: `${r.locador.nome || "— locador —"} → ${r.locatario.nome || "— locatário —"}`,
+      locador: r.locador,
+      locatario: r.locatario,
+      imovel: r.imovel,
+      numeroContrato: r.numeroContrato,
+      dataContrato: r.dataContrato,
+      meses,
+      totais,
+      raw,
+      recordIssues: validateLeaseRecord(r),
+      overridden: Object.keys(ov).length > 0,
+    };
+  });
 }
