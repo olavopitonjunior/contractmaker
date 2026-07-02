@@ -6,7 +6,16 @@ import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, Download, FileText, Loader2 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { AlertTriangle, Download, FileText, Loader2, Trash2, RotateCcw } from "lucide-react";
 import { DimobRecordGrid, type ReviewRecord, type ReviewCell } from "./DimobRecordGrid";
 import { DimobAssistant } from "./DimobAssistant";
 
@@ -41,12 +50,23 @@ interface Declarante {
   uf: string;
   codigoMunicipio: string;
 }
+interface ExcludedSale {
+  dealId: string;
+  title: string;
+  vendedor: string;
+  comprador: string;
+  valorAlienacao: number;
+  dataOperacao: string;
+  reason: string | null;
+}
+
 interface PreviewResponse {
   year: number;
   declarante: Declarante;
   dispensado: boolean;
   records: DimobRecord[];
   reviewRecords: ReviewRecord[];
+  excludedSales: ExcludedSale[];
   issues: Issue[];
   layoutValidated: boolean;
   canGenerate: boolean;
@@ -65,6 +85,10 @@ export function DimobReportClient() {
   const [loading, setLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [savingKeys, setSavingKeys] = useState<Set<string>>(new Set());
+  const [excludeTarget, setExcludeTarget] = useState<ReviewRecord | null>(null);
+  const [excludeReason, setExcludeReason] = useState("");
+  const [excluding, setExcluding] = useState(false);
+  const [reconciling, setReconciling] = useState<string | null>(null);
 
   /** Reconstrói o estado de overrides a partir das células marcadas. */
   const deriveOverrides = (d: PreviewResponse | null): OverrideState => {
@@ -167,6 +191,48 @@ export function DimobReportClient() {
   useEffect(() => {
     void load(year);
   }, [year, load]);
+
+  async function confirmExclude() {
+    if (!excludeTarget?.dealId) return;
+    setExcluding(true);
+    try {
+      const res = await fetch(`/api/dimob/exclusions?year=${year}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dealId: excludeTarget.dealId, reason: excludeReason.trim() || undefined }),
+      });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || "Falha ao excluir");
+      }
+      toast.success("Venda excluída da DIMOB.");
+      setExcludeTarget(null);
+      setExcludeReason("");
+      await load(year);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Falha ao excluir");
+    } finally {
+      setExcluding(false);
+    }
+  }
+
+  async function reconcile(dealId: string | "all") {
+    setReconciling(dealId);
+    try {
+      const qs = dealId === "all" ? "all=true" : `dealId=${dealId}`;
+      const res = await fetch(`/api/dimob/exclusions?year=${year}&${qs}`, { method: "DELETE" });
+      if (!res.ok) {
+        const j = await res.json().catch(() => ({}));
+        throw new Error(j.error || "Falha ao reconciliar");
+      }
+      toast.success(dealId === "all" ? "Vendas reconciliadas." : "Venda reconciliada.");
+      await load(year);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Falha ao reconciliar");
+    } finally {
+      setReconciling(null);
+    }
+  }
 
   async function markLayoutValidated() {
     try {
@@ -324,8 +390,71 @@ export function DimobReportClient() {
             onCommit={onCommit}
             onReset={onReset}
             onCorrigirOrigem={onCorrigirOrigem}
+            onExcludeSale={(record) => {
+              setExcludeReason("");
+              setExcludeTarget(record);
+            }}
           />
         </div>
+      )}
+
+      {/* Vendas excluídas da DIMOB (aparece mesmo em dispensa, p/ reconciliar) */}
+      {data && data.excludedSales.length > 0 && (
+        <Card className="border-amber-200">
+          <CardHeader className="pb-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <CardTitle className="text-base">
+                Vendas excluídas da DIMOB ({data.excludedSales.length})
+              </CardTitle>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => reconcile("all")}
+                disabled={reconciling !== null}
+              >
+                {reconciling === "all" ? (
+                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                ) : (
+                  <RotateCcw className="mr-1 h-4 w-4" />
+                )}
+                Reconciliar todas
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {data.excludedSales.map((s) => (
+              <div
+                key={s.dealId}
+                className="flex items-center justify-between gap-3 rounded-md border p-2 text-sm"
+              >
+                <div className="min-w-0">
+                  <div className="truncate font-medium">
+                    {s.vendedor || "—"} → {s.comprador || "—"}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {s.dataOperacao.split("-").reverse().join("/")} ·{" "}
+                    {s.valorAlienacao.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                    {s.reason ? ` · motivo: ${s.reason}` : ""}
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="shrink-0"
+                  onClick={() => reconcile(s.dealId)}
+                  disabled={reconciling !== null}
+                >
+                  {reconciling === s.dealId ? (
+                    <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="mr-1 h-4 w-4" />
+                  )}
+                  Reconciliar
+                </Button>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
       )}
 
       {/* Copiloto de IA */}
@@ -354,6 +483,46 @@ export function DimobReportClient() {
           </Button>
         </div>
       )}
+
+      {/* Diálogo de exclusão de venda (motivo opcional) */}
+      <Dialog
+        open={!!excludeTarget}
+        onOpenChange={(o) => {
+          if (!o) setExcludeTarget(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Excluir venda da DIMOB</DialogTitle>
+            <DialogDescription>
+              {excludeTarget?.title} não entrará no arquivo gerado. Você pode reconciliar
+              (re-incluir) depois.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <label className="text-sm text-muted-foreground">Motivo (opcional)</label>
+            <Textarea
+              value={excludeReason}
+              onChange={(e) => setExcludeReason(e.target.value)}
+              rows={2}
+              placeholder="Ex.: declarada por outra imobiliária, duplicada, cancelada…"
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setExcludeTarget(null)} disabled={excluding}>
+              Cancelar
+            </Button>
+            <Button variant="destructive" onClick={confirmExclude} disabled={excluding}>
+              {excluding ? (
+                <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="mr-1 h-4 w-4" />
+              )}
+              Excluir da DIMOB
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

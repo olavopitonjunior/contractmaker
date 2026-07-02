@@ -284,8 +284,9 @@ model Organization {
   newtonRequests NewtonRequest[]
 
   // DIMOB — histórico de arquivos gerados (auditoria + reemissão)
-  dimobExports   DimobExport[]
-  dimobOverrides DimobOverride[]
+  dimobExports    DimobExport[]
+  dimobOverrides  DimobOverride[]
+  dimobExclusions DimobExclusion[]
 
   // Newton — vínculo deal ↔ grupo WhatsApp
   dealGroupLinks DealGroupLink[]
@@ -3024,4 +3025,21 @@ model DimobOverride {
   org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@unique([orgId, year])
+}
+
+// DIMOB — vendas excluídas da declaração por (org, ano). Excluir tira o deal do
+// TXT; "reconciliar" apaga a linha e a venda volta. `reason` é opcional (audit).
+model DimobExclusion {
+  id               String   @id @default(cuid())
+  orgId            String
+  year             Int
+  dealId           String
+  reason           String?
+  excludedByUserId String?
+  createdAt        DateTime @default(now())
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, year, dealId])
+  @@index([orgId, year])
 }

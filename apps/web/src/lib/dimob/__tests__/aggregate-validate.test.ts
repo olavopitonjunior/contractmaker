@@ -138,6 +138,7 @@ describe("build-file", () => {
     year: 2025,
     declarante: goodDeclarante,
     records: [goodRecord],
+    excluded: [],
     dispensado: false,
   };
 

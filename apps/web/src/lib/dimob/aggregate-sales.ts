@@ -76,9 +76,25 @@ export interface DimobDeclarante {
 export interface DimobSalesAggregate {
   year: number;
   declarante: DimobDeclarante;
+  /** Operações INCLUÍDAS (o que vai no TXT). */
   records: DimobSaleRecord[];
-  /** Nenhuma operação no ano → dispensada de entrega (FAQ p6). */
+  /** Operações EXCLUÍDAS da declaração (para a lista de conciliação). */
+  excluded: DimobSaleRecord[];
+  /** Nenhuma operação INCLUÍDA no ano → dispensada de entrega (FAQ p6). */
   dispensado: boolean;
+}
+
+/** Separa os registros por deals excluídos. Puro e testável. */
+export function partitionByExclusion(
+  all: DimobSaleRecord[],
+  excludedDealIds: Set<string>
+): { records: DimobSaleRecord[]; excluded: DimobSaleRecord[] } {
+  const records: DimobSaleRecord[] = [];
+  const excluded: DimobSaleRecord[] = [];
+  for (const r of all) {
+    (excludedDealIds.has(r.dealId) ? excluded : records).push(r);
+  }
+  return { records, excluded };
 }
 
 function digits(s: string | null | undefined): string {
@@ -310,7 +326,13 @@ export async function aggregateSalesForYear(
     },
   });
 
-  const records: DimobSaleRecord[] = [];
+  const exclusions = await prisma.dimobExclusion.findMany({
+    where: { orgId, year },
+    select: { dealId: true },
+  });
+  const excludedDealIds = new Set(exclusions.map((e) => e.dealId));
+
+  const allRecords: DimobSaleRecord[] = [];
 
   for (const deal of deals) {
     const contract = deal.contracts[0];
@@ -349,15 +371,18 @@ export async function aggregateSalesForYear(
       commissionSource: source,
     };
 
-    records.push(
+    allRecords.push(
       ...explodeRecords(base, vendedores, compradores, valorTotal, comissao)
     );
   }
+
+  const { records, excluded } = partitionByExclusion(allRecords, excludedDealIds);
 
   return {
     year,
     declarante,
     records,
+    excluded,
     dispensado: records.length === 0,
   };
 }
