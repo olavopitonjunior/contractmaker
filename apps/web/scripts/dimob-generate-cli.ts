@@ -16,7 +16,7 @@ import { aggregateLeasesForYear } from "@/lib/dimob/aggregate-lease";
 import { applyOverrides, applyLeaseOverrides, type DimobOverrideState } from "@/lib/dimob/apply-overrides";
 import { validateAggregate, validateLeaseRecords, hasBlockingErrors } from "@/lib/dimob/validate";
 import { buildDimobFileFromAggregate } from "@/lib/dimob/build-file";
-import { DIMOB_LAYOUTS, DIMOB_LINE_SEPARATOR, DIMOB_LAYOUT_VERSION } from "@/lib/dimob/layout";
+import { DIMOB_LINE_SEPARATOR, DIMOB_LAYOUT_VERSION, layoutForLine } from "@/lib/dimob/layout";
 
 const arg = (k: string) => process.argv.find((a) => a.startsWith(`--${k}=`))?.split("=")[1];
 
@@ -51,11 +51,14 @@ async function main() {
   // Checagem estrutural rápida (mesma ideia do txt-structure.test): larguras.
   const lines = built.txt.split(DIMOB_LINE_SEPARATOR).filter(Boolean);
   const badLen = lines.filter((l) => {
-    const rec = l.slice(0, 3) as keyof typeof DIMOB_LAYOUTS;
-    return !DIMOB_LAYOUTS[rec] || l.length !== DIMOB_LAYOUTS[rec].totalLength;
+    const layout = layoutForLine(l);
+    return !layout || l.length !== layout.totalLength;
   });
   const byType: Record<string, number> = {};
-  for (const l of lines) byType[l.slice(0, 3)] = (byType[l.slice(0, 3)] ?? 0) + 1;
+  for (const l of lines) {
+    const rec = layoutForLine(l)?.record ?? "??";
+    byType[rec] = (byType[rec] ?? 0) + 1;
+  }
 
   mkdirSync(outDir, { recursive: true });
   const file = join(outDir, `DIMOB_staging_${year}.txt`);
