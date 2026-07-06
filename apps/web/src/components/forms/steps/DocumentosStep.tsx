@@ -29,7 +29,6 @@ interface DocumentosStepProps {
   adapter?: DocumentosStepAdapter;
 }
 
-const MAX_FILES = 15;
 const MAX_BYTES = 10 * 1024 * 1024;
 const RESIZE_MAX_SIDE = 1500;
 const IMAGE_JPEG_QUALITY = 0.8;
@@ -632,10 +631,6 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
     async (files: FileList | File[]) => {
       const arr = Array.from(files);
       if (arr.length === 0) return;
-      if (docs.length + arr.length > MAX_FILES) {
-        toast.error(`Máximo de ${MAX_FILES} documentos por formulário`);
-        return;
-      }
 
       // Filter + dedupe + size validation up-front. Each accepted file gets
       // a temporary card and runs its full pipeline (resize → upload → extract)
