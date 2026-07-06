@@ -93,8 +93,12 @@ export function formatField(field: DimobField, value: DimobValue): string {
     }
 
     case "doc": {
+      // CPF/CNPJ nos campos de parte (locador/locatário/comprador/vendedor) são
+      // alinhados à ESQUERDA com espaços à direita — NÃO zero-à-esquerda. CNPJ (14)
+      // preenche o campo; CPF (11) fica com 3 espaços à direita. Confirmado por
+      // fiscalbr-net + 2 arquivos DIMOB reais (docs/dimob-layout-reconciliation.md).
       const digits = value == null ? "" : onlyDigits(String(value));
-      return padLeftZero(digits, len);
+      return padRight(digits, len);
     }
 
     case "year": {

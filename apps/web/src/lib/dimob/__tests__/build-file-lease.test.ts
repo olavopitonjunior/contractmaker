@@ -75,20 +75,23 @@ describe("build-file com R02", () => {
   it("emite R01 + R02, com a linha R02 na largura do layout", () => {
     const out = buildDimobFileFromAggregate(emptyAgg, [leaseRecord()]);
     const lines = out.txt.split(DIMOB_LINE_SEPARATOR).filter(Boolean);
-    expect(lines[0].startsWith("R01")).toBe(true);
-    expect(lines[1].startsWith("R02")).toBe(true);
-    expect(lines[1].length).toBe(R02_LAYOUT.totalLength);
-    expect(lines[1]).toContain("LOCADOR PF");
+    expect(lines[0].startsWith("DIMOB")).toBe(true);
+    expect(lines[1].startsWith("R01")).toBe(true);
+    const r02 = lines.find((l) => l.startsWith("R02"))!;
+    expect(r02.length).toBe(R02_LAYOUT.totalLength);
+    expect(r02).toContain("LOCADOR PF");
   });
 
   it("totais incluem comissão da locação", () => {
     const out = buildDimobFileFromAggregate(emptyAgg, [leaseRecord()]);
     expect(out.totalComissao).toBeCloseTo(300, 2);
-    expect(out.recordCount).toBe(2); // R01 + 1 R02
+    expect(out.recordCount).toBe(4); // DIMOB + R01 + 1 R02 + T9
   });
 
   it("buildDimobRecords sem leaseRecords não emite R02", () => {
-    expect(buildDimobRecords(emptyAgg)).toHaveLength(1);
+    const recs = buildDimobRecords(emptyAgg);
+    expect(recs.some((r) => r.layout.record === "R02")).toBe(false);
+    expect(recs.map((r) => r.layout.record)).toEqual(["DIMOB", "R01", "T9"]);
   });
 });
 

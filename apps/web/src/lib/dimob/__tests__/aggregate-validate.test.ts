@@ -142,25 +142,26 @@ describe("build-file", () => {
     dispensado: false,
   };
 
-  it("gera R01 + R04 com totais e hash", () => {
+  it("gera DIMOB + R01 + R04 + T9 com totais e hash", () => {
     const out = buildDimobFileFromAggregate(agg);
-    expect(out.recordCount).toBe(2);
+    expect(out.recordCount).toBe(4); // header DIMOB + R01 + R04 + trailer T9
     expect(out.totalOperacoes).toBe(500000);
     expect(out.totalComissao).toBe(30000);
     expect(out.contentHash).toMatch(/^[a-f0-9]{64}$/);
 
     const lines = out.txt.split(DIMOB_LINE_SEPARATOR).filter(Boolean);
-    expect(lines[0].startsWith("R01")).toBe(true);
-    expect(lines[1].startsWith("R04")).toBe(true);
-    expect(lines[0]).toContain("IMOBILIARIA MODELO LTDA");
-    expect(lines[1]).toContain("ANA COMPRADORA");
+    expect(lines[0].startsWith("DIMOB")).toBe(true);
+    expect(lines[1].startsWith("R01")).toBe(true);
+    expect(lines[2].startsWith("R04")).toBe(true);
+    expect(lines[lines.length - 1].startsWith("T9")).toBe(true);
+    expect(lines[1]).toContain("IMOBILIARIA MODELO LTDA");
+    expect(lines[2]).toContain("ANA COMPRADORA");
   });
 
-  it("agregado sem operações gera só R01 (dispensa é sinalizada à parte)", () => {
+  it("agregado sem operações gera DIMOB + R01 + T9 (dispensa é sinalizada à parte)", () => {
     const empty = { ...agg, records: [], dispensado: true };
     const recs = buildDimobRecords(empty);
-    expect(recs).toHaveLength(1);
-    expect(recs[0].layout.record).toBe("R01");
+    expect(recs.map((r) => r.layout.record)).toEqual(["DIMOB", "R01", "T9"]);
   });
 
   it("hash é estável para o mesmo agregado", () => {
