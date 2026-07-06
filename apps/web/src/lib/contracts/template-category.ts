@@ -183,3 +183,23 @@ export async function selectLocacaoTemplate(
 
   return null;
 }
+
+// ============================================================================
+// Contrato de Administração de Locação (imobiliária ↔ proprietário).
+// Modalidade "administracao_locacao" — nome deliberado que NÃO começa com
+// "locacao" pra ficar fora do fallback startsWith acima. Match exato, SEM
+// fallback: sem template ativo da modalidade, retorna null e o caller orienta
+// a rodar sync-templates.ts --apply --seed.
+// ============================================================================
+export const ADMINISTRACAO_LOCACAO_MODALIDADE = "administracao_locacao";
+
+export async function selectAdministracaoTemplate(
+  orgId: string
+): Promise<{ template: ContractTemplate } | null> {
+  const { prisma } = await import("@/lib/db/prisma");
+  const exact = await prisma.contractTemplate.findMany({
+    where: { orgId, status: "active", modalidade: ADMINISTRACAO_LOCACAO_MODALIDADE },
+  });
+  if (exact.length === 0) return null;
+  return { template: exact.find((t) => t.isDefault) ?? exact[0] };
+}

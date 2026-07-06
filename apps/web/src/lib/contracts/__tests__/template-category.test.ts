@@ -1,10 +1,22 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+
+vi.mock("@/lib/db/prisma", () => ({
+  prisma: {
+    contractTemplate: { findMany: vi.fn() },
+  },
+}));
+
 import {
   deriveCategoryFromPayment,
   resolveTemplateId,
   modalidadeForCategory,
+  selectLocacaoTemplate,
+  selectAdministracaoTemplate,
   type TemplateLite,
 } from "../template-category";
+import { prisma } from "@/lib/db/prisma";
+
+const mockFindMany = vi.mocked(prisma.contractTemplate.findMany);
 
 describe("deriveCategoryFromPayment", () => {
   it("classifica o caso do deal 20486 (sinal + financiamento + banco) como financiamento", () => {
@@ -104,5 +116,56 @@ describe("resolveTemplateId", () => {
 
   it("lista vazia → null", () => {
     expect(resolveTemplateId("financiamento", [])).toBeNull();
+  });
+});
+
+describe("selectLocacaoTemplate × administracao_locacao", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const tpl = (id: string, modalidade: string, isDefault = false) =>
+    ({ id, modalidade, isDefault, status: "active" }) as never;
+
+  it("fallback startsWith('locacao') NÃO pega o template de administração", async () => {
+    // Org com APENAS o template de administração ativo: gerar a LOCAÇÃO deve
+    // falhar (null) em vez de usar o instrumento errado.
+    mockFindMany.mockResolvedValueOnce([tpl("adm", "administracao_locacao", true)]);
+    const result = await selectLocacaoTemplate("org-1", "locacao_residencial_v1");
+    expect(result).toBeNull();
+  });
+
+  it("match exato de locação prefere isDefault e ignora administração", async () => {
+    mockFindMany.mockResolvedValueOnce([
+      tpl("adm", "administracao_locacao", true),
+      tpl("loc-old", "locacao", false),
+      tpl("loc-def", "locacao", true),
+    ]);
+    const result = await selectLocacaoTemplate("org-1", "locacao_residencial_v1");
+    expect(result?.template.id).toBe("loc-def");
+  });
+});
+
+describe("selectAdministracaoTemplate", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const tpl = (id: string, isDefault = false) =>
+    ({ id, modalidade: "administracao_locacao", isDefault, status: "active" }) as never;
+
+  it("match exato preferindo isDefault", async () => {
+    mockFindMany.mockResolvedValueOnce([tpl("adm-b"), tpl("adm-a", true)]);
+    const result = await selectAdministracaoTemplate("org-1");
+    expect(result?.template.id).toBe("adm-a");
+    expect(mockFindMany).toHaveBeenCalledWith({
+      where: { orgId: "org-1", status: "active", modalidade: "administracao_locacao" },
+    });
+  });
+
+  it("sem template da modalidade → null (SEM fallback pra locação)", async () => {
+    mockFindMany.mockResolvedValueOnce([]);
+    const result = await selectAdministracaoTemplate("org-1");
+    expect(result).toBeNull();
   });
 });
