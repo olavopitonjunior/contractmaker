@@ -769,16 +769,17 @@ export async function generateContractForDeal(
   // (robusto a rows duplicadas legadas) e o par updateMany(isLatest:false) +
   // create(isLatest:true) roda numa transação. Sem isso, gerações concorrentes
   // produziam 2 linhas isLatest=true no mesmo deal. O índice único parcial
-  // `Contract_dealId_isLatest_unique` reforça a invariante no nível do banco.
+  // `Contract_dealId_kind_isLatest_unique` reforça a invariante (por kind) no
+  // nível do banco.
   const agg = await prisma.contract.aggregate({
-    where: { dealId: deal.id },
+    where: { dealId: deal.id, kind: "contract" },
     _max: { version: true },
   });
   const nextVersion = (agg._max.version ?? 0) + 1;
 
   const contract = await prisma.$transaction(async (tx) => {
     await tx.contract.updateMany({
-      where: { dealId: deal.id, isLatest: true },
+      where: { dealId: deal.id, kind: "contract", isLatest: true },
       data: { isLatest: false },
     });
     return tx.contract.create({
@@ -1130,14 +1131,14 @@ export async function generateLocacaoContractForDeal(
     : renderContratoHTML(template.handlebarsSource, enrichedData);
 
   const agg = await prisma.contract.aggregate({
-    where: { dealId: deal.id },
+    where: { dealId: deal.id, kind: "contract" },
     _max: { version: true },
   });
   const nextVersion = (agg._max.version ?? 0) + 1;
 
   const contract = await prisma.$transaction(async (tx) => {
     await tx.contract.updateMany({
-      where: { dealId: deal.id, isLatest: true },
+      where: { dealId: deal.id, kind: "contract", isLatest: true },
       data: { isLatest: false },
     });
     return tx.contract.create({

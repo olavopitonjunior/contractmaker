@@ -20,7 +20,7 @@ export async function GET(
       form: true,
       attachments: { orderBy: { createdAt: "desc" } },
       contracts: {
-        where: { isLatest: true },
+        where: { isLatest: true, kind: "contract" },
         include: { template: { select: { name: true } } },
         orderBy: { createdAt: "desc" },
       },

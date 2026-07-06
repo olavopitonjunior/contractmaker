@@ -31,7 +31,7 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
       attachments: { orderBy: { createdAt: "desc" } },
       stage: { select: { name: true } },
       envelopes: {
-        where: { source: "contract", status: "closed" },
+        where: { source: "contract", status: "closed", contract: { kind: "contract" } },
         select: { closedAt: true },
         orderBy: { closedAt: "desc" },
         take: 1,
@@ -49,8 +49,9 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
   if (deal.pipeline.orgId !== org.id) notFound();
 
   // Contrato mais recente do deal (mesma shape de /contracts/[id]).
+  // kind="contract" — o instrumento de locação; a administração vive em row própria.
   const contract = await prisma.contract.findFirst({
-    where: { dealId: deal.id, isLatest: true },
+    where: { dealId: deal.id, isLatest: true, kind: "contract" },
     include: {
       template: { select: { id: true, name: true } },
       chatSessions: {
@@ -65,7 +66,7 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
 
   const versions = contract
     ? await prisma.contract.findMany({
-        where: { dealId: deal.id },
+        where: { dealId: deal.id, kind: "contract" },
         select: { id: true, version: true, createdAt: true, status: true, isLatest: true },
         orderBy: { version: "desc" },
       })
