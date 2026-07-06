@@ -585,6 +585,14 @@ export function SalesFormWizard({
         const formatList =
           trueIndex === 1 ? "vendedores" : trueIndex === 2 ? "compradores" : null;
         if (formatList) {
+          // Formato só BLOQUEIA campos que a config marca como obrigatórios
+          // (mesmo `stepFields` do gate de não-vazio acima). Campo opcional
+          // preenchido com formato ruim — típico de OCR parcial, ex.: nome_mae
+          // "Maria N" — não trava mais o avanço. `nome`/`razao_social` do
+          // titular contam como obrigatórios quando o path guarda-chuva da
+          // lista está no preset (é o que o umbrella enforce via o step).
+          const requiredSet = new Set(stepFields);
+          const umbrellaRequired = requiredSet.has(formatList);
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const parties = (form.getValues(formatList as any) as any[]) ?? [];
           let firstInvalid: string | null = null;
@@ -592,6 +600,11 @@ export function SalesFormWizard({
           parties.forEach((parte, pIdx) => {
             for (const issue of collectPartyFormatIssues(parte)) {
               const path = `${formatList}.${pIdx}.${issue.path}`;
+              const isNameField =
+                issue.path === "nome" || issue.path === "razao_social";
+              const blocks =
+                requiredSet.has(path) || (umbrellaRequired && isNameField);
+              if (!blocks) continue;
               if (!firstInvalid) {
                 firstInvalid = path;
                 firstMessage = issue.message;
