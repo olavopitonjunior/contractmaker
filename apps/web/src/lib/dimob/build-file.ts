@@ -7,7 +7,13 @@
  */
 
 import { createHash } from "crypto";
-import { R01_LAYOUT, R02_LAYOUT, R04_LAYOUT } from "./layout";
+import {
+  R01_LAYOUT,
+  R02_LAYOUT,
+  R04_LAYOUT,
+  DIMOB_HEADER_LAYOUT,
+  DIMOB_TRAILER_LAYOUT,
+} from "./layout";
 import { buildDimobFile, type DimobRecordInput, type DimobValue } from "./txt-writer";
 import type {
   DimobSalesAggregate,
@@ -165,7 +171,9 @@ export function buildDimobRecords(
   opts: DimobDeclOptions = {}
 ): DimobRecordInput[] {
   const { declarante, year } = agg;
+  // Cabeçalho "DIMOB" (374) — sempre a 1ª linha.
   const records: DimobRecordInput[] = [
+    { layout: DIMOB_HEADER_LAYOUT, values: {} },
     { layout: R01_LAYOUT, values: declaranteValues(declarante, year, opts) },
   ];
   agg.records.forEach((r, i) => {
@@ -174,6 +182,8 @@ export function buildDimobRecords(
   groupLeaseRecordsByOwner(leaseRecords).forEach((o, i) => {
     records.push({ layout: R02_LAYOUT, values: leaseRecordValues(declarante, year, o, i + 1) });
   });
+  // Trailer "T9" (102) — sempre a última linha (contador não é preenchido).
+  records.push({ layout: DIMOB_TRAILER_LAYOUT, values: {} });
   return records;
 }
 

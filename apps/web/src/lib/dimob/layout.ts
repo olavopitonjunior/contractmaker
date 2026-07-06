@@ -153,11 +153,40 @@ export const R02_LAYOUT = buildLayout("R02", [
   { key: "reservado2", label: "Reservado", length: 10, type: "reserved" },
 ]);
 
+/**
+ * Cabeçalho do arquivo — PRIMEIRA linha, literal "DIMOB" + brancos (total 374).
+ * Confirmado por 4 fontes independentes + 2 arquivos DIMOB reais (ver
+ * docs/dimob-layout-reconciliation.md). Sem ele o PGD rejeita a importação.
+ */
+export const DIMOB_HEADER_LAYOUT = buildLayout("DIMOB", [
+  { key: "tipo", label: "Identificação do arquivo", length: 5, type: "const", literal: "DIMOB" },
+  { key: "reservado", label: "Reservado", length: 369, type: "reserved" },
+]);
+
+/**
+ * Trailer do arquivo — ÚLTIMA linha, literal "T9" + brancos (total 102). Nos
+ * arquivos reais o contador de linhas NÃO é preenchido (fica em branco).
+ */
+export const DIMOB_TRAILER_LAYOUT = buildLayout("T9", [
+  { key: "tipo", label: "Fim do arquivo", length: 2, type: "const", literal: "T9" },
+  { key: "reservado", label: "Reservado", length: 100, type: "reserved" },
+]);
+
 export const DIMOB_LAYOUTS = {
+  DIMOB: DIMOB_HEADER_LAYOUT,
   R01: R01_LAYOUT,
   R02: R02_LAYOUT,
   R04: R04_LAYOUT,
+  T9: DIMOB_TRAILER_LAYOUT,
 } as const;
+
+/** Resolve o layout de uma linha do arquivo (header/trailer têm prefixo != 3). */
+export function layoutForLine(line: string): DimobRecordLayout | undefined {
+  if (line.startsWith("DIMOB")) return DIMOB_HEADER_LAYOUT;
+  if (line.startsWith("T9")) return DIMOB_TRAILER_LAYOUT;
+  const key = line.slice(0, 3) as keyof typeof DIMOB_LAYOUTS;
+  return DIMOB_LAYOUTS[key];
+}
 
 /** Separador de linha do arquivo DIMOB (CRLF). */
 export const DIMOB_LINE_SEPARATOR = "\r\n";
@@ -168,4 +197,4 @@ export const DIMOB_LINE_SEPARATOR = "\r\n";
  * vale enquanto casar com esta versão — se ela mudar, o selo cai e o banner
  * "provisório" volta automaticamente.
  */
-export const DIMOB_LAYOUT_VERSION = "2026-07-provisorio-2-r02";
+export const DIMOB_LAYOUT_VERSION = "2026-07-provisorio-3-header-t9-docleft";

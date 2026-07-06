@@ -77,9 +77,11 @@ describe("formatField", () => {
     expect(formatField(f("text", 4), null)).toBe("    ");
   });
 
-  it("doc: só dígitos, zero à esquerda (14)", () => {
+  it("doc: só dígitos, alinhado à ESQUERDA + espaços à direita (CNPJ preenche, CPF sobra)", () => {
+    // CNPJ (14 díg) preenche o campo inteiro
     expect(formatField(f("doc", 14), "12.345.678/0001-90")).toBe("12345678000190");
-    expect(formatField(f("doc", 14), "111.222.333-44")).toBe("00011122233344");
+    // CPF (11 díg) → 11 dígitos à esquerda + 3 espaços à direita (NÃO zero-à-esquerda)
+    expect(formatField(f("doc", 14), "111.222.333-44")).toBe("11122233344   ");
   });
 
   it("money: reais => centavos, zero à esquerda", () => {
@@ -152,7 +154,7 @@ describe("serializeRecord", () => {
     });
     expect(line).toHaveLength(R04_LAYOUT.totalLength);
     expect(sliceField(R04_LAYOUT, line, "tipo")).toBe("R04");
-    expect(sliceField(R04_LAYOUT, line, "cpfCnpjComprador")).toBe("00011122233344");
+    expect(sliceField(R04_LAYOUT, line, "cpfCnpjComprador")).toBe("11122233344   ");
     expect(sliceField(R04_LAYOUT, line, "nomeVendedor").trim()).toBe("BETO VENDEDOR");
     expect(sliceField(R04_LAYOUT, line, "dataContrato")).toBe("10062025");
     expect(sliceField(R04_LAYOUT, line, "valorAlienacao")).toBe("00000050000000");
