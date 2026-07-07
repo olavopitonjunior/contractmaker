@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { getEffectivePermissions, can } from "@/lib/security/rbac/check";
 import { PERMISSION, PermissionKey } from "@/lib/security/rbac/permissions";
 import { assertModuleEnabled, assertFeatureEnabled, ModuleDisabledError } from "@/lib/modules/guard";
@@ -76,14 +77,16 @@ export async function ensureLocacaoAccess(
     }
     throw e;
   }
-  const permissions = await getEffectivePermissions(session.user.id, org.id);
+  // Id efetivo (owner impersonado sob "testar como"; senão o próprio usuário).
+  const effUserId = await getEffectiveUserId(session.user.id);
+  const permissions = await getEffectivePermissions(effUserId, org.id);
   if (!permissions || !can(permissions, permission)) {
     return NextResponse.json(
       { error: `Sem permissão (${permission})` },
       { status: 403 }
     );
   }
-  return { userId: session.user.id, orgId: org.id, permissions };
+  return { userId: effUserId, orgId: org.id, permissions };
 }
 
 export function isRouteError(r: RouteResult): r is NextResponse {

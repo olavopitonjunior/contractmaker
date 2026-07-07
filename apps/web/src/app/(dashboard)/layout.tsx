@@ -2,12 +2,14 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import type { CSSProperties } from "react";
 import { auth, getUserOrg } from "@/lib/auth/auth";
+import { isImpersonating } from "@/lib/auth/impersonation";
 import { getTenantBranding } from "@/lib/tenant/branding";
 import { getOrgModules } from "@/lib/modules/read";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { DashboardHeader } from "@/components/layout/dashboard-header";
 import { AIAssistButton } from "@/components/ai-assist/AIAssistButton";
+import { ImpersonationBanner } from "@/components/admin/ImpersonationBanner";
 
 export default async function DashboardLayout({
   children,
@@ -33,6 +35,8 @@ export default async function DashboardLayout({
   const branding = org ? await getTenantBranding(org.id) : null;
   // Entitlements de módulos da org → filtram a navegação na sidebar.
   const modules = org ? await getOrgModules(org.id) : null;
+  // "Testar como": super_admin operando este tenant como o dono → banner de aviso.
+  const impersonating = org ? await isImpersonating(session.user.id) : false;
   const tenantStyle: CSSProperties | undefined =
     branding && (branding.primaryHsl || branding.accentHsl)
       ? ({
@@ -56,6 +60,7 @@ export default async function DashboardLayout({
         </a>
         <AppSidebar user={session.user} modules={modules} />
         <SidebarInset>
+          {impersonating && org && <ImpersonationBanner orgId={org.id} />}
           <DashboardHeader />
           <main id="main-content" tabIndex={-1} className="flex-1 p-4 sm:p-6">
             {children}

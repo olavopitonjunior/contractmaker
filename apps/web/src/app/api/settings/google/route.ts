@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/db/prisma";
 import { disconnectOrgGoogle } from "@/lib/google/org-oauth";
 
@@ -35,8 +36,9 @@ export async function DELETE() {
   if (!org) {
     return NextResponse.json({ error: "No organization" }, { status: 400 });
   }
+  const effUserId = await getEffectiveUserId(session.user.id);
   const membership = await prisma.orgMembership.findFirst({
-    where: { userId: session.user.id, orgId: org.id },
+    where: { userId: effUserId, orgId: org.id },
     select: { role: true },
   });
   if (!membership || !["owner", "admin"].includes(membership.role)) {
