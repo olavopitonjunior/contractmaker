@@ -14,32 +14,42 @@ jobs:
     name: Validate (typecheck + tests)
     runs-on: ubuntu-latest
     if: github.head_ref == 'staging'
+    # Repo é npm-workspaces (root package.json `workspaces`, sem pnpm-workspace.yaml).
+    # Espelha ci.yml/staging-ci.yml — usa npm, não pnpm. Antes o job tentava
+    # `cache: pnpm` + `pnpm install --frozen-lockfile` e falhava por não haver
+    # pnpm-lock.yaml na raiz (o lockfile pnpm vive em apps/web/ e é untracked).
+    env:
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
+      # `prisma validate` exige DIRECT_URL (datasource declara directUrl); dummy.
+      DIRECT_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
+      ANTHROPIC_API_KEY: test-key
+      AUTH_SECRET: test-secret
+      # tsc --noEmit estoura a heap padrão (~2GB) neste projeto no runner.
+      NODE_OPTIONS: --max-old-space-size=4096
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - uses: actions/setup-node@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: pnpm
+          cache: npm
 
-      - name: Install
-        run: pnpm install --frozen-lockfile
+      - name: Install deps
+        run: npm install
 
-      - name: Prisma generate (no engine)
-        working-directory: apps/web
-        run: pnpm prisma generate --no-engine
+      - name: Prisma generate
+        run: npm run prisma:generate -w apps/web
+
+      - name: Prisma schema validate
+        run: npm run prisma:validate -w apps/web
 
       - name: Type check
-        working-directory: apps/web
-        run: pnpm typecheck
+        run: npm run typecheck -w apps/web
 
       - name: Tests
-        working-directory: apps/web
-        run: pnpm test
+        run: npm run test -w apps/web
 
   require-smoke-label:
     name: Require staging-smoke-passed
