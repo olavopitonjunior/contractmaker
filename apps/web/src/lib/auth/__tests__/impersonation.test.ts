@@ -91,6 +91,12 @@ describe("getImpersonationFor", () => {
     expect(await getImpersonationFor("admin-g")).toBeNull();
   });
 
+  it("path-guard: /api/security (2FA/elevação) → null", async () => {
+    happyPath();
+    mockHeaderGet.mockReturnValue("/api/security/2fa/disable");
+    expect(await getImpersonationFor("admin-g2")).toBeNull();
+  });
+
   it("path-guard: prefixo similar não-guardado (/administrar) NÃO é bloqueado", async () => {
     happyPath();
     mockHeaderGet.mockReturnValue("/administrar/algo");

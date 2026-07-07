@@ -30,9 +30,12 @@ const cache: <T extends (...args: never[]) => unknown>(fn: T) => T =
 const IMPERSONATION_COOKIE = "mt_impersonate";
 
 // Superfícies que SEMPRE enxergam o usuário cru (nunca o overlay):
-// painel de plataforma, ações de segurança da própria conta, e o fluxo de auth.
+// painel de plataforma, ações de segurança da própria conta (perfil/senha em
+// /api/me, 2FA/elevação/trusted-devices em /api/security), e o fluxo de auth.
 // Sem isso, o super_admin não conseguiria encerrar a impersonation nem operar o /admin.
-const RAW_PATH_PREFIXES = ["/admin", "/api/admin", "/api/me", "/api/auth"] as const;
+// Defense-in-depth: as escritas de credencial já chaveiam no session.user.id cru,
+// mas o guard evita que o orgId (e futuras rotas) sejam sobrepostos indevidamente.
+const RAW_PATH_PREFIXES = ["/admin", "/api/admin", "/api/me", "/api/security", "/api/auth"] as const;
 
 export interface ImpersonationContext {
   orgId: string;
