@@ -33,6 +33,23 @@ type DadosContrato = {
   compradores?: DadosPessoa[];
 };
 
+// Shape de LOCAÇÃO (dadosLocacaoSchema) — distinto de venda. As checagens de
+// venda acima no-op nele (pagamento/vendedores undefined); estas cobrem os
+// campos próprios da locação (Lei 8.245/91).
+type ParteLocacao = {
+  tipo_pessoa?: string | null;
+  nome?: string | null;
+  razao_social?: string | null;
+  cpf?: string | null;
+  cnpj?: string | null;
+};
+type DadosLocacao = {
+  locadores?: ParteLocacao[];
+  locatarios?: ParteLocacao[];
+  garantia?: { tipo?: string | null; caucao_meses?: number | null; fiador?: ParteLocacao | null } | null;
+  config?: { multa_rescisoria_meses?: number | null } | null;
+};
+
 function toNumber(v: unknown): number {
   if (typeof v === "number") return Number.isFinite(v) ? v : 0;
   if (typeof v === "string") {
@@ -422,8 +439,102 @@ export function quickChecks(
     }
   }
 
+  // --- 4.5 Locação (Lei 8.245/91): checagens determinísticas do shape de
+  // aluguel. Roda quando há locadores/locatários (venda não tem). ---
+  findings.push(...quickChecksLocacao(data as DadosLocacao));
+
   // --- 5. Render-quality (A0.2): catches the form→contract fidelity class. ---
   findings.push(...renderQualityChecks(htmlContent));
+
+  return findings;
+}
+
+/**
+ * Checagens determinísticas específicas de LOCAÇÃO (Lei 8.245/91). Sem LLM.
+ * No-op quando o dataJson não tem partes de locação (venda/importado).
+ */
+export function quickChecksLocacao(data: DadosLocacao): QuickFinding[] {
+  const findings: QuickFinding[] = [];
+  const locadores = Array.isArray(data.locadores) ? data.locadores : [];
+  const locatarios = Array.isArray(data.locatarios) ? data.locatarios : [];
+  if (locadores.length === 0 && locatarios.length === 0) return findings;
+
+  // Coleta todas as partes (locador/locatário/fiador) pra validar documento.
+  const parties: Array<{ label: string; parte: ParteLocacao }> = [];
+  locadores.forEach((p, i) => parties.push({ label: `Locador ${i + 1}`, parte: p }));
+  locatarios.forEach((p, i) => parties.push({ label: `Locatário ${i + 1}`, parte: p }));
+  if (data.garantia?.tipo === "fiador" && data.garantia.fiador) {
+    parties.push({ label: "Fiador", parte: data.garantia.fiador });
+  }
+
+  // --- Documento (CPF/CNPJ) de cada parte — o gap G4: venda validava, locação não.
+  for (const { label, parte } of parties) {
+    const nome = parte.nome || parte.razao_social || "sem nome";
+    if (parte.cpf && !isValidCPF(parte.cpf)) {
+      findings.push({
+        severity: "error",
+        category: "qualification",
+        message: `CPF de ${label} (${nome}) é inválido: ${parte.cpf}`,
+        selectedText: parte.cpf,
+        suggestedFix: "Verifique o CPF junto ao titular e corrija nos dados do formulário.",
+      });
+    }
+    if (parte.cnpj && !isValidCNPJ(parte.cnpj)) {
+      findings.push({
+        severity: "error",
+        category: "qualification",
+        message: `CNPJ de ${label} (${nome}) é inválido: ${parte.cnpj}`,
+        selectedText: parte.cnpj,
+        suggestedFix: "Confirme o CNPJ na Receita Federal e corrija.",
+      });
+    }
+  }
+
+  // --- Mesmo CPF em partes com nomes divergentes.
+  const cpfMap = new Map<string, Set<string>>();
+  for (const { parte } of parties) {
+    const cpf = (parte.cpf || "").replace(/\D/g, "");
+    if (cpf.length === 11 && parte.nome) {
+      if (!cpfMap.has(cpf)) cpfMap.set(cpf, new Set());
+      cpfMap.get(cpf)!.add(parte.nome.trim().toLowerCase());
+    }
+  }
+  for (const [cpf, names] of cpfMap) {
+    if (names.size > 1) {
+      findings.push({
+        severity: "warning",
+        category: "qualification",
+        message: `O CPF ${cpf} aparece com nomes diferentes: ${Array.from(names).join(" / ")}`,
+        selectedText: cpf,
+      });
+    }
+  }
+
+  // --- Caução limitada a 3 aluguéis (art. 38 §2º Lei 8.245/91).
+  if (data.garantia?.tipo === "caucao") {
+    const meses = toNumber(data.garantia.caucao_meses);
+    if (meses > 3) {
+      findings.push({
+        severity: "error",
+        category: "qualification",
+        message: `Caução de ${meses} aluguéis excede o limite legal de 3 (art. 38 §2º da Lei 8.245/91).`,
+        selectedText: `${meses} aluguéis`,
+        suggestedFix: "Reduza a caução para no máximo 3 aluguéis ou troque a modalidade de garantia.",
+      });
+    }
+  }
+
+  // --- Multa rescisória proporcional/razoável (art. 4º) — teto de 3 aluguéis.
+  const multaMeses = toNumber(data.config?.multa_rescisoria_meses);
+  if (multaMeses > 3) {
+    findings.push({
+      severity: "warning",
+      category: "qualification",
+      message: `Multa rescisória de ${multaMeses} aluguéis é elevada — o usual é até 3, aplicada de forma proporcional ao período restante (art. 4º da Lei 8.245/91).`,
+      selectedText: `${multaMeses}`,
+      suggestedFix: "Revise a multa rescisória para no máximo 3 aluguéis, proporcional ao tempo restante.",
+    });
+  }
 
   return findings;
 }
