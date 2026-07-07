@@ -1394,7 +1394,11 @@ const KIND_LABELS: Record<DocGroupKind, string> = {
 // dedicada na aba Documentos em vez de espalhadas por parte/imóvel.
 const CERTIDAO_CATS = new Set(["certidao", "relatorio_certidoes"]);
 // Documentos assinados (ClickSign) — destacados na pasta pra fácil identificação.
-const SIGNED_CATS = new Set(["contrato_assinado", "documento_assinado"]);
+const SIGNED_CATS = new Set([
+  "contrato_assinado",
+  "documento_assinado",
+  "contrato_administracao_assinado",
+]);
 
 function groupKindOf(kind: DocumentKind): DocGroupKind {
   if (kind === "vendedor" || kind === "conjuge_vendedor" || kind === "representante_vendedor") {

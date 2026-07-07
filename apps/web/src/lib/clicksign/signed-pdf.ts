@@ -51,7 +51,7 @@ export async function persistSignedPdf(
         dealId: true,
         source: true,
         name: true,
-        contract: { select: { version: true } },
+        contract: { select: { version: true, kind: true } },
       },
     });
     if (!env?.dealId) return;
@@ -66,10 +66,20 @@ export async function persistSignedPdf(
     });
     if (existing) return;
 
+    // Categoria kind-aware: o contrato de administração de locação vira uma
+    // categoria própria na pasta (senão apareceria como "contrato assinado" da
+    // locação e poluiria o gate de instrumento principal).
+    const isAdmin = env.contract?.kind === "administracao";
     const category =
-      env.source === "attachment" ? "documento_assinado" : "contrato_assinado";
+      env.source === "attachment"
+        ? "documento_assinado"
+        : isAdmin
+          ? "contrato_administracao_assinado"
+          : "contrato_assinado";
     const filename = env.contract
-      ? `Contrato assinado v${env.contract.version}.pdf`
+      ? isAdmin
+        ? `Contrato de administração assinado v${env.contract.version}.pdf`
+        : `Contrato assinado v${env.contract.version}.pdf`
       : `${env.name} (assinado).pdf`;
     await prisma.dealAttachment.create({
       data: {
