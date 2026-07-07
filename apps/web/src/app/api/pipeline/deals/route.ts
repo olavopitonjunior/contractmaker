@@ -145,7 +145,7 @@ export async function GET(req: NextRequest) {
       stage: true,
       form: { select: { id: true, token: true, status: true } },
       contracts: {
-        where: { isLatest: true },
+        where: { isLatest: true, kind: "contract" },
         select: { id: true, version: true, status: true },
       },
     },

@@ -6,7 +6,10 @@ import { matchDealGroup } from "@/lib/newton/group-match";
 import { generateLocacaoContractForDeal } from "@/lib/services/contract-generation";
 import { emitNotification } from "@/lib/notifications/emit";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
-import { schemaForLocacaoType } from "@/lib/forms/validation-locacao";
+import {
+  schemaForLocacaoType,
+  collectLocacaoFinalizeIssues,
+} from "@/lib/forms/validation-locacao";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
 import { MODULE } from "@/lib/modules/catalog";
@@ -74,11 +77,24 @@ export async function PATCH(
   if (isFinalizing) {
     const schema = schemaForLocacaoType(form.schemaType);
     const result = schema.safeParse(mergedData);
-    if (!result.success) {
-      validationIssues = result.error.issues.map((i) => ({
-        path: i.path.join("."),
-        message: i.message,
-      }));
+    const schemaIssues = result.success
+      ? []
+      : result.error.issues.map((i) => ({
+          path: i.path.join("."),
+          message: i.message,
+        }));
+    // Guarda de finalize (obrigatoriedade dura de endereço/valor/vigência +
+    // formato quando preenchido). Dedupe por path — o schema base e a guarda
+    // podem cobrir o mesmo campo (ex.: fiador).
+    const finalizeIssues = collectLocacaoFinalizeIssues(
+      mergedData as Record<string, unknown>
+    );
+    const seen = new Set(schemaIssues.map((i) => i.path));
+    validationIssues = [
+      ...schemaIssues,
+      ...finalizeIssues.filter((i) => !seen.has(i.path)),
+    ];
+    if (validationIssues.length > 0) {
       console.warn(
         `[locacao/finalize] form ${form.id} finalizado com ${validationIssues.length} problema(s):`,
         validationIssues.map((v) => `${v.path}: ${v.message}`).join(" | ")

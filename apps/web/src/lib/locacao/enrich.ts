@@ -47,6 +47,7 @@ export interface EnrichLocacaoContext {
   // "à PARTE LOCADORA ou a quem esta indicar".
   administradora?: {
     nome?: string;
+    cnpj?: string;
     creci?: string;
     endereco?: string;
   };
@@ -140,6 +141,57 @@ export function enrichLocacaoData(
       fim.setDate(fim.getDate() - 1);
       config.vigencia_fim_texto = formatLongPtBr(fim);
     }
+  }
+
+  enriched.config = config;
+  return enriched;
+}
+
+// ============================================================================
+// Contrato de Administração de Locação (template administracao_locacao_v1).
+// Estende enrichLocacaoData com os campos que só esse instrumento usa.
+// Idempotente como o resto: dataJson preenchido vence os defaults.
+// ============================================================================
+export function enrichAdministracaoData(
+  data: Record<string, unknown>,
+  ctx?: EnrichLocacaoContext
+): Record<string, unknown> {
+  const enriched = enrichLocacaoData(data, ctx);
+  const config = ((enriched.config as Record<string, unknown>) || {}) as Record<string, unknown>;
+
+  // CNPJ da administradora — o enrich base só injeta nome/CRECI/endereço
+  // (bloco condicionado a `adm.nome` acima; aqui repetimos o guard pra
+  // administradora sem nome não deixar CNPJ órfão no preâmbulo).
+  const adm = ctx?.administradora;
+  if (
+    adm?.nome &&
+    adm.cnpj &&
+    (config.administradora_cnpj == null || config.administradora_cnpj === "")
+  ) {
+    config.administradora_cnpj = adm.cnpj;
+  }
+
+  // Taxa de administração — fonte é o bloco fiscal operador-only do form;
+  // fallback aluguel.taxa_admin_percent; default da casa 10%.
+  if (config.taxa_admin_percent == null) {
+    const fiscal = (enriched.fiscal as Record<string, unknown> | undefined) || {};
+    const aluguel = (enriched.aluguel as Record<string, unknown> | undefined) || {};
+    const taxa =
+      Number(fiscal.taxa_admin_percent) ||
+      Number(aluguel.taxa_admin_percent) ||
+      10;
+    config.taxa_admin_percent = taxa;
+  }
+
+  // Prazo de repasse em texto (cláusula 6ª). LeaseContract.repasseTipo/Dia
+  // ainda não vêm do form — default da casa.
+  if (config.repasse_texto == null || config.repasse_texto === "") {
+    config.repasse_texto = "em até 5 (cinco) dias úteis após o efetivo recebimento";
+  }
+
+  // Exclusividade default sim (cláusula 8ª é condicional no template).
+  if (config.administracao_exclusiva == null) {
+    config.administracao_exclusiva = true;
   }
 
   enriched.config = config;

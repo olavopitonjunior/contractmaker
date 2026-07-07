@@ -65,11 +65,11 @@ export default async function PipelinePage({
                 },
               },
               contracts: {
-                where: { isLatest: true },
+                where: { isLatest: true, kind: "contract" },
                 select: { id: true, version: true },
               },
               envelopes: {
-                where: { source: "contract", status: "closed" },
+                where: { source: "contract", status: "closed", contract: { kind: "contract" } },
                 select: { closedAt: true },
                 orderBy: { closedAt: "desc" },
                 take: 1,

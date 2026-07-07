@@ -158,8 +158,11 @@ export async function DELETE(
   await prisma.$transaction(async (tx) => {
     await tx.contract.delete({ where: { id: contract.id } });
     if (contract.isLatest) {
+      // Promote escopado por kind — latest é por (dealId, kind); sem o filtro,
+      // deletar a versão latest de um instrumento promoveria outro instrumento
+      // (aditamento/administração) a latest do principal.
       const next = await tx.contract.findFirst({
-        where: { dealId: contract.dealId },
+        where: { dealId: contract.dealId, kind: contract.kind },
         orderBy: { version: "desc" },
         select: { id: true, version: true },
       });

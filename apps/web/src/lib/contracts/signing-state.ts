@@ -60,6 +60,10 @@ export async function getDealSigningState(
       dealId,
       source: "contract",
       status: "closed",
+      // Só o instrumento principal conta — envelope do contrato de
+      // administração de locação (kind="administracao") ou de aditamento
+      // não significa "CCV/locação assinado".
+      contract: { kind: "contract" },
     },
     orderBy: { closedAt: "desc" },
     select: {
@@ -93,6 +97,7 @@ export async function getDealSigningStates(
       dealId: { in: dealIds },
       source: "contract",
       status: "closed",
+      contract: { kind: "contract" },
     },
     orderBy: { closedAt: "desc" },
     select: {

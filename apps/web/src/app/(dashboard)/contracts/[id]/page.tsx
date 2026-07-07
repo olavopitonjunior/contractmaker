@@ -29,7 +29,9 @@ export default async function ContractPage({
   if (!contract) notFound();
 
   const versions = await prisma.contract.findMany({
-    where: { dealId: contract.dealId },
+    // Escopo por kind: o histórico de versões é do MESMO instrumento — sem o
+    // filtro, aditamentos/administração apareceriam como "versões" do principal.
+    where: { dealId: contract.dealId, kind: contract.kind },
     select: { id: true, version: true, createdAt: true, status: true, isLatest: true },
     orderBy: { version: "desc" },
   });

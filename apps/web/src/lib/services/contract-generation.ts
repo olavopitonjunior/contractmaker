@@ -11,11 +11,15 @@ import {
   deriveDealMetadata,
   deriveLocacaoDealMetadata,
 } from "@/lib/contracts/derive-deal-metadata";
-import { selectTemplateForDeal, selectLocacaoTemplate } from "@/lib/contracts/template-category";
+import {
+  selectTemplateForDeal,
+  selectLocacaoTemplate,
+  selectAdministracaoTemplate,
+} from "@/lib/contracts/template-category";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { assertModuleEnabled } from "@/lib/modules/guard";
 import { MODULE } from "@/lib/modules/catalog";
-import { enrichLocacaoData } from "@/lib/locacao/enrich";
+import { enrichLocacaoData, enrichAdministracaoData } from "@/lib/locacao/enrich";
 import { createLeaseContractFromDataJson } from "@/lib/locacao/create-lease-contract";
 import {
   MOMENTO_TEXTO,
@@ -769,16 +773,17 @@ export async function generateContractForDeal(
   // (robusto a rows duplicadas legadas) e o par updateMany(isLatest:false) +
   // create(isLatest:true) roda numa transação. Sem isso, gerações concorrentes
   // produziam 2 linhas isLatest=true no mesmo deal. O índice único parcial
-  // `Contract_dealId_isLatest_unique` reforça a invariante no nível do banco.
+  // `Contract_dealId_kind_isLatest_unique` reforça a invariante (por kind) no
+  // nível do banco.
   const agg = await prisma.contract.aggregate({
-    where: { dealId: deal.id },
+    where: { dealId: deal.id, kind: "contract" },
     _max: { version: true },
   });
   const nextVersion = (agg._max.version ?? 0) + 1;
 
   const contract = await prisma.$transaction(async (tx) => {
     await tx.contract.updateMany({
-      where: { dealId: deal.id, isLatest: true },
+      where: { dealId: deal.id, kind: "contract", isLatest: true },
       data: { isLatest: false },
     });
     return tx.contract.create({
@@ -1130,14 +1135,14 @@ export async function generateLocacaoContractForDeal(
     : renderContratoHTML(template.handlebarsSource, enrichedData);
 
   const agg = await prisma.contract.aggregate({
-    where: { dealId: deal.id },
+    where: { dealId: deal.id, kind: "contract" },
     _max: { version: true },
   });
   const nextVersion = (agg._max.version ?? 0) + 1;
 
   const contract = await prisma.$transaction(async (tx) => {
     await tx.contract.updateMany({
-      where: { dealId: deal.id, isLatest: true },
+      where: { dealId: deal.id, kind: "contract", isLatest: true },
       data: { isLatest: false },
     });
     return tx.contract.create({
@@ -1327,6 +1332,190 @@ export async function generateLocacaoContractForDeal(
   waitUntil(
     analyzeRenderQualityForContract(contract.id, htmlContent).catch((err) => {
       console.error("[locacao-generation] analyzeRenderQualityForContract falhou:", err);
+    })
+  );
+
+  return { contractId: contract.id, version: contract.version, googleDocUrl };
+}
+
+/**
+ * Gera o CONTRATO DE ADMINISTRAÇÃO DE LOCAÇÃO (instrumento imobiliária ↔
+ * proprietário) como Contract kind="administracao" no MESMO deal de locação.
+ * Espelha generateLocacaoContractForDeal com 3 diferenças: template da
+ * modalidade "administracao_locacao" (match exato, sem fallback), enrich
+ * próprio (taxa de administração/repasse/exclusividade) e NENHUM efeito
+ * colateral de esteira — não move stage, não mexe em LeaseContract. v1 só
+ * suporta engine handlebars.
+ */
+export async function generateAdministracaoContractForDeal(
+  dealId: string,
+  userId: string,
+  orgId: string
+): Promise<GenerateResult> {
+  await assertModuleEnabled(orgId, MODULE.LOCACAO);
+
+  const deal = await prisma.deal.findUniqueOrThrow({
+    where: { id: dealId },
+    include: { form: true },
+  });
+
+  const dataJson = deal.form
+    ? (deal.form.dataJson as Record<string, unknown>)
+    : (deal.dataJson as Record<string, unknown>) || {};
+
+  const selection = await selectAdministracaoTemplate(orgId);
+  if (!selection) {
+    throw new Error(
+      "Nenhum template de administração de locação ativo. Rode sync-templates.ts --apply --seed."
+    );
+  }
+  const template = selection.template;
+  if (template.engine === "google_docs") {
+    throw new Error(
+      "Template de administração com engine google_docs ainda não é suportado — use um template Handlebars."
+    );
+  }
+
+  // Administradora = a própria org. Diferente da locação (que só nomeia a
+  // administradora quando há CRECI), aqui a org É parte do instrumento —
+  // campos faltantes viram findings do render linter e gateiam o /approve.
+  const org = await prisma.organization.findUnique({
+    where: { id: orgId },
+    select: { name: true, legalName: true, cnpj: true, creci: true, legalAddress: true },
+  });
+  const administradora = {
+    nome: org?.legalName ?? org?.name ?? undefined,
+    cnpj: org?.cnpj ?? undefined,
+    creci: org?.creci ?? undefined,
+    endereco: org?.legalAddress ?? undefined,
+  };
+
+  const enrichedData = enrichAdministracaoData(dataJson, { administradora });
+  const htmlContent = renderContratoHTML(template.handlebarsSource, enrichedData);
+
+  const agg = await prisma.contract.aggregate({
+    where: { dealId: deal.id, kind: "administracao" },
+    _max: { version: true },
+  });
+  const nextVersion = (agg._max.version ?? 0) + 1;
+
+  const contract = await prisma.$transaction(async (tx) => {
+    await tx.contract.updateMany({
+      where: { dealId: deal.id, kind: "administracao", isLatest: true },
+      data: { isLatest: false },
+    });
+    return tx.contract.create({
+      data: {
+        dealId: deal.id,
+        templateId: template.id,
+        userId,
+        version: nextVersion,
+        dataJson: enrichedData as any,
+        htmlContent,
+        status: "rascunho",
+        isLatest: true,
+        kind: "administracao",
+      },
+    });
+  });
+
+  // Google Doc — mesmo pipeline handlebars da locação (upload + watch + share
+  // + DocumentStyle). Falha não bloqueia a criação do contrato.
+  let googleDocUrl: string | undefined;
+  if (isGoogleDocsFeatureEnabled()) {
+    try {
+      const numeroContrato = `${contract.id.slice(-8).toUpperCase()}-v${contract.version}`;
+      const docName = `Administração de Locação ${contract.id} — v${contract.version}`;
+      const htmlForUpload = htmlContent
+        .replace(/\{\{\s*contrato\.numero\s*\}\}/g, numeroContrato)
+        .replace(/\{\{\s*contrato\.id\s*\}\}/g, contract.id)
+        .replace(/\{\{\s*contrato\.versao\s*\}\}/g, String(contract.version));
+      const created = await uploadHtmlAsGoogleDoc({
+        htmlContent: htmlForUpload,
+        name: docName,
+        orgId,
+      });
+
+      let watchData: {
+        googleWatchChannel?: string;
+        googleWatchResource?: string;
+        googleWatchExpires?: Date;
+      } = {};
+      const webhookBase = process.env.NEXTAUTH_URL || process.env.PUBLIC_APP_URL;
+      const watchToken = process.env.GOOGLE_WATCH_TOKEN?.trim();
+      if (webhookBase && watchToken) {
+        try {
+          const watch = await watchFile({
+            fileId: created.docId,
+            webhookUrl: `${webhookBase.replace(/\/$/, "")}/api/webhooks/google-drive`,
+            token: watchToken,
+          });
+          watchData = {
+            googleWatchChannel: watch.channelId,
+            googleWatchResource: watch.resourceId,
+            googleWatchExpires: new Date(watch.expiration),
+          };
+        } catch (err) {
+          console.error("[administracao-generation] Falha ao registrar watch Drive:", err);
+        }
+      }
+
+      await prisma.contract.update({
+        where: { id: contract.id },
+        data: {
+          googleDocId: created.docId,
+          googleDocUrl: created.webViewLink,
+          googleDocStatus: "draft",
+          ...watchData,
+        },
+      });
+      googleDocUrl = created.webViewLink;
+
+      try {
+        await shareDocWithOrgMembers(created.docId, orgId);
+      } catch (shareErr) {
+        console.error("[administracao-generation] Falha ao compartilhar com org members:", shareErr);
+      }
+
+      try {
+        const defaultStyle = await prisma.documentStyle.findFirst({
+          where: { orgId, isDefault: true },
+        });
+        if (defaultStyle) {
+          const { googleApplyStylePreset } = await import("@/lib/ai/google-tool-handlers");
+          await googleApplyStylePreset(created.docId, {
+            fontFamily: defaultStyle.fontFamily,
+            fontSizeBase: defaultStyle.fontSizeBase,
+            lineHeight: defaultStyle.lineHeight,
+            colorPrimary: defaultStyle.colorPrimary,
+            marginTopMm: defaultStyle.marginTopMm,
+            marginBottomMm: defaultStyle.marginBottomMm,
+            marginLeftMm: defaultStyle.marginLeftMm,
+            marginRightMm: defaultStyle.marginRightMm,
+          });
+        }
+      } catch (styleErr) {
+        console.error("[administracao-generation] Falha ao aplicar DocumentStyle:", styleErr);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      console.error("[administracao-generation] Falha ao criar Google Doc:", err);
+      try {
+        await prisma.contract.update({
+          where: { id: contract.id },
+          data: { googleDocStatus: `error: ${msg.slice(0, 500)}` },
+        });
+      } catch {
+        // diagnóstico best-effort
+      }
+    }
+  }
+
+  // Render linter (genérico) — lacunas da administradora (CNPJ/CRECI vazios)
+  // viram ContractComment e gateiam o /approve.
+  waitUntil(
+    analyzeRenderQualityForContract(contract.id, htmlContent).catch((err) => {
+      console.error("[administracao-generation] analyzeRenderQualityForContract falhou:", err);
     })
   );
 

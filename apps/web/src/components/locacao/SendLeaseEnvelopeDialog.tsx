@@ -41,6 +41,10 @@ export interface LeaseSignerData {
   garantia?: { tipo?: string; fiador?: LeaseParte } | null;
 }
 
+/** Instrumento sendo enviado: locação (default) ou contrato de administração
+ *  (imobiliária ↔ proprietário — signers = locadores + representante da org). */
+export type LeaseEnvelopeVariant = "locacao" | "administracao";
+
 interface SendLeaseEnvelopeDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -48,9 +52,18 @@ interface SendLeaseEnvelopeDialogProps {
   contractStatus: string;
   data: LeaseSignerData;
   onSent: () => void;
+  variant?: LeaseEnvelopeVariant;
+  /** Nome da org pra pré-preencher a linha da imobiliária (variant administracao). */
+  imobiliaria?: { nome?: string };
 }
 
-type RowKind = "locador" | "locatario" | "fiador" | "testemunha" | "avulso";
+type RowKind =
+  | "locador"
+  | "locatario"
+  | "fiador"
+  | "testemunha"
+  | "avulso"
+  | "imobiliaria";
 type SubKind = "titular" | "representante" | "avulso";
 
 const ROLE_OPTIONS = CLICKSIGN_ROLE_OPTIONS;
@@ -63,7 +76,20 @@ const KIND_LABELS: Record<RowKind, string> = {
   fiador: "Fiador",
   testemunha: "Testemunha",
   avulso: "Avulso",
+  imobiliaria: "Imobiliária",
 };
+
+// Na administração o locador assina como PROPRIETÁRIO (mesmo dado, papel
+// contextual diferente).
+const KIND_LABELS_ADMINISTRACAO: Record<RowKind, string> = {
+  ...KIND_LABELS,
+  locador: "Proprietário",
+};
+
+function kindLabel(sourceKind: RowKind, variant: LeaseEnvelopeVariant): string {
+  const map = variant === "administracao" ? KIND_LABELS_ADMINISTRACAO : KIND_LABELS;
+  return map[sourceKind] ?? sourceKind;
+}
 
 function defaultRoleFor(sourceKind: RowKind): ClicksignRole {
   switch (sourceKind) {
@@ -71,6 +97,8 @@ function defaultRoleFor(sourceKind: RowKind): ClicksignRole {
       return "consenting";
     case "testemunha":
       return "witness";
+    case "imobiliaria":
+      return "realestate";
     case "locador":
     case "locatario":
       return "party";
@@ -160,11 +188,35 @@ function buildPartyRow(
   };
 }
 
-function buildInitialRows(data: LeaseSignerData): EditableRow[] {
+function buildInitialRows(
+  data: LeaseSignerData,
+  variant: LeaseEnvelopeVariant,
+  imobiliaria?: { nome?: string }
+): EditableRow[] {
   const rows: EditableRow[] = [];
   (data.locadores ?? []).forEach((p, i) =>
     rows.push(buildPartyRow("locador", p, i))
   );
+  if (variant === "administracao") {
+    // Administração: proprietários + representante da imobiliária. E-mail e
+    // CPF ficam vazios de propósito — a Organization não tem representante PF
+    // cadastrado e a ClickSign rejeita CNPJ como documentation (assina o
+    // representante, PF); a validação obriga o operador a completar.
+    rows.push({
+      rowId: "imobiliaria-0",
+      sourceKind: "imobiliaria",
+      sourceIndex: 0,
+      subKind: "representante",
+      name: (imobiliaria?.nome ?? "").trim(),
+      email: "",
+      documentation: "",
+      phone: "",
+      isPJ: true,
+      addedDuringDialog: false,
+      clicksignRole: defaultRoleFor("imobiliaria"),
+    });
+    return rows;
+  }
   (data.locatarios ?? []).forEach((p, i) =>
     rows.push(buildPartyRow("locatario", p, i))
   );
@@ -189,6 +241,8 @@ export function SendLeaseEnvelopeDialog({
   contractStatus,
   data,
   onSent,
+  variant = "locacao",
+  imobiliaria,
 }: SendLeaseEnvelopeDialogProps) {
   const [submitting, setSubmitting] = useState(false);
   const [orderEnabled, setOrderEnabled] = useState(false);
@@ -197,7 +251,7 @@ export function SendLeaseEnvelopeDialog({
 
   useEffect(() => {
     if (!open) return;
-    setRows(buildInitialRows(data));
+    setRows(buildInitialRows(data, variant, imobiliaria));
     setSubmitting(false);
     setOrderEnabled(false);
     setStep("edit");
@@ -257,15 +311,15 @@ export function SendLeaseEnvelopeDialog({
   const validationError = useMemo(() => {
     if (rows.length === 0) return "Inclua ao menos 1 signatário";
     for (const r of rows) {
-      if (r.name.trim().length < 2) return `Nome ausente em ${labelFor(r)}`;
+      if (r.name.trim().length < 2) return `Nome ausente em ${labelFor(r, variant)}`;
       if (!EMAIL_REGEX.test(r.email.trim()))
-        return `E-mail inválido em ${labelFor(r)}`;
+        return `E-mail inválido em ${labelFor(r, variant)}`;
       const d = r.documentation.replace(/\D/g, "");
       if (d && d.length !== 11 && d.length !== 14)
-        return `CPF/CNPJ inválido em ${labelFor(r)}`;
+        return `CPF/CNPJ inválido em ${labelFor(r, variant)}`;
     }
     return null;
-  }, [rows]);
+  }, [rows, variant]);
 
   const costCents = rows.length * COST_PER_SIGNER_CENTS;
   const showApprovedWarning =
@@ -368,6 +422,7 @@ export function SendLeaseEnvelopeDialog({
               <SignerCard
                 key={row.rowId}
                 row={row}
+                variant={variant}
                 onChange={updateRow}
                 onRemove={removeRow}
               />
@@ -466,10 +521,12 @@ export function SendLeaseEnvelopeDialog({
 
 function SignerCard({
   row,
+  variant = "locacao",
   onChange,
   onRemove,
 }: {
   row: EditableRow;
+  variant?: LeaseEnvelopeVariant;
   onChange: (rowId: string, patch: Partial<EditableRow>) => void;
   onRemove: (rowId: string) => void;
 }) {
@@ -479,10 +536,10 @@ function SignerCard({
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 min-w-0">
           <Badge variant="secondary" className="shrink-0 text-[11px]">
-            {KIND_LABELS[row.sourceKind] ?? row.sourceKind}
+            {kindLabel(row.sourceKind, variant)}
           </Badge>
           <span className="text-sm font-medium text-foreground truncate">
-            {labelFor(row)}
+            {labelFor(row, variant)}
           </span>
         </div>
         <Button
@@ -608,11 +665,13 @@ function ReviewStep({
   );
 }
 
-function labelFor(row: EditableRow): string {
+function labelFor(row: EditableRow, variant: LeaseEnvelopeVariant = "locacao"): string {
   if (row.name.trim()) {
-    if (row.subKind === "representante") return `${row.name.trim()} (representante)`;
+    if (row.subKind === "representante" && row.sourceKind !== "imobiliaria")
+      return `${row.name.trim()} (representante)`;
     return row.name.trim();
   }
-  if (row.subKind === "representante") return "Representante";
-  return `${KIND_LABELS[row.sourceKind] ?? row.sourceKind} ${row.sourceIndex + 1}`;
+  if (row.subKind === "representante" && row.sourceKind !== "imobiliaria")
+    return "Representante";
+  return `${kindLabel(row.sourceKind, variant)} ${row.sourceIndex + 1}`;
 }

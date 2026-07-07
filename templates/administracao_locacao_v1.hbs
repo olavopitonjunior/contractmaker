@@ -1,0 +1,71 @@
+<div class="contrato">
+
+<h1>INSTRUMENTO PARTICULAR DE CONTRATO DE ADMINISTRAÇÃO DE LOCAÇÃO DE IMÓVEL</h1>
+
+<p>Pelo presente instrumento particular de contrato de administração de locação, de um lado, como ADMINISTRADORA, {{config.administradora_nome}}{{#if (existe config.administradora_cnpj)}}, pessoa jurídica de direito privado, inscrita no CNPJ/MF sob nº {{cnpj config.administradora_cnpj}}{{/if}}{{#if (existe config.administradora_creci)}}, regularmente inscrita no CRECI sob nº {{config.administradora_creci}}{{/if}}{{#if (existe config.administradora_endereco)}}, com sede na {{config.administradora_endereco}}{{/if}}, e de outro lado, como PROPRIETÁRIO(A) e doravante nomeada PARTE PROPRIETÁRIA, {{#each locadores}}{{#if (eq this.tipo_pessoa "fisica")}}{{this.nome}}{{#if (existe this.nacionalidade)}}, {{this.nacionalidade}}{{/if}}{{#if (existe this.estado_civil)}}, {{this.estado_civil}}{{/if}}{{#if (existe this.profissao)}}, {{this.profissao}}{{/if}}{{#if (existe this.rg)}}, portador(a) da cédula de identidade RG nº {{this.rg}}{{/if}}{{#if (existe this.cpf)}}, inscrito(a) no CPF/MF sob nº {{cpf this.cpf}}{{/if}}{{#if (existe this.endereco)}}, residente e domiciliado(a) na {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, {{this.complemento}}{{/if}}{{#if this.bairro}}, {{this.bairro}}{{/if}}{{#if (existe this.cep)}}, CEP {{cep this.cep}}{{/if}}{{#if (existe this.cidade)}}, {{this.cidade}}/{{this.uf}}{{/if}}{{/if}}{{#if (existe this.email)}}, endereço eletrônico e-mail {{this.email}}{{/if}}{{else}}{{this.razao_social}}, pessoa jurídica de direito privado, inscrita no CNPJ/MF sob nº {{cnpj this.cnpj}}{{#if (existe this.endereco)}}, com sede na {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, {{this.complemento}}{{/if}}{{#if this.bairro}}, {{this.bairro}}{{/if}}{{#if (existe this.cep)}}, CEP {{cep this.cep}}{{/if}}{{#if (existe this.cidade)}}, {{this.cidade}}/{{this.uf}}{{/if}}{{/if}}{{#if this.representante.nome}}, neste ato representada por {{this.representante.nome}}, inscrito(a) no CPF/MF sob nº {{cpf this.representante.cpf}}{{/if}}{{/if}}{{#unless @last}}; {{/unless}}{{/each}}, têm entre si, justo e acertado o seguinte:</p>
+
+<h2>1. OBJETO</h2>
+<p>1.1. A PARTE PROPRIETÁRIA, proprietária do(a) {{#if (existe imovel.tipo_texto)}}{{imovel.tipo_texto}}{{else}}{{imovel.kind}}{{/if}}{{#if (existe imovel.complemento)}} {{imovel.complemento}}{{/if}}{{#if (existe imovel.condominio_nome)}}, do {{imovel.condominio_nome}}{{/if}}, localizado(a) na {{imovel.rua}}, nº {{imovel.numero}}{{#if imovel.bairro}}, {{imovel.bairro}}{{/if}}{{#if (existe imovel.cep)}}, CEP {{cep imovel.cep}}{{/if}}, {{imovel.cidade}}/{{imovel.uf}}{{#if imovel.inscricao_iptu}}, cadastrado na Prefeitura Municipal de {{imovel.cidade}} pelo contribuinte nº {{imovel.inscricao_iptu}}{{/if}}{{#if imovel.matricula}}, objeto da matrícula nº {{imovel.matricula}}{{#if imovel.cartorio}} do {{imovel.cartorio}}{{/if}}{{/if}}, nomeia e constitui a ADMINISTRADORA para exercer a administração da locação do referido imóvel, nos termos dos artigos 653 a 666 do Código Civil e da Lei nº 8.245/91, mediante as cláusulas e condições seguintes.</p>
+{{#if (gt aluguel.valor 0)}}
+<p>1.2. A locação administrada tem aluguel mensal de referência de {{moeda aluguel.valor}} ({{extenso aluguel.valor}}), sujeito aos reajustes previstos no respectivo contrato de locação.</p>
+{{/if}}
+
+<h2>2. PODERES DA ADMINISTRADORA</h2>
+<p>2.1. Para o desempenho da administração ora contratada, a PARTE PROPRIETÁRIA outorga à ADMINISTRADORA poderes para: (a) cobrar e receber aluguéis, encargos e acessórios da locação, dando recibo e quitação; (b) promover a seleção e a qualificação cadastral de candidatos a locatários, inclusive análise de crédito; (c) firmar, em nome da PARTE PROPRIETÁRIA, recibos, notificações, interpelações e comunicações relativas à locação; (d) acompanhar e realizar vistorias de entrada, periódicas e de saída; (e) contratar, às expensas da PARTE PROPRIETÁRIA e mediante prévia autorização, reparos e serviços de manutenção necessários à conservação do imóvel; (f) reter, dos valores recebidos, a remuneração prevista na cláusula 5ª e os encargos autorizados neste instrumento.</p>
+<p>2.2. Os poderes ora outorgados não compreendem os poderes da cláusula <i>ad judicia</i>; a representação judicial da PARTE PROPRIETÁRIA dependerá de procuração específica outorgada a advogado.</p>
+
+<h2>3. OBRIGAÇÕES DA ADMINISTRADORA</h2>
+<p>3.1. Constituem obrigações da ADMINISTRADORA: (a) empregar, na administração da locação, a diligência habitual do bom administrador (art. 667 do Código Civil, por analogia); (b) repassar à PARTE PROPRIETÁRIA os valores líquidos recebidos, na forma da cláusula 6ª; (c) prestar contas mensalmente, por demonstrativo discriminando valores recebidos, deduções e repasse líquido; (d) comunicar à PARTE PROPRIETÁRIA, em prazo razoável, a inadimplência do locatário e as providências adotadas; (e) zelar pelo cumprimento do contrato de locação pelo locatário, notificando-o das infrações de que tiver conhecimento.</p>
+
+<h2>4. OBRIGAÇÕES DA PARTE PROPRIETÁRIA</h2>
+<p>4.1. Constituem obrigações da PARTE PROPRIETÁRIA: (a) fornecer à ADMINISTRADORA a documentação do imóvel e as informações necessárias à administração da locação; (b) arcar com os encargos que a lei ou o contrato de locação atribuam ao locador, inclusive despesas extraordinárias de condomínio; (c) comunicar previamente à ADMINISTRADORA eventual intenção de alienar o imóvel, observado o direito de preferência do locatário previsto no art. 27 da Lei nº 8.245/91; (d) não receber diretamente do locatário valores relativos à locação administrada sem prévia comunicação à ADMINISTRADORA.</p>
+
+<h2>5. REMUNERAÇÃO</h2>
+<p>5.1. Pela administração ora contratada, a ADMINISTRADORA fará jus à taxa de administração de {{config.taxa_admin_percent}}% ({{numeroExtenso config.taxa_admin_percent}} por cento) sobre os aluguéis e encargos efetivamente recebidos, retida por ocasião de cada repasse.</p>
+{{#if (gt comissao.taxa_locacao_percent 0)}}
+<p>5.2. Pela intermediação da locação inicial, será devida à ADMINISTRADORA, por uma única vez, taxa de locação equivalente a {{comissao.taxa_locacao_percent}}% ({{numeroExtenso comissao.taxa_locacao_percent}} por cento) do primeiro aluguel, retida do primeiro repasse.</p>
+{{/if}}
+
+<h2>6. REPASSE</h2>
+<p>6.1. A ADMINISTRADORA repassará à PARTE PROPRIETÁRIA os valores recebidos do locatário, deduzidas a remuneração prevista na cláusula 5ª e as despesas autorizadas, {{#if (existe config.repasse_texto)}}{{config.repasse_texto}}{{else}}em até 5 (cinco) dias úteis após o efetivo recebimento{{/if}}.</p>
+<p>6.2. O repasse fica condicionado ao efetivo pagamento pelo locatário — a ADMINISTRADORA não responde pela inadimplência do locatário, salvo ajuste expresso em contrário.</p>
+{{#if (eq fiscal.regime_ir "retem_imobiliaria")}}
+<p>6.3. A ADMINISTRADORA promoverá a retenção e o recolhimento do Imposto de Renda incidente sobre os aluguéis, na forma da legislação vigente, deduzindo-o do valor repassado e fornecendo à PARTE PROPRIETÁRIA os comprovantes e o informe anual de rendimentos.</p>
+{{else}}
+<p>6.3. O recolhimento do Imposto de Renda incidente sobre os aluguéis (carnê-leão ou apuração própria) é de responsabilidade da PARTE PROPRIETÁRIA, fornecendo a ADMINISTRADORA o demonstrativo anual dos valores repassados.</p>
+{{/if}}
+
+<h2>7. VIGÊNCIA</h2>
+<p>7.1. O presente contrato vigorará {{#if (gt aluguel.vigencia_meses 0)}}pelo prazo de {{aluguel.vigencia_meses}} ({{numeroExtenso aluguel.vigencia_meses}}) meses{{#if (existe config.vigencia_inicio_texto)}}, a contar de {{config.vigencia_inicio_texto}}{{/if}}{{#if (existe config.vigencia_fim_texto)}} e com término fixado em {{config.vigencia_fim_texto}}{{/if}}{{else}}pelo prazo da locação administrada{{/if}}, prorrogando-se automaticamente enquanto vigorar a locação do imóvel administrado, inclusive em suas prorrogações legais ou convencionais.</p>
+
+{{#if config.administracao_exclusiva}}
+<h2>8. EXCLUSIVIDADE</h2>
+<p>8.1. A administração ora contratada é exercida em caráter de exclusividade: durante a vigência deste contrato, a PARTE PROPRIETÁRIA não poderá contratar terceiros para administrar a locação do imóvel objeto deste instrumento, nem praticar diretamente os atos de administração aqui delegados sem prévia anuência da ADMINISTRADORA.</p>
+{{/if}}
+
+<h2>9. RESCISÃO</h2>
+<p>9.1. Qualquer das partes poderá denunciar o presente contrato mediante notificação escrita com antecedência mínima de 30 (trinta) dias, sem prejuízo da conclusão dos repasses e da prestação de contas relativos aos valores recebidos até a data da rescisão.</p>
+<p>9.2. A parte que descumprir qualquer das cláusulas do presente contrato ficará sujeita à multa equivalente a 3 (três) vezes a remuneração mensal média percebida pela ADMINISTRADORA nos últimos 12 (doze) meses ou no período de vigência, se menor, sem prejuízo das perdas e danos apuradas.</p>
+
+<h2>10. CONDIÇÕES GERAIS</h2>
+<p>10.1. O presente contrato não estabelece vínculo empregatício ou societário entre as partes, tampouco solidariedade da ADMINISTRADORA pelas obrigações do locatário ou da PARTE PROPRIETÁRIA.</p>
+<p>10.2. As comunicações entre as partes far-se-ão por escrito, admitida a mensagem enviada ao endereço eletrônico indicado no preâmbulo.</p>
+<p>10.3. Quaisquer questões oriundas do presente contrato serão dirimidas no Foro {{#if (existe config.foro_texto)}}da comarca de {{config.foro_texto}}{{else}}da comarca de localização do imóvel{{/if}}, eleito pelas partes como o único competente para tal, com renúncia a qualquer outro, por mais privilegiado que seja ou possa vir a ser.</p>
+
+<p>E por estarem justos e acertados, assinam este instrumento, em 02 (duas) vias de igual teor e forma, na presença de duas testemunhas abaixo nomeadas.</p>
+
+<p style="margin-top: 24pt;">{{#if (existe config.municipio_imovel)}}{{config.municipio_imovel}}, {{/if}}{{#if (existe config.data_assinatura)}}{{dataExtenso config.data_assinatura}}{{/if}}.</p>
+
+{{#each locadores}}
+<p style="margin-top: 36pt; text-align: center;">____________________________________________<br>{{#if (eq this.tipo_pessoa "fisica")}}{{this.nome}}{{else}}{{this.razao_social}}{{/if}}<br>PARTE PROPRIETÁRIA</p>
+{{/each}}
+
+<p style="margin-top: 36pt; text-align: center;">____________________________________________<br>{{config.administradora_nome}}<br>ADMINISTRADORA</p>
+
+<p style="margin-top: 36pt; text-align: center;">____________________________________________<br>Nome:<br>CPF:<br>Testemunha</p>
+
+<p style="margin-top: 36pt; text-align: center;">____________________________________________<br>Nome:<br>CPF:<br>Testemunha</p>
+
+<!-- CLAUSE_SLOT:ADM_LOC -->
+
+</div>

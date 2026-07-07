@@ -10,6 +10,7 @@ import { EnvelopeCard } from "@/components/pipeline/SignaturesTab";
 import {
   SendLeaseEnvelopeDialog,
   type LeaseSignerData,
+  type LeaseEnvelopeVariant,
 } from "@/components/locacao/SendLeaseEnvelopeDialog";
 import { cn } from "@/lib/utils";
 
@@ -19,6 +20,10 @@ interface LeaseSignaturesTabProps {
   /** Partes do contrato (locador/locatário/fiador) pra popup de envio. Quando
    *  ausente, cai no envio direto (deriva do dataJson no servidor). */
   data?: LeaseSignerData;
+  /** Instrumento sendo assinado — locação (default) ou administração. */
+  variant?: LeaseEnvelopeVariant;
+  /** Nome da org pra pré-preencher a linha da imobiliária (variant administracao). */
+  imobiliaria?: { nome?: string };
 }
 
 /**
@@ -36,6 +41,8 @@ export function LeaseSignaturesTab({
   contractId,
   contractStatus,
   data,
+  variant = "locacao",
+  imobiliaria,
 }: LeaseSignaturesTabProps) {
   const { envelopes, loading, refetch } = useEnvelopePolling(contractId);
   const [sending, setSending] = useState(false);
@@ -188,6 +195,8 @@ export function LeaseSignaturesTab({
           contractId={contractId}
           contractStatus={contractStatus}
           data={data}
+          variant={variant}
+          imobiliaria={imobiliaria}
           onSent={refetch}
         />
       )}

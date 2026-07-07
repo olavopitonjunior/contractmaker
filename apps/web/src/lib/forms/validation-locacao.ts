@@ -1,4 +1,8 @@
 import { z } from "zod";
+import {
+  collectPartyFormatIssues,
+  isValidBirthdate,
+} from "@/lib/forms/field-formats";
 
 // ============================================================================
 // Locação — schema Zod (schemaType "locacao_residencial_v1").
@@ -353,6 +357,106 @@ export function schemaForLocacaoType(schemaType: string) {
   return schemaType === LOCACAO_COMERCIAL_SCHEMA_TYPE
     ? dadosLocacaoComercialSchema
     : dadosLocacaoSchema;
+}
+
+// ============================================================================
+// Guarda de FINALIZE (não altera os schemas base, que são .parse()'d por
+// import/OCR/testes com dados parciais). Roda SÓ no finalize do form público —
+// obrigatoriedade dura (endereço do imóvel, valor, vigência) + formato quando
+// preenchido (CPF/CNPJ/CEP/nascimento via field-formats). Não bloqueia a
+// geração: os issues são surfaced na resposta pra correção no editor (mesmo
+// contrato do schema base). Ver memórias feedback_form_format_rules e
+// project_form_hybrid_guard.
+// ============================================================================
+type FinalizeIssue = { path: string; message: string };
+
+const isBlankStr = (v: unknown): boolean =>
+  v === null || v === undefined || String(v).trim() === "";
+
+export function collectLocacaoFinalizeIssues(
+  data: Record<string, unknown>
+): FinalizeIssue[] {
+  const issues: FinalizeIssue[] = [];
+
+  // Endereço do imóvel — obrigatório no finalize (senão o contrato sai
+  // "localizado(a) na , nº , /"). Descrição já é obrigatória no schema base.
+  const imovel = (data.imovel as Record<string, unknown> | undefined) ?? {};
+  for (const [field, label] of [
+    ["rua", "Logradouro (rua) do imóvel"],
+    ["numero", "Número do imóvel"],
+    ["cidade", "Cidade do imóvel"],
+    ["uf", "UF do imóvel"],
+  ] as const) {
+    if (isBlankStr(imovel[field])) {
+      issues.push({ path: `imovel.${field}`, message: `${label} é obrigatório.` });
+    }
+  }
+
+  // Valor do aluguel > 0.
+  const aluguel = (data.aluguel as Record<string, unknown> | undefined) ?? {};
+  if (!(Number(aluguel.valor) > 0)) {
+    issues.push({
+      path: "aluguel.valor",
+      message: "Informe o valor do aluguel (maior que zero).",
+    });
+  }
+
+  // Início da vigência — obrigatório e, quando preenchido, data válida.
+  if (isBlankStr(aluguel.vigencia_inicio)) {
+    issues.push({
+      path: "aluguel.vigencia_inicio",
+      message: "Informe a data de início da vigência.",
+    });
+  } else if (!isValidBirthdate(String(aluguel.vigencia_inicio), new Date(9999, 0, 1))) {
+    // Reusa o parser de data (ISO/BR, calendário válido); teto no ano 9999
+    // pra não rejeitar vigência futura (isValidBirthdate proíbe futuro).
+    issues.push({
+      path: "aluguel.vigencia_inicio",
+      message: "Data de início da vigência inválida (use AAAA-MM-DD).",
+    });
+  }
+
+  // Formato das partes (CPF/CNPJ/CEP/telefone) quando preenchido.
+  const parties: Array<[string, unknown]> = [];
+  (data.locadores as unknown[] | undefined)?.forEach((p, i) =>
+    parties.push([`locadores.${i}`, p])
+  );
+  (data.locatarios as unknown[] | undefined)?.forEach((p, i) =>
+    parties.push([`locatarios.${i}`, p])
+  );
+  for (const [prefix, parte] of parties) {
+    for (const issue of collectPartyFormatIssues(parte as Record<string, unknown>)) {
+      issues.push({ path: `${prefix}.${issue.path}`, message: issue.message });
+    }
+  }
+
+  // Fiador completo quando garantia = fiador (CPF + endereço, além do nome que
+  // o schema base já exige).
+  const garantia = data.garantia as
+    | { tipo?: string; fiador?: Record<string, unknown> }
+    | undefined;
+  if (garantia?.tipo === "fiador") {
+    const fiador = garantia.fiador ?? {};
+    const isPJ = fiador.tipo_pessoa === "juridica";
+    if (!isPJ) {
+      if (isBlankStr(fiador.cpf)) {
+        issues.push({ path: "garantia.fiador.cpf", message: "CPF do fiador é obrigatório." });
+      }
+      if (isBlankStr(fiador.endereco)) {
+        issues.push({
+          path: "garantia.fiador.endereco",
+          message: "Endereço do fiador é obrigatório.",
+        });
+      }
+    } else if (isBlankStr(fiador.cnpj)) {
+      issues.push({ path: "garantia.fiador.cnpj", message: "CNPJ do fiador é obrigatório." });
+    }
+    for (const issue of collectPartyFormatIssues(fiador)) {
+      issues.push({ path: `garantia.fiador.${issue.path}`, message: issue.message });
+    }
+  }
+
+  return issues;
 }
 
 export function stepLabelsForLocacaoType(schemaType: string) {

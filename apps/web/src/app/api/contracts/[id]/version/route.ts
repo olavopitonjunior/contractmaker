@@ -142,6 +142,10 @@ export async function POST(
       templateOverride: current.templateOverride,
       status: current.status,
       isLatest: true,
+      // Preserva a natureza do instrumento — sem isso, versionar um aditamento
+      // ou contrato de administração criaria um kind="contract" (default) e
+      // colidiria com o latest do instrumento principal.
+      kind: current.kind,
       parentVersionId: current.id,
       ...(copiedDocId
         ? {
