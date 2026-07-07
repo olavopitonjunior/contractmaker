@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/db/prisma";
 import { buildOrgConnectClient, ORG_GOOGLE_SCOPES } from "@/lib/google/org-oauth";
 import { signOAuthState } from "@/lib/google/oauth-state";
@@ -16,8 +17,10 @@ export async function GET(req: NextRequest) {
   if (!org) {
     return NextResponse.json({ error: "No organization" }, { status: 400 });
   }
+  // Id efetivo (owner impersonado sob "testar como"; senão o próprio usuário).
+  const effUserId = await getEffectiveUserId(session.user.id);
   const membership = await prisma.orgMembership.findFirst({
-    where: { userId: session.user.id, orgId: org.id },
+    where: { userId: effUserId, orgId: org.id },
     select: { role: true },
   });
   if (!membership || !["owner", "admin"].includes(membership.role)) {
@@ -35,7 +38,7 @@ export async function GET(req: NextRequest) {
     access_type: "offline",
     prompt: "consent",
     scope: [...ORG_GOOGLE_SCOPES, "openid", "email"],
-    state: signOAuthState({ orgId: org.id, userId: session.user.id }),
+    state: signOAuthState({ orgId: org.id, userId: effUserId }),
   });
 
   return NextResponse.redirect(url);

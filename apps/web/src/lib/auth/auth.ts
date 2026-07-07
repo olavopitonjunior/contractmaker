@@ -7,6 +7,7 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { sendEmail } from "@/lib/email/client";
 import { MagicLinkEmail } from "@/lib/email/templates/magic-link";
+import { getImpersonationFor } from "./impersonation";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -138,6 +139,14 @@ export async function getUserOrg(
   userId: string,
   opts?: { subdomainHint?: string | null }
 ) {
+  // Overlay de impersonation: super_admin "testando como" o dono de um tenant
+  // enxerga a org impersonada (ignora o subdomainHint). auth() não é sobreposto,
+  // então `userId` aqui é sempre o admin real — a validação mora em getImpersonationFor.
+  const imp = await getImpersonationFor(userId);
+  if (imp) {
+    return prisma.organization.findUnique({ where: { id: imp.orgId } });
+  }
+
   const subdomain = opts?.subdomainHint;
   if (subdomain) {
     const scoped = await prisma.orgMembership.findFirst({

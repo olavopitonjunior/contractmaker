@@ -155,8 +155,9 @@ export function AdminOrgsClient({ orgs, canCreate }: { orgs: OrgRow[]; canCreate
         toast.error(data.error ?? "Falha ao impersonar");
         return;
       }
-      toast.success("Impersonando — abrindo o app como o tenant…");
-      window.location.href = "/pipeline";
+      toast.success("Testando como o tenant — abrindo o app…");
+      // "/" roteia por módulo (tenant só-locação cai em /locacao).
+      window.location.href = "/";
     } finally {
       setBusy(null);
     }
@@ -234,7 +235,7 @@ export function AdminOrgsClient({ orgs, canCreate }: { orgs: OrgRow[]; canCreate
                         <Link href={`/admin/orgs/${o.id}/modules`}>Módulos</Link>
                       </Button>
                       <Button size="sm" variant="outline" disabled={busy === o.id} onClick={() => { setImpersonateOrg(o); setReason(""); }}>
-                        Impersonar
+                        Testar como
                       </Button>
                     </div>
                   </td>
@@ -248,16 +249,16 @@ export function AdminOrgsClient({ orgs, canCreate }: { orgs: OrgRow[]; canCreate
       <Dialog open={impersonateOrg != null} onOpenChange={(o) => !o && setImpersonateOrg(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Impersonar {impersonateOrg?.name}</DialogTitle>
+            <DialogTitle>Testar como {impersonateOrg?.name}</DialogTitle>
             <DialogDescription>
-              A sessão de impersonação é auditada e expira em 1h. Informe o motivo.
+              Você vai operar este tenant como o dono. A sessão é auditada e expira em 1h. Informe o motivo.
             </DialogDescription>
           </DialogHeader>
           <Input placeholder="Motivo (auditado)" value={reason} onChange={(e) => setReason(e.target.value)} autoFocus />
           <DialogFooter>
             <Button variant="ghost" onClick={() => setImpersonateOrg(null)}>Cancelar</Button>
             <Button onClick={confirmImpersonate} disabled={busy === impersonateOrg?.id}>
-              {busy === impersonateOrg?.id ? "…" : "Impersonar"}
+              {busy === impersonateOrg?.id ? "…" : "Testar como"}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/db/prisma";
 import { uploadFileAsGoogleDoc } from "@/lib/google/upload-file-as-gdoc";
 import { isGoogleDocsFeatureEnabled } from "@/lib/google/client";
@@ -39,8 +40,10 @@ export async function POST(req: NextRequest) {
   if (!org) {
     return NextResponse.json({ error: "No organization" }, { status: 400 });
   }
+  // Id efetivo (owner impersonado sob "testar como"; senão o próprio usuário).
+  const effUserId = await getEffectiveUserId(session.user.id);
   const membership = await prisma.orgMembership.findFirst({
-    where: { userId: session.user.id, orgId: org.id },
+    where: { userId: effUserId, orgId: org.id },
     select: { role: true },
   });
   if (!membership || !["owner", "admin"].includes(membership.role)) {
