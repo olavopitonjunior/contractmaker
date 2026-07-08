@@ -51,12 +51,19 @@ export async function autoPromoteDealOnContractSigned(
         orgId: true,
         source: true,
         dealId: true,
+        contract: { select: { kind: true } },
       },
     });
     if (!envelope) {
       return { promoted: false, reason: "envelope_not_found" };
     }
     if (envelope.source !== "contract") {
+      return { promoted: false, reason: "not_contract_envelope" };
+    }
+    // Só o instrumento principal move o funil — assinar o contrato de
+    // administração (imobiliária↔proprietário) ou um aditamento não é
+    // "contrato assinado" pro pipeline.
+    if (envelope.contract && envelope.contract.kind !== "contract") {
       return { promoted: false, reason: "not_contract_envelope" };
     }
 

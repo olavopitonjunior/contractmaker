@@ -61,7 +61,7 @@ export async function regressDealStageAfterChargeCancel(
   }
 
   const closedEnvelopes = await prisma.envelope.count({
-    where: { dealId, source: "contract", status: "closed" },
+    where: { dealId, source: "contract", status: "closed", contract: { kind: "contract" } },
   });
   const targetName =
     closedEnvelopes > 0 ? "Contrato assinado" : "Enviado para assinatura";

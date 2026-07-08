@@ -1629,6 +1629,35 @@ async function handleSuggestImprovements(
   const data = context.dataJson;
   const pagamento = data.pagamento as Record<string, unknown> | undefined;
 
+  // Locação tem shape/regras próprias (Lei 8.245/91) — as heurísticas de venda
+  // abaixo (financiamento/FGTS/sócio PJ/comissão) não se aplicam.
+  const isLocacao =
+    Array.isArray(data.locadores) || Array.isArray(data.locatarios);
+  if (isLocacao) {
+    const garantia = data.garantia as
+      | { tipo?: string; caucao_meses?: number }
+      | undefined;
+    if (!garantia?.tipo || garantia.tipo === "sem_garantia") {
+      suggestions.push({
+        category: "garantia",
+        title: "Definir modalidade de garantia locatícia (art. 37)",
+        reason:
+          "Locação sem garantia definida. A Lei 8.245/91 (art. 37) admite caução, fiança, seguro-fiança ou cessão fiduciária — defina UMA (a cumulação é vedada pelo § único).",
+        importance: "high",
+      });
+    }
+    if (!data.vistoria_ref) {
+      suggestions.push({
+        category: "compromisso",
+        title: "Vistoria de entrada (art. 22, III / art. 23, III)",
+        reason:
+          "Sem laudo de vistoria de entrada anexo, fica difícil apurar o estado do imóvel na saída. Registre a vistoria inicial e referencie-a no contrato.",
+        importance: "medium",
+      });
+    }
+    return { totalSuggestions: suggestions.length, suggestions };
+  }
+
   // Check which clause bank groups are linked via DB
   const linkedClauses = await prisma.knowledgeItem.findMany({
     where: {

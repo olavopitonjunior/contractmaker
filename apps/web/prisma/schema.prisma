@@ -1009,10 +1009,13 @@ model Contract {
   isLatest            Boolean   @default(true)
   parentVersionId     String?
   // kind discrimina natureza do instrumento:
-  //   "contract"  → CCV original (default — retrocompat com rows existentes)
-  //   "addendum"  → aditamento contratual (parentVersionId aponta pro CCV)
-  //   "distrato"  → reservado pra fluxo futuro
+  //   "contract"      → CCV/locação original (default — retrocompat com rows existentes)
+  //   "addendum"      → aditamento contratual (parentVersionId aponta pro CCV)
+  //   "distrato"      → reservado pra fluxo futuro
+  //   "administracao" → contrato de administração de locação (imobiliária↔proprietário)
   // Aditamento herda dataJson + templateId + DocumentStyle do parent.
+  // Invariante: no máx 1 isLatest=true por (dealId, kind) — índice único parcial
+  // `Contract_dealId_kind_isLatest_unique` (migration 20260706100000).
   kind                String    @default("contract")
   // Google Docs migration (Phase 0+): when set, the contract content lives in
   // a Google Doc owned by the Contractmaker service account; htmlContent stays

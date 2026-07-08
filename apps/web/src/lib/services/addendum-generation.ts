@@ -180,24 +180,36 @@ export async function generateAddendumForDeal(
     // Não bloqueia — Contract é criado mesmo sem GoogleDoc (status=error)
   }
 
-  // Cria Contract kind="addendum"
-  const addendum = await prisma.contract.create({
-    data: {
-      dealId: input.dealId,
-      templateId: parent.templateId,
-      userId: input.userId,
-      version: 1,
-      dataJson: addendumData as never,
-      htmlContent: html,
-      status: "rascunho",
-      isLatest: true,
-      parentVersionId: parent.id,
-      kind: "addendum",
-      googleDocId,
-      googleDocUrl,
-      googleDocStatus: googleDocId ? "draft" : null,
-    },
-    select: { id: true },
+  // Cria Contract kind="addendum". O demote do addendum latest anterior roda
+  // na mesma transação — a invariante isLatest é por (dealId, kind), então um
+  // 2º aditamento sem o demote violaria o índice único parcial.
+  const addendum = await prisma.$transaction(async (tx) => {
+    const agg = await tx.contract.aggregate({
+      where: { dealId: input.dealId, kind: "addendum" },
+      _max: { version: true },
+    });
+    await tx.contract.updateMany({
+      where: { dealId: input.dealId, kind: "addendum", isLatest: true },
+      data: { isLatest: false },
+    });
+    return tx.contract.create({
+      data: {
+        dealId: input.dealId,
+        templateId: parent.templateId,
+        userId: input.userId,
+        version: (agg._max.version ?? 0) + 1,
+        dataJson: addendumData as never,
+        htmlContent: html,
+        status: "rascunho",
+        isLatest: true,
+        parentVersionId: parent.id,
+        kind: "addendum",
+        googleDocId,
+        googleDocUrl,
+        googleDocStatus: googleDocId ? "draft" : null,
+      },
+      select: { id: true },
+    });
   });
 
   // Audit

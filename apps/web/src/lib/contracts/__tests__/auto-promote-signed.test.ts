@@ -95,6 +95,25 @@ describe("autoPromoteDealOnContractSigned", () => {
     expect(mockDealUpdate).not.toHaveBeenCalled();
   });
 
+  it("não promove envelope do contrato de administração (kind=administracao)", async () => {
+    mockEnvelopeFindUnique.mockResolvedValueOnce({
+      id: "env-1",
+      orgId: "org-1",
+      source: "contract",
+      dealId: "deal-1",
+      contract: { kind: "administracao" },
+    } as never);
+
+    const result = await autoPromoteDealOnContractSigned("env-1");
+
+    expect(result).toEqual({
+      promoted: false,
+      reason: "not_contract_envelope",
+    });
+    expect(mockDealUpdate).not.toHaveBeenCalled();
+    expect(mockDealFindUnique).not.toHaveBeenCalled();
+  });
+
   it("é idempotente quando deal já está em 'Contrato assinado'", async () => {
     mockEnvelopeFindUnique.mockResolvedValueOnce({
       id: "env-1",

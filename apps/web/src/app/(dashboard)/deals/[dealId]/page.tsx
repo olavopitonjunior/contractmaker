@@ -27,7 +27,7 @@ export default async function DealPage({
       },
       certidaoJobs: { orderBy: { createdAt: "desc" }, take: 1 },
       envelopes: {
-        where: { source: "contract", status: "closed" },
+        where: { source: "contract", status: "closed", contract: { kind: "contract" } },
         select: { closedAt: true },
         orderBy: { closedAt: "desc" },
         take: 1,

@@ -157,7 +157,7 @@ export async function POST(req: NextRequest) {
             include: {
               form: { select: { id: true, token: true } },
               contracts: {
-                where: { isLatest: true },
+                where: { isLatest: true, kind: "contract" },
                 select: { id: true, googleDocUrl: true },
               },
             },

@@ -16,6 +16,7 @@ export default async function ContractsPage() {
     where: {
       userId: session.user.id,
       isLatest: true,
+      kind: "contract",
     },
     orderBy: { updatedAt: "desc" },
     include: {

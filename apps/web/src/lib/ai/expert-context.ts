@@ -114,15 +114,33 @@ async function loadSimilarContracts(context: AgentContext) {
 }
 
 async function loadTopClauses(context: AgentContext) {
-  // Filtra por modalidade quando relevante (G4 só faz sentido em financiamento).
-  const isFinanciamento = context.templateModalidade === "financiamento";
+  const modalidade = context.templateModalidade ?? "";
+  const isLocacao =
+    context.dealKind === "locacao" || modalidade.startsWith("locacao");
+
+  // As cláusulas de locação (seed-locacao-clauses) usam subcategoria/tags e
+  // têm groupCode NULL — o filtro antigo `groupCode: { not: "G4" }` as excluía
+  // (SQL: NULL <> 'G4' não é verdadeiro), então nunca entravam no contexto de
+  // um contrato de locação. Agora selecionamos por família:
+  //   - locação → cláusulas taggeadas "locacao" (groupCode null);
+  //   - venda   → grupos G1-G6, ocultando G4 fora de financiamento.
+  const clauseFilter: object = isLocacao
+    ? { tags: { has: "locacao" } }
+    : {
+        groupCode: {
+          in:
+            modalidade === "financiamento"
+              ? ["G1", "G2", "G3", "G4", "G5", "G6"]
+              : ["G1", "G2", "G3", "G5", "G6"],
+        },
+      };
+
   return prisma.knowledgeItem.findMany({
     where: {
       orgId: context.orgId,
       category: "clause",
       status: "approved",
-      // Em a_vista, ignora G4 (financiamento) — não é aplicável.
-      ...(isFinanciamento ? {} : { groupCode: { not: "G4" } }),
+      ...clauseFilter,
     },
     select: {
       id: true,

@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ContractEditorPage } from "@/components/contracts/ContractEditorPage";
 import { LeaseSignaturesTab } from "@/components/locacao/LeaseSignaturesTab";
+import { LocacaoAdminContractTab } from "@/components/locacao/LocacaoAdminContractTab";
 import type { LeaseSignerData } from "@/components/locacao/SendLeaseEnvelopeDialog";
 import { LocacaoDealHeaderActions } from "@/components/locacao/LocacaoDealHeaderActions";
 import { LocacaoDadosTab } from "@/components/locacao/LocacaoDadosTab";
@@ -32,7 +33,7 @@ import {
   VistoriaTab,
   type InspectionView,
 } from "@/components/locacao/lease-detail/VistoriaTab";
-import { FileText, ExternalLink, Receipt, Building2 } from "lucide-react";
+import { FileText, ExternalLink, Receipt, Building2, FileSignature } from "lucide-react";
 import { toast } from "sonner";
 
 type ContractProp = React.ComponentProps<typeof ContractEditorPage>["contract"];
@@ -72,6 +73,11 @@ interface LocacaoDealDetailProps {
   };
   contract: ContractProp | null;
   versions: VersionsProp;
+  /** Contrato de administração (kind="administracao") latest — aba Administração. */
+  adminContract: ContractProp | null;
+  adminVersions: VersionsProp;
+  /** Nome da org (administradora) pra pré-preencher o signatário da imobiliária. */
+  orgName?: string;
   lease: LeaseProp | null;
   /** Consentimento LGPD Serasa já registrado no deal. */
   serasaConsent?: boolean;
@@ -119,6 +125,9 @@ export function LocacaoDealDetail({
   deal,
   contract,
   versions,
+  adminContract,
+  adminVersions,
+  orgName,
   lease,
   serasaConsent = false,
   serasaJobs = [],
@@ -132,6 +141,7 @@ export function LocacaoDealDetail({
   const VALID_TABS = [
     "dados",
     "contrato",
+    "administracao",
     "documentos",
     "assinaturas",
     "garantias",
@@ -146,10 +156,13 @@ export function LocacaoDealDetail({
 
   const isLost = deal.lostAt !== null;
   const inAprovacao = deal.stageName === "Em Aprovação";
+  // Lease assinado e administração ainda não ativada — momento do handoff.
   const readyForAdm =
     (deal.stageName === "Assinado" || deal.stageName === "Cobrança Gerada") &&
     lease !== null &&
     lease.status !== "ativo";
+  const hasAdminContract = adminContract !== null;
+  const adminApproved = adminContract?.status === "aprovado";
 
   const locadores =
     (deal.dataJson.locadores as { nome?: string; razao_social?: string }[] | undefined) ?? [];
@@ -178,6 +191,14 @@ export function LocacaoDealDetail({
     } finally {
       setActivating(false);
     }
+  };
+
+  // Signatários do contrato de administração: proprietários (locadores) +
+  // imobiliária (montada no dialog). Reusa o shape de LeaseSignerData.
+  const adminSignerData: LeaseSignerData = {
+    locadores: (deal.dataJson.locadores as LeaseSignerData["locadores"]) ?? [],
+    locatarios: [],
+    garantia: null,
   };
 
   return (
@@ -230,7 +251,10 @@ export function LocacaoDealDetail({
         />
       )}
 
-      {/* Handoff pra ADM: contrato assinado e administração ainda não criada */}
+      {/* Handoff pra ADM: contrato de locação assinado e administração não ativada.
+          O banner orquestra o contrato de administração (opcional) + a ativação
+          do lease. Ativar o lease NÃO exige o contrato de administração
+          assinado — é induzido, não obrigatório (gate opcional). */}
       {readyForAdm && !isLost && (
         <div className="rounded-lg border border-emerald-300 bg-emerald-50 dark:bg-emerald-950/20 px-4 py-3">
           <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -241,18 +265,45 @@ export function LocacaoDealDetail({
                   Contrato assinado — pronto pra administração
                 </p>
                 <p className="text-sm text-emerald-700/80 dark:text-emerald-400/80">
-                  Criar a administração ativa o contrato e habilita as cobranças
-                  mensais de aluguel.
+                  {!hasAdminContract
+                    ? "Formalize a administração com o proprietário (opcional) e ative o contrato para habilitar as cobranças mensais."
+                    : !adminApproved
+                      ? "Conclua o contrato de administração na aba Administração, ou ative direto para habilitar as cobranças mensais."
+                      : "Ative o contrato para habilitar as cobranças mensais de aluguel."}
                 </p>
               </div>
             </div>
-            <Button
-              onClick={criarAdministracao}
-              disabled={activating}
-              className="bg-emerald-600 hover:bg-emerald-700"
-            >
-              {activating ? "Criando..." : "Criar administração"}
-            </Button>
+            <div className="flex items-center gap-2 flex-wrap">
+              {!hasAdminContract ? (
+                <Button
+                  variant="outline"
+                  onClick={() => setTab("administracao")}
+                  className="border-emerald-400 text-emerald-700 hover:bg-emerald-100"
+                >
+                  <FileSignature className="h-4 w-4 mr-1.5" />
+                  Contrato de administração
+                </Button>
+              ) : !adminApproved ? (
+                <Button
+                  variant="outline"
+                  onClick={() => setTab("administracao")}
+                  className="border-emerald-400 text-emerald-700 hover:bg-emerald-100"
+                >
+                  Continuar na aba Administração
+                </Button>
+              ) : null}
+              <Button
+                onClick={criarAdministracao}
+                disabled={activating}
+                className="bg-emerald-600 hover:bg-emerald-700"
+              >
+                {activating
+                  ? "Ativando..."
+                  : hasAdminContract
+                    ? "Ativar administração"
+                    : "Ativar sem contrato"}
+              </Button>
+            </div>
           </div>
         </div>
       )}
@@ -261,6 +312,7 @@ export function LocacaoDealDetail({
         <TabsList className="flex-wrap">
           <TabsTrigger value="dados">Dados</TabsTrigger>
           <TabsTrigger value="contrato">Contrato</TabsTrigger>
+          <TabsTrigger value="administracao">Administração</TabsTrigger>
           <TabsTrigger value="documentos">Documentos</TabsTrigger>
           <TabsTrigger value="assinaturas">Assinaturas</TabsTrigger>
           {/* Garantias/Vistoria/Seguros fazem parte da jornada comercial do deal
@@ -297,6 +349,17 @@ export function LocacaoDealDetail({
               </CardContent>
             </Card>
           )}
+        </TabsContent>
+
+        {/* ADMINISTRAÇÃO — contrato imobiliária ↔ proprietário (gerar/editar/assinar) */}
+        <TabsContent value="administracao" className="mt-4">
+          <LocacaoAdminContractTab
+            dealId={deal.id}
+            adminContract={adminContract}
+            adminVersions={adminVersions}
+            signerData={adminSignerData}
+            imobiliariaNome={orgName}
+          />
         </TabsContent>
 
         {/* DOCUMENTOS — pasta do deal com classificar/extrair/excluir (paridade vendas) */}

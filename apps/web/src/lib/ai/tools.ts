@@ -119,7 +119,7 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
         },
         groupCode: {
           type: "string",
-          description: "Filtro G1..G6 quando usar clauseQuery (opcional, mas recomendado pra precisão).",
+          description: "Filtro G1..G6 quando usar clauseQuery (opcional, mas recomendado pra precisão). Só venda — cláusulas de locação são achadas pelo próprio clauseQuery (busca semântica), sem groupCode.",
         },
         afterSection: {
           type: "string",
@@ -272,7 +272,7 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
           type: "string",
           enum: ["G1", "G2", "G3", "G4", "G5", "G6"],
           description:
-            "Filtro extra de grupo do banco de cláusulas — só aplica quando category='clause'. G1 (sinal/arras), G2 (posse/imissão), G3 (rescisão), G4 (financiamento), G5 (comissão), G6 (declarações).",
+            "Filtro extra de grupo do banco de cláusulas de VENDA — só aplica quando category='clause'. G1 (sinal/arras), G2 (posse/imissão), G3 (rescisão), G4 (financiamento), G5 (comissão), G6 (declarações). Cláusulas de LOCAÇÃO não têm groupCode: filtre por texto no próprio query (ex.: 'garantia caução', 'reajuste IGP-M', 'vistoria de entrada').",
         },
         topK: {
           type: "number",
@@ -317,7 +317,7 @@ export const AGENT_TOOLS: Anthropic.Tool[] = [
         groupCode: {
           type: "string",
           enum: ["G1", "G2", "G3", "G4", "G5", "G6"],
-          description: "Grupo do banco padronizado a que pertence",
+          description: "Grupo do banco padronizado de venda (G1..G6). Cláusulas de locação usam subcategoria/tags, sem groupCode — omita aqui.",
         },
         category: {
           type: "string",

@@ -25,7 +25,10 @@ const SEED = process.argv.includes("--seed");
 const UPDATE_METADATA = process.argv.includes("--update-metadata");
 
 interface TemplateFile {
-  modalidade: "a_vista" | "financiamento" | "locacao" | "locacao_comercial";
+  // "administracao_locacao" deliberadamente NÃO começa com "locacao" — o
+  // fallback de selectLocacaoTemplate casa startsWith("locacao") e pegaria o
+  // contrato de administração como template de locação.
+  modalidade: "a_vista" | "financiamento" | "locacao" | "locacao_comercial" | "administracao_locacao";
   filename: string;
   canonicalName: string;
   canonicalDescription: string;
@@ -63,6 +66,14 @@ const TEMPLATES: TemplateFile[] = [
     canonicalDescription:
       "Instrumento particular de contrato de locação não residencial (comercial) com administração - Lei nº 8.245/91",
     schemaType: "locacao_comercial_v1",
+  },
+  {
+    modalidade: "administracao_locacao",
+    filename: "administracao_locacao_v1.hbs",
+    canonicalName: "Administração de Locação",
+    canonicalDescription:
+      "Instrumento particular de contrato de administração de locação de imóvel (imobiliária ↔ proprietário) - CC arts. 653-666 e Lei nº 8.245/91",
+    schemaType: "administracao_locacao_v1",
   },
 ];
 
