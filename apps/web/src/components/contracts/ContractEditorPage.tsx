@@ -74,11 +74,21 @@ interface Version {
 interface ContractEditorPageProps {
   contract: ContractData;
   versions: Version[];
+  /** CTA "Enviar para assinatura" no banner de contrato aprovado.
+   *  - `undefined` (default): link para a aba Assinaturas do DealDetail de
+   *    VENDAS (`/deals/[id]?tab=assinaturas`).
+   *  - `false`: esconde o CTA (quando o container embute a própria superfície
+   *    de assinatura e não quer um CTA duplicado).
+   *  - `{ onClick, label }`: CTA customizado — usado em locação/administração
+   *    pra trocar de aba ou rolar até o `LeaseSignaturesTab` correto (senão o
+   *    operador cairia no módulo de vendas). */
+  signCta?: false | { onClick: () => void; label?: string };
 }
 
 export function ContractEditorPage({
   contract,
   versions,
+  signCta,
 }: ContractEditorPageProps) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
@@ -293,11 +303,17 @@ export function ContractEditorPage({
               </p>
             </div>
           </div>
-          <Button asChild size="sm" variant="outline">
-            <Link href={`/deals/${contract.dealId}?tab=assinaturas`}>
-              Enviar para assinatura
-            </Link>
-          </Button>
+          {signCta === undefined ? (
+            <Button asChild size="sm" variant="outline">
+              <Link href={`/deals/${contract.dealId}?tab=assinaturas`}>
+                Enviar para assinatura
+              </Link>
+            </Button>
+          ) : signCta === false ? null : (
+            <Button size="sm" variant="outline" onClick={signCta.onClick}>
+              {signCta.label ?? "Enviar para assinatura"}
+            </Button>
+          )}
         </div>
       )}
 

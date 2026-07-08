@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
@@ -43,6 +43,10 @@ export function LocacaoAdminContractTab({
 }: LocacaoAdminContractTabProps) {
   const router = useRouter();
   const [generating, setGenerating] = useState(false);
+  // Âncora da seção de assinatura — o CTA do banner de aprovado do editor rola
+  // até aqui (senão o CTA default do ContractEditorPage levaria à tela de
+  // VENDAS `/deals/[id]`, fora do fluxo de administração).
+  const signRef = useRef<HTMLDivElement>(null);
 
   const gerar = async () => {
     setGenerating(true);
@@ -95,15 +99,24 @@ export function LocacaoAdminContractTab({
 
   return (
     <div className="space-y-4">
-      <ContractEditorPage contract={adminContract} versions={adminVersions} />
-      <Separator />
-      <LeaseSignaturesTab
-        contractId={adminContract.id}
-        contractStatus={adminContract.status}
-        data={signerData}
-        variant="administracao"
-        imobiliaria={{ nome: imobiliariaNome }}
+      <ContractEditorPage
+        contract={adminContract}
+        versions={adminVersions}
+        signCta={{
+          onClick: () =>
+            signRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+        }}
       />
+      <Separator />
+      <div ref={signRef}>
+        <LeaseSignaturesTab
+          contractId={adminContract.id}
+          contractStatus={adminContract.status}
+          data={signerData}
+          variant="administracao"
+          imobiliaria={{ nome: imobiliariaNome }}
+        />
+      </div>
     </div>
   );
 }

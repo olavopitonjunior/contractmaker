@@ -123,8 +123,9 @@ export function LeaseSignaturesTab({
             Assinatura eletrônica
           </CardTitle>
           <p className="text-xs text-muted-foreground mt-1">
-            Revise os signatários (locador, locatário, fiador e testemunhas) na
-            popup antes de enviar.
+            {variant === "administracao"
+              ? "Revise os signatários (proprietário, imobiliária e testemunhas) na popup antes de enviar."
+              : "Revise os signatários (locador, locatário, fiador e testemunhas) na popup antes de enviar."}
           </p>
         </div>
         <div className="flex items-center gap-2">
