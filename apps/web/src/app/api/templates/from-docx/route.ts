@@ -13,13 +13,25 @@ const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const MAX_BYTES = 20 * 1024 * 1024;
 
-const MODALIDADES = ["locacao", "locacao_comercial", "a_vista", "financiamento"];
+const MODALIDADES = [
+  "locacao",
+  "locacao_comercial",
+  "a_vista",
+  "financiamento",
+  // Contrato de administração de locação (imobiliária ↔ proprietário). O modelo
+  // da imobiliária vira template engine="google_docs" igual aos demais; a
+  // geração (generateAdministracaoContractForDeal) copia o doc e substitui os
+  // placeholders via buildLocacaoPlaceholderMap (o deal de adm é um deal de
+  // locação, mesmo shape de dados).
+  "administracao_locacao",
+];
 
 const SCHEMA_TYPE_BY_MODALIDADE: Record<string, string> = {
   locacao: "locacao_residencial_v1",
   locacao_comercial: "locacao_comercial_v1",
   a_vista: "compra_venda_v2",
   financiamento: "compra_venda_v2",
+  administracao_locacao: "administracao_locacao_v1",
 };
 
 /**
