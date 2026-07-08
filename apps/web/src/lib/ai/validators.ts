@@ -40,9 +40,14 @@ export function validateCNPJ(cnpj: string): boolean {
 }
 
 export function validateContractData(
-  dataJson: Record<string, unknown>
+  dataJson: Record<string, unknown>,
+  // Natureza do instrumento. O contrato de administração de locação
+  // (kind="administracao") não tem a semântica de venda (pagamento, cônjuge,
+  // "Seção 8 multas / step 7 Comissão"), então pulamos essas checagens.
+  kind: string = "contract"
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
+  const isAdministracao = kind === "administracao";
 
   // --- Payment sum check ---
   const pagamento = dataJson.pagamento as Record<string, unknown> | undefined;
@@ -156,9 +161,11 @@ export function validateContractData(
     }
   }
 
-  // --- Empty config fields ---
+  // --- Empty config fields (venda/CCV) ---
+  // Pula no contrato de administração: sua Seção 8 é Exclusividade, não multas,
+  // e não há "step 7 Comissão e Config" no formulário de administração.
   const config = dataJson.config as Record<string, unknown> | undefined;
-  if (!config || !config.multa_penal_moratoria) {
+  if (!isAdministracao && (!config || !config.multa_penal_moratoria)) {
     issues.push({
       field: "config",
       severity: "warning",

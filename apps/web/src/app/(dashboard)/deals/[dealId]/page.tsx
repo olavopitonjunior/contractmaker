@@ -22,6 +22,10 @@ export default async function DealPage({
       },
       attachments: { orderBy: { createdAt: "desc" } },
       contracts: {
+        // Só o instrumento principal — sem isto, aditamentos (kind="addendum")
+        // e o contrato de administração de locação (kind="administracao")
+        // apareciam como "versões" do contrato na aba Contratos.
+        where: { kind: "contract" },
         include: { template: { select: { name: true } } },
         orderBy: { version: "desc" },
       },

@@ -73,7 +73,8 @@ export async function runContractApproval(
   }
 
   const issues = validateContractData(
-    contract.dataJson as Record<string, unknown>
+    contract.dataJson as Record<string, unknown>,
+    contract.kind
   );
   const errors = issues.filter((i) => i.severity === "error");
   const warnings = issues.filter((i) => i.severity === "warning");
