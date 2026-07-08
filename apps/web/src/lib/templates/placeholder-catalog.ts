@@ -13,7 +13,8 @@ export type PlaceholderModalidade =
   | "locacao"
   | "locacao_comercial"
   | "a_vista"
-  | "financiamento";
+  | "financiamento"
+  | "administracao_locacao";
 
 export interface PlaceholderDef {
   token: string;
@@ -28,6 +29,12 @@ export interface PlaceholderDef {
 const LOCACAO: PlaceholderModalidade[] = ["locacao", "locacao_comercial"];
 const VENDA: PlaceholderModalidade[] = ["a_vista", "financiamento"];
 const TODAS: PlaceholderModalidade[] = [...LOCACAO, ...VENDA];
+// Contrato de administração (imobiliária ↔ proprietário). Conjunto MÍNIMO e
+// seguro de tokens: só os que existem em buildLocacaoPlaceholderMap (senão o
+// cleanupOrphanPlaceholders apaga o token e o campo sai em branco). O restante
+// do modelo — administradora, taxa, repasse, foro, assinaturas — fica LITERAL
+// no doc da imobiliária (já vem baked no modelo).
+const ADMINISTRACAO: PlaceholderModalidade[] = ["administracao_locacao"];
 
 export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
   // ——— Compostos (server-side resolve loops/condicionais) ———
@@ -35,12 +42,12 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
     token: "locadores_qualificacao",
     label: "Qualificação do(s) locador(es)",
     description:
-      "Qualificação narrativa completa de todos os locadores (PF/PJ): nome, nacionalidade, estado civil, profissão, RG, CPF/CNPJ, endereço, e-mail.",
+      "Qualificação narrativa completa de todos os locadores (PF/PJ): nome, nacionalidade, estado civil, profissão, RG, CPF/CNPJ, endereço, e-mail. No contrato de administração, corresponde ao(à) CONTRATANTE / PARTE PROPRIETÁRIA.",
     example:
       "Helena Castro, brasileira, viúva, engenheira, portador(a) da cédula de identidade RG nº 11.222.333-4, inscrito(a) no CPF/MF sob nº 111.444.777-35, residente e domiciliado(a) na Rua das Acácias, nº 100…",
     required: true,
     kind: "composed",
-    modalidades: LOCACAO,
+    modalidades: [...LOCACAO, ...ADMINISTRACAO],
   },
   {
     token: "locatarios_qualificacao",
@@ -130,7 +137,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
     example: "Avenida Brigadeiro Faria Lima, nº 3500, apto. 121, Itaim Bibi, CEP 04538-132, São Paulo/SP",
     required: true,
     kind: "simple",
-    modalidades: TODAS,
+    modalidades: [...TODAS, ...ADMINISTRACAO],
   },
   {
     token: "imovel_descricao",
@@ -265,7 +272,7 @@ export const PLACEHOLDER_CATALOG: PlaceholderDef[] = [
     example: "São Paulo/SP, 9 de junho de 2026",
     required: false,
     kind: "simple",
-    modalidades: TODAS,
+    modalidades: [...TODAS, ...ADMINISTRACAO],
   },
   {
     token: "preco_total",

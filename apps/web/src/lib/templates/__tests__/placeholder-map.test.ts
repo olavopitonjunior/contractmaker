@@ -9,6 +9,7 @@ import {
   buildLocacaoPlaceholderMap,
   buildVendaPlaceholderMap,
 } from "../placeholder-map";
+import { catalogForModalidade } from "../placeholder-catalog";
 import { clausulaGarantia, qualificacaoPessoas, htmlToPlainText } from "../composed-blocks";
 import { renderContratoHTML } from "@/lib/render/handlebars";
 import { enrichLocacaoData } from "@/lib/locacao/enrich";
@@ -225,5 +226,41 @@ describe("buildVendaPlaceholderMap", () => {
     expect(map.sinal_valor).toMatch(/R\$\s?125\.000,00/);
     expect(map.comissao_valor).toMatch(/R\$\s?75\.000,00/);
     expect(map.imovel_endereco_completo).toContain("Rua A, nº 10");
+  });
+});
+
+describe("administração de locação — engine google_docs", () => {
+  // Invariante crítica: o contrato de administração reusa buildLocacaoPlaceholderMap
+  // (o deal de adm é um deal de locação). Se um token do catálogo de adm NÃO
+  // existir no mapa, o replacePlaceholdersInDoc não o substitui e o
+  // cleanupOrphanPlaceholders APAGA o {{token}} → campo em branco no contrato.
+  it("todo token do catálogo administracao_locacao existe em buildLocacaoPlaceholderMap", () => {
+    const enriched = enrichLocacaoData(locacaoBase as Record<string, unknown>, {});
+    const map = buildLocacaoPlaceholderMap(enriched);
+    const mapKeys = Object.keys(map);
+    const admTokens = catalogForModalidade("administracao_locacao").map((d) => d.token);
+    expect(admTokens.length).toBeGreaterThan(0);
+    for (const token of admTokens) {
+      expect(mapKeys).toContain(token);
+    }
+  });
+
+  // O conjunto de adm é intencionalmente mínimo: só CONTRATANTE (proprietário),
+  // imóvel e data. Administradora/foro/assinaturas ficam LITERAIS no modelo da
+  // imobiliária — `assinaturas` (blocoAssinaturas) montaria locador+locatário,
+  // errado pro adm; `foro_texto`/`bloco_administradora` virariam texto genérico.
+  it("expõe só os tokens seguros e mantém administradora/foro/assinaturas literais", () => {
+    const admTokens = catalogForModalidade("administracao_locacao").map((d) => d.token);
+    expect(admTokens).toEqual(
+      expect.arrayContaining([
+        "locadores_qualificacao",
+        "imovel_endereco_completo",
+        "data_local_assinatura",
+      ])
+    );
+    expect(admTokens).not.toContain("assinaturas");
+    expect(admTokens).not.toContain("foro_texto");
+    expect(admTokens).not.toContain("bloco_administradora");
+    expect(admTokens).not.toContain("locatarios_qualificacao");
   });
 });

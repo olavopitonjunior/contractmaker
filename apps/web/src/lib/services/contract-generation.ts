@@ -1344,8 +1344,9 @@ export async function generateLocacaoContractForDeal(
  * Espelha generateLocacaoContractForDeal com 3 diferenças: template da
  * modalidade "administracao_locacao" (match exato, sem fallback), enrich
  * próprio (taxa de administração/repasse/exclusividade) e NENHUM efeito
- * colateral de esteira — não move stage, não mexe em LeaseContract. v1 só
- * suporta engine handlebars.
+ * colateral de esteira — não move stage, não mexe em LeaseContract. Suporta
+ * engine handlebars (template canônico) e google_docs (modelo da imobiliária:
+ * copia o Doc + substitui placeholders via buildLocacaoPlaceholderMap).
  */
 export async function generateAdministracaoContractForDeal(
   dealId: string,
@@ -1370,15 +1371,16 @@ export async function generateAdministracaoContractForDeal(
     );
   }
   const template = selection.template;
-  if (template.engine === "google_docs") {
-    throw new Error(
-      "Template de administração com engine google_docs ainda não é suportado — use um template Handlebars."
-    );
-  }
+  // engine="google_docs": o template É o Google Doc-modelo da imobiliária
+  // (layout/timbrado + administradora/taxa/foro literais preservados); copiamos
+  // o doc e substituímos os placeholders. engine="handlebars": render do HTML
+  // canônico com a administradora vinda do cadastro da org.
+  const isGoogleDocsEngine = template.engine === "google_docs";
 
   // Administradora = a própria org. Diferente da locação (que só nomeia a
-  // administradora quando há CRECI), aqui a org É parte do instrumento —
-  // campos faltantes viram findings do render linter e gateiam o /approve.
+  // administradora quando há CRECI), no handlebars a org É parte do instrumento
+  // — campos faltantes viram findings do render linter e gateiam o /approve.
+  // No google_docs a administradora é literal no modelo (não usa esses campos).
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
     select: { name: true, legalName: true, cnpj: true, creci: true, legalAddress: true },
@@ -1391,7 +1393,9 @@ export async function generateAdministracaoContractForDeal(
   };
 
   const enrichedData = enrichAdministracaoData(dataJson, { administradora });
-  const htmlContent = renderContratoHTML(template.handlebarsSource, enrichedData);
+  const htmlContent = isGoogleDocsEngine
+    ? `<p>Contrato de administração gerado a partir do modelo Google Doc (${template.name}).</p>`
+    : renderContratoHTML(template.handlebarsSource, enrichedData);
 
   const agg = await prisma.contract.aggregate({
     where: { dealId: deal.id, kind: "administracao" },
@@ -1426,15 +1430,59 @@ export async function generateAdministracaoContractForDeal(
     try {
       const numeroContrato = `${contract.id.slice(-8).toUpperCase()}-v${contract.version}`;
       const docName = `Administração de Locação ${contract.id} — v${contract.version}`;
-      const htmlForUpload = htmlContent
-        .replace(/\{\{\s*contrato\.numero\s*\}\}/g, numeroContrato)
-        .replace(/\{\{\s*contrato\.id\s*\}\}/g, contract.id)
-        .replace(/\{\{\s*contrato\.versao\s*\}\}/g, String(contract.version));
-      const created = await uploadHtmlAsGoogleDoc({
-        htmlContent: htmlForUpload,
-        name: docName,
-        orgId,
-      });
+
+      let created: { docId: string; webViewLink: string };
+      if (isGoogleDocsEngine) {
+        if (!template.googleTemplateDocId) {
+          throw new Error("Template Google Docs sem googleTemplateDocId associado.");
+        }
+        const { buildLocacaoPlaceholderMap } = await import("@/lib/templates/placeholder-map");
+        const { cleanupOrphanPlaceholders } = await import("@/lib/google/docs");
+
+        const copy = await copyContractGoogleDoc({
+          sourceDocId: template.googleTemplateDocId,
+          name: docName,
+          orgId,
+        });
+        created = { docId: copy.docId, webViewLink: copy.webViewLink };
+
+        // O deal de administração É um deal de locação — reusa o mapa de
+        // locação (locadores_qualificacao = CONTRATANTE/proprietário, imóvel,
+        // data). Chaves não presentes no doc são ignoradas; {{token}} órfão
+        // (fora do mapa) é removido pelo cleanupOrphanPlaceholders.
+        const map = buildLocacaoPlaceholderMap(enrichedData);
+        map["contrato_numero"] = numeroContrato;
+        map["contrato_id"] = contract.id;
+        map["contrato_versao"] = String(contract.version);
+        try {
+          await replacePlaceholdersInDoc({ docId: copy.docId, replacements: map });
+          await cleanupOrphanPlaceholders(copy.docId);
+        } catch (replaceErr) {
+          console.error("[administracao-generation] Falha em replaceAllText:", replaceErr);
+        }
+
+        // Snapshot real do conteúdo pro htmlContent (export/diff/memória).
+        try {
+          const { exportDocAsHtml } = await import("@/lib/google/docs");
+          const snapshot = await exportDocAsHtml(copy.docId);
+          await prisma.contract.update({
+            where: { id: contract.id },
+            data: { htmlContent: snapshot },
+          });
+        } catch (snapErr) {
+          console.error("[administracao-generation] Falha no snapshot exportDocAsHtml:", snapErr);
+        }
+      } else {
+        const htmlForUpload = htmlContent
+          .replace(/\{\{\s*contrato\.numero\s*\}\}/g, numeroContrato)
+          .replace(/\{\{\s*contrato\.id\s*\}\}/g, contract.id)
+          .replace(/\{\{\s*contrato\.versao\s*\}\}/g, String(contract.version));
+        created = await uploadHtmlAsGoogleDoc({
+          htmlContent: htmlForUpload,
+          name: docName,
+          orgId,
+        });
+      }
 
       let watchData: {
         googleWatchChannel?: string;
@@ -1477,25 +1525,29 @@ export async function generateAdministracaoContractForDeal(
         console.error("[administracao-generation] Falha ao compartilhar com org members:", shareErr);
       }
 
-      try {
-        const defaultStyle = await prisma.documentStyle.findFirst({
-          where: { orgId, isDefault: true },
-        });
-        if (defaultStyle) {
-          const { googleApplyStylePreset } = await import("@/lib/ai/google-tool-handlers");
-          await googleApplyStylePreset(created.docId, {
-            fontFamily: defaultStyle.fontFamily,
-            fontSizeBase: defaultStyle.fontSizeBase,
-            lineHeight: defaultStyle.lineHeight,
-            colorPrimary: defaultStyle.colorPrimary,
-            marginTopMm: defaultStyle.marginTopMm,
-            marginBottomMm: defaultStyle.marginBottomMm,
-            marginLeftMm: defaultStyle.marginLeftMm,
-            marginRightMm: defaultStyle.marginRightMm,
+      // DocumentStyle SÓ no caminho handlebars — em engine google_docs o
+      // layout/timbrado vêm do modelo da imobiliária e não devem ser sobrescritos.
+      if (!isGoogleDocsEngine) {
+        try {
+          const defaultStyle = await prisma.documentStyle.findFirst({
+            where: { orgId, isDefault: true },
           });
+          if (defaultStyle) {
+            const { googleApplyStylePreset } = await import("@/lib/ai/google-tool-handlers");
+            await googleApplyStylePreset(created.docId, {
+              fontFamily: defaultStyle.fontFamily,
+              fontSizeBase: defaultStyle.fontSizeBase,
+              lineHeight: defaultStyle.lineHeight,
+              colorPrimary: defaultStyle.colorPrimary,
+              marginTopMm: defaultStyle.marginTopMm,
+              marginBottomMm: defaultStyle.marginBottomMm,
+              marginLeftMm: defaultStyle.marginLeftMm,
+              marginRightMm: defaultStyle.marginRightMm,
+            });
+          }
+        } catch (styleErr) {
+          console.error("[administracao-generation] Falha ao aplicar DocumentStyle:", styleErr);
         }
-      } catch (styleErr) {
-        console.error("[administracao-generation] Falha ao aplicar DocumentStyle:", styleErr);
       }
     } catch (err) {
       const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
