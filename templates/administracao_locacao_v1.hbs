@@ -36,7 +36,7 @@
 {{/if}}
 
 <h2>7. VIGÊNCIA</h2>
-<p>7.1. O presente contrato vigorará {{#if (gt aluguel.vigencia_meses 0)}}pelo prazo de {{aluguel.vigencia_meses}} ({{numeroExtenso aluguel.vigencia_meses}}) meses{{#if (existe config.vigencia_inicio_texto)}}, a contar de {{config.vigencia_inicio_texto}}{{/if}}{{#if (existe config.vigencia_fim_texto)}} e com término fixado em {{config.vigencia_fim_texto}}{{/if}}{{else}}pelo prazo da locação administrada{{/if}}, prorrogando-se automaticamente enquanto vigorar a locação do imóvel administrado, inclusive em suas prorrogações legais ou convencionais.</p>
+<p>7.1. O presente contrato vigorará enquanto vigorar a locação do imóvel administrado, acompanhando o prazo do respectivo contrato de locação{{#if (existe config.vigencia_inicio_texto)}}, cujo período inicial tem início em {{config.vigencia_inicio_texto}}{{#if (gt aluguel.vigencia_meses 0)}} e prazo de {{aluguel.vigencia_meses}} ({{numeroExtenso aluguel.vigencia_meses}}) meses{{/if}}{{/if}}, e suas prorrogações legais ou convencionais, extinguindo-se automaticamente com o término da locação.</p>
 
 {{#if config.administracao_exclusiva}}
 <h2>8. EXCLUSIVIDADE</h2>

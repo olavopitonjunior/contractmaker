@@ -335,7 +335,13 @@ export function LocacaoDealDetail({
         {/* CONTRATO — editor Google Docs + agente de IA (especializado em locação) */}
         <TabsContent value="contrato" className="mt-4">
           {contract ? (
-            <ContractEditorPage contract={contract} versions={versions} />
+            <ContractEditorPage
+              contract={contract}
+              versions={versions}
+              // Locação tem aba Assinaturas própria — o CTA default do editor
+              // levaria à tela de VENDAS `/deals/[id]`.
+              signCta={{ onClick: () => setTab("assinaturas") }}
+            />
           ) : (
             <Card>
               <CardContent className="py-10 text-center">
