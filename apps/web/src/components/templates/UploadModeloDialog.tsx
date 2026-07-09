@@ -19,6 +19,7 @@ import { FileUp, Loader2 } from "lucide-react";
 const MODALIDADES = [
   { value: "locacao", label: "Locação residencial" },
   { value: "locacao_comercial", label: "Locação comercial" },
+  { value: "administracao_locacao", label: "Administração de locação" },
   { value: "a_vista", label: "Venda à vista" },
   { value: "financiamento", label: "Venda com financiamento" },
 ];

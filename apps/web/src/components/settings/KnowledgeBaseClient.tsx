@@ -10,6 +10,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AlertCircle, Plus, Search, Sparkles, Trash2, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { KnowledgeItemForm } from "./KnowledgeItemForm";
+import { KnowledgeSeedButton } from "@/components/knowledge/KnowledgeSeedButton";
+import { KnowledgeUploadCard } from "@/components/knowledge/KnowledgeUploadCard";
 
 interface KnowledgeItem {
   id: string;
@@ -201,6 +203,18 @@ export function KnowledgeBaseClient({
             <Sparkles className="h-4 w-4 mr-1" />
             Testar RAG
           </Button>
+          <KnowledgeUploadCard
+            onDone={async () => {
+              await refresh();
+              router.refresh();
+            }}
+          />
+          <KnowledgeSeedButton
+            onDone={async () => {
+              await refresh();
+              router.refresh();
+            }}
+          />
           <Button size="sm" onClick={() => openEditor(null)}>
             <Plus className="h-4 w-4 mr-1" />
             Novo item
