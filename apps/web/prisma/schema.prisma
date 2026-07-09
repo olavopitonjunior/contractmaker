@@ -229,6 +229,10 @@ model Organization {
   // suspensa — o guard do dashboard bloqueia acesso e os módulos são desligados
   // em massa. Reativar limpa o campo e religa os módulos. Aditivo, default null.
   suspendedAt          DateTime?
+  // Onboarding self-service: setado quando o dono conclui/pula o tour ou gera o
+  // 1º contrato. Só serve pra parar o auto-launch do wizard — o progresso em si
+  // é derivado dos dados (lib/onboarding/status.ts). Aditivo, default null.
+  onboardingCompletedAt DateTime?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
