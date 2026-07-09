@@ -7,6 +7,9 @@ const authMock = auth as unknown as ReturnType<typeof vi.fn>;
 const platformFindUnique = prisma.platformRole.findUnique as unknown as ReturnType<typeof vi.fn>;
 const orgFindUnique = prisma.organization.findUnique as unknown as ReturnType<typeof vi.fn>;
 const orgModuleUpsert = prisma.orgModule.upsert as unknown as ReturnType<typeof vi.fn>;
+const pipelineFindFirst = prisma.pipeline.findFirst as unknown as ReturnType<typeof vi.fn>;
+const pipelineCreate = prisma.pipeline.create as unknown as ReturnType<typeof vi.fn>;
+const pipelineStageCreateMany = prisma.pipelineStage.createMany as unknown as ReturnType<typeof vi.fn>;
 
 function patchReq(body: unknown): Request {
   return new Request("http://localhost/api/admin/orgs/org1/modules", {
@@ -23,6 +26,9 @@ describe("PATCH /api/admin/orgs/[orgId]/modules", () => {
     vi.clearAllMocks();
     platformFindUnique.mockResolvedValue(null);
     orgFindUnique.mockResolvedValue({ id: "org1" });
+    // Habilitar um módulo agora chama seedPipeline (garante o pipeline do kind).
+    // Retornar um pipeline existente torna o seed um no-op — o teste foca no upsert.
+    pipelineFindFirst.mockResolvedValue({ id: "pipe1" });
   });
 
   it("401 sem sessão", async () => {
@@ -65,5 +71,31 @@ describe("PATCH /api/admin/orgs/[orgId]/modules", () => {
     // só a flag do próprio módulo sobrevive à sanitização
     expect(arg.update.featureFlags).toEqual({ "locacao.cobrancas": true });
     expect(arg.update.enabled).toBe(true);
+  });
+
+  it("habilitar módulo cria o pipeline do kind quando ausente (fecha o gap)", async () => {
+    authMock.mockResolvedValue({ user: { id: "u1" } });
+    platformFindUnique.mockResolvedValue({ role: "super_admin", scope: [] });
+    pipelineFindFirst.mockResolvedValue(null); // ainda não existe
+    pipelineCreate.mockResolvedValue({ id: "pipeNew" });
+    const res = await PATCH(
+      patchReq({ module: "locacao", enabled: true }) as never,
+      params
+    );
+    expect(res.status).toBe(200);
+    expect(pipelineCreate).toHaveBeenCalledTimes(1);
+    expect(pipelineCreate.mock.calls[0][0].data.kind).toBe("locacao");
+    expect(pipelineStageCreateMany).toHaveBeenCalledTimes(1);
+  });
+
+  it("desabilitar módulo não semeia pipeline", async () => {
+    authMock.mockResolvedValue({ user: { id: "u1" } });
+    platformFindUnique.mockResolvedValue({ role: "super_admin", scope: [] });
+    const res = await PATCH(
+      patchReq({ module: "locacao", enabled: false }) as never,
+      params
+    );
+    expect(res.status).toBe(200);
+    expect(pipelineFindFirst).not.toHaveBeenCalled();
   });
 });

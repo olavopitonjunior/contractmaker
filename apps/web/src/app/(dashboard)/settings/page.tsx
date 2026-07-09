@@ -6,13 +6,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
 import { AgentSettings } from "@/components/settings/AgentSettings";
-import { BookOpen, Palette, Lightbulb, ShieldCheck, Sparkles, KeyRound, Users, UsersRound, Split, FileSignature, Wallet, ListChecks, UserRound, Receipt, FileText, type LucideIcon } from "lucide-react";
+import { BookOpen, Palette, Lightbulb, ShieldCheck, Sparkles, KeyRound, Users, UsersRound, Split, FileSignature, Wallet, ListChecks, UserRound, Receipt, FileText, Rocket, type LucideIcon } from "lucide-react";
 
 type SettingsLink = { href: string; label: string; icon: LucideIcon };
 const SETTINGS_GROUPS: { title: string; items: SettingsLink[] }[] = [
   {
     title: "Conta & organização",
     items: [
+      { href: "/onboarding", label: "Primeiros passos", icon: Rocket },
       { href: "/settings/profile", label: "Meu perfil", icon: UserRound },
       { href: "/settings/membros", label: "Membros", icon: Users },
       { href: "/settings/seguranca", label: "Segurança", icon: KeyRound },

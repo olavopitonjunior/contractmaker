@@ -181,9 +181,11 @@ vi.mock("@/lib/db/prisma", () => {
     },
     pipeline: {
       findFirst: vi.fn(),
+      create: vi.fn().mockResolvedValue({ id: "pipe-mock" }),
     },
     pipelineStage: {
       findFirst: vi.fn(),
+      createMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     salesForm: {
       findUnique: vi.fn(),
