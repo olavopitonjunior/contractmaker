@@ -243,7 +243,9 @@ export type AuditAction =
   | "DIMOB_GENERATED"
   | "DIMOB_SALE_EXCLUDED"
   | "DIMOB_SALE_RECONCILED"
-  | "DIMOB_RECONCILED_ALL";
+  | "DIMOB_RECONCILED_ALL"
+  // Onboarding self-service
+  | "ORG_ONBOARDING_COMPLETED";
 
 export interface AuditContext {
   // Nullable (Fase 0c): eventos pré-resolução de tenant gravam orgId=null.

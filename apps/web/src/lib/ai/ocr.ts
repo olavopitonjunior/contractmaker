@@ -401,6 +401,71 @@ export function prevalidateForOcr(
   return null;
 }
 
+const PLAIN_TEXT_PROMPT = `Transcreva o texto deste documento na íntegra, verbatim, preservando a ordem e a estrutura (parágrafos, títulos, cláusulas numeradas). NÃO resuma, NÃO comente, NÃO traduza e NÃO adicione formatação markdown. Retorne apenas o texto extraído.`;
+
+/**
+ * Extrai o TEXTO CORRIDO de um PDF ou imagem via Gemini (verbatim, sem resumir).
+ * Usado pela ingestão de documentos na base de conhecimento. DOCX é extraído
+ * fora daqui (mammoth, lib/extraction/docx.ts) — aqui só PDF/imagem. Requer
+ * `GEMINI_API_KEY` (getGenAI lança se ausente).
+ */
+export async function extractPlainText(
+  buffer: Buffer,
+  mimeType: string,
+  ctx?: OcrUsageContext
+): Promise<string> {
+  if (!SUPPORTED_OCR_MIMES.has(mimeType)) {
+    throw new Error(`Mime type não suportado para extração de texto: ${mimeType}`);
+  }
+  const prevalidationError = prevalidateForOcr(buffer, mimeType);
+  if (prevalidationError) throw new Error(prevalidationError);
+
+  const model = process.env.GEMINI_OCR_MODEL || "gemini-2.5-flash";
+  const ai = getGenAI();
+  const t0 = Date.now();
+  try {
+    const response = await ai.models.generateContent({
+      model,
+      contents: [
+        { text: PLAIN_TEXT_PROMPT },
+        { inlineData: { mimeType, data: buffer.toString("base64") } },
+      ],
+    });
+    if (ctx) {
+      const usage = (response as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }).usageMetadata;
+      recordAIUsage({
+        orgId: ctx.orgId,
+        userId: ctx.userId,
+        contractId: ctx.contractId,
+        provider: "gemini",
+        model,
+        operation: "ocr_form",
+        promptTokens: usage?.promptTokenCount ?? 0,
+        completionTokens: usage?.candidatesTokenCount ?? 0,
+        latencyMs: Date.now() - t0,
+        success: true,
+      });
+    }
+    return (response.text ?? "").trim();
+  } catch (err) {
+    if (ctx) {
+      recordAIUsage({
+        orgId: ctx.orgId,
+        userId: ctx.userId,
+        contractId: ctx.contractId,
+        provider: "gemini",
+        model,
+        operation: "ocr_form",
+        promptTokens: 0,
+        latencyMs: Date.now() - t0,
+        success: false,
+        errorMessage: err instanceof Error ? err.message : String(err),
+      });
+    }
+    throw err;
+  }
+}
+
 /**
  * Extracts a human-readable heuristic to decide if a rate-limit/5xx error
  * should trigger a fallback model retry. Rate limits are handled by the

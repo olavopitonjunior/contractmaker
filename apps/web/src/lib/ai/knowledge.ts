@@ -62,14 +62,24 @@ function clauseExtras(input: CreateKnowledgeItemInput) {
   };
 }
 
+/** Linha que precisa de embedding + o texto (título + conteúdo) a embutir. */
+export interface EmbedTarget {
+  id: string;
+  text: string;
+}
+
 /**
- * Create a knowledge item. If content is long enough, split into chunks; each
- * chunk becomes its own row with a shared parentId. Embeddings are generated
- * in a single batch call to minimize API cost.
+ * Cria as linhas do knowledge item **sem** gerar embeddings — retorna os alvos
+ * de embedding pro caller decidir quando embutir (síncrono via
+ * `createKnowledgeItem`, ou em background via `waitUntil(embedKnowledgeItem(...))`
+ * num endpoint de upload, onde a chamada ao Voyage não pode segurar a resposta).
+ *
+ * Mantém a semântica original: single-chunk embute a própria linha; multi-chunk
+ * cria um parent-resumo (não embutido) + linhas-filhas embutidas.
  */
-export async function createKnowledgeItem(
+export async function createKnowledgeItemRows(
   input: CreateKnowledgeItemInput
-): Promise<{ parentId: string; chunksCreated: number }> {
+): Promise<{ parentId: string; embedTargets: EmbedTarget[] }> {
   const chunks = chunkText(input.content);
   if (chunks.length === 0) {
     throw new Error("Conteúdo vazio após limpeza");
@@ -94,21 +104,10 @@ export async function createKnowledgeItem(
         ...extras,
       },
     });
-
-    if (isEmbeddingsConfigured()) {
-      const [vec] = await embed(
-        [`${input.title}\n\n${chunks[0].text}`],
-        "document",
-        { orgId: input.orgId, userId: input.createdBy, operation: "embed_kb" }
-      );
-      await prisma.$executeRawUnsafe(
-        `UPDATE "KnowledgeItem" SET embedding = $1::vector WHERE id = $2`,
-        toPgVector(vec),
-        parent.id
-      );
-    }
-
-    return { parentId: parent.id, chunksCreated: 1 };
+    return {
+      parentId: parent.id,
+      embedTargets: [{ id: parent.id, text: `${input.title}\n\n${chunks[0].text}` }],
+    };
   }
 
   // Multi-chunk path: create parent row, then chunk rows linked to parent
@@ -147,23 +146,52 @@ export async function createKnowledgeItem(
     )
   );
 
-  if (isEmbeddingsConfigured()) {
-    const texts = chunks.map((c) => `${input.title}\n\n${c.text}`);
-    const vectors = await embed(texts, "document", {
-      orgId: input.orgId,
-      userId: input.createdBy,
-      operation: "embed_kb",
-    });
-    for (let i = 0; i < chunkRows.length; i++) {
-      await prisma.$executeRawUnsafe(
-        `UPDATE "KnowledgeItem" SET embedding = $1::vector WHERE id = $2`,
-        toPgVector(vectors[i]),
-        chunkRows[i].id
-      );
-    }
-  }
+  // Só as linhas-filhas são embutidas (o parent multi-chunk é só um resumo).
+  const embedTargets = chunkRows.map((row, i) => ({
+    id: row.id,
+    text: `${input.title}\n\n${chunks[i].text}`,
+  }));
+  return { parentId: parent.id, embedTargets };
+}
 
-  return { parentId: parent.id, chunksCreated: chunks.length };
+/**
+ * Gera embeddings (batch único, minimiza custo) e grava os vetores pgvector.
+ * No-op quando o Voyage não está configurado — as linhas seguem pesquisáveis
+ * via ILIKE. Best-effort: seguro chamar de `waitUntil`.
+ */
+export async function embedKnowledgeItem(
+  targets: EmbedTarget[],
+  ctx: { orgId: string; userId?: string | null }
+): Promise<void> {
+  if (!isEmbeddingsConfigured() || targets.length === 0) return;
+  const vectors = await embed(
+    targets.map((t) => t.text),
+    "document",
+    { orgId: ctx.orgId, userId: ctx.userId, operation: "embed_kb" }
+  );
+  for (let i = 0; i < targets.length; i++) {
+    await prisma.$executeRawUnsafe(
+      `UPDATE "KnowledgeItem" SET embedding = $1::vector WHERE id = $2`,
+      toPgVector(vectors[i]),
+      targets[i].id
+    );
+  }
+}
+
+/**
+ * Create a knowledge item (rows + embeddings, síncrono). Wrapper sobre
+ * `createKnowledgeItemRows` + `embedKnowledgeItem` — mantido pros callers que
+ * querem o embedding concluído dentro do request (ex.: criação por texto colado).
+ */
+export async function createKnowledgeItem(
+  input: CreateKnowledgeItemInput
+): Promise<{ parentId: string; chunksCreated: number }> {
+  const { parentId, embedTargets } = await createKnowledgeItemRows(input);
+  await embedKnowledgeItem(embedTargets, {
+    orgId: input.orgId,
+    userId: input.createdBy,
+  });
+  return { parentId, chunksCreated: embedTargets.length };
 }
 
 /**

@@ -9,6 +9,8 @@ import {
   cancelEnvelope,
   createEnvelope,
   deleteDraftEnvelope,
+  getEnvelope,
+  listEnvelopeSigners,
   type ClicksignRole,
 } from "./envelopes";
 import { ClicksignError } from "./client";
@@ -554,30 +556,104 @@ export async function sendEnvelopeForAttachment(
   });
 }
 
+function remoteEnvelopeStatus(resp: unknown): string | null {
+  const data = (resp as { data?: { attributes?: { status?: string } } })?.data;
+  return data?.attributes?.status ?? null;
+}
+
+function remoteSignerCount(resp: unknown): number | null {
+  const data = (resp as { data?: unknown })?.data;
+  return Array.isArray(data) ? data.length : null;
+}
+
+/**
+ * Cancela um envelope de forma RESILIENTE: reconcilia com o estado real na
+ * ClickSign antes de agir e nunca deixa o envelope local preso em `running`.
+ *
+ * Casos tratados:
+ *  - Remoto `closed` (já assinado) → lança 409 claro; NÃO marca cancelado.
+ *  - Remoto `canceled`/404 (já removido) → idempotente, só sincroniza local.
+ *  - Remoto `draft` → DELETE; `running` → PATCH status=canceled.
+ *  - PATCH recusado (ex.: envelope `running` SEM signers, morto — o usuário
+ *    removeu todos os assinantes antes de cancelar, e a ClickSign responde
+ *    "status deve estar em: draft, running"): força cancelamento local +
+ *    grava `lastError`, pois um envelope sem signatários nunca será assinado.
+ *  - PATCH recusado num envelope ainda VIVO (running COM signers) → re-lança,
+ *    pra não dessincronizar (o envelope continua ativo na ClickSign).
+ */
 export async function cancelEnvelopeFlow(envelopeId: string): Promise<void> {
   const envelope = await prisma.envelope.findUnique({
     where: { id: envelopeId },
   });
   if (!envelope) throw new Error("Envelope não encontrado");
 
+  let lastError: string | null = null;
+
   if (envelope.clicksignId) {
+    const clicksignId = envelope.clicksignId;
+
+    // 1. Descobre o status remoto real (o local pode estar defasado).
+    let remoteStatus: string | null = null;
+    let remoteGone = false;
     try {
-      if (envelope.status === "draft") {
-        await deleteDraftEnvelope(envelope.clicksignId);
-      } else if (envelope.status === "running") {
-        await cancelEnvelope(envelope.clicksignId);
-      }
+      remoteStatus = remoteEnvelopeStatus(await getEnvelope(clicksignId));
     } catch (err) {
-      // Se a Clicksign já tiver removido (404), ignoramos.
-      if (!(err instanceof ClicksignError) || err.status !== 404) {
-        throw err;
+      if (err instanceof ClicksignError && err.status === 404) {
+        remoteGone = true;
+      }
+      // Outros erros de GET: não bloqueiam; tentamos cancelar assim mesmo.
+    }
+
+    if (remoteStatus === "closed") {
+      throw new ClicksignError(
+        "Clicksign: envelope já foi finalizado (assinado) e não pode ser cancelado.",
+        409
+      );
+    }
+
+    // 2. Só chama a API de cancelamento se ainda não estiver removido/cancelado.
+    if (!remoteGone && remoteStatus !== "canceled") {
+      const isDraft = remoteStatus === "draft" || envelope.status === "draft";
+      try {
+        if (isDraft) {
+          await deleteDraftEnvelope(clicksignId);
+        } else {
+          await cancelEnvelope(clicksignId);
+        }
+      } catch (err) {
+        if (err instanceof ClicksignError && err.status === 404) {
+          // Já removido — segue pro update local.
+        } else {
+          // 3. Falha ao cancelar. Re-checa o remoto pra decidir com segurança.
+          const decision = await resolveCancelFailure(clicksignId);
+          if (decision === "closed") {
+            throw new ClicksignError(
+              "Clicksign: envelope já foi finalizado (assinado) e não pode ser cancelado.",
+              409
+            );
+          }
+          if (decision === "force") {
+            // Envelope `running` sem signers (morto): força cancelamento local.
+            lastError =
+              err instanceof Error ? err.message : String(err);
+          } else if (decision !== "reconcile") {
+            // Envelope ainda vivo (running COM signers) ou não conseguimos
+            // confirmar — re-lança pra não dessincronizar.
+            throw err;
+          }
+          // decision === "reconcile" (virou canceled): cai no update local.
+        }
       }
     }
   }
 
   await prisma.envelope.update({
     where: { id: envelopeId },
-    data: { status: "canceled", canceledAt: new Date() },
+    data: {
+      status: "canceled",
+      canceledAt: new Date(),
+      ...(lastError ? { lastError: lastError.slice(0, 500) } : {}),
+    },
   });
   await prisma.envelopeSigner.updateMany({
     where: {
@@ -586,6 +662,37 @@ export async function cancelEnvelopeFlow(envelopeId: string): Promise<void> {
     },
     data: { status: "removed" },
   });
+}
+
+/**
+ * Após uma falha no cancelamento, consulta a ClickSign pra decidir o que fazer:
+ *  - "closed"    → o envelope foi finalizado; não cancelar localmente.
+ *  - "reconcile" → já está canceled/removido remotamente; sincroniza local.
+ *  - "force"     → running SEM signers (morto); pode cancelar só localmente.
+ *  - "rethrow"   → running COM signers (vivo) ou incerto; propaga o erro.
+ */
+async function resolveCancelFailure(
+  clicksignId: string
+): Promise<"closed" | "reconcile" | "force" | "rethrow"> {
+  let status: string | null;
+  try {
+    status = remoteEnvelopeStatus(await getEnvelope(clicksignId));
+  } catch (err) {
+    if (err instanceof ClicksignError && err.status === 404) return "reconcile";
+    return "rethrow";
+  }
+
+  if (status === "closed") return "closed";
+  if (status === "canceled" || status === null) return "reconcile";
+  if (status === "draft") return "rethrow"; // draft deveria ter sido deletado
+
+  // status === "running": só é seguro forçar se não houver mais signatários.
+  try {
+    const count = remoteSignerCount(await listEnvelopeSigners(clicksignId));
+    return count === 0 ? "force" : "rethrow";
+  } catch {
+    return "rethrow";
+  }
 }
 
 function pickResourceId(resp: unknown): string | null {
