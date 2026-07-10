@@ -21,7 +21,11 @@ import {
 // feedback_oauth_testing_7d).
 // ============================================================================
 
-export const ORG_GOOGLE_SCOPES = ["https://www.googleapis.com/auth/drive"];
+// `drive.file` (não-sensível) em vez de `drive` (restrito): o app só acessa os
+// arquivos que ELE cria/copia na conta da imobiliária (templates, contratos) —
+// que é todo o fluxo por-org. Isso remove o aviso "app não verificado" e a
+// exigência de verificação (CASA) do Google no consent do connect por-org.
+export const ORG_GOOGLE_SCOPES = ["https://www.googleapis.com/auth/drive.file"];
 
 export interface ResolvedOwnerAuth {
   auth: OAuth2Client;
@@ -42,17 +46,22 @@ const orgClientCache = new Map<string, { client: OAuth2Client; email: string }>(
 // Refresh tokens são vinculados ao client que os emitiu: tokens de org são
 // emitidos e renovados SEMPRE pelo client web.
 function webClientCredentials(): { clientId: string; clientSecret: string } {
-  const clientId =
-    envTrim("GOOGLE_WEB_OAUTH_CLIENT_ID") ?? envTrim("GOOGLE_OAUTH_CLIENT_ID");
-  const clientSecret =
-    envTrim("GOOGLE_WEB_OAUTH_CLIENT_SECRET") ??
-    envTrim("GOOGLE_OAUTH_CLIENT_SECRET");
-  if (!clientId || !clientSecret) {
-    throw new Error(
-      "GOOGLE_WEB_OAUTH_CLIENT_ID/SECRET (ou GOOGLE_OAUTH_CLIENT_*) não configurados."
-    );
-  }
-  return { clientId, clientSecret };
+  // id e secret DEVEM ser do MESMO client. Antes eram resolvidos em cadeias `??`
+  // independentes — se o WEB_ID estava setado mas o WEB_SECRET vazio, o secret
+  // caía no do client Desktop (GOOGLE_OAUTH_CLIENT_SECRET) → id Web + secret
+  // Desktop → invalid_client no token exchange. Aqui pareamos: par Web completo,
+  // senão par legado completo, nunca misturado.
+  const webId = envTrim("GOOGLE_WEB_OAUTH_CLIENT_ID");
+  const webSecret = envTrim("GOOGLE_WEB_OAUTH_CLIENT_SECRET");
+  if (webId && webSecret) return { clientId: webId, clientSecret: webSecret };
+
+  const legacyId = envTrim("GOOGLE_OAUTH_CLIENT_ID");
+  const legacySecret = envTrim("GOOGLE_OAUTH_CLIENT_SECRET");
+  if (legacyId && legacySecret) return { clientId: legacyId, clientSecret: legacySecret };
+
+  throw new Error(
+    "Configure GOOGLE_WEB_OAUTH_CLIENT_ID + GOOGLE_WEB_OAUTH_CLIENT_SECRET (ou o par legado GOOGLE_OAUTH_CLIENT_ID/SECRET) — id e secret devem ser do MESMO client OAuth."
+  );
 }
 
 function buildOAuthClient(): OAuth2Client {
