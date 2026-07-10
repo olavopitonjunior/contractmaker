@@ -33,7 +33,7 @@ function extractClientName(dataJson: unknown): string | null {
 export default async function PipelinePage({
   searchParams,
 }: {
-  searchParams?: { arquivados?: string };
+  searchParams?: { arquivados?: string; novo?: string };
 }) {
   // Gate de módulo: tenant só-locação (vendas OFF) é redirecionado pra /locacao.
   // NÃO usar layout aqui — /pipeline/locacao é filho deste segmento e precisa
@@ -154,7 +154,14 @@ export default async function PipelinePage({
         </h1>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button size="sm">
+            <Button
+              size="sm"
+              className={
+                searchParams?.novo === "1"
+                  ? "ring-2 ring-brand-accent ring-offset-2 animate-pulse"
+                  : undefined
+              }
+            >
               <Plus className="mr-1.5 h-4 w-4" />
               Novo negócio
             </Button>

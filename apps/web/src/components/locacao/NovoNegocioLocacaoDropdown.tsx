@@ -1,7 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -37,11 +39,26 @@ export function NovoNegocioLocacaoDropdown({
   const [wizardOpen, setWizardOpen] = useState(false);
   const wizardDisabled = properties.length === 0 || tenants.length === 0;
 
+  // Vindo do onboarding (?novo=1): realça e abre o menu pra guiar o 1º negócio.
+  const highlight = useSearchParams().get("novo") === "1";
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => {
+    if (highlight) {
+      const t = setTimeout(() => setMenuOpen(true), 350);
+      return () => clearTimeout(t);
+    }
+  }, [highlight]);
+
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
-          <Button size="sm">
+          <Button
+            size="sm"
+            className={cn(
+              highlight && !menuOpen && "ring-2 ring-brand-accent ring-offset-2 animate-pulse"
+            )}
+          >
             <Plus className="mr-1.5 h-4 w-4" />
             Novo negócio
           </Button>

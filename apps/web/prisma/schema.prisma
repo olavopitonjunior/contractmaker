@@ -233,6 +233,9 @@ model Organization {
   // 1º contrato. Só serve pra parar o auto-launch do wizard — o progresso em si
   // é derivado dos dados (lib/onboarding/status.ts). Aditivo, default null.
   onboardingCompletedAt DateTime?
+  // Onboarding: dono já viu o modal de boas-vindas (1º acesso). Enquanto null e
+  // o onboarding está incompleto, a home "/" leva o owner pro /onboarding uma vez.
+  onboardingIntroSeenAt DateTime?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
