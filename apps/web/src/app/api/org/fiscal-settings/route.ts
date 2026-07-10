@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth/context";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/db/prisma";
 import {
   requirePermission,
@@ -30,7 +31,12 @@ async function guard(
   ctx: { userId: string; orgId: string },
   permission: PermissionValue
 ) {
-  await requirePermission({ userId: ctx.userId, orgId: ctx.orgId, permission });
+  // Impersonation-aware: sob "testar como" (mt_impersonate), o super_admin age
+  // como o dono da org. requireAuth resolve o orgId impersonado (via getUserOrg)
+  // mas mantém o userId real — então checar a permissão com o id efetivo, senão
+  // o super_admin (não-membro) leva MembershipRequired ao salvar o perfil.
+  const effUserId = await getEffectiveUserId(ctx.userId);
+  await requirePermission({ userId: effUserId, orgId: ctx.orgId, permission });
 }
 
 /** GET — devolve os dados fiscais atuais do declarante. */
