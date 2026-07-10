@@ -1,31 +1,24 @@
 import { prisma } from "@/lib/db/prisma";
 import { getOrgModules } from "@/lib/modules/read";
 import type { ModuleKey } from "@/lib/modules/catalog";
+import { STEP_ORDER, type OnboardingStepKey } from "./steps";
 
 /**
  * Progresso do onboarding — **derivado dos dados**, não de uma tabela de estado.
- * Cada etapa é um fato consultável (conta Google conectada, org.creci, template
- * ativo, cláusula, estilo default), então o status nunca "mente" (ex.: o dono
- * apaga o único template → templates volta a `false`). A única coisa que os dados
- * não sabem — "o dono concluiu/pulou o tour" — mora em
- * `Organization.onboardingCompletedAt` e só serve pra parar o auto-launch.
+ * Cada passo é um fato consultável (conta Google conectada, org.creci, template
+ * ativo, formulário configurado, convite enviado, negócio criado), então o
+ * status nunca "mente". `Organization.onboardingCompletedAt` só marca "onboarding
+ * concluído/encerrado" (setado ao chegar em 100%) — a partir daí o checklist some
+ * e o layout para de computar o status.
  *
- * Alinhado à vitória (gerar o 1º contrato): obrigatórios = google + perfil +
- * templates; cláusulas (KB) e estilo são opcionais/"depois" — não entram na
- * geração de um contrato google_docs.
+ * Os 6 passos são todos obrigatórios: o guia fica ativo até 100%.
  */
-export type OnboardingStepKey =
-  | "google"
-  | "profile"
-  | "templates"
-  | "knowledge"
-  | "docstyle";
+export type { OnboardingStepKey };
 
 export interface OnboardingStep {
   key: OnboardingStepKey;
   done: boolean;
   required: boolean;
-  /** Dica curta do que falta (ex.: "CRECI em falta"). */
   detail?: string;
 }
 
@@ -33,14 +26,13 @@ export interface OnboardingStatus {
   steps: OnboardingStep[];
   requiredDone: number;
   requiredTotal: number;
-  /** Todos os passos OBRIGATÓRIOS feitos → habilita "Gerar meu primeiro contrato". */
   complete: boolean;
   dismissedAt: Date | null;
 }
 
-// Famílias de modalidade por módulo — usadas pra achar um template ativo que o
-// dono consiga de fato gerar. Administração (administracao_locacao) é instrumento
-// acessório, não conta como o template de locação que destrava a vitória.
+// Famílias de modalidade por módulo — pra achar um template ativo que o dono
+// consiga de fato gerar. Administração é instrumento acessório, não conta como
+// o template que destrava o passo.
 const MODALIDADES_BY_MODULE: Record<ModuleKey, string[]> = {
   vendas: ["a_vista", "financiamento"],
   locacao: ["locacao", "locacao_comercial"],
@@ -64,24 +56,26 @@ export async function getOnboardingStatus(orgId: string): Promise<OnboardingStat
   );
   const modalidadesNeeded = enabledModules.flatMap((m) => MODALIDADES_BY_MODULE[m]);
 
-  const [activeTemplates, clauseCount, defaultStyle] = await Promise.all([
-    prisma.contractTemplate.findMany({
+  const [activeTemplates, formConfigured, invites, deals] = await Promise.all([
+    prisma.contractTemplate.count({
       where: { orgId, status: "active", modalidade: { in: modalidadesNeeded } },
-      select: { modalidade: true },
     }),
-    prisma.knowledgeItem.count({
-      where: { orgId, category: "clause", parentId: null },
+    // A row de OrgFormSettings nasce no preset "legado" por default → só conta
+    // como "configurado" quando o dono escolhe um preset real.
+    prisma.orgFormSettings.count({
+      where: { orgId, preset: { not: "legado" } },
     }),
-    prisma.documentStyle.findFirst({
-      where: { orgId, isDefault: true },
-      select: { id: true },
+    prisma.orgInvitation.count({
+      where: { orgId, status: { in: ["pending", "approved"] } },
     }),
+    // Deal não tem orgId direto — escopo via pipeline.
+    prisma.deal.count({ where: { pipeline: { orgId } } }),
   ]);
 
-  // --- google (obrigatório: docs nascem na Drive da org, não na global) ---
+  // --- google ---
   const googleDone = googleAccount?.status === "connected";
 
-  // --- profile (obrigatório: creci liga a cláusula da administradora) ---
+  // --- profile (creci liga a cláusula da administradora) ---
   const creci = org?.creci?.trim();
   const legalName = org?.legalName?.trim();
   const profileDone = Boolean(creci && legalName);
@@ -93,42 +87,36 @@ export async function getOnboardingStatus(orgId: string): Promise<OnboardingStat
     ? `${missingProfile.join(" + ")} em falta`
     : undefined;
 
-  // --- templates (obrigatório: ≥1 modelo ativo que o dono consiga gerar) ---
-  const activeModalidades = new Set(activeTemplates.map((t) => t.modalidade));
-  const modulesMissingTemplate = enabledModules.filter(
-    (m) => !MODALIDADES_BY_MODULE[m].some((mod) => activeModalidades.has(mod))
-  );
-  // A vitória precisa de UM contrato gerável — basta ≥1 template ativo em algum
-  // módulo habilitado. Módulos sem modelo viram nudge (detail), não bloqueio.
-  const templatesDone = activeTemplates.length > 0;
-  const templatesDetail = !templatesDone
-    ? "nenhum modelo ativo ainda"
-    : modulesMissingTemplate.length
-      ? `falta modelo de ${modulesMissingTemplate.join(", ")}`
-      : undefined;
+  // --- templates ---
+  const templatesDone = activeTemplates > 0;
 
-  // --- knowledge (opcional/"depois": alimenta o agente IA, não a geração) ---
-  const knowledgeDone = clauseCount >= 1;
+  const doneByKey: Record<OnboardingStepKey, boolean> = {
+    google: googleDone,
+    profile: profileDone,
+    templates: templatesDone,
+    form: formConfigured > 0,
+    invite: invites > 0,
+    deal: deals > 0,
+  };
+  const detailByKey: Partial<Record<OnboardingStepKey, string>> = {
+    profile: profileDetail,
+    templates: !templatesDone ? "nenhum modelo ativo ainda" : undefined,
+  };
 
-  // --- docstyle (opcional/"depois": google_docs carrega layout próprio) ---
-  const docstyleDone = Boolean(defaultStyle);
+  const steps: OnboardingStep[] = STEP_ORDER.map((key) => ({
+    key,
+    done: doneByKey[key],
+    required: true,
+    detail: detailByKey[key],
+  }));
 
-  const steps: OnboardingStep[] = [
-    { key: "google", done: googleDone, required: true },
-    { key: "profile", done: profileDone, required: true, detail: profileDetail },
-    { key: "templates", done: templatesDone, required: true, detail: templatesDetail },
-    { key: "knowledge", done: knowledgeDone, required: false },
-    { key: "docstyle", done: docstyleDone, required: false },
-  ];
-
-  const requiredSteps = steps.filter((s) => s.required);
-  const requiredDone = requiredSteps.filter((s) => s.done).length;
+  const requiredDone = steps.filter((s) => s.done).length;
 
   return {
     steps,
     requiredDone,
-    requiredTotal: requiredSteps.length,
-    complete: requiredDone === requiredSteps.length,
+    requiredTotal: steps.length,
+    complete: requiredDone === steps.length,
     dismissedAt: org?.onboardingCompletedAt ?? null,
   };
 }

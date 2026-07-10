@@ -20,6 +20,8 @@ import {
 } from "@/components/ui/sidebar";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { BrandWordmark } from "@/components/layout/brand-mark";
+import { OnboardingSidebarChecklist } from "@/components/onboarding/OnboardingSidebarChecklist";
+import type { OnboardingStatus } from "@/lib/onboarding/status";
 import { FEATURE, isValidModule } from "@/lib/modules/catalog";
 import {
   LayoutDashboard,
@@ -155,6 +157,8 @@ interface AppSidebarProps {
     image?: string | null;
   };
   modules?: ModulesView;
+  /** Status do onboarding (só pra owner em aberto) — renderiza o checklist no topo. */
+  onboarding?: OnboardingStatus | null;
 }
 
 function isItemActive(pathname: string, item: SubItem): boolean {
@@ -163,7 +167,7 @@ function isItemActive(pathname: string, item: SubItem): boolean {
     : pathname === item.url || pathname.startsWith(item.url + "/");
 }
 
-export function AppSidebar({ user, modules = null }: AppSidebarProps) {
+export function AppSidebar({ user, modules = null, onboarding = null }: AppSidebarProps) {
   const pathname = usePathname();
   // Override manual de abertura por grupo; quando indefinido, deriva da rota ativa.
   const [openOverride, setOpenOverride] = useState<Record<string, boolean>>({});
@@ -201,6 +205,9 @@ export function AppSidebar({ user, modules = null }: AppSidebarProps) {
       </SidebarHeader>
 
       <SidebarContent>
+        {onboarding && (
+          <OnboardingSidebarChecklist status={onboarding} modules={modules} />
+        )}
         <SidebarGroup>
           <SidebarGroupLabel>Menu</SidebarGroupLabel>
           <SidebarGroupContent>
