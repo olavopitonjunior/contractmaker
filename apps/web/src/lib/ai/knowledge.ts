@@ -15,7 +15,9 @@ export type KnowledgeCategory =
   | "model"
   | "rule"
   | "glossary"
-  | "clause";
+  | "clause"
+  // Base de conhecimento do assistente de suporte (plataforma). Ver lib/support/*.
+  | "support";
 
 export interface CreateKnowledgeItemInput {
   orgId: string;
