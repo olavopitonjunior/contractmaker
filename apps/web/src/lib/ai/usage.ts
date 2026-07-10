@@ -79,6 +79,8 @@ export type AIOperation =
   | "voice_extract"
   | "insights"
   | "assistant_chat"
+  // Assistente de suporte ao usuário (widget flutuante + /admin/support-ai)
+  | "support_chat"
   // Ingestão DOCX→template (engine google_docs): pass de IA que insere
   // {{placeholders}} no Doc-modelo da imobiliária.
   | "template_placeholder_insertion"

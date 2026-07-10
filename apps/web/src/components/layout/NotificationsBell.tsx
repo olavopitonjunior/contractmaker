@@ -9,6 +9,7 @@ import {
   FileCheck2,
   AlertTriangle,
   Wallet,
+  LifeBuoy,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -39,6 +40,8 @@ function iconForType(type: string) {
       return <Wallet className="h-4 w-4 text-green-600 shrink-0" />;
     case "transfer_failed":
       return <XCircle className="h-4 w-4 text-red-600 shrink-0" />;
+    case "support_answered":
+      return <LifeBuoy className="h-4 w-4 text-primary shrink-0" />;
     default:
       return <Bell className="h-4 w-4 text-muted-foreground shrink-0" />;
   }

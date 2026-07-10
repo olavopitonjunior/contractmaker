@@ -2,13 +2,20 @@ import { NextRequest, NextResponse } from "next/server";
 import Anthropic from "@anthropic-ai/sdk";
 import { z } from "zod";
 import { auth, getUserOrg } from "@/lib/auth/auth";
+import { prisma } from "@/lib/db/prisma";
 import { recordAIUsage } from "@/lib/ai/usage";
+import { rateLimit } from "@/lib/security/ratelimit";
+import { getOrgModules } from "@/lib/modules/read";
 import { ASSISTANT_TOOLS, runAssistantTool } from "@/lib/ai/assistant-tools";
+import { getSupportConfig } from "@/lib/support/config";
+import { describeScreen } from "@/lib/support/route-map";
+import { SUPPORT_TOOLS, isSupportTool, runSupportTool } from "@/lib/support/tools";
+import { createOrDedupeHandoff } from "@/lib/support/handoff";
+import type { SupportModuleTag } from "@/lib/support/constants";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const HAIKU = "claude-haiku-4-5-20251001";
 const MAX_ITERATIONS = 4;
 
 const chatSchema = z.object({
@@ -21,27 +28,19 @@ const chatSchema = z.object({
     )
     .min(1)
     .max(40),
-  context: z.string().optional(), // ex: "/locacao/contratos/cm123" — só pra system prompt
+  context: z.string().optional(), // pathname da tela atual (consciência de tela)
 });
 
-const SYSTEM_PROMPT = `Você é o assistente IA do imobpro.ai, especialista em gestão de locação imobiliária no Brasil (Lei 8.245).
+type SseEvent =
+  | { type: "text_delta"; text: string }
+  | { type: "tool_use"; name: string }
+  | { type: "tool_result"; name: string }
+  | { type: "handoff"; handoffId: string }
+  | { type: "done"; interactionId: string | null; handoff: boolean }
+  | { type: "error"; message: string };
 
-Sua função é ajudar gestores de imobiliária a:
-- Tirar dúvidas sobre contratos, cobranças, repasses, reajustes, garantias
-- Sugerir ações concretas (ex.: disparar régua Newton, propor reajuste)
-- Explicar status de fluxo de caixa, inadimplência, vencimentos
-
-Diretrizes:
-- Use as tools disponíveis pra puxar dados reais antes de responder.
-- Respostas DIRETAS e ACIONÁVEIS em PT-BR. Sem floreio.
-- Cite valores em R$ formatados (R$ 2.500,00).
-- Quando sugerir ação, mencione o endpoint/botão correspondente.
-- Se faltar contexto, peça o ID do contrato/proprietário (1 pergunta direta, sem rodeios).
-- Nunca invente dados. Se a tool retornar erro, diga isso ao usuário.`;
-
-interface ChatTurn {
-  role: "user" | "assistant";
-  content: string;
+function sse(event: SseEvent): Uint8Array {
+  return new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`);
 }
 
 export async function POST(req: NextRequest) {
@@ -51,6 +50,18 @@ export async function POST(req: NextRequest) {
   }
   const org = await getUserOrg(session.user.id);
   if (!org) return NextResponse.json({ error: "Sem org" }, { status: 404 });
+
+  const rl = await rateLimit({
+    identifier: `support-chat:${session.user.id}`,
+    limit: 20,
+    window: "1 m",
+  });
+  if (!rl.success) {
+    return NextResponse.json(
+      { error: "Muitas mensagens. Aguarde um instante e tente de novo." },
+      { status: 429 }
+    );
+  }
 
   let body: unknown;
   try {
@@ -66,127 +77,273 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const userId = session.user.id;
+  const orgId = org.id;
+  const screenPath = parsed.data.context ?? null;
+  const lastUserQuestion =
+    [...parsed.data.messages].reverse().find((m) => m.role === "user")?.content ?? "";
+  const transcript = parsed.data.messages.slice(-12);
+
+  // Módulos ativos do tenant → filtra tools de dados e tags de conteúdo.
+  const modules = await getOrgModules(orgId);
+  const locacaoEnabled = modules.enabled.locacao === true;
+  const moduleTags: SupportModuleTag[] = [
+    ...(modules.enabled.vendas ? (["vendas"] as const) : []),
+    ...(locacaoEnabled ? (["locacao"] as const) : []),
+  ];
+
+  const config = await getSupportConfig();
+  const screen = describeScreen(screenPath);
+
+  const enabledLabel =
+    [modules.enabled.vendas ? "Vendas" : null, locacaoEnabled ? "Locação" : null]
+      .filter(Boolean)
+      .join(" e ") || "nenhum módulo específico";
+
+  const systemPrompt = [
+    config.systemPrompt,
+    `\nMódulos habilitados neste tenant: ${enabledLabel}.`,
+    screen.prompt ? `\n${screen.prompt}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  // Sem chave: devolve um stream mínimo com a mensagem de "não configurado".
+  const encoderStreamNotConfigured = () =>
+    new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          sse({
+            type: "text_delta",
+            text: "Assistente de suporte não está configurado (ANTHROPIC_API_KEY ausente). Peça ao admin pra habilitar.",
+          })
+        );
+        controller.enqueue(sse({ type: "done", interactionId: null, handoff: false }));
+        controller.close();
+      },
+    });
+
   if (!process.env.ANTHROPIC_API_KEY) {
-    return NextResponse.json({
-      reply:
-        "Assistente IA não está configurado (ANTHROPIC_API_KEY ausente). Pergunte ao admin pra habilitar.",
+    return new Response(encoderStreamNotConfigured(), {
+      headers: {
+        "Content-Type": "text/event-stream; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      },
     });
   }
 
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+  const tools: Anthropic.Tool[] = [
+    ...SUPPORT_TOOLS,
+    ...(locacaoEnabled ? ASSISTANT_TOOLS : []),
+  ];
+
   const startedAt = Date.now();
-  const toolsUsed: string[] = [];
-  let totalPromptTokens = 0;
-  let totalCompletionTokens = 0;
-  let iterations = 0;
 
-  // Loop de tool-use estilo Anthropic (max 4 iterações).
-  // Mantemos as messages em formato Anthropic (com content array quando tem tool_use/result).
-  type AnthropicMessage =
-    | { role: "user" | "assistant"; content: string }
-    | { role: "user" | "assistant"; content: Anthropic.MessageParam["content"] };
+  const stream = new ReadableStream({
+    async start(controller) {
+      const emit = (e: SseEvent) => controller.enqueue(sse(e));
+      const toolsUsed: string[] = [];
+      const kbHitIds: string[] = [];
+      let kbTopSimilarity: number | null = null;
+      let kbSearched = false;
+      let handoffId: string | null = null;
+      let finalReply = "";
+      let promptTokens = 0;
+      let completionTokens = 0;
+      let iterations = 0;
 
-  const messages: AnthropicMessage[] = parsed.data.messages.map((m) => ({
-    role: m.role,
-    content: m.content,
-  }));
+      const messages: Anthropic.MessageParam[] = parsed.data.messages.map((m) => ({
+        role: m.role,
+        content: m.content,
+      }));
 
-  const systemPrompt =
-    SYSTEM_PROMPT +
-    (parsed.data.context ? `\n\nContexto da sessão (URL atual): ${parsed.data.context}` : "");
+      try {
+        while (iterations < MAX_ITERATIONS) {
+          iterations++;
+          const llmStream = client.messages.stream({
+            model: config.model,
+            max_tokens: config.maxTokens,
+            temperature: config.temperature,
+            system: systemPrompt,
+            tools,
+            messages,
+          });
 
-  try {
-    let finalReply = "";
-    while (iterations < MAX_ITERATIONS) {
-      iterations++;
-      const resp = await client.messages.create({
-        model: HAIKU,
-        max_tokens: 1024,
-        system: systemPrompt,
-        tools: ASSISTANT_TOOLS,
-        messages: messages as Anthropic.MessageParam[],
-      });
-      totalPromptTokens += resp.usage.input_tokens;
-      totalCompletionTokens += resp.usage.output_tokens;
+          // Encaminha deltas de texto ao vivo.
+          for await (const ev of llmStream) {
+            if (
+              ev.type === "content_block_delta" &&
+              ev.delta.type === "text_delta" &&
+              ev.delta.text
+            ) {
+              emit({ type: "text_delta", text: ev.delta.text });
+            }
+          }
 
-      const toolUseBlocks = resp.content.filter((b) => b.type === "tool_use");
-      const textBlocks = resp.content.filter((b) => b.type === "text");
+          const msg = await llmStream.finalMessage();
+          promptTokens += msg.usage.input_tokens;
+          completionTokens += msg.usage.output_tokens;
 
-      if (toolUseBlocks.length === 0 || resp.stop_reason === "end_turn") {
-        // Resposta final.
-        finalReply = textBlocks.map((b) => (b.type === "text" ? b.text : "")).join("\n").trim();
-        break;
-      }
-
-      // Executa todas as tools chamadas e injeta resultados.
-      messages.push({
-        role: "assistant",
-        content: resp.content as Anthropic.MessageParam["content"],
-      });
-
-      const toolResults = await Promise.all(
-        toolUseBlocks.map(async (tu) => {
-          if (tu.type !== "tool_use") return null;
-          toolsUsed.push(tu.name);
-          const result = await runAssistantTool(
-            tu.name,
-            tu.input as Record<string, unknown>,
-            { orgId: org.id }
+          const toolUseBlocks = msg.content.filter(
+            (b): b is Anthropic.ToolUseBlock => b.type === "tool_use"
           );
-          return {
-            type: "tool_result" as const,
-            tool_use_id: tu.id,
-            content: result,
-          };
-        })
-      );
+          const text = msg.content
+            .map((b) => (b.type === "text" ? b.text : ""))
+            .join("")
+            .trim();
 
-      messages.push({
-        role: "user",
-        content: toolResults.filter(Boolean) as Anthropic.MessageParam["content"],
-      });
-    }
+          if (toolUseBlocks.length === 0 || msg.stop_reason === "end_turn") {
+            finalReply = text || finalReply;
+            break;
+          }
 
-    if (!finalReply) {
-      finalReply = "Não consegui completar a resposta. Tente reformular a pergunta.";
-    }
+          messages.push({ role: "assistant", content: msg.content });
 
-    recordAIUsage({
-      orgId: org.id,
-      userId: session.user.id,
-      provider: "anthropic",
-      model: HAIKU,
-      operation: "assistant_chat",
-      promptTokens: totalPromptTokens,
-      completionTokens: totalCompletionTokens,
-      latencyMs: Date.now() - startedAt,
-      toolsUsed: [...new Set(toolsUsed)],
-      iterations,
-      success: true,
-    });
+          const toolResults: Anthropic.ToolResultBlockParam[] = [];
+          for (const tu of toolUseBlocks) {
+            toolsUsed.push(tu.name);
+            emit({ type: "tool_use", name: tu.name });
+            const input = (tu.input ?? {}) as Record<string, unknown>;
 
-    return NextResponse.json({ reply: finalReply, toolsUsed, iterations });
-  } catch (err) {
-    recordAIUsage({
-      orgId: org.id,
-      userId: session.user.id,
-      provider: "anthropic",
-      model: HAIKU,
-      operation: "assistant_chat",
-      promptTokens: totalPromptTokens,
-      completionTokens: totalCompletionTokens,
-      latencyMs: Date.now() - startedAt,
-      toolsUsed: [...new Set(toolsUsed)],
-      iterations,
-      success: false,
-      errorMessage: err instanceof Error ? err.message : String(err),
-    });
-    return NextResponse.json(
-      {
-        error: "Falha na consulta ao assistente",
-        detail: err instanceof Error ? err.message : String(err),
-      },
-      { status: 500 }
-    );
-  }
+            let content: string;
+            if (isSupportTool(tu.name)) {
+              if (tu.name === "search_support_kb") kbSearched = true;
+              const r = await runSupportTool(tu.name, input, {
+                orgId,
+                userId,
+                screenPath,
+                moduleTags,
+                transcript,
+              });
+              content = r.content;
+              if (typeof r.kbTopSimilarity === "number") {
+                kbTopSimilarity =
+                  kbTopSimilarity === null
+                    ? r.kbTopSimilarity
+                    : Math.max(kbTopSimilarity, r.kbTopSimilarity);
+              }
+              if (r.kbHitIds) kbHitIds.push(...r.kbHitIds);
+              if (r.handoffId) {
+                handoffId = r.handoffId;
+                emit({ type: "handoff", handoffId: r.handoffId });
+              }
+            } else {
+              content = await runAssistantTool(tu.name, input, { orgId });
+            }
+
+            emit({ type: "tool_result", name: tu.name });
+            toolResults.push({
+              type: "tool_result",
+              tool_use_id: tu.id,
+              content,
+            });
+          }
+
+          messages.push({ role: "user", content: toolResults });
+        }
+
+        if (!finalReply) {
+          finalReply = "Não consegui completar a resposta. Tente reformular a pergunta.";
+        }
+
+        // Guardrail determinístico: buscou na base, nenhum hit confiável e o modelo
+        // NÃO encaminhou → registra handoff pra revisão humana e avisa o usuário.
+        if (
+          kbSearched &&
+          !handoffId &&
+          (kbTopSimilarity === null || kbTopSimilarity < config.handoffMinSimilarity) &&
+          lastUserQuestion
+        ) {
+          try {
+            const { id } = await createOrDedupeHandoff({
+              question: lastUserQuestion,
+              orgId,
+              userId,
+              screenPath,
+              transcript,
+            });
+            handoffId = id;
+            emit({ type: "handoff", handoffId: id });
+            emit({
+              type: "text_delta",
+              text: "\n\n_Não achei isso com segurança na base — encaminhei sua dúvida ao nosso suporte e você será avisado quando respondermos._",
+            });
+            finalReply +=
+              "\n\n_Encaminhei sua dúvida ao nosso suporte e você será avisado quando respondermos._";
+          } catch (e) {
+            console.error("[support-chat] guardrail handoff falhou:", e);
+          }
+        }
+
+        // Persiste a interação (backbone de qualidade + alvo do feedback 👍/👎).
+        let interactionId: string | null = null;
+        try {
+          const interaction = await prisma.supportInteraction.create({
+            data: {
+              orgId,
+              userId,
+              question: lastUserQuestion.slice(0, 4000),
+              answer: finalReply.slice(0, 8000),
+              screenPath,
+              kbTopSimilarity,
+              kbHitIds: Array.from(new Set(kbHitIds)),
+              handoffCreated: !!handoffId,
+              handoffId,
+            },
+            select: { id: true },
+          });
+          interactionId = interaction.id;
+        } catch (e) {
+          console.error("[support-chat] persistência de interação falhou:", e);
+        }
+
+        emit({ type: "done", interactionId, handoff: !!handoffId });
+
+        recordAIUsage({
+          orgId,
+          userId,
+          provider: "anthropic",
+          model: config.model,
+          operation: "support_chat",
+          promptTokens,
+          completionTokens,
+          latencyMs: Date.now() - startedAt,
+          toolsUsed: [...new Set(toolsUsed)],
+          iterations,
+          success: true,
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error("[support-chat] erro:", message);
+        emit({ type: "error", message: "Falha na consulta ao assistente." });
+        recordAIUsage({
+          orgId,
+          userId,
+          provider: "anthropic",
+          model: config.model,
+          operation: "support_chat",
+          promptTokens,
+          completionTokens,
+          latencyMs: Date.now() - startedAt,
+          iterations,
+          success: false,
+          errorMessage: message,
+        });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      "X-Accel-Buffering": "no",
+    },
+  });
 }
