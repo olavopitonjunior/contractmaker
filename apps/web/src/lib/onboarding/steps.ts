@@ -127,7 +127,7 @@ export function stepUrl(
     case "google":
       return "/settings/integracoes";
     case "profile":
-      return "/onboarding";
+      return "/settings/perfil";
     case "templates":
       return "/templates";
     case "form":
@@ -135,6 +135,7 @@ export function stepUrl(
     case "invite":
       return "/settings/membros";
     case "deal":
-      return opts?.locacaoOnly ? "/pipeline/locacao" : "/pipeline";
+      // `?novo=1` destaca (e abre) o dropdown "Novo negócio" no Kanban.
+      return opts?.locacaoOnly ? "/pipeline/locacao?novo=1" : "/pipeline?novo=1";
   }
 }

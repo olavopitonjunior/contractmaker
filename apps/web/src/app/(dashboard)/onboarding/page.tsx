@@ -5,6 +5,7 @@ import { getOnboardingStatus } from "@/lib/onboarding/status";
 import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
 import { MODULE } from "@/lib/modules/catalog";
 import { OnboardingWizard } from "@/components/onboarding/OnboardingWizard";
+import { OnboardingWelcomeModal } from "@/components/onboarding/OnboardingWelcomeModal";
 
 export const dynamic = "force-dynamic";
 
@@ -22,7 +23,13 @@ export default async function OnboardingPage() {
     }),
     prisma.organization.findUnique({
       where: { id: org.id },
-      select: { legalName: true, cnpj: true, creci: true, legalAddress: true },
+      select: {
+        legalName: true,
+        cnpj: true,
+        creci: true,
+        legalAddress: true,
+        onboardingIntroSeenAt: true,
+      },
     }),
     getOrgModules(org.id),
   ]);
@@ -35,6 +42,7 @@ export default async function OnboardingPage() {
 
   return (
     <div className="mx-auto max-w-4xl">
+      <OnboardingWelcomeModal defaultOpen={!orgData?.onboardingIntroSeenAt} />
       <OnboardingWizard
         initialStatus={status}
         google={{

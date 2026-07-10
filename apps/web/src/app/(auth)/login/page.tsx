@@ -61,7 +61,9 @@ function LoginContent() {
       return;
     }
 
-    router.push("/pipeline");
+    // Passa pela home "/" pra rodar o landing inteligente (módulo + onboarding
+    // no 1º acesso), em vez de ir direto pro /pipeline.
+    router.push("/");
     router.refresh();
   }
 
@@ -73,7 +75,7 @@ function LoginContent() {
       const result = await signIn("resend", {
         email,
         redirect: false,
-        callbackUrl: "/pipeline",
+        callbackUrl: "/",
       });
       if (result?.error) {
         setError(

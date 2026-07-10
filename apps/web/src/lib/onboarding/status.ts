@@ -56,21 +56,35 @@ export async function getOnboardingStatus(orgId: string): Promise<OnboardingStat
   );
   const modalidadesNeeded = enabledModules.flatMap((m) => MODALIDADES_BY_MODULE[m]);
 
-  const [activeTemplates, formConfigured, invites, deals] = await Promise.all([
+  const [activeTemplates, formSettings, invites, extraMembers, deals] = await Promise.all([
     prisma.contractTemplate.count({
       where: { orgId, status: "active", modalidade: { in: modalidadesNeeded } },
     }),
-    // A row de OrgFormSettings nasce no preset "legado" por default → só conta
-    // como "configurado" quando o dono escolhe um preset real.
-    prisma.orgFormSettings.count({
-      where: { orgId, preset: { not: "legado" } },
+    // A row de OrgFormSettings nasce no preset "legado" por default (= o rádio
+    // pré-selecionado na UI), então "preset != legado" não flipa quando o dono
+    // só salva. Sinal correto: houve SAVE real (updatedAt > createdAt) — os
+    // únicos writers são o create lazy e o PATCH; ou preset != legado; ou custom.
+    prisma.orgFormSettings.findUnique({
+      where: { orgId },
+      select: { preset: true, customRequiredPaths: true, createdAt: true, updatedAt: true },
     }),
     prisma.orgInvitation.count({
       where: { orgId, status: { in: ["pending", "approved"] } },
     }),
+    // Fallback do convite: alguém além do owner já entrou (cobre o direct-add
+    // POST /api/org/members, que não cria OrgInvitation).
+    prisma.orgMembership.count({ where: { orgId, role: { not: "owner" } } }),
     // Deal não tem orgId direto — escopo via pipeline.
     prisma.deal.count({ where: { pipeline: { orgId } } }),
   ]);
+
+  const formDone =
+    !!formSettings &&
+    (formSettings.updatedAt.getTime() > formSettings.createdAt.getTime() ||
+      formSettings.preset !== "legado" ||
+      (Array.isArray(formSettings.customRequiredPaths) &&
+        (formSettings.customRequiredPaths as unknown[]).length > 0));
+  const inviteDone = invites > 0 || extraMembers > 0;
 
   // --- google ---
   const googleDone = googleAccount?.status === "connected";
@@ -94,8 +108,8 @@ export async function getOnboardingStatus(orgId: string): Promise<OnboardingStat
     google: googleDone,
     profile: profileDone,
     templates: templatesDone,
-    form: formConfigured > 0,
-    invite: invites > 0,
+    form: formDone,
+    invite: inviteDone,
     deal: deals > 0,
   };
   const detailByKey: Partial<Record<OnboardingStepKey, string>> = {

@@ -65,9 +65,9 @@ export function UploadModeloDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm" variant="outline">
+        <Button size="sm">
           <FileUp className="mr-1.5 h-4 w-4" />
-          Novo do modelo da imobiliária (DOCX)
+          Importar modelo da imobiliária (.docx)
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">

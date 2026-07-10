@@ -1,6 +1,6 @@
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import { Plus } from "lucide-react";
+import { PenLine } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
@@ -41,13 +41,13 @@ export default async function TemplatesPage({
     <div className="space-y-6">
       <PageHeader
         title="Templates de Contrato"
-        description="Cada modalidade tem um template marcado como padrão. Esse é usado automaticamente na criação de novos contratos."
+        description="Comece pelo modelo timbrado da sua imobiliária (.docx) — a IA insere as variáveis e você revisa. Cada modalidade tem um template padrão, usado automaticamente nos novos contratos."
       >
         <UploadModeloDialog />
-        <Button size="sm" asChild>
+        <Button size="sm" variant="ghost" asChild>
           <Link href="/templates/new">
-            <Plus className="mr-1.5 h-4 w-4" />
-            Novo Template
+            <PenLine className="mr-1.5 h-4 w-4" />
+            Criar do zero (avançado)
           </Link>
         </Button>
       </PageHeader>

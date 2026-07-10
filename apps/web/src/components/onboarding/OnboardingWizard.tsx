@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
@@ -100,6 +100,19 @@ export function OnboardingWizard({
       setRefreshing(false);
     }
   }
+
+  // Re-busca o status ao voltar pra aba (ex.: conectou o Google noutra aba,
+  // salvou algo e voltou) — o painel reflete sem reload manual.
+  useEffect(() => {
+    const onFocus = () => {
+      fetch("/api/onboarding/complete")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((s) => s && setStatus(s))
+        .catch(() => {});
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
 
   // "Continuar depois" NÃO conclui — o guia fica ativo (checklist na sidebar) até
   // 100%. Só navega pro app; o flag só é setado quando os 6 passos terminam.

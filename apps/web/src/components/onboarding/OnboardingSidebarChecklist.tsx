@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Check } from "lucide-react";
@@ -13,16 +13,53 @@ import { STEP_META, stepUrl } from "@/lib/onboarding/steps";
  * Checklist "Primeiros passos" no topo da sidebar — o guia persistente do
  * onboarding. Fica ativo até 100%; ao concluir, grava o flag (client-side) e
  * some. Só é montado pra owner com onboarding em aberto (gate no layout).
+ *
+ * Auto-refetch: o layout server só computa o status uma vez (não re-roda em
+ * navegação client), então ações inline (salvar formulário, convidar) não
+ * refletiriam. Aqui re-buscamos `GET /api/onboarding/complete` em troca de rota,
+ * foco/visibilidade da janela e num poll leve — assim o checklist atualiza sozinho.
  */
 export function OnboardingSidebarChecklist({
-  status,
+  status: initialStatus,
   modules,
 }: {
   status: OnboardingStatus;
   modules?: { enabled: Record<string, boolean> } | null;
 }) {
   const pathname = usePathname();
+  const [status, setStatus] = useState(initialStatus);
   const marked = useRef(false);
+
+  const refetch = useCallback(async () => {
+    try {
+      const res = await fetch("/api/onboarding/complete");
+      if (res.ok) setStatus(await res.json());
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  // Re-busca ao trocar de rota (o dono voltou de /settings/formulario etc.).
+  useEffect(() => {
+    refetch();
+  }, [pathname, refetch]);
+
+  // Re-busca ao focar a janela / voltar a aba visível + poll leve enquanto incompleto.
+  useEffect(() => {
+    if (status.complete) return;
+    const onFocus = () => refetch();
+    const onVis = () => {
+      if (document.visibilityState === "visible") refetch();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVis);
+    const id = window.setInterval(refetch, 20000);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVis);
+      window.clearInterval(id);
+    };
+  }, [status.complete, refetch]);
 
   // Ao chegar em 100%, grava "concluído" uma vez (o layout para de mostrar).
   useEffect(() => {
