@@ -15,8 +15,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import { Badge } from "@/components/ui/badge";
-import { ArrowDown, ArrowUp, Plus, Send, Trash2, UserPlus } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowDown,
+  ArrowUp,
+  Plus,
+  Send,
+  Trash2,
+  UserPlus,
+} from "lucide-react";
 import { CLICKSIGN_ROLE_OPTIONS, type ClicksignRole } from "@/lib/clicksign/roles";
+import { suggestEmailDomain } from "@/lib/forms/email-typo";
 
 interface AttachmentPick {
   id: string;
@@ -352,12 +361,36 @@ export function SendAttachmentEnvelopeDialog({
                       value={s.name}
                       onChange={(e) => updateSigner(s.id, { name: e.target.value })}
                     />
-                    <Input
-                      type="email"
-                      placeholder="email@exemplo.com"
-                      value={s.email}
-                      onChange={(e) => updateSigner(s.id, { email: e.target.value })}
-                    />
+                    <div className="space-y-1">
+                      <Input
+                        type="email"
+                        placeholder="email@exemplo.com"
+                        value={s.email}
+                        onChange={(e) =>
+                          updateSigner(s.id, { email: e.target.value })
+                        }
+                      />
+                      {(() => {
+                        const suggestion = suggestEmailDomain(s.email);
+                        if (!suggestion) return null;
+                        return (
+                          <p className="text-[11px] text-amber-600 flex items-center gap-1 flex-wrap">
+                            <AlertTriangle className="h-3 w-3 shrink-0" />
+                            <span>Você quis dizer</span>
+                            <button
+                              type="button"
+                              className="font-medium underline underline-offset-2 hover:text-amber-700"
+                              onClick={() =>
+                                updateSigner(s.id, { email: suggestion })
+                              }
+                            >
+                              {suggestion}
+                            </button>
+                            <span>?</span>
+                          </p>
+                        );
+                      })()}
+                    </div>
                     <Input
                       placeholder="CPF ou CNPJ (opcional)"
                       value={s.documentation}

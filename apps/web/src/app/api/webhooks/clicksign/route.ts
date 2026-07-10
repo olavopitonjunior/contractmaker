@@ -8,6 +8,7 @@ import { audit } from "@/lib/security/audit";
 import {
   getDocumentKeyFromPayload,
   getEnvelopeIdFromPayload,
+  getRawEventName,
   getSignedDocumentUrlFromPayload,
   getSignerEmailFromPayload,
   parseWebhookEventName,
@@ -143,9 +144,14 @@ export async function POST(req: NextRequest) {
   }
 
   const eventName = parseWebhookEventName(payload);
+  const rawEventName = getRawEventName(payload);
   const clicksignEnvelopeId = getEnvelopeIdFromPayload(payload);
   const documentKey = getDocumentKeyFromPayload(payload);
-  if (!eventName || (!clicksignEnvelopeId && !documentKey)) {
+  // Precisa de um nome (mesmo desconhecido) + uma âncora do envelope. Eventos
+  // desconhecidos NÃO são mais descartados aqui — resolvemos o envelope e
+  // registramos no EnvelopeEvent (só não disparam mutação). Antes um evento
+  // como `tracking_notification_error` (bounce) sumia sem deixar rastro.
+  if (!rawEventName || (!clicksignEnvelopeId && !documentKey)) {
     return NextResponse.json({ ok: true, ignored: true });
   }
 
@@ -175,14 +181,22 @@ export async function POST(req: NextRequest) {
       result: "SUCCESS",
       resourceType: "Envelope",
       resource: envelope.id,
-      metadata: { eventName, envelopeId: envelope.id, clicksignEnvelopeId, documentKey },
+      metadata: {
+        eventName: rawEventName,
+        handled: Boolean(eventName),
+        envelopeId: envelope.id,
+        clicksignEnvelopeId,
+        documentKey,
+      },
     }
   ).catch(() => {});
 
+  // Registra SEMPRE — inclusive eventos que não tratamos (eventName null).
+  // O nome cru fica no EnvelopeEvent pra diagnóstico (ex.: bounce de e-mail).
   await prisma.envelopeEvent.create({
     data: {
       envelopeId: envelope.id,
-      eventName,
+      eventName: rawEventName,
       payload: payload as unknown as Prisma.InputJsonValue,
       source: "webhook",
     },

@@ -1,15 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
-import { getEnvelope } from "@/lib/clicksign/envelopes";
 import { ClicksignError } from "@/lib/clicksign/client";
-import { uploadBufferToStorage } from "@/lib/storage/s3";
-import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-signed";
-import {
-  completeInspectionOnEnvelopeClosed,
-  revertInspectionOnEnvelopeCanceled,
-  updateInspectionSignedLaudo,
-} from "@/lib/locacao/inspection-signature";
+import { syncEnvelopeState } from "@/lib/clicksign/sync";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
 
 export const runtime = "nodejs";
@@ -19,13 +11,13 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/cron/clicksign/sync-envelopes
  * Fallback diário pra reconciliar envelopes "running" que não tiveram
- * webhook recente. Marca closed/canceled conforme estado da Clicksign.
+ * webhook recente. Delega pro `syncEnvelopeState` — mesma reconciliação do
+ * botão Atualizar: marca closed/canceled, baixa PDF, auto-promove deal E
+ * reconcilia signatários (inclui `email_failed` de bounces, que a ClickSign
+ * NUNCA manda por webhook — só no feed REST /events).
  *
- * **REDUNDANTE desde 2026-05-08** — webhook agora funciona (lookup por
- * `documentClicksignId` em vez de `envelope.id`). Botão Atualizar em
- * `/sync` cobre casos manuais. Mantido como suspensórios caso ClickSign
- * tenha downtime de webhook prolongado. Considere remover se logs
- * mostrarem 0 drift por 30+ dias.
+ * Webhook cobre closed/sign em tempo real; este cron é o único caminho
+ * automático pra surfacer bounces de e-mail sem ação do operador.
  */
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
@@ -46,6 +38,7 @@ export async function GET(req: NextRequest) {
       updatedAt: { lt: cutoff },
       clicksignId: { not: null },
     },
+    include: { signers: true },
     take: 50,
   });
 
@@ -54,49 +47,13 @@ export async function GET(req: NextRequest) {
   const errors: Array<{ id: string; error: string }> = [];
 
   for (const env of envelopes) {
-    if (!env.clicksignId) continue;
     try {
-      const resp = await getEnvelope(env.clicksignId);
-      const data = (resp as { data?: { attributes?: { status?: string } } })
-        .data;
-      const remoteStatus = data?.attributes?.status;
-      if (!remoteStatus) continue;
-
-      if (remoteStatus === "closed") {
-        await prisma.envelope.update({
-          where: { id: env.id },
-          data: { status: "closed", closedAt: new Date() },
-        });
-        await prisma.envelopeEvent.create({
-          data: {
-            envelopeId: env.id,
-            eventName: "close",
-            payload: { source: "cron-sync", remoteStatus },
-            source: "cron",
-          },
-        });
-        const signedUrl = extractSignedUrl(resp);
-        if (signedUrl) waitUntil(downloadSignedPdf(env.id, signedUrl));
-        await autoPromoteDealOnContractSigned(env.id);
-        await completeInspectionOnEnvelopeClosed(env.id);
-        drifted += 1;
-      } else if (remoteStatus === "canceled") {
-        await prisma.envelope.update({
-          where: { id: env.id },
-          data: { status: "canceled", canceledAt: new Date() },
-        });
-        await revertInspectionOnEnvelopeCanceled(env.id);
-        await prisma.envelopeEvent.create({
-          data: {
-            envelopeId: env.id,
-            eventName: "cancel",
-            payload: { source: "cron-sync", remoteStatus },
-            source: "cron",
-          },
-        });
+      const result = await syncEnvelopeState(env, { actorVia: "cron" });
+      const changed = result.envelopeUpdated || result.signersUpdated > 0;
+      if (changed) {
         drifted += 1;
       } else {
-        // Mantém running mas atualiza updatedAt pra não cair de novo no sweep.
+        // Nada mudou: bump updatedAt pra não cair de novo no próximo sweep.
         await prisma.envelope.update({
           where: { id: env.id },
           data: { updatedAt: new Date() },
@@ -117,39 +74,4 @@ export async function GET(req: NextRequest) {
     errorCount: errors.length,
     errors: errors.slice(0, 10),
   });
-}
-
-function extractSignedUrl(resp: unknown): string | null {
-  const included = (resp as { included?: Array<{ attributes?: Record<string, unknown> }> })
-    .included;
-  if (!Array.isArray(included)) return null;
-  for (const item of included) {
-    const downloads = item.attributes?.downloads as
-      | { signed_file_url?: string }
-      | undefined;
-    if (downloads?.signed_file_url) return downloads.signed_file_url;
-  }
-  return null;
-}
-
-async function downloadSignedPdf(envelopeId: string, url: string) {
-  try {
-    const res = await fetch(url);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const buf = Buffer.from(await res.arrayBuffer());
-    const stored = await uploadBufferToStorage({
-      bucket: process.env.S3_BUCKET,
-      key: `envelopes/${envelopeId}/signed.pdf`,
-      body: buf,
-      contentType: "application/pdf",
-    });
-    await prisma.envelope.update({
-      where: { id: envelopeId },
-      data: { signedDocumentUrl: stored },
-    });
-    // Laudo de vistoria: a versão assinada vira o laudoPdfUrl final.
-    await updateInspectionSignedLaudo(envelopeId, stored);
-  } catch (err) {
-    console.error("[clicksign cron] falha download PDF assinado:", err);
-  }
 }

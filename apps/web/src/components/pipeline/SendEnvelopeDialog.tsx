@@ -23,6 +23,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { CLICKSIGN_ROLE_OPTIONS, type ClicksignRole } from "@/lib/clicksign/roles";
+import { suggestEmailDomain } from "@/lib/forms/email-typo";
 
 interface Conjuge {
   nome?: string;
@@ -704,6 +705,24 @@ function SignerCard({
             onChange={(e) => onChange(row.rowId, { email: e.target.value })}
             placeholder="email@exemplo.com"
           />
+          {(() => {
+            const suggestion = suggestEmailDomain(row.email);
+            if (!suggestion) return null;
+            return (
+              <p className="text-[11px] text-amber-600 flex items-center gap-1 flex-wrap">
+                <AlertTriangle className="h-3 w-3 shrink-0" />
+                <span>Você quis dizer</span>
+                <button
+                  type="button"
+                  className="font-medium underline underline-offset-2 hover:text-amber-700"
+                  onClick={() => onChange(row.rowId, { email: suggestion })}
+                >
+                  {suggestion}
+                </button>
+                <span>?</span>
+              </p>
+            );
+          })()}
         </div>
         <div className="space-y-1">
           <Label className="text-xs">Celular</Label>
