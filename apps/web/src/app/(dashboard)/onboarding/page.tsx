@@ -1,7 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import { PageHeader } from "@/components/layout/page-header";
 import { getOnboardingStatus } from "@/lib/onboarding/status";
 import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
 import { MODULE } from "@/lib/modules/catalog";
@@ -28,18 +27,14 @@ export default async function OnboardingPage() {
     getOrgModules(org.id),
   ]);
 
-  // Landing pós-onboarding: tenant só-locação vai pra /locacao; senão /pipeline.
-  const landingHref =
-    !isModuleEnabled(modules, MODULE.VENDAS) && isModuleEnabled(modules, MODULE.LOCACAO)
-      ? "/locacao"
-      : "/pipeline";
+  // Tenant só-locação (vendas off): o negócio nasce no board de locação, e a
+  // landing pós-onboarding é /locacao; senão /pipeline.
+  const locacaoOnly =
+    !isModuleEnabled(modules, MODULE.VENDAS) && isModuleEnabled(modules, MODULE.LOCACAO);
+  const landingHref = locacaoOnly ? "/locacao" : "/pipeline";
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Bem-vindo(a) 👋"
-        description="Vamos deixar tudo pronto para você gerar o seu primeiro contrato."
-      />
+    <div className="mx-auto max-w-4xl">
       <OnboardingWizard
         initialStatus={status}
         google={{
@@ -54,6 +49,7 @@ export default async function OnboardingPage() {
           creci: orgData?.creci,
           legalAddress: orgData?.legalAddress,
         }}
+        locacaoOnly={locacaoOnly}
         landingHref={landingHref}
       />
     </div>

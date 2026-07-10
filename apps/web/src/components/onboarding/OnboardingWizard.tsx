@@ -3,29 +3,27 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { toast } from "sonner";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import {
   Check,
-  Circle,
-  CloudUpload,
-  Building2,
-  FileText,
-  BookOpen,
-  Palette,
-  Sparkles,
-  Loader2,
-  ExternalLink,
+  CheckCircle2,
+  Info,
+  ArrowRight,
   RefreshCw,
-  type LucideIcon,
+  Loader2,
 } from "lucide-react";
-import type { OnboardingStatus, OnboardingStepKey } from "@/lib/onboarding/status";
+import type { OnboardingStatus } from "@/lib/onboarding/status";
+import {
+  STEP_ORDER,
+  STEP_META,
+  stepUrl,
+  type OnboardingStepKey,
+} from "@/lib/onboarding/steps";
 import { GoogleDriveCard } from "@/components/settings/GoogleDriveCard";
 import { AgencyProfileForm, type AgencyProfile } from "./AgencyProfileForm";
-import { KnowledgeSeedButton } from "@/components/knowledge/KnowledgeSeedButton";
-import { KnowledgeUploadCard } from "@/components/knowledge/KnowledgeUploadCard";
 
 interface GoogleDriveState {
   connected: boolean;
@@ -34,86 +32,66 @@ interface GoogleDriveState {
   lastErrorMessage: string | null;
 }
 
-const STEP_META: Record<
-  OnboardingStepKey,
-  { title: string; blurb: string; icon: LucideIcon }
-> = {
-  google: {
-    title: "Conectar o Google Drive",
-    blurb:
-      "É onde seus contratos são criados e guardados — no Drive da imobiliária, com a identidade visual de vocês.",
-    icon: CloudUpload,
-  },
-  profile: {
-    title: "Perfil da imobiliária",
-    blurb:
-      "Razão social, CNPJ, CRECI e endereço. É o que nomeia a administradora nas cláusulas dos contratos de locação.",
-    icon: Building2,
-  },
-  templates: {
-    title: "Modelos de contrato",
-    blurb:
-      "Suba o seu modelo timbrado (.docx). A IA insere as variáveis {{...}} e você revisa antes de ativar.",
-    icon: FileText,
-  },
-  knowledge: {
-    title: "Base de conhecimento (opcional)",
-    blurb:
-      "Cláusulas que a IA usa para revisar e sugerir. Dá pra começar com as cláusulas padrão da Lei 8.245/91 — ou pular e fazer depois.",
-    icon: BookOpen,
-  },
-  docstyle: {
-    title: "Estilo do documento (opcional)",
-    blurb:
-      "Fonte, margens e espaçamento padrão. Opcional para modelos do Google Docs, que já trazem o próprio layout.",
-    icon: Palette,
-  },
+// Info-banner por passo (o "porquê" que reforça a ação).
+const STEP_NOTE: Partial<Record<OnboardingStepKey, string>> = {
+  templates: "Precisa do Google conectado — os modelos ficam no Drive da imobiliária.",
+  deal: "É o seu primeiro contrato saindo. Tudo que você configurou converge aqui.",
 };
 
-const STEP_ORDER: OnboardingStepKey[] = [
-  "google",
-  "profile",
-  "templates",
-  "knowledge",
-  "docstyle",
-];
+function ProgressRing({ pct, done, total }: { pct: number; done: number; total: number }) {
+  const R = 42;
+  const C = 2 * Math.PI * R;
+  const offset = C * (1 - pct / 100);
+  return (
+    <div className="relative h-24 w-24 flex-none">
+      <svg width="96" height="96" className="-rotate-90">
+        <circle cx="48" cy="48" r={R} fill="none" strokeWidth="8" className="stroke-muted" />
+        <circle
+          cx="48"
+          cy="48"
+          r={R}
+          fill="none"
+          strokeWidth="8"
+          strokeLinecap="round"
+          strokeDasharray={C}
+          strokeDashoffset={offset}
+          className="stroke-primary transition-[stroke-dashoffset] duration-700"
+        />
+      </svg>
+      <div className="absolute inset-0 grid place-content-center text-center">
+        <span className="font-display text-2xl font-semibold tabular-nums leading-none">{pct}%</span>
+        <span className="mt-0.5 text-[10.5px] text-muted-foreground">
+          {done} de {total}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 export function OnboardingWizard({
   initialStatus,
   google,
   profile,
+  locacaoOnly,
   landingHref,
 }: {
   initialStatus: OnboardingStatus;
   google: GoogleDriveState;
   profile: AgencyProfile;
+  locacaoOnly: boolean;
   landingHref: string;
 }) {
   const router = useRouter();
   const [status, setStatus] = useState(initialStatus);
   const [refreshing, setRefreshing] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [finishing, setFinishing] = useState(false);
 
-  const doneByKey = useMemo(
-    () => Object.fromEntries(status.steps.map((s) => [s.key, s.done])),
+  const firstPending = useMemo(
+    () => status.steps.find((s) => !s.done)?.key ?? STEP_ORDER[0],
     [status]
   );
-  const detailByKey = useMemo(
-    () => Object.fromEntries(status.steps.map((s) => [s.key, s.detail])),
-    [status]
-  );
-  const requiredByKey = useMemo(
-    () => Object.fromEntries(status.steps.map((s) => [s.key, s.required])),
-    [status]
-  );
-
-  // Passo ativo default: primeiro obrigatório não-feito.
-  const firstPending =
-    STEP_ORDER.find((k) => requiredByKey[k] && !doneByKey[k]) ?? "google";
   const [active, setActive] = useState<OnboardingStepKey>(firstPending);
 
-  async function refreshStatus() {
+  async function refresh() {
     setRefreshing(true);
     try {
       const res = await fetch("/api/onboarding/complete");
@@ -123,235 +101,201 @@ export function OnboardingWizard({
     }
   }
 
-  async function applyDefaultStyle() {
-    const res = await fetch("/api/document-styles", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Padrão", isDefault: true }),
-    });
-    if (res.ok) {
-      toast.success("Estilo padrão aplicado.");
-      await refreshStatus();
-    } else {
-      const j = await res.json().catch(() => ({}));
-      toast.error(j.error || "Falha ao aplicar o estilo.");
-    }
+  // "Continuar depois" NÃO conclui — o guia fica ativo (checklist na sidebar) até
+  // 100%. Só navega pro app; o flag só é setado quando os 6 passos terminam.
+  function continueLater() {
+    router.push(landingHref);
   }
 
-  async function markComplete(): Promise<boolean> {
-    const res = await fetch("/api/onboarding/complete", { method: "POST" });
-    if (!res.ok) {
-      const j = await res.json().catch(() => ({}));
-      toast.error(j.error || "Falha ao concluir o onboarding.");
-      return false;
-    }
-    return true;
-  }
+  const pct = Math.round((status.requiredDone / Math.max(1, status.requiredTotal)) * 100);
 
-  async function generateFirstContract() {
-    setGenerating(true);
-    try {
-      const res = await fetch("/api/locacao/forms", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          finalidade: "residencial",
-          title: "Contrato de teste (onboarding)",
-        }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data.dealId) {
-        toast.error(data.error || "Falha ao criar o negócio de teste.");
-        return;
-      }
-      await markComplete();
-      router.push(`/locacao/deals/${data.dealId}`);
-    } finally {
-      setGenerating(false);
-    }
-  }
-
-  async function finishTour() {
-    setFinishing(true);
-    try {
-      const ok = await markComplete();
-      if (ok) router.push(landingHref);
-    } finally {
-      setFinishing(false);
-    }
+  // --- Conclusão ---
+  if (status.complete) {
+    return (
+      <Card className="mx-auto max-w-xl overflow-hidden border-border text-center">
+        <CardContent className="flex flex-col items-center px-8 py-10">
+          <span className="mb-4 grid h-16 w-16 place-items-center rounded-full bg-success text-white animate-in zoom-in-50 duration-500">
+            <Check className="h-8 w-8" strokeWidth={2.5} />
+          </span>
+          <h2 className="font-display text-2xl font-semibold tracking-tight">
+            Sua imobiliária está pronta
+          </h2>
+          <p className="mt-2 max-w-sm text-sm text-muted-foreground">
+            Tudo configurado. Agora é criar negócios e deixar a esteira trabalhar por você.
+          </p>
+          <ul className="my-6 flex w-full max-w-xs flex-col gap-2 text-left">
+            {STEP_ORDER.map((k) => (
+              <li key={k} className="flex items-center gap-2.5 text-sm">
+                <CheckCircle2 className="h-4 w-4 flex-none text-success" />
+                {STEP_META[k].title}
+              </li>
+            ))}
+          </ul>
+          <Button asChild>
+            <Link href={landingHref}>
+              <ArrowRight className="mr-1.5 h-4 w-4" />
+              Ir para o pipeline
+            </Link>
+          </Button>
+        </CardContent>
+      </Card>
+    );
   }
 
   const meta = STEP_META[active];
+  const activeIdx = STEP_ORDER.indexOf(active);
+  const activeStep = status.steps.find((s) => s.key === active);
   const ActiveIcon = meta.icon;
+  const note = STEP_NOTE[active];
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[280px_1fr]">
-      {/* Checklist */}
-      <div className="space-y-2">
-        <div className="mb-3">
-          <p className="text-sm font-medium">
-            {status.requiredDone}/{status.requiredTotal} passos obrigatórios
+    <div>
+      {/* Hero */}
+      <div className="mb-6 flex flex-col-reverse items-start gap-5 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="mb-2 text-[11.5px] font-bold uppercase tracking-[0.14em] text-brand-accent">
+            Configuração inicial
           </p>
-          <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-            <div
-              className="h-full rounded-full bg-primary transition-all"
-              style={{
-                width: `${(status.requiredDone / Math.max(1, status.requiredTotal)) * 100}%`,
-              }}
-            />
-          </div>
+          <h1 className="max-w-[16ch] text-balance font-display text-3xl font-semibold leading-[1.1] tracking-tight">
+            Configure sua imobiliária
+          </h1>
+          <p className="mt-2 max-w-[46ch] text-sm text-muted-foreground">
+            Seis passos até o seu primeiro negócio. Cada etapa leva você direto ao lugar certo —
+            e o guia acompanha na barra lateral.
+          </p>
         </div>
-        {STEP_ORDER.map((key) => {
-          const m = STEP_META[key];
-          const done = doneByKey[key];
-          const isActive = active === key;
-          return (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setActive(key)}
-              className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-colors ${
-                isActive ? "border-primary/50 bg-accent" : "hover:bg-muted/50"
-              }`}
-            >
-              <span
-                className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${
-                  done ? "bg-green-600 text-white" : "border text-muted-foreground"
-                }`}
-              >
-                {done ? <Check className="h-3 w-3" /> : <Circle className="h-2 w-2" />}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-1.5 text-sm font-medium">
-                  {m.title.replace(" (opcional)", "")}
-                  {!requiredByKey[key] && (
-                    <Badge variant="secondary" className="text-[10px]">
-                      opcional
-                    </Badge>
-                  )}
-                </span>
-                {detailByKey[key] && (
-                  <span className="text-xs text-amber-600">{detailByKey[key]}</span>
-                )}
-              </span>
-            </button>
-          );
-        })}
+        <ProgressRing pct={pct} done={status.requiredDone} total={status.requiredTotal} />
       </div>
 
-      {/* Painel do passo ativo */}
-      <div className="space-y-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <ActiveIcon className="h-5 w-5 text-primary" />
-              {meta.title}
-            </CardTitle>
-            <p className="text-sm text-muted-foreground">{meta.blurb}</p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {active === "google" && <GoogleDriveCard initial={google} />}
-
-            {active === "profile" && (
-              <AgencyProfileForm initial={profile} onSaved={refreshStatus} />
-            )}
-
-            {active === "templates" && (
-              <div className="space-y-3">
-                <p className="text-sm text-muted-foreground">
-                  Abra a página de modelos, clique em{" "}
-                  <span className="font-medium">
-                    “Novo do modelo da imobiliária (DOCX)”
-                  </span>
-                  , escolha a modalidade e suba o seu contrato. Depois revise as
-                  variáveis e clique em <span className="font-medium">Ativar</span>.
-                </p>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Button asChild size="sm">
-                    <Link href="/templates">
-                      <ExternalLink className="mr-1 h-4 w-4" />
-                      Abrir modelos
-                    </Link>
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={refreshStatus}
-                    disabled={refreshing}
-                  >
-                    <RefreshCw
-                      className={`mr-1 h-4 w-4 ${refreshing ? "animate-spin" : ""}`}
-                    />
-                    Já ativei, atualizar
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {active === "knowledge" && (
-              <div className="space-y-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <KnowledgeSeedButton onDone={refreshStatus} />
-                  <KnowledgeUploadCard onDone={refreshStatus} />
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  Este passo é opcional — você pode gerar o primeiro contrato sem ele.
-                </p>
-              </div>
-            )}
-
-            {active === "docstyle" && (
-              <div className="space-y-3">
-                <Button variant="outline" size="sm" onClick={applyDefaultStyle}>
-                  <Palette className="mr-1 h-4 w-4" />
-                  Aplicar estilo padrão
-                </Button>
-                <p className="text-xs text-muted-foreground">
-                  Opcional — modelos do Google Docs já trazem o próprio layout.
-                </p>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Vitória: gerar o 1º contrato */}
-        <Card className="border-primary/30 bg-primary/5">
-          <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="flex items-center gap-2 text-sm font-medium">
-                <Sparkles className="h-4 w-4 text-primary" />
-                Gerar meu primeiro contrato
-              </p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {status.complete
-                  ? "Tudo pronto — criamos um negócio de teste e abrimos o editor."
-                  : "Conclua os passos obrigatórios (Google, perfil e modelo) para liberar."}
-              </p>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={finishTour}
-                disabled={finishing}
-              >
-                {finishing ? "Concluindo…" : "Pular tour"}
-              </Button>
-              <Button
-                size="sm"
-                onClick={generateFirstContract}
-                disabled={!status.complete || generating}
-              >
-                {generating ? (
-                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                ) : (
-                  <Sparkles className="mr-1 h-4 w-4" />
+      <div className="grid gap-5 lg:grid-cols-[300px_1fr]">
+        {/* Checklist */}
+        <div className="flex flex-col">
+          {status.steps.map((step, i) => {
+            const m = STEP_META[step.key];
+            const Icon = m.icon;
+            const isActive = step.key === active;
+            const isNext = step.key === firstPending;
+            const isLast = i === status.steps.length - 1;
+            return (
+              <button
+                key={step.key}
+                type="button"
+                onClick={() => setActive(step.key)}
+                className={cn(
+                  "relative grid grid-cols-[26px_1fr] gap-3 rounded-xl border border-transparent p-3 text-left transition-colors",
+                  isActive ? "border-border bg-card shadow-sm" : "hover:bg-card"
                 )}
-                Gerar contrato
-              </Button>
+              >
+                <span className="relative">
+                  <span
+                    className={cn(
+                      "flex h-[26px] w-[26px] items-center justify-center rounded-full border transition-colors",
+                      step.done
+                        ? "border-success bg-success text-white"
+                        : isNext
+                          ? "border-brand-accent text-brand-accent"
+                          : "border-border bg-card text-muted-foreground"
+                    )}
+                  >
+                    {step.done ? (
+                      <Check className="h-3.5 w-3.5 animate-in zoom-in-50 duration-300" strokeWidth={3} />
+                    ) : (
+                      <Icon className="h-3.5 w-3.5" />
+                    )}
+                  </span>
+                  {!isLast && (
+                    <span
+                      aria-hidden="true"
+                      className={cn(
+                        "absolute left-1/2 top-full h-[calc(100%-4px)] min-h-3.5 w-0.5 -translate-x-1/2",
+                        step.done ? "bg-success" : "bg-border"
+                      )}
+                    />
+                  )}
+                </span>
+                <span className="min-w-0">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className={cn("text-sm font-semibold", step.done && "text-muted-foreground")}>
+                      {m.title}
+                    </span>
+                    {step.done ? (
+                      <Badge className="border-transparent bg-success/15 text-[10.5px] font-bold uppercase tracking-wide text-success">
+                        Concluído
+                      </Badge>
+                    ) : isNext ? (
+                      <Badge className="border-transparent bg-brand-accent/10 text-[10.5px] font-bold uppercase tracking-wide text-brand-accent">
+                        Próximo passo
+                      </Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground">
+                        Pendente
+                      </Badge>
+                    )}
+                  </span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">{m.desc}</span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Painel do passo ativo */}
+        <Card className="min-h-[340px] animate-in fade-in duration-300">
+          <CardContent className="p-6">
+            <div className="flex items-center gap-3">
+              <span className="grid h-9 w-9 place-items-center rounded-[10px] bg-primary text-primary-foreground">
+                <ActiveIcon className="h-4 w-4" />
+              </span>
+              <span className="text-[11px] font-bold uppercase tracking-[0.12em] text-muted-foreground">
+                Passo {activeIdx + 1} de {STEP_ORDER.length} · {meta.eyebrow}
+              </span>
+            </div>
+            <h2 className="mt-3.5 font-display text-[22px] font-semibold tracking-tight text-balance">
+              {meta.title}
+            </h2>
+            <p className="mt-1.5 max-w-[52ch] text-sm text-muted-foreground">{meta.blurb}</p>
+
+            <div className="mt-5">
+              {active === "google" && <GoogleDriveCard initial={google} />}
+
+              {active === "profile" && (
+                <AgencyProfileForm initial={profile} onSaved={refresh} />
+              )}
+
+              {active !== "google" && active !== "profile" && (
+                <div className="space-y-4">
+                  {note && (
+                    <div className="flex gap-2.5 rounded-xl border border-info/30 bg-info/10 p-3.5 text-sm">
+                      <Info className="mt-0.5 h-4 w-4 flex-none text-info" />
+                      <span>{note}</span>
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    <Button asChild>
+                      <Link href={stepUrl(active, { locacaoOnly })}>
+                        <ArrowRight className="mr-1.5 h-4 w-4" />
+                        {meta.cta}
+                      </Link>
+                    </Button>
+                    {!activeStep?.done && (
+                      <Button variant="outline" onClick={refresh} disabled={refreshing}>
+                        <RefreshCw className={cn("mr-1.5 h-4 w-4", refreshing && "animate-spin")} />
+                        Já fiz — atualizar
+                      </Button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
+      </div>
+
+      {/* Rodapé: seguir usando o app — o guia continua na sidebar até 100% */}
+      <div className="mt-5 flex justify-end">
+        <Button variant="ghost" size="sm" onClick={continueLater}>
+          Continuar depois
+        </Button>
       </div>
     </div>
   );

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { toast } from "sonner";
+import { Info } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -84,6 +85,13 @@ export function AgencyProfileForm({
 
   return (
     <div className="space-y-4">
+      <div className="flex gap-2.5 rounded-xl border border-info/30 bg-info/10 p-3.5 text-sm">
+        <Info className="mt-0.5 h-4 w-4 flex-none text-info" />
+        <span>
+          O <b className="text-info">CRECI</b> liga a cláusula da administradora nos contratos —
+          sem ele, o contrato usa um texto genérico.
+        </span>
+      </div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {FIELDS.map((f) => (
           <div key={f.key} className="space-y-1.5">
