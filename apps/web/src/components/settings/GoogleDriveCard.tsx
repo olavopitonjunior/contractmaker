@@ -20,7 +20,31 @@ interface GoogleDriveState {
  * e quota isoladas por tenant). Sem conexão, vale a conta global da
  * plataforma (comportamento legado).
  */
-export function GoogleDriveCard({ initial }: { initial: GoogleDriveState }) {
+const CONNECT_ERROR_MESSAGES: Record<string, string> = {
+  redirect_uri_mismatch:
+    "A configuração do app Google (cliente OAuth) não bate com este endereço. Avise o suporte.",
+  token_exchange:
+    "O Google recusou a troca de credenciais. Tente novamente; se persistir, avise o suporte.",
+  no_refresh_token:
+    "O Google não devolveu a autorização completa. Reconecte marcando as permissões solicitadas.",
+  no_email: "Não foi possível ler o e-mail da conta Google. Tente com outra conta.",
+  access_denied: "Você cancelou a autorização no Google. Clique em Conectar para tentar de novo.",
+};
+
+function connectErrorMessage(code: string): string {
+  return (
+    CONNECT_ERROR_MESSAGES[code] ??
+    "Não foi possível conectar o Google. Tente novamente; se persistir, avise o suporte."
+  );
+}
+
+export function GoogleDriveCard({
+  initial,
+  connectError = null,
+}: {
+  initial: GoogleDriveState;
+  connectError?: string | null;
+}) {
   const [state, setState] = useState(initial);
   const [busy, setBusy] = useState(false);
 
@@ -50,6 +74,12 @@ export function GoogleDriveCard({ initial }: { initial: GoogleDriveState }) {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
+        {connectError && !state.connected && (
+          <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>{connectErrorMessage(connectError)}</span>
+          </div>
+        )}
         {state.status === "revoked" && (
           <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />

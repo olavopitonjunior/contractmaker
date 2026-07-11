@@ -52,6 +52,14 @@ export default async function AdminOrgsPage() {
           Painel super-admin · {orgs.length} tenant(s) · você é{" "}
           <span className="font-medium">{platformRole.role}</span>
         </p>
+        <nav className="mt-2 flex gap-4 text-sm">
+          <a href="/admin/platform-roles" className="text-primary hover:underline">
+            Papéis de plataforma
+          </a>
+          <a href="/admin/support-ai" className="text-primary hover:underline">
+            IA de Suporte
+          </a>
+        </nav>
       </header>
       <AdminOrgsClient orgs={orgs} canCreate={canCreate} />
     </div>

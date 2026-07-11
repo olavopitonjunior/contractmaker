@@ -229,6 +229,13 @@ model Organization {
   // suspensa — o guard do dashboard bloqueia acesso e os módulos são desligados
   // em massa. Reativar limpa o campo e religa os módulos. Aditivo, default null.
   suspendedAt          DateTime?
+  // Onboarding self-service: setado quando o dono conclui/pula o tour ou gera o
+  // 1º contrato. Só serve pra parar o auto-launch do wizard — o progresso em si
+  // é derivado dos dados (lib/onboarding/status.ts). Aditivo, default null.
+  onboardingCompletedAt DateTime?
+  // Onboarding: dono já viu o modal de boas-vindas (1º acesso). Enquanto null e
+  // o onboarding está incompleto, a home "/" leva o owner pro /onboarding uma vez.
+  onboardingIntroSeenAt DateTime?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -1240,6 +1247,73 @@ model AgentConfig {
   updatedAt    DateTime @updatedAt
 
   org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// ============================================
+// SUPPORT AI (assistente de suporte ao usuário)
+// ============================================
+
+// Config singleton do assistente de suporte (prompt + modelo), editável pelo
+// super-admin em /admin/support-ai. systemPrompt vazio → usa o default em código
+// (lib/support/config.ts::SUPPORT_DEFAULT_SYSTEM_PROMPT). Diferente de AgentConfig,
+// que é por-org e serve o editor de contrato — este é único de plataforma.
+model SupportAgentConfig {
+  id                   String   @id @default(cuid())
+  singletonKey         String   @unique @default("singleton")
+  model                String   @default("claude-haiku-4-5-20251001")
+  temperature          Float    @default(0.3)
+  maxTokens            Int      @default(1024)
+  systemPrompt         String   @default("") @db.Text
+  // Abaixo desse cosseno de similaridade, nenhum hit da KB é confiável → o agente
+  // é forçado ao handoff (guardrail determinístico além da decisão do LLM).
+  handoffMinSimilarity Float    @default(0.55)
+  updatedBy            String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+}
+
+// Pendência de suporte: pergunta que a IA não soube responder. Vira item da base
+// quando respondida (retroalimentação). answeredBy = userId do staff de suporte.
+model SupportHandoff {
+  id                 String    @id @default(cuid())
+  orgId              String? // tenant de quem perguntou (contexto/notificação)
+  userId             String? // quem perguntou
+  question           String    @db.Text
+  normalizedQuestion String // pra dedupe de pendências iguais
+  transcriptJson     Json? // snapshot do transcript recente (contexto p/ o staff)
+  screenPath         String?
+  status             String    @default("pending") // pending | answered | dismissed
+  answer             String?   @db.Text
+  answeredBy         String?
+  answeredAt         DateTime?
+  knowledgeItemId    String? // item da base criado a partir da resposta
+  count              Int       @default(1) // nº de vezes que a mesma pergunta caiu aqui
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([status, createdAt])
+  @@index([normalizedQuestion, status])
+}
+
+// Log de cada resposta do assistente — backbone de qualidade/analytics (aba
+// Insights) e alvo do feedback 👍/👎 (rating). Sem PII além do que o próprio
+// usuário digitou. orgId/userId são strings soltas (sem FK) de propósito.
+model SupportInteraction {
+  id              String   @id @default(cuid())
+  orgId           String
+  userId          String?
+  question        String   @db.Text
+  answer          String?  @db.Text
+  screenPath      String?
+  kbTopSimilarity Float? // maior similaridade de hit da KB nesta resposta
+  kbHitIds        String[] @default([])
+  handoffCreated  Boolean  @default(false)
+  handoffId       String?
+  rating          Int? // 1 (👍) | -1 (👎)
+  createdAt       DateTime @default(now())
+
+  @@index([orgId, createdAt])
+  @@index([rating])
 }
 
 // CronToggle (Fase staging B) — controle runtime de quais crons rodam em staging.

@@ -86,7 +86,8 @@ function ResetPasswordContent() {
 
     setTimeout(() => {
       if (result?.ok) {
-        router.push("/pipeline");
+        // Home "/" faz o landing (módulo + onboarding no 1º acesso do dono).
+        router.push("/");
         router.refresh();
       } else {
         router.push("/login");

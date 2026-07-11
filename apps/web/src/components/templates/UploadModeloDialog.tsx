@@ -19,6 +19,7 @@ import { FileUp, Loader2 } from "lucide-react";
 const MODALIDADES = [
   { value: "locacao", label: "Locação residencial" },
   { value: "locacao_comercial", label: "Locação comercial" },
+  { value: "administracao_locacao", label: "Administração de locação" },
   { value: "a_vista", label: "Venda à vista" },
   { value: "financiamento", label: "Venda com financiamento" },
 ];
@@ -64,9 +65,9 @@ export function UploadModeloDialog() {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm" variant="outline">
+        <Button size="sm">
           <FileUp className="mr-1.5 h-4 w-4" />
-          Novo do modelo da imobiliária (DOCX)
+          Importar modelo da imobiliária (.docx)
         </Button>
       </DialogTrigger>
       <DialogContent className="sm:max-w-md">

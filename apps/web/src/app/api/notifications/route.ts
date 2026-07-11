@@ -25,17 +25,26 @@ export async function GET(req: NextRequest) {
   const unreadOnly = searchParams.get("unread") === "1";
   const limit = Math.min(Number(searchParams.get("limit") ?? 20), 100);
 
+  // Notificações com `userId` são DIRECIONADAS ao alvo; as org-wide têm
+  // userId=null. Escopo = org + (org-wide OU minhas). Isso torna privadas as
+  // notificações direcionadas (ex.: support_answered, dual-approval), em vez de
+  // vazá-las pra toda a org.
+  const audienceScope = {
+    orgId: org.id,
+    OR: [{ userId: null }, { userId: session.user.id }],
+  };
+
   const [items, unreadCount] = await Promise.all([
     prisma.notification.findMany({
       where: {
-        orgId: org.id,
+        ...audienceScope,
         ...(unreadOnly ? { read: false } : {}),
       },
       orderBy: { createdAt: "desc" },
       take: limit,
     }),
     prisma.notification.count({
-      where: { orgId: org.id, read: false },
+      where: { ...audienceScope, read: false },
     }),
   ]);
 
@@ -64,7 +73,11 @@ export async function POST(req: NextRequest) {
 
   const now = new Date();
   const result = await prisma.notification.updateMany({
-    where: { orgId: org.id, read: false },
+    where: {
+      orgId: org.id,
+      read: false,
+      OR: [{ userId: null }, { userId: session.user.id }],
+    },
     data: { read: true, readAt: now },
   });
 

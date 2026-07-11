@@ -11,31 +11,10 @@ import {
 import { subdomainSchema } from "@/lib/tenant/subdomain";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { MODULE, MODULE_CATALOG, isValidModule, type ModuleKey } from "@/lib/modules/catalog";
+import { seedPipeline } from "@/lib/pipelines/seed";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-// 7 stages canônicos do pipeline de VENDAS (espelha scripts/migrate-pipeline-stages.ts).
-const DEFAULT_STAGES: { name: string; color: string; position: number }[] = [
-  { name: "Formulário", color: "#6366f1", position: 0 },
-  { name: "Confecção de Contrato", color: "#f59e0b", position: 1 },
-  { name: "Enviado para assinatura", color: "#3b82f6", position: 2 },
-  { name: "Contrato assinado", color: "#0ea5e9", position: 3 },
-  { name: "Cobrança emitida", color: "#a855f7", position: 4 },
-  { name: "Comissão paga", color: "#22c55e", position: 5 },
-  { name: "Negócio perdido", color: "#ef4444", position: 6 },
-];
-
-// 6 stages canônicos do pipeline de LOCAÇÃO (espelha scripts/seed-pipeline-locacao.ts;
-// cor por NOME — o board traduz via STAGE_COLOR_HEX).
-const LOCACAO_STAGES: { name: string; color: string; position: number }[] = [
-  { name: "Em Aprovação", color: "indigo", position: 0 },
-  { name: "Formulário", color: "amber", position: 1 },
-  { name: "Em contrato", color: "yellow", position: 2 },
-  { name: "Assinado", color: "blue", position: 3 },
-  { name: "Cobrança Gerada", color: "purple", position: 4 },
-  { name: "ADM", color: "green", position: 5 },
-];
 
 const createOrgSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -178,36 +157,10 @@ export async function POST(req: NextRequest) {
       data: { userId: ownerId, orgId: org.id, role: "owner" },
     });
 
-    // Pipeline de vendas (7 stages canônicos) — só quando o módulo Vendas está
-    // habilitado. Um tenant só-locação não deve carregar um funil de vendas órfão.
-    if (vendasEnabled) {
-      const pipeline = await tx.pipeline.create({
-        data: { orgId: org.id, name: "Pipeline Principal" },
-      });
-      await tx.pipelineStage.createMany({
-        data: DEFAULT_STAGES.map((s) => ({
-          pipelineId: pipeline.id,
-          name: s.name,
-          color: s.color,
-          position: s.position,
-        })),
-      });
-    }
-
-    // Pipeline de locação (kind="locacao") — só quando o módulo está habilitado.
-    if (locacaoEnabled) {
-      const locacaoPipeline = await tx.pipeline.create({
-        data: { orgId: org.id, name: "Pipeline de Locação", kind: "locacao" },
-      });
-      await tx.pipelineStage.createMany({
-        data: LOCACAO_STAGES.map((s) => ({
-          pipelineId: locacaoPipeline.id,
-          name: s.name,
-          color: s.color,
-          position: s.position,
-        })),
-      });
-    }
+    // Pipelines dos módulos habilitados (stages canônicos via helper idempotente).
+    // Um tenant só-locação não carrega um funil de vendas órfão, e vice-versa.
+    if (vendasEnabled) await seedPipeline(org.id, "venda", tx);
+    if (locacaoEnabled) await seedPipeline(org.id, "locacao", tx);
 
     // Entitlements de módulos — grava uma row EXPLÍCITA por módulo do catálogo,
     // com `enabled` refletindo a intenção. Sem isto, um módulo ausente resolveria

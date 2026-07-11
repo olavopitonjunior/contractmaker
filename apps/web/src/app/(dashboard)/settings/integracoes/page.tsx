@@ -3,7 +3,11 @@ import { prisma } from "@/lib/db/prisma";
 import { PageHeader } from "@/components/layout/page-header";
 import { GoogleDriveCard } from "@/components/settings/GoogleDriveCard";
 
-export default async function IntegracoesPage() {
+export default async function IntegracoesPage({
+  searchParams,
+}: {
+  searchParams: { google_error?: string };
+}) {
   const session = await auth();
   if (!session?.user) return null;
   const org = await getUserOrg(session.user.id);
@@ -27,6 +31,7 @@ export default async function IntegracoesPage() {
           email: account?.email ?? null,
           lastErrorMessage: account?.lastErrorMessage ?? null,
         }}
+        connectError={searchParams.google_error ?? null}
       />
     </div>
   );

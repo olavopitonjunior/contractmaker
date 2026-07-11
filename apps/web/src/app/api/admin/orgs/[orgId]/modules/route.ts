@@ -9,12 +9,14 @@ import {
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { getOrgModules } from "@/lib/modules/read";
 import {
+  MODULE,
   MODULE_CATALOG,
   isValidModule,
   isValidFeature,
   featureModule,
   type FeatureKey,
 } from "@/lib/modules/catalog";
+import { seedPipeline } from "@/lib/pipelines/seed";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -136,6 +138,13 @@ export async function PATCH(
       featureFlags: mergedFlags,
     },
   });
+
+  // Habilitar um módulo cria o pipeline correspondente se ainda não existir —
+  // fecha o gap "ligar módulo não cria pipeline" (o seed só rodava na criação da
+  // org). Idempotente: no-op quando o pipeline do kind já existe.
+  if (enabled === true) {
+    await seedPipeline(params.orgId, module === MODULE.LOCACAO ? "locacao" : "venda");
+  }
 
   await audit(extractAuditContextFromRequest(req, params.orgId, session.user.id), {
     action: "ORG_MODULES_UPDATED",

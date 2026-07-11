@@ -6,24 +6,49 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Sparkles, Send, RotateCcw, Wrench } from "lucide-react";
+import {
+  Sparkles,
+  Send,
+  RotateCcw,
+  Wrench,
+  LifeBuoy,
+  ThumbsUp,
+  ThumbsDown,
+} from "lucide-react";
+import { describeScreen } from "@/lib/support/route-map";
 
 interface ChatTurn {
   role: "user" | "assistant";
   content: string;
   toolsUsed?: string[];
+  interactionId?: string | null;
+  handoff?: boolean;
+  rating?: 1 | -1;
+  streaming?: boolean;
 }
 
+// Sugestões: as de /locacao só aparecem em telas de locação (o tenant tem o
+// módulo); as de ajuda genérica aparecem em qualquer tela.
 const SUGGESTIONS: Array<{ context: string[]; label: string }> = [
+  { context: ["*"], label: "O que eu faço nesta tela?" },
+  { context: ["*"], label: "Como gero um contrato?" },
+  { context: ["*"], label: "Como envio um contrato para assinatura?" },
+  { context: ["/pipeline"], label: "Como crio um novo negócio?" },
+  { context: ["/templates"], label: "Como defino o modelo padrão?" },
+  { context: ["/financeiro"], label: "Como emito uma cobrança de comissão?" },
   { context: ["/locacao"], label: "Como está minha inadimplência este mês?" },
-  { context: ["/locacao"], label: "Quem são os 3 maiores devedores?" },
   { context: ["/locacao/contratos/"], label: "Resumo deste contrato" },
-  { context: ["/locacao/contratos/"], label: "Sugerir estratégia de cobrança" },
-  { context: ["/locacao/imoveis/"], label: "Resumo deste imóvel" },
-  { context: ["/locacao/pessoas/proprietarios/"], label: "Extrato do proprietário" },
-  { context: ["/locacao/repasses"], label: "Projete fluxo de caixa pros próximos 3 meses" },
-  { context: ["*"], label: "O que preciso fazer hoje na minha imobiliária?" },
 ];
+
+interface SseEvent {
+  type: "text_delta" | "tool_use" | "tool_result" | "handoff" | "done" | "error";
+  text?: string;
+  name?: string;
+  handoffId?: string;
+  interactionId?: string | null;
+  handoff?: boolean;
+  message?: string;
+}
 
 export function AIChatDrawer({
   open,
@@ -38,6 +63,8 @@ export function AIChatDrawer({
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  const screen = describeScreen(pathname);
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
@@ -48,13 +75,28 @@ export function AIChatDrawer({
     (s) => s.context.includes("*") || s.context.some((c) => pathname.includes(c))
   ).slice(0, 4);
 
+  // Atualiza o último turn de assistente (o que está sendo transmitido).
+  function patchLastAssistant(fn: (t: ChatTurn) => ChatTurn) {
+    setTurns((prev) => {
+      const next = [...prev];
+      for (let i = next.length - 1; i >= 0; i--) {
+        if (next[i].role === "assistant") {
+          next[i] = fn(next[i]);
+          break;
+        }
+      }
+      return next;
+    });
+  }
+
   async function sendMessage(content: string) {
     if (!content.trim() || sending) return;
     const userTurn: ChatTurn = { role: "user", content: content.trim() };
     const nextTurns = [...turns, userTurn];
-    setTurns(nextTurns);
+    setTurns([...nextTurns, { role: "assistant", content: "", streaming: true }]);
     setInput("");
     setSending(true);
+
     try {
       const res = await fetch("/api/ai/chat", {
         method: "POST",
@@ -64,25 +106,95 @@ export function AIChatDrawer({
           context: pathname,
         }),
       });
-      if (!res.ok) {
+      if (!res.ok || !res.body) {
         const d = await res.json().catch(() => ({}));
         throw new Error(d.error ?? `HTTP ${res.status}`);
       }
-      const data = (await res.json()) as { reply: string; toolsUsed?: string[] };
-      setTurns((prev) => [
-        ...prev,
-        { role: "assistant", content: data.reply, toolsUsed: data.toolsUsed },
-      ]);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const frames = buffer.split("\n\n");
+        buffer = frames.pop() ?? "";
+        for (const frame of frames) {
+          const line = frame.trim();
+          if (!line.startsWith("data:")) continue;
+          let ev: SseEvent;
+          try {
+            ev = JSON.parse(line.slice(5).trim()) as SseEvent;
+          } catch {
+            continue;
+          }
+          handleEvent(ev);
+        }
+      }
     } catch (err) {
-      setTurns((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `❌ ${err instanceof Error ? err.message : "Erro"}`,
-        },
-      ]);
+      patchLastAssistant((t) => ({
+        ...t,
+        content: t.content || `❌ ${err instanceof Error ? err.message : "Erro"}`,
+        streaming: false,
+      }));
     } finally {
       setSending(false);
+      patchLastAssistant((t) => ({ ...t, streaming: false }));
+    }
+  }
+
+  function handleEvent(ev: SseEvent) {
+    switch (ev.type) {
+      case "text_delta":
+        if (ev.text) patchLastAssistant((t) => ({ ...t, content: t.content + ev.text }));
+        break;
+      case "tool_use":
+        if (ev.name)
+          patchLastAssistant((t) => ({
+            ...t,
+            toolsUsed: [...new Set([...(t.toolsUsed ?? []), ev.name!])],
+          }));
+        break;
+      case "handoff":
+        patchLastAssistant((t) => ({ ...t, handoff: true }));
+        break;
+      case "done":
+        patchLastAssistant((t) => ({
+          ...t,
+          interactionId: ev.interactionId ?? null,
+          handoff: ev.handoff ?? t.handoff,
+          streaming: false,
+        }));
+        break;
+      case "error":
+        patchLastAssistant((t) => ({
+          ...t,
+          content: t.content || `❌ ${ev.message ?? "Erro"}`,
+          streaming: false,
+        }));
+        break;
+    }
+  }
+
+  async function sendFeedback(idx: number, rating: 1 | -1) {
+    const turn = turns[idx];
+    if (!turn?.interactionId || turn.rating) return;
+    setTurns((prev) => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], rating };
+      return next;
+    });
+    try {
+      await fetch("/api/support/feedback", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ interactionId: turn.interactionId, rating }),
+      });
+    } catch {
+      /* silencioso — feedback é best-effort */
     }
   }
 
@@ -97,17 +209,23 @@ export function AIChatDrawer({
         <SheetHeader>
           <SheetTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-primary" />
-            Assistente IA
+            Assistente de suporte
           </SheetTitle>
           <p className="text-xs text-muted-foreground">
-            Pergunte sobre contratos, cobranças, fluxo de caixa ou sugestões de ação. Usa Haiku 4.5.
+            Tire dúvidas de como usar a ferramenta. Se eu não souber, encaminho ao suporte.
           </p>
         </SheetHeader>
 
         <div ref={scrollRef} className="flex-1 space-y-3 overflow-y-auto py-4">
           {turns.length === 0 && (
-            <div className="space-y-2">
-              <p className="text-xs text-muted-foreground">Sugestões pra esta tela:</p>
+            <div className="space-y-3">
+              {screen.info && (
+                <div className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs">
+                  <span className="font-medium">{screen.info.name}.</span>{" "}
+                  {screen.info.purpose}
+                </div>
+              )}
+              <p className="text-xs text-muted-foreground">Sugestões:</p>
               {suggestions.map((s, i) => (
                 <button
                   key={i}
@@ -128,7 +246,22 @@ export function AIChatDrawer({
                   : "mr-6 bg-muted"
               }`}
             >
-              <div className="whitespace-pre-wrap">{t.content}</div>
+              <div className="whitespace-pre-wrap">
+                {t.content}
+                {t.streaming && !t.content && (
+                  <span className="inline-block animate-pulse text-muted-foreground">
+                    Pensando…
+                  </span>
+                )}
+              </div>
+
+              {t.role === "assistant" && t.handoff && (
+                <div className="mt-1 flex items-center gap-1 text-[11px] text-amber-600">
+                  <LifeBuoy className="h-3 w-3" />
+                  Encaminhado ao suporte humano
+                </div>
+              )}
+
               {t.toolsUsed && t.toolsUsed.length > 0 && (
                 <div className="mt-1 flex flex-wrap gap-1">
                   {t.toolsUsed.map((tool, i) => (
@@ -139,13 +272,33 @@ export function AIChatDrawer({
                   ))}
                 </div>
               )}
+
+              {t.role === "assistant" && !t.streaming && t.interactionId && (
+                <div className="mt-1.5 flex items-center gap-1">
+                  <button
+                    aria-label="Resposta útil"
+                    onClick={() => sendFeedback(idx, 1)}
+                    disabled={!!t.rating}
+                    className={`rounded p-1 hover:bg-background/60 ${
+                      t.rating === 1 ? "text-green-600" : "text-muted-foreground"
+                    }`}
+                  >
+                    <ThumbsUp className="h-3 w-3" />
+                  </button>
+                  <button
+                    aria-label="Resposta não ajudou"
+                    onClick={() => sendFeedback(idx, -1)}
+                    disabled={!!t.rating}
+                    className={`rounded p-1 hover:bg-background/60 ${
+                      t.rating === -1 ? "text-red-600" : "text-muted-foreground"
+                    }`}
+                  >
+                    <ThumbsDown className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
             </div>
           ))}
-          {sending && (
-            <div className="mr-6 rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
-              <span className="inline-block animate-pulse">Pensando…</span>
-            </div>
-          )}
         </div>
 
         <div className="space-y-2 border-t pt-3">
@@ -172,9 +325,6 @@ export function AIChatDrawer({
               </Button>
             )}
           </form>
-          <p className="text-[10px] text-muted-foreground">
-            Contexto atual: <code>{pathname}</code>
-          </p>
         </div>
       </SheetContent>
     </Sheet>
