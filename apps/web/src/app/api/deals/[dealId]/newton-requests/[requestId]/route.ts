@@ -71,6 +71,7 @@ export async function PATCH(
   // Pede ao Newton para derrubar os lembretes (só se havia algum agendado).
   if (existing.cronJobIds.length > 0) {
     waitUntil(triggerNewtonForRequest({
+      orgId: existing.orgId,
       dealId: params.dealId,
       requestId: existing.id,
       ask: existing.ask,

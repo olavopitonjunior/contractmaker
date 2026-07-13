@@ -1,11 +1,18 @@
 import { prisma } from "@/lib/db/prisma";
 import { generateSecureToken, sha256Hex, timingSafeEqualStr } from "@/lib/security/crypto";
 
-const TOKEN_TTL_MS = 60 * 60 * 1000; // 1h
 const IDENTIFIER_PREFIX = "pwd:";
 const WELCOME_PREFIX = "pwd-welcome:";
 
 export type PasswordResetReason = "reset" | "welcome";
+
+// `reset` é reativo (a pessoa acabou de pedir) → janela curta.
+// `welcome` é o primeiro acesso de um convite/provisionamento: chega por e-mail e
+// costuma ser aberto horas ou dias depois. Com 1h, o link morria antes do uso.
+const TTL_BY_REASON: Record<PasswordResetReason, number> = {
+  reset: 60 * 60 * 1000, // 1h
+  welcome: 7 * 24 * 60 * 60 * 1000, // 7 dias
+};
 
 function identifierFor(email: string, reason: PasswordResetReason): string {
   const prefix = reason === "welcome" ? WELCOME_PREFIX : IDENTIFIER_PREFIX;
@@ -26,7 +33,7 @@ export async function createPasswordResetToken(
   const normalizedEmail = email.toLowerCase().trim();
   const token = generateSecureToken(32);
   const tokenHash = sha256Hex(token);
-  const expiresAt = new Date(Date.now() + TOKEN_TTL_MS);
+  const expiresAt = new Date(Date.now() + TTL_BY_REASON[reason]);
   const identifier = identifierFor(normalizedEmail, reason);
 
   // Apaga tokens anteriores do mesmo email/reason (single active token)

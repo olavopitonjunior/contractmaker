@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -211,23 +211,33 @@ interface DealDetailProps {
     envelopes: { closedAt: Date | null }[];
     commissionCharges: { createdAt: Date }[];
   };
+  /**
+   * Newton (agente de WhatsApp) habilitado pra este tenant. Feature default OFF —
+   * quem não usa o Newton não vê a aba de pedidos. Resolvido no server (page.tsx),
+   * porque este componente é client e não pode ler `getOrgModules`.
+   */
+  newtonEnabled?: boolean;
 }
 
-const VALID_TABS = new Set([
+const BASE_TABS = [
   "dados",
   "anexos",
   "certidoes",
   "contratos",
   "assinaturas",
   "pagamentos",
-  "newton",
-]);
+] as const;
 
-export function DealDetail({ deal }: DealDetailProps) {
+export function DealDetail({ deal, newtonEnabled = false }: DealDetailProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
-  const initialTab = tabParam && VALID_TABS.has(tabParam) ? tabParam : "dados";
+  // `?tab=newton` num tenant sem Newton cai no default em vez de abrir uma aba morta.
+  const validTabs = useMemo(
+    () => new Set<string>(newtonEnabled ? [...BASE_TABS, "newton"] : [...BASE_TABS]),
+    [newtonEnabled]
+  );
+  const initialTab = tabParam && validTabs.has(tabParam) ? tabParam : "dados";
   const [activeTab, setActiveTab] = useState(initialTab);
   const [generating, setGenerating] = useState(false);
   const [confirmDuplicateOpen, setConfirmDuplicateOpen] = useState(false);
@@ -940,10 +950,12 @@ export function DealDetail({ deal }: DealDetailProps) {
             <Wallet className="h-3.5 w-3.5 mr-1" />
             Pagamentos
           </TabsTrigger>
-          <TabsTrigger value="newton">
-            <Bot className="h-3.5 w-3.5 mr-1" />
-            Pedidos ao Newton
-          </TabsTrigger>
+          {newtonEnabled && (
+            <TabsTrigger value="newton">
+              <Bot className="h-3.5 w-3.5 mr-1" />
+              Pedidos ao Newton
+            </TabsTrigger>
+          )}
         </TabsList>
 
         <TabsContent value="dados" className="mt-4">
@@ -1314,9 +1326,11 @@ export function DealDetail({ deal }: DealDetailProps) {
           </div>
         </TabsContent>
 
-        <TabsContent value="newton" className="mt-4">
-          <NewtonRequestsTab dealId={deal.id} />
-        </TabsContent>
+        {newtonEnabled && (
+          <TabsContent value="newton" className="mt-4">
+            <NewtonRequestsTab dealId={deal.id} />
+          </TabsContent>
+        )}
       </Tabs>
 
       <CommissionChargeDialog

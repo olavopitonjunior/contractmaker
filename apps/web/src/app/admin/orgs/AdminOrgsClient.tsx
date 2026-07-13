@@ -101,41 +101,70 @@ export function AdminOrgsClient({ orgs, canCreate }: { orgs: OrgRow[]; canCreate
   const [impersonateOrg, setImpersonateOrg] = useState<OrgRow | null>(null);
   const [reason, setReason] = useState("");
 
-  async function createOrg(e: React.FormEvent) {
-    e.preventDefault();
-    const selected = Object.entries(modules).filter(([, on]) => on).map(([m]) => m);
-    if (selected.length === 0) {
-      toast.error("Selecione ao menos um módulo.");
-      return;
-    }
-    setBusy("create");
-    try {
-      const res = await fetch("/api/admin/orgs", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          ...form,
-          ownerName: form.ownerName.trim() || undefined,
-          modules: selected,
-        }),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        toast.error(data.message ?? data.error ?? "Falha ao criar org");
+  // Resultado da criação — dialog persistente. A senha temporária é o fallback caso
+  // o e-mail de acesso não saia; um toast que some levava a credencial junto.
+  const [created, setCreated] = useState<{
+    orgName: string;
+    ownerEmail: string;
+    tempPassword: string | null;
+    emailQueued: boolean;
+  } | null>(null);
+
+  // Aviso do 409 OWNER_ALREADY_IN_ORG — Dialog, não window.confirm (modal nativo
+  // trava o driver de browser e o resto da sessão).
+  const [ownerWarning, setOwnerWarning] = useState<string | null>(null);
+
+  const submitCreate = useCallback(
+    async (confirmExistingUser: boolean) => {
+      const selected = Object.entries(modules).filter(([, on]) => on).map(([m]) => m);
+      if (selected.length === 0) {
+        toast.error("Selecione ao menos um módulo.");
         return;
       }
-      toast.success(
-        data.owner?.tempPassword
-          ? `Org criada. Senha temp do owner: ${data.owner.tempPassword}`
-          : "Org criada (owner já existia)."
-      );
-      setForm({ name: "", subdomain: "", ownerEmail: "", ownerName: "" });
-      setModules({ [MODULE.VENDAS]: true, [MODULE.LOCACAO]: true });
-      setCreating(false);
-      router.refresh();
-    } finally {
-      setBusy(null);
-    }
+      setBusy("create");
+      try {
+        const res = await fetch("/api/admin/orgs", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            ...form,
+            ownerName: form.ownerName.trim() || undefined,
+            modules: selected,
+            ...(confirmExistingUser ? { confirmExistingUser: true } : {}),
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          if (res.status === 409 && data.error === "OWNER_ALREADY_IN_ORG") {
+            setOwnerWarning(data.message ?? "O e-mail do owner já pertence a outra organização.");
+            return;
+          }
+          toast.error(data.message ?? data.error ?? "Falha ao criar org");
+          return;
+        }
+        setOwnerWarning(null);
+        setCreated({
+          orgName: form.name,
+          ownerEmail: form.ownerEmail,
+          tempPassword: data.owner?.tempPassword ?? null,
+          emailQueued: data.owner?.emailQueued === true,
+        });
+        setForm({ name: "", subdomain: "", ownerEmail: "", ownerName: "" });
+        setModules({ [MODULE.VENDAS]: true, [MODULE.LOCACAO]: true });
+        setCreating(false);
+        router.refresh();
+      } catch {
+        toast.error("Falha de rede ao criar a organização.");
+      } finally {
+        setBusy(null);
+      }
+    },
+    [form, modules, router]
+  );
+
+  async function createOrg(e: React.FormEvent) {
+    e.preventDefault();
+    await submitCreate(false);
   }
 
   async function confirmImpersonate() {
@@ -260,6 +289,67 @@ export function AdminOrgsClient({ orgs, canCreate }: { orgs: OrgRow[]; canCreate
             <Button onClick={confirmImpersonate} disabled={busy === impersonateOrg?.id}>
               {busy === impersonateOrg?.id ? "…" : "Testar como"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={ownerWarning != null} onOpenChange={(o) => !o && setOwnerWarning(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Este e-mail já pertence a outra organização</DialogTitle>
+            <DialogDescription>{ownerWarning}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => setOwnerWarning(null)}>
+              Usar outro e-mail
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={busy === "create"}
+              onClick={() => submitCreate(true)}
+            >
+              {busy === "create" ? "Criando…" : "Criar assim mesmo"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={created != null} onOpenChange={(o) => !o && setCreated(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{created?.orgName} criada</DialogTitle>
+            <DialogDescription>
+              {created?.emailQueued
+                ? `Enviamos para ${created?.ownerEmail} um e-mail com o link para definir a senha (válido por 7 dias). O dono cai direto no guia de primeiros passos.`
+                : `${created?.ownerEmail} já tinha conta na plataforma — ele entra com a senha atual. Nenhum e-mail foi enviado.`}
+            </DialogDescription>
+          </DialogHeader>
+
+          {created?.tempPassword && (
+            <div className="space-y-2 rounded-md border bg-muted/40 p-3">
+              <p className="text-sm text-muted-foreground">
+                Senha temporária (só use se o e-mail não chegar — entregue por canal seguro):
+              </p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 rounded bg-background px-2 py-1 font-mono text-sm">
+                  {created.tempPassword}
+                </code>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    navigator.clipboard.writeText(created.tempPassword!);
+                    toast.success("Senha copiada.");
+                  }}
+                >
+                  Copiar
+                </Button>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter>
+            <Button onClick={() => setCreated(null)}>Fechar</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

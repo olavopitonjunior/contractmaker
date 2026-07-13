@@ -192,6 +192,17 @@ export async function PATCH(
           contractId = result.contractId;
         } catch (error) {
           console.error("Auto-generate contract failed:", error);
+          // Falha da imobiliária (ex.: modelo inacessível no Drive) não derruba o
+          // finalize do cliente — mas a equipe precisa ser avisada, senão o deal
+          // simplesmente fica sem contrato e ninguém entende por quê.
+          waitUntil(emitNotification({
+            orgId: form.orgId,
+            type: "contract_generation_failed",
+            title: "Não foi possível gerar o contrato",
+            body: error instanceof Error ? error.message : "Erro ao gerar o contrato do modelo.",
+            linkUrl: `/deals/${deal.id}`,
+            metadata: { dealId: deal.id, formId: form.id },
+          }));
         }
       }
 

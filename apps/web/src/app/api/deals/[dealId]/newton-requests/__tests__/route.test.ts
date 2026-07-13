@@ -15,12 +15,21 @@ const mockAuth = vi.mocked(auth);
 const mockGetUserOrg = vi.mocked(getUserOrg);
 const mockPrisma = vi.mocked(prisma);
 
+/** O Newton é feature por tenant e nasce DESLIGADA — org de teste tem que ligar. */
+function enableNewton(enabled = true) {
+  mockPrisma.orgModule.findMany.mockResolvedValue([
+    { module: "vendas", enabled: true, featureFlags: { "vendas.newton": enabled } },
+    { module: "locacao", enabled: true, featureFlags: { "locacao.newton": enabled } },
+  ] as never);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockGetUserOrg.mockResolvedValue(createMockOrg() as never);
+  enableNewton();
 });
 
-const baseDeal = { id: "d1", form: { orgId: "org-1" }, pipeline: { orgId: "org-1" } };
+const baseDeal = { id: "d1", kind: "venda", form: { orgId: "org-1" }, pipeline: { orgId: "org-1" } };
 
 function makeRequestRow(overrides: Record<string, unknown> = {}) {
   return {
@@ -106,6 +115,20 @@ describe("POST /api/deals/[dealId]/newton-requests", () => {
     expect(body.id).toBe("nr1");
     expect(body.status).toBe("open");
     expect(triggerNewtonForRequest).toHaveBeenCalledOnce();
+  });
+
+  it("403 quando o tenant não tem o Newton (default do catálogo)", async () => {
+    const { triggerNewtonForRequest } = await import("@/lib/newton/trigger");
+    enableNewton(false);
+    mockAuth.mockResolvedValue(createMockSession() as never);
+    mockPrisma.deal.findUnique.mockResolvedValue(baseDeal as never);
+
+    const res = await POST(makeReq(validBody), { params: { dealId: "d1" } });
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({ error: "MODULE_DISABLED" });
+    // E o mais importante: nada é criado nem cutucado no WhatsApp.
+    expect(mockPrisma.newtonRequest.create).not.toHaveBeenCalled();
+    expect(triggerNewtonForRequest).not.toHaveBeenCalled();
   });
 });
 

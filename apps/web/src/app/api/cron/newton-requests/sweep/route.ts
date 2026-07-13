@@ -81,6 +81,9 @@ export async function GET(req: NextRequest) {
   for (const r of candidates) {
     waitUntil(
       triggerNewtonForRequest({
+        // O trigger checa a feature por org — pedidos de tenant sem Newton (ex.: os
+        // criados pelos executores de locação) são varridos, mas não disparam nada.
+        orgId: r.orgId,
         dealId: r.dealId,
         requestId: r.id,
         ask: r.ask,

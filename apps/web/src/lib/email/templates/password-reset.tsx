@@ -48,8 +48,41 @@ export function WelcomeSetPasswordEmail({
         <ActionButton href={setupUrl} label="Definir minha senha" />
       </div>
       <p style={{ fontSize: 13, color: "#737373" }}>
-        Este link expira em 1 hora. Se você não esperava este convite, ignore
+        Este link expira em 7 dias. Se você não esperava este convite, ignore
         este email.
+      </p>
+    </EmailLayout>
+  );
+}
+
+/**
+ * Primeiro acesso do DONO de uma imobiliária recém-provisionada (painel super-admin).
+ * Diferente do WelcomeSetPasswordEmail: aqui ninguém "te adicionou" a uma equipe —
+ * a conta da imobiliária inteira é da pessoa, e o próximo passo é o onboarding.
+ */
+export function OwnerAccessEmail({
+  orgName,
+  setupUrl,
+}: {
+  orgName: string;
+  setupUrl: string;
+}) {
+  return (
+    <EmailLayout title={`${orgName} no imobpro.ai`}>
+      <h1 style={{ fontSize: 20, margin: "0 0 16px 0" }}>
+        A conta da {orgName} está pronta
+      </h1>
+      <p style={{ fontSize: 14, lineHeight: 1.6 }}>
+        Criamos a conta da <strong>{orgName}</strong> no imobpro.ai e você é o
+        responsável por ela. Defina sua senha para entrar — o próprio sistema vai
+        te guiar, passo a passo, até o primeiro contrato.
+      </p>
+      <div style={{ margin: "24px 0" }}>
+        <ActionButton href={setupUrl} label="Definir minha senha" />
+      </div>
+      <p style={{ fontSize: 13, color: "#737373" }}>
+        Este link expira em 7 dias. Se ele vencer, use &quot;Esqueci minha
+        senha&quot; na tela de login com este mesmo e-mail.
       </p>
     </EmailLayout>
   );

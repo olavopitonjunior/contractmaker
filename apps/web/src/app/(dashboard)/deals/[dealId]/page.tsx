@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { DealDetail } from "@/components/pipeline/DealDetail";
+import { isNewtonEnabledForDeal } from "@/lib/newton/gate";
 
 export default async function DealPage({
   params,
@@ -14,6 +15,8 @@ export default async function DealPage({
   const deal = await prisma.deal.findUnique({
     where: { id: params.dealId },
     include: {
+      // Deal não tem orgId direto — o escopo vem do pipeline.
+      pipeline: { select: { orgId: true } },
       stage: true,
       form: {
         include: {
@@ -46,5 +49,7 @@ export default async function DealPage({
 
   if (!deal) notFound();
 
-  return <DealDetail deal={deal} />;
+  const newtonEnabled = await isNewtonEnabledForDeal(deal.pipeline.orgId, deal.kind);
+
+  return <DealDetail deal={deal} newtonEnabled={newtonEnabled} />;
 }

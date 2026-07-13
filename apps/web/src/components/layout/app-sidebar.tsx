@@ -100,7 +100,7 @@ const NAV: NavEntry[] = [
       { title: "Vistorias", url: "/locacao/vistorias", requires: FEATURE.LOCACAO_VISTORIAS },
       { title: "Pessoas", url: "/locacao/pessoas", requires: FEATURE.LOCACAO_PESSOAS },
       { title: "Seguros", url: "/locacao/seguros", requires: FEATURE.LOCACAO_SEGUROS },
-      { title: "Newton", url: "/locacao/newton" },
+      { title: "Newton", url: "/locacao/newton", requires: FEATURE.LOCACAO_NEWTON },
     ],
   },
   {
