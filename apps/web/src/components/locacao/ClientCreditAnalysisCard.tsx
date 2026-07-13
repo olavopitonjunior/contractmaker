@@ -50,10 +50,13 @@ export function ClientCreditAnalysisCard({
   clientId,
   hasConsent,
   jobs,
+  serasaAvailable = true,
 }: {
   clientId: string;
   hasConsent: boolean;
   jobs: ClientSerasaJob[];
+  /** false quando SERASA_* não está configurado — some com o CTA e evita o 503. */
+  serasaAvailable?: boolean;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
@@ -116,7 +119,11 @@ export function ClientCreditAnalysisCard({
         <CardTitle className="text-base flex items-center gap-2">
           <Gauge className="h-4 w-4" /> Análise de crédito (Serasa)
         </CardTitle>
-        {!hasConsent ? (
+        {!serasaAvailable ? (
+          <Badge variant="outline" className="text-muted-foreground">
+            Indisponível
+          </Badge>
+        ) : !hasConsent ? (
           <Button size="sm" variant="outline" onClick={registerConsent} disabled={busy !== null}>
             <ShieldCheck className="h-4 w-4 mr-1.5" />
             {busy === "consent" ? "Registrando…" : "Registrar consentimento LGPD"}
@@ -129,19 +136,29 @@ export function ClientCreditAnalysisCard({
         )}
       </CardHeader>
       <CardContent className="space-y-2">
+        {!serasaAvailable ? (
+          jobs.length === 0 && (
+            <p className="text-sm text-muted-foreground">
+              A consulta Serasa não está habilitada nesta conta. A análise de crédito fica por conta
+              das certidões e da fiança por seguradora.
+            </p>
+          )
+        ) : (
+          <>
         {!hasConsent && (
           <p className="text-xs text-muted-foreground">
             A consulta Serasa exige consentimento LGPD do titular (base legal: proteção ao crédito).
             Custo ~R$ 5,00 por consulta (score + negativação por pessoa).
           </p>
         )}
-        {jobs.length === 0 ? (
-          hasConsent && (
-            <p className="text-sm text-muted-foreground">
-              Nenhuma consulta ainda. Preencha o CPF/CNPJ do cliente e clique em Analisar crédito.
-            </p>
-          )
-        ) : (
+        {jobs.length === 0 && hasConsent && (
+          <p className="text-sm text-muted-foreground">
+            Nenhuma consulta ainda. Preencha o CPF/CNPJ do cliente e clique em Analisar crédito.
+          </p>
+        )}
+          </>
+        )}
+        {jobs.length > 0 && (
           <ul className="divide-y">
             {jobs.map((j) => (
               <li key={j.id} className="flex items-center justify-between gap-3 py-2">
