@@ -159,8 +159,20 @@ export async function searchSupportKnowledge(
 
   if (!q) return { results: [], mode: "keyword_fallback", topSimilarity: null };
 
+  // Observabilidade: base vazia pra uma pergunta costuma ser mismatch de org
+  // (seed num banco/org diferente do runtime) — logamos o orgId resolvido pra
+  // diagnosticar via Vercel logs sem precisar acessar o banco.
+  const logResult = (r: SupportSearchResult) => {
+    if (r.results.length === 0) {
+      console.warn(
+        `[searchSupportKnowledge] 0 hits — orgId=${orgId} mode=${r.mode} q="${q.slice(0, 60)}"`
+      );
+    }
+    return r;
+  };
+
   if (!isEmbeddingsConfigured()) {
-    return keywordFallback(q, topK, orgId, moduleTags);
+    return logResult(await keywordFallback(q, topK, orgId, moduleTags));
   }
 
   try {
@@ -202,11 +214,11 @@ export async function searchSupportKnowledge(
       similarity: Number(r.similarity?.toFixed?.(3) ?? r.similarity),
     }));
 
-    return {
+    return logResult({
       results,
       mode: "semantic",
       topSimilarity: results.length ? results[0].similarity : null,
-    };
+    });
   } catch (err) {
     const reason =
       err instanceof VoyageError
@@ -215,6 +227,6 @@ export async function searchSupportKnowledge(
         ? err.message.slice(0, 160)
         : String(err).slice(0, 160);
     console.error("[searchSupportKnowledge] fallback acionado:", reason);
-    return keywordFallback(q, topK, orgId, moduleTags);
+    return logResult(await keywordFallback(q, topK, orgId, moduleTags));
   }
 }
