@@ -76,11 +76,18 @@ export async function runSupportTool(
     return {
       content: JSON.stringify({
         mode: res.mode,
+        // No modo keyword (sem Voyage) NÃO há similaridade — omitimos o campo em
+        // vez de mandar null, que o modelo interpreta como "match ruim" e
+        // encaminha à toa. Estes resultados são contexto VÁLIDO; responda com eles.
+        note:
+          res.mode === "keyword_fallback" && res.results.length
+            ? "Resultados por palavra-chave (sem score). São contexto válido — use-os para responder."
+            : undefined,
         results: res.results.map((r) => ({
           title: r.title,
           content: r.content,
           source: r.source,
-          similarity: r.similarity,
+          ...(typeof r.similarity === "number" ? { similarity: r.similarity } : {}),
         })),
       }),
       kbTopSimilarity: res.topSimilarity,
