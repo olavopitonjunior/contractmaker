@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { waitUntil } from "@vercel/functions";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
@@ -222,17 +221,20 @@ export async function POST(req: NextRequest) {
 
   // Owner novo recebe o link pra definir a senha (token welcome, 7d). Sem isto o
   // tenant nasce inacessível: a senha temporária só existia na resposta desta API.
-  // `waitUntil` porque `void promise()` depois do NextResponse é cancelado na Vercel.
-  const emailQueued = !existingUser;
-  if (emailQueued) {
-    waitUntil(sendOwnerAccessEmail({ email: ownerEmail, orgName: name }));
-  }
+  //
+  // Aguarda o envio (é rápido) em vez de fire-and-forget: o admin precisa saber NA HORA
+  // se o e-mail saiu. Se o provider recusar (domínio do EMAIL_FROM não verificado, chave
+  // ausente), a tela mostra a senha temporária como caminho de entrega — em vez de
+  // prometer um link que nunca chegou.
+  const emailSent = existingUser
+    ? false
+    : await sendOwnerAccessEmail({ email: ownerEmail, orgName: name });
 
   return NextResponse.json(
     {
       ok: true,
       org: { id: result.org.id, name, slug, subdomain, modules: enabledModules },
-      owner: { email: ownerEmail, userId: result.ownerId, tempPassword, emailQueued },
+      owner: { email: ownerEmail, userId: result.ownerId, tempPassword, emailSent },
     },
     { status: 201 }
   );

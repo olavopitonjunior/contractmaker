@@ -107,7 +107,7 @@ export function AdminOrgsClient({ orgs, canCreate }: { orgs: OrgRow[]; canCreate
     orgName: string;
     ownerEmail: string;
     tempPassword: string | null;
-    emailQueued: boolean;
+    emailSent: boolean;
   } | null>(null);
 
   // Aviso do 409 OWNER_ALREADY_IN_ORG — Dialog, não window.confirm (modal nativo
@@ -147,7 +147,7 @@ export function AdminOrgsClient({ orgs, canCreate }: { orgs: OrgRow[]; canCreate
           orgName: form.name,
           ownerEmail: form.ownerEmail,
           tempPassword: data.owner?.tempPassword ?? null,
-          emailQueued: data.owner?.emailQueued === true,
+          emailSent: data.owner?.emailSent === true,
         });
         setForm({ name: "", subdomain: "", ownerEmail: "", ownerName: "" });
         setModules({ [MODULE.VENDAS]: true, [MODULE.LOCACAO]: true });
@@ -319,16 +319,20 @@ export function AdminOrgsClient({ orgs, canCreate }: { orgs: OrgRow[]; canCreate
           <DialogHeader>
             <DialogTitle>{created?.orgName} criada</DialogTitle>
             <DialogDescription>
-              {created?.emailQueued
+              {created?.emailSent
                 ? `Enviamos para ${created?.ownerEmail} um e-mail com o link para definir a senha (válido por 7 dias). O dono cai direto no guia de primeiros passos.`
-                : `${created?.ownerEmail} já tinha conta na plataforma — ele entra com a senha atual. Nenhum e-mail foi enviado.`}
+                : created?.tempPassword
+                  ? `O e-mail de acesso NÃO saiu (provedor recusou — normalmente EMAIL_FROM fora de um domínio verificado no Resend). Entregue a senha abaixo por canal seguro; o dono também pode usar "Esqueci minha senha".`
+                  : `${created?.ownerEmail} já tinha conta na plataforma — entra com a senha atual. Nenhum e-mail foi enviado.`}
             </DialogDescription>
           </DialogHeader>
 
           {created?.tempPassword && (
             <div className="space-y-2 rounded-md border bg-muted/40 p-3">
               <p className="text-sm text-muted-foreground">
-                Senha temporária (só use se o e-mail não chegar — entregue por canal seguro):
+                {created.emailSent
+                  ? "Senha temporária (só use se o e-mail não chegar — entregue por canal seguro):"
+                  : "Senha temporária — este é o caminho de entrega agora:"}
               </p>
               <div className="flex items-center gap-2">
                 <code className="flex-1 rounded bg-background px-2 py-1 font-mono text-sm">
