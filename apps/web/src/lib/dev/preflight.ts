@@ -38,9 +38,19 @@ const REQUIRED_ENVS = [
   "CHALLENGE_TOKEN_SECRET",
   "TRUSTED_DEVICE_SECRET",
   "SUDO_TOKEN_SECRET",
-  "RESEND_API_KEY",
   "EMAIL_FROM",
 ] as const;
+
+/**
+ * Envs de e-mail dependem do provider escolhido — exigir `RESEND_API_KEY` sempre
+ * reprovaria uma produção saudável rodando por SMTP (o caminho atual).
+ */
+function requiredEmailEnvs(): string[] {
+  const provider = process.env.EMAIL_PROVIDER ?? "resend";
+  if (provider === "smtp") return ["SMTP_HOST", "SMTP_USER", "SMTP_PASS"];
+  if (provider === "resend") return ["RESEND_API_KEY"];
+  return [];
+}
 
 const OPTIONAL_ENVS = [
   "UPSTASH_REDIS_REST_URL",
@@ -244,6 +254,67 @@ async function checkAsaas(orgId: string | null): Promise<CheckResult[]> {
   return out;
 }
 
+/**
+ * Health-check do e-mail, escolhido pelo provider ativo. Em SMTP faz um
+ * `verify()` (handshake + auth, sem enviar nada) — é o equivalente honesto do
+ * ping que a gente fazia na API do Resend.
+ */
+async function checkEmail(): Promise<CheckResult> {
+  const provider = process.env.EMAIL_PROVIDER ?? "resend";
+  if (provider === "smtp") return checkSmtp();
+  if (provider === "resend") return checkResend();
+  return {
+    category: "email",
+    key: "email",
+    severity: "blocker",
+    message: `EMAIL_PROVIDER="${provider}" não implementado — nenhum e-mail sai (log-only)`,
+  };
+}
+
+async function checkSmtp(): Promise<CheckResult> {
+  const host = process.env.SMTP_HOST;
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  if (!host || !user || !pass) {
+    return {
+      category: "email",
+      key: "smtp",
+      severity: "blocker",
+      message: "SMTP_HOST/SMTP_USER/SMTP_PASS ausentes",
+    };
+  }
+  try {
+    const { result, ms } = await time(async () => {
+      const nodemailer = await import("nodemailer");
+      const port = Number(process.env.SMTP_PORT ?? 587);
+      const transporter = nodemailer.createTransport({
+        host,
+        port,
+        secure: process.env.SMTP_SECURE === "true" || port === 465,
+        auth: { user, pass },
+        connectionTimeout: 5000,
+      });
+      await transporter.verify();
+      transporter.close();
+      return { host, port };
+    });
+    return {
+      category: "email",
+      key: "smtp",
+      severity: "ok",
+      message: `SMTP autenticado (${result.host}:${result.port})`,
+      durationMs: ms,
+    };
+  } catch (err) {
+    return {
+      category: "email",
+      key: "smtp",
+      severity: "blocker",
+      message: `SMTP falhou: ${err instanceof Error ? err.message : String(err)}`,
+    };
+  }
+}
+
 async function checkResend(): Promise<CheckResult> {
   const key = process.env.RESEND_API_KEY;
   if (!key) {
@@ -370,11 +441,12 @@ export async function runPreflight(orgId: string | null): Promise<PreflightRepor
   const checks: CheckResult[] = [];
 
   for (const e of REQUIRED_ENVS) checks.push(envCheck(e, true));
+  for (const e of requiredEmailEnvs()) checks.push(envCheck(e, true));
   for (const e of OPTIONAL_ENVS) checks.push(envCheck(e, false));
 
   checks.push(...(await checkDatabase()));
   checks.push(...(await checkAsaas(orgId)));
-  checks.push(await checkResend());
+  checks.push(await checkEmail());
   checks.push(await checkUpstash());
   checks.push(await checkDeals(orgId));
 
