@@ -1,10 +1,16 @@
 /**
  * Abstração de envio de email.
  *
- * Provider default: Resend (EMAIL_PROVIDER=resend). Fallback: log-only em dev.
+ * Providers: `smtp` (nodemailer — usado em produção) e `resend` (legado, default
+ * histórico). Sem provider reconhecido, cai em log-only.
  *
  * Para enviar emails: chame `sendEmail({to, subject, react})` passando um
- * componente React (templates em ./templates/*).
+ * componente React (templates em ./templates/*). O render JSX→HTML acontece aqui
+ * dentro; nenhum call-site precisa saber qual é o transporte.
+ *
+ * Contrato: NUNCA lança. Devolve `{ ok:false, error }` quando o provedor recusa —
+ * quem chama precisa LER esse `ok` (um try/catch sozinho não vê a recusa e acaba
+ * dizendo "enviado" pra um e-mail que nunca saiu).
  */
 
 import { STAGING_MODE } from "@/lib/env/staging";
@@ -100,6 +106,89 @@ async function sendViaResend(input: SendEmailInput): Promise<SendEmailResult> {
   }
 }
 
+/**
+ * Envio por SMTP (nodemailer). É o caminho de produção desde 2026-07: o Resend
+ * exigia domínio verificado e, sem isso, só entregava e-mail pro dono da conta —
+ * ou seja, nenhum e-mail chegava aos clientes (acesso de dono, reset de senha,
+ * convites, avisos de cobrança).
+ *
+ * SMTP genérico DE PROPÓSITO, em vez da API HTTP de um vendor: Brevo, Mailjet,
+ * Postmark e até o Gmail falam SMTP. Trocar de provedor é mudar `SMTP_*` no
+ * ambiente — sem código novo e sem repetir o lock-in que nos trouxe até aqui.
+ *
+ * O corpo vem dos mesmos templates React de sempre: `@react-email/render` faz o
+ * JSX virar HTML (e a versão texto), papel que antes era do SDK do Resend.
+ */
+async function sendViaSmtp(input: SendEmailInput): Promise<SendEmailResult> {
+  const host = process.env.SMTP_HOST;
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  if (!host || !user || !pass) {
+    console.warn("[email] SMTP_HOST/SMTP_USER/SMTP_PASS ausentes — email não enviado");
+    return { id: null, ok: false, error: "SMTP config missing" };
+  }
+
+  try {
+    const transporter = await getSmtpTransporter({ host, user, pass });
+
+    let html = input.html;
+    let text = input.text;
+    if (!html && input.react) {
+      const { render } = await import("@react-email/render");
+      html = await render(input.react);
+      text = text ?? (await render(input.react, { plainText: true }));
+    }
+
+    const info = await transporter.sendMail({
+      from: getFrom(),
+      to: Array.isArray(input.to) ? input.to : [input.to],
+      subject: input.subject,
+      html,
+      text,
+      replyTo: input.replyTo ?? getReplyTo(),
+      // `tags` é conceito do Resend; em SMTP o equivalente útil é um header de
+      // correlação, lido depois nos logs do provedor.
+      headers: input.tags?.length
+        ? { "X-Entity-Ref-ID": input.tags.map((t) => `${t.name}:${t.value}`).join(",") }
+        : undefined,
+    });
+
+    return { id: info.messageId ?? null, ok: true };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error("[email] SMTP send failed", msg);
+    return { id: null, ok: false, error: msg };
+  }
+}
+
+/**
+ * Transporter memoizado por processo. `notifications.ts` e `transfers/route.ts`
+ * mandam e-mail em loop por destinatário — sem pool, cada mensagem abriria (e
+ * derrubaria) uma conexão SMTP nova, o que o relay trata como abuso.
+ */
+let smtpTransporter: import("nodemailer").Transporter | null = null;
+
+async function getSmtpTransporter(cfg: { host: string; user: string; pass: string }) {
+  if (smtpTransporter) return smtpTransporter;
+  const nodemailer = await import("nodemailer");
+  const port = Number(process.env.SMTP_PORT ?? 587);
+  smtpTransporter = nodemailer.createTransport({
+    host: cfg.host,
+    port,
+    // 465 é TLS implícito; 587 abre em claro e sobe pra TLS via STARTTLS.
+    secure: process.env.SMTP_SECURE === "true" || port === 465,
+    auth: { user: cfg.user, pass: cfg.pass },
+    pool: true,
+    maxConnections: 3,
+  });
+  return smtpTransporter;
+}
+
+/** Só pra teste: descarta o transporter memoizado entre casos. */
+export function __resetSmtpTransporterForTests() {
+  smtpTransporter = null;
+}
+
 function logOnly(input: SendEmailInput): SendEmailResult {
   console.log("[email:dev] subject=%s to=%s", input.subject, input.to);
   return { id: "dev-log", ok: true };
@@ -120,9 +209,10 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
 
   const provider = process.env.EMAIL_PROVIDER ?? "resend";
 
+  if (provider === "smtp") return sendViaSmtp(effective);
   if (provider === "resend") return sendViaResend(effective);
 
-  // ses, smtp: placeholders — implementar on-demand
+  // ses: placeholder — implementar on-demand
   console.warn(`[email] provider "${provider}" não implementado, usando log-only`);
   return logOnly(effective);
 }

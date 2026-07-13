@@ -409,6 +409,37 @@ async function checkUpstash(): Promise<CheckResult> {
   }
 }
 
+/** Roteia pro check do provider ativo (SMTP em produção; Resend é legado). */
+async function checkEmail(): Promise<CheckResult> {
+  const provider = process.env.EMAIL_PROVIDER ?? "resend";
+  if (provider !== "smtp") return checkResend();
+
+  const host = process.env.SMTP_HOST;
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  if (!host || !user || !pass) {
+    return { name: "SMTP (email)", status: "fail", detail: "SMTP_HOST/SMTP_USER/SMTP_PASS ausentes" };
+  }
+  try {
+    const t0 = Date.now();
+    const nodemailer = await import("nodemailer");
+    const port = Number(process.env.SMTP_PORT ?? 587);
+    const transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure: process.env.SMTP_SECURE === "true" || port === 465,
+      auth: { user, pass },
+      connectionTimeout: TIMEOUT_MS,
+    });
+    // verify() = handshake + auth, sem enviar e-mail nenhum.
+    await transporter.verify();
+    transporter.close();
+    return { name: "SMTP (email)", status: "ok", detail: `${host}:${port}`, ms: Date.now() - t0 };
+  } catch (e) {
+    return { name: "SMTP (email)", status: "fail", detail: (e as Error).message };
+  }
+}
+
 async function checkResend(): Promise<CheckResult> {
   try {
     const key = process.env.RESEND_API_KEY;
@@ -502,7 +533,7 @@ const CHECKS: Array<() => Promise<CheckResult>> = [
   checkGoogleOwnerOAuth,
   checkVercelBlob,
   checkUpstash,
-  checkResend,
+  checkEmail,
   checkInfosimples,
   checkSecrets,
 ];
