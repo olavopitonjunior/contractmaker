@@ -4,9 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -14,7 +12,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ShieldCheck, Plus } from "lucide-react";
+import { ShieldCheck } from "lucide-react";
+import {
+  LEASE_INSURERS,
+  matchInsurerKey,
+  INSURER_STATUSES,
+  INSURER_STATUS_LABEL,
+  INSURER_STATUS_TONE,
+} from "@/lib/locacao/insurers";
 
 export interface InsurerAnalysisRow {
   id: string;
@@ -22,33 +27,6 @@ export interface InsurerAnalysisRow {
   status: string;
   premioMensal: number | null;
 }
-
-const STATUSES = [
-  "pendente",
-  "enviado",
-  "em_analise",
-  "aprovado",
-  "aprovado_com_restricao",
-  "recusado",
-] as const;
-
-const STATUS_LABEL: Record<string, string> = {
-  pendente: "Pendente",
-  enviado: "Enviado",
-  em_analise: "Em análise",
-  aprovado: "Aprovado",
-  aprovado_com_restricao: "Aprovado c/ restrição",
-  recusado: "Recusado",
-};
-
-const STATUS_TONE: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
-  aprovado: "default",
-  aprovado_com_restricao: "outline",
-  em_analise: "secondary",
-  enviado: "secondary",
-  pendente: "outline",
-  recusado: "destructive",
-};
 
 export function ClientInsurerAnalysisCard({
   clientId,
@@ -58,44 +36,32 @@ export function ClientInsurerAnalysisCard({
   analyses: InsurerAnalysisRow[];
 }) {
   const router = useRouter();
-  const [adding, setAdding] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [seguradora, setSeguradora] = useState("");
-  const [status, setStatus] = useState<string>("pendente");
 
-  async function addSeguradora(e: React.FormEvent) {
-    e.preventDefault();
-    if (!seguradora.trim()) return;
+  // Roster fixo das 6 seguradoras — cada uma casada com a análise existente (se houver).
+  const rosterRows = LEASE_INSURERS.map((ins) => {
+    const existing = analyses.find((a) => matchInsurerKey(a.seguradora) === ins.key);
+    return { ins, existing };
+  });
+  // Análises fora do roster (custom/legado) — exibidas separadamente.
+  const extras = analyses.filter((a) => matchInsurerKey(a.seguradora) === null);
+
+  /** Cria (POST) ou atualiza (PATCH) o status de uma seguradora. */
+  async function setStatus(opts: {
+    analysisId?: string;
+    seguradora: string;
+    status: string;
+  }) {
     setBusy(true);
     try {
       const res = await fetch(`/api/locacao/clients/${clientId}/insurer-analyses`, {
-        method: "POST",
+        method: opts.analysisId ? "PATCH" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ seguradora: seguradora.trim(), status }),
-      });
-      if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        throw new Error(d.error ?? `HTTP ${res.status}`);
-      }
-      toast.success("Seguradora adicionada");
-      setSeguradora("");
-      setStatus("pendente");
-      setAdding(false);
-      router.refresh();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao salvar");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function updateStatus(analysisId: string, newStatus: string) {
-    setBusy(true);
-    try {
-      const res = await fetch(`/api/locacao/clients/${clientId}/insurer-analyses`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ analysisId, status: newStatus }),
+        body: JSON.stringify(
+          opts.analysisId
+            ? { analysisId: opts.analysisId, status: opts.status }
+            : { seguradora: opts.seguradora, status: opts.status }
+        ),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
@@ -109,87 +75,88 @@ export function ClientInsurerAnalysisCard({
     }
   }
 
+  function StatusSelect({
+    value,
+    onPick,
+  }: {
+    value: string | undefined;
+    onPick: (s: string) => void;
+  }) {
+    return (
+      <Select value={value} onValueChange={onPick} disabled={busy}>
+        <SelectTrigger className="h-8 w-[170px] text-xs">
+          <SelectValue placeholder="Não enviado" />
+        </SelectTrigger>
+        <SelectContent>
+          {INSURER_STATUSES.map((s) => (
+            <SelectItem key={s} value={s}>
+              {INSURER_STATUS_LABEL[s]}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    );
+  }
+
   return (
     <Card>
-      <CardHeader className="pb-3 flex flex-row items-center justify-between gap-3 flex-wrap">
+      <CardHeader className="pb-3">
         <CardTitle className="text-base flex items-center gap-2">
           <ShieldCheck className="h-4 w-4" /> Fiança por seguradora
         </CardTitle>
-        <Button size="sm" variant="outline" onClick={() => setAdding((v) => !v)}>
-          <Plus className="h-4 w-4 mr-1.5" /> Adicionar seguradora
-        </Button>
       </CardHeader>
-      <CardContent className="space-y-3">
-        {adding && (
-          <form onSubmit={addSeguradora} className="flex flex-wrap items-end gap-2 rounded-md border p-3">
-            <div className="flex-1 space-y-1 min-w-[160px]">
-              <label className="text-xs text-muted-foreground">Seguradora</label>
-              <Input
-                value={seguradora}
-                onChange={(e) => setSeguradora(e.target.value)}
-                placeholder="ex.: Porto, Credpago"
-                autoFocus
-              />
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">Status</label>
-              <Select value={status} onValueChange={setStatus}>
-                <SelectTrigger className="w-[180px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {STATUSES.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {STATUS_LABEL[s]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <Button type="submit" disabled={busy || !seguradora.trim()}>
-              Salvar
-            </Button>
-          </form>
-        )}
-
-        {analyses.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            Nenhuma seguradora ainda. Adicione as seguradoras às quais a fiança foi enviada e
-            acompanhe o status de cada uma.
-          </p>
-        ) : (
-          <ul className="divide-y">
-            {analyses.map((a) => (
-              <li key={a.id} className="flex items-center justify-between gap-3 py-2">
-                <div className="min-w-0">
-                  <p className="text-sm font-medium capitalize truncate">{a.seguradora}</p>
-                  {a.premioMensal != null && (
-                    <p className="text-xs text-muted-foreground">
-                      Prêmio: {a.premioMensal.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}/mês
-                    </p>
-                  )}
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <Badge variant={STATUS_TONE[a.status] ?? "outline"}>
-                    {STATUS_LABEL[a.status] ?? a.status}
+      <CardContent>
+        <ul className="divide-y">
+          {rosterRows.map(({ ins, existing }) => (
+            <li key={ins.key} className="flex items-center justify-between gap-3 py-2">
+              <div className="min-w-0">
+                <p className="text-sm font-medium">{ins.label}</p>
+                {existing?.premioMensal != null && (
+                  <p className="text-xs text-muted-foreground">
+                    Prêmio:{" "}
+                    {existing.premioMensal.toLocaleString("pt-BR", {
+                      style: "currency",
+                      currency: "BRL",
+                    })}
+                    /mês
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                {existing ? (
+                  <Badge variant={INSURER_STATUS_TONE[existing.status] ?? "outline"}>
+                    {INSURER_STATUS_LABEL[existing.status] ?? existing.status}
                   </Badge>
-                  <Select value={a.status} onValueChange={(v) => updateStatus(a.id, v)} disabled={busy}>
-                    <SelectTrigger className="h-8 w-[160px] text-xs">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {STATUSES.map((s) => (
-                        <SelectItem key={s} value={s}>
-                          {STATUS_LABEL[s]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </li>
-            ))}
-          </ul>
-        )}
+                ) : (
+                  <Badge variant="outline" className="text-muted-foreground/70">
+                    Não enviado
+                  </Badge>
+                )}
+                <StatusSelect
+                  value={existing?.status}
+                  onPick={(s) =>
+                    setStatus({ analysisId: existing?.id, seguradora: ins.label, status: s })
+                  }
+                />
+              </div>
+            </li>
+          ))}
+
+          {extras.map((a) => (
+            <li key={a.id} className="flex items-center justify-between gap-3 py-2">
+              <p className="text-sm font-medium capitalize truncate">{a.seguradora}</p>
+              <div className="flex items-center gap-2 shrink-0">
+                <Badge variant={INSURER_STATUS_TONE[a.status] ?? "outline"}>
+                  {INSURER_STATUS_LABEL[a.status] ?? a.status}
+                </Badge>
+                <StatusSelect
+                  value={a.status}
+                  onPick={(s) => setStatus({ analysisId: a.id, seguradora: a.seguradora, status: s })}
+                />
+              </div>
+            </li>
+          ))}
+        </ul>
       </CardContent>
     </Card>
   );

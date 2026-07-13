@@ -6,6 +6,7 @@ import { ClientesTable, type ClienteRow } from "@/components/locacao/ClientesTab
 import { NovoClienteDialog } from "@/components/locacao/NovoClienteDialog";
 import { ImportarCrmDialog } from "@/components/locacao/ImportarCrmDialog";
 import { summarizeSerasaJobs } from "@/lib/locacao/client-credit";
+import { LEASE_INSURERS, matchInsurerKey } from "@/lib/locacao/insurers";
 
 export const dynamic = "force-dynamic";
 
@@ -40,7 +41,11 @@ export default async function LocacaoClientesPage() {
       createdByName: c.createdBy?.name ?? c.createdBy?.email ?? "—",
       serasaLabel: serasa.label,
       serasaTone: serasa.tone,
-      insurers: c.insurerAnalyses.map((i) => ({ seguradora: i.seguradora, status: i.status })),
+      // Todas as seguradoras do roster com o status de cada (null = não enviado).
+      insurers: LEASE_INSURERS.map((ins) => {
+        const a = c.insurerAnalyses.find((x) => matchInsurerKey(x.seguradora) === ins.key);
+        return { key: ins.key, label: ins.label, status: a?.status ?? null };
+      }),
       href: `/locacao/pessoas/clientes/${c.id}`,
     };
   });
