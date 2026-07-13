@@ -32,6 +32,11 @@ import {
 import { collectPartyFormatIssues } from "@/lib/forms/field-formats";
 import { findMissingRequired, getByPath } from "@/lib/forms/party-required";
 import { resolveAllRequiredFields } from "@/lib/forms/presets";
+import {
+  GoogleDocsGenerationError,
+  googleDocsFailureMessage,
+  rollbackFailedContract,
+} from "@/lib/contracts/google-docs-failure";
 
 interface GenerateResult {
   contractId: string;
@@ -840,18 +845,13 @@ export async function generateContractForDeal(
         map["contrato_numero"] = numeroContrato;
         map["contrato_id"] = contract.id;
         map["contrato_versao"] = String(contract.version);
-        try {
-          await replacePlaceholdersInDoc({
-            docId: copy.docId,
-            replacements: map,
-          });
-          await cleanupOrphanPlaceholders(copy.docId);
-        } catch (replaceErr) {
-          console.error(
-            "[contract-generation] Falha em replaceAllText:",
-            replaceErr
-          );
-        }
+        // Sem replace, o contrato sai com `{{tokens}}` crus — inútil. Deixa propagar
+        // para o catch externo, que desfaz o contrato e lança.
+        await replacePlaceholdersInDoc({
+          docId: copy.docId,
+          replacements: map,
+        });
+        await cleanupOrphanPlaceholders(copy.docId);
 
         // Snapshot real do conteúdo (substitui o stub de htmlContent).
         try {
@@ -974,6 +974,13 @@ export async function generateContractForDeal(
         });
       } catch {
         // ignora — diagnóstico best-effort
+      }
+
+      // engine=google_docs não tem corpo alternativo: degradar aqui produziria um
+      // contrato com stub de HTML e sem doc. Desfaz e lança.
+      if (isGoogleDocsEngine) {
+        await rollbackFailedContract(contract.id, deal.id, "contract");
+        throw new GoogleDocsGenerationError(googleDocsFailureMessage(err, template.name), err);
       }
     }
   }
@@ -1187,12 +1194,9 @@ export async function generateLocacaoContractForDeal(
         map["contrato_numero"] = numeroContrato;
         map["contrato_id"] = contract.id;
         map["contrato_versao"] = String(contract.version);
-        try {
-          await replacePlaceholdersInDoc({ docId: copy.docId, replacements: map });
-          await cleanupOrphanPlaceholders(copy.docId);
-        } catch (replaceErr) {
-          console.error("[locacao-generation] Falha em replaceAllText:", replaceErr);
-        }
+        // Sem replace, o contrato sai com `{{tokens}}` crus — deixa propagar.
+        await replacePlaceholdersInDoc({ docId: copy.docId, replacements: map });
+        await cleanupOrphanPlaceholders(copy.docId);
 
         // Snapshot real do conteúdo pro htmlContent (export/diff/memória).
         try {
@@ -1289,6 +1293,12 @@ export async function generateLocacaoContractForDeal(
         });
       } catch {
         // diagnóstico best-effort
+      }
+
+      // engine=google_docs não tem corpo alternativo — ver google-docs-failure.ts.
+      if (isLocacaoGoogleDocsEngine) {
+        await rollbackFailedContract(contract.id, deal.id, "contract");
+        throw new GoogleDocsGenerationError(googleDocsFailureMessage(err, template.name), err);
       }
     }
   }
@@ -1454,12 +1464,9 @@ export async function generateAdministracaoContractForDeal(
         map["contrato_numero"] = numeroContrato;
         map["contrato_id"] = contract.id;
         map["contrato_versao"] = String(contract.version);
-        try {
-          await replacePlaceholdersInDoc({ docId: copy.docId, replacements: map });
-          await cleanupOrphanPlaceholders(copy.docId);
-        } catch (replaceErr) {
-          console.error("[administracao-generation] Falha em replaceAllText:", replaceErr);
-        }
+        // Sem replace, o contrato sai com `{{tokens}}` crus — deixa propagar.
+        await replacePlaceholdersInDoc({ docId: copy.docId, replacements: map });
+        await cleanupOrphanPlaceholders(copy.docId);
 
         // Snapshot real do conteúdo pro htmlContent (export/diff/memória).
         try {
@@ -1559,6 +1566,12 @@ export async function generateAdministracaoContractForDeal(
         });
       } catch {
         // diagnóstico best-effort
+      }
+
+      // engine=google_docs não tem corpo alternativo — ver google-docs-failure.ts.
+      if (isGoogleDocsEngine) {
+        await rollbackFailedContract(contract.id, deal.id, "administracao");
+        throw new GoogleDocsGenerationError(googleDocsFailureMessage(err, template.name), err);
       }
     }
   }

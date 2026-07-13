@@ -31,6 +31,7 @@ export const FEATURE = {
   VENDAS_FORM_PUBLICO: "vendas.form_publico",
   VENDAS_CERTIDOES: "vendas.certidoes",
   VENDAS_PAGADORIA: "vendas.pagadoria",
+  VENDAS_NEWTON: "vendas.newton",
 
   // Módulo Locação
   LOCACAO_PIPELINE: "locacao.pipeline",
@@ -42,6 +43,7 @@ export const FEATURE = {
   LOCACAO_VISTORIAS: "locacao.vistorias",
   LOCACAO_SEGUROS: "locacao.seguros",
   LOCACAO_PESSOAS: "locacao.pessoas",
+  LOCACAO_NEWTON: "locacao.newton",
 } as const;
 
 export type FeatureKey = (typeof FEATURE)[keyof typeof FEATURE];
@@ -68,6 +70,7 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
       { key: FEATURE.VENDAS_FORM_PUBLICO, label: "Formulário público", default: true },
       { key: FEATURE.VENDAS_CERTIDOES, label: "Certidões", default: true },
       { key: FEATURE.VENDAS_PAGADORIA, label: "Pagadoria / comissão", default: true },
+      { key: FEATURE.VENDAS_NEWTON, label: "Newton (agente WhatsApp) — vendas", default: false },
     ],
   },
   {
@@ -83,6 +86,7 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
       { key: FEATURE.LOCACAO_VISTORIAS, label: "Vistorias", default: false },
       { key: FEATURE.LOCACAO_SEGUROS, label: "Seguros", default: false },
       { key: FEATURE.LOCACAO_PESSOAS, label: "Pessoas", default: true },
+      { key: FEATURE.LOCACAO_NEWTON, label: "Newton (agente WhatsApp) — locação", default: false },
     ],
   },
 ] as const;
@@ -122,6 +126,21 @@ export function featureModule(feature: FeatureKey): ModuleKey {
 /** Default do catálogo para uma feature (usado quando a flag não está explícita). */
 export function featureDefault(feature: FeatureKey): boolean {
   return FEATURE_BY_KEY.get(feature)?.default ?? false;
+}
+
+/**
+ * Feature do Newton correspondente à natureza do negócio.
+ *
+ * O Newton (agente de WhatsApp) é transversal: o inbox de pedidos vive sob ADM Locação,
+ * mas a aba "Pedidos" aparece em deals de venda E de locação. Como toda feature do
+ * catálogo pertence a exatamente um módulo (`featureModule` lança se não pertencer),
+ * existe uma chave por módulo e este helper escolhe a certa pelo `Deal.kind`.
+ *
+ * Default OFF nas duas: tenants novos não nascem com o Newton (as RE/MAX usam outro
+ * agente). Quem quiser liga no painel super-admin.
+ */
+export function newtonFeatureForDealKind(kind: string): FeatureKey {
+  return kind === "locacao" ? FEATURE.LOCACAO_NEWTON : FEATURE.VENDAS_NEWTON;
 }
 
 /** Definição completa de um módulo. */

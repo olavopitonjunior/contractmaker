@@ -312,6 +312,47 @@ function ActionsPanel({
     }
   }
 
+  async function resendOwnerAccess() {
+    setBusy("resend");
+    try {
+      const res = await fetch(`/api/admin/orgs/${orgId}/resend-owner-access`, { method: "POST" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(d.message ?? d.error ?? "Falha ao reenviar o acesso");
+        return;
+      }
+      toast.success(`E-mail de acesso enviado para ${d.sentTo}.`);
+    } catch {
+      toast.error("Falha de rede.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function resetOnboarding() {
+    setBusy("reset-onboarding");
+    try {
+      const res = await fetch(`/api/admin/orgs/${orgId}/reset-onboarding`, { method: "POST" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(d.message ?? d.error ?? "Falha ao reabrir o onboarding");
+        return;
+      }
+      // Os 6 passos derivam dos dados: se já estão todos cumpridos, o checklist
+      // se re-encerra sozinho no próximo carregamento — avisar em vez de mentir.
+      if (d.alreadyComplete) {
+        toast.warning("Onboarding reaberto, mas os 6 passos já estão cumpridos — o guia vai se encerrar de novo sozinho.");
+      } else {
+        toast.success(`Onboarding reaberto. Passos pendentes: ${(d.pendingSteps ?? []).join(", ")}.`);
+      }
+      router.refresh();
+    } catch {
+      toast.error("Falha de rede.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   const expectedConfirm = subdomain ?? orgName;
 
   return (
@@ -321,6 +362,23 @@ function ActionsPanel({
         <Button variant="outline" asChild><Link href="/admin/platform-roles">Gerenciar staff de plataforma</Link></Button>
         <BrandingFeesEditor orgId={orgId} />
       </div>
+
+      <Card>
+        <CardHeader><CardTitle className="text-sm">Acesso do dono</CardTitle></CardHeader>
+        <CardContent className="flex items-center justify-between gap-4">
+          <p className="text-sm text-muted-foreground">
+            Reenvia ao owner o e-mail para definir a senha (link válido por 7 dias) e reabre o guia de primeiros passos.
+          </p>
+          <div className="flex shrink-0 gap-2">
+            <Button variant="outline" disabled={busy === "resend"} onClick={resendOwnerAccess}>
+              {busy === "resend" ? "Enviando…" : "Reenviar acesso"}
+            </Button>
+            <Button variant="outline" disabled={busy === "reset-onboarding"} onClick={resetOnboarding}>
+              {busy === "reset-onboarding" ? "…" : "Reabrir onboarding"}
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader><CardTitle className="text-sm">Suspensão</CardTitle></CardHeader>

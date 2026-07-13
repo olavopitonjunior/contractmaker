@@ -5,6 +5,7 @@ import {
   isAuthFailure,
   authFailureResponse,
 } from "@/lib/api/require-auth";
+import { newtonDisabledResponse } from "@/lib/newton/gate";
 import { serializeRequest } from "@/lib/newton/requests";
 
 export const runtime = "nodejs";
@@ -25,6 +26,10 @@ export const dynamic = "force-dynamic";
 export async function GET(req: NextRequest) {
   const auth = await requireApiAuth(req, { scope: "deals:r" });
   if (isAuthFailure(auth)) return authFailureResponse(auth);
+
+  // Tenant sem Newton (default do catálogo) não fala com o agente.
+  const newtonOff = await newtonDisabledResponse(auth.org.id);
+  if (newtonOff) return newtonOff;
 
   const url = new URL(req.url);
   const dealIdParam = url.searchParams.get("dealId");

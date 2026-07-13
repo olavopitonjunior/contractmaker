@@ -216,7 +216,7 @@ export default async function SegurosPage() {
             <CardContent className="space-y-2 text-sm text-muted-foreground">
               <p>
                 Integração com Tokio/Porto/Pottencial está no roadmap. Hoje cotações são
-                solicitadas via Newton/WhatsApp.
+                solicitadas por WhatsApp.
               </p>
               <p className="text-xs">
                 Quando integrarmos, esta aba lista cotações abertas com prazo, prêmio

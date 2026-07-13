@@ -15,9 +15,18 @@ const mockAuth = vi.mocked(auth);
 const mockGetUserOrg = vi.mocked(getUserOrg);
 const mockPrisma = vi.mocked(prisma);
 
+/** O Newton é feature por tenant e nasce DESLIGADA — org de teste tem que ligar. */
+function enableNewton(enabled = true) {
+  mockPrisma.orgModule.findMany.mockResolvedValue([
+    { module: "vendas", enabled: true, featureFlags: { "vendas.newton": enabled } },
+    { module: "locacao", enabled: true, featureFlags: { "locacao.newton": enabled } },
+  ] as never);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockGetUserOrg.mockResolvedValue(createMockOrg() as never);
+  enableNewton();
 });
 
 function existingRow(overrides: Record<string, unknown> = {}) {

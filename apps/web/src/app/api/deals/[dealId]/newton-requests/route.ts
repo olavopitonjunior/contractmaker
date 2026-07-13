@@ -9,6 +9,7 @@ import {
 } from "@/lib/api/require-auth";
 import { appendEvent, serializeRequest } from "@/lib/newton/requests";
 import { triggerNewtonForRequest } from "@/lib/newton/trigger";
+import { newtonDisabledResponse } from "@/lib/newton/gate";
 
 export const runtime = "nodejs";
 
@@ -43,7 +44,8 @@ async function loadDealOrg(dealId: string, orgId: string) {
   if (!deal) return { error: "Deal not found" as const, status: 404 as const };
   const dealOrgId = deal.form?.orgId ?? deal.pipeline.orgId;
   if (dealOrgId !== orgId) return { error: "Forbidden" as const, status: 403 as const };
-  return { dealOrgId };
+  // O kind decide QUAL feature do Newton vale (vendas.newton vs locacao.newton).
+  return { dealOrgId, dealKind: deal.kind };
 }
 
 export async function GET(
@@ -57,6 +59,8 @@ export async function GET(
   if ("error" in guard) {
     return NextResponse.json({ error: guard.error }, { status: guard.status });
   }
+  const disabled = await newtonDisabledResponse(guard.dealOrgId, guard.dealKind);
+  if (disabled) return disabled;
 
   const requests = await prisma.newtonRequest.findMany({
     where: { dealId: params.dealId },
@@ -94,6 +98,8 @@ export async function POST(
   if ("error" in guard) {
     return NextResponse.json({ error: guard.error }, { status: guard.status });
   }
+  const disabled = await newtonDisabledResponse(guard.dealOrgId, guard.dealKind);
+  if (disabled) return disabled;
 
   const created = await prisma.newtonRequest.create({
     data: {
@@ -119,6 +125,7 @@ export async function POST(
   // waitUntil mantém o lambda vivo após o NextResponse; sem ele a Vercel
   // cancela a promise e o trigger pode não chegar ao sidecar.
   waitUntil(triggerNewtonForRequest({
+    orgId: guard.dealOrgId,
     dealId: params.dealId,
     requestId: created.id,
     ask,

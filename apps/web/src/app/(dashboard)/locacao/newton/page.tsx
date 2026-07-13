@@ -1,6 +1,6 @@
-import { redirect } from "next/navigation";
-import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import { requireFeaturePage } from "@/lib/modules/page-guard";
+import { FEATURE } from "@/lib/modules/catalog";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Bell, MessageSquare } from "lucide-react";
@@ -27,17 +27,15 @@ export default async function LocacaoNewtonInboxPage({
 }: {
   searchParams?: Promise<{ status?: string }>;
 }) {
-  const session = await auth();
-  if (!session?.user?.id) redirect("/login");
-  const org = await getUserOrg(session.user.id);
-  if (!org) redirect("/");
+  // Tenant sem o Newton (default do catálogo) não tem inbox — redireciona.
+  const { orgId } = await requireFeaturePage(FEATURE.LOCACAO_NEWTON, "/locacao");
 
   const params = (await searchParams) ?? {};
   const status = params.status;
 
   const requests = await prisma.newtonRequest.findMany({
     where: {
-      orgId: org.id,
+      orgId,
       ...(status
         ? { status }
         : { status: { in: ["open", "chasing", "awaiting_reply"] } }),
@@ -48,7 +46,7 @@ export default async function LocacaoNewtonInboxPage({
 
   const counts = await prisma.newtonRequest.groupBy({
     by: ["status"],
-    where: { orgId: org.id },
+    where: { orgId },
     _count: { _all: true },
   });
   const countMap = Object.fromEntries(counts.map((c) => [c.status, c._count._all]));
