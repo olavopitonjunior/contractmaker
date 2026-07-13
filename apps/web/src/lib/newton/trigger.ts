@@ -24,6 +24,8 @@ const TRIGGER_PHONE = process.env.NEWTON_TRIGGER_PHONE ?? "5511999063228";
 const TRIGGER_TIMEOUT_MS = 2500;
 
 export interface TriggerArgs {
+  /** Org do pedido — o Newton é uma feature por tenant (default OFF). */
+  orgId: string;
   dealId: string;
   requestId: string;
   ask: string;
@@ -76,6 +78,14 @@ function buildText(a: TriggerArgs): string {
 export async function triggerNewtonForRequest(a: TriggerArgs): Promise<void> {
   if (NEWTON_DISABLED) {
     console.log("[newton.trigger] NEWTON_DISABLED=true — pulando dispatch (request=%s)", a.requestId);
+    return;
+  }
+  // Chokepoint por tenant: a env acima é global (por deploy). Tenants sem o Newton
+  // (default do catálogo) nunca podem cutucar o WhatsApp — nem por API, nem pelo cron
+  // de sweep, nem pelos executores de locação que criam NewtonRequest como fila.
+  const { isNewtonEnabledForOrg } = await import("@/lib/newton/gate");
+  if (!(await isNewtonEnabledForOrg(a.orgId))) {
+    console.log("[newton.trigger] Newton desabilitado na org %s — pulando dispatch", a.orgId);
     return;
   }
   if (!SIDECAR_URL || !SIDECAR_TOKEN) {

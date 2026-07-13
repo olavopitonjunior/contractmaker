@@ -19,8 +19,10 @@ const FULL_SUB_NAV: SubNavItem[] = [
   { label: "Pessoas", href: "/locacao/pessoas" },
   { label: "Seguros", href: "/locacao/seguros" },
   { label: "DIMOB", href: "/relatorios/dimob" },
-  { label: "Newton", href: "/locacao/newton" },
 ];
+
+// O Newton é feature por tenant (default OFF) — entra na sub-nav só quando ligado.
+const NEWTON_ITEM: SubNavItem = { label: "Newton", href: "/locacao/newton" };
 
 // Modo simplificado: só a esteira (fluxo form → contrato → assinatura).
 const SIMPLIFIED_SUB_NAV: SubNavItem[] = [
@@ -36,15 +38,16 @@ const SUB_NAV: SubNavItem[] = LOCACAO_SIMPLIFIED_MODE
  * Pills com active state derivado de pathname (exact match pra dashboard, prefix pros outros).
  * Touch targets ≥44px de altura.
  */
-export function LocacaoSubNav() {
+export function LocacaoSubNav({ newtonEnabled = false }: { newtonEnabled?: boolean }) {
   const pathname = usePathname();
+  const items = newtonEnabled && !LOCACAO_SIMPLIFIED_MODE ? [...SUB_NAV, NEWTON_ITEM] : SUB_NAV;
 
   return (
     <nav
       className="-mx-2 flex gap-1 overflow-x-auto px-2 pb-1 sm:mx-0 sm:px-0"
       aria-label="Navegação Locação"
     >
-      {SUB_NAV.map((item) => {
+      {items.map((item) => {
         const isActive = item.exact
           ? pathname === item.href
           : pathname === item.href || pathname.startsWith(item.href + "/");

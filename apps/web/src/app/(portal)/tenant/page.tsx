@@ -159,8 +159,7 @@ export default async function TenantPortalPage() {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground">
-            Pra solicitar reparo, fale com sua imobiliária pelo WhatsApp (Newton vai responder e
-            registrar o chamado automaticamente).
+            Pra solicitar reparo, fale com sua imobiliária pelo WhatsApp.
           </p>
         </CardContent>
       </Card>

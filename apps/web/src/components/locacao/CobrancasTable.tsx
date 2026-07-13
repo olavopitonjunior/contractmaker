@@ -118,7 +118,7 @@ export function CobrancasTable({ data, emptyState }: Props) {
           actions={[
             {
               key: "cobrar",
-              label: "Cobrar (régua Newton)",
+              label: "Cobrar (régua de cobrança)",
               confirm: `Disparar régua de cobrança para ${rows.length} cobrança(s)?`,
             },
             {

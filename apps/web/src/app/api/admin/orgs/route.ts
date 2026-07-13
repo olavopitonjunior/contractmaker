@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { z } from "zod";
 import { randomBytes } from "node:crypto";
 import bcrypt from "bcryptjs";
@@ -12,6 +13,8 @@ import { subdomainSchema } from "@/lib/tenant/subdomain";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { MODULE, MODULE_CATALOG, isValidModule, type ModuleKey } from "@/lib/modules/catalog";
 import { seedPipeline } from "@/lib/pipelines/seed";
+import { seedDefaultDocumentStyle } from "@/lib/org/seed-document-style";
+import { sendOwnerAccessEmail } from "@/lib/org/owner-access";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -29,6 +32,10 @@ const createOrgSchema = z.object({
   cnpj: z.string().trim().max(20).optional(),
   creci: z.string().trim().max(40).optional(),
   legalAddress: z.string().trim().max(300).optional(),
+  // Reusar um usuário que JÁ é membro de outra org exige confirmação explícita:
+  // com múltiplas memberships e sem subdomínio no host, `getUserOrg` escolhe a org
+  // pelo primeiro `findFirst` — e não há org switcher. Ver o 409 abaixo.
+  confirmExistingUser: z.boolean().optional(),
 });
 
 async function gate(userId: string, role: "support" | "super_admin") {
@@ -120,10 +127,30 @@ export async function POST(req: NextRequest) {
 
   const existingUser = await prisma.user.findUnique({
     where: { email: ownerEmail },
-    select: { id: true },
+    select: { id: true, _count: { select: { orgMemberships: true } } },
   });
-  // Senha temporária só pra owner novo (entregue por canal seguro — Resend pode estar sandbox).
+
+  // Um usuário com membership em outra org passaria a ter duas — e o login pelo apex
+  // resolveria a org por `findFirst` (arbitrária). Exige confirmação explícita.
+  if (existingUser && existingUser._count.orgMemberships > 0 && !parsed.data.confirmExistingUser) {
+    return NextResponse.json(
+      {
+        error: "OWNER_ALREADY_IN_ORG",
+        message:
+          `${ownerEmail} já é membro de outra organização. Torná-lo owner desta também ` +
+          `deixa o login dele ambíguo (sem subdomínio, a plataforma escolhe uma das orgs). ` +
+          `Prefira um e-mail dedicado. Para prosseguir mesmo assim, confirme.`,
+        requiresConfirmation: true,
+      },
+      { status: 409 }
+    );
+  }
+
+  // Senha temporária só pra owner novo. É fallback: o acesso normal vai pelo e-mail
+  // "defina sua senha" enviado abaixo.
   const tempPassword = existingUser ? null : `${randomBytes(9).toString("base64url")}!7`;
+  // bcrypt (10 rounds) é ~100ms de CPU — fora da transação pra não segurar conexão do pool.
+  const passwordHash = tempPassword ? await bcrypt.hash(tempPassword, 10) : null;
   const slug = subdomain; // subdomínio é único e url-safe → serve de slug
 
   const result = await prisma.$transaction(async (tx) => {
@@ -146,7 +173,7 @@ export async function POST(req: NextRequest) {
           data: {
             email: ownerEmail,
             name: ownerName ?? null,
-            passwordHash: await bcrypt.hash(tempPassword!, 10),
+            passwordHash,
             emailVerified: new Date(),
           },
           select: { id: true },
@@ -176,6 +203,9 @@ export async function POST(req: NextRequest) {
 
     await tx.brandingSettings.create({ data: { orgId: org.id } });
 
+    // Preset de layout default — sem ele, contratos Handlebars nascem Arial 11pt.
+    await seedDefaultDocumentStyle(org.id, tx);
+
     return { org, ownerId };
   });
 
@@ -190,11 +220,19 @@ export async function POST(req: NextRequest) {
     }
   );
 
+  // Owner novo recebe o link pra definir a senha (token welcome, 7d). Sem isto o
+  // tenant nasce inacessível: a senha temporária só existia na resposta desta API.
+  // `waitUntil` porque `void promise()` depois do NextResponse é cancelado na Vercel.
+  const emailQueued = !existingUser;
+  if (emailQueued) {
+    waitUntil(sendOwnerAccessEmail({ email: ownerEmail, orgName: name }));
+  }
+
   return NextResponse.json(
     {
       ok: true,
       org: { id: result.org.id, name, slug, subdomain, modules: enabledModules },
-      owner: { email: ownerEmail, userId: result.ownerId, tempPassword },
+      owner: { email: ownerEmail, userId: result.ownerId, tempPassword, emailQueued },
     },
     { status: 201 }
   );

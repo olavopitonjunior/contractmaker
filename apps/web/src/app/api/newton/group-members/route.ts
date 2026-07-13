@@ -6,6 +6,7 @@ import {
   isAuthFailure,
   authFailureResponse,
 } from "@/lib/api/require-auth";
+import { newtonDisabledResponse } from "@/lib/newton/gate";
 import { normalizePhone } from "@/lib/newton/group-match";
 
 export const runtime = "nodejs";
@@ -35,6 +36,10 @@ const bodySchema = z.object({
 export async function POST(req: NextRequest) {
   const auth = await requireApiAuth(req, { scope: "deals:rw" });
   if (isAuthFailure(auth)) return authFailureResponse(auth);
+
+  // Tenant sem Newton (default do catálogo) não fala com o agente.
+  const newtonOff = await newtonDisabledResponse(auth.org.id);
+  if (newtonOff) return newtonOff;
 
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
