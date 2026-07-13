@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Building2, MapPin, Users, LayoutGrid, Table as TableIcon } from "lucide-react";
 import { NovoImovelDialog } from "@/components/locacao/NovoImovelDialog";
+import { ImportarCrmDialog } from "@/components/locacao/ImportarCrmDialog";
 import { ImoveisTable, type ImovelRow } from "@/components/locacao/ImoveisTable";
 
 export const dynamic = "force-dynamic";
@@ -81,7 +82,10 @@ export default async function LocacaoImoveisPage() {
             Catálogo. {total} no total · {ativosCount} ativos · {locadosCount} locados · {disponiveisCount} disponíveis.
           </p>
         </div>
-        <NovoImovelDialog />
+        <div className="flex flex-wrap gap-2">
+          <ImportarCrmDialog entity="imovel" />
+          <NovoImovelDialog />
+        </div>
       </div>
 
       <Tabs defaultValue="grid">
