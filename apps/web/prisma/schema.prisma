@@ -85,6 +85,10 @@ model User {
   // Newton — Leads ownership
   leads Lead[]
 
+  // Locação — Clientes/prospects cadastrados por este usuário ("quem cadastrou")
+  leaseClientsCreated         LeaseClient[]
+  leaseClientInsurerAnalyses  LeaseClientInsurerAnalysis[]
+
   // Newton — pedidos de cobrança de informação criados pela negociadora
   newtonRequests NewtonRequest[]
 
@@ -321,6 +325,8 @@ model Organization {
   insurancePolicies  InsurancePolicy[]
   maintenances       Maintenance[]
   leaseReadjustments LeaseReadjustment[]
+  leaseClients       LeaseClient[]
+  leaseClientInsurerAnalyses LeaseClientInsurerAnalysis[]
 
   // Modularização — entitlements de módulos (Vendas/Locação) por tenant
   orgModules OrgModule[]
@@ -638,6 +644,9 @@ model CertidaoJob {
   // diligenciado, jobs passam a se ligar à pessoa por id. Null pra partes do
   // contrato (vendedor/comprador/imóvel) e pra alvos ad-hoc (sem row no banco).
   diligentedPersonId String?
+  // Locação — job escopado a um LeaseClient (prospect) em vez de um Deal. Mutuamente
+  // exclusivo com dealId: crédito/certidões de cliente rodam pré-deal (dealId null).
+  leaseClientId   String?
   requestPayload  Json
   status          String    @default("pending")
   resultCode      Int?
@@ -676,6 +685,7 @@ model CertidaoJob {
   user             User?                 @relation("certidaoJobUser", fields: [userId], references: [id], onDelete: SetNull)
   attachment       DealAttachment?       @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
   diligentedPerson DiligentedPerson?     @relation(fields: [diligentedPersonId], references: [id], onDelete: SetNull)
+  leaseClient      LeaseClient?          @relation(fields: [leaseClientId], references: [id], onDelete: SetNull)
   auditLogs        CertidaoJobAuditLog[]
 
   @@index([dealId, batchId])
@@ -684,6 +694,7 @@ model CertidaoJob {
   @@index([status, expectedReadyAt])
   @@index([userId, createdAt])
   @@index([dealId, diligentedPersonId])
+  @@index([leaseClientId, batchId])
 }
 
 // Phase F.II-β — audit log de transições de status do CertidaoJob. Cada
@@ -2707,6 +2718,88 @@ model CreditAnalysis {
 
   @@index([orgId, status])
   @@index([tenantId])
+}
+
+// Cliente/prospect de locação — cadastro leve ANTES de virar Deal/Tenant.
+// Separado de Tenant (que só nasce num deal): aqui o operador registra um lead
+// com campos do formulário (todos opcionais) e acompanha crédito + fiança +
+// certidões + documentos. `createdByUserId` = "quem cadastrou". Ver plano
+// project_locacao_clientes.
+model LeaseClient {
+  id              String   @id @default(cuid())
+  orgId           String
+  createdByUserId String
+  tipoPessoa      String   @default("fisica") // fisica | juridica
+  nome            String
+  cpfCnpj         String?
+  email           String?
+  phone           String?
+  // Origem do cadastro. "form" reservado pra ingestão futura via formulário.
+  source          String   @default("manual") // manual | crm | form
+  crmId           String? // id no CRM externo (usado pelo import por ID)
+  status          String   @default("novo") // novo|em_analise|aprovado|reprovado|convertido|arquivado
+  // Ficha espelhando os campos opcionais do form de locação (rg, nascimento,
+  // endereço, renda, cônjuge, etc). Aditivo — sem shape rígido.
+  dataJson        Json?
+  // Consentimento LGPD pra consulta Serasa — mesmo shape de Deal.complianceJson.
+  complianceJson  Json?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  org             Organization                 @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  createdBy       User                         @relation(fields: [createdByUserId], references: [id])
+  attachments     LeaseClientAttachment[]
+  insurerAnalyses LeaseClientInsurerAnalysis[]
+  certidaoJobs    CertidaoJob[]
+
+  @@index([orgId, createdAt])
+  @@index([orgId, status])
+  @@index([orgId, cpfCnpj])
+}
+
+// Documento do cliente (RG, comprovante de renda, PDF de certidão gerado, etc).
+// Espelha LeadAttachment. `certidaoJobId` liga o PDF ao job que o gerou (o FK
+// CertidaoJob.attachmentId aponta pra DealAttachment e não serve pra cliente).
+model LeaseClientAttachment {
+  id            String   @id @default(cuid())
+  leaseClientId String
+  filename      String
+  mime          String
+  url           String
+  category      String? // "rg" | "comprovante_renda" | "certidao" | "serasa" | etc
+  contentHash   String? // SHA-256 — dedupe por conteúdo
+  byteSize      Int?
+  certidaoJobId String? // job de certidão/serasa que originou o PDF (quando aplicável)
+  createdAt     DateTime @default(now())
+
+  leaseClient LeaseClient @relation(fields: [leaseClientId], references: [id], onDelete: Cascade)
+
+  @@index([leaseClientId])
+  @@index([contentHash])
+  @@index([certidaoJobId])
+}
+
+// Análise de fiança por seguradora (1 linha por seguradora). Status manual nesta
+// entrega; resultJson/externalRef/premioMensal preparam a integração real futura.
+model LeaseClientInsurerAnalysis {
+  id              String   @id @default(cuid())
+  orgId           String
+  leaseClientId   String
+  seguradora      String // credpago | porto | garantti | creditas | outro
+  status          String   @default("pendente") // pendente|enviado|em_analise|aprovado|aprovado_com_restricao|recusado
+  premioMensal    Float?
+  resultJson      Json?
+  externalRef     String?
+  createdByUserId String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  org         Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  leaseClient LeaseClient  @relation(fields: [leaseClientId], references: [id], onDelete: Cascade)
+  createdBy   User         @relation(fields: [createdByUserId], references: [id])
+
+  @@index([leaseClientId])
+  @@index([orgId])
 }
 
 // Vistoria (entrada/saída/contra). Laudo PDF + QR + assinatura ClickSign.

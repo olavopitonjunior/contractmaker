@@ -29,6 +29,10 @@ const PERMISSION_FEATURE: Partial<Record<PermissionKey, FeatureKey>> = {
   // Garantia é intrínseca ao contrato (Lei 8.245 art. 37) — gateia em contratos.
   [PERMISSION.GUARANTEE_VIEW]: FEATURE.LOCACAO_CONTRATOS,
   [PERMISSION.GUARANTEE_MANAGE]: FEATURE.LOCACAO_CONTRATOS,
+  // Clientes/prospects fazem parte do subdomínio Pessoas.
+  [PERMISSION.CLIENT_VIEW]: FEATURE.LOCACAO_PESSOAS,
+  [PERMISSION.CLIENT_CREATE]: FEATURE.LOCACAO_PESSOAS,
+  [PERMISSION.CLIENT_UPDATE]: FEATURE.LOCACAO_PESSOAS,
 };
 
 // Helpers compartilhados pelos endpoints /api/locacao/*.

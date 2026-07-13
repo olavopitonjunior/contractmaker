@@ -710,3 +710,54 @@ export const inspectionSendSignatureSchema = z.object({
 });
 
 export { orgScopeSchema };
+
+// ============================================================================
+// LeaseClient — cliente/prospect de locação (cadastro leve pré-deal).
+// Campos espelham o form de locação (pessoaFisicaLocacaoSchema), mas TODOS
+// opcionais: o objetivo é registrar um lead sem fricção e enriquecer depois.
+// ============================================================================
+
+export const leaseClientCreateSchema = z.object({
+  tipoPessoa: z.enum(["fisica", "juridica"]).default("fisica"),
+  // `nome` é o único campo com um mínimo — sem ele a listagem não faz sentido.
+  // Ainda assim aceita string curta; a UI oferece placeholder "Sem nome".
+  nome: z.string().trim().min(1, "Informe ao menos um nome").max(200),
+  cpfCnpj: z.string().trim().max(20).optional(),
+  email: z.string().trim().email("E-mail inválido").optional().or(z.literal("")),
+  phone: z.string().trim().max(30).optional(),
+  source: z.enum(["manual", "crm", "form"]).default("manual"),
+  crmId: z.string().trim().max(120).optional(),
+  status: z
+    .enum(["novo", "em_analise", "aprovado", "reprovado", "convertido", "arquivado"])
+    .default("novo"),
+  // Ficha livre (rg, nascimento, endereço, renda, cônjuge, etc). Aditivo.
+  dataJson: z.record(z.any()).optional(),
+});
+
+export const leaseClientUpdateSchema = leaseClientCreateSchema.partial();
+
+// Fiança por seguradora — status manual nesta entrega.
+export const INSURER_STATUSES = [
+  "pendente",
+  "enviado",
+  "em_analise",
+  "aprovado",
+  "aprovado_com_restricao",
+  "recusado",
+] as const;
+
+export const insurerAnalysisCreateSchema = z.object({
+  seguradora: z.string().trim().min(1).max(80),
+  status: z.enum(INSURER_STATUSES).default("pendente"),
+  premioMensal: z.number().nonnegative().optional(),
+  externalRef: z.string().trim().max(120).optional(),
+  resultJson: z.record(z.any()).optional(),
+});
+
+export const insurerAnalysisUpdateSchema = insurerAnalysisCreateSchema.partial();
+
+// CRM lookup (stub) — localizar registro externo por ID.
+export const crmLookupSchema = z.object({
+  entity: z.enum(["cliente", "imovel"]),
+  crmId: z.string().trim().min(1, "Informe o ID no CRM").max(120),
+});
