@@ -20,49 +20,15 @@
  * chunks, via cascade) com aquele source antes de recriar — re-rodar substitui.
  */
 import { prisma } from "@/lib/db/prisma";
-import { createKnowledgeItem } from "@/lib/ai/knowledge";
 import { isEmbeddingsConfigured } from "@/lib/ai/embeddings";
-import { SUPPORT_CATEGORY } from "@/lib/support/constants";
 import { resolveSupportOrgId } from "@/lib/support/org";
-import { ROUTE_MAP } from "@/lib/support/route-map";
-import { SUPPORT_FAQ } from "@/lib/support/seed-faq";
+import { collectSupportSeedItems, seedSupportKb } from "@/lib/support/seed";
 
 const APPLY = process.argv.includes("--apply");
 
-interface SeedItem {
-  source: string;
-  title: string;
-  content: string;
-  tags: string[];
-}
-
-function collectItems(): SeedItem[] {
-  const items: SeedItem[] = [];
-
-  for (const faq of SUPPORT_FAQ) {
-    items.push({
-      source: `faq:${faq.slug}`,
-      title: faq.title,
-      content: faq.content,
-      tags: faq.tags,
-    });
-  }
-
-  for (const screen of ROUTE_MAP) {
-    items.push({
-      source: `route:${screen.match}`,
-      title: `${screen.name} — para que serve esta tela`,
-      content: `${screen.purpose}\n\nO que dá pra fazer aqui: ${screen.actions.join("; ")}.`,
-      tags: [screen.module],
-    });
-  }
-
-  return items;
-}
-
 async function main() {
   const orgId = await resolveSupportOrgId();
-  const items = collectItems();
+  const items = collectSupportSeedItems();
   const willEmbed = isEmbeddingsConfigured();
 
   console.log(
@@ -74,27 +40,14 @@ async function main() {
   if (!APPLY) {
     for (const i of items) console.log(`  - [${i.tags.join(",")}] ${i.title}  (${i.source})`);
     console.log("\nDry-run. Rode com --apply para persistir.");
+    console.log(
+      "Dica: em staging/prod, prefira o botão 'Semear base padrão' em /admin/support-ai\n" +
+        "(roda dentro do deploy, no banco/org corretos)."
+    );
     return;
   }
 
-  let created = 0;
-  for (const i of items) {
-    // Idempotência: remove versão anterior por source (chunks caem por cascade).
-    await prisma.knowledgeItem.deleteMany({
-      where: { orgId, category: SUPPORT_CATEGORY, source: i.source },
-    });
-    await createKnowledgeItem({
-      orgId,
-      category: SUPPORT_CATEGORY,
-      title: i.title,
-      content: i.content,
-      tags: i.tags,
-      source: i.source,
-    });
-    created++;
-    console.log(`  ✓ ${i.title}`);
-  }
-
+  const { created } = await seedSupportKb(orgId);
   console.log(`\n[seed-support-kb] concluído: ${created} itens.`);
 }
 
