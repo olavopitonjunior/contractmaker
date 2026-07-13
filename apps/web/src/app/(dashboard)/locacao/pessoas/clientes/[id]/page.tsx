@@ -11,6 +11,7 @@ import { ClientInsurerAnalysisCard } from "@/components/locacao/ClientInsurerAna
 import { ClientDocumentsCard } from "@/components/locacao/ClientDocumentsCard";
 import { ConverterClienteButton } from "@/components/locacao/ConverterClienteButton";
 import { ClientCertidoesCard } from "@/components/locacao/ClientCertidoesCard";
+import { isSerasaConfigured } from "@/lib/serasa/client";
 
 export const dynamic = "force-dynamic";
 
@@ -114,7 +115,12 @@ export default async function ClienteDetailPage({ params }: { params: { id: stri
             createdAt: client.createdAt.toISOString(),
           }}
         />
-        <ClientCreditAnalysisCard clientId={client.id} hasConsent={hasConsent} jobs={serasaJobs} />
+        <ClientCreditAnalysisCard
+          clientId={client.id}
+          hasConsent={hasConsent}
+          jobs={serasaJobs}
+          serasaAvailable={isSerasaConfigured()}
+        />
         <ClientInsurerAnalysisCard
           clientId={client.id}
           analyses={client.insurerAnalyses.map((a) => ({
