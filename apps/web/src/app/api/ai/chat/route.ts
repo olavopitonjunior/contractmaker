@@ -251,12 +251,14 @@ export async function POST(req: NextRequest) {
 
         // Guardrail determinístico: buscou na base, nenhum hit confiável e o modelo
         // NÃO encaminhou → registra handoff pra revisão humana e avisa o usuário.
-        if (
-          kbSearched &&
-          !handoffId &&
-          (kbTopSimilarity === null || kbTopSimilarity < config.handoffMinSimilarity) &&
-          lastUserQuestion
-        ) {
+        // "Sem hit confiável" = nenhum resultado, OU (modo semântico) similaridade
+        // abaixo do limiar. Em modo ILIKE (sem Voyage) a similaridade é null — NÃO
+        // tratamos isso como baixa-confiança, senão todo turno viraria handoff.
+        const noConfidentHit =
+          kbHitIds.length === 0 ||
+          (typeof kbTopSimilarity === "number" &&
+            kbTopSimilarity < config.handoffMinSimilarity);
+        if (kbSearched && !handoffId && noConfidentHit && lastUserQuestion) {
           try {
             const { id } = await createOrDedupeHandoff({
               question: lastUserQuestion,

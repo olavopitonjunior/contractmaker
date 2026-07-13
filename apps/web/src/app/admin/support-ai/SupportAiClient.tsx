@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { Trash2, Search, MessageSquare, RefreshCw } from "lucide-react";
+import { Trash2, Search, MessageSquare, RefreshCw, Sprout } from "lucide-react";
 
 const MODULE_TAGS = ["geral", "vendas", "locacao"] as const;
 type ModuleTag = (typeof MODULE_TAGS)[number];
@@ -177,7 +177,10 @@ function TagPicker({
 
 function KnowledgeTab() {
   const [items, setItems] = useState<KbItem[]>([]);
+  const [orgId, setOrgId] = useState<string | null>(null);
+  const [count, setCount] = useState<number>(0);
   const [loading, setLoading] = useState(true);
+  const [seeding, setSeeding] = useState(false);
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [tags, setTags] = useState<ModuleTag[]>(["geral"]);
@@ -194,6 +197,8 @@ function KnowledgeTab() {
     try {
       const d = await fetch("/api/admin/support/knowledge").then((r) => r.json());
       setItems(d.items ?? []);
+      setOrgId(d.orgId ?? null);
+      setCount(typeof d.count === "number" ? d.count : (d.items?.length ?? 0));
     } finally {
       setLoading(false);
     }
@@ -202,6 +207,21 @@ function KnowledgeTab() {
   useEffect(() => {
     load();
   }, [load]);
+
+  async function seedDefaults() {
+    setSeeding(true);
+    try {
+      const res = await fetch("/api/admin/support/knowledge/seed", { method: "POST" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error ?? "");
+      toast.success(`Base semeada: ${d.created} itens (org ${d.orgId})`);
+      load();
+    } catch {
+      toast.error("Falha ao semear a base");
+    } finally {
+      setSeeding(false);
+    }
+  }
 
   async function create() {
     if (title.trim().length < 3 || content.trim().length < 3 || tags.length === 0) {
@@ -257,9 +277,18 @@ function KnowledgeTab() {
             onChange={(e) => setContent(e.target.value)}
           />
           <TagPicker value={tags} onChange={setTags} />
-          <Button size="sm" onClick={create} disabled={creating}>
-            {creating ? "Salvando…" : "Adicionar"}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" onClick={create} disabled={creating}>
+              {creating ? "Salvando…" : "Adicionar"}
+            </Button>
+            <Button size="sm" variant="outline" onClick={seedDefaults} disabled={seeding}>
+              <Sprout className="mr-1 h-3.5 w-3.5" />
+              {seeding ? "Semeando…" : "Semear base padrão"}
+            </Button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            &quot;Semear base padrão&quot; roda no servidor (banco/org deste ambiente) — idempotente.
+          </p>
         </Card>
 
         <Card className="space-y-2 p-4">
@@ -303,16 +332,31 @@ function KnowledgeTab() {
 
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <h3 className="text-sm font-medium">Itens ({items.length})</h3>
+          <div>
+            <h3 className="text-sm font-medium">Itens ({items.length})</h3>
+            <p className="text-[11px] text-muted-foreground">
+              Base: {count} {count === 1 ? "item" : "itens"}
+              {orgId && (
+                <>
+                  {" · org "}
+                  <code className="text-[10px]">{orgId}</code>
+                </>
+              )}
+            </p>
+          </div>
           <Button size="sm" variant="ghost" onClick={load}>
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
         </div>
         {loading && <p className="text-sm text-muted-foreground">Carregando…</p>}
         {!loading && items.length === 0 && (
-          <p className="text-sm text-muted-foreground">
-            Base vazia. Rode <code>scripts/seed-support-kb.ts --apply</code> ou adicione itens.
-          </p>
+          <div className="space-y-2 rounded-md border border-dashed p-4 text-sm text-muted-foreground">
+            <p>Base vazia neste ambiente.</p>
+            <Button size="sm" onClick={seedDefaults} disabled={seeding}>
+              <Sprout className="mr-1 h-3.5 w-3.5" />
+              {seeding ? "Semeando…" : "Semear base padrão"}
+            </Button>
+          </div>
         )}
         {items.map((i) => (
           <Card key={i.id} className="flex items-start justify-between gap-2 p-3">

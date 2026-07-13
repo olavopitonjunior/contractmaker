@@ -14,6 +14,10 @@ import {
   Palette,
   Image as ImageIcon,
   Wrench,
+  LifeBuoy,
+  Wallet,
+  UserCircle,
+  TrendingUp,
   type LucideIcon,
 } from "lucide-react";
 
@@ -63,6 +67,15 @@ const TOOL_REGISTRY: Record<string, ToolDescriptor> = {
   // ===== Design / mídia =====
   apply_style_preset: { icon: Palette, label: "Aplicou preset de estilo", kind: "design" },
   insert_image: { icon: ImageIcon, label: "Inseriu imagem", kind: "design" },
+
+  // ===== Assistente de suporte (widget) =====
+  search_support_kb: { icon: Search, label: "Consultou a base de ajuda", kind: "kb" },
+  request_human_handoff: { icon: LifeBuoy, label: "Encaminhou ao suporte", kind: "suggest" },
+  // Tools de dados de locação (o widget de suporte também as expõe)
+  query_lease_status: { icon: FileSearch, label: "Consultou o contrato", kind: "analyze" },
+  summarize_owner_position: { icon: UserCircle, label: "Resumiu o proprietário", kind: "analyze" },
+  forecast_cashflow: { icon: TrendingUp, label: "Projetou o fluxo de caixa", kind: "analyze" },
+  suggest_dunning_strategy: { icon: Wallet, label: "Sugeriu estratégia de cobrança", kind: "analyze" },
 };
 
 const FALLBACK: ToolDescriptor = {

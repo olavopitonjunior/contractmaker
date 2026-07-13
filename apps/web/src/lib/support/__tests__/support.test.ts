@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { describeScreen } from "../route-map";
+import { describeScreen, ROUTE_MAP } from "../route-map";
 import { normalizeQuestion } from "../handoff";
 import { isSupportModuleTag, SUPPORT_MODULE_TAGS } from "../constants";
 import { isSupportTool, SUPPORT_TOOLS } from "../tools";
+import { collectSupportSeedItems } from "../seed";
+import { SUPPORT_FAQ } from "../seed-faq";
 
 describe("describeScreen (consciência de tela)", () => {
   it("casa o prefixo mais específico primeiro", () => {
@@ -71,5 +73,29 @@ describe("guards", () => {
   it("SUPPORT_TOOLS expõe exatamente as 2 tools esperadas", () => {
     const names = SUPPORT_TOOLS.map((t) => t.name).sort();
     expect(names).toEqual(["request_human_handoff", "search_support_kb"]);
+  });
+});
+
+describe("collectSupportSeedItems (base padrão)", () => {
+  const items = collectSupportSeedItems();
+
+  it("cobre FAQ + mapa de telas", () => {
+    expect(items.length).toBe(SUPPORT_FAQ.length + ROUTE_MAP.length);
+  });
+
+  it("todo item tem source único e ao menos uma tag de módulo", () => {
+    const sources = items.map((i) => i.source);
+    expect(new Set(sources).size).toBe(sources.length);
+    for (const i of items) {
+      expect(i.tags.length).toBeGreaterThan(0);
+      i.tags.forEach((t) => expect(isSupportModuleTag(t)).toBe(true));
+      expect(i.title.length).toBeGreaterThan(2);
+      expect(i.content.length).toBeGreaterThan(2);
+    }
+  });
+
+  it("prefixa sources por origem (faq:/route:)", () => {
+    expect(items.some((i) => i.source.startsWith("faq:"))).toBe(true);
+    expect(items.some((i) => i.source.startsWith("route:"))).toBe(true);
   });
 });
