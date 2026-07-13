@@ -9,6 +9,8 @@ import { ClienteFichaCard } from "@/components/locacao/ClienteFichaCard";
 import { ClientCreditAnalysisCard } from "@/components/locacao/ClientCreditAnalysisCard";
 import { ClientInsurerAnalysisCard } from "@/components/locacao/ClientInsurerAnalysisCard";
 import { ClientDocumentsCard } from "@/components/locacao/ClientDocumentsCard";
+import { ConverterClienteButton } from "@/components/locacao/ConverterClienteButton";
+import { ClientCertidoesCard } from "@/components/locacao/ClientCertidoesCard";
 
 export const dynamic = "force-dynamic";
 
@@ -25,10 +27,16 @@ export default async function ClienteDetailPage({ params }: { params: { id: stri
       insurerAnalyses: { orderBy: { createdAt: "desc" } },
       attachments: { orderBy: { createdAt: "desc" } },
       certidaoJobs: {
-        where: { provider: "serasa" },
         orderBy: { createdAt: "desc" },
-        take: 20,
-        select: { id: true, label: true, status: true, resultData: true },
+        take: 40,
+        select: {
+          id: true,
+          label: true,
+          status: true,
+          resultData: true,
+          provider: true,
+          portalUrl: true,
+        },
       },
     },
   });
@@ -42,17 +50,35 @@ export default async function ClienteDetailPage({ params }: { params: { id: stri
     if (a.certidaoJobId) attByJob.set(a.certidaoJobId, a.id);
   }
 
-  const serasaJobs = client.certidaoJobs.map((j) => {
-    const r = j.resultData as { situacao?: string; detalhes?: string } | null;
-    return {
-      id: j.id,
-      label: j.label,
-      status: j.status,
-      situacao: r?.situacao ?? null,
-      detalhes: r?.detalhes ?? null,
-      attachmentId: attByJob.get(j.id) ?? null,
-    };
-  });
+  const serasaJobs = client.certidaoJobs
+    .filter((j) => j.provider === "serasa")
+    .map((j) => {
+      const r = j.resultData as { situacao?: string; detalhes?: string } | null;
+      return {
+        id: j.id,
+        label: j.label,
+        status: j.status,
+        situacao: r?.situacao ?? null,
+        detalhes: r?.detalhes ?? null,
+        attachmentId: attByJob.get(j.id) ?? null,
+      };
+    });
+
+  const certidaoJobs = client.certidaoJobs
+    .filter((j) => j.provider !== "serasa")
+    .map((j) => {
+      const r = j.resultData as { situacao?: string } | null;
+      return {
+        id: j.id,
+        label: j.label,
+        status: j.status,
+        situacao: r?.situacao ?? null,
+        portalUrl: j.portalUrl,
+        attachmentId: attByJob.get(j.id) ?? null,
+      };
+    });
+
+  const hasDoc = !!client.cpfCnpj && client.cpfCnpj.replace(/\D/g, "").length >= 11;
 
   const compliance = (client.complianceJson as Record<string, unknown> | null) ?? null;
   const hasConsent = !!(compliance?.serasaConsent as { at?: string } | undefined)?.at;
@@ -68,6 +94,9 @@ export default async function ClienteDetailPage({ params }: { params: { id: stri
         <div className="flex items-center gap-2">
           <h1 className="text-2xl font-semibold">{client.nome}</h1>
           <Badge variant="outline">{client.tipoPessoa === "juridica" ? "PJ" : "PF"}</Badge>
+        </div>
+        <div className="ml-auto">
+          <ConverterClienteButton clientId={client.id} alreadyConverted={client.status === "convertido"} />
         </div>
       </div>
 
@@ -95,6 +124,7 @@ export default async function ClienteDetailPage({ params }: { params: { id: stri
             premioMensal: a.premioMensal,
           }))}
         />
+        <ClientCertidoesCard clientId={client.id} hasDoc={hasDoc} jobs={certidaoJobs} />
         <ClientDocumentsCard
           clientId={client.id}
           documents={client.attachments.map((a) => ({

@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Plus, ChevronLeft, ChevronRight, Check } from "lucide-react";
+import { ImportarClientePicker, type ImportedTenant } from "@/components/locacao/ImportarClientePicker";
 
 interface Option {
   id: string;
@@ -140,9 +141,26 @@ export function NovoContratoWizard({
     finalidade: "residencial",
   });
 
+  // Locatários importados de clientes cadastrados (convertidos em Tenant). Mesclam
+  // com a lista pré-carregada — o wizard nasceu só com os Tenants existentes.
+  const [extraTenants, setExtraTenants] = useState<Option[]>([]);
+  const allTenants = [...tenants, ...extraTenants];
+
+  function handleImportedTenant(t: ImportedTenant) {
+    setExtraTenants((prev) =>
+      prev.some((p) => p.id === t.id) || tenants.some((p) => p.id === t.id)
+        ? prev
+        : [...prev, { id: t.id, label: t.label }]
+    );
+    setForm((s) => ({
+      ...s,
+      tenantIds: s.tenantIds.includes(t.id) ? s.tenantIds : [...s.tenantIds, t.id],
+    }));
+  }
+
   const propertyLabel = properties.find((p) => p.id === form.propertyId)?.label;
   const tenantLabels = form.tenantIds
-    .map((id) => tenants.find((t) => t.id === id)?.label)
+    .map((id) => allTenants.find((t) => t.id === id)?.label)
     .filter(Boolean);
 
   function canAdvance(): boolean {
@@ -207,7 +225,9 @@ export function NovoContratoWizard({
     }
   }
 
-  const noPropertyOrTenant = properties.length === 0 || tenants.length === 0;
+  // Basta ter imóvel: o locatário pode vir de um cliente cadastrado (import →
+  // convert no passo 2), então não exigimos Tenant pré-existente pra abrir.
+  const noPropertyOrTenant = properties.length === 0;
 
   return (
     <Dialog
@@ -278,9 +298,12 @@ export function NovoContratoWizard({
 
           {step === 1 && (
             <div className="space-y-2">
-              <Label>Locatários (multi-select)</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label>Locatários (multi-select)</Label>
+                <ImportarClientePicker onImported={handleImportedTenant} />
+              </div>
               <div className="max-h-[200px] space-y-1 overflow-y-auto rounded-md border p-2">
-                {tenants.map((t) => (
+                {allTenants.map((t) => (
                   <label
                     key={t.id}
                     className="flex cursor-pointer items-center gap-2 rounded p-1.5 text-sm hover:bg-muted"

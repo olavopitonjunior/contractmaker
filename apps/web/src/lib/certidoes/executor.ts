@@ -863,7 +863,9 @@ export async function runSingleJob(
         job.label,
         receipt,
         job.targetKind,
-        job.targetIndex
+        job.targetIndex,
+        job.leaseClientId,
+        job.id
       );
     }
 
@@ -915,7 +917,11 @@ export async function runSingleJob(
         resultCode: resp.code,
         resultMessage: resp.code_message,
         resultData: enrichedResultData as object,
-        attachmentId,
+        // Job de cliente: o PDF vive em LeaseClientAttachment (ligado por
+        // certidaoJobId). CertidaoJob.attachmentId é FK → DealAttachment, então
+        // NÃO pode receber o id do anexo de cliente. O classifyOutcome acima já
+        // enxergou o PDF via `attachmentId` (lógica requiresPdf preservada).
+        attachmentId: job.leaseClientId ? null : attachmentId,
         costCents:
           detalhesExtraCostCents > 0
             ? (outcome.costCents ?? 0) + detalhesExtraCostCents
@@ -1668,13 +1674,14 @@ async function downloadAndAttach(
   label: string,
   receiptUrl: string,
   targetKind: string,
-  targetIndex: number
+  targetIndex: number,
+  leaseClientId: string | null = null,
+  jobId: string | null = null
 ): Promise<string | null> {
-  // Phase C: ad-hoc jobs have no dealId — skip DealAttachment creation and
-  // let the UI consume site_receipts[] directly from the Infosimples result.
-  // This avoids a broader schema change (DealAttachment.dealId nullable)
-  // while still letting ad-hoc users download the PDFs via the original URL.
-  if (!dealId) return null;
+  // Phase C: ad-hoc jobs (sem deal E sem cliente) pulam a criação de anexo e
+  // deixam a UI consumir site_receipts[] direto do resultado Infosimples.
+  // Jobs de cliente (leaseClientId) anexam em LeaseClientAttachment (abaixo).
+  if (!dealId && !leaseClientId) return null;
   try {
     const { buffer, contentType } = await downloadReceipt(receiptUrl);
     // Validamos a natureza do conteúdo pelo magic + content-type:
@@ -1712,13 +1719,28 @@ async function downloadAndAttach(
     }
     const safeName = `${endpoint.replace(/[^a-z0-9]/gi, "_")}_${Date.now()}.pdf`;
     const bucket = process.env.S3_BUCKET;
-    const key = `deal-certidoes/${dealId}/${safeName}`;
+    const key = dealId
+      ? `deal-certidoes/${dealId}/${safeName}`
+      : `client-certidoes/${leaseClientId}/${safeName}`;
     const url = await uploadBufferToStorage({
       bucket,
       key,
       body: finalBuffer,
       contentType: finalContentType,
     });
+    // Job de cliente: anexa em LeaseClientAttachment (ligado por certidaoJobId).
+    if (!dealId && leaseClientId) {
+      const { attachment } = await persistLeaseClientDocument({
+        leaseClientId,
+        buffer: finalBuffer,
+        url,
+        filename: safeName,
+        mime: finalContentType,
+        category: "certidao",
+        certidaoJobId: jobId,
+      });
+      return attachment.id;
+    }
     // Persist assignment so DocumentsTab groups certidao attachments by part/imovel.
     // Os dependentes do vendedor (cônjuge/procurador/representante) são mapeados
     // para os kinds que o DocumentsTab/DealDetail já reconhecem (conjuge_vendedor,
@@ -1733,6 +1755,9 @@ async function downloadAndAttach(
       "representante_vendedor",
     ]);
     const assignmentKind = ASSIGNABLE_KINDS.has(targetKind) ? targetKind : "outro";
+    // Aqui dealId é garantidamente não-nulo (caso cliente já retornou acima, e
+    // ad-hoc puro retornou no topo) — o guard reafirma pro type-checker.
+    if (!dealId) return null;
     const attachment = await prisma.dealAttachment.create({
       data: {
         dealId,
