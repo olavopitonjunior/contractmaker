@@ -49,7 +49,16 @@ export async function GET(req: NextRequest) {
     },
   });
 
+  // Total de itens de nível superior (sem filtro) pra o admin ver o estado real
+  // da base + em qual org ela vive — teria tornado o bug de "seed no banco errado"
+  // óbvio na hora.
+  const total = await prisma.knowledgeItem.count({
+    where: { orgId, category: SUPPORT_CATEGORY, parentId: null },
+  });
+
   return NextResponse.json({
+    orgId,
+    count: total,
     items: items.map((i) => ({
       ...i,
       content: i.content.slice(0, 300),

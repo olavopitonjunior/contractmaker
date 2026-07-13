@@ -30,6 +30,11 @@ export async function resolveSupportOrgId(): Promise<string> {
       "Nenhuma organização encontrada para hospedar a base de suporte. Configure SUPPORT_KB_ORG_ID ou SHARED_ORG_ID."
     );
   }
+  // Fallback frágil: sem env, seed e runtime podem mirar orgs diferentes se a
+  // "mais antiga" divergir entre ambientes. Logamos pra misconfig ficar visível.
+  console.warn(
+    `[support] SUPPORT_KB_ORG_ID/SHARED_ORG_ID ausentes — usando a org mais antiga (${org.id}) para a base de suporte.`
+  );
   cached = org.id;
   return org.id;
 }
