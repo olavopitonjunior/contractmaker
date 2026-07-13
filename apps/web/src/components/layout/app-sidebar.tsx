@@ -98,6 +98,7 @@ const NAV: NavEntry[] = [
       { title: "Repasses", url: "/locacao/repasses", requires: FEATURE.LOCACAO_REPASSES },
       { title: "Despesas", url: "/locacao/despesas", requires: FEATURE.LOCACAO_DESPESAS },
       { title: "Vistorias", url: "/locacao/vistorias", requires: FEATURE.LOCACAO_VISTORIAS },
+      { title: "Clientes", url: "/locacao/pessoas/clientes", requires: FEATURE.LOCACAO_PESSOAS },
       { title: "Pessoas", url: "/locacao/pessoas", requires: FEATURE.LOCACAO_PESSOAS },
       { title: "Seguros", url: "/locacao/seguros", requires: FEATURE.LOCACAO_SEGUROS },
       { title: "Newton", url: "/locacao/newton" },

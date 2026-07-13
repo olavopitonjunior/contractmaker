@@ -19,6 +19,7 @@ import {
 import type { InfosimplesResponse, JobStatus, Situacao, TargetKind } from "./types";
 import { emitNotification } from "@/lib/notifications/emit";
 import { classifyJobBucket, missingFieldHint } from "./health-monitor";
+import { persistLeaseClientDocument } from "@/lib/locacao/client-attachments";
 
 /**
  * Phase G.1 — audit log helper (fire-and-forget). Registra transições de
@@ -339,16 +340,22 @@ async function isOrgInfosimplesBlocked(
  * enviado pelo cron diário `certidoes/problem-digest`.
  */
 async function reportCertidaoProblem(
-  job: { id: string; orgId: string | null; dealId: string | null; batchId: string; endpoint: string; label: string },
+  job: { id: string; orgId: string | null; dealId: string | null; leaseClientId?: string | null; batchId: string; endpoint: string; label: string },
   reason: string
 ): Promise<void> {
-  if (!job.orgId || !job.dealId) return;
+  // Emite pra jobs de deal OU de cliente/prospect (locação). Ad-hoc puro (sem
+  // deal nem cliente) permanece silencioso — não há superfície pra linkar.
+  if (!job.orgId || (!job.dealId && !job.leaseClientId)) return;
+  const linkUrl = job.dealId
+    ? `/deals/${job.dealId}`
+    : `/locacao/pessoas/clientes/${job.leaseClientId}`;
+  const alvo = job.dealId ? "do negócio" : "do cliente";
   await emitNotification({
     orgId: job.orgId,
     type: "certidao_problem",
     title: "Certidões com problema",
-    body: `Há certidões que não puderam ser emitidas (${reason}). Abra o relatório de certidões do negócio.`,
-    linkUrl: `/deals/${job.dealId}`,
+    body: `Há certidões que não puderam ser emitidas (${reason}). Abra o relatório de certidões ${alvo}.`,
+    linkUrl,
     batchId: job.batchId,
     metadata: { jobId: job.id, endpoint: job.endpoint, label: job.label, reason },
   });
@@ -856,7 +863,9 @@ export async function runSingleJob(
         job.label,
         receipt,
         job.targetKind,
-        job.targetIndex
+        job.targetIndex,
+        job.leaseClientId,
+        job.id
       );
     }
 
@@ -908,7 +917,11 @@ export async function runSingleJob(
         resultCode: resp.code,
         resultMessage: resp.code_message,
         resultData: enrichedResultData as object,
-        attachmentId,
+        // Job de cliente: o PDF vive em LeaseClientAttachment (ligado por
+        // certidaoJobId). CertidaoJob.attachmentId é FK → DealAttachment, então
+        // NÃO pode receber o id do anexo de cliente. O classifyOutcome acima já
+        // enxergou o PDF via `attachmentId` (lógica requiresPdf preservada).
+        attachmentId: job.leaseClientId ? null : attachmentId,
         costCents:
           detalhesExtraCostCents > 0
             ? (outcome.costCents ?? 0) + detalhesExtraCostCents
@@ -1094,7 +1107,7 @@ async function resolveSerasaConsultado(
  * em api_error/rate_limited zera pra retry honesto.
  */
 async function runSerasaJob(
-  job: { id: string; endpoint: string; label: string; targetKind: string; targetIndex: number; diligentedPersonId?: string | null; requestPayload: unknown; batchId: string; createdAt: Date },
+  job: { id: string; endpoint: string; label: string; targetKind: string; targetIndex: number; diligentedPersonId?: string | null; leaseClientId?: string | null; requestPayload: unknown; batchId: string; createdAt: Date },
   dealId: string | null,
   startedAt: Date
 ): Promise<void> {
@@ -1112,9 +1125,12 @@ async function runSerasaJob(
       job.diligentedPersonId ?? null
     );
 
-    // Gera PDF próprio (Serasa não devolve PDF) e anexa como DealAttachment.
+    // Gera PDF próprio (Serasa não devolve PDF) e anexa. Escopo por deal
+    // (DealAttachment) OU por cliente/prospect de locação (LeaseClientAttachment,
+    // via job.leaseClientId — o FK CertidaoJob.attachmentId aponta pra
+    // DealAttachment e não serve pra cliente, então o link é por certidaoJobId).
     let attachmentId: string | null = null;
-    if (dealId) {
+    if (dealId || job.leaseClientId) {
       try {
         const html = renderSerasaHtml(normalized, {
           endpoint: job.endpoint,
@@ -1123,38 +1139,60 @@ async function runSerasaJob(
         });
         const buffer = await exportPdfToBuffer(html);
         const safeName = `${job.endpoint.replace(/[^a-z0-9]/gi, "_")}_${Date.now()}.pdf`;
-        const url = await uploadBufferToStorage({
-          bucket: process.env.S3_BUCKET,
-          key: `deal-certidoes/${dealId}/${safeName}`,
-          body: buffer,
-          contentType: "application/pdf",
-        });
-        const assignmentKind =
-          job.targetKind === "vendedor" ||
-          job.targetKind === "comprador" ||
-          job.targetKind === "imovel" ||
-          // Locação: agrupa o PDF Serasa na pasta do locatário/fiador
-          // (DocumentKind já inclui esses papéis).
-          job.targetKind === "locatario" ||
-          job.targetKind === "fiador"
-            ? job.targetKind
-            : "outro";
-        const attachment = await prisma.dealAttachment.create({
-          data: {
-            dealId,
+        const protocolo =
+          (normalized.raw as Record<string, unknown> | undefined)?.protocolo ?? null;
+        if (dealId) {
+          const url = await uploadBufferToStorage({
+            bucket: process.env.S3_BUCKET,
+            key: `deal-certidoes/${dealId}/${safeName}`,
+            body: buffer,
+            contentType: "application/pdf",
+          });
+          const assignmentKind =
+            job.targetKind === "vendedor" ||
+            job.targetKind === "comprador" ||
+            job.targetKind === "imovel" ||
+            // Locação: agrupa o PDF Serasa na pasta do locatário/fiador
+            // (DocumentKind já inclui esses papéis).
+            job.targetKind === "locatario" ||
+            job.targetKind === "fiador"
+              ? job.targetKind
+              : "outro";
+          const attachment = await prisma.dealAttachment.create({
+            data: {
+              dealId,
+              filename: safeName,
+              mime: "application/pdf",
+              url,
+              category: "certidao",
+              source: "serasa",
+              extractedData: {
+                certidao: { endpoint: job.endpoint, label: job.label },
+                assignment: { kind: assignmentKind, index: job.targetIndex },
+                serasa: { protocolo },
+              },
+            },
+          });
+          attachmentId = attachment.id;
+        } else if (job.leaseClientId) {
+          const url = await uploadBufferToStorage({
+            bucket: process.env.S3_BUCKET,
+            key: `client-certidoes/${job.leaseClientId}/${safeName}`,
+            body: buffer,
+            contentType: "application/pdf",
+          });
+          // PDF vive no LeaseClientAttachment ligado ao job por certidaoJobId.
+          // NÃO setamos CertidaoJob.attachmentId (FK → DealAttachment).
+          await persistLeaseClientDocument({
+            leaseClientId: job.leaseClientId,
+            buffer,
+            url,
             filename: safeName,
             mime: "application/pdf",
-            url,
-            category: "certidao",
-            source: "serasa",
-            extractedData: {
-              certidao: { endpoint: job.endpoint, label: job.label },
-              assignment: { kind: assignmentKind, index: job.targetIndex },
-              serasa: { protocolo: (normalized.raw as Record<string, unknown> | undefined)?.protocolo ?? null },
-            },
-          },
-        });
-        attachmentId = attachment.id;
+            category: "serasa",
+            certidaoJobId: job.id,
+          });
+        }
       } catch (renderErr) {
         // PDF é nice-to-have — perda de render NÃO invalida a consulta. Log e segue.
         console.error("[serasa] falha ao gerar PDF/anexo:", renderErr);
@@ -1636,13 +1674,14 @@ async function downloadAndAttach(
   label: string,
   receiptUrl: string,
   targetKind: string,
-  targetIndex: number
+  targetIndex: number,
+  leaseClientId: string | null = null,
+  jobId: string | null = null
 ): Promise<string | null> {
-  // Phase C: ad-hoc jobs have no dealId — skip DealAttachment creation and
-  // let the UI consume site_receipts[] directly from the Infosimples result.
-  // This avoids a broader schema change (DealAttachment.dealId nullable)
-  // while still letting ad-hoc users download the PDFs via the original URL.
-  if (!dealId) return null;
+  // Phase C: ad-hoc jobs (sem deal E sem cliente) pulam a criação de anexo e
+  // deixam a UI consumir site_receipts[] direto do resultado Infosimples.
+  // Jobs de cliente (leaseClientId) anexam em LeaseClientAttachment (abaixo).
+  if (!dealId && !leaseClientId) return null;
   try {
     const { buffer, contentType } = await downloadReceipt(receiptUrl);
     // Validamos a natureza do conteúdo pelo magic + content-type:
@@ -1680,13 +1719,28 @@ async function downloadAndAttach(
     }
     const safeName = `${endpoint.replace(/[^a-z0-9]/gi, "_")}_${Date.now()}.pdf`;
     const bucket = process.env.S3_BUCKET;
-    const key = `deal-certidoes/${dealId}/${safeName}`;
+    const key = dealId
+      ? `deal-certidoes/${dealId}/${safeName}`
+      : `client-certidoes/${leaseClientId}/${safeName}`;
     const url = await uploadBufferToStorage({
       bucket,
       key,
       body: finalBuffer,
       contentType: finalContentType,
     });
+    // Job de cliente: anexa em LeaseClientAttachment (ligado por certidaoJobId).
+    if (!dealId && leaseClientId) {
+      const { attachment } = await persistLeaseClientDocument({
+        leaseClientId,
+        buffer: finalBuffer,
+        url,
+        filename: safeName,
+        mime: finalContentType,
+        category: "certidao",
+        certidaoJobId: jobId,
+      });
+      return attachment.id;
+    }
     // Persist assignment so DocumentsTab groups certidao attachments by part/imovel.
     // Os dependentes do vendedor (cônjuge/procurador/representante) são mapeados
     // para os kinds que o DocumentsTab/DealDetail já reconhecem (conjuge_vendedor,
@@ -1701,6 +1755,9 @@ async function downloadAndAttach(
       "representante_vendedor",
     ]);
     const assignmentKind = ASSIGNABLE_KINDS.has(targetKind) ? targetKind : "outro";
+    // Aqui dealId é garantidamente não-nulo (caso cliente já retornou acima, e
+    // ad-hoc puro retornou no topo) — o guard reafirma pro type-checker.
+    if (!dealId) return null;
     const attachment = await prisma.dealAttachment.create({
       data: {
         dealId,
@@ -1951,7 +2008,10 @@ export async function getMonthlySpendByProvider(
     where: {
       createdAt: { gte: firstOfMonth },
       provider,
-      deal: { form: { orgId } },
+      // Conta tanto jobs de deal (org via form) quanto ad-hoc/cliente (orgId
+      // direto no job). Sem o OR, jobs de LeaseClient (dealId null) escapavam do
+      // orçamento mensal. Cada row é contada uma vez (OR não duplica linhas).
+      OR: [{ deal: { form: { orgId } } }, { orgId }],
     },
     _sum: { costCents: true },
   });
