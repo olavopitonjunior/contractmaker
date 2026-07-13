@@ -5,10 +5,13 @@ import type { ReactNode } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { DataTable } from "@/components/data-table/data-table";
 import { Badge } from "@/components/ui/badge";
+import { INSURER_STATUS_SHORT, INSURER_STATUS_TONE } from "@/lib/locacao/insurers";
 
 export interface InsurerBadge {
-  seguradora: string;
-  status: string;
+  key: string;
+  label: string;
+  /** null = seguradora ainda não acionada (não enviado). */
+  status: string | null;
 }
 
 export interface ClienteRow {
@@ -25,24 +28,6 @@ export interface ClienteRow {
   href: string;
 }
 
-const INSURER_TONE: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
-  aprovado: "default",
-  aprovado_com_restricao: "outline",
-  em_analise: "secondary",
-  enviado: "secondary",
-  pendente: "outline",
-  recusado: "destructive",
-};
-
-const INSURER_LABEL: Record<string, string> = {
-  pendente: "pendente",
-  enviado: "enviado",
-  em_analise: "em análise",
-  aprovado: "aprovado",
-  aprovado_com_restricao: "aprov. c/ restrição",
-  recusado: "recusado",
-};
-
 function SerasaBadge({ label, tone }: { label: string | null; tone: ClienteRow["serasaTone"] }) {
   if (!label) return <span className="text-xs text-muted-foreground">—</span>;
   if (tone === "pending") return <Badge variant="outline">{label}</Badge>;
@@ -56,17 +41,35 @@ function SerasaBadge({ label, tone }: { label: string | null; tone: ClienteRow["
   return <Badge variant="secondary">{label}</Badge>;
 }
 
+function InsurerBadgeView({ ins }: { ins: InsurerBadge }) {
+  // Sem análise ainda = "não enviado" (badge neutro esmaecido).
+  if (!ins.status) {
+    return (
+      <Badge variant="outline" className="text-muted-foreground/70">
+        {ins.label}: não enviado
+      </Badge>
+    );
+  }
+  return (
+    <Badge variant={INSURER_STATUS_TONE[ins.status] ?? "outline"}>
+      {ins.label}: {INSURER_STATUS_SHORT[ins.status] ?? ins.status}
+    </Badge>
+  );
+}
+
 function AnalysisCell({ row }: { row: ClienteRow }) {
   return (
     <div className="flex flex-wrap items-center gap-1">
-      <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Serasa</span>
-      <SerasaBadge label={row.serasaLabel} tone={row.serasaTone} />
-      {row.insurers.length > 0 && <span className="mx-1 text-muted-foreground">·</span>}
       {row.insurers.map((i) => (
-        <Badge key={i.seguradora} variant={INSURER_TONE[i.status] ?? "outline"} className="capitalize">
-          {i.seguradora}: {INSURER_LABEL[i.status] ?? i.status}
-        </Badge>
+        <InsurerBadgeView key={i.key} ins={i} />
       ))}
+      {row.serasaLabel && (
+        <>
+          <span className="mx-0.5 text-muted-foreground">·</span>
+          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">Serasa</span>
+          <SerasaBadge label={row.serasaLabel} tone={row.serasaTone} />
+        </>
+      )}
     </div>
   );
 }
@@ -130,15 +133,11 @@ export function ClientesTable({ data, emptyState }: Props) {
             <SerasaBadge label={row.serasaLabel} tone={row.serasaTone} />
           </div>
           <div className="mt-1 text-xs text-muted-foreground">Cadastrado por {row.createdByName}</div>
-          {row.insurers.length > 0 && (
-            <div className="mt-1 flex flex-wrap gap-1">
-              {row.insurers.map((i) => (
-                <Badge key={i.seguradora} variant={INSURER_TONE[i.status] ?? "outline"} className="capitalize">
-                  {i.seguradora}
-                </Badge>
-              ))}
-            </div>
-          )}
+          <div className="mt-1 flex flex-wrap gap-1">
+            {row.insurers.map((i) => (
+              <InsurerBadgeView key={i.key} ins={i} />
+            ))}
+          </div>
         </Link>
       )}
     />
