@@ -3,7 +3,7 @@ import { redirect } from "next/navigation";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Users, UserCheck, ShieldUser, Briefcase, Wrench, HardHat } from "lucide-react";
+import { Users, UserCheck, ShieldUser, Briefcase, Wrench, HardHat, UserPlus } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
@@ -22,8 +22,9 @@ export default async function LocacaoPessoasPage() {
   const org = await getUserOrg(session.user.id);
   if (!org) redirect("/");
 
-  const [proprietariosTotal, proprietariosPj, locatariosTotal, locatariosPj, fiadoresTotal, corretoresTotal] =
+  const [clientesTotal, proprietariosTotal, proprietariosPj, locatariosTotal, locatariosPj, fiadoresTotal, corretoresTotal] =
     await Promise.all([
+      prisma.leaseClient.count({ where: { orgId: org.id } }),
       prisma.propertyOwner.count({ where: { orgId: org.id } }),
       prisma.propertyOwner.count({ where: { orgId: org.id, tipoPessoa: "juridica" } }),
       prisma.tenant.count({ where: { orgId: org.id } }),
@@ -35,6 +36,13 @@ export default async function LocacaoPessoasPage() {
     ]);
 
   const cards: Card[] = [
+    {
+      label: "Clientes",
+      count: clientesTotal,
+      href: "/locacao/pessoas/clientes",
+      icon: UserPlus,
+      description: "Leads/prospects com acompanhamento de crédito e fiança.",
+    },
     {
       label: "Proprietários",
       count: proprietariosTotal,

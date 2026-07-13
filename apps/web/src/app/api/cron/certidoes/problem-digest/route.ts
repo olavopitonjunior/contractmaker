@@ -65,6 +65,7 @@ export async function GET(req: NextRequest) {
       id: true,
       orgId: true,
       dealId: true,
+      leaseClientId: true,
       endpoint: true,
       label: true,
       errorMessage: true,
@@ -89,6 +90,14 @@ export async function GET(req: NextRequest) {
   }
 
   const baseUrl = process.env.NEXTAUTH_URL ?? "https://imobpro.ia.br";
+  // Link do job: deal, cliente/prospect de locação, ou o painel de certidões
+  // (evita o antigo /deals/null pra jobs sem deal — ad-hoc/cliente).
+  const jobLink = (j: { dealId: string | null; leaseClientId: string | null }): string =>
+    j.dealId
+      ? `${baseUrl}/deals/${j.dealId}`
+      : j.leaseClientId
+        ? `${baseUrl}/locacao/pessoas/clientes/${j.leaseClientId}`
+        : `${baseUrl}/settings/certidoes`;
   let emailsSent = 0;
   const notifiedIds: string[] = [];
 
@@ -104,7 +113,7 @@ export async function GET(req: NextRequest) {
     if (emails.length > 0) {
       const lines = orgJobs.slice(0, 50).map(
         (j) =>
-          `• ${j.label} — ${j.endpoint} (cód ${j.resultCode ?? "-"}, ${j.retryCount}/${j.maxRetries} tentativas): ${j.errorMessage ?? "falha"}\n  ${baseUrl}/deals/${j.dealId}`
+          `• ${j.label} — ${j.endpoint} (cód ${j.resultCode ?? "-"}, ${j.retryCount}/${j.maxRetries} tentativas): ${j.errorMessage ?? "falha"}\n  ${jobLink(j)}`
       );
       const resumo = bucketSummary(orgJobs);
       const text = `${orgJobs.length} certidão(ões) com problema não resolvido.\nResumo: ${resumo}\n\n${lines.join("\n\n")}\n\nPainel: ${baseUrl}/settings/certidoes`;
@@ -112,7 +121,7 @@ export async function GET(req: NextRequest) {
         .slice(0, 50)
         .map(
           (j) =>
-            `<li>${j.label} — <code>${j.endpoint}</code> (cód ${j.resultCode ?? "-"}, ${j.retryCount}/${j.maxRetries} tentativas): ${j.errorMessage ?? "falha"} — <a href="${baseUrl}/deals/${j.dealId}">abrir negócio</a></li>`
+            `<li>${j.label} — <code>${j.endpoint}</code> (cód ${j.resultCode ?? "-"}, ${j.retryCount}/${j.maxRetries} tentativas): ${j.errorMessage ?? "falha"} — <a href="${jobLink(j)}">abrir</a></li>`
         )
         .join("")}</ul><p><a href="${baseUrl}/settings/certidoes">Abrir painel de certidões</a></p>`;
       const res = await sendEmail({

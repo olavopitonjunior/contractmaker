@@ -33,7 +33,7 @@ export async function GET(req: NextRequest) {
   const insensitive = "insensitive" as const;
   const orFilter = (field: string) => ({ contains: q, mode: insensitive });
 
-  const [imoveis, contratos, owners, tenants, cobrancas] = await Promise.all([
+  const [imoveis, contratos, owners, tenants, clientes, cobrancas] = await Promise.all([
     prisma.property.findMany({
       where: {
         orgId: org.id,
@@ -86,6 +86,18 @@ export async function GET(req: NextRequest) {
       select: { id: true, nome: true, cpfCnpj: true, tipoPessoa: true },
       take: 5,
     }),
+    prisma.leaseClient.findMany({
+      where: {
+        orgId: org.id,
+        OR: [
+          { nome: orFilter("nome") },
+          { cpfCnpj: orFilter("cpfCnpj") },
+          { phone: orFilter("phone") },
+        ],
+      },
+      select: { id: true, nome: true, cpfCnpj: true, tipoPessoa: true },
+      take: 5,
+    }),
     prisma.rentCharge.findMany({
       where: {
         orgId: org.id,
@@ -134,6 +146,13 @@ export async function GET(req: NextRequest) {
       title: t.nome,
       subtitle: `${t.tipoPessoa === "fisica" ? "PF" : "PJ"} · ${t.cpfCnpj} · Locatário`,
       href: `/locacao/pessoas/locatarios/${t.id}`,
+    })),
+    ...clientes.map((c) => ({
+      id: c.id,
+      type: "pessoa" as const,
+      title: c.nome,
+      subtitle: `${c.tipoPessoa === "fisica" ? "PF" : "PJ"} · ${c.cpfCnpj ?? "sem doc"} · Cliente`,
+      href: `/locacao/pessoas/clientes/${c.id}`,
     })),
     ...cobrancas.map((c) => ({
       id: c.id,

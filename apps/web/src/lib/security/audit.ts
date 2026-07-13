@@ -230,6 +230,14 @@ export type AuditAction =
   | "MAINTENANCE_CANCEL"
   | "CREDIT_ANALYSIS_REQUESTED"
   | "CREDIT_ANALYSIS_DECIDED"
+  // Locação — clientes/prospects (ambiente de cadastro + acompanhamento)
+  | "CLIENT_CREATE"
+  | "CLIENT_UPDATE"
+  | "CLIENT_DELETE"
+  | "CLIENT_IMPORT"
+  | "CLIENT_CREDIT_DISPATCH"
+  | "CLIENT_INSURER_UPSERT"
+  | "CLIENT_DOCUMENT_UPLOAD"
   | "TRANSFER_NFSE_REQUESTED"
   | "TRANSFER_NFSE_EMITTED"
   // Newton — pedidos tipados de locação + executor
