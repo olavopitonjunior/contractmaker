@@ -894,6 +894,9 @@ model SalesForm {
   // Setado quando status transiciona pra "completo"|"vinculado". Marco SLA
   // do funil — diferente de updatedAt (qualquer auto-save bumpa updatedAt).
   completedAt DateTime?
+  // Última vez que o resumo consolidado foi enviado por e-mail. Protege a
+  // automação contra re-disparo em re-finalize (form é reabrível).
+  summarySentAt DateTime?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -2095,6 +2098,12 @@ model OrgFormSettings {
   orgId               String   @unique
   preset              String   @default("legado") // legado | minimo | padrao | completo | custom
   customRequiredPaths Json     @default("[]")
+  // Resumo consolidado do formulário por e-mail. `summaryRecipientEmail` é o
+  // destino fixo usado pela automação e sugerido no envio manual;
+  // `autoSendSummaryOnComplete` liga o disparo automático no finalize.
+  summaryRecipientEmail     String?
+  autoSendSummaryOnComplete Boolean @default(false)
+  summaryIncludeAttachments Boolean @default(true)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 

@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { ExternalLink, Copy, Plus, Check, Users } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
+import { SendFormSummaryDialog } from "@/components/forms/SendFormSummaryDialog";
 
 interface FormsActionsProps {
   formId: string;
@@ -14,9 +15,10 @@ interface FormsActionsProps {
   hasDeal: boolean;
   dealId?: string | null;
   title: string | null;
+  schemaType?: string;
 }
 
-export function FormsActions({ formId, token, status, hasDeal, dealId, title }: FormsActionsProps) {
+export function FormsActions({ formId, token, status, hasDeal, dealId, title, schemaType }: FormsActionsProps) {
   const router = useRouter();
   const [copied, setCopied] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -93,6 +95,12 @@ export function FormsActions({ formId, token, status, hasDeal, dealId, title }: 
             </Link>
           </Button>
         )}
+        {hasDeal &&
+          dealId &&
+          (schemaType ?? "compra_venda_v1") === "compra_venda_v1" &&
+          (status === "completo" || status === "vinculado") && (
+            <SendFormSummaryDialog dealId={dealId} triggerLabel="Resumo" />
+          )}
         {status === "completo" && !hasDeal && (
           <Button
             size="sm"

@@ -44,6 +44,9 @@ export default async function FormularioSettingsPage() {
         initial={{
           preset: settings.preset,
           customRequiredPaths: settings.customRequiredPaths as unknown,
+          summaryRecipientEmail: settings.summaryRecipientEmail,
+          autoSendSummaryOnComplete: settings.autoSendSummaryOnComplete,
+          summaryIncludeAttachments: settings.summaryIncludeAttachments,
         }}
       />
     </div>

@@ -429,6 +429,21 @@ export function SalesFormWizard({
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
   const [generatedContractId, setGeneratedContractId] = useState<string | null>(null);
   const [generatedDealId, setGeneratedDealId] = useState<string | null>(null);
+  const [emailCopyState, setEmailCopyState] = useState<"idle" | "sending" | "sent" | "error">("idle");
+
+  async function requestEmailCopy() {
+    setEmailCopyState("sending");
+    try {
+      const res = await fetch(`/api/forms/${token}/send-summary`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ target: "parties", includeAttachments: true }),
+      });
+      setEmailCopyState(res.ok ? "sent" : "error");
+    } catch {
+      setEmailCopyState("error");
+    }
+  }
   // Incrementa toda vez que validateAndNavigate falha — RequiredFieldMarker observa
   // pra disparar scroll/focus no primeiro [aria-invalid="true"].
   const [failedTriggerCount, setFailedTriggerCount] = useState(0);
@@ -733,6 +748,37 @@ export function SalesFormWizard({
             </a>
           </Button>
         </div>
+
+        {finalizeMode === "main" && (
+          <div className="mt-8 w-full max-w-md rounded-lg border bg-muted/20 p-4 text-center">
+            <p className="text-sm text-muted-foreground mb-3">
+              Quer uma cópia do resumo por e-mail? Enviaremos o PDF com os dados
+              preenchidos para os e-mails informados no formulário.
+            </p>
+            {emailCopyState === "sent" ? (
+              <p className="text-sm font-medium text-green-600 dark:text-green-400">
+                Enviado! Verifique sua caixa de entrada.
+              </p>
+            ) : (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={requestEmailCopy}
+                  disabled={emailCopyState === "sending"}
+                >
+                  {emailCopyState === "sending" ? "Enviando..." : "Receber cópia por e-mail"}
+                </Button>
+                {emailCopyState === "error" && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
+                    Não foi possível enviar agora. Verifique se há e-mail
+                    preenchido para as partes.
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        )}
       </div>
     );
   }
