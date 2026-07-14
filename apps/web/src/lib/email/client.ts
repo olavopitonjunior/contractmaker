@@ -221,42 +221,51 @@ function logOnly(input: SendEmailInput): SendEmailResult {
 }
 
 /**
- * Embrulha o template na marca da imobiliária. Ponto ÚNICO de injeção: nenhum
- * dos 13 templates nem dos call-sites precisa saber de branding — quem tem
- * `orgId` em escopo passa, e o e-mail sai assinado pela imobiliária em vez de
- * "Contractmaker". Sem `orgId` (reset de senha, OTP), vale a marca da
+ * Renderiza o template JÁ com a marca da imobiliária. Ponto ÚNICO de injeção:
+ * nenhum dos 13 templates nem dos call-sites precisa saber de branding — quem
+ * tem `orgId` em escopo passa, e o e-mail sai assinado pela imobiliária em vez
+ * de "Contractmaker". Sem `orgId` (reset de senha, OTP), vale a marca da
  * plataforma.
  *
- * Falha de resolução nunca derruba o envio: o e-mail sai com a marca default.
+ * O render acontece AQUI (e não dentro de cada provider) porque a marca vive num
+ * escopo de AsyncLocalStorage: renderizando dentro do escopo, os dois providers
+ * recebem HTML pronto e ninguém depende de React Context — que nem existe no
+ * bundle `react-server` do Next.
+ *
+ * Falha de resolução nunca derruba o envio: sai com a marca da plataforma.
  */
-async function withBrand(input: SendEmailInput): Promise<SendEmailInput> {
-  if (!input.orgId || !input.react) return input;
-  try {
-    const [{ getOrgBrand }, { EmailBrandProvider }, React] = await Promise.all([
-      import("@/lib/tenant/branding"),
-      import("./templates/shared"),
-      import("react"),
-    ]);
-    const brand = await getOrgBrand(input.orgId);
-    return {
-      ...input,
-      react: React.createElement(
-        EmailBrandProvider,
-        {
-          brand: {
-            displayName: brand.displayName,
-            logoUrl: brand.logoUrl,
-            primaryColor: brand.primaryColor,
-            supportEmail: brand.supportEmail,
-          },
-          children: input.react,
-        }
-      ),
-    };
-  } catch (err) {
-    console.warn("[email] falha ao resolver a marca da org %s: %s", input.orgId, err);
-    return input;
+async function renderWithBrand(input: SendEmailInput): Promise<SendEmailInput> {
+  if (!input.react || input.html) return input;
+
+  const [{ render }, { withEmailBrand, PLATFORM_BRAND }] = await Promise.all([
+    import("@react-email/render"),
+    import("./templates/shared"),
+  ]);
+
+  let brand = PLATFORM_BRAND;
+  if (input.orgId) {
+    try {
+      const { getOrgBrand } = await import("@/lib/tenant/branding");
+      const b = await getOrgBrand(input.orgId);
+      brand = {
+        displayName: b.displayName,
+        logoUrl: b.logoUrl,
+        primaryColor: b.primaryColor,
+        supportEmail: b.supportEmail,
+      };
+    } catch (err) {
+      console.warn("[email] falha ao resolver a marca da org %s: %s", input.orgId, err);
+    }
   }
+
+  const element = input.react;
+  const html = await withEmailBrand(brand, () => render(element));
+  const text =
+    input.text ?? (await withEmailBrand(brand, () => render(element, { plainText: true })));
+
+  // `react` sai do input: os providers passam a receber HTML pronto (o Resend
+  // renderizaria por conta própria, FORA do escopo da marca).
+  return { ...input, react: undefined, html, text };
 }
 
 export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
@@ -264,7 +273,7 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
   if (gated.to.length === 0) {
     return { id: "staging-blocked", ok: true };
   }
-  const branded = await withBrand(input);
+  const branded = await renderWithBrand(input);
   const effective: SendEmailInput = gated.redirected
     ? {
         ...branded,
