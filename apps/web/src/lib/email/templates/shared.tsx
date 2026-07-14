@@ -1,12 +1,21 @@
 import * as React from "react";
+import { AsyncLocalStorage } from "node:async_hooks";
 
 /**
  * Marca que assina o e-mail. Injetada por `sendEmail` quando o call-site passa
- * `orgId` (ver lib/email/client.ts) — nenhum template precisa receber prop.
+ * `orgId` (ver lib/email/client.ts) — nenhum dos 13 templates precisa receber
+ * prop, e nenhum call-site precisa saber de branding.
  *
  * Sem org (reset de senha, OTP e outros e-mails de plataforma), vale o default:
  * a marca do produto. Antes disso, TODO e-mail — inclusive as cobranças que vão
  * pro cliente da imobiliária — saía assinado "Contractmaker".
+ *
+ * **Por que AsyncLocalStorage e não React Context:** estes templates são
+ * renderizados a partir de rotas de servidor, e no bundle `react-server` do Next
+ * o `React.createContext` NÃO EXISTE — usá-lo derrubou o build inteiro
+ * (`TypeError: createContext is not a function` ao coletar as páginas). ALS é o
+ * escopo do próprio Node: seguro sob concorrência (cada `run` tem seu store) e
+ * invisível pros templates.
  */
 export interface EmailBrand {
   displayName: string;
@@ -22,16 +31,11 @@ export const PLATFORM_BRAND: EmailBrand = {
   supportEmail: null,
 };
 
-const EmailBrandContext = React.createContext<EmailBrand>(PLATFORM_BRAND);
+const brandStore = new AsyncLocalStorage<EmailBrand>();
 
-export function EmailBrandProvider({
-  brand,
-  children,
-}: {
-  brand: EmailBrand;
-  children: React.ReactNode;
-}) {
-  return <EmailBrandContext.Provider value={brand}>{children}</EmailBrandContext.Provider>;
+/** Executa `fn` (o render) com a marca da imobiliária em escopo. */
+export function withEmailBrand<T>(brand: EmailBrand, fn: () => T): T {
+  return brandStore.run(brand, fn);
 }
 
 export function EmailLayout({
@@ -41,7 +45,7 @@ export function EmailLayout({
   title: string;
   children: React.ReactNode;
 }) {
-  const brand = React.useContext(EmailBrandContext);
+  const brand = brandStore.getStore() ?? PLATFORM_BRAND;
   return (
     <html lang="pt-BR">
       <head>
