@@ -303,6 +303,7 @@ export async function notifyChargeEvent(params: {
             to: owner.email,
             subject: tpl.subject,
             react: tpl.react,
+            orgId,
             tags: [
               { name: "kind", value: "pagadoria" },
               { name: "event", value: notifType },
@@ -337,6 +338,7 @@ export async function notifyChargeEvent(params: {
             dealTitle,
             linkUrl,
           }),
+          orgId,
           tags: [
             { name: "kind", value: "pagadoria" },
             { name: "event", value: "charge_paid_admin" },
@@ -392,6 +394,7 @@ export async function notifyChargeEvent(params: {
             dealTitle,
             recipientType: r.recipientType,
           }),
+          orgId,
           tags: [
             { name: "kind", value: "pagadoria" },
             { name: "event", value: "charge_paid_recipient" },

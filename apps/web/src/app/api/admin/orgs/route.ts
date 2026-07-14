@@ -228,7 +228,11 @@ export async function POST(req: NextRequest) {
   // prometer um link que nunca chegou.
   const emailSent = existingUser
     ? false
-    : await sendOwnerAccessEmail({ email: ownerEmail, orgName: name });
+    : await sendOwnerAccessEmail({
+        email: ownerEmail,
+        orgName: name,
+        orgId: result.org.id,
+      });
 
   return NextResponse.json(
     {

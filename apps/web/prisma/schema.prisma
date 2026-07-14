@@ -145,6 +145,12 @@ model PlatformConfigHistory {
 // White-label por tenant (Fase 1a). Cores em hex; o render injeta como CSS vars
 // HSL no `[data-tenant]` (ver globals.css + lib/tenant/branding.ts). poweredBy
 // controla o selo "Powered by imobpro.ai" no rodapé de páginas públicas.
+// FONTE CANÔNICA da marca da imobiliária (1:1 com a org). Alimenta o dashboard
+// (--primary/--brand-accent), a sidebar (logo), a página pública /pay e o header
+// dos e-mails — tudo via lib/tenant/branding.ts::getOrgBrand, que deriva
+// displayName/supportEmail quando o dono não preencheu.
+// Os campos OrgFinancialSettings.brand* (por conta Asaas) foram DEPRECADOS em
+// favor destes: branding é da imobiliária, não da conta de recebimento.
 model BrandingSettings {
   id             String       @id @default(cuid())
   orgId          String       @unique
@@ -156,6 +162,10 @@ model BrandingSettings {
   emailHeader    String?      @db.Text
   emailFooter    String?      @db.Text
   poweredBy      Boolean      @default(true)
+  // Identidade que o cliente final vê (migrados de OrgFinancialSettings.brand*)
+  displayName    String?
+  supportEmail   String?
+  supportPhone   String?
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 }
@@ -2055,7 +2065,11 @@ model OrgFinancialSettings {
   // Dual control (valores em centavos; Int suporta até ~R$ 21M)
   dualApprovalCapCents    Int      @default(5000000)
   hardCapCents            Int      @default(10000000)
-  // Branding (página pública)
+  // DEPRECATED — a marca da imobiliária mora em BrandingSettings (1:1 com a org).
+  // Estes campos são por CONTA ASAAS, o que permitia dois logos na mesma org e
+  // deixava sem marca quem não tem conta. Ninguém mais lê nem escreve: migrados
+  // pela migration 20260714190000. Mantidos só como rollback; drop em release
+  // futura.
   brandLogoUrl            String?
   brandPrimaryColor       String?  @default("#0f172a")
   brandDisplayName        String?

@@ -169,12 +169,13 @@ export async function POST(req: NextRequest) {
     const setupUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(token)}`;
     await sendEmail({
       to: email,
-      subject: `Bem-vindo a ${ctx.orgName} no Contractmaker`,
+      subject: `Bem-vindo a ${ctx.orgName}`,
       react: WelcomeSetPasswordEmail({
         inviterName: ctx.userName,
         orgName: ctx.orgName,
         setupUrl,
       }) as any,
+      orgId: ctx.orgId,
     });
   } else {
     const { MemberInvitedEmail } = await import(
@@ -190,6 +191,7 @@ export async function POST(req: NextRequest) {
         role,
         acceptUrl,
       }) as any,
+      orgId: ctx.orgId,
     });
   }
 
