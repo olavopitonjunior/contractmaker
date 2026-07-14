@@ -338,13 +338,23 @@ export async function listWebhooks(creds?: ClicksignCreds) {
  * Cadastra um webhook na conta ClickSign apontando pra `url`. A ClickSign gera
  * o HMAC secret por webhook e o devolve na resposta (campo varia — o chamador
  * extrai defensivamente). Auto-provisionamento no connect per-org.
+ *
+ * ClickSign v3 (confirmado 2026-07-14 contra a conta real): o campo do endereço
+ * é `endpoint` (NÃO `url` — `url` retorna 400 "não está disponível"); `status`
+ * = "active" | "inactive"; `events` = array de eventos a assinar (omitir tem
+ * comportamento ambíguo, então passamos explicitamente).
  */
 export async function createWebhook(
-  input: { url: string; description?: string },
+  input: { url: string; events?: string[] },
   creds?: ClicksignCreds
 ) {
-  const attributes: Record<string, unknown> = { url: input.url };
-  if (input.description) attributes.description = input.description;
+  const attributes: Record<string, unknown> = {
+    endpoint: input.url,
+    status: "active",
+  };
+  if (input.events && input.events.length > 0) {
+    attributes.events = input.events;
+  }
   return clicksignRequest<ClicksignResponse>({
     method: "POST",
     path: `/api/v3/webhooks`,

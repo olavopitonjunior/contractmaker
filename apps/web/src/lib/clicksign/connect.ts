@@ -12,6 +12,21 @@ import { webhookUrlForSlug } from "./account";
 
 const DEFAULT_BASE_URL = "https://app.clicksign.com";
 
+// Eventos ClickSign v3 que o webhook-process trata. Assinados explicitamente no
+// auto-provisionamento pra garantir que sign/close cheguem (o default de omitir
+// `events` é ambíguo na doc).
+const WEBHOOK_EVENTS = [
+  "sign",
+  "close",
+  "auto_close",
+  "document_closed",
+  "refusal",
+  "cancel",
+  "deadline",
+  "add_signer",
+  "remove_signer",
+];
+
 export class ClickSignConnectError extends Error {
   constructor(
     message: string,
@@ -100,7 +115,7 @@ export async function connectClickSignAccount(input: {
   let webhookProvisioned = false;
   try {
     const resp = await createWebhook(
-      { url: webhookUrl, description: "Contractmaker" },
+      { url: webhookUrl, events: WEBHOOK_EVENTS },
       creds
     );
     webhookId = extractWebhookId(resp);
