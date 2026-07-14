@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import { generatePublicToken } from "@/lib/security/crypto";
+import { getOrgBrand } from "@/lib/tenant/branding";
 
 /**
  * Cria (ou retorna existente) ChargePublicLink para uma charge.
@@ -14,46 +15,21 @@ export async function mintPublicLink(chargeId: string): Promise<string> {
 
   const charge = await prisma.commissionCharge.findUnique({
     where: { id: chargeId },
-    include: {
-      org: { select: { name: true } },
-    },
+    select: { id: true, orgId: true },
   });
   if (!charge) throw new Error("Charge not found");
 
-  // Branding agora é per-conta (financialSettings.accountId @unique). Resolve
-  // via charge.accountId; fallback pra primeira conta da org.
-  let brand: { brandDisplayName: string | null; brandLogoUrl: string | null; brandPrimaryColor: string | null; brandSupportEmail: string | null; brandSupportPhone: string | null } | null = null;
-  if (charge.accountId) {
-    brand = await prisma.orgFinancialSettings.findUnique({
-      where: { accountId: charge.accountId },
-      select: {
-        brandDisplayName: true,
-        brandLogoUrl: true,
-        brandPrimaryColor: true,
-        brandSupportEmail: true,
-        brandSupportPhone: true,
-      },
-    });
-  }
-  if (!brand) {
-    brand = await prisma.orgFinancialSettings.findFirst({
-      where: { orgId: charge.orgId },
-      select: {
-        brandDisplayName: true,
-        brandLogoUrl: true,
-        brandPrimaryColor: true,
-        brandSupportEmail: true,
-        brandSupportPhone: true,
-      },
-      orderBy: { createdAt: "asc" },
-    });
-  }
+  // A marca é da IMOBILIÁRIA, não da conta de recebimento. Antes o branding vinha
+  // de OrgFinancialSettings (1:1 com a conta Asaas): uma org com duas contas tinha
+  // duas marcas, e uma org sem conta caía no nome cru da org, sem logo nem cor.
+  // getOrgBrand resolve a fonte canônica e deriva os defaults.
+  const brand = await getOrgBrand(charge.orgId);
   const snapshot = {
-    displayName: brand?.brandDisplayName ?? charge.org.name,
-    logoUrl: brand?.brandLogoUrl ?? null,
-    primaryColor: brand?.brandPrimaryColor ?? "#0f172a",
-    supportEmail: brand?.brandSupportEmail ?? null,
-    supportPhone: brand?.brandSupportPhone ?? null,
+    displayName: brand.displayName,
+    logoUrl: brand.logoUrl,
+    primaryColor: brand.primaryColor,
+    supportEmail: brand.supportEmail,
+    supportPhone: brand.supportPhone,
     capturedAt: new Date().toISOString(),
   };
 

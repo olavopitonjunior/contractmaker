@@ -36,15 +36,38 @@ interface BrandWordmarkProps {
   textClassName?: string;
   /** Cor do ".ai". Default usa o acento de marca (bordô). */
   accentClassName?: string;
+  /** Logo da imobiliária (BrandingSettings.logoUrl). Quando presente, substitui a marca do produto. */
+  logoUrl?: string | null;
+  /** Nome da imobiliária — alt do logo. */
+  displayName?: string | null;
 }
 
-/** Mark + wordmark "imobpro.ai" lado a lado. */
+/**
+ * Mark + wordmark. Quando a imobiliária tem logo cadastrado, ele assume o lugar
+ * da marca do produto — o dono vê a própria casa no topo da sidebar. Sem logo,
+ * cai no "imobpro.ai" de sempre.
+ */
 export function BrandWordmark({
   className,
   markClassName,
   textClassName,
   accentClassName = "text-brand-accent",
+  logoUrl,
+  displayName,
 }: BrandWordmarkProps) {
+  if (logoUrl) {
+    return (
+      <div className={cn("flex items-center gap-2", className)}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={logoUrl}
+          alt={displayName ?? "Logo da imobiliária"}
+          className="h-8 max-w-[150px] object-contain"
+        />
+      </div>
+    );
+  }
+
   return (
     <div className={cn("flex items-center gap-2", className)}>
       <BrandMark className={markClassName} />

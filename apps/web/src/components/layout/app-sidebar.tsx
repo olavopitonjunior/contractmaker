@@ -160,6 +160,8 @@ interface AppSidebarProps {
   modules?: ModulesView;
   /** Status do onboarding (só pra owner em aberto) — renderiza o checklist no topo. */
   onboarding?: OnboardingStatus | null;
+  /** Marca da imobiliária: com logo cadastrado, ela assume o topo da sidebar. */
+  brand?: { logoUrl: string | null; displayName: string } | null;
 }
 
 function isItemActive(pathname: string, item: SubItem): boolean {
@@ -168,7 +170,12 @@ function isItemActive(pathname: string, item: SubItem): boolean {
     : pathname === item.url || pathname.startsWith(item.url + "/");
 }
 
-export function AppSidebar({ user, modules = null, onboarding = null }: AppSidebarProps) {
+export function AppSidebar({
+  user,
+  modules = null,
+  onboarding = null,
+  brand = null,
+}: AppSidebarProps) {
   const pathname = usePathname();
   // Override manual de abertura por grupo; quando indefinido, deriva da rota ativa.
   const [openOverride, setOpenOverride] = useState<Record<string, boolean>>({});
@@ -198,9 +205,13 @@ export function AppSidebar({ user, modules = null, onboarding = null }: AppSideb
     <Sidebar>
       <SidebarHeader className="border-b px-4 py-3">
         <Link href="/pipeline" className="block">
-          <BrandWordmark markClassName="text-primary" />
+          <BrandWordmark
+            markClassName="text-primary"
+            logoUrl={brand?.logoUrl}
+            displayName={brand?.displayName}
+          />
           <span className="mt-0.5 block pl-10 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-            Legaltech Solutions
+            {brand?.logoUrl ? "" : "Legaltech Solutions"}
           </span>
         </Link>
       </SidebarHeader>

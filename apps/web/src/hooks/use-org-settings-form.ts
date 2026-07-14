@@ -4,10 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 export type OrgSettingsSaveStatus = "idle" | "saving" | "saved" | "error";
 
-/** Campos editáveis de Organization expostos por /api/org/fiscal-settings. */
+/** Campos de texto do cadastro da org (perfil fiscal, identidade visual…). */
 export type OrgSettingsFields = Record<string, string | null | undefined>;
 
-const ENDPOINT = "/api/org/fiscal-settings";
+/** Endpoint default — o cadastro fiscal/perfil da imobiliária. */
+const DEFAULT_ENDPOINT = "/api/org/fiscal-settings";
 
 function norm(v: unknown): string {
   return (v ?? "").toString();
@@ -35,9 +36,10 @@ function norm(v: unknown): string {
  */
 export function useOrgSettingsForm<T extends OrgSettingsFields>(
   initial: T,
-  opts: { debounceMs?: number; onSaved?: () => void } = {}
+  opts: { debounceMs?: number; onSaved?: () => void; endpoint?: string } = {}
 ) {
   const debounceMs = opts.debounceMs ?? 1200;
+  const ENDPOINT = opts.endpoint ?? DEFAULT_ENDPOINT;
   const onSavedRef = useRef(opts.onSaved);
   onSavedRef.current = opts.onSaved;
 
@@ -148,7 +150,7 @@ export function useOrgSettingsForm<T extends OrgSettingsFields>(
         inFlightRef.current = false;
       }
     },
-    [dirtyKeys, keys]
+    [dirtyKeys, keys, ENDPOINT]
   );
 
   // --- Autosave: debounce após a última tecla ---

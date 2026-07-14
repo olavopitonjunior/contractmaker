@@ -249,6 +249,8 @@ export type AuditAction =
   | "NEWTON_REQUEST_FULFILLED"
   | "NEWTON_INTENT_APPROVED"
   | "NEWTON_INTENT_REJECTED"
+  // Identidade visual da imobiliária (BrandingSettings — fonte canônica)
+  | "ORG_BRANDING_UPDATE"
   // DIMOB / fiscal
   | "FISCAL_SETTINGS_UPDATE"
   | "DIMOB_GENERATED"

@@ -20,6 +20,8 @@ import { OwnerAccessEmail } from "@/lib/email/templates/password-reset";
 export async function sendOwnerAccessEmail(input: {
   email: string;
   orgName: string;
+  /** Assina o e-mail com a marca da imobiliária (logo/nome/cor). Opcional. */
+  orgId?: string;
 }): Promise<boolean> {
   try {
     const { token } = await createPasswordResetToken(input.email, "welcome");
@@ -30,6 +32,7 @@ export async function sendOwnerAccessEmail(input: {
       to: input.email,
       subject: `Seu acesso ao imobpro.ai — ${input.orgName}`,
       react: OwnerAccessEmail({ orgName: input.orgName, setupUrl }) as any,
+      orgId: input.orgId,
     });
     if (!result.ok) {
       console.error("[owner-access] provider recusou o e-mail de acesso:", result.error);
