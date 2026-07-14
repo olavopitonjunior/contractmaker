@@ -86,6 +86,18 @@ Conta ClickSign é a mesma de prod (sem sandbox). Em staging:
 
 Se estourar: `EnvelopeBudgetError` lançada. Aumentar cap via env (rebuild Vercel) ou esperar o mês virar.
 
+## ClickSign multitenant (per-org)
+
+Desde 2026-07, ClickSign é **per-org**: cada imobiliária conecta a própria conta em `/settings/signatures › Conexão` (token/webhook criptografados em `ClickSignAccount`, AES-256-GCM). O envio resolve a credencial via `resolveClickSignCreds(orgId)`:
+- Org com conta conectada → usa a conta dela; webhook per-org em `/api/webhooks/clicksign/[slug]` (HMAC próprio).
+- **Fallback global** (env `CLICKSIGN_API_TOKEN`/`CLICKSIGN_WEBHOOK_SECRET`) só pra org compartilhada legada (`SHARED_ORG_ID`); qualquer outra org sem conta **não envia** (409 `ClickSignNotConfiguredError`).
+
+O webhook auto-provisionado aponta pra `NEXTAUTH_URL/api/webhooks/clicksign/{slug}` — garantir `NEXTAUTH_URL=https://staging.imobpro.ia.br` em staging, senão os eventos não chegam. Conectar exige `MASTER_ENCRYPTION_KEY` no ambiente.
+
+## Migrations em build (Vercel)
+
+O build roda `node scripts/vercel-migrate.mjs`, que só executa `prisma migrate deploy` quando `VERCEL_ENV=production` (deploy de prod do projeto), pulando em **preview**. O projeto `web` tem o `DATABASE_URL`/`DIRECT_URL` do escopo **Preview** apontando pro branch Neon de **staging** — então preview de PR nunca migra nem lê o banco de produção. (Contexto: incidente 2026-07-14 em que um preview migrou prod e travou os deploys.)
+
 ## Asaas sandbox
 
 Subconta sandbox separada. Webhooks apontam pra:
