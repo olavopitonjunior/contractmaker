@@ -103,6 +103,19 @@ export async function syncEnvelopeState(
       if (!local.viewedAt || +remote.viewedAt !== +local.viewedAt) {
         updates.viewedAt = remote.viewedAt;
       }
+    } else if (remote.bounceAt) {
+      // E-mail não entregue e o signatário ainda não avançou (sem
+      // view/sign/refusal). Marca `email_failed` pra UI destacar em vermelho
+      // com CTA de corrigir o e-mail. Prioridade mais baixa: qualquer avanço
+      // real acima sobrepõe.
+      if (
+        local.status !== "signed" &&
+        local.status !== "viewed" &&
+        local.status !== "refused" &&
+        local.status !== "email_failed"
+      ) {
+        updates.status = "email_failed";
+      }
     }
 
     if (Object.keys(updates).length > 0) {
@@ -190,6 +203,8 @@ export async function syncEnvelopeState(
             signedAt: state.signedAt,
             viewedAt: state.viewedAt,
             refusedAt: state.refusedAt,
+            bounceAt: state.bounceAt,
+            bounceReason: state.bounceReason,
           })
         ),
         aggregatedByKey: Array.from(stateBySigner.entries()).map(
@@ -198,6 +213,8 @@ export async function syncEnvelopeState(
             signedAt: state.signedAt,
             viewedAt: state.viewedAt,
             refusedAt: state.refusedAt,
+            bounceAt: state.bounceAt,
+            bounceReason: state.bounceReason,
           })
         ),
         localSigners: envelope.signers.map((s) => ({
@@ -223,6 +240,11 @@ interface SignerEventState {
   signedAt: Date | null;
   viewedAt: Date | null;
   refusedAt: Date | null;
+  /** Última falha de entrega de e-mail (evento `tracking_notification_error`
+   *  com `notification.last_status === "bounce"`). A ClickSign expõe isso só
+   *  no feed REST `/events` — NUNCA via webhook. */
+  bounceAt: Date | null;
+  bounceReason: string | null;
 }
 
 function aggregateEventsBySigner(resp: unknown): Map<string, SignerEventState> {
@@ -248,7 +270,15 @@ function aggregateEventsBy(
     attributes?: {
       name?: string;
       created?: string;
-      data?: { signer?: { key?: string; email?: string } };
+      data?: {
+        signer?: { key?: string; email?: string };
+        notification?: {
+          kind?: string;
+          last_status?: string;
+          last_bounce_type?: string;
+          details?: string;
+        };
+      };
     };
   }>) {
     const name = item.attributes?.name;
@@ -262,6 +292,8 @@ function aggregateEventsBy(
       signedAt: null,
       viewedAt: null,
       refusedAt: null,
+      bounceAt: null,
+      bounceReason: null,
     };
 
     if (name === "sign") {
@@ -271,6 +303,20 @@ function aggregateEventsBy(
     } else if (name === "refusal") {
       if (!cur.refusedAt || +createdAt < +cur.refusedAt) {
         cur.refusedAt = createdAt;
+      }
+    } else if (
+      name === "tracking_notification_error" &&
+      eventData.notification?.last_status === "bounce"
+    ) {
+      // E-mail voltou (endereço inválido/inexistente). Guarda a falha MAIS
+      // RECENTE — se o operador corrigir o e-mail e reenviar, um `sign`/
+      // `signature_started` posterior tem prioridade na reconciliação.
+      if (!cur.bounceAt || +createdAt > +cur.bounceAt) {
+        cur.bounceAt = createdAt;
+        cur.bounceReason =
+          eventData.notification?.details ??
+          eventData.notification?.last_bounce_type ??
+          "bounce";
       }
     }
 
