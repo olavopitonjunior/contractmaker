@@ -76,6 +76,10 @@ export async function GET(
     formTitle: participant.form.title,
     formStatus: participant.form.status,
     completedAt: participant.completedAt?.toISOString() ?? null,
+    // Travamento do form: cliente do subtoken renderiza somente-leitura.
+    lockedAt: participant.form.lockedAt
+      ? participant.form.lockedAt.toISOString()
+      : null,
     dataJson: filtered,
     allowedTopKeys: ROLE_PATHS[role],
   });
@@ -114,6 +118,14 @@ export async function PATCH(
     return NextResponse.json(
       { error: "Token inválido ou revogado" },
       { status: 401 },
+    );
+  }
+
+  // Guard de travamento: form travado congela também os subtokens por parte.
+  if (participant.form.lockedAt) {
+    return NextResponse.json(
+      { error: "Formulário travado — não aceita mais alterações" },
+      { status: 403 },
     );
   }
 

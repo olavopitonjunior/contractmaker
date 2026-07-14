@@ -3,7 +3,7 @@ import { createHash } from "crypto";
 import { Prisma } from "@prisma/client";
 import { put, del } from "@vercel/blob";
 import { prisma } from "@/lib/db/prisma";
-import { resolveFormScope } from "@/lib/forms/resolve-form-scope";
+import { resolveFormScope, formLockedResponse } from "@/lib/forms/resolve-form-scope";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -62,6 +62,8 @@ export async function POST(
   if (!scope) {
     return NextResponse.json({ error: "Form not found" }, { status: 404 });
   }
+  const locked = formLockedResponse(scope);
+  if (locked) return locked;
   const form = { id: scope.formId, orgId: scope.orgId };
 
   const formData = await req.formData();
@@ -193,6 +195,8 @@ export async function PATCH(
   if (!scope) {
     return NextResponse.json({ error: "Form not found" }, { status: 404 });
   }
+  const locked = formLockedResponse(scope);
+  if (locked) return locked;
 
   const attachment = await prisma.formAttachment.findUnique({ where: { id } });
   if (!attachment || attachment.formId !== scope.formId) {

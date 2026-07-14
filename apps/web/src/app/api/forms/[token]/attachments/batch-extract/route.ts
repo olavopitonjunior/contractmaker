@@ -76,10 +76,16 @@ export async function POST(
 ) {
   const form = await prisma.salesForm.findUnique({
     where: { token: params.token },
-    select: { id: true, orgId: true },
+    select: { id: true, orgId: true, lockedAt: true },
   });
   if (!form) {
     return NextResponse.json({ error: "Form not found" }, { status: 404 });
+  }
+  if (form.lockedAt) {
+    return NextResponse.json(
+      { error: "Formulário travado — não aceita mais alterações" },
+      { status: 403 },
+    );
   }
 
   const body = await req.json().catch(() => ({}));

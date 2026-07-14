@@ -1,3 +1,4 @@
+import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import {
   verifyParticipantToken,
@@ -25,13 +26,15 @@ export interface FormScope {
   participantId: string | null;
   role: ParticipantRole | null;
   partyIndex: number | null;
+  /** Setado = form travado; callers DEVEM bloquear writes (uploads/delete). */
+  lockedAt: Date | null;
 }
 
 export async function resolveFormScope(token: string): Promise<FormScope | null> {
   // 1. Token principal (uuid/cuid — nunca tem "." de JWT).
   const form = await prisma.salesForm.findUnique({
     where: { token },
-    select: { id: true, orgId: true, schemaType: true },
+    select: { id: true, orgId: true, schemaType: true, lockedAt: true },
   });
   if (form) {
     return {
@@ -41,6 +44,7 @@ export async function resolveFormScope(token: string): Promise<FormScope | null>
       participantId: null,
       role: null,
       partyIndex: null,
+      lockedAt: form.lockedAt,
     };
   }
 
@@ -58,7 +62,7 @@ export async function resolveFormScope(token: string): Promise<FormScope | null>
       id: true,
       role: true,
       partyIndex: true,
-      form: { select: { id: true, orgId: true, schemaType: true } },
+      form: { select: { id: true, orgId: true, schemaType: true, lockedAt: true } },
     },
   });
   if (!participant) return null;
@@ -70,5 +74,21 @@ export async function resolveFormScope(token: string): Promise<FormScope | null>
     participantId: participant.id,
     role: participant.role as ParticipantRole,
     partyIndex: participant.partyIndex,
+    lockedAt: participant.form.lockedAt,
   };
+}
+
+/**
+ * Guard de travamento pros writes públicos de anexo. Retorna a resposta 403 se
+ * o form estiver travado, ou null se liberado. Leituras (GET) NÃO usam — a
+ * visão somente-leitura precisa listar/baixar os anexos já enviados.
+ */
+export function formLockedResponse(scope: FormScope): NextResponse | null {
+  if (scope.lockedAt) {
+    return NextResponse.json(
+      { error: "Formulário travado — não aceita mais alterações" },
+      { status: 403 },
+    );
+  }
+  return null;
 }

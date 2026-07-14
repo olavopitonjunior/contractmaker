@@ -12,6 +12,8 @@ interface FormPageClientProps {
   requiredFieldsByStep: readonly (readonly string[])[];
   prefilled?: boolean;
   proposalAttachmentUrl?: string | null;
+  /** Form travado (SalesForm.lockedAt) → wizard somente-leitura. */
+  locked?: boolean;
 }
 
 export function FormPageClient({
@@ -21,6 +23,7 @@ export function FormPageClient({
   requiredFieldsByStep,
   prefilled,
   proposalAttachmentUrl,
+  locked,
 }: FormPageClientProps) {
   const isLocacao = isLocacaoSchemaType(schemaType);
 
@@ -41,7 +44,12 @@ export function FormPageClient({
       </header>
       <main className="flex-1 mx-auto w-full max-w-4xl p-6 pb-16">
         {isLocacao ? (
-          <LocacaoFormWizard token={token} initialData={initialData} schemaType={schemaType} />
+          <LocacaoFormWizard
+            token={token}
+            initialData={initialData}
+            schemaType={schemaType}
+            readOnly={locked}
+          />
         ) : (
           <SalesFormWizard
             token={token}
@@ -49,6 +57,7 @@ export function FormPageClient({
             requiredFieldsByStep={requiredFieldsByStep}
             prefilled={prefilled}
             proposalAttachmentUrl={proposalAttachmentUrl}
+            readOnly={locked}
           />
         )}
       </main>

@@ -3,7 +3,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { downloadBufferFromUrl } from "@/lib/storage/s3";
 import { classifyAndExtract, isRateLimitError, humanizeOcrError } from "@/lib/ai/ocr";
-import { resolveFormScope } from "@/lib/forms/resolve-form-scope";
+import { resolveFormScope, formLockedResponse } from "@/lib/forms/resolve-form-scope";
 import { extractFirstPages, OCR_MAX_PAGES } from "@/lib/ai/pdf-utils";
 
 async function fetchBuffer(url: string): Promise<Buffer> {
@@ -84,6 +84,8 @@ export async function POST(
   if (!scope) {
     return NextResponse.json({ error: "Form not found" }, { status: 404 });
   }
+  const locked = formLockedResponse(scope);
+  if (locked) return locked;
   const form = { id: scope.formId, orgId: scope.orgId };
 
   const attachment = await prisma.formAttachment.findUnique({

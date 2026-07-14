@@ -46,6 +46,7 @@ export default async function ShareFormByPartyPage({
       <ShareByPartyClient
         formToken={form.token}
         mainFormUrl={`/f/${form.token}`}
+        initialLockedAt={form.lockedAt?.toISOString() ?? null}
         initialParticipants={form.participants.map((p) => ({
           id: p.id,
           role: p.role,

@@ -67,6 +67,7 @@ export default async function PublicParticipantFormPage({
       pathScope={Array.from(ROLE_PATHS[role])}
       formTitle={participant.form.title}
       completedAt={participant.completedAt?.toISOString() ?? null}
+      locked={Boolean(participant.form.lockedAt)}
     />
   );
 }
