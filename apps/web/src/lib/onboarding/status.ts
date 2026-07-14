@@ -89,7 +89,11 @@ export async function getOnboardingStatus(orgId: string): Promise<OnboardingStat
   // --- google ---
   const googleDone = googleAccount?.status === "connected";
 
-  // --- profile (creci liga a cláusula da administradora) ---
+  // --- profile ---
+  // Quem liga a cláusula (administradora na locação, intermediadora na venda) é
+  // a RAZÃO SOCIAL; o CRECI é impresso junto quando existe. Ainda assim o passo
+  // só fecha com os dois: uma imobiliária sem CRECI no contrato é cadastro pela
+  // metade — a diferença é que agora isso atrasa o checklist, não o contrato.
   const creci = org?.creci?.trim();
   const legalName = org?.legalName?.trim();
   const profileDone = Boolean(creci && legalName);
