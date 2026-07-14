@@ -107,7 +107,15 @@ async function main() {
   checkEnvVar("CHALLENGE_TOKEN_SECRET");
   checkEnvVar("TRUSTED_DEVICE_SECRET");
   checkEnvVar("SUDO_TOKEN_SECRET");
-  checkEnvVar("RESEND_API_KEY");
+  // As envs de e-mail dependem do provider: em SMTP (produção) não existe
+  // RESEND_API_KEY, e exigi-la reprovaria uma config saudável.
+  if ((process.env.EMAIL_PROVIDER ?? "resend") === "smtp") {
+    checkEnvVar("SMTP_HOST");
+    checkEnvVar("SMTP_USER");
+    checkEnvVar("SMTP_PASS");
+  } else {
+    checkEnvVar("RESEND_API_KEY");
+  }
   checkEnvVar("EMAIL_FROM");
   checkEnvVar("UPSTASH_REDIS_REST_URL", { pattern: /^https:\/\// });
   checkEnvVar("UPSTASH_REDIS_REST_TOKEN");

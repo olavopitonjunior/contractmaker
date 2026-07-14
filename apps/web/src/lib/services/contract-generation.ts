@@ -169,8 +169,25 @@ function buildDestinoTexto(out: Record<string, unknown>): string {
   return "";
 }
 
+export interface EnrichContractContext {
+  /**
+   * Imobiliária do tenant (perfil da org: razão social, CNPJ, CRECI). Serve de
+   * FALLBACK pro bloco da intermediadora quando o formulário do negócio não
+   * nomeou nenhuma corretora — antes disso, o CCV saía sem intermediadora e o
+   * corretor tinha que redigitar os dados da própria imobiliária a cada deal.
+   *
+   * Só fallback: o que veio do formulário sempre vence.
+   */
+  imobiliaria?: {
+    nome?: string;
+    cnpj?: string;
+    creci?: string;
+  };
+}
+
 export function enrichContractData(
-  data: Record<string, unknown>
+  data: Record<string, unknown>,
+  ctx?: EnrichContractContext
 ): Record<string, unknown> {
   const enriched = { ...data };
   const config = ((enriched.config as Record<string, unknown>) || {}) as Record<string, unknown>;
@@ -659,20 +676,44 @@ export function enrichContractData(
   //  2. `valor` e `percentual` são complementares — quando há um, deriva o outro
   //  3. Forms legados (só comissao.imobiliaria_*, sem array) sintetizam um
   //     comissionado único pra cláusula de breakdown poder iterar
+  //  4. Form sem corretora nomeada + org com perfil cadastrado → a própria
+  //     imobiliária do tenant (ctx.imobiliaria) entra como intermediadora
   const comissaoMut = enriched.comissao as Record<string, unknown> | undefined;
   if (comissaoMut) {
     const valorTotalComissao = Number(comissaoMut.valor || 0);
     const comissionados = (comissaoMut.comissionados as Array<Record<string, unknown>> | undefined) ?? [];
 
     if (comissionados.length === 0) {
-      const imobNome = typeof comissaoMut.imobiliaria_nome === "string"
+      const imobNomeForm = typeof comissaoMut.imobiliaria_nome === "string"
         ? (comissaoMut.imobiliaria_nome as string).trim()
         : "";
+
+      // Fallback pro perfil da org — só quando o form não nomeou corretora E há
+      // comissão de fato. Numa venda direta sem comissão, carimbar a imobiliária
+      // como comissionada seria inventar uma parte que não existe no negócio.
+      const percentualForm =
+        typeof comissaoMut.percentual === "number" ? comissaoMut.percentual : 0;
+      const temComissao = valorTotalComissao > 0 || percentualForm > 0;
+      const daOrg =
+        !imobNomeForm && temComissao && ctx?.imobiliaria?.nome?.trim()
+          ? ctx.imobiliaria
+          : undefined;
+
+      const imobNome = imobNomeForm || (daOrg?.nome ?? "").trim();
       if (imobNome) {
-        const tipoPessoa = comissaoMut.corretora_tipo_pessoa === "fisica" ? "fisica" : "juridica";
-        const docRaw = typeof comissaoMut.imobiliaria_cnpj === "string"
-          ? (comissaoMut.imobiliaria_cnpj as string)
-          : "";
+        // A org do tenant é sempre PJ; só o form pode declarar corretora PF.
+        const tipoPessoa =
+          !daOrg && comissaoMut.corretora_tipo_pessoa === "fisica" ? "fisica" : "juridica";
+        const docRaw = daOrg
+          ? (daOrg.cnpj ?? "")
+          : typeof comissaoMut.imobiliaria_cnpj === "string"
+            ? (comissaoMut.imobiliaria_cnpj as string)
+            : "";
+        const creciRaw = daOrg
+          ? (daOrg.creci ?? "")
+          : typeof comissaoMut.creci === "string"
+            ? (comissaoMut.creci as string)
+            : "";
         const sintetizado: Record<string, unknown> = {
           nome: imobNome,
           tipo_pessoa: tipoPessoa,
@@ -681,8 +722,8 @@ export function enrichContractData(
         };
         if (tipoPessoa === "fisica") sintetizado.cpf = docRaw;
         else sintetizado.cnpj = docRaw;
-        if (typeof comissaoMut.creci === "string" && comissaoMut.creci) {
-          sintetizado.creci = comissaoMut.creci;
+        if (creciRaw) {
+          sintetizado.creci = creciRaw;
         }
         if (typeof comissaoMut.imobiliaria_email === "string" && comissaoMut.imobiliaria_email) {
           sintetizado.email = comissaoMut.imobiliaria_email;
@@ -762,8 +803,23 @@ export async function generateContractForDeal(
   }
   const template = selection.template;
 
+  // Perfil da imobiliária (Organization) — fallback da intermediadora quando o
+  // formulário do negócio não nomeou corretora. Espelha o que a locação já faz
+  // com a administradora; sem isso o CCV saía sem intermediadora e o corretor
+  // redigitava nome/CNPJ/CRECI da própria imobiliária a cada negócio.
+  const orgProfile = await prisma.organization.findUnique({
+    where: { id: orgId },
+    select: { legalName: true, cnpj: true, creci: true },
+  });
+
   // Enrich data with template defaults (multas, prazos, percentual comissao)
-  const enrichedData = enrichContractData(dataJson);
+  const enrichedData = enrichContractData(dataJson, {
+    imobiliaria: {
+      nome: orgProfile?.legalName?.trim() || undefined,
+      cnpj: orgProfile?.cnpj?.trim() || undefined,
+      creci: orgProfile?.creci?.trim() || undefined,
+    },
+  });
 
   // Render HTML — apenas pra engine="handlebars". Em engine="google_docs"
   // o conteúdo nunca passa por Handlebars; o doc fonte é copiado e tem seus
@@ -1115,18 +1171,22 @@ export async function generateLocacaoContractForDeal(
   }
   const template = selection.template;
 
-  // Administradora nomeada na cláusula de pagamento: só quando a org tem CRECI
-  // cadastrado (sinal de cadastro completo); senão o template usa o fallback
-  // "à PARTE LOCADORA ou a quem esta indicar".
+  // Administradora nomeada na cláusula de pagamento. O gate é a RAZÃO SOCIAL
+  // (cadastro deliberado do dono no perfil da imobiliária) — não `org.name`,
+  // que toda org tem e nomearia uma administradora que ninguém cadastrou, nem
+  // o CRECI, que o bloco Handlebars já trata como opcional. Sem razão social,
+  // o template usa o fallback "à PARTE LOCADORA ou a quem esta indicar".
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
-    select: { name: true, legalName: true, creci: true, legalAddress: true },
+    select: { name: true, legalName: true, cnpj: true, creci: true, legalAddress: true },
   });
-  const administradora = org?.creci
+  const orgLegalName = org?.legalName?.trim();
+  const administradora = orgLegalName
     ? {
-        nome: org.legalName ?? org.name,
-        creci: org.creci,
-        endereco: org.legalAddress ?? undefined,
+        nome: orgLegalName,
+        cnpj: org?.cnpj?.trim() || undefined,
+        creci: org?.creci?.trim() || undefined,
+        endereco: org?.legalAddress?.trim() || undefined,
       }
     : undefined;
 

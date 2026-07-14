@@ -96,6 +96,9 @@ export function OnboardingWizard({
     try {
       const res = await fetch("/api/onboarding/complete");
       if (res.ok) setStatus(await res.json());
+      // Revalida o RSC: as props vindas do servidor (profile, google) são um
+      // snapshot do load da página e ficariam velhas depois de um save.
+      router.refresh();
     } finally {
       setRefreshing(false);
     }
@@ -271,9 +274,12 @@ export function OnboardingWizard({
             <div className="mt-5">
               {active === "google" && <GoogleDriveCard initial={google} />}
 
-              {active === "profile" && (
+              {/* Sempre montado (só escondido): desmontar o form ao trocar de
+                  passo descartava o que estava digitado e ainda não tinha caído
+                  no autosave. */}
+              <div className={active === "profile" ? undefined : "hidden"}>
                 <AgencyProfileForm initial={profile} onSaved={refresh} />
-              )}
+              </div>
 
               {active !== "google" && active !== "profile" && (
                 <div className="space-y-4">
