@@ -26,18 +26,25 @@ import {
   Copy,
   ExternalLink,
   FileText,
+  Lock,
+  LockOpen,
   Pencil,
+  RefreshCw,
   RotateCcw,
+  ShieldAlert,
   Trash2,
   X,
   XOctagon,
 } from "lucide-react";
+import { AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { Badge } from "@/components/ui/badge";
 
 interface LocacaoDealHeaderActionsProps {
   dealId: string;
   title: string;
   stageName: string | null;
   formToken: string | null;
+  formLockedAt: string | null;
   hasContract: boolean;
   isLost: boolean;
   archivedAt: string | null;
@@ -52,7 +59,8 @@ export function LocacaoDealHeaderActions({
   dealId,
   title,
   stageName,
-  formToken,
+  formToken: initialFormToken,
+  formLockedAt: initialFormLockedAt,
   hasContract,
   isLost,
   archivedAt,
@@ -63,6 +71,57 @@ export function LocacaoDealHeaderActions({
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(title);
   const [busy, setBusy] = useState<string | null>(null);
+  // Segurança do link: token em estado (rotação gera novo) + travamento.
+  const [formToken, setFormToken] = useState(initialFormToken);
+  const [formLockedAt, setFormLockedAt] = useState<string | null>(
+    initialFormLockedAt,
+  );
+  const [linkBusy, setLinkBusy] = useState<"lock" | "rotate" | null>(null);
+
+  async function toggleFormLock() {
+    if (!formToken) return;
+    const next = !formLockedAt;
+    setLinkBusy("lock");
+    try {
+      const res = await fetch(`/api/forms/${formToken}/lock`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locked: next }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data?.error || "Falha ao atualizar travamento");
+        return;
+      }
+      setFormLockedAt(data.lockedAt ?? null);
+      toast.success(next ? "Formulário travado" : "Formulário destravado");
+    } catch {
+      toast.error("Erro de conexão");
+    } finally {
+      setLinkBusy(null);
+    }
+  }
+
+  async function rotateFormLinks() {
+    if (!formToken) return;
+    setLinkBusy("rotate");
+    try {
+      const res = await fetch(`/api/forms/${formToken}/rotate-links`, {
+        method: "POST",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data?.error || "Falha ao trocar os links");
+        return;
+      }
+      setFormToken(data.token);
+      toast.success("Links trocados — os anteriores foram desativados");
+    } catch {
+      toast.error("Erro de conexão");
+    } finally {
+      setLinkBusy(null);
+    }
+  }
 
   const isTerminal = stageName === "ADM" || isLost;
 
@@ -240,6 +299,12 @@ export function LocacaoDealHeaderActions({
       <div className="flex gap-2 flex-wrap pt-1.5">
         {formToken && (
           <>
+            {formLockedAt && (
+              <Badge variant="secondary" className="gap-1 self-center">
+                <Lock className="h-3 w-3" />
+                Travado
+              </Badge>
+            )}
             <Button variant="outline" size="sm" asChild>
               <a href={`/f/${formToken}`} target="_blank" rel="noopener noreferrer">
                 <ExternalLink className="h-4 w-4 mr-1" />
@@ -255,6 +320,60 @@ export function LocacaoDealHeaderActions({
               <Copy className="h-4 w-4 mr-1" />
               Copiar link
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleFormLock}
+              disabled={linkBusy !== null}
+              title={
+                formLockedAt
+                  ? "Destravar: permite editar o formulário novamente"
+                  : "Travar: congela as informações — as partes só conseguem consultar"
+              }
+            >
+              {linkBusy === "lock" ? (
+                <RefreshCw className="h-4 w-4 mr-1 animate-spin" />
+              ) : formLockedAt ? (
+                <LockOpen className="h-4 w-4 mr-1" />
+              ) : (
+                <Lock className="h-4 w-4 mr-1" />
+              )}
+              {formLockedAt ? "Destravar" : "Travar"}
+            </Button>
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={linkBusy !== null}
+                  title="Trocar o link (revoga o acesso de quem já tem o link atual, mantém os dados)"
+                >
+                  <RefreshCw
+                    className={`h-4 w-4 mr-1 ${linkBusy === "rotate" ? "animate-spin" : ""}`}
+                  />
+                  Trocar link
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle className="flex items-center gap-2">
+                    <ShieldAlert className="h-4 w-4 text-amber-500" />
+                    Trocar todos os links?
+                  </AlertDialogTitle>
+                  <AlertDialogDescription>
+                    O link do formulário e os links de cada parte atuais vão
+                    parar de funcionar imediatamente. Quem já recebeu algum
+                    deles perde o acesso. Os dados preenchidos são mantidos.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogAction onClick={rotateFormLinks}>
+                    Trocar links
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
           </>
         )}
         <Button size="sm" onClick={generateContract} disabled={busy === "generate"}>

@@ -5,7 +5,8 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Loader2, Settings2 } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Loader2, Settings2, Lock } from "lucide-react";
 
 type Preset = "legado" | "minimo" | "padrao" | "completo" | "custom";
 
@@ -13,6 +14,7 @@ interface FormSettingsClientProps {
   initial: {
     preset: string;
     customRequiredPaths: unknown;
+    autoLockFormOnFinalize: boolean;
   };
 }
 
@@ -144,6 +146,7 @@ export function FormSettingsClient({ initial }: FormSettingsClientProps) {
   const [showOverride, setShowOverride] = useState(
     parseCustomPaths(initial.customRequiredPaths).length > 0,
   );
+  const [autoLock, setAutoLock] = useState(Boolean(initial.autoLockFormOnFinalize));
   const [saving, setSaving] = useState(false);
 
   const selected = useMemo(() => {
@@ -173,6 +176,7 @@ export function FormSettingsClient({ initial }: FormSettingsClientProps) {
         body: JSON.stringify({
           preset,
           customRequiredPaths: customPaths,
+          autoLockFormOnFinalize: autoLock,
         }),
       });
       if (!res.ok) {
@@ -282,6 +286,31 @@ export function FormSettingsClient({ initial }: FormSettingsClientProps) {
             ))}
           </CardContent>
         )}
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Lock className="h-4 w-4" />
+            Segurança do link
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <label className="flex items-start justify-between gap-4 cursor-pointer">
+            <div className="flex-1">
+              <p className="text-sm font-medium">
+                Travar o formulário quando o cliente finalizar
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Ao finalizar, o formulário é congelado automaticamente: quem tiver
+                o link ainda consegue consultar, mas não editar. Evita alterações
+                indevidas após o negócio estar fechado. Você sempre pode destravar
+                manualmente no negócio.
+              </p>
+            </div>
+            <Switch checked={autoLock} onCheckedChange={setAutoLock} />
+          </label>
+        </CardContent>
       </Card>
 
       <div className="flex justify-end">

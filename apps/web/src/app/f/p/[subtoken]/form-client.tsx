@@ -16,6 +16,8 @@ interface SubtokenFormClientProps {
   pathScope: readonly string[];
   formTitle: string | null;
   completedAt: string | null;
+  /** Form travado (SalesForm.lockedAt) → wizard somente-leitura. */
+  locked?: boolean;
 }
 
 const ROLE_LABELS: Record<ParticipantRole, string> = {
@@ -36,6 +38,7 @@ export function SubtokenFormClient({
   pathScope,
   formTitle,
   completedAt,
+  locked,
 }: SubtokenFormClientProps) {
   const roleLabel = ROLE_LABELS[role] ?? role;
   const isLocacao = schemaType.startsWith("locacao");
@@ -90,6 +93,7 @@ export function SubtokenFormClient({
             endpoint={participantEndpoint}
             pathScope={pathScope}
             finalizeMode="participant"
+            readOnly={locked}
           />
         ) : (
           <SalesFormWizard
@@ -100,6 +104,7 @@ export function SubtokenFormClient({
             endpoint={participantEndpoint}
             pathScope={pathScope}
             finalizeMode="participant"
+            readOnly={locked}
           />
         )}
       </main>

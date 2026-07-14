@@ -82,6 +82,13 @@ interface SalesFormWizardProps {
    * com `markCompleted: true`. Subtoken nunca "finaliza" o form principal.
    */
   finalizeMode?: "main" | "participant";
+  /**
+   * Somente-leitura: form travado (SalesForm.lockedAt). Desliga o auto-save,
+   * desabilita os campos (fieldset) e esconde o botão de finalizar. A navegação
+   * entre etapas continua ativa pra visualizar os dados. O servidor é o guard
+   * autoritativo (403 nos writes); isto é UX.
+   */
+  readOnly?: boolean;
 }
 
 const FULL_STEP_INDEXES: readonly number[] = [0, 1, 2, 3, 4, 5, 6];
@@ -417,6 +424,7 @@ export function SalesFormWizard({
   endpoint,
   pathScope,
   finalizeMode = "main",
+  readOnly = false,
 }: SalesFormWizardProps) {
   // `visibleStepIndexes` mapeia cursor virtual (0..N-1) para índice "real"
   // dos 8 steps existentes. Default = todos os 8. Subtoken passa subset.
@@ -451,6 +459,7 @@ export function SalesFormWizard({
   const { status: saveStatus } = useAutoSave(token, watchedData, {
     endpoint: autoSaveEndpoint,
     pathScope,
+    enabled: !readOnly,
   });
 
   const isLastStep = currentStep === TOTAL_STEPS - 1;
@@ -749,8 +758,21 @@ export function SalesFormWizard({
 
   return (
     <div className="w-full max-w-4xl mx-auto">
+      {/* Banner de travamento — form congelado pelo corretor (somente-leitura) */}
+      {readOnly && (
+        <div className="mb-6 rounded-lg border border-slate-300 bg-slate-100 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/60">
+          <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+            🔒 Formulário travado
+          </p>
+          <p className="mt-0.5 text-xs text-slate-700 dark:text-slate-300">
+            Este formulário foi travado pelo corretor e não aceita mais
+            alterações. Você pode consultar os dados, mas não editá-los.
+          </p>
+        </div>
+      )}
+
       {/* Banner "dados extraídos da proposta" — só com ?prefilled=1 */}
-      {prefilled && (
+      {prefilled && !readOnly && (
         <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 dark:border-amber-700 dark:bg-amber-950/40">
           <div className="flex items-start gap-3 flex-wrap">
             <div className="flex-1 min-w-[200px]">
@@ -855,7 +877,7 @@ export function SalesFormWizard({
       )}
 
       {/* Voice input — só nos steps que têm schema mapeado em voice-extract.ts */}
-      {STEPS_WITH_VOICE.has(currentTrueIndex) && (
+      {STEPS_WITH_VOICE.has(currentTrueIndex) && !readOnly && (
         <div className="mb-3 flex items-center justify-end gap-2">
           <span className="text-xs text-muted-foreground hidden sm:inline">
             Prefere falar?
@@ -869,11 +891,15 @@ export function SalesFormWizard({
         </div>
       )}
 
-      {/* Step Content — resolve trueIndex pra mapear no array de 8 components */}
-      <div>{stepComponents[currentTrueIndex]}</div>
+      {/* Step Content — resolve trueIndex pra mapear no array de 8 components.
+          fieldset[disabled] desabilita todos os inputs nativos descendentes
+          quando o form está travado; a navegação (fora do fieldset) continua. */}
+      <fieldset disabled={readOnly} className="m-0 border-0 p-0 min-w-0 disabled:opacity-70">
+        {stepComponents[currentTrueIndex]}
+      </fieldset>
 
-      {/* LGPD consent — exibido só na última etapa */}
-      {isLastStep && (
+      {/* LGPD consent — exibido só na última etapa (não em somente-leitura) */}
+      {isLastStep && !readOnly && (
         <div className="mt-6">
           <PrivacyConsent
             checked={privacyAccepted}
@@ -920,19 +946,23 @@ export function SalesFormWizard({
           </div>
 
           {isLastStep ? (
-            <Button
-              type="button"
-              onClick={handleFinalize}
-              disabled={isSubmitting || !privacyAccepted}
-              className="min-w-[120px]"
-              title={
-                !privacyAccepted
-                  ? "Aceite a Política de Privacidade abaixo para finalizar"
-                  : undefined
-              }
-            >
-              {isSubmitting ? "Finalizando..." : "Finalizar"}
-            </Button>
+            readOnly ? (
+              <span className="min-w-[120px]" aria-hidden />
+            ) : (
+              <Button
+                type="button"
+                onClick={handleFinalize}
+                disabled={isSubmitting || !privacyAccepted}
+                className="min-w-[120px]"
+                title={
+                  !privacyAccepted
+                    ? "Aceite a Política de Privacidade abaixo para finalizar"
+                    : undefined
+                }
+              >
+                {isSubmitting ? "Finalizando..." : "Finalizar"}
+              </Button>
+            )
           ) : (
             <Button
               type="button"

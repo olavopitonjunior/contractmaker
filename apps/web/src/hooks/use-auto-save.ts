@@ -21,6 +21,11 @@ export interface UseAutoSaveOptions {
    */
   pathScope?: readonly string[];
   debounceMs?: number;
+  /**
+   * Quando false, desliga o agendamento de saves (form travado / somente-leitura).
+   * Default true. Evita PATCHs que só levariam 403 do servidor travado.
+   */
+  enabled?: boolean;
 }
 
 export function useAutoSave(
@@ -35,6 +40,7 @@ export function useAutoSave(
   const debounceMs = options.debounceMs ?? 1500;
   const endpoint = options.endpoint ?? `/api/forms/${token}`;
   const pathScope = options.pathScope;
+  const enabled = options.enabled ?? true;
 
   const [status, setStatus] = useState<SaveStatus>("idle");
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -102,6 +108,7 @@ export function useAutoSave(
   );
 
   useEffect(() => {
+    if (!enabled) return;
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
 
     const serialized = JSON.stringify(slice(data));
@@ -114,7 +121,7 @@ export function useAutoSave(
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
-  }, [data, debounceMs, save, slice]);
+  }, [data, debounceMs, save, slice, enabled]);
 
   return { status, save: () => save(data) };
 }

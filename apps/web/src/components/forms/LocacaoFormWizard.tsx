@@ -33,6 +33,11 @@ interface LocacaoFormWizardProps {
   pathScope?: readonly string[];
   /** "participant" marca completedAt do participante; não finaliza o form. */
   finalizeMode?: "main" | "participant";
+  /**
+   * Somente-leitura: form travado (SalesForm.lockedAt). Desliga auto-save,
+   * desabilita campos e esconde o finalizar. Navegação continua ativa.
+   */
+  readOnly?: boolean;
 }
 
 // Steps de partes (locador/locatário) — validados de forma CIENTE de
@@ -99,6 +104,7 @@ export function LocacaoFormWizard({
   endpoint: endpointProp,
   pathScope,
   finalizeMode = "main",
+  readOnly = false,
 }: LocacaoFormWizardProps) {
   const comercial = schemaType === LOCACAO_COMERCIAL_SCHEMA_TYPE;
   const stepLabels = stepLabelsForLocacaoType(schemaType);
@@ -125,6 +131,7 @@ export function LocacaoFormWizard({
   const { status: saveStatus } = useAutoSave(token, watchedData, {
     endpoint,
     pathScope,
+    enabled: !readOnly,
   });
 
   const isLastStep = currentStep === TOTAL - 1;
@@ -284,6 +291,17 @@ export function LocacaoFormWizard({
 
   return (
     <div className="w-full max-w-4xl mx-auto">
+      {readOnly && (
+        <div className="mb-6 rounded-lg border border-slate-300 bg-slate-100 px-4 py-3 dark:border-slate-700 dark:bg-slate-900/60">
+          <p className="text-sm font-medium text-slate-900 dark:text-slate-100">
+            🔒 Formulário travado
+          </p>
+          <p className="mt-0.5 text-xs text-slate-700 dark:text-slate-300">
+            Este formulário foi travado pelo corretor e não aceita mais
+            alterações. Você pode consultar os dados, mas não editá-los.
+          </p>
+        </div>
+      )}
       <div className="mb-6 space-y-4">
         <div className="flex items-center justify-between flex-wrap gap-2">
           <div>
@@ -326,9 +344,11 @@ export function LocacaoFormWizard({
         <Separator />
       </div>
 
-      <div>{steps[visibleStepIndexes[currentStep] ?? currentStep]}</div>
+      <fieldset disabled={readOnly} className="m-0 border-0 p-0 min-w-0 disabled:opacity-70">
+        {steps[visibleStepIndexes[currentStep] ?? currentStep]}
+      </fieldset>
 
-      {isLastStep && (
+      {isLastStep && !readOnly && (
         <div className="mt-6">
           <PrivacyConsent
             checked={privacyAccepted}
@@ -345,15 +365,19 @@ export function LocacaoFormWizard({
             Anterior
           </Button>
           {isLastStep ? (
-            <Button
-              type="button"
-              onClick={handleFinalize}
-              disabled={isSubmitting || !privacyAccepted}
-              className="min-w-[120px]"
-              title={!privacyAccepted ? "Aceite a Política de Privacidade abaixo para finalizar" : undefined}
-            >
-              {isSubmitting ? "Finalizando..." : "Finalizar"}
-            </Button>
+            readOnly ? (
+              <span className="min-w-[120px]" aria-hidden />
+            ) : (
+              <Button
+                type="button"
+                onClick={handleFinalize}
+                disabled={isSubmitting || !privacyAccepted}
+                className="min-w-[120px]"
+                title={!privacyAccepted ? "Aceite a Política de Privacidade abaixo para finalizar" : undefined}
+              >
+                {isSubmitting ? "Finalizando..." : "Finalizar"}
+              </Button>
+            )
           ) : (
             <Button type="button" onClick={() => goTo(currentStep + 1)} className="min-w-[100px]">
               Próximo

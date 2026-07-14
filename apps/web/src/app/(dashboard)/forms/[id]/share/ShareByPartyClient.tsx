@@ -11,7 +11,21 @@ import {
   MessageCircle,
   RefreshCw,
   Plus,
+  Lock,
+  LockOpen,
+  ShieldAlert,
 } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 
 interface Participant {
@@ -27,6 +41,7 @@ interface Participant {
 interface ShareByPartyClientProps {
   formToken: string;
   mainFormUrl: string;
+  initialLockedAt: string | null;
   initialParticipants: Participant[];
 }
 
@@ -60,17 +75,77 @@ function relativeTime(iso: string): string {
 export function ShareByPartyClient({
   formToken,
   mainFormUrl,
+  initialLockedAt,
   initialParticipants,
 }: ShareByPartyClientProps) {
   const [participants, setParticipants] = useState(initialParticipants);
   const [busy, setBusy] = useState<string | null>(null);
+  // Token principal em estado: "Trocar todos os links" gera um novo, e as
+  // operações por parte (criar/regenerar) precisam apontar pro token atual.
+  const [mainToken, setMainToken] = useState(formToken);
+  const [lockedAt, setLockedAt] = useState<string | null>(initialLockedAt);
+  const currentMainUrl = mainFormUrl.replace(formToken, mainToken);
 
   const byRole = (role: string) => participants.find((p) => p.role === role);
+
+  async function rotateAllLinks() {
+    setBusy("rotate");
+    try {
+      const res = await fetch(`/api/forms/${mainToken}/rotate-links`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data?.error ?? "Falha ao trocar os links");
+        return;
+      }
+      setMainToken(data.token);
+      // Re-busca a lista de participantes com os tokens novos.
+      const listRes = await fetch(`/api/forms/${data.token}/participants`, {
+        method: "GET",
+        credentials: "include",
+      });
+      const listData = await listRes.json().catch(() => ({}));
+      if (listRes.ok && Array.isArray(listData.participants)) {
+        setParticipants(listData.participants);
+      }
+      toast.success("Links trocados — os anteriores foram desativados");
+    } catch {
+      toast.error("Erro de rede");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function toggleLock() {
+    const next = !lockedAt;
+    setBusy("lock");
+    try {
+      const res = await fetch(`/api/forms/${mainToken}/lock`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ locked: next }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data?.error ?? "Falha ao atualizar travamento");
+        return;
+      }
+      setLockedAt(data.lockedAt ?? null);
+      toast.success(next ? "Formulário travado" : "Formulário destravado");
+    } catch {
+      toast.error("Erro de rede");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function ensureParticipants() {
     setBusy("create");
     try {
-      const res = await fetch(`/api/forms/${formToken}/participants`, {
+      const res = await fetch(`/api/forms/${mainToken}/participants`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
@@ -94,7 +169,7 @@ export function ShareByPartyClient({
     setBusy(participantId);
     try {
       const res = await fetch(
-        `/api/forms/${formToken}/participants/${participantId}/regenerate`,
+        `/api/forms/${mainToken}/participants/${participantId}/regenerate`,
         { method: "POST", credentials: "include" },
       );
       const data = await res.json();
@@ -135,25 +210,92 @@ export function ShareByPartyClient({
   return (
     <div className="space-y-4">
       <Card>
-        <CardHeader className="pb-2">
+        <CardHeader className="pb-2 flex flex-row items-start justify-between space-y-0">
           <CardTitle className="text-sm">Link completo (admin)</CardTitle>
+          {lockedAt ? (
+            <Badge variant="secondary" className="gap-1">
+              <Lock className="h-3 w-3" />
+              Travado
+            </Badge>
+          ) : (
+            <Badge variant="outline">Ativo</Badge>
+          )}
         </CardHeader>
-        <CardContent className="space-y-2">
+        <CardContent className="space-y-3">
           <p className="text-xs text-muted-foreground">
             Acesso a todos os campos. Use só pra você ou um corretor de
             confiança — não envie pras partes.
           </p>
           <div className="flex items-center gap-2 flex-wrap">
             <code className="text-xs bg-muted px-2 py-1 rounded flex-1 min-w-[200px] truncate">
-              {mainFormUrl}
+              {currentMainUrl}
             </code>
             <Button asChild variant="outline" size="sm">
-              <a href={mainFormUrl} target="_blank" rel="noopener noreferrer">
+              <a href={currentMainUrl} target="_blank" rel="noopener noreferrer">
                 <ExternalLink className="h-3 w-3 mr-1" />
                 Abrir
               </a>
             </Button>
           </div>
+
+          {/* Segurança do link: travar (congela edição, mantém leitura) e trocar
+              todos os links (revoga acesso de quem tiver os links atuais). */}
+          <div className="flex items-center gap-2 flex-wrap border-t pt-3">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={toggleLock}
+              disabled={busy === "lock"}
+            >
+              {busy === "lock" ? (
+                <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              ) : lockedAt ? (
+                <LockOpen className="h-3 w-3 mr-1" />
+              ) : (
+                <Lock className="h-3 w-3 mr-1" />
+              )}
+              {lockedAt ? "Destravar" : "Travar formulário"}
+            </Button>
+
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button variant="outline" size="sm" disabled={busy === "rotate"}>
+                  {busy === "rotate" ? (
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3 w-3 mr-1" />
+                  )}
+                  Trocar todos os links
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle className="flex items-center gap-2">
+                    <ShieldAlert className="h-4 w-4 text-amber-500" />
+                    Trocar todos os links?
+                  </AlertDialogTitle>
+                  <AlertDialogDescription>
+                    O link completo e os links de cada parte atuais vão parar de
+                    funcionar imediatamente. Quem já tiver recebido algum deles
+                    perde o acesso. Os dados preenchidos são mantidos — você
+                    recebe links novos para reenviar.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogAction onClick={rotateAllLinks}>
+                    Trocar links
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+          </div>
+          {lockedAt && (
+            <p className="text-xs text-muted-foreground">
+              Travado: as partes conseguem abrir o link e consultar, mas não
+              editar. Destrave para permitir alterações.
+            </p>
+          )}
         </CardContent>
       </Card>
 

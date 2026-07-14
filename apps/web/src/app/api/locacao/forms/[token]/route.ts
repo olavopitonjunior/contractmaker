@@ -41,6 +41,7 @@ export async function GET(
     dataJson: form.dataJson,
     status: form.status,
     updatedAt: form.updatedAt,
+    lockedAt: form.lockedAt ? form.lockedAt.toISOString() : null,
   });
 }
 
@@ -54,10 +55,25 @@ export async function PATCH(
 ) {
   const body = await req.json();
 
-  const form = await prisma.salesForm.findUnique({ where: { token: params.token } });
+  const form = await prisma.salesForm.findUnique({
+    where: { token: params.token },
+    include: {
+      org: { select: { formSettings: { select: { autoLockFormOnFinalize: true } } } },
+    },
+  });
   if (!form) return NextResponse.json({ error: "Form not found" }, { status: 404 });
   if (!(await locacaoEnabled(form.orgId))) {
     return NextResponse.json({ error: "Formulário indisponível" }, { status: 404 });
+  }
+
+  // Guard de travamento: form travado não aceita mais alterações (espelha
+  // /api/forms/[token]). Lê o estado ANTERIOR — o auto-lock do finalize abaixo
+  // não se auto-bloqueia.
+  if (form.lockedAt) {
+    return NextResponse.json(
+      { error: "Formulário travado — não aceita mais alterações" },
+      { status: 403 },
+    );
   }
 
   const currentData = (form.dataJson as Record<string, unknown>) || {};
@@ -102,6 +118,9 @@ export async function PATCH(
     }
   }
 
+  const autoLockOnFinalize =
+    isFinalizing && form.org.formSettings?.autoLockFormOnFinalize === true;
+
   const updated = await prisma.salesForm.update({
     where: { token: params.token },
     data: {
@@ -109,6 +128,7 @@ export async function PATCH(
       title: body.title ?? form.title,
       status: newStatus,
       ...(isFinalizing ? { completedAt: new Date() } : {}),
+      ...(autoLockOnFinalize ? { lockedAt: new Date() } : {}),
     },
   });
 

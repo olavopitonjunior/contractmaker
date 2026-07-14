@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { useOrgSettingsForm } from "@/hooks/use-org-settings-form";
+import { SaveStatusPill } from "@/components/settings/SaveStatusPill";
 
 export interface FiscalSettings {
   legalName?: string | null;
@@ -151,34 +153,27 @@ function MunicipioAutocomplete({
 }
 
 export function FiscalSettingsForm({ initial }: { initial: FiscalSettings }) {
-  const [form, setForm] = useState<FiscalSettings>(initial);
-  const [saving, setSaving] = useState(false);
+  // Autosave + hidratação do servidor + PATCH só dos campos sujos. Esta tela e
+  // o perfil da imobiliária (onboarding) escrevem nas MESMAS colunas de
+  // Organization — mandar os campos intocados faria uma pisar na outra.
+  const { form, set, patch, saveNow, status, error, hydrated, isDirty } = useOrgSettingsForm(
+    {
+      legalName: initial.legalName ?? "",
+      cnpj: initial.cnpj ?? "",
+      creci: initial.creci ?? "",
+      legalAddress: initial.legalAddress ?? "",
+      fiscalResponsibleCpf: initial.fiscalResponsibleCpf ?? "",
+      fiscalUf: initial.fiscalUf ?? "",
+      fiscalMunicipioCode: initial.fiscalMunicipioCode ?? "",
+      fiscalMunicipioName: initial.fiscalMunicipioName ?? "",
+    },
+    { onSaved: undefined }
+  );
 
-  const set = (key: keyof FiscalSettings, value: string) =>
-    setForm((f) => ({ ...f, [key]: value }));
-
-  async function save() {
-    setSaving(true);
-    try {
-      const res = await fetch("/api/org/fiscal-settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...Object.fromEntries(FIELDS.map((f) => [f.key, (form[f.key] ?? "").toString().trim()])),
-          fiscalMunicipioCode: (form.fiscalMunicipioCode ?? "").toString().trim(),
-          fiscalMunicipioName: (form.fiscalMunicipioName ?? "").toString().trim(),
-        }),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j.error || "Falha ao salvar");
-      }
-      toast.success("Dados fiscais salvos.");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Falha ao salvar");
-    } finally {
-      setSaving(false);
-    }
+  async function onSaveClick() {
+    const ok = await saveNow();
+    if (ok) toast.success("Dados fiscais salvos.");
+    else toast.error(error ?? "Falha ao salvar");
   }
 
   return (
@@ -193,7 +188,7 @@ export function FiscalSettingsForm({ initial }: { initial: FiscalSettings }) {
               <Label htmlFor={f.key}>{f.label}</Label>
               <Input
                 id={f.key}
-                value={(form[f.key] ?? "").toString()}
+                value={form[f.key]}
                 placeholder={f.placeholder}
                 onChange={(e) => set(f.key, e.target.value)}
               />
@@ -201,23 +196,23 @@ export function FiscalSettingsForm({ initial }: { initial: FiscalSettings }) {
             </div>
           ))}
           <MunicipioAutocomplete
-            uf={(form.fiscalUf ?? "").toString().trim().toUpperCase()}
-            code={(form.fiscalMunicipioCode ?? "").toString()}
-            name={(form.fiscalMunicipioName ?? "").toString()}
+            uf={form.fiscalUf.trim().toUpperCase()}
+            code={form.fiscalMunicipioCode}
+            name={form.fiscalMunicipioName}
             onPick={(m) =>
-              setForm((f) => ({
-                ...f,
+              patch({
                 fiscalMunicipioCode: m.tom,
                 fiscalMunicipioName: m.nome,
-                fiscalUf: f.fiscalUf?.trim() ? f.fiscalUf : m.uf,
-              }))
+                ...(form.fiscalUf.trim() ? {} : { fiscalUf: m.uf }),
+              })
             }
             onCodeChange={(code) => set("fiscalMunicipioCode", code)}
           />
         </div>
-        <div className="flex justify-end">
-          <Button onClick={save} disabled={saving}>
-            {saving ? "Salvando…" : "Salvar dados fiscais"}
+        <div className="flex items-center justify-end gap-3">
+          <SaveStatusPill status={status} isDirty={isDirty} />
+          <Button onClick={onSaveClick} disabled={!hydrated || status === "saving"}>
+            {status === "saving" ? "Salvando…" : "Salvar dados fiscais"}
           </Button>
         </div>
       </CardContent>

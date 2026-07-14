@@ -61,6 +61,7 @@ interface LocacaoDealDetailProps {
     stageName: string | null;
     formStatus: string | null;
     formToken: string | null;
+    formLockedAt: string | null;
     dataJson: Record<string, unknown>;
     lostAt: string | null;
     lostReason: string | null;
@@ -215,6 +216,7 @@ export function LocacaoDealDetail({
             title={deal.title}
             stageName={deal.stageName}
             formToken={deal.formToken}
+            formLockedAt={deal.formLockedAt}
             hasContract={contract !== null}
             isLost={isLost}
             archivedAt={deal.archivedAt}
