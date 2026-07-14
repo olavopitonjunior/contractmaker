@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
 import { toast } from "sonner";
 import { Info } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { useOrgSettingsForm } from "@/hooks/use-org-settings-form";
+import { SaveStatusPill } from "@/components/settings/SaveStatusPill";
 
 export interface AgencyProfile {
   legalName?: string | null;
@@ -15,7 +16,7 @@ export interface AgencyProfile {
 }
 
 const FIELDS: {
-  key: keyof AgencyProfile;
+  key: keyof AgencyProfile & string;
   label: string;
   placeholder?: string;
   hint?: string;
@@ -42,8 +43,12 @@ const FIELDS: {
 
 /**
  * Formulário enxuto do perfil da imobiliária (razão social, CNPJ, CRECI,
- * endereço) — os 4 campos que nomeiam a administradora nos contratos de locação.
- * Posta no endpoint existente `/api/org/fiscal-settings` (gate ORG_SETTINGS_EDIT).
+ * endereço) — os 4 campos que nomeiam a administradora nos contratos de locação
+ * e a intermediadora nos de venda.
+ *
+ * Salva sozinho (debounce) via `useOrgSettingsForm`, que hidrata do servidor e
+ * só transmite campos sujos — trocar de passo no wizard não perde nem apaga
+ * nada. Posta no endpoint existente `/api/org/fiscal-settings`.
  */
 export function AgencyProfileForm({
   initial,
@@ -52,35 +57,22 @@ export function AgencyProfileForm({
   initial: AgencyProfile;
   onSaved?: () => void;
 }) {
-  const [form, setForm] = useState<AgencyProfile>(initial);
-  const [saving, setSaving] = useState(false);
+  const { form, set, saveNow, status, error, hydrated, isDirty } = useOrgSettingsForm(
+    {
+      legalName: initial.legalName ?? "",
+      cnpj: initial.cnpj ?? "",
+      creci: initial.creci ?? "",
+      legalAddress: initial.legalAddress ?? "",
+    },
+    { onSaved }
+  );
 
-  const set = (key: keyof AgencyProfile, value: string) =>
-    setForm((f) => ({ ...f, [key]: value }));
-
-  async function save() {
-    setSaving(true);
-    try {
-      const res = await fetch("/api/org/fiscal-settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(
-          Object.fromEntries(
-            FIELDS.map((f) => [f.key, (form[f.key] ?? "").toString().trim()])
-          )
-        ),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j.error || "Falha ao salvar");
-      }
-      toast.success("Perfil da imobiliária salvo.");
-      onSaved?.();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Falha ao salvar");
-    } finally {
-      setSaving(false);
-    }
+  // O autosave é silencioso (sinalizado pelo pill). O clique explícito confirma
+  // com toast — inclusive quando não havia nada sujo pra salvar.
+  async function onSaveClick() {
+    const ok = await saveNow();
+    if (ok) toast.success("Perfil da imobiliária salvo.");
+    else toast.error(error ?? "Falha ao salvar");
   }
 
   return (
@@ -98,7 +90,7 @@ export function AgencyProfileForm({
             <Label htmlFor={`agency-${f.key}`}>{f.label}</Label>
             <Input
               id={`agency-${f.key}`}
-              value={(form[f.key] ?? "").toString()}
+              value={form[f.key]}
               placeholder={f.placeholder}
               onChange={(e) => set(f.key, e.target.value)}
             />
@@ -106,9 +98,10 @@ export function AgencyProfileForm({
           </div>
         ))}
       </div>
-      <div className="flex justify-end">
-        <Button onClick={save} disabled={saving}>
-          {saving ? "Salvando…" : "Salvar perfil"}
+      <div className="flex items-center justify-end gap-3">
+        <SaveStatusPill status={status} isDirty={isDirty} />
+        <Button onClick={onSaveClick} disabled={!hydrated || status === "saving"}>
+          {status === "saving" ? "Salvando…" : "Salvar perfil"}
         </Button>
       </div>
     </div>
