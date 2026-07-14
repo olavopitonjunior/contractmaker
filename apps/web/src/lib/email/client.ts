@@ -15,6 +15,12 @@
 
 import { STAGING_MODE } from "@/lib/env/staging";
 
+export interface EmailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+}
+
 export interface SendEmailInput {
   to: string | string[];
   subject: string;
@@ -23,6 +29,16 @@ export interface SendEmailInput {
   text?: string;
   replyTo?: string;
   tags?: { name: string; value: string }[];
+  /**
+   * Org que assina o e-mail. Quando presente, o template é renderizado com a
+   * marca da imobiliária (logo, nome, cor) em vez da marca da plataforma.
+   * Omitir em e-mails de plataforma (reset de senha, OTP).
+   */
+  orgId?: string;
+  // Anexos binários. Formato do nodemailer ({filename, content, contentType});
+  // o Resend aceita o mesmo shape. Sem retry embutido — quem chama decide o
+  // fallback sem anexos ao receber ok:false (o relay pode recusar por tamanho).
+  attachments?: EmailAttachment[];
 }
 
 /**
@@ -93,6 +109,11 @@ async function sendViaResend(input: SendEmailInput): Promise<SendEmailResult> {
       text: input.text,
       replyTo: input.replyTo ?? getReplyTo(),
       tags: input.tags,
+      attachments: input.attachments?.map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        contentType: a.contentType,
+      })),
     } as any);
     if (error) {
       console.error("[email] Resend error", error);
@@ -151,6 +172,11 @@ async function sendViaSmtp(input: SendEmailInput): Promise<SendEmailResult> {
       headers: input.tags?.length
         ? { "X-Entity-Ref-ID": input.tags.map((t) => `${t.name}:${t.value}`).join(",") }
         : undefined,
+      attachments: input.attachments?.map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        contentType: a.contentType,
+      })),
     });
 
     return { id: info.messageId ?? null, ok: true };
@@ -194,18 +220,67 @@ function logOnly(input: SendEmailInput): SendEmailResult {
   return { id: "dev-log", ok: true };
 }
 
+/**
+ * Renderiza o template JÁ com a marca da imobiliária. Ponto ÚNICO de injeção:
+ * nenhum dos 13 templates nem dos call-sites precisa saber de branding — quem
+ * tem `orgId` em escopo passa, e o e-mail sai assinado pela imobiliária em vez
+ * de "Contractmaker". Sem `orgId` (reset de senha, OTP), vale a marca da
+ * plataforma.
+ *
+ * O render acontece AQUI (e não dentro de cada provider) porque a marca vive num
+ * escopo de AsyncLocalStorage: renderizando dentro do escopo, os dois providers
+ * recebem HTML pronto e ninguém depende de React Context — que nem existe no
+ * bundle `react-server` do Next.
+ *
+ * Falha de resolução nunca derruba o envio: sai com a marca da plataforma.
+ */
+async function renderWithBrand(input: SendEmailInput): Promise<SendEmailInput> {
+  if (!input.react || input.html) return input;
+
+  const [{ render }, { withEmailBrand, PLATFORM_BRAND }] = await Promise.all([
+    import("@react-email/render"),
+    import("./templates/shared"),
+  ]);
+
+  let brand = PLATFORM_BRAND;
+  if (input.orgId) {
+    try {
+      const { getOrgBrand } = await import("@/lib/tenant/branding");
+      const b = await getOrgBrand(input.orgId);
+      brand = {
+        displayName: b.displayName,
+        logoUrl: b.logoUrl,
+        primaryColor: b.primaryColor,
+        supportEmail: b.supportEmail,
+      };
+    } catch (err) {
+      console.warn("[email] falha ao resolver a marca da org %s: %s", input.orgId, err);
+    }
+  }
+
+  const element = input.react;
+  const html = await withEmailBrand(brand, () => render(element));
+  const text =
+    input.text ?? (await withEmailBrand(brand, () => render(element, { plainText: true })));
+
+  // `react` sai do input: os providers passam a receber HTML pronto (o Resend
+  // renderizaria por conta própria, FORA do escopo da marca).
+  return { ...input, react: undefined, html, text };
+}
+
 export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
   const gated = applyStagingEmailGate(input.to);
   if (gated.to.length === 0) {
     return { id: "staging-blocked", ok: true };
   }
+  const branded = await renderWithBrand(input);
   const effective: SendEmailInput = gated.redirected
     ? {
-        ...input,
+        ...branded,
         to: gated.to,
         subject: `[STAGING] ${input.subject} (originalmente: ${gated.original.join(", ")})`,
       }
-    : input;
+    : branded;
 
   const provider = process.env.EMAIL_PROVIDER ?? "resend";
 

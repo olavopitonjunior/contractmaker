@@ -23,6 +23,7 @@ import {
 } from "@/lib/forms/negotiation-summary";
 import { CertidoesTab } from "@/components/pipeline/CertidoesTab";
 import { SignaturesTab } from "@/components/pipeline/SignaturesTab";
+import { SendFormSummaryDialog } from "@/components/forms/SendFormSummaryDialog";
 import { NewtonRequestsTab } from "@/components/pipeline/NewtonRequestsTab";
 import { CommissionChargeDialog } from "@/components/pipeline/CommissionChargeDialog";
 import { CommissionChargeList } from "@/components/pipeline/CommissionChargeList";
@@ -1075,6 +1076,11 @@ export function DealDetail({ deal, newtonEnabled = false }: DealDetailProps) {
         </TabsList>
 
         <TabsContent value="dados" className="mt-4">
+          {deal.form && (
+            <div className="mb-3 flex items-center justify-end">
+              <SendFormSummaryDialog dealId={deal.id} />
+            </div>
+          )}
           {isImportedDeal && (
             <div className="mb-3 flex items-center justify-between rounded-md border border-dashed bg-muted/30 p-3">
               <div className="text-xs text-muted-foreground">

@@ -43,7 +43,11 @@ export async function POST(
     );
   }
 
-  const sent = await sendOwnerAccessEmail({ email: owner.email, orgName: org.name });
+  const sent = await sendOwnerAccessEmail({
+    email: owner.email,
+    orgName: org.name,
+    orgId: org.id,
+  });
 
   await audit(extractAuditContextFromRequest(req, org.id, session!.user!.id), {
     action: "ORG_OWNER_ACCESS_RESENT",

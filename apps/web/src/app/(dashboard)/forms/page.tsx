@@ -85,6 +85,7 @@ export default async function FormsPage() {
                   hasDeal={!!form.deal}
                   dealId={form.deal?.id}
                   title={form.title}
+                  schemaType={form.schemaType}
                 />
               </CardContent>
             </Card>

@@ -61,3 +61,63 @@ export async function getTenantBranding(
     poweredBy: b.poweredBy,
   };
 }
+
+/** Cor da casa quando o tenant não escolheu uma. */
+export const DEFAULT_BRAND_COLOR = "#0f172a";
+
+/**
+ * A marca da imobiliária como o cliente final a vê — nome, logo, cor e contato.
+ * FONTE ÚNICA: BrandingSettings (1:1 com a org). Antes disso, o branding vivia
+ * em OrgFinancialSettings, que é 1:1 com a CONTA ASAAS — uma org com duas contas
+ * tinha duas marcas, e uma org sem conta (o caso dos tenants novos) não tinha
+ * nenhuma.
+ *
+ * Os defaults são DERIVADOS de dados que já existem, não exigidos do dono: uma
+ * imobiliária recém-cadastrada nunca aparece sem nome nem sem contato, mesmo que
+ * ninguém tenha aberto a tela de identidade visual.
+ */
+export interface OrgBrand {
+  displayName: string;
+  logoUrl: string | null;
+  primaryColor: string;
+  supportEmail: string | null;
+  supportPhone: string | null;
+  poweredBy: boolean;
+}
+
+export async function getOrgBrand(orgId: string): Promise<OrgBrand> {
+  const org = await prisma.organization.findUnique({
+    where: { id: orgId },
+    select: {
+      name: true,
+      legalName: true,
+      brandingSettings: true,
+      members: {
+        where: { role: "owner" },
+        orderBy: { invitedAt: "asc" },
+        take: 1,
+        select: { user: { select: { email: true } } },
+      },
+    },
+  });
+
+  const b = org?.brandingSettings ?? null;
+  const ownerEmail = org?.members[0]?.user.email ?? null;
+
+  return {
+    // Nome FANTASIA na frente da razão social: este nome assina e-mails e a
+    // página de pagamento, onde o cliente espera "RE/MAX Ativa", não "Ativa
+    // Consultoria Imobiliaria Ltda". A razão social é o nome de contrato — mora
+    // em Organization.legalName e é usada lá.
+    displayName:
+      b?.displayName?.trim() ||
+      org?.name?.trim() ||
+      org?.legalName?.trim() ||
+      "Imobiliária",
+    logoUrl: b?.logoUrl?.trim() || null,
+    primaryColor: b?.primaryColor?.trim() || DEFAULT_BRAND_COLOR,
+    supportEmail: b?.supportEmail?.trim() || ownerEmail,
+    supportPhone: b?.supportPhone?.trim() || null,
+    poweredBy: b?.poweredBy ?? true,
+  };
+}

@@ -7,6 +7,7 @@ import { generateContractForDeal } from "@/lib/services/contract-generation";
 import { emitNotification } from "@/lib/notifications/emit";
 import { dedupConjuges } from "@/lib/forms/dedup-conjuges";
 import { dadosContratoSchema } from "@/lib/forms/validation";
+import { sendFormSummary } from "@/lib/forms/form-summary-mailer";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
@@ -275,6 +276,41 @@ export async function PATCH(
         }
       } catch (error) {
         console.error("Link form attachments to deal failed:", error);
+      }
+
+      // Auto-envio do resumo consolidado por e-mail (opt-in por org). Roda
+      // inteiramente em waitUntil pra não somar latência ao finalize; gera o
+      // PDF + baixa anexos + envia. summarySentAt protege contra re-disparo
+      // em re-finalize (o form é reabrível). Só venda (compra_venda_v1).
+      if (form.schemaType === "compra_venda_v1") {
+        waitUntil(
+          (async () => {
+            const settings = await prisma.orgFormSettings.findUnique({
+              where: { orgId: form.orgId },
+              select: {
+                autoSendSummaryOnComplete: true,
+                summaryRecipientEmail: true,
+                summaryIncludeAttachments: true,
+              },
+            });
+            const recipient = settings?.summaryRecipientEmail?.trim();
+            if (!settings?.autoSendSummaryOnComplete || !recipient) return;
+            const result = await sendFormSummary({
+              formId: form.id,
+              to: recipient,
+              includeAttachments: settings.summaryIncludeAttachments,
+              persist: true,
+            });
+            if (result.ok) {
+              await prisma.salesForm.update({
+                where: { id: form.id },
+                data: { summarySentAt: new Date() },
+              });
+            }
+          })().catch((e) =>
+            console.error("[forms/finalize] auto-send summary failed", e)
+          )
+        );
       }
 
       // Phase F.II-δ — automação "sou sócio de PJ X":

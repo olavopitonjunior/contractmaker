@@ -66,9 +66,9 @@ export const STEP_META: Record<OnboardingStepKey, StepMeta> = {
     short: "Perfil",
     title: "Perfil da imobiliária",
     eyebrow: "Identidade",
-    desc: "Nomeia a administradora nos contratos.",
+    desc: "Nomeia a sua imobiliária nos contratos.",
     blurb:
-      "Razão social, CNPJ, CRECI e endereço. É o que nomeia a administradora nas cláusulas dos contratos de locação.",
+      "Razão social, CNPJ, CRECI e endereço. A razão social nomeia a administradora nas cláusulas de locação e a intermediadora nas de venda; CNPJ e CRECI saem impressos junto.",
     icon: Building2,
   },
   templates: {
