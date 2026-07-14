@@ -13,7 +13,10 @@ export type SignerStatus =
   | "viewed"
   | "signed"
   | "refused"
-  | "removed";
+  | "removed"
+  // E-mail voltou (bounce) — endereço inválido/inexistente. Derivado do evento
+  // `tracking_notification_error` da ClickSign (só no feed REST `/events`).
+  | "email_failed";
 
 export type AuthMethod = "email" | "whatsapp" | "selfie" | "icp_brasil";
 

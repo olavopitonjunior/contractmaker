@@ -49,6 +49,17 @@ export function parseWebhookEventName(payload: WebhookPayload): WebhookEventName
   return KNOWN_EVENTS.includes(name) ? name : null;
 }
 
+/**
+ * Nome CRU do evento (mesmo os que não tratamos, ex.:
+ * `tracking_notification_error` de bounce de e-mail). Usado só pra registrar
+ * no `EnvelopeEvent` — antes eventos desconhecidos eram descartados sem log,
+ * o que escondia sinais como falha de entrega. NÃO dispara mutação.
+ */
+export function getRawEventName(payload: WebhookPayload): string | null {
+  const name = payload?.event?.name;
+  return name ? String(name) : null;
+}
+
 export function getEnvelopeIdFromPayload(payload: WebhookPayload): string | null {
   // v3 publica eventos por envelope; o id pode vir em event.data.envelope_id
   // ou no objeto envelope dependendo da versão.

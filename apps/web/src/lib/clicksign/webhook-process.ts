@@ -12,6 +12,7 @@ import { audit } from "@/lib/security/audit";
 import {
   getDocumentKeyFromPayload,
   getEnvelopeIdFromPayload,
+  getRawEventName,
   getSignedDocumentUrlFromPayload,
   getSignerEmailFromPayload,
   parseWebhookEventName,
@@ -45,9 +46,15 @@ export async function processClickSignWebhookPayload(
   opts?: { orgId?: string }
 ): Promise<ProcessResult> {
   const eventName = parseWebhookEventName(payload);
+  const rawEventName = getRawEventName(payload);
   const clicksignEnvelopeId = getEnvelopeIdFromPayload(payload);
   const documentKey = getDocumentKeyFromPayload(payload);
-  if (!eventName || (!clicksignEnvelopeId && !documentKey)) {
+  // Basta um nome (mesmo desconhecido) + uma âncora do envelope. Evento
+  // desconhecido NÃO é mais descartado: resolvemos o envelope e registramos no
+  // EnvelopeEvent — só não dispara mutação. Antes, um evento como
+  // `tracking_notification_error` (bounce de e-mail) sumia sem deixar rastro, e
+  // o operador não tinha como saber que o e-mail do signatário voltou.
+  if (!rawEventName || (!clicksignEnvelopeId && !documentKey)) {
     return { ok: true, ignored: true };
   }
 
@@ -74,14 +81,22 @@ export async function processClickSignWebhookPayload(
       result: "SUCCESS",
       resourceType: "Envelope",
       resource: envelope.id,
-      metadata: { eventName, envelopeId: envelope.id, clicksignEnvelopeId, documentKey },
+      metadata: {
+        eventName: rawEventName,
+        handled: Boolean(eventName),
+        envelopeId: envelope.id,
+        clicksignEnvelopeId,
+        documentKey,
+      },
     }
   ).catch(() => {});
 
+  // Registra SEMPRE — inclusive o que não tratamos (`eventName` null). O nome
+  // cru fica no EnvelopeEvent pra diagnóstico.
   await prisma.envelopeEvent.create({
     data: {
       envelopeId: envelope.id,
-      eventName,
+      eventName: rawEventName,
       payload: payload as unknown as Prisma.InputJsonValue,
       source: "webhook",
     },
@@ -158,7 +173,9 @@ export async function processClickSignWebhookPayload(
       break;
   }
 
-  return { ok: true, envelopeId: envelope.id, eventName };
+  // Devolve o nome CRU: um evento não tratado (ex.: bounce) foi registrado, e o
+  // caller precisa enxergá-lo — não um `undefined` que parece "nada aconteceu".
+  return { ok: true, envelopeId: envelope.id, eventName: rawEventName ?? undefined };
 }
 
 /** Lookup signed_file_url via /documents quando o webhook v3 não traz a URL. */
