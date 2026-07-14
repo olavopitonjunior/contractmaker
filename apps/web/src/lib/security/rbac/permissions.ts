@@ -116,6 +116,14 @@ export const PERMISSION = {
   NEWTON_REQUEST_CREATE: "newton.request.create",
   NEWTON_REQUEST_VIEW: "newton.request.view",
   NEWTON_INTENT_APPROVE: "newton.intent.approve",
+  // Propostas (vendas + locação). Primeira RBAC de pipeline do repo: o corretor
+  // (preset `sales`) enxerga só as próprias; gestor/owner enxerga todas. O par
+  // VIEW_ALL / VIEW_OWN_ONLY espelha CHARGE_VIEW_ALL / CHARGE_VIEW_OWN_DEALS_ONLY.
+  PROPOSAL_VIEW_ALL: "proposal.view.all",
+  PROPOSAL_VIEW_OWN_ONLY: "proposal.view.own_only",
+  PROPOSAL_CREATE: "proposal.create",
+  PROPOSAL_SEND: "proposal.send",
+  PROPOSAL_CONVERT: "proposal.convert",
 } as const;
 
 export type PermissionKey =
@@ -237,6 +245,13 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionKey[]> = {
     PERMISSION.NEWTON_REQUEST_VIEW,
     PERMISSION.NEWTON_INTENT_APPROVE,
   ],
+  Propostas: [
+    PERMISSION.PROPOSAL_VIEW_ALL,
+    PERMISSION.PROPOSAL_VIEW_OWN_ONLY,
+    PERMISSION.PROPOSAL_CREATE,
+    PERMISSION.PROPOSAL_SEND,
+    PERMISSION.PROPOSAL_CONVERT,
+  ],
 };
 
 export const PERMISSION_LABELS_PT: Record<PermissionKey, string> = {
@@ -333,4 +348,9 @@ export const PERMISSION_LABELS_PT: Record<PermissionKey, string> = {
   [PERMISSION.NEWTON_REQUEST_CREATE]: "Criar pedido para Newton",
   [PERMISSION.NEWTON_REQUEST_VIEW]: "Ver pedidos do Newton",
   [PERMISSION.NEWTON_INTENT_APPROVE]: "Aprovar ActionIntent do Newton (HITL)",
+  [PERMISSION.PROPOSAL_VIEW_ALL]: "Ver todas as propostas",
+  [PERMISSION.PROPOSAL_VIEW_OWN_ONLY]: "Ver apenas as próprias propostas",
+  [PERMISSION.PROPOSAL_CREATE]: "Criar proposta",
+  [PERMISSION.PROPOSAL_SEND]: "Enviar proposta para assinatura",
+  [PERMISSION.PROPOSAL_CONVERT]: "Converter proposta em negócio",
 };

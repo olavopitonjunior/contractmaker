@@ -68,3 +68,46 @@ export function canAccessCharge(params: {
 
   return false;
 }
+
+/**
+ * Checa se o user pode acessar UMA proposta específica.
+ * VIEW_ALL (gestor/owner/admin/viewer) → qualquer uma da org.
+ * VIEW_OWN_ONLY (corretor) → só as que ele criou.
+ *
+ * O `orgId` é responsabilidade do caller (o scopeWhere abaixo já injeta).
+ */
+export function canAccessProposal(params: {
+  effective: EffectivePermissions;
+  ownerUserId: string; // Proposal.userId (quem criou)
+}): boolean {
+  const { effective, ownerUserId } = params;
+  if (can(effective, PERMISSION.PROPOSAL_VIEW_ALL)) return true;
+  if (can(effective, PERMISSION.PROPOSAL_VIEW_OWN_ONLY)) {
+    return effective.userId === ownerUserId;
+  }
+  return false;
+}
+
+/**
+ * Cláusula `where` de escopo de proposta — DEVE ser espalhada no `where` de
+ * TODA query de proposta (lista, detalhe, PATCH, preview, convert, duplicate,
+ * export CSV, KPIs). Nunca filtrar pós-fetch: é o pós-fetch que gera o
+ * esquecimento e vira IDOR.
+ *
+ * `null` = sem acesso a proposta nenhuma (nem VIEW_ALL nem VIEW_OWN_ONLY) — o
+ * caller deve tratar como 403/lista vazia.
+ *
+ * Uso: `prisma.proposal.findMany({ where: { ...scope, status: "enviada" } })`.
+ */
+export function proposalScopeWhere(
+  effective: EffectivePermissions | null
+): { orgId: string } | { orgId: string; userId: string } | null {
+  if (!effective) return null;
+  if (can(effective, PERMISSION.PROPOSAL_VIEW_ALL)) {
+    return { orgId: effective.orgId };
+  }
+  if (can(effective, PERMISSION.PROPOSAL_VIEW_OWN_ONLY)) {
+    return { orgId: effective.orgId, userId: effective.userId };
+  }
+  return null;
+}

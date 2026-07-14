@@ -40,6 +40,10 @@ export const HIGH_RISK_ACTIONS = [
   // INSPECTION_SCHEDULE entra em HITL quando há conflito de agenda detectado.
   "EXPENSE_CREATE_FROM_OCR",
   "INSPECTION_SCHEDULE",
+  // Propostas: enviar gasta orçamento ClickSign; converter cria um Deal
+  // (mutação estrutural). Via Bearer (Max), ambos exigem aprovação humana.
+  "PROPOSAL_SEND",
+  "PROPOSAL_CONVERT",
 ] as const;
 
 export type IntentAction = (typeof HIGH_RISK_ACTIONS)[number];
