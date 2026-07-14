@@ -321,7 +321,7 @@ async function createEnvelopeFromBuffer(input: {
         {
           envelopeId: clicksignEnvelopeId,
           name: localSigner.name,
-          email: localSigner.email,
+          email: localSigner.email ?? undefined,
           documentation: localSigner.documentation ?? undefined,
           phoneNumber: localSigner.phone ?? undefined,
           hasDocumentation: Boolean(localSigner.documentation),

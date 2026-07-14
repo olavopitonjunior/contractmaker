@@ -115,6 +115,9 @@ export async function getDealSigningStates(
   // findMany retorna múltiplos envelopes por deal se houver — só guarda o
   // primeiro (mais recente, graças ao orderBy).
   for (const e of envelopes) {
+    // `dealId` é nullable desde as Propostas. O `where` acima já filtra por
+    // `dealId: { in: dealIds }`, então aqui nunca é null — o guard é o narrowing.
+    if (!e.dealId) continue;
     if (map.get(e.dealId)?.hasSignedContract) continue;
     map.set(e.dealId, {
       hasSignedContract: true,

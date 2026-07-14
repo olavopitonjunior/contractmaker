@@ -64,7 +64,8 @@ export async function addDocument(
 interface AddSignerInput {
   envelopeId: string;
   name: string;
-  email: string;
+  /** Opcional: signatário notificado só por WhatsApp não tem e-mail. */
+  email?: string;
   documentation?: string;
   phoneNumber?: string;
   hasDocumentation?: boolean;
@@ -93,10 +94,12 @@ interface AddSignerInput {
 export async function addSigner(input: AddSignerInput, creds?: ClicksignCreds) {
   const attributes: Record<string, unknown> = {
     name: input.name,
-    email: input.email,
     has_documentation: input.hasDocumentation ?? Boolean(input.documentation),
     refusable: input.refusable ?? true,
   };
+  // Omitido quando ausente (signatário só-WhatsApp). Mandar `email: null` gera
+  // 422; o certo é não mandar a chave.
+  if (input.email) attributes.email = input.email;
   if (input.documentation) {
     const digits = input.documentation.replace(/\D/g, "");
     if (digits.length === 14) {

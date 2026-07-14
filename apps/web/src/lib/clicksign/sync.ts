@@ -74,7 +74,11 @@ export async function syncEnvelopeState(
     const byKey = local.clicksignId
       ? stateBySigner.get(local.clicksignId)
       : null;
-    const byEmail = stateByEmail.get(local.email.toLowerCase());
+    // `email` é nullable (signatário só-WhatsApp). Sem e-mail, só a `key` casa —
+    // que é o caminho correto de qualquer forma.
+    const byEmail = local.email
+      ? stateByEmail.get(local.email.toLowerCase())
+      : null;
     const remote = byKey ?? byEmail;
     if (!remote) continue;
 
