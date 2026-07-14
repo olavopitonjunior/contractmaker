@@ -2,6 +2,13 @@
 -- e preferências de assinatura por org. Idempotente: IF NOT EXISTS pra
 -- sobreviver a re-run em prod/staging.
 
+-- A migration órfã 20260527140000_clicksign_account (removida do repo) criou uma
+-- ClickSignAccount ANTIGA de white-label (mode/whiteLabelId/apiKeyCiphertext/
+-- hmacSecret*) que ficou sem model no schema, sem referência no código e com 0
+-- linhas em prod. Este design (per-org token + webhook slug) a SUBSTITUI, então
+-- dropamos a tabela órfã antes de recriar no formato novo.
+DROP TABLE IF EXISTS "ClickSignAccount";
+
 -- ClickSignAccount: uma conta ClickSign por org (token/webhook criptografados).
 CREATE TABLE IF NOT EXISTS "ClickSignAccount" (
     "id" TEXT NOT NULL,
