@@ -95,6 +95,11 @@ export function SendAttachmentEnvelopeDialog({
   const [signers, setSigners] = useState<SignerDraft[]>([]);
   const [orderEnabled, setOrderEnabled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [sigConfig, setSigConfig] = useState<{
+    configured: boolean;
+    defaultAuthMethod: string;
+    allowedAuthMethods: string[];
+  } | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -107,6 +112,27 @@ export function SendAttachmentEnvelopeDialog({
       setAttachmentId(pdfAttachments[0].id);
     }
   }, [open, pdfAttachments, attachmentId, preselectAttachmentId]);
+
+  useEffect(() => {
+    if (!open) return;
+    fetch("/api/signatures/config")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((cfg) => {
+        if (cfg) {
+          setSigConfig(cfg);
+          if (
+            Array.isArray(cfg.allowedAuthMethods) &&
+            !cfg.allowedAuthMethods.includes(authMethod)
+          ) {
+            setAuthMethod(
+              (cfg.defaultAuthMethod || cfg.allowedAuthMethods[0] || "email") as typeof authMethod
+            );
+          }
+        }
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   function updateSigner(id: string, patch: Partial<SignerDraft>) {
     setSigners((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
@@ -184,7 +210,11 @@ export function SendAttachmentEnvelopeDialog({
       });
       const data = await res.json();
       if (!res.ok) {
-        if (res.status === 422 && data.missing) {
+        if (res.status === 409 && data.code === "CLICKSIGN_NOT_CONFIGURED") {
+          toast.error(
+            "Conecte a conta ClickSign da imobiliária em Configurações › Assinaturas para enviar."
+          );
+        } else if (res.status === 422 && data.missing) {
           toast.error(`${data.missing.length} signatário(s) sem e-mail válido`);
         } else if (res.status === 402) {
           toast.error(
@@ -404,7 +434,11 @@ export function SendAttachmentEnvelopeDialog({
                   { value: "whatsapp", label: "WhatsApp" },
                   { value: "selfie", label: "Selfie + RG/CNH" },
                   { value: "icp_brasil", label: "ICP-Brasil (certificado)" },
-                ]}
+                ].filter(
+                  (o) =>
+                    !sigConfig ||
+                    sigConfig.allowedAuthMethods.includes(o.value)
+                )}
               />
             </div>
             <div className="space-y-2 md:col-span-2">

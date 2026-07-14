@@ -27,20 +27,25 @@ describe("getOnboardingStatus (6 passos)", () => {
     dealCount.mockResolvedValue(0);
   });
 
-  it("org nova: 6 passos obrigatórios, nenhum feito, incompleto", async () => {
+  it("org nova: 6 passos obrigatórios + clicksign opcional, nenhum feito, incompleto", async () => {
     const s = await getOnboardingStatus("org1");
     expect(s.steps.map((x) => x.key)).toEqual([
       "google",
       "profile",
       "templates",
+      "clicksign",
       "form",
       "invite",
       "deal",
     ]);
+    // clicksign é opcional → não conta pro total obrigatório.
     expect(s.requiredTotal).toBe(6);
     expect(s.requiredDone).toBe(0);
     expect(s.complete).toBe(false);
-    expect(s.steps.every((x) => x.required)).toBe(true);
+    expect(s.steps.find((x) => x.key === "clicksign")?.required).toBe(false);
+    expect(
+      s.steps.filter((x) => x.key !== "clicksign").every((x) => x.required)
+    ).toBe(true);
   });
 
   it("tudo configurado → 6/6 e complete", async () => {

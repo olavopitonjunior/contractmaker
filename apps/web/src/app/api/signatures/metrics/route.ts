@@ -5,6 +5,7 @@ import {
   getMonthlySpendCents,
 } from "@/lib/clicksign/executor";
 import { getMonthlyBudgetCents } from "@/lib/clicksign/costs";
+import { getSignatureSettings } from "@/lib/clicksign/account";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -99,6 +100,7 @@ export async function GET(req: NextRequest) {
     }),
     getMonthlySpendCents(org.id),
   ]);
+  const sigSettings = await getSignatureSettings(org.id);
 
   const byStatus: Record<string, number> = {};
   let spendCents = 0;
@@ -146,7 +148,7 @@ export async function GET(req: NextRequest) {
     range: { from: from.toISOString(), to: to.toISOString() },
     spendCents,
     spendMonthCents,
-    budgetCents: getMonthlyBudgetCents(),
+    budgetCents: getMonthlyBudgetCents(sigSettings.monthlyBudgetCents),
     totalEnvelopes: envelopes.length,
     byStatus,
     closeRate,

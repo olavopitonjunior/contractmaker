@@ -29,7 +29,9 @@ function maskCpf(raw: string): string {
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-export function DefaultWitnessesClient() {
+export function DefaultWitnessesClient({
+  embedded = false,
+}: { embedded?: boolean } = {}) {
   const [witnesses, setWitnesses] = useState<Witness[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -117,22 +119,30 @@ export function DefaultWitnessesClient() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <Button variant="ghost" size="sm" asChild className="mb-2 -ml-2">
-          <Link href="/settings">
-            <ArrowLeft className="h-4 w-4 mr-1" />
-            Configurações
-          </Link>
-        </Button>
-        <h1 className="font-display tracking-tight text-2xl font-semibold">
-          Testemunhas padrão
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
+      {embedded ? (
+        <p className="text-sm text-muted-foreground">
           Cadastre as testemunhas que assinam os contratos por padrão. As
-          marcadas como <strong>padrão</strong> já vêm pré-selecionadas na popup
-          de envio para assinatura.
+          marcadas como <strong>padrão</strong> são incluídas automaticamente em
+          todos os envios para assinatura.
         </p>
-      </div>
+      ) : (
+        <div>
+          <Button variant="ghost" size="sm" asChild className="mb-2 -ml-2">
+            <Link href="/settings">
+              <ArrowLeft className="h-4 w-4 mr-1" />
+              Configurações
+            </Link>
+          </Button>
+          <h1 className="font-display tracking-tight text-2xl font-semibold">
+            Testemunhas padrão
+          </h1>
+          <p className="text-sm text-muted-foreground mt-1">
+            Cadastre as testemunhas que assinam os contratos por padrão. As
+            marcadas como <strong>padrão</strong> já vêm pré-selecionadas na popup
+            de envio para assinatura.
+          </p>
+        </div>
+      )}
 
       <Card>
         <CardHeader>

@@ -8,6 +8,10 @@ import {
   MissingEmailsError,
 } from "@/lib/clicksign/executor";
 import { ClicksignError } from "@/lib/clicksign/client";
+import {
+  ClickSignNotConfiguredError,
+  AuthMethodNotAllowedError,
+} from "@/lib/clicksign/account";
 import type { ClicksignRole } from "@/lib/clicksign/roles";
 
 export const runtime = "nodejs";
@@ -136,6 +140,15 @@ export async function POST(
     });
     return NextResponse.json({ envelope }, { status: 201 });
   } catch (err) {
+    if (err instanceof ClickSignNotConfiguredError) {
+      return NextResponse.json(
+        { error: err.message, code: "CLICKSIGN_NOT_CONFIGURED" },
+        { status: 409 }
+      );
+    }
+    if (err instanceof AuthMethodNotAllowedError) {
+      return NextResponse.json({ error: err.message }, { status: 422 });
+    }
     if (err instanceof MissingEmailsError) {
       return NextResponse.json(
         { error: "Partes sem e-mail", missing: err.missing },

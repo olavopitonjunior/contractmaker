@@ -234,6 +234,19 @@ interface DefaultWitness {
   mobilePhone: string | null;
 }
 
+const AUTH_METHOD_LABELS: Record<string, string> = {
+  email: "E-mail (token)",
+  whatsapp: "WhatsApp",
+  selfie: "Selfie + documento",
+  icp_brasil: "ICP-Brasil (certificado)",
+};
+
+interface SignatureConfig {
+  configured: boolean;
+  defaultAuthMethod: string;
+  allowedAuthMethods: string[];
+}
+
 export function SendLeaseEnvelopeDialog({
   open,
   onOpenChange,
@@ -248,6 +261,8 @@ export function SendLeaseEnvelopeDialog({
   const [orderEnabled, setOrderEnabled] = useState(false);
   const [step, setStep] = useState<"edit" | "review">("edit");
   const [rows, setRows] = useState<EditableRow[]>([]);
+  const [sigConfig, setSigConfig] = useState<SignatureConfig | null>(null);
+  const [authMethod, setAuthMethod] = useState("email");
 
   useEffect(() => {
     if (!open) return;
@@ -255,6 +270,16 @@ export function SendLeaseEnvelopeDialog({
     setSubmitting(false);
     setOrderEnabled(false);
     setStep("edit");
+
+    fetch("/api/signatures/config")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((cfg: SignatureConfig | null) => {
+        if (cfg) {
+          setSigConfig(cfg);
+          setAuthMethod(cfg.defaultAuthMethod || "email");
+        }
+      })
+      .catch(() => {});
 
     let cancelled = false;
     (async () => {
@@ -375,10 +400,16 @@ export function SendLeaseEnvelopeDialog({
       const res = await fetch(`/api/contracts/${contractId}/envelopes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ authMethod: "email", signers }),
+        body: JSON.stringify({ authMethod, signers }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (res.status === 409 && body.code === "CLICKSIGN_NOT_CONFIGURED") {
+          toast.error(
+            "Conecte a conta ClickSign da imobiliária em Configurações › Assinaturas para enviar."
+          );
+          return;
+        }
         if (res.status === 422 && Array.isArray(body.missing)) {
           toast.error(`Faltam e-mails em ${body.missing.length} parte(s).`);
           setStep("edit");
@@ -411,7 +442,7 @@ export function SendLeaseEnvelopeDialog({
           </DialogTitle>
           <DialogDescription>
             {step === "edit"
-              ? "Confira os signatários, dados e o papel de cada um. Autenticação por token de e-mail."
+              ? "Confira os signatários, dados e o papel de cada um."
               : "Confira a lista final de signatários antes de enviar o envelope ClickSign."}
           </DialogDescription>
         </DialogHeader>
@@ -438,6 +469,39 @@ export function SendLeaseEnvelopeDialog({
               <Plus className="h-3.5 w-3.5 mr-1.5" />
               Adicionar assinante avulso
             </Button>
+
+            {sigConfig && !sigConfig.configured && (
+              <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
+                <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                <span>
+                  A conta ClickSign da imobiliária ainda não está conectada.{" "}
+                  <a
+                    href="/settings/signatures?tab=conexao"
+                    className="font-medium underline"
+                  >
+                    Conectar agora
+                  </a>{" "}
+                  para poder enviar.
+                </span>
+              </div>
+            )}
+
+            {sigConfig && sigConfig.allowedAuthMethods.length > 1 && (
+              <div className="flex items-center justify-between gap-2 rounded-md border bg-muted/30 px-3 py-2">
+                <span className="text-sm font-medium">Tipo de assinatura</span>
+                <select
+                  value={authMethod}
+                  onChange={(e) => setAuthMethod(e.target.value)}
+                  className="rounded-md border bg-background px-2 py-1 text-sm"
+                >
+                  {sigConfig.allowedAuthMethods.map((m) => (
+                    <option key={m} value={m}>
+                      {AUTH_METHOD_LABELS[m] ?? m}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <label className="flex items-center gap-2 text-sm cursor-pointer rounded-md border bg-muted/30 px-3 py-2">
               <input
@@ -493,7 +557,13 @@ export function SendLeaseEnvelopeDialog({
               >
                 Cancelar
               </Button>
-              <Button onClick={handleContinue} disabled={validationError !== null}>
+              <Button
+                onClick={handleContinue}
+                disabled={
+                  validationError !== null ||
+                  (sigConfig !== null && !sigConfig.configured)
+                }
+              >
                 Revisar signatários
               </Button>
             </>

@@ -120,7 +120,7 @@ function presetRange(preset: RangePreset): { from: Date; to: Date } {
   };
 }
 
-export function SignaturesClient() {
+export function SignaturesClient({ embedded = false }: { embedded?: boolean } = {}) {
   const [preset, setPreset] = useState<RangePreset>("30d");
   const [data, setData] = useState<MetricsResponse | null>(null);
   const [loading, setLoading] = useState(false);
@@ -162,23 +162,32 @@ export function SignaturesClient() {
   return (
     <div className="space-y-6">
       <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div>
-          <Button variant="ghost" size="sm" asChild className="mb-2">
-            <Link href="/settings">
-              <ArrowLeft className="h-4 w-4 mr-1" />
-              Configurações
-            </Link>
-          </Button>
-          <h1 className="font-display tracking-tight text-2xl font-semibold flex items-center gap-2">
-            <FileSignature className="h-6 w-6 text-primary" />
-            Assinaturas eletrônicas
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-            Visão consolidada dos envelopes Clicksign emitidos pela
-            organização: gasto vs orçamento mensal, taxa de conclusão,
-            latência e histórico de eventos.
-          </p>
-        </div>
+        {embedded ? (
+          <div>
+            <p className="text-sm text-muted-foreground max-w-2xl">
+              Gasto vs orçamento mensal, taxa de conclusão, latência e histórico
+              de eventos dos envelopes ClickSign.
+            </p>
+          </div>
+        ) : (
+          <div>
+            <Button variant="ghost" size="sm" asChild className="mb-2">
+              <Link href="/settings">
+                <ArrowLeft className="h-4 w-4 mr-1" />
+                Configurações
+              </Link>
+            </Button>
+            <h1 className="font-display tracking-tight text-2xl font-semibold flex items-center gap-2">
+              <FileSignature className="h-6 w-6 text-primary" />
+              Assinaturas eletrônicas
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
+              Visão consolidada dos envelopes Clicksign emitidos pela
+              organização: gasto vs orçamento mensal, taxa de conclusão,
+              latência e histórico de eventos.
+            </p>
+          </div>
+        )}
         <Button
           size="sm"
           variant="outline"

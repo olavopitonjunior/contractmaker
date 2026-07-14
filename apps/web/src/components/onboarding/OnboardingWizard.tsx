@@ -23,6 +23,7 @@ import {
   type OnboardingStepKey,
 } from "@/lib/onboarding/steps";
 import { GoogleDriveCard } from "@/components/settings/GoogleDriveCard";
+import { ClickSignConnectCard } from "@/components/settings/ClickSignConnectCard";
 import { AgencyProfileForm, type AgencyProfile } from "./AgencyProfileForm";
 
 interface GoogleDriveState {
@@ -35,6 +36,8 @@ interface GoogleDriveState {
 // Info-banner por passo (o "porquê" que reforça a ação).
 const STEP_NOTE: Partial<Record<OnboardingStepKey, string>> = {
   templates: "Precisa do Google conectado — os modelos ficam no Drive da imobiliária.",
+  clicksign:
+    "Opcional para concluir, mas sem conectar você não consegue enviar contratos para assinatura.",
   deal: "É o seu primeiro contrato saindo. Tudo que você configurou converge aqui.",
 };
 
@@ -275,7 +278,25 @@ export function OnboardingWizard({
                 <AgencyProfileForm initial={profile} onSaved={refresh} />
               )}
 
-              {active !== "google" && active !== "profile" && (
+              {active === "clicksign" && (
+                <div className="space-y-4">
+                  {note && (
+                    <div className="flex gap-2.5 rounded-xl border border-info/30 bg-info/10 p-3.5 text-sm">
+                      <Info className="mt-0.5 h-4 w-4 flex-none text-info" />
+                      <span>{note}</span>
+                    </div>
+                  )}
+                  <ClickSignConnectCard />
+                  <Button variant="outline" onClick={refresh} disabled={refreshing}>
+                    <RefreshCw className={cn("mr-1.5 h-4 w-4", refreshing && "animate-spin")} />
+                    Atualizar
+                  </Button>
+                </div>
+              )}
+
+              {active !== "google" &&
+                active !== "profile" &&
+                active !== "clicksign" && (
                 <div className="space-y-4">
                   {note && (
                     <div className="flex gap-2.5 rounded-xl border border-info/30 bg-info/10 p-3.5 text-sm">

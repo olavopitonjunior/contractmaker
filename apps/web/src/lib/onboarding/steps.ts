@@ -2,6 +2,7 @@ import {
   Cloud,
   Building2,
   FileText,
+  FileSignature,
   ListChecks,
   Users,
   Briefcase,
@@ -17,6 +18,7 @@ export type OnboardingStepKey =
   | "google"
   | "profile"
   | "templates"
+  | "clicksign"
   | "form"
   | "invite"
   | "deal";
@@ -25,6 +27,7 @@ export const STEP_ORDER: OnboardingStepKey[] = [
   "google",
   "profile",
   "templates",
+  "clicksign",
   "form",
   "invite",
   "deal",
@@ -79,6 +82,17 @@ export const STEP_META: Record<OnboardingStepKey, StepMeta> = {
     icon: FileText,
     cta: "Abrir modelos",
   },
+  clicksign: {
+    key: "clicksign",
+    short: "Assinaturas",
+    title: "Conectar a ClickSign",
+    eyebrow: "Assinatura digital",
+    desc: "Assine em nome da sua imobiliária.",
+    blurb:
+      "Conecte a conta ClickSign da imobiliária para enviar contratos e documentos para assinatura — sem isso, o envio para assinatura fica bloqueado.",
+    icon: FileSignature,
+    cta: "Conectar ClickSign",
+  },
   form: {
     key: "form",
     short: "Formulário",
@@ -130,6 +144,8 @@ export function stepUrl(
       return "/settings/perfil";
     case "templates":
       return "/templates";
+    case "clicksign":
+      return "/settings/signatures?tab=conexao";
     case "form":
       return "/settings/formulario";
     case "invite":
