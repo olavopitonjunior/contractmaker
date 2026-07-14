@@ -51,6 +51,7 @@ export default async function PublicFormPage({
       requiredFieldsByStep={requiredFieldsByStep}
       prefilled={isPrefilled}
       proposalAttachmentUrl={proposalAttachmentUrl}
+      locked={Boolean(form.lockedAt)}
     />
   );
 }

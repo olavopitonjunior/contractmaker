@@ -31,6 +31,8 @@ export async function GET(
     dataJson: form.dataJson,
     status: form.status,
     updatedAt: form.updatedAt,
+    // Travamento: quando setado, o cliente público renderiza somente-leitura.
+    lockedAt: form.lockedAt ? form.lockedAt.toISOString() : null,
   });
 }
 
@@ -43,10 +45,24 @@ export async function PATCH(
 
   const form = await prisma.salesForm.findUnique({
     where: { token: params.token },
+    include: {
+      org: { select: { formSettings: { select: { autoLockFormOnFinalize: true } } } },
+    },
   });
 
   if (!form) {
     return NextResponse.json({ error: "Form not found" }, { status: 404 });
+  }
+
+  // Guard de travamento: form travado não aceita mais alterações por quem tiver
+  // o link (espelha o padrão "Contract aprovado = imutável" em
+  // contracts/[id]/route.ts). Lê o estado ANTERIOR — o auto-lock que pode
+  // acontecer no mesmo finalize (abaixo) não se auto-bloqueia.
+  if (form.lockedAt) {
+    return NextResponse.json(
+      { error: "Formulário travado — não aceita mais alterações" },
+      { status: 403 },
+    );
   }
 
   const currentData = (form.dataJson as Record<string, unknown>) || {};
@@ -111,6 +127,12 @@ export async function PATCH(
     }
   }
 
+  // Auto-lock no finalize: se a org optou por travar o formulário quando o
+  // cliente finaliza, congela os dados no mesmo update (o link continua
+  // acessível, mas somente-leitura). Default false preserva o reabrível.
+  const autoLockOnFinalize =
+    isFinalizing && form.org.formSettings?.autoLockFormOnFinalize === true;
+
   const updated = await prisma.salesForm.update({
     where: { token: params.token },
     data: {
@@ -118,6 +140,7 @@ export async function PATCH(
       title: body.title ?? form.title,
       status: newStatus,
       ...(isFinalizing ? { completedAt: new Date() } : {}),
+      ...(autoLockOnFinalize ? { lockedAt: new Date() } : {}),
     },
   });
 

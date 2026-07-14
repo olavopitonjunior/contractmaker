@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
 import { processOcrQueue } from "@/lib/ai/ocr-worker";
-import { resolveFormScope } from "@/lib/forms/resolve-form-scope";
+import { resolveFormScope, formLockedResponse } from "@/lib/forms/resolve-form-scope";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -25,6 +25,8 @@ export async function POST(
   if (!scope) {
     return NextResponse.json({ error: "Form not found" }, { status: 404 });
   }
+  const locked = formLockedResponse(scope);
+  if (locked) return locked;
   const form = { id: scope.formId };
 
   const attachment = await prisma.formAttachment.findUnique({

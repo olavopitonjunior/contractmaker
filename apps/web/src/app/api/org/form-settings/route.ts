@@ -32,6 +32,7 @@ const customRequiredPathItemSchema = z.object({
 const formSettingsPatchSchema = z.object({
   preset: z.enum(PRESETS).optional(),
   customRequiredPaths: z.array(customRequiredPathItemSchema).max(200).optional(),
+  autoLockFormOnFinalize: z.boolean().optional(),
 });
 
 /**
@@ -96,6 +97,9 @@ export async function PATCH(req: NextRequest) {
       ...(parsed.data.preset !== undefined ? { preset: parsed.data.preset } : {}),
       ...(parsed.data.customRequiredPaths !== undefined
         ? { customRequiredPaths: parsed.data.customRequiredPaths }
+        : {}),
+      ...(parsed.data.autoLockFormOnFinalize !== undefined
+        ? { autoLockFormOnFinalize: parsed.data.autoLockFormOnFinalize }
         : {}),
     },
   });

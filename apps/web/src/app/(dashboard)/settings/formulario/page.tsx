@@ -44,6 +44,7 @@ export default async function FormularioSettingsPage() {
         initial={{
           preset: settings.preset,
           customRequiredPaths: settings.customRequiredPaths as unknown,
+          autoLockFormOnFinalize: settings.autoLockFormOnFinalize,
         }}
       />
     </div>

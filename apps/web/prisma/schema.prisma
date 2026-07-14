@@ -894,6 +894,13 @@ model SalesForm {
   // Setado quando status transiciona pra "completo"|"vinculado". Marco SLA
   // do funil — diferente de updatedAt (qualquer auto-save bumpa updatedAt).
   completedAt DateTime?
+  // Travamento (lock) do formulário público: quando setado, os endpoints de
+  // escrita (PATCH do token principal, PATCH do subtoken, uploads de anexo)
+  // retornam 403 e as páginas públicas renderizam somente-leitura. Congela as
+  // informações num marco (manual pelo corretor ou auto no finalize se
+  // Organization.autoLockFormOnFinalize). Destravar = voltar a null.
+  lockedAt    DateTime?
+  lockedById  String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -2095,6 +2102,11 @@ model OrgFormSettings {
   orgId               String   @unique
   preset              String   @default("legado") // legado | minimo | padrao | completo | custom
   customRequiredPaths Json     @default("[]")
+  // Segurança do link do formulário: quando true, o SalesForm trava sozinho
+  // (SalesForm.lockedAt) no momento em que o cliente finaliza — congela os
+  // dados contra edição posterior por quem ainda tiver o link. Default false
+  // preserva o comportamento atual (form reabrível pós-finalize).
+  autoLockFormOnFinalize Boolean @default(false)
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 

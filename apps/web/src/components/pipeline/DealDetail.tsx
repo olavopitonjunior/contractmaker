@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot, Pencil, Check, CheckCircle2, X, Archive, ArchiveRestore } from "lucide-react";
+import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot, Pencil, Check, CheckCircle2, X, Archive, ArchiveRestore, Lock, LockOpen, ShieldAlert } from "lucide-react";
 import { SendAttachmentEnvelopeDialog } from "@/components/pipeline/SendAttachmentEnvelopeDialog";
 import { AddDocumentsCard } from "@/components/pipeline/AddDocumentsCard";
 import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
@@ -38,6 +38,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
+  AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 
 type Parte = {
@@ -187,6 +188,7 @@ interface DealDetailProps {
       status: string;
       createdAt: Date;
       completedAt: Date | null;
+      lockedAt: Date | null;
       attachments: {
         id: string;
         filename: string;
@@ -240,6 +242,13 @@ export function DealDetail({ deal, newtonEnabled = false }: DealDetailProps) {
   const initialTab = tabParam && validTabs.has(tabParam) ? tabParam : "dados";
   const [activeTab, setActiveTab] = useState(initialTab);
   const [generating, setGenerating] = useState(false);
+  // Segurança do link do formulário: token principal em estado (rotação gera
+  // um novo) + travamento (congela edição pública).
+  const [formToken, setFormToken] = useState(deal.form?.token ?? null);
+  const [formLockedAt, setFormLockedAt] = useState<string | null>(
+    deal.form?.lockedAt ? deal.form.lockedAt.toISOString() : null,
+  );
+  const [linkBusy, setLinkBusy] = useState<"lock" | "rotate" | null>(null);
   const [confirmDuplicateOpen, setConfirmDuplicateOpen] = useState(false);
   const [chargeDialogOpen, setChargeDialogOpen] = useState(false);
   const [chargeDialogMode, setChargeDialogMode] = useState<
@@ -420,10 +429,55 @@ export function DealDetail({ deal, newtonEnabled = false }: DealDetailProps) {
   }
 
   function handleCopyFormLink() {
-    if (!deal.form) return;
-    const url = `${window.location.origin}/f/${deal.form.token}`;
+    if (!formToken) return;
+    const url = `${window.location.origin}/f/${formToken}`;
     navigator.clipboard.writeText(url);
     toast.success("Link do formulário copiado!");
+  }
+
+  async function handleToggleFormLock() {
+    if (!formToken) return;
+    const next = !formLockedAt;
+    setLinkBusy("lock");
+    try {
+      const res = await fetch(`/api/forms/${formToken}/lock`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ locked: next }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data?.error || "Falha ao atualizar travamento");
+        return;
+      }
+      setFormLockedAt(data.lockedAt ?? null);
+      toast.success(next ? "Formulário travado" : "Formulário destravado");
+    } catch {
+      toast.error("Erro de rede");
+    } finally {
+      setLinkBusy(null);
+    }
+  }
+
+  async function handleRotateFormLinks() {
+    if (!formToken) return;
+    setLinkBusy("rotate");
+    try {
+      const res = await fetch(`/api/forms/${formToken}/rotate-links`, {
+        method: "POST",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data?.error || "Falha ao trocar os links");
+        return;
+      }
+      setFormToken(data.token);
+      toast.success("Links trocados — os anteriores foram desativados");
+    } catch {
+      toast.error("Erro de rede");
+    } finally {
+      setLinkBusy(null);
+    }
   }
 
   async function handleDelete() {
@@ -664,11 +718,17 @@ export function DealDetail({ deal, newtonEnabled = false }: DealDetailProps) {
           </div>
         </div>
         <div className="w-full sm:w-auto sm:ml-auto flex gap-2 flex-wrap">
-          {deal.form && (
+          {deal.form && formToken && (
             <>
+              {formLockedAt && (
+                <Badge variant="secondary" className="gap-1 self-center">
+                  <Lock className="h-3 w-3" />
+                  Travado
+                </Badge>
+              )}
               <Button variant="outline" size="sm" asChild>
                 <a
-                  href={`/f/${deal.form.token}`}
+                  href={`/f/${formToken}`}
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -685,6 +745,62 @@ export function DealDetail({ deal, newtonEnabled = false }: DealDetailProps) {
                 <Copy className="h-4 w-4 mr-1" />
                 Copiar link
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleToggleFormLock}
+                disabled={linkBusy !== null}
+                title={
+                  formLockedAt
+                    ? "Destravar: permite editar o formulário novamente"
+                    : "Travar: congela as informações — as partes só conseguem consultar"
+                }
+              >
+                {linkBusy === "lock" ? (
+                  <RefreshCw className="h-4 w-4 mr-1 animate-spin" />
+                ) : formLockedAt ? (
+                  <LockOpen className="h-4 w-4 mr-1" />
+                ) : (
+                  <Lock className="h-4 w-4 mr-1" />
+                )}
+                {formLockedAt ? "Destravar" : "Travar"}
+              </Button>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={linkBusy !== null}
+                    title="Trocar o link (revoga o acesso de quem já tem o link atual, mantém os dados)"
+                  >
+                    {linkBusy === "rotate" ? (
+                      <RefreshCw className="h-4 w-4 mr-1 animate-spin" />
+                    ) : (
+                      <RefreshCw className="h-4 w-4 mr-1" />
+                    )}
+                    Trocar link
+                  </Button>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle className="flex items-center gap-2">
+                      <ShieldAlert className="h-4 w-4 text-amber-500" />
+                      Trocar todos os links?
+                    </AlertDialogTitle>
+                    <AlertDialogDescription>
+                      O link do formulário e os links de cada parte atuais vão
+                      parar de funcionar imediatamente. Quem já recebeu algum
+                      deles perde o acesso. Os dados preenchidos são mantidos.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction onClick={handleRotateFormLinks}>
+                      Trocar links
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </>
           )}
           {isImportedDeal && latestImportedContractId ? (
