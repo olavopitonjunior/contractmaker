@@ -13,8 +13,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Save } from "lucide-react";
+import { AlertTriangle, Save } from "lucide-react";
 import type { EnvelopeSignerRow } from "@/hooks/useEnvelopePolling";
+import { suggestEmailDomain } from "@/lib/forms/email-typo";
 
 interface EditSignerDialogProps {
   open: boolean;
@@ -142,6 +143,24 @@ export function EditSignerDialog({
               onChange={(e) => setEmail(e.target.value)}
               disabled={submitting}
             />
+            {(() => {
+              const suggestion = suggestEmailDomain(email);
+              if (!suggestion) return null;
+              return (
+                <p className="text-[11px] text-amber-600 flex items-center gap-1 flex-wrap">
+                  <AlertTriangle className="h-3 w-3 shrink-0" />
+                  <span>Você quis dizer</span>
+                  <button
+                    type="button"
+                    className="font-medium underline underline-offset-2 hover:text-amber-700"
+                    onClick={() => setEmail(suggestion)}
+                  >
+                    {suggestion}
+                  </button>
+                  <span>?</span>
+                </p>
+              );
+            })()}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="signer-doc">CPF/CNPJ (opcional)</Label>

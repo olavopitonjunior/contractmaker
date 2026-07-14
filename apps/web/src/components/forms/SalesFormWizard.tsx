@@ -93,6 +93,42 @@ interface SalesFormWizardProps {
 
 const FULL_STEP_INDEXES: readonly number[] = [0, 1, 2, 3, 4, 5, 6];
 
+/**
+ * Backfilla `estado_civil` em partes PF que vieram sem ele (OCR/import, ou
+ * forms salvos antes deste fix). O select de estado civil exibe "Solteiro(a)"
+ * como fallback puramente visual (`watch(...) || "Solteiro(a)"`), mas sem
+ * valor salvo o estado do RHF fica `undefined` — o que trava a validação de
+ * "campo obrigatório" no avanço (preset padrão/completo exigem estado_civil)
+ * e faz o campo nunca ser persistido no finalize. Commitamos o default pra
+ * que o estado do form bata com o que o usuário vê na tela.
+ */
+function withPartyDefaults(
+  data: Record<string, unknown>,
+): Record<string, unknown> {
+  const fillParties = (parties: unknown): unknown => {
+    if (!Array.isArray(parties)) return parties;
+    return parties.map((p) => {
+      if (!p || typeof p !== "object") return p;
+      const party = p as Record<string, unknown>;
+      if (party.tipo_pessoa === "juridica") return party;
+      const ec = party.estado_civil;
+      if (ec === undefined || ec === null || ec === "") {
+        return { ...party, estado_civil: "Solteiro(a)" };
+      }
+      return party;
+    });
+  };
+  return {
+    ...data,
+    ...(data.vendedores !== undefined
+      ? { vendedores: fillParties(data.vendedores) }
+      : {}),
+    ...(data.compradores !== undefined
+      ? { compradores: fillParties(data.compradores) }
+      : {}),
+  };
+}
+
 function SaveStatusBadge({
   status,
 }: {
@@ -464,7 +500,7 @@ export function SalesFormWizard({
   const form = useForm<DadosContratoForm>({
     defaultValues: {
       ...defaultFormValues,
-      ...(initialData as Partial<DadosContratoForm>),
+      ...(withPartyDefaults(initialData) as Partial<DadosContratoForm>),
     },
     mode: "onChange",
   });

@@ -2404,7 +2404,9 @@ model EnvelopeSigner {
   // Reservado para auth via SMS/WhatsApp (não usado no MVP email).
   phone          String?
   authMethod     String    @default("email")
-  // status: pending | notified | viewed | signed | refused | removed
+  // status: pending | notified | viewed | signed | refused | removed | email_failed
+  // email_failed = e-mail voltou (bounce); derivado do evento ClickSign
+  // `tracking_notification_error` no feed REST /events (nunca via webhook).
   status         String    @default("pending")
   notifiedAt     DateTime?
   viewedAt       DateTime?

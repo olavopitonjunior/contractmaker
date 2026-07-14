@@ -134,6 +134,7 @@ const SIGNER_STATUS_LABEL: Record<EnvelopeSignerRow["status"], string> = {
   signed: "Assinado",
   refused: "Recusou",
   removed: "Removido",
+  email_failed: "E-mail não entregue",
 };
 
 export function SignaturesTab({
@@ -749,6 +750,15 @@ function SignerRow({
           <div className="text-xs text-muted-foreground truncate">
             {signer.email}
           </div>
+          {signer.status === "email_failed" && (
+            <div className="text-[11px] text-destructive mt-0.5 flex items-center gap-1">
+              <AlertTriangle className="h-3 w-3 shrink-0" />
+              <span>
+                E-mail não entregue (endereço inválido). Corrija o endereço e
+                reenvie.
+              </span>
+            </div>
+          )}
           {timeline.length > 0 && (
             <div className="text-[11px] text-muted-foreground/80 mt-0.5">
               {timeline.join(" · ")}
@@ -761,7 +771,9 @@ function SignerRow({
           className={cn(
             "text-xs",
             signer.status === "signed" && "text-emerald-600",
-            signer.status === "refused" && "text-destructive"
+            (signer.status === "refused" ||
+              signer.status === "email_failed") &&
+              "text-destructive"
           )}
         >
           {SIGNER_STATUS_LABEL[signer.status]}
@@ -828,6 +840,8 @@ function signerStatusIcon(status: EnvelopeSignerRow["status"]) {
       return <Mail className={cn(cls, "text-amber-600")} />;
     case "removed":
       return <UserMinus className={cn(cls, "text-muted-foreground")} />;
+    case "email_failed":
+      return <AlertTriangle className={cn(cls, "text-destructive")} />;
     case "pending":
     default:
       return <Clock className={cn(cls, "text-muted-foreground")} />;

@@ -15,7 +15,14 @@ export interface EnvelopeSignerRow {
   email: string;
   documentation: string | null;
   authMethod: string;
-  status: "pending" | "notified" | "viewed" | "signed" | "refused" | "removed";
+  status:
+    | "pending"
+    | "notified"
+    | "viewed"
+    | "signed"
+    | "refused"
+    | "removed"
+    | "email_failed";
   notifiedAt: string | null;
   viewedAt: string | null;
   signedAt: string | null;
