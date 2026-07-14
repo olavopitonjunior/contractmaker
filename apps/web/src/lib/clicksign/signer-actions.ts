@@ -8,6 +8,7 @@ import {
   updateSigner,
 } from "./envelopes";
 import { ClicksignError } from "./client";
+import { resolveClickSignCreds } from "./account";
 import type { ClicksignRole } from "./roles";
 import type { AuthMethod } from "./types";
 
@@ -45,9 +46,10 @@ export async function resendSignerAction(
     return { ok: false, status: 429, error: `Aguarde ${wait} min antes de reenviar` };
   }
 
-  if (signer.envelope.clicksignId && signer.clicksignId) {
+  const creds = await resolveClickSignCreds(signer.envelope.orgId);
+  if (signer.envelope.clicksignId && signer.clicksignId && creds) {
     try {
-      await notifySigner(signer.envelope.clicksignId, signer.clicksignId);
+      await notifySigner(signer.envelope.clicksignId, signer.clicksignId, creds);
     } catch (err) {
       if (err instanceof ClicksignError) {
         return { ok: false, status: 502, error: `Clicksign: ${err.message}` };
@@ -97,16 +99,20 @@ export async function updateSignerAction(
     return { ok: false, status: 400, error: "Nenhum campo informado" };
   }
 
-  if (signer.envelope.clicksignId && signer.clicksignId) {
+  const creds = await resolveClickSignCreds(signer.envelope.orgId);
+  if (signer.envelope.clicksignId && signer.clicksignId && creds) {
     try {
-      await updateSigner({
-        envelopeId: signer.envelope.clicksignId,
-        signerId: signer.clicksignId,
-        name: updates.name,
-        email: updates.email,
-        documentation: updates.documentation,
-        phoneNumber: updates.phone,
-      });
+      await updateSigner(
+        {
+          envelopeId: signer.envelope.clicksignId,
+          signerId: signer.clicksignId,
+          name: updates.name,
+          email: updates.email,
+          documentation: updates.documentation,
+          phoneNumber: updates.phone,
+        },
+        creds
+      );
     } catch (err) {
       if (err instanceof ClicksignError) {
         return { ok: false, status: 502, error: `Clicksign: ${err.message}` };
@@ -141,9 +147,10 @@ export async function removeSignerAction(
     return { ok: false, status: 400, error: "Envelope não permite remoção neste estado" };
   }
 
-  if (signer.envelope.clicksignId && signer.clicksignId) {
+  const creds = await resolveClickSignCreds(signer.envelope.orgId);
+  if (signer.envelope.clicksignId && signer.clicksignId && creds) {
     try {
-      await removeSigner(signer.envelope.clicksignId, signer.clicksignId);
+      await removeSigner(signer.envelope.clicksignId, signer.clicksignId, creds);
     } catch (err) {
       if (err instanceof ClicksignError && err.status !== 404) {
         return { ok: false, status: 502, error: `Clicksign: ${err.message}` };
@@ -215,34 +222,44 @@ export async function addSignerToEnvelope(
     },
   });
 
-  if (envelope.clicksignId && envelope.documentClicksignId) {
+  const creds = await resolveClickSignCreds(envelope.orgId);
+  if (envelope.clicksignId && envelope.documentClicksignId && creds) {
     try {
-      const signerResp = await addSigner({
-        envelopeId: envelope.clicksignId,
-        name: data.name,
-        email: data.email,
-        documentation,
-        phoneNumber: phone,
-        hasDocumentation: Boolean(documentation),
-        group: data.group ?? undefined,
-      });
+      const signerResp = await addSigner(
+        {
+          envelopeId: envelope.clicksignId,
+          name: data.name,
+          email: data.email,
+          documentation,
+          phoneNumber: phone,
+          hasDocumentation: Boolean(documentation),
+          group: data.group ?? undefined,
+        },
+        creds
+      );
       const signerId = pickId(signerResp);
       if (!signerId) throw new Error("Resposta sem id de signer");
 
-      const authReq = await addRequirement({
-        envelopeId: envelope.clicksignId,
-        documentClicksignId: envelope.documentClicksignId,
-        signerClicksignId: signerId,
-        action: "provide_evidence",
-        auth: authMethod,
-      });
-      const signReq = await addRequirement({
-        envelopeId: envelope.clicksignId,
-        documentClicksignId: envelope.documentClicksignId,
-        signerClicksignId: signerId,
-        action: "agree",
-        role,
-      });
+      const authReq = await addRequirement(
+        {
+          envelopeId: envelope.clicksignId,
+          documentClicksignId: envelope.documentClicksignId,
+          signerClicksignId: signerId,
+          action: "provide_evidence",
+          auth: authMethod,
+        },
+        creds
+      );
+      const signReq = await addRequirement(
+        {
+          envelopeId: envelope.clicksignId,
+          documentClicksignId: envelope.documentClicksignId,
+          signerClicksignId: signerId,
+          action: "agree",
+          role,
+        },
+        creds
+      );
       const reqIds = [pickId(authReq), pickId(signReq)].filter(Boolean) as string[];
 
       await prisma.envelopeSigner.update({

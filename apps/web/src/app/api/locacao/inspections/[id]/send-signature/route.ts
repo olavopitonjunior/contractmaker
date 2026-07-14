@@ -5,6 +5,10 @@ import { audit } from "@/lib/security/audit";
 import { ensureLocacaoAccess, isRouteError, parseJsonBody } from "@/lib/locacao/route-helpers";
 import { inspectionSendSignatureSchema } from "@/lib/locacao/validators";
 import { sendEnvelopeForAttachment } from "@/lib/clicksign/executor";
+import {
+  ClickSignNotConfiguredError,
+  AuthMethodNotAllowedError,
+} from "@/lib/clicksign/account";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -120,6 +124,15 @@ export async function POST(
         metadata: { error: msg.slice(0, 300) },
       }
     );
+    if (err instanceof ClickSignNotConfiguredError) {
+      return NextResponse.json(
+        { error: err.message, code: "CLICKSIGN_NOT_CONFIGURED" },
+        { status: 409 }
+      );
+    }
+    if (err instanceof AuthMethodNotAllowedError) {
+      return NextResponse.json({ error: err.message }, { status: 422 });
+    }
     return NextResponse.json({ error: msg }, { status: 502 });
   }
 }

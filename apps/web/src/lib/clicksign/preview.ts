@@ -3,7 +3,8 @@ import { dealDataToSigners, leaseDataToSigners } from "@/lib/clicksign/mapping";
 import { moduleForDealKind } from "@/lib/modules/resolve";
 import { MODULE } from "@/lib/modules/catalog";
 import { envelopeCostCents, getMonthlyBudgetCents } from "@/lib/clicksign/costs";
-import { getMonthlySpendCents } from "@/lib/clicksign/executor";
+import { getMonthlySpendCents, mergeDefaultWitnesses } from "@/lib/clicksign/executor";
+import { getSignatureSettings } from "@/lib/clicksign/account";
 import type { AuthMethod } from "@/lib/clicksign/types";
 
 /**
@@ -37,7 +38,9 @@ export async function buildEnvelopeSendPreview(args: {
   envelopeName?: string;
   deadlineAt?: string | null;
 }): Promise<EnvelopeSendPreview | { error: string; status: number }> {
-  const authMethod: AuthMethod = args.authMethod ?? "email";
+  const settings = await getSignatureSettings(args.orgId);
+  const authMethod: AuthMethod =
+    args.authMethod ?? (settings.defaultAuthMethod as AuthMethod);
 
   const contract = await prisma.contract.findFirst({
     where: { id: args.contractId, deal: { pipeline: { orgId: args.orgId } } },
@@ -60,7 +63,7 @@ export async function buildEnvelopeSendPreview(args: {
 
   const dataSource =
     (contract.dataJson as Record<string, unknown> | null) ?? null;
-  const { signers, missing } =
+  const { signers: derived, missing } =
     moduleForDealKind(contract.deal?.pipeline?.kind) === MODULE.LOCACAO
       ? leaseDataToSigners(dataSource, authMethod)
       : dealDataToSigners(dataSource, authMethod);
@@ -70,6 +73,19 @@ export async function buildEnvelopeSendPreview(args: {
       status: 422,
     };
   }
+  // Reflete no preview as testemunhas padrão que o servidor vai forçar no envio.
+  const signers = await mergeDefaultWitnesses(
+    args.orgId,
+    derived.map((s) => ({
+      name: s.name,
+      email: s.email,
+      documentation: s.documentation,
+      phone: s.phone,
+      sourceKind: s.sourceKind,
+      sourceIndex: s.sourceIndex,
+      subKind: s.subKind,
+    }))
+  );
   if (signers.length === 0) {
     return {
       error: "Nenhum signatário válido encontrado nos dados do contrato",
@@ -77,8 +93,12 @@ export async function buildEnvelopeSendPreview(args: {
     };
   }
 
-  const planCost = envelopeCostCents(signers.map(() => authMethod));
-  const budget = getMonthlyBudgetCents();
+  const overrides = settings.costOverridesJson as Record<string, unknown> | null;
+  const planCost = envelopeCostCents(
+    signers.map(() => authMethod),
+    overrides
+  );
+  const budget = getMonthlyBudgetCents(settings.monthlyBudgetCents);
   const spent = await getMonthlySpendCents(args.orgId);
 
   return {
@@ -88,8 +108,8 @@ export async function buildEnvelopeSendPreview(args: {
       authMethod,
       signers: signers.map((s) => ({
         name: s.name,
-        email: s.email,
-        role: s.sourceKind,
+        email: s.email ?? null,
+        role: s.sourceKind ?? "outro",
       })),
       planCostCents: planCost,
       monthlySpentCents: spent,

@@ -8,6 +8,8 @@ import {
   listEnvelopeRequirements,
   listEnvelopeSigners,
 } from "./envelopes";
+import { resolveClickSignCreds } from "./account";
+import type { ClicksignCreds } from "./client";
 import { persistSignedPdf } from "@/lib/clicksign/signed-pdf";
 import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-signed";
 import {
@@ -44,13 +46,20 @@ export async function syncEnvelopeState(
     throw new EnvelopeNotSyncableError();
   }
 
+  const creds = await resolveClickSignCreds(envelope.orgId);
+  if (!creds) {
+    throw new EnvelopeNotSyncableError(
+      "Conta ClickSign não configurada para esta imobiliária."
+    );
+  }
+
   const [envResp, signersResp, requirementsResp, eventsResp, documentsResp] =
     await Promise.all([
-      getEnvelope(envelope.clicksignId),
-      listEnvelopeSigners(envelope.clicksignId),
-      listEnvelopeRequirements(envelope.clicksignId),
-      listEnvelopeEvents(envelope.clicksignId).catch(() => null),
-      listEnvelopeDocuments(envelope.clicksignId).catch(() => null),
+      getEnvelope(envelope.clicksignId, creds),
+      listEnvelopeSigners(envelope.clicksignId, creds),
+      listEnvelopeRequirements(envelope.clicksignId, creds),
+      listEnvelopeEvents(envelope.clicksignId, creds).catch(() => null),
+      listEnvelopeDocuments(envelope.clicksignId, creds).catch(() => null),
     ]);
 
   const remoteStatus = (
@@ -112,7 +121,7 @@ export async function syncEnvelopeState(
       where: { id: envelope.id },
       data: { status: "closed", closedAt: new Date() },
     });
-    const signedUrl = await resolveSignedUrl(envelope.clicksignId, envResp);
+    const signedUrl = await resolveSignedUrl(envelope.clicksignId, envResp, creds);
     if (signedUrl) waitUntil(downloadSignedPdf(envelope.id, signedUrl));
     envelopeUpdated = true;
     const promote = await autoPromoteDealOnContractSigned(envelope.id);
@@ -139,7 +148,7 @@ export async function syncEnvelopeState(
     envelope.status === "closed" &&
     !envelope.signedDocumentUrl
   ) {
-    const signedUrl = await resolveSignedUrl(envelope.clicksignId, envResp);
+    const signedUrl = await resolveSignedUrl(envelope.clicksignId, envResp, creds);
     if (signedUrl) {
       await downloadSignedPdf(envelope.id, signedUrl);
       envelopeUpdated = true;
@@ -204,8 +213,8 @@ export async function syncEnvelopeState(
 }
 
 export class EnvelopeNotSyncableError extends Error {
-  constructor() {
-    super("Envelope ainda não tem ID na ClickSign");
+  constructor(message = "Envelope ainda não tem ID na ClickSign") {
+    super(message);
     this.name = "EnvelopeNotSyncableError";
   }
 }
@@ -278,13 +287,14 @@ function parseDate(s: string | null | undefined): Date | null {
 
 async function resolveSignedUrl(
   clicksignId: string,
-  envResp: unknown
+  envResp: unknown,
+  creds: ClicksignCreds
 ): Promise<string | null> {
   const fromIncluded = extractSignedUrl(envResp);
   if (fromIncluded) return fromIncluded;
 
   try {
-    const docs = await listEnvelopeDocuments(clicksignId);
+    const docs = await listEnvelopeDocuments(clicksignId, creds);
     const docsData = (docs as { data?: unknown }).data;
     if (!Array.isArray(docsData)) return null;
     for (const doc of docsData as Array<{

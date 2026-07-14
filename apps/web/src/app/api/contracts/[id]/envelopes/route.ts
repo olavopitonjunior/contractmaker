@@ -8,6 +8,10 @@ import {
   MissingEmailsError,
 } from "@/lib/clicksign/executor";
 import { ClicksignError } from "@/lib/clicksign/client";
+import {
+  ClickSignNotConfiguredError,
+  AuthMethodNotAllowedError,
+} from "@/lib/clicksign/account";
 import { buildEnvelopeSendPreview } from "@/lib/clicksign/preview";
 import { requireApproval, approvalResponse } from "@/lib/api/intents";
 
@@ -230,6 +234,15 @@ export async function POST(
     });
     return NextResponse.json({ envelope }, { status: 201 });
   } catch (err) {
+    if (err instanceof ClickSignNotConfiguredError) {
+      return NextResponse.json(
+        { error: err.message, code: "CLICKSIGN_NOT_CONFIGURED" },
+        { status: 409 }
+      );
+    }
+    if (err instanceof AuthMethodNotAllowedError) {
+      return NextResponse.json({ error: err.message }, { status: 422 });
+    }
     if (err instanceof MissingEmailsError) {
       return NextResponse.json(
         {
@@ -270,6 +283,15 @@ function clicksignErrorToResponse(err: unknown): {
   status: number;
   body: Record<string, unknown>;
 } {
+  if (err instanceof ClickSignNotConfiguredError) {
+    return {
+      status: 409,
+      body: { error: err.message, code: "CLICKSIGN_NOT_CONFIGURED" },
+    };
+  }
+  if (err instanceof AuthMethodNotAllowedError) {
+    return { status: 422, body: { error: err.message } };
+  }
   if (err instanceof MissingEmailsError) {
     return {
       status: 422,

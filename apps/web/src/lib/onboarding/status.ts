@@ -39,12 +39,16 @@ const MODALIDADES_BY_MODULE: Record<ModuleKey, string[]> = {
 };
 
 export async function getOnboardingStatus(orgId: string): Promise<OnboardingStatus> {
-  const [org, googleAccount, modules] = await Promise.all([
+  const [org, googleAccount, clicksignAccount, modules] = await Promise.all([
     prisma.organization.findUnique({
       where: { id: orgId },
       select: { creci: true, legalName: true, onboardingCompletedAt: true },
     }),
     prisma.orgGoogleAccount.findUnique({
+      where: { orgId },
+      select: { status: true },
+    }),
+    prisma.clickSignAccount.findUnique({
       where: { orgId },
       select: { status: true },
     }),
@@ -89,6 +93,14 @@ export async function getOnboardingStatus(orgId: string): Promise<OnboardingStat
   // --- google ---
   const googleDone = googleAccount?.status === "connected";
 
+  // --- clicksign (passo OPCIONAL — não bloqueia os 100%) ---
+  // Conta própria conectada OU org compartilhada legada (usa a conta global da
+  // plataforma). Sem isso, o envio pra assinatura fica bloqueado, mas o
+  // onboarding pode ser concluído.
+  const clicksignDone =
+    clicksignAccount?.status === "connected" ||
+    orgId === process.env.SHARED_ORG_ID;
+
   // --- profile ---
   // Quem liga a cláusula (administradora na locação, intermediadora na venda) é
   // a RAZÃO SOCIAL; o CRECI é impresso junto quando existe. Ainda assim o passo
@@ -112,6 +124,7 @@ export async function getOnboardingStatus(orgId: string): Promise<OnboardingStat
     google: googleDone,
     profile: profileDone,
     templates: templatesDone,
+    clicksign: clicksignDone,
     form: formDone,
     invite: inviteDone,
     deal: deals > 0,
@@ -119,22 +132,29 @@ export async function getOnboardingStatus(orgId: string): Promise<OnboardingStat
   const detailByKey: Partial<Record<OnboardingStepKey, string>> = {
     profile: profileDetail,
     templates: !templatesDone ? "nenhum modelo ativo ainda" : undefined,
+    clicksign: !clicksignDone
+      ? "necessário para enviar assinaturas"
+      : undefined,
   };
+
+  // clicksign é OPCIONAL (não bloqueia os 100%). Os demais são obrigatórios.
+  const OPTIONAL_STEPS: OnboardingStepKey[] = ["clicksign"];
 
   const steps: OnboardingStep[] = STEP_ORDER.map((key) => ({
     key,
     done: doneByKey[key],
-    required: true,
+    required: !OPTIONAL_STEPS.includes(key),
     detail: detailByKey[key],
   }));
 
-  const requiredDone = steps.filter((s) => s.done).length;
+  const requiredSteps = steps.filter((s) => s.required);
+  const requiredDone = requiredSteps.filter((s) => s.done).length;
 
   return {
     steps,
     requiredDone,
-    requiredTotal: steps.length,
-    complete: requiredDone === steps.length,
+    requiredTotal: requiredSteps.length,
+    complete: requiredDone === requiredSteps.length,
     dismissedAt: org?.onboardingCompletedAt ?? null,
   };
 }

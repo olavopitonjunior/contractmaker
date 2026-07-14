@@ -347,6 +347,12 @@ model Organization {
   // Assinatura — cadastro de testemunhas padrão do sistema (auto-preenchem o
   // envelope ClickSign quando marcadas como padrão).
   defaultWitnesses DefaultWitness[]
+
+  // ClickSign multitenant — conta própria da imobiliária (token/webhook
+  // criptografados) + preferências de assinatura (tipos, orçamento, padrões).
+  // Sem conta conectada, só a org compartilhada legada cai no token global.
+  clicksignAccount  ClickSignAccount?
+  signatureSettings OrgSignatureSettings?
 }
 
 /// Conta Google conectada pela imobiliária (OAuth offline). Os Docs de template
@@ -3195,6 +3201,68 @@ model DefaultWitness {
   org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 
   @@index([orgId])
+}
+
+/// ClickSignAccount — conta ClickSign própria da imobiliária (multitenant). Uma
+/// por org (`orgId @unique`), mesmo padrão do OrgGoogleAccount. Token e webhook
+/// secret criptografados com AES-256-GCM (lib/security/crypto.ts), como a
+/// AsaasAccount. Sem row, só a org compartilhada legada (SHARED_ORG_ID) cai no
+/// CLICKSIGN_API_TOKEN global; qualquer outra org sem conta NÃO envia assinatura.
+/// `webhookSlug` compõe a URL pública per-org /api/webhooks/clicksign/{slug}; o
+/// secret é gerado pela ClickSign no cadastro do webhook (auto-provision) ou
+/// colado manualmente (fallback).
+model ClickSignAccount {
+  id                     String    @id @default(cuid())
+  orgId                  String    @unique
+  label                  String?
+  // Token de acesso da conta ClickSign (AES-256-GCM).
+  apiTokenEncrypted      String    @db.Text
+  apiTokenIvBase64       String
+  apiTokenTagBase64      String
+  baseUrl                String    @default("https://app.clicksign.com")
+  // Webhook per-org: slug público na URL + HMAC secret criptografado (nullable
+  // até provisionar/colar).
+  webhookSlug            String    @unique
+  webhookSecretEncrypted String?   @db.Text
+  webhookSecretIvBase64  String?
+  webhookSecretTagBase64 String?
+  clicksignWebhookId     String?
+  webhookProvisioned     Boolean   @default(false)
+  status                 String    @default("connected") // connected | error | disconnected
+  accountName            String?
+  connectedById          String?
+  lastValidatedAt        DateTime?
+  lastError              String?   @db.Text
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+/// OrgSignatureSettings — preferências de assinatura por org (independentes da
+/// credencial: existem mesmo na org legada que usa o token global). Guardam os
+/// tipos de assinatura (método padrão + permitidos), orçamento/custo e os
+/// padrões de envelope que hoje eram hardcoded (locale/auto_close/refusable/
+/// prazo/ordem). Lazy-create com defaults em getSignatureSettings().
+model OrgSignatureSettings {
+  id                 String   @id @default(cuid())
+  orgId              String   @unique
+  // Orçamento/custo (fallback: CLICKSIGN_MONTHLY_BUDGET_CENTS / tabela hardcoded).
+  monthlyBudgetCents Int?
+  costOverridesJson  Json? // { email: 150, whatsapp: 250, ... } — override por método
+  // Tipos de assinatura (AuthMethod: email | whatsapp | selfie | icp_brasil).
+  defaultAuthMethod  String   @default("email")
+  allowedAuthMethods String[] @default(["email", "whatsapp", "selfie", "icp_brasil"])
+  // Padrões de envelope.
+  defaultLocale      String   @default("pt-BR")
+  autoClose          Boolean  @default(true)
+  refusable          Boolean  @default(true)
+  defaultDeadlineDays Int?
+  defaultSequential  Boolean  @default(false)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 }
 
 // DIMOB — registro de cada arquivo TXT gerado (auditoria + reemissão anual).

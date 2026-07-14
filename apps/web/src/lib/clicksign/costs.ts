@@ -10,14 +10,40 @@ export const CLICKSIGN_COST_CENTS: Record<AuthMethod, number> = {
   icp_brasil: 350,
 };
 
-export function envelopeCostCents(authMethods: AuthMethod[]): number {
+/** Custo por método efetivo: override per-org (OrgSignatureSettings.costOverridesJson)
+ *  sobre a tabela global hardcoded. `overrides` chega como Json do banco. */
+export function costCentsForMethod(
+  method: AuthMethod,
+  overrides?: Record<string, unknown> | null
+): number {
+  const ov = overrides?.[method];
+  if (typeof ov === "number" && Number.isFinite(ov) && ov >= 0) return ov;
+  return CLICKSIGN_COST_CENTS[method] ?? 0;
+}
+
+export function envelopeCostCents(
+  authMethods: AuthMethod[],
+  overrides?: Record<string, unknown> | null
+): number {
   return authMethods.reduce(
-    (sum, m) => sum + (CLICKSIGN_COST_CENTS[m] ?? 0),
+    (sum, m) => sum + costCentsForMethod(m, overrides),
     0
   );
 }
 
-export function getMonthlyBudgetCents(): number {
+/**
+ * Orçamento mensal em centavos. Prioridade: override per-org (quando informado)
+ * → env global CLICKSIGN_MONTHLY_BUDGET_CENTS → default R$100. O `orgBudgetCents`
+ * vem de OrgSignatureSettings.monthlyBudgetCents (null = usa o global).
+ */
+export function getMonthlyBudgetCents(orgBudgetCents?: number | null): number {
+  if (
+    typeof orgBudgetCents === "number" &&
+    Number.isFinite(orgBudgetCents) &&
+    orgBudgetCents > 0
+  ) {
+    return orgBudgetCents;
+  }
   const raw = process.env.CLICKSIGN_MONTHLY_BUDGET_CENTS;
   const parsed = raw ? Number(raw) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 10_000;

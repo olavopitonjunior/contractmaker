@@ -139,6 +139,9 @@ export function ensureIntentExecutorsRegistered(): void {
     const { sendEnvelopeForContract } = await import(
       "@/lib/clicksign/executor"
     );
+    const { ClickSignNotConfiguredError } = await import(
+      "@/lib/clicksign/account"
+    );
     try {
       const envelope = await sendEnvelopeForContract({
         contractId: p.contractId,
@@ -148,6 +151,9 @@ export function ensureIntentExecutorsRegistered(): void {
       });
       return { status: 201, body: { envelope } };
     } catch (err) {
+      if (err instanceof ClickSignNotConfiguredError) {
+        return { status: 409, body: { error: err.message } };
+      }
       const message = err instanceof Error ? err.message : String(err);
       return { status: 500, body: { error: message } };
     }
