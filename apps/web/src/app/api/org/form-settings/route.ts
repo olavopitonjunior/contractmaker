@@ -33,6 +33,12 @@ const formSettingsPatchSchema = z.object({
   preset: z.enum(PRESETS).optional(),
   customRequiredPaths: z.array(customRequiredPathItemSchema).max(200).optional(),
   autoLockFormOnFinalize: z.boolean().optional(),
+  // Resumo consolidado por e-mail. String vazia limpa o destinatário.
+  summaryRecipientEmail: z
+    .union([z.string().email("E-mail inválido"), z.literal("")])
+    .optional(),
+  autoSendSummaryOnComplete: z.boolean().optional(),
+  summaryIncludeAttachments: z.boolean().optional(),
 });
 
 /**
@@ -100,6 +106,15 @@ export async function PATCH(req: NextRequest) {
         : {}),
       ...(parsed.data.autoLockFormOnFinalize !== undefined
         ? { autoLockFormOnFinalize: parsed.data.autoLockFormOnFinalize }
+        : {}),
+      ...(parsed.data.summaryRecipientEmail !== undefined
+        ? { summaryRecipientEmail: parsed.data.summaryRecipientEmail || null }
+        : {}),
+      ...(parsed.data.autoSendSummaryOnComplete !== undefined
+        ? { autoSendSummaryOnComplete: parsed.data.autoSendSummaryOnComplete }
+        : {}),
+      ...(parsed.data.summaryIncludeAttachments !== undefined
+        ? { summaryIncludeAttachments: parsed.data.summaryIncludeAttachments }
         : {}),
     },
   });

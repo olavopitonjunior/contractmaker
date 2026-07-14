@@ -155,6 +155,12 @@ export const RateLimits = {
   publicResendByToken: (token: string) =>
     rateLimit({ identifier: `public-resend:${token}`, limit: 1, window: "1 h" }),
   /**
+   * Envio do resumo consolidado pelo form público: 1/h por token. Gera PDF via
+   * Puppeteer + baixa anexos + envia e-mail — caro e disparável sem auth.
+   */
+  formSummarySendPerToken: (token: string) =>
+    rateLimit({ identifier: `form-summary:${token}`, limit: 1, window: "1 h" }),
+  /**
    * Voz no formulário: 30 chamadas/h por token (~$0.30/h de Gemini no
    * pior caso). Evita abuse de scrapers e custo descontrolado.
    */

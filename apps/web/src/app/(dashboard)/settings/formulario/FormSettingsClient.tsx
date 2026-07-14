@@ -5,8 +5,9 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { Loader2, Settings2, Lock } from "lucide-react";
+import { Loader2, Settings2, Lock, Mail } from "lucide-react";
 
 type Preset = "legado" | "minimo" | "padrao" | "completo" | "custom";
 
@@ -15,6 +16,9 @@ interface FormSettingsClientProps {
     preset: string;
     customRequiredPaths: unknown;
     autoLockFormOnFinalize: boolean;
+    summaryRecipientEmail?: string | null;
+    autoSendSummaryOnComplete?: boolean;
+    summaryIncludeAttachments?: boolean;
   };
 }
 
@@ -147,6 +151,11 @@ export function FormSettingsClient({ initial }: FormSettingsClientProps) {
     parseCustomPaths(initial.customRequiredPaths).length > 0,
   );
   const [autoLock, setAutoLock] = useState(Boolean(initial.autoLockFormOnFinalize));
+  const [summaryEmail, setSummaryEmail] = useState(initial.summaryRecipientEmail ?? "");
+  const [autoSend, setAutoSend] = useState(initial.autoSendSummaryOnComplete ?? false);
+  const [includeAttachments, setIncludeAttachments] = useState(
+    initial.summaryIncludeAttachments ?? true,
+  );
   const [saving, setSaving] = useState(false);
 
   const selected = useMemo(() => {
@@ -177,6 +186,9 @@ export function FormSettingsClient({ initial }: FormSettingsClientProps) {
           preset,
           customRequiredPaths: customPaths,
           autoLockFormOnFinalize: autoLock,
+          summaryRecipientEmail: summaryEmail.trim(),
+          autoSendSummaryOnComplete: autoSend,
+          summaryIncludeAttachments: includeAttachments,
         }),
       });
       if (!res.ok) {
@@ -309,6 +321,51 @@ export function FormSettingsClient({ initial }: FormSettingsClientProps) {
               </p>
             </div>
             <Switch checked={autoLock} onCheckedChange={setAutoLock} />
+          </label>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base flex items-center gap-2">
+            <Mail className="h-4 w-4" />
+            Resumo do formulário por e-mail
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-xs text-muted-foreground">
+            Gera um PDF consolidado com tudo o que foi preenchido e pode
+            encaminhá-lo (com os documentos anexados) por e-mail. O envio manual
+            está disponível no detalhe de cada negócio.
+          </p>
+          <div className="space-y-1.5">
+            <Label htmlFor="summary-email">E-mail destinatário (automação)</Label>
+            <Input
+              id="summary-email"
+              type="email"
+              placeholder="juridico@suaimobiliaria.com"
+              value={summaryEmail}
+              onChange={(e) => setSummaryEmail(e.target.value)}
+            />
+          </div>
+          <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
+            <div>
+              <p className="text-sm font-medium">Enviar automaticamente ao finalizar</p>
+              <p className="text-xs text-muted-foreground">
+                Ao concluir um formulário, envia o resumo para o e-mail acima.
+              </p>
+            </div>
+            <Switch checked={autoSend} onCheckedChange={setAutoSend} />
+          </label>
+          <label className="flex items-center justify-between gap-3 rounded-lg border p-3">
+            <div>
+              <p className="text-sm font-medium">Incluir documentos anexados</p>
+              <p className="text-xs text-muted-foreground">
+                Anexa também os arquivos enviados no formulário (respeitando o
+                limite de tamanho do e-mail).
+              </p>
+            </div>
+            <Switch checked={includeAttachments} onCheckedChange={setIncludeAttachments} />
           </label>
         </CardContent>
       </Card>

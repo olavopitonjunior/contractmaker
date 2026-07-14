@@ -15,6 +15,12 @@
 
 import { STAGING_MODE } from "@/lib/env/staging";
 
+export interface EmailAttachment {
+  filename: string;
+  content: Buffer;
+  contentType?: string;
+}
+
 export interface SendEmailInput {
   to: string | string[];
   subject: string;
@@ -29,6 +35,10 @@ export interface SendEmailInput {
    * Omitir em e-mails de plataforma (reset de senha, OTP).
    */
   orgId?: string;
+  // Anexos binários. Formato do nodemailer ({filename, content, contentType});
+  // o Resend aceita o mesmo shape. Sem retry embutido — quem chama decide o
+  // fallback sem anexos ao receber ok:false (o relay pode recusar por tamanho).
+  attachments?: EmailAttachment[];
 }
 
 /**
@@ -99,6 +109,11 @@ async function sendViaResend(input: SendEmailInput): Promise<SendEmailResult> {
       text: input.text,
       replyTo: input.replyTo ?? getReplyTo(),
       tags: input.tags,
+      attachments: input.attachments?.map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        contentType: a.contentType,
+      })),
     } as any);
     if (error) {
       console.error("[email] Resend error", error);
@@ -157,6 +172,11 @@ async function sendViaSmtp(input: SendEmailInput): Promise<SendEmailResult> {
       headers: input.tags?.length
         ? { "X-Entity-Ref-ID": input.tags.map((t) => `${t.name}:${t.value}`).join(",") }
         : undefined,
+      attachments: input.attachments?.map((a) => ({
+        filename: a.filename,
+        content: a.content,
+        contentType: a.contentType,
+      })),
     });
 
     return { id: info.messageId ?? null, ok: true };

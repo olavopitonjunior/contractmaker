@@ -45,6 +45,9 @@ export default async function FormularioSettingsPage() {
           preset: settings.preset,
           customRequiredPaths: settings.customRequiredPaths as unknown,
           autoLockFormOnFinalize: settings.autoLockFormOnFinalize,
+          summaryRecipientEmail: settings.summaryRecipientEmail,
+          autoSendSummaryOnComplete: settings.autoSendSummaryOnComplete,
+          summaryIncludeAttachments: settings.summaryIncludeAttachments,
         }}
       />
     </div>
