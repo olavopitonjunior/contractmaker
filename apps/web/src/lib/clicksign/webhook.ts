@@ -83,6 +83,25 @@ export function getDocumentKeyFromPayload(
   return payload.document?.key ?? null;
 }
 
+/**
+ * `key` do signatário na ClickSign — identificador estável e único, ao
+ * contrário do e-mail. É o que persistimos em `EnvelopeSigner.clicksignId`.
+ *
+ * Preferir SEMPRE esta âncora ao e-mail: dois signatários do mesmo envelope
+ * podem compartilhar o e-mail (cônjuges, procurador que usa o e-mail do
+ * outorgante), e nesse caso o e-mail não identifica ninguém.
+ */
+export function getSignerKeyFromPayload(payload: WebhookPayload): string | null {
+  const data = payload.event?.data as
+    | { signer?: { key?: string } }
+    | undefined;
+  if (data?.signer?.key) return data.signer.key;
+  if (payload.signers && payload.signers.length === 1) {
+    return payload.signers[0]?.key ?? null;
+  }
+  return null;
+}
+
 export function getSignerEmailFromPayload(payload: WebhookPayload): string | null {
   const data = payload.event?.data as
     | { signer?: { email?: string } }

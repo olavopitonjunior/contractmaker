@@ -257,6 +257,12 @@ vi.mock("@/lib/db/prisma", () => {
       create: vi.fn(),
       update: vi.fn(),
     },
+    envelopeSigner: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+      update: vi.fn(),
+      updateMany: vi.fn(),
+    },
   };
   Object.assign(prismaMock, mock);
   return { prisma: mock };

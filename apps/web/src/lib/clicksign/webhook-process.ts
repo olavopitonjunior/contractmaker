@@ -15,6 +15,7 @@ import {
   getRawEventName,
   getSignedDocumentUrlFromPayload,
   getSignerEmailFromPayload,
+  getSignerKeyFromPayload,
   parseWebhookEventName,
 } from "@/lib/clicksign/webhook";
 import { listEnvelopeDocuments } from "@/lib/clicksign/envelopes";
@@ -105,32 +106,38 @@ export async function processClickSignWebhookPayload(
   switch (eventName) {
     case "sign":
     case "signature_started": {
-      const email = getSignerEmailFromPayload(payload);
-      if (email) {
-        const signer = await prisma.envelopeSigner.findFirst({
-          where: { envelopeId: envelope.id, email },
-        });
-        if (signer) {
-          if (eventName === "sign") {
-            await prisma.envelopeSigner.update({
-              where: { id: signer.id },
-              data: { status: "signed", signedAt: new Date() },
-            });
-          } else if (signer.status === "notified") {
-            await prisma.envelopeSigner.update({
-              where: { id: signer.id },
-              data: { status: "viewed", viewedAt: new Date() },
-            });
-          }
+      const signer = await resolveSigner(envelope.id, payload, {
+        // Um 2º evento `sign` no mesmo envelope é de OUTRO signatário: quando o
+        // fallback por e-mail é ambíguo, pular quem já assinou faz N eventos
+        // marcarem N signatários em vez de reescreverem o mesmo.
+        skipStatuses:
+          eventName === "sign" ? ["signed"] : ["viewed", "signed", "refused"],
+      });
+      if (signer) {
+        if (eventName === "sign") {
+          await prisma.envelopeSigner.update({
+            where: { id: signer.id },
+            data: { status: "signed", signedAt: new Date() },
+          });
+        } else if (signer.status === "notified") {
+          await prisma.envelopeSigner.update({
+            where: { id: signer.id },
+            data: { status: "viewed", viewedAt: new Date() },
+          });
         }
       }
       break;
     }
     case "refusal": {
-      const email = getSignerEmailFromPayload(payload);
-      if (email) {
-        await prisma.envelopeSigner.updateMany({
-          where: { envelopeId: envelope.id, email },
+      // Antes: `updateMany` por e-mail — dois signatários que compartilham o
+      // e-mail eram marcados como recusados quando só UM recusou. Agora resolve
+      // um signatário só, pela `key` quando disponível.
+      const signer = await resolveSigner(envelope.id, payload, {
+        skipStatuses: ["refused"],
+      });
+      if (signer) {
+        await prisma.envelopeSigner.update({
+          where: { id: signer.id },
           data: { status: "refused", refusedAt: new Date() },
         });
       }
@@ -176,6 +183,51 @@ export async function processClickSignWebhookPayload(
   // Devolve o nome CRU: um evento não tratado (ex.: bounce) foi registrado, e o
   // caller precisa enxergá-lo — não um `undefined` que parece "nada aconteceu".
   return { ok: true, envelopeId: envelope.id, eventName: rawEventName ?? undefined };
+}
+
+/**
+ * Resolve QUAL `EnvelopeSigner` local o evento se refere.
+ *
+ * Ordem de confiança:
+ *  1. `signer.key` da ClickSign → `EnvelopeSigner.clicksignId`. Âncora única e
+ *     estável; é o caminho correto.
+ *  2. Fallback por e-mail — necessário porque nem todo payload traz a key, e
+ *     porque signers criados antes desta correção podem não ter `clicksignId`.
+ *
+ * O fallback é o ponto delicado: dois signatários do MESMO envelope podem ter o
+ * mesmo e-mail (cônjuges, procurador que usa o e-mail do outorgante). O código
+ * anterior fazia `findFirst` sem `orderBy` — o Postgres devolvia um deles ao
+ * acaso, então um signatário era marcado e o outro ficava preso em `notified`
+ * para sempre, e o envelope nunca fechava do nosso lado. Aqui a busca é
+ * ordenada (determinística) e prefere quem ainda NÃO atingiu o estado alvo.
+ */
+export async function resolveSigner(
+  envelopeId: string,
+  payload: WebhookPayload,
+  opts: { skipStatuses?: string[] } = {}
+) {
+  const key = getSignerKeyFromPayload(payload);
+  if (key) {
+    const byKey = await prisma.envelopeSigner.findFirst({
+      where: { envelopeId, clicksignId: key },
+    });
+    if (byKey) return byKey;
+  }
+
+  const email = getSignerEmailFromPayload(payload);
+  if (!email) return null;
+
+  const candidates = await prisma.envelopeSigner.findMany({
+    where: {
+      envelopeId,
+      email: { equals: email.trim(), mode: "insensitive" },
+    },
+    orderBy: { createdAt: "asc" },
+  });
+  if (candidates.length === 0) return null;
+
+  const skip = opts.skipStatuses ?? [];
+  return candidates.find((s) => !skip.includes(s.status)) ?? candidates[0];
 }
 
 /** Lookup signed_file_url via /documents quando o webhook v3 não traz a URL. */
