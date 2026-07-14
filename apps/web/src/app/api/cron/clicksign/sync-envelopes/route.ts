@@ -3,6 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
 import { getEnvelope } from "@/lib/clicksign/envelopes";
 import { ClicksignError } from "@/lib/clicksign/client";
+import { resolveClickSignCreds } from "@/lib/clicksign/account";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-signed";
 import {
@@ -55,8 +56,12 @@ export async function GET(req: NextRequest) {
 
   for (const env of envelopes) {
     if (!env.clicksignId) continue;
+    // Cada envelope usa a conta ClickSign da sua org. Sem conta (conta
+    // desconectada) não dá pra reconciliar remotamente — pula.
+    const creds = await resolveClickSignCreds(env.orgId);
+    if (!creds) continue;
     try {
-      const resp = await getEnvelope(env.clicksignId);
+      const resp = await getEnvelope(env.clicksignId, creds);
       const data = (resp as { data?: { attributes?: { status?: string } } })
         .data;
       const remoteStatus = data?.attributes?.status;

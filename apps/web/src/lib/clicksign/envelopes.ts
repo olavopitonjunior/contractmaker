@@ -1,4 +1,4 @@
-import { clicksignRequest } from "./client";
+import { clicksignRequest, type ClicksignCreds } from "./client";
 import type { ClicksignResponse, AuthMethod } from "./types";
 import type { ClicksignRole } from "./roles";
 
@@ -13,7 +13,10 @@ interface CreateEnvelopeInput {
   locale?: "pt-BR" | "en-US";
 }
 
-export async function createEnvelope(input: CreateEnvelopeInput) {
+export async function createEnvelope(
+  input: CreateEnvelopeInput,
+  creds?: ClicksignCreds
+) {
   const attributes: Record<string, unknown> = {
     name: input.name,
     locale: input.locale || "pt-BR",
@@ -26,6 +29,7 @@ export async function createEnvelope(input: CreateEnvelopeInput) {
     method: "POST",
     path: "/api/v3/envelopes",
     body: { data: { type: "envelopes", attributes } },
+    creds,
   });
 }
 
@@ -36,7 +40,10 @@ interface AddDocumentInput {
 }
 
 // Recebe o conteúdo do PDF como data URL: data:application/pdf;base64,...
-export async function addDocument(input: AddDocumentInput) {
+export async function addDocument(
+  input: AddDocumentInput,
+  creds?: ClicksignCreds
+) {
   const dataUrl = `data:application/pdf;base64,${input.contentBase64}`;
   return clicksignRequest<ClicksignResponse>({
     method: "POST",
@@ -50,6 +57,7 @@ export async function addDocument(input: AddDocumentInput) {
         },
       },
     },
+    creds,
   });
 }
 
@@ -82,7 +90,7 @@ interface AddSignerInput {
  * via POST /requirements (action="provide_evidence", auth=...) — não no
  * signer.
  */
-export async function addSigner(input: AddSignerInput) {
+export async function addSigner(input: AddSignerInput, creds?: ClicksignCreds) {
   const attributes: Record<string, unknown> = {
     name: input.name,
     email: input.email,
@@ -112,13 +120,19 @@ export async function addSigner(input: AddSignerInput) {
     method: "POST",
     path: `/api/v3/envelopes/${input.envelopeId}/signers`,
     body: { data: { type: "signers", attributes } },
+    creds,
   });
 }
 
-export async function removeSigner(envelopeId: string, signerId: string) {
+export async function removeSigner(
+  envelopeId: string,
+  signerId: string,
+  creds?: ClicksignCreds
+) {
   return clicksignRequest<void>({
     method: "DELETE",
     path: `/api/v3/envelopes/${envelopeId}/signers/${signerId}`,
+    creds,
   });
 }
 
@@ -154,7 +168,10 @@ interface AddRequirementInput {
   role?: ClicksignRole;
 }
 
-export async function addRequirement(input: AddRequirementInput) {
+export async function addRequirement(
+  input: AddRequirementInput,
+  creds?: ClicksignCreds
+) {
   const attributes: Record<string, unknown> = { action: input.action };
   if (input.auth) attributes.auth = input.auth;
   if (input.role) attributes.role = input.role;
@@ -172,10 +189,14 @@ export async function addRequirement(input: AddRequirementInput) {
         },
       },
     },
+    creds,
   });
 }
 
-export async function activateEnvelope(envelopeId: string) {
+export async function activateEnvelope(
+  envelopeId: string,
+  creds?: ClicksignCreds
+) {
   return clicksignRequest<ClicksignResponse>({
     method: "PATCH",
     path: `/api/v3/envelopes/${envelopeId}`,
@@ -186,10 +207,14 @@ export async function activateEnvelope(envelopeId: string) {
         attributes: { status: "running" },
       },
     },
+    creds,
   });
 }
 
-export async function cancelEnvelope(envelopeId: string) {
+export async function cancelEnvelope(
+  envelopeId: string,
+  creds?: ClicksignCreds
+) {
   return clicksignRequest<ClicksignResponse>({
     method: "PATCH",
     path: `/api/v3/envelopes/${envelopeId}`,
@@ -200,20 +225,26 @@ export async function cancelEnvelope(envelopeId: string) {
         attributes: { status: "canceled" },
       },
     },
+    creds,
   });
 }
 
-export async function deleteDraftEnvelope(envelopeId: string) {
+export async function deleteDraftEnvelope(
+  envelopeId: string,
+  creds?: ClicksignCreds
+) {
   return clicksignRequest<void>({
     method: "DELETE",
     path: `/api/v3/envelopes/${envelopeId}`,
+    creds,
   });
 }
 
-export async function getEnvelope(envelopeId: string) {
+export async function getEnvelope(envelopeId: string, creds?: ClicksignCreds) {
   return clicksignRequest<ClicksignResponse>({
     method: "GET",
     path: `/api/v3/envelopes/${envelopeId}`,
+    creds,
   });
 }
 
@@ -222,10 +253,14 @@ export async function getEnvelope(envelopeId: string) {
  * documento/birthday) — o STATUS de assinatura está nos requirements
  * (action=agree). Pra reconciliar quem assinou, use `listEnvelopeRequirements`.
  */
-export async function listEnvelopeSigners(envelopeId: string) {
+export async function listEnvelopeSigners(
+  envelopeId: string,
+  creds?: ClicksignCreds
+) {
   return clicksignRequest<ClicksignResponse>({
     method: "GET",
     path: `/api/v3/envelopes/${envelopeId}/signers`,
+    creds,
   });
 }
 
@@ -235,10 +270,14 @@ export async function listEnvelopeSigners(envelopeId: string) {
  * SEM status nem fulfilled_at nem relationship com signer. Pra saber
  * se um signer assinou, use `listEnvelopeEvents`.
  */
-export async function listEnvelopeRequirements(envelopeId: string) {
+export async function listEnvelopeRequirements(
+  envelopeId: string,
+  creds?: ClicksignCreds
+) {
   return clicksignRequest<ClicksignResponse>({
     method: "GET",
     path: `/api/v3/envelopes/${envelopeId}/requirements`,
+    creds,
   });
 }
 
@@ -248,10 +287,14 @@ export async function listEnvelopeRequirements(envelopeId: string) {
  * dispara o mesmo fluxo, mas o endpoint REST permite reconciliação
  * manual quando o webhook não chega.
  */
-export async function listEnvelopeEvents(envelopeId: string) {
+export async function listEnvelopeEvents(
+  envelopeId: string,
+  creds?: ClicksignCreds
+) {
   return clicksignRequest<ClicksignResponse>({
     method: "GET",
     path: `/api/v3/envelopes/${envelopeId}/events`,
+    creds,
   });
 }
 
@@ -266,10 +309,14 @@ export async function listEnvelopeEvents(envelopeId: string) {
  * ```
  * Após close, `signed` aponta pro PDF com certificado de assinatura.
  */
-export async function listEnvelopeDocuments(envelopeId: string) {
+export async function listEnvelopeDocuments(
+  envelopeId: string,
+  creds?: ClicksignCreds
+) {
   return clicksignRequest<ClicksignResponse>({
     method: "GET",
     path: `/api/v3/envelopes/${envelopeId}/documents`,
+    creds,
   });
 }
 
@@ -279,10 +326,38 @@ export async function listEnvelopeDocuments(envelopeId: string) {
  * quando webhooks não estão chegando (URL não registrada, eventos
  * filtrados, etc.).
  */
-export async function listWebhooks() {
+export async function listWebhooks(creds?: ClicksignCreds) {
   return clicksignRequest<ClicksignResponse>({
     method: "GET",
     path: `/api/v3/webhooks`,
+    creds,
+  });
+}
+
+/**
+ * Cadastra um webhook na conta ClickSign apontando pra `url`. A ClickSign gera
+ * o HMAC secret por webhook e o devolve na resposta (campo varia — o chamador
+ * extrai defensivamente). Auto-provisionamento no connect per-org.
+ */
+export async function createWebhook(
+  input: { url: string; description?: string },
+  creds?: ClicksignCreds
+) {
+  const attributes: Record<string, unknown> = { url: input.url };
+  if (input.description) attributes.description = input.description;
+  return clicksignRequest<ClicksignResponse>({
+    method: "POST",
+    path: `/api/v3/webhooks`,
+    body: { data: { type: "webhooks", attributes } },
+    creds,
+  });
+}
+
+export async function deleteWebhook(webhookId: string, creds?: ClicksignCreds) {
+  return clicksignRequest<void>({
+    method: "DELETE",
+    path: `/api/v3/webhooks/${webhookId}`,
+    creds,
   });
 }
 
@@ -292,7 +367,10 @@ interface UpdateEnvelopeInput {
   deadlineAt?: Date | null;
 }
 
-export async function updateEnvelope(input: UpdateEnvelopeInput) {
+export async function updateEnvelope(
+  input: UpdateEnvelopeInput,
+  creds?: ClicksignCreds
+) {
   const attributes: Record<string, unknown> = {};
   if (input.name !== undefined) attributes.name = input.name;
   if (input.deadlineAt !== undefined) {
@@ -310,14 +388,20 @@ export async function updateEnvelope(input: UpdateEnvelopeInput) {
         attributes,
       },
     },
+    creds,
   });
 }
 
-export async function notifySigner(envelopeId: string, signerId: string) {
+export async function notifySigner(
+  envelopeId: string,
+  signerId: string,
+  creds?: ClicksignCreds
+) {
   return clicksignRequest<ClicksignResponse>({
     method: "POST",
     path: `/api/v3/envelopes/${envelopeId}/signers/${signerId}/notifications`,
     body: { data: { type: "notifications", attributes: {} } },
+    creds,
   });
 }
 
@@ -331,7 +415,10 @@ interface UpdateSignerInput {
   birthday?: string;
 }
 
-export async function updateSigner(input: UpdateSignerInput) {
+export async function updateSigner(
+  input: UpdateSignerInput,
+  creds?: ClicksignCreds
+) {
   const attributes: Record<string, unknown> = {};
   if (input.name !== undefined) attributes.name = input.name;
   if (input.email !== undefined) attributes.email = input.email;
@@ -354,6 +441,7 @@ export async function updateSigner(input: UpdateSignerInput) {
         attributes,
       },
     },
+    creds,
   });
 }
 

@@ -15,7 +15,15 @@ export class ClicksignError extends Error {
   }
 }
 
-function getToken(): string {
+// Credenciais efetivas de uma requisição. Multitenant: o chamador resolve a
+// conta da org (lib/clicksign/account.ts) e passa `creds`; sem `creds`, cai no
+// token global do .env (org compartilhada legada + scripts de plataforma).
+export interface ClicksignCreds {
+  token: string;
+  baseUrl: string;
+}
+
+function envToken(): string {
   const token = process.env.CLICKSIGN_API_TOKEN;
   if (!token) {
     throw new Error(
@@ -25,9 +33,14 @@ function getToken(): string {
   return token;
 }
 
-function getBaseUrl(): string {
+function envBaseUrl(): string {
   const url = process.env.CLICKSIGN_API_BASE_URL || "https://app.clicksign.com";
   return url.replace(/\/+$/, "");
+}
+
+function resolveCreds(creds?: ClicksignCreds): ClicksignCreds {
+  if (creds) return { token: creds.token, baseUrl: creds.baseUrl.replace(/\/+$/, "") };
+  return { token: envToken(), baseUrl: envBaseUrl() };
 }
 
 async function fetchWithTimeout(
@@ -49,6 +62,8 @@ interface RequestOptions {
   path: string;
   body?: unknown;
   timeoutMs?: number;
+  /** Credenciais da conta ClickSign da org. Omitir → token global do .env. */
+  creds?: ClicksignCreds;
 }
 
 export async function clicksignRequest<T = unknown>({
@@ -56,10 +71,12 @@ export async function clicksignRequest<T = unknown>({
   path,
   body,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  creds,
 }: RequestOptions): Promise<T> {
+  const { token, baseUrl } = resolveCreds(creds);
   const rawPath = path.startsWith("/") ? path : `/${path}`;
   const sep = rawPath.includes("?") ? "&" : "?";
-  const url = `${getBaseUrl()}${rawPath}${sep}access_token=${encodeURIComponent(getToken())}`;
+  const url = `${baseUrl}${rawPath}${sep}access_token=${encodeURIComponent(token)}`;
   const headers: Record<string, string> = {
     Accept: "application/vnd.api+json",
   };

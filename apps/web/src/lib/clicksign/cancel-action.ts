@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import { clicksignRequest } from "./client";
+import { resolveClickSignCreds } from "./account";
 
 /**
  * Cancela envelope na ClickSign + atualiza Envelope local.
@@ -27,7 +28,7 @@ export async function runEnvelopeCancel(
 ): Promise<RunEnvelopeCancelResult> {
   const envelope = await prisma.envelope.findUnique({
     where: { id: args.envelopeId },
-    select: { id: true, clicksignId: true, status: true },
+    select: { id: true, clicksignId: true, status: true, orgId: true },
   });
   if (!envelope) {
     return { status: 404, body: { error: "Envelope não encontrado" } };
@@ -54,6 +55,18 @@ export async function runEnvelopeCancel(
     };
   }
 
+  const creds = await resolveClickSignCreds(envelope.orgId);
+  if (!creds) {
+    return {
+      status: 422,
+      body: {
+        error:
+          "Conta ClickSign não configurada para esta imobiliária — não é possível cancelar remotamente.",
+        envelopeId: args.envelopeId,
+      },
+    };
+  }
+
   try {
     await clicksignRequest({
       method: "PATCH",
@@ -65,6 +78,7 @@ export async function runEnvelopeCancel(
           attributes: { status: "canceled" },
         },
       },
+      creds,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

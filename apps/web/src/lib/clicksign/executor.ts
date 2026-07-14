@@ -13,8 +13,14 @@ import {
   listEnvelopeSigners,
   type ClicksignRole,
 } from "./envelopes";
-import { ClicksignError } from "./client";
+import { ClicksignError, type ClicksignCreds } from "./client";
 import { dealDataToSigners, leaseDataToSigners } from "./mapping";
+import {
+  AuthMethodNotAllowedError,
+  getSignatureSettings,
+  requireClickSignCreds,
+  resolveClickSignCreds,
+} from "./account";
 import { moduleForDealKind } from "@/lib/modules/resolve";
 import { MODULE } from "@/lib/modules/catalog";
 import {
@@ -23,6 +29,7 @@ import {
   getMonthlyBudgetCents,
 } from "./costs";
 import type { AuthMethod } from "./types";
+import type { OrgSignatureSettings } from "@prisma/client";
 import { STAGING_MODE } from "@/lib/env/staging";
 
 export class EnvelopeBudgetError extends Error {
@@ -150,6 +157,10 @@ async function createEnvelopeFromBuffer(input: {
   filename: string;
   /** Prefixo do path Blob ("envelopes/<id>/"). Usado pra organizar snapshots. */
   storageKeyPrefix: string;
+  /** Credenciais ClickSign da org (resolvidas no entry-point). */
+  creds: ClicksignCreds;
+  /** Preferências de assinatura da org (padrões de envelope + custo). */
+  settings: OrgSignatureSettings;
 }) {
   const {
     orgId,
@@ -159,23 +170,45 @@ async function createEnvelopeFromBuffer(input: {
     source,
     name: rawName,
     authMethod,
-    deadlineAt,
-    signers,
+    deadlineAt: rawDeadlineAt,
     pdfBuffer,
     filename,
     storageKeyPrefix,
+    creds,
+    settings,
   } = input;
+
+  // Testemunhas padrão da imobiliária são FORÇADAS no servidor (merge + dedupe),
+  // valendo em TODOS os caminhos — popup, Newton/bearer e avulsos. Antes a
+  // injeção só existia client-side e sumia fora do diálogo (bug reportado).
+  const signers = await mergeDefaultWitnesses(orgId, input.signers);
 
   if (signers.length === 0) {
     throw new Error("Nenhum signatário válido encontrado");
   }
 
+  // Prazo default da org quando o envio não especifica um.
+  const deadlineAt =
+    rawDeadlineAt ??
+    (settings.defaultDeadlineDays && settings.defaultDeadlineDays > 0
+      ? new Date(Date.now() + settings.defaultDeadlineDays * 86_400_000)
+      : null);
+
+  // Ordem sequencial default da org: só aplica quando nenhum signer já traz
+  // grupo explícito (a popup "Assinar em ordem" tem precedência).
+  const applyDefaultOrder =
+    settings.defaultSequential && signers.every((s) => s.group == null);
+
   // Prefixo [STAGING] no nome do envelope deixa claro pra signatário em caso
   // de vazamento + facilita identificar/filtrar no dashboard ClickSign.
   const name = STAGING_MODE ? `[STAGING] ${rawName}` : rawName;
 
-  const planCost = envelopeCostCents(signers.map(() => authMethod));
-  const budget = getMonthlyBudgetCents();
+  const overrides = settings.costOverridesJson as Record<string, unknown> | null;
+  const planCost = envelopeCostCents(
+    signers.map(() => authMethod),
+    overrides
+  );
+  const budget = getMonthlyBudgetCents(settings.monthlyBudgetCents);
   const spent = await getMonthlySpendCents(orgId);
   if (spent + planCost > budget) {
     throw new EnvelopeBudgetError(
@@ -234,13 +267,14 @@ async function createEnvelopeFromBuffer(input: {
       documentUrl,
       deadlineAt,
       signers: {
-        create: signers.map((s) => {
+        create: signers.map((s, idx) => {
           const { role, group } = resolveRoleGroup(s);
+          const finalGroup = applyDefaultOrder ? idx + 1 : group;
           return {
             sourceKind: s.sourceKind ?? "outro",
             sourceIndex: s.sourceIndex ?? 0,
             role,
-            signingGroup: group,
+            signingGroup: finalGroup,
             name: s.name,
             email: s.email,
             documentation: s.documentation ?? null,
@@ -257,54 +291,72 @@ async function createEnvelopeFromBuffer(input: {
   // 3. Sequência Clicksign. Em qualquer falha, marca failed + limpa draft.
   let clicksignEnvelopeId: string | null = null;
   try {
-    const envResp = await createEnvelope({
-      name: envelope.name,
-      deadlineAt: envelope.deadlineAt ?? undefined,
-    });
+    const envResp = await createEnvelope(
+      {
+        name: envelope.name,
+        deadlineAt: envelope.deadlineAt ?? undefined,
+        locale: settings.defaultLocale === "en-US" ? "en-US" : "pt-BR",
+        autoClose: settings.autoClose,
+      },
+      creds
+    );
     clicksignEnvelopeId = pickResourceId(envResp);
     if (!clicksignEnvelopeId) throw new Error("Resposta sem id de envelope");
 
     const base64 = pdfBuffer.toString("base64");
-    const docResp = await addDocument({
-      envelopeId: clicksignEnvelopeId,
-      filename,
-      contentBase64: base64,
-    });
+    const docResp = await addDocument(
+      {
+        envelopeId: clicksignEnvelopeId,
+        filename,
+        contentBase64: base64,
+      },
+      creds
+    );
     const documentClicksignId = pickResourceId(docResp);
     if (!documentClicksignId) throw new Error("Resposta sem id de documento");
 
     const signerIdMap = new Map<string, { signerId: string; reqIds: string[] }>();
     for (const localSigner of envelope.signers) {
-      const signerResp = await addSigner({
-        envelopeId: clicksignEnvelopeId,
-        name: localSigner.name,
-        email: localSigner.email,
-        documentation: localSigner.documentation ?? undefined,
-        phoneNumber: localSigner.phone ?? undefined,
-        hasDocumentation: Boolean(localSigner.documentation),
-        group: localSigner.signingGroup ?? undefined,
-      });
+      const signerResp = await addSigner(
+        {
+          envelopeId: clicksignEnvelopeId,
+          name: localSigner.name,
+          email: localSigner.email,
+          documentation: localSigner.documentation ?? undefined,
+          phoneNumber: localSigner.phone ?? undefined,
+          hasDocumentation: Boolean(localSigner.documentation),
+          group: localSigner.signingGroup ?? undefined,
+          refusable: settings.refusable,
+        },
+        creds
+      );
       const signerId = pickResourceId(signerResp);
       if (!signerId) throw new Error("Resposta sem id de signer");
 
-      const authReq = await addRequirement({
-        envelopeId: clicksignEnvelopeId,
-        documentClicksignId,
-        signerClicksignId: signerId,
-        action: "provide_evidence",
-        auth: authMethod,
-      });
+      const authReq = await addRequirement(
+        {
+          envelopeId: clicksignEnvelopeId,
+          documentClicksignId,
+          signerClicksignId: signerId,
+          action: "provide_evidence",
+          auth: authMethod,
+        },
+        creds
+      );
       // Role já resolvido e persistido no row (input → override → default).
       const role: ClicksignRole =
         (localSigner.role as ClicksignRole | null) ??
         defaultRoleForSourceKind(localSigner.sourceKind);
-      const signReq = await addRequirement({
-        envelopeId: clicksignEnvelopeId,
-        documentClicksignId,
-        signerClicksignId: signerId,
-        action: "agree",
-        role,
-      });
+      const signReq = await addRequirement(
+        {
+          envelopeId: clicksignEnvelopeId,
+          documentClicksignId,
+          signerClicksignId: signerId,
+          action: "agree",
+          role,
+        },
+        creds
+      );
       const reqIds = [
         pickResourceId(authReq),
         pickResourceId(signReq),
@@ -321,7 +373,7 @@ async function createEnvelopeFromBuffer(input: {
       )
     );
 
-    await activateEnvelope(clicksignEnvelopeId);
+    await activateEnvelope(clicksignEnvelopeId, creds);
 
     const updated = await prisma.envelope.update({
       where: { id: envelope.id },
@@ -346,7 +398,7 @@ async function createEnvelopeFromBuffer(input: {
     console.error("[clicksign] falha durante o envio:", msg);
     if (clicksignEnvelopeId) {
       try {
-        await deleteDraftEnvelope(clicksignEnvelopeId);
+        await deleteDraftEnvelope(clicksignEnvelopeId, creds);
       } catch (cleanupErr) {
         console.error("[clicksign] falha ao limpar envelope draft:", cleanupErr);
       }
@@ -365,8 +417,6 @@ async function createEnvelopeFromBuffer(input: {
  * gera o PDF via Puppeteer/Drive antes de delegar.
  */
 export async function sendEnvelopeForContract(input: SendEnvelopeInput) {
-  const authMethod: AuthMethod = input.authMethod ?? "email";
-
   const contract = await prisma.contract.findUnique({
     where: { id: input.contractId },
     include: {
@@ -379,6 +429,21 @@ export async function sendEnvelopeForContract(input: SendEnvelopeInput) {
   }
   const orgId = contract.deal?.pipeline?.orgId;
   if (!orgId) throw new Error("Deal sem organização vinculada");
+
+  // Gating multitenant: sem conta ClickSign conectada (e não sendo a org legada
+  // com fallback global), NÃO envia. Resolvido cedo, antes de gerar o PDF.
+  const creds = await requireClickSignCreds(orgId);
+  const settings = await getSignatureSettings(orgId);
+  const authMethod: AuthMethod =
+    input.authMethod ?? (settings.defaultAuthMethod as AuthMethod);
+  // Só métodos habilitados nas preferências da org (defense-in-depth — a UI já
+  // restringe o seletor à allow-list).
+  if (
+    settings.allowedAuthMethods.length > 0 &&
+    !settings.allowedAuthMethods.includes(authMethod)
+  ) {
+    throw new AuthMethodNotAllowedError(authMethod);
+  }
 
   const existingActive = await prisma.envelope.findFirst({
     where: {
@@ -459,6 +524,8 @@ export async function sendEnvelopeForContract(input: SendEnvelopeInput) {
     pdfBuffer,
     filename,
     storageKeyPrefix: `envelopes/${contract.id}/`,
+    creds,
+    settings,
   });
 }
 
@@ -471,8 +538,6 @@ export async function sendEnvelopeForContract(input: SendEnvelopeInput) {
 export async function sendEnvelopeForAttachment(
   input: SendEnvelopeForAttachmentInput
 ) {
-  const authMethod: AuthMethod = input.authMethod ?? "email";
-
   if (!input.signers || input.signers.length === 0) {
     throw new Error("Informe ao menos um signatário");
   }
@@ -505,6 +570,20 @@ export async function sendEnvelopeForAttachment(
 
   const orgId = attachment.deal.pipeline.orgId;
   if (!orgId) throw new Error("Deal sem organização vinculada");
+
+  // Gating multitenant + preferências da org (default do método de assinatura).
+  const creds = await requireClickSignCreds(orgId);
+  const settings = await getSignatureSettings(orgId);
+  const authMethod: AuthMethod =
+    input.authMethod ?? (settings.defaultAuthMethod as AuthMethod);
+  // Só métodos habilitados nas preferências da org (defense-in-depth — a UI já
+  // restringe o seletor à allow-list).
+  if (
+    settings.allowedAuthMethods.length > 0 &&
+    !settings.allowedAuthMethods.includes(authMethod)
+  ) {
+    throw new AuthMethodNotAllowedError(authMethod);
+  }
 
   // 2026-06-03 — Limpa drafts ÓRFÃOS (row local status=draft que nunca chegou a
   // virar envelope na ClickSign — `clicksignId=null`; tipicamente um timeout no
@@ -553,6 +632,8 @@ export async function sendEnvelopeForAttachment(
     pdfBuffer,
     filename: attachment.filename,
     storageKeyPrefix: `envelopes/attachment/${attachment.id}/`,
+    creds,
+    settings,
   });
 }
 
@@ -589,14 +670,18 @@ export async function cancelEnvelopeFlow(envelopeId: string): Promise<void> {
 
   let lastError: string | null = null;
 
-  if (envelope.clicksignId) {
+  // Credenciais da org do envelope. Se a conta foi desconectada, `creds` vem
+  // null: pulamos as chamadas remotas e só cancelamos localmente.
+  const creds = await resolveClickSignCreds(envelope.orgId);
+
+  if (envelope.clicksignId && creds) {
     const clicksignId = envelope.clicksignId;
 
     // 1. Descobre o status remoto real (o local pode estar defasado).
     let remoteStatus: string | null = null;
     let remoteGone = false;
     try {
-      remoteStatus = remoteEnvelopeStatus(await getEnvelope(clicksignId));
+      remoteStatus = remoteEnvelopeStatus(await getEnvelope(clicksignId, creds));
     } catch (err) {
       if (err instanceof ClicksignError && err.status === 404) {
         remoteGone = true;
@@ -616,16 +701,16 @@ export async function cancelEnvelopeFlow(envelopeId: string): Promise<void> {
       const isDraft = remoteStatus === "draft" || envelope.status === "draft";
       try {
         if (isDraft) {
-          await deleteDraftEnvelope(clicksignId);
+          await deleteDraftEnvelope(clicksignId, creds);
         } else {
-          await cancelEnvelope(clicksignId);
+          await cancelEnvelope(clicksignId, creds);
         }
       } catch (err) {
         if (err instanceof ClicksignError && err.status === 404) {
           // Já removido — segue pro update local.
         } else {
           // 3. Falha ao cancelar. Re-checa o remoto pra decidir com segurança.
-          const decision = await resolveCancelFailure(clicksignId);
+          const decision = await resolveCancelFailure(clicksignId, creds);
           if (decision === "closed") {
             throw new ClicksignError(
               "Clicksign: envelope já foi finalizado (assinado) e não pode ser cancelado.",
@@ -672,11 +757,12 @@ export async function cancelEnvelopeFlow(envelopeId: string): Promise<void> {
  *  - "rethrow"   → running COM signers (vivo) ou incerto; propaga o erro.
  */
 async function resolveCancelFailure(
-  clicksignId: string
+  clicksignId: string,
+  creds: ClicksignCreds
 ): Promise<"closed" | "reconcile" | "force" | "rethrow"> {
   let status: string | null;
   try {
-    status = remoteEnvelopeStatus(await getEnvelope(clicksignId));
+    status = remoteEnvelopeStatus(await getEnvelope(clicksignId, creds));
   } catch (err) {
     if (err instanceof ClicksignError && err.status === 404) return "reconcile";
     return "rethrow";
@@ -688,7 +774,7 @@ async function resolveCancelFailure(
 
   // status === "running": só é seguro forçar se não houver mais signatários.
   try {
-    const count = remoteSignerCount(await listEnvelopeSigners(clicksignId));
+    const count = remoteSignerCount(await listEnvelopeSigners(clicksignId, creds));
     return count === 0 ? "force" : "rethrow";
   } catch {
     return "rethrow";
@@ -747,6 +833,61 @@ async function listSigners(envelopeId: string) {
     where: { envelopeId },
     orderBy: [{ sourceKind: "asc" }, { sourceIndex: "asc" }],
   });
+}
+
+const onlyDigits = (v?: string | null) => (v ?? "").replace(/\D/g, "");
+
+/**
+ * Testemunhas padrão da imobiliária FORÇADAS no servidor. Lê DefaultWitness
+ * (isDefault) da org e mescla nos signers, dedupando por e-mail (lowercase) ou
+ * CPF (dígitos) contra quem já está no envelope. Vale em TODOS os caminhos de
+ * envio — antes a injeção só existia no diálogo e sumia no Newton/bearer e nos
+ * avulsos (bug "assinantes padrão não funcionam"). Testemunhas sem e-mail são
+ * ignoradas (não dá pra notificar).
+ */
+export async function mergeDefaultWitnesses(
+  orgId: string,
+  signers: EnvelopeSignerInput[]
+): Promise<EnvelopeSignerInput[]> {
+  const defaults = await prisma.defaultWitness.findMany({
+    where: { orgId, isDefault: true },
+  });
+  if (defaults.length === 0) return signers;
+
+  const emails = new Set(
+    signers.map((s) => s.email?.toLowerCase().trim()).filter(Boolean)
+  );
+  const cpfs = new Set(
+    signers.map((s) => onlyDigits(s.documentation)).filter((d) => d.length > 0)
+  );
+  let nextIndex =
+    Math.max(
+      -1,
+      ...signers
+        .filter((s) => s.sourceKind === "testemunha")
+        .map((s) => s.sourceIndex ?? 0)
+    ) + 1;
+
+  const merged = [...signers];
+  for (const w of defaults) {
+    const email = w.email?.toLowerCase().trim();
+    if (!email || !email.includes("@")) continue; // sem e-mail → não notifica
+    const cpf = onlyDigits(w.cpf);
+    if (emails.has(email) || (cpf && cpfs.has(cpf))) continue; // já presente
+    emails.add(email);
+    if (cpf) cpfs.add(cpf);
+    merged.push({
+      name: w.nome,
+      email: w.email,
+      documentation: w.cpf ?? null,
+      phone: w.mobilePhone ?? null,
+      sourceKind: "testemunha",
+      sourceIndex: nextIndex++,
+      subKind: "avulso",
+      role: "witness",
+    });
+  }
+  return merged;
 }
 
 export const EXPORTS_FOR_TESTS = {

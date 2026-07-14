@@ -42,6 +42,16 @@ vi.mock("@/lib/db/prisma", () => {
     orgGoogleAccount: {
       findUnique: vi.fn().mockResolvedValue(null),
     },
+    clickSignAccount: {
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
+    orgSignatureSettings: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn().mockResolvedValue({}),
+    },
+    defaultWitness: {
+      findMany: vi.fn().mockResolvedValue([]),
+    },
     orgFormSettings: {
       count: vi.fn().mockResolvedValue(0),
       findUnique: vi.fn().mockResolvedValue(null),

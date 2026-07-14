@@ -3,6 +3,12 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { listWebhooks } from "@/lib/clicksign/envelopes";
 import { ClicksignError } from "@/lib/clicksign/client";
+import {
+  decryptWebhookSecret,
+  resolveClickSignCreds,
+  webhookUrlForSlug,
+  publicBaseUrl,
+} from "@/lib/clicksign/account";
 
 export const runtime = "nodejs";
 
@@ -37,11 +43,31 @@ export async function GET(_req: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const expected = "https://imobpro.ia.br/api/webhooks/clicksign";
-  const hasSecret = Boolean(process.env.CLICKSIGN_WEBHOOK_SECRET);
+  // Diagnóstico per-org: usa a conta ClickSign da org (ou o fallback global da
+  // org legada). Sem conta configurada, não há o que diagnosticar.
+  const account = await prisma.clickSignAccount.findUnique({
+    where: { orgId: org.id },
+  });
+  const creds = await resolveClickSignCreds(org.id);
+  if (!creds) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error:
+          "Conta ClickSign não configurada para esta imobiliária. Conecte em Configurações › Assinaturas.",
+      },
+      { status: 400 }
+    );
+  }
+  const expected = account
+    ? webhookUrlForSlug(account.webhookSlug)
+    : `${publicBaseUrl()}/api/webhooks/clicksign`;
+  const hasSecret = account
+    ? Boolean(decryptWebhookSecret(account))
+    : Boolean(process.env.CLICKSIGN_WEBHOOK_SECRET);
 
   try {
-    const resp = await listWebhooks();
+    const resp = await listWebhooks(creds);
     const data = (resp as { data?: unknown }).data;
     const webhooks = Array.isArray(data)
       ? (data as Array<{
