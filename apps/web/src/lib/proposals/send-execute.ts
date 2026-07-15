@@ -31,6 +31,20 @@ function clicksignRole(role: string): ClicksignRole {
   return "party";
 }
 
+/**
+ * Telefone no formato que o `signer.phone_number` da ClickSign aceita: DÍGITOS
+ * NACIONAIS (DDD + número), sem `+` e sem o código do país. Mandar E.164
+ * (`+55…`) retorna 422 "phone_number não está em um formato válido" — o path de
+ * contratos usa `onlyDigits` (nacional) e é o formato provado. Aceita E.164 ou
+ * cru; tira o `55` inicial quando o comprimento indica DDI (12-13 díg.).
+ */
+export function toClicksignPhone(raw: string | null | undefined): string | undefined {
+  if (!raw) return undefined;
+  let d = raw.replace(/\D/g, "");
+  if ((d.length === 12 || d.length === 13) && d.startsWith("55")) d = d.slice(2);
+  return d || undefined;
+}
+
 export type SendResult =
   | { ok: true; instrument: "envelope" | "aceite"; envelopeId?: string }
   | { ok: false; block: PrepareResult };
@@ -133,6 +147,13 @@ async function sendEnvelope(
 ): Promise<SendResult> {
   const pdf = await exportPdfToBuffer(html, "A4", null);
 
+  // Retry-safe: uma tentativa anterior que falhou ANTES de ativar deixa uma row
+  // draft/failed com o mesmo (proposalId, via) — o @@unique bloquearia o novo
+  // create. Limpa as tentativas mortas (nunca uma running/closed).
+  await prisma.envelope.deleteMany({
+    where: { proposalId: proposal.id, via: "completa", status: { in: ["draft", "failed"] } },
+  });
+
   // Row local (draft) + signers.
   const envelope = await prisma.envelope.create({
     data: {
@@ -183,7 +204,7 @@ async function sendEnvelope(
           name: local.name,
           email: local.email ?? undefined,
           documentation: local.documentation ?? undefined,
-          phoneNumber: local.phone ?? undefined,
+          phoneNumber: toClicksignPhone(local.phone),
           hasDocumentation: Boolean(local.documentation),
           group: local.signingGroup ?? undefined,
           notifyChannel: (local.notifyChannel as "email" | "whatsapp" | "sms") ?? "email",
