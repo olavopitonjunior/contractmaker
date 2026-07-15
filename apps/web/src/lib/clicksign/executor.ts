@@ -327,6 +327,13 @@ async function createEnvelopeFromBuffer(input: {
           hasDocumentation: Boolean(localSigner.documentation),
           group: localSigner.signingGroup ?? undefined,
           refusable: settings.refusable,
+          // Canal de notificação por signatário. "whatsapp" só chega aqui quando
+          // a conta tem o plano Plus (o roteamento decide antes; ver
+          // lib/proposals/routing.ts). Signatário sem e-mail → o preflight já
+          // exigiu telefone, e communicate_events cuida do resto.
+          notifyChannel:
+            (localSigner.notifyChannel as "email" | "whatsapp" | "sms" | undefined) ??
+            "email",
         },
         creds
       );
