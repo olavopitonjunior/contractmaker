@@ -259,6 +259,12 @@ vi.mock("@/lib/db/prisma", () => {
       create: vi.fn(),
       update: vi.fn(),
     },
+    envelopeSigner: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+      update: vi.fn(),
+      updateMany: vi.fn(),
+    },
     proposal: {
       findUnique: vi.fn().mockResolvedValue(null),
       findFirst: vi.fn().mockResolvedValue(null),

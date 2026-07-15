@@ -179,8 +179,8 @@ export function OnboardingWizard({
             Configure sua imobiliária
           </h1>
           <p className="mt-2 max-w-[46ch] text-sm text-muted-foreground">
-            Seis passos até o seu primeiro negócio. Cada etapa leva você direto ao lugar certo —
-            e o guia acompanha na barra lateral.
+            {status.requiredTotal} passos essenciais até o seu primeiro negócio, mais a
+            conexão da ClickSign para enviar assinaturas. O guia acompanha na barra lateral.
           </p>
         </div>
         <ProgressRing pct={pct} done={status.requiredDone} total={status.requiredTotal} />

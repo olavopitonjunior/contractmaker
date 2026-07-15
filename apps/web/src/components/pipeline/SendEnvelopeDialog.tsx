@@ -343,6 +343,7 @@ interface SignatureConfig {
   configured: boolean;
   defaultAuthMethod: string;
   allowedAuthMethods: string[];
+  costCentsByMethod?: Record<string, number>;
 }
 
 export function SendEnvelopeDialog({
@@ -450,7 +451,9 @@ export function SendEnvelopeDialog({
     return null;
   }, [rows]);
 
-  const costCents = rows.length * COST_PER_SIGNER_CENTS;
+  const perSignerCents =
+    sigConfig?.costCentsByMethod?.[authMethod] ?? COST_PER_SIGNER_CENTS;
+  const costCents = rows.length * perSignerCents;
   const showApprovedWarning =
     contractStatus === "aprovado" && rows.some((r) => r.addedDuringDialog);
 

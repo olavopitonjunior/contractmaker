@@ -108,6 +108,7 @@ export function SendAttachmentEnvelopeDialog({
     configured: boolean;
     defaultAuthMethod: string;
     allowedAuthMethods: string[];
+    costCentsByMethod?: Record<string, number>;
   } | null>(null);
 
   useEffect(() => {
@@ -252,7 +253,9 @@ export function SendAttachmentEnvelopeDialog({
   const validSignerCount = signers.filter(
     (s) => s.name.trim() && s.email.trim()
   ).length;
-  const estimatedCost = (validSignerCount * COST_PER_SIGNER_CENTS) / 100;
+  const perSignerCents =
+    sigConfig?.costCentsByMethod?.[authMethod] ?? COST_PER_SIGNER_CENTS;
+  const estimatedCost = (validSignerCount * perSignerCents) / 100;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -488,7 +491,7 @@ export function SendAttachmentEnvelopeDialog({
           {validSignerCount > 0 && (
             <p className="text-xs text-muted-foreground">
               Custo estimado: R$ {estimatedCost.toFixed(2)} ({validSignerCount}{" "}
-              signatário(s) × R$ 1,50)
+              signatário(s) × R$ {(perSignerCents / 100).toFixed(2).replace(".", ",")})
             </p>
           )}
         </div>
