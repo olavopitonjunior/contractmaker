@@ -3522,6 +3522,13 @@ model OrgSignatureSettings {
   // ENTREGA): depende do recurso estar habilitado na conta ClickSign do tenant.
   // Off até provar contra a conta real.
   acceptanceEnabled  Boolean  @default(false)
+  // Capacidade DETECTADA da conta ClickSign (probe na conexão). Null = ainda não
+  // probado. Roteia o WhatsApp: signatura (Plus+) vs Aceite. Ver lib/proposals/
+  // routing.ts + lib/clicksign/capabilities.ts. `capabilitiesCheckedAt` permite
+  // reprobar quando o tenant fizer upgrade.
+  whatsappSignatureAvailable   Boolean?
+  acceptanceWhatsappAvailable  Boolean?
+  capabilitiesCheckedAt        DateTime?
   // Tipos de assinatura (AuthMethod: email | whatsapp | selfie | icp_brasil).
   defaultAuthMethod  String   @default("email")
   allowedAuthMethods String[] @default(["email", "whatsapp", "selfie", "icp_brasil"])
