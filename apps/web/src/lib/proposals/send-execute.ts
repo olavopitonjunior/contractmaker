@@ -9,6 +9,9 @@ import {
   deleteDraftEnvelope,
 } from "@/lib/clicksign/envelopes";
 import { createAcceptanceWhatsapp } from "@/lib/clicksign/acceptance";
+import { getSignatureSettings } from "@/lib/clicksign/account";
+import { ClicksignError } from "@/lib/clicksign/client";
+import { STAGING_MODE } from "@/lib/env/staging";
 import { buildAcceptanceMessage } from "./acceptance-proof";
 import { renderProposalVia } from "./render";
 import { selectPropostaTemplate } from "./template-select";
@@ -16,6 +19,7 @@ import { prepareSend, type PrepareResult } from "./send";
 import { advanceProposalStatus } from "./status";
 import { toE164BR } from "./clicksign-readiness";
 import type { ClicksignRole } from "@/lib/clicksign/roles";
+import type { AuthMethod } from "@/lib/clicksign/types";
 
 function extractId(resp: unknown): string | null {
   const data = (resp as { data?: unknown })?.data;
@@ -43,6 +47,21 @@ export function toClicksignPhone(raw: string | null | undefined): string | undef
   let d = raw.replace(/\D/g, "");
   if ((d.length === 12 || d.length === 13) && d.startsWith("55")) d = d.slice(2);
   return d || undefined;
+}
+
+/**
+ * Canal de notificação do signatário → método de autenticação do requirement
+ * `provide_evidence`. Um signatário notificado por WhatsApp deve autenticar por
+ * WhatsApp (coerente com a assinatura Plus), não por token de e-mail. Demais
+ * canais caem no padrão da org (`defaultAuthMethod`, e-mail por default) — em
+ * paridade com o path de contrato (`executor.ts`), que é o que funciona em prod.
+ * `sms` não é `AuthMethod` na v3, então também cai no padrão.
+ */
+export function channelToAuth(
+  channel: string | null | undefined,
+  fallback: AuthMethod
+): AuthMethod {
+  return channel === "whatsapp" ? "whatsapp" : fallback;
 }
 
 export type SendResult =
@@ -141,11 +160,18 @@ async function sendAceite(
 }
 
 async function sendEnvelope(
-  proposal: { id: string; orgId: string; title: string },
+  proposal: { id: string; orgId: string; title: string; validUntil: Date | null },
   decision: Extract<PrepareResult, { ok: true }>,
   html: string
 ): Promise<SendResult> {
   const pdf = await exportPdfToBuffer(html, "A4", null);
+
+  // Paridade com o path de contrato (executor.ts): lê os defaults da org em vez
+  // de hardcodar locale/autoClose/refusable/auth.
+  const settings = await getSignatureSettings(proposal.orgId);
+  const defaultAuth = (settings.defaultAuthMethod as AuthMethod) ?? "email";
+  const rawName = `Proposta — ${proposal.title}`;
+  const name = STAGING_MODE ? `[STAGING] ${rawName}` : rawName;
 
   // Retry-safe: uma tentativa anterior que falhou ANTES de ativar deixa uma row
   // draft/failed com o mesmo (proposalId, via) — o @@unique bloquearia o novo
@@ -161,9 +187,9 @@ async function sendEnvelope(
       orgId: proposal.orgId,
       source: "proposal",
       via: "completa",
-      name: `Proposta — ${proposal.title}`,
+      name,
       status: "draft",
-      authMethod: "email",
+      authMethod: defaultAuth,
       signers: {
         create: decision.signers.map((s, i) => ({
           sourceKind: s.role === "vendedor" ? "vendedor" : "comprador",
@@ -184,7 +210,12 @@ async function sendEnvelope(
   let clicksignId: string | null = null;
   try {
     const envResp = await createEnvelope(
-      { name: envelope.name, autoClose: true, locale: "pt-BR" },
+      {
+        name: envelope.name,
+        autoClose: settings.autoClose,
+        locale: settings.defaultLocale === "en-US" ? "en-US" : "pt-BR",
+        deadlineAt: proposal.validUntil ?? undefined,
+      },
       decision.creds
     );
     clicksignId = extractId(envResp);
@@ -206,6 +237,7 @@ async function sendEnvelope(
           documentation: local.documentation ?? undefined,
           phoneNumber: toClicksignPhone(local.phone),
           hasDocumentation: Boolean(local.documentation),
+          refusable: settings.refusable,
           group: local.signingGroup ?? undefined,
           notifyChannel: (local.notifyChannel as "email" | "whatsapp" | "sms") ?? "email",
         },
@@ -213,10 +245,27 @@ async function sendEnvelope(
       );
       const signerId = extractId(sResp);
       if (!signerId) throw new Error("Signer sem id");
-      const authReq = await addRequirement(
-        { envelopeId: clicksignId, documentClicksignId, signerClicksignId: signerId, action: "provide_evidence", auth: "email" },
-        decision.creds
-      );
+
+      // Autenticação coerente com o canal (whatsapp→whatsapp), com fallback pro
+      // padrão da org se a ClickSign recusar o método (422) — sem derrubar o
+      // envelope inteiro por causa do auth.
+      const preferredAuth = channelToAuth(local.notifyChannel, defaultAuth);
+      let authReq;
+      try {
+        authReq = await addRequirement(
+          { envelopeId: clicksignId, documentClicksignId, signerClicksignId: signerId, action: "provide_evidence", auth: preferredAuth },
+          decision.creds
+        );
+      } catch (e) {
+        if (e instanceof ClicksignError && e.status === 422 && preferredAuth !== defaultAuth) {
+          authReq = await addRequirement(
+            { envelopeId: clicksignId, documentClicksignId, signerClicksignId: signerId, action: "provide_evidence", auth: defaultAuth },
+            decision.creds
+          );
+        } else {
+          throw e;
+        }
+      }
       const signReq = await addRequirement(
         { envelopeId: clicksignId, documentClicksignId, signerClicksignId: signerId, action: "agree", role: (local.role as ClicksignRole) ?? "party" },
         decision.creds
