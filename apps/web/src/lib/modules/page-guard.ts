@@ -39,3 +39,23 @@ export async function requireFeaturePage(
   if (!isFeatureEnabled(view, feature)) redirect(fallback);
   return { userId: session.user.id, orgId: org.id };
 }
+
+/**
+ * Como `requireFeaturePage`, mas passa se QUALQUER uma das features estiver
+ * ligada (anyOf). Devolve também quais estão ligadas — a tela de Propostas usa
+ * pra decidir se mostra o segmented control Vendas/Locação.
+ */
+export async function requireAnyFeaturePage(
+  features: readonly FeatureKey[],
+  fallback = "/pipeline",
+): Promise<{ userId: string; orgId: string; enabled: Record<string, boolean> }> {
+  const session = await auth();
+  if (!session?.user?.id) redirect("/login");
+  const org = await getUserOrg(session.user.id);
+  if (!org) redirect(fallback);
+  const view = await getOrgModules(org.id);
+  const enabled: Record<string, boolean> = {};
+  for (const f of features) enabled[f] = isFeatureEnabled(view, f);
+  if (!features.some((f) => enabled[f])) redirect(fallback);
+  return { userId: session.user.id, orgId: org.id, enabled };
+}
