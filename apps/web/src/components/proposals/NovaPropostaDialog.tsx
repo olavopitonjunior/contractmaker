@@ -152,6 +152,60 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
               autoFocus
             />
           </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>E-mail do proponente</Label>
+              <Input
+                type="email"
+                value={form.proponenteEmail}
+                onChange={(e) => set("proponenteEmail", e.target.value)}
+                placeholder="cliente@email.com"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Telefone (WhatsApp)</Label>
+              <Input
+                inputMode="tel"
+                value={form.proponenteFone}
+                onChange={(e) => set("proponenteFone", e.target.value)}
+                placeholder="(41) 99999-9999"
+              />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label>Canal de assinatura</Label>
+            <Select
+              value={form.proponenteCanal}
+              onValueChange={(v) => set("proponenteCanal", v)}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="email">E-mail</SelectItem>
+                <SelectItem value="whatsapp">WhatsApp</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>Vendedor (opcional)</Label>
+              <Input
+                value={form.vendedor}
+                onChange={(e) => set("vendedor", e.target.value)}
+                placeholder="Nome do proprietário"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>E-mail do vendedor</Label>
+              <Input
+                type="email"
+                value={form.vendedorEmail}
+                onChange={(e) => set("vendedorEmail", e.target.value)}
+                placeholder="proprietario@email.com"
+              />
+            </div>
+          </div>
           <div className="space-y-1">
             <Label>Imóvel</Label>
             <Input
