@@ -13,6 +13,7 @@ import {
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { proposalStatusView } from "@/lib/proposals/status-view";
+import { NovaPropostaDialog } from "./NovaPropostaDialog";
 
 export interface ProposalRow {
   id: string;
@@ -84,6 +85,7 @@ export function ProposalsListClient({
             </div>
           )}
         </div>
+        <NovaPropostaDialog tipo={tipo} />
       </div>
 
       <div className="grid grid-cols-3 gap-3 max-w-xl">
