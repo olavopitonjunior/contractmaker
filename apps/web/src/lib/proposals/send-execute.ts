@@ -9,6 +9,7 @@ import {
   deleteDraftEnvelope,
 } from "@/lib/clicksign/envelopes";
 import { createAcceptanceWhatsapp } from "@/lib/clicksign/acceptance";
+import { buildAcceptanceMessage } from "./acceptance-proof";
 import { renderProposalVia } from "./render";
 import { selectPropostaTemplate } from "./template-select";
 import { prepareSend, type PrepareResult } from "./send";
@@ -100,13 +101,11 @@ async function sendAceite(
   for (const s of decision.signers) {
     const phone = toE164BR(s.phone)?.replace("+", "") ?? "";
     if (!phone) continue;
-    const message =
-      `Proposta nº ${numero} — ${proposal.title}. ` +
-      `Declaro que li a Proposta cujo inteiro teor está em ${link} e aceito integralmente suas condições.`;
+    const message = buildAcceptanceMessage({ numero, title: proposal.title, link });
     const resp = await createAcceptanceWhatsapp(
       {
         title: `Proposta ${numero}`,
-        message: message.slice(0, 1500),
+        message,
         signerName: s.name,
         signerPhone: phone,
       },

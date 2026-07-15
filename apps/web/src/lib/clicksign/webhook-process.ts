@@ -10,6 +10,7 @@ import { prisma } from "@/lib/db/prisma";
 import { persistSignedPdf } from "@/lib/clicksign/signed-pdf";
 import { audit } from "@/lib/security/audit";
 import {
+  getAcceptanceEventFromPayload,
   getDocumentKeyFromPayload,
   getEnvelopeIdFromPayload,
   getRawEventName,
@@ -30,6 +31,7 @@ import {
   onProposalEnvelopeClosed,
   onProposalEnvelopeRefused,
 } from "@/lib/proposals/webhook-hooks";
+import { processProposalAcceptanceEvent } from "@/lib/proposals/acceptance-webhook";
 
 export interface ProcessResult {
   ok: true;
@@ -52,6 +54,25 @@ export async function processClickSignWebhookPayload(
 ): Promise<ProcessResult> {
   const eventName = parseWebhookEventName(payload);
   const rawEventName = getRawEventName(payload);
+
+  // Aceite via WhatsApp (`acceptance_term_*`) — sem envelope; resolvido pelo
+  // acceptance_term id. Intercepta ANTES do lookup de envelope (senão cairia no
+  // `unknownEnvelope` e sumiria).
+  const acceptance = getAcceptanceEventFromPayload(payload);
+  if (acceptance) {
+    const r = await processProposalAcceptanceEvent({
+      acceptanceId: acceptance.acceptanceId,
+      phase: acceptance.phase,
+      payload,
+      orgId: opts?.orgId,
+    });
+    return {
+      ok: true,
+      eventName: rawEventName ?? undefined,
+      unknownEnvelope: r.unknownAcceptance,
+    };
+  }
+
   const clicksignEnvelopeId = getEnvelopeIdFromPayload(payload);
   const documentKey = getDocumentKeyFromPayload(payload);
   // Basta um nome (mesmo desconhecido) + uma âncora do envelope. Evento

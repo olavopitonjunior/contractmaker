@@ -15,6 +15,24 @@ import { selectPropostaTemplate } from "./template-select";
  * `ProposalAttachment` e sobrevive à conversão (pasta do deal).
  */
 
+/**
+ * Texto de vinculação do Aceite via WhatsApp — a manifestação de vontade que a
+ * pessoa aceita. PURO e compartilhado entre o ENVIO (vira o `message` do
+ * acceptance_term, ≤1500 chars) e o COMPROVANTE (vira o `acceptedText`), pra
+ * garantir que o comprovante reproduza exatamente o que foi aceito.
+ */
+export function buildAcceptanceMessage(input: {
+  numero: string | number;
+  title: string;
+  link: string;
+}): string {
+  return (
+    `Proposta nº ${input.numero} — ${input.title}. ` +
+    `Declaro que li a Proposta cujo inteiro teor está em ${input.link} ` +
+    `e aceito integralmente suas condições.`
+  ).slice(0, 1500);
+}
+
 export interface AcceptanceFacts {
   numero: string | number;
   signerName: string;
