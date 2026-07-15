@@ -91,6 +91,7 @@ vi.mock("@/lib/db/prisma", () => {
       findFirst: vi.fn(),
       findMany: vi.fn().mockResolvedValue([]),
       create: vi.fn(),
+      createMany: vi.fn(),
       delete: vi.fn(),
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
