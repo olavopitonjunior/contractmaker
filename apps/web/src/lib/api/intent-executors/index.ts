@@ -217,4 +217,35 @@ export function ensureIntentExecutorsRegistered(): void {
       userId: ctx.requestedBy,
     });
   });
+
+  // PROPOSAL_CONVERT — converte proposta em negócio após aprovação humana.
+  registerIntentExecutor("PROPOSAL_CONVERT", async (payload, ctx) => {
+    const p = payload as {
+      proposalId: string;
+      allowUnsigned?: boolean;
+      unsignedReason?: string | null;
+    };
+    const { convertProposalToDeal, ProposalConvertError } = await import(
+      "@/lib/proposals/convert"
+    );
+    try {
+      const r = await convertProposalToDeal({
+        proposalId: p.proposalId,
+        orgId: ctx.orgId,
+        actorUserId: ctx.requestedBy,
+        allowUnsigned: p.allowUnsigned,
+        unsignedReason: p.unsignedReason ?? undefined,
+      });
+      return { status: 201, body: r };
+    } catch (err) {
+      if (err instanceof ProposalConvertError) {
+        return {
+          status: err.code === "already_converted" ? 409 : 400,
+          body: { error: err.message, code: err.code },
+        };
+      }
+      const message = err instanceof Error ? err.message : String(err);
+      return { status: 500, body: { error: message } };
+    }
+  });
 }
