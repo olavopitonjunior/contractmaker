@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { DEFAULT_SYSTEM_PROMPT } from "@/lib/ai/prompts";
+import { resolveModel, SONNET_MODEL, HAIKU_MODEL } from "@/lib/ai/shared/models";
 
 export async function GET() {
   const session = await auth();
@@ -18,15 +19,23 @@ export async function GET() {
     where: { orgId: org.id },
   });
 
-  return NextResponse.json(
-    config || {
-      model: "claude-sonnet-4-20250514",
-      ocrModel: "claude-haiku-4-5-20251001",
+  if (!config) {
+    return NextResponse.json({
+      model: SONNET_MODEL,
+      ocrModel: HAIKU_MODEL,
       temperature: 0.3,
       maxTokens: 4096,
       systemPrompt: DEFAULT_SYSTEM_PROMPT,
-    }
-  );
+    });
+  }
+
+  // Normaliza IDs aposentados gravados antes da migração — o select da UI só
+  // conhece os IDs atuais e o runtime já resolve via resolveModel.
+  return NextResponse.json({
+    ...config,
+    model: resolveModel(config.model, SONNET_MODEL),
+    ocrModel: resolveModel(config.ocrModel, HAIKU_MODEL),
+  });
 }
 
 export async function PUT(req: NextRequest) {
@@ -41,20 +50,22 @@ export async function PUT(req: NextRequest) {
   }
 
   const body = await req.json();
+  const model = resolveModel(body.model, SONNET_MODEL);
+  const ocrModel = resolveModel(body.ocrModel, HAIKU_MODEL);
 
   const config = await prisma.agentConfig.upsert({
     where: { orgId: org.id },
     update: {
-      model: body.model || "claude-sonnet-4-20250514",
-      ocrModel: body.ocrModel || "claude-haiku-4-5-20251001",
+      model,
+      ocrModel,
       temperature: body.temperature ?? 0.3,
       maxTokens: body.maxTokens ?? 4096,
       systemPrompt: body.systemPrompt || DEFAULT_SYSTEM_PROMPT,
     },
     create: {
       orgId: org.id,
-      model: body.model || "claude-sonnet-4-20250514",
-      ocrModel: body.ocrModel || "claude-haiku-4-5-20251001",
+      model,
+      ocrModel,
       temperature: body.temperature ?? 0.3,
       maxTokens: body.maxTokens ?? 4096,
       systemPrompt: body.systemPrompt || DEFAULT_SYSTEM_PROMPT,
