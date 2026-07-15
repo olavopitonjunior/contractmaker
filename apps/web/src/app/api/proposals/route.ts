@@ -13,6 +13,7 @@ import { moduleForSchemaType } from "@/lib/modules/resolve";
 import { getEffectivePermissions, proposalScopeWhere, can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { generateProposalToken } from "@/lib/proposals/token";
+import { computeDedupeKey } from "@/lib/proposals/signer-dedupe";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
 
@@ -26,6 +27,16 @@ function kindForSchema(schemaType: string): "venda" | "locacao" {
   return schemaType === "compra_venda_v1" ? "venda" : "locacao";
 }
 
+const signerSchema = z.object({
+  role: z.enum(["proponente", "vendedor", "conjuge", "testemunha"]),
+  name: z.string().min(1),
+  email: z.string().optional().nullable(),
+  cpf: z.string().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  notifyChannel: z.enum(["email", "whatsapp", "sms"]).optional(),
+  signingGroup: z.number().int().optional(),
+});
+
 const createSchema = z.object({
   title: z.string().min(1),
   schemaType: z.enum(SCHEMA_TYPES),
@@ -35,6 +46,7 @@ const createSchema = z.object({
   tenantId: z.string().optional(),
   validUntil: z.string().datetime().optional(),
   comissaoIncluida: z.boolean().optional(),
+  signers: z.array(signerSchema).optional(),
 });
 
 async function moduleGuard(orgId: string, schemaType: string) {
@@ -112,6 +124,26 @@ export async function POST(req: NextRequest) {
           propertyId: input.propertyId ?? null,
           leaseClientId: input.leaseClientId ?? null,
           tenantId: input.tenantId ?? null,
+          signers: input.signers?.length
+            ? {
+                create: input.signers.map((s) => ({
+                  role: s.role,
+                  name: s.name,
+                  email: s.email || null,
+                  cpf: s.cpf || null,
+                  phone: s.phone || null,
+                  notifyChannel: s.notifyChannel ?? "email",
+                  // Proponente assina primeiro (grupo 1); demais no grupo 2.
+                  signingGroup: s.signingGroup ?? (s.role === "proponente" ? 1 : 2),
+                  dedupeKey: computeDedupeKey({
+                    name: s.name,
+                    email: s.email,
+                    cpf: s.cpf,
+                    phone: s.phone,
+                  }),
+                })),
+              }
+            : undefined,
         },
       });
       await audit(

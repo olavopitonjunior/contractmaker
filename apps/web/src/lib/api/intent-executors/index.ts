@@ -218,6 +218,22 @@ export function ensureIntentExecutorsRegistered(): void {
     });
   });
 
+  // PROPOSAL_SEND — envia proposta pra assinatura/Aceite após aprovação humana.
+  registerIntentExecutor("PROPOSAL_SEND", async (payload) => {
+    const p = payload as { proposalId: string };
+    const { executeProposalSend, blockToResponse } = await import(
+      "@/lib/proposals/send-execute"
+    );
+    try {
+      const r = await executeProposalSend(p.proposalId);
+      if (!r.ok) return blockToResponse(r.block);
+      return { status: 200, body: { ok: true, instrument: r.instrument } };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { status: 500, body: { error: message } };
+    }
+  });
+
   // PROPOSAL_CONVERT — converte proposta em negócio após aprovação humana.
   registerIntentExecutor("PROPOSAL_CONVERT", async (payload, ctx) => {
     const p = payload as {

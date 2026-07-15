@@ -43,6 +43,11 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
   const [schemaType, setSchemaType] = useState(SCHEMA_BY_TIPO[tipo][0].value);
   const [form, setForm] = useState({
     proponente: "",
+    proponenteEmail: "",
+    proponenteFone: "",
+    proponenteCanal: "email",
+    vendedor: "",
+    vendedorEmail: "",
     imovel: "",
     valor: "",
     validadeDias: "5",
@@ -80,6 +85,26 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
           ? new Date(Date.now() + Number(form.validadeDias) * 86_400_000).toISOString()
           : undefined;
 
+      const signers: Record<string, unknown>[] = [
+        {
+          role: "proponente",
+          name: form.proponente,
+          email: form.proponenteEmail || null,
+          phone: form.proponenteFone || null,
+          notifyChannel: form.proponenteCanal,
+          signingGroup: 1,
+        },
+      ];
+      if (form.vendedor.trim()) {
+        signers.push({
+          role: "vendedor",
+          name: form.vendedor,
+          email: form.vendedorEmail || null,
+          notifyChannel: "email",
+          signingGroup: 2,
+        });
+      }
+
       const res = await fetch("/api/proposals", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -88,6 +113,7 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
           schemaType,
           dataJson,
           validUntil,
+          signers,
         }),
       });
       if (!res.ok) {

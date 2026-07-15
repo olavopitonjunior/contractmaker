@@ -45,12 +45,37 @@ export function ProposalDetailClient({
   const [busy, setBusy] = useState(false);
   const sv = proposalStatusView(proposal.status);
 
+  const canSend = ["rascunho", "falha_envio"].includes(proposal.status);
   const canConvert = ["completa", "assinada_proponente", "aguardando_vendedor"].includes(
     proposal.status
   );
   const canConvertUnsigned = ["enviada", "entregue", "visualizada", "rascunho"].includes(
     proposal.status
   );
+
+  async function send() {
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/proposals/${proposal.id}/send`, { method: "POST" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (d.error === "preflight" && Array.isArray(d.issues)) {
+          throw new Error(
+            "Corrija antes de enviar: " + d.issues.map((i: { reason: string }) => i.reason).join(" · ")
+          );
+        }
+        throw new Error(d.error === "budget" ? "Orçamento de assinaturas excedido." : d.error ?? `HTTP ${res.status}`);
+      }
+      toast.success(
+        d.instrument === "aceite" ? "Enviado por Aceite via WhatsApp" : "Enviado para assinatura"
+      );
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao enviar");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function convert(allowUnsigned: boolean) {
     if (allowUnsigned) {
@@ -104,6 +129,11 @@ export function ProposalDetailClient({
           </div>
         </div>
         <div className="flex gap-2">
+          {canSend && (
+            <Button onClick={send} disabled={busy}>
+              Enviar para assinatura
+            </Button>
+          )}
           {canConvert && (
             <Button onClick={() => convert(false)} disabled={busy}>
               Converter em negócio
