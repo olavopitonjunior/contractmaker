@@ -427,11 +427,20 @@ export async function ensureWebhook(
     if (Array.isArray(data)) {
       const match = (data as Array<{
         id?: string;
-        attributes?: { endpoint?: string; url?: string };
+        attributes?: { endpoint?: string; url?: string; secret?: string };
       }>).find(
         (w) => w.attributes?.endpoint === url || w.attributes?.url === url
       );
-      if (match?.id) return { webhookId: match.id, secret: null, adopted: true };
+      if (match?.id) {
+        // A listagem expõe o secret do webhook — captura pra HMAC bater sem o
+        // usuário colar manualmente.
+        const s = match.attributes?.secret;
+        return {
+          webhookId: match.id,
+          secret: typeof s === "string" && s.length > 0 ? s : null,
+          adopted: true,
+        };
+      }
     }
     throw err;
   }
