@@ -7,28 +7,10 @@ import {
   resolveClickSignCreds,
   webhookUrlForSlug,
 } from "@/lib/clicksign/account";
-import {
-  createWebhook,
-  deleteWebhook,
-  WEBHOOK_EVENTS,
-} from "@/lib/clicksign/envelopes";
+import { ensureWebhook, WEBHOOK_EVENTS } from "@/lib/clicksign/envelopes";
 import { ClicksignError } from "@/lib/clicksign/client";
 
 export const runtime = "nodejs";
-
-/** Extrai o HMAC secret da resposta de criação do webhook (campo varia). */
-function extractWebhookSecret(resp: unknown): string | null {
-  const attrs =
-    (resp as { data?: { attributes?: Record<string, unknown> } }).data
-      ?.attributes ?? {};
-  const c =
-    attrs.secret ??
-    attrs.hmac_secret ??
-    attrs.hmac ??
-    attrs.signing_secret ??
-    attrs.secret_key;
-  return typeof c === "string" && c.length > 0 ? c : null;
-}
 
 /**
  * POST — (re)provisiona o webhook per-org usando o TOKEN JÁ SALVO (sem re-colar).
@@ -57,22 +39,17 @@ export async function POST() {
 
   const webhookUrl = webhookUrlForSlug(account.webhookSlug);
   try {
-    const resp = await createWebhook(
-      { url: webhookUrl, events: WEBHOOK_EVENTS },
+    // Cria OU adota o webhook existente (reconexão / criado à mão na ClickSign).
+    const { webhookId, secret } = await ensureWebhook(
+      webhookUrl,
+      WEBHOOK_EVENTS,
       creds
     );
-    const webhookId =
-      (resp as { data?: { id?: string } }).data?.id ?? null;
-    const secret = extractWebhookSecret(resp);
     if (!webhookId) {
       return NextResponse.json(
         { error: "ClickSign não retornou id do webhook." },
         { status: 502 }
       );
-    }
-    // Remove o webhook antigo se havia um diferente.
-    if (account.clicksignWebhookId && account.clicksignWebhookId !== webhookId) {
-      await deleteWebhook(account.clicksignWebhookId, creds).catch(() => {});
     }
     const enc = secret ? encryptSecret(secret) : null;
     await prisma.clickSignAccount.update({

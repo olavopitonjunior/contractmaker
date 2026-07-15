@@ -7,12 +7,7 @@ import { prisma } from "@/lib/db/prisma";
 import { encryptSecret } from "@/lib/security/crypto";
 import { generatePublicToken } from "@/lib/security/crypto";
 import { ClicksignError } from "./client";
-import {
-  createWebhook,
-  deleteWebhook,
-  listWebhooks,
-  WEBHOOK_EVENTS,
-} from "./envelopes";
+import { ensureWebhook, listWebhooks, WEBHOOK_EVENTS } from "./envelopes";
 import { webhookUrlForSlug } from "./account";
 
 const DEFAULT_BASE_URL = "https://app.clicksign.com";
@@ -33,28 +28,6 @@ export interface ConnectResult {
   webhookProvisioned: boolean;
   webhookUrl: string;
   needsManualSecret: boolean;
-}
-
-/** Extrai o HMAC secret da resposta de criação do webhook (campo varia por versão). */
-function extractWebhookSecret(resp: unknown): string | null {
-  const attrs =
-    (resp as { data?: { attributes?: Record<string, unknown> } }).data
-      ?.attributes ?? {};
-  const candidate =
-    attrs.secret ??
-    attrs.hmac_secret ??
-    attrs.hmac ??
-    attrs.signing_secret ??
-    attrs.secret_key;
-  return typeof candidate === "string" && candidate.length > 0
-    ? candidate
-    : null;
-}
-
-function extractWebhookId(resp: unknown): string | null {
-  return (
-    (resp as { data?: { id?: string } }).data?.id ?? null
-  );
 }
 
 /**
@@ -104,21 +77,11 @@ export async function connectClickSignAccount(input: {
   let webhookSecret: string | null = null;
   let webhookProvisioned = false;
   try {
-    const resp = await createWebhook(
-      { url: webhookUrl, events: WEBHOOK_EVENTS },
-      creds
-    );
-    webhookId = extractWebhookId(resp);
-    webhookSecret = extractWebhookSecret(resp);
+    // Cria OU adota um webhook existente com a mesma URL (reconexão / criado à mão).
+    const r = await ensureWebhook(webhookUrl, WEBHOOK_EVENTS, creds);
+    webhookId = r.webhookId;
+    webhookSecret = r.secret;
     webhookProvisioned = Boolean(webhookId);
-    // Se re-provisionamos e havia um webhook antigo diferente, remove o velho.
-    if (
-      existing?.clicksignWebhookId &&
-      webhookId &&
-      existing.clicksignWebhookId !== webhookId
-    ) {
-      await deleteWebhook(existing.clicksignWebhookId, creds).catch(() => {});
-    }
   } catch (err) {
     console.error("[clicksign connect] auto-provision de webhook falhou:", err);
     // segue: webhookProvisioned=false → fallback manual na UI
