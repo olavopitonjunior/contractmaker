@@ -1,4 +1,4 @@
-import { clicksignRequest, type ClicksignCreds } from "./client";
+import { clicksignRequest, ClicksignError, type ClicksignCreds } from "./client";
 import type { ClicksignResponse, AuthMethod } from "./types";
 import type { ClicksignRole } from "./roles";
 
@@ -338,13 +338,36 @@ export async function listWebhooks(creds?: ClicksignCreds) {
  * Cadastra um webhook na conta ClickSign apontando pra `url`. A ClickSign gera
  * o HMAC secret por webhook e o devolve na resposta (campo varia — o chamador
  * extrai defensivamente). Auto-provisionamento no connect per-org.
+ *
+ * ClickSign v3 (confirmado 2026-07-14 contra a conta real): o campo do endereço
+ * é `endpoint` (NÃO `url` — `url` retorna 400 "não está disponível"); `status`
+ * = "active" | "inactive"; `events` = array de eventos a assinar (omitir tem
+ * comportamento ambíguo, então passamos explicitamente).
  */
+/** Eventos ClickSign v3 que o webhook-process trata — assinados no provisionamento. */
+export const WEBHOOK_EVENTS = [
+  "sign",
+  "close",
+  "auto_close",
+  "document_closed",
+  "refusal",
+  "cancel",
+  "deadline",
+  "add_signer",
+  "remove_signer",
+];
+
 export async function createWebhook(
-  input: { url: string; description?: string },
+  input: { url: string; events?: string[] },
   creds?: ClicksignCreds
 ) {
-  const attributes: Record<string, unknown> = { url: input.url };
-  if (input.description) attributes.description = input.description;
+  const attributes: Record<string, unknown> = {
+    endpoint: input.url,
+    status: "active",
+  };
+  if (input.events && input.events.length > 0) {
+    attributes.events = input.events;
+  }
   return clicksignRequest<ClicksignResponse>({
     method: "POST",
     path: `/api/v3/webhooks`,
@@ -359,6 +382,68 @@ export async function deleteWebhook(webhookId: string, creds?: ClicksignCreds) {
     path: `/api/v3/webhooks/${webhookId}`,
     creds,
   });
+}
+
+function pickWebhookId(resp: unknown): string | null {
+  return (resp as { data?: { id?: string } }).data?.id ?? null;
+}
+
+function pickWebhookSecret(resp: unknown): string | null {
+  const attrs =
+    (resp as { data?: { attributes?: Record<string, unknown> } }).data
+      ?.attributes ?? {};
+  const c =
+    attrs.secret ??
+    attrs.hmac_secret ??
+    attrs.hmac ??
+    attrs.signing_secret ??
+    attrs.secret_key;
+  return typeof c === "string" && c.length > 0 ? c : null;
+}
+
+/**
+ * Garante um webhook na conta apontando pra `url`: cria; se a ClickSign
+ * recusar com "endpoint já está em uso" (reconexão ou webhook criado à mão),
+ * lista os webhooks e ADOTA o que já aponta pra essa URL (sem duplicar). O
+ * secret só vem no create (a listagem não expõe) — nesse caso retorna null e o
+ * chamador preserva o secret existente/manual.
+ */
+export async function ensureWebhook(
+  url: string,
+  events: string[],
+  creds?: ClicksignCreds
+): Promise<{ webhookId: string | null; secret: string | null; adopted: boolean }> {
+  try {
+    const resp = await createWebhook({ url, events }, creds);
+    return { webhookId: pickWebhookId(resp), secret: pickWebhookSecret(resp), adopted: false };
+  } catch (err) {
+    const conflict =
+      err instanceof ClicksignError &&
+      /em uso|already|taken|duplicat/i.test(err.message);
+    if (!conflict) throw err;
+    // Adota o webhook existente com o mesmo endpoint.
+    const list = await listWebhooks(creds);
+    const data = (list as { data?: unknown }).data;
+    if (Array.isArray(data)) {
+      const match = (data as Array<{
+        id?: string;
+        attributes?: { endpoint?: string; url?: string; secret?: string };
+      }>).find(
+        (w) => w.attributes?.endpoint === url || w.attributes?.url === url
+      );
+      if (match?.id) {
+        // A listagem expõe o secret do webhook — captura pra HMAC bater sem o
+        // usuário colar manualmente.
+        const s = match.attributes?.secret;
+        return {
+          webhookId: match.id,
+          secret: typeof s === "string" && s.length > 0 ? s : null,
+          adopted: true,
+        };
+      }
+    }
+    throw err;
+  }
 }
 
 interface UpdateEnvelopeInput {

@@ -73,21 +73,29 @@ export async function GET(_req: NextRequest) {
       ? (data as Array<{
           id: string;
           attributes?: {
+            endpoint?: string;
             url?: string;
             description?: string;
             events?: string[];
             active?: boolean;
+            status?: string;
             created?: string;
           };
-        }>).map((w) => ({
+        }>).map((w) => {
+          // ClickSign v3 retorna a URL em `endpoint` (v2 usava `url`).
+          const wurl = w.attributes?.endpoint ?? w.attributes?.url;
+          const active =
+            w.attributes?.active ?? w.attributes?.status === "active";
+          return {
           id: w.id,
-          url: w.attributes?.url,
+          url: wurl,
           description: w.attributes?.description,
           events: w.attributes?.events,
-          active: w.attributes?.active,
+          active,
           created: w.attributes?.created,
-          matchesExpected: w.attributes?.url === expected,
-        }))
+          matchesExpected: wurl === expected,
+          };
+        })
       : [];
 
     return NextResponse.json({

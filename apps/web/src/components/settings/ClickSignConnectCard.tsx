@@ -109,6 +109,27 @@ export function ClickSignConnectCard() {
     }
   }
 
+  async function reprovision() {
+    setBusy(true);
+    try {
+      const res = await fetch("/api/settings/clicksign/provision-webhook", {
+        method: "POST",
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok || !d.ok) throw new Error(d.error ?? "Falha ao provisionar");
+      toast.success(
+        d.needsManualSecret
+          ? "Webhook registrado. Cole o secret do webhook (painel ClickSign)."
+          : "Webhook registrado na sua conta ClickSign."
+      );
+      await refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Falha ao provisionar");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function test() {
     setBusy(true);
     try {
@@ -240,8 +261,19 @@ export function ClickSignConnectCard() {
                 <p className="mt-1 text-xs text-muted-foreground">
                   {state.webhookProvisioned
                     ? "Registrado automaticamente na sua conta ClickSign."
-                    : "Cadastre esta URL em ClickSign › Configurações › API › Webhooks."}
+                    : "Ainda não registrado na ClickSign — clique em Reprovisionar para registrar automaticamente."}
                 </p>
+                {!state.webhookProvisioned && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="mt-2"
+                    onClick={reprovision}
+                    disabled={busy}
+                  >
+                    Reprovisionar webhook
+                  </Button>
+                )}
               </div>
             )}
 
