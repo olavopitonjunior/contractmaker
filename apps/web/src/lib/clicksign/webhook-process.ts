@@ -25,6 +25,10 @@ import {
   completeInspectionOnEnvelopeClosed,
   revertInspectionOnEnvelopeCanceled,
 } from "@/lib/locacao/inspection-signature";
+import {
+  onProposalEnvelopeClosed,
+  onProposalEnvelopeRefused,
+} from "@/lib/proposals/webhook-hooks";
 
 export interface ProcessResult {
   ok: true;
@@ -134,6 +138,9 @@ export async function processClickSignWebhookPayload(
           data: { status: "refused", refusedAt: new Date() },
         });
       }
+      // Proposta: recusa move o status (proponente vs proprietário). No-op p/
+      // envelope de contrato/attachment.
+      await onProposalEnvelopeRefused(envelope.id);
       break;
     }
     case "close":
@@ -145,6 +152,9 @@ export async function processClickSignWebhookPayload(
       });
       await autoPromoteDealOnContractSigned(envelope.id);
       await completeInspectionOnEnvelopeClosed(envelope.id);
+      // Proposta: avança o status (assinada_proponente / completa / aguardando
+      // vendedor). No-op p/ envelope de contrato/attachment.
+      await onProposalEnvelopeClosed(envelope.id);
 
       // v3 não traz signed_file_url no payload — tenta do payload (compat v2) e,
       // se null, faz lookup via /documents (canônico v3, requer creds da org).
