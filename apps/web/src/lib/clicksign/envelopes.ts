@@ -344,6 +344,19 @@ export async function listWebhooks(creds?: ClicksignCreds) {
  * = "active" | "inactive"; `events` = array de eventos a assinar (omitir tem
  * comportamento ambíguo, então passamos explicitamente).
  */
+/** Eventos ClickSign v3 que o webhook-process trata — assinados no provisionamento. */
+export const WEBHOOK_EVENTS = [
+  "sign",
+  "close",
+  "auto_close",
+  "document_closed",
+  "refusal",
+  "cancel",
+  "deadline",
+  "add_signer",
+  "remove_signer",
+];
+
 export async function createWebhook(
   input: { url: string; events?: string[] },
   creds?: ClicksignCreds

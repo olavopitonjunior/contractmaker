@@ -7,25 +7,15 @@ import { prisma } from "@/lib/db/prisma";
 import { encryptSecret } from "@/lib/security/crypto";
 import { generatePublicToken } from "@/lib/security/crypto";
 import { ClicksignError } from "./client";
-import { createWebhook, deleteWebhook, listWebhooks } from "./envelopes";
+import {
+  createWebhook,
+  deleteWebhook,
+  listWebhooks,
+  WEBHOOK_EVENTS,
+} from "./envelopes";
 import { webhookUrlForSlug } from "./account";
 
 const DEFAULT_BASE_URL = "https://app.clicksign.com";
-
-// Eventos ClickSign v3 que o webhook-process trata. Assinados explicitamente no
-// auto-provisionamento pra garantir que sign/close cheguem (o default de omitir
-// `events` é ambíguo na doc).
-const WEBHOOK_EVENTS = [
-  "sign",
-  "close",
-  "auto_close",
-  "document_closed",
-  "refusal",
-  "cancel",
-  "deadline",
-  "add_signer",
-  "remove_signer",
-];
 
 export class ClickSignConnectError extends Error {
   constructor(
