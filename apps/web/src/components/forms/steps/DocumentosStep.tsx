@@ -17,6 +17,7 @@ import {
   createVendaAdapter,
   type DocumentosStepAdapter,
 } from "@/components/forms/steps/doc-step-adapter";
+import { mapAttachmentStatusToCard } from "@/lib/forms/attachment-status";
 
 interface DocumentosStepProps {
   form: UseFormReturn<any>;
@@ -35,9 +36,10 @@ const IMAGE_JPEG_QUALITY = 0.8;
 const IMAGE_MIMES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
 const ACCEPTED_MIMES = [...IMAGE_MIMES, "application/pdf"];
 // Upload pool: 4 concurrent HTTP uploads to Blob/S3. Não toca Gemini.
-// O OCR roda no servidor via worker fire-and-forget (ocr-worker.ts) que
-// é disparado pelo POST /attachments. Cliente apenas faz polling no GET
-// /attachments para receber o resultado quando ready.
+// OCR é ON-DEMAND: o POST /attachments cria o anexo com status
+// "awaiting_user" e NÃO enfileira worker — o usuário clica "Extrair com IA"
+// (POST /attachments/[id]/retry) quando quiser gastar tokens. O polling no
+// GET /attachments acompanha o resultado depois do clique.
 const UPLOAD_CONCURRENCY = 4;
 
 /**
@@ -317,19 +319,9 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
           const extracted = a.extractedData || {};
           const fields = extracted.fields || null;
           const assignment = adapter.suggest(a.category, fields || {}, snapshot);
-          // Mapeia status enum do server pro status do card.
-          // Server: "awaiting_user" | "queued" | "extracting" | "ready" | "failed"
-          // UI:     "awaiting"      | "extracting"             | "ready" | "failed"
-          // - awaiting_user: doc subido, IA não rolou — UI mostra botão
-          //                  "Extrair com IA" pra usuário decidir.
-          // - queued/extracting: legacy do worker — mostra spinner.
-          let cardStatus: DocumentCardData["status"];
-          if (a.status === "ready") cardStatus = "ready";
-          else if (a.status === "failed") cardStatus = "failed";
-          else if (a.status === "awaiting_user") cardStatus = "awaiting";
-          else if (a.status === "extracting" || a.status === "queued") cardStatus = "extracting";
-          else if (fields) cardStatus = "ready";
-          else cardStatus = "awaiting";
+          // Mapeamento canônico server → card em lib/forms/attachment-status
+          // (compartilhado com polling e doUpload — não duplicar aqui).
+          const cardStatus = mapAttachmentStatusToCard(a.status, !!fields);
           // Phase F.I-α+fix — timestamp de quando entrou em extracting
           // (usado pelo DocumentCard para mostrar aviso > 60s)
           const extractingSince =
@@ -438,6 +430,16 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
                 error: a.extractError ?? "Extração falhou",
                 extractingSince: null,
               };
+            }
+            // Servidor em "awaiting_user" = OCR on-demand nunca disparada.
+            // Se o card local mostra spinner (ex.: estado stale de upload),
+            // rebaixa pra "awaiting" — o banner "Extrair com IA" aparece em
+            // vez de "Analisando…" eterno.
+            if (mapAttachmentStatusToCard(a.status, !!fields) === "awaiting") {
+              if (d.status === "extracting" || d.status === "uploading") {
+                return { ...d, status: "awaiting", extractingSince: null };
+              }
+              return d;
             }
             const sinceMs = a.extractingStartedAt
               ? new Date(a.extractingStartedAt).getTime()
@@ -667,15 +669,13 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
         toast.info(`Enviando ${validFiles.length} documentos…`);
       }
 
-      // Pipeline simplificado (Phase F.II):
+      // Pipeline (OCR on-demand):
       //   1. Upload paralelo (até 4 simultâneos) para Blob storage.
-      //   2. Servidor cria FormAttachment com status="queued" e dispara
-      //      processOcrQueue fire-and-forget no background.
-      //   3. Cliente NÃO chama mais /batch-extract — a chamada gerava race
-      //      com o worker (ambos disputando o lock extractingStartedAt) e
-      //      causava "Extração concorrente em andamento" na 1ª tentativa.
-      //   4. O useEffect de polling (acima) pega o resultado do GET quando
-      //      o worker completar (status "ready" ou "failed").
+      //   2. Servidor cria FormAttachment com status="awaiting_user" e NÃO
+      //      enfileira OCR — cache-hit por SHA-256 responde direto "ready".
+      //   3. Card fica em "awaiting" com o banner "Extrair com IA"; o clique
+      //      chama /retry, que enfileira o worker, e o polling (useEffect
+      //      acima) pega o resultado quando ficar "ready" ou "failed".
       const uploadLimit = pLimit(UPLOAD_CONCURRENCY);
 
       type UploadOutcome = { doc: DocumentCardData; cached: boolean } | null;
@@ -753,9 +753,15 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
             };
           }
 
-          // Promote temp card to persisted id. Status stays "extracting"
-          // visually but the actual OCR call may be waiting in the ocrLimit
-          // queue — for the user, both look like "Analisando…".
+          // Promote temp card to persisted id. Status vem da RESPOSTA do
+          // servidor via mapeamento canônico — normalmente "awaiting_user"
+          // → "awaiting" (banner "Extrair com IA"). NÃO assumir "extracting":
+          // o servidor não enfileira OCR no upload, e um spinner aqui vira
+          // "Analisando…" eterno (bug do teste RE/MAX Trio, 2026-07-15).
+          const cardStatus = mapAttachmentStatusToCard(
+            uploadData.status,
+            false
+          );
           setDocs((prev) =>
             prev.map((d) =>
               d.id === tempId
@@ -763,7 +769,7 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
                     ...d,
                     id: uploadData.id,
                     fileUrl: uploadData.fileUrl,
-                    status: "extracting",
+                    status: cardStatus,
                   }
                 : d
             )
@@ -775,7 +781,7 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
               filename: rawFile.name,
               mime: rawFile.type,
               fileUrl: uploadData.fileUrl,
-              status: "extracting",
+              status: cardStatus,
               category: null,
               fields: null,
               confidence: null,
