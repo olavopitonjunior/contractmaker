@@ -424,30 +424,16 @@ const defaultFormValues: Partial<DadosContratoForm> = {
     creci: "",
     incluir_como_signatario: false,
   },
-  desistencia: {
-    permite: false,
-    prazo_dias: 7,
-  },
-  foro: "arbitragem",
-  assinatura: {
-    cidade: "",
-    uf: "",
-    data: "",
-  },
   testemunhas: [
     { nome: "", cpf: "", email: "", incluir_como_signatario: false },
     { nome: "", cpf: "", email: "", incluir_como_signatario: false },
   ],
-  config: {
-    multa_penal_moratoria: 2,
-    base_calculo_multa: "valor da parcela",
-    juros_mensais_atraso: 1,
-    atualizacao_monetaria: "IPCA",
-    prazo_atraso_rescisao: 10,
-    multa_cominatoria_diaria: 150,
-    multa_penal_compensatoria: 10,
-    prazo_multa_rescisoria: 7,
-  },
+  observacoes: "",
+  // `desistencia`, `foro`, `assinatura` e `config` saíram daqui junto com os
+  // campos: o form não deve mais gravá-los no dataJson, senão o valor de
+  // fábrica do wizard venceria o padrão da imobiliária (o enrich é aditivo — só
+  // preenche o que está ausente). Quem resolve isso agora é
+  // `enrichContractData` na geração, com `DEFAULT_CONTRACT_SETTINGS` de piso.
 };
 
 export function SalesFormWizard({

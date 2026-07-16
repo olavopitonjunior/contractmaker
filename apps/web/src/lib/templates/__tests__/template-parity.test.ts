@@ -6,6 +6,7 @@ import path from "path";
 vi.unmock("@/lib/render/handlebars");
 
 import { enrichContractData } from "@/lib/services/contract-generation";
+import { DEFAULT_CONTRACT_SETTINGS } from "@/lib/contracts/default-config";
 import { enrichLocacaoData } from "@/lib/locacao/enrich";
 import { renderContratoHTML } from "@/lib/render/handlebars";
 import {
@@ -78,6 +79,148 @@ describe("template parity (A0.1)", () => {
     const html = renderContratoHTML(tpl, enriched as Record<string, unknown>);
     const leftover = leftoverMustaches(html);
     expect(leftover, `Variáveis sem fonte no template ${file}: ${leftover.join(", ")}`).toEqual([]);
+  });
+
+  // Form novo NÃO manda mais foro/config/desistencia/assinatura: esses campos
+  // saíram da última etapa e viraram padrão da org, aplicado por
+  // `enrichContractData`. Estes casos simulam esse dataJson e provam que o
+  // fallback do enrich cobre o buraco.
+  //
+  // Os `leftoverMustaches` dos testes acima NÃO pegariam isso: Handlebars
+  // renderiza `undefined` como string vazia, então um `config` faltando sai
+  // como "multa de %" — HTML limpo, CI verde, contrato quebrado.
+  it.each([
+    ["ccv_a_vista_v2.hbs", previewSampleDataAVista],
+    ["ccv_financiamento_v2.hbs", previewSampleDataFinanciamento],
+  ])(
+    "%s: dataJson sem foro/config/desistencia/assinatura ainda renderiza íntegro",
+    (file, sample) => {
+      const tpl = readFileSync(templatePath(file), "utf-8");
+      const semConfig = JSON.parse(JSON.stringify(sample)) as Record<string, unknown>;
+      delete semConfig.foro;
+      delete semConfig.desistencia;
+      delete semConfig.assinatura;
+      delete semConfig.config;
+
+      const enriched = enrichContractData(semConfig);
+      const html = renderContratoHTML(tpl, enriched as Record<string, unknown>);
+
+      expect(leftoverMustaches(html)).toEqual([]);
+      // Sintomas de campo ausente: percentual/valor órfãos e fecho vazio.
+      expect(html).not.toMatch(/\bde\s*%/);
+      expect(html).not.toMatch(/<p>\s*,\s*\.?\s*<\/p>/);
+      // Padrão de fábrica aplicado onde o template REALMENTE lê config.
+      expect(enriched).toMatchObject({ foro: "arbitragem" });
+    }
+  );
+
+  it("padrão da org troca a cláusula de foro na geração", () => {
+    // `foro` é o caso mais forte: não é um valor interpolado, é um `{{#if}}`
+    // que troca a cláusula inteira (arbitragem × justiça comum).
+    const tpl = readFileSync(templatePath("ccv_a_vista_v2.hbs"), "utf-8");
+    const semConfig = JSON.parse(
+      JSON.stringify(previewSampleDataAVista)
+    ) as Record<string, unknown>;
+    delete semConfig.foro;
+
+    const arbitragem = renderContratoHTML(
+      tpl,
+      enrichContractData(JSON.parse(JSON.stringify(semConfig)), {
+        contractDefaults: { ...DEFAULT_CONTRACT_SETTINGS, foro: "arbitragem" },
+      }) as Record<string, unknown>
+    );
+    const justica = renderContratoHTML(
+      tpl,
+      enrichContractData(JSON.parse(JSON.stringify(semConfig)), {
+        contractDefaults: { ...DEFAULT_CONTRACT_SETTINGS, foro: "justica-publica" },
+      }) as Record<string, unknown>
+    );
+
+    expect(arbitragem).toMatch(/arbitragem/i);
+    expect(justica).not.toMatch(/arbitragem/i);
+    expect(justica).toMatch(/foro/i);
+  });
+
+  it("padrão da org liga a cláusula de desistência", () => {
+    const tpl = readFileSync(templatePath("ccv_a_vista_v2.hbs"), "utf-8");
+    const base = JSON.parse(JSON.stringify(previewSampleDataAVista)) as Record<
+      string,
+      unknown
+    >;
+    delete base.desistencia;
+    delete base.config;
+
+    const semDesistencia = renderContratoHTML(
+      tpl,
+      enrichContractData(JSON.parse(JSON.stringify(base))) as Record<string, unknown>
+    );
+    const comDesistencia = renderContratoHTML(
+      tpl,
+      enrichContractData(JSON.parse(JSON.stringify(base)), {
+        contractDefaults: {
+          ...DEFAULT_CONTRACT_SETTINGS,
+          desistencia: { permite: true, prazo_dias: 15 },
+        },
+      }) as Record<string, unknown>
+    );
+
+    expect(semDesistencia).not.toMatch(/desist/i);
+    expect(comDesistencia).toMatch(/desist/i);
+    expect(comDesistencia).toContain("15");
+  });
+
+  it("valor já gravado no dataJson vence o padrão (enrich é aditivo)", () => {
+    const comConfig = JSON.parse(
+      JSON.stringify(previewSampleDataAVista)
+    ) as Record<string, unknown>;
+    comConfig.foro = "justica-publica";
+    comConfig.config = {
+      ...(comConfig.config as Record<string, unknown>),
+      multa_penal_moratoria: 7,
+    };
+
+    const enriched = enrichContractData(comConfig, {
+      contractDefaults: {
+        ...DEFAULT_CONTRACT_SETTINGS,
+        foro: "arbitragem",
+        config: { ...DEFAULT_CONTRACT_SETTINGS.config, multa_penal_moratoria: 3 },
+      },
+    }) as Record<string, unknown>;
+
+    // O que o negócio definiu não é sobrescrito pelo padrão da org.
+    expect(enriched.foro).toBe("justica-publica");
+    expect((enriched.config as Record<string, unknown>).multa_penal_moratoria).toBe(7);
+  });
+
+  it("DOCUMENTA: os 8 campos numéricos de config NÃO são lidos pelos templates v2", () => {
+    // Achado real: `multa_penal_moratoria`, `juros_mensais_atraso`,
+    // `atualizacao_monetaria`, `base_calculo_multa`, `prazo_atraso_rescisao`,
+    // `multa_cominatoria_diaria`, `multa_penal_compensatoria` e
+    // `prazo_multa_rescisoria` são coletados/armazenados, mas os v2 trazem
+    // esses números HARDCODED no texto das cláusulas (ex.: "multa de 2%",
+    // "IPCA/IBGE"). Só o template legado `contrato_compra_venda.hbs` os lê.
+    //
+    // Ou seja: mudar esses valores hoje NÃO muda o contrato. Este teste
+    // congela o fato — se alguém parametrizar os templates, ele falha e obriga
+    // a revisitar a aba Configurações (que hoje avisa o usuário disso).
+    const INERTES = [
+      "multa_penal_moratoria",
+      "base_calculo_multa",
+      "juros_mensais_atraso",
+      "atualizacao_monetaria",
+      "prazo_atraso_rescisao",
+      "multa_cominatoria_diaria",
+      "multa_penal_compensatoria",
+      "prazo_multa_rescisoria",
+    ];
+    for (const file of ["ccv_a_vista_v2.hbs", "ccv_financiamento_v2.hbs"]) {
+      const tpl = readFileSync(templatePath(file), "utf-8");
+      for (const campo of INERTES) {
+        expect(tpl, `${file} passou a referenciar config.${campo}`).not.toContain(
+          campo
+        );
+      }
+    }
   });
 
   it("À Vista: fecho com local E data preenchidos (regressão F1)", () => {

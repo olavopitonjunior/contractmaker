@@ -17,6 +17,11 @@ import {
   selectAdministracaoTemplate,
 } from "@/lib/contracts/template-category";
 import { getPipelineByKind } from "@/lib/modules/resolve";
+import {
+  DEFAULT_CONTRACT_SETTINGS,
+  resolveOrgContractDefaults,
+  type ContractSettings,
+} from "@/lib/contracts/default-config";
 import { assertModuleEnabled } from "@/lib/modules/guard";
 import { MODULE } from "@/lib/modules/catalog";
 import { enrichLocacaoData, enrichAdministracaoData } from "@/lib/locacao/enrich";
@@ -183,6 +188,37 @@ export interface EnrichContractContext {
     cnpj?: string;
     creci?: string;
   };
+  /**
+   * Padrão de configurações contratuais da org (multas, juros, foro,
+   * desistência, local/data de assinatura). Sobrepõe o padrão de fábrica.
+   *
+   * Omitir é seguro: cai em `DEFAULT_CONTRACT_SETTINGS`. É por isso que o
+   * fallback mora AQUI e não no wizard — `enrichContractData` é chamado sem ctx
+   * pelo preview de template, pelo parity test e pelo resumo do formulário, e
+   * qualquer um desses ficaria sem os valores quando eles saíram do form.
+   */
+  contractDefaults?: ContractSettings;
+}
+
+/**
+ * Padrão de configurações contratuais da org (`OrgFormSettings.
+ * contractDefaultsJson`). Nunca lança: sem row, sem coluna preenchida ou com
+ * Json inválido, cai no padrão de fábrica — a geração de contrato não pode
+ * quebrar por causa de uma preferência.
+ */
+export async function loadOrgContractDefaults(
+  orgId: string
+): Promise<ContractSettings> {
+  try {
+    const settings = await prisma.orgFormSettings.findUnique({
+      where: { orgId },
+      select: { contractDefaultsJson: true },
+    });
+    return resolveOrgContractDefaults(settings?.contractDefaultsJson);
+  } catch (err) {
+    console.warn("[contract-defaults] falha ao carregar padrão da org:", err);
+    return DEFAULT_CONTRACT_SETTINGS;
+  }
 }
 
 export function enrichContractData(
@@ -191,6 +227,24 @@ export function enrichContractData(
 ): Record<string, unknown> {
   const enriched = { ...data };
   const config = ((enriched.config as Record<string, unknown>) || {}) as Record<string, unknown>;
+
+  // --- Configurações contratuais: padrão da org > padrão de fábrica ---
+  //
+  // Estes campos eram coletados na última etapa do form público (e o wizard
+  // gravava os literais no dataJson via defaultFormValues). Ao saírem de lá, a
+  // geração passou a depender deste fallback — sem ele o template renderiza
+  // "multa de %" e ", ." no fecho, e o parity test NÃO pega: `undefined` vira
+  // string vazia no Handlebars, não sobra `{{...}}` pra detectar.
+  //
+  // Aditivo por definição: só preenche o que está ausente. Contrato/form que já
+  // tem o valor gravado mantém o dele.
+  const settings = ctx?.contractDefaults ?? DEFAULT_CONTRACT_SETTINGS;
+  if (enriched.foro == null || enriched.foro === "") enriched.foro = settings.foro;
+  if (enriched.desistencia == null) enriched.desistencia = { ...settings.desistencia };
+  if (enriched.assinatura == null) enriched.assinatura = { ...settings.assinatura };
+  for (const [key, value] of Object.entries(settings.config)) {
+    if (config[key] == null) config[key] = value;
+  }
   const tituloDefinitivo = enriched.titulo_definitivo as { prazo_dias?: number } | undefined;
   const entregaPosse = enriched.entrega_posse as { momento?: string } | undefined;
   const pagamento = enriched.pagamento as { valor_total?: number } | undefined;
@@ -812,6 +866,10 @@ export async function generateContractForDeal(
     select: { legalName: true, cnpj: true, creci: true },
   });
 
+  // Padrão de configurações contratuais da imobiliária (multas, juros, foro,
+  // desistência). Ausente → padrão de fábrica.
+  const contractDefaults = await loadOrgContractDefaults(orgId);
+
   // Enrich data with template defaults (multas, prazos, percentual comissao)
   const enrichedData = enrichContractData(dataJson, {
     imobiliaria: {
@@ -819,6 +877,7 @@ export async function generateContractForDeal(
       cnpj: orgProfile?.cnpj?.trim() || undefined,
       creci: orgProfile?.creci?.trim() || undefined,
     },
+    contractDefaults,
   });
 
   // Render HTML — apenas pra engine="handlebars". Em engine="google_docs"

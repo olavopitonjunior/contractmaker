@@ -5,13 +5,14 @@ import { useFieldArray, UseFormReturn, Controller } from "react-hook-form";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Plus, Trash2, UserPlus, Building2, Search } from "lucide-react";
-import { UFSelect } from "@/components/forms/UFSelect";
 import { MoneyInput } from "@/components/forms/MoneyInput";
 import { NativeSelect } from "@/components/forms/NativeSelect";
+import { OBSERVACOES_MAX } from "@/lib/forms/validation";
 
 interface ComissaoConfigStepProps {
   form: UseFormReturn<any>;
@@ -166,8 +167,6 @@ function SaveAsCadastroButton({
 export function ComissaoConfigStep({ form, token }: ComissaoConfigStepProps) {
   const quemPaga = form.watch("comissao.quem_paga");
   const quandoPaga = form.watch("comissao.quando_paga");
-  const permiteDesistencia = form.watch("desistencia.permite");
-  const foro = form.watch("foro");
 
   // Lookup público de comissionados cadastrados na org.
   // Carregado sob demanda quando usuário abre o picker "Selecionar cadastrado".
@@ -742,85 +741,12 @@ export function ComissaoConfigStep({ form, token }: ComissaoConfigStepProps) {
         </CardContent>
       </Card>
 
-      {/* Desistencia */}
-      <Card className="border border-border">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base font-semibold">
-            Cláusula de Desistência
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <CheckboxField
-            id="permite-desistencia"
-            label="Permite desistência do negócio dentro de prazo"
-            checked={!!permiteDesistencia}
-            onChange={(v) => form.setValue("desistencia.permite", v)}
-          />
-
-          {permiteDesistencia && (
-            <FormField label="Prazo para desistência (dias)" className="max-w-xs">
-              <Input
-                type="number"
-                min="1"
-                {...form.register("desistencia.prazo_dias", {
-                  valueAsNumber: true,
-                })}
-                placeholder="7"
-              />
-            </FormField>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Foro */}
-      <Card className="border border-border">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base font-semibold">
-            Foro de Resolução de Disputas
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <FormField label="Forma de resolução de conflitos">
-            <NativeSelect
-              className="w-full md:w-80"
-              value={foro || "arbitragem"}
-              onChange={(v) => form.setValue("foro", v, { shouldDirty: true })}
-              options={[
-                { value: "arbitragem", label: "Arbitragem" },
-                { value: "justica-publica", label: "Justiça Comum" },
-              ]}
-            />
-          </FormField>
-        </CardContent>
-      </Card>
-
-      {/* Assinatura */}
-      <Card className="border border-border">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-base font-semibold">
-            Local e Data de Assinatura
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <FormField label="Cidade" className="md:col-span-1">
-              <Input
-                {...form.register("assinatura.cidade")}
-                placeholder="Cidade"
-              />
-            </FormField>
-            <FormField label="UF">
-              <UFSelect
-                value={form.watch("assinatura.uf")}
-                onChange={(v) => form.setValue("assinatura.uf", v, { shouldDirty: true })}
-              />
-            </FormField>
-            <FormField label="Data">
-              <Input type="date" {...form.register("assinatura.data")} />
-            </FormField>
-          </div>
-        </CardContent>
-      </Card>
+      {/*
+        Cláusula de desistência, foro e local/data de assinatura saíram daqui:
+        são decisões jurídicas da imobiliária, não do cliente que preenche o
+        link. Agora vivem na aba "Configurações" do editor de contrato, com
+        padrão por org (lib/contracts/default-config.ts).
+      */}
 
       {/* Testemunhas */}
       <Card className="border border-border">
@@ -885,100 +811,26 @@ export function ComissaoConfigStep({ form, token }: ComissaoConfigStepProps) {
         </CardContent>
       </Card>
 
-      {/* Configurações Contratuais */}
+      {/* Observações gerais */}
       <Card className="border border-border">
         <CardHeader className="pb-3">
           <CardTitle className="text-base font-semibold">
-            Configurações Contratuais
+            Observações Gerais
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="Multa Penal Moratória (%)">
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                {...form.register("config.multa_penal_moratoria", {
-                  valueAsNumber: true,
-                })}
-                placeholder="2"
-              />
-            </FormField>
-
-            <FormField label="Base de Cálculo da Multa">
-              <Input
-                {...form.register("config.base_calculo_multa")}
-                placeholder="valor da parcela"
-              />
-            </FormField>
-
-            <FormField label="Juros por Atraso (% ao mês)">
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                {...form.register("config.juros_mensais_atraso", {
-                  valueAsNumber: true,
-                })}
-                placeholder="1"
-              />
-            </FormField>
-
-            <FormField label="Atualização Monetária">
-              <Input
-                {...form.register("config.atualizacao_monetaria")}
-                placeholder="IPCA"
-              />
-            </FormField>
-
-            <FormField label="Prazo de Atraso para Rescisão (dias)">
-              <Input
-                type="number"
-                min="1"
-                {...form.register("config.prazo_atraso_rescisao", {
-                  valueAsNumber: true,
-                })}
-                placeholder="10"
-              />
-            </FormField>
-
-            <FormField label="Multa Cominatória Diária">
-              <Controller
-                control={form.control}
-                name="config.multa_cominatoria_diaria"
-                render={({ field }) => (
-                  <MoneyInput
-                    value={field.value || 0}
-                    onChange={(v) => field.onChange(v)}
-                  />
-                )}
-              />
-            </FormField>
-
-            <FormField label="Multa Penal Compensatória (%)">
-              <Input
-                type="number"
-                step="0.01"
-                min="0"
-                {...form.register("config.multa_penal_compensatoria", {
-                  valueAsNumber: true,
-                })}
-                placeholder="10"
-              />
-            </FormField>
-
-            <FormField label="Prazo para Multa Rescisória (dias)">
-              <Input
-                type="number"
-                min="1"
-                {...form.register("config.prazo_multa_rescisoria", {
-                  valueAsNumber: true,
-                })}
-                placeholder="7"
-              />
-            </FormField>
-          </div>
+        <CardContent>
+          <FormField label="Algo mais que a imobiliária precise saber? (opcional)">
+            <Textarea
+              {...form.register("observacoes")}
+              rows={5}
+              maxLength={OBSERVACOES_MAX}
+              placeholder="Combinados, prazos, condições especiais ou qualquer detalhe da negociação que não coube nos campos acima."
+            />
+          </FormField>
+          <p className="mt-2 text-xs text-muted-foreground">
+            Entra no resumo enviado à imobiliária e é considerado na análise do
+            contrato. Não vira texto do contrato automaticamente.
+          </p>
         </CardContent>
       </Card>
     </div>

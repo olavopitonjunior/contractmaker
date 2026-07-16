@@ -2150,6 +2150,16 @@ model OrgFormSettings {
   summaryRecipientEmail     String?
   autoSendSummaryOnComplete Boolean @default(false)
   summaryIncludeAttachments Boolean @default(true)
+  // Padrão de configurações contratuais da imobiliária (multas, juros, foro,
+  // desistência, local de assinatura) — o que antes o cliente respondia na
+  // última etapa do form público e virou decisão da org, aplicada na geração e
+  // editável na aba "Configurações" do contrato.
+  //
+  // Namespaced por módulo (`{ venda: {...}, locacao: {...} }`) porque os campos
+  // NÃO são equivalentes entre as esteiras: em venda `foro` é enum
+  // (arbitragem|justica-publica) e em locação é a comarca em texto livre. Ver
+  // lib/contracts/default-config.ts. `{}` = usa o padrão de fábrica.
+  contractDefaultsJson      Json    @default("{}")
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
