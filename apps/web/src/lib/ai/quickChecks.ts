@@ -2,6 +2,7 @@
  * Fast, deterministic checks that run client-side or server-side without touching an LLM.
  * These filter out the easy cases so the passive analyzer only escalates to Haiku when needed.
  */
+import { parseMoneyBR } from "@/lib/format/money";
 
 export type QuickFinding = {
   severity: "info" | "warning" | "error";
@@ -50,15 +51,9 @@ type DadosLocacao = {
   config?: { multa_rescisoria_meses?: number | null } | null;
 };
 
-function toNumber(v: unknown): number {
-  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
-  if (typeof v === "string") {
-    const cleaned = v.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".");
-    const n = parseFloat(cleaned);
-    return Number.isFinite(n) ? n : 0;
-  }
-  return 0;
-}
+// Parse monetário BR/US robusto (lib/format/money) — o inline antigo removia
+// pontos incondicionalmente e inflava "1000.00" em 100×.
+const toNumber = parseMoneyBR;
 
 function formatBRL(n: number): string {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(n);

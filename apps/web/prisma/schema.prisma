@@ -924,6 +924,13 @@ model SalesForm {
   // Última vez que o resumo consolidado foi enviado por e-mail. Protege a
   // automação contra re-disparo em re-finalize (form é reabrível).
   summarySentAt DateTime?
+  // Consentimento LGPD (art. 7º): registrado no FINALIZE (o ato de submeter).
+  // Antes o aceite era só estado de UI e nunca persistia — sem evidência do
+  // consentimento nem da versão da política aceita. ipHash = sha256(ip+secret),
+  // nunca o IP cru.
+  privacyAcceptedAt    DateTime?
+  privacyIpHash        String?
+  privacyPolicyVersion String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -1090,7 +1097,6 @@ model Contract {
   changeLogs        ContractChangeLog[]
   comments          ContractComment[]
   suggestions       ContractSuggestion[]
-  aiUsage           AIUsage[]
   commissionCharges CommissionCharge[]
   envelopes         Envelope[]
 
@@ -1628,10 +1634,14 @@ model AIUsage {
   id               String   @id @default(cuid())
   orgId            String
   userId           String?
+  // Coluna simples (SEM FK pra Contract). Antes era FK com onDelete:SetNull, o
+  // que ZERAVA a atribuição retroativamente ao apagar o contrato — o custo já
+  // gasto virava órfão sem contrato. Mantendo só o id, a atribuição histórica
+  // sobrevive à deleção do contrato (id fica "dangling", mas rastreável).
   contractId       String?
   provider         String // "anthropic" | "gemini" | "voyage"
   model            String
-  operation        String // "chat" | "passive_open" | "passive_edit" | "ocr_form" | "ocr_tool" | "embed_kb" | "embed_memory" | "summarize_memory" | "clause_generate" | "doc_analysis"
+  operation        String // union canônico em lib/ai/usage.ts::AIOperation (chat, passive_*, ocr_*, embed_*, specialist_*, sentinel_classify, intent_classify, ...)
   promptTokens     Int      @default(0)
   completionTokens Int      @default(0)
   cacheReadTokens  Int      @default(0)
@@ -1645,9 +1655,8 @@ model AIUsage {
   errorMessage     String?  @db.Text
   createdAt        DateTime @default(now())
 
-  org      Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
-  user     User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
-  contract Contract?    @relation(fields: [contractId], references: [id], onDelete: SetNull)
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User?        @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([orgId, createdAt])
   @@index([orgId, provider, createdAt])

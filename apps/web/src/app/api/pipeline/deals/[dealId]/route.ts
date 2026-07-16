@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
@@ -213,42 +214,85 @@ export async function DELETE(
     }
   }
 
-  // Cascata transacional. Onde Cascade FK não cobre (CertidaoJob, DealAttachment),
-  // fazemos deleteMany explícito.
+  // Cleanup fora da cascata (ContractMemory sem FK + blobs órfãos). Coleta
+  // ANTES do delete.
   const formId = deal.formId;
+  const contractIds = deal.contracts.map((c) => c.id);
+  const {
+    collectContractBlobUrls,
+    deleteContractMemories,
+    deleteBlobs,
+  } = await import("@/lib/contracts/delete-cleanup");
+  const contractBlobUrls = await collectContractBlobUrls(prisma, contractIds);
+  // Blobs de FormAttachment (RG/CNH) só somem se o form também for deletado.
+  const formBlobUrls =
+    deleteForm && formId
+      ? (
+          await prisma.formAttachment.findMany({
+            where: { formId },
+            select: { url: true },
+          })
+        ).map((a) => a.url)
+      : [];
+
+  // Cascata transacional do DEAL. O salesForm.delete fica FORA desta tx: um
+  // `.catch(()=>null)` dentro dela era ilusório — no Postgres qualquer erro de
+  // statement ABORTA a transação inteira, então o form falhando reverteria o
+  // delete do deal/contratos/anexos SEM sinalizar, e mesmo assim os blobs eram
+  // apagados depois (rows sobreviviam → 404 irrecuperável). Separado, o form é
+  // best-effort de verdade e não arrasta o delete do deal.
   const counts = await prisma.$transaction(async (tx) => {
     const jobs = await tx.certidaoJob.deleteMany({ where: { dealId: deal.id } });
     const atts = await tx.dealAttachment.deleteMany({ where: { dealId: deal.id } });
+    await deleteContractMemories(tx, contractIds);
     const contracts = await tx.contract.deleteMany({ where: { dealId: deal.id } });
     await tx.deal.delete({ where: { id: deal.id } });
-    let formsDeleted = 0;
-    if (deleteForm && formId) {
-      const f = await tx.salesForm.delete({ where: { id: formId } }).catch(() => null);
-      if (f) formsDeleted = 1;
-    }
     return {
       certidaoJobs: jobs.count,
       attachments: atts.count,
       contracts: contracts.count,
-      forms: formsDeleted,
+      forms: 0,
     };
   });
+
+  // Form em transação SEPARADA (após o deal já ter sido deletado com sucesso).
+  if (deleteForm && formId) {
+    const f = await prisma.salesForm
+      .delete({ where: { id: formId } })
+      .catch((err) => {
+        console.warn("[deal DELETE] salesForm.delete falhou (form mantido):", err);
+        return null;
+      });
+    if (f) counts.forms = 1;
+  }
 
   // Best-effort: apaga os blobs dos anexos e PDFs de envelope APÓS o commit
   // (se a transação falhar, não removemos arquivos). Antes a deleção do deal
   // órfãava 100% dos arquivos no Blob/S3. Cada item é isolado em try/catch
   // dentro de deleteFromStorage.
-  let blobsDeleted = 0;
-  const urlsToDelete = [
-    ...deal.attachments.map((a) => a.url),
-    ...deal.envelopes.flatMap((e) => [e.documentUrl, e.signedDocumentUrl]),
-  ];
-  if (urlsToDelete.length > 0) {
-    const { deleteFromStorage } = await import("@/lib/storage/s3");
-    for (const url of urlsToDelete) {
-      if (await deleteFromStorage(url)) blobsDeleted++;
-    }
-  }
+  // Dedup via Set — collectContractBlobUrls também traz os PDFs de envelope,
+  // que já vêm de deal.envelopes; deletar a mesma URL 2× é inofensivo, mas o
+  // Set evita trabalho redundante. Inclui ChatAttachment (via contratos) e
+  // FormAttachment (RG/CNH) que antes ficavam órfãos.
+  // FormAttachment (RG/CNH): só apaga os blobs se o form REALMENTE foi deletado.
+  // O salesForm.delete acima é `.catch(()=>null)` — se ele falhar (FK/constraint),
+  // o form e seus anexos sobrevivem; apagar os blobs mesmo assim deixaria o form
+  // vivo apontando pra documentos de identidade que dão 404 (perda irrecuperável).
+  const formBlobsToDelete = counts.forms > 0 ? formBlobUrls : [];
+  const urlsToDelete = Array.from(
+    new Set(
+      [
+        ...deal.attachments.map((a) => a.url),
+        ...deal.envelopes.flatMap((e) => [e.documentUrl, e.signedDocumentUrl]),
+        ...contractBlobUrls,
+        ...formBlobsToDelete,
+      ].filter((u): u is string => Boolean(u))
+    )
+  );
+  // Pós-commit em waitUntil (como as rotas irmãs de contrato) — deletar dezenas
+  // de PDFs sequencialmente inline poderia estourar o timeout e devolver 504
+  // com as rows já commitadas.
+  waitUntil(deleteBlobs(urlsToDelete));
 
   await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
     action: "DEAL_DELETE",
@@ -258,7 +302,7 @@ export async function DELETE(
     metadata: {
       ...counts,
       driveDocsTrashed: docsToTrash.length,
-      blobsDeleted,
+      blobsQueued: urlsToDelete.length,
       deleteForm,
     },
   });

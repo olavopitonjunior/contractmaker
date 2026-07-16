@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { parseMoneyBR } from "@/lib/format/money";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -84,9 +85,10 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
     const validVendedores = vendedores.filter((p) => p.name.trim());
     setSaving(true);
     try {
-      const valorNum = valor
-        ? Number(valor.replace(/\./g, "").replace(",", "."))
-        : undefined;
+      // parseMoneyBR (não o replace bugado) — senão "1.500" vira 1500 ok mas
+      // "1000.00" viraria 100000. Estrutura nova do dialog (staging) + parse
+      // correto (master/ALTO-1).
+      const valorNum = valor ? parseMoneyBR(valor) : undefined;
       const dataJson: Record<string, unknown> = {
         imoveis: imovel ? [{ endereco: imovel }] : [],
       };

@@ -6,6 +6,7 @@
  */
 
 import type { CreatePaymentInput, CreateCustomerInput, AsaasSplit } from "./types";
+import { parseMoneyBR, parsePercentBR } from "@/lib/format/money";
 
 // Tipo mínimo para trabalhar — reflete a parte de `comissao` do DadosContrato.
 // Evita dep circular com lib/forms por enquanto; caller valida completude.
@@ -154,17 +155,6 @@ export function resolvePayer(
   };
 }
 
-function parseNumber(v: unknown): number {
-  if (typeof v === "number") return v;
-  if (typeof v === "string") {
-    // Aceita "1.000,00", "1000.00", "1000"
-    const cleaned = v.replace(/\./g, "").replace(",", ".").replace(/[^0-9.-]/g, "");
-    const n = parseFloat(cleaned);
-    return isNaN(n) ? 0 : n;
-  }
-  return 0;
-}
-
 /**
  * Calcula o valor da comissão a cobrar.
  * Prioridade: `override` > `comissao.valor` > `comissao.percentual` × `pagamento.valor_total`.
@@ -175,11 +165,18 @@ export function resolveCommissionValue(
 ): number {
   if (typeof opts.override === "number" && opts.override > 0) return opts.override;
 
-  const valor = parseNumber(data.comissao?.valor);
+  // A raiz do bug 100× (comissão inflada) é o parsing, corrigido em
+  // parseMoneyBR. NÃO bloqueamos comissão > valor_total: em contrato importado/
+  // OCR o valor_total pode capturar só o sinal/parcela enquanto a comissão é a
+  // real (ex.: total=R$1.500 do sinal, comissão=R$30.000) — um throw aqui
+  // impediria o corretor de emitir uma cobrança legítima (422).
+  const valor = parseMoneyBR(data.comissao?.valor);
   if (valor > 0) return valor;
 
-  const pct = parseNumber(data.comissao?.percentual);
-  const total = parseNumber(data.pagamento?.valor_total);
+  const total = parseMoneyBR(data.pagamento?.valor_total);
+  // Percentual usa parser próprio — porcentagem não tem separador de milhar,
+  // então "6.500" é 6,5% e não 6500 (que geraria comissão ~1000× maior).
+  const pct = parsePercentBR(data.comissao?.percentual);
   if (pct > 0 && total > 0) {
     return Math.round(((pct / 100) * total) * 100) / 100;
   }

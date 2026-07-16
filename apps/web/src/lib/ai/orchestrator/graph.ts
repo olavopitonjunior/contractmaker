@@ -761,8 +761,14 @@ export function ledgerOutcome(l: WriteLedger, intent: string | undefined): strin
   if (l.applied.length > 0) return l.failed.length || l.notApplied.length ? "applied_partial" : "applied";
   if (l.pending.length > 0) return "pending_plan";
   if (l.failed.length > 0 || l.notApplied.length > 0) return "failed";
-  if (l.dataOnly.length > 0) return "failed"; // dados mudaram mas texto não — não é o que o usuário espera
-  return intent === "informational" ? "no_op_informational" : "no_op_informational";
+  // `update_contract_data` bem-sucedido É sucesso — mudou o dataJson, só não o
+  // texto visível. Rebaixar pra "failed" mentia na telemetria (bug: dataOnly
+  // contava como falha). Outcome próprio pra distinguir de edição de texto.
+  if (l.dataOnly.length > 0) return "applied_data";
+  // Ledger vazio: distinguir "consulta informativa" de "pediu edição e nada
+  // aconteceu" (antes ambos os braços retornavam no_op_informational, apagando
+  // o segundo caso — que é um sintoma real de o Editor não ter agido).
+  return intent === "informational" ? "no_op_informational" : "no_op_requested";
 }
 
 function formatLedger(l: WriteLedger): string {
