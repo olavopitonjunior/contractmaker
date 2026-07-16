@@ -97,10 +97,18 @@ export async function POST(
     );
   }
 
+  // Isolamento entre titulares: pra "parties" NUNCA anexa os documentos de
+  // identidade (RG/CNH/comprovantes) — senão o comprador recebe os documentos
+  // do vendedor e vice-versa no mesmo e-mail. Anexos só quando o destino é a
+  // org (uso interno). Os documentos devem circular por link autenticado, não
+  // por anexo de e-mail a terceiros.
+  const includeAttachments =
+    parsed.data.target === "org" ? parsed.data.includeAttachments : false;
+
   const result = await sendFormSummary({
     formId: form.id,
     to: recipients,
-    includeAttachments: parsed.data.includeAttachments,
+    includeAttachments,
     persist: true,
   });
 
