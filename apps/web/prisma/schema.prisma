@@ -514,6 +514,9 @@ model Deal {
   // Locação (aditivo): "venda" (default) | "locacao". Discrimina a natureza
   // do negócio sem quebrar deals existentes. Ver docs/locacao/spec.md §4.2.
   kind             String    @default("venda")
+  // Canal de entrada (funil por origem) — capturado na criação. Nullable:
+  // deals pré-migration ficam null. Valores em lib/pipeline/source-channel.ts.
+  sourceChannel    String?
   position         Int       @default(0)
   // SLA pós-assinatura — datas terminais do funil.
   // commissionPaidAt: setado pelo botão "Marcar comissão paga" no DealDetail.
