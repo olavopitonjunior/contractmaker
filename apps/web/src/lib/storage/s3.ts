@@ -60,11 +60,18 @@ export async function uploadBufferToStorage(params: {
   // Priority 1: Vercel Blob
   if (process.env.BLOB_READ_WRITE_TOKEN) {
     const { put } = await import('@vercel/blob');
+    // addRandomSuffix: true — sufixo aleatório na key torna a URL não
+    // adivinhável. Antes era false + key determinística (ex.:
+    // envelopes/<contractId>/signed.pdf), então PDFs assinados, certidões
+    // (CPF) e KYC ficavam em URLs enumeráveis. Defesa em profundidade: o
+    // caller sempre persiste a URL retornada, então nada depende da key
+    // determinística. Documentos sensíveis devem ser servidos pela rota
+    // proxy autenticada /api/files/* (ver fase 2 do plano de segurança).
     const result = await put(safeKey, params.body, {
       access: 'public',
       contentType: params.contentType,
       token: process.env.BLOB_READ_WRITE_TOKEN,
-      addRandomSuffix: false,
+      addRandomSuffix: true,
       allowOverwrite: true,
     });
     return result.url;
@@ -116,11 +123,18 @@ export async function uploadStringToStorage(params: {
   // Priority 1: Vercel Blob
   if (process.env.BLOB_READ_WRITE_TOKEN) {
     const { put } = await import('@vercel/blob');
+    // addRandomSuffix: true — sufixo aleatório na key torna a URL não
+    // adivinhável. Antes era false + key determinística (ex.:
+    // envelopes/<contractId>/signed.pdf), então PDFs assinados, certidões
+    // (CPF) e KYC ficavam em URLs enumeráveis. Defesa em profundidade: o
+    // caller sempre persiste a URL retornada, então nada depende da key
+    // determinística. Documentos sensíveis devem ser servidos pela rota
+    // proxy autenticada /api/files/* (ver fase 2 do plano de segurança).
     const result = await put(safeKey, params.body, {
       access: 'public',
       contentType: params.contentType,
       token: process.env.BLOB_READ_WRITE_TOKEN,
-      addRandomSuffix: false,
+      addRandomSuffix: true,
       allowOverwrite: true,
     });
     return result.url;

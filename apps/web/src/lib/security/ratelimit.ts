@@ -168,6 +168,14 @@ export const RateLimits = {
     rateLimit({ identifier: `voice:${token}`, limit: 30, window: "1 h" }),
 
   /**
+   * Upload de anexo no formulário público: 40 arquivos/h por token. O form
+   * é anônimo (qualquer um com o link) e cada upload custa Blob + potencial
+   * OCR — evita abuso de custo e flood de arquivos.
+   */
+  formAttachmentPerToken: (token: string) =>
+    rateLimit({ identifier: `form-attach:${token}`, limit: 40, window: "1 h" }),
+
+  /**
    * Newton API per-token + per-scope. Limites variam por scope:
    *  - metrics:r — 600/min (polling-friendly)
    *  - documents:rw — 30/min (certidões caras)

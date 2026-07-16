@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { authOrBearer, hasScope } from "@/lib/auth/auth-or-bearer";
 import { prisma } from "@/lib/db/prisma";
+import {
+  orgScopedNotFound,
+  resolveUserOrgId,
+} from "@/lib/security/org-scope";
 
 /**
  * GET /api/attachments/[id]/url
@@ -43,12 +47,25 @@ export async function GET(
       filename: true,
       mime: true,
       url: true,
-      deal: { select: { userId: true } },
+      deal: {
+        select: {
+          userId: true,
+          pipeline: { select: { orgId: true } },
+        },
+      },
     },
   });
 
   if (!attachment) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
+  }
+
+  // Cross-org guard: vale pra session E bearer — antes só bearer tinha
+  // check (por deal.userId), e sessão de qualquer org lia URL de qualquer
+  // attachment por id. 404 pra não vazar existência.
+  const orgId = await resolveUserOrgId(ident.userId);
+  if (!orgId || attachment.deal.pipeline.orgId !== orgId) {
+    return orgScopedNotFound("Anexo");
   }
 
   // Cross-user guard: bearer só acessa attachments de deals próprios.

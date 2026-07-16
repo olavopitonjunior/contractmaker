@@ -85,13 +85,20 @@ export async function POST(
   }
   const { fieldPath, value } = parsed.data;
 
-  // Cross-user check pra Bearer (carrega antes do requireApproval pra
-  // 403 não virar intent pending falso-positivo)
+  // Cross-org + cross-user check (carrega antes do requireApproval pra
+  // 403 não virar intent pending falso-positivo). O org-check vale pra
+  // session E bearer — 404 pra não vazar existência.
   const contract = await prisma.contract.findUnique({
     where: { id: params.id },
-    select: { id: true, userId: true, status: true, version: true },
+    select: {
+      id: true,
+      userId: true,
+      status: true,
+      version: true,
+      deal: { select: { pipeline: { select: { orgId: true } } } },
+    },
   });
-  if (!contract) {
+  if (!contract || contract.deal.pipeline.orgId !== apiAuth.org.id) {
     return NextResponse.json(
       { error: "Contrato não encontrado" },
       { status: 404 }

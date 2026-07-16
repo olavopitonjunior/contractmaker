@@ -27,11 +27,12 @@ describe("GET /api/settings/agent", () => {
     expect(res.status).toBe(400);
   });
 
-  it("returns existing config when found", async () => {
+  it("returns existing config when found (migra modelo aposentado)", async () => {
     mockAuth.mockResolvedValueOnce(createMockSession());
     mockGetUserOrg.mockResolvedValueOnce(createMockOrg());
     mockPrisma.agentConfig.findUnique.mockResolvedValueOnce({
       model: "claude-opus-4-20250514",
+      ocrModel: "claude-haiku-4-5-20251001",
       temperature: 0.5,
       maxTokens: 8192,
       systemPrompt: "Custom",
@@ -41,7 +42,8 @@ describe("GET /api/settings/agent", () => {
     const json = await res.json();
 
     expect(res.status).toBe(200);
-    expect(json.model).toBe("claude-opus-4-20250514");
+    // Opus 4 (20250514) está deprecado — GET normaliza pro sucessor atual.
+    expect(json.model).toBe("claude-opus-4-6");
     expect(json.temperature).toBe(0.5);
   });
 
@@ -54,7 +56,7 @@ describe("GET /api/settings/agent", () => {
     const json = await res.json();
 
     expect(res.status).toBe(200);
-    expect(json.model).toBe("claude-sonnet-4-20250514");
+    expect(json.model).toBe("claude-sonnet-4-6");
     expect(json.temperature).toBe(0.3);
     expect(json.maxTokens).toBe(4096);
   });
@@ -72,12 +74,44 @@ describe("PUT /api/settings/agent", () => {
     expect(res.status).toBe(401);
   });
 
-  it("upserts config with body values", async () => {
+  it("returns 403 quando o usuário é member (não owner/admin)", async () => {
     mockAuth.mockResolvedValueOnce(createMockSession());
     mockGetUserOrg.mockResolvedValueOnce(createMockOrg({ id: "org-1" }));
+    mockPrisma.orgMembership.findFirst.mockResolvedValueOnce({ role: "member" } as any);
+
+    const req = new NextRequest("http://localhost/api/settings/agent", {
+      method: "PUT",
+      body: JSON.stringify({ model: "claude-sonnet-4-6" }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(403);
+    expect(mockPrisma.agentConfig.upsert).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 quando o modelo não está na allowlist", async () => {
+    mockAuth.mockResolvedValueOnce(createMockSession());
+    mockGetUserOrg.mockResolvedValueOnce(createMockOrg({ id: "org-1" }));
+    mockPrisma.orgMembership.findFirst.mockResolvedValueOnce({ role: "owner" } as any);
+
+    const req = new NextRequest("http://localhost/api/settings/agent", {
+      method: "PUT",
+      body: JSON.stringify({ model: "gpt-4-turbo-caro" }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(400);
+    expect(mockPrisma.agentConfig.upsert).not.toHaveBeenCalled();
+  });
+
+  it("upserts config normalizando modelo aposentado do body (owner)", async () => {
+    mockAuth.mockResolvedValueOnce(createMockSession());
+    mockGetUserOrg.mockResolvedValueOnce(createMockOrg({ id: "org-1" }));
+    mockPrisma.orgMembership.findFirst.mockResolvedValueOnce({ role: "owner" } as any);
     mockPrisma.agentConfig.upsert.mockResolvedValueOnce({
-      model: "claude-opus-4-20250514",
+      model: "claude-opus-4-6",
       temperature: 0.7,
+      maxTokens: 6000,
     } as any);
 
     const req = new NextRequest("http://localhost/api/settings/agent", {
@@ -93,17 +127,19 @@ describe("PUT /api/settings/agent", () => {
     const res = await PUT(req);
 
     expect(res.status).toBe(200);
+    // O ID aposentado enviado pelo client é migrado antes de persistir —
+    // o banco nunca volta a guardar um modelo que a API rejeita com 404.
     expect(mockPrisma.agentConfig.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { orgId: "org-1" },
         update: expect.objectContaining({
-          model: "claude-opus-4-20250514",
+          model: "claude-opus-4-6",
           temperature: 0.7,
           maxTokens: 6000,
         }),
         create: expect.objectContaining({
           orgId: "org-1",
-          model: "claude-opus-4-20250514",
+          model: "claude-opus-4-6",
         }),
       })
     );

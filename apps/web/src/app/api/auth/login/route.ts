@@ -1,20 +1,20 @@
-﻿import { NextRequest, NextResponse } from 'next/server';
-import { loginSchema } from '@/lib/validation/schemas';
-import { verifyOrBootstrapUser } from '@/lib/auth/auth';
+import { NextResponse } from "next/server";
 
-export const runtime = 'nodejs';
-
-export async function POST(req: NextRequest) {
-  const body = await req.json();
-  const parsed = loginSchema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: 'Invalid payload' }, { status: 400 });
-  }
-
-  const user = await verifyOrBootstrapUser(parsed.data.email, parsed.data.password);
-  if (!user) {
-    return NextResponse.json({ error: 'Invalid credentials' }, { status: 401 });
-  }
-
-  return NextResponse.json({ user });
+/**
+ * ⚠️ DEPRECATED (2026-07-15)
+ *
+ * Endpoint legado de login pré-NextAuth. O login real é o NextAuth
+ * Credentials em /api/auth/[...nextauth]. Este endpoint era um orÁculo de
+ * credenciais sem rate-limit e, com ALLOW_SELF_REGISTER=true, ainda criava
+ * usuário via verifyOrBootstrapUser — nenhum client o consome desde a
+ * migração.
+ *
+ * Mantém o endpoint apenas para retornar 410 Gone — mesma convenção do
+ * /api/auth/register desativado.
+ */
+export async function POST() {
+  return NextResponse.json(
+    { error: "Endpoint desativado. Use o login padrão da plataforma." },
+    { status: 410 }
+  );
 }

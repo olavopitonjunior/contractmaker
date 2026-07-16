@@ -17,16 +17,28 @@ const patchSchema = z.object({
 async function loadOwnedSession(
   contractId: string,
   sessionId: string,
+  orgId: string,
   authUserId: string,
   isBearer: boolean
 ) {
   const session = await prisma.chatSession.findUnique({
     where: { id: sessionId },
     include: {
-      contract: { select: { id: true, userId: true } },
+      contract: {
+        select: {
+          id: true,
+          userId: true,
+          deal: { select: { pipeline: { select: { orgId: true } } } },
+        },
+      },
     },
   });
-  if (!session || session.contractId !== contractId) {
+  // Cross-org check pra session E bearer — 404 pra não vazar existência.
+  if (
+    !session ||
+    session.contractId !== contractId ||
+    session.contract.deal.pipeline.orgId !== orgId
+  ) {
     return { error: "Session not found", status: 404 as const };
   }
   if (isBearer && session.contract.userId !== authUserId) {
@@ -49,6 +61,7 @@ export async function GET(
   const result = await loadOwnedSession(
     params.id,
     params.sessionId,
+    auth.org.id,
     auth.ident.via === "bearer" ? auth.ident.userId : "",
     auth.ident.via === "bearer"
   );
@@ -104,6 +117,7 @@ export async function PATCH(
   const result = await loadOwnedSession(
     params.id,
     params.sessionId,
+    auth.org.id,
     auth.ident.via === "bearer" ? auth.ident.userId : "",
     auth.ident.via === "bearer"
   );
@@ -144,6 +158,7 @@ export async function DELETE(
   const result = await loadOwnedSession(
     params.id,
     params.sessionId,
+    auth.org.id,
     auth.ident.via === "bearer" ? auth.ident.userId : "",
     auth.ident.via === "bearer"
   );

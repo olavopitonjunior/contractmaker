@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db/prisma";
+import { withOrgBudgetLock } from "@/lib/security/budget-lock";
 import { uploadBufferToStorage, downloadBufferFromUrl } from "@/lib/storage/s3";
 import { generateContractPdfBuffer } from "@/lib/render/contract-pdf";
 import {
@@ -222,17 +223,8 @@ async function createEnvelopeFromBuffer(input: {
     overrides
   );
   const budget = getMonthlyBudgetCents(settings.monthlyBudgetCents);
-  const spent = await getMonthlySpendCents(orgId);
-  if (spent + planCost > budget) {
-    throw new EnvelopeBudgetError(
-      "Orçamento mensal Clicksign excedido",
-      spent,
-      budget,
-      planCost
-    );
-  }
 
-  // 1. Snapshot do PDF (best-effort).
+  // 1. Snapshot do PDF (best-effort). Fora do lock — é rede/storage.
   let documentUrl: string | null = null;
   try {
     documentUrl = await uploadBufferToStorage({
@@ -266,8 +258,53 @@ async function createEnvelopeFromBuffer(input: {
     return { role, group };
   };
 
-  // 2. Cria row local com status=draft.
-  const envelope = await prisma.envelope.create({
+  // 2. Cria row local com status=draft — sob advisory lock por org pra fechar
+  // o TOCTOU do budget: o check (soma running+closed+draft do mês) e o create
+  // acontecem atomicamente, então dois envios paralelos da mesma org não furam
+  // o teto. Drafts do mês entram na conta pra que um envio in-flight seja
+  // visível ao concorrente (draft órfão é limpo por deleteDraftEnvelope).
+  const start = new Date();
+  start.setUTCDate(1);
+  start.setUTCHours(0, 0, 0, 0);
+  const envelope = await withOrgBudgetLock("clicksign", orgId, async (tx) => {
+    // Re-checa "1 envelope ativo por contrato" DENTRO do lock. O check no
+    // entry-point (sendEnvelopeForContract) roda antes do lock, então dois
+    // envios paralelos do mesmo contrato passavam ambos e criavam 2 envelopes
+    // ClickSign (cobrança dobrada + 2 e-mails por signatário). Aqui é
+    // serializado com o create do draft.
+    if (contractId) {
+      const active = await tx.envelope.findFirst({
+        where: {
+          contractId,
+          status: { in: ["draft", "running", "closed"] },
+        },
+        select: { id: true, status: true },
+      });
+      if (active) {
+        throw new Error(
+          `Já existe um envelope ${active.status} para este contrato (id ${active.id})`
+        );
+      }
+    }
+
+    const agg = await tx.envelope.aggregate({
+      where: {
+        orgId,
+        sentAt: { gte: start },
+        status: { in: ["running", "closed", "draft"] },
+      },
+      _sum: { costCents: true },
+    });
+    const spent = agg._sum.costCents ?? 0;
+    if (spent + planCost > budget) {
+      throw new EnvelopeBudgetError(
+        "Orçamento mensal Clicksign excedido",
+        spent,
+        budget,
+        planCost
+      );
+    }
+    return tx.envelope.create({
     data: {
       contractId,
       attachmentId,
@@ -279,6 +316,8 @@ async function createEnvelopeFromBuffer(input: {
       authMethod,
       documentUrl,
       deadlineAt,
+      costCents: planCost,
+      sentAt: new Date(),
       signers: {
         create: signers.map((s, idx) => {
           const { role, group } = resolveRoleGroup(s);
@@ -299,6 +338,7 @@ async function createEnvelopeFromBuffer(input: {
       },
     },
     include: { signers: true },
+    });
   });
 
   // 3. Sequência Clicksign. Em qualquer falha, marca failed + limpa draft.

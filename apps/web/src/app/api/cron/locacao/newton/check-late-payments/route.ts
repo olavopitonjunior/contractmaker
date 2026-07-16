@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireCronAuth } from "@/lib/security/cron-auth";
 import { prisma } from "@/lib/db/prisma";
 import { detectLatePaymentExecutor } from "@/lib/locacao/executors/detect-late-payment";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
@@ -17,13 +18,8 @@ export const dynamic = "force-dynamic";
  * Dedupe interna (7d). Auth via CRON_SECRET.
  */
 export async function GET(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = req.headers.get("authorization");
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-  }
+  const cronDenied = requireCronAuth(req);
+  if (cronDenied) return cronDenied;
   if (!(await isCronAllowedInStaging("/api/cron/locacao/newton/check-late-payments"))) {
     return NextResponse.json({ skipped: "staging-disabled", path: "/api/cron/locacao/newton/check-late-payments" });
   }

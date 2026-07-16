@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireCronAuth } from "@/lib/security/cron-auth";
 import { prisma } from "@/lib/db/prisma";
 import { notifyChargeEvent } from "@/lib/financeiro/notifications";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
@@ -20,13 +21,8 @@ export const dynamic = "force-dynamic";
  * dos outros crons).
  */
 export async function GET(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = req.headers.get("authorization");
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-  }
+  const cronDenied = requireCronAuth(req);
+  if (cronDenied) return cronDenied;
   if (!(await isCronAllowedInStaging("/api/cron/charges/due-soon"))) {
     return NextResponse.json({ skipped: "staging-disabled", path: "/api/cron/charges/due-soon" });
   }

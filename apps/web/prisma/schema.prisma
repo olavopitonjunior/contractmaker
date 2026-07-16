@@ -1023,7 +1023,7 @@ model Clause {
   agentNotes  String?  @db.Text
   groupCode   String?
   isVariable  Boolean  @default(false)
-  tags        String[]
+  tags        String[] @default([])
   source      String   @default("manual")
   status      String   @default("approved")
   usageCount  Int      @default(0)
@@ -1492,7 +1492,7 @@ model KnowledgeItem {
   chunkIndex     Int      @default(0)
   chunkTotal     Int      @default(1)
   parentId       String?
-  tags           String[]
+  tags           String[] @default([])
   source         String? // URL, doc id, "manual", "seed"
   createdBy      String?
   // Campos herdados de Clause na unificação 2026-05-18 (migration
@@ -1553,7 +1553,7 @@ model ClauseProposal {
   category   String? // partes, objeto, compromisso, preco, posse, titulo, comissao, etc.
   reason     String    @db.Text
   evidence   Json? // contractIds that motivated it
-  tags       String[]
+  tags       String[] @default([])
   status     String    @default("pending") // "pending" | "approved" | "rejected"
   resolvedAt DateTime?
   resolvedBy String?
@@ -2020,6 +2020,7 @@ model CommissionCharge {
 
   @@index([orgId, status])
   @@index([orgId, currentDueDate])
+  @@index([orgId, kind])
   @@index([accountId])
   @@index([dealId])
   @@index([contractId])
@@ -2278,6 +2279,12 @@ model AsaasTransfer {
   // Trigger automático (Fase 6): split PIX externo gerado a partir de cobrança paga
   commissionChargeId String?
   splitRecipientId   String?
+  // Idempotência de dispatch: `${chargeId}:${splitRecipientId ?? 'ext:'+pixKey}`.
+  // O @@unique([commissionChargeId, splitRecipientId]) NÃO protege PIX externo
+  // one-shot (splitRecipientId NULL → NULLs distintos no índice), então o
+  // webhook Asaas disparando em PAYMENT_RECEIVED e PAYMENT_CONFIRMED pagava 2×.
+  // Esta chave é não-nula pra todo dispatch automático e barra a duplicata.
+  dispatchDedupeKey  String?   @unique
   origin             String    @default("manual") // manual | split_dispatch
   // NFS-e por repasse (locação, A16) — emitida pela imobiliária quando
   // LeaseContract.emitirNfse=true. Provider varia por município.
@@ -2403,7 +2410,7 @@ model EnvelopeSigner {
   clicksignId    String?
   // IDs dos requirements (auth + sign) criados via POST /requirements.
   // Guardamos pra poder remover/alterar depois sem refazer GET.
-  requirementIds String[]
+  requirementIds String[] @default([])
   // sourceKind: vendedor | comprador | testemunha | corretora | outro.
   // sourceIndex aponta o array em dataJson (sempre 0 para corretora).
   sourceKind     String
@@ -2460,6 +2467,11 @@ model EnvelopeEvent {
   payload    Json
   // source: webhook | cron | manual
   source     String   @default("webhook")
+  // Idempotência: hash estável do evento (envelope+nome+signer+occurred_at).
+  // ClickSign reentrega webhooks; o create com este @unique é o lock que
+  // impede reprocessar `close`/`refusal` duas vezes (auto-promote de deal,
+  // download de PDF, etc.). Nullable pra eventos legados/manuais sem chave.
+  dedupeKey  String?  @unique
   receivedAt DateTime @default(now())
 
   envelope Envelope @relation(fields: [envelopeId], references: [id], onDelete: Cascade)

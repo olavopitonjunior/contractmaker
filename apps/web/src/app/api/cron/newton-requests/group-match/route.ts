@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireCronAuth } from "@/lib/security/cron-auth";
 import { prisma } from "@/lib/db/prisma";
 import { matchDealGroup } from "@/lib/newton/group-match";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
@@ -21,13 +22,8 @@ const MAX_AGE_DAYS = 30;
 const BATCH = 100;
 
 export async function GET(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = req.headers.get("authorization");
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-  }
+  const cronDenied = requireCronAuth(req);
+  if (cronDenied) return cronDenied;
   if (!(await isCronAllowedInStaging("/api/cron/newton-requests/group-match"))) {
     return NextResponse.json({ skipped: "staging-disabled", path: "/api/cron/newton-requests/group-match" });
   }

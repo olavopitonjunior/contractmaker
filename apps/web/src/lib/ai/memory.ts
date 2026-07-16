@@ -18,6 +18,7 @@ import { prisma } from "@/lib/db/prisma";
 import { renderContratoHTML } from "@/lib/render/handlebars";
 import { embedOne, toPgVector, isEmbeddingsConfigured } from "./embeddings";
 import { recordAIUsage } from "./usage";
+import { resolveModel, HAIKU_MODEL } from "./shared/models";
 
 interface PersonSnapshot {
   nome?: string;
@@ -118,7 +119,7 @@ async function summarizeContract(
     return `Contrato ${fingerprint.modality || ""} — ${fingerprint.valueTotalBucket || "valor indefinido"} — ${fingerprint.cityUf || "local indefinido"}`;
   }
 
-  const model = process.env.ANTHROPIC_PASSIVE_MODEL || "claude-haiku-4-5-20251001";
+  const model = resolveModel(process.env.ANTHROPIC_PASSIVE_MODEL, HAIKU_MODEL);
   const client = new Anthropic({ apiKey });
   const t0 = Date.now();
 
