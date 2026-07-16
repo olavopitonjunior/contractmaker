@@ -1,3 +1,4 @@
+import { prisma } from "@/lib/db/prisma";
 import { emitNotification } from "@/lib/notifications/emit";
 
 /**
@@ -6,7 +7,13 @@ import { emitNotification } from "@/lib/notifications/emit";
  * e-mail. Fire-and-forget e escopado por org (userId null = org-wide, mesmo
  * padrão das notificações de certidões).
  *
- * `dealId` vem do chamador (que já tem o envelope carregado) — sem re-query.
+ * SÓ pra envelope de contrato/attachment: um envelope de PROPOSTA (pré-negócio,
+ * source="proposal", sem deal no kanban) NÃO deve gerar sino de "Contrato
+ * assinado" — seria sinal enganoso sem pasta/deal pra abrir.
+ *
+ * `dealId` vem do chamador (que já tem o envelope carregado). O link respeita a
+ * esteira: locação → `/locacao/deals/...`, venda → `/deals/...`.
+ *
  * `dedupeSuffix` entra no batchId: pra "signed"/"refused" é uma notificação
  * por envelope; pra "email_failed" o chamador passa o signerId, senão o bounce
  * de um 2º signatário seria engolido pelo unique (type, batchId) do model.
@@ -34,13 +41,28 @@ const TEXT: Record<EnvelopeNotifKind, { type: string; title: string; body: strin
 export async function notifyEnvelopeMilestone(params: {
   envelopeId: string;
   orgId: string;
+  /** Origem do envelope — só "contract"/"attachment" geram sino. */
+  source: string;
   dealId: string | null;
   kind: EnvelopeNotifKind;
   /** Discriminador extra do batchId (ex.: signerId pro bounce por signatário). */
   dedupeSuffix?: string;
 }): Promise<void> {
-  const { envelopeId, orgId, dealId, kind, dedupeSuffix } = params;
+  const { envelopeId, orgId, source, dealId, kind, dedupeSuffix } = params;
+  if (source !== "contract" && source !== "attachment") return;
   try {
+    let linkUrl: string | undefined;
+    if (dealId) {
+      // Descobre a esteira (venda/locação) pra montar o link certo.
+      const deal = await prisma.deal.findUnique({
+        where: { id: dealId },
+        select: { pipeline: { select: { kind: true } } },
+      });
+      linkUrl =
+        deal?.pipeline?.kind === "locacao"
+          ? `/locacao/deals/${dealId}`
+          : `/deals/${dealId}`;
+    }
     const t = TEXT[kind];
     const batchId = `${envelopeId}:${kind}${dedupeSuffix ? `:${dedupeSuffix}` : ""}`;
     await emitNotification({
@@ -48,7 +70,7 @@ export async function notifyEnvelopeMilestone(params: {
       type: t.type,
       title: t.title,
       body: t.body,
-      linkUrl: dealId ? `/deals/${dealId}` : undefined,
+      linkUrl,
       batchId,
       metadata: { envelopeId, ...(dealId ? { dealId } : {}) },
     });

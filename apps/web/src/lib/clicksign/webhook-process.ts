@@ -247,6 +247,7 @@ export async function processClickSignWebhookPayload(
       await notifyEnvelopeMilestone({
         envelopeId: envelope.id,
         orgId: envelope.orgId,
+        source: envelope.source,
         dealId: envelope.dealId,
         kind: "refused",
       });
@@ -267,6 +268,7 @@ export async function processClickSignWebhookPayload(
       await notifyEnvelopeMilestone({
         envelopeId: envelope.id,
         orgId: envelope.orgId,
+        source: envelope.source,
         dealId: envelope.dealId,
         kind: "signed",
       });

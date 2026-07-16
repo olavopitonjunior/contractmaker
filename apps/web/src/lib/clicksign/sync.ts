@@ -72,6 +72,7 @@ export async function syncEnvelopeState(
 
   let signersUpdated = 0;
   const bouncedSignerIds: string[] = [];
+  let refusedNewly = false;
   for (const local of envelope.signers) {
     const byKey = local.clicksignId
       ? stateBySigner.get(local.clicksignId)
@@ -87,7 +88,10 @@ export async function syncEnvelopeState(
     const updates: Prisma.EnvelopeSignerUpdateInput = {};
 
     if (remote.refusedAt) {
-      if (local.status !== "refused") updates.status = "refused";
+      if (local.status !== "refused") {
+        updates.status = "refused";
+        refusedNewly = true;
+      }
       if (!local.refusedAt || +remote.refusedAt !== +local.refusedAt) {
         updates.refusedAt = remote.refusedAt;
       }
@@ -134,18 +138,34 @@ export async function syncEnvelopeState(
     }
   }
 
-  // Bounce de e-mail (detectado só no /events, via sync) → sino pro operador.
-  // Um sino POR signatário (dedupeSuffix = signerId) — senão o bounce de um 2º
-  // signatário seria engolido pelo dedupe de batchId por envelope.
-  for (const signerId of bouncedSignerIds) {
-    await notifyEnvelopeMilestone({
-      envelopeId: envelope.id,
-      orgId: envelope.orgId,
-      dealId: envelope.dealId,
-      kind: "email_failed",
-      dedupeSuffix: signerId,
-    });
-  }
+  // Marcos detectados só via reconciliação (webhook perdido). O helper ignora
+  // envelope de proposta e dedupa (batchId) com o caminho do webhook.
+  //  - bounce: um sino POR signatário (dedupeSuffix=signerId), senão o 2º seria
+  //    engolido pelo dedupe por envelope;
+  //  - recusa: um sino por envelope (simetria com o caminho signed do sync).
+  await Promise.all([
+    ...bouncedSignerIds.map((signerId) =>
+      notifyEnvelopeMilestone({
+        envelopeId: envelope.id,
+        orgId: envelope.orgId,
+        source: envelope.source,
+        dealId: envelope.dealId,
+        kind: "email_failed",
+        dedupeSuffix: signerId,
+      })
+    ),
+    ...(refusedNewly
+      ? [
+          notifyEnvelopeMilestone({
+            envelopeId: envelope.id,
+            orgId: envelope.orgId,
+            source: envelope.source,
+            dealId: envelope.dealId,
+            kind: "refused",
+          }),
+        ]
+      : []),
+  ]);
 
   let envelopeUpdated = false;
   let dealStagePromoted = false;
@@ -165,6 +185,7 @@ export async function syncEnvelopeState(
     await notifyEnvelopeMilestone({
       envelopeId: envelope.id,
       orgId: envelope.orgId,
+      source: envelope.source,
       dealId: envelope.dealId,
       kind: "signed",
     });
