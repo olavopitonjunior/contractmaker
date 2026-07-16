@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 import {
-  signParticipantToken,
+  newParticipantToken,
   type ParticipantRole,
 } from "@/lib/forms/participant-token";
 import { audit } from "@/lib/security/audit";
@@ -29,14 +29,6 @@ export async function POST(
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
 
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) {
-    return NextResponse.json(
-      { error: "AUTH_SECRET não configurado" },
-      { status: 500 },
-    );
-  }
-
   // Cross-org guard: form precisa pertencer à org do ctx. `[token]` é o
   // SalesForm.token atual (lookup único).
   const form = await prisma.salesForm.findFirst({
@@ -52,11 +44,11 @@ export async function POST(
     return NextResponse.json({ error: "Form não encontrado" }, { status: 404 });
   }
 
-  // Novo token principal — UUID (sem "."), então resolveFormScope continua
-  // tratando como token principal, não como subtoken JWT.
+  // Novo token principal. `resolveFormScope` tenta SalesForm antes de
+  // participante, então não há ambiguidade com os subtokens.
   const newMainToken = randomUUID();
 
-  // Re-assina cada subtoken (mesma lógica do endpoint regenerate).
+  // Novo subtoken pra cada parte (mesma lógica do endpoint regenerate).
   const rotatedParticipants: Array<{ role: string; url: string }> = [];
   await prisma.$transaction(async (tx) => {
     await tx.salesForm.update({
@@ -65,15 +57,7 @@ export async function POST(
     });
 
     for (const p of form.participants) {
-      const { token, exp } = signParticipantToken(
-        {
-          participantId: p.id,
-          formId: form.id,
-          role: p.role as ParticipantRole,
-          partyIndex: p.partyIndex,
-        },
-        secret,
-      );
+      const { token, exp } = newParticipantToken();
       await tx.salesFormParticipant.update({
         where: { id: p.id },
         data: { token, tokenExp: exp },

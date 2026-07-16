@@ -1,16 +1,33 @@
-import { signToken, verifyToken, type VerifyTokenResult } from "@/lib/jwt-hmac";
+import { randomBytes } from "node:crypto";
+import { prisma } from "@/lib/db/prisma";
 
 /**
- * Subtoken por parte (vendedor/comprador) pro form público.
+ * Subtoken por parte (vendedor/comprador; locador/locatário/fiador) pro form
+ * público. Server filtra `dataJson` por `ROLE_PATHS[role]` na leitura e enforça
+ * a allowlist via `deepMergeAtPaths` no PATCH.
  *
- * Cada SalesFormParticipant tem seu token JWT-HMAC com AUTH_SECRET, exp 7d.
- * Server filtra `dataJson` por `ROLE_PATHS[role]` na leitura e enforça
- * allowlist via `deepMergeAtPaths` no PATCH.
+ * ## Por que é um token opaco, e não um JWT
  *
- * Decisão de design: token é stateless (assinatura suficiente pra autenticar),
- * MAS persistimos `SalesFormParticipant.token` no DB pra suportar "regenerar
- * link" (admin clica → JWT antigo perde a referência → vira 401 mesmo com
- * assinatura válida). Sem isso, regenerar exigia invalidar uma window de 7d.
+ * Era um JWT-HMAC de ~257 chars, o que fazia a URL do link — mandada pro
+ * cliente por WhatsApp — passar de 280 caracteres. O comentário antigo
+ * justificava o formato dizendo que o token era "stateless (assinatura
+ * suficiente pra autenticar)", mas o código nunca foi stateless: toda rota
+ * verificava a assinatura e **em seguida ia ao banco assim mesmo**, porque
+ * `SalesFormParticipant.token` precisa bater com o valor persistido (é o que
+ * faz "regenerar link" invalidar o antigo).
+ *
+ * Ou seja: a ida ao banco já autenticava sozinha, e `tokenExp` já era coluna.
+ * A assinatura não comprava nada — só 235 chars de URL. Agora o token é 16
+ * bytes aleatórios em base64url (22 chars, 128 bits, URL-safe) e a
+ * autenticação é a própria busca por `token` (`@unique`) + checagem de
+ * `tokenExp`.
+ *
+ * ## Links antigos continuam valendo
+ *
+ * Os JWTs já emitidos estão gravados na coluna `token`. Como a autenticação
+ * virou `findUnique({ token })`, um link legado resolve normalmente — pro banco
+ * é só uma string opaca comprida. Eles somem sozinhos no `tokenExp` (7d). Sem
+ * migração, sem link quebrado.
  */
 
 // Venda: vendedor/comprador. Locação: locador/locatario/fiador (validados
@@ -30,42 +47,72 @@ export const PARTICIPANT_ROLES: ReadonlySet<ParticipantRole> = new Set([
   "fiador",
 ]);
 
-export interface ParticipantTokenPayload {
-  participantId: string;
-  formId: string;
-  role: ParticipantRole;
-  partyIndex: number;
-  exp: number; // epoch seconds
-}
-
 const TTL_SECONDS = 7 * 24 * 60 * 60;
 
-export function signParticipantToken(
-  payload: Omit<ParticipantTokenPayload, "exp">,
-  secret: string,
-): { token: string; exp: Date } {
-  const exp = new Date(Date.now() + TTL_SECONDS * 1000);
-  const fullPayload: ParticipantTokenPayload = {
-    ...payload,
-    exp: Math.floor(exp.getTime() / 1000),
+/**
+ * Token novo + sua expiração. 16 bytes = 128 bits de entropia: inadivinhável,
+ * e curto o bastante pra caber numa mensagem sem virar parágrafo.
+ */
+export function newParticipantToken(): { token: string; exp: Date } {
+  return {
+    token: randomBytes(16).toString("base64url"),
+    exp: new Date(Date.now() + TTL_SECONDS * 1000),
   };
-  return { token: signToken(fullPayload, secret), exp };
 }
 
-export function verifyParticipantToken(
-  token: string,
-  secret: string,
-): VerifyTokenResult<ParticipantTokenPayload> {
-  const result = verifyToken<ParticipantTokenPayload>(token, secret);
-  if (!result.ok) return result;
-  const p = result.payload;
-  if (
-    typeof p.participantId !== "string" ||
-    typeof p.formId !== "string" ||
-    !PARTICIPANT_ROLES.has(p.role as ParticipantRole) ||
-    typeof p.partyIndex !== "number"
-  ) {
-    return { ok: false, error: "Payload de participant incompleto" };
+export type ResolveParticipantResult =
+  | {
+      ok: true;
+      participant: {
+        id: string;
+        role: ParticipantRole;
+        partyIndex: number;
+        formId: string;
+        tokenExp: Date;
+        completedAt: Date | null;
+      };
+    }
+  | { ok: false; error: string };
+
+/**
+ * Resolve um subtoken. É a autenticação inteira: token desconhecido não existe
+ * no banco, e token vencido é barrado por `tokenExp`.
+ *
+ * Não distingue "nunca existiu" de "revogado" de propósito — quem tem o link
+ * não precisa saber qual dos dois.
+ */
+export async function resolveParticipantToken(
+  token: string
+): Promise<ResolveParticipantResult> {
+  if (!token) return { ok: false, error: "Token inválido ou revogado" };
+
+  const participant = await prisma.salesFormParticipant
+    .findUnique({
+      where: { token },
+      select: {
+        id: true,
+        role: true,
+        partyIndex: true,
+        formId: true,
+        tokenExp: true,
+        completedAt: true,
+      },
+    })
+    .catch(() => null);
+
+  if (!participant) return { ok: false, error: "Token inválido ou revogado" };
+  if (participant.tokenExp.getTime() < Date.now()) {
+    return { ok: false, error: "Link expirado — peça um novo à imobiliária" };
   }
-  return { ok: true, payload: p };
+  if (!PARTICIPANT_ROLES.has(participant.role as ParticipantRole)) {
+    return { ok: false, error: "Papel de participante desconhecido" };
+  }
+
+  return {
+    ok: true,
+    participant: {
+      ...participant,
+      role: participant.role as ParticipantRole,
+    },
+  };
 }

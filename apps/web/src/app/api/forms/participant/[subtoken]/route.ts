@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import { verifyParticipantToken } from "@/lib/forms/participant-token";
+import { resolveParticipantToken } from "@/lib/forms/participant-token";
 import {
   ROLE_PATHS,
   filterDataJsonByRole,
@@ -32,32 +32,15 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { subtoken: string } },
 ) {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) {
-    return NextResponse.json(
-      { error: "AUTH_SECRET não configurado" },
-      { status: 500 },
-    );
+  const resolved = await resolveParticipantToken(params.subtoken);
+  if (!resolved.ok) {
+    return NextResponse.json({ error: resolved.error }, { status: 401 });
   }
 
-  const verify = verifyParticipantToken(params.subtoken, secret);
-  if (!verify.ok) {
-    return NextResponse.json({ error: verify.error }, { status: 401 });
-  }
-
-  const participant = await prisma.salesFormParticipant.findFirst({
-    where: {
-      id: verify.payload.participantId,
-      token: params.subtoken, // confirma DB canônico
-    },
+  const participant = await prisma.salesFormParticipant.findUniqueOrThrow({
+    where: { id: resolved.participant.id },
     include: { form: true },
   });
-  if (!participant) {
-    return NextResponse.json(
-      { error: "Token inválido ou revogado" },
-      { status: 401 },
-    );
-  }
 
   // Form-pai já enviado: o subtoken também para de servir dados. Mesmo gate do
   // token principal — senão o link por parte vira a porta dos fundos.
@@ -100,32 +83,15 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { subtoken: string } },
 ) {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) {
-    return NextResponse.json(
-      { error: "AUTH_SECRET não configurado" },
-      { status: 500 },
-    );
+  const resolved = await resolveParticipantToken(params.subtoken);
+  if (!resolved.ok) {
+    return NextResponse.json({ error: resolved.error }, { status: 401 });
   }
 
-  const verify = verifyParticipantToken(params.subtoken, secret);
-  if (!verify.ok) {
-    return NextResponse.json({ error: verify.error }, { status: 401 });
-  }
-
-  const participant = await prisma.salesFormParticipant.findFirst({
-    where: {
-      id: verify.payload.participantId,
-      token: params.subtoken,
-    },
+  const participant = await prisma.salesFormParticipant.findUniqueOrThrow({
+    where: { id: resolved.participant.id },
     include: { form: true },
   });
-  if (!participant) {
-    return NextResponse.json(
-      { error: "Token inválido ou revogado" },
-      { status: 401 },
-    );
-  }
 
   // Guard de travamento: form travado congela também os subtokens por parte.
   if (participant.form.lockedAt) {

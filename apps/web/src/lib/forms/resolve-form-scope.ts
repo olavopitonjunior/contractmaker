@@ -1,18 +1,20 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
-import {
-  verifyParticipantToken,
-  type ParticipantRole,
-} from "./participant-token";
+import { type ParticipantRole } from "./participant-token";
 
 /**
  * Resolve o `[token]` das rotas públicas de form/attachments aceitando DOIS
  * formatos:
  *   1. token principal do SalesForm (acesso total ao form);
- *   2. subtoken JWT de participante (acesso escopado por papel) — fecha o gap
+ *   2. subtoken de participante (acesso escopado por papel) — fecha o gap
  *      "subtoken não consegue subir documentos" sem mudar o cliente: o
  *      DocumentosStep continua batendo em /api/forms/{token}/attachments e o
  *      resolver decide o escopo.
+ *
+ * A ordem é a desambiguação: os dois são strings opacas e não dá pra saber qual
+ * é qual olhando (antes o subtoken era um JWT e dava pra farejar pelo ponto —
+ * heurística que morreu junto com o JWT). Tenta form, depois participante; as
+ * duas colunas são `@unique` e o espaço é aleatório, então não há colisão real.
  *
  * Quando `participantId` vem preenchido, o caller DEVE: filtrar GETs por
  * participantId, carimbar participantId nos uploads e restringir mutações a
@@ -41,7 +43,7 @@ export interface FormScope {
 }
 
 export async function resolveFormScope(token: string): Promise<FormScope | null> {
-  // 1. Token principal (uuid/cuid — nunca tem "." de JWT).
+  // 1. Token principal do SalesForm.
   const form = await prisma.salesForm.findUnique({
     where: { token },
     select: {
@@ -69,20 +71,16 @@ export async function resolveFormScope(token: string): Promise<FormScope | null>
     };
   }
 
-  // 2. Subtoken de participante (JWT-HMAC + match canônico no DB — regenerar
-  //    link invalida o antigo mesmo com assinatura válida).
-  if (!token.includes(".")) return null;
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) return null;
-  const verify = verifyParticipantToken(token, secret);
-  if (!verify.ok) return null;
-
-  const participant = await prisma.salesFormParticipant.findFirst({
-    where: { id: verify.payload.participantId, token },
+  // 2. Subtoken de participante. A própria busca autentica — o token é opaco e
+  //    aleatório, e "regenerar link" troca o valor, invalidando o antigo.
+  //    Expiração fica com `tokenExp` (não há mais `exp` assinado no token).
+  const participant = await prisma.salesFormParticipant.findUnique({
+    where: { token },
     select: {
       id: true,
       role: true,
       partyIndex: true,
+      tokenExp: true,
       form: {
         select: {
           id: true,
@@ -97,6 +95,7 @@ export async function resolveFormScope(token: string): Promise<FormScope | null>
     },
   });
   if (!participant) return null;
+  if (participant.tokenExp.getTime() < Date.now()) return null;
 
   return {
     formId: participant.form.id,
