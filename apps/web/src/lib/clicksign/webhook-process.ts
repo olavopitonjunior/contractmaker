@@ -24,7 +24,7 @@ import { listEnvelopeDocuments } from "@/lib/clicksign/envelopes";
 import { resolveClickSignCreds } from "@/lib/clicksign/account";
 import type { WebhookPayload } from "@/lib/clicksign/types";
 import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-signed";
-import { notifyEnvelopeMilestone } from "@/lib/clicksign/notify-envelope";
+import { notifyEnvelopeMilestone, resolveDealLink } from "@/lib/clicksign/notify-envelope";
 import {
   completeInspectionOnEnvelopeClosed,
   revertInspectionOnEnvelopeCanceled,
@@ -249,6 +249,7 @@ export async function processClickSignWebhookPayload(
         orgId: envelope.orgId,
         source: envelope.source,
         dealId: envelope.dealId,
+        linkUrl: await resolveDealLink(envelope.dealId),
         kind: "refused",
       });
       break;
@@ -270,6 +271,7 @@ export async function processClickSignWebhookPayload(
         orgId: envelope.orgId,
         source: envelope.source,
         dealId: envelope.dealId,
+        linkUrl: await resolveDealLink(envelope.dealId),
         kind: "signed",
       });
       triggerSignedPdfDownload(envelope, payload);

@@ -12,7 +12,7 @@ import { resolveClickSignCreds } from "./account";
 import type { ClicksignCreds } from "./client";
 import { persistSignedPdf } from "@/lib/clicksign/signed-pdf";
 import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-signed";
-import { notifyEnvelopeMilestone } from "@/lib/clicksign/notify-envelope";
+import { notifyEnvelopeMilestone, resolveDealLink } from "@/lib/clicksign/notify-envelope";
 import {
   completeInspectionOnEnvelopeClosed,
   revertInspectionOnEnvelopeCanceled,
@@ -143,29 +143,24 @@ export async function syncEnvelopeState(
   //  - bounce: um sino POR signatário (dedupeSuffix=signerId), senão o 2º seria
   //    engolido pelo dedupe por envelope;
   //  - recusa: um sino por envelope (simetria com o caminho signed do sync).
-  await Promise.all([
-    ...bouncedSignerIds.map((signerId) =>
-      notifyEnvelopeMilestone({
-        envelopeId: envelope.id,
-        orgId: envelope.orgId,
-        source: envelope.source,
-        dealId: envelope.dealId,
-        kind: "email_failed",
-        dedupeSuffix: signerId,
-      })
-    ),
-    ...(refusedNewly
-      ? [
-          notifyEnvelopeMilestone({
-            envelopeId: envelope.id,
-            orgId: envelope.orgId,
-            source: envelope.source,
-            dealId: envelope.dealId,
-            kind: "refused",
-          }),
-        ]
-      : []),
-  ]);
+  if (bouncedSignerIds.length > 0 || refusedNewly) {
+    const linkUrl = await resolveDealLink(envelope.dealId); // uma vez por envelope
+    const common = {
+      envelopeId: envelope.id,
+      orgId: envelope.orgId,
+      source: envelope.source,
+      dealId: envelope.dealId,
+      linkUrl,
+    };
+    await Promise.all([
+      ...bouncedSignerIds.map((signerId) =>
+        notifyEnvelopeMilestone({ ...common, kind: "email_failed", dedupeSuffix: signerId })
+      ),
+      ...(refusedNewly
+        ? [notifyEnvelopeMilestone({ ...common, kind: "refused" })]
+        : []),
+    ]);
+  }
 
   let envelopeUpdated = false;
   let dealStagePromoted = false;
@@ -187,6 +182,7 @@ export async function syncEnvelopeState(
       orgId: envelope.orgId,
       source: envelope.source,
       dealId: envelope.dealId,
+      linkUrl: await resolveDealLink(envelope.dealId),
       kind: "signed",
     });
   } else if (remoteStatus === "canceled" && envelope.status !== "canceled") {

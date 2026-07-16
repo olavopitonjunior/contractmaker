@@ -8,11 +8,15 @@ import { emitNotification } from "@/lib/notifications/emit";
  * padrão das notificações de certidões).
  *
  * SÓ pra envelope de contrato/attachment: um envelope de PROPOSTA (pré-negócio,
- * source="proposal", sem deal no kanban) NÃO deve gerar sino de "Contrato
- * assinado" — seria sinal enganoso sem pasta/deal pra abrir.
+ * source="proposal", sem deal no kanban) NÃO entra aqui. A wording é de
+ * contrato ("Contrato assinado", "pasta do negócio") e proposta tem máquina de
+ * status própria (onProposalEnvelope*). Marcos de proposta (incl. bounce) são
+ * feature separada do módulo de propostas — BACKLOG, não regressão: antes deste
+ * lote proposta nunca teve sino de marco de envelope.
  *
- * `dealId` vem do chamador (que já tem o envelope carregado). O link respeita a
- * esteira: locação → `/locacao/deals/...`, venda → `/deals/...`.
+ * `linkUrl` é resolvido pelo CHAMADOR (uma vez por envelope) e passado pronto —
+ * a query da esteira NÃO fica dentro do try do emit (senão um erro de DB no
+ * link secundário engoliria o sino inteiro) nem se repete por signatário.
  *
  * `dedupeSuffix` entra no batchId: pra "signed"/"refused" é uma notificação
  * por envelope; pra "email_failed" o chamador passa o signerId, senão o bounce
@@ -38,31 +42,43 @@ const TEXT: Record<EnvelopeNotifKind, { type: string; title: string; body: strin
   },
 };
 
+/**
+ * Monta o link do deal respeitando a esteira (locação → /locacao/deals). Best-
+ * effort: qualquer falha cai no fallback de venda — o link é secundário e
+ * nunca deve impedir o sino. Nunca lança.
+ */
+export async function resolveDealLink(
+  dealId: string | null | undefined
+): Promise<string | undefined> {
+  if (!dealId) return undefined;
+  try {
+    const deal = await prisma.deal.findUnique({
+      where: { id: dealId },
+      select: { pipeline: { select: { kind: true } } },
+    });
+    return deal?.pipeline?.kind === "locacao"
+      ? `/locacao/deals/${dealId}`
+      : `/deals/${dealId}`;
+  } catch {
+    return `/deals/${dealId}`;
+  }
+}
+
 export async function notifyEnvelopeMilestone(params: {
   envelopeId: string;
   orgId: string;
   /** Origem do envelope — só "contract"/"attachment" geram sino. */
   source: string;
   dealId: string | null;
+  /** Link já resolvido pelo chamador via `resolveDealLink`. */
+  linkUrl?: string;
   kind: EnvelopeNotifKind;
   /** Discriminador extra do batchId (ex.: signerId pro bounce por signatário). */
   dedupeSuffix?: string;
 }): Promise<void> {
-  const { envelopeId, orgId, source, dealId, kind, dedupeSuffix } = params;
+  const { envelopeId, orgId, source, dealId, linkUrl, kind, dedupeSuffix } = params;
   if (source !== "contract" && source !== "attachment") return;
   try {
-    let linkUrl: string | undefined;
-    if (dealId) {
-      // Descobre a esteira (venda/locação) pra montar o link certo.
-      const deal = await prisma.deal.findUnique({
-        where: { id: dealId },
-        select: { pipeline: { select: { kind: true } } },
-      });
-      linkUrl =
-        deal?.pipeline?.kind === "locacao"
-          ? `/locacao/deals/${dealId}`
-          : `/deals/${dealId}`;
-    }
     const t = TEXT[kind];
     const batchId = `${envelopeId}:${kind}${dedupeSuffix ? `:${dedupeSuffix}` : ""}`;
     await emitNotification({
