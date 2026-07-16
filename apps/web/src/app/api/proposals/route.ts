@@ -14,6 +14,7 @@ import { getEffectivePermissions, proposalScopeWhere, can } from "@/lib/security
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { generateProposalToken } from "@/lib/proposals/token";
 import { computeDedupeKey } from "@/lib/proposals/signer-dedupe";
+import { sanitizeHiddenPaths } from "@/lib/proposals/hidden-fields";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
 
@@ -46,6 +47,7 @@ const createSchema = z.object({
   tenantId: z.string().optional(),
   validUntil: z.string().datetime().optional(),
   comissaoIncluida: z.boolean().optional(),
+  hiddenPaths: z.array(z.string()).optional(),
   signers: z.array(signerSchema).optional(),
 });
 
@@ -120,6 +122,11 @@ export async function POST(req: NextRequest) {
           token: generateProposalToken(),
           dataJson: input.dataJson as Prisma.InputJsonValue,
           comissaoIncluida: input.comissaoIncluida ?? false,
+          // Ocultar comissão do proprietário → sanitiza contra a allowlist do
+          // schemaType. Não-vazio força o 2º envelope a sair na via reduzida.
+          hiddenPaths: input.hiddenPaths
+            ? sanitizeHiddenPaths(input.schemaType, input.hiddenPaths)
+            : [],
           validUntil: input.validUntil ? new Date(input.validUntil) : null,
           propertyId: input.propertyId ?? null,
           leaseClientId: input.leaseClientId ?? null,

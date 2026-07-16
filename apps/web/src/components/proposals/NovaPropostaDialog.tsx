@@ -21,6 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Plus, Trash2, UserPlus } from "lucide-react";
 
 const SCHEMA_BY_TIPO: Record<string, { label: string; value: string }[]> = {
@@ -58,6 +59,8 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
   const [imovel, setImovel] = useState("");
   const [valor, setValor] = useState("");
   const [validadeDias, setValidadeDias] = useState("5");
+  const [comissao, setComissao] = useState(false);
+  const [esconderComissao, setEsconderComissao] = useState(false);
 
   const proponenteLabel = isVenda ? "Comprador" : "Locatário";
   const vendedorLabel = isVenda ? "Proprietário / Vendedor" : "Locador";
@@ -124,10 +127,21 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
       ];
 
       const title = `${validProponentes[0].name}${imovel ? ` — ${imovel}` : ""}`;
+      // Esconder a comissão só faz sentido com comissão incluída + proprietário
+      // assinando (2ª via reduzida). hiddenPaths não-vazio dispara a via reduzida.
+      const hide = comissao && esconderComissao && validVendedores.length > 0;
       const res = await fetch("/api/proposals", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title, schemaType, dataJson, validUntil, signers }),
+        body: JSON.stringify({
+          title,
+          schemaType,
+          dataJson,
+          validUntil,
+          signers,
+          comissaoIncluida: comissao,
+          hiddenPaths: hide ? ["comissao"] : [],
+        }),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
@@ -296,6 +310,23 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
                 onChange={(e) => setValidadeDias(e.target.value)}
               />
             </div>
+          </div>
+
+          {/* Comissão + ocultação do proprietário */}
+          <div className="space-y-2 rounded-md border p-3">
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox checked={comissao} onCheckedChange={(v) => setComissao(Boolean(v))} />
+              Incluir comissão da imobiliária no documento
+            </label>
+            {comissao && vendedores.some((p) => p.name.trim()) && (
+              <label className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Checkbox
+                  checked={esconderComissao}
+                  onCheckedChange={(v) => setEsconderComissao(Boolean(v))}
+                />
+                Esconder a comissão do {vendedorLabel.toLowerCase()} (ele assina uma via reduzida)
+              </label>
+            )}
           </div>
 
           <DialogFooter>
