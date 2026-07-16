@@ -80,7 +80,13 @@ export async function POST(
   // Todos os intents (informational, edit_simple, edit_multi, review, propose)
   // são roteados via graph — edit_multi força propose_plan no Editor.
   void classifyIntent; // mantido pra debug/log futuro
-  const useMultiAgent = process.env.ENABLE_MULTI_AGENT !== "false";
+  // Rollback de arquitetura NÃO pode ser rollback de SEGURANÇA: o caminho legado
+  // (streamContractAgent) não passa anexos pelo Sentinel/quarentena. Quando há
+  // anexos (conteúdo não-confiável, vetor de prompt-injection), força o
+  // orquestrador mesmo com o flag desligado. O rollback vale só pro chat sem anexo.
+  const hasAttachments = (agentParams.attachmentIds?.length ?? 0) > 0;
+  const useMultiAgent =
+    process.env.ENABLE_MULTI_AGENT !== "false" || hasAttachments;
 
   const stream = new ReadableStream({
     async start(controller) {

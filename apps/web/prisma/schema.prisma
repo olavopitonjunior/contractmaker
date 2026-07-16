@@ -924,6 +924,13 @@ model SalesForm {
   // Última vez que o resumo consolidado foi enviado por e-mail. Protege a
   // automação contra re-disparo em re-finalize (form é reabrível).
   summarySentAt DateTime?
+  // Consentimento LGPD (art. 7º): registrado no FINALIZE (o ato de submeter).
+  // Antes o aceite era só estado de UI e nunca persistia — sem evidência do
+  // consentimento nem da versão da política aceita. ipHash = sha256(ip+secret),
+  // nunca o IP cru.
+  privacyAcceptedAt    DateTime?
+  privacyIpHash        String?
+  privacyPolicyVersion String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 

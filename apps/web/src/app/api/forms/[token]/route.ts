@@ -1,7 +1,22 @@
 import { NextRequest, NextResponse } from "next/server";
+import { createHash } from "node:crypto";
 import { waitUntil } from "@vercel/functions";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+
+/** Versão da política de privacidade vigente — bump ao alterar /privacy. */
+const PRIVACY_POLICY_VERSION = "2026-07-16";
+
+/** Hash do IP (nunca o IP cru) pra evidência de consentimento LGPD. */
+function hashIp(req: NextRequest): string | null {
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
+    req.headers.get("x-real-ip") ||
+    null;
+  if (!ip) return null;
+  const secret = process.env.AUTH_SECRET ?? "";
+  return createHash("sha256").update(`${ip}:${secret}`).digest("hex");
+}
 import { matchDealGroup } from "@/lib/newton/group-match";
 import { generateContractForDeal } from "@/lib/services/contract-generation";
 import { emitNotification } from "@/lib/notifications/emit";
@@ -134,6 +149,13 @@ export async function PATCH(
   const autoLockOnFinalize =
     isFinalizing && form.org.formSettings?.autoLockFormOnFinalize === true;
 
+  // Consentimento LGPD: o finalize É o ato de consentir (o wizard bloqueia o
+  // submit sem o checkbox). Registra a evidência — quando, de qual IP (hasheado)
+  // e qual versão da política — na 1ª finalização. Antes o aceite era só estado
+  // de UI e nunca persistia.
+  const recordConsent =
+    isFinalizing && !form.privacyAcceptedAt && body.privacyAccepted !== false;
+
   const updated = await prisma.salesForm.update({
     where: { token: params.token },
     data: {
@@ -142,6 +164,13 @@ export async function PATCH(
       status: newStatus,
       ...(isFinalizing ? { completedAt: new Date() } : {}),
       ...(autoLockOnFinalize ? { lockedAt: new Date() } : {}),
+      ...(recordConsent
+        ? {
+            privacyAcceptedAt: new Date(),
+            privacyIpHash: hashIp(req),
+            privacyPolicyVersion: PRIVACY_POLICY_VERSION,
+          }
+        : {}),
     },
   });
 
