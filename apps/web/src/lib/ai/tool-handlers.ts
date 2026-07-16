@@ -29,6 +29,9 @@ const RAG_MIN_SIMILARITY = (() => {
   return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : 0.35;
 })();
 
+/** Warn-once: RAG rodando em modo keyword por VOYAGE ausente (config, não erro). */
+let voyageAbsentWarned = false;
+
 function deepMerge(
   target: Record<string, unknown>,
   patch: Record<string, unknown>
@@ -847,13 +850,18 @@ async function handleQueryKnowledgeBase(
   if (!isEmbeddingsConfigured()) {
     // Degradação pro ILIKE (recall inferior) era TOTALMENTE silenciosa aqui —
     // um deploy sem VOYAGE_API_KEY rodava em modo keyword sem nenhum rastro.
-    // Observabilidade: registra a degradação (o fallback já sinaliza ao modelo
-    // via mode/note, mas ops precisa ver que o RAG está capado).
-    logError(
-      "rag/query_knowledge_base",
-      new Error("RAG em modo keyword — VOYAGE_API_KEY não configurada"),
-      { orgId: context.orgId, category: category ?? null }
-    );
+    // Observabilidade: registra a degradação UMA vez por processo. VOYAGE é
+    // opcional (config steady-state), não erro transitório — logar a cada
+    // chamada floodaria o Sentry (alert fatigue). O fallback já sinaliza ao
+    // modelo via mode/note; ops precisa ver só que o RAG está capado.
+    if (!voyageAbsentWarned) {
+      voyageAbsentWarned = true;
+      logError(
+        "rag/query_knowledge_base",
+        new Error("RAG em modo keyword — VOYAGE_API_KEY não configurada (mensagem única por processo)"),
+        { category: category ?? null }
+      );
+    }
     return knowledgeBaseKeywordFallback(
       query,
       category,

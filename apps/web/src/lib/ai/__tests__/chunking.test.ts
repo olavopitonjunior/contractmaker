@@ -44,6 +44,13 @@ describe("chunkText — overlap na fronteira de palavra", () => {
     expect(out.length).toBeLessThan(40);
   });
 
+  it("overlap 0 não trava e produz chunks sem sobreposição", () => {
+    const texto = "palavra ".repeat(500).trim(); // ~4000 chars
+    const out = chunkText(texto, 200, 0); // maxChars 800, overlap 0
+    expect(out.length).toBeGreaterThan(1);
+    expect(out.length).toBeLessThan(20);
+  });
+
   it("índices são sequenciais e total bate com o número de chunks", () => {
     const texto = "Frase A. ".repeat(300);
     const out = chunkText(texto, 50, 10);

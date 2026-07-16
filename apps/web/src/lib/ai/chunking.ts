@@ -36,7 +36,11 @@ const DEFAULT_OVERLAP_TOKENS = 100;
  * loop infinito quando overlap ≥ maxChars — rejeitado.
  */
 function wordSafeTail(s: string, overlapChars: number): string {
-  if (overlapChars <= 0 || s.length <= overlapChars) return s;
+  // overlap 0 = SEM cauda (não a string inteira). Devolver `s` aqui fazia o
+  // hard-cut loop não progredir (current = head + resto = current) → loop
+  // infinito quando o chamador pede overlapTokens=0.
+  if (overlapChars <= 0) return "";
+  if (s.length <= overlapChars) return s;
   const rawStart = s.length - overlapChars;
   const nextSpace = s.indexOf(" ", rawStart);
   if (nextSpace === -1) return s.slice(rawStart);
