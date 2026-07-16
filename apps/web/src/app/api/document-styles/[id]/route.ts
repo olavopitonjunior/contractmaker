@@ -35,12 +35,13 @@ export async function PATCH(
 
   const body = await req.json().catch(() => ({}));
 
-  // If setting this as default, clear previous default first
-  if (body.isDefault === true) {
-    await prisma.documentStyle.updateMany({
-      where: { orgId: org.id, isDefault: true, id: { not: params.id } },
-      data: { isDefault: false },
-    });
+  // Cross-org guard: só edita estilo da própria org.
+  const owned = await prisma.documentStyle.findFirst({
+    where: { id: params.id, orgId: org.id },
+    select: { id: true },
+  });
+  if (!owned) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
   const allowedFields = [
@@ -65,9 +66,20 @@ export async function PATCH(
     if (key in body) data[key] = body[key];
   }
 
-  const updated = await prisma.documentStyle.update({
-    where: { id: params.id },
-    data,
+  // Invariante "um default por org": limpar o default anterior e gravar o novo
+  // numa transação, senão duas requests concorrentes deixam a org com 0 ou 2
+  // defaults.
+  const updated = await prisma.$transaction(async (tx) => {
+    if (body.isDefault === true) {
+      await tx.documentStyle.updateMany({
+        where: { orgId: org.id, isDefault: true, id: { not: params.id } },
+        data: { isDefault: false },
+      });
+    }
+    return tx.documentStyle.update({
+      where: { id: params.id },
+      data,
+    });
   });
   return NextResponse.json(updated);
 }

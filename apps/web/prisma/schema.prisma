@@ -2273,6 +2273,12 @@ model AsaasTransfer {
   // Trigger automático (Fase 6): split PIX externo gerado a partir de cobrança paga
   commissionChargeId String?
   splitRecipientId   String?
+  // Idempotência de dispatch: `${chargeId}:${splitRecipientId ?? 'ext:'+pixKey}`.
+  // O @@unique([commissionChargeId, splitRecipientId]) NÃO protege PIX externo
+  // one-shot (splitRecipientId NULL → NULLs distintos no índice), então o
+  // webhook Asaas disparando em PAYMENT_RECEIVED e PAYMENT_CONFIRMED pagava 2×.
+  // Esta chave é não-nula pra todo dispatch automático e barra a duplicata.
+  dispatchDedupeKey  String?   @unique
   origin             String    @default("manual") // manual | split_dispatch
   // NFS-e por repasse (locação, A16) — emitida pela imobiliária quando
   // LeaseContract.emitirNfse=true. Provider varia por município.
@@ -2433,6 +2439,11 @@ model EnvelopeEvent {
   payload    Json
   // source: webhook | cron | manual
   source     String   @default("webhook")
+  // Idempotência: hash estável do evento (envelope+nome+signer+occurred_at).
+  // ClickSign reentrega webhooks; o create com este @unique é o lock que
+  // impede reprocessar `close`/`refusal` duas vezes (auto-promote de deal,
+  // download de PDF, etc.). Nullable pra eventos legados/manuais sem chave.
+  dedupeKey  String?  @unique
   receivedAt DateTime @default(now())
 
   envelope Envelope @relation(fields: [envelopeId], references: [id], onDelete: Cascade)

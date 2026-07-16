@@ -127,6 +127,14 @@ export async function dispatchExternalSplits(
       }
     }
 
+    // Chave de idempotência não-nula pra TODO dispatch — cobre o PIX externo
+    // one-shot (splitRecipientFk NULL) que o @@unique não protegia. O webhook
+    // Asaas dispara em PAYMENT_RECEIVED e PAYMENT_CONFIRMED; sem isso o mesmo
+    // repasse saía 2×.
+    const dispatchDedupeKey = `${charge.id}:${
+      splitRecipientFk ?? `ext:${entry.pixAddressKey ?? entry.recipientId ?? "?"}`
+    }`;
+
     // Pagadoria v2 — rascunho de SplitRecipient: pula dispatch e marca como
     // FAILED com motivo claro. Cobrança continua emitida normalmente; admin
     // pode completar cadastro via UI ou magic link e re-tentar transfer.
@@ -151,6 +159,7 @@ export async function dispatchExternalSplits(
             ownerName: entry.ownerName,
             ownerCpfCnpj: entry.ownerCpfCnpj,
             origin: "split_dispatch",
+            dispatchDedupeKey,
             description: `Split de ${charge.id} — ${entry.label ?? entry.ownerName} (cadastro pendente)`,
             failureReason: reason.slice(0, 1000),
           },
@@ -188,12 +197,15 @@ export async function dispatchExternalSplits(
           ownerName: entry.ownerName,
           ownerCpfCnpj: entry.ownerCpfCnpj,
           origin: "split_dispatch",
+          dispatchDedupeKey,
           description: `Split de ${charge.id} — ${entry.label ?? entry.ownerName}`,
         },
       });
     } catch (err) {
       const code = (err as { code?: string }).code;
       if (code === "P2002") {
+        // Dispatch já registrado (reentrega de webhook / segunda transição de
+        // status da cobrança). No-op idempotente — não paga de novo.
         result.skipped++;
         continue;
       }
