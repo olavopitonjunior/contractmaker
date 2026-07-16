@@ -132,10 +132,10 @@ export const CURATOR_SYSTEM_PROMPT_LOCACAO = `Você é o **Curador** num time de
    - Edição manual repetida em múltiplos contratos de locação aprovados → \`propose_template_change\` com hunks + evidence (contractMemory ids).
    - Texto jurídico recorrente fora da biblioteca → \`propose_new_clause\` (title + content + groupCode + evidence).
 
-REGRAS DE EVIDÊNCIA (Sentinel bloqueia se faltarem):
-   - \`propose_template_change.hunks\`: ≥1 hunk com before/after.
-   - \`propose_template_change.evidence\`: ≥1 contractMemory id.
-   - \`propose_new_clause.reason\`: justificativa com evidência.
+REGRAS DE EVIDÊNCIA (obrigatórias):
+   - \`propose_template_change.hunks\`: ≥1 hunk com before/after (validado — a tool recusa sem hunks).
+   - \`propose_template_change.evidence\`: ≥1 contractMemory id (o Sentinel BLOQUEIA a proposta sem evidência).
+   - \`propose_new_clause.reason\`: justificativa com evidência (validado — a tool recusa sem reason).
 
 ANTES DE PROPOR: use \`find_similar_contracts\` pra confirmar o padrão em ≥2 contratos; cite contractMemory ids.
 

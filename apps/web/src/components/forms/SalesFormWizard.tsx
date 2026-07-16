@@ -93,41 +93,14 @@ interface SalesFormWizardProps {
 
 const FULL_STEP_INDEXES: readonly number[] = [0, 1, 2, 3, 4, 5, 6];
 
-/**
- * Backfilla `estado_civil` em partes PF que vieram sem ele (OCR/import, ou
- * forms salvos antes deste fix). O select de estado civil exibe "Solteiro(a)"
- * como fallback puramente visual (`watch(...) || "Solteiro(a)"`), mas sem
- * valor salvo o estado do RHF fica `undefined` — o que trava a validação de
- * "campo obrigatório" no avanço (preset padrão/completo exigem estado_civil)
- * e faz o campo nunca ser persistido no finalize. Commitamos o default pra
- * que o estado do form bata com o que o usuário vê na tela.
- */
-function withPartyDefaults(
-  data: Record<string, unknown>,
-): Record<string, unknown> {
-  const fillParties = (parties: unknown): unknown => {
-    if (!Array.isArray(parties)) return parties;
-    return parties.map((p) => {
-      if (!p || typeof p !== "object") return p;
-      const party = p as Record<string, unknown>;
-      if (party.tipo_pessoa === "juridica") return party;
-      const ec = party.estado_civil;
-      if (ec === undefined || ec === null || ec === "") {
-        return { ...party, estado_civil: "Solteiro(a)" };
-      }
-      return party;
-    });
-  };
-  return {
-    ...data,
-    ...(data.vendedores !== undefined
-      ? { vendedores: fillParties(data.vendedores) }
-      : {}),
-    ...(data.compradores !== undefined
-      ? { compradores: fillParties(data.compradores) }
-      : {}),
-  };
-}
+// NOTA (fix estado_civil, 2026-07-16): removido o antigo `withPartyDefaults`,
+// que fabricava `estado_civil: "Solteiro(a)"` em partes PF sem o campo
+// (OCR/import/forms legados). Isso era risco jurídico: um casado cujo estado
+// civil não foi extraído virava "solteiro" persistido → contrato sem outorga
+// conjugal, sem ninguém decidir. Agora a ausência é preservada; o select mostra
+// "Selecione…" (placeholder) e a validação de campo obrigatório força o
+// operador a escolher conscientemente. A aprovação ainda emite um aviso quando
+// o estado civil de uma parte PF ficou em branco (contract-generation.ts).
 
 function SaveStatusBadge({
   status,
@@ -323,7 +296,7 @@ const defaultFormValues: Partial<DadosContratoForm> = {
       tipo_pessoa: "fisica",
       nome: "",
       nacionalidade: "Brasileiro(a)",
-      estado_civil: "Solteiro(a)",
+      estado_civil: "", // vazio => select mostra "Selecione…"; força escolha (outorga)
       profissao: "",
       rg: "",
       cpf: "",
@@ -347,7 +320,7 @@ const defaultFormValues: Partial<DadosContratoForm> = {
       tipo_pessoa: "fisica",
       nome: "",
       nacionalidade: "Brasileiro(a)",
-      estado_civil: "Solteiro(a)",
+      estado_civil: "", // vazio => select mostra "Selecione…"; força escolha (outorga)
       profissao: "",
       rg: "",
       cpf: "",
@@ -500,7 +473,7 @@ export function SalesFormWizard({
   const form = useForm<DadosContratoForm>({
     defaultValues: {
       ...defaultFormValues,
-      ...(withPartyDefaults(initialData) as Partial<DadosContratoForm>),
+      ...(initialData as Partial<DadosContratoForm>),
     },
     mode: "onChange",
   });

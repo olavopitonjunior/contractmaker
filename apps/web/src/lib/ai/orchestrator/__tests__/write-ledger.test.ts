@@ -80,6 +80,15 @@ describe("buildWriteLedger (B2 anti-confabulação)", () => {
     );
     expect(l.applied.length).toBe(0);
     expect(l.dataOnly.length).toBe(1);
+    // dataOnly bem-sucedido é SUCESSO próprio, não "failed" (regressão corrigida).
+    expect(ledgerOutcome(l, "update_data")).toBe("applied_data");
+  });
+
+  it("pediu edição mas nenhuma escrita aconteceu => no_op_requested (≠ consulta)", () => {
+    const l = buildWriteLedger(editor([]));
+    expect(ledgerIsEmpty(l)).toBe(true);
+    expect(ledgerOutcome(l, "edit_simple")).toBe("no_op_requested");
+    expect(ledgerOutcome(l, "informational")).toBe("no_op_informational");
   });
 
   it("edição aplicada + uma falha => applied_partial", () => {

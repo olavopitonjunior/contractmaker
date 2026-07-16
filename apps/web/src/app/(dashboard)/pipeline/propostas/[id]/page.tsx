@@ -59,7 +59,7 @@ export default async function PropostaDetailPage({
         name: s.name,
         role: s.role,
         channel: s.notifyChannel,
-        status: "—",
+        acceptanceStatus: s.acceptanceStatus,
       }))}
       events={events.map((e) => ({
         id: e.id,

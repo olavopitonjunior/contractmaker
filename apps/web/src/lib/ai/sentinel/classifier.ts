@@ -13,6 +13,7 @@
 import { createHash } from "node:crypto";
 import { getAnthropicClient, HAIKU_MODEL } from "../shared/anthropic-client";
 import { recordAIUsage } from "../usage";
+import { logError } from "@/lib/observability/log";
 
 export type Intent = "chat" | "injection" | "exfiltration" | "other";
 
@@ -163,6 +164,16 @@ async function classifyViaLLM(
         completionTokens: response.usage?.output_tokens ?? 0,
         latencyMs: Date.now() - t0,
         success: true,
+      });
+    } else {
+      // Custo do Haiku JÁ foi incorrido acima, mas recordAIUsage exige orgId —
+      // sem ele o custo do Sentinel sumiria da telemetria e do budget guard sem
+      // rastro. Registra a lacuna de observabilidade em vez de descartar em
+      // silêncio (o chamador deveria sempre propagar orgId).
+      logError("sentinel/classifier", new Error("sentinel_classify sem orgId — custo não contabilizado"), {
+        contractId: options.contractId ?? null,
+        inputTokens: response.usage?.input_tokens ?? 0,
+        outputTokens: response.usage?.output_tokens ?? 0,
       });
     }
 
