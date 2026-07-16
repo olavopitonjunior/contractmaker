@@ -1,6 +1,8 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db/prisma";
 import { resolveAllRequiredFields } from "@/lib/forms/presets";
+import { canAccessForm } from "@/lib/forms/form-gate";
+import { FormClosedNotice } from "@/components/forms/FormClosedNotice";
 import { FormPageClient } from "./form-client";
 
 export default async function PublicFormPage({
@@ -16,6 +18,13 @@ export default async function PublicFormPage({
 
   if (!form) {
     notFound();
+  }
+
+  // Form enviado: só membro da org segue vendo os dados. Para o público o link
+  // vira um aviso sem conteúdo — a página nem chega a montar o wizard, então
+  // nenhum dataJson viaja pro browser.
+  if (!(await canAccessForm(form))) {
+    return <FormClosedNotice />;
   }
 
   // Resolve OrgFormSettings server-side e calcula required fields por step

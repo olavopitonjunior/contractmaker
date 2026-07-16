@@ -1,6 +1,14 @@
 import { z } from "zod";
 import { collectPartyFormatIssues } from "@/lib/forms/field-formats";
 
+/**
+ * Teto das observações gerais do formulário. Existe por dois motivos além de
+ * higiene de UI: o dataJson inteiro entra no prompt da análise passiva (sem
+ * truncar, diferente do HTML do contrato, que é cortado em 8000 chars), e o
+ * texto vem de um formulário público anônimo.
+ */
+export const OBSERVACOES_MAX = 1500;
+
 // ========= Shared schemas =========
 
 // Recebimento (PIX + dados bancários) do vendedor.
@@ -334,16 +342,33 @@ export const step7Schema = z.object({
       splitRecipientId: z.string().optional(),
     })).optional(),
   }).optional(),
+  // `desistencia`, `foro`, `assinatura` e `config` SAÍRAM do formulário público
+  // (viraram configuração da imobiliária, na aba "Configurações" do contrato —
+  // lib/contracts/default-config.ts). Continuam aceitos aqui, e NÃO opcionais
+  // por acaso: forms antigos têm esses campos gravados no dataJson, o schema é
+  // usado no finalize pra reportar problemas, e o Zod é non-strict — tirá-los
+  // faria a validação ignorá-los, mas o dado permanece. A geração preenche o
+  // que faltar via `enrichContractData`.
   desistencia: z.object({
     permite: z.boolean().optional().default(false),
     prazo_dias: z.number().optional().default(7),
   }).optional(),
-  foro: z.string().optional().default("arbitragem"),
+  foro: z.string().optional(),
   assinatura: z.object({
     cidade: z.string().optional().default(""),
     uf: z.string().optional().default(""),
     data: z.string().optional().default(""),
   }).optional(),
+  /**
+   * Campo livre no fim do formulário (após testemunhas). Substituiu os campos
+   * de configuração contratual que o cliente não deveria decidir.
+   *
+   * Vai pro resumo enviado à imobiliária e é lido pela IA na análise do
+   * contrato — mas como TEXTO DE TERCEIRO, nunca como instrução (o form público
+   * é anônimo). Cap de tamanho é defesa: o dataJson entra inteiro no prompt da
+   * análise passiva, então texto longo aqui competiria com o contrato.
+   */
+  observacoes: z.string().max(OBSERVACOES_MAX).optional().default(""),
   testemunhas: z.array(z.object({
     nome: z.string().default(""),
     cpf: z.string().default(""),
@@ -484,7 +509,9 @@ export const STEP_LABELS = [
   "Imóvel(is)",
   "Posse/Propriedade",
   "Pagamento",
-  "Comissão e Config",
+  // Era "Comissão e Config": as configurações contratuais migraram pra aba
+  // "Configurações" do editor de contrato.
+  "Comissão e Testemunhas",
 ] as const;
 
 // Campos obrigatórios por etapa — array LEGADO mantido pra retrocompat.

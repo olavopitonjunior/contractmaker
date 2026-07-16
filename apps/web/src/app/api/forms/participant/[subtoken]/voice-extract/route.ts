@@ -4,6 +4,7 @@ import {
   extractFromVoice,
   SUPPORTED_VOICE_MIMES,
 } from "@/lib/ai/voice-extract";
+import { formClosedResponse } from "@/lib/forms/form-gate";
 import { verifyParticipantToken } from "@/lib/forms/participant-token";
 import { ROLE_PATHS } from "@/lib/forms/role-paths";
 import { RateLimits } from "@/lib/security/ratelimit";
@@ -39,7 +40,11 @@ export async function POST(
 
   const participant = await prisma.salesFormParticipant.findFirst({
     where: { id: verify.payload.participantId, token: params.subtoken },
-    include: { form: { select: { orgId: true, status: true } } },
+    include: {
+      form: {
+        select: { orgId: true, status: true, completedAt: true, reopenedAt: true },
+      },
+    },
   });
   if (!participant) {
     return NextResponse.json(
@@ -47,12 +52,8 @@ export async function POST(
       { status: 401 },
     );
   }
-  if (participant.form.status === "completo") {
-    return NextResponse.json(
-      { error: "Formulário já finalizado" },
-      { status: 409 },
-    );
-  }
+  const closed = await formClosedResponse(participant.form);
+  if (closed) return closed;
 
   const rl = await RateLimits.voiceExtractPerForm(params.subtoken);
   if (!rl.success) {

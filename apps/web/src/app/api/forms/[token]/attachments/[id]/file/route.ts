@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { downloadBufferFromUrl } from "@/lib/storage/s3";
 import { resolveFormScope } from "@/lib/forms/resolve-form-scope";
+import { formClosedResponse } from "@/lib/forms/form-gate";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -14,6 +15,13 @@ export async function GET(
   if (!scope) {
     return NextResponse.json({ error: "Form not found" }, { status: 404 });
   }
+
+  // ATENÇÃO ao alcance: quando o anexo mora no Vercel Blob esta rota só faz 302
+  // pra uma URL pública e permanente (abaixo). O gate impede DESCOBERTA nova do
+  // documento, mas não revoga a URL de quem já a obteve enquanto o form estava
+  // aberto. Revogação real depende de blob privado + URL assinada.
+  const closed = await formClosedResponse(scope);
+  if (closed) return closed;
 
   const attachment = await prisma.formAttachment.findUnique({
     where: { id: params.id },

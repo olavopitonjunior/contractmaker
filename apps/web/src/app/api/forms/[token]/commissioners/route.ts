@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { formClosedResponse } from "@/lib/forms/form-gate";
 import { audit } from "@/lib/security/audit";
 import { detectPixKeyType } from "@/lib/asaas/pix";
 
@@ -35,11 +36,16 @@ export async function GET(
 
   const form = await prisma.salesForm.findUnique({
     where: { token },
-    select: { id: true, orgId: true },
+    select: { id: true, orgId: true, status: true, completedAt: true, reopenedAt: true },
   });
   if (!form) {
     return NextResponse.json({ error: "Form não encontrado" }, { status: 404 });
   }
+  // Este GET busca o roster de comissionados da ORG inteira (`?q=` livre), não
+  // só o que está no form — um token de form encerrado não pode seguir servindo
+  // de oráculo de busca sobre a base da imobiliária.
+  const closed = await formClosedResponse(form);
+  if (closed) return closed;
 
   const where: Prisma.SplitRecipientWhereInput = {
     orgId: form.orgId,
@@ -139,17 +145,15 @@ export async function POST(
 
   const form = await prisma.salesForm.findUnique({
     where: { token },
-    select: { id: true, orgId: true, status: true },
+    select: { id: true, orgId: true, status: true, completedAt: true, reopenedAt: true },
   });
   if (!form) {
     return NextResponse.json({ error: "Form não encontrado" }, { status: 404 });
   }
-  if (form.status === "completo") {
-    return NextResponse.json(
-      { error: "Formulário já finalizado — não aceita novos cadastros" },
-      { status: 409 }
-    );
-  }
+  // Era 409 só em `status === "completo"` — cego pra "vinculado" e divergente
+  // do resto. Unifica no gate (403 + reason).
+  const closed = await formClosedResponse(form);
+  if (closed) return closed;
 
   const raw = await req.json().catch(() => ({}));
   const parsed = createSchema.safeParse(raw);

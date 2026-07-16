@@ -7,6 +7,7 @@ import {
   filterDataJsonByRole,
 } from "@/lib/forms/role-paths";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
+import { formClosedResponse } from "@/lib/forms/form-gate";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { waitUntil } from "@vercel/functions";
 import { emitNotification } from "@/lib/notifications/emit";
@@ -58,6 +59,11 @@ export async function GET(
     );
   }
 
+  // Form-pai já enviado: o subtoken também para de servir dados. Mesmo gate do
+  // token principal — senão o link por parte vira a porta dos fundos.
+  const closed = await formClosedResponse(participant.form);
+  if (closed) return closed;
+
   // lastAccessAt best-effort — não bloqueia leitura.
   prisma.salesFormParticipant
     .update({
@@ -82,7 +88,7 @@ export async function GET(
       : null,
     dataJson: filtered,
     allowedTopKeys: ROLE_PATHS[role],
-  });
+  }, { headers: { "Cache-Control": "no-store" } });
 }
 
 /**
@@ -124,10 +130,13 @@ export async function PATCH(
   // Guard de travamento: form travado congela também os subtokens por parte.
   if (participant.form.lockedAt) {
     return NextResponse.json(
-      { error: "Formulário travado — não aceita mais alterações" },
+      { error: "Formulário travado — não aceita mais alterações", reason: "form_locked" },
       { status: 403 },
     );
   }
+
+  const closed = await formClosedResponse(participant.form);
+  if (closed) return closed;
 
   const body = await req.json().catch(() => ({}));
   const role = participant.role as keyof typeof ROLE_PATHS;

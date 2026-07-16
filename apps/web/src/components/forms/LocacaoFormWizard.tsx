@@ -119,7 +119,6 @@ export function LocacaoFormWizard({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
-  const [dealId, setDealId] = useState<string | null>(null);
 
   const form = useForm({
     defaultValues: { ...defaultValues(comercial), ...initialData },
@@ -131,7 +130,9 @@ export function LocacaoFormWizard({
   const { status: saveStatus } = useAutoSave(token, watchedData, {
     endpoint,
     pathScope,
-    enabled: !readOnly,
+    // Ver SalesFormWizard: pós-finalize o PATCH público responde 403, e um
+    // auto-save pendente sujaria a tela de sucesso com "erro".
+    enabled: !readOnly && !isComplete,
   });
 
   const isLastStep = currentStep === TOTAL - 1;
@@ -226,10 +227,12 @@ export function LocacaoFormWizard({
       });
       if (res.ok) {
         const data = await res.json().catch(() => ({}));
-        if (data.dealId) setDealId(data.dealId);
         if (Array.isArray(data.validationIssues) && data.validationIssues.length > 0) {
+          // Quem vê este toast é quem preencheu o link — normalmente o cliente.
+          // "Contrato gerado, revisar no editor" era instrução interna vazando
+          // pra ele.
           toast.warning(
-            `Contrato gerado com ${data.validationIssues.length} ponto(s) a revisar no editor.`,
+            `Enviado com ${data.validationIssues.length} ponto(s) incompleto(s) — a imobiliária vai revisar.`,
           );
         }
         setIsComplete(true);
@@ -253,18 +256,17 @@ export function LocacaoFormWizard({
           </svg>
         </div>
         <h2 className="font-display tracking-tight text-2xl font-semibold text-foreground mb-2">
-          {isParticipant ? "Seus dados foram salvos!" : "Formulário concluído!"}
+          {isParticipant ? "Seus dados foram salvos!" : "Formulário enviado!"}
         </h2>
+        {/*
+          Como no form de venda: o link é preenchido pelo cliente, então a tela
+          confirma o envio e não promete contrato pronto.
+        */}
         <p className="text-muted-foreground max-w-md mb-6">
           {isParticipant
             ? "Obrigado! A imobiliária foi avisada e segue com o contrato."
-            : "O contrato de locação foi gerado e está pronto para edição."}
+            : "Recebemos suas informações. A imobiliária responsável foi avisada e seguirá com o seu negócio a partir daqui."}
         </p>
-        {!isParticipant && dealId && (
-          <Button asChild>
-            <a href={`/locacao/deals/${dealId}`}>Abrir negócio de locação</a>
-          </Button>
-        )}
       </div>
     );
   }

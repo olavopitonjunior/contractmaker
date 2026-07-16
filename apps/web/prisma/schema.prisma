@@ -916,7 +916,15 @@ model SalesForm {
   status      String    @default("rascunho")
   // Setado quando status transiciona pra "completo"|"vinculado". Marco SLA
   // do funil — diferente de updatedAt (qualquer auto-save bumpa updatedAt).
+  // Setado UMA vez: re-finalizar depois de reabrir NÃO sobrescreve, senão o
+  // kanban/timeline passariam a mostrar a data da correção em vez da do envio.
   completedAt DateTime?
+  // Reabertura do formulário enviado (POST .../lock { reopen: true }).
+  // `completedAt != null && reopenedAt == null` = form fechado: o link público
+  // para de servir dados a quem não é da org (lib/forms/form-gate.ts). Reabrir
+  // seta esta data (sem tocar completedAt) pra devolver o acesso ao cliente;
+  // o finalize seguinte volta a null e fecha o gate.
+  reopenedAt  DateTime?
   // Travamento (lock) do formulário público: quando setado, os endpoints de
   // escrita (PATCH do token principal, PATCH do subtoken, uploads de anexo)
   // retornam 403 e as páginas públicas renderizam somente-leitura. Congela as
@@ -2154,6 +2162,16 @@ model OrgFormSettings {
   summaryRecipientEmail     String?
   autoSendSummaryOnComplete Boolean @default(false)
   summaryIncludeAttachments Boolean @default(true)
+  // Padrão de configurações contratuais da imobiliária (multas, juros, foro,
+  // desistência, local de assinatura) — o que antes o cliente respondia na
+  // última etapa do form público e virou decisão da org, aplicada na geração e
+  // editável na aba "Configurações" do contrato.
+  //
+  // Namespaced por módulo (`{ venda: {...}, locacao: {...} }`) porque os campos
+  // NÃO são equivalentes entre as esteiras: em venda `foro` é enum
+  // (arbitragem|justica-publica) e em locação é a comarca em texto livre. Ver
+  // lib/contracts/default-config.ts. `{}` = usa o padrão de fábrica.
+  contractDefaultsJson      Json    @default("{}")
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
