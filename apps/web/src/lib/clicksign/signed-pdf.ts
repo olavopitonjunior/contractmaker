@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import { prisma } from "@/lib/db/prisma";
+import { logError } from "@/lib/observability/log";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { updateInspectionSignedLaudo } from "@/lib/locacao/inspection-signature";
 import { safeFetch } from "@/lib/security/ssrf";
@@ -131,6 +132,8 @@ export async function persistSignedPdf(
       },
     });
   } catch (err) {
-    console.error(`${logPrefix} falha ao persistir PDF assinado:`, err);
+    // Erro aqui = contrato assinado NÃO chega na pasta do deal (perda de dado
+    // legal). Log estruturado pra virar alerta.
+    logError("clicksign/persist-signed-pdf", err, { envelopeId });
   }
 }

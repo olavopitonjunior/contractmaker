@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { Input } from "@/components/ui/input";
+import { parseMoneyBR } from "@/lib/format/money";
 
 interface MoneyInputProps {
   value?: number;
@@ -32,38 +33,9 @@ function formatNumber(value: number): string {
  *   "850.000,50"   -> 850000.50
  *   "R$ 850.000"   -> 850000      (remove prefixo)
  */
-function parseInput(raw: string): number {
-  if (!raw) return 0;
-  // Remove tudo que nao e digito, virgula ou ponto
-  let cleaned = raw.replace(/[^\d.,]/g, "");
-  if (!cleaned) return 0;
-
-  // Se tem virgula, ela e o decimal. Pontos sao separadores de milhar.
-  if (cleaned.includes(",")) {
-    // Pega a ultima virgula como decimal
-    const lastComma = cleaned.lastIndexOf(",");
-    const integerPart = cleaned.slice(0, lastComma).replace(/[.,]/g, "");
-    const decimalPart = cleaned.slice(lastComma + 1).replace(/[.,]/g, "");
-    const normalized = `${integerPart}.${decimalPart}`;
-    const n = parseFloat(normalized);
-    return Number.isNaN(n) ? 0 : n;
-  }
-
-  // Sem virgula: pontos podem ser separador de milhar OU decimal (raro em pt-BR)
-  // Convencao: se so tem um ponto com 1-2 digitos apos, tratar como decimal; caso contrario, milhar.
-  const dotCount = (cleaned.match(/\./g) || []).length;
-  if (dotCount === 1) {
-    const afterDot = cleaned.split(".")[1];
-    if (afterDot && afterDot.length <= 2) {
-      // "100.5" = 100.5
-      const n = parseFloat(cleaned);
-      return Number.isNaN(n) ? 0 : n;
-    }
-  }
-  // Multiplos pontos ou ponto com 3+ digitos: sao milhares, remover
-  const n = parseFloat(cleaned.replace(/\./g, ""));
-  return Number.isNaN(n) ? 0 : n;
-}
+// Parsing delegado ao util compartilhado (lib/format/money) — fonte única de
+// verdade, coberta por testes. Evita divergência com os parsers do servidor.
+const parseInput = parseMoneyBR;
 
 export function MoneyInput({
   value,

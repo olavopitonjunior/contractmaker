@@ -61,14 +61,22 @@ export default function PrivacyPage() {
       <h2 className="text-xl font-semibold mt-8 mb-3">4. Compartilhamento com terceiros</h2>
       <p>Compartilhamos dados estritamente com operadores que precisam para entregar funcionalidades:</p>
       <ul className="list-disc pl-6 space-y-1">
-        <li><strong>Asaas</strong> (provedor de pagamentos): CPF, nome, e-mail, telefone, endereço, valor da cobrança</li>
-        <li><strong>Vercel</strong> (hospedagem): logs de aplicação, anexos enviados</li>
-        <li><strong>Neon</strong> (banco de dados): todos os dados estruturados, criptografados em repouso</li>
-        <li><strong>Anthropic e Google</strong> (IA): trechos de contrato e documentos enviados para OCR/análise (não persistidos do lado deles segundo seus contratos)</li>
-        <li><strong>Resend</strong> (transacional): e-mails de notificação</li>
-        <li><strong>Infosimples</strong> (certidões — opcional): CPF/CNPJ enviado para extração de certidões</li>
+        <li><strong>Asaas</strong> (pagamentos): CPF/CNPJ, nome, e-mail, telefone, endereço, valor da cobrança</li>
+        <li><strong>ClickSign</strong> (assinatura eletrônica): nome, CPF, e-mail, telefone e o documento a ser assinado</li>
+        <li><strong>Infosimples</strong> (certidões — opcional): CPF/CNPJ e dados das partes para emissão de certidões</li>
+        <li><strong>Serasa Experian</strong> (análise de crédito — opcional, mediante consentimento): CPF/CNPJ para score e restritivos</li>
+        <li><strong>Anthropic (Claude)</strong> e <strong>Google (Gemini)</strong> (IA): trechos de contrato e documentos enviados para OCR/análise</li>
+        <li><strong>Voyage AI</strong> (busca semântica): trechos de cláusulas e contratos para geração de embeddings</li>
+        <li><strong>Google Drive/Docs</strong> (editor de contratos): o conteúdo do contrato é hospedado como documento Google</li>
+        <li><strong>Brevo</strong> (e-mail transacional): e-mail e nome do destinatário para notificações</li>
+        <li><strong>Vercel</strong> (hospedagem) e <strong>Neon</strong> (banco de dados, criptografado em repouso)</li>
       </ul>
       <p>Nenhum terceiro vende ou cede seus dados para fins não autorizados.</p>
+      <p className="text-sm text-muted-foreground">
+        Esta lista reflete os operadores integrados na plataforma. As categorias
+        de dados e as bases legais devem ser revisadas com o responsável jurídico
+        da organização antes de publicação definitiva.
+      </p>
 
       <h2 className="text-xl font-semibold mt-8 mb-3">5. Retenção</h2>
       <p>

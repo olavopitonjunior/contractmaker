@@ -23,6 +23,8 @@ function maxAttachBytes(): number {
 export interface SendFormSummaryInput {
   formId: string;
   to: string | string[];
+  /** Cópia oculta — destinatários que não podem ver o e-mail um do outro. */
+  bcc?: string | string[];
   includeAttachments: boolean;
   /** Persiste o PDF como DealAttachment (quando há deal vinculado). */
   persist: boolean;
@@ -168,6 +170,7 @@ export async function sendFormSummary(
 
   let result = await sendEmail({
     to: input.to,
+    bcc: input.bcc,
     subject,
     react: renderEmail(attachmentsSkipped, attachedDocs),
     attachments,
@@ -179,6 +182,7 @@ export async function sendFormSummary(
     attachedDocs = 0;
     result = await sendEmail({
       to: input.to,
+      bcc: input.bcc,
       subject,
       react: renderEmail(true, 0),
     });
