@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
+import { requireOrgAdmin } from "@/lib/security/org-scope";
 import { callInfosimples } from "@/lib/certidoes/infosimples";
 import { checkOnrAuth } from "@/lib/certidoes/onr-auth";
 
@@ -32,6 +33,9 @@ export async function GET() {
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  // Diagnóstico consome saldo Infosimples e expõe estado de infra — owner/admin.
+  const gate = await requireOrgAdmin(session.user.id);
+  if (!gate.ok) return gate.res;
   const org = await getUserOrg(session.user.id);
   if (!org) {
     return NextResponse.json({ error: "No organization" }, { status: 400 });

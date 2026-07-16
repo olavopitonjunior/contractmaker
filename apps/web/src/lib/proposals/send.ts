@@ -18,6 +18,7 @@ import { plannedProposalCostCents, plannedAcceptanceCostCents } from "./cost";
 export type PrepareBlock =
   | { blocked: "not_configured" }
   | { blocked: "no_signers" }
+  | { blocked: "already_sending" }
   | { blocked: "preflight"; issues: ReadinessIssue[] }
   | { blocked: "collision"; message: string }
   | { blocked: "routing"; message: string }

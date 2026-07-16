@@ -12,11 +12,13 @@ const mockPrisma = vi.mocked(prisma);
 
 beforeEach(() => {
   vi.clearAllMocks();
-  delete process.env.CRON_SECRET;
+  // Auth de cron é fail-closed: exige CRON_SECRET no ambiente + header válido.
+  process.env.CRON_SECRET = "secret";
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  delete process.env.CRON_SECRET;
 });
 
 function row(overrides: Record<string, unknown> = {}) {
@@ -36,7 +38,9 @@ function row(overrides: Record<string, unknown> = {}) {
 }
 
 function req() {
-  return new NextRequest("http://localhost/api/cron/newton-requests/sweep");
+  return new NextRequest("http://localhost/api/cron/newton-requests/sweep", {
+    headers: { authorization: "Bearer secret" },
+  });
 }
 
 /** Fixa o relógio numa hora dentro/fora da janela SP (UTC-3). */
@@ -48,13 +52,18 @@ function freezeAtSpHour(spHour: number) {
 }
 
 describe("GET /api/cron/newton-requests/sweep", () => {
-  it("403 com CRON_SECRET errado", async () => {
-    process.env.CRON_SECRET = "secret";
+  it("401 com CRON_SECRET errado", async () => {
     const r = new NextRequest("http://localhost/api/cron/newton-requests/sweep", {
       headers: { authorization: "Bearer wrong" },
     });
     const res = await GET(r);
-    expect(res.status).toBe(403);
+    expect(res.status).toBe(401);
+  });
+
+  it("503 quando CRON_SECRET não está no ambiente (fail-closed)", async () => {
+    delete process.env.CRON_SECRET;
+    const res = await GET(req());
+    expect(res.status).toBe(503);
   });
 
   it("pula fora da janela 7h-22h SP", async () => {

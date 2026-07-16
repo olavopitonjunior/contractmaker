@@ -1,4 +1,5 @@
 ﻿import { Anthropic } from '@anthropic-ai/sdk';
+import { resolveModel, SONNET_MODEL } from '@/lib/ai/shared/models';
 
 export interface ChatResult {
   assistantText: string;
@@ -43,7 +44,7 @@ export async function runChat(params: {
   ];
 
   const response = await anthropic.messages.create({
-    model: process.env.ANTHROPIC_MODEL ?? 'claude-3-5-sonnet-20240620',
+    model: resolveModel(process.env.ANTHROPIC_MODEL, SONNET_MODEL),
     max_tokens: 1000,
     temperature: 0.3,
     system: CHAT_SYSTEM,

@@ -316,9 +316,11 @@ describe("runContractAgent", () => {
 
     // system agora é array com cache_control ephemeral (introduzido pra
     // economizar tokens em chat multi-turn). Validamos só o text.
+    // O AgentConfig do banco carrega o Opus 4 aposentado — resolveModel
+    // migra pro sucessor antes da chamada (senão a API responde 404).
     expect(mockCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        model: "claude-opus-4-20250514",
+        model: "claude-opus-4-6",
         temperature: 0.5,
         max_tokens: 8192,
         system: expect.arrayContaining([

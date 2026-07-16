@@ -115,7 +115,12 @@ export async function POST(
       },
     },
   });
-  if (!session || session.contractId !== params.id) {
+  // Cross-org check pra session E bearer — 404 pra não vazar existência.
+  if (
+    !session ||
+    session.contractId !== params.id ||
+    session.contract.deal.pipeline.orgId !== auth.org.id
+  ) {
     return NextResponse.json({ error: "Session not found" }, { status: 404 });
   }
   if (auth.ident.via === "bearer" && session.contract.userId !== auth.ident.userId) {

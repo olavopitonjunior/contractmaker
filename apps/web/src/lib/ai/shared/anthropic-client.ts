@@ -14,9 +14,14 @@ export function getAnthropicClient(): Anthropic {
   return cachedClient;
 }
 
-/** Modelos default usados em todo o sistema multi-agente. */
-export const HAIKU_MODEL = "claude-haiku-4-5-20251001";
-export const SONNET_MODEL = "claude-sonnet-4-6";
+/** Modelos default usados em todo o sistema multi-agente (re-export — a
+ *  fonte é lib/ai/shared/models.ts, módulo puro sem SDK pra uso no client). */
+export {
+  HAIKU_MODEL,
+  SONNET_MODEL,
+  OPUS_MODEL,
+  resolveModel,
+} from "./models";
 
 /** Reset pra testes (forçar re-instanciar com env mockada). */
 export function __resetAnthropicClientForTests(): void {

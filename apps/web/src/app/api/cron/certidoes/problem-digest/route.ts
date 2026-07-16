@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireCronAuth } from "@/lib/security/cron-auth";
 import { prisma } from "@/lib/db/prisma";
 import { sendEmail } from "@/lib/email/client";
 import { classifyJobBucket, type HealthBucket } from "@/lib/certidoes/health-monitor";
@@ -42,13 +43,8 @@ export const dynamic = "force-dynamic";
  * `reportCertidaoProblem`). Auth: `Authorization: Bearer <CRON_SECRET>`.
  */
 export async function GET(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = req.headers.get("authorization") || "";
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-  }
+  const cronDenied = requireCronAuth(req);
+  if (cronDenied) return cronDenied;
   if (!(await isCronAllowedInStaging("/api/cron/certidoes/problem-digest"))) {
     return NextResponse.json({ skipped: "staging-disabled", path: "/api/cron/certidoes/problem-digest" });
   }

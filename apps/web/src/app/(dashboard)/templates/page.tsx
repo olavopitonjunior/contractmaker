@@ -1,6 +1,6 @@
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import { PenLine } from "lucide-react";
+import { PenLine, KeyRound } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
@@ -48,6 +48,12 @@ export default async function TemplatesPage({
           <Link href="/templates/new">
             <PenLine className="mr-1.5 h-4 w-4" />
             Criar do zero (avançado)
+          </Link>
+        </Button>
+        <Button size="sm" variant="ghost" asChild>
+          <Link href="/templates/placeholders">
+            <KeyRound className="mr-1.5 h-4 w-4" />
+            Chaves de auto-preenchimento
           </Link>
         </Button>
       </PageHeader>

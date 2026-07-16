@@ -26,12 +26,22 @@ export async function DELETE(
       session: {
         select: {
           contractId: true,
-          contract: { select: { userId: true } },
+          contract: {
+            select: {
+              userId: true,
+              deal: { select: { pipeline: { select: { orgId: true } } } },
+            },
+          },
         },
       },
     },
   });
-  if (!attachment || attachment.session.contractId !== params.id) {
+  // Cross-org check pra session E bearer — 404 pra não vazar existência.
+  if (
+    !attachment ||
+    attachment.session.contractId !== params.id ||
+    attachment.session.contract.deal.pipeline.orgId !== auth.org.id
+  ) {
     return NextResponse.json({ error: "Attachment not found" }, { status: 404 });
   }
   if (

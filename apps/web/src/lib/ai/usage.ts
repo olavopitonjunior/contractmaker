@@ -10,6 +10,7 @@
  */
 
 import { prisma } from "@/lib/db/prisma";
+import { waitUntil } from "@vercel/functions";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Pricing table — USD per 1,000,000 tokens.
@@ -25,10 +26,13 @@ export interface ModelPricing {
 }
 
 export const PRICING: Record<string, ModelPricing> = {
-  // Anthropic — Claude 4 family
+  // Anthropic — família 4.6 (atual; revisado 2026-07-15)
+  "claude-opus-4-6": { input: 5, output: 25, cacheRead: 0.5, cacheWrite: 6.25 },
+  "claude-sonnet-4-6": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
+  "claude-haiku-4-5-20251001": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
+  // Anthropic — aposentados/deprecados (mantidos pra custo de AIUsage histórico)
   "claude-opus-4-20250514": { input: 15, output: 75, cacheRead: 1.5, cacheWrite: 18.75 },
   "claude-sonnet-4-20250514": { input: 3, output: 15, cacheRead: 0.3, cacheWrite: 3.75 },
-  "claude-haiku-4-5-20251001": { input: 1, output: 5, cacheRead: 0.1, cacheWrite: 1.25 },
   // Google Gemini
   "gemini-2.5-flash": { input: 0.3, output: 2.5 },
   "gemini-2.5-flash-lite": { input: 0.1, output: 0.4 },
@@ -46,7 +50,13 @@ export function calcCostUsd(
   cacheWriteTokens = 0
 ): number {
   const p = PRICING[model];
-  if (!p) return 0;
+  if (!p) {
+    // Modelo sem pricing → custo 0 silencioso mascarava gasto real (o Editor
+    // rodava em claude-sonnet-4-6 e gravava $0). Loga pra buracos futuros
+    // ficarem visíveis no lugar de sumirem.
+    console.warn(`[usage] modelo sem pricing na tabela, custo=0: ${model}`);
+    return 0;
+  }
   const perToken = 1 / 1_000_000;
   return (
     promptTokens * p.input * perToken +
@@ -87,7 +97,15 @@ export type AIOperation =
   // DIMOB — copiloto de revisão fiscal (one-shot Haiku)
   | "dimob_review"
   | "dimob_diagnose"
-  | "dimob_explain";
+  | "dimob_explain"
+  // Orquestrador multi-agente (caminho de chat default). Antes entravam como
+  // `as never` em specialist-runner e sumiam de qualquer filtro por operação.
+  | "specialist_analyst"
+  | "specialist_legal"
+  | "specialist_editor"
+  | "specialist_curator"
+  // Sentinel — classificador de policy (anti prompt-injection em anexos)
+  | "sentinel_classify";
 
 export interface RecordUsageParams {
   orgId: string;
@@ -110,6 +128,11 @@ export interface RecordUsageParams {
 /**
  * Fire-and-forget recording. Never throws — observability must not break the
  * AI flow. Errors are logged but swallowed.
+ *
+ * Usa `waitUntil` quando disponível (serverless Vercel): um `void promise()`
+ * cru é cancelado quando a função congela após a resposta, perdendo a linha de
+ * custo — o que também fura o budget guard que soma AIUsage. `waitUntil`
+ * segura a execução até a escrita terminar.
  */
 export function recordAIUsage(params: RecordUsageParams): void {
   const completion = params.completionTokens ?? 0;
@@ -128,7 +151,7 @@ export function recordAIUsage(params: RecordUsageParams): void {
     ? params.errorMessage.slice(0, 500)
     : null;
 
-  void prisma.aIUsage
+  const write = prisma.aIUsage
     .create({
       data: {
         orgId: params.orgId,
@@ -150,9 +173,18 @@ export function recordAIUsage(params: RecordUsageParams): void {
         errorMessage,
       },
     })
+    .then(() => undefined)
     .catch((err) => {
       console.error("[recordAIUsage] failed to persist:", err);
     });
+
+  // Segura a escrita além da resposta (serverless). Fora da Vercel, waitUntil
+  // não existe — cai no fire-and-forget puro.
+  try {
+    waitUntil(write);
+  } catch {
+    void write;
+  }
 }
 
 /**

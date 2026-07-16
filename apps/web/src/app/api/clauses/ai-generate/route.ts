@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { Anthropic } from "@anthropic-ai/sdk";
 import { recordAIUsage } from "@/lib/ai/usage";
 import { createKnowledgeItem } from "@/lib/ai/knowledge";
+import { resolveModel, SONNET_MODEL } from "@/lib/ai/shared/models";
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -19,7 +20,7 @@ export async function POST(req: NextRequest) {
   }
 
   const { context, category, description } = await req.json();
-  const model = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-20250514";
+  const model = resolveModel(process.env.ANTHROPIC_MODEL, SONNET_MODEL);
   const t0 = Date.now();
 
   let response;

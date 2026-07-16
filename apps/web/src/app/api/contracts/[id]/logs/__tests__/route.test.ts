@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 import { GET } from "../route";
-import { auth } from "@/lib/auth/auth";
+import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { createMockSession } from "@/__tests__/helpers";
 
 const mockAuth = vi.mocked(auth);
+const mockGetUserOrg = vi.mocked(getUserOrg);
 const mockPrisma = vi.mocked(prisma);
 
 function createRequest() {
@@ -14,8 +15,15 @@ function createRequest() {
   });
 }
 
+function mockContractInOrg(orgId: string) {
+  mockPrisma.contract.findUnique.mockResolvedValueOnce({
+    deal: { pipeline: { orgId } },
+  } as any);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  mockGetUserOrg.mockResolvedValue({ id: "org-1" } as any);
 });
 
 describe("GET /api/contracts/[id]/logs", () => {
@@ -25,8 +33,19 @@ describe("GET /api/contracts/[id]/logs", () => {
     expect(res.status).toBe(401);
   });
 
+  it("returns 404 when contract belongs to another org", async () => {
+    mockAuth.mockResolvedValueOnce(createMockSession());
+    mockContractInOrg("org-OUTRA");
+
+    const res = await GET(createRequest(), { params: { id: "test-id" } });
+
+    expect(res.status).toBe(404);
+    expect(mockPrisma.contractChangeLog.findMany).not.toHaveBeenCalled();
+  });
+
   it("returns logs array ordered by createdAt desc", async () => {
     mockAuth.mockResolvedValueOnce(createMockSession());
+    mockContractInOrg("org-1");
     const mockLogs = [
       {
         id: "log-2",
@@ -57,6 +76,7 @@ describe("GET /api/contracts/[id]/logs", () => {
 
   it("queries with correct params", async () => {
     mockAuth.mockResolvedValueOnce(createMockSession());
+    mockContractInOrg("org-1");
     mockPrisma.contractChangeLog.findMany.mockResolvedValueOnce([]);
 
     await GET(createRequest(), { params: { id: "contract-99" } });

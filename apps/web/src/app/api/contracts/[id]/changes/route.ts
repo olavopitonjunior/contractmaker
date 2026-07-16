@@ -28,9 +28,14 @@ export async function GET(
 
   const contract = await prisma.contract.findUnique({
     where: { id: params.id },
-    select: { id: true, userId: true },
+    select: {
+      id: true,
+      userId: true,
+      deal: { select: { pipeline: { select: { orgId: true } } } },
+    },
   });
-  if (!contract) {
+  // Cross-org check pra session E bearer — 404 pra não vazar existência.
+  if (!contract || contract.deal.pipeline.orgId !== auth.org.id) {
     return NextResponse.json({ error: "Contract not found" }, { status: 404 });
   }
   if (auth.ident.via === "bearer" && contract.userId !== auth.ident.userId) {

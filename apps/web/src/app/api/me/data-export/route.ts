@@ -85,59 +85,32 @@ export async function GET(req: NextRequest) {
     }),
   ]);
 
-  // Cobranças e transfers escopadas pela org do usuário (não dados pessoais
-  // do user em si, mas que ele tem acesso por ser membro)
+  // LGPD art. 18, II é o direito de acesso do TITULAR aos SEUS dados. Não
+  // pode devolver a base de clientes da org (CPF/CNPJ, e-mail, telefone de até
+  // 1000 pagadores) — isso é PII de terceiros e vazava pra qualquer member
+  // (inclusive signup novo no SHARED_ORG). Só listamos as cobranças que o
+  // próprio usuário criou; a base de clientes da org sai por relatório interno
+  // com RBAC, não pelo export pessoal.
   const org = await getUserOrg(userId);
   const orgScopedData: Record<string, unknown> = {};
-  if (org) {
-    const [charges, transfers, customers] = await Promise.all([
-      prisma.commissionCharge.findMany({
-        where: { orgId: org.id },
-        select: {
-          id: true,
-          asaasPaymentId: true,
-          value: true,
-          netValue: true,
-          status: true,
-          billingType: true,
-          description: true,
-          currentDueDate: true,
-          paidAt: true,
-          createdAt: true,
-        },
-        take: 1000,
-      }),
-      prisma.asaasTransfer.findMany({
-        where: { orgId: org.id },
-        select: {
-          id: true,
-          asaasTransferId: true,
-          value: true,
-          status: true,
-          type: true,
-          ownerName: true,
-          createdAt: true,
-        },
-        take: 1000,
-      }),
-      prisma.asaasCustomer.findMany({
-        where: { orgId: org.id },
-        select: {
-          id: true,
-          name: true,
-          cpfCnpj: true,
-          email: true,
-          mobilePhone: true,
-          origin: true,
-          createdAt: true,
-        },
-        take: 1000,
-      }),
-    ]);
-    orgScopedData.charges = charges;
-    orgScopedData.transfers = transfers;
-    orgScopedData.customers = customers;
-  }
+  // Só cobranças dos deals do próprio usuário (CommissionCharge não tem criador
+  // — a ligação com a pessoa é via deal.userId).
+  const ownCharges = await prisma.commissionCharge.findMany({
+    where: { deal: { userId } },
+    select: {
+      id: true,
+      value: true,
+      netValue: true,
+      status: true,
+      billingType: true,
+      description: true,
+      currentDueDate: true,
+      paidAt: true,
+      createdAt: true,
+    },
+    take: 1000,
+  });
+  orgScopedData.chargesFromMyDeals = ownCharges;
 
   await audit(
     {

@@ -30,6 +30,7 @@ import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { getOrchestratorGraph } from "@/lib/ai/orchestrator/graph";
 import type { ToolCallRecord } from "@/lib/ai/orchestrator/state";
+import { resolveUserOrgId } from "@/lib/security/org-scope";
 
 export const runtime = "nodejs";
 
@@ -54,7 +55,9 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Cross-org guard via deal.pipeline.orgId
+  // Cross-org guard via deal.pipeline.orgId — compara com a org do usuário
+  // (antes só carregava o orgId sem comparar; qualquer sessão lia checkpoints
+  // de qualquer contrato).
   const contract = await prisma.contract.findUnique({
     where: { id: params.id },
     include: {
@@ -65,7 +68,8 @@ export async function GET(
       },
     },
   });
-  if (!contract) {
+  const userOrgId = await resolveUserOrgId(session.user.id);
+  if (!contract || !userOrgId || contract.deal.pipeline.orgId !== userOrgId) {
     return NextResponse.json({ error: "Contract not found" }, { status: 404 });
   }
 
