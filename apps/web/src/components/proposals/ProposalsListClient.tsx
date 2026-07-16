@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import {
   Table,
@@ -56,6 +57,16 @@ export function ProposalsListClient({
   showTabs: boolean;
 }) {
   const router = useRouter();
+
+  // Tempo real leve na lista: enquanto houver proposta em aberto, dá refresh no
+  // server component a cada 10s (o webhook já atualizou o DB). Sem polling
+  // por-proposta — o gestor vê os status andarem sem recarregar a página.
+  const hasOpen = proposals.some((p) => OPEN_STATUSES.has(p.status));
+  useEffect(() => {
+    if (!hasOpen) return;
+    const t = setInterval(() => router.refresh(), 10_000);
+    return () => clearInterval(t);
+  }, [hasOpen, router]);
 
   const emAberto = proposals.filter((p) => OPEN_STATUSES.has(p.status)).length;
   const expirando = proposals.filter((p) => {

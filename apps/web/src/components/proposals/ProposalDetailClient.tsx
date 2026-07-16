@@ -9,6 +9,17 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { proposalStatusView } from "@/lib/proposals/status-view";
+import { useProposalPolling } from "@/hooks/useProposalPolling";
+
+const SIGNER_STATUS_LABEL: Record<string, string> = {
+  pending: "Pendente",
+  notified: "Notificado",
+  viewed: "Visualizou",
+  signed: "Assinou",
+  refused: "Recusou",
+  email_failed: "Falha no e-mail",
+  removed: "Removido",
+};
 
 interface Proposal {
   id: string;
@@ -43,7 +54,28 @@ export function ProposalDetailClient({
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
-  const sv = proposalStatusView(proposal.status);
+
+  // Tempo real: pulla o status enquanto a proposta está viva e dá refresh no
+  // server component quando o status muda (webhook → DB → aqui em ~3.5s).
+  const isLive = !["convertida", "cancelada", "expirada", "recusada_proponente", "rascunho"].includes(
+    proposal.status
+  );
+  const { data: live } = useProposalPolling(proposal.id, {
+    enabled: isLive,
+    onStatusChange: () => router.refresh(),
+  });
+  const liveStatus = live?.status ?? proposal.status;
+  const sv = proposalStatusView(liveStatus);
+  // Status por signatário ao vivo (dos EnvelopeSigner), casado por nome. Prefere
+  // o estado mais avançado se o mesmo nome aparece em duas vias.
+  const RANK = ["removed", "pending", "notified", "email_failed", "viewed", "refused", "signed"];
+  const liveSignerStatus = new Map<string, string>();
+  for (const s of live?.signers ?? []) {
+    const cur = liveSignerStatus.get(s.name);
+    if (!cur || RANK.indexOf(s.status) > RANK.indexOf(cur)) {
+      liveSignerStatus.set(s.name, s.status);
+    }
+  }
 
   const canSend = ["rascunho", "falha_envio"].includes(proposal.status);
   const canConvert = ["completa", "assinada_proponente", "aguardando_vendedor"].includes(
@@ -175,14 +207,29 @@ export function ProposalDetailClient({
             <p className="text-sm text-muted-foreground">Nenhum signatário definido ainda.</p>
           ) : (
             <ul className="text-sm space-y-1">
-              {signers.map((s) => (
-                <li key={s.id} className="flex justify-between">
-                  <span>
-                    {s.name} <span className="text-muted-foreground">· {s.role}</span>
-                  </span>
-                  <span className="text-muted-foreground">{s.channel}</span>
-                </li>
-              ))}
+              {signers.map((s) => {
+                const live = liveSignerStatus.get(s.name);
+                const badge = live ? SIGNER_STATUS_LABEL[live] ?? live : null;
+                const badgeCls =
+                  live === "signed"
+                    ? "text-green-600"
+                    : live === "refused" || live === "email_failed"
+                      ? "text-red-600"
+                      : live === "viewed"
+                        ? "text-blue-600"
+                        : "text-muted-foreground";
+                return (
+                  <li key={s.id} className="flex justify-between gap-2">
+                    <span>
+                      {s.name} <span className="text-muted-foreground">· {s.role}</span>
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className="text-muted-foreground">{s.channel}</span>
+                      {badge && <span className={badgeCls}>· {badge}</span>}
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </Card>
