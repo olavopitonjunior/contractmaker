@@ -1,6 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import {
+  orgScopedNotFound,
+  resolveUserOrgId,
+} from "@/lib/security/org-scope";
+
+/**
+ * Carrega o comentário validando (a) que pertence ao contrato da URL e
+ * (b) que o contrato pertence à org do usuário. Cross-org/mismatch → null.
+ */
+async function loadScopedComment(
+  commentId: string,
+  contractId: string,
+  userId: string
+) {
+  const orgId = await resolveUserOrgId(userId);
+  if (!orgId) return null;
+  const comment = await prisma.contractComment.findUnique({
+    where: { id: commentId },
+    include: {
+      contract: {
+        select: {
+          id: true,
+          googleDocId: true,
+          deal: { select: { pipeline: { select: { orgId: true } } } },
+        },
+      },
+    },
+  });
+  if (
+    !comment ||
+    comment.contract.id !== contractId ||
+    comment.contract.deal.pipeline.orgId !== orgId
+  ) {
+    return null;
+  }
+  return comment;
+}
 
 export async function PATCH(
   req: NextRequest,
@@ -16,14 +53,31 @@ export async function PATCH(
   if (typeof body.resolved === "boolean") data.resolved = body.resolved;
   if (typeof body.text === "string") data.text = body.text;
 
-  const existing = await prisma.contractComment.findUnique({
-    where: { id: params.commentId },
-    include: { contract: { select: { googleDocId: true } } },
-  });
+  const existing = await loadScopedComment(
+    params.commentId,
+    params.id,
+    session.user.id
+  );
+  if (!existing) {
+    return orgScopedNotFound("Comentário");
+  }
+
+  // Editar o texto é só do autor; resolver/reabrir qualquer membro da org
+  // pode (fluxo normal pra comentários de IA e de colegas).
+  if (
+    typeof body.text === "string" &&
+    existing.authorType === "user" &&
+    existing.userId !== session.user.id
+  ) {
+    return NextResponse.json(
+      { error: "Só o autor pode editar o texto do comentário" },
+      { status: 403 }
+    );
+  }
 
   // Espelha resolve no Drive Comments quando o doc é Google Docs.
   if (
-    existing?.googleCommentId &&
+    existing.googleCommentId &&
     existing.contract?.googleDocId &&
     typeof body.resolved === "boolean" &&
     body.resolved === true
@@ -53,11 +107,16 @@ export async function DELETE(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const existing = await prisma.contractComment.findUnique({
-    where: { id: params.commentId },
-    include: { contract: { select: { googleDocId: true } } },
-  });
-  if (existing?.googleCommentId && existing.contract?.googleDocId) {
+  const existing = await loadScopedComment(
+    params.commentId,
+    params.id,
+    session.user.id
+  );
+  if (!existing) {
+    return orgScopedNotFound("Comentário");
+  }
+
+  if (existing.googleCommentId && existing.contract?.googleDocId) {
     try {
       const { deleteComment } = await import("@/lib/google/comments");
       await deleteComment(existing.contract.googleDocId, existing.googleCommentId);
@@ -84,11 +143,13 @@ export async function POST(
     return NextResponse.json({ error: "text é obrigatório" }, { status: 400 });
   }
 
-  const parent = await prisma.contractComment.findUnique({
-    where: { id: params.commentId },
-  });
+  const parent = await loadScopedComment(
+    params.commentId,
+    params.id,
+    session.user.id
+  );
   if (!parent) {
-    return NextResponse.json({ error: "Comentário pai não encontrado" }, { status: 404 });
+    return orgScopedNotFound("Comentário pai");
   }
 
   const reply = await prisma.contractComment.create({

@@ -6,6 +6,11 @@ import { copyContractGoogleDoc } from "@/lib/google/copy-doc";
 import { exportDocAsHtml } from "@/lib/google/docs";
 import { watchFile } from "@/lib/google/watch";
 import { shareDocWithOrgMembers } from "@/lib/google/share-org";
+import {
+  contractBelongsToOrg,
+  orgScopedNotFound,
+  resolveUserOrgId,
+} from "@/lib/security/org-scope";
 
 export async function POST(
   req: NextRequest,
@@ -14,6 +19,12 @@ export async function POST(
   const session = await auth();
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  // Cross-org check — versionar é escrita; 404 pra não vazar existência.
+  const userOrgId = await resolveUserOrgId(session.user.id);
+  if (!(await contractBelongsToOrg(params.id, userOrgId))) {
+    return orgScopedNotFound("Contrato");
   }
 
   const body = await req.json().catch(() => ({}));
