@@ -743,12 +743,15 @@ export async function runPassiveAnalysis(
     throw err;
   }
 
-  // Skip-no-change vale pra `edit` E `open`: se a última `validation` é mais
-  // recente que qualquer edição real, o LLM não tem o que reanalisar. Antes só
-  // `edit` pulava, então TODA abertura/refresh de contrato rodava um pass
-  // completo (no `open`, em Sonnet) mesmo sem nada ter mudado — a maior fonte
-  // de custo passivo. `open` só roda o LLM na 1ª análise ou após uma edição.
-  if (params.trigger === "edit" || params.trigger === "open") {
+  // Skip-no-change vale SÓ pra `edit`. NÃO estender pro `open`: edições feitas
+  // direto no iframe do Google Docs só entram no ContractChangeLog via o watch
+  // do Drive, que é best-effort e pode estar expirado/atrasado — então "sem
+  // changelog novo" NÃO garante "sem mudança". No `open` a análise relê o texto
+  // vivo do Drive (getDocPlainText) e roda os quickChecks determinísticos, que é
+  // exatamente o que pega uma edição externa sem changelog. Pular o `open` fazia
+  // uma edição arriscada passar sem nenhum comentário. (Corte de custo do `open`
+  // deve vir de comparar hash do doc vivo, não de confiar no changelog.)
+  if (params.trigger === "edit") {
     const lastValidation = await prisma.contractChangeLog.findFirst({
       where: { contractId: params.contractId, action: "validation" },
       orderBy: { createdAt: "desc" },

@@ -254,6 +254,26 @@ async function createEnvelopeFromBuffer(input: {
   start.setUTCDate(1);
   start.setUTCHours(0, 0, 0, 0);
   const envelope = await withOrgBudgetLock("clicksign", orgId, async (tx) => {
+    // Re-checa "1 envelope ativo por contrato" DENTRO do lock. O check no
+    // entry-point (sendEnvelopeForContract) roda antes do lock, então dois
+    // envios paralelos do mesmo contrato passavam ambos e criavam 2 envelopes
+    // ClickSign (cobrança dobrada + 2 e-mails por signatário). Aqui é
+    // serializado com o create do draft.
+    if (contractId) {
+      const active = await tx.envelope.findFirst({
+        where: {
+          contractId,
+          status: { in: ["draft", "running", "closed"] },
+        },
+        select: { id: true, status: true },
+      });
+      if (active) {
+        throw new Error(
+          `Já existe um envelope ${active.status} para este contrato (id ${active.id})`
+        );
+      }
+    }
+
     const agg = await tx.envelope.aggregate({
       where: {
         orgId,

@@ -43,6 +43,24 @@ export interface ProcessResult {
  * evento + signatário + timestamp de ocorrência). Reentregas do MESMO evento
  * geram a mesma chave e são barradas pelo @unique do EnvelopeEvent.
  */
+/**
+ * Dispara o download do PDF assinado (fire-and-forget, idempotente por
+ * findFirst). v3 não traz signed_file_url no payload — tenta do payload
+ * (compat v2) e, se null, faz lookup via /documents (canônico v3). Usado tanto
+ * no fechamento normal quanto na recuperação por reentrega.
+ */
+function triggerSignedPdfDownload(
+  envelope: { id: string; orgId: string; clicksignId: string | null },
+  payload: WebhookPayload
+): void {
+  const fromPayload = getSignedDocumentUrlFromPayload(payload);
+  if (fromPayload) {
+    waitUntil(downloadSignedPdf(envelope.id, fromPayload));
+  } else if (envelope.clicksignId) {
+    waitUntil(resolveAndDownload(envelope.id, envelope.orgId, envelope.clicksignId));
+  }
+}
+
 export function computeEventDedupeKey(
   envelopeId: string,
   payload: WebhookPayload
@@ -117,9 +135,10 @@ export async function processClickSignWebhookPayload(
   // Registra SEMPRE — inclusive o que não tratamos (`eventName` null). O nome
   // cru fica no EnvelopeEvent pra diagnóstico. O create com `dedupeKey @unique`
   // é o LOCK de idempotência: se a ClickSign reentregar o mesmo evento, o
-  // segundo create dá P2002 e a gente retorna sem re-disparar os efeitos
-  // colaterais (auto-promote de deal, download de PDF, etc.).
+  // segundo create dá P2002 e a gente NÃO re-dispara os efeitos que não devem
+  // repetir (auto-promote de deal, mutação de status).
   const dedupeKey = computeEventDedupeKey(envelope.id, payload);
+  const closeEvents = ["close", "auto_close", "document_closed"];
   try {
     await prisma.envelopeEvent.create({
       data: {
@@ -135,7 +154,19 @@ export async function processClickSignWebhookPayload(
       err instanceof Prisma.PrismaClientKnownRequestError &&
       err.code === "P2002"
     ) {
-      // Evento já processado — reentrega. No-op idempotente.
+      // Reentrega de um evento já visto. Os efeitos não-idempotentes já rodaram.
+      // MAS a ClickSign reentrega justamente pra RECUPERAR uma 1ª entrega em que
+      // o download do PDF assinado (fire-and-forget) falhou transientemente. Se
+      // for um evento de fechamento e o PDF ainda estiver faltando, re-dispara
+      // SÓ o download (idempotente por findFirst) — senão o contrato assinado
+      // ficava permanentemente ausente da pasta apesar da reentrega.
+      if (
+        eventName &&
+        closeEvents.includes(eventName) &&
+        !envelope.signedDocumentUrl
+      ) {
+        triggerSignedPdfDownload(envelope, payload);
+      }
       return {
         ok: true,
         duplicate: true,
@@ -195,15 +226,7 @@ export async function processClickSignWebhookPayload(
       });
       await autoPromoteDealOnContractSigned(envelope.id);
       await completeInspectionOnEnvelopeClosed(envelope.id);
-
-      // v3 não traz signed_file_url no payload — tenta do payload (compat v2) e,
-      // se null, faz lookup via /documents (canônico v3, requer creds da org).
-      const fromPayload = getSignedDocumentUrlFromPayload(payload);
-      if (fromPayload) {
-        waitUntil(downloadSignedPdf(envelope.id, fromPayload));
-      } else if (envelope.clicksignId) {
-        waitUntil(resolveAndDownload(envelope.id, envelope.orgId, envelope.clicksignId));
-      }
+      triggerSignedPdfDownload(envelope, payload);
       break;
     }
     case "cancel":

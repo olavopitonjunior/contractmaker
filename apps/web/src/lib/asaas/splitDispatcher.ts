@@ -105,7 +105,7 @@ export async function dispatchExternalSplits(
   const feeAdjustment =
     feePolicy === "deduct_from_recipient" ? observedFeeCents / 100 : 0;
 
-  for (const entry of externals) {
+  for (const [entryIndex, entry] of externals.entries()) {
     result.attempted++;
 
     // entry.recipientId pode ser:
@@ -130,9 +130,12 @@ export async function dispatchExternalSplits(
     // Chave de idempotência não-nula pra TODO dispatch — cobre o PIX externo
     // one-shot (splitRecipientFk NULL) que o @@unique não protegia. O webhook
     // Asaas dispara em PAYMENT_RECEIVED e PAYMENT_CONFIRMED; sem isso o mesmo
-    // repasse saía 2×.
+    // repasse saía 2×. Externos são chaveados pelo ÍNDICE na lista (estável por
+    // charge, pois splitJson é imutável) e NÃO pela pixAddressKey — dois
+    // line-items externos pra MESMA chave PIX (ex.: duas taxas pro mesmo CPF)
+    // colidiriam e o 2º seria descartado como duplicata sem repassar o dinheiro.
     const dispatchDedupeKey = `${charge.id}:${
-      splitRecipientFk ?? `ext:${entry.pixAddressKey ?? entry.recipientId ?? "?"}`
+      splitRecipientFk ?? `ext:${entryIndex}`
     }`;
 
     // Pagadoria v2 — rascunho de SplitRecipient: pula dispatch e marca como
