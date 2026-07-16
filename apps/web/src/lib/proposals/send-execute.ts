@@ -116,17 +116,29 @@ export async function executeProposalSend(proposalId: string): Promise<SendResul
   }
 
   try {
-    return await runSend(proposalId, decision);
+    const result = await runSend(proposalId, decision);
+    // Um bloqueio APÓS o claim (ex.: proposta sumiu entre prepareSend e runSend)
+    // não gastou recurso mas deixou o status em "enviada" — sem liberar, o claim
+    // trava o reenvio pra sempre ("already_sending" eterno). Libera pra
+    // falha_envio (reenviável).
+    if (!result.ok) {
+      await releaseClaim(proposalId);
+    }
+    return result;
   } catch (err) {
-    // Libera o claim pra permitir re-envio manual.
-    await prisma.proposal
-      .updateMany({
-        where: { id: proposalId, status: "enviada" },
-        data: { status: "falha_envio" },
-      })
-      .catch(() => {});
+    await releaseClaim(proposalId);
     throw err;
   }
+}
+
+/** Devolve o status pra "falha_envio" quando o claim foi feito mas o envio não completou. */
+async function releaseClaim(proposalId: string): Promise<void> {
+  await prisma.proposal
+    .updateMany({
+      where: { id: proposalId, status: "enviada" },
+      data: { status: "falha_envio" },
+    })
+    .catch(() => {});
 }
 
 async function runSend(
@@ -198,12 +210,15 @@ async function sendAceite(
   });
 
   let proponenteAcceptanceId: string | null = null;
+  let termsCreated = 0;
+  let termsPresent = 0; // criados agora + pré-existentes (retry)
 
   for (const s of decision.signers) {
     const row = matchSignerRow(rows, s);
     if (!row) continue;
     // Já enviado (retry) → reaproveita e não cobra de novo.
     if (row.acceptanceClicksignId) {
+      termsPresent++;
       if (row.role === "proponente") proponenteAcceptanceId = row.acceptanceClicksignId;
       continue;
     }
@@ -224,25 +239,40 @@ async function sendAceite(
           where: { id: row.id },
           data: { acceptanceClicksignId: acceptanceId, acceptanceStatus: "sent" },
         });
+        termsCreated++;
+        termsPresent++;
         if (row.role === "proponente") proponenteAcceptanceId = acceptanceId;
       }
     } catch (err) {
       console.error(`[proposals] Aceite falhou pro signatário ${row.id}:`, err);
-      // Não relança: os já enviados ficam válidos; o retry cobre os faltantes.
+      // Não relança AQUI: os já enviados ficam válidos; a checagem abaixo decide
+      // se o envio como um todo fracassou.
     }
   }
 
+  const proponenteTerm =
+    proponenteAcceptanceId ??
+    rows.find((r) => r.role === "proponente")?.acceptanceClicksignId ??
+    null;
+
+  // Envio SÓ é sucesso se o proponente (termo vinculante) tem acceptance_term.
+  // Antes, mesmo com ZERO termos criados a função marcava "enviada" e retornava
+  // ok:true — o operador via "enviada" sem ninguém ter recebido, e o claim CAS
+  // bloqueava o reenvio. Sem termo do proponente, lança pro executeProposalSend
+  // liberar o claim (→ falha_envio, reenviável).
+  if (!proponenteTerm) {
+    throw new Error(
+      `Aceite não criado para o proponente (termos criados: ${termsCreated}, presentes: ${termsPresent}). Envio abortado.`
+    );
+  }
+
   // Backward-compat: Proposal.acceptanceClicksignId aponta pro termo do
-  // PROPONENTE (o vinculante) — antes era o 1º signatário iterado ao acaso,
-  // então o desfecho do proponente podia não casar com a proposta.
+  // PROPONENTE (o vinculante) — antes era o 1º signatário iterado ao acaso.
   await prisma.proposal.update({
     where: { id: proposal.id },
     data: {
       instrument: "aceite",
-      acceptanceClicksignId:
-        proponenteAcceptanceId ??
-        rows.find((r) => r.role === "proponente")?.acceptanceClicksignId ??
-        null,
+      acceptanceClicksignId: proponenteTerm,
       sentAt: new Date(),
       reservedCostCents: decision.planCostCents,
     },

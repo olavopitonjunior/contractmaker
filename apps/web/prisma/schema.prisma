@@ -2668,7 +2668,6 @@ model ProposalSigner {
 
   @@unique([proposalId, dedupeKey])
   @@index([proposalId])
-  @@index([acceptanceClicksignId])
 }
 
 // Anexos da proposta. Necessário porque DealAttachment.dealId é NOT NULL — o

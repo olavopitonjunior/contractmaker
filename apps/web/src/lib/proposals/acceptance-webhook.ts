@@ -114,6 +114,7 @@ export async function processProposalAcceptanceEvent(
       completed: { acceptanceStatus: "completed", acceptedAt: new Date() },
       refused: { acceptanceStatus: "refused", refusedAt: new Date() },
       expired: { acceptanceStatus: "expired" },
+      canceled: { acceptanceStatus: "canceled" },
     };
     const upd = perSigner[input.phase];
     if (upd) {
@@ -137,10 +138,13 @@ export async function processProposalAcceptanceEvent(
         return { ok: true, handled: true, proposalId: proposal.id, phase: input.phase };
       }
 
-      // Caducidade (CC art. 431): aceite após validUntil não vincula como aceite
-      // — registra o evento mas NÃO marca "completa". O prazo expirado vale, no
-      // máximo, como nova proposta a ser reavaliada pelo operador.
-      if (proposal.validUntil && new Date() > proposal.validUntil) {
+      // Caducidade (CC art. 431): aceite após validUntil não vincula. Compara com
+      // a HORA REAL do aceite (completed_at do payload), não com o relógio de
+      // processamento — senão um aceite tempestivo (23:59) cujo webhook chega/
+      // reprocessa depois do vencimento (00:05) seria descartado indevidamente.
+      const acceptedAtReal = facts.completedAt ? new Date(facts.completedAt) : new Date();
+      const acceptedAtValid = !Number.isNaN(acceptedAtReal.getTime());
+      if (proposal.validUntil && acceptedAtValid && acceptedAtReal > proposal.validUntil) {
         await advanceProposalStatus(proposal.id, "expirada", { expiredAt: new Date() });
         return { ok: true, handled: true, proposalId: proposal.id, phase: input.phase };
       }
@@ -175,17 +179,36 @@ export async function processProposalAcceptanceEvent(
     }
 
     case "refused":
-      await advanceProposalStatus(proposal.id, "recusada_proponente", {
-        refusedAt: new Date(),
-      });
+      // Quem recusou importa. O proponente recusar é terminal frio
+      // (recusada_proponente). O VENDEDOR/proprietário recusar deixa um
+      // comprador comprometido na mão → estado quente (recusada_vendedor).
+      // Antes, sem o guard, a recusa de qualquer terceiro virava
+      // "recusada_proponente" — atribuição errada do desfecho.
+      if (isProponente) {
+        await advanceProposalStatus(proposal.id, "recusada_proponente", {
+          refusedAt: new Date(),
+        });
+      } else {
+        await advanceProposalStatus(proposal.id, "recusada_vendedor", {
+          refusedAt: new Date(),
+        });
+      }
       break;
 
     case "expired":
-      await advanceProposalStatus(proposal.id, "expirada", { expiredAt: new Date() });
+      // Só o vencimento do termo do PROPONENTE (o vinculante) expira a proposta.
+      // O termo de um terceiro expirar não mata o negócio — o proponente ainda
+      // pode aceitar. Sem o guard, a expiração de qualquer termo terminava tudo.
+      if (isProponente) {
+        await advanceProposalStatus(proposal.id, "expirada", { expiredAt: new Date() });
+      }
       break;
 
     case "canceled":
-      await advanceProposalStatus(proposal.id, "cancelada", { canceledAt: new Date() });
+      // Idem: só o cancelamento do termo do proponente cancela a proposta.
+      if (isProponente) {
+        await advanceProposalStatus(proposal.id, "cancelada", { canceledAt: new Date() });
+      }
       break;
 
     default:

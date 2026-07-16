@@ -7,9 +7,9 @@ ALTER TABLE "ProposalSigner" ADD COLUMN IF NOT EXISTS "acceptanceStatus" TEXT;
 ALTER TABLE "ProposalSigner" ADD COLUMN IF NOT EXISTS "acceptedAt" TIMESTAMP(3);
 ALTER TABLE "ProposalSigner" ADD COLUMN IF NOT EXISTS "refusedAt" TIMESTAMP(3);
 
+-- O índice UNIQUE já serve os lookups por igualdade — não há @@index separado
+-- (seria redundante, dobrando a amplificação de escrita na coluna).
 CREATE UNIQUE INDEX IF NOT EXISTS "ProposalSigner_acceptanceClicksignId_key"
-  ON "ProposalSigner" ("acceptanceClicksignId");
-CREATE INDEX IF NOT EXISTS "ProposalSigner_acceptanceClicksignId_idx"
   ON "ProposalSigner" ("acceptanceClicksignId");
 
 -- Snapshot congelado do documento enviado (valor probatório do aceite).
