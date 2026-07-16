@@ -49,3 +49,54 @@ export function proposalStatusView(status: string): StatusView {
       return { label: status, bucket: "encerrada", className: ENCERRADA };
   }
 }
+
+/**
+ * Rótulo por signatário a partir do `ProposalSigner.acceptanceStatus`
+ * (sent | completed | refused | expired) — antes a UI mostrava "—" fixo.
+ */
+export function signerStatusLabel(
+  acceptanceStatus: string | null | undefined
+): { label: string; className: string } {
+  switch (acceptanceStatus) {
+    case "completed":
+      return { label: "Assinou", className: "text-emerald-700" };
+    case "refused":
+      return { label: "Recusou", className: "text-destructive" };
+    case "expired":
+      return { label: "Expirou", className: "text-muted-foreground" };
+    case "sent":
+      return { label: "Aguardando", className: "text-sky-700" };
+    default:
+      return { label: "Pendente", className: "text-muted-foreground" };
+  }
+}
+
+/**
+ * Traduz o `ProposalEvent.eventName` técnico (snake_case em inglês) pro
+ * histórico legível ao corretor. Fallback = o próprio nome cru.
+ */
+const EVENT_LABEL: Record<string, string> = {
+  sent: "Enviada",
+  delivered: "Entregue",
+  fetched: "Baixada",
+  viewed: "Visualizada",
+  signed_proponente: "Proponente assinou",
+  chained_envelope2: "2º envelope encadeado",
+  chained_envelope2_pending: "2º envelope — aguardando",
+  closed: "Concluída",
+  refused: "Recusada",
+  expired: "Expirada",
+  canceled: "Cancelada",
+  converted: "Virou negócio",
+  reminder_sent: "Lembrete enviado",
+  status_transition_rejected: "Transição de status rejeitada",
+};
+
+export function proposalEventLabel(eventName: string): string {
+  if (EVENT_LABEL[eventName]) return EVENT_LABEL[eventName];
+  // acceptance_term_${phase} (Aceite via WhatsApp) — normaliza o prefixo.
+  if (eventName.startsWith("acceptance_term_")) {
+    return `Termo de aceite — ${eventName.slice("acceptance_term_".length)}`;
+  }
+  return eventName;
+}

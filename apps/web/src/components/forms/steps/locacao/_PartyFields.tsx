@@ -63,7 +63,8 @@ export function PessoaFisicaLocacaoFields({
         </FormField>
         <FormField label="Estado Civil">
           <NativeSelect
-            value={form.watch(`${prefix}.estado_civil`) || "Solteiro(a)"}
+            value={form.watch(`${prefix}.estado_civil`) || ""}
+            placeholder="Selecione…"
             onChange={(v) => form.setValue(`${prefix}.estado_civil`, v, { shouldDirty: true })}
             options={ESTADOS_CIVIS.map((ec) => ({ value: ec, label: ec }))}
           />

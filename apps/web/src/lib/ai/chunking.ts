@@ -18,6 +18,24 @@ const CHARS_PER_TOKEN = 4;
 const DEFAULT_MAX_TOKENS = 800;
 const DEFAULT_OVERLAP_TOKENS = 100;
 
+/**
+ * Retorna a "cauda" de overlap de `s` com ~overlapChars, mas começando numa
+ * FRONTEIRA DE PALAVRA — evita o overlap iniciar no meio de uma palavra (que
+ * polui o embedding do próximo chunk com um fragmento sem sentido). Avança o
+ * ponto de corte até o próximo espaço; se a palavra for longa demais (>25%
+ * além do overlap), mantém o corte cru pra não perder contexto.
+ */
+function wordSafeTail(s: string, overlapChars: number): string {
+  if (overlapChars <= 0 || s.length <= overlapChars) return s;
+  const rawStart = s.length - overlapChars;
+  // Recua até a fronteira de palavra no espaço em/antes de rawStart — overlap
+  // fica ligeiramente maior que o alvo, porém SEMPRE começa em palavra íntegra.
+  const prevSpace = s.lastIndexOf(" ", rawStart);
+  if (prevSpace >= 0) return s.slice(prevSpace + 1);
+  // Sem espaço anterior → a cauda é um único token gigante (raro); corte cru.
+  return s.slice(rawStart);
+}
+
 export function chunkText(
   text: string,
   maxTokens: number = DEFAULT_MAX_TOKENS,
@@ -50,8 +68,8 @@ export function chunkText(
     // If adding this block would exceed maxChars, flush current and start new
     if (current && current.length + trimmed.length + 2 > maxChars) {
       chunks.push(current.trim());
-      // Keep tail of current as overlap
-      const tail = current.slice(Math.max(0, current.length - overlapChars));
+      // Keep tail of current as overlap (na fronteira de palavra)
+      const tail = wordSafeTail(current, overlapChars);
       current = tail + "\n\n" + trimmed;
     } else {
       current = current ? current + "\n\n" + trimmed : trimmed;
@@ -63,7 +81,7 @@ export function chunkText(
       const lastSpace = hardCut.lastIndexOf(" ");
       const cutAt = lastSpace > maxChars * 0.7 ? lastSpace : maxChars;
       chunks.push(current.slice(0, cutAt).trim());
-      current = current.slice(Math.max(0, cutAt - overlapChars));
+      current = wordSafeTail(current.slice(0, cutAt), overlapChars) + current.slice(cutAt);
     }
   }
 

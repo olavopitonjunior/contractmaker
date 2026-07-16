@@ -15,6 +15,19 @@ import {
   googleInsertImage,
 } from "./google-tool-handlers";
 import type { AgentContext, ValidationIssue, ClauseSuggestion } from "./types";
+import { logError } from "@/lib/observability/log";
+
+/**
+ * Piso de similaridade (cosine, Voyage law-2) abaixo do qual um resultado é
+ * ruído — descartado em vez de devolvido como "resultado". Sem isso o
+ * query_knowledge_base retornava sempre topK, e o agente citava a cláusula
+ * "menos distante" mesmo quando irrelevante (em vez de cair na regra 13 =
+ * placeholder). Conservador por default; ajustável por env.
+ */
+const RAG_MIN_SIMILARITY = (() => {
+  const raw = Number(process.env.RAG_MIN_SIMILARITY);
+  return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : 0.35;
+})();
 
 function deepMerge(
   target: Record<string, unknown>,
@@ -800,6 +813,15 @@ async function handleQueryKnowledgeBase(
   }
 
   if (!isEmbeddingsConfigured()) {
+    // Degradação pro ILIKE (recall inferior) era TOTALMENTE silenciosa aqui —
+    // um deploy sem VOYAGE_API_KEY rodava em modo keyword sem nenhum rastro.
+    // Observabilidade: registra a degradação (o fallback já sinaliza ao modelo
+    // via mode/note, mas ops precisa ver que o RAG está capado).
+    logError(
+      "rag/query_knowledge_base",
+      new Error("RAG em modo keyword — VOYAGE_API_KEY não configurada"),
+      { orgId: context.orgId, category: category ?? null }
+    );
     return knowledgeBaseKeywordFallback(
       query,
       category,
@@ -868,8 +890,23 @@ async function handleQueryKnowledgeBase(
       ...params
     );
 
+    // Piso de relevância: descarta o que está abaixo do limiar (ruído). Se
+    // sobrar nada acima do piso, devolve lista vazia + note pro modelo — melhor
+    // que citar a "cláusula menos distante" quando nenhuma é pertinente.
+    const relevant = rows.filter((r) => Number(r.similarity ?? 0) >= RAG_MIN_SIMILARITY);
+    if (relevant.length === 0) {
+      return {
+        results: [],
+        mode: "semantic",
+        topK,
+        note: `Nenhum item na base com similaridade ≥ ${RAG_MIN_SIMILARITY} pra esta consulta. Não invente cláusula: use placeholder [preencher] se precisar do dado.`,
+        topSimilarity: rows.length
+          ? Number(Math.max(...rows.map((r) => Number(r.similarity ?? 0))).toFixed(3))
+          : 0,
+      };
+    }
     return {
-      results: rows.map((r) => ({
+      results: relevant.map((r) => ({
         id: r.id,
         title: r.title,
         content: r.content.slice(0, 800),

@@ -8,7 +8,11 @@ import { ChevronLeft, FileText } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { proposalStatusView } from "@/lib/proposals/status-view";
+import {
+  proposalStatusView,
+  signerStatusLabel,
+  proposalEventLabel,
+} from "@/lib/proposals/status-view";
 
 interface Proposal {
   id: string;
@@ -37,7 +41,13 @@ export function ProposalDetailClient({
   attachments,
 }: {
   proposal: Proposal;
-  signers: { id: string; name: string; role: string; channel: string; status: string }[];
+  signers: {
+    id: string;
+    name: string;
+    role: string;
+    channel: string;
+    acceptanceStatus: string | null;
+  }[];
   events: { id: string; eventName: string; receivedAt: string }[];
   attachments: { id: string; filename: string; category: string | null; url: string }[];
 }) {
@@ -175,14 +185,20 @@ export function ProposalDetailClient({
             <p className="text-sm text-muted-foreground">Nenhum signatário definido ainda.</p>
           ) : (
             <ul className="text-sm space-y-1">
-              {signers.map((s) => (
-                <li key={s.id} className="flex justify-between">
-                  <span>
-                    {s.name} <span className="text-muted-foreground">· {s.role}</span>
-                  </span>
-                  <span className="text-muted-foreground">{s.channel}</span>
-                </li>
-              ))}
+              {signers.map((s) => {
+                const st = signerStatusLabel(s.acceptanceStatus);
+                return (
+                  <li key={s.id} className="flex items-center justify-between gap-2">
+                    <span>
+                      {s.name} <span className="text-muted-foreground">· {s.role}</span>
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <span className="text-muted-foreground text-xs">{s.channel}</span>
+                      <span className={st.className}>{st.label}</span>
+                    </span>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </Card>
@@ -212,7 +228,7 @@ export function ProposalDetailClient({
           <ul className="text-sm space-y-1">
             {events.map((e) => (
               <li key={e.id} className="flex justify-between">
-                <span>{e.eventName}</span>
+                <span>{proposalEventLabel(e.eventName)}</span>
                 <span className="text-muted-foreground">{fmt(e.receivedAt)}</span>
               </li>
             ))}

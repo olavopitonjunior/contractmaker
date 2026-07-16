@@ -16,7 +16,8 @@ const pessoaFisicaLocacaoSchema = z.object({
   tipo_pessoa: z.literal("fisica"),
   nome: z.string().min(2, "Nome obrigatório"),
   nacionalidade: z.string().optional().default("Brasileiro(a)"),
-  estado_civil: z.string().optional().default("Solteiro(a)"),
+  // Sem default silencioso (ver validation.ts) — evita casado sem outorga.
+  estado_civil: z.string().optional(),
   profissao: z.string().optional().default(""),
   rg: z.string().optional().default(""),
   cpf: z.string().optional().default(""),

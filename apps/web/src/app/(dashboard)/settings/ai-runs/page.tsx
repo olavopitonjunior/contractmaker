@@ -8,8 +8,10 @@ export const dynamic = "force-dynamic";
 const OUTCOME_STYLE: Record<string, { label: string; cls: string }> = {
   applied: { label: "Aplicado", cls: "bg-green-100 text-green-800" },
   applied_partial: { label: "Aplicado parcial", cls: "bg-amber-100 text-amber-800" },
+  applied_data: { label: "Dados atualizados", cls: "bg-teal-100 text-teal-800" },
   pending_plan: { label: "Pendente (aprovação)", cls: "bg-blue-100 text-blue-800" },
   no_op_informational: { label: "Consulta", cls: "bg-gray-100 text-gray-700" },
+  no_op_requested: { label: "Sem alteração", cls: "bg-orange-100 text-orange-800" },
   failed: { label: "Falhou", cls: "bg-red-100 text-red-800" },
   confabulation_blocked: { label: "Confabulação bloqueada", cls: "bg-purple-100 text-purple-800" },
 };

@@ -111,7 +111,7 @@ function buildEditorPrompt(state: OrchestratorState, wantsDirectEdit = false): s
   const signingState = (state as unknown as { signingState?: { hasSignedContract: boolean; originalContractId: string | null } }).signingState;
   const signingHint = signingState
     ? signingState.hasSignedContract
-      ? `\n\n🔒 ESTADO DE ASSINATURA: contrato ORIGINAL JÁ ASSINADO (envelope closed, original=${signingState.originalContractId}). Qualquer alteração que o usuário pedir deve virar ADITAMENTO (novo Contract kind="addendum") — NÃO edite o original. Siga regra 20: consulte KB pra modelo, herde template+style do parent, use estrutura formal de aditamento. Se for apenas dúvida sem write, responda informativo normal.`
+      ? `\n\n🔒 ESTADO DE ASSINATURA: contrato ORIGINAL JÁ ASSINADO (envelope closed, original=${signingState.originalContractId}). Qualquer alteração que o usuário pedir deve virar ADITAMENTO (novo Contract kind="addendum") — NÃO edite o original. Consulte a KB pra modelo de aditamento, herde template+style do contrato pai e use estrutura formal de aditamento. Se for apenas dúvida sem write, responda informativo normal.`
       : `\n\n📝 ESTADO DE ASSINATURA: contrato é RASCUNHO (não assinado). Alterações vão DIRETO no documento original via \`edit_contract_section\` ou \`propose_suggestion\` — NÃO crie aditamento. Aditamento só faz sentido depois da assinatura.`
     : "";
 
@@ -131,5 +131,5 @@ ${state.userMessage}
 ${htmlSlice}${truncated ? "\n...(truncado)" : ""}
 
 ---
-Aplique a alteração solicitada usando as tools apropriadas. Lembre-se das regras 11.1 (propose_suggestion default em GDocs) e 11.2 (edit_contract_section pra texto hardcoded vs update_contract_data pra {{variavel}}).${intentHint}${signingHint}`;
+Aplique a alteração solicitada usando as tools apropriadas. Lembre-se: em GDocs, \`propose_suggestion\` é o default; use \`edit_contract_section\` pra texto hardcoded e \`update_contract_data\` pra {{variavel}}.${intentHint}${signingHint}`;
 }
