@@ -457,7 +457,7 @@ Descrição: {{this.descricao}}
 
 <p>E por estarem assim justos e contratados, firmam o presente instrumento em meio eletrônico.</p>
 
-<p>{{config.municipio_imovel}}, {{dataExtenso config.data_assinatura}}.</p>
+<p>{{config.municipio_imovel}}{{#if (existe config.data_assinatura)}}, {{dataExtenso config.data_assinatura}}{{/if}}.</p>
 
 <div class="assinaturas">
 
