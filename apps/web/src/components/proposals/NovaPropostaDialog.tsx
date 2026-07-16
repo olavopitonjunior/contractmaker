@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus } from "lucide-react";
+import { Plus, Trash2, UserPlus } from "lucide-react";
 
 const SCHEMA_BY_TIPO: Record<string, { label: string; value: string }[]> = {
   venda: [{ label: "Compra e venda", value: "compra_venda_v1" }],
@@ -31,90 +31,103 @@ const SCHEMA_BY_TIPO: Record<string, { label: string; value: string }[]> = {
   ],
 };
 
+interface Party {
+  name: string;
+  email: string;
+  phone: string;
+  canal: string; // email | whatsapp
+}
+
+const emptyParty = (): Party => ({ name: "", email: "", phone: "", canal: "email" });
+
 /**
- * Criação de proposta numa tela só. Monta o dataJson no shape que a conversão e
- * os templates esperam (proponente = comprador/locatário; imóvel; valor), então
- * o negócio nasce sem retradução.
+ * Criação de proposta numa tela só, com N proponentes + N proprietários, cada um
+ * com seu canal de assinatura (e-mail/WhatsApp — pode misturar, e >1 por
+ * WhatsApp). Monta o dataJson no shape que a conversão e os templates esperam
+ * (compradores/vendedores ou locatarios/locadores), então o negócio nasce sem
+ * retradução. O backend (`/api/proposals`) já aceita o array de signers.
  */
 export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
   const router = useRouter();
+  const isVenda = tipo === "venda";
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [schemaType, setSchemaType] = useState(SCHEMA_BY_TIPO[tipo][0].value);
-  const [form, setForm] = useState({
-    proponente: "",
-    proponenteEmail: "",
-    proponenteFone: "",
-    proponenteCanal: "email",
-    vendedor: "",
-    vendedorEmail: "",
-    imovel: "",
-    valor: "",
-    validadeDias: "5",
-  });
+  const [proponentes, setProponentes] = useState<Party[]>([emptyParty()]);
+  const [vendedores, setVendedores] = useState<Party[]>([]);
+  const [imovel, setImovel] = useState("");
+  const [valor, setValor] = useState("");
+  const [validadeDias, setValidadeDias] = useState("5");
 
-  function set(k: keyof typeof form, v: string) {
-    setForm((f) => ({ ...f, [k]: v }));
+  const proponenteLabel = isVenda ? "Comprador" : "Locatário";
+  const vendedorLabel = isVenda ? "Proprietário / Vendedor" : "Locador";
+
+  function updateParty(
+    list: Party[],
+    setList: (p: Party[]) => void,
+    idx: number,
+    patch: Partial<Party>
+  ) {
+    setList(list.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.proponente.trim()) {
-      toast.error("Informe o nome do proponente");
+    const validProponentes = proponentes.filter((p) => p.name.trim());
+    if (validProponentes.length === 0) {
+      toast.error(`Informe ao menos um ${proponenteLabel.toLowerCase()}`);
       return;
     }
+    const validVendedores = vendedores.filter((p) => p.name.trim());
     setSaving(true);
     try {
-      const isVenda = tipo === "venda";
-      const valor = form.valor ? Number(form.valor.replace(/\./g, "").replace(",", ".")) : undefined;
+      const valorNum = valor
+        ? Number(valor.replace(/\./g, "").replace(",", "."))
+        : undefined;
       const dataJson: Record<string, unknown> = {
-        imoveis: form.imovel ? [{ endereco: form.imovel }] : [],
+        imoveis: imovel ? [{ endereco: imovel }] : [],
       };
+      const propNomes = validProponentes.map((p) => ({ nome: p.name }));
+      const vendNomes = validVendedores.map((p) => ({ nome: p.name }));
       if (isVenda) {
-        dataJson.compradores = [{ nome: form.proponente }];
-        dataJson.vendedores = [];
-        if (valor != null) dataJson.pagamento = { valor_total: valor };
+        dataJson.compradores = propNomes;
+        dataJson.vendedores = vendNomes;
+        if (valorNum != null) dataJson.pagamento = { valor_total: valorNum };
       } else {
-        dataJson.locatarios = [{ nome: form.proponente }];
-        dataJson.locadores = [];
-        if (valor != null) dataJson.locacao = { valor_aluguel: valor };
+        dataJson.locatarios = propNomes;
+        dataJson.locadores = vendNomes;
+        if (valorNum != null) dataJson.locacao = { valor_aluguel: valorNum };
       }
 
       const validUntil =
-        form.validadeDias && Number(form.validadeDias) > 0
-          ? new Date(Date.now() + Number(form.validadeDias) * 86_400_000).toISOString()
+        validadeDias && Number(validadeDias) > 0
+          ? new Date(Date.now() + Number(validadeDias) * 86_400_000).toISOString()
           : undefined;
 
       const signers: Record<string, unknown>[] = [
-        {
+        ...validProponentes.map((p) => ({
           role: "proponente",
-          name: form.proponente,
-          email: form.proponenteEmail || null,
-          phone: form.proponenteFone || null,
-          notifyChannel: form.proponenteCanal,
+          name: p.name,
+          email: p.email || null,
+          phone: p.phone || null,
+          notifyChannel: p.canal,
           signingGroup: 1,
-        },
-      ];
-      if (form.vendedor.trim()) {
-        signers.push({
+        })),
+        ...validVendedores.map((p) => ({
           role: "vendedor",
-          name: form.vendedor,
-          email: form.vendedorEmail || null,
-          notifyChannel: "email",
+          name: p.name,
+          email: p.email || null,
+          phone: p.phone || null,
+          notifyChannel: p.canal,
           signingGroup: 2,
-        });
-      }
+        })),
+      ];
 
+      const title = `${validProponentes[0].name}${imovel ? ` — ${imovel}` : ""}`;
       const res = await fetch("/api/proposals", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: `${form.proponente}${form.imovel ? ` — ${form.imovel}` : ""}`,
-          schemaType,
-          dataJson,
-          validUntil,
-          signers,
-        }),
+        body: JSON.stringify({ title, schemaType, dataJson, validUntil, signers }),
       });
       if (!res.ok) {
         const d = await res.json().catch(() => ({}));
@@ -131,6 +144,63 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
     }
   }
 
+  const renderParties = (
+    list: Party[],
+    setList: (p: Party[]) => void,
+    roleLabel: string,
+    removableToZero: boolean
+  ) =>
+    list.map((p, idx) => (
+      <div key={idx} className="rounded-md border p-2 space-y-2">
+        <div className="flex items-center gap-2">
+          <Input
+            value={p.name}
+            onChange={(e) => updateParty(list, setList, idx, { name: e.target.value })}
+            placeholder={`Nome do ${roleLabel.toLowerCase()}`}
+            autoFocus={idx === 0 && list === proponentes}
+          />
+          {(removableToZero || list.length > 1) && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="shrink-0 text-muted-foreground"
+              onClick={() => setList(list.filter((_, i) => i !== idx))}
+              aria-label="Remover"
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          )}
+        </div>
+        <div className="grid grid-cols-[1fr_1fr_130px] gap-2">
+          <Input
+            type="email"
+            value={p.email}
+            onChange={(e) => updateParty(list, setList, idx, { email: e.target.value })}
+            placeholder="e-mail"
+          />
+          <Input
+            inputMode="tel"
+            value={p.phone}
+            onChange={(e) => updateParty(list, setList, idx, { phone: e.target.value })}
+            placeholder="(DDD) WhatsApp"
+          />
+          <Select
+            value={p.canal}
+            onValueChange={(v) => updateParty(list, setList, idx, { canal: v })}
+          >
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="email">E-mail</SelectItem>
+              <SelectItem value="whatsapp">WhatsApp</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+    ));
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -138,82 +208,58 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
           <Plus className="mr-1 h-4 w-4" /> Nova proposta
         </Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Nova proposta — {tipo === "venda" ? "Vendas" : "Locação"}</DialogTitle>
         </DialogHeader>
-        <form onSubmit={handleSubmit} className="space-y-3">
-          <div className="space-y-1">
-            <Label>Proponente</Label>
-            <Input
-              value={form.proponente}
-              onChange={(e) => set("proponente", e.target.value)}
-              placeholder="Nome do comprador/locatário"
-              autoFocus
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label>E-mail do proponente</Label>
-              <Input
-                type="email"
-                value={form.proponenteEmail}
-                onChange={(e) => set("proponenteEmail", e.target.value)}
-                placeholder="cliente@email.com"
-              />
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Proponentes */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>{proponenteLabel}(es) — quem faz a proposta</Label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setProponentes([...proponentes, emptyParty()])}
+              >
+                <UserPlus className="mr-1 h-3.5 w-3.5" /> Adicionar
+              </Button>
             </div>
-            <div className="space-y-1">
-              <Label>Telefone (WhatsApp)</Label>
-              <Input
-                inputMode="tel"
-                value={form.proponenteFone}
-                onChange={(e) => set("proponenteFone", e.target.value)}
-                placeholder="(41) 99999-9999"
-              />
-            </div>
+            {renderParties(proponentes, setProponentes, proponenteLabel, false)}
           </div>
-          <div className="space-y-1">
-            <Label>Canal de assinatura</Label>
-            <Select
-              value={form.proponenteCanal}
-              onValueChange={(v) => set("proponenteCanal", v)}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="email">E-mail</SelectItem>
-                <SelectItem value="whatsapp">WhatsApp</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label>Vendedor (opcional)</Label>
-              <Input
-                value={form.vendedor}
-                onChange={(e) => set("vendedor", e.target.value)}
-                placeholder="Nome do proprietário"
-              />
+
+          {/* Proprietários / Vendedores */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>{vendedorLabel}(es) — opcional</Label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setVendedores([...vendedores, emptyParty()])}
+              >
+                <UserPlus className="mr-1 h-3.5 w-3.5" /> Adicionar
+              </Button>
             </div>
-            <div className="space-y-1">
-              <Label>E-mail do vendedor</Label>
-              <Input
-                type="email"
-                value={form.vendedorEmail}
-                onChange={(e) => set("vendedorEmail", e.target.value)}
-                placeholder="proprietario@email.com"
-              />
-            </div>
+            {vendedores.length === 0 ? (
+              <p className="text-xs text-muted-foreground">
+                Adicione se o {vendedorLabel.toLowerCase()} também vai assinar.
+              </p>
+            ) : (
+              renderParties(vendedores, setVendedores, vendedorLabel, true)
+            )}
           </div>
+
           <div className="space-y-1">
             <Label>Imóvel</Label>
             <Input
-              value={form.imovel}
-              onChange={(e) => set("imovel", e.target.value)}
+              value={imovel}
+              onChange={(e) => setImovel(e.target.value)}
               placeholder="Endereço do imóvel"
             />
           </div>
+
           {SCHEMA_BY_TIPO[tipo].length > 1 && (
             <div className="space-y-1">
               <Label>Modelo</Label>
@@ -231,13 +277,14 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
               </Select>
             </div>
           )}
+
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
-              <Label>{tipo === "venda" ? "Valor (R$)" : "Aluguel (R$/mês)"}</Label>
+              <Label>{isVenda ? "Valor (R$)" : "Aluguel (R$/mês)"}</Label>
               <Input
                 inputMode="numeric"
-                value={form.valor}
-                onChange={(e) => set("valor", e.target.value)}
+                value={valor}
+                onChange={(e) => setValor(e.target.value)}
                 placeholder="0"
               />
             </div>
@@ -245,11 +292,12 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
               <Label>Validade (dias)</Label>
               <Input
                 inputMode="numeric"
-                value={form.validadeDias}
-                onChange={(e) => set("validadeDias", e.target.value)}
+                value={validadeDias}
+                onChange={(e) => setValidadeDias(e.target.value)}
               />
             </div>
           </div>
+
           <DialogFooter>
             <Button type="submit" disabled={saving}>
               {saving ? "Criando…" : "Criar rascunho"}
