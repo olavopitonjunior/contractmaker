@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 
@@ -29,6 +30,8 @@ interface Settings {
   refusable: boolean;
   defaultDeadlineDays: number | null;
   defaultSequential: boolean;
+  proposalEmailSubject: string | null;
+  proposalEmailMessage: string | null;
 }
 
 const reais = (cents: number | null | undefined) =>
@@ -123,6 +126,8 @@ export function SignaturePreferencesForm() {
           defaultDeadlineDays:
             deadline.trim() === "" ? null : Math.max(1, Number(deadline)),
           defaultSequential: s.defaultSequential,
+          proposalEmailSubject: s.proposalEmailSubject || null,
+          proposalEmailMessage: s.proposalEmailMessage || null,
         }),
       });
       const d = await res.json().catch(() => ({}));
@@ -287,10 +292,57 @@ export function SignaturePreferencesForm() {
               placeholder="Ex.: 15"
             />
           </div>
+          <div className="space-y-1 border-t pt-3">
+            <Label htmlFor="propSubject" className="text-xs">
+              Assunto da notificação das propostas — vazio = padrão da ClickSign
+            </Label>
+            <Input
+              id="propSubject"
+              value={s.proposalEmailSubject ?? ""}
+              onChange={(e) => setS({ ...s, proposalEmailSubject: e.target.value })}
+              placeholder="Proposta nº {{numero}} — assine"
+            />
+            <Label htmlFor="propMessage" className="text-xs pt-2 block">
+              Mensagem da notificação das propostas
+            </Label>
+            <Textarea
+              id="propMessage"
+              rows={3}
+              value={s.proposalEmailMessage ?? ""}
+              onChange={(e) => setS({ ...s, proposalEmailMessage: e.target.value })}
+              placeholder="Olá! Você recebeu a proposta {{titulo}} para assinatura."
+            />
+            <p className="text-xs text-muted-foreground">
+              Placeholders: {"{{numero}}"} {"{{proponente}}"} {"{{imovel}}"} {"{{titulo}}"}
+            </p>
+          </div>
         </CardContent>
       </Card>
 
-      <div className="flex justify-end">
+      <div className="flex justify-between gap-2">
+        <Button
+          variant="outline"
+          disabled={busy}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              const res = await fetch("/api/settings/clicksign/recheck-capabilities", {
+                method: "POST",
+              });
+              const d = await res.json().catch(() => ({}));
+              if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+              toast.success(
+                `Recursos verificados — assinatura WhatsApp: ${d.whatsappSignatureAvailable ? "sim" : "não"}`
+              );
+            } catch (err) {
+              toast.error(err instanceof Error ? err.message : "Erro ao verificar");
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          Reverificar recursos (WhatsApp)
+        </Button>
         <Button onClick={save} disabled={busy}>
           {busy ? (
             <>

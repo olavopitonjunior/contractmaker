@@ -3576,6 +3576,11 @@ model OrgSignatureSettings {
   refusable          Boolean  @default(true)
   defaultDeadlineDays Int?
   defaultSequential  Boolean  @default(false)
+  // Mensagem/assunto da notificação de assinatura das PROPOSTAS (envelope). Null
+  // = usa o template padrão da ClickSign. Placeholders: {{numero}} {{proponente}}
+  // {{imovel}} {{titulo}}. Editável em /settings.
+  proposalEmailSubject String?
+  proposalEmailMessage String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 

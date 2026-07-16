@@ -296,6 +296,21 @@ interface EnvSignerSpec {
 
 type SigSettings = Awaited<ReturnType<typeof getSignatureSettings>>;
 
+/** Resolve placeholders da mensagem/assunto customizável da org. */
+function fillPlaceholders(
+  tpl: string | null | undefined,
+  p: { proposalId: string; title: string; specs: EnvSignerSpec[] }
+): string | null {
+  if (!tpl) return null;
+  const proponente = p.specs.find((s) => s.role !== "vendedor")?.name ?? "";
+  const imovel = p.title.includes(" — ") ? p.title.split(" — ").slice(1).join(" — ") : "";
+  return tpl
+    .replace(/\{\{\s*numero\s*\}\}/g, p.proposalId.slice(-8))
+    .replace(/\{\{\s*titulo\s*\}\}/g, p.title)
+    .replace(/\{\{\s*proponente\s*\}\}/g, proponente)
+    .replace(/\{\{\s*imovel\s*\}\}/g, imovel);
+}
+
 /**
  * CORE reusável: cria UM envelope ClickSign (`via`) com os signatários dados +
  * o PDF do `html`, roda a sequência v3 (create→addDocument→per-signer
@@ -320,6 +335,9 @@ async function runClickSignEnvelope(p: {
   const defaultAuth = (p.settings.defaultAuthMethod as AuthMethod) ?? "email";
   const rawName = `Proposta — ${p.title}${p.via === "reduzida" ? " (proprietário)" : ""}`;
   const name = STAGING_MODE ? `[STAGING] ${rawName}` : rawName;
+  // Mensagem/assunto customizável da org, com placeholders resolvidos.
+  const subject = fillPlaceholders(p.settings.proposalEmailSubject, p);
+  const message = fillPlaceholders(p.settings.proposalEmailMessage, p);
 
   await prisma.envelope.deleteMany({
     where: { proposalId: p.proposalId, via: p.via, status: { in: ["draft", "failed"] } },
@@ -359,6 +377,8 @@ async function runClickSignEnvelope(p: {
         autoClose: p.settings.autoClose,
         locale: p.settings.defaultLocale === "en-US" ? "en-US" : "pt-BR",
         deadlineAt: p.deadlineAt ?? undefined,
+        defaultSubject: subject,
+        defaultMessage: message,
       },
       p.creds
     );
