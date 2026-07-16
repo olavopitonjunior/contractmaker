@@ -66,16 +66,6 @@ export function ProposalDetailClient({
   });
   const liveStatus = live?.status ?? proposal.status;
   const sv = proposalStatusView(liveStatus);
-  // Status por signatário ao vivo (dos EnvelopeSigner), casado por nome. Prefere
-  // o estado mais avançado se o mesmo nome aparece em duas vias.
-  const RANK = ["removed", "pending", "notified", "email_failed", "viewed", "refused", "signed"];
-  const liveSignerStatus = new Map<string, string>();
-  for (const s of live?.signers ?? []) {
-    const cur = liveSignerStatus.get(s.name);
-    if (!cur || RANK.indexOf(s.status) > RANK.indexOf(cur)) {
-      liveSignerStatus.set(s.name, s.status);
-    }
-  }
 
   const canSend = ["rascunho", "falha_envio"].includes(proposal.status);
   const canConvert = ["completa", "assinada_proponente", "aguardando_vendedor"].includes(
@@ -104,6 +94,73 @@ export function ProposalDetailClient({
       router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao enviar");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const canCancel = ![
+    "convertida",
+    "cancelada",
+    "expirada",
+    "recusada_proponente",
+    "recusada_vendedor",
+    "completa",
+  ].includes(liveStatus);
+
+  async function cancelProposal() {
+    if (!window.confirm("Cancelar esta proposta? Os envelopes na ClickSign serão cancelados.")) return;
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/proposals/${proposal.id}/cancel`, { method: "POST" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+      toast.success("Proposta cancelada");
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao cancelar");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function signerAction(
+    signerId: string,
+    kind: "resend" | "remove" | "edit"
+  ) {
+    let url = `/api/proposals/${proposal.id}/signers/${signerId}`;
+    let method = "PATCH";
+    let body: string | undefined;
+    if (kind === "resend") {
+      url += "/resend";
+      method = "POST";
+    } else if (kind === "remove") {
+      if (!window.confirm("Remover este signatário da proposta?")) return;
+      method = "DELETE";
+    } else {
+      const email = window.prompt("Novo e-mail (deixe em branco pra não alterar):") ?? "";
+      const phone = window.prompt("Novo WhatsApp/telefone (deixe em branco pra não alterar):") ?? "";
+      const patch: Record<string, string> = {};
+      if (email.trim()) patch.email = email.trim();
+      if (phone.trim()) patch.phone = phone.trim();
+      if (Object.keys(patch).length === 0) return;
+      body = JSON.stringify(patch);
+    }
+    setBusy(true);
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: body ? { "Content-Type": "application/json" } : undefined,
+        body,
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
+      toast.success(
+        kind === "resend" ? "Notificação reenviada" : kind === "remove" ? "Signatário removido" : "Contato atualizado"
+      );
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro na ação");
     } finally {
       setBusy(false);
     }
@@ -176,6 +233,11 @@ export function ProposalDetailClient({
               Converter sem assinatura
             </Button>
           )}
+          {canCancel && (
+            <Button variant="ghost" className="text-red-600" onClick={cancelProposal} disabled={busy}>
+              Cancelar
+            </Button>
+          )}
         </div>
       </div>
 
@@ -203,35 +265,61 @@ export function ProposalDetailClient({
 
         <Card className="p-4 space-y-2">
           <h2 className="font-medium">Assinaturas</h2>
-          {signers.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhum signatário definido ainda.</p>
-          ) : (
-            <ul className="text-sm space-y-1">
-              {signers.map((s) => {
-                const live = liveSignerStatus.get(s.name);
-                const badge = live ? SIGNER_STATUS_LABEL[live] ?? live : null;
-                const badgeCls =
-                  live === "signed"
-                    ? "text-green-600"
-                    : live === "refused" || live === "email_failed"
-                      ? "text-red-600"
-                      : live === "viewed"
-                        ? "text-blue-600"
-                        : "text-muted-foreground";
-                return (
-                  <li key={s.id} className="flex justify-between gap-2">
-                    <span>
-                      {s.name} <span className="text-muted-foreground">· {s.role}</span>
-                    </span>
-                    <span className="flex items-center gap-2">
-                      <span className="text-muted-foreground">{s.channel}</span>
-                      {badge && <span className={badgeCls}>· {badge}</span>}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          {(() => {
+            // Enviada: usa os EnvelopeSigner do polling (têm id + status → ações).
+            // Antes do envio: usa os ProposalSigner (sem ações).
+            const rows =
+              live && live.signers.length > 0
+                ? live.signers
+                    .filter((s) => s.status !== "removed")
+                    .map((s) => ({ id: s.id, name: s.name, role: s.role ?? "", channel: s.channel, status: s.status, sent: true }))
+                : signers.map((s) => ({ id: s.id, name: s.name, role: s.role, channel: s.channel, status: "", sent: false }));
+            if (rows.length === 0) {
+              return <p className="text-sm text-muted-foreground">Nenhum signatário definido ainda.</p>;
+            }
+            return (
+              <ul className="text-sm space-y-2">
+                {rows.map((s) => {
+                  const badge = s.status ? SIGNER_STATUS_LABEL[s.status] ?? s.status : null;
+                  const badgeCls =
+                    s.status === "signed"
+                      ? "text-green-600"
+                      : s.status === "refused" || s.status === "email_failed"
+                        ? "text-red-600"
+                        : s.status === "viewed"
+                          ? "text-blue-600"
+                          : "text-muted-foreground";
+                  const actionable = s.sent && !["signed", "removed"].includes(s.status);
+                  return (
+                    <li key={s.id} className="space-y-1">
+                      <div className="flex justify-between gap-2">
+                        <span>
+                          {s.name} <span className="text-muted-foreground">· {s.role}</span>
+                        </span>
+                        <span className="flex items-center gap-2">
+                          <span className="text-muted-foreground">{s.channel}</span>
+                          {badge && <span className={badgeCls}>· {badge}</span>}
+                        </span>
+                      </div>
+                      {actionable && (
+                        <div className="flex gap-3 text-xs">
+                          <button className="text-primary hover:underline" onClick={() => signerAction(s.id, "resend")} disabled={busy}>
+                            Reenviar
+                          </button>
+                          <button className="text-primary hover:underline" onClick={() => signerAction(s.id, "edit")} disabled={busy}>
+                            Editar contato
+                          </button>
+                          <button className="text-red-600 hover:underline" onClick={() => signerAction(s.id, "remove")} disabled={busy}>
+                            Remover
+                          </button>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
+              </ul>
+            );
+          })()}
         </Card>
       </div>
 
