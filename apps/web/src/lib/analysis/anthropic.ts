@@ -1,5 +1,6 @@
 ﻿import { Anthropic } from '@anthropic-ai/sdk';
 import { ModeloAnalise } from './heuristics';
+import { resolveModel, SONNET_MODEL } from '@/lib/ai/shared/models';
 
 const anthropic = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
@@ -9,7 +10,7 @@ export async function runAnthropicAnalysis(params: {
   text: string;
 }): Promise<ModeloAnalise> {
   const response = await anthropic.messages.create({
-    model: process.env.ANTHROPIC_MODEL ?? 'claude-3-5-sonnet-20240620',
+    model: resolveModel(process.env.ANTHROPIC_MODEL, SONNET_MODEL),
     max_tokens: 2000,
     temperature: 0.2,
     system: ANALYSIS_SYSTEM,

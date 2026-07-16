@@ -1,6 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import {
+  resolveModel,
+  SONNET_MODEL,
+  OPUS_MODEL,
+  HAIKU_MODEL,
+} from "@/lib/ai/shared/models";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,8 +41,12 @@ interface AgentSettingsProps {
 }
 
 export function AgentSettings({ initialConfig }: AgentSettingsProps) {
-  const [model, setModel] = useState(initialConfig?.model || "claude-sonnet-4-20250514");
-  const [ocrModel, setOcrModel] = useState(initialConfig?.ocrModel || "claude-haiku-4-5-20251001");
+  const [model, setModel] = useState(
+    resolveModel(initialConfig?.model, SONNET_MODEL)
+  );
+  const [ocrModel, setOcrModel] = useState(
+    resolveModel(initialConfig?.ocrModel, HAIKU_MODEL)
+  );
   const [temperature, setTemperature] = useState(initialConfig?.temperature ?? 0.3);
   const [maxTokens, setMaxTokens] = useState(initialConfig?.maxTokens ?? 4096);
   const [systemPrompt, setSystemPrompt] = useState(initialConfig?.systemPrompt || DEFAULT_SYSTEM_PROMPT);
@@ -80,13 +90,13 @@ export function AgentSettings({ initialConfig }: AgentSettingsProps) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="claude-sonnet-4-20250514">
-                    Claude Sonnet 4.5 (recomendado)
+                  <SelectItem value={SONNET_MODEL}>
+                    Claude Sonnet 4.6 (recomendado)
                   </SelectItem>
-                  <SelectItem value="claude-opus-4-20250514">
-                    Claude Opus 4
+                  <SelectItem value={OPUS_MODEL}>
+                    Claude Opus 4.6 (mais capaz)
                   </SelectItem>
-                  <SelectItem value="claude-haiku-4-5-20251001">
+                  <SelectItem value={HAIKU_MODEL}>
                     Claude Haiku 4.5 (econômico)
                   </SelectItem>
                 </SelectContent>
@@ -100,11 +110,11 @@ export function AgentSettings({ initialConfig }: AgentSettingsProps) {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="claude-haiku-4-5-20251001">
+                  <SelectItem value={HAIKU_MODEL}>
                     Claude Haiku 4.5 (recomendado - $0.003/doc)
                   </SelectItem>
-                  <SelectItem value="claude-sonnet-4-20250514">
-                    Claude Sonnet 4.5 (mais preciso)
+                  <SelectItem value={SONNET_MODEL}>
+                    Claude Sonnet 4.6 (mais preciso)
                   </SelectItem>
                 </SelectContent>
               </Select>

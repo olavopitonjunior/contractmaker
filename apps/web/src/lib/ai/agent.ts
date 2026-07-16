@@ -7,7 +7,7 @@ import { quickChecks, dedupeKeyFor, type QuickFinding } from "./quickChecks";
 import { recordAIUsage } from "./usage";
 import { assertContractBudget, ContractBudgetExceededError } from "./budget";
 import { loadExpertContext } from "./expert-context";
-import { getAnthropicClient, HAIKU_MODEL, SONNET_MODEL } from "./shared/anthropic-client";
+import { getAnthropicClient, HAIKU_MODEL, SONNET_MODEL, resolveModel } from "./shared/anthropic-client";
 import { loadContext } from "./shared/context";
 import { resolveSession, loadChatHistory } from "./shared/session";
 import { streamOneTurn, type StreamedTurnResult } from "./shared/turn";
@@ -52,11 +52,12 @@ async function getAgentConfig(orgId: string, mode: AgentMode) {
   // - fast: SEMPRE Haiku (sobrepõe AgentConfig.model). Otimizado pra latência.
   // - plan: respeita AgentConfig.model > ANTHROPIC_MODEL env > default Sonnet
   //   (raciocínio mais profundo justifica o custo 3× maior).
+  // resolveModel migra IDs aposentados que sobrevivam no banco/env (404 na API).
   let model: string;
   if (mode === "fast") {
     model = HAIKU_MODEL;
   } else {
-    model = config?.model || process.env.ANTHROPIC_MODEL || SONNET_MODEL;
+    model = resolveModel(config?.model || process.env.ANTHROPIC_MODEL);
   }
 
   return {
@@ -775,8 +776,8 @@ export async function runPassiveAnalysis(
   } else {
     const passiveModel =
       params.trigger === "open"
-        ? process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514"
-        : process.env.ANTHROPIC_PASSIVE_MODEL || "claude-haiku-4-5-20251001";
+        ? resolveModel(process.env.ANTHROPIC_MODEL, SONNET_MODEL)
+        : resolveModel(process.env.ANTHROPIC_PASSIVE_MODEL, HAIKU_MODEL);
     modelUsed = passiveModel;
 
     let analysisInput: string;

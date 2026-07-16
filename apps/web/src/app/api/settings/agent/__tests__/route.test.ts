@@ -27,11 +27,12 @@ describe("GET /api/settings/agent", () => {
     expect(res.status).toBe(400);
   });
 
-  it("returns existing config when found", async () => {
+  it("returns existing config when found (migra modelo aposentado)", async () => {
     mockAuth.mockResolvedValueOnce(createMockSession());
     mockGetUserOrg.mockResolvedValueOnce(createMockOrg());
     mockPrisma.agentConfig.findUnique.mockResolvedValueOnce({
       model: "claude-opus-4-20250514",
+      ocrModel: "claude-haiku-4-5-20251001",
       temperature: 0.5,
       maxTokens: 8192,
       systemPrompt: "Custom",
@@ -41,7 +42,8 @@ describe("GET /api/settings/agent", () => {
     const json = await res.json();
 
     expect(res.status).toBe(200);
-    expect(json.model).toBe("claude-opus-4-20250514");
+    // Opus 4 (20250514) está deprecado — GET normaliza pro sucessor atual.
+    expect(json.model).toBe("claude-opus-4-6");
     expect(json.temperature).toBe(0.5);
   });
 
@@ -54,7 +56,7 @@ describe("GET /api/settings/agent", () => {
     const json = await res.json();
 
     expect(res.status).toBe(200);
-    expect(json.model).toBe("claude-sonnet-4-20250514");
+    expect(json.model).toBe("claude-sonnet-4-6");
     expect(json.temperature).toBe(0.3);
     expect(json.maxTokens).toBe(4096);
   });
@@ -72,11 +74,11 @@ describe("PUT /api/settings/agent", () => {
     expect(res.status).toBe(401);
   });
 
-  it("upserts config with body values", async () => {
+  it("upserts config normalizando modelo aposentado do body", async () => {
     mockAuth.mockResolvedValueOnce(createMockSession());
     mockGetUserOrg.mockResolvedValueOnce(createMockOrg({ id: "org-1" }));
     mockPrisma.agentConfig.upsert.mockResolvedValueOnce({
-      model: "claude-opus-4-20250514",
+      model: "claude-opus-4-6",
       temperature: 0.7,
     } as any);
 
@@ -93,17 +95,19 @@ describe("PUT /api/settings/agent", () => {
     const res = await PUT(req);
 
     expect(res.status).toBe(200);
+    // O ID aposentado enviado pelo client é migrado antes de persistir —
+    // o banco nunca volta a guardar um modelo que a API rejeita com 404.
     expect(mockPrisma.agentConfig.upsert).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { orgId: "org-1" },
         update: expect.objectContaining({
-          model: "claude-opus-4-20250514",
+          model: "claude-opus-4-6",
           temperature: 0.7,
           maxTokens: 6000,
         }),
         create: expect.objectContaining({
           orgId: "org-1",
-          model: "claude-opus-4-20250514",
+          model: "claude-opus-4-6",
         }),
       })
     );
