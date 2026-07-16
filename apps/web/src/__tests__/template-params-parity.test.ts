@@ -56,6 +56,20 @@ function render(file: string, sample: unknown, defaults = DEFAULT_CONTRACT_SETTI
   );
 }
 
+/** Como `render`, mas também sem `assinatura` — o form não a coleta mais. */
+function renderSemAssinatura(file: string, sample: unknown) {
+  const tpl = readFileSync(templatePath(file), "utf-8");
+  const data = JSON.parse(JSON.stringify(sample)) as Record<string, unknown>;
+  delete data.config;
+  delete data.foro;
+  delete data.desistencia;
+  delete data.assinatura;
+  return renderContratoHTML(
+    tpl,
+    enrichContractData(data) as Record<string, unknown>
+  );
+}
+
 /** `moeda` usa NBSP depois do "R$" (como todo valor do contrato). */
 const norm = (s: string) => s.replace(/ /g, " ");
 
@@ -135,6 +149,29 @@ describe("parametrização das cláusulas preserva o texto praticado", () => {
     // Sem sobra de placeholder nem número órfão.
     expect(html).not.toMatch(/\{\{/);
     expect(html).not.toMatch(/\bde\s*%/);
+  });
+
+  it.each([
+    ["ccv_a_vista_v2.hbs", previewSampleDataAVista],
+    ["ccv_financiamento_v2.hbs", previewSampleDataFinanciamento],
+  ])("%s: sem data de assinatura, o fecho não sai quebrado", (file, sample) => {
+    // Achado do E2E em staging. O fecho é `{{config.municipio_imovel}},
+    // {{dataExtenso config.data_assinatura}}.` — com data vazia rendia
+    // "São Paulo/SP, .". Sempre foi assim quando o cliente deixava a data em
+    // branco no formulário, mas o campo SAIU do form (a data real da assinatura
+    // é decidida depois, na aba Configurações): o que era eventual virou
+    // sistemático — todo contrato novo nasceria com o fecho quebrado.
+    const html = renderSemAssinatura(file, sample);
+    expect(html).not.toMatch(/,\s*\.\s*<\/p>/);
+    expect(html).toContain("São Paulo/SP.</p>");
+  });
+
+  it("com data de assinatura, o fecho volta a trazê-la por extenso", () => {
+    const html = render("ccv_a_vista_v2.hbs", {
+      ...previewSampleDataAVista,
+      assinatura: { cidade: "Santos", uf: "SP", data: "2026-08-01" },
+    });
+    expect(html).toContain("Santos/SP, 1 de agosto de 2026.");
   });
 
   it("decimais no percentual saem por extenso corretamente", () => {

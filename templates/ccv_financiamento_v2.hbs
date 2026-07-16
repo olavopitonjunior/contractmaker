@@ -444,7 +444,7 @@ Descrição: {{this.descricao}}
 
 <p>E por estarem assim justas e contratadas, as partes firmam o presente instrumento em meio eletrônico, na presença das testemunhas abaixo identificadas.</p>
 
-<p>{{config.municipio_imovel}}, {{dataExtenso config.data_assinatura}}.</p>
+<p>{{config.municipio_imovel}}{{#if (existe config.data_assinatura)}}, {{dataExtenso config.data_assinatura}}{{/if}}.</p>
 
 <div class="assinaturas">
 
