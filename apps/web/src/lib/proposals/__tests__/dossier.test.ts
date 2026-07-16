@@ -25,18 +25,26 @@ describe("buildDossier", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("proposta sem dossierUrl e sem envelope → empty", async () => {
-    propFind.mockResolvedValue({ id: "p1", dossierUrl: null });
+    propFind.mockResolvedValue({ id: "p1", dossierUrl: null, status: "completa" });
     envMany.mockResolvedValue([]);
     expect(await buildDossier("p1")).toEqual({ skipped: "empty" });
   });
 
   it("dossierUrl já preenchido → already_built (não regera)", async () => {
-    propFind.mockResolvedValue({ id: "p1", dossierUrl: "s3://ja.pdf" });
+    propFind.mockResolvedValue({ id: "p1", dossierUrl: "s3://ja.pdf", status: "completa" });
     expect(await buildDossier("p1")).toEqual({ skipped: "already_built" });
   });
 
+  it("proposta ainda não completa (proponente assinou, falta o proprietário) → pending", async () => {
+    // Gate anti-corrida: o buildDossier do envelope completo NÃO pode montar
+    // antes da reduzida existir/fechar.
+    propFind.mockResolvedValue({ id: "p1", dossierUrl: null, status: "aguardando_vendedor" });
+    expect(await buildDossier("p1")).toEqual({ skipped: "pending" });
+    expect(envMany).not.toHaveBeenCalled();
+  });
+
   it("algum envelope sem PDF assinado → pending (espera)", async () => {
-    propFind.mockResolvedValue({ id: "p1", dossierUrl: null });
+    propFind.mockResolvedValue({ id: "p1", dossierUrl: null, status: "completa" });
     envMany.mockResolvedValue([
       { id: "e1", via: "completa", signedDocumentUrl: "s3://a.pdf", status: "closed" },
       { id: "e2", via: "reduzida", signedDocumentUrl: null, status: "closed" },
@@ -45,8 +53,8 @@ describe("buildDossier", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("todos assinados → merge das duas vias + cria dossiê", async () => {
-    propFind.mockResolvedValue({ id: "p1", dossierUrl: null });
+  it("completa + todos assinados → merge das duas vias + cria dossiê", async () => {
+    propFind.mockResolvedValue({ id: "p1", dossierUrl: null, status: "completa" });
     envMany.mockResolvedValue([
       { id: "e1", via: "completa", signedDocumentUrl: "s3://a.pdf", status: "closed" },
       { id: "e2", via: "reduzida", signedDocumentUrl: "s3://b.pdf", status: "closed" },
