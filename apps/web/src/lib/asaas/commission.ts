@@ -165,22 +165,15 @@ export function resolveCommissionValue(
 ): number {
   if (typeof opts.override === "number" && opts.override > 0) return opts.override;
 
-  const total = parseMoneyBR(data.pagamento?.valor_total);
-
+  // A raiz do bug 100× (comissão inflada) é o parsing, corrigido em
+  // parseMoneyBR. NÃO bloqueamos comissão > valor_total: em contrato importado/
+  // OCR o valor_total pode capturar só o sinal/parcela enquanto a comissão é a
+  // real (ex.: total=R$1.500 do sinal, comissão=R$30.000) — um throw aqui
+  // impediria o corretor de emitir uma cobrança legítima (422).
   const valor = parseMoneyBR(data.comissao?.valor);
-  if (valor > 0) {
-    // Sanidade: comissão explícita maior que o valor do imóvel é quase sempre
-    // erro de digitação (o bug 100× produzia exatamente isto). Bloqueia em vez
-    // de emitir uma cobrança absurda.
-    if (total > 0 && valor > total) {
-      throw new CommissionBuildError(
-        "INVALID_VALUE",
-        `Valor de comissão (${valor}) maior que o valor do imóvel (${total}) — provável erro de digitação.`
-      );
-    }
-    return valor;
-  }
+  if (valor > 0) return valor;
 
+  const total = parseMoneyBR(data.pagamento?.valor_total);
   const pct = parseMoneyBR(data.comissao?.percentual);
   if (pct > 0 && total > 0) {
     return Math.round(((pct / 100) * total) * 100) / 100;

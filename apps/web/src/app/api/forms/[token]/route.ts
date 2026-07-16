@@ -153,8 +153,12 @@ export async function PATCH(
   // submit sem o checkbox). Registra a evidência — quando, de qual IP (hasheado)
   // e qual versão da política — na 1ª finalização. Antes o aceite era só estado
   // de UI e nunca persistia.
+  // Exige aceite EXPLÍCITO (=== true). Um `!== false` gravaria evidência de
+  // consentimento mesmo quando o cliente não enviou o campo (client antigo,
+  // link de participante, chamada direta à API) — fabricando prova de um
+  // consentimento que o titular nunca deu.
   const recordConsent =
-    isFinalizing && !form.privacyAcceptedAt && body.privacyAccepted !== false;
+    isFinalizing && !form.privacyAcceptedAt && body.privacyAccepted === true;
 
   const updated = await prisma.salesForm.update({
     where: { token: params.token },

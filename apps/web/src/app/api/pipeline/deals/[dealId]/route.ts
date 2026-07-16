@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
@@ -273,7 +274,10 @@ export async function DELETE(
       ].filter((u): u is string => Boolean(u))
     )
   );
-  const blobsDeleted = await deleteBlobs(urlsToDelete);
+  // Pós-commit em waitUntil (como as rotas irmãs de contrato) — deletar dezenas
+  // de PDFs sequencialmente inline poderia estourar o timeout e devolver 504
+  // com as rows já commitadas.
+  waitUntil(deleteBlobs(urlsToDelete));
 
   await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
     action: "DEAL_DELETE",
@@ -283,7 +287,7 @@ export async function DELETE(
     metadata: {
       ...counts,
       driveDocsTrashed: docsToTrash.length,
-      blobsDeleted,
+      blobsQueued: urlsToDelete.length,
       deleteForm,
     },
   });

@@ -731,7 +731,7 @@ export function SalesFormWizard({
               : fullValues,
             markCompleted: true,
           }
-        : { dataJson: fullValues, status: "completo" };
+        : { dataJson: fullValues, status: "completo", privacyAccepted };
 
       const res = await fetch(autoSaveEndpoint, {
         method: "PATCH",
