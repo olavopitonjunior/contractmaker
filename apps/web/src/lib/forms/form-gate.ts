@@ -37,6 +37,8 @@ import { prisma } from "@/lib/db/prisma";
 export interface FormGateSubject {
   orgId: string;
   completedAt: Date | null;
+  /** "rascunho" | "completo" | "vinculado" — ver `isFormClosed`. */
+  status?: string | null;
   /**
    * Reaberto pela imobiliária (`POST .../lock { reopen: true }`) → volta a ser
    * público até o próximo finalize. Fica separado de `completedAt` porque este
@@ -45,9 +47,26 @@ export interface FormGateSubject {
   reopenedAt?: Date | null;
 }
 
-/** Fechado = já enviado e ainda não reaberto. */
+/**
+ * Fechado = o form terminou e ainda não foi reaberto.
+ *
+ * "Terminou" tem DOIS caminhos, e é preciso cobrir os dois:
+ *
+ *  - `completedAt` — o cliente finalizou pelo link (`PATCH` com
+ *    `status: "completo"`). É o único lugar do código que grava esse campo.
+ *  - `status === "vinculado"` — o form nasceu preso a um contrato criado por
+ *    outra via (import de CCV, cadastro rápido com upload, proposta). Esses
+ *    NUNCA passam pelo finalize, então **nunca ganham `completedAt`** — o
+ *    comentário do schema sugere o contrário, mas nenhum caminho o seta
+ *    (`import-contract`, `contract-import.ts`, `pipeline/deals`,
+ *    `locacao/deals` criam com status e sem data). E o dataJson deles é
+ *    justamente o que o Gemini extraiu do CCV: PII completa de todas as
+ *    partes. Gatear só por `completedAt` deixaria 100% deles abertos pra
+ *    sempre — o oposto do objetivo.
+ */
 export function isFormClosed(form: FormGateSubject): boolean {
-  return Boolean(form.completedAt) && !form.reopenedAt;
+  const finished = Boolean(form.completedAt) || form.status === "vinculado";
+  return finished && !form.reopenedAt;
 }
 
 /**

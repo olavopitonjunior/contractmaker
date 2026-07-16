@@ -36,6 +36,8 @@ export interface FormScope {
   completedAt: Date | null;
   /** Reaberto pela org → gate desligado até o próximo finalize. */
   reopenedAt: Date | null;
+  /** "rascunho" | "completo" | "vinculado" — `vinculado` também fecha o gate. */
+  status: string;
 }
 
 export async function resolveFormScope(token: string): Promise<FormScope | null> {
@@ -49,6 +51,7 @@ export async function resolveFormScope(token: string): Promise<FormScope | null>
       lockedAt: true,
       completedAt: true,
       reopenedAt: true,
+      status: true,
     },
   });
   if (form) {
@@ -62,6 +65,7 @@ export async function resolveFormScope(token: string): Promise<FormScope | null>
       lockedAt: form.lockedAt,
       completedAt: form.completedAt,
       reopenedAt: form.reopenedAt,
+      status: form.status,
     };
   }
 
@@ -87,6 +91,7 @@ export async function resolveFormScope(token: string): Promise<FormScope | null>
           lockedAt: true,
           completedAt: true,
           reopenedAt: true,
+          status: true,
         },
       },
     },
@@ -103,6 +108,7 @@ export async function resolveFormScope(token: string): Promise<FormScope | null>
     lockedAt: participant.form.lockedAt,
     completedAt: participant.form.completedAt,
     reopenedAt: participant.form.reopenedAt,
+    status: participant.form.status,
   };
 }
 

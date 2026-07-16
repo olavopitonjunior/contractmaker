@@ -34,10 +34,35 @@ beforeEach(() => {
 describe("isFormClosed", () => {
   it("form em rascunho está aberto", () => {
     expect(isFormClosed({ orgId: "org1", completedAt: null })).toBe(false);
+    expect(
+      isFormClosed({ orgId: "org1", completedAt: null, status: "rascunho" })
+    ).toBe(false);
   });
 
   it("form enviado está fechado", () => {
     expect(isFormClosed({ orgId: "org1", completedAt: new Date() })).toBe(true);
+  });
+
+  it("form 'vinculado' fecha MESMO sem completedAt", () => {
+    // Regressão: nenhum caminho de código seta `completedAt` para status
+    // "vinculado" — import de CCV, cadastro rápido com upload e proposta criam
+    // o form já vinculado, sem passar pelo finalize. Gatear só por
+    // `completedAt` deixava 100% desses forms públicos, com o dataJson que o
+    // Gemini extraiu do contrato (PII de todas as partes).
+    expect(
+      isFormClosed({ orgId: "org1", completedAt: null, status: "vinculado" })
+    ).toBe(true);
+  });
+
+  it("form vinculado reaberto volta a abrir", () => {
+    expect(
+      isFormClosed({
+        orgId: "org1",
+        completedAt: null,
+        status: "vinculado",
+        reopenedAt: new Date(),
+      })
+    ).toBe(false);
   });
 
   it("form reaberto volta a ficar aberto sem perder completedAt", () => {
@@ -65,6 +90,13 @@ describe("canAccessForm", () => {
     loggedOut();
     await expect(
       canAccessForm({ orgId: "org1", completedAt: new Date() })
+    ).resolves.toBe(false);
+  });
+
+  it("form 'vinculado' (import/upload) nega anônimo", async () => {
+    loggedOut();
+    await expect(
+      canAccessForm({ orgId: "org1", completedAt: null, status: "vinculado" })
     ).resolves.toBe(false);
   });
 

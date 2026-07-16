@@ -36,7 +36,7 @@ export async function GET(
 
   const form = await prisma.salesForm.findUnique({
     where: { token },
-    select: { id: true, orgId: true, completedAt: true, reopenedAt: true },
+    select: { id: true, orgId: true, status: true, completedAt: true, reopenedAt: true },
   });
   if (!form) {
     return NextResponse.json({ error: "Form não encontrado" }, { status: 404 });

@@ -77,7 +77,14 @@ export async function POST(
 ) {
   const form = await prisma.salesForm.findUnique({
     where: { token: params.token },
-    select: { id: true, orgId: true, lockedAt: true, completedAt: true, reopenedAt: true },
+    select: {
+      id: true,
+      orgId: true,
+      status: true,
+      lockedAt: true,
+      completedAt: true,
+      reopenedAt: true,
+    },
   });
   if (!form) {
     return NextResponse.json({ error: "Form not found" }, { status: 404 });

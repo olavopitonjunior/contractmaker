@@ -64,6 +64,7 @@ export async function POST(
       id: true,
       orgId: true,
       schemaType: true,
+      status: true,
       completedAt: true,
       reopenedAt: true,
     },

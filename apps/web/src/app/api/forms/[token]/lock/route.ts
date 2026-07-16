@@ -67,7 +67,7 @@ export async function POST(
     return NextResponse.json({ error: "Form não encontrado" }, { status: 404 });
   }
 
-  if (reopen && !form.completedAt) {
+  if (reopen && !form.completedAt && form.status !== "vinculado") {
     return NextResponse.json(
       { error: "Formulário ainda não foi enviado — não há o que reabrir" },
       { status: 409 },
@@ -82,9 +82,14 @@ export async function POST(
           lockedAt: null,
           lockedById: null,
           summarySentAt: null,
-          // Volta pra rascunho pro próximo PATCH do cliente contar como
-          // finalize de novo (é o que fecha o gate e ressincroniza o contrato).
-          status: "rascunho",
+          // Só o form finalizado pelo cliente volta a "rascunho" — é o que faz
+          // o próximo PATCH contar como finalize (fecha o gate e ressincroniza
+          // o contrato). Form "vinculado" (import/upload/proposta) MANTÉM o
+          // status: ele nunca passou pelo finalize, e rebaixá-lo apagaria o
+          // discriminador que o resto do sistema usa pra saber que o deal
+          // nasceu de um contrato pronto. Pra ele, `reopenedAt` sozinho já
+          // reabre o gate.
+          ...(form.status === "completo" ? { status: "rascunho" } : {}),
         }
       : locked
         ? { lockedAt: new Date(), lockedById: ctx.userId }

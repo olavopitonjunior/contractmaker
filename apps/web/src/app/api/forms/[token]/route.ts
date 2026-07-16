@@ -221,7 +221,7 @@ export async function PATCH(
       const existingContract = await prisma.contract.findFirst({
         where: { dealId: deal.id },
         orderBy: { version: "desc" },
-        select: { id: true, status: true },
+        select: { id: true, status: true, dataJson: true },
       });
       if (existingContract) {
         // A sincronização do dataJson só roda se NÃO estiver aprovado —
@@ -229,9 +229,24 @@ export async function PATCH(
         contractId = existingContract.id;
         if (existingContract.status !== "aprovado") {
           try {
+            // MERGE, não replace. O `Contract.dataJson` de um contrato gerado
+            // por template é o resultado de `enrichContractData` — carrega as
+            // pontes que o template lê (`config.municipio_imovel`,
+            // `config.data_assinatura`, `parcelas[].momento_texto`,
+            // `comissionados[].papel_texto`…) e que o dataJson do form NÃO tem.
+            // Substituir pelo cru (comportamento que valia só pro importado,
+            // cujo dataJson nunca foi enriquecido) apagaria tudo isso: o render
+            // do PDF sairia com "multa de % ( por cento)" e fecho ", .", e o
+            // diff da aba Configurações não casaria mais com o Google Doc.
+            const existingData =
+              (existingContract.dataJson as Record<string, unknown> | null) ?? {};
+            const syncedData = deepMergeAtPaths(
+              structuredClone(existingData),
+              mergedData
+            ).merged;
             await prisma.contract.update({
               where: { id: existingContract.id },
-              data: { dataJson: mergedData as Prisma.InputJsonValue },
+              data: { dataJson: syncedData as Prisma.InputJsonValue },
             });
           } catch (error) {
             console.error("Sync contract dataJson failed:", error);

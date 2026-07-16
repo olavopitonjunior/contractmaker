@@ -67,14 +67,16 @@ describe("GET /api/forms/[token] — gate de form enviado", () => {
     expect(JSON.stringify(body)).not.toContain("148.109.698-27");
   });
 
-  it("form 'vinculado' também fecha — é o status de todo deal vindo de import/proposta", async () => {
-    // Gatear por `status === "completo"` deixaria 100% desses forms abertos:
-    // eles nascem "vinculado" e nunca transicionam pra "completo".
+  it("form 'vinculado' fecha mesmo SEM completedAt (import/upload/proposta)", async () => {
+    // Esses forms nunca passam pelo finalize, então nenhum código seta
+    // `completedAt` neles — e o dataJson é o CCV extraído pelo Gemini, com PII
+    // de todas as partes. Gatear só por `completedAt` os deixaria abertos.
     mockPrisma.salesForm.findUnique.mockResolvedValue(
-      formRow({ status: "vinculado", completedAt: new Date("2026-07-16") }) as never
+      formRow({ status: "vinculado", completedAt: null }) as never
     );
     const res = await GET(req(), { params: { token: "tok1" } });
     expect(res.status).toBe(403);
+    expect(JSON.stringify(await res.json())).not.toContain("148.109.698-27");
   });
 
   it("form enviado libera membro da org", async () => {
