@@ -18,6 +18,7 @@ import {
 } from "./types";
 import { dispatchExternalSplits } from "./splitDispatcher";
 import { notifyChargeEvent, type ChargeEvent } from "@/lib/financeiro/notifications";
+import { autoPromoteDealOnCommissionPaid } from "@/lib/contracts/auto-promote-commission";
 
 export function validateWebhookToken(headerToken: string | null): boolean {
   const expected = process.env.ASAAS_WEBHOOK_TOKEN;
@@ -285,6 +286,11 @@ export async function applyWebhookToCharge(
         err instanceof Error ? err.message : err
       );
     }
+    // Auto-promove o deal pra "Comissão paga" — o único estágio que exigia
+    // clique manual apesar de o webhook já saber do pagamento. Guard interno
+    // (só de "Cobrança emitida"/"Contrato assinado") + no-op se não houver deal
+    // ou stage. Inline pela mesma razão do dispatch (serverless aborta o após).
+    await autoPromoteDealOnCommissionPaid(charge.dealId);
   }
 
   // Régua interna (Pagadoria 2026-05-09): fan-out por evento. Inline

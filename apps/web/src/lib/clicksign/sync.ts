@@ -12,6 +12,7 @@ import { resolveClickSignCreds } from "./account";
 import type { ClicksignCreds } from "./client";
 import { persistSignedPdf } from "@/lib/clicksign/signed-pdf";
 import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-signed";
+import { notifyEnvelopeMilestone } from "@/lib/clicksign/notify-envelope";
 import {
   completeInspectionOnEnvelopeClosed,
   revertInspectionOnEnvelopeCanceled,
@@ -70,6 +71,7 @@ export async function syncEnvelopeState(
   const stateByEmail = aggregateEventsByEmail(eventsResp);
 
   let signersUpdated = 0;
+  let emailFailedNewly = false;
   for (const local of envelope.signers) {
     const byKey = local.clicksignId
       ? stateBySigner.get(local.clicksignId)
@@ -119,6 +121,7 @@ export async function syncEnvelopeState(
         local.status !== "email_failed"
       ) {
         updates.status = "email_failed";
+        emailFailedNewly = true;
       }
     }
 
@@ -129,6 +132,12 @@ export async function syncEnvelopeState(
       });
       signersUpdated += 1;
     }
+  }
+
+  // Bounce de e-mail (detectado só no /events, via sync) → sino pro operador.
+  // batchId dedupa por envelope: um bounce vira uma notificação, não N.
+  if (emailFailedNewly) {
+    await notifyEnvelopeMilestone(envelope.id, envelope.orgId, "email_failed");
   }
 
   let envelopeUpdated = false;

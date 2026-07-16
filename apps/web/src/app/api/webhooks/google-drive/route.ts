@@ -1,8 +1,38 @@
 import { NextRequest, NextResponse } from "next/server";
 import { timingSafeEqual } from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
+import { getDriveClient, getServiceAccountEmail } from "@/lib/google/client";
+import { logError } from "@/lib/observability/log";
 
 export const runtime = "nodejs";
+
+/**
+ * Classifica a origem da edição do Google Doc olhando `lastModifyingUser`:
+ * a IA/sistema edita via SERVICE ACCOUNT (getGoogleAuth), então quem editou
+ * === e-mail da SA → "system"; qualquer outra conta = humano no iframe →
+ * "user". Antes TODA edição virava "system", quebrando a dimensão IA×humano
+ * (em prod 348 "system" vs 4 "user"). Best-effort: se a Drive API falhar ou
+ * não trouxer o autor, mantém o default seguro "system".
+ */
+async function classifyEditSource(googleDocId: string | null): Promise<string> {
+  if (!googleDocId) return "system";
+  const saEmail = getServiceAccountEmail();
+  if (!saEmail) return "system"; // sem como comparar → default seguro
+  try {
+    const drive = getDriveClient();
+    const meta = await drive.files.get({
+      fileId: googleDocId,
+      fields: "lastModifyingUser/emailAddress",
+      supportsAllDrives: true,
+    });
+    const editor = meta.data.lastModifyingUser?.emailAddress;
+    if (!editor) return "system";
+    return editor.toLowerCase() === saEmail.toLowerCase() ? "system" : "user";
+  } catch (err) {
+    logError("google-drive-webhook/classify", err, { googleDocId });
+    return "system";
+  }
+}
 
 /** Comparação constant-time de tokens (evita timing oracle). */
 function tokensMatch(a: string, b: string): boolean {
@@ -68,6 +98,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, unmatched: true });
   }
 
+  const source = await classifyEditSource(contract.googleDocId);
+
   await prisma.contractChangeLog.create({
     data: {
       contractId: contract.id,
@@ -79,7 +111,7 @@ export async function POST(req: NextRequest) {
         channelId,
         timestamp: new Date().toISOString(),
       },
-      source: "system",
+      source,
     },
   });
 
