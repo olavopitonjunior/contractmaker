@@ -112,6 +112,12 @@ function salesAccess(): PermissionMap {
     [PERMISSION.CHARGE_RESEND_NOTIFICATION]: true,
     [PERMISSION.CUSTOMER_VIEW_OWN_DEALS]: true,
     [PERMISSION.FEES_VIEW]: true,
+    // Corretor: opera as PRÓPRIAS propostas ponta a ponta (cria, envia,
+    // converte), mas só enxerga as dele. Sem PROPOSAL_VIEW_ALL de propósito.
+    [PERMISSION.PROPOSAL_VIEW_OWN_ONLY]: true,
+    [PERMISSION.PROPOSAL_CREATE]: true,
+    [PERMISSION.PROPOSAL_SEND]: true,
+    [PERMISSION.PROPOSAL_CONVERT]: true,
   };
 }
 
@@ -126,6 +132,8 @@ function viewerAccess(): PermissionMap {
     [PERMISSION.FINANCE_STATEMENT_VIEW]: true,
     [PERMISSION.RECONCILIATION_VIEW]: true,
     [PERMISSION.REPORT_VIEW]: true,
+    // Leitura global — vê todas as propostas (gestor/auditoria), sem criar.
+    [PERMISSION.PROPOSAL_VIEW_ALL]: true,
   };
 }
 
@@ -173,6 +181,11 @@ function gestorLocacaoAccess(): PermissionMap {
     [PERMISSION.NEWTON_REQUEST_VIEW]: true,
     [PERMISSION.NEWTON_INTENT_APPROVE]: true,
     [PERMISSION.REPORT_VIEW]: true,
+    // Gestor de locação: enxerga todas as propostas da carteira e opera todas.
+    [PERMISSION.PROPOSAL_VIEW_ALL]: true,
+    [PERMISSION.PROPOSAL_CREATE]: true,
+    [PERMISSION.PROPOSAL_SEND]: true,
+    [PERMISSION.PROPOSAL_CONVERT]: true,
   };
 }
 

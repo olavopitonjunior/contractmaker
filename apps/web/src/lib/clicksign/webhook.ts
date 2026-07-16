@@ -60,6 +60,36 @@ export function getRawEventName(payload: WebhookPayload): string | null {
   return name ? String(name) : null;
 }
 
+/**
+ * Aceite via WhatsApp (`acceptance_term_*`) — produto SEPARADO do envelope, sem
+ * `document.key` nem `envelope.id`. O webhook referencia um `acceptance_term`
+ * por id. Retorna `{ acceptanceId, phase }` quando o evento é de Aceite, senão
+ * null (o caller segue o fluxo de envelope). A fase é o sufixo do nome cru:
+ * `sent | completed | refused | expired | canceled | error | created`.
+ */
+export function getAcceptanceEventFromPayload(
+  payload: WebhookPayload
+): { acceptanceId: string; phase: string } | null {
+  const raw = getRawEventName(payload);
+  if (!raw || !raw.startsWith("acceptance_term")) return null;
+  const phase = raw.replace(/^acceptance_term[_.]?/, "") || "unknown";
+  // O id do termo pode vir em vários pontos conforme a versão do payload.
+  const p = payload as unknown as {
+    event?: { data?: { acceptance_term?: { id?: string }; id?: string } };
+    acceptance_term?: { id?: string; key?: string };
+    data?: { id?: string };
+  };
+  const acceptanceId =
+    p.event?.data?.acceptance_term?.id ||
+    p.event?.data?.id ||
+    p.acceptance_term?.id ||
+    p.acceptance_term?.key ||
+    p.data?.id ||
+    null;
+  if (!acceptanceId) return null;
+  return { acceptanceId, phase };
+}
+
 export function getEnvelopeIdFromPayload(payload: WebhookPayload): string | null {
   // v3 publica eventos por envelope; o id pode vir em event.data.envelope_id
   // ou no objeto envelope dependendo da versão.

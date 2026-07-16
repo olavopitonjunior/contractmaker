@@ -93,6 +93,7 @@ vi.mock("@/lib/db/prisma", () => {
       findFirst: vi.fn(),
       findMany: vi.fn().mockResolvedValue([]),
       create: vi.fn(),
+      createMany: vi.fn(),
       delete: vi.fn(),
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
@@ -255,6 +256,7 @@ vi.mock("@/lib/db/prisma", () => {
     },
     envelope: {
       findFirst: vi.fn().mockResolvedValue(null),
+      findUnique: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
       create: vi.fn(),
       update: vi.fn(),
@@ -264,6 +266,33 @@ vi.mock("@/lib/db/prisma", () => {
       findMany: vi.fn().mockResolvedValue([]),
       update: vi.fn(),
       updateMany: vi.fn(),
+    },
+    proposal: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn(),
+      update: vi.fn(),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      count: vi.fn().mockResolvedValue(0),
+    },
+    proposalEvent: {
+      create: vi.fn().mockResolvedValue({}),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    proposalSigner: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn().mockResolvedValue({}),
+      createMany: vi.fn().mockResolvedValue({ count: 0 }),
+      update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    proposalAttachment: {
+      create: vi.fn(),
+      createMany: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
     },
   };
   Object.assign(prismaMock, mock);

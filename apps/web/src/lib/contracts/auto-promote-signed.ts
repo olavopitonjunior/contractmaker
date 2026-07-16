@@ -25,7 +25,10 @@ export type AutoPromoteResult =
         | "not_contract_envelope"
         | "stage_missing"
         | "already_advanced"
-        | "deal_not_found";
+        | "deal_not_found"
+        // Envelope de PROPOSTA: não há deal ainda (a proposta vive fora do
+        // kanban; o deal só nasce na conversão). Não há stage pra promover.
+        | "no_deal";
     };
 
 /**
@@ -65,6 +68,13 @@ export async function autoPromoteDealOnContractSigned(
     // "contrato assinado" pro pipeline.
     if (envelope.contract && envelope.contract.kind !== "contract") {
       return { promoted: false, reason: "not_contract_envelope" };
+    }
+    // `dealId` é nullable desde as Propostas. Um envelope de proposta não tem
+    // deal (ele nasce só na conversão), então não há funil pra mover. O guard
+    // acima (source !== "contract") já cobre o caso na prática; este é o
+    // narrowing explícito, e vale como rede se um envelope vier sem deal.
+    if (!envelope.dealId) {
+      return { promoted: false, reason: "no_deal" };
     }
 
     const deal = await prisma.deal.findUnique({

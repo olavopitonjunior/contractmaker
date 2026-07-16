@@ -32,6 +32,7 @@ export const FEATURE = {
   VENDAS_CERTIDOES: "vendas.certidoes",
   VENDAS_PAGADORIA: "vendas.pagadoria",
   VENDAS_NEWTON: "vendas.newton",
+  VENDAS_PROPOSTAS: "vendas.propostas",
 
   // Módulo Locação
   LOCACAO_PIPELINE: "locacao.pipeline",
@@ -44,6 +45,7 @@ export const FEATURE = {
   LOCACAO_SEGUROS: "locacao.seguros",
   LOCACAO_PESSOAS: "locacao.pessoas",
   LOCACAO_NEWTON: "locacao.newton",
+  LOCACAO_PROPOSTAS: "locacao.propostas",
 } as const;
 
 export type FeatureKey = (typeof FEATURE)[keyof typeof FEATURE];
@@ -71,6 +73,7 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
       { key: FEATURE.VENDAS_CERTIDOES, label: "Certidões", default: true },
       { key: FEATURE.VENDAS_PAGADORIA, label: "Pagadoria / comissão", default: true },
       { key: FEATURE.VENDAS_NEWTON, label: "Newton (agente WhatsApp) — vendas", default: false },
+      { key: FEATURE.VENDAS_PROPOSTAS, label: "Propostas — vendas", default: false },
     ],
   },
   {
@@ -87,6 +90,7 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
       { key: FEATURE.LOCACAO_SEGUROS, label: "Seguros", default: false },
       { key: FEATURE.LOCACAO_PESSOAS, label: "Pessoas", default: true },
       { key: FEATURE.LOCACAO_NEWTON, label: "Newton (agente WhatsApp) — locação", default: false },
+      { key: FEATURE.LOCACAO_PROPOSTAS, label: "Propostas — locação", default: false },
     ],
   },
 ] as const;
@@ -141,6 +145,11 @@ export function featureDefault(feature: FeatureKey): boolean {
  */
 export function newtonFeatureForDealKind(kind: string): FeatureKey {
   return kind === "locacao" ? FEATURE.LOCACAO_NEWTON : FEATURE.VENDAS_NEWTON;
+}
+
+/** Feature de Propostas por kind. Default OFF nos dois (rollout gradual). */
+export function proposalFeatureForKind(kind: string): FeatureKey {
+  return kind === "locacao" ? FEATURE.LOCACAO_PROPOSTAS : FEATURE.VENDAS_PROPOSTAS;
 }
 
 /** Definição completa de um módulo. */

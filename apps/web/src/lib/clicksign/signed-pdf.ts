@@ -49,11 +49,48 @@ export async function persistSignedPdf(
       where: { id: envelopeId },
       select: {
         dealId: true,
+        proposalId: true,
+        via: true,
         source: true,
         name: true,
         contract: { select: { version: true, kind: true } },
       },
     });
+
+    // Envelope de PROPOSTA: o PDF assinado vira ProposalAttachment (o deal só
+    // nasce na conversão). Dedupe por url/contentHash (corrida webhook×cron).
+    if (env?.proposalId) {
+      const dup = await prisma.proposalAttachment.findFirst({
+        where: { proposalId: env.proposalId, OR: [{ url: stored }, { contentHash }] },
+        select: { id: true },
+      });
+      if (dup) return;
+      const category =
+        env.via === "reduzida"
+          ? "proposta_assinada_reduzida"
+          : "proposta_assinada_completa";
+      await prisma.proposalAttachment.create({
+        data: {
+          proposalId: env.proposalId,
+          filename: `${env.name} (assinado).pdf`,
+          mime: "application/pdf",
+          url: stored,
+          category,
+          source: "clicksign_signed",
+          byteSize: buf.byteLength,
+          contentHash,
+        },
+      });
+      // Único ponto onde signedDocumentUrl acabou de ser gravado — se este era o
+      // último envelope pendente da proposta, o dossiê é montado agora. Guardado
+      // por dossierUrl; no-op enquanto houver envelope sem PDF.
+      const { buildDossier } = await import("@/lib/proposals/dossier");
+      await buildDossier(env.proposalId).catch((e) =>
+        console.error(`${logPrefix} falha ao montar dossiê:`, e)
+      );
+      return;
+    }
+
     if (!env?.dealId) return;
 
     // Dedupe por url estável OU por conteúdo (corrida webhook×cron).

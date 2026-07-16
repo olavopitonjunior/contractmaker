@@ -123,15 +123,28 @@ export async function getMonthlySpendCents(orgId: string): Promise<number> {
   const start = new Date();
   start.setUTCDate(1);
   start.setUTCHours(0, 0, 0, 0);
-  const result = await prisma.envelope.aggregate({
-    where: {
-      orgId,
-      sentAt: { gte: start },
-      status: { in: ["running", "closed"] },
-    },
-    _sum: { costCents: true },
-  });
-  return result._sum.costCents ?? 0;
+  const [envelopes, aceites] = await Promise.all([
+    prisma.envelope.aggregate({
+      where: {
+        orgId,
+        sentAt: { gte: start },
+        status: { in: ["running", "closed"] },
+      },
+      _sum: { costCents: true },
+    }),
+    // Aceite via WhatsApp não cria Envelope — o custo fica em
+    // Proposal.reservedCostCents. Sem somar isto, aceites eram INVISÍVEIS ao
+    // teto mensal (gasto efetivamente ilimitado). Conta os enviados no mês.
+    prisma.proposal.aggregate({
+      where: {
+        orgId,
+        instrument: "aceite",
+        sentAt: { gte: start },
+      },
+      _sum: { reservedCostCents: true },
+    }),
+  ]);
+  return (envelopes._sum.costCents ?? 0) + (aceites._sum.reservedCostCents ?? 0);
 }
 
 /**
@@ -361,12 +374,19 @@ async function createEnvelopeFromBuffer(input: {
         {
           envelopeId: clicksignEnvelopeId,
           name: localSigner.name,
-          email: localSigner.email,
+          email: localSigner.email ?? undefined,
           documentation: localSigner.documentation ?? undefined,
           phoneNumber: localSigner.phone ?? undefined,
           hasDocumentation: Boolean(localSigner.documentation),
           group: localSigner.signingGroup ?? undefined,
           refusable: settings.refusable,
+          // Canal de notificação por signatário. "whatsapp" só chega aqui quando
+          // a conta tem o plano Plus (o roteamento decide antes; ver
+          // lib/proposals/routing.ts). Signatário sem e-mail → o preflight já
+          // exigiu telefone, e communicate_events cuida do resto.
+          notifyChannel:
+            (localSigner.notifyChannel as "email" | "whatsapp" | "sms" | undefined) ??
+            "email",
         },
         creds
       );

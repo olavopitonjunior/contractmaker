@@ -1,0 +1,95 @@
+import { renderContratoHTML } from "@/lib/render/handlebars";
+import { enrichContractData } from "@/lib/services/contract-generation";
+import { sanitizeHiddenPaths } from "./hidden-fields";
+
+export type ProposalVia = "completa" | "reduzida";
+
+/**
+ * Remove uma chave de um objeto aninhado por dot-path. Suporta índice de array
+ * (`compradores.0.renda`).
+ *
+ * DELETA a chave — não seta "" nem null. É isto que faz o `{{#if existe X}}` do
+ * Handlebars remover o BLOCO inteiro: um valor vazio renderizaria a moldura da
+ * frase ("comissão de % sobre o valor") com um buraco no meio; a chave ausente
+ * some a frase toda.
+ *
+ * Muta uma cópia — nunca o objeto de entrada. Retorna a cópia.
+ */
+export function unsetByPath<T extends Record<string, unknown>>(
+  obj: T,
+  path: string
+): T {
+  const parts = path.split(".");
+  const clone = structuredClone(obj);
+  let cur: unknown = clone;
+  for (let i = 0; i < parts.length - 1; i++) {
+    if (cur == null || typeof cur !== "object") return clone; // path não existe
+    cur = (cur as Record<string, unknown>)[parts[i]];
+  }
+  if (cur != null && typeof cur === "object") {
+    delete (cur as Record<string, unknown>)[parts[parts.length - 1]];
+  }
+  return clone;
+}
+
+/**
+ * Monta o contexto de render de UMA via da proposta.
+ *
+ * - `completa`  → dados enriquecidos, `via_reduzida = false`. É o que o
+ *   proponente assina.
+ * - `reduzida`  → idem, mas com os `hiddenPaths` DELETADOS e
+ *   `via_reduzida = true`. É o que o proprietário/locador assina. O template usa
+ *   `via_reduzida` pra imprimir a cláusula de "extrato" (§ frase obrigatória).
+ *
+ * `hiddenPaths` é re-sanitizado aqui contra a allowlist do schemaType — defesa
+ * em profundidade, mesmo que a rota já tenha sanitizado na escrita.
+ */
+export function buildViaContext(input: {
+  schemaType: string;
+  dataJson: Record<string, unknown>;
+  hiddenPaths: string[];
+  via: ProposalVia;
+  numero: string | number;
+  /** Comissão é opcional na proposta. Só entra no documento quando true. */
+  comissaoIncluida?: boolean;
+}): Record<string, unknown> {
+  let ctx = enrichContractData(input.dataJson);
+  ctx.numero_proposta = input.numero;
+
+  // `enrichContractData` sempre materializa `comissao` (mesmo vazia). Se a
+  // comissão não foi incluída, tira o bloco do contexto.
+  if (input.comissaoIncluida !== true) {
+    ctx = unsetByPath(ctx, "comissao");
+  }
+
+  if (input.via === "reduzida") {
+    const paths = sanitizeHiddenPaths(input.schemaType, input.hiddenPaths);
+    for (const p of paths) {
+      ctx = unsetByPath(ctx, p);
+    }
+    ctx.via_reduzida = true;
+  } else {
+    ctx.via_reduzida = false;
+  }
+
+  // O flag que o template testa (`{{#if comissao_incluida}}`) é recalculado
+  // DEPOIS das remoções: a via reduzida pode ter escondido `comissao`, e aí o
+  // header de intermediação não pode renderizar vazio. Fonte de verdade = a
+  // comissão ainda estar no contexto.
+  ctx.comissao_incluida = "comissao" in ctx;
+  return ctx;
+}
+
+/** Renderiza o HTML de uma via a partir do source do template. */
+export function renderProposalVia(input: {
+  templateSource: string;
+  schemaType: string;
+  dataJson: Record<string, unknown>;
+  hiddenPaths: string[];
+  via: ProposalVia;
+  numero: string | number;
+  comissaoIncluida?: boolean;
+}): string {
+  const ctx = buildViaContext(input);
+  return renderContratoHTML(input.templateSource, ctx);
+}

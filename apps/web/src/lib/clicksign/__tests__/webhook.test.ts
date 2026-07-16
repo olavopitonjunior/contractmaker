@@ -6,6 +6,7 @@ import {
   getEnvelopeIdFromPayload,
   getSignerEmailFromPayload,
   getSignedDocumentUrlFromPayload,
+  getAcceptanceEventFromPayload,
 } from "../webhook";
 
 describe("verifyWebhookSignature", () => {
@@ -95,5 +96,39 @@ describe("getSignedDocumentUrlFromPayload", () => {
         document: { downloads: { signed_file_url: "https://x/y.pdf" } },
       } as never)
     ).toBe("https://x/y.pdf");
+  });
+});
+
+describe("getAcceptanceEventFromPayload", () => {
+  it("evento de envelope (sign) → null (segue fluxo de envelope)", () => {
+    expect(
+      getAcceptanceEventFromPayload({ event: { name: "sign" } } as never)
+    ).toBeNull();
+  });
+
+  it("acceptance_term_completed com id em event.data.acceptance_term.id", () => {
+    const r = getAcceptanceEventFromPayload({
+      event: {
+        name: "acceptance_term_completed",
+        data: { acceptance_term: { id: "acc_123" } },
+      },
+    } as never);
+    expect(r).toEqual({ acceptanceId: "acc_123", phase: "completed" });
+  });
+
+  it("acceptance_term_sent com id top-level acceptance_term.key", () => {
+    const r = getAcceptanceEventFromPayload({
+      event: { name: "acceptance_term_sent" },
+      acceptance_term: { key: "acc_key_9" },
+    } as never);
+    expect(r).toEqual({ acceptanceId: "acc_key_9", phase: "sent" });
+  });
+
+  it("acceptance sem id resolvível → null (não trata sem âncora)", () => {
+    expect(
+      getAcceptanceEventFromPayload({
+        event: { name: "acceptance_term_completed" },
+      } as never)
+    ).toBeNull();
   });
 });
