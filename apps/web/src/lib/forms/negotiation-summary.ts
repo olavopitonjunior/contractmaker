@@ -60,10 +60,15 @@ export function buildNegotiationSummary(
   pushMoney("Financiamento", pagamento.alienacao_fiduciaria);
   pushMoney("FGTS", pagamento.fgts);
   pushMoney("Cessão de consórcio", pagamento.cessao_consorcio);
+  pushMoney("Outras formas", pagamento.outras_formas);
   const parcelas = Array.isArray(pagamento.parcelas) ? pagamento.parcelas : [];
   if (parcelas.length > 0) {
     pagRows.push({ label: "Parcelas", value: `${parcelas.length} parcela(s)` });
   }
+  const meioPagamento = str(pagamento.meio_pagamento);
+  if (meioPagamento) pagRows.push({ label: "Meio de pagamento", value: meioPagamento });
+  const bancoFin = str(pagamento.banco_financiamento);
+  if (bancoFin) pagRows.push({ label: "Banco do financiamento", value: bancoFin });
   const saldoDevedor = brl(data.saldo_devedor);
   if (saldoDevedor) pagRows.push({ label: "Saldo devedor", value: saldoDevedor });
   if (pagRows.length > 0) sections.push({ title: "Pagamento", rows: pagRows });
