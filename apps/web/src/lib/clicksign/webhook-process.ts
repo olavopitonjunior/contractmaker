@@ -244,7 +244,12 @@ export async function processClickSignWebhookPayload(
       // Proposta: recusa move o status (proponente vs proprietário). No-op p/
       // envelope de contrato/attachment.
       await onProposalEnvelopeRefused(envelope.id);
-      await notifyEnvelopeMilestone(envelope.id, envelope.orgId, "refused");
+      await notifyEnvelopeMilestone({
+        envelopeId: envelope.id,
+        orgId: envelope.orgId,
+        dealId: envelope.dealId,
+        kind: "refused",
+      });
       break;
     }
     case "close":
@@ -259,7 +264,12 @@ export async function processClickSignWebhookPayload(
       // Proposta: avança o status (assinada_proponente / completa / aguardando
       // vendedor). No-op p/ envelope de contrato/attachment.
       await onProposalEnvelopeClosed(envelope.id);
-      await notifyEnvelopeMilestone(envelope.id, envelope.orgId, "signed");
+      await notifyEnvelopeMilestone({
+        envelopeId: envelope.id,
+        orgId: envelope.orgId,
+        dealId: envelope.dealId,
+        kind: "signed",
+      });
       triggerSignedPdfDownload(envelope, payload);
       break;
     }

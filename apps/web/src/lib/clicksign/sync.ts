@@ -71,7 +71,7 @@ export async function syncEnvelopeState(
   const stateByEmail = aggregateEventsByEmail(eventsResp);
 
   let signersUpdated = 0;
-  let emailFailedNewly = false;
+  const bouncedSignerIds: string[] = [];
   for (const local of envelope.signers) {
     const byKey = local.clicksignId
       ? stateBySigner.get(local.clicksignId)
@@ -121,7 +121,7 @@ export async function syncEnvelopeState(
         local.status !== "email_failed"
       ) {
         updates.status = "email_failed";
-        emailFailedNewly = true;
+        bouncedSignerIds.push(local.id);
       }
     }
 
@@ -135,9 +135,16 @@ export async function syncEnvelopeState(
   }
 
   // Bounce de e-mail (detectado só no /events, via sync) → sino pro operador.
-  // batchId dedupa por envelope: um bounce vira uma notificação, não N.
-  if (emailFailedNewly) {
-    await notifyEnvelopeMilestone(envelope.id, envelope.orgId, "email_failed");
+  // Um sino POR signatário (dedupeSuffix = signerId) — senão o bounce de um 2º
+  // signatário seria engolido pelo dedupe de batchId por envelope.
+  for (const signerId of bouncedSignerIds) {
+    await notifyEnvelopeMilestone({
+      envelopeId: envelope.id,
+      orgId: envelope.orgId,
+      dealId: envelope.dealId,
+      kind: "email_failed",
+      dedupeSuffix: signerId,
+    });
   }
 
   let envelopeUpdated = false;
@@ -153,6 +160,14 @@ export async function syncEnvelopeState(
     const promote = await autoPromoteDealOnContractSigned(envelope.id);
     dealStagePromoted = promote.promoted;
     await completeInspectionOnEnvelopeClosed(envelope.id);
+    // Fecho via reconciliação (webhook perdido) também emite o sino de assinado.
+    // batchId `${envelopeId}:signed` dedupa com o do webhook — nunca 2 sinos.
+    await notifyEnvelopeMilestone({
+      envelopeId: envelope.id,
+      orgId: envelope.orgId,
+      dealId: envelope.dealId,
+      kind: "signed",
+    });
   } else if (remoteStatus === "canceled" && envelope.status !== "canceled") {
     await prisma.envelope.update({
       where: { id: envelope.id },

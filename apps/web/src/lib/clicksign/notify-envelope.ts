@@ -1,4 +1,3 @@
-import { prisma } from "@/lib/db/prisma";
 import { emitNotification } from "@/lib/notifications/emit";
 
 /**
@@ -7,8 +6,10 @@ import { emitNotification } from "@/lib/notifications/emit";
  * e-mail. Fire-and-forget e escopado por org (userId null = org-wide, mesmo
  * padrão das notificações de certidões).
  *
- * `batchId` = `${envelopeId}:${kind}` → o unique (type, batchId) do model
- * dedupa reentregas do webhook (o mesmo envelope fechado 2× não gera 2 sinos).
+ * `dealId` vem do chamador (que já tem o envelope carregado) — sem re-query.
+ * `dedupeSuffix` entra no batchId: pra "signed"/"refused" é uma notificação
+ * por envelope; pra "email_failed" o chamador passa o signerId, senão o bounce
+ * de um 2º signatário seria engolido pelo unique (type, batchId) do model.
  */
 type EnvelopeNotifKind = "signed" | "refused" | "email_failed";
 
@@ -30,25 +31,25 @@ const TEXT: Record<EnvelopeNotifKind, { type: string; title: string; body: strin
   },
 };
 
-export async function notifyEnvelopeMilestone(
-  envelopeId: string,
-  orgId: string,
-  kind: EnvelopeNotifKind
-): Promise<void> {
+export async function notifyEnvelopeMilestone(params: {
+  envelopeId: string;
+  orgId: string;
+  dealId: string | null;
+  kind: EnvelopeNotifKind;
+  /** Discriminador extra do batchId (ex.: signerId pro bounce por signatário). */
+  dedupeSuffix?: string;
+}): Promise<void> {
+  const { envelopeId, orgId, dealId, kind, dedupeSuffix } = params;
   try {
-    const envelope = await prisma.envelope.findUnique({
-      where: { id: envelopeId },
-      select: { dealId: true },
-    });
-    const dealId = envelope?.dealId ?? null;
     const t = TEXT[kind];
+    const batchId = `${envelopeId}:${kind}${dedupeSuffix ? `:${dedupeSuffix}` : ""}`;
     await emitNotification({
       orgId,
       type: t.type,
       title: t.title,
       body: t.body,
       linkUrl: dealId ? `/deals/${dealId}` : undefined,
-      batchId: `${envelopeId}:${kind}`,
+      batchId,
       metadata: { envelopeId, ...(dealId ? { dealId } : {}) },
     });
   } catch (err) {

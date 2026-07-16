@@ -17,8 +17,10 @@ import { audit } from "@/lib/security/audit";
  * Idempotente e fire-and-forget: nunca relança (o webhook não pode falhar por
  * causa da promoção). Retorna o resultado só pra teste/observabilidade.
  */
-const ALLOWED_FROM = ["Cobrança emitida", "Contrato assinado"];
-const TARGET_STAGE = "Comissão paga";
+/** Estágios de origem válidos + alvo — fonte única (reusada pelo endpoint
+ * manual mark-commission-paid, pra webhook e clique não divergirem). */
+export const COMMISSION_PAID_ALLOWED_FROM = ["Cobrança emitida", "Contrato assinado"];
+export const COMMISSION_PAID_TARGET_STAGE = "Comissão paga";
 
 export type CommissionPromoteResult =
   | { promoted: true; fromStageId: string; toStageId: string }
@@ -52,13 +54,15 @@ export async function autoPromoteDealOnCommissionPaid(
     });
     if (!deal) return { promoted: false, reason: "deal_not_found" };
 
-    if (!ALLOWED_FROM.includes(deal.stage.name)) {
+    if (!COMMISSION_PAID_ALLOWED_FROM.includes(deal.stage.name)) {
       // Já está em "Comissão paga"/"Perdido", ou ainda não chegou na cobrança —
       // não regride nem pula etapa.
       return { promoted: false, reason: "already_advanced" };
     }
 
-    const targetStage = deal.pipeline.stages.find((s) => s.name === TARGET_STAGE);
+    const targetStage = deal.pipeline.stages.find(
+      (s) => s.name === COMMISSION_PAID_TARGET_STAGE
+    );
     if (!targetStage) {
       // Pipeline sem "Comissão paga" (ex.: locação) — nada a promover.
       return { promoted: false, reason: "stage_missing" };

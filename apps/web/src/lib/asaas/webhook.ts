@@ -290,7 +290,11 @@ export async function applyWebhookToCharge(
     // clique manual apesar de o webhook já saber do pagamento. Guard interno
     // (só de "Cobrança emitida"/"Contrato assinado") + no-op se não houver deal
     // ou stage. Inline pela mesma razão do dispatch (serverless aborta o após).
-    await autoPromoteDealOnCommissionPaid(charge.dealId);
+    // SÓ pra charge de comissão: uma avulsa/aluguel (kind != "commission") paga
+    // no mesmo deal NÃO significa que a comissão foi paga → não promove.
+    if (charge.kind === "commission") {
+      await autoPromoteDealOnCommissionPaid(charge.dealId);
+    }
   }
 
   // Régua interna (Pagadoria 2026-05-09): fan-out por evento. Inline
