@@ -14,6 +14,7 @@ import {
   type FormSummaryAttachment,
 } from "@/lib/forms/form-summary";
 import type { SummarySection } from "@/lib/forms/negotiation-summary";
+import { enrichContractData } from "@/lib/services/contract-generation";
 
 function esc(v: string): string {
   return v
@@ -28,6 +29,14 @@ export interface FormSummaryMeta {
   formTitle: string;
   generatedAtLabel: string;
   statusLabel?: string;
+  /**
+   * Quando os dados do form foram alterados pela última vez. O PDF é um
+   * SNAPSHOT: se o cliente editar o form depois, o arquivo já enviado por
+   * e-mail (e o que fica na pasta do deal) continua com o conteúdo velho, e
+   * nada indicava isso — o leitor achava que o campo estava vazio quando na
+   * verdade o PDF é que era anterior ao preenchimento.
+   */
+  dataUpdatedAtLabel?: string;
 }
 
 /**
@@ -58,6 +67,10 @@ export function renderFormSummaryHtml(
       <h1>${esc(meta.formTitle)}</h1>
       <div class="fs-meta">${esc(meta.orgName)} · Gerado em ${esc(meta.generatedAtLabel)}${
         meta.statusLabel ? ` · ${esc(meta.statusLabel)}` : ""
+      }${
+        meta.dataUpdatedAtLabel
+          ? ` · Dados de ${esc(meta.dataUpdatedAtLabel)}`
+          : ""
       }</div>
     </div>`;
 
@@ -91,6 +104,35 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 /**
+ * Passa o dataJson cru do form pelo mesmo enriquecimento que a geração de
+ * contrato usa, ANTES de montar o resumo.
+ *
+ * Sem isso o resumo mente por omissão: `pagamento.sinal_arras`,
+ * `recursos_proprios`, `fgts`, `cessao_consorcio` e `alienacao_fiduciaria` são
+ * buckets DERIVADOS de `parcelas[].tipo` (ver validation.ts, step5Schema) — no
+ * dataJson do form eles são estruturalmente `0` por default do Zod. O gerador
+ * lia o cru, via zero em tudo e simplesmente não emitia a seção Pagamento,
+ * mesmo num negócio com parcelas preenchidas. Idem `config.municipio_imovel` e
+ * `config.data_assinatura`, que só existem depois da ponte do enrich.
+ *
+ * Clone profundo é obrigatório: `enrichContractData` faz `{...data}` (raso) e
+ * MUTA `config` nested — sem clone, contaminaríamos o dataJson em memória.
+ * A função é pura (sem DB) e já é chamada sem ctx pelo preview de template.
+ * Falha aqui não derruba o resumo: cai pro dado cru.
+ */
+function prepareDataForSummary(
+  dataJson: Record<string, unknown> | null
+): Record<string, unknown> | null {
+  if (!dataJson) return null;
+  try {
+    return enrichContractData(structuredClone(dataJson));
+  } catch (err) {
+    console.warn("[form-summary] enrich falhou, usando dataJson cru:", err);
+    return dataJson;
+  }
+}
+
+/**
  * Gera o PDF consolidado do formulário. Lança se o form não existir.
  */
 export async function generateFormSummaryPdf(formId: string): Promise<GeneratedPdf> {
@@ -103,6 +145,7 @@ export async function generateFormSummaryPdf(formId: string): Promise<GeneratedP
       status: true,
       dataJson: true,
       createdAt: true,
+      updatedAt: true,
       org: { select: { name: true } },
       attachments: {
         select: { filename: true, category: true },
@@ -112,13 +155,23 @@ export async function generateFormSummaryPdf(formId: string): Promise<GeneratedP
   });
   if (!form) throw new Error(`SalesForm ${formId} não encontrado`);
 
+  // O builder é venda-only (dataJson de locação tem outra estrutura:
+  // locadores/locatarios/garantia). Sem este guard ele devolve [] e a gente
+  // gerava, persistia na pasta do deal e MANDAVA POR E-MAIL um PDF com
+  // "Nenhuma informação preenchida." — falha silenciosa pior que erro.
+  if (form.schemaType !== "compra_venda_v1") {
+    throw new Error(
+      "Resumo consolidado disponível apenas para formulários de compra e venda"
+    );
+  }
+
   const attachments: FormSummaryAttachment[] = form.attachments.map((a) => ({
     filename: a.filename,
     category: a.category,
   }));
 
   const sections = buildConsolidatedFormSummary(
-    form.dataJson as Record<string, unknown> | null,
+    prepareDataForSummary(form.dataJson as Record<string, unknown> | null),
     { schemaType: form.schemaType, attachments }
   );
 
@@ -127,6 +180,9 @@ export async function generateFormSummaryPdf(formId: string): Promise<GeneratedP
     formTitle: form.title || "Resumo do formulário",
     generatedAtLabel: new Date().toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" }),
     statusLabel: STATUS_LABEL[form.status] ?? undefined,
+    dataUpdatedAtLabel: form.updatedAt.toLocaleString("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+    }),
   });
 
   const buffer = await exportPdfToBuffer(html, "A4", null);

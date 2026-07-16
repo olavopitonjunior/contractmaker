@@ -22,6 +22,7 @@ import { AddCommentDialog } from "./AddCommentDialog";
 import { SuggestionsToolbar } from "./SuggestionsToolbar";
 import { ShareDialog } from "./ShareDialog";
 import { ApprovalReviewDialog, type ApprovalReviewData } from "./ApprovalReviewDialog";
+import { ContractSettingsPanel } from "./ContractSettingsPanel";
 import { ExportDialog } from "@/components/export/ExportDialog";
 import { PromoteToTemplateDialog } from "@/components/templates/PromoteToTemplateDialog";
 import { useAutoAnalyze } from "@/hooks/useAutoAnalyze";
@@ -39,6 +40,7 @@ import {
   Info,
   CloudOff,
   Share2,
+  Settings,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -94,6 +96,7 @@ export function ContractEditorPage({
   const [saving, setSaving] = useState(false);
   const [approving, setApproving] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [chatInitialInput, setChatInitialInput] = useState<string>("");
   const [status, setStatus] = useState(contract.status);
   const [commentsOpen, setCommentsOpen] = useState(false);
@@ -376,6 +379,17 @@ export function ContractEditorPage({
             </Button>
           )}
 
+          {!isApproved && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSettingsOpen(true)}
+            >
+              <Settings className="h-4 w-4 sm:mr-1" />
+              <span className="hidden sm:inline">Configurações</span>
+            </Button>
+          )}
+
           {/* Comments with proactive AI badge */}
           <Button
             variant="outline"
@@ -586,6 +600,33 @@ export function ContractEditorPage({
             onContentUpdate={() => {}}
             onChatTurnComplete={() => setCommentsVersion((v) => v + 1)}
             initialInput={chatInitialInput}
+          />
+        </ResizableSheet>
+      )}
+
+      {/* Configurações do contrato — mesmo padrão do chat (ResizableSheet
+          próprio), ao lado dele no header. */}
+      {!isApproved && (
+        <ResizableSheet
+          open={settingsOpen}
+          onOpenChange={setSettingsOpen}
+          defaultWidth={520}
+          storageKey="contract-settings:size"
+        >
+          <SheetTitle className="sr-only">Configurações do contrato</SheetTitle>
+          <ContractSettingsPanel
+            contractId={contract.id}
+            dataJson={(contract.dataJson ?? {}) as Record<string, unknown>}
+            onSaved={() => {
+              // O iframe do Drive é colaborativo e reflete a edição sozinho; o
+              // refresh serve pro dataJson do server component.
+              router.refresh();
+            }}
+            onOpenChat={(prompt) => {
+              setChatInitialInput(prompt);
+              setSettingsOpen(false);
+              setChatOpen(true);
+            }}
           />
         </ResizableSheet>
       )}

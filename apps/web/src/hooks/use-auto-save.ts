@@ -4,6 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
+/**
+ * Motivo pelo qual o auto-save parou de vez. `form_locked`/`form_closed` vêm do
+ * campo `reason` do 403; `http` é qualquer outro 4xx definitivo.
+ */
+export type AutoSaveStoppedReason = "form_locked" | "form_closed" | "http";
+
 export interface UseAutoSaveOptions {
   /**
    * Endpoint override. Default `/api/forms/${token}` (token principal).
@@ -43,9 +49,18 @@ export function useAutoSave(
   const enabled = options.enabled ?? true;
 
   const [status, setStatus] = useState<SaveStatus>("idle");
+  const [stoppedReason, setStoppedReason] =
+    useState<AutoSaveStoppedReason | null>(null);
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastSavedRef = useRef<string>("");
   const mountedRef = useRef(true);
+  /**
+   * Trava definitiva após um 4xx não-retryável. Sem isso o hook re-agenda a
+   * cada tecla: `lastSavedRef` só avança no sucesso, então `serialized !==
+   * lastSavedRef` segue verdadeiro pra sempre e cada caractere digitado vira um
+   * PATCH novo contra uma rota que já respondeu 403.
+   */
+  const stoppedRef = useRef(false);
 
   useEffect(() => {
     return () => {
@@ -80,6 +95,7 @@ export function useAutoSave(
       const sliced = slice(dataToSave);
       const serialized = JSON.stringify(sliced);
       if (serialized === lastSavedRef.current) return;
+      if (stoppedRef.current) return;
 
       setStatus("saving");
       try {
@@ -97,10 +113,26 @@ export function useAutoSave(
           setTimeout(() => {
             if (mountedRef.current) setStatus("idle");
           }, 2000);
-        } else {
-          setStatus("error");
+          return;
         }
+
+        // 4xx aqui é veredito, não falha transitória: o form travou, fechou ou
+        // o link não vale mais. Retentar só queima request (a rota pública nem
+        // passa pelo middleware de rate limit) e trava a pill em "erro".
+        if (res.status >= 400 && res.status < 500) {
+          const body = await res.json().catch(() => null);
+          const reason: AutoSaveStoppedReason =
+            body?.reason === "form_locked" || body?.reason === "form_closed"
+              ? body.reason
+              : "http";
+          stoppedRef.current = true;
+          if (timeoutRef.current) clearTimeout(timeoutRef.current);
+          if (mountedRef.current) setStoppedReason(reason);
+        }
+        setStatus("error");
       } catch {
+        // Rede: pode ser transitório, então NÃO trava — o próximo keystroke
+        // reagenda.
         if (mountedRef.current) setStatus("error");
       }
     },
@@ -108,7 +140,7 @@ export function useAutoSave(
   );
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled || stoppedRef.current) return;
     if (timeoutRef.current) clearTimeout(timeoutRef.current);
 
     const serialized = JSON.stringify(slice(data));
@@ -121,7 +153,7 @@ export function useAutoSave(
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
     };
-  }, [data, debounceMs, save, slice, enabled]);
+  }, [data, debounceMs, save, slice, enabled, stoppedReason]);
 
-  return { status, save: () => save(data) };
+  return { status, stoppedReason, save: () => save(data) };
 }

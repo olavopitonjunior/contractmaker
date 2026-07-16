@@ -24,6 +24,7 @@ import { dedupConjuges } from "@/lib/forms/dedup-conjuges";
 import { dadosContratoSchema } from "@/lib/forms/validation";
 import { sendFormSummary } from "@/lib/forms/form-summary-mailer";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
+import { formClosedResponse } from "@/lib/forms/form-gate";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
 // GET: public - fetch form data by token
@@ -39,17 +40,27 @@ export async function GET(
     return NextResponse.json({ error: "Form not found" }, { status: 404 });
   }
 
-  return NextResponse.json({
-    id: form.id,
-    token: form.token,
-    title: form.title,
-    schemaType: form.schemaType,
-    dataJson: form.dataJson,
-    status: form.status,
-    updatedAt: form.updatedAt,
-    // Travamento: quando setado, o cliente público renderiza somente-leitura.
-    lockedAt: form.lockedAt ? form.lockedAt.toISOString() : null,
-  });
+  // Form já enviado só é legível por membro da org — o link público deixa de
+  // servir PII depois do envio. Antes do gate, o dataJson inteiro (CPF, RG,
+  // nome da mãe, PIX de todas as partes) saía aqui sem auth nenhuma.
+  const closed = await formClosedResponse(form);
+  if (closed) return closed;
+
+  return NextResponse.json(
+    {
+      id: form.id,
+      token: form.token,
+      title: form.title,
+      schemaType: form.schemaType,
+      dataJson: form.dataJson,
+      status: form.status,
+      updatedAt: form.updatedAt,
+      // Travamento: quando setado, o cliente público renderiza somente-leitura.
+      lockedAt: form.lockedAt ? form.lockedAt.toISOString() : null,
+    },
+    // PII não pode encostar em cache de CDN/proxy intermediário.
+    { headers: { "Cache-Control": "no-store" } }
+  );
 }
 
 // PATCH: public - auto-save form data
@@ -76,10 +87,16 @@ export async function PATCH(
   // acontecer no mesmo finalize (abaixo) não se auto-bloqueia.
   if (form.lockedAt) {
     return NextResponse.json(
-      { error: "Formulário travado — não aceita mais alterações" },
+      { error: "Formulário travado — não aceita mais alterações", reason: "form_locked" },
       { status: 403 },
     );
   }
+
+  // Form já enviado não aceita mais escrita pública. Sem isto, quem tivesse o
+  // link continuaria editando (e re-finalizando) um negócio já fechado.
+  // Reabrir é ação autenticada (`POST .../lock { locked:false, reopen:true }`).
+  const closed = await formClosedResponse(form);
+  if (closed) return closed;
 
   const currentData = (form.dataJson as Record<string, unknown>) || {};
   // Deep-merge restrito substitui `{ ...current, ...incoming }` raso.
@@ -166,7 +183,15 @@ export async function PATCH(
       dataJson: mergedData as Prisma.InputJsonValue,
       title: body.title ?? form.title,
       status: newStatus,
-      ...(isFinalizing ? { completedAt: new Date() } : {}),
+      // `completedAt` só na PRIMEIRA vez: é marco de SLA do funil, e um form
+      // reaberto pra corrigir um dado não pode reescrever a data em que o
+      // cliente de fato enviou. `reopenedAt: null` fecha o gate de novo.
+      ...(isFinalizing
+        ? {
+            ...(form.completedAt ? {} : { completedAt: new Date() }),
+            reopenedAt: null,
+          }
+        : {}),
       ...(autoLockOnFinalize ? { lockedAt: new Date() } : {}),
       ...(recordConsent
         ? {
@@ -217,30 +242,47 @@ export async function PATCH(
 
     if (deal) {
       dealId = deal.id;
-      // Guard anti-duplicação: deal IMPORTADO (Contract templateId=null) NÃO
-      // regenera contrato no finalize — o corpo de verdade é o GDoc importado.
-      // Gerar um novo (template-based) rebaixaria o importado a isLatest=false e
-      // confundiria qual é o autoritativo. Aqui só sincronizamos os dados
-      // revisados no contrato importado (reflete na assinatura/Dados/certidões).
-      const importedContract = await prisma.contract.findFirst({
-        where: { dealId: deal.id, templateId: null },
+      // Guard anti-duplicação: QUALQUER contrato já existente no deal bloqueia a
+      // geração — não só o importado (templateId=null).
+      //
+      // Antes o guard só olhava o importado, então re-finalizar um form (o que
+      // acontece sempre que a org reabre pra corrigir um dado) chamava
+      // `generateContractForDeal` de novo: nascia um Contract v2 e o v1 virava
+      // isLatest=false, levando junto TODA edição que o corretor já tinha feito
+      // no Google Doc. Sincronizar o dataJson é o comportamento certo nos dois
+      // casos; gerar versão nova é ação explícita do corretor (`POST .../version`).
+      const existingContract = await prisma.contract.findFirst({
+        where: { dealId: deal.id },
         orderBy: { version: "desc" },
-        select: { id: true, status: true },
+        select: { id: true, status: true, dataJson: true },
       });
-      if (importedContract) {
-        // QUALQUER contrato importado bloqueia a geração (não duplicar). A
-        // sincronização do dataJson só roda se NÃO estiver aprovado — o form
-        // público é reabrível por qualquer um com o link, e aprovado é imutável
-        // + congelado no PDF da ClickSign.
-        contractId = importedContract.id;
-        if (importedContract.status !== "aprovado") {
+      if (existingContract) {
+        // A sincronização do dataJson só roda se NÃO estiver aprovado —
+        // aprovado é imutável + congelado no PDF da ClickSign.
+        contractId = existingContract.id;
+        if (existingContract.status !== "aprovado") {
           try {
+            // MERGE, não replace. O `Contract.dataJson` de um contrato gerado
+            // por template é o resultado de `enrichContractData` — carrega as
+            // pontes que o template lê (`config.municipio_imovel`,
+            // `config.data_assinatura`, `parcelas[].momento_texto`,
+            // `comissionados[].papel_texto`…) e que o dataJson do form NÃO tem.
+            // Substituir pelo cru (comportamento que valia só pro importado,
+            // cujo dataJson nunca foi enriquecido) apagaria tudo isso: o render
+            // do PDF sairia com "multa de % ( por cento)" e fecho ", .", e o
+            // diff da aba Configurações não casaria mais com o Google Doc.
+            const existingData =
+              (existingContract.dataJson as Record<string, unknown> | null) ?? {};
+            const syncedData = deepMergeAtPaths(
+              structuredClone(existingData),
+              mergedData
+            ).merged;
             await prisma.contract.update({
-              where: { id: importedContract.id },
-              data: { dataJson: mergedData as Prisma.InputJsonValue },
+              where: { id: existingContract.id },
+              data: { dataJson: syncedData as Prisma.InputJsonValue },
             });
           } catch (error) {
-            console.error("Sync imported contract dataJson failed:", error);
+            console.error("Sync contract dataJson failed:", error);
           }
         }
       } else {

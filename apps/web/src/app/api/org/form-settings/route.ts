@@ -10,6 +10,7 @@ import {
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
 import { isKnownFormPath } from "@/lib/forms/presets";
+import { contractSettingsSchema } from "@/lib/contracts/default-config";
 
 const PRESETS = ["legado", "minimo", "padrao", "completo", "custom"] as const;
 
@@ -39,6 +40,16 @@ const formSettingsPatchSchema = z.object({
     .optional(),
   autoSendSummaryOnComplete: z.boolean().optional(),
   summaryIncludeAttachments: z.boolean().optional(),
+  /**
+   * Padrão de configurações contratuais da imobiliária, aplicado na geração de
+   * contratos novos (lib/services/contract-generation.ts) e usado como piso na
+   * aba "Configurações" do editor.
+   *
+   * Namespaced por módulo: em venda `foro` é enum, em locação é comarca em
+   * texto livre — um objeto único corromperia uma das duas esteiras. Só o
+   * branch de venda é validado por ora.
+   */
+  contractDefaults: z.object({ venda: contractSettingsSchema }).optional(),
 });
 
 /**
@@ -115,6 +126,9 @@ export async function PATCH(req: NextRequest) {
         : {}),
       ...(parsed.data.summaryIncludeAttachments !== undefined
         ? { summaryIncludeAttachments: parsed.data.summaryIncludeAttachments }
+        : {}),
+      ...(parsed.data.contractDefaults !== undefined
+        ? { contractDefaultsJson: parsed.data.contractDefaults as object }
         : {}),
     },
   });

@@ -424,30 +424,16 @@ const defaultFormValues: Partial<DadosContratoForm> = {
     creci: "",
     incluir_como_signatario: false,
   },
-  desistencia: {
-    permite: false,
-    prazo_dias: 7,
-  },
-  foro: "arbitragem",
-  assinatura: {
-    cidade: "",
-    uf: "",
-    data: "",
-  },
   testemunhas: [
     { nome: "", cpf: "", email: "", incluir_como_signatario: false },
     { nome: "", cpf: "", email: "", incluir_como_signatario: false },
   ],
-  config: {
-    multa_penal_moratoria: 2,
-    base_calculo_multa: "valor da parcela",
-    juros_mensais_atraso: 1,
-    atualizacao_monetaria: "IPCA",
-    prazo_atraso_rescisao: 10,
-    multa_cominatoria_diaria: 150,
-    multa_penal_compensatoria: 10,
-    prazo_multa_rescisoria: 7,
-  },
+  observacoes: "",
+  // `desistencia`, `foro`, `assinatura` e `config` saíram daqui junto com os
+  // campos: o form não deve mais gravá-los no dataJson, senão o valor de
+  // fábrica do wizard venceria o padrão da imobiliária (o enrich é aditivo — só
+  // preenche o que está ausente). Quem resolve isso agora é
+  // `enrichContractData` na geração, com `DEFAULT_CONTRACT_SETTINGS` de piso.
 };
 
 export function SalesFormWizard({
@@ -471,8 +457,6 @@ export function SalesFormWizard({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isComplete, setIsComplete] = useState(false);
   const [privacyAccepted, setPrivacyAccepted] = useState(false);
-  const [generatedContractId, setGeneratedContractId] = useState<string | null>(null);
-  const [generatedDealId, setGeneratedDealId] = useState<string | null>(null);
   const [emailCopyState, setEmailCopyState] = useState<"idle" | "sending" | "sent" | "error">("idle");
 
   async function requestEmailCopy() {
@@ -510,7 +494,10 @@ export function SalesFormWizard({
   const { status: saveStatus } = useAutoSave(token, watchedData, {
     endpoint: autoSaveEndpoint,
     pathScope,
-    enabled: !readOnly,
+    // Depois do finalize o form fecha e o PATCH público passa a responder 403.
+    // Sem desligar aqui, um auto-save com debounce pendente cai DEPOIS do
+    // finalize e a tela de sucesso nasce com a pill em "erro".
+    enabled: !readOnly && !isComplete,
   });
 
   const isLastStep = currentStep === TOTAL_STEPS - 1;
@@ -740,9 +727,9 @@ export function SalesFormWizard({
       });
 
       if (res.ok) {
-        const data = await res.json().catch(() => ({}));
-        if (data.contractId) setGeneratedContractId(data.contractId);
-        if (data.dealId) setGeneratedDealId(data.dealId);
+        // A resposta traz contractId/dealId, mas a tela de sucesso é pública e
+        // não os usa mais — quem preenche o link não tem acesso a /contracts
+        // nem /pipeline.
         setIsComplete(true);
       } else {
         console.error("Erro ao finalizar formulário");
@@ -773,26 +760,19 @@ export function SalesFormWizard({
           </svg>
         </div>
         <h2 className="font-display tracking-tight text-2xl font-semibold text-foreground mb-2">
-          Formulário Concluído!
+          Formulário enviado!
         </h2>
+        {/*
+          Esta tela é vista pelo CLIENTE (o link principal é o que vai pra ele),
+          então ela confirma só o envio. Falar em "contrato gerado e pronto para
+          edição" prometia ao cliente algo que é etapa interna da imobiliária —
+          e os botões levavam pra /contracts e /pipeline, rotas autenticadas que
+          ele não acessa.
+        */}
         <p className="text-muted-foreground max-w-md mb-6">
-          Todas as informações foram salvas com sucesso.{" "}
-          {generatedContractId
-            ? "O contrato foi gerado automaticamente e está pronto para edição."
-            : "O contrato será gerado automaticamente."}
+          Recebemos suas informações. A imobiliária responsável foi avisada e
+          seguirá com o seu negócio a partir daqui.
         </p>
-        <div className="flex gap-3 flex-wrap justify-center">
-          {generatedContractId && (
-            <Button asChild>
-              <a href={`/contracts/${generatedContractId}`}>Abrir Contrato</a>
-            </Button>
-          )}
-          <Button variant="outline" asChild>
-            <a href={generatedDealId ? `/pipeline?highlight=${generatedDealId}` : "/pipeline"}>
-              Ver Pipeline
-            </a>
-          </Button>
-        </div>
 
         {finalizeMode === "main" && (
           <div className="mt-8 w-full max-w-md rounded-lg border bg-muted/20 p-4 text-center">

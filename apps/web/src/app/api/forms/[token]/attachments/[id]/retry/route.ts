@@ -3,6 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
 import { processOcrQueue } from "@/lib/ai/ocr-worker";
 import { resolveFormScope, formLockedResponse } from "@/lib/forms/resolve-form-scope";
+import { formClosedResponse } from "@/lib/forms/form-gate";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -27,6 +28,10 @@ export async function POST(
   }
   const locked = formLockedResponse(scope);
   if (locked) return locked;
+  // Form enviado não roda mais OCR pelo link público (custo Gemini + o dado já
+  // foi consolidado).
+  const closed = await formClosedResponse(scope);
+  if (closed) return closed;
   const form = { id: scope.formId };
 
   const attachment = await prisma.formAttachment.findUnique({

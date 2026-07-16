@@ -10,6 +10,8 @@ import {
   filterDataJsonByRole,
 } from "@/lib/forms/role-paths";
 import { ROLE_STEP_INDEXES } from "@/lib/forms/role-steps";
+import { canAccessForm } from "@/lib/forms/form-gate";
+import { FormClosedNotice } from "@/components/forms/FormClosedNotice";
 import { SubtokenFormClient } from "./form-client";
 
 export default async function PublicParticipantFormPage({
@@ -35,6 +37,13 @@ export default async function PublicParticipantFormPage({
     include: { form: true },
   });
   if (!participant) return notFound();
+
+  // O form-pai fechou: o link por parte para junto. (Diferente do
+  // `participant.completedAt`, que só diz que ESTA parte terminou e continua
+  // permitindo revisão enquanto o form estiver aberto.)
+  if (!(await canAccessForm(participant.form))) {
+    return <FormClosedNotice />;
+  }
 
   const role = participant.role as ParticipantRole;
   const fullData = (participant.form.dataJson ?? {}) as Record<string, unknown>;

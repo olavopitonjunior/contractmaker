@@ -6,6 +6,7 @@ import { matchDealGroup } from "@/lib/newton/group-match";
 import { generateLocacaoContractForDeal } from "@/lib/services/contract-generation";
 import { emitNotification } from "@/lib/notifications/emit";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
+import { formClosedResponse } from "@/lib/forms/form-gate";
 import {
   schemaForLocacaoType,
   collectLocacaoFinalizeIssues,
@@ -33,16 +34,24 @@ export async function GET(
   if (!(await locacaoEnabled(form.orgId))) {
     return NextResponse.json({ error: "Formulário indisponível" }, { status: 404 });
   }
-  return NextResponse.json({
-    id: form.id,
-    token: form.token,
-    title: form.title,
-    schemaType: form.schemaType,
-    dataJson: form.dataJson,
-    status: form.status,
-    updatedAt: form.updatedAt,
-    lockedAt: form.lockedAt ? form.lockedAt.toISOString() : null,
-  });
+  // Mesmo gate do form de venda: enviado → só membro da org. O dataJson de
+  // locação carrega PII de locador/locatário/fiador.
+  const closed = await formClosedResponse(form);
+  if (closed) return closed;
+
+  return NextResponse.json(
+    {
+      id: form.id,
+      token: form.token,
+      title: form.title,
+      schemaType: form.schemaType,
+      dataJson: form.dataJson,
+      status: form.status,
+      updatedAt: form.updatedAt,
+      lockedAt: form.lockedAt ? form.lockedAt.toISOString() : null,
+    },
+    { headers: { "Cache-Control": "no-store" } }
+  );
 }
 
 // PATCH público — auto-save + finalize. Espelha /api/forms/[token] mas valida
@@ -71,10 +80,13 @@ export async function PATCH(
   // não se auto-bloqueia.
   if (form.lockedAt) {
     return NextResponse.json(
-      { error: "Formulário travado — não aceita mais alterações" },
+      { error: "Formulário travado — não aceita mais alterações", reason: "form_locked" },
       { status: 403 },
     );
   }
+
+  const closed = await formClosedResponse(form);
+  if (closed) return closed;
 
   const currentData = (form.dataJson as Record<string, unknown>) || {};
   const mergeOutcome = deepMergeAtPaths(
@@ -127,7 +139,17 @@ export async function PATCH(
       dataJson: mergedData as Prisma.InputJsonValue,
       title: body.title ?? form.title,
       status: newStatus,
-      ...(isFinalizing ? { completedAt: new Date() } : {}),
+      // Espelha o finalize de venda: `completedAt` só na primeira vez (é marco
+      // de SLA — re-finalizar após uma correção não pode reescrever a data do
+      // envio original) e `reopenedAt: null` fecha o gate de novo. Sem este
+      // último, um form de locação reaberto ficaria PÚBLICO pra sempre: o
+      // `isFormClosed` só volta a valer quando a reabertura é encerrada.
+      ...(isFinalizing
+        ? {
+            ...(form.completedAt ? {} : { completedAt: new Date() }),
+            reopenedAt: null,
+          }
+        : {}),
       ...(autoLockOnFinalize ? { lockedAt: new Date() } : {}),
     },
   });
@@ -142,22 +164,53 @@ export async function PATCH(
     const deal = await prisma.deal.findFirst({ where: { formId: form.id } });
     if (deal) {
       dealId = deal.id;
-      try {
-        const result = await generateLocacaoContractForDeal(deal.id, deal.userId, form.orgId);
-        contractId = result.contractId;
-      } catch (error) {
-        console.error("[locacao] auto-generate contract failed:", error);
-        // O cliente que preencheu o form não pode ser punido por um problema da
-        // imobiliária (modelo inacessível no Drive, etc.) — o finalize segue. Mas a
-        // imobiliária precisa SABER: sem isto, o deal só ficaria sem contrato.
-        waitUntil(emitNotification({
-          orgId: form.orgId,
-          type: "contract_generation_failed",
-          title: "Não foi possível gerar o contrato",
-          body: error instanceof Error ? error.message : "Erro ao gerar o contrato do modelo.",
-          linkUrl: `/locacao/deals/${deal.id}`,
-          metadata: { dealId: deal.id, formId: form.id },
-        }));
+      // Mesmo guard do finalize de venda: contrato já existente NÃO é
+      // regenerado. Como a reabertura é no nível do SalesForm (a rota /lock
+      // serve as duas esteiras), re-finalizar uma locação criaria um Contract
+      // v2 e rebaixaria o v1 a isLatest=false, levando junto as edições que o
+      // corretor já fez no Google Doc. Aqui só sincronizamos os dados
+      // revisados (merge, pra não apagar o enriquecimento).
+      const existingContract = await prisma.contract.findFirst({
+        where: { dealId: deal.id },
+        orderBy: { version: "desc" },
+        select: { id: true, status: true, dataJson: true },
+      });
+      if (existingContract) {
+        contractId = existingContract.id;
+        if (existingContract.status !== "aprovado") {
+          try {
+            const existingData =
+              (existingContract.dataJson as Record<string, unknown> | null) ?? {};
+            const syncedData = deepMergeAtPaths(
+              structuredClone(existingData),
+              mergedData
+            ).merged;
+            await prisma.contract.update({
+              where: { id: existingContract.id },
+              data: { dataJson: syncedData as Prisma.InputJsonValue },
+            });
+          } catch (error) {
+            console.error("[locacao] sync contract dataJson failed:", error);
+          }
+        }
+      } else {
+        try {
+          const result = await generateLocacaoContractForDeal(deal.id, deal.userId, form.orgId);
+          contractId = result.contractId;
+        } catch (error) {
+          console.error("[locacao] auto-generate contract failed:", error);
+          // O cliente que preencheu o form não pode ser punido por um problema da
+          // imobiliária (modelo inacessível no Drive, etc.) — o finalize segue. Mas a
+          // imobiliária precisa SABER: sem isto, o deal só ficaria sem contrato.
+          waitUntil(emitNotification({
+            orgId: form.orgId,
+            type: "contract_generation_failed",
+            title: "Não foi possível gerar o contrato",
+            body: error instanceof Error ? error.message : "Erro ao gerar o contrato do modelo.",
+            linkUrl: `/locacao/deals/${deal.id}`,
+            metadata: { dealId: deal.id, formId: form.id },
+          }));
+        }
       }
 
       // Sino: avisa a equipe que o cliente finalizou o form (paridade com

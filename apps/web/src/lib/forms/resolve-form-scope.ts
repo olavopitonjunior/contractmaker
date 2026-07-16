@@ -28,13 +28,31 @@ export interface FormScope {
   partyIndex: number | null;
   /** Setado = form travado; callers DEVEM bloquear writes (uploads/delete). */
   lockedAt: Date | null;
+  /**
+   * Setado = form já enviado (status "completo" OU "vinculado"). Callers DEVEM
+   * passar pelo gate de `form-gate.ts` — fechado só é acessível por membro da
+   * org, inclusive na LEITURA (diferente do lockedAt, que só barra escrita).
+   */
+  completedAt: Date | null;
+  /** Reaberto pela org → gate desligado até o próximo finalize. */
+  reopenedAt: Date | null;
+  /** "rascunho" | "completo" | "vinculado" — `vinculado` também fecha o gate. */
+  status: string;
 }
 
 export async function resolveFormScope(token: string): Promise<FormScope | null> {
   // 1. Token principal (uuid/cuid — nunca tem "." de JWT).
   const form = await prisma.salesForm.findUnique({
     where: { token },
-    select: { id: true, orgId: true, schemaType: true, lockedAt: true },
+    select: {
+      id: true,
+      orgId: true,
+      schemaType: true,
+      lockedAt: true,
+      completedAt: true,
+      reopenedAt: true,
+      status: true,
+    },
   });
   if (form) {
     return {
@@ -45,6 +63,9 @@ export async function resolveFormScope(token: string): Promise<FormScope | null>
       role: null,
       partyIndex: null,
       lockedAt: form.lockedAt,
+      completedAt: form.completedAt,
+      reopenedAt: form.reopenedAt,
+      status: form.status,
     };
   }
 
@@ -62,7 +83,17 @@ export async function resolveFormScope(token: string): Promise<FormScope | null>
       id: true,
       role: true,
       partyIndex: true,
-      form: { select: { id: true, orgId: true, schemaType: true, lockedAt: true } },
+      form: {
+        select: {
+          id: true,
+          orgId: true,
+          schemaType: true,
+          lockedAt: true,
+          completedAt: true,
+          reopenedAt: true,
+          status: true,
+        },
+      },
     },
   });
   if (!participant) return null;
@@ -75,6 +106,9 @@ export async function resolveFormScope(token: string): Promise<FormScope | null>
     role: participant.role as ParticipantRole,
     partyIndex: participant.partyIndex,
     lockedAt: participant.form.lockedAt,
+    completedAt: participant.form.completedAt,
+    reopenedAt: participant.form.reopenedAt,
+    status: participant.form.status,
   };
 }
 
