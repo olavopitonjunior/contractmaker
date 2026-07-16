@@ -1018,7 +1018,7 @@ model Clause {
   agentNotes  String?  @db.Text
   groupCode   String?
   isVariable  Boolean  @default(false)
-  tags        String[]
+  tags        String[] @default([])
   source      String   @default("manual")
   status      String   @default("approved")
   usageCount  Int      @default(0)
@@ -1487,7 +1487,7 @@ model KnowledgeItem {
   chunkIndex     Int      @default(0)
   chunkTotal     Int      @default(1)
   parentId       String?
-  tags           String[]
+  tags           String[] @default([])
   source         String? // URL, doc id, "manual", "seed"
   createdBy      String?
   // Campos herdados de Clause na unificação 2026-05-18 (migration
@@ -1548,7 +1548,7 @@ model ClauseProposal {
   category   String? // partes, objeto, compromisso, preco, posse, titulo, comissao, etc.
   reason     String    @db.Text
   evidence   Json? // contractIds that motivated it
-  tags       String[]
+  tags       String[] @default([])
   status     String    @default("pending") // "pending" | "approved" | "rejected"
   resolvedAt DateTime?
   resolvedBy String?
@@ -2015,6 +2015,7 @@ model CommissionCharge {
 
   @@index([orgId, status])
   @@index([orgId, currentDueDate])
+  @@index([orgId, kind])
   @@index([accountId])
   @@index([dealId])
   @@index([contractId])
@@ -2393,7 +2394,7 @@ model EnvelopeSigner {
   clicksignId    String?
   // IDs dos requirements (auth + sign) criados via POST /requirements.
   // Guardamos pra poder remover/alterar depois sem refazer GET.
-  requirementIds String[]
+  requirementIds String[] @default([])
   // sourceKind: vendedor | comprador | testemunha | corretora | outro.
   // sourceIndex aponta o array em dataJson (sempre 0 para corretora).
   sourceKind     String
