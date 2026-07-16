@@ -5,6 +5,7 @@ import {
   signParticipantToken,
   type ParticipantRole,
 } from "@/lib/forms/participant-token";
+import { formClosedResponse } from "@/lib/forms/form-gate";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { rateLimit } from "@/lib/security/ratelimit";
 
@@ -59,11 +60,22 @@ export async function POST(
 
   const form = await prisma.salesForm.findUnique({
     where: { token: params.token },
-    select: { id: true, orgId: true, schemaType: true },
+    select: {
+      id: true,
+      orgId: true,
+      schemaType: true,
+      completedAt: true,
+      reopenedAt: true,
+    },
   });
   if (!form) {
     return NextResponse.json({ error: "Form não encontrado" }, { status: 404 });
   }
+  // Sem este gate a rota é o bypass do gate inteiro: ela cunha (e RENOVA)
+  // subtokens de 7d a partir do token principal, sem session. Quem tivesse o
+  // link seguiria emitindo links de leitura novos pra um form já enviado.
+  const closed = await formClosedResponse(form);
+  if (closed) return closed;
 
   const raw = await req.json().catch(() => ({}));
   const parsed = bodySchema.safeParse(raw);

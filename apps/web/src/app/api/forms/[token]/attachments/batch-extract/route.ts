@@ -15,6 +15,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
+import { formClosedResponse } from "@/lib/forms/form-gate";
 import { downloadBufferFromUrl } from "@/lib/storage/s3";
 import {
   classifyAndExtract,
@@ -76,17 +77,19 @@ export async function POST(
 ) {
   const form = await prisma.salesForm.findUnique({
     where: { token: params.token },
-    select: { id: true, orgId: true, lockedAt: true },
+    select: { id: true, orgId: true, lockedAt: true, completedAt: true, reopenedAt: true },
   });
   if (!form) {
     return NextResponse.json({ error: "Form not found" }, { status: 404 });
   }
   if (form.lockedAt) {
     return NextResponse.json(
-      { error: "Formulário travado — não aceita mais alterações" },
+      { error: "Formulário travado — não aceita mais alterações", reason: "form_locked" },
       { status: 403 },
     );
   }
+  const closed = await formClosedResponse(form);
+  if (closed) return closed;
 
   const body = await req.json().catch(() => ({}));
   const parsed = batchSchema.safeParse(body);

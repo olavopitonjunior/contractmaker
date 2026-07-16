@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
+import { formClosedResponse } from "@/lib/forms/form-gate";
 import {
   extractFromVoice,
   SUPPORTED_VOICE_MIMES,
@@ -27,17 +28,16 @@ export async function POST(
 ) {
   const form = await prisma.salesForm.findUnique({
     where: { token: params.token },
-    select: { id: true, orgId: true, status: true },
+    select: { id: true, orgId: true, status: true, completedAt: true, reopenedAt: true },
   });
   if (!form) {
     return NextResponse.json({ error: "Form não encontrado" }, { status: 404 });
   }
-  if (form.status === "completo") {
-    return NextResponse.json(
-      { error: "Formulário já finalizado" },
-      { status: 409 },
-    );
-  }
+  // Antes checava `status === "completo"`, que é cego pra "vinculado" (todo
+  // form vindo de import/proposta nasce assim e nunca vira "completo").
+  // `completedAt` é o discriminador que os dois status setam.
+  const closed = await formClosedResponse(form);
+  if (closed) return closed;
 
   const rl = await RateLimits.voiceExtractPerForm(params.token);
   if (!rl.success) {

@@ -1,0 +1,14 @@
+-- Reabertura de formulário enviado.
+--
+-- `SalesForm.completedAt` passou a ser o gate de acesso público (form enviado
+-- só é legível por membro da org — ver lib/forms/form-gate.ts). Reabrir não
+-- pode zerar `completedAt`, porque ele também é o marco de SLA do funil
+-- (kanban + timeline leem esse campo). Então a reabertura ganha coluna própria:
+--
+--   completedAt != null AND reopenedAt == null  -> fechado (gate ativo)
+--   reopenedAt != null                          -> reaberto (cliente volta a editar)
+--
+-- Idempotente (IF NOT EXISTS): migrations rodam via `prisma migrate deploy` no
+-- build e podem ser reaplicadas. Nullable e sem default — nenhuma row existente
+-- precisa de backfill: todo form já enviado nasce "fechado", que é o desejado.
+ALTER TABLE "SalesForm" ADD COLUMN IF NOT EXISTS "reopenedAt" TIMESTAMP(3);

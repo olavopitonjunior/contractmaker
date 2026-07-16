@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { put, del } from "@vercel/blob";
 import { prisma } from "@/lib/db/prisma";
 import { resolveFormScope, formLockedResponse } from "@/lib/forms/resolve-form-scope";
+import { formClosedResponse } from "@/lib/forms/form-gate";
 import { signatureMatchesMime } from "@/lib/security/file-signature";
 import { RateLimits } from "@/lib/security/ratelimit";
 
@@ -30,6 +31,11 @@ export async function GET(
     return NextResponse.json({ error: "Form not found" }, { status: 404 });
   }
 
+  // Listagem expõe `extractedData` (CPF/RG/nome da mãe extraídos por OCR) — o
+  // gate de form enviado vale aqui igual ao do dataJson.
+  const closed = await formClosedResponse(scope);
+  if (closed) return closed;
+
   const attachments = await prisma.formAttachment.findMany({
     where: {
       formId: scope.formId,
@@ -53,7 +59,7 @@ export async function GET(
       fileUrl: `/api/forms/${params.token}/attachments/${a.id}/file`,
       createdAt: a.createdAt,
     })),
-  });
+  }, { headers: { "Cache-Control": "no-store" } });
 }
 
 export async function POST(
@@ -66,6 +72,8 @@ export async function POST(
   }
   const locked = formLockedResponse(scope);
   if (locked) return locked;
+  const closed = await formClosedResponse(scope);
+  if (closed) return closed;
   const form = { id: scope.formId, orgId: scope.orgId };
 
   // Form público é anônimo — throttle por token pra conter abuso de custo.
@@ -219,6 +227,8 @@ export async function PATCH(
   }
   const locked = formLockedResponse(scope);
   if (locked) return locked;
+  const closed = await formClosedResponse(scope);
+  if (closed) return closed;
 
   const attachment = await prisma.formAttachment.findUnique({ where: { id } });
   if (!attachment || attachment.formId !== scope.formId) {
@@ -263,6 +273,12 @@ export async function DELETE(
   if (!scope) {
     return NextResponse.json({ error: "Form not found" }, { status: 404 });
   }
+  // O DELETE não tinha guard nenhum: quem tivesse o link apagava anexo de form
+  // travado/enviado. Espelha POST/PATCH.
+  const locked = formLockedResponse(scope);
+  if (locked) return locked;
+  const closed = await formClosedResponse(scope);
+  if (closed) return closed;
 
   const attachment = await prisma.formAttachment.findUnique({
     where: { id },

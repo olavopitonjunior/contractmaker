@@ -6,6 +6,7 @@ import { matchDealGroup } from "@/lib/newton/group-match";
 import { generateLocacaoContractForDeal } from "@/lib/services/contract-generation";
 import { emitNotification } from "@/lib/notifications/emit";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
+import { formClosedResponse } from "@/lib/forms/form-gate";
 import {
   schemaForLocacaoType,
   collectLocacaoFinalizeIssues,
@@ -33,16 +34,24 @@ export async function GET(
   if (!(await locacaoEnabled(form.orgId))) {
     return NextResponse.json({ error: "Formulário indisponível" }, { status: 404 });
   }
-  return NextResponse.json({
-    id: form.id,
-    token: form.token,
-    title: form.title,
-    schemaType: form.schemaType,
-    dataJson: form.dataJson,
-    status: form.status,
-    updatedAt: form.updatedAt,
-    lockedAt: form.lockedAt ? form.lockedAt.toISOString() : null,
-  });
+  // Mesmo gate do form de venda: enviado → só membro da org. O dataJson de
+  // locação carrega PII de locador/locatário/fiador.
+  const closed = await formClosedResponse(form);
+  if (closed) return closed;
+
+  return NextResponse.json(
+    {
+      id: form.id,
+      token: form.token,
+      title: form.title,
+      schemaType: form.schemaType,
+      dataJson: form.dataJson,
+      status: form.status,
+      updatedAt: form.updatedAt,
+      lockedAt: form.lockedAt ? form.lockedAt.toISOString() : null,
+    },
+    { headers: { "Cache-Control": "no-store" } }
+  );
 }
 
 // PATCH público — auto-save + finalize. Espelha /api/forms/[token] mas valida
@@ -71,10 +80,13 @@ export async function PATCH(
   // não se auto-bloqueia.
   if (form.lockedAt) {
     return NextResponse.json(
-      { error: "Formulário travado — não aceita mais alterações" },
+      { error: "Formulário travado — não aceita mais alterações", reason: "form_locked" },
       { status: 403 },
     );
   }
+
+  const closed = await formClosedResponse(form);
+  if (closed) return closed;
 
   const currentData = (form.dataJson as Record<string, unknown>) || {};
   const mergeOutcome = deepMergeAtPaths(
