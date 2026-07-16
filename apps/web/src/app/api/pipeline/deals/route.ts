@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
+import { DEAL_SOURCE_CHANNEL } from "@/lib/pipeline/source-channel";
 import { z } from "zod";
 import {
   requireApiAuth,
@@ -83,6 +84,7 @@ export async function POST(req: NextRequest) {
           stageId: firstStage.id,
           userId: auth.actor.effectiveUserId,
           formId: parsed.data.formId || null,
+          sourceChannel: DEAL_SOURCE_CHANNEL.MANUAL,
           title: parsed.data.title,
           value: parsed.data.value || null,
           dataJson: dataJson ?? undefined,
