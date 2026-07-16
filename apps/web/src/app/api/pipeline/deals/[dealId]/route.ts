@@ -264,13 +264,18 @@ export async function DELETE(
   // que já vêm de deal.envelopes; deletar a mesma URL 2× é inofensivo, mas o
   // Set evita trabalho redundante. Inclui ChatAttachment (via contratos) e
   // FormAttachment (RG/CNH) que antes ficavam órfãos.
+  // FormAttachment (RG/CNH): só apaga os blobs se o form REALMENTE foi deletado.
+  // O salesForm.delete acima é `.catch(()=>null)` — se ele falhar (FK/constraint),
+  // o form e seus anexos sobrevivem; apagar os blobs mesmo assim deixaria o form
+  // vivo apontando pra documentos de identidade que dão 404 (perda irrecuperável).
+  const formBlobsToDelete = counts.forms > 0 ? formBlobUrls : [];
   const urlsToDelete = Array.from(
     new Set(
       [
         ...deal.attachments.map((a) => a.url),
         ...deal.envelopes.flatMap((e) => [e.documentUrl, e.signedDocumentUrl]),
         ...contractBlobUrls,
-        ...formBlobUrls,
+        ...formBlobsToDelete,
       ].filter((u): u is string => Boolean(u))
     )
   );

@@ -36,16 +36,24 @@ export function parseMoneyBR(raw: unknown): number {
     const decimalPart = digits.slice(lastComma + 1).replace(/[.,]/g, "");
     result = parseFloat(`${integerPart || "0"}.${decimalPart || "0"}`);
   } else {
-    // Sem vírgula: um único ponto com 1-2 dígitos após = decimal; senão milhar.
+    // Sem vírgula: distinguir decimal (US ou percentual) de milhar (BR).
     const dotCount = (digits.match(/\./g) || []).length;
     if (dotCount === 1) {
-      const afterDot = digits.split(".")[1] ?? "";
-      if (afterDot.length >= 1 && afterDot.length <= 2) {
+      const [before, afterDot = ""] = digits.split(".");
+      if (afterDot.length <= 2) {
+        // 1-2 dígitos após o ponto = decimal ("1000.00", "6.5").
         result = parseFloat(digits);
-      } else {
+      } else if (/^[1-9]\d{0,2}$/.test(before)) {
+        // Exatamente um grupo de milhar válido antes do ponto (1-3 dígitos, sem
+        // zero à esquerda) e 3+ depois = separador de milhar BR ("1.500",
+        // "999.500"→999500). Um "0.750" (percentual) ou "1234.567" (4 dígitos
+        // antes, típico de decimal US) NÃO casa → cai no decimal abaixo.
         result = parseFloat(digits.replace(/\./g, ""));
+      } else {
+        result = parseFloat(digits);
       }
     } else {
+      // Múltiplos pontos = milhares BR ("1.234.567").
       result = parseFloat(digits.replace(/\./g, ""));
     }
   }

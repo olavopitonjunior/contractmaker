@@ -99,37 +99,22 @@ export async function POST(
 
   // Isolamento entre titulares (LGPD): pra "parties" NUNCA anexa os documentos
   // de identidade (RG/CNH) — senão o comprador recebe os documentos do vendedor
-  // e vice-versa. E envia UM e-mail POR destinatário, não todos no mesmo `to`,
-  // senão cada parte veria o e-mail da outra no cabeçalho. Anexos só pro destino
-  // "org" (uso interno).
+  // e vice-versa. E os destinatários vão em BCC (um `to` neutro = o remetente),
+  // então uma parte NÃO vê o e-mail da outra no cabeçalho. É UM único envio
+  // (uma renderização do PDF, artefato persistido) e é all-or-nothing — o
+  // status reflete o envio real, sem mascarar falha parcial. Anexos só pro
+  // destino "org" (uso interno).
   const isOrg = parsed.data.target === "org";
-  const includeAttachments = isOrg ? parsed.data.includeAttachments : false;
+  const result = await sendFormSummary({
+    formId: form.id,
+    to: isOrg ? recipients : process.env.EMAIL_FROM ?? "no-reply@contractmaker.local",
+    bcc: isOrg ? undefined : recipients,
+    includeAttachments: isOrg ? parsed.data.includeAttachments : false,
+    persist: true,
+  });
 
-  if (isOrg) {
-    const result = await sendFormSummary({
-      formId: form.id,
-      to: recipients,
-      includeAttachments,
-      persist: true,
-    });
-    if (!result.ok) {
-      return NextResponse.json({ error: result.error ?? "Falha ao enviar" }, { status: 502 });
-    }
-  } else {
-    // Um envio isolado por parte — sem cruzar e-mails no cabeçalho.
-    let anyOk = false;
-    for (const to of recipients) {
-      const r = await sendFormSummary({
-        formId: form.id,
-        to,
-        includeAttachments: false,
-        persist: false,
-      });
-      anyOk = anyOk || r.ok;
-    }
-    if (!anyOk) {
-      return NextResponse.json({ error: "Falha ao enviar" }, { status: 502 });
-    }
+  if (!result.ok) {
+    return NextResponse.json({ error: result.error ?? "Falha ao enviar" }, { status: 502 });
   }
 
   // Não devolve os e-mails (privacidade) — só confirmação.

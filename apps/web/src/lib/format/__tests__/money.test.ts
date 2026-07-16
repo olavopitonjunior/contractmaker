@@ -16,6 +16,12 @@ describe("parseMoneyBR", () => {
     ["100.5", 100.5],
     ["1500.00", 1500],
     ["1.500", 1500], // ponto com 3 dígitos = milhar → 1500 (não 1,5)
+    ["999.500", 999500], // grupo de milhar de 3 dígitos antes
+    // Casos do re-review: 3 dígitos após NÃO viram milhar quando o antes é 0
+    // (percentual) ou tem 4+ dígitos (decimal US):
+    ["0.750", 0.75], // 0,75% — NÃO 750
+    ["0.5", 0.5],
+    ["1234.567", 1234.567], // decimal US de 3 casas — NÃO 1234567
     // Plain / inteiros:
     ["1000", 1000],
     ["0", 0],
