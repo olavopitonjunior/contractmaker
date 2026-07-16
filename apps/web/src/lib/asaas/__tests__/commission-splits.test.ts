@@ -1,6 +1,19 @@
 import { describe, it, expect } from "vitest";
 import { composeSplits, CommissionBuildError } from "../commission";
-import type { SplitInputEntry } from "../commission";
+import type { SplitInputEntry, ExternalSplit } from "../commission";
+import { computeAmount } from "../splitDispatcher";
+
+function extPix(percentualValue?: number, fixedValue?: number): ExternalSplit {
+  return {
+    recipientId: "rec",
+    pixAddressKey: "12345678901",
+    pixKeyType: "CPF",
+    ownerName: "Owner",
+    ownerCpfCnpj: "12345678901",
+    percentualValue,
+    fixedValue,
+  };
+}
 
 const ORG_WALLET = "org-wallet-uuid-xxx";
 const PLATFORM_WALLET = "platform-wallet-uuid-yyy";
@@ -319,5 +332,38 @@ describe("composeSplits — Fase 6 (PIX externos)", () => {
       ownerCpfCnpj: "12345678901",
       percentualValue: 25,
     });
+  });
+});
+
+describe("computeAmount — valor efetivo do PIX externo (splitDispatcher)", () => {
+  it("percentual aplica sobre a base (líquido), não sobre o bruto", () => {
+    // base líquida 980 (bruto 1000 − ~2% taxa). 30% => 294, não 300 (=30% do bruto).
+    expect(computeAmount(980, extPix(30), 0)).toBe(294);
+  });
+
+  it("fixo + percentual somam; arredonda a 2 casas", () => {
+    // 10% de 333.33 = 33.333 + fixo 5 = 38.333 → 38.33
+    expect(computeAmount(333.33, extPix(10, 5), 0)).toBe(38.33);
+  });
+
+  it("feeAdjustment (deduct_from_recipient) é subtraído do repasse", () => {
+    expect(computeAmount(1000, extPix(50), 1)).toBe(499); // 500 − R$1 de taxa
+  });
+
+  it("clampa em 0 quando a taxa excede o valor (nunca transfere negativo)", () => {
+    expect(computeAmount(100, extPix(undefined, 0.5), 1)).toBe(0);
+  });
+
+  it("soma de repasses arredondados por entry pode divergir do total em centavos", () => {
+    // 3 splits de 33.333% sobre 100 → cada 33.33; soma 99.99 ≠ 100 (drift por design).
+    const base = 100;
+    const parts = [
+      computeAmount(base, extPix(100 / 3), 0),
+      computeAmount(base, extPix(100 / 3), 0),
+      computeAmount(base, extPix(100 / 3), 0),
+    ];
+    const sum = parts.reduce((a, b) => a + b, 0);
+    expect(sum).toBeCloseTo(99.99, 2);
+    expect(sum).toBeLessThanOrEqual(base); // invariante: nunca repassa mais que a base
   });
 });

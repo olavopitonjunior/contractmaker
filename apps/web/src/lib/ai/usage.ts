@@ -105,7 +105,10 @@ export type AIOperation =
   | "specialist_editor"
   | "specialist_curator"
   // Sentinel — classificador de policy (anti prompt-injection em anexos)
-  | "sentinel_classify";
+  | "sentinel_classify"
+  // Classificador de intenção (fallback do orquestrador). Antes entrava como
+  // `as never` em intent-fallback e sumia de qualquer filtro por operação.
+  | "intent_classify";
 
 export interface RecordUsageParams {
   orgId: string;

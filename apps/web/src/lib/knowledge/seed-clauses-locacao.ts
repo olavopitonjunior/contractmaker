@@ -65,10 +65,20 @@ export const LOCACAO_SEED_CLAUSES: SeedClause[] = [
     title: "Garantia Locatícia — Fiador Solidário",
     subcategory: "garantia",
     content:
-      "Em garantia de todas as obrigações deste contrato, o(a) FIADOR(A) qualificado(a) no preâmbulo assume responsabilidade solidária com o LOCATÁRIO, com expressa renúncia ao benefício de ordem previsto nos arts. 827 e 838 do Código Civil, respondendo pelo adimplemento integral até a efetiva devolução das chaves, ainda que a locação se prorrogue por prazo indeterminado, nos termos do art. 39 da Lei nº 8.245/91.",
-    tags: ["locacao", "garantia", "fiador", "fianca", "solidario", "art 39"],
+      "Em garantia de todas as obrigações deste contrato, o(a) FIADOR(A) qualificado(a) no preâmbulo assume responsabilidade solidária com o LOCATÁRIO, com expressa renúncia ao benefício de ordem previsto no art. 827 do Código Civil, faculdade de renúncia autorizada pelo art. 828, inciso I, do mesmo Código, respondendo pelo adimplemento integral até a efetiva devolução das chaves, ainda que a locação se prorrogue por prazo indeterminado, nos termos do art. 39 da Lei nº 8.245/91.",
+    tags: ["locacao", "garantia", "fiador", "fianca", "solidario", "art 39", "art 827", "art 828"],
     agentNotes:
-      "Use quando garantia.tipo = fiador. Exige qualificação do fiador no preâmbulo. Cláusula do art. 39 (responde até a entrega das chaves).",
+      "Use quando garantia.tipo = fiador. Exige qualificação do fiador no preâmbulo. O benefício de ordem é o art. 827; a RENÚNCIA a ele é autorizada pelo art. 828, I (NÃO art. 838, que trata de exoneração do fiador). Responde até a entrega das chaves (art. 39).",
+    isVariable: false,
+  },
+  {
+    title: "Divisão de Encargos — Despesas Ordinárias e Extraordinárias",
+    subcategory: "encargos",
+    content:
+      "Correm por conta do LOCATÁRIO as despesas ordinárias de condomínio, assim entendidas as necessárias à administração respectiva, especialmente as previstas no art. 23, §1º, da Lei nº 8.245/91 (salários e encargos de empregados do condomínio, consumo de água, esgoto, gás, luz e força das áreas comuns, limpeza, conservação e pintura das instalações e dependências de uso comum, manutenção e conservação de elevadores, porteiro eletrônico e antenas coletivas, pequenos reparos nas dependências de uso comum e rateio de saldo devedor, salvo se referente a período anterior ao início da locação). Correm por conta do LOCADOR as despesas extraordinárias de condomínio, assim entendidas as que não se refiram aos gastos rotineiros de manutenção, nos termos do art. 22, parágrafo único, e do art. 23, §2º, da Lei nº 8.245/91 (obras de reforma ou acréscimo que interessem à estrutura integral do imóvel, pintura das fachadas, esquadrias externas e áreas comuns, instalação de equipamento de segurança e de incêndio, de lazer e de comunicação, constituição de fundo de reserva, indenizações trabalhistas anteriores ao início da locação e despesas de decoração e paisagismo nas partes de uso comum). O IPTU, a taxa de coleta de lixo e o prêmio de seguro contra incêndio, quando expressamente atribuídos ao LOCATÁRIO neste contrato, serão por ele suportados, nos termos do art. 22, VIII, da Lei nº 8.245/91.",
+    tags: ["locacao", "encargos", "condominio", "despesas ordinarias", "despesas extraordinarias", "iptu", "fundo de reserva", "art 22", "art 23"],
+    agentNotes:
+      "Cláusula essencial — a divisão ordinárias (locatário) x extraordinárias (locador) é a nulidade mais litigada em locação (arts. 22 e 23 da 8.245/91). Fundo de reserva e reformas estruturais são SEMPRE do locador. IPTU/seguro só do locatário se expressamente pactuado (art. 22, VIII).",
     isVariable: false,
   },
   {

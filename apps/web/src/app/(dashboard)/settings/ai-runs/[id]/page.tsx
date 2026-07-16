@@ -9,8 +9,10 @@ export const dynamic = "force-dynamic";
 const OUTCOME_LABEL: Record<string, string> = {
   applied: "Aplicado",
   applied_partial: "Aplicado parcial",
+  applied_data: "Dados atualizados",
   pending_plan: "Pendente (aprovação)",
   no_op_informational: "Consulta",
+  no_op_requested: "Sem alteração",
   failed: "Falhou",
   confabulation_blocked: "Confabulação bloqueada",
 };

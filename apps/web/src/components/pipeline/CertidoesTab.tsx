@@ -211,7 +211,10 @@ function statusLabel(row: CertidaoJobRow): string {
   // failed_permanent → "use o portal oficial", enganoso. É só recarregar e
   // retentar. (2026-06-05)
   if (getFailureCategory(row) === "account_issue") {
-    return "Sem saldo na conta Infosimples — recarregue para emitir/retentar";
+    // Não vaza detalhe de plataforma (conta/saldo do provedor) pro tenant, que
+    // não acessa isso — é o suporte que resolve. Mensagem acionável só no que
+    // depende do usuário: aguardar/retentar.
+    return "Emissão temporariamente indisponível — nova tentativa em breve";
   }
   if (status === "failed") return row.errorMessage || "Erro";
   if (status === "pending") return "Pendente · na fila";
@@ -241,8 +244,8 @@ function statusLabel(row: CertidaoJobRow): string {
   if (status === "rate_limited") {
     const retry = formatRelativeTo(row.nextRetryAt);
     return retry
-      ? `Limite do portal atingido — retry ${retry}`
-      : "Limite do portal atingido — retry agendado";
+      ? `Limite do portal atingido — nova tentativa ${retry}`
+      : "Limite do portal atingido — nova tentativa agendada";
   }
   if (status === "data_missing") {
     return row.errorMessage
@@ -976,7 +979,7 @@ export function CertidoesTab({
               className="inline-flex h-9 items-center justify-center gap-1 whitespace-nowrap rounded-md border border-input bg-background px-3 text-sm font-medium shadow-sm ring-offset-background transition-colors hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
             >
               <RefreshCw className="h-4 w-4 mr-1" />
-              Retry em massa
+              Retentar em massa
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="w-64">
               <DropdownMenuLabel className="text-xs">
@@ -1172,11 +1175,11 @@ export function CertidoesTab({
         <div className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
           <Wallet className="h-4 w-4 mt-0.5 shrink-0" />
           <span>
-            <strong>Conta Infosimples sem saldo.</strong> As certidões marcadas
-            como &quot;sem saldo&quot; falharam por falta de crédito (não é erro
-            dos dados). Recarregue no painel da Infosimples e use{" "}
-            <strong>Retentar erros</strong> — o re-disparo sem saldo é gratuito e
-            não emite nada.
+            <strong>Emissão temporariamente indisponível.</strong> Algumas
+            certidões não puderam ser emitidas agora por uma limitação do serviço
+            de emissão (não é erro dos dados). Tente novamente em{" "}
+            <strong>Retentar erros</strong> — o re-disparo é gratuito e não emite
+            nada enquanto indisponível. Se persistir, contate o suporte.
           </span>
         </div>
       )}

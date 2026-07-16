@@ -15,6 +15,22 @@ import {
   googleInsertImage,
 } from "./google-tool-handlers";
 import type { AgentContext, ValidationIssue, ClauseSuggestion } from "./types";
+import { logError } from "@/lib/observability/log";
+
+/**
+ * Piso de similaridade (cosine, Voyage law-2) abaixo do qual um resultado é
+ * ruído — descartado em vez de devolvido como "resultado". Sem isso o
+ * query_knowledge_base retornava sempre topK, e o agente citava a cláusula
+ * "menos distante" mesmo quando irrelevante (em vez de cair na regra 13 =
+ * placeholder). Conservador por default; ajustável por env.
+ */
+const RAG_MIN_SIMILARITY = (() => {
+  const raw = Number(process.env.RAG_MIN_SIMILARITY);
+  return Number.isFinite(raw) && raw >= 0 && raw <= 1 ? raw : 0.35;
+})();
+
+/** Warn-once: RAG rodando em modo keyword por VOYAGE ausente (config, não erro). */
+let voyageAbsentWarned = false;
 
 function deepMerge(
   target: Record<string, unknown>,
@@ -693,6 +709,38 @@ function kbNormalize(s: string): string {
     .replace(/[̀-ͯ]/g, "");
 }
 
+/** Campos de KnowledgeItem devolvidos ao agente pelas 3 vias de busca. */
+interface KbRow {
+  id: string;
+  title: string;
+  content: string;
+  category: string;
+  groupCode: string | null;
+  subcategory: string | null;
+  agentNotes: string | null;
+  tags: string[];
+  source: string | null;
+}
+
+/**
+ * Mapeia uma linha de KnowledgeItem pro shape de resultado (com content
+ * truncado). Fonte única pras 3 vias (semântica + 2 fallbacks ILIKE) — sem
+ * isso o shape divergia silenciosamente entre semantic e keyword_fallback.
+ */
+function mapKbRow(r: KbRow) {
+  return {
+    id: r.id,
+    title: r.title,
+    content: r.content.slice(0, 800),
+    category: r.category,
+    groupCode: r.groupCode,
+    subcategory: r.subcategory,
+    agentNotes: r.agentNotes,
+    tags: r.tags,
+    source: r.source,
+  };
+}
+
 async function knowledgeBaseKeywordFallback(
   query: string,
   category: string | undefined,
@@ -744,7 +792,7 @@ async function knowledgeBaseKeywordFallback(
       select,
     });
     return {
-      results: rows.map((r) => ({ ...r, content: r.content.slice(0, 800) })),
+      results: rows.map(mapKbRow),
       mode: "keyword_fallback",
       note: `Busca por palavra-chave (recall inferior). Motivo: ${reason}`,
     };
@@ -774,7 +822,7 @@ async function knowledgeBaseKeywordFallback(
     .slice(0, topK);
 
   return {
-    results: scored.map(({ r }) => ({ ...r, content: r.content.slice(0, 800) })),
+    results: scored.map(({ r }) => mapKbRow(r)),
     mode: "keyword_fallback",
     note: `Busca por palavra-chave tokenizada (recall inferior ao semântico). Motivo: ${reason}`,
   };
@@ -800,6 +848,20 @@ async function handleQueryKnowledgeBase(
   }
 
   if (!isEmbeddingsConfigured()) {
+    // Degradação pro ILIKE (recall inferior) era TOTALMENTE silenciosa aqui —
+    // um deploy sem VOYAGE_API_KEY rodava em modo keyword sem nenhum rastro.
+    // Observabilidade: registra a degradação UMA vez por processo. VOYAGE é
+    // opcional (config steady-state), não erro transitório — logar a cada
+    // chamada floodaria o Sentry (alert fatigue). O fallback já sinaliza ao
+    // modelo via mode/note; ops precisa ver só que o RAG está capado.
+    if (!voyageAbsentWarned) {
+      voyageAbsentWarned = true;
+      logError(
+        "rag/query_knowledge_base",
+        new Error("RAG em modo keyword — VOYAGE_API_KEY não configurada (mensagem única por processo)"),
+        { category: category ?? null }
+      );
+    }
     return knowledgeBaseKeywordFallback(
       query,
       category,
@@ -868,21 +930,34 @@ async function handleQueryKnowledgeBase(
       ...params
     );
 
+    // Piso de relevância como ANOTAÇÃO, nunca como filtro que oculta. Decisão
+    // definitiva depois de rounds de review empurrando pra lados opostos:
+    //  - Esconder linhas abaixo do piso REGREDIA o recall — some cláusula real,
+    //    inclusive obrigatória (G4 embeda em ~0.32 contra query parafraseada).
+    //    Esse é o risco que NÃO podemos introduzir.
+    //  - Devolver id de baixa similaridade que o modelo poderia inserir por id
+    //    (pulando o guard 0.4 do auto-resolve) já é comportamento do master
+    //    (sempre retornou topK, sem piso) — NÃO é regressão deste lote. Fica
+    //    documentado como backlog (gate no insert_clause por id explícito).
+    // Então: devolve todos os topK; marca `lowConfidence` nos de baixa
+    // similaridade; e emite o note anti-confabulação quando NADA é confiável
+    // (lista vazia — KB sem embeddings — OU todos abaixo do piso).
+    const mapped = rows.map((r) => ({
+      ...mapKbRow(r),
+      similarity: Number(r.similarity?.toFixed?.(3) ?? r.similarity),
+      lowConfidence: Number(r.similarity ?? 0) < RAG_MIN_SIMILARITY,
+    }));
+    const nothingConfident =
+      mapped.length === 0 || mapped.every((m) => m.lowConfidence);
     return {
-      results: rows.map((r) => ({
-        id: r.id,
-        title: r.title,
-        content: r.content.slice(0, 800),
-        category: r.category,
-        groupCode: r.groupCode,
-        subcategory: r.subcategory,
-        agentNotes: r.agentNotes,
-        tags: r.tags,
-        source: r.source,
-        similarity: Number(r.similarity?.toFixed?.(3) ?? r.similarity),
-      })),
+      results: mapped,
       mode: "semantic",
       topK,
+      ...(nothingConfident
+        ? {
+            note: `Nenhum item de ALTA similaridade (≥ ${RAG_MIN_SIMILARITY}) pra esta consulta. Avalie a pertinência de cada resultado antes de citar; se uma cláusula OBRIGATÓRIA (ex.: G4) estiver na lista, use-a mesmo assim. Se nenhum servir, NÃO invente: use placeholder [preencher]. Lista vazia pode indicar base não semeada.`,
+          }
+        : {}),
     };
   } catch (err) {
     // Em vez de retornar {error} e gastar o turn do agente esperando um
