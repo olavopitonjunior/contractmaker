@@ -97,16 +97,26 @@ export async function POST(
     );
   }
 
+  // Isolamento entre titulares (LGPD): pra "parties" NUNCA anexa os documentos
+  // de identidade (RG/CNH) — senão o comprador recebe os documentos do vendedor
+  // e vice-versa. E os destinatários vão em BCC (um `to` neutro = o remetente),
+  // então uma parte NÃO vê o e-mail da outra no cabeçalho. É UM único envio
+  // (uma renderização do PDF, artefato persistido) e é all-or-nothing — o
+  // status reflete o envio real, sem mascarar falha parcial. Anexos só pro
+  // destino "org" (uso interno).
+  const isOrg = parsed.data.target === "org";
   const result = await sendFormSummary({
     formId: form.id,
-    to: recipients,
-    includeAttachments: parsed.data.includeAttachments,
+    to: isOrg ? recipients : process.env.EMAIL_FROM ?? "no-reply@contractmaker.local",
+    bcc: isOrg ? undefined : recipients,
+    includeAttachments: isOrg ? parsed.data.includeAttachments : false,
     persist: true,
   });
 
   if (!result.ok) {
     return NextResponse.json({ error: result.error ?? "Falha ao enviar" }, { status: 502 });
   }
+
   // Não devolve os e-mails (privacidade) — só confirmação.
   return NextResponse.json({ ok: true, sent: recipients.length });
 }

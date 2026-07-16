@@ -17,6 +17,7 @@
  */
 
 import { prisma } from "@/lib/db/prisma";
+import { parseMoneyBR } from "@/lib/format/money";
 import {
   resolveCommissionValue,
   type DadosContratoLite,
@@ -115,15 +116,9 @@ function partyDoc(p: PartyLike): string {
   return digits(raw);
 }
 
-function toNumber(v: unknown): number {
-  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
-  if (typeof v === "string") {
-    const cleaned = v.replace(/\./g, "").replace(",", ".").replace(/[^0-9.-]/g, "");
-    const n = parseFloat(cleaned);
-    return Number.isFinite(n) ? n : 0;
-  }
-  return 0;
-}
+// parseMoneyBR (lib/format/money) — o inline antigo removia pontos
+// incondicionalmente e inflava "1000.00"→100000 na declaração DIMOB à Receita.
+const toNumber = parseMoneyBR;
 
 interface ComissionadoLike {
   nome?: string;

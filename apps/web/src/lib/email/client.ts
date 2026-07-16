@@ -23,6 +23,13 @@ export interface EmailAttachment {
 
 export interface SendEmailInput {
   to: string | string[];
+  /**
+   * Cópia oculta. Usada pra enviar A MESMA mensagem a vários destinatários SEM
+   * que um veja o e-mail do outro (ex.: resumo pra vendedor + comprador — cada
+   * um é uma parte que não pode ver o contato da outra). O gate de staging vale
+   * pro bcc também.
+   */
+  bcc?: string | string[];
   subject: string;
   react?: React.ReactElement;
   html?: string;
@@ -103,6 +110,7 @@ async function sendViaResend(input: SendEmailInput): Promise<SendEmailResult> {
     const { data, error } = await resend.emails.send({
       from: getFrom(),
       to: Array.isArray(input.to) ? input.to : [input.to],
+      ...(input.bcc ? { bcc: Array.isArray(input.bcc) ? input.bcc : [input.bcc] } : {}),
       subject: input.subject,
       react: input.react,
       html: input.html,
@@ -163,6 +171,7 @@ async function sendViaSmtp(input: SendEmailInput): Promise<SendEmailResult> {
     const info = await transporter.sendMail({
       from: getFrom(),
       to: Array.isArray(input.to) ? input.to : [input.to],
+      ...(input.bcc ? { bcc: Array.isArray(input.bcc) ? input.bcc : [input.bcc] } : {}),
       subject: input.subject,
       html,
       text,
@@ -270,6 +279,9 @@ async function renderWithBrand(input: SendEmailInput): Promise<SendEmailInput> {
 
 export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult> {
   const gated = applyStagingEmailGate(input.to);
+  // O bcc também passa pelo gate — senão um destinatário externo em bcc vazaria
+  // em staging. Se ele redireciona, dropa o bcc (a mensagem já vai pro override).
+  const gatedBcc = input.bcc ? applyStagingEmailGate(input.bcc) : null;
   if (gated.to.length === 0) {
     return { id: "staging-blocked", ok: true };
   }
@@ -278,9 +290,10 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
     ? {
         ...branded,
         to: gated.to,
+        bcc: undefined,
         subject: `[STAGING] ${input.subject} (originalmente: ${gated.original.join(", ")})`,
       }
-    : branded;
+    : { ...branded, bcc: gatedBcc ? gatedBcc.to : input.bcc };
 
   const provider = process.env.EMAIL_PROVIDER ?? "resend";
 

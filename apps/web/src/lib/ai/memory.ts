@@ -15,6 +15,7 @@
 
 import { Anthropic } from "@anthropic-ai/sdk";
 import { prisma } from "@/lib/db/prisma";
+import { parseMoneyBR } from "@/lib/format/money";
 import { renderContratoHTML } from "@/lib/render/handlebars";
 import { embedOne, toPgVector, isEmbeddingsConfigured } from "./embeddings";
 import { recordAIUsage } from "./usage";
@@ -93,13 +94,7 @@ export function extractFingerprint(
 }
 
 function toNumber(v: unknown): number {
-  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
-  if (typeof v === "string") {
-    const cleaned = v.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".");
-    const n = parseFloat(cleaned);
-    return Number.isFinite(n) ? n : 0;
-  }
-  return 0;
+  return parseMoneyBR(v);
 }
 
 /**
@@ -129,7 +124,7 @@ async function summarizeContract(
       max_tokens: 400,
       temperature: 0.2,
       system:
-        "Você resume contratos imobiliários em 3-5 sentenças objetivas. Liste: partes (vendedor, comprador, estado civil), imóvel (tipo, localização, preço), pagamento (à vista / financiamento / FGTS / parcelas) e qualquer cláusula ou ponto de atenção incomum. Sem markdown, sem introdução.",
+        "Você resume contratos imobiliários em 3-5 sentenças objetivas. NÃO cite NOMES, CPF/CNPJ nem endereços completos das partes — refira-se a elas por papel e perfil (ex.: 'vendedor PF casado', 'compradora PJ'). O resumo é reutilizado como memória entre negócios da mesma imobiliária, então não pode conter dados pessoais identificáveis. Liste: perfil das partes (papel, tipo de pessoa, estado civil), imóvel (tipo, cidade/UF, faixa de preço), pagamento (à vista / financiamento / FGTS / parcelas) e qualquer cláusula ou ponto de atenção incomum. Sem markdown, sem introdução.",
       messages: [
         {
           role: "user",

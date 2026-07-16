@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { parseMoneyBR } from "@/lib/format/money";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -66,7 +67,7 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
     setSaving(true);
     try {
       const isVenda = tipo === "venda";
-      const valor = form.valor ? Number(form.valor.replace(/\./g, "").replace(",", ".")) : undefined;
+      const valor = form.valor ? parseMoneyBR(form.valor) : undefined;
       const dataJson: Record<string, unknown> = {
         imoveis: form.imovel ? [{ endereco: form.imovel }] : [],
       };
