@@ -22,7 +22,7 @@ export const CLICKSIGN_ROLE_OPTIONS: Array<{ value: ClicksignRole; label: string
   { value: "seller", label: "Vendedor" },
   { value: "consenting", label: "Anuente" },
   { value: "party", label: "Interessado" },
-  { value: "attorney", label: "Advogado" },
+  { value: "attorney", label: "Procurador" },
   { value: "intervening", label: "Intermediador" },
   { value: "witness", label: "Testemunha" },
   { value: "sign", label: "Assinante" },

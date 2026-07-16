@@ -12,6 +12,7 @@ import { resolveClickSignCreds } from "./account";
 import type { ClicksignCreds } from "./client";
 import { persistSignedPdf } from "@/lib/clicksign/signed-pdf";
 import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-signed";
+import { notifyEnvelopeMilestone, resolveDealLink } from "@/lib/clicksign/notify-envelope";
 import {
   completeInspectionOnEnvelopeClosed,
   revertInspectionOnEnvelopeCanceled,
@@ -70,6 +71,8 @@ export async function syncEnvelopeState(
   const stateByEmail = aggregateEventsByEmail(eventsResp);
 
   let signersUpdated = 0;
+  const bouncedSignerIds: string[] = [];
+  let refusedNewly = false;
   for (const local of envelope.signers) {
     const byKey = local.clicksignId
       ? stateBySigner.get(local.clicksignId)
@@ -85,7 +88,10 @@ export async function syncEnvelopeState(
     const updates: Prisma.EnvelopeSignerUpdateInput = {};
 
     if (remote.refusedAt) {
-      if (local.status !== "refused") updates.status = "refused";
+      if (local.status !== "refused") {
+        updates.status = "refused";
+        refusedNewly = true;
+      }
       if (!local.refusedAt || +remote.refusedAt !== +local.refusedAt) {
         updates.refusedAt = remote.refusedAt;
       }
@@ -119,6 +125,7 @@ export async function syncEnvelopeState(
         local.status !== "email_failed"
       ) {
         updates.status = "email_failed";
+        bouncedSignerIds.push(local.id);
       }
     }
 
@@ -129,6 +136,30 @@ export async function syncEnvelopeState(
       });
       signersUpdated += 1;
     }
+  }
+
+  // Marcos detectados só via reconciliação (webhook perdido). O helper ignora
+  // envelope de proposta e dedupa (batchId) com o caminho do webhook.
+  //  - bounce: um sino POR signatário (dedupeSuffix=signerId), senão o 2º seria
+  //    engolido pelo dedupe por envelope;
+  //  - recusa: um sino por envelope (simetria com o caminho signed do sync).
+  if (bouncedSignerIds.length > 0 || refusedNewly) {
+    const linkUrl = await resolveDealLink(envelope.dealId); // uma vez por envelope
+    const common = {
+      envelopeId: envelope.id,
+      orgId: envelope.orgId,
+      source: envelope.source,
+      dealId: envelope.dealId,
+      linkUrl,
+    };
+    await Promise.all([
+      ...bouncedSignerIds.map((signerId) =>
+        notifyEnvelopeMilestone({ ...common, kind: "email_failed", dedupeSuffix: signerId })
+      ),
+      ...(refusedNewly
+        ? [notifyEnvelopeMilestone({ ...common, kind: "refused" })]
+        : []),
+    ]);
   }
 
   let envelopeUpdated = false;
@@ -144,6 +175,16 @@ export async function syncEnvelopeState(
     const promote = await autoPromoteDealOnContractSigned(envelope.id);
     dealStagePromoted = promote.promoted;
     await completeInspectionOnEnvelopeClosed(envelope.id);
+    // Fecho via reconciliação (webhook perdido) também emite o sino de assinado.
+    // batchId `${envelopeId}:signed` dedupa com o do webhook — nunca 2 sinos.
+    await notifyEnvelopeMilestone({
+      envelopeId: envelope.id,
+      orgId: envelope.orgId,
+      source: envelope.source,
+      dealId: envelope.dealId,
+      linkUrl: await resolveDealLink(envelope.dealId),
+      kind: "signed",
+    });
   } else if (remoteStatus === "canceled" && envelope.status !== "canceled") {
     await prisma.envelope.update({
       where: { id: envelope.id },

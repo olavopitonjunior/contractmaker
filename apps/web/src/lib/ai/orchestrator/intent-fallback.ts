@@ -58,7 +58,7 @@ export async function resolveIntent(
       contractId: ctx?.contractId,
       provider: "anthropic",
       model: HAIKU_MODEL,
-      operation: "intent_classify" as never,
+      operation: "intent_classify",
       promptTokens: resp.usage?.input_tokens ?? 0,
       completionTokens: resp.usage?.output_tokens ?? 0,
       latencyMs: Date.now() - t0,

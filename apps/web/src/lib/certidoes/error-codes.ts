@@ -312,7 +312,7 @@ export const CATEGORY_DESCRIPTION: Record<FailureCategory, string> = {
   provider_timeout:
     "A consulta demorou mais que o esperado. O provedor pode estar sobrecarregado. Tente novamente.",
   account_issue:
-    "Há um problema com a conta Infosimples (saldo/token). Verifique com o administrador.",
+    "Emissão temporariamente indisponível por uma limitação do serviço de emissão. Tente novamente em breve; se persistir, contate o suporte.",
   integration_error:
     "Erro interno do sistema durante a consulta. Nossa equipe foi notificada. Tente novamente ou reporte o bug.",
   genuine_no_data:

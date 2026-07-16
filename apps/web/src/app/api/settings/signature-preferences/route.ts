@@ -24,6 +24,8 @@ const patchSchema = z
     refusable: z.boolean().optional(),
     defaultDeadlineDays: z.number().int().positive().max(365).nullable().optional(),
     defaultSequential: z.boolean().optional(),
+    proposalEmailSubject: z.string().max(200).nullable().optional(),
+    proposalEmailMessage: z.string().max(2000).nullable().optional(),
   })
   .refine(
     (d) =>
@@ -96,6 +98,12 @@ export async function PATCH(req: NextRequest) {
         : {}),
       ...(d.defaultSequential !== undefined
         ? { defaultSequential: d.defaultSequential }
+        : {}),
+      ...(d.proposalEmailSubject !== undefined
+        ? { proposalEmailSubject: d.proposalEmailSubject || null }
+        : {}),
+      ...(d.proposalEmailMessage !== undefined
+        ? { proposalEmailMessage: d.proposalEmailMessage || null }
         : {}),
     },
   });

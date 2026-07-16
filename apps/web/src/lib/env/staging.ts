@@ -33,6 +33,9 @@ const DEFAULT_STAGING_CRON_ALLOWLIST = new Set<string>([
   "/api/cron/drafts/cleanup",
   "/api/cron/agent-runs/cleanup",
   "/api/cron/api-usage/cleanup",
+  // Só expirar propostas é DB-only e seguro em staging. remind (manda mensagem
+  // real) e reconcile (pode disparar envelope) ficam OFF por padrão.
+  "/api/cron/proposals/expire",
 ]);
 
 /**

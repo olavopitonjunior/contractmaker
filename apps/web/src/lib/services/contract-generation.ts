@@ -1795,6 +1795,17 @@ async function analyzeContractDataValidity(
 
   const checkParte = (p: Parte, label: string) => {
     if (p.tipo_pessoa !== "fisica") return;
+    // Estado civil em branco não é mais preenchido com "Solteiro(a)" por default
+    // (evita casado sem outorga). Se ficou vazio, avisa pra confirmar antes de
+    // aprovar — impacta necessidade de outorga conjugal / meação.
+    if (!(p.estado_civil ?? "").trim()) {
+      issues.push({
+        severity: "warning",
+        key: `estado_civil:${label}`,
+        anchor: `${label} — estado civil`,
+        text: `${label} está sem ESTADO CIVIL informado. Confirme antes de aprovar — se for casado(a)/união estável, o contrato precisa de outorga conjugal e qualificação do cônjuge.`,
+      });
+    }
     const casado = p.estado_civil === "Casado(a)" || p.estado_civil === "União Estável";
     if (!casado) return;
     const nome = (p.conjuge?.nome ?? "").trim();

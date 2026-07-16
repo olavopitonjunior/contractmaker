@@ -27,7 +27,9 @@ const pessoaFisicaSchema = z.object({
   tipo_pessoa: z.literal("fisica"),
   nome: z.string().min(2, "Nome obrigatorio"),
   nacionalidade: z.string().optional().default("Brasileiro(a)"),
-  estado_civil: z.string().optional().default("Solteiro(a)"),
+  // Sem default silencioso: um "Solteiro(a)" fabricado escondia casados sem
+  // outorga conjugal. Ausência fica ausente; a UI exige escolha explícita.
+  estado_civil: z.string().optional(),
   profissao: z.string().optional().default(""),
   rg: z.string().optional().default(""),
   cpf: z.string().optional().default(""),

@@ -28,10 +28,20 @@ interface ChargeSplitJson {
 }
 
 /**
- * Calcula o valor a transferir para cada split externo.
- * Base = netValue (após taxa Asaas) se disponível, senão value (gross).
+ * Calcula o valor a transferir para cada split externo (PIX).
+ *
+ * Base = netValue (após taxa Asaas) se disponível, senão value (bruto).
+ *
+ * ATENÇÃO à divergência de base (intencional, não bug): o split de WALLET Asaas
+ * (composeSplits → payment.split) tem seu `percentualValue` aplicado pelo Asaas
+ * sobre o valor BRUTO da cobrança; aqui o PIX externo aplica o mesmo percentual
+ * sobre o LÍQUIDO (o que efetivamente caiu na conta após a taxa Asaas), pois é
+ * o que há disponível pra transferir. Logo, o MESMO percentual nominal rende
+ * valores diferentes em reais nas duas vias — por design. Além disso, cada
+ * entry é arredondada individualmente (linha do Math.round), então a soma dos
+ * repasses pode divergir do total em centavos. Exported pra teste de invariante.
  */
-function computeAmount(
+export function computeAmount(
   base: number,
   entry: ExternalSplit,
   feeAdjustment: number
