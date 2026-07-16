@@ -24,6 +24,7 @@ import { listEnvelopeDocuments } from "@/lib/clicksign/envelopes";
 import { resolveClickSignCreds } from "@/lib/clicksign/account";
 import type { WebhookPayload } from "@/lib/clicksign/types";
 import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-signed";
+import { notifyEnvelopeMilestone, resolveDealLink } from "@/lib/clicksign/notify-envelope";
 import {
   completeInspectionOnEnvelopeClosed,
   revertInspectionOnEnvelopeCanceled,
@@ -243,6 +244,14 @@ export async function processClickSignWebhookPayload(
       // Proposta: recusa move o status (proponente vs proprietário). No-op p/
       // envelope de contrato/attachment.
       await onProposalEnvelopeRefused(envelope.id);
+      await notifyEnvelopeMilestone({
+        envelopeId: envelope.id,
+        orgId: envelope.orgId,
+        source: envelope.source,
+        dealId: envelope.dealId,
+        linkUrl: await resolveDealLink(envelope.dealId),
+        kind: "refused",
+      });
       break;
     }
     case "close":
@@ -257,6 +266,14 @@ export async function processClickSignWebhookPayload(
       // Proposta: avança o status (assinada_proponente / completa / aguardando
       // vendedor). No-op p/ envelope de contrato/attachment.
       await onProposalEnvelopeClosed(envelope.id);
+      await notifyEnvelopeMilestone({
+        envelopeId: envelope.id,
+        orgId: envelope.orgId,
+        source: envelope.source,
+        dealId: envelope.dealId,
+        linkUrl: await resolveDealLink(envelope.dealId),
+        kind: "signed",
+      });
       triggerSignedPdfDownload(envelope, payload);
       break;
     }

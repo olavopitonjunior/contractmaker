@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import {
+  COMMISSION_PAID_ALLOWED_FROM,
+  COMMISSION_PAID_TARGET_STAGE,
+} from "@/lib/contracts/auto-promote-commission";
 
 /**
  * POST /api/pipeline/deals/:dealId/mark-commission-paid
@@ -43,8 +47,7 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const ALLOWED_FROM = ["Cobrança emitida", "Contrato assinado"];
-  if (!ALLOWED_FROM.includes(deal.stage.name)) {
+  if (!COMMISSION_PAID_ALLOWED_FROM.includes(deal.stage.name)) {
     return NextResponse.json(
       {
         error: `Negócio precisa estar em "Cobrança emitida" (está em "${deal.stage.name}")`,
@@ -54,7 +57,7 @@ export async function POST(
   }
 
   const targetStage = deal.pipeline.stages.find(
-    (s) => s.name === "Comissão paga"
+    (s) => s.name === COMMISSION_PAID_TARGET_STAGE
   );
   if (!targetStage) {
     return NextResponse.json(
