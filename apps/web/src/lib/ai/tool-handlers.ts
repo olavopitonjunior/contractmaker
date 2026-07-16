@@ -706,6 +706,38 @@ function kbNormalize(s: string): string {
     .replace(/[̀-ͯ]/g, "");
 }
 
+/** Campos de KnowledgeItem devolvidos ao agente pelas 3 vias de busca. */
+interface KbRow {
+  id: string;
+  title: string;
+  content: string;
+  category: string;
+  groupCode: string | null;
+  subcategory: string | null;
+  agentNotes: string | null;
+  tags: string[];
+  source: string | null;
+}
+
+/**
+ * Mapeia uma linha de KnowledgeItem pro shape de resultado (com content
+ * truncado). Fonte única pras 3 vias (semântica + 2 fallbacks ILIKE) — sem
+ * isso o shape divergia silenciosamente entre semantic e keyword_fallback.
+ */
+function mapKbRow(r: KbRow) {
+  return {
+    id: r.id,
+    title: r.title,
+    content: r.content.slice(0, 800),
+    category: r.category,
+    groupCode: r.groupCode,
+    subcategory: r.subcategory,
+    agentNotes: r.agentNotes,
+    tags: r.tags,
+    source: r.source,
+  };
+}
+
 async function knowledgeBaseKeywordFallback(
   query: string,
   category: string | undefined,
@@ -757,7 +789,7 @@ async function knowledgeBaseKeywordFallback(
       select,
     });
     return {
-      results: rows.map((r) => ({ ...r, content: r.content.slice(0, 800) })),
+      results: rows.map(mapKbRow),
       mode: "keyword_fallback",
       note: `Busca por palavra-chave (recall inferior). Motivo: ${reason}`,
     };
@@ -787,7 +819,7 @@ async function knowledgeBaseKeywordFallback(
     .slice(0, topK);
 
   return {
-    results: scored.map(({ r }) => ({ ...r, content: r.content.slice(0, 800) })),
+    results: scored.map(({ r }) => mapKbRow(r)),
     mode: "keyword_fallback",
     note: `Busca por palavra-chave tokenizada (recall inferior ao semântico). Motivo: ${reason}`,
   };
@@ -890,44 +922,34 @@ async function handleQueryKnowledgeBase(
       ...params
     );
 
-    // Piso de relevância reconciliando dois riscos opostos:
-    //  - COM groupCode explícito (ex.: G4 obrigatória em financiamento), o
-    //    filtro de grupo já garante pertinência → NÃO aplica piso: uma cláusula
-    //    obrigatória que embeda em ~0.32 contra query parafraseada NUNCA some.
-    //  - SEM groupCode (busca semântica aberta), aplica o piso como FILTRO:
-    //    devolver ids de ruído (~0.2) permitiria o modelo inserir por id
-    //    pulando o guard 0.4 do auto-resolve → cláusula irrelevante no contrato.
-    // Quando o resultado fica vazio (filtrado OU KB sem embeddings), devolve o
-    // note anti-confabulação (regra 13: placeholder, não invenção).
-    const relevant = groupCode
-      ? rows
-      : rows.filter((r) => Number(r.similarity ?? 0) >= RAG_MIN_SIMILARITY);
-    if (relevant.length === 0) {
-      return {
-        results: [],
-        mode: "semantic",
-        topK,
-        note: "Nenhum item pertinente na base pra esta consulta. Não invente cláusula: use placeholder [preencher] se precisar do dado. Se uma cláusula obrigatória era esperada, verifique se a base foi semeada.",
-        topSimilarity: rows.length
-          ? Number(Math.max(...rows.map((r) => Number(r.similarity ?? 0))).toFixed(3))
-          : 0,
-      };
-    }
+    // Piso de relevância como ANOTAÇÃO, nunca como filtro que oculta. Decisão
+    // definitiva depois de rounds de review empurrando pra lados opostos:
+    //  - Esconder linhas abaixo do piso REGREDIA o recall — some cláusula real,
+    //    inclusive obrigatória (G4 embeda em ~0.32 contra query parafraseada).
+    //    Esse é o risco que NÃO podemos introduzir.
+    //  - Devolver id de baixa similaridade que o modelo poderia inserir por id
+    //    (pulando o guard 0.4 do auto-resolve) já é comportamento do master
+    //    (sempre retornou topK, sem piso) — NÃO é regressão deste lote. Fica
+    //    documentado como backlog (gate no insert_clause por id explícito).
+    // Então: devolve todos os topK; marca `lowConfidence` nos de baixa
+    // similaridade; e emite o note anti-confabulação quando NADA é confiável
+    // (lista vazia — KB sem embeddings — OU todos abaixo do piso).
+    const mapped = rows.map((r) => ({
+      ...mapKbRow(r),
+      similarity: Number(r.similarity?.toFixed?.(3) ?? r.similarity),
+      lowConfidence: Number(r.similarity ?? 0) < RAG_MIN_SIMILARITY,
+    }));
+    const nothingConfident =
+      mapped.length === 0 || mapped.every((m) => m.lowConfidence);
     return {
-      results: relevant.map((r) => ({
-        id: r.id,
-        title: r.title,
-        content: r.content.slice(0, 800),
-        category: r.category,
-        groupCode: r.groupCode,
-        subcategory: r.subcategory,
-        agentNotes: r.agentNotes,
-        tags: r.tags,
-        source: r.source,
-        similarity: Number(r.similarity?.toFixed?.(3) ?? r.similarity),
-      })),
+      results: mapped,
       mode: "semantic",
       topK,
+      ...(nothingConfident
+        ? {
+            note: `Nenhum item de ALTA similaridade (≥ ${RAG_MIN_SIMILARITY}) pra esta consulta. Avalie a pertinência de cada resultado antes de citar; se uma cláusula OBRIGATÓRIA (ex.: G4) estiver na lista, use-a mesmo assim. Se nenhum servir, NÃO invente: use placeholder [preencher]. Lista vazia pode indicar base não semeada.`,
+          }
+        : {}),
     };
   } catch (err) {
     // Em vez de retornar {error} e gastar o turn do agente esperando um

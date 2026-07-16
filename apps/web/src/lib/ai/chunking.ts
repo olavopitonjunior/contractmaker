@@ -27,6 +27,13 @@ const DEFAULT_OVERLAP_TOKENS = 100;
  * gigante, ex.: base64/URL) cai no corte cru em rawStart. Como a cauda nunca
  * excede overlapChars (e o chamador garante overlapChars ≤ maxChars/2), o loop
  * de hard-cut sempre progride — sem risco de explosão nem de loop infinito.
+ *
+ * TRADEOFF DELIBERADO: se a única fronteira de palavra na janela de overlap
+ * ficar perto do fim (bloco com run longo sem espaço), a cauda encolhe abaixo
+ * do alvo e o overlap efetivo cai. Só ocorre em conteúdo sem espaços
+ * (base64/URL/números longos), inexistente em prosa de cláusula — é o preço de
+ * garantir término. O backtrack (que preservava overlap cheio) reintroduziria o
+ * loop infinito quando overlap ≥ maxChars — rejeitado.
  */
 function wordSafeTail(s: string, overlapChars: number): string {
   if (overlapChars <= 0 || s.length <= overlapChars) return s;
