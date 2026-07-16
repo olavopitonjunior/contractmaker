@@ -19,26 +19,21 @@ const DEFAULT_MAX_TOKENS = 800;
 const DEFAULT_OVERLAP_TOKENS = 100;
 
 /**
- * Retorna a "cauda" de overlap de `s` com ~overlapChars, mas começando numa
- * FRONTEIRA DE PALAVRA — evita o overlap iniciar no meio de uma palavra (que
- * polui o embedding do próximo chunk com um fragmento sem sentido). Avança o
- * ponto de corte até o próximo espaço; se a palavra for longa demais (>25%
- * além do overlap), mantém o corte cru pra não perder contexto.
+ * Retorna a "cauda" de overlap de `s` começando numa FRONTEIRA DE PALAVRA — o
+ * overlap não inicia no meio de uma palavra (fragmento polui o embedding do
+ * próximo chunk). A cauda-alvo tem ~overlapChars; AVANÇA de `rawStart` até o
+ * PRÓXIMO espaço, então a cauda retornada é sempre ≤ overlapChars e começa em
+ * palavra íntegra. Só quando NÃO há espaço de rawStart até o fim (token único
+ * gigante, ex.: base64/URL) cai no corte cru em rawStart. Como a cauda nunca
+ * excede overlapChars (e o chamador garante overlapChars ≤ maxChars/2), o loop
+ * de hard-cut sempre progride — sem risco de explosão nem de loop infinito.
  */
 function wordSafeTail(s: string, overlapChars: number): string {
   if (overlapChars <= 0 || s.length <= overlapChars) return s;
   const rawStart = s.length - overlapChars;
-  // Recua até a fronteira de palavra no espaço em/antes de rawStart — overlap
-  // fica ligeiramente maior que o alvo, porém começa em palavra íntegra.
-  // LIMITE do backtrack a ~2× overlapChars: sem isso, um bloco com um espaço
-  // isolado no começo seguido de um token gigante faria o tail ≈ a string
-  // inteira, e o loop de hard-cut avançaria ~1 char/iteração (explosão de
-  // chunks). Recuo além do limite → corte cru em rawStart (aceitável no caso
-  // patológico de token único enorme).
-  const minStart = rawStart - overlapChars;
-  const prevSpace = s.lastIndexOf(" ", rawStart);
-  if (prevSpace >= minStart) return s.slice(prevSpace + 1);
-  return s.slice(rawStart);
+  const nextSpace = s.indexOf(" ", rawStart);
+  if (nextSpace === -1) return s.slice(rawStart);
+  return s.slice(nextSpace + 1);
 }
 
 export function chunkText(
@@ -47,7 +42,13 @@ export function chunkText(
   overlapTokens: number = DEFAULT_OVERLAP_TOKENS
 ): Chunk[] {
   const maxChars = maxTokens * CHARS_PER_TOKEN;
-  const overlapChars = overlapTokens * CHARS_PER_TOKEN;
+  // Clampa o overlap a ≤ metade do chunk. Garante que a cauda de overlap
+  // (≤ overlapChars) seja sempre menor que o corte do hard-cut loop → progresso
+  // garantido (sem loop infinito quando o chamador pede overlap ≥ maxChars).
+  const overlapChars = Math.min(
+    overlapTokens * CHARS_PER_TOKEN,
+    Math.floor(maxChars / 2)
+  );
 
   const cleaned = text.replace(/\r\n/g, "\n").trim();
   if (!cleaned) return [];

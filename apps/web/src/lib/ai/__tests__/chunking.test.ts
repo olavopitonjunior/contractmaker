@@ -35,6 +35,15 @@ describe("chunkText — overlap na fronteira de palavra", () => {
     expect(out.length).toBeLessThan(25);
   });
 
+  it("não trava com overlap > metade do chunk + token sem espaço", () => {
+    // Antes: overlap 150 tok (600 chars) > maxChars/2 (400) fazia a cauda ≈
+    // string inteira e o hard-cut loop nunca terminar. O clamp garante término.
+    const texto = "y".repeat(5_000); // sem espaços
+    const out = chunkText(texto, 200, 150); // maxChars 800, overlap clampa p/ 400
+    expect(out.length).toBeGreaterThan(0);
+    expect(out.length).toBeLessThan(40);
+  });
+
   it("índices são sequenciais e total bate com o número de chunks", () => {
     const texto = "Frase A. ".repeat(300);
     const out = chunkText(texto, 50, 10);

@@ -890,41 +890,44 @@ async function handleQueryKnowledgeBase(
       ...params
     );
 
-    // Piso de relevância como ANOTAÇÃO, não como filtro que oculta. Descartar
-    // resultados abaixo do piso podia esconder uma cláusula real — inclusive
-    // OBRIGATÓRIA (ex.: G4 em financiamento embeda em ~0.32 contra query
-    // parafraseada) — e mandar o agente usar placeholder no lugar. Então:
-    //  - com groupCode explícito, o filtro de grupo já garante pertinência →
-    //    piso NÃO se aplica (nunca oculta cláusula do grupo pedido);
-    //  - sem groupCode, devolve todos os topK mas marca `lowConfidence` nos de
-    //    baixa similaridade, e só quando TODOS estão abaixo do piso adiciona um
-    //    note pedindo pro modelo avaliar pertinência (sem esconder nada).
-    const mapped = rows.map((r) => ({
-      id: r.id,
-      title: r.title,
-      content: r.content.slice(0, 800),
-      category: r.category,
-      groupCode: r.groupCode,
-      subcategory: r.subcategory,
-      agentNotes: r.agentNotes,
-      tags: r.tags,
-      source: r.source,
-      similarity: Number(r.similarity?.toFixed?.(3) ?? r.similarity),
-      lowConfidence: !groupCode && Number(r.similarity ?? 0) < RAG_MIN_SIMILARITY,
-    }));
-    const allLow =
-      !groupCode &&
-      rows.length > 0 &&
-      rows.every((r) => Number(r.similarity ?? 0) < RAG_MIN_SIMILARITY);
+    // Piso de relevância reconciliando dois riscos opostos:
+    //  - COM groupCode explícito (ex.: G4 obrigatória em financiamento), o
+    //    filtro de grupo já garante pertinência → NÃO aplica piso: uma cláusula
+    //    obrigatória que embeda em ~0.32 contra query parafraseada NUNCA some.
+    //  - SEM groupCode (busca semântica aberta), aplica o piso como FILTRO:
+    //    devolver ids de ruído (~0.2) permitiria o modelo inserir por id
+    //    pulando o guard 0.4 do auto-resolve → cláusula irrelevante no contrato.
+    // Quando o resultado fica vazio (filtrado OU KB sem embeddings), devolve o
+    // note anti-confabulação (regra 13: placeholder, não invenção).
+    const relevant = groupCode
+      ? rows
+      : rows.filter((r) => Number(r.similarity ?? 0) >= RAG_MIN_SIMILARITY);
+    if (relevant.length === 0) {
+      return {
+        results: [],
+        mode: "semantic",
+        topK,
+        note: "Nenhum item pertinente na base pra esta consulta. Não invente cláusula: use placeholder [preencher] se precisar do dado. Se uma cláusula obrigatória era esperada, verifique se a base foi semeada.",
+        topSimilarity: rows.length
+          ? Number(Math.max(...rows.map((r) => Number(r.similarity ?? 0))).toFixed(3))
+          : 0,
+      };
+    }
     return {
-      results: mapped,
+      results: relevant.map((r) => ({
+        id: r.id,
+        title: r.title,
+        content: r.content.slice(0, 800),
+        category: r.category,
+        groupCode: r.groupCode,
+        subcategory: r.subcategory,
+        agentNotes: r.agentNotes,
+        tags: r.tags,
+        source: r.source,
+        similarity: Number(r.similarity?.toFixed?.(3) ?? r.similarity),
+      })),
       mode: "semantic",
       topK,
-      ...(allLow
-        ? {
-            note: `Nenhum item com similaridade alta (≥ ${RAG_MIN_SIMILARITY}) pra esta consulta — avalie a pertinência antes de citar. Se uma cláusula OBRIGATÓRIA (ex.: G4) estiver na lista, use-a mesmo assim; se nada servir, use placeholder [preencher].`,
-          }
-        : {}),
     };
   } catch (err) {
     // Em vez de retornar {error} e gastar o turn do agente esperando um
