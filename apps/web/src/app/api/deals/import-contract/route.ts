@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { prisma } from "@/lib/db/prisma";
+import { DEAL_SOURCE_CHANNEL } from "@/lib/pipeline/source-channel";
 import {
   requireApiAuth,
   isAuthFailure,
@@ -228,6 +229,7 @@ export async function POST(req: NextRequest) {
             stageId: stage.id,
             userId: auth.actor.effectiveUserId,
             formId: createdForm.id,
+            sourceChannel: DEAL_SOURCE_CHANNEL.IMPORT_CONTRATO,
             title: title || `Contrato importado — ${file.name}`,
             position: dealsInStage,
           },

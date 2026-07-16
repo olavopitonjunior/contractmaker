@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db/prisma";
+import { DEAL_SOURCE_CHANNEL } from "@/lib/pipeline/source-channel";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { moduleForSchemaType } from "@/lib/modules/resolve";
 import { deriveDealMetadata } from "@/lib/contracts/derive-deal-metadata";
@@ -106,6 +107,7 @@ export async function convertProposalToDeal(input: {
         // NOT NULL — sem sessão (Max via Bearer), é o dono da proposta.
         userId: proposal.userId,
         formId: form.id,
+        sourceChannel: DEAL_SOURCE_CHANNEL.PROPOSTA,
         title: meta.title,
         value: meta.value,
         // default "venda"; sem isto toda locação viraria deal de venda.

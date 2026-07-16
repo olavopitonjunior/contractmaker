@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
+import { DEAL_SOURCE_CHANNEL } from "@/lib/pipeline/source-channel";
 import {
   requireApiAuth,
   isAuthFailure,
@@ -67,6 +68,7 @@ export async function POST(request: NextRequest) {
             stageId: formularioStage.id,
             userId: auth.actor.effectiveUserId,
             formId: form.id,
+            sourceChannel: DEAL_SOURCE_CHANNEL.FORM_PUBLICO,
             title:
               body.title || `Negocio - ${form.token.slice(0, 8)}`,
             position: dealsInStage,

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
+import { DEAL_SOURCE_CHANNEL } from "@/lib/pipeline/source-channel";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
 import { ensureLocacaoAccess, isRouteError, parseJsonBody } from "@/lib/locacao/route-helpers";
@@ -101,6 +102,7 @@ export async function POST(req: NextRequest) {
         userId: ctx.userId,
         formId: form.id,
         kind: "locacao",
+        sourceChannel: DEAL_SOURCE_CHANNEL.FORM_PUBLICO,
         title: d.title || `Locação - ${form.token.slice(0, 8)}`,
         position: dealsInStage,
       },

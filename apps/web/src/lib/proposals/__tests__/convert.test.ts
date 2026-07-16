@@ -44,7 +44,13 @@ describe("convertProposalToDeal", () => {
     );
     expect(dealCreate).toHaveBeenCalledWith(
       expect.objectContaining({
-        data: expect.objectContaining({ kind: "locacao", userId: "corretor1", stageId: "stage1" }),
+        data: expect.objectContaining({
+          kind: "locacao",
+          userId: "corretor1",
+          stageId: "stage1",
+          // canal de origem capturado na conversão de proposta
+          sourceChannel: "proposta",
+        }),
       })
     );
   });

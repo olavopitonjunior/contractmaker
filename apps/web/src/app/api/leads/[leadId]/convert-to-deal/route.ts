@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { DEAL_SOURCE_CHANNEL } from "@/lib/pipeline/source-channel";
 import {
   requireApiAuth,
   isAuthFailure,
@@ -72,6 +73,7 @@ export async function POST(
         stageId: pipeline.stages[0].id,
         userId: apiAuth.actor.effectiveUserId,
         formId: form.id,
+        sourceChannel: DEAL_SOURCE_CHANNEL.LEAD,
         title: lead.title,
       },
     });

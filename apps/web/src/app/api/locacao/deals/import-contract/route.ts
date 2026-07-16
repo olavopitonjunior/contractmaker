@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { prisma } from "@/lib/db/prisma";
+import { DEAL_SOURCE_CHANNEL } from "@/lib/pipeline/source-channel";
 import {
   ensureLocacaoAccess,
   isRouteError,
@@ -206,6 +207,7 @@ export async function POST(req: NextRequest) {
             userId: ctx.userId,
             formId: createdForm.id,
             kind: "locacao",
+            sourceChannel: DEAL_SOURCE_CHANNEL.IMPORT_CONTRATO,
             title: title || `Contrato de locação importado — ${file.name}`,
             position: dealsInStage,
           },
