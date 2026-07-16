@@ -22,6 +22,18 @@
       "schedule": "0 6 * * *"
     },
     {
+      "path": "/api/cron/proposals/expire",
+      "schedule": "30 6 * * *"
+    },
+    {
+      "path": "/api/cron/proposals/reconcile",
+      "schedule": "0 7 * * *"
+    },
+    {
+      "path": "/api/cron/proposals/remind",
+      "schedule": "0 13 * * *"
+    },
+    {
       "path": "/api/cron/google-watches/renew",
       "schedule": "0 */6 * * *"
     },
