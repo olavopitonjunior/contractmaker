@@ -316,15 +316,15 @@ Descrição: {{this.descricao}}
 
 <h2>CLÁUSULA OITAVA - DA INADIMPLÊNCIA</h2>
 
-<p><strong>8.1.</strong> O descumprimento de qualquer obrigação prevista neste instrumento, incluindo, mas não se limitando ao disposto no item 4.1 (prazo para formalização do financiamento), sujeitará a parte inadimplente ao pagamento de multa moratória de 2% (dois por cento) sobre o valor da obrigação descumprida, acrescida de juros moratórios de 1% (um por cento) ao mês, calculados <em>pro rata die</em>, sem prejuízo das demais cominações previstas neste contrato. A parte inadimplente terá o prazo de 15 (quinze) dias para a purgação da mora, contados da notificação escrita.</p>
+<p><strong>8.1.</strong> O descumprimento de qualquer obrigação prevista neste instrumento, incluindo, mas não se limitando ao disposto no item 4.1 (prazo para formalização do financiamento), sujeitará a parte inadimplente ao pagamento de multa moratória de {{numero config.multa_penal_moratoria}}% ({{numeroExtenso config.multa_penal_moratoria}} por cento) sobre o valor da obrigação descumprida, acrescida de juros moratórios de {{numero config.juros_mensais_atraso}}% ({{numeroExtenso config.juros_mensais_atraso}} por cento) ao mês, calculados <em>pro rata die</em>, sem prejuízo das demais cominações previstas neste contrato. A parte inadimplente terá o prazo de {{numero config.prazo_atraso_rescisao}} ({{numeroExtenso config.prazo_atraso_rescisao}}) dias para a purgação da mora, contados da notificação escrita.</p>
 
 <hr>
 
 <h2>CLÁUSULA NONA - DA RESCISÃO</h2>
 
-<p><strong>9.1.</strong> Na hipótese de rescisão por culpa exclusiva do(s) PROMISSÁRIO(S) COMPRADOR(ES), este(s) pagará(ão) ao(s) PROMITENTE(S) VENDEDOR(ES) multa compensatória equivalente a 5% (cinco por cento) do valor total do contrato, podendo o(s) PROMITENTE(S) VENDEDOR(ES) reter tal quantia dos valores já pagos, devolvendo o saldo remanescente em até 30 (trinta) dias.</p>
+<p><strong>9.1.</strong> Na hipótese de rescisão por culpa exclusiva do(s) PROMISSÁRIO(S) COMPRADOR(ES), este(s) pagará(ão) ao(s) PROMITENTE(S) VENDEDOR(ES) multa compensatória equivalente a {{numero config.multa_penal_compensatoria}}% ({{numeroExtenso config.multa_penal_compensatoria}} por cento) do valor total do contrato, podendo o(s) PROMITENTE(S) VENDEDOR(ES) reter tal quantia dos valores já pagos, devolvendo o saldo remanescente em até {{numero config.prazo_multa_rescisoria}} ({{numeroExtenso config.prazo_multa_rescisoria}}) dias.</p>
 
-<p><strong>9.2.</strong> Na hipótese de rescisão por culpa exclusiva do(s) PROMITENTE(S) VENDEDOR(ES), este(s) restituirá(ão) integralmente os valores recebidos ao(s) PROMISSÁRIO(S) COMPRADOR(ES), acrescidos de multa compensatória equivalente a 5% (cinco por cento) do valor total do contrato, no prazo de 30 (trinta) dias contados da formalização da rescisão.</p>
+<p><strong>9.2.</strong> Na hipótese de rescisão por culpa exclusiva do(s) PROMITENTE(S) VENDEDOR(ES), este(s) restituirá(ão) integralmente os valores recebidos ao(s) PROMISSÁRIO(S) COMPRADOR(ES), acrescidos de multa compensatória equivalente a {{numero config.multa_penal_compensatoria}}% ({{numeroExtenso config.multa_penal_compensatoria}} por cento) do valor total do contrato, no prazo de {{numero config.prazo_multa_rescisoria}} ({{numeroExtenso config.prazo_multa_rescisoria}}) dias contados da formalização da rescisão.</p>
 
 <p><strong>9.3.</strong> A rescisão por mútuo acordo dispensará a aplicação das multas previstas nos itens 9.1 e 9.2, devendo os valores pagos ser restituídos integralmente ao(s) PROMISSÁRIO(S) COMPRADOR(ES) no prazo acordado entre as partes.</p>
 

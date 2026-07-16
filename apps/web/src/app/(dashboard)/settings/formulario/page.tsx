@@ -4,7 +4,9 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
+import { resolveOrgContractDefaults } from "@/lib/contracts/default-config";
 import { FormSettingsClient } from "./FormSettingsClient";
+import { ContractDefaultsCard } from "./ContractDefaultsCard";
 
 export default async function FormularioSettingsPage() {
   const session = await auth();
@@ -49,6 +51,10 @@ export default async function FormularioSettingsPage() {
           autoSendSummaryOnComplete: settings.autoSendSummaryOnComplete,
           summaryIncludeAttachments: settings.summaryIncludeAttachments,
         }}
+      />
+
+      <ContractDefaultsCard
+        initial={resolveOrgContractDefaults(settings.contractDefaultsJson)}
       />
     </div>
   );

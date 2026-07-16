@@ -192,34 +192,37 @@ describe("template parity (A0.1)", () => {
     expect((enriched.config as Record<string, unknown>).multa_penal_moratoria).toBe(7);
   });
 
-  it("DOCUMENTA: os 8 campos numéricos de config NÃO são lidos pelos templates v2", () => {
-    // Achado real: `multa_penal_moratoria`, `juros_mensais_atraso`,
-    // `atualizacao_monetaria`, `base_calculo_multa`, `prazo_atraso_rescisao`,
-    // `multa_cominatoria_diaria`, `multa_penal_compensatoria` e
-    // `prazo_multa_rescisoria` são coletados/armazenados, mas os v2 trazem
-    // esses números HARDCODED no texto das cláusulas (ex.: "multa de 2%",
-    // "IPCA/IBGE"). Só o template legado `contrato_compra_venda.hbs` os lê.
-    //
-    // Ou seja: mudar esses valores hoje NÃO muda o contrato. Este teste
-    // congela o fato — se alguém parametrizar os templates, ele falha e obriga
-    // a revisitar a aba Configurações (que hoje avisa o usuário disso).
-    const INERTES = [
-      "multa_penal_moratoria",
-      "base_calculo_multa",
-      "juros_mensais_atraso",
-      "atualizacao_monetaria",
-      "prazo_atraso_rescisao",
-      "multa_cominatoria_diaria",
-      "multa_penal_compensatoria",
-      "prazo_multa_rescisoria",
+  it("os campos de config são lidos pelos templates (não voltar a hardcodar)", () => {
+    // Estes números viviam escritos à mão nas cláusulas e os campos do form
+    // eram inertes. Agora a aba Configurações depende deles serem variáveis —
+    // se alguém "simplificar" um de volta pra literal, o campo some da prática
+    // sem nenhum erro visível. Daí o teste.
+    const PARAMETRIZADOS = [
+      "config.multa_penal_moratoria",
+      "config.base_calculo_multa",
+      "config.juros_mensais_atraso",
+      "config.atualizacao_monetaria",
+      "config.prazo_atraso_rescisao",
+      "config.multa_cominatoria_diaria",
+      "config.multa_penal_compensatoria",
+      "config.prazo_multa_rescisoria",
     ];
-    for (const file of ["ccv_a_vista_v2.hbs", "ccv_financiamento_v2.hbs"]) {
-      const tpl = readFileSync(templatePath(file), "utf-8");
-      for (const campo of INERTES) {
-        expect(tpl, `${file} passou a referenciar config.${campo}`).not.toContain(
-          campo
-        );
-      }
+    const aVista = readFileSync(templatePath("ccv_a_vista_v2.hbs"), "utf-8");
+    for (const campo of PARAMETRIZADOS) {
+      expect(aVista, `ccv_a_vista_v2.hbs deixou de usar ${campo}`).toContain(campo);
+    }
+
+    // O financiamento não tem cláusula de multa cominatória diária nem base de
+    // cálculo separada — o resto vale igual.
+    const fin = readFileSync(templatePath("ccv_financiamento_v2.hbs"), "utf-8");
+    for (const campo of [
+      "config.multa_penal_moratoria",
+      "config.juros_mensais_atraso",
+      "config.prazo_atraso_rescisao",
+      "config.multa_penal_compensatoria",
+      "config.prazo_multa_rescisoria",
+    ]) {
+      expect(fin, `ccv_financiamento_v2.hbs deixou de usar ${campo}`).toContain(campo);
     }
   });
 

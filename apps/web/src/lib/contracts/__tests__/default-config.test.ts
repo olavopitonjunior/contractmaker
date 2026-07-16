@@ -20,7 +20,7 @@ describe("resolveOrgContractDefaults", () => {
     });
     expect(out.foro).toBe("justica-publica");
     expect(out.config.multa_penal_moratoria).toBe(5);
-    expect(out.config.atualizacao_monetaria).toBe("IPCA");
+    expect(out.config.atualizacao_monetaria).toBe("IPCA/IBGE");
     expect(out.desistencia).toEqual(DEFAULT_CONTRACT_SETTINGS.desistencia);
   });
 
@@ -62,8 +62,8 @@ describe("extractContractSettings", () => {
     });
     expect(out.foro).toBe("justica-publica");
     expect(out.config.multa_penal_moratoria).toBe(7);
-    // Não gravado → padrão.
-    expect(out.config.prazo_atraso_rescisao).toBe(10);
+    // Não gravado → padrão (= o prazo que a cláusula já praticava).
+    expect(out.config.prazo_atraso_rescisao).toBe(15);
   });
 
   it("usa o padrão da ORG como piso quando informado", () => {

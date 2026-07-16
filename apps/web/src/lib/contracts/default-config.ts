@@ -23,41 +23,61 @@ import { z } from "zod";
  * mesmo com só o branch de venda implementado.
  */
 
+/**
+ * Sem `.default()` nos campos de propósito: o schema descreve um objeto
+ * COMPLETO. Os valores de piso moram em `DEFAULT_CONTRACT_SETTINGS` (e o
+ * caminho parcial é o `resolveOrgContractDefaults`). Isso mantém input e output
+ * do Zod idênticos — com defaults, `z.input` teria tudo opcional e o
+ * `zodResolver` do painel não casaria com o tipo do formulário.
+ */
 export const contractSettingsSchema = z.object({
   desistencia: z.object({
-    permite: z.boolean().default(false),
-    prazo_dias: z.number().int().min(1).max(365).default(7),
+    permite: z.boolean(),
+    prazo_dias: z.number().int().min(1).max(365),
   }),
   foro: z.enum(["arbitragem", "justica-publica"]),
   assinatura: z.object({
-    cidade: z.string().max(120).default(""),
-    uf: z.string().max(2).default(""),
+    cidade: z.string().max(120),
+    uf: z.string().max(2),
     // "" = usar a data em que o contrato for assinado (o template cai no
     // fallback do enrich); senão ISO yyyy-mm-dd.
     data: z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/, "Data deve ser AAAA-MM-DD")
-      .or(z.literal(""))
-      .default(""),
+      .or(z.literal("")),
   }),
   config: z.object({
-    multa_penal_moratoria: z.number().min(0).max(100).default(2),
-    base_calculo_multa: z.string().max(200).default("valor da parcela"),
-    juros_mensais_atraso: z.number().min(0).max(100).default(1),
-    atualizacao_monetaria: z.string().max(100).default("IPCA"),
-    prazo_atraso_rescisao: z.number().int().min(1).max(365).default(10),
-    multa_cominatoria_diaria: z.number().min(0).default(150),
-    multa_penal_compensatoria: z.number().min(0).max(100).default(10),
-    prazo_multa_rescisoria: z.number().int().min(1).max(365).default(7),
+    multa_penal_moratoria: z.number().min(0).max(100),
+    base_calculo_multa: z.string().max(200),
+    juros_mensais_atraso: z.number().min(0).max(100),
+    atualizacao_monetaria: z.string().max(100),
+    prazo_atraso_rescisao: z.number().int().min(1).max(365),
+    multa_cominatoria_diaria: z.number().min(0),
+    multa_penal_compensatoria: z.number().min(0).max(100),
+    prazo_multa_rescisoria: z.number().int().min(1).max(365),
   }),
 });
 
 export type ContractSettings = z.infer<typeof contractSettingsSchema>;
 
 /**
- * Padrão de fábrica. São os mesmos literais que viviam hardcoded em
- * `SalesFormWizard.defaultFormValues` — manter em sincronia importa: forms
- * antigos gravaram exatamente estes valores no dataJson.
+ * Padrão de fábrica.
+ *
+ * ATENÇÃO — estes valores são o TEXTO JURÍDICO que os templates v2 já
+ * praticavam, não os defaults do formulário antigo. A diferença importa:
+ *
+ * Antes de os templates serem parametrizados, esses 8 campos eram coletados no
+ * form mas IGNORADOS — os v2 traziam os números escritos à mão nas cláusulas.
+ * E os dois conjuntos divergiam: o form default-ava multa compensatória 10%,
+ * multa diária R$ 150 e purgação em 10 dias, enquanto as cláusulas diziam 5%,
+ * R$ 500,00 e 15 dias. Adotar os defaults do form ao parametrizar teria DOBRADO
+ * as perdas e danos de todo contrato novo, silenciosamente.
+ *
+ * Então o piso é o que o contrato já dizia. Mudar daqui pra frente é decisão
+ * explícita da imobiliária, na aba Configurações.
+ * `apps/web/src/__tests__/template-params-parity.test.ts` trava isso: o HTML
+ * renderizado com estes defaults tem que bater byte a byte com o de antes da
+ * parametrização.
  */
 export const DEFAULT_CONTRACT_SETTINGS: ContractSettings = {
   desistencia: { permite: false, prazo_dias: 7 },
@@ -65,13 +85,13 @@ export const DEFAULT_CONTRACT_SETTINGS: ContractSettings = {
   assinatura: { cidade: "", uf: "", data: "" },
   config: {
     multa_penal_moratoria: 2,
-    base_calculo_multa: "valor da parcela",
+    base_calculo_multa: "valor da obrigação inadimplida",
     juros_mensais_atraso: 1,
-    atualizacao_monetaria: "IPCA",
-    prazo_atraso_rescisao: 10,
-    multa_cominatoria_diaria: 150,
-    multa_penal_compensatoria: 10,
-    prazo_multa_rescisoria: 7,
+    atualizacao_monetaria: "IPCA/IBGE",
+    prazo_atraso_rescisao: 15,
+    multa_cominatoria_diaria: 500,
+    multa_penal_compensatoria: 5,
+    prazo_multa_rescisoria: 30,
   },
 };
 
