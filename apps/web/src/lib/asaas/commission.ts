@@ -6,6 +6,7 @@
  */
 
 import type { CreatePaymentInput, CreateCustomerInput, AsaasSplit } from "./types";
+import { parseMoneyBR } from "@/lib/format/money";
 
 // Tipo mínimo para trabalhar — reflete a parte de `comissao` do DadosContrato.
 // Evita dep circular com lib/forms por enquanto; caller valida completude.
@@ -154,17 +155,6 @@ export function resolvePayer(
   };
 }
 
-function parseNumber(v: unknown): number {
-  if (typeof v === "number") return v;
-  if (typeof v === "string") {
-    // Aceita "1.000,00", "1000.00", "1000"
-    const cleaned = v.replace(/\./g, "").replace(",", ".").replace(/[^0-9.-]/g, "");
-    const n = parseFloat(cleaned);
-    return isNaN(n) ? 0 : n;
-  }
-  return 0;
-}
-
 /**
  * Calcula o valor da comissão a cobrar.
  * Prioridade: `override` > `comissao.valor` > `comissao.percentual` × `pagamento.valor_total`.
@@ -175,11 +165,23 @@ export function resolveCommissionValue(
 ): number {
   if (typeof opts.override === "number" && opts.override > 0) return opts.override;
 
-  const valor = parseNumber(data.comissao?.valor);
-  if (valor > 0) return valor;
+  const total = parseMoneyBR(data.pagamento?.valor_total);
 
-  const pct = parseNumber(data.comissao?.percentual);
-  const total = parseNumber(data.pagamento?.valor_total);
+  const valor = parseMoneyBR(data.comissao?.valor);
+  if (valor > 0) {
+    // Sanidade: comissão explícita maior que o valor do imóvel é quase sempre
+    // erro de digitação (o bug 100× produzia exatamente isto). Bloqueia em vez
+    // de emitir uma cobrança absurda.
+    if (total > 0 && valor > total) {
+      throw new CommissionBuildError(
+        "INVALID_VALUE",
+        `Valor de comissão (${valor}) maior que o valor do imóvel (${total}) — provável erro de digitação.`
+      );
+    }
+    return valor;
+  }
+
+  const pct = parseMoneyBR(data.comissao?.percentual);
   if (pct > 0 && total > 0) {
     return Math.round(((pct / 100) * total) * 100) / 100;
   }

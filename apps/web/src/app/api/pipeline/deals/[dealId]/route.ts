@@ -213,12 +213,33 @@ export async function DELETE(
     }
   }
 
-  // Cascata transacional. Onde Cascade FK não cobre (CertidaoJob, DealAttachment),
-  // fazemos deleteMany explícito.
+  // Cleanup fora da cascata (ContractMemory sem FK + blobs órfãos). Coleta
+  // ANTES do delete.
   const formId = deal.formId;
+  const contractIds = deal.contracts.map((c) => c.id);
+  const {
+    collectContractBlobUrls,
+    deleteContractMemories,
+    deleteBlobs,
+  } = await import("@/lib/contracts/delete-cleanup");
+  const contractBlobUrls = await collectContractBlobUrls(prisma, contractIds);
+  // Blobs de FormAttachment (RG/CNH) só somem se o form também for deletado.
+  const formBlobUrls =
+    deleteForm && formId
+      ? (
+          await prisma.formAttachment.findMany({
+            where: { formId },
+            select: { url: true },
+          })
+        ).map((a) => a.url)
+      : [];
+
+  // Cascata transacional. Onde Cascade FK não cobre (CertidaoJob, DealAttachment,
+  // ContractMemory), fazemos deleteMany explícito.
   const counts = await prisma.$transaction(async (tx) => {
     const jobs = await tx.certidaoJob.deleteMany({ where: { dealId: deal.id } });
     const atts = await tx.dealAttachment.deleteMany({ where: { dealId: deal.id } });
+    await deleteContractMemories(tx, contractIds);
     const contracts = await tx.contract.deleteMany({ where: { dealId: deal.id } });
     await tx.deal.delete({ where: { id: deal.id } });
     let formsDeleted = 0;
@@ -238,17 +259,21 @@ export async function DELETE(
   // (se a transação falhar, não removemos arquivos). Antes a deleção do deal
   // órfãava 100% dos arquivos no Blob/S3. Cada item é isolado em try/catch
   // dentro de deleteFromStorage.
-  let blobsDeleted = 0;
-  const urlsToDelete = [
-    ...deal.attachments.map((a) => a.url),
-    ...deal.envelopes.flatMap((e) => [e.documentUrl, e.signedDocumentUrl]),
-  ];
-  if (urlsToDelete.length > 0) {
-    const { deleteFromStorage } = await import("@/lib/storage/s3");
-    for (const url of urlsToDelete) {
-      if (await deleteFromStorage(url)) blobsDeleted++;
-    }
-  }
+  // Dedup via Set — collectContractBlobUrls também traz os PDFs de envelope,
+  // que já vêm de deal.envelopes; deletar a mesma URL 2× é inofensivo, mas o
+  // Set evita trabalho redundante. Inclui ChatAttachment (via contratos) e
+  // FormAttachment (RG/CNH) que antes ficavam órfãos.
+  const urlsToDelete = Array.from(
+    new Set(
+      [
+        ...deal.attachments.map((a) => a.url),
+        ...deal.envelopes.flatMap((e) => [e.documentUrl, e.signedDocumentUrl]),
+        ...contractBlobUrls,
+        ...formBlobUrls,
+      ].filter((u): u is string => Boolean(u))
+    )
+  );
+  const blobsDeleted = await deleteBlobs(urlsToDelete);
 
   await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
     action: "DEAL_DELETE",

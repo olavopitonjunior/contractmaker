@@ -103,8 +103,23 @@ export async function DELETE(
     }
   }
 
+  // Cleanup fora da cascata: ContractMemory (PII, sem FK) + blobs órfãos.
+  const contractIds = deal.contracts.map((c) => c.id);
+  const {
+    collectContractBlobUrls,
+    deleteContractMemories,
+    deleteBlobs,
+  } = await import("@/lib/contracts/delete-cleanup");
+  const blobUrls = await collectContractBlobUrls(prisma, contractIds);
+
   // Cascata FK derruba ContractClause/Comment/Suggestion/ChangeLog/ChatSession/Envelope
-  const result = await prisma.contract.deleteMany({ where: { dealId: deal.id } });
+  const result = await prisma.$transaction(async (tx) => {
+    await deleteContractMemories(tx, contractIds);
+    return tx.contract.deleteMany({ where: { dealId: deal.id } });
+  });
+
+  const { waitUntil } = await import("@vercel/functions");
+  waitUntil(deleteBlobs(blobUrls));
 
   await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
     action: "CONTRACT_DELETE_BULK",
@@ -114,6 +129,7 @@ export async function DELETE(
     metadata: {
       contractsDeleted: result.count,
       googleDocsTrashed: trashed,
+      blobsQueued: blobUrls.length,
     },
   });
 

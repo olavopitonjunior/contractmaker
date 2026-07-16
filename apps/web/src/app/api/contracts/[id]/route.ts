@@ -153,9 +153,20 @@ export async function DELETE(
     await trashDriveFile(contract.googleDocId, org.id);
   }
 
+  // Coleta blobs órfãos ANTES do delete (as rows somem na cascata).
+  const {
+    collectContractBlobUrls,
+    deleteContractMemories,
+    deleteBlobs,
+  } = await import("@/lib/contracts/delete-cleanup");
+  const blobUrls = await collectContractBlobUrls(prisma, [contract.id]);
+
   // Delete + promote latest em transação atômica
   let promoted: { contractId: string; version: number } | null = null;
   await prisma.$transaction(async (tx) => {
+    // ContractMemory não tem FK — deleta explicitamente pra não vazar PII
+    // das partes pra chats de outros deals via find_similar_contracts.
+    await deleteContractMemories(tx, [contract.id]);
     await tx.contract.delete({ where: { id: contract.id } });
     if (contract.isLatest) {
       // Promote escopado por kind — latest é por (dealId, kind); sem o filtro,
@@ -176,6 +187,10 @@ export async function DELETE(
     }
   });
 
+  // Blobs órfãos: deleta pós-commit (best-effort, não segura a resposta).
+  const { waitUntil } = await import("@vercel/functions");
+  waitUntil(deleteBlobs(blobUrls));
+
   await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
     action: "CONTRACT_DELETE",
     result: "SUCCESS",
@@ -186,6 +201,7 @@ export async function DELETE(
       wasLatest: contract.isLatest,
       promoted,
       googleDocTrashed: Boolean(contract.googleDocId),
+      blobsQueued: blobUrls.length,
     },
   });
 
