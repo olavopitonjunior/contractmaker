@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireCronAuth } from "@/lib/security/cron-auth";
 import { expirePendingIntents } from "@/lib/api/intents";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
 
@@ -14,13 +15,8 @@ export const dynamic = "force-dynamic";
  * Auth: opcional via `CRON_SECRET` em Authorization header.
  */
 export async function GET(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const authHeader = req.headers.get("authorization");
-    if (authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-  }
+  const cronDenied = requireCronAuth(req);
+  if (cronDenied) return cronDenied;
   if (!(await isCronAllowedInStaging("/api/cron/intents/expire"))) {
     return NextResponse.json({ skipped: "staging-disabled", path: "/api/cron/intents/expire" });
   }

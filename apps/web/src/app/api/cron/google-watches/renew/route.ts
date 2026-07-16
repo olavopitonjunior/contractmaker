@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireCronAuth } from "@/lib/security/cron-auth";
 import { prisma } from "@/lib/db/prisma";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
 
@@ -13,13 +14,8 @@ export const maxDuration = 60;
  * certidoes/poll-portal). Em Vercel, cron jobs já incluem esse header.
  */
 export async function GET(req: NextRequest) {
-  const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret) {
-    const auth = req.headers.get("authorization");
-    if (auth !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-    }
-  }
+  const cronDenied = requireCronAuth(req);
+  if (cronDenied) return cronDenied;
   if (!(await isCronAllowedInStaging("/api/cron/google-watches/renew"))) {
     return NextResponse.json({ skipped: "staging-disabled", path: "/api/cron/google-watches/renew" });
   }
