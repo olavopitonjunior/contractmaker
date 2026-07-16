@@ -19,6 +19,8 @@ import { advanceProposalStatus } from "../status";
 import { buildAcceptanceProof } from "../acceptance-proof";
 
 const propFind = prisma.proposal.findFirst as unknown as ReturnType<typeof vi.fn>;
+const propFindUnique = prisma.proposal.findUnique as unknown as ReturnType<typeof vi.fn>;
+const signerFind = prisma.proposalSigner.findFirst as unknown as ReturnType<typeof vi.fn>;
 const advance = advanceProposalStatus as unknown as ReturnType<typeof vi.fn>;
 const proof = buildAcceptanceProof as unknown as ReturnType<typeof vi.fn>;
 
@@ -93,5 +95,29 @@ describe("processProposalAcceptanceEvent", () => {
     const r = await processProposalAcceptanceEvent({ acceptanceId: "acc_1", phase: "created", payload: {} });
     expect(r.handled).toBe(false);
     expect(advance).not.toHaveBeenCalled();
+  });
+
+  it("completed de NÃO-proponente → não completa (só registra a linha)", async () => {
+    // Resolve por signatário: role vendedor → não é o proponente.
+    signerFind.mockResolvedValue({ id: "s2", role: "vendedor", proposalId: "p1" });
+    propFindUnique.mockResolvedValue({ ...PROPOSAL, validUntil: null });
+    const r = await processProposalAcceptanceEvent({ acceptanceId: "acc_2", phase: "completed", payload: {} });
+    expect(r.handled).toBe(true);
+    // Não deve ter chamado assinada_proponente/completa.
+    const dests = advance.mock.calls.map((c) => c[1]);
+    expect(dests).not.toContain("completa");
+  });
+
+  it("completed do proponente APÓS validUntil → expira, não completa (CC art. 431)", async () => {
+    signerFind.mockResolvedValue({ id: "s1", role: "proponente", proposalId: "p1" });
+    propFindUnique.mockResolvedValue({
+      ...PROPOSAL,
+      validUntil: new Date(Date.now() - 24 * 3600 * 1000), // ontem
+    });
+    await processProposalAcceptanceEvent({ acceptanceId: "acc_1", phase: "completed", payload: {} });
+    const dests = advance.mock.calls.map((c) => c[1]);
+    expect(dests).toContain("expirada");
+    expect(dests).not.toContain("completa");
+    expect(proof).not.toHaveBeenCalled();
   });
 });

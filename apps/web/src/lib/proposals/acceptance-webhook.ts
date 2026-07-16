@@ -64,18 +64,35 @@ export async function processProposalAcceptanceEvent(
   input: AcceptanceEventInput
 ): Promise<AcceptanceProcessResult> {
   const orgScope = input.orgId ? { orgId: input.orgId } : {};
-  const proposal = await prisma.proposal.findFirst({
-    where: { acceptanceClicksignId: input.acceptanceId, ...orgScope },
-    select: {
-      id: true,
-      title: true,
-      token: true,
-      instrument: true,
+
+  // Resolve por SIGNATÁRIO primeiro (cada ProposalSigner tem seu acceptance_term)
+  // e cai pra Proposal.acceptanceClicksignId (compat). Saber QUEM aceitou é o que
+  // permite (a) marcar o desfecho do signatário certo, (b) só completar quando o
+  // PROPONENTE aceitar, (c) não descartar a recusa de um proprietário.
+  const signer = await prisma.proposalSigner.findFirst({
+    where: {
+      acceptanceClicksignId: input.acceptanceId,
+      ...(input.orgId ? { proposal: { orgId: input.orgId } } : {}),
     },
+    select: { id: true, role: true, proposalId: true },
   });
+  const proposal = signer
+    ? await prisma.proposal.findUnique({
+        where: { id: signer.proposalId },
+        select: { id: true, title: true, token: true, instrument: true, validUntil: true },
+      })
+    : await prisma.proposal.findFirst({
+        where: { acceptanceClicksignId: input.acceptanceId, ...orgScope },
+        select: { id: true, title: true, token: true, instrument: true, validUntil: true },
+      });
   if (!proposal) {
     return { ok: true, handled: false, phase: input.phase, unknownAcceptance: true };
   }
+
+  // O signatário é o proponente quando resolvemos por linha e role="proponente",
+  // OU quando caímos no fallback (Proposal.acceptanceClicksignId aponta pro
+  // proponente por construção no envio).
+  const isProponente = signer ? signer.role === "proponente" : true;
 
   // Registra SEMPRE o evento cru na timeline da proposta (durabilidade §9.6).
   await prisma.proposalEvent
@@ -91,6 +108,21 @@ export async function processProposalAcceptanceEvent(
 
   const facts = factsFromPayload(input.payload);
 
+  // Marca o desfecho NA LINHA do signatário (quando resolvido por linha).
+  if (signer) {
+    const perSigner: Record<string, { acceptanceStatus: string; acceptedAt?: Date; refusedAt?: Date }> = {
+      completed: { acceptanceStatus: "completed", acceptedAt: new Date() },
+      refused: { acceptanceStatus: "refused", refusedAt: new Date() },
+      expired: { acceptanceStatus: "expired" },
+    };
+    const upd = perSigner[input.phase];
+    if (upd) {
+      await prisma.proposalSigner
+        .update({ where: { id: signer.id }, data: upd })
+        .catch(() => {});
+    }
+  }
+
   switch (input.phase) {
     case "sent":
       // No Aceite a ClickSign confirma a ENTREGA — "Entregue" é real neste modo.
@@ -98,9 +130,23 @@ export async function processProposalAcceptanceEvent(
       break;
 
     case "completed": {
-      // O proponente aceitou: proposta completa. Reusa as transições existentes
-      // (enviada/entregue/visualizada → assinada_proponente → completa) em vez
-      // de alargar ALLOWED_FROM.
+      // Só o aceite do PROPONENTE completa a proposta. O aceite de um proprietário
+      // (terceiro) é registrado na linha dele, mas não redefine o desfecho —
+      // antes, com 1 aceite de qualquer um a proposta virava "completa".
+      if (!isProponente) {
+        return { ok: true, handled: true, proposalId: proposal.id, phase: input.phase };
+      }
+
+      // Caducidade (CC art. 431): aceite após validUntil não vincula como aceite
+      // — registra o evento mas NÃO marca "completa". O prazo expirado vale, no
+      // máximo, como nova proposta a ser reavaliada pelo operador.
+      if (proposal.validUntil && new Date() > proposal.validUntil) {
+        await advanceProposalStatus(proposal.id, "expirada", { expiredAt: new Date() });
+        return { ok: true, handled: true, proposalId: proposal.id, phase: input.phase };
+      }
+
+      // O proponente aceitou dentro do prazo: proposta completa. Reusa as
+      // transições existentes em vez de alargar ALLOWED_FROM.
       await advanceProposalStatus(proposal.id, "assinada_proponente");
       await advanceProposalStatus(proposal.id, "completa", { completedAt: new Date() });
 

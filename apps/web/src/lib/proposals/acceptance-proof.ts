@@ -99,23 +99,29 @@ export async function buildAcceptanceProof(
   if (!proposal) return { skipped: "not_found" };
   if (proposal.dossierUrl) return { skipped: "already_built" };
 
-  const dataJson = (proposal.dataJson ?? {}) as Record<string, unknown>;
-  const tpl = proposal.templateId
-    ? await prisma.contractTemplate.findUnique({ where: { id: proposal.templateId } })
-    : (await selectPropostaTemplate(proposal.orgId, proposal.schemaType))?.template ?? null;
-
-  // Documento como a pessoa viu (via completa — o Aceite não faz ocultação).
-  const proposalHtml = tpl?.handlebarsSource
-    ? renderProposalVia({
-        templateSource: tpl.handlebarsSource,
-        schemaType: proposal.schemaType,
-        dataJson,
-        hiddenPaths: [],
-        via: "completa",
-        numero: proposal.id.slice(-8),
-        comissaoIncluida: proposal.comissaoIncluida,
-      })
-    : (proposal.htmlContent ?? "<p>Proposta</p>");
+  // Documento como a pessoa REALMENTE viu no envio: usa o snapshot CONGELADO,
+  // nunca re-renderiza o template atual (que pode ter mudado via sync-templates
+  // entre o envio e o aceite — reproduzir um doc diferente do aceito anula o
+  // valor probatório). Fallback ao re-render só pra propostas antigas sem
+  // snapshot.
+  let proposalHtml = proposal.sentSnapshotHtml ?? "";
+  if (!proposalHtml) {
+    const dataJson = (proposal.dataJson ?? {}) as Record<string, unknown>;
+    const tpl = proposal.templateId
+      ? await prisma.contractTemplate.findUnique({ where: { id: proposal.templateId } })
+      : (await selectPropostaTemplate(proposal.orgId, proposal.schemaType))?.template ?? null;
+    proposalHtml = tpl?.handlebarsSource
+      ? renderProposalVia({
+          templateSource: tpl.handlebarsSource,
+          schemaType: proposal.schemaType,
+          dataJson,
+          hiddenPaths: [],
+          via: "completa",
+          numero: proposal.id.slice(-8),
+          comissaoIncluida: proposal.comissaoIncluida,
+        })
+      : (proposal.htmlContent ?? "<p>Proposta</p>");
+  }
 
   const html = buildAcceptanceProofHtml({
     proposalHtml,

@@ -5,7 +5,8 @@ import {
   isAuthFailure,
   authFailureResponse,
 } from "@/lib/api/require-auth";
-import { getEffectivePermissions, canAccessProposal } from "@/lib/security/rbac/check";
+import { getEffectivePermissions, canAccessProposal, can } from "@/lib/security/rbac/check";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { ClicksignError } from "@/lib/clicksign/client";
 import { syncEnvelopeState, EnvelopeNotSyncableError } from "@/lib/clicksign/sync";
 import {
@@ -34,6 +35,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const eff = await getEffectivePermissions(auth.actor.effectiveUserId, auth.org.id);
   if (!eff || !canAccessProposal({ effective: eff, ownerUserId: proposal.userId })) {
     return NextResponse.json({ error: "Não encontrada" }, { status: 404 });
+  }
+  // /sync dispara chamadas REST à ClickSign + muta status → é ação de escrita,
+  // não de leitura. Antes um viewer (só PROPOSAL_VIEW_ALL) passava e acionava
+  // efeitos colaterais. Exige a mesma permissão do envio.
+  if (!can(eff, PERMISSION.PROPOSAL_SEND)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const debug = new URL(req.url).searchParams.get("debug") === "1";
