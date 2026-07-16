@@ -45,7 +45,10 @@ export default async function AIRunsPage({
 
   const counts = Object.fromEntries(grouped.map((g) => [g.outcome, g._count._all]));
   const total = grouped.reduce((s, g) => s + g._count._all, 0);
-  const applied = (counts.applied ?? 0) + (counts.applied_partial ?? 0);
+  // applied_data (update_contract_data bem-sucedido) É aplicação — antes era
+  // "failed" e não entrava; agora conta no numerador do % aplicados.
+  const applied =
+    (counts.applied ?? 0) + (counts.applied_partial ?? 0) + (counts.applied_data ?? 0);
   const appliedPct = total > 0 ? Math.round((applied / total) * 100) : 0;
   const confab = counts.confabulation_blocked ?? 0;
   const failed = counts.failed ?? 0;

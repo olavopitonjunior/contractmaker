@@ -29,10 +29,15 @@ function wordSafeTail(s: string, overlapChars: number): string {
   if (overlapChars <= 0 || s.length <= overlapChars) return s;
   const rawStart = s.length - overlapChars;
   // Recua até a fronteira de palavra no espaço em/antes de rawStart — overlap
-  // fica ligeiramente maior que o alvo, porém SEMPRE começa em palavra íntegra.
+  // fica ligeiramente maior que o alvo, porém começa em palavra íntegra.
+  // LIMITE do backtrack a ~2× overlapChars: sem isso, um bloco com um espaço
+  // isolado no começo seguido de um token gigante faria o tail ≈ a string
+  // inteira, e o loop de hard-cut avançaria ~1 char/iteração (explosão de
+  // chunks). Recuo além do limite → corte cru em rawStart (aceitável no caso
+  // patológico de token único enorme).
+  const minStart = rawStart - overlapChars;
   const prevSpace = s.lastIndexOf(" ", rawStart);
-  if (prevSpace >= 0) return s.slice(prevSpace + 1);
-  // Sem espaço anterior → a cauda é um único token gigante (raro); corte cru.
+  if (prevSpace >= minStart) return s.slice(prevSpace + 1);
   return s.slice(rawStart);
 }
 

@@ -520,7 +520,7 @@ export function VendedorStep({ form }: VendedorStepProps) {
       tipo_pessoa: "fisica",
       nome: "",
       nacionalidade: "Brasileiro(a)",
-      estado_civil: "Solteiro(a)",
+      estado_civil: "", // vazio => select mostra "Selecione…"; força escolha (outorga)
       profissao: "",
       rg: "",
       cpf: "",

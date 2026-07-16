@@ -890,36 +890,41 @@ async function handleQueryKnowledgeBase(
       ...params
     );
 
-    // Piso de relevância: descarta o que está abaixo do limiar (ruído). Se
-    // sobrar nada acima do piso, devolve lista vazia + note pro modelo — melhor
-    // que citar a "cláusula menos distante" quando nenhuma é pertinente.
-    const relevant = rows.filter((r) => Number(r.similarity ?? 0) >= RAG_MIN_SIMILARITY);
-    if (relevant.length === 0) {
-      return {
-        results: [],
-        mode: "semantic",
-        topK,
-        note: `Nenhum item na base com similaridade ≥ ${RAG_MIN_SIMILARITY} pra esta consulta. Não invente cláusula: use placeholder [preencher] se precisar do dado.`,
-        topSimilarity: rows.length
-          ? Number(Math.max(...rows.map((r) => Number(r.similarity ?? 0))).toFixed(3))
-          : 0,
-      };
-    }
+    // Piso de relevância como ANOTAÇÃO, não como filtro que oculta. Descartar
+    // resultados abaixo do piso podia esconder uma cláusula real — inclusive
+    // OBRIGATÓRIA (ex.: G4 em financiamento embeda em ~0.32 contra query
+    // parafraseada) — e mandar o agente usar placeholder no lugar. Então:
+    //  - com groupCode explícito, o filtro de grupo já garante pertinência →
+    //    piso NÃO se aplica (nunca oculta cláusula do grupo pedido);
+    //  - sem groupCode, devolve todos os topK mas marca `lowConfidence` nos de
+    //    baixa similaridade, e só quando TODOS estão abaixo do piso adiciona um
+    //    note pedindo pro modelo avaliar pertinência (sem esconder nada).
+    const mapped = rows.map((r) => ({
+      id: r.id,
+      title: r.title,
+      content: r.content.slice(0, 800),
+      category: r.category,
+      groupCode: r.groupCode,
+      subcategory: r.subcategory,
+      agentNotes: r.agentNotes,
+      tags: r.tags,
+      source: r.source,
+      similarity: Number(r.similarity?.toFixed?.(3) ?? r.similarity),
+      lowConfidence: !groupCode && Number(r.similarity ?? 0) < RAG_MIN_SIMILARITY,
+    }));
+    const allLow =
+      !groupCode &&
+      rows.length > 0 &&
+      rows.every((r) => Number(r.similarity ?? 0) < RAG_MIN_SIMILARITY);
     return {
-      results: relevant.map((r) => ({
-        id: r.id,
-        title: r.title,
-        content: r.content.slice(0, 800),
-        category: r.category,
-        groupCode: r.groupCode,
-        subcategory: r.subcategory,
-        agentNotes: r.agentNotes,
-        tags: r.tags,
-        source: r.source,
-        similarity: Number(r.similarity?.toFixed?.(3) ?? r.similarity),
-      })),
+      results: mapped,
       mode: "semantic",
       topK,
+      ...(allLow
+        ? {
+            note: `Nenhum item com similaridade alta (≥ ${RAG_MIN_SIMILARITY}) pra esta consulta — avalie a pertinência antes de citar. Se uma cláusula OBRIGATÓRIA (ex.: G4) estiver na lista, use-a mesmo assim; se nada servir, use placeholder [preencher].`,
+          }
+        : {}),
     };
   } catch (err) {
     // Em vez de retornar {error} e gastar o turn do agente esperando um

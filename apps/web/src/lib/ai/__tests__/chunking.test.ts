@@ -25,6 +25,16 @@ describe("chunkText — overlap na fronteira de palavra", () => {
     }
   });
 
+  it("bloco com espaço isolado + token gigante não explode em milhares de chunks", () => {
+    // "ab" + espaço + 20k chars sem espaço. Sem o limite do backtrack, o loop
+    // de hard-cut avançaria ~1 char/iteração. Deve terminar com contagem sã.
+    const texto = "ab " + "x".repeat(20_000);
+    const out = chunkText(texto, 800, 100); // maxChars 3200
+    // Piso teórico ~ len/(maxChars) ≈ 20000/3200 ≈ 7. Teto generoso: 3×.
+    expect(out.length).toBeGreaterThan(0);
+    expect(out.length).toBeLessThan(25);
+  });
+
   it("índices são sequenciais e total bate com o número de chunks", () => {
     const texto = "Frase A. ".repeat(300);
     const out = chunkText(texto, 50, 10);

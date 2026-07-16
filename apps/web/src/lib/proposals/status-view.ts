@@ -62,6 +62,8 @@ export function signerStatusLabel(
       return { label: "Assinou", className: "text-emerald-700" };
     case "refused":
       return { label: "Recusou", className: "text-destructive" };
+    case "canceled":
+      return { label: "Cancelado", className: "text-muted-foreground" };
     case "expired":
       return { label: "Expirou", className: "text-muted-foreground" };
     case "sent":
