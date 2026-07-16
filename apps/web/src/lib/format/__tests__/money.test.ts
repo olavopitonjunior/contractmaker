@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseMoneyBR } from "../money";
+import { parseMoneyBR, parsePercentBR } from "../money";
 
 describe("parseMoneyBR", () => {
   it.each([
@@ -46,5 +46,28 @@ describe("parseMoneyBR", () => {
     // Antes: "1000.00" → 100000. Agora tem que ser 1000.
     expect(parseMoneyBR("1000.00")).not.toBe(100000);
     expect(parseMoneyBR("1000.00")).toBe(1000);
+  });
+});
+
+describe("parsePercentBR", () => {
+  it.each([
+    ["6", 6],
+    ["6,5", 6.5],
+    ["6.5", 6.5],
+    // Porcentagem nunca tem milhar — ponto/vírgula é sempre decimal:
+    ["6.500", 6.5], // NÃO 6500
+    ["6,500", 6.5],
+    ["0.750", 0.75],
+    ["100", 100],
+    ["", 0],
+    [6.5, 6.5],
+    ["-1,5", -1.5],
+  ])("parsePercentBR(%p) === %p", (input, expected) => {
+    expect(parsePercentBR(input as string | number)).toBe(expected);
+  });
+
+  it("NÃO infla o percentual ~1000× (regressão do 3º review)", () => {
+    // "6.500" (6,5%) NÃO pode virar 6500 (comissão ~1000× maior).
+    expect(parsePercentBR("6.500")).toBe(6.5);
   });
 });

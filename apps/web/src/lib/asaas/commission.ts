@@ -6,7 +6,7 @@
  */
 
 import type { CreatePaymentInput, CreateCustomerInput, AsaasSplit } from "./types";
-import { parseMoneyBR } from "@/lib/format/money";
+import { parseMoneyBR, parsePercentBR } from "@/lib/format/money";
 
 // Tipo mínimo para trabalhar — reflete a parte de `comissao` do DadosContrato.
 // Evita dep circular com lib/forms por enquanto; caller valida completude.
@@ -174,7 +174,9 @@ export function resolveCommissionValue(
   if (valor > 0) return valor;
 
   const total = parseMoneyBR(data.pagamento?.valor_total);
-  const pct = parseMoneyBR(data.comissao?.percentual);
+  // Percentual usa parser próprio — porcentagem não tem separador de milhar,
+  // então "6.500" é 6,5% e não 6500 (que geraria comissão ~1000× maior).
+  const pct = parsePercentBR(data.comissao?.percentual);
   if (pct > 0 && total > 0) {
     return Math.round(((pct / 100) * total) * 100) / 100;
   }

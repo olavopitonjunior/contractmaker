@@ -235,26 +235,36 @@ export async function DELETE(
         ).map((a) => a.url)
       : [];
 
-  // Cascata transacional. Onde Cascade FK não cobre (CertidaoJob, DealAttachment,
-  // ContractMemory), fazemos deleteMany explícito.
+  // Cascata transacional do DEAL. O salesForm.delete fica FORA desta tx: um
+  // `.catch(()=>null)` dentro dela era ilusório — no Postgres qualquer erro de
+  // statement ABORTA a transação inteira, então o form falhando reverteria o
+  // delete do deal/contratos/anexos SEM sinalizar, e mesmo assim os blobs eram
+  // apagados depois (rows sobreviviam → 404 irrecuperável). Separado, o form é
+  // best-effort de verdade e não arrasta o delete do deal.
   const counts = await prisma.$transaction(async (tx) => {
     const jobs = await tx.certidaoJob.deleteMany({ where: { dealId: deal.id } });
     const atts = await tx.dealAttachment.deleteMany({ where: { dealId: deal.id } });
     await deleteContractMemories(tx, contractIds);
     const contracts = await tx.contract.deleteMany({ where: { dealId: deal.id } });
     await tx.deal.delete({ where: { id: deal.id } });
-    let formsDeleted = 0;
-    if (deleteForm && formId) {
-      const f = await tx.salesForm.delete({ where: { id: formId } }).catch(() => null);
-      if (f) formsDeleted = 1;
-    }
     return {
       certidaoJobs: jobs.count,
       attachments: atts.count,
       contracts: contracts.count,
-      forms: formsDeleted,
+      forms: 0,
     };
   });
+
+  // Form em transação SEPARADA (após o deal já ter sido deletado com sucesso).
+  if (deleteForm && formId) {
+    const f = await prisma.salesForm
+      .delete({ where: { id: formId } })
+      .catch((err) => {
+        console.warn("[deal DELETE] salesForm.delete falhou (form mantido):", err);
+        return null;
+      });
+    if (f) counts.forms = 1;
+  }
 
   // Best-effort: apaga os blobs dos anexos e PDFs de envelope APÓS o commit
   // (se a transação falhar, não removemos arquivos). Antes a deleção do deal

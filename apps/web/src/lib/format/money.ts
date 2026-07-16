@@ -61,3 +61,30 @@ export function parseMoneyBR(raw: unknown): number {
   if (Number.isNaN(result)) return 0;
   return negative ? -result : result;
 }
+
+/**
+ * Parse de PERCENTUAL (0-100). Ao contrário de valor monetário, porcentagem
+ * NUNCA usa separador de milhar — então ponto E vírgula são sempre decimais.
+ * "6.500" e "6,500" e "6.5" e "6,5" → 6.5. Sem isto, parseMoneyBR trataria
+ * "6.500" como 6500 (milhar) e a comissão sairia ~1000× o valor pretendido.
+ */
+export function parsePercentBR(raw: unknown): number {
+  if (typeof raw === "number") return Number.isFinite(raw) ? raw : 0;
+  if (typeof raw !== "string") return 0;
+  const s = raw.replace(/[^\d.,-]/g, "");
+  if (!s) return 0;
+  const negative = s.trimStart().startsWith("-");
+  const d = s.replace(/-/g, "");
+  // O último separador (ponto ou vírgula) é o decimal; os demais são ruído.
+  const lastSep = Math.max(d.lastIndexOf(","), d.lastIndexOf("."));
+  let n: number;
+  if (lastSep === -1) {
+    n = parseFloat(d);
+  } else {
+    const intPart = d.slice(0, lastSep).replace(/[.,]/g, "");
+    const decPart = d.slice(lastSep + 1).replace(/[.,]/g, "");
+    n = parseFloat(`${intPart || "0"}.${decPart || "0"}`);
+  }
+  if (Number.isNaN(n)) return 0;
+  return negative ? -n : n;
+}
