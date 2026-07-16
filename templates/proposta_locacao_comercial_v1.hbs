@@ -1,0 +1,63 @@
+<div style="font-family: 'EB Garamond', Georgia, serif; color: #111; max-width: 720px; margin: 0 auto; line-height: 1.5;">
+  <h1 style="text-align: center; font-size: 18pt; margin: 0 0 4px;">PROPOSTA DE LOCAÇÃO</h1>
+  <p style="text-align: center; font-size: 10pt; color: #555; margin: 0 0 20px;">Comercial · Proposta nº {{numero_proposta}}</p>
+
+  <p>Pela presente, o(a) <strong>PROPONENTE</strong> abaixo qualificado(a) manifesta
+  interesse em locar o imóvel a seguir descrito, para fim não residencial, nas condições declaradas.</p>
+
+  {{#each locatarios}}
+  <p><strong>Proponente (locatário):</strong> {{this.nome}}{{#if this.cpf}}, CPF {{cpf this.cpf}}{{/if}}{{#if this.cnpj}}, CNPJ {{cnpj this.cnpj}}{{/if}}{{#if this.email}}, {{this.email}}{{/if}}.</p>
+  {{/each}}
+
+  {{#each imoveis}}
+  <p><strong>Imóvel:</strong> {{this.endereco}}{{#if this.numero}}, nº {{this.numero}}{{/if}}{{#if this.bairro}} — {{this.bairro}}{{/if}}{{#if this.cidade}}, {{this.cidade}}{{#if this.uf}}/{{this.uf}}{{/if}}{{/if}}.</p>
+  {{/each}}
+
+  <h2 style="font-size: 12pt; margin: 20px 0 8px;">Condições da oferta</h2>
+  {{#if locacao.destinacao}}
+  <p><strong>Destinação / ramo de atividade:</strong> {{locacao.destinacao}}.</p>
+  {{/if}}
+  {{#if locacao.valor_aluguel}}
+  <p><strong>Aluguel ofertado:</strong> {{moeda locacao.valor_aluguel}} ({{extenso locacao.valor_aluguel}}) por mês.</p>
+  {{/if}}
+  {{#if locacao.prazo_meses}}
+  <p><strong>Prazo pretendido:</strong> {{locacao.prazo_meses}} meses.</p>
+  {{/if}}
+  {{#if locacao.garantia}}
+  <p><strong>Garantia oferecida:</strong> {{locacao.garantia}}.</p>
+  {{/if}}
+  {{#if locacao.luvas}}
+  <p><strong>Luvas / ponto:</strong> {{moeda locacao.luvas}}.</p>
+  {{/if}}
+  {{#if locacao.data_entrada}}
+  <p><strong>Início pretendido:</strong> {{dataExtenso locacao.data_entrada}}.</p>
+  {{/if}}
+  {{#if config.condicoes_internas}}
+  <p><strong>Observações:</strong> {{config.condicoes_internas}}.</p>
+  {{/if}}
+
+  {{#if comissao_incluida}}
+  <h2 style="font-size: 12pt; margin: 20px 0 8px;">Intermediação</h2>
+  <p>A presente negociação é intermediada pela imobiliária, com comissão
+  {{#if comissao.percentual}}de {{numero comissao.percentual}}% sobre o valor da locação{{else}}{{#if comissao.valor}}de {{moeda comissao.valor}}{{/if}}{{/if}}.</p>
+  {{/if}}
+
+  <h2 style="font-size: 12pt; margin: 20px 0 8px;">Validade</h2>
+  <p>Esta proposta é válida até a data indicada no envio, após a qual perde efeito automaticamente, salvo prorrogação expressa.</p>
+
+  {{#if via_reduzida}}
+  <p style="margin-top: 24px; font-size: 9pt; color: #555; border-top: 1px solid #ccc; padding-top: 8px;">
+    Este instrumento reproduz as condições essenciais da Proposta nº {{numero_proposta}},
+    arquivada na íntegra junto à imobiliária.
+  </p>
+  {{/if}}
+
+  <div style="margin-top: 40px;">
+    <p>_______________________________________</p>
+    <p style="font-size: 10pt;">{{#each locatarios}}{{this.nome}}{{#unless @last}}; {{/unless}}{{/each}} — Proponente (locatário)</p>
+  </div>
+  <div style="margin-top: 24px;">
+    <p>_______________________________________</p>
+    <p style="font-size: 10pt;">{{#each locadores}}{{this.nome}}{{#unless @last}}; {{/unless}}{{/each}} — Locador(es)</p>
+  </div>
+</div>

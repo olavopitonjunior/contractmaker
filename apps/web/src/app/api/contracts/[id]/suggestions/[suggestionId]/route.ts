@@ -1,6 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import {
+  orgScopedNotFound,
+  resolveUserOrgId,
+} from "@/lib/security/org-scope";
+
+/**
+ * Carrega a suggestion validando (a) que pertence ao contrato da URL e
+ * (b) que o contrato pertence à org do usuário. Cross-org/mismatch → null.
+ */
+async function loadScopedSuggestion(
+  suggestionId: string,
+  contractId: string,
+  userId: string
+) {
+  const orgId = await resolveUserOrgId(userId);
+  if (!orgId) return null;
+  const suggestion = await prisma.contractSuggestion.findUnique({
+    where: { id: suggestionId },
+    include: {
+      contract: {
+        select: {
+          id: true,
+          googleDocId: true,
+          deal: { select: { pipeline: { select: { orgId: true } } } },
+        },
+      },
+    },
+  });
+  if (
+    !suggestion ||
+    suggestion.contract.id !== contractId ||
+    suggestion.contract.deal.pipeline.orgId !== orgId
+  ) {
+    return null;
+  }
+  return suggestion;
+}
 
 export async function PATCH(
   req: NextRequest,
@@ -18,10 +55,14 @@ export async function PATCH(
     return NextResponse.json({ error: "action deve ser accept ou reject" }, { status: 400 });
   }
 
-  const existing = await prisma.contractSuggestion.findUnique({
-    where: { id: params.suggestionId },
-    include: { contract: { select: { googleDocId: true } } },
-  });
+  const existing = await loadScopedSuggestion(
+    params.suggestionId,
+    params.id,
+    session.user.id
+  );
+  if (!existing) {
+    return orgScopedNotFound("Sugestão");
+  }
 
   // Google Docs path: aplica a mudança real no doc (accept) ou só remove o
   // comment-suggestion (reject).
@@ -112,11 +153,20 @@ function findFirstRangeInDoc(
 
 export async function DELETE(
   _req: NextRequest,
-  { params }: { params: { suggestionId: string } }
+  { params }: { params: { id: string; suggestionId: string } }
 ) {
   const session = await auth();
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const existing = await loadScopedSuggestion(
+    params.suggestionId,
+    params.id,
+    session.user.id
+  );
+  if (!existing) {
+    return orgScopedNotFound("Sugestão");
   }
 
   await prisma.contractSuggestion.delete({ where: { id: params.suggestionId } });

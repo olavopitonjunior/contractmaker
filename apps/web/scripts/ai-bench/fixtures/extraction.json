@@ -1,0 +1,33 @@
+{
+  "_doc": "Casos de extração campo-a-campo. Cada caso: um documento em texto (input) + os campos esperados (expected). O harness pede pro modelo extrair JSON e compara campo a campo. SUBSTITUA/EXPANDA com CCVs reais ANONIMIZADOS (troque nomes/CPFs por fictícios) — quanto mais casos, mais confiável o número. Estes 2 são sintéticos, só pra o harness rodar de ponta a ponta.",
+  "cases": [
+    {
+      "id": "ccv-avista-01",
+      "input": "INSTRUMENTO PARTICULAR DE COMPROMISSO DE COMPRA E VENDA. VENDEDOR: João da Silva Souza, CPF 111.444.777-35. COMPRADOR: Maria Oliveira Costa, CPF 222.555.888-40. IMÓVEL: Apartamento 42, Rua das Flores 100, São Paulo/SP, matrícula 12.345. VALOR TOTAL: R$ 480.000,00, à vista, sendo R$ 48.000,00 de sinal na assinatura e o saldo de R$ 432.000,00 em 30 dias.",
+      "expected": {
+        "modalidade": "a_vista",
+        "vendedor_nome": "João da Silva Souza",
+        "vendedor_cpf": "11144477735",
+        "comprador_nome": "Maria Oliveira Costa",
+        "comprador_cpf": "22255588840",
+        "valor_total": 480000,
+        "sinal": 48000,
+        "saldo": 432000
+      }
+    },
+    {
+      "id": "ccv-financiamento-01",
+      "input": "COMPROMISSO DE COMPRA E VENDA. VENDEDORA: Construtora Alfa Ltda, CNPJ 12.345.678/0001-90. COMPRADOR: Carlos Pereira Lima, CPF 333.666.999-12. IMÓVEL: Casa, Rua B 250, Curitiba/PR. PREÇO: R$ 650.000,00, sendo R$ 130.000,00 de entrada e R$ 520.000,00 financiados junto à Caixa Econômica Federal.",
+      "expected": {
+        "modalidade": "financiamento",
+        "vendedor_nome": "Construtora Alfa Ltda",
+        "vendedor_cpf": "12345678000190",
+        "comprador_nome": "Carlos Pereira Lima",
+        "comprador_cpf": "33366699912",
+        "valor_total": 650000,
+        "entrada": 130000,
+        "financiado": 520000
+      }
+    }
+  ]
+}

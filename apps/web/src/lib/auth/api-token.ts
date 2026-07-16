@@ -19,6 +19,7 @@ export const API_TOKEN_SCOPES = [
   "charges:rw",
   "signatures:rw",
   "documents:rw",
+  "proposals:rw",
   "metrics:r",
   // Newton — delegação Bearer via header X-Act-As-User (Fase A RBAC
   // hardening). Token com esse scope pode operar como qualquer user da

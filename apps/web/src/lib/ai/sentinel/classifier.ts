@@ -158,7 +158,7 @@ async function classifyViaLLM(
         contractId: options.contractId ?? null,
         provider: "anthropic",
         model: HAIKU_MODEL,
-        operation: "sentinel_classify" as never,
+        operation: "sentinel_classify",
         promptTokens: response.usage?.input_tokens ?? 0,
         completionTokens: response.usage?.output_tokens ?? 0,
         latencyMs: Date.now() - t0,
@@ -166,13 +166,19 @@ async function classifyViaLLM(
       });
     }
 
+    // Fail-CLOSED: quando o classificador degrada (sem text block, sem JSON,
+    // parse falho, score não-numérico), devolvemos um score ABAIXO do limiar
+    // de quarentena (0.5) em vez de 0.5. Antes, 0.5 caía do lado "confiável"
+    // (`0.5 < 0.5` é falso), então um anexo passava sem classificação —
+    // fail-open. 0.3 quarantina; conteúdo injetável não é auto-executado.
+    const FAIL_CLOSED = 0.3;
     const block = response.content.find((b) => b.type === "text");
     if (!block || block.type !== "text") {
-      return { trustedScore: 0.5, intent: "other", fastPath: false, reason: "LLM sem text block" };
+      return { trustedScore: FAIL_CLOSED, intent: "other", fastPath: false, reason: "LLM sem text block" };
     }
     const match = block.text.match(/\{[\s\S]*\}/);
     if (!match) {
-      return { trustedScore: 0.5, intent: "other", fastPath: false, reason: "LLM sem JSON parseável" };
+      return { trustedScore: FAIL_CLOSED, intent: "other", fastPath: false, reason: "LLM sem JSON parseável" };
     }
     try {
       const parsed = JSON.parse(match[0]) as {
@@ -180,7 +186,8 @@ async function classifyViaLLM(
         intent?: Intent;
         reason?: string;
       };
-      const score = typeof parsed.trustedScore === "number" ? parsed.trustedScore : 0.5;
+      const score =
+        typeof parsed.trustedScore === "number" ? parsed.trustedScore : FAIL_CLOSED;
       const intent = parsed.intent ?? "other";
       return {
         trustedScore: Math.max(0, Math.min(1, score)),
@@ -189,7 +196,7 @@ async function classifyViaLLM(
         reason: parsed.reason?.slice(0, 100),
       };
     } catch {
-      return { trustedScore: 0.5, intent: "other", fastPath: false, reason: "JSON parse falhou" };
+      return { trustedScore: FAIL_CLOSED, intent: "other", fastPath: false, reason: "JSON parse falhou" };
     }
   } catch (err) {
     if (options.orgId) {
@@ -199,7 +206,7 @@ async function classifyViaLLM(
         contractId: options.contractId ?? null,
         provider: "anthropic",
         model: HAIKU_MODEL,
-        operation: "sentinel_classify" as never,
+        operation: "sentinel_classify",
         promptTokens: 0,
         latencyMs: Date.now() - t0,
         success: false,
@@ -207,9 +214,9 @@ async function classifyViaLLM(
       });
     }
     console.error("[sentinel/classifier] LLM falhou:", err);
-    // Falha de LLM → conservador, marca como "other" mid-trust (não bloqueia
-    // mas alerta que classificador degradou).
-    return { trustedScore: 0.5, intent: "other", fastPath: false, reason: "Classifier LLM falhou" };
+    // Fail-CLOSED: LLM indisponível → trata como não-confiável (quarantina).
+    // Um outage do classificador não pode virar bypass da defesa de injection.
+    return { trustedScore: 0.3, intent: "other", fastPath: false, reason: "Classifier LLM falhou" };
   }
 }
 

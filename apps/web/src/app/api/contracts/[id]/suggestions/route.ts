@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import {
+  contractBelongsToOrg,
+  orgScopedNotFound,
+  resolveUserOrgId,
+} from "@/lib/security/org-scope";
 
 export async function GET(
   req: NextRequest,
@@ -10,6 +15,11 @@ export async function GET(
   const session = await auth();
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const orgId = await resolveUserOrgId(session.user.id);
+  if (!(await contractBelongsToOrg(params.id, orgId))) {
+    return orgScopedNotFound("Contrato");
   }
 
   const url = new URL(req.url);
@@ -40,8 +50,15 @@ export async function POST(
     return NextResponse.json({ error: "type é obrigatório" }, { status: 400 });
   }
 
-  const contract = await prisma.contract.findUnique({ where: { id: params.id } });
-  if (!contract) {
+  const contract = await prisma.contract.findUnique({
+    where: { id: params.id },
+    select: {
+      status: true,
+      deal: { select: { pipeline: { select: { orgId: true } } } },
+    },
+  });
+  const orgId = await resolveUserOrgId(session.user.id);
+  if (!contract || !orgId || contract.deal.pipeline.orgId !== orgId) {
     return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
   }
   if (contract.status === "aprovado") {

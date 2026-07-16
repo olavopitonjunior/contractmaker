@@ -119,7 +119,10 @@ export async function DELETE(
       { status: 404 }
     );
   }
-  if (envelope.deal.pipeline.orgId !== ctx.orgId) {
+  // `deal` é nullable desde as Propostas (envelope de proposta não tem deal).
+  // Aqui o `where` já filtra por dealId, então um envelope sem deal nunca cai
+  // neste handler — o `?.` é o narrowing, e nega acesso se por algum motivo vier.
+  if (envelope.deal?.pipeline.orgId !== ctx.orgId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 

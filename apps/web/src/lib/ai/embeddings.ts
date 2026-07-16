@@ -81,21 +81,35 @@ export async function embed(
   const model = process.env.VOYAGE_EMBED_MODEL || DEFAULT_MODEL;
   const t0 = Date.now();
 
-  let res: Response;
-  try {
-    res = await fetch(VOYAGE_API_URL, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify({
-        input: texts,
-        model,
-        input_type: inputType,
-      }),
-    });
-  } catch (err) {
+  // Retry com backoff exponencial em 429/5xx — um pico de rate-limit não pode
+  // falhar a ingestão/consulta RAG na primeira tentativa (antes era fetch
+  // único, ao contrário do OCR que já tinha backoff).
+  const MAX_ATTEMPTS = 3;
+  let res: Response | null = null;
+  let lastErr: unknown = null;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      res = await fetch(VOYAGE_API_URL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ input: texts, model, input_type: inputType }),
+      });
+    } catch (err) {
+      lastErr = err;
+      res = null;
+    }
+    // Sucesso ou erro não-retryável → sai do loop.
+    if (res && (res.ok || (res.status !== 429 && res.status < 500))) break;
+    if (attempt < MAX_ATTEMPTS) {
+      const backoffMs = 300 * 2 ** (attempt - 1); // 300ms, 600ms
+      await new Promise((r) => setTimeout(r, backoffMs));
+    }
+  }
+
+  if (!res) {
     if (ctx) {
       recordAIUsage({
         orgId: ctx.orgId,
@@ -107,13 +121,13 @@ export async function embed(
         promptTokens: 0,
         latencyMs: Date.now() - t0,
         success: false,
-        errorMessage: err instanceof Error ? err.message : String(err),
+        errorMessage: lastErr instanceof Error ? lastErr.message : String(lastErr),
       });
     }
     throw new VoyageError({
       code: "network_error",
       message: "Falha ao conectar com a API da Voyage",
-      cause: err,
+      cause: lastErr,
     });
   }
 
@@ -174,7 +188,24 @@ export async function embed(
 
   // Sort by index to ensure order matches input
   const sorted = [...data.data].sort((a, b) => a.index - b.index);
-  return sorted.map((d) => d.embedding);
+  const vectors = sorted.map((d) => d.embedding);
+
+  // Valida a dimensão — um vetor com tamanho inesperado (modelo trocado por
+  // engano, resposta corrompida) quebraria o INSERT no pgvector (coluna
+  // vector(1024)) ou, pior, entraria com dimensão errada e degradaria o RAG
+  // silenciosamente. Só validamos quando o modelo é o default 1024d.
+  if (model === DEFAULT_MODEL) {
+    for (const v of vectors) {
+      if (!Array.isArray(v) || v.length !== EMBEDDING_DIMENSION) {
+        throw new VoyageError({
+          code: "invalid_response",
+          message: `Embedding com dimensão inesperada: ${v?.length ?? "?"} (esperado ${EMBEDDING_DIMENSION})`,
+        });
+      }
+    }
+  }
+
+  return vectors;
 }
 
 export async function embedOne(

@@ -20,7 +20,9 @@ interface RecentEnvelope {
   contractId: string | null;
   attachmentId: string | null;
   source: string;
-  dealId: string;
+  // Null em envelope de proposta — ela vive fora do kanban e só ganha deal na
+  // conversão.
+  dealId: string | null;
   signerCount: number;
 }
 

@@ -69,6 +69,7 @@ model User {
   asaasTransfers         AsaasTransfer[]
   reconciliationMatches  BankReconciliation[]
   commissionChargeDrafts CommissionChargeDraft[]
+  proposals              Proposal[]
 
   // Pagadoria — Multi-account (capabilities granulares por conta bancária)
   accountPermissions      AsaasAccountPermission[] @relation("AccountPermissionUser")
@@ -353,6 +354,7 @@ model Organization {
   // Sem conta conectada, só a org compartilhada legada cai no token global.
   clicksignAccount  ClickSignAccount?
   signatureSettings OrgSignatureSettings?
+  proposals         Proposal[]
 }
 
 /// Conta Google conectada pela imobiliária (OAuth offline). Os Docs de template
@@ -558,6 +560,8 @@ model Deal {
   envelopes              Envelope[]
   newtonRequests         NewtonRequest[]
   groupLink              DealGroupLink?
+  // Proposta que originou este deal (conversão). Null = deal criado direto.
+  fromProposal           Proposal?               @relation("ProposalConvertedDeal")
 
   // Lead que originou (se veio de conversão Lead -> Deal)
   fromLead Lead?
@@ -995,6 +999,7 @@ model ContractTemplate {
   org         Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
   contracts   Contract[]
   suggestions TemplateSuggestion[]
+  proposals   Proposal[]
 }
 
 // ============================================
@@ -1018,7 +1023,7 @@ model Clause {
   agentNotes  String?  @db.Text
   groupCode   String?
   isVariable  Boolean  @default(false)
-  tags        String[]
+  tags        String[] @default([])
   source      String   @default("manual")
   status      String   @default("approved")
   usageCount  Int      @default(0)
@@ -1487,7 +1492,7 @@ model KnowledgeItem {
   chunkIndex     Int      @default(0)
   chunkTotal     Int      @default(1)
   parentId       String?
-  tags           String[]
+  tags           String[] @default([])
   source         String? // URL, doc id, "manual", "seed"
   createdBy      String?
   // Campos herdados de Clause na unificação 2026-05-18 (migration
@@ -1548,7 +1553,7 @@ model ClauseProposal {
   category   String? // partes, objeto, compromisso, preco, posse, titulo, comissao, etc.
   reason     String    @db.Text
   evidence   Json? // contractIds that motivated it
-  tags       String[]
+  tags       String[] @default([])
   status     String    @default("pending") // "pending" | "approved" | "rejected"
   resolvedAt DateTime?
   resolvedBy String?
@@ -2015,6 +2020,7 @@ model CommissionCharge {
 
   @@index([orgId, status])
   @@index([orgId, currentDueDate])
+  @@index([orgId, kind])
   @@index([accountId])
   @@index([dealId])
   @@index([contractId])
@@ -2273,6 +2279,12 @@ model AsaasTransfer {
   // Trigger automático (Fase 6): split PIX externo gerado a partir de cobrança paga
   commissionChargeId String?
   splitRecipientId   String?
+  // Idempotência de dispatch: `${chargeId}:${splitRecipientId ?? 'ext:'+pixKey}`.
+  // O @@unique([commissionChargeId, splitRecipientId]) NÃO protege PIX externo
+  // one-shot (splitRecipientId NULL → NULLs distintos no índice), então o
+  // webhook Asaas disparando em PAYMENT_RECEIVED e PAYMENT_CONFIRMED pagava 2×.
+  // Esta chave é não-nula pra todo dispatch automático e barra a duplicata.
+  dispatchDedupeKey  String?   @unique
   origin             String    @default("manual") // manual | split_dispatch
   // NFS-e por repasse (locação, A16) — emitida pela imobiliária quando
   // LeaseContract.emitirNfse=true. Provider varia por município.
@@ -2335,16 +2347,24 @@ model BankReconciliation {
 // Um Contract aprovado pode gerar 1+ envelopes (cancelamento permite reenvio).
 model Envelope {
   id                  String    @id @default(cuid())
-  // contractId é nullable: envelope avulso (source="attachment") nasce de um
-  // DealAttachment direto, sem passar por Contract aprovado. CHECK constraint
-  // na migration garante exatamente uma das duas FKs.
+  // SUJEITO do envelope — exatamente um de (contractId | attachmentId |
+  // proposalId). CHECK `envelope_subject_xor` na migration garante.
   contractId          String?
   attachmentId        String?
-  dealId              String
+  proposalId          String?
+  // PAI do envelope — exatamente um de (dealId | proposalId). Proposta vive
+  // FORA do kanban, então um envelope de proposta não tem deal ainda (o deal
+  // nasce só na conversão). CHECK `envelope_parent_xor` na migration.
+  dealId              String?
   orgId               String
-  // source: "contract" | "attachment". Discrimina a origem do envelope no
-  // webhook close (categoria do DealAttachment final) e na UI.
+  // source: "contract" | "attachment" | "proposal". Discrimina a origem do
+  // envelope no webhook close (categoria do anexo final) e na UI.
   source              String    @default("contract")
+  // Só quando source="proposal": "completa" (via do proponente, com todos os
+  // campos) | "reduzida" (via do proprietário, sem os hiddenPaths). O
+  // @@unique([proposalId, via]) é o que torna o encadeamento das duas vias
+  // fisicamente idempotente — webhook reentregue não cria um 2º envelope.
+  via                 String?
   // ID retornado pela Clicksign (data.id no payload JSON:API). Nulo enquanto
   // a row local existe mas a chamada à API ainda não completou.
   clicksignId         String?   @unique
@@ -2369,13 +2389,16 @@ model Envelope {
 
   contract   Contract?        @relation(fields: [contractId], references: [id], onDelete: Cascade)
   attachment DealAttachment?  @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
-  deal       Deal             @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  deal       Deal?            @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  proposal   Proposal?        @relation(fields: [proposalId], references: [id], onDelete: Cascade)
   org        Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
   signers    EnvelopeSigner[]
   events     EnvelopeEvent[]
 
+  @@unique([proposalId, via])
   @@index([contractId])
   @@index([attachmentId])
+  @@index([proposalId])
   @@index([dealId])
   @@index([orgId, status])
   @@index([status, updatedAt])
@@ -2387,7 +2410,7 @@ model EnvelopeSigner {
   clicksignId    String?
   // IDs dos requirements (auth + sign) criados via POST /requirements.
   // Guardamos pra poder remover/alterar depois sem refazer GET.
-  requirementIds String[]
+  requirementIds String[] @default([])
   // sourceKind: vendedor | comprador | testemunha | corretora | outro.
   // sourceIndex aponta o array em dataJson (sempre 0 para corretora).
   sourceKind     String
@@ -2398,12 +2421,23 @@ model EnvelopeSigner {
   // Ordem de assinatura (group ClickSign v3). Null = paralelo (sem ordem).
   signingGroup   Int?
   name           String
-  email          String
+  // NULLABLE desde as Propostas: o signatário do lado proprietário costuma vir
+  // de PropertyOwner, cujo `email` é opcional e cujo canalPreferido default é
+  // WhatsApp. Notificação por WhatsApp não exige e-mail. A correlação do
+  // webhook NÃO depende mais do e-mail (usa signer.key → clicksignId).
+  email          String?
   // CPF limpo (11 dígitos) ou CNPJ (14 dígitos) sem máscara.
   documentation  String?
-  // Reservado para auth via SMS/WhatsApp (não usado no MVP email).
+  // E.164 COM DDI (+5511987654321). Obrigatório quando notifyChannel=whatsapp.
   phone          String?
+  // Método de AUTENTICAÇÃO (requirement auth). Não confundir com notifyChannel.
   authMethod     String    @default("email")
+  // Canal de NOTIFICAÇÃO — vira communicate_events.signature_request na v3
+  // (email | whatsapp | sms | none). Eixo ortogonal ao authMethod.
+  notifyChannel  String    @default("email")
+  // `key` devolvida pela ClickSign na criação do signatário. Usada pra carregar
+  // o widget de assinatura embedada na nossa landing.
+  signatureKey   String?
   // status: pending | notified | viewed | signed | refused | removed | email_failed
   // email_failed = e-mail voltou (bounce); derivado do evento ClickSign
   // `tracking_notification_error` no feed REST /events (nunca via webhook).
@@ -2433,11 +2467,264 @@ model EnvelopeEvent {
   payload    Json
   // source: webhook | cron | manual
   source     String   @default("webhook")
+  // Idempotência: hash estável do evento (envelope+nome+signer+occurred_at).
+  // ClickSign reentrega webhooks; o create com este @unique é o lock que
+  // impede reprocessar `close`/`refusal` duas vezes (auto-promote de deal,
+  // download de PDF, etc.). Nullable pra eventos legados/manuais sem chave.
+  dedupeKey  String?  @unique
   receivedAt DateTime @default(now())
 
   envelope Envelope @relation(fields: [envelopeId], references: [id], onDelete: Cascade)
 
   @@index([envelopeId, receivedAt])
+}
+
+// ============================================
+// PROPOSTAS (vendas + locação)
+// ============================================
+// A proposta é o passo ANTES do negócio: o proponente oferece um valor, o
+// proprietário aceita ou não. Vive FORA do kanban (ver docs/locacao/spec.md
+// §4.3) e, quando aceita, converte em Deal + SalesForm com o dataJson já
+// preenchido — é o que elimina a redigitação.
+//
+// Por que não reusa `Contract`: `Contract` não tem `orgId`; o escopo de org de
+// todo contrato é derivado via `deal.pipeline.orgId`. Tornar `Contract.dealId`
+// nullable arrancaria o guard cross-org de todas as rotas de contrato. A
+// Proposal carrega o próprio documento (os 6 campos abaixo espelham os do
+// Contract). Consequência aceita: chat IA/versões/comentários não existem na
+// proposta (esses models têm FK contractId NOT NULL).
+model Proposal {
+  id              String    @id @default(cuid())
+  orgId           String
+  // Dono da proposta. Sustenta a regra "corretor vê só as dele".
+  userId          String
+  // Discriminador CANÔNICO. Não usar `kind` sozinho: SalesForm.schemaType tem
+  // default "compra_venda_v1", então sem isto toda proposta de locação
+  // convertida viraria um form de compra e venda (→ template errado → CCV
+  // gerado para um aluguel). Locação comercial tem termos próprios (destinação,
+  // luvas/ponto, ação renovatória arts. 51-57) — por isso são 3, não 2.
+  // "compra_venda_v1" | "locacao_residencial_v1" | "locacao_comercial_v1"
+  schemaType      String    @default("compra_venda_v1")
+  // Derivado do schemaType. Persistido pra facilitar filtro/índice.
+  kind            String    @default("venda") // venda | locacao
+  title           String
+  // rascunho | aguardando_aprovacao | enviada | entregue | visualizada |
+  // assinada_proponente | aguardando_vendedor | completa | convertida |
+  // recusada_proponente | recusada_vendedor | expirada | cancelada | falha_envio
+  status          String    @default("rascunho")
+
+  // ── Instrumento de aceite ────────────────────────────────────────────────
+  // "aceite"   = Aceite via WhatsApp da ClickSign (~R$0,99, cobrado na ENTREGA;
+  //              message ≤1500 chars, sem anexo → resumo + link pra landing).
+  // "envelope" = assinatura ClickSign clássica (PDF + certificado).
+  instrument      String    @default("envelope")
+  // ID do acceptance_term na ClickSign (só quando instrument="aceite").
+  acceptanceClicksignId String?
+
+  // ── Documento (espelha Contract, sem reusar a tabela) ────────────────────
+  templateId      String?
+  version         Int       @default(1)
+  dataJson        Json      @default("{}")
+  htmlContent     String?   @db.Text
+  googleDocId     String?
+  googleDocUrl    String?
+  googleDocStatus String?
+
+  // ── Comissão e as duas vias ──────────────────────────────────────────────
+  // A comissão é OPCIONAL na proposta. Só quando incluída E marcada como oculta
+  // é que a proposta sai em duas vias (completa p/ o proponente, reduzida p/ o
+  // proprietário) — e aí custa 2 envelopes. Sem ocultação: 1 via, 1 custo.
+  comissaoIncluida Boolean  @default(false)
+  // Dot-paths do dataJson suprimidos na via reduzida. Vêm de uma ALLOWLIST por
+  // template — nunca dot-path arbitrário do cliente (senão quebra o Handlebars).
+  hiddenPaths     String[]  @default([])
+
+  // ── Link rastreado (/p/[token]) ──────────────────────────────────────────
+  // randomBytes(32).base64url — NÃO cuid(): cuid v1 tem ~40 bits imprevisíveis
+  // e é monotônico no tempo (conhecendo um token você conhece o prefixo dos
+  // vizinhos). Este link entrega valor de imóvel, CPF e comissão.
+  token           String    @unique
+  validUntil      DateTime?
+  sentAt          DateTime?
+  // Snapshot CONGELADO no envio: o HTML exato (via completa) que o proponente
+  // viu, + hash SHA-256. O comprovante e a página /p/[token] usam ISTO, nunca
+  // re-renderizam o template atual (que pode mudar via sync-templates entre o
+  // envio e o aceite) — senão o comprovante reproduz um documento que a pessoa
+  // nunca viu, anulando o valor probatório.
+  sentSnapshotHtml String?  @db.Text
+  sentSnapshotHash String?
+  // Só é confiável no modo "aceite" (a ClickSign cobra na entrega, logo sabe
+  // dela). No modo "envelope" não há confirmação real de entrega.
+  deliveredAt     DateTime?
+  // "visualizada" REAL: vem do beacon client-side, não do GET. Crawler de
+  // WhatsApp/Gmail busca a URL pra montar o card de preview e dispararia o GET.
+  firstViewedAt   DateTime?
+  lastViewedAt    DateTime?
+  viewCount       Int       @default(0)
+  lastReminderAt  DateTime?
+  reminderCount   Int       @default(0)
+
+  // ── Recusa e contraproposta ──────────────────────────────────────────────
+  // Quem recusou importa: o proprietário recusar (desfecho mais comum) deixa um
+  // COMPRADOR JÁ COMPROMETIDO na mão — é um estado quente, não um terminal frio.
+  refusedBy       String?   // "proponente" | "vendedor:<ownerId>"
+  refusedAt       DateTime?
+  refusedReason   String?   @db.Text
+  // Valor que o proprietário aceitaria. Alimenta a rodada seguinte.
+  counterAmount   Float?
+  // Self-FK: liga a thread da negociação. NÃO é "modelar negociação" (threads,
+  // versões comparáveis seguem fora de escopo) — é um ponteiro que faz a lista
+  // contar a história em vez de mostrar duplicatas soltas.
+  parentProposalId String?
+  round           Int       @default(1)
+  supersededById  String?
+
+  // ── Terminais ────────────────────────────────────────────────────────────
+  expiredAt       DateTime?
+  canceledAt      DateTime?
+  completedAt     DateTime?
+  // PDF consolidado das vias assinadas (merge via pdf-lib).
+  // GUARD do buildDossier é `dossierUrl != null` — nunca `dossierBuiltAt`: um
+  // timestamp de TENTATIVA como guard de SUCESSO transforma falha transitória
+  // em corrupção permanente (dossiê vazio marcado como pronto).
+  dossierUrl      String?
+  dossierBuiltAt  DateTime?
+  lastError       String?   @db.Text
+
+  // ── Custo ────────────────────────────────────────────────────────────────
+  // Reservado no /send com o custo TOTAL (incluindo a via reduzida, que só nasce
+  // dias depois). Sem a reserva, o envelope 2 pode estourar o orçamento com o
+  // proponente já tendo assinado e o dinheiro já gasto.
+  reservedCostCents Int     @default(0)
+
+  // ── Origem / cadastros prévios (todos opcionais) ─────────────────────────
+  propertyId      String?
+  leaseClientId   String?
+  tenantId        String?
+  crmRef          String?   // id no CRM externo (Superlógica) — lookup ainda stub
+  source          String    @default("manual") // manual | crm | importada | max
+
+  // ── Conversão em negócio ─────────────────────────────────────────────────
+  convertedDealId String?   @unique
+  convertedAt     DateTime?
+  // O corretor fechou no telefone e converteu sem esperar assinatura. Exige
+  // motivo (audit) e marca o card no kanban.
+  convertedWithoutSignature Boolean @default(false)
+
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  org            Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user           User                 @relation(fields: [userId], references: [id])
+  template       ContractTemplate?    @relation(fields: [templateId], references: [id])
+  property       Property?            @relation(fields: [propertyId], references: [id], onDelete: SetNull)
+  leaseClient    LeaseClient?         @relation(fields: [leaseClientId], references: [id], onDelete: SetNull)
+  tenant         Tenant?              @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  convertedDeal  Deal?                @relation("ProposalConvertedDeal", fields: [convertedDealId], references: [id], onDelete: SetNull)
+  parentProposal Proposal?            @relation("ProposalThread", fields: [parentProposalId], references: [id], onDelete: SetNull)
+  children       Proposal[]           @relation("ProposalThread")
+  signers        ProposalSigner[]
+  attachments    ProposalAttachment[]
+  events         ProposalEvent[]
+  envelopes      Envelope[]
+
+  @@index([orgId, status])
+  @@index([orgId, userId])
+  @@index([status, validUntil])
+  @@index([propertyId, status])
+  @@index([parentProposalId])
+}
+
+// Signatários da proposta. Model próprio (não dataJson) porque é o que dá, de
+// uma vez: seleção de quais proprietários assinam, custo recalculado ao vivo,
+// dedupe com backstop no banco, e preflight por linha.
+model ProposalSigner {
+  id            String   @id @default(cuid())
+  proposalId    String
+  // proponente | vendedor | conjuge | testemunha
+  role          String
+  // FK lógica pra PropertyOwner quando role=vendedor (sem constraint: o dono
+  // pode ter sido digitado à mão, sem cadastro).
+  ownerId       String?
+  name          String
+  // Opcional: PropertyOwner.email é nullable e canalPreferido default é WhatsApp.
+  email         String?
+  cpf           String?
+  phone         String?  // E.164 COM DDI
+  // Copiado de PropertyOwnership.percentual no momento do envio. Se a soma dos
+  // que assinaram < 100%, a proposta NÃO vincula os demais proprietários e o
+  // status jamais pode ser exibido como "Completa".
+  percentual    Float?
+  // 1 = proponente · 2 = proprietários. A ordem é regra de negócio, não opção.
+  signingGroup  Int      @default(1)
+  notifyChannel String   @default("email") // email | whatsapp | sms
+  included      Boolean  @default(true)
+  // cpf → email lowercase → nome normalizado + phone. O @@unique abaixo é o
+  // backstop da regra "sem duplicidade": hoje o mesmo CPF duas vezes no envelope
+  // gera COBRANÇA DOBRADA e deixa o webhook marcando um dos dois ao acaso.
+  dedupeKey     String
+  // ── Rastreio do Aceite via WhatsApp por signatário ──────────────────────
+  // Antes o id do acceptance_term ficava só em Proposal.acceptanceClicksignId
+  // (o do 1º signatário iterado), então: (a) retry re-enviava a TODOS
+  // duplicando cobrança, (b) casal virava "completa" com 1 aceite, (c) recusa
+  // de um caía em unknownAcceptance. Agora cada linha guarda seu próprio id +
+  // desfecho, e o @unique torna o envio idempotente por signatário.
+  acceptanceClicksignId String?  @unique
+  acceptanceStatus      String?  // sent | completed | refused | expired
+  acceptedAt            DateTime?
+  refusedAt             DateTime?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@unique([proposalId, dedupeKey])
+  @@index([proposalId])
+}
+
+// Anexos da proposta. Necessário porque DealAttachment.dealId é NOT NULL — o
+// PDF assinado de um envelope de proposta não teria onde pousar (não há deal
+// ainda). Na conversão viram DealAttachment copiando url/contentHash, sem
+// re-upload: é o mesmo blob.
+model ProposalAttachment {
+  id          String   @id @default(cuid())
+  proposalId  String
+  filename    String
+  mime        String
+  url         String
+  // proposta_assinada_completa | proposta_assinada_reduzida | dossie | documento
+  category    String?
+  source      String   @default("manual") // manual | clicksign_signed | dossier
+  contentHash String?
+  byteSize    Int?
+  createdAt   DateTime @default(now())
+
+  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@index([proposalId])
+  @@index([contentHash])
+}
+
+// Timeline append-only. Separa `fetched` (bot/crawler buscou a URL) de `viewed`
+// (humano abriu, via beacon) — sem essa distinção, o crawler do WhatsApp marca
+// toda proposta como visualizada segundos após o envio.
+model ProposalEvent {
+  id         String   @id @default(cuid())
+  proposalId String
+  // sent | delivered | fetched | viewed | signed_proponente | chained_envelope2
+  // | closed | refused | expired | canceled | converted | reminder_sent
+  // | revival_requested | status_transition_rejected
+  eventName  String
+  payload    Json?
+  source     String   @default("system") // system | public | webhook | cron
+  // sha256(ip + AUTH_SECRET) — NUNCA o IP cru (LGPD).
+  ipHash     String?
+  userAgent  String?
+  receivedAt DateTime @default(now())
+
+  proposal Proposal @relation(fields: [proposalId], references: [id], onDelete: Cascade)
+
+  @@index([proposalId, receivedAt])
 }
 
 // ============================================
@@ -2612,6 +2899,7 @@ model Tenant {
   leaseTenants   LeaseTenant[]
   debtAgreements DebtAgreement[]
   creditAnalyses CreditAnalysis[]
+  proposals      Proposal[]
 
   @@unique([orgId, cpfCnpj])
   @@index([orgId])
@@ -2662,6 +2950,7 @@ model Property {
   insurancePolicies InsurancePolicy[]
   maintenances      Maintenance[]
   expenses          Expense[]
+  proposals         Proposal[]
 
   @@index([orgId, status])
 }
@@ -2861,6 +3150,7 @@ model LeaseClient {
   attachments     LeaseClientAttachment[]
   insurerAnalyses LeaseClientInsurerAnalysis[]
   certidaoJobs    CertidaoJob[]
+  proposals       Proposal[]
 
   @@index([orgId, createdAt])
   @@index([orgId, status])
@@ -3252,6 +3542,22 @@ model OrgSignatureSettings {
   // Orçamento/custo (fallback: CLICKSIGN_MONTHLY_BUDGET_CENTS / tabela hardcoded).
   monthlyBudgetCents Int?
   costOverridesJson  Json? // { email: 150, whatsapp: 250, ... } — override por método
+  // Sub-orçamento das PROPOSTAS, dentro do mensal. Proposta é especulativa (a
+  // maioria não fecha); contrato é receita. Sem este teto, uma enxurrada de
+  // propostas consome o orçamento e bloqueia o envio de um contrato assinado.
+  // Null = sem sub-teto (só o mensal vale).
+  proposalBudgetCents Int?
+  // Aceite via WhatsApp (POST /acceptance_term/whatsapps, ~R$0,99, cobrado na
+  // ENTREGA): depende do recurso estar habilitado na conta ClickSign do tenant.
+  // Off até provar contra a conta real.
+  acceptanceEnabled  Boolean  @default(false)
+  // Capacidade DETECTADA da conta ClickSign (probe na conexão). Null = ainda não
+  // probado. Roteia o WhatsApp: signatura (Plus+) vs Aceite. Ver lib/proposals/
+  // routing.ts + lib/clicksign/capabilities.ts. `capabilitiesCheckedAt` permite
+  // reprobar quando o tenant fizer upgrade.
+  whatsappSignatureAvailable   Boolean?
+  acceptanceWhatsappAvailable  Boolean?
+  capabilitiesCheckedAt        DateTime?
   // Tipos de assinatura (AuthMethod: email | whatsapp | selfie | icp_brasil).
   defaultAuthMethod  String   @default("email")
   allowedAuthMethods String[] @default(["email", "whatsapp", "selfie", "icp_brasil"])

@@ -7,6 +7,7 @@ import {
   listDocPermissions,
   removeDocPermission,
 } from "@/lib/google/docs";
+import { resolveUserOrgId } from "@/lib/security/org-scope";
 
 /**
  * Compartilhamento do Google Doc do contrato com terceiros via Drive
@@ -20,11 +21,22 @@ const shareSchema = z.object({
   message: z.string().max(500).optional(),
 });
 
-async function loadContractWithDocId(contractId: string) {
+/**
+ * Carrega o contrato já validando que pertence à org do usuário — cross-org
+ * responde como inexistente (null → 404 no caller).
+ */
+async function loadContractWithDocId(contractId: string, userId: string) {
+  const orgId = await resolveUserOrgId(userId);
+  if (!orgId) return null;
   const contract = await prisma.contract.findUnique({
     where: { id: contractId },
-    select: { googleDocId: true, status: true },
+    select: {
+      googleDocId: true,
+      status: true,
+      deal: { select: { pipeline: { select: { orgId: true } } } },
+    },
   });
+  if (!contract || contract.deal.pipeline.orgId !== orgId) return null;
   return contract;
 }
 
@@ -36,7 +48,7 @@ export async function GET(
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const contract = await loadContractWithDocId(params.id);
+  const contract = await loadContractWithDocId(params.id, session.user.id);
   if (!contract) {
     return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
   }
@@ -64,7 +76,7 @@ export async function POST(
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const contract = await loadContractWithDocId(params.id);
+  const contract = await loadContractWithDocId(params.id, session.user.id);
   if (!contract) {
     return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
   }
@@ -116,7 +128,7 @@ export async function DELETE(
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const contract = await loadContractWithDocId(params.id);
+  const contract = await loadContractWithDocId(params.id, session.user.id);
   if (!contract?.googleDocId) {
     return NextResponse.json({ error: "Contrato não encontrado ou sem Google Doc" }, { status: 404 });
   }

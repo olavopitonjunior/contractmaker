@@ -12,6 +12,10 @@ export async function GET(
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const org = await getUserOrg(session.user.id);
+  if (!org) {
+    return NextResponse.json({ error: "No organization" }, { status: 400 });
+  }
 
   const deal = await prisma.deal.findUnique({
     where: { id: params.dealId },
@@ -24,10 +28,14 @@ export async function GET(
         include: { template: { select: { name: true } } },
         orderBy: { createdAt: "desc" },
       },
+      pipeline: { select: { orgId: true } },
     },
   });
 
-  if (!deal) {
+  // Cross-org guard — o GET devolve o dossiê completo (dataJson com CPF/RG/
+  // renda + anexos). Antes só exigia auth(); qualquer conta lia deal alheio.
+  // 404 pra não vazar existência.
+  if (!deal || (deal.form?.orgId ?? deal.pipeline.orgId) !== org.id) {
     return NextResponse.json({ error: "Deal not found" }, { status: 404 });
   }
 

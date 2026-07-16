@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
+import { requireOrgAdmin } from "@/lib/security/org-scope";
 import { runPreflight } from "@/lib/dev/preflight";
 
 export const runtime = "nodejs";
@@ -23,6 +24,10 @@ export async function GET() {
   if (!session?.user?.id) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
+  // Preflight exercita integrações pagas e expõe estado de infra — owner/admin.
+  const gate = await requireOrgAdmin(session.user.id);
+  if (!gate.ok) return gate.res;
 
   const org = await getUserOrg(session.user.id);
   const orgId = org?.id ?? null;

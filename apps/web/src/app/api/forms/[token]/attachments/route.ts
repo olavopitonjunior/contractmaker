@@ -4,6 +4,8 @@ import { Prisma } from "@prisma/client";
 import { put, del } from "@vercel/blob";
 import { prisma } from "@/lib/db/prisma";
 import { resolveFormScope, formLockedResponse } from "@/lib/forms/resolve-form-scope";
+import { signatureMatchesMime } from "@/lib/security/file-signature";
+import { RateLimits } from "@/lib/security/ratelimit";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -66,6 +68,15 @@ export async function POST(
   if (locked) return locked;
   const form = { id: scope.formId, orgId: scope.orgId };
 
+  // Form público é anônimo — throttle por token pra conter abuso de custo.
+  const rl = await RateLimits.formAttachmentPerToken(params.token);
+  if (!rl.success) {
+    return NextResponse.json(
+      { error: "Muitos uploads. Tente novamente em alguns minutos." },
+      { status: 429 }
+    );
+  }
+
   const formData = await req.formData();
   const file = formData.get("file");
   if (!(file instanceof File)) {
@@ -101,6 +112,16 @@ export async function POST(
     // Compute SHA-256 before upload so the extract route can skip Gemini when
     // the same content has already been OCRed in this org (see F5.3 cache).
     const buffer = Buffer.from(await file.arrayBuffer());
+
+    // Magic bytes — o content-type do formData vem do cliente e é forjável.
+    // Rejeita arquivo renomeado (ex.: executável com extensão .pdf).
+    if (!signatureMatchesMime(buffer, file.type)) {
+      return NextResponse.json(
+        { error: "O conteúdo do arquivo não corresponde ao tipo informado." },
+        { status: 400 }
+      );
+    }
+
     const contentHash = createHash("sha256").update(buffer).digest("hex");
 
     // Pre-warm cache: if any other attachment in this org already has OCR
@@ -123,6 +144,7 @@ export async function POST(
       access: "public",
       contentType: file.type,
       token: blobToken,
+      addRandomSuffix: true,
     });
 
     // Status inicial — economia de tokens:

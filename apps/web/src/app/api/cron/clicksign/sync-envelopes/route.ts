@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireCronAuth } from "@/lib/security/cron-auth";
 import { prisma } from "@/lib/db/prisma";
 import { ClicksignError } from "@/lib/clicksign/client";
 import { syncEnvelopeState, EnvelopeNotSyncableError } from "@/lib/clicksign/sync";
@@ -20,13 +21,8 @@ export const dynamic = "force-dynamic";
  * automático pra surfacer bounces de e-mail sem ação do operador.
  */
 export async function GET(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = req.headers.get("authorization") || "";
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-  }
+  const cronDenied = requireCronAuth(req);
+  if (cronDenied) return cronDenied;
   if (!(await isCronAllowedInStaging("/api/cron/clicksign/sync-envelopes"))) {
     return NextResponse.json({ skipped: "staging-disabled", path: "/api/cron/clicksign/sync-envelopes" });
   }

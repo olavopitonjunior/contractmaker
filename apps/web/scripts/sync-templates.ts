@@ -28,7 +28,15 @@ interface TemplateFile {
   // "administracao_locacao" deliberadamente NÃO começa com "locacao" — o
   // fallback de selectLocacaoTemplate casa startsWith("locacao") e pegaria o
   // contrato de administração como template de locação.
-  modalidade: "a_vista" | "financiamento" | "locacao" | "locacao_comercial" | "administracao_locacao";
+  modalidade:
+    | "a_vista"
+    | "financiamento"
+    | "locacao"
+    | "locacao_comercial"
+    | "administracao_locacao"
+    | "proposta_venda"
+    | "proposta_locacao_residencial"
+    | "proposta_locacao_comercial";
   filename: string;
   canonicalName: string;
   canonicalDescription: string;
@@ -74,6 +82,32 @@ const TEMPLATES: TemplateFile[] = [
     canonicalDescription:
       "Instrumento particular de contrato de administração de locação de imóvel (imobiliária ↔ proprietário) - CC arts. 653-666 e Lei nº 8.245/91",
     schemaType: "administracao_locacao_v1",
+  },
+  // Propostas comerciais (oferta pré-contrato). schemaType igual ao do contrato
+  // correspondente — a conversão herda o dataJson sem tradução.
+  {
+    modalidade: "proposta_venda",
+    filename: "proposta_venda_v1.hbs",
+    canonicalName: "Proposta de Compra",
+    canonicalDescription:
+      "Proposta de compra de imóvel (oferta do proponente antes do contrato)",
+    schemaType: "compra_venda_v1",
+  },
+  {
+    modalidade: "proposta_locacao_residencial",
+    filename: "proposta_locacao_residencial_v1.hbs",
+    canonicalName: "Proposta de Locação Residencial",
+    canonicalDescription:
+      "Proposta de locação residencial (oferta do proponente antes do contrato)",
+    schemaType: "locacao_residencial_v1",
+  },
+  {
+    modalidade: "proposta_locacao_comercial",
+    filename: "proposta_locacao_comercial_v1.hbs",
+    canonicalName: "Proposta de Locação Comercial",
+    canonicalDescription:
+      "Proposta de locação não residencial/comercial (oferta do proponente antes do contrato)",
+    schemaType: "locacao_comercial_v1",
   },
 ];
 

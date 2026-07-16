@@ -18,7 +18,7 @@ import { streamOneTurn } from "./turn";
 import { executeToolHandler } from "../tool-handlers";
 import { mapToolToAction, summarizeToolResult, type ToolOutput } from "./tool-mapping";
 import { capturePreSnapshot, capturePostSnapshot } from "./snapshot";
-import { recordAIUsage } from "../usage";
+import { recordAIUsage, type AIOperation } from "../usage";
 import { assertContractBudget, ContractBudgetExceededError } from "../budget";
 import type { AgentContext } from "../types";
 import type {
@@ -140,7 +140,7 @@ export async function runSpecialist(
       contractId,
       provider: "anthropic",
       model,
-      operation: `specialist_${agentName}` as never,
+      operation: `specialist_${agentName}` as AIOperation,
       promptTokens: 0,
       latencyMs: Date.now() - t0,
       success: false,
@@ -303,7 +303,7 @@ export async function runSpecialist(
         contractId,
         provider: "anthropic",
         model,
-        operation: `specialist_${agentName}` as never,
+        operation: `specialist_${agentName}` as AIOperation,
         promptTokens: usageAgg.promptTokens,
         completionTokens: usageAgg.completionTokens,
         cacheReadTokens: usageAgg.cacheReadTokens,
@@ -329,7 +329,7 @@ export async function runSpecialist(
     contractId,
     provider: "anthropic",
     model,
-    operation: `specialist_${agentName}` as never,
+    operation: `specialist_${agentName}` as AIOperation,
     promptTokens: usageAgg.promptTokens,
     completionTokens: usageAgg.completionTokens,
     cacheReadTokens: usageAgg.cacheReadTokens,

@@ -1298,7 +1298,11 @@ async function handleInsertClause(
     const search = (await handleQueryKnowledgeBase(
       { query: clauseQuery, category: "clause", groupCode, topK: 1 },
       context
-    )) as { results?: Array<{ id: string; title: string; similarity?: number }>; error?: string };
+    )) as {
+      results?: Array<{ id: string; title: string; similarity?: number }>;
+      mode?: string;
+      error?: string;
+    };
     if (search.error) {
       return {
         success: false,
@@ -1307,11 +1311,21 @@ async function handleInsertClause(
       };
     }
     const top = search.results?.[0];
-    if (!top || (typeof top.similarity === "number" && top.similarity < 0.4)) {
+    // Fail-safe: só auto-insere quando há match SEMÂNTICO acima do limiar. O
+    // fallback keyword (ILIKE, quando o Voyage está fora) não traz `similarity`
+    // — antes o check `typeof === "number"` era pulado e a cláusula do top-1 por
+    // keyword entrava DIRETO no Google Doc sem revisão. Agora exige similaridade
+    // numérica ≥ 0.4; sem ela, devolve no_match instrutivo em vez de arriscar
+    // inserir a cláusula errada.
+    const sim = typeof top?.similarity === "number" ? top.similarity : null;
+    if (!top || sim === null || sim < 0.4) {
       return {
         success: false,
-        error: `Auto-resolve não encontrou cláusula compatível com "${clauseQuery}"${groupCode ? ` em ${groupCode}` : ""}. Ajuste o clauseQuery ou tente outro groupCode.`,
-        hint: "kb_search_no_match",
+        error:
+          sim === null && top
+            ? `Busca semântica indisponível no momento — não é seguro auto-inserir por palavra-chave. Passe o knowledgeItemId explícito ou tente de novo.`
+            : `Auto-resolve não encontrou cláusula compatível com "${clauseQuery}"${groupCode ? ` em ${groupCode}` : ""}. Ajuste o clauseQuery ou tente outro groupCode.`,
+        hint: sim === null && top ? "semantic_unavailable" : "kb_search_no_match",
       };
     }
     knowledgeItemId = top.id;

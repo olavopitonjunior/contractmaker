@@ -1,0 +1,54 @@
+<div style="font-family: 'EB Garamond', Georgia, serif; color: #111; max-width: 720px; margin: 0 auto; line-height: 1.5;">
+  <h1 style="text-align: center; font-size: 18pt; margin: 0 0 4px;">PROPOSTA DE COMPRA</h1>
+  <p style="text-align: center; font-size: 10pt; color: #555; margin: 0 0 20px;">Proposta nº {{numero_proposta}}</p>
+
+  <p>Pela presente, o(a) <strong>PROPONENTE</strong> abaixo qualificado(a) oferece,
+  de forma {{#if via_reduzida}}resumida{{else}}firme{{/if}}, a compra do imóvel a seguir descrito, nas condições aqui declaradas.</p>
+
+  {{#each compradores}}
+  <p><strong>Proponente:</strong> {{this.nome}}{{#if this.cpf}}, CPF {{cpf this.cpf}}{{/if}}{{#if this.email}}, {{this.email}}{{/if}}.</p>
+  {{/each}}
+
+  {{#each imoveis}}
+  <p><strong>Imóvel:</strong> {{this.endereco}}{{#if this.numero}}, nº {{this.numero}}{{/if}}{{#if this.bairro}} — {{this.bairro}}{{/if}}{{#if this.cidade}}, {{this.cidade}}{{#if this.uf}}/{{this.uf}}{{/if}}{{/if}}{{#if this.matricula}}. Matrícula {{this.matricula}}{{/if}}.</p>
+  {{/each}}
+
+  <h2 style="font-size: 12pt; margin: 20px 0 8px;">Condições da oferta</h2>
+  {{#if pagamento.valor_total}}
+  <p><strong>Valor ofertado:</strong> {{moeda pagamento.valor_total}} ({{extenso pagamento.valor_total}}).</p>
+  {{/if}}
+  {{#if pagamento.sinal}}
+  <p><strong>Sinal:</strong> {{moeda pagamento.sinal}}.</p>
+  {{/if}}
+  {{#if pagamento.forma}}
+  <p><strong>Forma de pagamento:</strong> {{pagamento.forma}}.</p>
+  {{/if}}
+  {{#if config.condicoes_internas}}
+  <p><strong>Observações:</strong> {{config.condicoes_internas}}.</p>
+  {{/if}}
+
+  {{#if comissao_incluida}}
+  <h2 style="font-size: 12pt; margin: 20px 0 8px;">Intermediação</h2>
+  <p>A presente negociação é intermediada pela imobiliária, com comissão
+  {{#if comissao.percentual}}de {{numero comissao.percentual}}% sobre o valor da venda{{else}}{{#if comissao.valor}}de {{moeda comissao.valor}}{{/if}}{{/if}}.</p>
+  {{/if}}
+
+  <h2 style="font-size: 12pt; margin: 20px 0 8px;">Validade</h2>
+  <p>Esta proposta é válida até a data indicada no envio, após a qual perde efeito automaticamente, salvo prorrogação expressa.</p>
+
+  {{#if via_reduzida}}
+  <p style="margin-top: 24px; font-size: 9pt; color: #555; border-top: 1px solid #ccc; padding-top: 8px;">
+    Este instrumento reproduz as condições essenciais da Proposta nº {{numero_proposta}},
+    arquivada na íntegra junto à imobiliária.
+  </p>
+  {{/if}}
+
+  <div style="margin-top: 40px;">
+    <p>_______________________________________</p>
+    <p style="font-size: 10pt;">{{#each compradores}}{{this.nome}}{{#unless @last}}; {{/unless}}{{/each}} — Proponente</p>
+  </div>
+  <div style="margin-top: 24px;">
+    <p>_______________________________________</p>
+    <p style="font-size: 10pt;">{{#each vendedores}}{{this.nome}}{{#unless @last}}; {{/unless}}{{/each}} — Vendedor(es)</p>
+  </div>
+</div>

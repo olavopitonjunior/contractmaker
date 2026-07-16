@@ -35,8 +35,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 
-/** Chave de módulo OU sub-função que gateia a visibilidade do item na sidebar. */
-type Requires = string;
+/** Chave de módulo OU sub-função que gateia a visibilidade do item na sidebar.
+ *  Um array = anyOf (visível se QUALQUER uma estiver ligada) — ex.: Propostas,
+ *  que aparece se vendas.propostas OU locacao.propostas. */
+type Requires = string | string[];
 type SubItem = { title: string; url: string; exact?: boolean; requires?: Requires };
 type NavSimple = {
   kind: "item";
@@ -68,6 +70,10 @@ type ModulesView = {
 function requiresEnabled(modules: ModulesView, requires?: Requires): boolean {
   if (!requires) return true;
   if (!modules) return true;
+  // Array = anyOf.
+  if (Array.isArray(requires)) {
+    return requires.some((r) => requiresEnabled(modules, r));
+  }
   return isValidModule(requires)
     ? modules.enabled[requires] === true
     : modules.features[requires] === true;
@@ -81,6 +87,11 @@ const NAV: NavEntry[] = [
     items: [
       { title: "Vendas", url: "/pipeline", exact: true, requires: FEATURE.VENDAS_PIPELINE },
       { title: "Locação", url: "/pipeline/locacao", requires: FEATURE.LOCACAO_PIPELINE },
+      {
+        title: "Propostas",
+        url: "/pipeline/propostas",
+        requires: [FEATURE.VENDAS_PROPOSTAS, FEATURE.LOCACAO_PROPOSTAS],
+      },
     ],
   },
   {
@@ -110,7 +121,7 @@ const NAV: NavEntry[] = [
     icon: BookOpen,
     items: [
       { title: "Banco de cláusulas", url: "/clauses", exact: true },
-      { title: "Propostas", url: "/clauses/proposals" },
+      { title: "Sugestões de cláusula", url: "/clauses/proposals" },
     ],
   },
   { kind: "item", title: "Templates", url: "/templates", icon: FileStack },

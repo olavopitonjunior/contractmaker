@@ -2,14 +2,22 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { updateKnowledgeItem } from "@/lib/ai/knowledge";
+import { resolveUserOrgId } from "@/lib/security/org-scope";
 
 /**
  * /api/clauses/[id] — pós-unificação 2026-05-18 opera contra KnowledgeItem
  * com category="clause". URL preservada pra retrocompat de UI.
+ *
+ * Escopo multitenant: a cláusula só é visível/editável pela org dona. O
+ * filtro por orgId do USUÁRIO (não da cláusula) é o que impede escrita
+ * cross-org — antes o PATCH passava `clause.orgId` (da vítima) pro check
+ * interno do updateKnowledgeItem, que sempre batia.
  */
-async function findClause(id: string) {
+async function findClause(id: string, userId: string) {
+  const orgId = await resolveUserOrgId(userId);
+  if (!orgId) return null;
   return prisma.knowledgeItem.findFirst({
-    where: { id, category: "clause" },
+    where: { id, category: "clause", orgId },
   });
 }
 
@@ -26,7 +34,7 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const clause = await findClause(params.id);
+  const clause = await findClause(params.id, session.user.id);
   if (!clause) {
     return NextResponse.json({ error: "Clause not found" }, { status: 404 });
   }
@@ -43,7 +51,7 @@ export async function PATCH(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const clause = await findClause(params.id);
+  const clause = await findClause(params.id, session.user.id);
   if (!clause) {
     return NextResponse.json({ error: "Clause not found" }, { status: 404 });
   }
@@ -75,8 +83,12 @@ export async function DELETE(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const orgId = await resolveUserOrgId(session.user.id);
+  if (!orgId) {
+    return NextResponse.json({ error: "Clause not found" }, { status: 404 });
+  }
   const clause = await prisma.knowledgeItem.findFirst({
-    where: { id: params.id, category: "clause" },
+    where: { id: params.id, category: "clause", orgId },
     include: { _count: { select: { contractClauses: true } } },
   });
 

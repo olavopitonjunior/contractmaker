@@ -74,7 +74,12 @@ export async function POST(
       },
     },
   });
-  if (!plan || plan.session.contractId !== params.id) {
+  // Cross-org check pra session E bearer — 404 pra não vazar existência.
+  if (
+    !plan ||
+    plan.session.contractId !== params.id ||
+    plan.session.contract.deal.pipeline.orgId !== auth.org.id
+  ) {
     return NextResponse.json({ error: "Plan not found" }, { status: 404 });
   }
   if (

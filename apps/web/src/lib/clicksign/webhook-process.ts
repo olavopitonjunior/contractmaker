@@ -4,12 +4,14 @@
 // verificação de HMAC fica em cada rota (o secret difere); aqui é só a lógica
 // de resolver o envelope + aplicar mutações, idêntica nos dois caminhos.
 
+import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
 import { persistSignedPdf } from "@/lib/clicksign/signed-pdf";
 import { audit } from "@/lib/security/audit";
 import {
+  getAcceptanceEventFromPayload,
   getDocumentKeyFromPayload,
   getEnvelopeIdFromPayload,
   getRawEventName,
@@ -26,13 +28,57 @@ import {
   completeInspectionOnEnvelopeClosed,
   revertInspectionOnEnvelopeCanceled,
 } from "@/lib/locacao/inspection-signature";
+import {
+  onProposalEnvelopeClosed,
+  onProposalEnvelopeRefused,
+} from "@/lib/proposals/webhook-hooks";
+import { processProposalAcceptanceEvent } from "@/lib/proposals/acceptance-webhook";
 
 export interface ProcessResult {
   ok: true;
   ignored?: boolean;
   unknownEnvelope?: boolean;
+  duplicate?: boolean;
   envelopeId?: string;
   eventName?: string;
+}
+
+/**
+ * Chave de idempotência estável do evento. ClickSign v3 não manda um id de
+ * evento, então derivamos de campos estáveis do payload (envelope + nome do
+ * evento + signatário + timestamp de ocorrência). Reentregas do MESMO evento
+ * geram a mesma chave e são barradas pelo @unique do EnvelopeEvent.
+ */
+/**
+ * Dispara o download do PDF assinado (fire-and-forget, idempotente por
+ * findFirst). v3 não traz signed_file_url no payload — tenta do payload
+ * (compat v2) e, se null, faz lookup via /documents (canônico v3). Usado tanto
+ * no fechamento normal quanto na recuperação por reentrega.
+ */
+function triggerSignedPdfDownload(
+  envelope: { id: string; orgId: string; clicksignId: string | null },
+  payload: WebhookPayload
+): void {
+  const fromPayload = getSignedDocumentUrlFromPayload(payload);
+  if (fromPayload) {
+    waitUntil(downloadSignedPdf(envelope.id, fromPayload));
+  } else if (envelope.clicksignId) {
+    waitUntil(resolveAndDownload(envelope.id, envelope.orgId, envelope.clicksignId));
+  }
+}
+
+export function computeEventDedupeKey(
+  envelopeId: string,
+  payload: WebhookPayload
+): string {
+  const parts = [
+    envelopeId,
+    getRawEventName(payload) ?? "",
+    getSignerKeyFromPayload(payload) ?? getSignerEmailFromPayload(payload) ?? "",
+    payload.event?.occurred_at ?? "",
+    getDocumentKeyFromPayload(payload) ?? "",
+  ];
+  return createHash("sha256").update(parts.join("|")).digest("hex");
 }
 
 /**
@@ -48,6 +94,25 @@ export async function processClickSignWebhookPayload(
 ): Promise<ProcessResult> {
   const eventName = parseWebhookEventName(payload);
   const rawEventName = getRawEventName(payload);
+
+  // Aceite via WhatsApp (`acceptance_term_*`) — sem envelope; resolvido pelo
+  // acceptance_term id. Intercepta ANTES do lookup de envelope (senão cairia no
+  // `unknownEnvelope` e sumiria).
+  const acceptance = getAcceptanceEventFromPayload(payload);
+  if (acceptance) {
+    const r = await processProposalAcceptanceEvent({
+      acceptanceId: acceptance.acceptanceId,
+      phase: acceptance.phase,
+      payload,
+      orgId: opts?.orgId,
+    });
+    return {
+      ok: true,
+      eventName: rawEventName ?? undefined,
+      unknownEnvelope: r.unknownAcceptance,
+    };
+  }
+
   const clicksignEnvelopeId = getEnvelopeIdFromPayload(payload);
   const documentKey = getDocumentKeyFromPayload(payload);
   // Basta um nome (mesmo desconhecido) + uma âncora do envelope. Evento
@@ -93,15 +158,49 @@ export async function processClickSignWebhookPayload(
   ).catch(() => {});
 
   // Registra SEMPRE — inclusive o que não tratamos (`eventName` null). O nome
-  // cru fica no EnvelopeEvent pra diagnóstico.
-  await prisma.envelopeEvent.create({
-    data: {
-      envelopeId: envelope.id,
-      eventName: rawEventName,
-      payload: payload as unknown as Prisma.InputJsonValue,
-      source: "webhook",
-    },
-  });
+  // cru fica no EnvelopeEvent pra diagnóstico. O create com `dedupeKey @unique`
+  // é o LOCK de idempotência: se a ClickSign reentregar o mesmo evento, o
+  // segundo create dá P2002 e a gente NÃO re-dispara os efeitos que não devem
+  // repetir (auto-promote de deal, mutação de status).
+  const dedupeKey = computeEventDedupeKey(envelope.id, payload);
+  const closeEvents = ["close", "auto_close", "document_closed"];
+  try {
+    await prisma.envelopeEvent.create({
+      data: {
+        envelopeId: envelope.id,
+        eventName: rawEventName,
+        payload: payload as unknown as Prisma.InputJsonValue,
+        source: "webhook",
+        dedupeKey,
+      },
+    });
+  } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2002"
+    ) {
+      // Reentrega de um evento já visto. Os efeitos não-idempotentes já rodaram.
+      // MAS a ClickSign reentrega justamente pra RECUPERAR uma 1ª entrega em que
+      // o download do PDF assinado (fire-and-forget) falhou transientemente. Se
+      // for um evento de fechamento e o PDF ainda estiver faltando, re-dispara
+      // SÓ o download (idempotente por findFirst) — senão o contrato assinado
+      // ficava permanentemente ausente da pasta apesar da reentrega.
+      if (
+        eventName &&
+        closeEvents.includes(eventName) &&
+        !envelope.signedDocumentUrl
+      ) {
+        triggerSignedPdfDownload(envelope, payload);
+      }
+      return {
+        ok: true,
+        duplicate: true,
+        envelopeId: envelope.id,
+        eventName: eventName ?? undefined,
+      };
+    }
+    throw err;
+  }
 
   switch (eventName) {
     case "sign":
@@ -141,6 +240,9 @@ export async function processClickSignWebhookPayload(
           data: { status: "refused", refusedAt: new Date() },
         });
       }
+      // Proposta: recusa move o status (proponente vs proprietário). No-op p/
+      // envelope de contrato/attachment.
+      await onProposalEnvelopeRefused(envelope.id);
       break;
     }
     case "close":
@@ -152,15 +254,10 @@ export async function processClickSignWebhookPayload(
       });
       await autoPromoteDealOnContractSigned(envelope.id);
       await completeInspectionOnEnvelopeClosed(envelope.id);
-
-      // v3 não traz signed_file_url no payload — tenta do payload (compat v2) e,
-      // se null, faz lookup via /documents (canônico v3, requer creds da org).
-      const fromPayload = getSignedDocumentUrlFromPayload(payload);
-      if (fromPayload) {
-        waitUntil(downloadSignedPdf(envelope.id, fromPayload));
-      } else if (envelope.clicksignId) {
-        waitUntil(resolveAndDownload(envelope.id, envelope.orgId, envelope.clicksignId));
-      }
+      // Proposta: avança o status (assinada_proponente / completa / aguardando
+      // vendedor). No-op p/ envelope de contrato/attachment.
+      await onProposalEnvelopeClosed(envelope.id);
+      triggerSignedPdfDownload(envelope, payload);
       break;
     }
     case "cancel":

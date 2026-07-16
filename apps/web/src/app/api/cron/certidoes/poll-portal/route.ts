@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireCronAuth } from "@/lib/security/cron-auth";
 import { prisma } from "@/lib/db/prisma";
 import { pollPortalJob, runSingleJob, sweepStaleJobs } from "@/lib/certidoes/executor";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
@@ -18,13 +19,8 @@ export const dynamic = "force-dynamic";
  * Auth: expects `Authorization: Bearer <CRON_SECRET>` header.
  */
 export async function GET(req: NextRequest) {
-  const secret = process.env.CRON_SECRET;
-  if (secret) {
-    const auth = req.headers.get("authorization") || "";
-    if (auth !== `Bearer ${secret}`) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-  }
+  const cronDenied = requireCronAuth(req);
+  if (cronDenied) return cronDenied;
   if (!(await isCronAllowedInStaging("/api/cron/certidoes/poll-portal"))) {
     return NextResponse.json({ skipped: "staging-disabled", path: "/api/cron/certidoes/poll-portal" });
   }
