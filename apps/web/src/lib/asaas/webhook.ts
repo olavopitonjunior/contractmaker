@@ -18,6 +18,7 @@ import {
 } from "./types";
 import { dispatchExternalSplits } from "./splitDispatcher";
 import { notifyChargeEvent, type ChargeEvent } from "@/lib/financeiro/notifications";
+import { autoPromoteDealOnCommissionPaid } from "@/lib/contracts/auto-promote-commission";
 
 export function validateWebhookToken(headerToken: string | null): boolean {
   const expected = process.env.ASAAS_WEBHOOK_TOKEN;
@@ -284,6 +285,15 @@ export async function applyWebhookToCharge(
         `[webhook] dispatchExternalSplits failed for charge ${charge.id}:`,
         err instanceof Error ? err.message : err
       );
+    }
+    // Auto-promove o deal pra "Comissão paga" — o único estágio que exigia
+    // clique manual apesar de o webhook já saber do pagamento. Guard interno
+    // (só de "Cobrança emitida"/"Contrato assinado") + no-op se não houver deal
+    // ou stage. Inline pela mesma razão do dispatch (serverless aborta o após).
+    // SÓ pra charge de comissão: uma avulsa/aluguel (kind != "commission") paga
+    // no mesmo deal NÃO significa que a comissão foi paga → não promove.
+    if (charge.kind === "commission") {
+      await autoPromoteDealOnCommissionPaid(charge.dealId);
     }
   }
 
