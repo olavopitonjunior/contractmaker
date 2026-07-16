@@ -74,12 +74,44 @@ describe("PUT /api/settings/agent", () => {
     expect(res.status).toBe(401);
   });
 
-  it("upserts config normalizando modelo aposentado do body", async () => {
+  it("returns 403 quando o usuário é member (não owner/admin)", async () => {
     mockAuth.mockResolvedValueOnce(createMockSession());
     mockGetUserOrg.mockResolvedValueOnce(createMockOrg({ id: "org-1" }));
+    mockPrisma.orgMembership.findFirst.mockResolvedValueOnce({ role: "member" } as any);
+
+    const req = new NextRequest("http://localhost/api/settings/agent", {
+      method: "PUT",
+      body: JSON.stringify({ model: "claude-sonnet-4-6" }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(403);
+    expect(mockPrisma.agentConfig.upsert).not.toHaveBeenCalled();
+  });
+
+  it("returns 400 quando o modelo não está na allowlist", async () => {
+    mockAuth.mockResolvedValueOnce(createMockSession());
+    mockGetUserOrg.mockResolvedValueOnce(createMockOrg({ id: "org-1" }));
+    mockPrisma.orgMembership.findFirst.mockResolvedValueOnce({ role: "owner" } as any);
+
+    const req = new NextRequest("http://localhost/api/settings/agent", {
+      method: "PUT",
+      body: JSON.stringify({ model: "gpt-4-turbo-caro" }),
+      headers: { "Content-Type": "application/json" },
+    });
+    const res = await PUT(req);
+    expect(res.status).toBe(400);
+    expect(mockPrisma.agentConfig.upsert).not.toHaveBeenCalled();
+  });
+
+  it("upserts config normalizando modelo aposentado do body (owner)", async () => {
+    mockAuth.mockResolvedValueOnce(createMockSession());
+    mockGetUserOrg.mockResolvedValueOnce(createMockOrg({ id: "org-1" }));
+    mockPrisma.orgMembership.findFirst.mockResolvedValueOnce({ role: "owner" } as any);
     mockPrisma.agentConfig.upsert.mockResolvedValueOnce({
       model: "claude-opus-4-6",
       temperature: 0.7,
+      maxTokens: 6000,
     } as any);
 
     const req = new NextRequest("http://localhost/api/settings/agent", {
