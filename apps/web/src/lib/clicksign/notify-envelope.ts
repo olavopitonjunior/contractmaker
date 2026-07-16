@@ -44,8 +44,9 @@ const TEXT: Record<EnvelopeNotifKind, { type: string; title: string; body: strin
 
 /**
  * Monta o link do deal respeitando a esteira (locação → /locacao/deals). Best-
- * effort: qualquer falha cai no fallback de venda — o link é secundário e
- * nunca deve impedir o sino. Nunca lança.
+ * effort: o link é secundário e nunca deve impedir o sino. Nunca lança. Em erro
+ * de DB devolve `undefined` (sino sem link) em vez de adivinhar `/deals/` — pra
+ * um deal de locação, `/deals/` levaria a 404/módulo errado; melhor sem link.
  */
 export async function resolveDealLink(
   dealId: string | null | undefined
@@ -60,7 +61,7 @@ export async function resolveDealLink(
       ? `/locacao/deals/${dealId}`
       : `/deals/${dealId}`;
   } catch {
-    return `/deals/${dealId}`;
+    return undefined;
   }
 }
 
