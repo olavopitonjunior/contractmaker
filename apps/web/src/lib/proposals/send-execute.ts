@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
 import { exportPdfToBuffer } from "@/lib/render/exporter";
 import {
@@ -78,6 +79,8 @@ export function blockToResponse(block: PrepareResult): { status: number; body: u
       return { status: 402, body: { error: "budget", ...block } };
     case "not_configured":
       return { status: 409, body: { error: "ClickSign não conectada nesta organização." } };
+    case "already_sending":
+      return { status: 409, body: { error: "Esta proposta já está sendo enviada." } };
     default:
       return {
         status: 400,
@@ -97,6 +100,51 @@ export async function executeProposalSend(proposalId: string): Promise<SendResul
   const decision = await prepareSend(proposalId);
   if (!("ok" in decision)) return { ok: false, block: decision };
 
+  // Claim atômico anti-duplo-envio: só UMA request move o status de um estado
+  // pré-envio pra "enviada". A segunda (clique duplo / duas abas) vê count 0 e
+  // é barrada ANTES de gastar — sem isso o guard do route é check-then-act e as
+  // duas criam recursos pagos (2 termos de Aceite vinculantes + cobrança).
+  const claim = await prisma.proposal.updateMany({
+    where: {
+      id: proposalId,
+      status: { in: ["rascunho", "aguardando_aprovacao", "falha_envio"] },
+    },
+    data: { status: "enviada" },
+  });
+  if (claim.count === 0) {
+    return { ok: false, block: { blocked: "already_sending" } };
+  }
+
+  try {
+    const result = await runSend(proposalId, decision);
+    // Um bloqueio APÓS o claim (ex.: proposta sumiu entre prepareSend e runSend)
+    // não gastou recurso mas deixou o status em "enviada" — sem liberar, o claim
+    // trava o reenvio pra sempre ("already_sending" eterno). Libera pra
+    // falha_envio (reenviável).
+    if (!result.ok) {
+      await releaseClaim(proposalId);
+    }
+    return result;
+  } catch (err) {
+    await releaseClaim(proposalId);
+    throw err;
+  }
+}
+
+/** Devolve o status pra "falha_envio" quando o claim foi feito mas o envio não completou. */
+async function releaseClaim(proposalId: string): Promise<void> {
+  await prisma.proposal
+    .updateMany({
+      where: { id: proposalId, status: "enviada" },
+      data: { status: "falha_envio" },
+    })
+    .catch(() => {});
+}
+
+async function runSend(
+  proposalId: string,
+  decision: Extract<PrepareResult, { ok: true }>
+): Promise<SendResult> {
   const proposal = await prisma.proposal.findUnique({ where: { id: proposalId } });
   if (!proposal) return { ok: false, block: { blocked: "no_signers" } };
 
@@ -117,10 +165,33 @@ export async function executeProposalSend(proposalId: string): Promise<SendResul
       })
     : (proposal.htmlContent ?? `<h1>${proposal.title}</h1>`);
 
+  // Congela o snapshot do que está sendo enviado ANTES de criar recursos —
+  // o comprovante e a página /p/[token] usam este HTML/hash, nunca a
+  // re-renderização do template atual (que pode mudar entre envio e aceite).
+  const snapshotHash = createHash("sha256").update(html).digest("hex");
+  await prisma.proposal.update({
+    where: { id: proposal.id },
+    data: { sentSnapshotHtml: html, sentSnapshotHash: snapshotHash },
+  });
+
   if (decision.instrument === "aceite") {
     return sendAceite(proposal, decision, html);
   }
   return sendEnvelope(proposal, decision, html);
+}
+
+/** Casa um signer deduplicado com a linha ProposalSigner por identidade estável. */
+function matchSignerRow<T extends { cpf: string | null; email: string | null; phone: string | null; name: string }>(
+  rows: T[],
+  s: { cpf?: string | null; email?: string | null; phone?: string | null; name: string }
+): T | undefined {
+  const digits = (v: string | null | undefined) => (v ?? "").replace(/\D/g, "");
+  return (
+    (s.cpf ? rows.find((r) => digits(r.cpf) === digits(s.cpf)) : undefined) ??
+    (s.email ? rows.find((r) => (r.email ?? "").toLowerCase() === (s.email ?? "").toLowerCase()) : undefined) ??
+    (s.phone ? rows.find((r) => digits(r.phone) === digits(s.phone)) : undefined) ??
+    rows.find((r) => r.name.trim().toLowerCase() === s.name.trim().toLowerCase())
+  );
 }
 
 async function sendAceite(
@@ -130,27 +201,78 @@ async function sendAceite(
 ): Promise<SendResult> {
   const link = `${process.env.NEXTAUTH_URL ?? "https://staging.imobpro.ia.br"}/p/${proposal.token}`;
   const numero = proposal.id.slice(-8);
-  let firstId: string | null = null;
+
+  // Carrega as linhas pra rastrear o acceptance_term POR signatário. Retry-safe:
+  // um signatário que já tem acceptanceClicksignId não é reenviado (senão o
+  // retry após falha parcial duplicaria termos vinculantes + cobrança).
+  const rows = await prisma.proposalSigner.findMany({
+    where: { proposalId: proposal.id, included: true },
+  });
+
+  let proponenteAcceptanceId: string | null = null;
+  let termsCreated = 0;
+  let termsPresent = 0; // criados agora + pré-existentes (retry)
+
   for (const s of decision.signers) {
+    const row = matchSignerRow(rows, s);
+    if (!row) continue;
+    // Já enviado (retry) → reaproveita e não cobra de novo.
+    if (row.acceptanceClicksignId) {
+      termsPresent++;
+      if (row.role === "proponente") proponenteAcceptanceId = row.acceptanceClicksignId;
+      continue;
+    }
     const phone = toE164BR(s.phone)?.replace("+", "") ?? "";
     if (!phone) continue;
-    const message = buildAcceptanceMessage({ numero, title: proposal.title, link });
-    const resp = await createAcceptanceWhatsapp(
-      {
-        title: `Proposta ${numero}`,
-        message,
-        signerName: s.name,
-        signerPhone: phone,
-      },
-      decision.creds
-    );
-    firstId = firstId ?? extractId(resp);
+
+    // try/catch por signatário: uma falha no signatário N não perde os 1..N-1
+    // (já persistidos) nem re-envia a todos no retry.
+    try {
+      const message = buildAcceptanceMessage({ numero, title: proposal.title, link });
+      const resp = await createAcceptanceWhatsapp(
+        { title: `Proposta ${numero}`, message, signerName: s.name, signerPhone: phone },
+        decision.creds
+      );
+      const acceptanceId = extractId(resp);
+      if (acceptanceId) {
+        await prisma.proposalSigner.update({
+          where: { id: row.id },
+          data: { acceptanceClicksignId: acceptanceId, acceptanceStatus: "sent" },
+        });
+        termsCreated++;
+        termsPresent++;
+        if (row.role === "proponente") proponenteAcceptanceId = acceptanceId;
+      }
+    } catch (err) {
+      console.error(`[proposals] Aceite falhou pro signatário ${row.id}:`, err);
+      // Não relança AQUI: os já enviados ficam válidos; a checagem abaixo decide
+      // se o envio como um todo fracassou.
+    }
   }
+
+  const proponenteTerm =
+    proponenteAcceptanceId ??
+    rows.find((r) => r.role === "proponente")?.acceptanceClicksignId ??
+    null;
+
+  // Envio SÓ é sucesso se o proponente (termo vinculante) tem acceptance_term.
+  // Antes, mesmo com ZERO termos criados a função marcava "enviada" e retornava
+  // ok:true — o operador via "enviada" sem ninguém ter recebido, e o claim CAS
+  // bloqueava o reenvio. Sem termo do proponente, lança pro executeProposalSend
+  // liberar o claim (→ falha_envio, reenviável).
+  if (!proponenteTerm) {
+    throw new Error(
+      `Aceite não criado para o proponente (termos criados: ${termsCreated}, presentes: ${termsPresent}). Envio abortado.`
+    );
+  }
+
+  // Backward-compat: Proposal.acceptanceClicksignId aponta pro termo do
+  // PROPONENTE (o vinculante) — antes era o 1º signatário iterado ao acaso.
   await prisma.proposal.update({
     where: { id: proposal.id },
     data: {
       instrument: "aceite",
-      acceptanceClicksignId: firstId,
+      acceptanceClicksignId: proponenteTerm,
       sentAt: new Date(),
       reservedCostCents: decision.planCostCents,
     },

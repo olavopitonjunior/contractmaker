@@ -64,18 +64,35 @@ export async function processProposalAcceptanceEvent(
   input: AcceptanceEventInput
 ): Promise<AcceptanceProcessResult> {
   const orgScope = input.orgId ? { orgId: input.orgId } : {};
-  const proposal = await prisma.proposal.findFirst({
-    where: { acceptanceClicksignId: input.acceptanceId, ...orgScope },
-    select: {
-      id: true,
-      title: true,
-      token: true,
-      instrument: true,
+
+  // Resolve por SIGNATÁRIO primeiro (cada ProposalSigner tem seu acceptance_term)
+  // e cai pra Proposal.acceptanceClicksignId (compat). Saber QUEM aceitou é o que
+  // permite (a) marcar o desfecho do signatário certo, (b) só completar quando o
+  // PROPONENTE aceitar, (c) não descartar a recusa de um proprietário.
+  const signer = await prisma.proposalSigner.findFirst({
+    where: {
+      acceptanceClicksignId: input.acceptanceId,
+      ...(input.orgId ? { proposal: { orgId: input.orgId } } : {}),
     },
+    select: { id: true, role: true, proposalId: true },
   });
+  const proposal = signer
+    ? await prisma.proposal.findUnique({
+        where: { id: signer.proposalId },
+        select: { id: true, title: true, token: true, instrument: true, validUntil: true },
+      })
+    : await prisma.proposal.findFirst({
+        where: { acceptanceClicksignId: input.acceptanceId, ...orgScope },
+        select: { id: true, title: true, token: true, instrument: true, validUntil: true },
+      });
   if (!proposal) {
     return { ok: true, handled: false, phase: input.phase, unknownAcceptance: true };
   }
+
+  // O signatário é o proponente quando resolvemos por linha e role="proponente",
+  // OU quando caímos no fallback (Proposal.acceptanceClicksignId aponta pro
+  // proponente por construção no envio).
+  const isProponente = signer ? signer.role === "proponente" : true;
 
   // Registra SEMPRE o evento cru na timeline da proposta (durabilidade §9.6).
   await prisma.proposalEvent
@@ -91,6 +108,22 @@ export async function processProposalAcceptanceEvent(
 
   const facts = factsFromPayload(input.payload);
 
+  // Marca o desfecho NA LINHA do signatário (quando resolvido por linha).
+  if (signer) {
+    const perSigner: Record<string, { acceptanceStatus: string; acceptedAt?: Date; refusedAt?: Date }> = {
+      completed: { acceptanceStatus: "completed", acceptedAt: new Date() },
+      refused: { acceptanceStatus: "refused", refusedAt: new Date() },
+      expired: { acceptanceStatus: "expired" },
+      canceled: { acceptanceStatus: "canceled" },
+    };
+    const upd = perSigner[input.phase];
+    if (upd) {
+      await prisma.proposalSigner
+        .update({ where: { id: signer.id }, data: upd })
+        .catch(() => {});
+    }
+  }
+
   switch (input.phase) {
     case "sent":
       // No Aceite a ClickSign confirma a ENTREGA — "Entregue" é real neste modo.
@@ -98,9 +131,26 @@ export async function processProposalAcceptanceEvent(
       break;
 
     case "completed": {
-      // O proponente aceitou: proposta completa. Reusa as transições existentes
-      // (enviada/entregue/visualizada → assinada_proponente → completa) em vez
-      // de alargar ALLOWED_FROM.
+      // Só o aceite do PROPONENTE completa a proposta. O aceite de um proprietário
+      // (terceiro) é registrado na linha dele, mas não redefine o desfecho —
+      // antes, com 1 aceite de qualquer um a proposta virava "completa".
+      if (!isProponente) {
+        return { ok: true, handled: true, proposalId: proposal.id, phase: input.phase };
+      }
+
+      // Caducidade (CC art. 431): aceite após validUntil não vincula. Compara com
+      // a HORA REAL do aceite (completed_at do payload), não com o relógio de
+      // processamento — senão um aceite tempestivo (23:59) cujo webhook chega/
+      // reprocessa depois do vencimento (00:05) seria descartado indevidamente.
+      const acceptedAtReal = facts.completedAt ? new Date(facts.completedAt) : new Date();
+      const acceptedAtValid = !Number.isNaN(acceptedAtReal.getTime());
+      if (proposal.validUntil && acceptedAtValid && acceptedAtReal > proposal.validUntil) {
+        await advanceProposalStatus(proposal.id, "expirada", { expiredAt: new Date() });
+        return { ok: true, handled: true, proposalId: proposal.id, phase: input.phase };
+      }
+
+      // O proponente aceitou dentro do prazo: proposta completa. Reusa as
+      // transições existentes em vez de alargar ALLOWED_FROM.
       await advanceProposalStatus(proposal.id, "assinada_proponente");
       await advanceProposalStatus(proposal.id, "completa", { completedAt: new Date() });
 
@@ -129,17 +179,36 @@ export async function processProposalAcceptanceEvent(
     }
 
     case "refused":
-      await advanceProposalStatus(proposal.id, "recusada_proponente", {
-        refusedAt: new Date(),
-      });
+      // Quem recusou importa. O proponente recusar é terminal frio
+      // (recusada_proponente). O VENDEDOR/proprietário recusar deixa um
+      // comprador comprometido na mão → estado quente (recusada_vendedor).
+      // Antes, sem o guard, a recusa de qualquer terceiro virava
+      // "recusada_proponente" — atribuição errada do desfecho.
+      if (isProponente) {
+        await advanceProposalStatus(proposal.id, "recusada_proponente", {
+          refusedAt: new Date(),
+        });
+      } else {
+        await advanceProposalStatus(proposal.id, "recusada_vendedor", {
+          refusedAt: new Date(),
+        });
+      }
       break;
 
     case "expired":
-      await advanceProposalStatus(proposal.id, "expirada", { expiredAt: new Date() });
+      // Só o vencimento do termo do PROPONENTE (o vinculante) expira a proposta.
+      // O termo de um terceiro expirar não mata o negócio — o proponente ainda
+      // pode aceitar. Sem o guard, a expiração de qualquer termo terminava tudo.
+      if (isProponente) {
+        await advanceProposalStatus(proposal.id, "expirada", { expiredAt: new Date() });
+      }
       break;
 
     case "canceled":
-      await advanceProposalStatus(proposal.id, "cancelada", { canceledAt: new Date() });
+      // Idem: só o cancelamento do termo do proponente cancela a proposta.
+      if (isProponente) {
+        await advanceProposalStatus(proposal.id, "cancelada", { canceledAt: new Date() });
+      }
       break;
 
     default:
