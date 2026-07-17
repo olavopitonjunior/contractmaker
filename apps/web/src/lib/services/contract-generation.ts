@@ -1101,7 +1101,7 @@ export async function generateContractForDeal(
   }
 
   // Derive deal title and value from form data
-  const { title: derivedTitle, value: derivedValue } = deriveDealMetadata(
+  const { title: derivedTitle, value: derivedValue, clientName } = deriveDealMetadata(
     dataJson,
     { formTitle: deal.form?.title, fallbackTitle: deal.title }
   );
@@ -1120,6 +1120,7 @@ export async function generateContractForDeal(
     data: {
       title: derivedTitle,
       value: derivedValue ?? deal.value,
+      ...(clientName ? { clientName } : {}),
       ...(confeccaoStage
         ? { stageId: confeccaoStage.id, stageEnteredAt: new Date() }
         : {}),
@@ -1438,7 +1439,7 @@ export async function generateLocacaoContractForDeal(
   // deriveLocacaoDealMetadata lê o shape de locação (locadores/locatarios/
   // imovel singular/aluguel.valor) — a variante de venda deixava o card com
   // título genérico e "Sem valor".
-  const { title: derivedTitle, value: derivedValue } = deriveLocacaoDealMetadata(dataJson, {
+  const { title: derivedTitle, value: derivedValue, clientName } = deriveLocacaoDealMetadata(dataJson, {
     formTitle: deal.form?.title,
     fallbackTitle: deal.title,
   });
@@ -1451,6 +1452,7 @@ export async function generateLocacaoContractForDeal(
     data: {
       title: derivedTitle,
       value: derivedValue ?? deal.value,
+      ...(clientName ? { clientName } : {}),
       ...(confeccaoStage
         ? { stageId: confeccaoStage.id, stageEnteredAt: new Date() }
         : {}),

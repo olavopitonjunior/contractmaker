@@ -25,19 +25,6 @@ const STAGE_COLOR_HEX: Record<string, string> = {
   red: "#ef4444",
 };
 
-/** Extrai o nome do 1º locatário do dataJson do form (best-effort, null-safe). */
-function extractTenantName(dataJson: unknown): string | null {
-  if (!dataJson || typeof dataJson !== "object") return null;
-  const locatarios = (dataJson as { locatarios?: unknown }).locatarios;
-  if (!Array.isArray(locatarios) || locatarios.length === 0) return null;
-  const first = locatarios[0] as { nome?: unknown; razao_social?: unknown };
-  const nome =
-    (typeof first?.nome === "string" && first.nome.trim()) ||
-    (typeof first?.razao_social === "string" && first.razao_social.trim()) ||
-    null;
-  return nome || null;
-}
-
 export default async function PipelineLocacaoPage({
   searchParams,
 }: {
@@ -67,6 +54,8 @@ export default async function PipelineLocacaoPage({
               : { kind: "locacao", archivedAt: null },
             orderBy: { createdAt: "desc" },
             include: {
+              // Sem form.dataJson: o nome do locatário vive denormalizado
+              // em Deal.clientName (backfill + write-points).
               form: {
                 select: {
                   id: true,
@@ -74,7 +63,6 @@ export default async function PipelineLocacaoPage({
                   token: true,
                   createdAt: true,
                   completedAt: true,
-                  dataJson: true,
                 },
               },
               contracts: {
@@ -146,7 +134,7 @@ export default async function PipelineLocacaoPage({
       title: deal.title,
       value: deal.value,
       createdAt: deal.createdAt.toISOString(),
-      clientName: extractTenantName(deal.form?.dataJson),
+      clientName: deal.clientName,
       formStatus: deal.form?.status || null,
       formToken: deal.form?.token || null,
       hasContract: deal.contracts.length > 0,

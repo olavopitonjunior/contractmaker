@@ -2,7 +2,10 @@ import { prisma } from "@/lib/db/prisma";
 import { DEAL_SOURCE_CHANNEL } from "@/lib/pipeline/source-channel";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { moduleForSchemaType } from "@/lib/modules/resolve";
-import { deriveDealMetadata } from "@/lib/contracts/derive-deal-metadata";
+import {
+  deriveDealMetadata,
+  deriveLocacaoDealMetadata,
+} from "@/lib/contracts/derive-deal-metadata";
 
 export class ProposalConvertError extends Error {
   constructor(
@@ -77,7 +80,12 @@ export async function convertProposalToDeal(input: {
     );
   }
   const firstStage = pipeline.stages[0];
-  const meta = deriveDealMetadata(dataJson, {
+  // Derive por kind — a variante de venda sobre dataJson de locação devolve
+  // value/clientName null (lê compradores/pagamento; locação usa locatarios/
+  // aluguel). Mesmo fix já aplicado no apply de anexos e no import.
+  const deriveMeta =
+    proposal.kind === "locacao" ? deriveLocacaoDealMetadata : deriveDealMetadata;
+  const meta = deriveMeta(dataJson, {
     formTitle: proposal.title,
     fallbackTitle: proposal.title,
   });
@@ -110,6 +118,7 @@ export async function convertProposalToDeal(input: {
         sourceChannel: DEAL_SOURCE_CHANNEL.PROPOSTA,
         title: meta.title,
         value: meta.value,
+        clientName: meta.clientName,
         // default "venda"; sem isto toda locação viraria deal de venda.
         kind: proposal.kind,
         dataJson: proposal.dataJson ?? {},

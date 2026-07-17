@@ -203,7 +203,7 @@ export async function importContractFromFile(
     select: { title: true, value: true },
   });
   const derive = kind === "locacao" ? deriveLocacaoDealMetadata : deriveDealMetadata;
-  const { title: derivedTitle, value: derivedValue } = derive(extracted, {
+  const { title: derivedTitle, value: derivedValue, clientName } = derive(extracted, {
     formTitle: input.manualTitle ?? null,
     fallbackTitle: deal.title,
   });
@@ -212,6 +212,7 @@ export async function importContractFromFile(
     data: {
       title: derivedTitle,
       value: derivedValue ?? deal.value,
+      ...(clientName ? { clientName } : {}),
     },
   });
 

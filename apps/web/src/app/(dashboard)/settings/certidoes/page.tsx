@@ -74,16 +74,10 @@ export default async function CertidoesSettingsPage() {
   const monthJobsSerasa = monthJobs.filter((j) => j.endpoint.startsWith("serasa/"));
   const monthSpend = monthJobsInfosimples.reduce((a, j) => a + (j.costCents ?? 0), 0);
   const monthSpendSerasa = monthJobsSerasa.reduce((a, j) => a + (j.costCents ?? 0), 0);
-  const budgetCents = Number(
-    process.env.INFOSIMPLES_MONTHLY_BUDGET_CENTS ?? "20000"
-  );
-  const budgetCentsSerasa = Number(process.env.SERASA_MONTHLY_BUDGET_CENTS ?? "500000");
-  const budgetPct =
-    budgetCents > 0 ? Math.min(100, Math.round((monthSpend / budgetCents) * 100)) : 0;
-  const budgetPctSerasa =
-    budgetCentsSerasa > 0
-      ? Math.min(100, Math.round((monthSpendSerasa / budgetCentsSerasa) * 100))
-      : 0;
+  // NÃO mostrar o budget aqui: INFOSIMPLES/SERASA_MONTHLY_BUDGET_CENTS são
+  // tetos DA PLATAFORMA (env compartilhado entre todos os tenants) — expor o
+  // valor e o percentual pra qualquer membro da org vazava um número de infra
+  // que não é do tenant. A página mostra só o GASTO da org no mês.
 
   const totalLast30 = recent.length;
   const successCount = recent.filter((j) => j.status === "success").length;
@@ -251,16 +245,8 @@ export default async function CertidoesSettingsPage() {
           <CardContent>
             <p className="text-2xl font-semibold">{brl(monthSpend)}</p>
             <p className="text-xs text-muted-foreground mt-1">
-              de {brl(budgetCents)} · {budgetPct}%
+              {monthJobsInfosimples.length} consulta{monthJobsInfosimples.length === 1 ? "" : "s"} no mês
             </p>
-            <div className="mt-2 h-1.5 bg-muted rounded overflow-hidden">
-              <div
-                className={`h-full ${
-                  budgetPct >= 90 ? "bg-red-500" : budgetPct >= 70 ? "bg-amber-500" : "bg-green-500"
-                }`}
-                style={{ width: `${budgetPct}%` }}
-              />
-            </div>
           </CardContent>
         </Card>
 
@@ -273,22 +259,7 @@ export default async function CertidoesSettingsPage() {
           <CardContent>
             <p className="text-2xl font-semibold">{brl(monthSpendSerasa)}</p>
             <p className="text-xs text-muted-foreground mt-1">
-              de {brl(budgetCentsSerasa)} · {budgetPctSerasa}%
-            </p>
-            <div className="mt-2 h-1.5 bg-muted rounded overflow-hidden">
-              <div
-                className={`h-full ${
-                  budgetPctSerasa >= 90
-                    ? "bg-red-500"
-                    : budgetPctSerasa >= 70
-                    ? "bg-amber-500"
-                    : "bg-amber-600"
-                }`}
-                style={{ width: `${budgetPctSerasa}%` }}
-              />
-            </div>
-            <p className="text-[10px] text-muted-foreground mt-2">
-              {monthJobsSerasa.length} consulta{monthJobsSerasa.length === 1 ? "" : "s"}
+              {monthJobsSerasa.length} consulta{monthJobsSerasa.length === 1 ? "" : "s"} no mês
             </p>
           </CardContent>
         </Card>

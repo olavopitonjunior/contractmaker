@@ -14,6 +14,10 @@
 export interface DerivedDealMetadata {
   title: string;
   value: number | null;
+  /** Nome do cliente titular (comprador/locatário; PJ usa razao_social).
+   *  Denormalizado em Deal.clientName — o kanban lê a coluna em vez de
+   *  carregar form.dataJson inteiro. Null quando o form não tem titular. */
+  clientName: string | null;
 }
 
 export function deriveDealMetadata(
@@ -46,6 +50,7 @@ export function deriveDealMetadata(
   return {
     title,
     value: valorTotal > 0 ? valorTotal : null,
+    clientName: compradorLabel?.trim() || null,
   };
 }
 
@@ -92,5 +97,6 @@ export function deriveLocacaoDealMetadata(
   return {
     title,
     value: valorAluguel > 0 ? valorAluguel : null,
+    clientName: locatarioLabel?.trim() || null,
   };
 }

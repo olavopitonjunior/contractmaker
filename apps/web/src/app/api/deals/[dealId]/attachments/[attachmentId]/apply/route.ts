@@ -110,7 +110,7 @@ export async function POST(
   // dataJson não tem o campo (deriveDealMetadata de venda sobre dataJson de
   // locação devolvia null e apagava o aluguel do card).
   const derive = dealKind === "locacao" ? deriveLocacaoDealMetadata : deriveDealMetadata;
-  const { value } = derive(merged, {
+  const { value, clientName } = derive(merged, {
     formTitle: deal.form.title,
     fallbackTitle: deal.title,
   });
@@ -122,7 +122,7 @@ export async function POST(
     }),
     prisma.deal.update({
       where: { id: deal.id },
-      data: { value: value ?? deal.value },
+      data: { value: value ?? deal.value, ...(clientName ? { clientName } : {}) },
     }),
     prisma.dealAttachment.update({
       where: { id: attachment.id },

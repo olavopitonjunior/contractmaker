@@ -50,6 +50,7 @@ export async function loadContext(contractId: string, orgId: string): Promise<Ag
     templateModalidade: contract.template?.modalidade || "a_vista",
     templateName: contract.template?.name ?? "Contrato importado",
     dealKind: contract.deal?.kind ?? "venda",
+    dealId: contract.dealId,
     activeClauses: contract.clauses.map((cc) => ({
       id: cc.id,
       clauseId: cc.knowledgeItem.id,

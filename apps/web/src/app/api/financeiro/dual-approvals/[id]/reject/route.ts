@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
@@ -82,7 +83,9 @@ export async function POST(
     }
   );
 
-  sendEmail({
+  // waitUntil: um `promise.catch()` cru é cancelado quando a função serverless
+  // congela após a resposta — o e-mail/notificação nunca saía.
+  waitUntil(sendEmail({
     to: existing.initiator.email,
     subject: `Sua operação ${existing.kind} foi rejeitada`,
     react: DualApprovalResolvedEmail({
@@ -92,9 +95,9 @@ export async function POST(
       resolution: "REJECTED",
       note: parsed.data.note,
     }) as any,
-  }).catch((e) => console.error("[dual-approval] email falhou:", e));
+  }).catch((e) => console.error("[dual-approval] email falhou:", e)));
 
-  emitDualApprovalResolvedNotif({
+  waitUntil(emitDualApprovalResolvedNotif({
     approvalId: id,
     orgId: ctx.orgId,
     initiatorUserId: existing.initiatedBy,
@@ -102,7 +105,7 @@ export async function POST(
     kind: existing.kind,
     resolution: "REJECTED",
     note: parsed.data.note,
-  }).catch((e) => console.error("[dual-approval] notif falhou:", e));
+  }).catch((e) => console.error("[dual-approval] notif falhou:", e)));
 
   return NextResponse.json({ approval: result.approval });
 }
