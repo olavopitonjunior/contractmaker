@@ -1,0 +1,154 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { createHash } from "node:crypto";
+import { runPassiveAnalysis } from "../agent";
+import { prisma } from "@/lib/db/prisma";
+import { Anthropic } from "@anthropic-ai/sdk";
+import { createAnthropicTextResponse } from "@/__tests__/helpers";
+
+const mockPrisma = vi.mocked(prisma);
+
+const HTML = "<p>Contrato de compra e venda — texto estável</p>";
+const DATA = { vendedores: [] };
+const HASH = createHash("sha1")
+  .update(HTML)
+  .update("\0")
+  .update(JSON.stringify(DATA))
+  .digest("hex");
+
+let mockCreate: ReturnType<typeof vi.fn>;
+
+function mockContract(overrides: Record<string, unknown> = {}) {
+  mockPrisma.contract.findUniqueOrThrow.mockResolvedValue({
+    id: "contract-1",
+    status: "rascunho",
+    dealId: "deal-1",
+    htmlContent: HTML,
+    googleDocId: null, // sem GDoc → usa htmlContent direto (sem Drive no test)
+    dataJson: DATA,
+    template: null,
+    deal: { kind: "venda" },
+    lastAnalyzedTextHash: null,
+    ...overrides,
+  } as any);
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  const instance = new Anthropic();
+  mockCreate = vi.mocked(instance.messages.create);
+
+  mockContract();
+  mockPrisma.contractComment.findMany.mockResolvedValue([]);
+  mockPrisma.contractComment.upsert = vi.fn().mockResolvedValue({});
+  mockPrisma.contractChangeLog.create.mockResolvedValue({} as any);
+  mockPrisma.contract.update.mockResolvedValue({} as any);
+  mockPrisma.contract.updateMany = vi.fn().mockResolvedValue({ count: 1 });
+  mockCreate.mockResolvedValue(createAnthropicTextResponse('{"findings": []}'));
+});
+
+const run = (trigger: "open" | "edit" | "approve", extra: object = {}) =>
+  runPassiveAnalysis({ contractId: "contract-1", orgId: "org-1", trigger, ...extra });
+
+describe("runPassiveAnalysis — skip por hash (tier deep/light)", () => {
+  it("edit skipa com carimbo de QUALQUER tier no mesmo conteúdo", async () => {
+    for (const stamp of [`deep:${HASH}`, `light:${HASH}`, `err:${HASH}`]) {
+      mockContract({ lastAnalyzedTextHash: stamp });
+      const result = await run("edit");
+      expect(result.modelUsed).toBe("skipped-no-change");
+    }
+    expect(mockCreate).not.toHaveBeenCalled();
+  });
+
+  it("open só skipa com carimbo DEEP — light não suprime o passe Sonnet", async () => {
+    mockContract({ lastAnalyzedTextHash: `deep:${HASH}` });
+    expect((await run("open")).modelUsed).toBe("skipped-no-change");
+    expect(mockCreate).not.toHaveBeenCalled();
+
+    mockContract({ lastAnalyzedTextHash: `light:${HASH}` });
+    const result = await run("open");
+    expect(result.modelUsed).not.toBe("skipped-no-change");
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+  });
+
+  it("mudança SÓ no dataJson (texto igual) re-analisa — hash cobre os dois", async () => {
+    mockContract({
+      lastAnalyzedTextHash: `deep:${HASH}`,
+      dataJson: { vendedores: [{ nome: "Novo" }] },
+    });
+    const result = await run("open");
+    expect(result.modelUsed).not.toBe("skipped-no-change");
+  });
+
+  it("análise completa carimba com tier do trigger via CAS (updateMany condicionado)", async () => {
+    mockContract({ lastAnalyzedTextHash: "deep:hash-velho" });
+    await run("edit");
+    expect(mockPrisma.contract.updateMany).toHaveBeenCalledWith({
+      where: { id: "contract-1", lastAnalyzedTextHash: "deep:hash-velho" },
+      data: { lastAnalyzedTextHash: `light:${HASH}` },
+    });
+
+    mockContract({ lastAnalyzedTextHash: null });
+    await run("open");
+    expect(mockPrisma.contract.updateMany).toHaveBeenLastCalledWith({
+      where: { id: "contract-1", lastAnalyzedTextHash: null },
+      data: { lastAnalyzedTextHash: `deep:${HASH}` },
+    });
+  });
+
+  it("run ESCOPADO (scope.changedText) nunca carimba — análise parcial", async () => {
+    await run("edit", { scope: { changedText: "compra e venda" } });
+    expect(mockPrisma.contract.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("falha do LLM não carimba (próximo run re-analisa)", async () => {
+    mockCreate.mockRejectedValueOnce(new Error("api down"));
+    await run("open");
+    expect(mockPrisma.contract.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("resposta 200 sem JSON parseável carimba `err:` (corta o loop do poll, open re-tenta)", async () => {
+    mockCreate.mockResolvedValueOnce(
+      createAnthropicTextResponse("desculpe, não consegui analisar")
+    );
+    await run("open");
+    expect(mockPrisma.contract.updateMany).toHaveBeenCalledWith({
+      where: { id: "contract-1", lastAnalyzedTextHash: null },
+      data: { lastAnalyzedTextHash: `err:${HASH}` },
+    });
+
+    // open com carimbo err re-analisa (err não suprime o passe deep)
+    mockContract({ lastAnalyzedTextHash: `err:${HASH}` });
+    const result = await run("open");
+    expect(result.modelUsed).not.toBe("skipped-no-change");
+  });
+
+  it("upsert de comentário falho não carimba", async () => {
+    mockCreate.mockResolvedValueOnce(
+      createAnthropicTextResponse(
+        JSON.stringify({
+          findings: [
+            {
+              category: "juridico",
+              severity: "warning",
+              selectedText: "compra e venda",
+              message: "teste",
+            },
+          ],
+        })
+      )
+    );
+    (mockPrisma.contractComment.upsert as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new Error("neon down")
+    );
+    await run("open");
+    expect(mockPrisma.contract.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("trigger approve: não skipa por hash, não carimba (quickChecks sempre rodam)", async () => {
+    mockContract({ lastAnalyzedTextHash: `deep:${HASH}` });
+    const result = await run("approve");
+    expect(result.modelUsed).toBe("quickChecks-only");
+    expect(mockCreate).not.toHaveBeenCalled();
+    expect(mockPrisma.contract.updateMany).not.toHaveBeenCalled();
+  });
+});
