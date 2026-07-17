@@ -5,7 +5,7 @@ import {
   SUPPORTED_VOICE_MIMES,
 } from "@/lib/ai/voice-extract";
 import { formClosedResponse } from "@/lib/forms/form-gate";
-import { verifyParticipantToken } from "@/lib/forms/participant-token";
+import { resolveParticipantToken } from "@/lib/forms/participant-token";
 import { ROLE_PATHS } from "@/lib/forms/role-paths";
 import { RateLimits } from "@/lib/security/ratelimit";
 
@@ -25,33 +25,19 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { subtoken: string } },
 ) {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) {
-    return NextResponse.json(
-      { error: "AUTH_SECRET não configurado" },
-      { status: 500 },
-    );
+  const resolved = await resolveParticipantToken(params.subtoken);
+  if (!resolved.ok) {
+    return NextResponse.json({ error: resolved.error }, { status: 401 });
   }
 
-  const verify = verifyParticipantToken(params.subtoken, secret);
-  if (!verify.ok) {
-    return NextResponse.json({ error: verify.error }, { status: 401 });
-  }
-
-  const participant = await prisma.salesFormParticipant.findFirst({
-    where: { id: verify.payload.participantId, token: params.subtoken },
+  const participant = await prisma.salesFormParticipant.findUniqueOrThrow({
+    where: { id: resolved.participant.id },
     include: {
       form: {
         select: { orgId: true, status: true, completedAt: true, reopenedAt: true },
       },
     },
   });
-  if (!participant) {
-    return NextResponse.json(
-      { error: "Token inválido ou revogado" },
-      { status: 401 },
-    );
-  }
   const closed = await formClosedResponse(participant.form);
   if (closed) return closed;
 

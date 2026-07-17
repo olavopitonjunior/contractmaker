@@ -219,6 +219,14 @@ vi.mock("@/lib/db/prisma", () => {
       update: vi.fn().mockResolvedValue({}),
       delete: vi.fn().mockResolvedValue({}),
     },
+    salesFormParticipant: {
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn(),
+      update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
     $transaction: vi.fn(async (cb: never) =>
       typeof cb === "function"
         ? (cb as (tx: unknown) => unknown)(prismaMock)
