@@ -233,6 +233,11 @@ vi.mock("@/lib/db/prisma", () => {
         ? (cb as (tx: unknown) => unknown)(prismaMock)
         : cb
     ),
+    // Raw SQL (pgvector, agregações do funil) — default vazio; testes que
+    // precisam de rows fazem mockResolvedValue no próprio caso.
+    $queryRaw: vi.fn().mockResolvedValue([]),
+    $queryRawUnsafe: vi.fn().mockResolvedValue([]),
+    $executeRawUnsafe: vi.fn().mockResolvedValue(0),
     commissionCharge: {
       groupBy: vi.fn().mockResolvedValue([]),
       findMany: vi.fn().mockResolvedValue([]),
