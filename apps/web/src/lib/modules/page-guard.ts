@@ -13,6 +13,15 @@ import type { ModuleKey, FeatureKey } from "./catalog";
  * Em falta de sessão redireciona pra /login; sem org ou módulo/feature desabilitado
  * redireciona pro `fallback` (default /pipeline, espelhando o layout de locação).
  * Retornam { userId, orgId } pro call-site reusar sem reconsultar.
+ *
+ * NOTA (multi-org / subdomínio): resolve por "primeira membership", SEM
+ * subdomainHint. O app hoje é MISTO: o layout do dashboard e o context das
+ * APIs usam o hint, mas estes guards, o layout de locação e as páginas
+ * internas não — pra usuário multi-org, dado servido pode divergir do
+ * branding. Consertar SÓ aqui provou criar split-brain (gate na org do
+ * subdomínio, páginas na primeira membership) e loop de redirect com os
+ * fallbacks hint-less. O fix é um SWEEP único (todos os call-sites de
+ * getUserOrg juntos) — memória project_multiorg_subdomain_resolution.
  */
 export async function requireModulePage(
   module: ModuleKey,
@@ -20,11 +29,6 @@ export async function requireModulePage(
 ): Promise<{ userId: string; orgId: string }> {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
-  // NOTA (multi-org): resolve por "primeira membership", SEM subdomainHint —
-  // consistente com locacao/layout e as páginas internas. Passar o hint SÓ
-  // aqui criaria split-brain (gate na org do subdomínio, dados da primeira
-  // membership) e loop de redirect com os fallbacks hint-less. O fix por
-  // subdomínio precisa ser um sweep único em getUserOrg — backlog.
   const org = await getUserOrg(session.user.id);
   if (!org) redirect(fallback);
   const view = await getOrgModules(org.id);
@@ -38,11 +42,6 @@ export async function requireFeaturePage(
 ): Promise<{ userId: string; orgId: string }> {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
-  // NOTA (multi-org): resolve por "primeira membership", SEM subdomainHint —
-  // consistente com locacao/layout e as páginas internas. Passar o hint SÓ
-  // aqui criaria split-brain (gate na org do subdomínio, dados da primeira
-  // membership) e loop de redirect com os fallbacks hint-less. O fix por
-  // subdomínio precisa ser um sweep único em getUserOrg — backlog.
   const org = await getUserOrg(session.user.id);
   if (!org) redirect(fallback);
   const view = await getOrgModules(org.id);
@@ -61,11 +60,6 @@ export async function requireAnyFeaturePage(
 ): Promise<{ userId: string; orgId: string; enabled: Record<string, boolean> }> {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
-  // NOTA (multi-org): resolve por "primeira membership", SEM subdomainHint —
-  // consistente com locacao/layout e as páginas internas. Passar o hint SÓ
-  // aqui criaria split-brain (gate na org do subdomínio, dados da primeira
-  // membership) e loop de redirect com os fallbacks hint-less. O fix por
-  // subdomínio precisa ser um sweep único em getUserOrg — backlog.
   const org = await getUserOrg(session.user.id);
   if (!org) redirect(fallback);
   const view = await getOrgModules(org.id);

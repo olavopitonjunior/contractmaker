@@ -1,5 +1,3 @@
-import { COMMISSION_PAID_TARGET_STAGE } from "@/lib/contracts/auto-promote-commission";
-
 /**
  * Configuração de stages por `pipeline.kind`. Os nomes de stage diferem por
  * esteira (venda × locação) e várias rotas precisam decidir terminal/fallback
@@ -11,10 +9,12 @@ import { COMMISSION_PAID_TARGET_STAGE } from "@/lib/contracts/auto-promote-commi
 
 export const LOST_STAGE_NAME = "Negócio perdido";
 
-/** Terminal FELIZ por kind — contrato nominal (não posicional). O de venda
- *  reusa a constante canônica do auto-promote (fonte única do nome). */
+/** Terminal FELIZ por kind — contrato nominal (não posicional). FONTE ÚNICA
+ *  do nome: auto-promote-commission re-exporta daqui (a aresta é invertida de
+ *  propósito — este módulo é importado por components "use client" e não pode
+ *  puxar cadeia com Prisma). */
 export const WON_STAGE_BY_KIND: Record<string, string> = {
-  venda: COMMISSION_PAID_TARGET_STAGE,
+  venda: "Comissão paga",
   locacao: "ADM",
 };
 

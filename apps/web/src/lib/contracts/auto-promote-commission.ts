@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db/prisma";
+import { WON_STAGE_BY_KIND } from "@/lib/pipeline/stage-config";
 import { audit } from "@/lib/security/audit";
 
 /**
@@ -20,7 +21,8 @@ import { audit } from "@/lib/security/audit";
 /** Estágios de origem válidos + alvo — fonte única (reusada pelo endpoint
  * manual mark-commission-paid, pra webhook e clique não divergirem). */
 export const COMMISSION_PAID_ALLOWED_FROM = ["Cobrança emitida", "Contrato assinado"];
-export const COMMISSION_PAID_TARGET_STAGE = "Comissão paga";
+// Nome canônico vem de stage-config (client-safe) — fonte única.
+export const COMMISSION_PAID_TARGET_STAGE = WON_STAGE_BY_KIND.venda;
 
 export type CommissionPromoteResult =
   | { promoted: true; fromStageId: string; toStageId: string }
