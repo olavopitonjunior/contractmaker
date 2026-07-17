@@ -75,15 +75,116 @@ export async function getContractBudgetStatus(contractId: string): Promise<Budge
   return { ok: spent < budget, spent, budget, pct, remaining };
 }
 
+// ────────────────────────────────────────────────────────────────────────────
+// Budget MENSAL da org em USD (E2 governança) — teto configurável em
+// OrgFinancialSettings.aiMonthlyBudgetUsd (null = sem teto). Complementa o
+// budget por contrato: o por-contrato limita um contrato "guloso"; o por-org
+// limita o gasto agregado do tenant no mês.
+// ────────────────────────────────────────────────────────────────────────────
+
 /**
- * Lança `ContractBudgetExceededError` se o contrato já esgotou o budget. Use
- * antes de cada chamada IA — não no meio. As funções consumidoras (chat /
- * passive) traduzem a exceção em resposta amigável.
+ * Subclasse: os callers já capturam ContractBudgetExceededError e exibem
+ * err.message — a mensagem certa (org, USD, onde ajustar) chega sem mudar
+ * nenhum call-site.
+ */
+export class OrgAiBudgetExceededError extends ContractBudgetExceededError {
+  constructor(spentUsd: number, budgetUsd: number) {
+    super(0, 0);
+    this.message = `Budget mensal de IA da imobiliária esgotado: US$ ${spentUsd.toFixed(2)} / US$ ${budgetUsd.toFixed(2)} neste mês. Ajuste o teto em Configurações → Uso de IA ou aguarde o próximo mês.`;
+    this.name = "OrgAiBudgetExceededError";
+  }
+}
+
+export interface OrgAiBudgetStatus {
+  /** null = org sem teto configurado. */
+  budgetUsd: number | null;
+  spentUsd: number;
+  pct: number;
+}
+
+export async function getOrgAiBudgetStatus(orgId: string): Promise<OrgAiBudgetStatus> {
+  const settings = await prisma.orgFinancialSettings.findFirst({
+    where: { orgId },
+    select: { aiMonthlyBudgetUsd: true },
+  });
+  const budgetUsd =
+    settings?.aiMonthlyBudgetUsd != null ? Number(settings.aiMonthlyBudgetUsd) : null;
+
+  const now = new Date();
+  const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const agg = await prisma.aIUsage.aggregate({
+    where: { orgId, createdAt: { gte: firstOfMonth } },
+    _sum: { estimatedCostUsd: true },
+  });
+  const spentUsd = Number(agg._sum.estimatedCostUsd ?? 0);
+  const pct = budgetUsd && budgetUsd > 0 ? Math.min(1, spentUsd / budgetUsd) : 0;
+  return { budgetUsd, spentUsd, pct };
+}
+
+/** Alerta 80%/100% no sino — dedupe mensal por threshold via batchId. */
+async function maybeNotifyOrgAiBudget(
+  orgId: string,
+  status: OrgAiBudgetStatus
+): Promise<void> {
+  if (!status.budgetUsd || status.budgetUsd <= 0) return;
+  const threshold = status.pct >= 1 ? 100 : status.pct >= 0.8 ? 80 : null;
+  if (!threshold) return;
+  try {
+    const { emitNotification } = await import("@/lib/notifications/emit");
+    const now = new Date();
+    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
+    await emitNotification({
+      orgId,
+      type: "ai_budget_threshold",
+      title:
+        threshold === 100
+          ? "Budget de IA do mês esgotado"
+          : "Budget de IA em 80%",
+      body:
+        threshold === 100
+          ? `O gasto de IA do mês (US$ ${status.spentUsd.toFixed(2)}) atingiu o teto de US$ ${status.budgetUsd.toFixed(2)}. O chat de contratos fica pausado até o próximo mês ou ajuste do teto em Configurações → Uso de IA.`
+          : `O gasto de IA do mês (US$ ${status.spentUsd.toFixed(2)}) passou de 80% do teto de US$ ${status.budgetUsd.toFixed(2)}.`,
+      linkUrl: "/settings/ai-usage",
+      batchId: `ai-budget:${orgId}:${ym}:${threshold}`,
+      metadata: { orgId, threshold, spentUsd: status.spentUsd },
+    });
+  } catch (err) {
+    console.error("[budget] alerta de budget de IA falhou:", err);
+  }
+}
+
+/**
+ * Lança `ContractBudgetExceededError` se o contrato já esgotou o budget POR
+ * CONTRATO ou se a ORG esgotou o budget mensal (quando configurado). Use antes
+ * de cada chamada IA — não no meio. As funções consumidoras (chat / passive)
+ * traduzem a exceção em resposta amigável.
  */
 export async function assertContractBudget(contractId: string): Promise<BudgetStatus> {
   const status = await getContractBudgetStatus(contractId);
   if (!status.ok) {
     throw new ContractBudgetExceededError(status.spent, status.budget);
   }
+
+  // Teto mensal da org (opt-in). Resolve orgId via deal.pipeline (Deal não tem
+  // orgId direto). Best-effort no lookup: falha de resolução NÃO bloqueia o
+  // chat — o teto é um guarda de custo, não pode virar ponto único de falha.
+  try {
+    const contract = await prisma.contract.findUnique({
+      where: { id: contractId },
+      select: { deal: { select: { pipeline: { select: { orgId: true } } } } },
+    });
+    const orgId = contract?.deal?.pipeline?.orgId;
+    if (orgId) {
+      const orgStatus = await getOrgAiBudgetStatus(orgId);
+      await maybeNotifyOrgAiBudget(orgId, orgStatus);
+      if (orgStatus.budgetUsd && orgStatus.pct >= 1) {
+        throw new OrgAiBudgetExceededError(orgStatus.spentUsd, orgStatus.budgetUsd);
+      }
+    }
+  } catch (err) {
+    if (err instanceof ContractBudgetExceededError) throw err;
+    console.error("[budget] checagem de budget da org falhou (segue):", err);
+  }
+
   return status;
 }
