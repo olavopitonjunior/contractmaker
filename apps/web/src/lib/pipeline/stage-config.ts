@@ -1,3 +1,5 @@
+import { COMMISSION_PAID_TARGET_STAGE } from "@/lib/contracts/auto-promote-commission";
+
 /**
  * Configuração de stages por `pipeline.kind`. Os nomes de stage diferem por
  * esteira (venda × locação) e várias rotas precisam decidir terminal/fallback
@@ -9,9 +11,10 @@
 
 export const LOST_STAGE_NAME = "Negócio perdido";
 
-/** Terminal FELIZ por kind — contrato nominal (não posicional). */
+/** Terminal FELIZ por kind — contrato nominal (não posicional). O de venda
+ *  reusa a constante canônica do auto-promote (fonte única do nome). */
 export const WON_STAGE_BY_KIND: Record<string, string> = {
-  venda: "Comissão paga",
+  venda: COMMISSION_PAID_TARGET_STAGE,
   locacao: "ADM",
 };
 
