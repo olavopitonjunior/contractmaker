@@ -145,11 +145,28 @@ export async function syncEnvelopeState(
   //  - recusa: um sino por envelope (simetria com o caminho signed do sync).
   if (bouncedSignerIds.length > 0 || refusedNewly) {
     const linkUrl = await resolveDealLink(envelope.dealId); // uma vez por envelope
+    // Pro bounce de PROPOSTA: resolve o DONO uma vez — sem isto a delegação
+    // faria 1 query de Proposal por signatário bounced.
+    const proposalUserId =
+      envelope.source === "proposal" && envelope.proposalId && bouncedSignerIds.length > 0
+        ? (
+            await prisma.proposal
+              .findUnique({
+                where: { id: envelope.proposalId },
+                select: { userId: true },
+              })
+              // Best-effort: falha aqui só custa o sino — NUNCA aborta o sync
+              // (o resto da reconciliação, incl. close/PDF, tem que rodar).
+              .catch(() => null)
+          )?.userId ?? null
+        : null;
     const common = {
       envelopeId: envelope.id,
       orgId: envelope.orgId,
       source: envelope.source,
       dealId: envelope.dealId,
+      proposalId: envelope.proposalId,
+      proposalUserId,
       linkUrl,
     };
     await Promise.all([

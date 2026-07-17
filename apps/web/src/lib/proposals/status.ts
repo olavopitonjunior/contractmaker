@@ -42,11 +42,19 @@ export const ALLOWED_FROM: Record<ProposalStatus, ProposalStatus[]> = {
   aguardando_vendedor: ["assinada_proponente"],
   completa: ["assinada_proponente", "aguardando_vendedor"],
   convertida: ["completa", "assinada_proponente", "aguardando_vendedor"],
-  // Recusa pode vir de qualquer estado ativo. `recusada_vendedor` inclui
-  // aguardando_vendedor e assinada_proponente — SEM isso, a recusa do
-  // proprietário (o desfecho mais comum) seria engolida como "já avançou".
+  // Recusa pode vir de qualquer estado ativo. `recusada_vendedor` também
+  // admite os estados PRÉ-assinatura: na via ÚNICA (proponente + proprietário
+  // no mesmo envelope) e no Aceite multi-termo, o proprietário pode recusar
+  // ANTES do proponente assinar — sem esses estados, a transição era CAS-
+  // rejeitada e a proposta ficava presa em "enviada" pra sempre.
   recusada_proponente: ["enviada", "entregue", "visualizada"],
-  recusada_vendedor: ["assinada_proponente", "aguardando_vendedor"],
+  recusada_vendedor: [
+    "enviada",
+    "entregue",
+    "visualizada",
+    "assinada_proponente",
+    "aguardando_vendedor",
+  ],
   expirada: ["enviada", "entregue", "visualizada"],
   cancelada: [
     "rascunho",

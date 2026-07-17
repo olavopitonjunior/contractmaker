@@ -12,6 +12,12 @@ describe("ALLOWED_FROM — cobre os predecessores certos", () => {
     expect(ALLOWED_FROM.recusada_vendedor).toContain("assinada_proponente");
   });
 
+  it("recusada_vendedor aceita estados PRÉ-assinatura (via única: proprietário recusa antes do proponente assinar)", () => {
+    expect(ALLOWED_FROM.recusada_vendedor).toContain("enviada");
+    expect(ALLOWED_FROM.recusada_vendedor).toContain("entregue");
+    expect(ALLOWED_FROM.recusada_vendedor).toContain("visualizada");
+  });
+
   it("assinada_proponente aceita `enviada` direto (assinou sem abrir a landing)", () => {
     expect(ALLOWED_FROM.assinada_proponente).toContain("enviada");
   });

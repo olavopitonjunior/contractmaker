@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import { emitNotification } from "@/lib/notifications/emit";
+import { notifyProposalMilestone } from "@/lib/proposals/notify-proposal";
 
 /**
  * Emite Notification (sino) pros marcos críticos de assinatura, que antes
@@ -8,11 +9,12 @@ import { emitNotification } from "@/lib/notifications/emit";
  * padrão das notificações de certidões).
  *
  * SÓ pra envelope de contrato/attachment: um envelope de PROPOSTA (pré-negócio,
- * source="proposal", sem deal no kanban) NÃO entra aqui. A wording é de
- * contrato ("Contrato assinado", "pasta do negócio") e proposta tem máquina de
- * status própria (onProposalEnvelope*). Marcos de proposta (incl. bounce) são
- * feature separada do módulo de propostas — BACKLOG, não regressão: antes deste
- * lote proposta nunca teve sino de marco de envelope.
+ * source="proposal", sem deal no kanban) NÃO usa a wording daqui ("Contrato
+ * assinado", "pasta do negócio") — os marcos semânticos (aceite/recusa/
+ * expiração) são emitidos pela máquina de status própria (webhook-hooks +
+ * acceptance-webhook → lib/proposals/notify-proposal.ts). EXCEÇÃO: o BOUNCE
+ * de e-mail é detectado aqui embaixo (sync per-signer, agnóstico de source) e
+ * é DELEGADO pro sino de proposta — sem isso, o bounce de proposta sumia.
  *
  * `linkUrl` é resolvido pelo CHAMADOR (uma vez por envelope) e passado pronto —
  * a query da esteira NÃO fica dentro do try do emit (senão um erro de DB no
@@ -76,8 +78,52 @@ export async function notifyEnvelopeMilestone(params: {
   kind: EnvelopeNotifKind;
   /** Discriminador extra do batchId (ex.: signerId pro bounce por signatário). */
   dedupeSuffix?: string;
+  /** Pra envelope de PROPOSTA: id/dono já em mãos do chamador evitam
+   *  re-queries por signatário bounced (o sync chama N vezes pro mesmo
+   *  envelope — resolver uma vez e passar). */
+  proposalId?: string | null;
+  proposalUserId?: string | null;
 }): Promise<void> {
   const { envelopeId, orgId, source, dealId, linkUrl, kind, dedupeSuffix } = params;
+  if (source === "proposal" && kind === "email_failed") {
+    // Bounce em envelope de PROPOSTA: delega pro sino de proposta (wording,
+    // link e DONO certos). Best-effort como todo o resto.
+    try {
+      const proposalId =
+        params.proposalId ??
+        (
+          await prisma.envelope.findUnique({
+            where: { id: envelopeId },
+            select: { proposalId: true },
+          })
+        )?.proposalId;
+      if (proposalId) {
+        const userId =
+          params.proposalUserId ??
+          (
+            await prisma.proposal.findUnique({
+              where: { id: proposalId },
+              select: { userId: true },
+            })
+          )?.userId;
+        if (userId) {
+          await notifyProposalMilestone({
+            proposalId,
+            orgId,
+            userId,
+            kind: "email_failed",
+            dedupeSuffix,
+          });
+        }
+      }
+    } catch (err) {
+      console.error(
+        "[clicksign/notify-envelope] delegação de bounce de proposta falhou:",
+        err instanceof Error ? err.message : String(err)
+      );
+    }
+    return;
+  }
   if (source !== "contract" && source !== "attachment") return;
   try {
     const t = TEXT[kind];
