@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { auth, getUserOrg } from "@/lib/auth/auth";
+import { requireAnyFeaturePage } from "@/lib/modules/page-guard";
+import { FEATURE } from "@/lib/modules/catalog";
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -20,12 +21,16 @@ const PERIODS: Array<{ key: string; label: string; days: number | null }> = [
   { key: "all", label: "Tudo", days: null },
 ];
 
+// Compacto pt-BR ("R$ 1,5 mi") — Intl, não toFixed (que renderiza decimal
+// com ponto num app inteiro em vírgula).
+const brlCompact = new Intl.NumberFormat("pt-BR", {
+  style: "currency",
+  currency: "BRL",
+  notation: "compact",
+  maximumFractionDigits: 1,
+});
 function fmtBRL(v: number): string {
-  return v >= 1_000_000
-    ? `R$ ${(v / 1_000_000).toFixed(1)}M`
-    : v >= 1000
-      ? `R$ ${(v / 1000).toFixed(0)}k`
-      : `R$ ${v.toFixed(0)}`;
+  return brlCompact.format(v);
 }
 
 function FunnelTable({ rows, kind }: { rows: FunnelRow[]; kind: "venda" | "locacao" }) {
@@ -102,19 +107,28 @@ export default async function FunilPage({
 }: {
   searchParams?: { periodo?: string; kind?: string };
 }) {
-  const session = await auth();
-  if (!session?.user) return null;
-  const org = await getUserOrg(session.user.id);
-  if (!org) return null;
+  // Gate de entitlement + org resolvida pelo SUBDOMÍNIO (não "primeira
+  // membership") — mesmo padrão da página de Propostas. Redireciona quem não
+  // tem nenhum dos pipelines habilitados.
+  const { orgId, enabled } = await requireAnyFeaturePage([
+    FEATURE.VENDAS_PIPELINE,
+    FEATURE.LOCACAO_PIPELINE,
+  ]);
+  const hasVendas = enabled[FEATURE.VENDAS_PIPELINE] === true;
+  const hasLocacao = enabled[FEATURE.LOCACAO_PIPELINE] === true;
 
   const period =
     PERIODS.find((p) => p.key === searchParams?.periodo) ?? PERIODS[1]; // default 90d
-  const kind = searchParams?.kind === "locacao" ? ("locacao" as const) : ("venda" as const);
+  // Default segue o entitlement: tenant só-locação cai direto em locação.
+  const kind =
+    searchParams?.kind === "locacao" || (!hasVendas && hasLocacao)
+      ? ("locacao" as const)
+      : ("venda" as const);
   const from = period.days
     ? new Date(Date.now() - period.days * 24 * 60 * 60_000)
     : undefined;
 
-  const rows = await getFunnelByChannel({ orgId: org.id, kind, from });
+  const rows = await getFunnelByChannel({ orgId, kind, from });
   const totals = rows.reduce(
     (a, r) => ({
       total: a.total + r.total,
@@ -140,7 +154,9 @@ export default async function FunilPage({
       {/* Filtros: esteira + período (links server-side, sem client JS) */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex rounded-md border overflow-hidden">
-          {(["venda", "locacao"] as const).map((k) => (
+          {(["venda", "locacao"] as const)
+            .filter((k) => (k === "venda" ? hasVendas : hasLocacao))
+            .map((k) => (
             <Link
               key={k}
               href={qs({ kind: k })}
@@ -150,7 +166,7 @@ export default async function FunilPage({
             >
               {k === "venda" ? "Vendas" : "Locação"}
             </Link>
-          ))}
+            ))}
         </div>
         <div className="flex rounded-md border overflow-hidden">
           {PERIODS.map((p) => (

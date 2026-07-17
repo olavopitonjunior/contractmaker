@@ -1,5 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { TERMINAL_STAGES_BY_KIND } from "./stage-config";
 import {
   DEAL_SOURCE_CHANNEL_LABEL,
   type DealSourceChannel,
@@ -9,11 +10,13 @@ import {
  * Funil por canal de origem — o primeiro LEITOR de `Deal.sourceChannel`
  * (escrito em todos os 11 pontos de criação de deal desde 2026-07).
  *
- * Uma query agregada (join Pipeline pro escopo de org + PipelineStage pro
- * terminal de locação). Critérios de desfecho:
+ * Uma query agregada por kind. Critérios de desfecho:
  *   - perdido: `lostAt IS NOT NULL` (terminal alternativo das duas esteiras)
  *   - ganho (venda):   `commissionPaidAt IS NOT NULL` (terminal feliz)
- *   - ganho (locação): stage atual "ADM" (contrato graduado pra administração)
+ *   - ganho (locação): stage terminal feliz do kind (stage-config — fonte
+ *     única dos nomes; o join de PipelineStage só entra nesse caso)
+ *   - deals ARQUIVADOS ficam de fora (paridade com o kanban — arquivar é o
+ *     jeito sancionado de tirar lixo/duplicata da frente sem deletar)
  *
  * Deals anteriores à migration têm sourceChannel null → bucket
  * "Anterior ao rastreio" (dado honesto; sem backfill heurístico).
@@ -41,6 +44,19 @@ export async function getFunnelByChannel(opts: {
 }): Promise<FunnelRow[]> {
   const { orgId, kind, from, to } = opts;
 
+  // Predicado de "ganho" por kind, montado em TS — o WHERE já pina d.kind,
+  // então um CASE por kind teria um braço permanentemente morto (e o join de
+  // PipelineStage só é necessário em locação).
+  const locacaoWonStage = TERMINAL_STAGES_BY_KIND.locacao[0]; // "ADM"
+  const wonPredicate =
+    kind === "venda"
+      ? Prisma.sql`d."commissionPaidAt" IS NOT NULL`
+      : Prisma.sql`s.name = ${locacaoWonStage}`;
+  const stageJoin =
+    kind === "venda"
+      ? Prisma.empty
+      : Prisma.sql`JOIN "PipelineStage" s ON s.id = d."stageId"`;
+
   const rows = await prisma.$queryRaw<
     Array<{
       sourceChannel: string | null;
@@ -53,20 +69,15 @@ export async function getFunnelByChannel(opts: {
     SELECT
       d."sourceChannel",
       COUNT(*)::bigint AS total,
-      SUM(
-        CASE
-          WHEN d.kind = 'venda' AND d."commissionPaidAt" IS NOT NULL THEN 1
-          WHEN d.kind = 'locacao' AND s.name = 'ADM' THEN 1
-          ELSE 0
-        END
-      )::bigint AS won,
+      SUM(CASE WHEN ${wonPredicate} THEN 1 ELSE 0 END)::bigint AS won,
       SUM(CASE WHEN d."lostAt" IS NOT NULL THEN 1 ELSE 0 END)::bigint AS lost,
       SUM(COALESCE(d.value, 0))::float8 AS "totalValue"
     FROM "Deal" d
     JOIN "Pipeline" p ON p.id = d."pipelineId"
-    JOIN "PipelineStage" s ON s.id = d."stageId"
+    ${stageJoin}
     WHERE p."orgId" = ${orgId}
       AND d.kind = ${kind}
+      AND d."archivedAt" IS NULL
       ${from ? Prisma.sql`AND d."createdAt" >= ${from}` : Prisma.empty}
       ${to ? Prisma.sql`AND d."createdAt" < ${to}` : Prisma.empty}
     GROUP BY d."sourceChannel"
