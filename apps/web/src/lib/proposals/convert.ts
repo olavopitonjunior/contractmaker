@@ -95,14 +95,14 @@ export async function convertProposalToDeal(input: {
       (dataJson.locacao as { valor_aluguel?: unknown } | undefined)
         ?.valor_aluguel ?? 0
     );
-    // Injeta SÓ quando aluguel.valor está de fato ausente/vazio. `!Number(v)`
-    // trataria um valor legítimo não-numérico (ex.: "3.100,00" formatado por
-    // outro caminho) como faltante e o sobrescreveria com o valor da proposta.
-    const hasValor =
-      aluguel.valor !== undefined &&
-      aluguel.valor !== null &&
-      aluguel.valor !== "";
-    if (!hasValor && proposalAluguel > 0) {
+    // Injeta quando aluguel.valor está ausente/vazio OU é zero explícito
+    // (aluguel R$ 0 nunca é legítimo — trata como faltante). NÃO injeta sobre
+    // valor não-numérico (ex.: "3.100,00" formatado por outro caminho): esse
+    // é um valor real que a proposta não pode sobrescrever.
+    const raw = aluguel.valor;
+    const isAbsent =
+      raw === undefined || raw === null || raw === "" || raw === 0 || raw === "0";
+    if (isAbsent && proposalAluguel > 0) {
       normalizedData = {
         ...dataJson,
         aluguel: { ...aluguel, valor: proposalAluguel },

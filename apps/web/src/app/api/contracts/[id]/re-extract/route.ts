@@ -148,6 +148,23 @@ export async function POST(
   // já tem (SalesForm/Contract.dataJson viravam {} e a aba Dados esvaziava,
   // com resposta ok:true). Sem dados novos, NADA é persistido.
   if (fieldsCount === 0) {
+    // Audita a tentativa mesmo sem persistir nada — a chamada Gemini custou
+    // (AIUsage registra) e um admin investigando gasto/reclamação precisa do
+    // rastro no AuditLog.
+    await audit(
+      extractAuditContextFromRequest(req, org.id, session.user.id),
+      {
+        action: "CONTRACT_REEXTRACT",
+        result: "FAILURE",
+        resource: contract.id,
+        resourceType: "Contract",
+        metadata: {
+          attachmentId: sourceAttachment.id,
+          fieldsCount: 0,
+          reason: "empty_extraction",
+        },
+      }
+    );
     return NextResponse.json(
       {
         error:
