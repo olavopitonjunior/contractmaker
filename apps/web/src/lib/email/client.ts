@@ -14,6 +14,7 @@
  */
 
 import { STAGING_MODE } from "@/lib/env/staging";
+import { maskEmail } from "@/lib/security/pii";
 
 export interface EmailAttachment {
   filename: string;
@@ -229,6 +230,12 @@ function logOnly(input: SendEmailInput): SendEmailResult {
   return { id: "dev-log", ok: true };
 }
 
+/** Mascara destinatário(s) pra log — reusa o maskEmail canônico do pii.ts. */
+function maskRecipient(to: string | string[]): string {
+  const list = Array.isArray(to) ? to : [to];
+  return list.map((addr) => maskEmail(addr)).join(", ");
+}
+
 /**
  * Renderiza o template JÁ com a marca da imobiliária. Ponto ÚNICO de injeção:
  * nenhum dos 13 templates nem dos call-sites precisa saber de branding — quem
@@ -297,10 +304,27 @@ export async function sendEmail(input: SendEmailInput): Promise<SendEmailResult>
 
   const provider = process.env.EMAIL_PROVIDER ?? "resend";
 
-  if (provider === "smtp") return sendViaSmtp(effective);
-  if (provider === "resend") return sendViaResend(effective);
+  let result: SendEmailResult;
+  if (provider === "smtp") result = await sendViaSmtp(effective);
+  else if (provider === "resend") result = await sendViaResend(effective);
+  else {
+    // ses: placeholder — implementar on-demand
+    console.warn(`[email] provider "${provider}" não implementado, usando log-only`);
+    result = logOnly(effective);
+  }
 
-  // ses: placeholder — implementar on-demand
-  console.warn(`[email] provider "${provider}" não implementado, usando log-only`);
-  return logOnly(effective);
+  // Log estruturado da recusa AQUI, no ponto único: ~15 call-sites descartam o
+  // retorno (convites, notificações financeiras, magic link), e sem esta linha
+  // um e-mail que nunca saiu não deixa rastro com destinatário+assunto — os
+  // logs dos providers acima não têm esse contexto.
+  if (!result.ok) {
+    console.error(
+      "[email] envio FALHOU provider=%s to=%s subject=%j error=%s",
+      provider,
+      maskRecipient(effective.to),
+      input.subject,
+      result.error ?? "?"
+    );
+  }
+  return result;
 }

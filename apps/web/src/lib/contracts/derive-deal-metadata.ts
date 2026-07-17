@@ -14,6 +14,23 @@
 export interface DerivedDealMetadata {
   title: string;
   value: number | null;
+  /** Nome do cliente titular (comprador/locatário; PJ usa razao_social).
+   *  Denormalizado em Deal.clientName — o kanban lê a coluna em vez de
+   *  carregar form.dataJson inteiro. Null quando o form não tem titular. */
+  clientName: string | null;
+}
+
+/**
+ * Primeiro valor não-vazio (trim). `??` não serve aqui: autosave/RHF deixam
+ * `nome: ""` em partes PJ, e string vazia curto-circuitaria o fallback pra
+ * `razao_social` — o card do kanban perderia o nome da empresa.
+ */
+function firstNonBlank(...vals: Array<string | undefined>): string | null {
+  for (const v of vals) {
+    const t = typeof v === "string" ? v.trim() : "";
+    if (t) return t;
+  }
+  return null;
 }
 
 export function deriveDealMetadata(
@@ -29,8 +46,8 @@ export function deriveDealMetadata(
   const pagamento = dataJson.pagamento as { valor_total?: number } | undefined;
   const valorTotal = Number(pagamento?.valor_total || 0);
 
-  const compradorLabel = compradorNome?.nome ?? compradorNome?.razao_social;
-  const vendedorLabel = vendedorNome?.nome ?? vendedorNome?.razao_social;
+  const compradorLabel = firstNonBlank(compradorNome?.nome, compradorNome?.razao_social);
+  const vendedorLabel = firstNonBlank(vendedorNome?.nome, vendedorNome?.razao_social);
 
   const formTitle = options.formTitle?.trim();
   const title =
@@ -46,6 +63,7 @@ export function deriveDealMetadata(
   return {
     title,
     value: valorTotal > 0 ? valorTotal : null,
+    clientName: compradorLabel,
   };
 }
 
@@ -75,8 +93,8 @@ export function deriveLocacaoDealMetadata(
   const aluguel = dataJson.aluguel as { valor?: number } | undefined;
   const valorAluguel = Number(aluguel?.valor || 0);
 
-  const locadorLabel = locador?.nome ?? locador?.razao_social;
-  const locatarioLabel = locatario?.nome ?? locatario?.razao_social;
+  const locadorLabel = firstNonBlank(locador?.nome, locador?.razao_social);
+  const locatarioLabel = firstNonBlank(locatario?.nome, locatario?.razao_social);
 
   const formTitle = options.formTitle?.trim();
   const title =
@@ -92,5 +110,6 @@ export function deriveLocacaoDealMetadata(
   return {
     title,
     value: valorAluguel > 0 ? valorAluguel : null,
+    clientName: locatarioLabel,
   };
 }

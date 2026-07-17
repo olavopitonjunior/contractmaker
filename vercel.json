@@ -34,6 +34,10 @@
       "schedule": "0 4 * * *"
     },
     {
+      "path": "/api/cron/retention",
+      "schedule": "0 5 1 * *"
+    },
+    {
       "path": "/api/cron/charges/due-soon",
       "schedule": "0 12 * * *"
     },

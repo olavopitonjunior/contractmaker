@@ -108,6 +108,80 @@ describe("POST /api/forms (retrofit Newton)", () => {
     expect(auditCall.data.metadata.via).toBe("newton");
   });
 
+  it("409 duplicate_recent quando existe deal com mesmo título criado há pouco", async () => {
+    mockAuth.mockResolvedValue(createMockSession() as never);
+    mockPrisma.pipeline.findFirst.mockResolvedValue({
+      id: "p1",
+      stages: [{ id: "s1", name: "Formulário" }],
+    } as never);
+    mockPrisma.deal.findFirst.mockResolvedValue({
+      id: "d-dup",
+      title: "Venda Apto 302",
+      createdAt: new Date(),
+    } as never);
+
+    const res = await POST(makeReq({ title: "Venda Apto 302" }));
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toBe("duplicate_recent");
+    expect(body.existing.id).toBe("d-dup");
+    expect(mockPrisma.salesForm.create).not.toHaveBeenCalled();
+  });
+
+  it("force: true fura o soft-block de título repetido", async () => {
+    mockAuth.mockResolvedValue(createMockSession() as never);
+    mockPrisma.pipeline.findFirst.mockResolvedValue({
+      id: "p1",
+      stages: [{ id: "s1", name: "Formulário" }],
+    } as never);
+    mockPrisma.salesForm.create.mockResolvedValue({
+      id: "f1",
+      token: "tok",
+    } as never);
+    mockPrisma.deal.count.mockResolvedValue(0 as never);
+    mockPrisma.deal.create.mockResolvedValue({ id: "d1" } as never);
+
+    const res = await POST(makeReq({ title: "Venda Apto 302", force: true }));
+    expect(res.status).toBe(201);
+    // Com force, o dup-check nem roda.
+    expect(mockPrisma.deal.findFirst).not.toHaveBeenCalled();
+  });
+
+  it("caller bearer (Newton) NÃO passa pelo soft-block — POST sempre cria", async () => {
+    mockAuth.mockResolvedValue(null);
+    mockPrisma.userApiToken.findUnique.mockResolvedValue({
+      id: "t1",
+      userId: "u-bearer",
+      scopes: ["documents:rw"],
+      revokedAt: null,
+      expiresAt: null,
+    } as never);
+    mockPrisma.userApiToken.update.mockResolvedValue({} as never);
+    mockPrisma.pipeline.findFirst.mockResolvedValue({
+      id: "p1",
+      stages: [{ id: "s1", name: "Formulário" }],
+    } as never);
+    // Mesmo com um duplicado recente existindo…
+    mockPrisma.deal.findFirst.mockResolvedValue({
+      id: "d-dup",
+      title: "Maria",
+      createdAt: new Date(),
+    } as never);
+    mockPrisma.salesForm.create.mockResolvedValue({
+      id: "f1",
+      token: "tok",
+    } as never);
+    mockPrisma.deal.count.mockResolvedValue(0 as never);
+    mockPrisma.deal.create.mockResolvedValue({ id: "d1" } as never);
+
+    const res = await POST(
+      makeReq({ title: "Maria" }, { Authorization: "Bearer cmt_x" })
+    );
+    // …o Newton não tem confirm de UI: o contrato "POST sempre cria" vale.
+    expect(res.status).toBe(201);
+    expect(mockPrisma.deal.findFirst).not.toHaveBeenCalled();
+  });
+
   it("idempotency replay retorna mesma resposta", async () => {
     mockAuth.mockResolvedValue(createMockSession() as never);
     mockPrisma.idempotencyKey.findUnique.mockResolvedValue({
