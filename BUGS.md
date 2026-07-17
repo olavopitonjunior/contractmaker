@@ -15,6 +15,15 @@
 
 ## Bugs Ativos
 
+### [CRITICA] Migration nao-idempotente trava TODOS os deploys de producao (P3009) — reincidente
+- **Status:** resolvido (PR #137 + `migrate resolve` em prod 2026-07-16); guarda-trilho pendente
+- **Encontrado em:** 2026-07-16 (prod ficou ~7h sem conseguir deployar, 14:37 → 21:40 UTC)
+- **Descricao:** `20260715140000_db_hygiene_defaults_indexes` (veio no #126) fazia `ALTER TABLE "Clause"` sem guardar a existencia da tabela. `Clause` foi unificada em `KnowledgeItem` (20260518 unify_clause), entao o statement estoura 42P01, a migration inteira aborta e a row fica em estado *failed* no `_prisma_migrations`. A partir dai o `prisma migrate deploy` recusa aplicar QUALQUER migration nova (P3009) e todo build de prod morre em ~19s, antes do `next build`.
+- **Reincidencia:** o MESMO problema derrubou a staging horas antes e foi corrigido la (`79d3171b`), mas o fix ficou so na branch `staging` e nunca foi promovido pra master — entao prod pegou a versao quebrada. Ver tambem as migrations `unify_clause` e `clicksign_multitenant`, que ja tem `rolled_back_at` preenchido no banco de prod: e a terceira vez que essa classe de falha acontece.
+- **Impacto:** CRITICO e silencioso — ninguem percebeu por 7h. Nenhum deploy de prod passa, incluindo hotfix de seguranca (bloqueou o #135, que fecha vazamento de PII).
+- **Solucao aplicada:** (A) `to_regclass` guard nos ALTER de Clause/ClauseProposal (#137). (B) `prisma migrate resolve --rolled-back 20260715140000_db_hygiene_defaults_indexes` contra prod — a migration roda em transacao e abortou no 1o statement, entao nada dela tinha sido aplicado.
+- **Guarda-trilho pendente:** (1) fix de migration que quebrou staging DEVE ir pra master antes/junto — o workflow `staging → master` nao cobre branches promovidas direto (`feat/*` → master, como o #126/#133); (2) alertar quando o deploy de prod falha (7h sem ninguem ver e o buraco real); (3) todo `ALTER TABLE` em migration deveria nascer com guard `to_regclass` — o repo tem historico de tabela removida por unificacao.
+
 ### [ALTA] "Falha no upload" ao anexar documentos na pasta do deal (limite 4.5MB da Vercel)
 - **Status:** corrigido no codigo (pendente deploy) — branch worktree-melhorias-ocr-storage-obrigatoriedade
 - **Encontrado em:** 2026-06-30
