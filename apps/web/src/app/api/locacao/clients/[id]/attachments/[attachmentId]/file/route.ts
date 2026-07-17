@@ -40,6 +40,9 @@ export async function GET(
     });
   } catch (err) {
     console.error("[client-attachments] download failed", err);
-    return NextResponse.json({ error: "Falha ao servir arquivo" }, { status: 500 });
+    const { storageDownloadErrorResponse } = await import(
+      "@/lib/storage/download-error"
+    );
+    return storageDownloadErrorResponse(err);
   }
 }

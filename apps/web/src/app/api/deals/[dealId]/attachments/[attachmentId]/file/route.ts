@@ -50,6 +50,11 @@ export async function GET(
     });
   } catch (err) {
     console.error("[attachments] download failed", err);
-    return NextResponse.json({ error: "Falha ao servir arquivo" }, { status: 500 });
+    // Objeto removido do storage (ex.: órfão de delete que apagava blob
+    // compartilhado) → 404 claro "arquivo indisponível / reenvie"; transitório → 500.
+    const { storageDownloadErrorResponse } = await import(
+      "@/lib/storage/download-error"
+    );
+    return storageDownloadErrorResponse(err);
   }
 }

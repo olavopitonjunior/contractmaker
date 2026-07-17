@@ -44,7 +44,13 @@ export async function GET(
         "Content-Disposition": `${disposition}; filename="${attachment.filename}"`,
       },
     });
-  } catch {
-    return NextResponse.json({ error: "Falha ao servir arquivo" }, { status: 500 });
+  } catch (err) {
+    const { storageDownloadErrorResponse } = await import(
+      "@/lib/storage/download-error"
+    );
+    return storageDownloadErrorResponse(err, {
+      notFoundMessage:
+        "Arquivo indisponível no armazenamento (pode ter sido removido).",
+    });
   }
 }

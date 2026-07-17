@@ -51,17 +51,85 @@ export async function deleteContractMemories(
   return res.count;
 }
 
-/** Deleta blobs do storage best-effort (pós-commit). Nunca lança. */
-export async function deleteBlobs(urls: string[]): Promise<number> {
+/**
+ * Conta quantas rows do banco ainda referenciam este blob URL.
+ *
+ * Um mesmo blob é COMPARTILHADO por referência entre tabelas: o finalize do form
+ * copia `FormAttachment.url` pro `DealAttachment.url` (sem re-upload), a conversão
+ * de proposta copia `ProposalAttachment.url`, e a esteira de locação copia
+ * `LeaseClientAttachment.url` — todos apontando pro MESMO objeto no storage. Além
+ * disso, re-finalizar um form gera `DealAttachment` duplicados com a mesma URL.
+ * Por isso apagar o blob ao deletar UMA row órfãva o arquivo de todas as irmãs
+ * (bug: matrícula/IPTU davam 404 no download). Conte antes de apagar.
+ */
+export async function countBlobUrlReferences(db: Db, url: string): Promise<number> {
+  if (!url) return 0;
+  const [deal, form, proposal, leaseClient, lead, envelope, inspection, chat] =
+    await Promise.all([
+      db.dealAttachment.count({ where: { url } }),
+      db.formAttachment.count({ where: { url } }),
+      db.proposalAttachment.count({ where: { url } }),
+      db.leaseClientAttachment.count({ where: { url } }),
+      db.leadAttachment.count({ where: { url } }),
+      // Envelope ClickSign: o PDF assinado é gravado em `signedDocumentUrl` E
+      // espelhado como DealAttachment com a MESMA url (signed-pdf.ts). Deletar o
+      // anexo espelho NÃO pode apagar o blob que o envelope ainda serve no botão
+      // "Baixar assinado" — senão perde-se um contrato assinado legalmente.
+      db.envelope.count({
+        where: { OR: [{ documentUrl: url }, { signedDocumentUrl: url }] },
+      }),
+      // Laudo de vistoria (locação): a versão assinada vira `Inspection.laudoPdfUrl`
+      // apontando pro mesmo blob do envelope/anexo.
+      db.inspection.count({ where: { laudoPdfUrl: url } }),
+      // ChatAttachment usa `blobUrl` — namespace próprio, mas incluído por
+      // completude (o delete de contrato trata blobUrl como apagável).
+      db.chatAttachment.count({ where: { blobUrl: url } }),
+    ]);
+  return (
+    deal + form + proposal + leaseClient + lead + envelope + inspection + chat
+  );
+}
+
+/**
+ * Apaga o blob do storage SÓ se nenhuma outra row ainda o referencia. Chame
+ * DEPOIS de deletar a row (a row já deletada não se conta). Best-effort: nunca
+ * lança. Retorna "deleted" | "kept" (ainda referenciado) | "skipped" (url vazia
+ * ou storage não removeu).
+ */
+export async function deleteBlobIfUnreferenced(
+  db: Db,
+  url: string | null | undefined
+): Promise<"deleted" | "kept" | "skipped"> {
+  if (!url) return "skipped";
+  try {
+    if ((await countBlobUrlReferences(db, url)) > 0) return "kept";
+    const { deleteFromStorage } = await import("@/lib/storage/s3");
+    return (await deleteFromStorage(url)) ? "deleted" : "skipped";
+  } catch {
+    // best-effort — órfão residual é preferível a falhar o delete
+    return "skipped";
+  }
+}
+
+/**
+ * Deleta blobs do storage best-effort (pós-commit), pulando os que ainda são
+ * referenciados por outra row (ref-count via `countBlobUrlReferences`). Nunca
+ * lança. Chame DEPOIS do commit que removeu as rows-alvo.
+ */
+export async function deleteBlobs(urls: string[], db: Db): Promise<number> {
   if (urls.length === 0) return 0;
-  const { deleteFromStorage } = await import("@/lib/storage/s3");
+  // Concorrência limitada: cada URL dispara 8 count queries + 1 delete. Em batch
+  // grande (delete de deal com dezenas de anexos) o loop serial O(N) poderia
+  // estourar o orçamento do waitUntil e deixar blobs sem avaliar. Processa em
+  // lotes de CONCURRENCY sem inundar o pool do Neon.
+  const CONCURRENCY = 5;
   let deleted = 0;
-  for (const url of urls) {
-    try {
-      if (await deleteFromStorage(url)) deleted++;
-    } catch {
-      // best-effort — órfão residual é preferível a falhar o delete
-    }
+  for (let i = 0; i < urls.length; i += CONCURRENCY) {
+    const batch = urls.slice(i, i + CONCURRENCY);
+    const outcomes = await Promise.all(
+      batch.map((url) => deleteBlobIfUnreferenced(db, url))
+    );
+    deleted += outcomes.filter((o) => o === "deleted").length;
   }
   return deleted;
 }
