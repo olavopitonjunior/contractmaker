@@ -150,10 +150,14 @@ export async function syncEnvelopeState(
     const proposalUserId =
       envelope.source === "proposal" && envelope.proposalId && bouncedSignerIds.length > 0
         ? (
-            await prisma.proposal.findUnique({
-              where: { id: envelope.proposalId },
-              select: { userId: true },
-            })
+            await prisma.proposal
+              .findUnique({
+                where: { id: envelope.proposalId },
+                select: { userId: true },
+              })
+              // Best-effort: falha aqui só custa o sino — NUNCA aborta o sync
+              // (o resto da reconciliação, incl. close/PDF, tem que rodar).
+              .catch(() => null)
           )?.userId ?? null
         : null;
     const common = {

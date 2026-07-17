@@ -18,8 +18,8 @@ import { emitNotification } from "@/lib/notifications/emit";
  *                     completa (o marco que pede ação: converter em negócio)
  *   - accepted_party: um TERCEIRO (proprietário) aceitou o termo dele —
  *                     por-signatário, suffix obrigatório
- *   - refused:        recusa; `refusedBy` ajusta o body (proponente = frio,
- *                     vendedor = quente: comprador já comprometido na mão)
+ *   - refused:        recusa; `refusedBy` ajusta o body (recusa do
+ *                     proprietário pede follow-up com o comprador)
  *   - expired:        termo do proponente venceu sem aceite (CC art. 431)
  *   - email_failed:   bounce do e-mail do envelope de proposta — suffix =
  *                     signerId (senão o 2º bounce é engolido pelo unique)
@@ -65,8 +65,11 @@ const TEXT: Record<ProposalNotifKind, { type: string; title: string; body: strin
 
 const REFUSED_BODY: Record<"proponente" | "vendedor", string> = {
   proponente: "O proponente recusou a proposta.",
+  // Copy válida ANTES e DEPOIS da assinatura do proponente (com o alargamento
+  // de recusada_vendedor, a recusa pode chegar pré-assinatura — não dá pra
+  // afirmar "comprador comprometido" sempre).
   vendedor:
-    "O proprietário recusou — há um comprador comprometido aguardando. Priorize o contato.",
+    "O proprietário recusou a proposta. Se o comprador já assinou/aceitou, priorize o contato com ele.",
 };
 
 export async function notifyProposalMilestone(params: {
@@ -86,28 +89,49 @@ export async function notifyProposalMilestone(params: {
   const batchId = `proposal:${proposalId}:${kind}${dedupeSuffix ? `:${dedupeSuffix}` : ""}`;
 
   // Dono que SAIU da org: o sino escopado iria pra alguém que não vê mais
-  // nada (e o batchId único impediria re-emitir). Fallback: org-wide — melhor
-  // a org inteira saber do marco do que ninguém. Best-effort: erro na checagem
-  // mantém o escopo por dono.
-  let targetUserId: string | null = userId;
+  // nada (e o batchId único impediria re-emitir). Fallback: OWNERS/ADMINS da
+  // org (que têm visão total das propostas) — NUNCA broadcast org-wide, que
+  // vazaria atividade que o RBAC esconde de members e cujo link 404a pra
+  // eles. batchId por destinatário no fallback (o unique é [type, batchId]).
+  // Best-effort: erro na checagem mantém o escopo por dono.
+  let recipients: Array<{ userId: string; batchSuffix: string }> = [
+    { userId, batchSuffix: "" },
+  ];
   try {
     const member = await prisma.orgMembership.findFirst({
       where: { orgId, userId },
       select: { id: true },
     });
-    if (!member) targetUserId = null;
+    if (!member) {
+      const admins = await prisma.orgMembership.findMany({
+        where: { orgId, role: { in: ["owner", "admin"] } },
+        select: { userId: true },
+      });
+      if (admins.length > 0) {
+        recipients = admins.map((a) => ({
+          userId: a.userId,
+          batchSuffix: `:u:${a.userId}`,
+        }));
+      }
+      // Sem owner/admin (estado degenerado): mantém o dono original — o
+      // sino fica invisível, mas não vaza.
+    }
   } catch {
-    // mantém escopado
+    // mantém escopado no dono
   }
 
-  await emitNotification({
-    orgId,
-    userId: targetUserId,
-    type: t.type,
-    title: t.title,
-    body,
-    linkUrl: `/pipeline/propostas/${proposalId}`,
-    batchId,
-    metadata: { proposalId, ...(refusedBy ? { refusedBy } : {}) },
-  });
+  await Promise.all(
+    recipients.map((r) =>
+      emitNotification({
+        orgId,
+        userId: r.userId,
+        type: t.type,
+        title: t.title,
+        body,
+        linkUrl: `/pipeline/propostas/${proposalId}`,
+        batchId: `${batchId}${r.batchSuffix}`,
+        metadata: { proposalId, ...(refusedBy ? { refusedBy } : {}) },
+      })
+    )
+  );
 }

@@ -57,18 +57,22 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       // Propaga o desfecho pro status da proposta (idempotente via CAS).
       if (result.remoteStatus === "closed" || result.remoteStatus === "finished") {
         await onProposalEnvelopeClosed(env.id);
-      } else if (
-        env.signers.some((s) => s.status === "refused") ||
-        result.remoteStatus === "canceled"
-      ) {
-        // Mesmo hint do caminho de webhook: o sourceKind do signatário que
-        // recusou desambigua a via ÚNICA (proprietário → recusada_vendedor).
-        // Sem ele, o sync atribuía toda recusa ao proponente — e como
-        // recusada_proponente é terminal, o webhook posterior não corrigia.
-        const refusedSigner = env.signers.find((s) => s.status === "refused");
-        await onProposalEnvelopeRefused(env.id, {
-          refusedSourceKind: refusedSigner?.sourceKind ?? null,
+      } else {
+        // Leitura FRESCA pós-sync: o syncEnvelopeState acabou de gravar os
+        // status dos signers — o env.signers em memória é o snapshot PRÉ-sync
+        // e não veria uma recusa recém-descoberta (o hint sairia null e a
+        // recusa seria atribuída ao proponente, terminal errado sem correção).
+        const refusedSigner = await prisma.envelopeSigner.findFirst({
+          where: { envelopeId: env.id, status: "refused" },
+          select: { sourceKind: true },
         });
+        if (refusedSigner || result.remoteStatus === "canceled") {
+          // Mesmo hint do caminho de webhook: sourceKind desambigua a via
+          // ÚNICA (proprietário → recusada_vendedor).
+          await onProposalEnvelopeRefused(env.id, {
+            refusedSourceKind: refusedSigner?.sourceKind ?? null,
+          });
+        }
       }
       results.push({ envelopeId: env.id, via: env.via, ...result });
     } catch (err) {

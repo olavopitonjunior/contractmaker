@@ -138,17 +138,17 @@ export async function processProposalAcceptanceEvent(
       if (!isProponente) {
         // Sino por-signatário: um proprietário aceitou o termo dele. Suffix
         // obrigatório — sem ele o aceite do 2º proprietário seria engolido
-        // pelo unique (type, batchId). GATE por status vivo: aceite tardio de
-        // termo stale numa proposta cancelada/convertida/terminal não toca
-        // sino (não há advance neste ramo pra servir de gate).
-        const LIVE_FOR_PARTY_ACCEPT = new Set([
-          "enviada",
-          "entregue",
-          "visualizada",
-          "assinada_proponente",
-          "aguardando_vendedor",
+        // pelo unique (type, batchId). GATE: bloqueia SÓ terminais NEGATIVOS
+        // (proposta morta) — aceite do proprietário DEPOIS de completa/
+        // convertida é a ordem normal do Aceite multi-termo (termos paralelos)
+        // e falha_envio segue viva/reenviável; nesses casos o sino toca.
+        const DEAD_FOR_PARTY_ACCEPT = new Set([
+          "cancelada",
+          "expirada",
+          "recusada_proponente",
+          "recusada_vendedor",
         ]);
-        if (LIVE_FOR_PARTY_ACCEPT.has(proposal.status)) {
+        if (!DEAD_FOR_PARTY_ACCEPT.has(proposal.status)) {
           waitUntil(
             notifyProposalMilestone({
               proposalId: proposal.id,
