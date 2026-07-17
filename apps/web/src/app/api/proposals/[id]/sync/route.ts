@@ -61,7 +61,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         env.signers.some((s) => s.status === "refused") ||
         result.remoteStatus === "canceled"
       ) {
-        await onProposalEnvelopeRefused(env.id);
+        // Mesmo hint do caminho de webhook: o sourceKind do signatário que
+        // recusou desambigua a via ÚNICA (proprietário → recusada_vendedor).
+        // Sem ele, o sync atribuía toda recusa ao proponente — e como
+        // recusada_proponente é terminal, o webhook posterior não corrigia.
+        const refusedSigner = env.signers.find((s) => s.status === "refused");
+        await onProposalEnvelopeRefused(env.id, {
+          refusedSourceKind: refusedSigner?.sourceKind ?? null,
+        });
       }
       results.push({ envelopeId: env.id, via: env.via, ...result });
     } catch (err) {

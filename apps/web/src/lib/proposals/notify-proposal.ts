@@ -1,3 +1,4 @@
+import { prisma } from "@/lib/db/prisma";
 import { emitNotification } from "@/lib/notifications/emit";
 
 /**
@@ -83,9 +84,25 @@ export async function notifyProposalMilestone(params: {
   const t = TEXT[kind];
   const body = kind === "refused" && refusedBy ? REFUSED_BODY[refusedBy] : t.body;
   const batchId = `proposal:${proposalId}:${kind}${dedupeSuffix ? `:${dedupeSuffix}` : ""}`;
+
+  // Dono que SAIU da org: o sino escopado iria pra alguém que não vê mais
+  // nada (e o batchId único impediria re-emitir). Fallback: org-wide — melhor
+  // a org inteira saber do marco do que ninguém. Best-effort: erro na checagem
+  // mantém o escopo por dono.
+  let targetUserId: string | null = userId;
+  try {
+    const member = await prisma.orgMembership.findFirst({
+      where: { orgId, userId },
+      select: { id: true },
+    });
+    if (!member) targetUserId = null;
+  } catch {
+    // mantém escopado
+  }
+
   await emitNotification({
     orgId,
-    userId,
+    userId: targetUserId,
     type: t.type,
     title: t.title,
     body,

@@ -78,9 +78,11 @@ export async function notifyEnvelopeMilestone(params: {
   kind: EnvelopeNotifKind;
   /** Discriminador extra do batchId (ex.: signerId pro bounce por signatário). */
   dedupeSuffix?: string;
-  /** Pra envelope de PROPOSTA: id já em mãos do chamador evita re-query por
-   *  signatário bounced (o sync chama N vezes pro mesmo envelope). */
+  /** Pra envelope de PROPOSTA: id/dono já em mãos do chamador evitam
+   *  re-queries por signatário bounced (o sync chama N vezes pro mesmo
+   *  envelope — resolver uma vez e passar). */
   proposalId?: string | null;
+  proposalUserId?: string | null;
 }): Promise<void> {
   const { envelopeId, orgId, source, dealId, linkUrl, kind, dedupeSuffix } = params;
   if (source === "proposal" && kind === "email_failed") {
@@ -96,15 +98,19 @@ export async function notifyEnvelopeMilestone(params: {
           })
         )?.proposalId;
       if (proposalId) {
-        const proposal = await prisma.proposal.findUnique({
-          where: { id: proposalId },
-          select: { userId: true },
-        });
-        if (proposal) {
+        const userId =
+          params.proposalUserId ??
+          (
+            await prisma.proposal.findUnique({
+              where: { id: proposalId },
+              select: { userId: true },
+            })
+          )?.userId;
+        if (userId) {
           await notifyProposalMilestone({
             proposalId,
             orgId,
-            userId: proposal.userId,
+            userId,
             kind: "email_failed",
             dedupeSuffix,
           });

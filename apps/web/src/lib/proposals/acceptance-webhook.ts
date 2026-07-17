@@ -80,11 +80,11 @@ export async function processProposalAcceptanceEvent(
   const proposal = signer
     ? await prisma.proposal.findUnique({
         where: { id: signer.proposalId },
-        select: { id: true, orgId: true, userId: true, title: true, token: true, instrument: true, validUntil: true },
+        select: { id: true, orgId: true, userId: true, status: true, title: true, token: true, instrument: true, validUntil: true },
       })
     : await prisma.proposal.findFirst({
         where: { acceptanceClicksignId: input.acceptanceId, ...orgScope },
-        select: { id: true, orgId: true, userId: true, title: true, token: true, instrument: true, validUntil: true },
+        select: { id: true, orgId: true, userId: true, status: true, title: true, token: true, instrument: true, validUntil: true },
       });
   if (!proposal) {
     return { ok: true, handled: false, phase: input.phase, unknownAcceptance: true };
@@ -138,16 +138,27 @@ export async function processProposalAcceptanceEvent(
       if (!isProponente) {
         // Sino por-signatário: um proprietário aceitou o termo dele. Suffix
         // obrigatório — sem ele o aceite do 2º proprietário seria engolido
-        // pelo unique (type, batchId).
-        waitUntil(
-          notifyProposalMilestone({
-            proposalId: proposal.id,
-            orgId: proposal.orgId,
-            userId: proposal.userId,
-            kind: "accepted_party",
-            dedupeSuffix: signer!.id,
-          })
-        );
+        // pelo unique (type, batchId). GATE por status vivo: aceite tardio de
+        // termo stale numa proposta cancelada/convertida/terminal não toca
+        // sino (não há advance neste ramo pra servir de gate).
+        const LIVE_FOR_PARTY_ACCEPT = new Set([
+          "enviada",
+          "entregue",
+          "visualizada",
+          "assinada_proponente",
+          "aguardando_vendedor",
+        ]);
+        if (LIVE_FOR_PARTY_ACCEPT.has(proposal.status)) {
+          waitUntil(
+            notifyProposalMilestone({
+              proposalId: proposal.id,
+              orgId: proposal.orgId,
+              userId: proposal.userId,
+              kind: "accepted_party",
+              dedupeSuffix: signer!.id,
+            })
+          );
+        }
         return { ok: true, handled: true, proposalId: proposal.id, phase: input.phase };
       }
 
