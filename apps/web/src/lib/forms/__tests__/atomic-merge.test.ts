@@ -24,6 +24,7 @@ function setupFakeDb(initial: {
     dataJson: initial.dataJson ?? {},
     status: "rascunho",
     completedAt: null as Date | null,
+    privacyAcceptedAt: null as Date | null,
     updatedAt: new Date("2026-07-16T12:00:00Z"),
     exists: initial.exists ?? true,
   };
@@ -32,7 +33,17 @@ function setupFakeDb(initial: {
 
   const tx = {
     $queryRaw: vi.fn(async () =>
-      db.exists ? [{ id: db.id, dataJson: db.dataJson }] : [],
+      db.exists
+        ? [
+            {
+              id: db.id,
+              dataJson: db.dataJson,
+              status: db.status,
+              completedAt: db.completedAt,
+              privacyAcceptedAt: db.privacyAcceptedAt,
+            },
+          ]
+        : [],
     ),
     salesForm: {
       update: vi.fn(async (args: { data: Record<string, unknown> }) => {
@@ -178,6 +189,27 @@ describe("mergeSalesFormDataJson", () => {
       completedAt,
     });
     expect(result.updated.status).toBe("completo");
+  });
+
+  it("extraData como função recebe a linha FRESCA sob o lock (status atual, não stale)", async () => {
+    // Cenário do finalize×auto-save: o handler leu status="rascunho", mas um
+    // finalize concorrente já gravou "completo". O auto-save (sem body.status)
+    // não pode regredir — decidindo contra o fresh.status, mantém "completo".
+    const { db, updateCalls } = setupFakeDb({ dataJson: {} });
+    db.status = "completo"; // outro escritor finalizou depois da leitura stale
+    db.completedAt = new Date("2026-07-16T20:00:00Z");
+
+    await mergeSalesFormDataJson({
+      where: { id: "form-1" },
+      incoming: { vendedores: [] },
+      extraData: (fresh) => ({
+        // simula o handler: requestedStatus undefined → mantém o fresco
+        status: fresh.status,
+      }),
+    });
+
+    expect(updateCalls[0]).toMatchObject({ status: "completo" });
+    expect(db.status).toBe("completo");
   });
 
   it("also roda dentro da mesma transação, com o tx client", async () => {

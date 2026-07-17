@@ -29,6 +29,14 @@ import { deepMergeAtPaths, type DeepMergeResult } from "./dataJson-merge";
  * e anexos ficam no caller, consumindo `finalData`.
  */
 
+/** Estado fresco da linha, lido sob o lock — base pra extraData condicional. */
+export interface FreshFormRow {
+  id: string;
+  status: string;
+  completedAt: Date | null;
+  privacyAcceptedAt: Date | null;
+}
+
 export interface AtomicMergeArgs {
   /** Localiza o form — os handlers têm token (rotas públicas) ou id. */
   where: { id: string } | { token: string };
@@ -38,10 +46,23 @@ export interface AtomicMergeArgs {
   /**
    * Pós-processamento síncrono do merged DENTRO do lock (ex.: dedupConjuges
    * no finalize) — roda sobre a leitura fresca, o que gravamos é o retorno.
+   * Recebe também a linha fresca pra decisões que dependem do estado atual
+   * (ex.: só dedupar quando a transição pra "completo" é real).
    */
-  transform?: (merged: Record<string, unknown>) => Record<string, unknown>;
-  /** Campos extras do MESMO update (status, completedAt, lockedAt, privacy…). */
-  extraData?: Omit<Prisma.SalesFormUncheckedUpdateInput, "dataJson">;
+  transform?: (
+    merged: Record<string, unknown>,
+    fresh: FreshFormRow,
+  ) => Record<string, unknown>;
+  /**
+   * Campos extras do MESMO update (status, completedAt, lockedAt, privacy…).
+   * A forma FUNÇÃO recebe a linha fresca lida sob o lock — obrigatória quando
+   * o valor depende do estado atual (ex.: `body.status ?? status`): calcular
+   * isso da leitura stale pré-lock deixaria um auto-save concorrente regredir
+   * o `status="completo"` de um finalize dentro do próprio lock.
+   */
+  extraData?:
+    | Omit<Prisma.SalesFormUncheckedUpdateInput, "dataJson">
+    | ((fresh: FreshFormRow) => Omit<Prisma.SalesFormUncheckedUpdateInput, "dataJson">);
   /** Escritas irmãs na mesma transação (ex.: participant.completedAt). */
   also?: (tx: Prisma.TransactionClient) => Promise<void>;
 }
@@ -71,31 +92,40 @@ export async function mergeSalesFormDataJson(
     async (tx) => {
       // Row lock: serializa contra outros merges do mesmo form. A releitura
       // sob o lock é o que elimina o lost update.
+      type LockedRow = FreshFormRow & { dataJson: unknown };
       const rows =
         "id" in args.where
-          ? await tx.$queryRaw<Array<{ id: string; dataJson: unknown }>>`
-              SELECT "id", "dataJson" FROM "SalesForm"
+          ? await tx.$queryRaw<LockedRow[]>`
+              SELECT "id", "dataJson", "status", "completedAt", "privacyAcceptedAt"
+              FROM "SalesForm"
               WHERE "id" = ${args.where.id} FOR UPDATE`
-          : await tx.$queryRaw<Array<{ id: string; dataJson: unknown }>>`
-              SELECT "id", "dataJson" FROM "SalesForm"
+          : await tx.$queryRaw<LockedRow[]>`
+              SELECT "id", "dataJson", "status", "completedAt", "privacyAcceptedAt"
+              FROM "SalesForm"
               WHERE "token" = ${args.where.token} FOR UPDATE`;
       if (rows.length === 0) throw new FormNotFoundError();
 
-      const current = (rows[0].dataJson ?? {}) as Record<string, unknown>;
+      const fresh = rows[0];
+      const current = (fresh.dataJson ?? {}) as Record<string, unknown>;
       const outcome = deepMergeAtPaths(
         current,
         args.incoming,
         args.allowedTopKeys,
       );
       const finalData = args.transform
-        ? args.transform(outcome.merged)
+        ? args.transform(outcome.merged, fresh)
         : outcome.merged;
 
+      const extraData =
+        typeof args.extraData === "function"
+          ? args.extraData(fresh)
+          : (args.extraData ?? {});
+
       const updated = await tx.salesForm.update({
-        where: { id: rows[0].id },
+        where: { id: fresh.id },
         data: {
           dataJson: finalData as Prisma.InputJsonValue,
-          ...(args.extraData ?? {}),
+          ...extraData,
         },
         select: { id: true, status: true, updatedAt: true, completedAt: true },
       });

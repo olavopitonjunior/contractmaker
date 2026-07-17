@@ -5,7 +5,10 @@ import {
   ROLE_PATHS,
   filterDataJsonByRole,
 } from "@/lib/forms/role-paths";
-import { mergeSalesFormDataJson } from "@/lib/forms/atomic-merge";
+import {
+  mergeSalesFormDataJson,
+  FormNotFoundError,
+} from "@/lib/forms/atomic-merge";
 import { formClosedResponse } from "@/lib/forms/form-gate";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { waitUntil } from "@vercel/functions";
@@ -118,20 +121,31 @@ export async function PATCH(
   // principal (ou de outro subtoken) feitas depois da leitura acima.
   const completedNow =
     markCompleted && !participant.completedAt ? new Date() : null;
-  const mergeOutcome = await mergeSalesFormDataJson({
-    where: { id: participant.formId },
-    incoming,
-    allowedTopKeys: ROLE_PATHS[role],
-    also: async (tx) => {
-      await tx.salesFormParticipant.update({
-        where: { id: participant.id },
-        data: {
-          lastAccessAt: new Date(),
-          ...(completedNow ? { completedAt: completedNow } : {}),
-        },
-      });
-    },
-  });
+  let mergeOutcome;
+  try {
+    mergeOutcome = await mergeSalesFormDataJson({
+      where: { id: participant.formId },
+      incoming,
+      allowedTopKeys: ROLE_PATHS[role],
+      also: async (tx) => {
+        await tx.salesFormParticipant.update({
+          where: { id: participant.id },
+          data: {
+            lastAccessAt: new Date(),
+            ...(completedNow ? { completedAt: completedNow } : {}),
+          },
+        });
+      },
+    });
+  } catch (error) {
+    // Form deletado entre o findUniqueOrThrow acima e o SELECT FOR UPDATE
+    // (delete do deal com ?deleteForm=true durante o auto-save da parte).
+    // 404 explícito — 500 faria o use-auto-save re-tentar pra sempre.
+    if (error instanceof FormNotFoundError) {
+      return NextResponse.json({ error: "Form not found" }, { status: 404 });
+    }
+    throw error;
+  }
 
   if (mergeOutcome.rejectedPaths.length > 0) {
     // Log + audit (não bloqueia save — bug de UI não pode quebrar fluxo).
