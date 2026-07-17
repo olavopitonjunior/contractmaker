@@ -1,12 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { resolveParticipantToken } from "@/lib/forms/participant-token";
 import {
   ROLE_PATHS,
   filterDataJsonByRole,
 } from "@/lib/forms/role-paths";
-import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
+import { mergeSalesFormDataJson } from "@/lib/forms/atomic-merge";
 import { formClosedResponse } from "@/lib/forms/form-gate";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { waitUntil } from "@vercel/functions";
@@ -77,7 +76,8 @@ export async function GET(
 /**
  * PATCH /api/forms/participant/[subtoken]
  * Público — sem session. Auto-save do subtoken. Allowlist enforced via
- * `deepMergeAtPaths(current, incoming, ROLE_PATHS[role])`.
+ * `mergeSalesFormDataJson({ allowedTopKeys: ROLE_PATHS[role] })` — merge
+ * atômico sob row lock (ver lib/forms/atomic-merge.ts).
  */
 export async function PATCH(
   req: NextRequest,
@@ -106,17 +106,32 @@ export async function PATCH(
 
   const body = await req.json().catch(() => ({}));
   const role = participant.role as keyof typeof ROLE_PATHS;
-  const currentData = (participant.form.dataJson ?? {}) as Record<
-    string,
-    unknown
-  >;
   const incoming = (body.dataJson ?? {}) as Record<string, unknown>;
 
-  const mergeOutcome = deepMergeAtPaths(
-    currentData,
+  // Status do subtoken: "completo" só se body explicitamente pediu.
+  // Form principal só transiciona pra "completo" via token principal —
+  // subtoken faz "completedAt" apenas no próprio participant.
+  const markCompleted = body.markCompleted === true;
+
+  // Merge atômico: releitura do dataJson sob FOR UPDATE dentro da transação —
+  // o save do participante nunca regride edições concorrentes do token
+  // principal (ou de outro subtoken) feitas depois da leitura acima.
+  const completedNow =
+    markCompleted && !participant.completedAt ? new Date() : null;
+  const mergeOutcome = await mergeSalesFormDataJson({
+    where: { id: participant.formId },
     incoming,
-    ROLE_PATHS[role],
-  );
+    allowedTopKeys: ROLE_PATHS[role],
+    also: async (tx) => {
+      await tx.salesFormParticipant.update({
+        where: { id: participant.id },
+        data: {
+          lastAccessAt: new Date(),
+          ...(completedNow ? { completedAt: completedNow } : {}),
+        },
+      });
+    },
+  });
 
   if (mergeOutcome.rejectedPaths.length > 0) {
     // Log + audit (não bloqueia save — bug de UI não pode quebrar fluxo).
@@ -139,26 +154,6 @@ export async function PATCH(
       },
     );
   }
-
-  // Status do subtoken: "completo" só se body explicitamente pediu.
-  // Form principal só transiciona pra "completo" via token principal —
-  // subtoken faz "completedAt" apenas no próprio participant.
-  const markCompleted = body.markCompleted === true;
-  const updated = await prisma.$transaction([
-    prisma.salesForm.update({
-      where: { id: participant.formId },
-      data: { dataJson: mergeOutcome.merged as Prisma.InputJsonValue },
-    }),
-    prisma.salesFormParticipant.update({
-      where: { id: participant.id },
-      data: {
-        lastAccessAt: new Date(),
-        ...(markCompleted && !participant.completedAt
-          ? { completedAt: new Date() }
-          : {}),
-      },
-    }),
-  ]);
 
   if (markCompleted && !participant.completedAt) {
     audit(
@@ -192,7 +187,8 @@ export async function PATCH(
 
   return NextResponse.json({
     role,
-    completedAt: updated[1].completedAt?.toISOString() ?? null,
+    completedAt:
+      (participant.completedAt ?? completedNow)?.toISOString() ?? null,
     rejectedPaths: mergeOutcome.rejectedPaths,
   });
 }

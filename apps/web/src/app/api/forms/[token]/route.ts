@@ -24,6 +24,7 @@ import { dedupConjuges } from "@/lib/forms/dedup-conjuges";
 import { dadosContratoSchema } from "@/lib/forms/validation";
 import { sendFormSummary } from "@/lib/forms/form-summary-mailer";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
+import { mergeSalesFormDataJson } from "@/lib/forms/atomic-merge";
 import { formClosedResponse } from "@/lib/forms/form-gate";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
@@ -98,16 +99,63 @@ export async function PATCH(
   const closed = await formClosedResponse(form);
   if (closed) return closed;
 
-  const currentData = (form.dataJson as Record<string, unknown>) || {};
-  // Deep-merge restrito substitui `{ ...current, ...incoming }` raso.
-  // Sem allowlist no token principal — subtokens (PR 4) passam ROLE_PATHS.
-  // undefined/null em incoming não apaga chave existente. Arrays substituem
-  // inteiros pra permitir remoção de itens (ex: deletar 2º comprador).
-  const mergeOutcome = deepMergeAtPaths(
-    currentData,
-    (body.dataJson ?? {}) as Record<string, unknown>,
-  );
-  const rawMergedData = mergeOutcome.merged;
+  const previousStatus = form.status;
+  const newStatus = body.status ?? form.status;
+  const isFinalizing = newStatus === "completo" && previousStatus !== "completo";
+
+  // Auto-lock no finalize: se a org optou por travar o formulário quando o
+  // cliente finaliza, congela os dados no mesmo update (o link continua
+  // acessível, mas somente-leitura). Default false preserva o reabrível.
+  const autoLockOnFinalize =
+    isFinalizing && form.org.formSettings?.autoLockFormOnFinalize === true;
+
+  // Consentimento LGPD: o finalize É o ato de consentir (o wizard bloqueia o
+  // submit sem o checkbox). Registra a evidência — quando, de qual IP (hasheado)
+  // e qual versão da política — na 1ª finalização. Antes o aceite era só estado
+  // de UI e nunca persistia.
+  // Exige aceite EXPLÍCITO (=== true). Um `!== false` gravaria evidência de
+  // consentimento mesmo quando o cliente não enviou o campo (client antigo,
+  // link de participante, chamada direta à API) — fabricando prova de um
+  // consentimento que o titular nunca deu.
+  const recordConsent =
+    isFinalizing && !form.privacyAcceptedAt && body.privacyAccepted === true;
+
+  // Merge atômico sob row lock (lib/forms/atomic-merge.ts): a releitura do
+  // dataJson acontece dentro da transação — um save do token principal não
+  // regride mais o que um subtoken (vendedor/comprador) gravou depois da
+  // leitura inicial acima. Sem allowlist no token principal.
+  // No finalize, dedupConjuges roda DENTRO do lock, sobre a leitura fresca.
+  // Bug demo 2026-05-05: Isabel virou comprador 2 mesmo já sendo cônjuge de
+  // Luiz. Em auto-save intermediário não rodamos dedup — usuário pode estar
+  // revendo.
+  const mergeOutcome = await mergeSalesFormDataJson({
+    where: { token: params.token },
+    incoming: (body.dataJson ?? {}) as Record<string, unknown>,
+    transform: isFinalizing ? dedupConjuges : undefined,
+    extraData: {
+      title: body.title ?? form.title,
+      status: newStatus,
+      // `completedAt` só na PRIMEIRA vez: é marco de SLA do funil, e um form
+      // reaberto pra corrigir um dado não pode reescrever a data em que o
+      // cliente de fato enviou. `reopenedAt: null` fecha o gate de novo.
+      ...(isFinalizing
+        ? {
+            ...(form.completedAt ? {} : { completedAt: new Date() }),
+            reopenedAt: null,
+          }
+        : {}),
+      ...(autoLockOnFinalize ? { lockedAt: new Date() } : {}),
+      ...(recordConsent
+        ? {
+            privacyAcceptedAt: new Date(),
+            privacyIpHash: hashIp(req),
+            privacyPolicyVersion: PRIVACY_POLICY_VERSION,
+          }
+        : {}),
+    },
+  });
+  const mergedData = mergeOutcome.finalData;
+  const updated = mergeOutcome.updated;
 
   if (mergeOutcome.rejectedPaths.length > 0) {
     // Token principal não deveria ter allowlist — qualquer rejectedPath aqui
@@ -127,16 +175,6 @@ export async function PATCH(
       },
     );
   }
-
-  const previousStatus = form.status;
-  const newStatus = body.status ?? form.status;
-
-  // No finalize (transição para "completo"), aplica dedup de cônjuges
-  // duplicados como vendedor/comprador autônomo. Bug demo 2026-05-05:
-  // Isabel virou comprador 2 mesmo já sendo cônjuge de Luiz. Em auto-save
-  // intermediário não rodamos dedup — usuário pode estar revendo.
-  const isFinalizing = newStatus === "completo" && previousStatus !== "completo";
-  const mergedData = isFinalizing ? dedupConjuges(rawMergedData) : rawMergedData;
 
   // A6 (QA deal 20486): validação server-side no finalize. O form público é
   // editável por qualquer um com o link e a validação client-side é burlável —
@@ -159,49 +197,6 @@ export async function PATCH(
       );
     }
   }
-
-  // Auto-lock no finalize: se a org optou por travar o formulário quando o
-  // cliente finaliza, congela os dados no mesmo update (o link continua
-  // acessível, mas somente-leitura). Default false preserva o reabrível.
-  const autoLockOnFinalize =
-    isFinalizing && form.org.formSettings?.autoLockFormOnFinalize === true;
-
-  // Consentimento LGPD: o finalize É o ato de consentir (o wizard bloqueia o
-  // submit sem o checkbox). Registra a evidência — quando, de qual IP (hasheado)
-  // e qual versão da política — na 1ª finalização. Antes o aceite era só estado
-  // de UI e nunca persistia.
-  // Exige aceite EXPLÍCITO (=== true). Um `!== false` gravaria evidência de
-  // consentimento mesmo quando o cliente não enviou o campo (client antigo,
-  // link de participante, chamada direta à API) — fabricando prova de um
-  // consentimento que o titular nunca deu.
-  const recordConsent =
-    isFinalizing && !form.privacyAcceptedAt && body.privacyAccepted === true;
-
-  const updated = await prisma.salesForm.update({
-    where: { token: params.token },
-    data: {
-      dataJson: mergedData as Prisma.InputJsonValue,
-      title: body.title ?? form.title,
-      status: newStatus,
-      // `completedAt` só na PRIMEIRA vez: é marco de SLA do funil, e um form
-      // reaberto pra corrigir um dado não pode reescrever a data em que o
-      // cliente de fato enviou. `reopenedAt: null` fecha o gate de novo.
-      ...(isFinalizing
-        ? {
-            ...(form.completedAt ? {} : { completedAt: new Date() }),
-            reopenedAt: null,
-          }
-        : {}),
-      ...(autoLockOnFinalize ? { lockedAt: new Date() } : {}),
-      ...(recordConsent
-        ? {
-            privacyAcceptedAt: new Date(),
-            privacyIpHash: hashIp(req),
-            privacyPolicyVersion: PRIVACY_POLICY_VERSION,
-          }
-        : {}),
-    },
-  });
 
   // Keep the deal title in sync with the form title when the user renames the form
   if (typeof body.title === "string" && body.title.trim() && body.title !== form.title) {

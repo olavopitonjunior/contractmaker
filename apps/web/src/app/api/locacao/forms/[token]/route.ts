@@ -6,6 +6,7 @@ import { matchDealGroup } from "@/lib/newton/group-match";
 import { generateLocacaoContractForDeal } from "@/lib/services/contract-generation";
 import { emitNotification } from "@/lib/notifications/emit";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
+import { mergeSalesFormDataJson } from "@/lib/forms/atomic-merge";
 import { formClosedResponse } from "@/lib/forms/form-gate";
 import {
   schemaForLocacaoType,
@@ -88,16 +89,39 @@ export async function PATCH(
   const closed = await formClosedResponse(form);
   if (closed) return closed;
 
-  const currentData = (form.dataJson as Record<string, unknown>) || {};
-  const mergeOutcome = deepMergeAtPaths(
-    currentData,
-    (body.dataJson ?? {}) as Record<string, unknown>
-  );
-  const mergedData = mergeOutcome.merged;
-
   const previousStatus = form.status;
   const newStatus = body.status ?? form.status;
   const isFinalizing = newStatus === "completo" && previousStatus !== "completo";
+
+  const autoLockOnFinalize =
+    isFinalizing && form.org.formSettings?.autoLockFormOnFinalize === true;
+
+  // Merge atômico sob row lock (lib/forms/atomic-merge.ts): releitura do
+  // dataJson dentro da transação — o save do token principal não regride o
+  // que um subtoken (locador/locatário/fiador) gravou depois da leitura
+  // inicial acima. Espelha /api/forms/[token].
+  const mergeOutcome = await mergeSalesFormDataJson({
+    where: { token: params.token },
+    incoming: (body.dataJson ?? {}) as Record<string, unknown>,
+    extraData: {
+      title: body.title ?? form.title,
+      status: newStatus,
+      // Espelha o finalize de venda: `completedAt` só na primeira vez (é marco
+      // de SLA — re-finalizar após uma correção não pode reescrever a data do
+      // envio original) e `reopenedAt: null` fecha o gate de novo. Sem este
+      // último, um form de locação reaberto ficaria PÚBLICO pra sempre: o
+      // `isFormClosed` só volta a valer quando a reabertura é encerrada.
+      ...(isFinalizing
+        ? {
+            ...(form.completedAt ? {} : { completedAt: new Date() }),
+            reopenedAt: null,
+          }
+        : {}),
+      ...(autoLockOnFinalize ? { lockedAt: new Date() } : {}),
+    },
+  });
+  const mergedData = mergeOutcome.finalData;
+  const updated = mergeOutcome.updated;
 
   // Validação server-side no finalize (form público é burlável). Não bloqueia a
   // geração — materializa os problemas na resposta pra correção no editor.
@@ -129,30 +153,6 @@ export async function PATCH(
       );
     }
   }
-
-  const autoLockOnFinalize =
-    isFinalizing && form.org.formSettings?.autoLockFormOnFinalize === true;
-
-  const updated = await prisma.salesForm.update({
-    where: { token: params.token },
-    data: {
-      dataJson: mergedData as Prisma.InputJsonValue,
-      title: body.title ?? form.title,
-      status: newStatus,
-      // Espelha o finalize de venda: `completedAt` só na primeira vez (é marco
-      // de SLA — re-finalizar após uma correção não pode reescrever a data do
-      // envio original) e `reopenedAt: null` fecha o gate de novo. Sem este
-      // último, um form de locação reaberto ficaria PÚBLICO pra sempre: o
-      // `isFormClosed` só volta a valer quando a reabertura é encerrada.
-      ...(isFinalizing
-        ? {
-            ...(form.completedAt ? {} : { completedAt: new Date() }),
-            reopenedAt: null,
-          }
-        : {}),
-      ...(autoLockOnFinalize ? { lockedAt: new Date() } : {}),
-    },
-  });
 
   if (typeof body.title === "string" && body.title.trim() && body.title !== form.title) {
     await prisma.deal.updateMany({ where: { formId: form.id }, data: { title: body.title } });
