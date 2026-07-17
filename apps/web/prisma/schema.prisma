@@ -240,6 +240,11 @@ model Organization {
   // Conta Asaas selecionada pelo admin como destino default de novas cobranças
   // e fonte das telas financeiras quando o user não passa hint explícito.
   activeAsaasAccountId String?
+  // Budget mensal de IA da org em USD (soma de AIUsage.estimatedCostUsd do
+  // mês). Null = sem teto. Mora AQUI (não em OrgFinancialSettings, que é
+  // per-conta Asaas @@unique[accountId]) porque o teto é ORG-level. ≥100% →
+  // chat 402; 80%/100% → sino. Ver lib/ai/budget.ts.
+  aiMonthlyBudgetUsd   Decimal? @db.Decimal(10, 2)
   // Suspensão administrativa (painel super-admin): quando setado, a org está
   // suspensa — o guard do dashboard bloqueia acesso e os módulos são desligados
   // em massa. Reativar limpa o campo e religa os módulos. Aditivo, default null.
@@ -1327,6 +1332,27 @@ model AgentConfig {
 // super-admin em /admin/support-ai. systemPrompt vazio → usa o default em código
 // (lib/support/config.ts::SUPPORT_DEFAULT_SYSTEM_PROMPT). Diferente de AgentConfig,
 // que é por-org e serve o editor de contrato — este é único de plataforma.
+// Defaults de PLATAFORMA pros especialistas do orquestrador multi-agente
+// (Analyst/Legal/Editor/Curator). Singleton editável pelo super_admin em
+// /admin/agent-defaults. Campo null/vazio = fallback pro prompt/modelo
+// hardcoded (lib/ai/specialists/prompts*.ts). Um override de prompt vale
+// pras DUAS esteiras (venda e locação) — substitui a variante inteira.
+model PlatformAgentDefaults {
+  id            String   @id @default(cuid())
+  singletonKey  String   @unique @default("singleton")
+  analystPrompt String?  @db.Text
+  legalPrompt   String?  @db.Text
+  editorPrompt  String?  @db.Text
+  curatorPrompt String?  @db.Text
+  analystModel  String?
+  legalModel    String?
+  editorModel   String?
+  curatorModel  String?
+  updatedBy     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
 model SupportAgentConfig {
   id                   String   @id @default(cuid())
   singletonKey         String   @unique @default("singleton")

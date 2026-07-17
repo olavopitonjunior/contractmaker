@@ -153,7 +153,7 @@ export function AgentSettings({ initialConfig }: AgentSettingsProps) {
 
           <div className="space-y-2">
             <div className="flex items-center justify-between">
-              <Label>System Prompt</Label>
+              <Label>Instruções adicionais da imobiliária</Label>
               <Button
                 variant="ghost"
                 size="sm"
@@ -168,14 +168,16 @@ export function AgentSettings({ initialConfig }: AgentSettingsProps) {
               onChange={(e) => setSystemPrompt(e.target.value)}
               rows={12}
               className="font-mono text-xs"
-              placeholder="Instruções para o agente IA..."
+              placeholder="Instruções da SUA imobiliária pro assistente (padrões de redação, cláusulas preferidas, tom)..."
             />
             <p className="text-xs text-muted-foreground">
-              Este prompt define o comportamento do agente na tela de edição de contratos.
-              O agente tem acesso a {AGENT_TOOLS.length} ferramentas: consulta de cláusulas
-              e templates, edição, validação, sugestões, extração de documentos, análise de
-              contradições, base de conhecimento (RAG), aprendizado com contratos aprovados,
-              modo Propose, aplicação de presets de estilo e inserção de imagens.
+              Estas instruções são enviadas ao assistente do editor de contratos —
+              inclusive aos especialistas do chat (análise, jurídico, edição e
+              biblioteca) — como orientações adicionais da sua imobiliária, por
+              cima das regras da plataforma. O agente tem acesso a {AGENT_TOOLS.length}{" "}
+              ferramentas: consulta de cláusulas e templates, edição, validação,
+              sugestões, extração de documentos, análise de contradições, base de
+              conhecimento (RAG) e mais.
             </p>
           </div>
 

@@ -172,7 +172,8 @@ export async function PATCH(
 
   // Comprador/locatário titular pode ser preenchido EXCLUSIVAMENTE por este
   // link por parte — sem o sync aqui, o card no kanban ficava sem nome até
-  // alguém salvar pelo token principal ou gerar o contrato.
+  // alguém salvar pelo token principal ou gerar o contrato. finalData é o
+  // estado realmente gravado (pós-merge atômico sob lock).
   if (body.dataJson) {
     await syncDealClientName({
       formId: participant.formId,

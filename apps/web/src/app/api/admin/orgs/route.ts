@@ -14,6 +14,8 @@ import { MODULE, MODULE_CATALOG, isValidModule, type ModuleKey } from "@/lib/mod
 import { seedPipeline } from "@/lib/pipelines/seed";
 import { seedDefaultDocumentStyle } from "@/lib/org/seed-document-style";
 import { sendOwnerAccessEmail } from "@/lib/org/owner-access";
+import { seedAndEmbedDefaultClauses } from "@/lib/knowledge/seed-clauses";
+import { waitUntil } from "@vercel/functions";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -35,6 +37,8 @@ const createOrgSchema = z.object({
   // com múltiplas memberships e sem subdomínio no host, `getUserOrg` escolhe a org
   // pelo primeiro `findFirst` — e não há org switcher. Ver o 409 abaixo.
   confirmExistingUser: z.boolean().optional(),
+  // Semeadura da biblioteca-base de cláusulas (opt-out) — default true.
+  seedClauses: z.boolean().optional(),
 });
 
 async function gate(userId: string, role: "support" | "super_admin") {
@@ -218,6 +222,26 @@ export async function POST(req: NextRequest) {
       metadata: { name, subdomain, ownerEmail, ownerCreated: !existingUser, modules: enabledModules },
     }
   );
+
+  // Biblioteca-base de cláusulas (opt-out, default true) — banco pelos módulos
+  // escolhidos na criação (não pelo getOrgModules, que ainda não reflete a org
+  // recém-criada dentro deste request). Best-effort: falha NÃO derruba a
+  // criação do tenant, que já está commitada.
+  if (parsed.data.seedClauses !== false) {
+    try {
+      const banks: Array<"vendas" | "locacao"> = [];
+      if (vendasEnabled) banks.push("vendas");
+      if (locacaoEnabled) banks.push("locacao");
+      const { embed } = await seedAndEmbedDefaultClauses({
+        orgId: result.org.id,
+        createdBy: result.ownerId,
+        banks: banks.length > 0 ? banks : undefined,
+      });
+      if (embed) waitUntil(embed);
+    } catch (err) {
+      console.error("[admin/orgs] seed de cláusulas falhou (org já criada):", err);
+    }
+  }
 
   // Owner novo recebe o link pra definir a senha (token welcome, 7d). Sem isto o
   // tenant nasce inacessível: a senha temporária só existia na resposta desta API.

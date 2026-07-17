@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { AIUsageClient } from "@/components/settings/AIUsageClient";
+import { AiBudgetCard } from "@/components/settings/AiBudgetCard";
+import { getOrgAiBudgetStatus } from "@/lib/ai/budget";
 
 export const dynamic = "force-dynamic";
 
@@ -12,15 +14,21 @@ export default async function AIUsagePage() {
   const org = await getUserOrg(session.user.id);
   if (!org) notFound();
 
-  // Admin-only — check org membership role
   const membership = await prisma.orgMembership.findFirst({
     where: { userId: session.user.id, orgId: org.id },
     select: { role: true },
   });
-  if (!membership || membership.role !== "admin") {
-    // Also allow the org owner (first member) for now since we don't enforce roles strictly
-    // If you want to be strict, remove this and require role === "admin"
-  }
+  const canEditBudget = ["owner", "admin"].includes(membership?.role ?? "");
 
-  return <AIUsageClient />;
+  const budget = await getOrgAiBudgetStatus(org.id);
+
+  return (
+    <div className="space-y-6">
+      <AiBudgetCard
+        initial={{ budgetUsd: budget.budgetUsd, spentUsd: budget.spentUsd }}
+        canEdit={canEditBudget}
+      />
+      <AIUsageClient />
+    </div>
+  );
 }
