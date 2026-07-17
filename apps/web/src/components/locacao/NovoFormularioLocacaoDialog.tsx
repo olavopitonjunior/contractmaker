@@ -56,6 +56,9 @@ export function NovoFormularioLocacaoDialog({
   const [formToken, setFormToken] = useState<string | null>(null);
   const [dealId, setDealId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // Key por INTENÇÃO (mount/reset), não por clique: duplo-clique e retry de
+  // rede replayam a mesma resposta no servidor em vez de criar 2 forms+deals.
+  const [idemKey, setIdemKey] = useState(() => crypto.randomUUID());
 
   const [finalidade, setFinalidade] = useState("residencial");
   const [taxaAdmin, setTaxaAdmin] = useState(10);
@@ -69,25 +72,51 @@ export function NovoFormularioLocacaoDialog({
     setFormToken(null);
     setDealId(null);
     setCopied(false);
+    // Nova intenção de criação → nova key de idempotência.
+    setIdemKey(crypto.randomUUID());
+  };
+
+  const postForm = async (key: string, force: boolean) => {
+    return fetch("/api/locacao/forms", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-idempotency-key": key,
+      },
+      body: JSON.stringify({
+        finalidade,
+        ...(force ? { force: true } : {}),
+        fiscal: {
+          taxa_admin_percent: taxaAdmin,
+          regime_ir: regimeIr,
+          regime_cobranca: regimeCobranca,
+          emitir_nfse: emitirNfse,
+        },
+        comissao: { taxa_locacao_percent: taxaLocacao, angariadores: [] },
+      }),
+    });
   };
 
   const handleCreate = async () => {
     setSubmitting(true);
     try {
-      const res = await fetch("/api/locacao/forms", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          finalidade,
-          fiscal: {
-            taxa_admin_percent: taxaAdmin,
-            regime_ir: regimeIr,
-            regime_cobranca: regimeCobranca,
-            emitir_nfse: emitirNfse,
-          },
-          comissao: { taxa_locacao_percent: taxaLocacao, angariadores: [] },
-        }),
-      });
+      let res = await postForm(idemKey, false);
+
+      // Soft-block do servidor: título repetido criado há pouco. Confirmar
+      // cria mesmo assim — com key NOVA (o 409 fica cacheado na antiga).
+      if (res.status === 409) {
+        const dup = await res.json().catch(() => ({}));
+        if (dup?.error === "duplicate_recent") {
+          const proceed = window.confirm(
+            `Já existe um negócio "${dup.existing?.title ?? ""}" criado há poucos minutos. Deseja criar outro mesmo assim?`,
+          );
+          if (!proceed) return;
+          const freshKey = crypto.randomUUID();
+          setIdemKey(freshKey);
+          res = await postForm(freshKey, true);
+        }
+      }
+
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         toast.error(err.error || "Falha ao criar o formulário.");

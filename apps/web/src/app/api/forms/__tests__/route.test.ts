@@ -108,6 +108,45 @@ describe("POST /api/forms (retrofit Newton)", () => {
     expect(auditCall.data.metadata.via).toBe("newton");
   });
 
+  it("409 duplicate_recent quando existe deal com mesmo título criado há pouco", async () => {
+    mockAuth.mockResolvedValue(createMockSession() as never);
+    mockPrisma.pipeline.findFirst.mockResolvedValue({
+      id: "p1",
+      stages: [{ id: "s1", name: "Formulário" }],
+    } as never);
+    mockPrisma.deal.findFirst.mockResolvedValue({
+      id: "d-dup",
+      title: "Venda Apto 302",
+      createdAt: new Date(),
+    } as never);
+
+    const res = await POST(makeReq({ title: "Venda Apto 302" }));
+    expect(res.status).toBe(409);
+    const body = await res.json();
+    expect(body.error).toBe("duplicate_recent");
+    expect(body.existing.id).toBe("d-dup");
+    expect(mockPrisma.salesForm.create).not.toHaveBeenCalled();
+  });
+
+  it("force: true fura o soft-block de título repetido", async () => {
+    mockAuth.mockResolvedValue(createMockSession() as never);
+    mockPrisma.pipeline.findFirst.mockResolvedValue({
+      id: "p1",
+      stages: [{ id: "s1", name: "Formulário" }],
+    } as never);
+    mockPrisma.salesForm.create.mockResolvedValue({
+      id: "f1",
+      token: "tok",
+    } as never);
+    mockPrisma.deal.count.mockResolvedValue(0 as never);
+    mockPrisma.deal.create.mockResolvedValue({ id: "d1" } as never);
+
+    const res = await POST(makeReq({ title: "Venda Apto 302", force: true }));
+    expect(res.status).toBe(201);
+    // Com force, o dup-check nem roda.
+    expect(mockPrisma.deal.findFirst).not.toHaveBeenCalled();
+  });
+
   it("idempotency replay retorna mesma resposta", async () => {
     mockAuth.mockResolvedValue(createMockSession() as never);
     mockPrisma.idempotencyKey.findUnique.mockResolvedValue({

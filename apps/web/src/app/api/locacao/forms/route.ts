@@ -5,10 +5,14 @@ import { DEAL_SOURCE_CHANNEL } from "@/lib/pipeline/source-channel";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
 import { ensureLocacaoAccess, isRouteError, parseJsonBody } from "@/lib/locacao/route-helpers";
+import { withIdempotency } from "@/lib/api/idempotency";
 import {
   LOCACAO_SCHEMA_TYPE,
   LOCACAO_COMERCIAL_SCHEMA_TYPE,
 } from "@/lib/forms/validation-locacao";
+
+// Janela do soft-block de título repetido (recriação manual de card).
+const DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +33,8 @@ const angariadorSchema = z.object({
 const bodySchema = z.object({
   finalidade: z.enum(["residencial", "comercial"]).default("residencial"),
   title: z.string().optional(),
+  // Confirma a criação apesar do soft-block de título repetido (409).
+  force: z.boolean().optional(),
   fiscal: z
     .object({
       taxa_admin_percent: z.number().min(0).max(100).default(10),
@@ -61,80 +67,120 @@ export async function POST(req: NextRequest) {
   const schemaType =
     d.finalidade === "comercial" ? LOCACAO_COMERCIAL_SCHEMA_TYPE : LOCACAO_SCHEMA_TYPE;
 
-  const pipeline = await prisma.pipeline.findFirst({
-    where: { orgId: ctx.orgId, kind: "locacao" },
-    include: { stages: { orderBy: { position: "asc" } } },
-  });
-  if (!pipeline || pipeline.stages.length === 0) {
-    return NextResponse.json(
-      { error: "Pipeline locação não inicializada. Rode seed-pipeline-locacao.ts --apply." },
-      { status: 412 }
-    );
-  }
-  // Deal nasce no stage "Formulário" (link público sendo preenchido). "Em
-  // Aprovação" (1º stage) fica como coluna manual pré-formulário. Fallback p/
-  // o 1º stage se "Formulário" não existir.
-  const firstStage =
-    pipeline.stages.find((s) => s.name === "Formulário") ?? pipeline.stages[0];
+  // Idempotência espelhando POST /api/forms (vendas): key ausente executa
+  // sempre; key presente replaya a resposta em duplo-clique/retry de rede.
+  const idempotencyKey = req.headers.get("x-idempotency-key");
 
-  const result = await prisma.$transaction(async (tx) => {
-    const form = await tx.salesForm.create({
-      data: {
-        orgId: ctx.orgId,
-        title: d.title || null,
-        schemaType,
-        status: "rascunho",
-        // Config fiscal/comissão (operador-only) já pré-gravada — o auto-save do
-        // cliente faz deep-merge e não toca essas chaves.
-        dataJson: {
-          finalidade: d.finalidade,
-          ...(d.fiscal ? { fiscal: d.fiscal } : {}),
-          ...(d.comissao ? { comissao: d.comissao } : {}),
-        } as object,
-      },
-    });
+  const outcome = await withIdempotency({
+    userId: ctx.userId,
+    key: idempotencyKey,
+    method: "POST",
+    path: "/api/locacao/forms",
+    handler: async (): Promise<{ status: number; body: unknown }> => {
+      const pipeline = await prisma.pipeline.findFirst({
+        where: { orgId: ctx.orgId, kind: "locacao" },
+        include: { stages: { orderBy: { position: "asc" } } },
+      });
+      if (!pipeline || pipeline.stages.length === 0) {
+        return {
+          status: 412,
+          body: {
+            error:
+              "Pipeline locação não inicializada. Rode seed-pipeline-locacao.ts --apply.",
+          },
+        };
+      }
+      // Deal nasce no stage "Formulário" (link público sendo preenchido). "Em
+      // Aprovação" (1º stage) fica como coluna manual pré-formulário. Fallback p/
+      // o 1º stage se "Formulário" não existir.
+      const firstStage =
+        pipeline.stages.find((s) => s.name === "Formulário") ?? pipeline.stages[0];
 
-    const dealsInStage = await tx.deal.count({ where: { stageId: firstStage.id } });
-    const deal = await tx.deal.create({
-      data: {
-        pipelineId: pipeline.id,
-        stageId: firstStage.id,
-        userId: ctx.userId,
-        formId: form.id,
-        kind: "locacao",
-        sourceChannel: DEAL_SOURCE_CHANNEL.FORM_PUBLICO,
-        title: d.title || `Locação - ${form.token.slice(0, 8)}`,
-        position: dealsInStage,
-      },
-    });
+      // Soft-block anti-duplicação (espelha /api/forms): título repetido em
+      // janela curta → 409 pro operador confirmar. Re-POST com force:true e
+      // key NOVA (o 409 fica cacheado na key antiga).
+      const trimmedTitle = d.title?.trim() ?? "";
+      if (trimmedTitle && d.force !== true) {
+        const recentDup = await prisma.deal.findFirst({
+          where: {
+            pipelineId: pipeline.id,
+            title: trimmedTitle,
+            archivedAt: null,
+            createdAt: { gte: new Date(Date.now() - DUPLICATE_WINDOW_MS) },
+          },
+          select: { id: true, title: true, createdAt: true },
+          orderBy: { createdAt: "desc" },
+        });
+        if (recentDup) {
+          return {
+            status: 409,
+            body: { error: "duplicate_recent", existing: recentDup },
+          };
+        }
+      }
 
-    return { form, deal };
-  });
+      const result = await prisma.$transaction(async (tx) => {
+        const form = await tx.salesForm.create({
+          data: {
+            orgId: ctx.orgId,
+            title: d.title || null,
+            schemaType,
+            status: "rascunho",
+            // Config fiscal/comissão (operador-only) já pré-gravada — o auto-save do
+            // cliente faz deep-merge e não toca essas chaves.
+            dataJson: {
+              finalidade: d.finalidade,
+              ...(d.fiscal ? { fiscal: d.fiscal } : {}),
+              ...(d.comissao ? { comissao: d.comissao } : {}),
+            } as object,
+          },
+        });
 
-  await audit(
-    { orgId: ctx.orgId, userId: ctx.userId },
-    {
-      action: "FORM_CREATE",
-      result: "SUCCESS",
-      resource: result.form.id,
-      resourceType: "SalesForm",
-      metadata: {
-        kind: "locacao",
-        schemaType,
-        finalidade: d.finalidade,
-        token: result.form.token,
-        dealId: result.deal.id,
-      },
-    }
-  );
+        const dealsInStage = await tx.deal.count({ where: { stageId: firstStage.id } });
+        const deal = await tx.deal.create({
+          data: {
+            pipelineId: pipeline.id,
+            stageId: firstStage.id,
+            userId: ctx.userId,
+            formId: form.id,
+            kind: "locacao",
+            sourceChannel: DEAL_SOURCE_CHANNEL.FORM_PUBLICO,
+            title: d.title || `Locação - ${form.token.slice(0, 8)}`,
+            position: dealsInStage,
+          },
+        });
 
-  return NextResponse.json(
-    {
-      id: result.form.id,
-      token: result.form.token,
-      url: `/f/${result.form.token}`,
-      dealId: result.deal.id,
+        return { form, deal };
+      });
+
+      await audit(
+        { orgId: ctx.orgId, userId: ctx.userId },
+        {
+          action: "FORM_CREATE",
+          result: "SUCCESS",
+          resource: result.form.id,
+          resourceType: "SalesForm",
+          metadata: {
+            kind: "locacao",
+            schemaType,
+            finalidade: d.finalidade,
+            token: result.form.token,
+            dealId: result.deal.id,
+          },
+        }
+      );
+
+      return {
+        status: 201,
+        body: {
+          id: result.form.id,
+          token: result.form.token,
+          url: `/f/${result.form.token}`,
+          dealId: result.deal.id,
+        },
+      };
     },
-    { status: 201 }
-  );
+  });
+
+  return NextResponse.json(outcome.body, { status: outcome.status });
 }

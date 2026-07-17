@@ -13,6 +13,10 @@ import { getPipelineByKind } from "@/lib/modules/resolve";
 import { assertFeatureEnabled, ModuleDisabledError } from "@/lib/modules/guard";
 import { FEATURE, MODULE } from "@/lib/modules/catalog";
 
+// Janela do soft-block de título repetido (recriação manual de card).
+// Não-exportado: route.ts só pode exportar handlers/config no App Router.
+const DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
+
 export async function POST(request: NextRequest) {
   const auth = await requireApiAuth(request, { scope: "documents:rw" });
   if (isAuthFailure(auth)) return authFailureResponse(auth);
@@ -37,6 +41,39 @@ export async function POST(request: NextRequest) {
     method: "POST",
     path: "/api/forms",
     handler: async (): Promise<{ status: number; body: unknown }> => {
+      // Form de vendas → pipeline de vendas (kind="venda"). getPipelineByKind
+      // evita pegar o pipeline de locação em orgs com os dois módulos.
+      const pipeline = await getPipelineByKind(auth.org.id, MODULE.VENDAS, {
+        include: { stages: { orderBy: { position: "asc" } } },
+      });
+
+      // Soft-block anti-duplicação: o padrão real observado em prod (caso
+      // "Alexandre Gonçalves", 2026-07-16) é o operador recriar o form minutos
+      // depois — a idempotency key não pega isso (cada tentativa é uma
+      // "intenção" nova). Com título repetido em janela curta, devolve 409 pro
+      // cliente confirmar; re-POST com `force: true` (e key NOVA — o 409 fica
+      // cacheado na key antiga) cria mesmo assim.
+      const trimmedTitle =
+        typeof body.title === "string" ? body.title.trim() : "";
+      if (trimmedTitle && body.force !== true && pipeline) {
+        const recentDup = await prisma.deal.findFirst({
+          where: {
+            pipelineId: pipeline.id,
+            title: trimmedTitle,
+            archivedAt: null,
+            createdAt: { gte: new Date(Date.now() - DUPLICATE_WINDOW_MS) },
+          },
+          select: { id: true, title: true, createdAt: true },
+          orderBy: { createdAt: "desc" },
+        });
+        if (recentDup) {
+          return {
+            status: 409,
+            body: { error: "duplicate_recent", existing: recentDup },
+          };
+        }
+      }
+
       const form = await prisma.salesForm.create({
         data: {
           orgId: auth.org.id,
@@ -48,12 +85,6 @@ export async function POST(request: NextRequest) {
       });
 
       let dealId: string | null = null;
-      // Form de vendas → pipeline de vendas (kind="venda"). getPipelineByKind
-      // evita pegar o pipeline de locação em orgs com os dois módulos.
-      const pipeline = await getPipelineByKind(auth.org.id, MODULE.VENDAS, {
-        include: { stages: { orderBy: { position: "asc" } } },
-      });
-
       if (pipeline && pipeline.stages.length > 0) {
         const formularioStage =
           pipeline.stages.find((s) => s.name === "Formulário") ??
