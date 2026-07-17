@@ -267,15 +267,17 @@ export function ContractEditorPage({
             </p>
             {googleDocFailureReason?.includes("invalid_grant") && (
               <p className="text-xs mt-2 text-amber-700 dark:text-amber-300">
-                <strong>OAuth expirado</strong> — o consent screen do Google está em modo
-                Testing e o refresh token vence em 7 dias. Rode{" "}
+                <strong>invalid_grant</strong> — o refresh token do Google não é mais
+                aceito. Causas comuns: token revogado/rotacionado, quebra de linha
+                (<code className="font-mono text-[11px]">\n</code>) escapada ao colar a
+                env no Vercel, ou — apenas se o app OAuth estiver em modo Testing —
+                expiração de 7 dias. Regenere com{" "}
                 <code className="font-mono text-[11px]">
-                  npx ts-node apps/web/scripts/oauth-bootstrap.ts
+                  npx tsx apps/web/scripts/oauth-bootstrap.ts
                 </code>{" "}
-                pra renovar e atualize{" "}
+                e cole o novo{" "}
                 <code className="font-mono text-[11px]">GOOGLE_OWNER_REFRESH_TOKEN</code>{" "}
-                no Vercel. Fix permanente: mover o consent screen pra &quot;In production&quot;
-                no Cloud Console.
+                no Vercel do ambiente afetado SEM escapar quebras de linha; depois faça redeploy.
               </p>
             )}
           </div>
