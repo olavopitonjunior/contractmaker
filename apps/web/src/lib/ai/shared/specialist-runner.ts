@@ -20,6 +20,10 @@ import { mapToolToAction, summarizeToolResult, type ToolOutput } from "./tool-ma
 import { capturePreSnapshot, capturePostSnapshot } from "./snapshot";
 import { recordAIUsage, type AIOperation } from "../usage";
 import { assertContractBudget, ContractBudgetExceededError } from "../budget";
+import {
+  getTenantAgentInstructions,
+  buildTenantInstructionsBlock,
+} from "../specialists/platform-defaults";
 import type { AgentContext } from "../types";
 import type {
   SpecialistName,
@@ -91,10 +95,20 @@ export async function runSpecialist(
     throw err;
   }
 
+  // Instruções adicionais da imobiliária (AgentConfig.systemPrompt do tenant)
+  // entram como bloco DELIMITADO no fim do system prompt. Ponto único: cobre
+  // os 4 specialists sem tocar em cada call-site. Best-effort com cache 60s
+  // (o loader nunca lança). O cache_control continua efetivo: o prompt vira
+  // por-org, mas dentro da org o texto é estável entre turns.
+  const tenantInstructions = await getTenantAgentInstructions(orgId);
+  const effectiveSystemPrompt = tenantInstructions
+    ? `${systemPrompt}${buildTenantInstructionsBlock(tenantInstructions)}`
+    : systemPrompt;
+
   const systemBlocks = [
     {
       type: "text" as const,
-      text: systemPrompt,
+      text: effectiveSystemPrompt,
       cache_control: { type: "ephemeral" as const },
     },
   ] as unknown as Anthropic.TextBlockParam[];

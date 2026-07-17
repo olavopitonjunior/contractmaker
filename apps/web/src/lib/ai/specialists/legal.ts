@@ -13,7 +13,8 @@
  */
 
 import { AGENT_TOOLS } from "../tools";
-import { HAIKU_MODEL } from "../shared/anthropic-client";
+import { HAIKU_MODEL, resolveModel } from "../shared/anthropic-client";
+import { getPlatformAgentDefaults } from "./platform-defaults";
 import { runSpecialist } from "../shared/specialist-runner";
 import { pickSpecialistPrompt } from "./prompts-locacao";
 import type { OrchestratorState, SpecialistOutput } from "../orchestrator/state";
@@ -46,10 +47,14 @@ export async function runLegal(state: OrchestratorState): Promise<SpecialistOutp
 
   const userPrompt = buildLegalPrompt(state);
 
+  const overrides = await getPlatformAgentDefaults();
+
   return runSpecialist({
     agentName: "legal",
-    model: HAIKU_MODEL,
-    systemPrompt: pickSpecialistPrompt("legal", state.contractContext),
+    // Overrides de plataforma (/admin/agent-defaults) — null = hardcoded.
+    model: resolveModel(overrides.legalModel ?? undefined, HAIKU_MODEL),
+    systemPrompt:
+      overrides.legalPrompt ?? pickSpecialistPrompt("legal", state.contractContext),
     tools: LEGAL_TOOLS,
     maxIterations: 2,
     userPrompt,

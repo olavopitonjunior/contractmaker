@@ -12,7 +12,8 @@
  */
 
 import { AGENT_TOOLS } from "../tools";
-import { HAIKU_MODEL } from "../shared/anthropic-client";
+import { HAIKU_MODEL, resolveModel } from "../shared/anthropic-client";
+import { getPlatformAgentDefaults } from "./platform-defaults";
 import { runSpecialist, type ToolUseGuard } from "../shared/specialist-runner";
 import { applyPolicy } from "../sentinel/middleware";
 import { pickSpecialistPrompt } from "./prompts-locacao";
@@ -43,10 +44,14 @@ export async function runCurator(state: OrchestratorState): Promise<SpecialistOu
 
   const userPrompt = buildCuratorPrompt(state);
 
+  const overrides = await getPlatformAgentDefaults();
+
   return runSpecialist({
     agentName: "curator",
-    model: HAIKU_MODEL,
-    systemPrompt: pickSpecialistPrompt("curator", state.contractContext),
+    // Overrides de plataforma (/admin/agent-defaults) — null = hardcoded.
+    model: resolveModel(overrides.curatorModel ?? undefined, HAIKU_MODEL),
+    systemPrompt:
+      overrides.curatorPrompt ?? pickSpecialistPrompt("curator", state.contractContext),
     tools: CURATOR_TOOLS,
     maxIterations: 2,
     userPrompt,
