@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import { TERMINAL_STAGES_BY_KIND } from "./stage-config";
+import { WON_STAGE_BY_KIND } from "./stage-config";
 import {
   DEAL_SOURCE_CHANNEL_LABEL,
   type DealSourceChannel,
@@ -47,7 +47,7 @@ export async function getFunnelByChannel(opts: {
   // Predicado de "ganho" por kind, montado em TS — o WHERE já pina d.kind,
   // então um CASE por kind teria um braço permanentemente morto (e o join de
   // PipelineStage só é necessário em locação).
-  const locacaoWonStage = TERMINAL_STAGES_BY_KIND.locacao[0]; // "ADM"
+  const locacaoWonStage = WON_STAGE_BY_KIND.locacao; // "ADM"
   const wonPredicate =
     kind === "venda"
       ? Prisma.sql`d."commissionPaidAt" IS NOT NULL`

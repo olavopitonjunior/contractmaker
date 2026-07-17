@@ -119,9 +119,11 @@ export default async function FunilPage({
 
   const period =
     PERIODS.find((p) => p.key === searchParams?.periodo) ?? PERIODS[1]; // default 90d
-  // Default segue o entitlement: tenant só-locação cai direto em locação.
+  // Clamp BIDIRECIONAL pelo entitlement: ?kind só é honrado se o pipeline
+  // correspondente existe; tenant só-locação cai direto em locação.
+  const wantsLocacao = searchParams?.kind === "locacao";
   const kind =
-    searchParams?.kind === "locacao" || (!hasVendas && hasLocacao)
+    (wantsLocacao && hasLocacao) || (!hasVendas && hasLocacao)
       ? ("locacao" as const)
       : ("venda" as const);
   const from = period.days

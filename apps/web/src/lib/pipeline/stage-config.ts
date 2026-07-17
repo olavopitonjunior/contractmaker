@@ -9,10 +9,16 @@
 
 export const LOST_STAGE_NAME = "Negócio perdido";
 
+/** Terminal FELIZ por kind — contrato nominal (não posicional). */
+export const WON_STAGE_BY_KIND: Record<string, string> = {
+  venda: "Comissão paga",
+  locacao: "ADM",
+};
+
 /** Stages terminais (feliz + perdido) — bloqueiam mark-lost. */
 export const TERMINAL_STAGES_BY_KIND: Record<string, readonly string[]> = {
-  venda: ["Comissão paga", LOST_STAGE_NAME],
-  locacao: ["ADM", LOST_STAGE_NAME],
+  venda: [WON_STAGE_BY_KIND.venda, LOST_STAGE_NAME],
+  locacao: [WON_STAGE_BY_KIND.locacao, LOST_STAGE_NAME],
 };
 
 /** Stage de retorno do reopen quando o audit não tem o stage anterior. */

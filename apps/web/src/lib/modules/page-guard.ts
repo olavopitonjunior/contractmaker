@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { getOrgModules, isModuleEnabled, isFeatureEnabled } from "./read";
 import type { ModuleKey, FeatureKey } from "./catalog";
@@ -20,7 +21,11 @@ export async function requireModulePage(
 ): Promise<{ userId: string; orgId: string }> {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
-  const org = await getUserOrg(session.user.id);
+  // Org do SUBDOMÍNIO navegado (não "primeira membership") — sem o hint,
+  // usuário multi-org via os dados do tenant errado sob o branding do certo.
+  const org = await getUserOrg(session.user.id, {
+    subdomainHint: headers().get("x-org-subdomain"),
+  });
   if (!org) redirect(fallback);
   const view = await getOrgModules(org.id);
   if (!isModuleEnabled(view, module)) redirect(fallback);
@@ -33,7 +38,11 @@ export async function requireFeaturePage(
 ): Promise<{ userId: string; orgId: string }> {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
-  const org = await getUserOrg(session.user.id);
+  // Org do SUBDOMÍNIO navegado (não "primeira membership") — sem o hint,
+  // usuário multi-org via os dados do tenant errado sob o branding do certo.
+  const org = await getUserOrg(session.user.id, {
+    subdomainHint: headers().get("x-org-subdomain"),
+  });
   if (!org) redirect(fallback);
   const view = await getOrgModules(org.id);
   if (!isFeatureEnabled(view, feature)) redirect(fallback);
@@ -51,7 +60,11 @@ export async function requireAnyFeaturePage(
 ): Promise<{ userId: string; orgId: string; enabled: Record<string, boolean> }> {
   const session = await auth();
   if (!session?.user?.id) redirect("/login");
-  const org = await getUserOrg(session.user.id);
+  // Org do SUBDOMÍNIO navegado (não "primeira membership") — sem o hint,
+  // usuário multi-org via os dados do tenant errado sob o branding do certo.
+  const org = await getUserOrg(session.user.id, {
+    subdomainHint: headers().get("x-org-subdomain"),
+  });
   if (!org) redirect(fallback);
   const view = await getOrgModules(org.id);
   const enabled: Record<string, boolean> = {};
