@@ -14,6 +14,7 @@
  */
 
 import { STAGING_MODE } from "@/lib/env/staging";
+import { maskEmail } from "@/lib/security/pii";
 
 export interface EmailAttachment {
   filename: string;
@@ -229,16 +230,10 @@ function logOnly(input: SendEmailInput): SendEmailResult {
   return { id: "dev-log", ok: true };
 }
 
-/** Mascara o destinatário pra log ("a***@dominio.com") — sem PII completa. */
+/** Mascara destinatário(s) pra log — reusa o maskEmail canônico do pii.ts. */
 function maskRecipient(to: string | string[]): string {
   const list = Array.isArray(to) ? to : [to];
-  return list
-    .map((addr) => {
-      const at = addr.indexOf("@");
-      if (at <= 0) return "***";
-      return `${addr[0]}***${addr.slice(at)}`;
-    })
-    .join(", ");
+  return list.map((addr) => maskEmail(addr)).join(", ");
 }
 
 /**

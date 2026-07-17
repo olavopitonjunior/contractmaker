@@ -53,4 +53,23 @@ describe("clientName derivado", () => {
     );
     expect(clientName).toBeNull();
   });
+
+  // Regressão do review: `nome: ""` (artefato de autosave em PJ) não pode
+  // sombrear a razao_social — `??` curto-circuitava em string vazia.
+  it("venda: nome vazio NÃO sombreia razao_social (PJ)", () => {
+    const { clientName, title } = deriveDealMetadata(
+      { compradores: [{ nome: "", razao_social: "Construtora Gama Ltda" }] },
+      OPTS
+    );
+    expect(clientName).toBe("Construtora Gama Ltda");
+    expect(title).toContain("Construtora Gama Ltda");
+  });
+
+  it("locação: nome whitespace NÃO sombreia razao_social (PJ)", () => {
+    const { clientName } = deriveLocacaoDealMetadata(
+      { locatarios: [{ nome: "   ", razao_social: "Padaria Beta ME" }] },
+      OPTS
+    );
+    expect(clientName).toBe("Padaria Beta ME");
+  });
 });

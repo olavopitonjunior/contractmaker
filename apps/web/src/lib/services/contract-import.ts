@@ -212,7 +212,7 @@ export async function importContractFromFile(
     data: {
       title: derivedTitle,
       value: derivedValue ?? deal.value,
-      ...(clientName ? { clientName } : {}),
+      clientName,
     },
   });
 

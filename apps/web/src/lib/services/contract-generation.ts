@@ -1120,7 +1120,9 @@ export async function generateContractForDeal(
     data: {
       title: derivedTitle,
       value: derivedValue ?? deal.value,
-      ...(clientName ? { clientName } : {}),
+      // Sempre grava o derivado (null LIMPA): comprador trocado/removido não
+      // pode deixar o nome antigo no card — o kanban antigo re-derivava ao vivo.
+      clientName,
       ...(confeccaoStage
         ? { stageId: confeccaoStage.id, stageEnteredAt: new Date() }
         : {}),
@@ -1452,7 +1454,9 @@ export async function generateLocacaoContractForDeal(
     data: {
       title: derivedTitle,
       value: derivedValue ?? deal.value,
-      ...(clientName ? { clientName } : {}),
+      // Sempre grava o derivado (null LIMPA): comprador trocado/removido não
+      // pode deixar o nome antigo no card — o kanban antigo re-derivava ao vivo.
+      clientName,
       ...(confeccaoStage
         ? { stageId: confeccaoStage.id, stageEnteredAt: new Date() }
         : {}),

@@ -89,6 +89,18 @@ export async function convertProposalToDeal(input: {
     formTitle: proposal.title,
     fallbackTitle: proposal.title,
   });
+  // Proposta de locação guarda o aluguel em `locacao.valor_aluguel`
+  // (NovaPropostaDialog) — não no shape do form (`aluguel.valor`) que o
+  // derive lê. Sem o fallback, o card convertido nascia sem valor.
+  const proposalAluguel =
+    proposal.kind === "locacao"
+      ? Number(
+          (dataJson.locacao as { valor_aluguel?: unknown } | undefined)
+            ?.valor_aluguel ?? 0
+        )
+      : 0;
+  const dealValue =
+    meta.value ?? (proposalAluguel > 0 ? proposalAluguel : null);
 
   const attachments = await prisma.proposalAttachment.findMany({
     where: { proposalId: proposal.id },
@@ -117,7 +129,7 @@ export async function convertProposalToDeal(input: {
         formId: form.id,
         sourceChannel: DEAL_SOURCE_CHANNEL.PROPOSTA,
         title: meta.title,
-        value: meta.value,
+        value: dealValue,
         clientName: meta.clientName,
         // default "venda"; sem isto toda locação viraria deal de venda.
         kind: proposal.kind,

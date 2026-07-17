@@ -122,7 +122,8 @@ export async function POST(
     }),
     prisma.deal.update({
       where: { id: deal.id },
-      data: { value: value ?? deal.value, ...(clientName ? { clientName } : {}) },
+      // clientName sempre gravado (null limpa) — deriva do dataJson pós-merge.
+      data: { value: value ?? deal.value, clientName },
     }),
     prisma.dealAttachment.update({
       where: { id: attachment.id },

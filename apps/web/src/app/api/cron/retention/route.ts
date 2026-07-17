@@ -10,41 +10,30 @@ export const maxDuration = 60;
 /**
  * GET /api/cron/retention
  *
- * Mensal (vercel.json `0 5 1 * *`). Retenção de tabelas de alto volume:
- *   - ContractChangeLog > 90d (watch do Drive + turns de chat — cresce sem
- *     parar; contratos aprovados ficam imutáveis, o histórico antigo não é
- *     mais consultado no painel Mudanças)
- *   - EnvelopeEvent > 90d (ledger de webhooks ClickSign; o dedupe protege
- *     contra reentrega em DIAS, não meses — apagar >90d não reabre a janela)
+ * Mensal (vercel.json `0 5 1 * *`). Retenção de RUÍDO do ContractChangeLog:
+ * apaga apenas rows > 90d com `action` em NOISE_ACTIONS —
+ *   - "google_doc_updated": ping do watch do Drive (1 row por edição no doc,
+ *     sem conteúdo — só resourceState/channelId). É o motor de crescimento
+ *     da tabela (~350 rows/contrato em prod).
+ *   - "validation": marcador de análise passiva (contagem de findings).
  *
- * AuditLog NÃO entra: imutável por design (compliance).
+ * O que NÃO entra, de propósito:
+ *   - Rows de edição (chat/humano, com htmlBefore/htmlAfter): são o painel
+ *     Mudanças — negociação longa (4+ meses é comum em imóvel) precisa do
+ *     histórico inteiro, e produto jurídico não apaga trilha de edição.
+ *   - EnvelopeEvent: o `dedupeKey @unique` é o LOCK de idempotência do
+ *     webhook ClickSign (webhook-process.ts) — apagar reabriria a janela de
+ *     replay pra envelopes antigos, e o volume é trivial (~10 rows/envelope).
+ *   - AuditLog: imutável por design (compliance).
  *
  * Deleção em batches via subquery com LIMIT (deleteMany do Prisma não
- * limita) + guarda de tempo — a função serverless tem teto de 60s.
+ * limita) + guarda de tempo — teto serverless de 60s. Índice de suporte:
+ * ContractChangeLog(action, createdAt).
  */
 const RETENTION_DAYS = 90;
 const BATCH_SIZE = 5000;
 const TIME_BUDGET_MS = 45_000;
-
-async function purgeBatched(
-  table: "ContractChangeLog" | "EnvelopeEvent",
-  dateColumn: "createdAt" | "receivedAt",
-  cutoff: Date,
-  deadline: number
-): Promise<{ deleted: number; exhausted: boolean }> {
-  let deleted = 0;
-  // Identificadores fixos do allowlist acima — nunca input externo.
-  while (Date.now() < deadline) {
-    const n = await prisma.$executeRawUnsafe(
-      `DELETE FROM "${table}" WHERE id IN (SELECT id FROM "${table}" WHERE "${dateColumn}" < $1 LIMIT ${BATCH_SIZE})`,
-      cutoff
-    );
-    deleted += n;
-    if (n < BATCH_SIZE) return { deleted, exhausted: false };
-  }
-  // Tempo estourou com rows sobrando — a próxima execução continua de onde parou.
-  return { deleted, exhausted: true };
-}
+const NOISE_ACTIONS = ["google_doc_updated", "validation"] as const;
 
 export async function GET(req: NextRequest) {
   const cronDenied = requireCronAuth(req);
@@ -56,12 +45,29 @@ export async function GET(req: NextRequest) {
   const cutoff = new Date(Date.now() - RETENTION_DAYS * 24 * 60 * 60_000);
   const deadline = Date.now() + TIME_BUDGET_MS;
 
-  const changeLog = await purgeBatched("ContractChangeLog", "createdAt", cutoff, deadline);
-  const envelopeEvents = await purgeBatched("EnvelopeEvent", "receivedAt", cutoff, deadline);
+  let deleted = 0;
+  let exhausted = false;
+  for (;;) {
+    // Identificadores e actions são constantes do módulo — nunca input externo.
+    const n = await prisma.$executeRawUnsafe(
+      `DELETE FROM "ContractChangeLog" WHERE id IN (
+         SELECT id FROM "ContractChangeLog"
+         WHERE "action" IN ('${NOISE_ACTIONS.join("','")}') AND "createdAt" < $1
+         LIMIT ${BATCH_SIZE}
+       )`,
+      cutoff
+    );
+    deleted += n;
+    if (n < BATCH_SIZE) break;
+    if (Date.now() >= deadline) {
+      // Tempo estourou com rows sobrando — a próxima execução continua.
+      exhausted = true;
+      break;
+    }
+  }
 
   return NextResponse.json({
     cutoff: cutoff.toISOString(),
-    contractChangeLog: changeLog,
-    envelopeEvent: envelopeEvents,
+    contractChangeLog: { deleted, exhausted, actions: NOISE_ACTIONS },
   });
 }

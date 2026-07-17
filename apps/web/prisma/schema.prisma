@@ -1417,6 +1417,9 @@ model ContractChangeLog {
 
   @@index([contractId, createdAt(sort: Desc)])
   @@index([sessionId])
+  // Cron de retenção deleta ruído (google_doc_updated/validation) em batches
+  // filtrando action+createdAt — sem este índice cada batch é seq-scan.
+  @@index([action, createdAt])
 }
 
 // ============================================

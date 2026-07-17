@@ -139,6 +139,19 @@ export async function POST(
 
   const fieldsCount = Object.keys(extracted).length;
 
+  // Re-deriva o nome denormalizado do card (Deal.clientName) do dataJson novo.
+  // Sem isto, uma re-extração que finalmente trouxe o comprador deixaria o
+  // kanban com o nome velho/vazio (o card não lê mais o dataJson ao vivo).
+  // Sempre grava (null limpa) — mesmo contrato do dataJson, que é substituído.
+  const { deriveDealMetadata, deriveLocacaoDealMetadata } = await import(
+    "@/lib/contracts/derive-deal-metadata"
+  );
+  const deriveMeta =
+    dealKind === "locacao" ? deriveLocacaoDealMetadata : deriveDealMetadata;
+  const { clientName } = deriveMeta(extracted, {
+    fallbackTitle: contract.deal.title,
+  });
+
   // Atualiza ambos: SalesForm (alimenta a aba Dados) e Contract (snapshot do
   // dataJson usado por find_similar_contracts e enrich futuro).
   await prisma.$transaction([
@@ -154,6 +167,10 @@ export async function POST(
       where: { id: contract.id },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data: { dataJson: extracted as any },
+    }),
+    prisma.deal.update({
+      where: { id: contract.dealId },
+      data: { clientName },
     }),
   ]);
 
