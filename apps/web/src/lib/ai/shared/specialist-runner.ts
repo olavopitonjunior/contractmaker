@@ -19,7 +19,11 @@ import { executeToolHandler } from "../tool-handlers";
 import { mapToolToAction, summarizeToolResult, type ToolOutput } from "./tool-mapping";
 import { capturePreSnapshot, capturePostSnapshot } from "./snapshot";
 import { recordAIUsage, type AIOperation } from "../usage";
-import { assertContractBudget, ContractBudgetExceededError } from "../budget";
+import {
+  assertContractBudget,
+  ContractBudgetExceededError,
+  OrgAiBudgetExceededError,
+} from "../budget";
 import {
   getTenantAgentInstructions,
   buildTenantInstructionsBlock,
@@ -86,6 +90,11 @@ export async function runSpecialist(
   try {
     await assertContractBudget(contractId);
   } catch (err) {
+    // Org-level (USD): a mensagem carrega o remédio certo (Config → Uso de
+    // IA) — checar a subclasse ANTES do contrato.
+    if (err instanceof OrgAiBudgetExceededError) {
+      return { text: `⚠️ ${err.message}`, toolCalls: [] };
+    }
     if (err instanceof ContractBudgetExceededError) {
       return {
         text: `⚠️ Budget de IA atingido neste contrato. Não foi possível executar o ${agentName}.`,

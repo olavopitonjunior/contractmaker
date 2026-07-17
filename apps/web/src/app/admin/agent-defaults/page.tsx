@@ -28,9 +28,11 @@ export default async function AgentDefaultsPage() {
           Especialistas do Editor (orquestrador)
         </h1>
         <p className="text-sm text-muted-foreground">
-          Override de prompt e modelo por especialista, válido pra TODOS os
-          tenants. Vazio = usa o padrão hardcoded. Um override de prompt vale
-          pras duas esteiras (venda e locação). Mudanças pegam em ≤1 min (cache).
+          Válido pra TODOS os tenants. O <strong>modelo</strong> substitui o
+          padrão; as <strong>instruções</strong> são APENDADAS ao prompt-base do
+          especialista (que já se adapta a venda × locação) — não o substituem,
+          pra não perder a variante de locação. Vazio = sem override. Mudanças
+          pegam em ≤1 min (cache).
         </p>
       </header>
       <AgentDefaultsClient canEdit={canEdit} />

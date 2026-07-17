@@ -52,22 +52,12 @@ export async function PUT(req: NextRequest) {
     );
   }
 
-  // OrgFinancialSettings.orgId não é @unique (multi-account) — atualiza a row
-  // existente da org ou cria uma sem accountId.
-  const existing = await prisma.orgFinancialSettings.findFirst({
-    where: { orgId: org.id },
-    select: { id: true },
+  // Home em Organization (org-level, @id) — não em OrgFinancialSettings, que é
+  // per-conta Asaas e teria N rows/org.
+  await prisma.organization.update({
+    where: { id: org.id },
+    data: { aiMonthlyBudgetUsd: parsed.data.budgetUsd },
   });
-  if (existing) {
-    await prisma.orgFinancialSettings.update({
-      where: { id: existing.id },
-      data: { aiMonthlyBudgetUsd: parsed.data.budgetUsd },
-    });
-  } else {
-    await prisma.orgFinancialSettings.create({
-      data: { orgId: org.id, aiMonthlyBudgetUsd: parsed.data.budgetUsd },
-    });
-  }
 
   await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
     action: "AGENT_CONFIG_UPDATE",

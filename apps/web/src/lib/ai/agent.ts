@@ -5,7 +5,11 @@ import { executeToolHandler } from "./tool-handlers";
 import { DEFAULT_SYSTEM_PROMPT, buildContextMessage } from "./prompts";
 import { quickChecks, dedupeKeyFor, type QuickFinding } from "./quickChecks";
 import { recordAIUsage } from "./usage";
-import { assertContractBudget, ContractBudgetExceededError } from "./budget";
+import {
+  assertContractBudget,
+  ContractBudgetExceededError,
+  OrgAiBudgetExceededError,
+} from "./budget";
 import { loadExpertContext } from "./expert-context";
 import { getAnthropicClient, HAIKU_MODEL, SONNET_MODEL, resolveModel } from "./shared/anthropic-client";
 import { loadContext } from "./shared/context";
@@ -126,10 +130,16 @@ export async function* streamContractAgent(
       await assertContractBudget(params.contractId);
     } catch (err) {
       if (err instanceof ContractBudgetExceededError) {
+        // Org-level (USD) traz o próprio remédio na mensagem; o contract-level
+        // ganha o hint de aprovar/ajustar env. Checar a subclasse antes.
+        const message =
+          err instanceof OrgAiBudgetExceededError
+            ? `⚠️ ${err.message}`
+            : `⚠️ ${err.message}\n\nApós aprovar este contrato (ou ajustar a env \`CONTRACT_AI_TOKEN_BUDGET\`) o assistente volta a responder.`;
         const done: AgentEvent = {
           type: "done",
           result: {
-            message: `⚠️ ${err.message}\n\nApós aprovar este contrato (ou ajustar a env \`CONTRACT_AI_TOKEN_BUDGET\`) o assistente volta a responder.`,
+            message,
             htmlContent: null,
             dataJson: null,
             changeLogs: [],

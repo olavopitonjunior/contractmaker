@@ -83,12 +83,19 @@ export async function getContractBudgetStatus(contractId: string): Promise<Budge
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
- * Subclasse: os callers já capturam ContractBudgetExceededError e exibem
- * err.message — a mensagem certa (org, USD, onde ajustar) chega sem mudar
- * nenhum call-site.
+ * Estoura o budget MENSAL da org (USD). Subclasse de
+ * ContractBudgetExceededError pra ser pega pelos `instanceof` existentes —
+ * MAS os call-sites (chat/specialist) precisam checar `instanceof
+ * OrgAiBudgetExceededError` PRIMEIRO e usar `.message`, senão mostram a
+ * remediação errada (aprovar contrato / env de tokens) pra um teto de org.
+ * Os campos herdados `spent`/`budget` (tokens) NÃO se aplicam aqui — os
+ * valores em USD ficam em `spentUsd`/`budgetUsd`.
  */
 export class OrgAiBudgetExceededError extends ContractBudgetExceededError {
-  constructor(spentUsd: number, budgetUsd: number) {
+  constructor(
+    public readonly spentUsd: number,
+    public readonly budgetUsd: number
+  ) {
     super(0, 0);
     this.message = `Budget mensal de IA da imobiliária esgotado: US$ ${spentUsd.toFixed(2)} / US$ ${budgetUsd.toFixed(2)} neste mês. Ajuste o teto em Configurações → Uso de IA ou aguarde o próximo mês.`;
     this.name = "OrgAiBudgetExceededError";
@@ -103,12 +110,19 @@ export interface OrgAiBudgetStatus {
 }
 
 export async function getOrgAiBudgetStatus(orgId: string): Promise<OrgAiBudgetStatus> {
-  const settings = await prisma.orgFinancialSettings.findFirst({
-    where: { orgId },
+  const org = await prisma.organization.findUnique({
+    where: { id: orgId },
     select: { aiMonthlyBudgetUsd: true },
   });
   const budgetUsd =
-    settings?.aiMonthlyBudgetUsd != null ? Number(settings.aiMonthlyBudgetUsd) : null;
+    org?.aiMonthlyBudgetUsd != null ? Number(org.aiMonthlyBudgetUsd) : null;
+
+  // Sem teto configurado (caso comum): PULA o aggregate mensal — senão toda
+  // chamada de specialist (até 4/turn) somaria AIUsage do mês inteiro da org
+  // à toa, no caminho quente do chat.
+  if (budgetUsd == null || budgetUsd <= 0) {
+    return { budgetUsd, spentUsd: 0, pct: 0 };
+  }
 
   const now = new Date();
   const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -117,7 +131,7 @@ export async function getOrgAiBudgetStatus(orgId: string): Promise<OrgAiBudgetSt
     _sum: { estimatedCostUsd: true },
   });
   const spentUsd = Number(agg._sum.estimatedCostUsd ?? 0);
-  const pct = budgetUsd && budgetUsd > 0 ? Math.min(1, spentUsd / budgetUsd) : 0;
+  const pct = Math.min(1, spentUsd / budgetUsd);
   return { budgetUsd, spentUsd, pct };
 }
 

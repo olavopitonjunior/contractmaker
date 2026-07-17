@@ -13,7 +13,10 @@
 
 import { AGENT_TOOLS } from "../tools";
 import { HAIKU_MODEL, resolveModel } from "../shared/anthropic-client";
-import { getPlatformAgentDefaults } from "./platform-defaults";
+import {
+  getPlatformAgentDefaults,
+  buildPlatformPromptOverrideBlock,
+} from "./platform-defaults";
 import { runSpecialist } from "../shared/specialist-runner";
 import { pickSpecialistPrompt } from "./prompts-locacao";
 import type { OrchestratorState, SpecialistOutput } from "../orchestrator/state";
@@ -41,8 +44,14 @@ export async function runAnalyst(state: OrchestratorState): Promise<SpecialistOu
     agentName: "analyst",
     // Overrides de plataforma (/admin/agent-defaults) — null = hardcoded.
     model: resolveModel(overrides.analystModel ?? undefined, HAIKU_MODEL),
+    // Prompt override é APÊNDICE ao base por-domínio (venda×locação) — não
+    // substitui, senão a variante de locação sumiria (singleton só tem o
+    // baseline de venda). Modelo, esse sim, substitui.
     systemPrompt:
-      overrides.analystPrompt ?? pickSpecialistPrompt("analyst", state.contractContext),
+      pickSpecialistPrompt("analyst", state.contractContext) +
+      (overrides.analystPrompt
+        ? buildPlatformPromptOverrideBlock(overrides.analystPrompt)
+        : ""),
     tools: ANALYST_TOOLS,
     maxIterations: 2,
     userPrompt,

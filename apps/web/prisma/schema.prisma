@@ -240,6 +240,11 @@ model Organization {
   // Conta Asaas selecionada pelo admin como destino default de novas cobranças
   // e fonte das telas financeiras quando o user não passa hint explícito.
   activeAsaasAccountId String?
+  // Budget mensal de IA da org em USD (soma de AIUsage.estimatedCostUsd do
+  // mês). Null = sem teto. Mora AQUI (não em OrgFinancialSettings, que é
+  // per-conta Asaas @@unique[accountId]) porque o teto é ORG-level. ≥100% →
+  // chat 402; 80%/100% → sino. Ver lib/ai/budget.ts.
+  aiMonthlyBudgetUsd   Decimal? @db.Decimal(10, 2)
   // Suspensão administrativa (painel super-admin): quando setado, a org está
   // suspensa — o guard do dashboard bloqueia acesso e os módulos são desligados
   // em massa. Reativar limpa o campo e religa os módulos. Aditivo, default null.
@@ -2112,10 +2117,6 @@ model OrgFinancialSettings {
   id                      String   @id @default(cuid())
   orgId                   String
   accountId               String?  @unique
-  // Budget mensal de IA da org em USD (soma de AIUsage.estimatedCostUsd do
-  // mês). Null = sem teto. ≥100% → chat 402 (leitura segue); 80%/100% → sino
-  // (dedupe ai-budget:{orgId}:{YYYY-MM}:{pct}). Ver lib/ai/budget.ts.
-  aiMonthlyBudgetUsd      Decimal? @db.Decimal(10, 2)
   // Platform fee (Fase 3)
   platformFeePercent      Float    @default(0)
   platformFeeWalletId     String?

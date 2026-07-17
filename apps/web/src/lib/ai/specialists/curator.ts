@@ -13,7 +13,10 @@
 
 import { AGENT_TOOLS } from "../tools";
 import { HAIKU_MODEL, resolveModel } from "../shared/anthropic-client";
-import { getPlatformAgentDefaults } from "./platform-defaults";
+import {
+  getPlatformAgentDefaults,
+  buildPlatformPromptOverrideBlock,
+} from "./platform-defaults";
 import { runSpecialist, type ToolUseGuard } from "../shared/specialist-runner";
 import { applyPolicy } from "../sentinel/middleware";
 import { pickSpecialistPrompt } from "./prompts-locacao";
@@ -50,8 +53,14 @@ export async function runCurator(state: OrchestratorState): Promise<SpecialistOu
     agentName: "curator",
     // Overrides de plataforma (/admin/agent-defaults) — null = hardcoded.
     model: resolveModel(overrides.curatorModel ?? undefined, HAIKU_MODEL),
+    // Prompt override é APÊNDICE ao base por-domínio (venda×locação) — não
+    // substitui, senão a variante de locação sumiria (singleton só tem o
+    // baseline de venda). Modelo, esse sim, substitui.
     systemPrompt:
-      overrides.curatorPrompt ?? pickSpecialistPrompt("curator", state.contractContext),
+      pickSpecialistPrompt("curator", state.contractContext) +
+      (overrides.curatorPrompt
+        ? buildPlatformPromptOverrideBlock(overrides.curatorPrompt)
+        : ""),
     tools: CURATOR_TOOLS,
     maxIterations: 2,
     userPrompt,

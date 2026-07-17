@@ -122,7 +122,7 @@ export function AgentDefaultsClient({ canEdit }: { canEdit: boolean }) {
               onChange={(e) => setPrompts((s) => ({ ...s, [key]: e.target.value }))}
               disabled={!canEdit}
               rows={6}
-              placeholder={`Vazio = prompt padrão hardcoded.\n\nBaseline (venda):\n${(defaults[`${key}Prompt`] ?? "").slice(0, 400)}…`}
+              placeholder={`Instruções adicionais apendadas ao prompt-base (venda × locação). Vazio = sem override.\n\nReferência do baseline (venda):\n${(defaults[`${key}Prompt`] ?? "").slice(0, 300)}…`}
               className="font-mono text-xs"
             />
           </CardContent>

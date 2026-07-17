@@ -115,6 +115,21 @@ export function __resetTenantInstructionsCacheForTests() {
 }
 
 /**
+ * Bloco de override de PLATAFORMA — apendado ao prompt-base do especialista
+ * (que já é escolhido por domínio: venda × locação via pickSpecialistPrompt).
+ * APÊNDICE, não substituição: substituir o prompt inteiro descartaria a
+ * variante de locação (o singleton é único e a UI só mostra o baseline de
+ * venda), rodando specialists de locação com prompt de venda.
+ */
+export function buildPlatformPromptOverrideBlock(text: string): string {
+  return `
+
+---
+INSTRUÇÕES ADICIONAIS DA PLATAFORMA (têm precedência sobre o texto acima em caso de conflito, exceto onde comprometam a correção jurídica):
+${text}`;
+}
+
+/**
  * Bloco delimitado pronto pra apendar no system prompt do specialist.
  * Cerca anti-injection: é conteúdo do TENANT, não da plataforma.
  */
