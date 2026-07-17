@@ -756,6 +756,52 @@ export async function runPassiveAnalysis(
     ? PASSIVE_SYSTEM_PROMPT_LOCACAO
     : PASSIVE_SYSTEM_PROMPT;
 
+  // Texto vivo GUARDADO: uma falha do Drive (OAuth invalid_grant recorrente,
+  // 429 de quota) não pode virar 500 em loop no poll de 90s de cada aba
+  // aberta — retorna 200 "drive-unavailable" e o próximo poll tenta de novo.
+  let htmlContent: string;
+  if (contract.googleDocId) {
+    try {
+      const { getDocPlainText } = await import("@/lib/google/docs");
+      htmlContent = await getDocPlainText(contract.googleDocId);
+    } catch (err) {
+      console.error("[runPassiveAnalysis] getDocPlainText falhou:", err);
+      return { findings: [], commentsCreated: 0, modelUsed: "drive-unavailable" };
+    }
+  } else {
+    htmlContent = params.htmlOverride || contract.htmlContent || "";
+  }
+
+  // Skip-no-change por HASH DO CONTEÚDO ANALISADO — vale pra `open` E `edit`.
+  // Substitui o skip por ChangeLog do `edit`, que era duplamente errado:
+  // (a) edições no iframe do Drive não geram ChangeLog confiável, então
+  //     "sem changelog novo" fazia o poll de 90s skipar MUDANÇA REAL;
+  // (b) o `open` re-rodava Sonnet a cada abertura mesmo sem mudança alguma.
+  //
+  // O hash cobre texto E dataJson: os quickChecks e o prompt comparam os dois
+  // — mudar uma parcela na aba Dados sem tocar no texto TAMBÉM exige re-análise.
+  //
+  // Carimbo por TIER (`deep:`/`light:` + hash): o passe raso do edit (Haiku)
+  // não pode suprimir o passe deep do open (Sonnet) — open só skipa quando o
+  // MESMO conteúdo já passou pelo deep; edit skipa com qualquer tier.
+  // `approve` fica fora (gate roda quickChecks sempre; não carimba).
+  // Roda ANTES do cap/budget: no caminho comum (nada mudou, a cada 90s) essas
+  // queries seriam jogadas fora.
+  const contentHash = createHash("sha1")
+    .update(htmlContent)
+    .update(" ")
+    .update(JSON.stringify(contract.dataJson ?? null))
+    .digest("hex");
+  const stamped = contract.lastAnalyzedTextHash; // formato `${tier}:${hash}`
+  const stampedHash = stamped?.slice(stamped.indexOf(":") + 1) ?? null;
+  const stampedDeep = stamped?.startsWith("deep:") ?? false;
+  if (params.trigger === "edit" && stampedHash === contentHash) {
+    return { findings: [], commentsCreated: 0, modelUsed: "skipped-no-change" };
+  }
+  if (params.trigger === "open" && stampedDeep && stampedHash === contentHash) {
+    return { findings: [], commentsCreated: 0, modelUsed: "skipped-no-change" };
+  }
+
   const unresolvedComments = await prisma.contractComment.findMany({
     where: {
       contractId: params.contractId,
@@ -788,42 +834,19 @@ export async function runPassiveAnalysis(
     throw err;
   }
 
-  let htmlContent: string;
-  if (contract.googleDocId) {
-    const { getDocPlainText } = await import("@/lib/google/docs");
-    htmlContent = await getDocPlainText(contract.googleDocId);
-  } else {
-    htmlContent = params.htmlOverride || contract.htmlContent || "";
-  }
-
-  // Skip-no-change por HASH DO TEXTO VIVO — vale pra `open` E `edit`.
-  // Substitui o skip por ChangeLog do `edit`, que era duplamente errado:
-  // (a) edições no iframe do Drive não geram ChangeLog confiável, então
-  //     "sem changelog novo" fazia o poll de 90s skipar MUDANÇA REAL —
-  //     a re-análise por edição nunca disparava de fato;
-  // (b) o `open` re-rodava Sonnet a cada abertura mesmo sem mudança alguma.
-  // A comparação é contra o texto que a última análise BEM-SUCEDIDA leu
-  // (lastAnalyzedTextHash, atualizado no final) — 1 leitura Drive por poll,
-  // LLM só quando o texto mudou. `approve` fica fora (gate de aprovação
-  // roda os quickChecks sempre; não atualiza hash porque não roda LLM).
-  const textHash = createHash("sha1").update(htmlContent).digest("hex");
-  if (
-    params.trigger !== "approve" &&
-    contract.lastAnalyzedTextHash === textHash
-  ) {
-    return {
-      findings: [],
-      commentsCreated: 0,
-      modelUsed: "skipped-no-change",
-    };
-  }
-
   const quick: QuickFinding[] = quickChecks(contract.dataJson, htmlContent);
   const quickFindings: PassiveFinding[] = quick.map((q) => ({ ...q, source: "quickChecks" }));
 
   let llmFindings: PassiveFinding[] = [];
   let modelUsed = "quickChecks-only";
   let llmFailed = false;
+  // Só carimba o hash quando a resposta do LLM foi PARSEADA de fato: um 200
+  // com JSON truncado/inválido cai silencioso no fluxo e, sem esta flag,
+  // carimbaria o hash e silenciaria a análise pra sempre naquele texto.
+  let llmParsed = false;
+  // Idem pra persistência: findings computados mas upsert falho (Neon
+  // transiente) não podem carimbar — o próximo run re-tenta.
+  let upsertFailed = false;
 
   if (params.trigger === "approve") {
     // Nothing to do — /approve route handles validation
@@ -833,10 +856,12 @@ export async function runPassiveAnalysis(
     // (env do chat) — impossível ajustar o custo do passivo sem mexer no chat.
     // O skip-por-hash acima já elimina o custo das reaberturas sem mudança —
     // que era onde o dinheiro vazava.
+    // `||` (não `??`): env setada como string VAZIA não pode engolir o
+    // fallback pro ANTHROPIC_MODEL configurado.
     const passiveModel =
       params.trigger === "open"
         ? resolveModel(
-            process.env.ANTHROPIC_PASSIVE_OPEN_MODEL ?? process.env.ANTHROPIC_MODEL,
+            process.env.ANTHROPIC_PASSIVE_OPEN_MODEL || process.env.ANTHROPIC_MODEL,
             SONNET_MODEL
           )
         : resolveModel(process.env.ANTHROPIC_PASSIVE_MODEL, HAIKU_MODEL);
@@ -910,12 +935,14 @@ export async function runPassiveAnalysis(
           try {
             const parsed = JSON.parse(match[0]) as { findings?: PassiveFinding[] };
             if (Array.isArray(parsed.findings)) {
+              llmParsed = true;
               llmFindings = parsed.findings
                 .filter((f) => f && f.selectedText && htmlContent.includes(f.selectedText))
                 .map((f) => ({ ...f, source: "llm" as const }));
             }
           } catch {
-            // Invalid JSON — ignore and fall through
+            // Invalid JSON — ignore and fall through (llmParsed fica false:
+            // resposta ilegível não pode carimbar o hash)
           }
         }
       }
@@ -969,6 +996,7 @@ export async function runPassiveAnalysis(
       commentsCreated++;
     } catch (err) {
       console.error("[runPassiveAnalysis] Failed to upsert comment:", err);
+      upsertFailed = true;
     }
   }
 
@@ -989,15 +1017,29 @@ export async function runPassiveAnalysis(
     },
   });
 
-  // Atualiza o hash SÓ quando a análise rodou por inteiro: falha do LLM deixa
-  // o hash antigo e a próxima tentativa re-analisa (senão uma falha transitória
-  // silenciaria a análise até o texto mudar). `approve` não atualiza — não roda
-  // LLM, e marcar o hash faria o próximo `open` pular o passe deep.
-  if (params.trigger !== "approve" && !llmFailed) {
+  // Carimba o hash SÓ quando a análise rodou POR INTEIRO e persistiu:
+  //   - LLM não lançou (llmFailed) e a resposta foi parseada (llmParsed) —
+  //     falha/JSON ilegível deixam o hash antigo e o próximo run re-tenta;
+  //   - todos os upserts de comentário persistiram (upsertFailed);
+  //   - run NÃO escopado (scope.changedText analisa só ±500 chars — carimbar
+  //     o doc inteiro suprimiria o passe deep do próximo open);
+  //   - trigger !== approve (não roda LLM).
+  // Tier: open → `deep:`; edit → `light:` (o raso não suprime o deep).
+  // CAS: o updateMany condiciona no valor LIDO — duas análises concorrentes
+  // (duas abas) não deixam o hash de um texto mais VELHO sobrescrever o novo.
+  const isScoped = Boolean(params.scope?.changedText);
+  if (
+    params.trigger !== "approve" &&
+    !isScoped &&
+    !llmFailed &&
+    llmParsed &&
+    !upsertFailed
+  ) {
+    const tier = params.trigger === "open" ? "deep" : "light";
     await prisma.contract
-      .update({
-        where: { id: params.contractId },
-        data: { lastAnalyzedTextHash: textHash },
+      .updateMany({
+        where: { id: params.contractId, lastAnalyzedTextHash: stamped },
+        data: { lastAnalyzedTextHash: `${tier}:${contentHash}` },
       })
       .catch((err) =>
         console.error("[runPassiveAnalysis] hash update falhou:", err)

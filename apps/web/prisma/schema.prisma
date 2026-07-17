@@ -1099,10 +1099,11 @@ model Contract {
   googleWatchChannel  String?
   googleWatchResource String?
   googleWatchExpires  DateTime?
-  // sha1 do plain text analisado pela última análise passiva bem-sucedida.
-  // Detector de mudança REAL do doc (o ChangeLog não vê edição no iframe
-  // Drive): texto igual → análise skipa, pra open E edit. Null = nunca
-  // analisado (analisa).
+  // Carimbo da última análise passiva COMPLETA: `${tier}:${sha1}` onde
+  // tier = deep (open/Sonnet) | light (edit/Haiku) e o sha1 cobre texto
+  // vivo + dataJson. Detector de mudança REAL (o ChangeLog não vê edição no
+  // iframe Drive): edit skipa com qualquer tier; open só skipa se deep.
+  // Null = nunca analisado.
   lastAnalyzedTextHash String?
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
