@@ -31,6 +31,7 @@ import {
   LogOut,
   Wallet,
   Building2,
+  BarChart3,
   ChevronRight,
   type LucideIcon,
 } from "lucide-react";
@@ -125,6 +126,18 @@ const NAV: NavEntry[] = [
     ],
   },
   { kind: "item", title: "Templates", url: "/templates", icon: FileStack },
+  {
+    kind: "group",
+    title: "Relatórios",
+    icon: BarChart3,
+    items: [
+      {
+        title: "Origem dos negócios",
+        url: "/relatorios/funil",
+        requires: [FEATURE.VENDAS_PIPELINE, FEATURE.LOCACAO_PIPELINE],
+      },
+    ],
+  },
   {
     kind: "group",
     title: "Financeiro",
