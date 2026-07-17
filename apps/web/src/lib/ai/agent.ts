@@ -1,4 +1,5 @@
 import type { Anthropic } from "@anthropic-ai/sdk";
+import { createHash } from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
 import { AGENT_TOOLS } from "./tools";
 import { executeToolHandler } from "./tool-handlers";
@@ -787,39 +788,6 @@ export async function runPassiveAnalysis(
     throw err;
   }
 
-  // Skip-no-change vale SÓ pra `edit`. NÃO estender pro `open`: edições feitas
-  // direto no iframe do Google Docs só entram no ContractChangeLog via o watch
-  // do Drive, que é best-effort e pode estar expirado/atrasado — então "sem
-  // changelog novo" NÃO garante "sem mudança". No `open` a análise relê o texto
-  // vivo do Drive (getDocPlainText) e roda os quickChecks determinísticos, que é
-  // exatamente o que pega uma edição externa sem changelog. Pular o `open` fazia
-  // uma edição arriscada passar sem nenhum comentário. (Corte de custo do `open`
-  // deve vir de comparar hash do doc vivo, não de confiar no changelog.)
-  if (params.trigger === "edit") {
-    const lastValidation = await prisma.contractChangeLog.findFirst({
-      where: { contractId: params.contractId, action: "validation" },
-      orderBy: { createdAt: "desc" },
-      select: { createdAt: true },
-    });
-    if (lastValidation) {
-      const newerEdit = await prisma.contractChangeLog.findFirst({
-        where: {
-          contractId: params.contractId,
-          action: { not: "validation" },
-          createdAt: { gt: lastValidation.createdAt },
-        },
-        select: { id: true },
-      });
-      if (!newerEdit) {
-        return {
-          findings: [],
-          commentsCreated: 0,
-          modelUsed: "skipped-no-change",
-        };
-      }
-    }
-  }
-
   let htmlContent: string;
   if (contract.googleDocId) {
     const { getDocPlainText } = await import("@/lib/google/docs");
@@ -828,18 +796,49 @@ export async function runPassiveAnalysis(
     htmlContent = params.htmlOverride || contract.htmlContent || "";
   }
 
+  // Skip-no-change por HASH DO TEXTO VIVO — vale pra `open` E `edit`.
+  // Substitui o skip por ChangeLog do `edit`, que era duplamente errado:
+  // (a) edições no iframe do Drive não geram ChangeLog confiável, então
+  //     "sem changelog novo" fazia o poll de 90s skipar MUDANÇA REAL —
+  //     a re-análise por edição nunca disparava de fato;
+  // (b) o `open` re-rodava Sonnet a cada abertura mesmo sem mudança alguma.
+  // A comparação é contra o texto que a última análise BEM-SUCEDIDA leu
+  // (lastAnalyzedTextHash, atualizado no final) — 1 leitura Drive por poll,
+  // LLM só quando o texto mudou. `approve` fica fora (gate de aprovação
+  // roda os quickChecks sempre; não atualiza hash porque não roda LLM).
+  const textHash = createHash("sha1").update(htmlContent).digest("hex");
+  if (
+    params.trigger !== "approve" &&
+    contract.lastAnalyzedTextHash === textHash
+  ) {
+    return {
+      findings: [],
+      commentsCreated: 0,
+      modelUsed: "skipped-no-change",
+    };
+  }
+
   const quick: QuickFinding[] = quickChecks(contract.dataJson, htmlContent);
   const quickFindings: PassiveFinding[] = quick.map((q) => ({ ...q, source: "quickChecks" }));
 
   let llmFindings: PassiveFinding[] = [];
   let modelUsed = "quickChecks-only";
+  let llmFailed = false;
 
   if (params.trigger === "approve") {
     // Nothing to do — /approve route handles validation
   } else {
+    // `open` = passe deep (default Sonnet), agora com env DEDICADO
+    // (ANTHROPIC_PASSIVE_OPEN_MODEL). Antes pegava carona no ANTHROPIC_MODEL
+    // (env do chat) — impossível ajustar o custo do passivo sem mexer no chat.
+    // O skip-por-hash acima já elimina o custo das reaberturas sem mudança —
+    // que era onde o dinheiro vazava.
     const passiveModel =
       params.trigger === "open"
-        ? resolveModel(process.env.ANTHROPIC_MODEL, SONNET_MODEL)
+        ? resolveModel(
+            process.env.ANTHROPIC_PASSIVE_OPEN_MODEL ?? process.env.ANTHROPIC_MODEL,
+            SONNET_MODEL
+          )
         : resolveModel(process.env.ANTHROPIC_PASSIVE_MODEL, HAIKU_MODEL);
     modelUsed = passiveModel;
 
@@ -935,6 +934,7 @@ export async function runPassiveAnalysis(
         errorMessage: err instanceof Error ? err.message : String(err),
       });
       console.error("[runPassiveAnalysis] LLM call failed:", err);
+      llmFailed = true;
     }
   }
 
@@ -988,6 +988,21 @@ export async function runPassiveAnalysis(
       source: "ai",
     },
   });
+
+  // Atualiza o hash SÓ quando a análise rodou por inteiro: falha do LLM deixa
+  // o hash antigo e a próxima tentativa re-analisa (senão uma falha transitória
+  // silenciaria a análise até o texto mudar). `approve` não atualiza — não roda
+  // LLM, e marcar o hash faria o próximo `open` pular o passe deep.
+  if (params.trigger !== "approve" && !llmFailed) {
+    await prisma.contract
+      .update({
+        where: { id: params.contractId },
+        data: { lastAnalyzedTextHash: textHash },
+      })
+      .catch((err) =>
+        console.error("[runPassiveAnalysis] hash update falhou:", err)
+      );
+  }
 
   return { findings: allFindings, commentsCreated, modelUsed };
 }
