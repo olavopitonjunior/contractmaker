@@ -277,7 +277,7 @@ export function ContractEditorPage({
                 </code>{" "}
                 e cole o novo{" "}
                 <code className="font-mono text-[11px]">GOOGLE_OWNER_REFRESH_TOKEN</code>{" "}
-                no Vercel (staging) SEM escapar quebras de linha; depois faça redeploy.
+                no Vercel do ambiente afetado SEM escapar quebras de linha; depois faça redeploy.
               </p>
             )}
           </div>
