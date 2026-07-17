@@ -9,6 +9,7 @@ import {
   featureModule,
   featureDefault,
   moduleDef,
+  proposalFeatureForKind,
 } from "./catalog";
 
 describe("catalog — integridade", () => {
@@ -73,5 +74,20 @@ describe("moduleDef", () => {
   it("retorna a definição completa", () => {
     expect(moduleDef(MODULE.LOCACAO).label).toBe("Locação");
     expect(moduleDef(MODULE.VENDAS).features.length).toBeGreaterThan(0);
+  });
+});
+
+describe("proposalFeatureForKind", () => {
+  it("mapeia kind → feature de propostas do módulo certo", () => {
+    expect(proposalFeatureForKind("locacao")).toBe(FEATURE.LOCACAO_PROPOSTAS);
+    // Qualquer coisa que não seja "locacao" cai em vendas (inclui o "venda"
+    // singular de Deal.kind e o schemaType de compra_venda).
+    expect(proposalFeatureForKind("venda")).toBe(FEATURE.VENDAS_PROPOSTAS);
+    expect(proposalFeatureForKind("compra_venda_v1")).toBe(FEATURE.VENDAS_PROPOSTAS);
+  });
+
+  it("propostas nasce OFF nos dois módulos (o gating da API depende disso)", () => {
+    expect(featureDefault(FEATURE.VENDAS_PROPOSTAS)).toBe(false);
+    expect(featureDefault(FEATURE.LOCACAO_PROPOSTAS)).toBe(false);
   });
 });

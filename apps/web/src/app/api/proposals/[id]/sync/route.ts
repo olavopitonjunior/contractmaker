@@ -7,6 +7,8 @@ import {
 } from "@/lib/api/require-auth";
 import { getEffectivePermissions, canAccessProposal, can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { assertFeatureEnabled, ModuleDisabledError } from "@/lib/modules/guard";
+import { proposalFeatureForKind } from "@/lib/modules/catalog";
 import { ClicksignError } from "@/lib/clicksign/client";
 import { syncEnvelopeState, EnvelopeNotSyncableError } from "@/lib/clicksign/sync";
 import {
@@ -41,6 +43,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   // efeitos colaterais. Exige a mesma permissão do envio.
   if (!can(eff, PERMISSION.PROPOSAL_SEND)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  try {
+    await assertFeatureEnabled(auth.org.id, proposalFeatureForKind(proposal.kind));
+  } catch (e) {
+    if (e instanceof ModuleDisabledError) {
+      return NextResponse.json({ error: e.code }, { status: e.status });
+    }
+    throw e;
   }
 
   const debug = new URL(req.url).searchParams.get("debug") === "1";

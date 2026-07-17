@@ -8,6 +8,8 @@ import {
 } from "@/lib/api/require-auth";
 import { getEffectivePermissions, canAccessProposal, can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { assertFeatureEnabled, ModuleDisabledError } from "@/lib/modules/guard";
+import { proposalFeatureForKind } from "@/lib/modules/catalog";
 import { requireApproval, approvalResponse } from "@/lib/api/intents";
 import { ensureIntentExecutorsRegistered } from "@/lib/api/intent-executors";
 import { convertProposalToDeal, ProposalConvertError } from "@/lib/proposals/convert";
@@ -36,6 +38,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
   if (!can(eff, PERMISSION.PROPOSAL_CONVERT)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  try {
+    await assertFeatureEnabled(auth.org.id, proposalFeatureForKind(proposal.kind));
+  } catch (e) {
+    if (e instanceof ModuleDisabledError) {
+      return NextResponse.json({ error: e.code }, { status: e.status });
+    }
+    throw e;
   }
 
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));

@@ -7,6 +7,8 @@ import {
 } from "@/lib/api/require-auth";
 import { getEffectivePermissions, canAccessProposal, can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { assertFeatureEnabled, ModuleDisabledError } from "@/lib/modules/guard";
+import { proposalFeatureForKind } from "@/lib/modules/catalog";
 import { requireApproval, approvalResponse } from "@/lib/api/intents";
 import { ensureIntentExecutorsRegistered } from "@/lib/api/intent-executors";
 import { executeProposalSend, blockToResponse } from "@/lib/proposals/send-execute";
@@ -31,6 +33,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
   if (!can(eff, PERMISSION.PROPOSAL_SEND)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  try {
+    await assertFeatureEnabled(auth.org.id, proposalFeatureForKind(proposal.kind));
+  } catch (e) {
+    if (e instanceof ModuleDisabledError) {
+      return NextResponse.json({ error: e.code }, { status: e.status });
+    }
+    throw e;
   }
   if (!["rascunho", "aguardando_aprovacao", "falha_envio"].includes(proposal.status)) {
     return NextResponse.json(

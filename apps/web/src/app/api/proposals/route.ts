@@ -8,8 +8,8 @@ import {
   authFailureResponse,
 } from "@/lib/api/require-auth";
 import { withIdempotency } from "@/lib/api/idempotency";
-import { assertModuleEnabled, ModuleDisabledError } from "@/lib/modules/guard";
-import { moduleForSchemaType } from "@/lib/modules/resolve";
+import { assertFeatureEnabled, ModuleDisabledError } from "@/lib/modules/guard";
+import { proposalFeatureForKind } from "@/lib/modules/catalog";
 import { getEffectivePermissions, proposalScopeWhere, can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { generateProposalToken } from "@/lib/proposals/token";
@@ -49,8 +49,11 @@ const createSchema = z.object({
   signers: z.array(signerSchema).optional(),
 });
 
-async function moduleGuard(orgId: string, schemaType: string) {
-  await assertModuleEnabled(orgId, moduleForSchemaType(schemaType));
+// Gateia pela sub-função (vendas.propostas / locacao.propostas), não só pelo
+// módulo — o toggle "Propostas" precisa segurar a criação no servidor, não só
+// esconder o menu. assertFeatureEnabled já implica o módulo habilitado.
+async function featureGuard(orgId: string, schemaType: string) {
+  await assertFeatureEnabled(orgId, proposalFeatureForKind(kindForSchema(schemaType)));
 }
 
 // GET /api/proposals — lista escopada (corretor vê só as dele).
@@ -95,7 +98,7 @@ export async function POST(req: NextRequest) {
   const input = parsed.data;
 
   try {
-    await moduleGuard(auth.org.id, input.schemaType);
+    await featureGuard(auth.org.id, input.schemaType);
   } catch (e) {
     if (e instanceof ModuleDisabledError) {
       return NextResponse.json({ error: e.code }, { status: e.status });
