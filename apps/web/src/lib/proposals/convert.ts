@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db/prisma";
 import { DEAL_SOURCE_CHANNEL } from "@/lib/pipeline/source-channel";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { moduleForSchemaType } from "@/lib/modules/resolve";
+import type { Prisma } from "@prisma/client";
 import {
   deriveDealMetadata,
   deriveLocacaoDealMetadata,
@@ -80,27 +81,37 @@ export async function convertProposalToDeal(input: {
     );
   }
   const firstStage = pipeline.stages[0];
+
+  // Normaliza o shape da proposta pro shape do FORM antes de copiar: a
+  // proposta guarda o aluguel em `locacao.valor_aluguel` (NovaPropostaDialog),
+  // mas o form/templates/derive leem `aluguel.valor`. Normalizando NA CÓPIA,
+  // todos os consumidores downstream (card, geração do contrato de locação,
+  // cláusula de aluguel) enxergam o valor — não só este call-site.
+  let normalizedData = dataJson;
+  if (proposal.kind === "locacao") {
+    const aluguel =
+      (dataJson.aluguel as Record<string, unknown> | undefined) ?? {};
+    const proposalAluguel = Number(
+      (dataJson.locacao as { valor_aluguel?: unknown } | undefined)
+        ?.valor_aluguel ?? 0
+    );
+    if (!Number(aluguel.valor) && proposalAluguel > 0) {
+      normalizedData = {
+        ...dataJson,
+        aluguel: { ...aluguel, valor: proposalAluguel },
+      };
+    }
+  }
+
   // Derive por kind — a variante de venda sobre dataJson de locação devolve
   // value/clientName null (lê compradores/pagamento; locação usa locatarios/
   // aluguel). Mesmo fix já aplicado no apply de anexos e no import.
   const deriveMeta =
     proposal.kind === "locacao" ? deriveLocacaoDealMetadata : deriveDealMetadata;
-  const meta = deriveMeta(dataJson, {
+  const meta = deriveMeta(normalizedData, {
     formTitle: proposal.title,
     fallbackTitle: proposal.title,
   });
-  // Proposta de locação guarda o aluguel em `locacao.valor_aluguel`
-  // (NovaPropostaDialog) — não no shape do form (`aluguel.valor`) que o
-  // derive lê. Sem o fallback, o card convertido nascia sem valor.
-  const proposalAluguel =
-    proposal.kind === "locacao"
-      ? Number(
-          (dataJson.locacao as { valor_aluguel?: unknown } | undefined)
-            ?.valor_aluguel ?? 0
-        )
-      : 0;
-  const dealValue =
-    meta.value ?? (proposalAluguel > 0 ? proposalAluguel : null);
 
   const attachments = await prisma.proposalAttachment.findMany({
     where: { proposalId: proposal.id },
@@ -114,7 +125,7 @@ export async function convertProposalToDeal(input: {
         // schemaType herdado — SEM isto, locação convertida viraria form de
         // compra e venda (default do campo) e o contrato sairia errado.
         schemaType: proposal.schemaType,
-        dataJson: proposal.dataJson ?? {},
+        dataJson: normalizedData as Prisma.InputJsonValue,
         status: "completo",
         completedAt: new Date(),
       },
@@ -129,11 +140,11 @@ export async function convertProposalToDeal(input: {
         formId: form.id,
         sourceChannel: DEAL_SOURCE_CHANNEL.PROPOSTA,
         title: meta.title,
-        value: dealValue,
+        value: meta.value,
         clientName: meta.clientName,
         // default "venda"; sem isto toda locação viraria deal de venda.
         kind: proposal.kind,
-        dataJson: proposal.dataJson ?? {},
+        dataJson: normalizedData as Prisma.InputJsonValue,
         stageEnteredAt: new Date(),
       },
     });

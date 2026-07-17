@@ -4,6 +4,10 @@ import { prisma } from "@/lib/db/prisma";
 import { downloadBufferFromUrl } from "@/lib/storage/s3";
 import { extractCcvDataJson } from "@/lib/extraction/ccv-extractor";
 import { extractLocacaoContractDataJson } from "@/lib/extraction/locacao-extractor";
+import {
+  deriveDealMetadata,
+  deriveLocacaoDealMetadata,
+} from "@/lib/contracts/derive-deal-metadata";
 import { exportDocAsPdf } from "@/lib/google/docs";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
@@ -142,10 +146,9 @@ export async function POST(
   // Re-deriva o nome denormalizado do card (Deal.clientName) do dataJson novo.
   // Sem isto, uma re-extração que finalmente trouxe o comprador deixaria o
   // kanban com o nome velho/vazio (o card não lê mais o dataJson ao vivo).
-  // Sempre grava (null limpa) — mesmo contrato do dataJson, que é substituído.
-  const { deriveDealMetadata, deriveLocacaoDealMetadata } = await import(
-    "@/lib/contracts/derive-deal-metadata"
-  );
+  // GUARD extração vazia: o extractor engole erro do Gemini e devolve {} —
+  // uma indisponibilidade transitória não pode APAGAR o nome do card (nem
+  // faz sentido derivar de {}). Com dados, grava o derivado (null limpa).
   const deriveMeta =
     dealKind === "locacao" ? deriveLocacaoDealMetadata : deriveDealMetadata;
   const { clientName } = deriveMeta(extracted, {
@@ -168,10 +171,14 @@ export async function POST(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data: { dataJson: extracted as any },
     }),
-    prisma.deal.update({
-      where: { id: contract.dealId },
-      data: { clientName },
-    }),
+    ...(fieldsCount > 0
+      ? [
+          prisma.deal.update({
+            where: { id: contract.dealId },
+            data: { clientName },
+          }),
+        ]
+      : []),
   ]);
 
   await audit(

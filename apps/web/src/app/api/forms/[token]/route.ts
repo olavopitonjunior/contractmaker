@@ -21,7 +21,7 @@ import { matchDealGroup } from "@/lib/newton/group-match";
 import { generateContractForDeal } from "@/lib/services/contract-generation";
 import { emitNotification } from "@/lib/notifications/emit";
 import { dedupConjuges } from "@/lib/forms/dedup-conjuges";
-import { deriveDealMetadata } from "@/lib/contracts/derive-deal-metadata";
+import { syncDealClientName } from "@/lib/forms/sync-deal-client-name";
 import { dadosContratoSchema } from "@/lib/forms/validation";
 import { sendFormSummary } from "@/lib/forms/form-summary-mailer";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
@@ -212,21 +212,16 @@ export async function PATCH(
     });
   }
 
-  // Sincroniza o nome denormalizado do card (Deal.clientName) a cada auto-save.
-  // O kanban não lê mais form.dataJson ao vivo — sem este write-point, um deal
-  // em "Formulário" ficaria sem nome até a geração do contrato. Sempre grava
-  // (null limpa: comprador removido some do card). Best-effort.
-  try {
-    const { clientName } = deriveDealMetadata(
-      mergedData as Record<string, unknown>,
-      { fallbackTitle: "" }
-    );
-    await prisma.deal.updateMany({
-      where: { formId: form.id },
-      data: { clientName },
+  // Sincroniza o nome denormalizado do card (Deal.clientName) — o kanban não
+  // lê mais form.dataJson ao vivo. Helper compartilhado com locação e subtoken;
+  // só roda quando o PATCH trouxe dataJson (PATCH só de título não deriva nada).
+  if (body.dataJson) {
+    await syncDealClientName({
+      formId: form.id,
+      schemaType: form.schemaType,
+      previousData: currentData,
+      mergedData: mergedData as Record<string, unknown>,
     });
-  } catch (err) {
-    console.error("[forms PATCH] clientName sync falhou:", err);
   }
 
   // Audita o finalize (paridade com locação, que já emite FORM_UPDATE). Persiste

@@ -6,7 +6,7 @@ import { matchDealGroup } from "@/lib/newton/group-match";
 import { generateLocacaoContractForDeal } from "@/lib/services/contract-generation";
 import { emitNotification } from "@/lib/notifications/emit";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
-import { deriveLocacaoDealMetadata } from "@/lib/contracts/derive-deal-metadata";
+import { syncDealClientName } from "@/lib/forms/sync-deal-client-name";
 import { formClosedResponse } from "@/lib/forms/form-gate";
 import {
   schemaForLocacaoType,
@@ -159,19 +159,15 @@ export async function PATCH(
     await prisma.deal.updateMany({ where: { formId: form.id }, data: { title: body.title } });
   }
 
-  // Sincroniza Deal.clientName (locatário titular) a cada auto-save — espelha
-  // a esteira de vendas. Sempre grava (null limpa). Best-effort.
-  try {
-    const { clientName } = deriveLocacaoDealMetadata(
-      mergedData as Record<string, unknown>,
-      { fallbackTitle: "" }
-    );
-    await prisma.deal.updateMany({
-      where: { formId: form.id },
-      data: { clientName },
+  // Sincroniza Deal.clientName (locatário titular) — helper compartilhado
+  // com a esteira de vendas e o subtoken por parte.
+  if (body.dataJson) {
+    await syncDealClientName({
+      formId: form.id,
+      schemaType: form.schemaType,
+      previousData: currentData,
+      mergedData: mergedData as Record<string, unknown>,
     });
-  } catch (err) {
-    console.error("[locacao forms PATCH] clientName sync falhou:", err);
   }
 
   let contractId: string | null = null;
