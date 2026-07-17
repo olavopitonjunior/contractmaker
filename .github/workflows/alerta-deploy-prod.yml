@@ -1,0 +1,151 @@
+name: Alerta — deploy de produção falhou
+
+# Em 2026-07-16 produção ficou 7h sem conseguir deployar (P3009 — migration em
+# estado failed) e NINGUÉM percebeu: o build morre em ~19s, o site continua no ar
+# servindo a versão antiga, e nada grita. Foi descoberto por acaso, ao promover
+# um fix de segurança que não subia.
+#
+# A Vercel JÁ reportava a falha ao GitHub esse tempo todo (`deployment_status`
+# com state=failure) — só não havia ninguém escutando. Este workflow escuta.
+#
+# Canal: uma issue atribuída ao dono do repo → o GitHub manda e-mail nativo.
+# Zero secret novo. Pra mandar em Slack/Discord, veja o passo opcional no fim.
+
+on:
+  deployment_status:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  LABEL: deploy-prod-falhou
+
+jobs:
+  alertar:
+    name: Abrir alerta
+    runs-on: ubuntu-latest
+    # `startsWith`/`endsWith` em vez do nome exato de propósito: o separador do
+    # ambiente é um TRAVESSÃO (U+2013), não hífen — comparar a string inteira
+    # aqui é um convite a quebrar em silêncio. Os 4 ambientes são:
+    #   "Production – web"                    ← prod de verdade (é este)
+    #   "Production – contractmaker-staging"  ← "prod" do projeto de staging
+    #   "Preview – web" / "Preview – contractmaker-staging"
+    if: >
+      (github.event.deployment_status.state == 'failure' ||
+       github.event.deployment_status.state == 'error') &&
+      startsWith(github.event.deployment.environment, 'Production') &&
+      endsWith(github.event.deployment.environment, 'web')
+    steps:
+      - name: Abrir (ou atualizar) a issue de alerta
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.deployment.sha }}
+          REF: ${{ github.event.deployment.ref }}
+          STATE: ${{ github.event.deployment_status.state }}
+          DESCRICAO: ${{ github.event.deployment_status.description }}
+          LOG_URL: ${{ github.event.deployment_status.target_url }}
+        run: |
+          set -euo pipefail
+
+          # Label idempotente (a 1ª execução cria).
+          gh label create "$LABEL" --repo "$REPO" \
+            --color B60205 --description "Deploy de produção falhou" 2>/dev/null || true
+
+          CORPO=$(cat <<EOF
+          **O deploy de produção falhou.** O site continua no ar servindo a versão
+          anterior — ou seja, *nada que for mergeado a partir de agora chega em prod*
+          até isto ser resolvido.
+
+          | | |
+          |---|---|
+          | Estado | \`$STATE\` |
+          | Commit | \`${SHA:0:8}\` ($REF) |
+          | Quando | $(date -u +"%Y-%m-%d %H:%M UTC") |
+
+          **Vercel diz:** $DESCRICAO
+
+          Log: $LOG_URL
+
+          ---
+
+          <details>
+          <summary>Se for <code>P3009</code> (migration travada) — já aconteceu</summary>
+
+          Sintoma: o build morre em ~19s, antes do \`next build\`, com
+          \`migrate found failed migrations in the target database\`.
+
+          Uma migration não-idempotente falha, fica *failed* no \`_prisma_migrations\`
+          e o Prisma passa a recusar **todas** as migrations seguintes. Receita e
+          histórico no \`BUGS.md\` (seção do P3009). Resumo:
+
+          1. Corrija a migration e leve o fix **pra master** (não só pra \`staging\` —
+             foi exatamente esse o erro que custou 7h).
+          2. \`prisma migrate resolve --rolled-back <nome>\` contra o banco de prod.
+          3. Dispare deploy do master **atual** — nunca \`vercel redeploy\` do deploy
+             que falhou, que rebuilda o commit antigo e suja o banco de novo.
+          </details>
+
+          _Esta issue fecha sozinha no próximo deploy de produção bem-sucedido._
+          EOF
+          )
+
+          # Dedupe: falha em série (retry, vários merges) vira comentário, não
+          # uma issue nova a cada tentativa — senão o alerta vira ruído e é
+          # ignorado, que é o problema que ele existe pra resolver.
+          EXISTENTE=$(gh issue list --repo "$REPO" --state open --label "$LABEL" \
+            --limit 1 --json number --jq '.[0].number // empty')
+
+          if [ -n "$EXISTENTE" ]; then
+            echo "Issue #$EXISTENTE já aberta — comentando."
+            gh issue comment "$EXISTENTE" --repo "$REPO" --body "$CORPO"
+          else
+            gh issue create --repo "$REPO" \
+              --title "🚨 Deploy de produção falhou (${SHA:0:8})" \
+              --label "$LABEL" \
+              --assignee "${{ github.repository_owner }}" \
+              --body "$CORPO"
+          fi
+
+      # Opcional: só dispara se alguém cadastrar o secret. Sem ele, o passo é
+      # pulado e o alerta segue valendo pela issue + e-mail do GitHub.
+      - name: Avisar no Slack (se configurado)
+        if: ${{ env.SLACK_WEBHOOK_URL != '' }}
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SHA: ${{ github.event.deployment.sha }}
+          LOG_URL: ${{ github.event.deployment_status.target_url }}
+        run: |
+          curl -sS -X POST "$SLACK_WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -d "{\"text\":\":rotating_light: Deploy de *produção* falhou (\`${SHA:0:8}\`). Nada novo chega em prod até resolver. Log: $LOG_URL\"}" \
+            || echo "Slack falhou — a issue já foi aberta, seguindo."
+
+  resolver:
+    name: Fechar alerta
+    runs-on: ubuntu-latest
+    # Deploy de prod voltou a passar → fecha o alerta. Sem isto a issue fica
+    # aberta pra sempre e o time aprende a ignorá-la.
+    if: >
+      github.event.deployment_status.state == 'success' &&
+      startsWith(github.event.deployment.environment, 'Production') &&
+      endsWith(github.event.deployment.environment, 'web')
+    steps:
+      - name: Fechar issues de alerta abertas
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.deployment.sha }}
+        run: |
+          set -euo pipefail
+          ABERTAS=$(gh issue list --repo "$REPO" --state open --label "$LABEL" \
+            --limit 20 --json number --jq '.[].number')
+          if [ -z "$ABERTAS" ]; then
+            echo "Nenhum alerta aberto."
+            exit 0
+          fi
+          for n in $ABERTAS; do
+            gh issue close "$n" --repo "$REPO" \
+              --comment "✅ Deploy de produção voltou a passar em \`${SHA:0:8}\` — fechando automaticamente."
+          done
