@@ -1,4 +1,5 @@
 import type { Anthropic } from "@anthropic-ai/sdk";
+import { createHash } from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
 import { AGENT_TOOLS } from "./tools";
 import { executeToolHandler } from "./tool-handlers";
@@ -755,17 +756,19 @@ export async function runPassiveAnalysis(
     ? PASSIVE_SYSTEM_PROMPT_LOCACAO
     : PASSIVE_SYSTEM_PROMPT;
 
-  const unresolvedComments = await prisma.contractComment.findMany({
-    where: {
-      contractId: params.contractId,
-      authorType: "ai",
-      resolved: false,
-    },
-    orderBy: { createdAt: "desc" },
-    select: { text: true },
-    take: MAX_AI_UNRESOLVED_COMMENTS,
+  // Cap e budget ANTES do fetch do Drive: um contrato no cap/estourado NÃO
+  // pode pagar uma leitura de Drive por poll de 90s por aba aberta pra sempre
+  // (quota compartilhada com export/versão/PDF). O cap usa count() — os TEXTOS
+  // dos comentários só são buscados depois do hash-skip, quando a análise vai
+  // rodar de fato (alimentam o pendingBlock do prompt).
+  const unresolvedFilter = {
+    contractId: params.contractId,
+    authorType: "ai",
+    resolved: false,
+  } as const;
+  const existingUnresolved = await prisma.contractComment.count({
+    where: unresolvedFilter,
   });
-  const existingUnresolved = unresolvedComments.length;
   if (existingUnresolved >= MAX_AI_UNRESOLVED_COMMENTS) {
     return {
       findings: [],
@@ -787,59 +790,92 @@ export async function runPassiveAnalysis(
     throw err;
   }
 
-  // Skip-no-change vale SÓ pra `edit`. NÃO estender pro `open`: edições feitas
-  // direto no iframe do Google Docs só entram no ContractChangeLog via o watch
-  // do Drive, que é best-effort e pode estar expirado/atrasado — então "sem
-  // changelog novo" NÃO garante "sem mudança". No `open` a análise relê o texto
-  // vivo do Drive (getDocPlainText) e roda os quickChecks determinísticos, que é
-  // exatamente o que pega uma edição externa sem changelog. Pular o `open` fazia
-  // uma edição arriscada passar sem nenhum comentário. (Corte de custo do `open`
-  // deve vir de comparar hash do doc vivo, não de confiar no changelog.)
-  if (params.trigger === "edit") {
-    const lastValidation = await prisma.contractChangeLog.findFirst({
-      where: { contractId: params.contractId, action: "validation" },
-      orderBy: { createdAt: "desc" },
-      select: { createdAt: true },
-    });
-    if (lastValidation) {
-      const newerEdit = await prisma.contractChangeLog.findFirst({
-        where: {
-          contractId: params.contractId,
-          action: { not: "validation" },
-          createdAt: { gt: lastValidation.createdAt },
-        },
-        select: { id: true },
-      });
-      if (!newerEdit) {
-        return {
-          findings: [],
-          commentsCreated: 0,
-          modelUsed: "skipped-no-change",
-        };
-      }
-    }
-  }
-
+  // Texto vivo GUARDADO: uma falha do Drive (OAuth invalid_grant recorrente,
+  // 429 de quota) não pode virar 500 em loop no poll de 90s de cada aba
+  // aberta — retorna 200 "drive-unavailable" e o próximo poll tenta de novo.
   let htmlContent: string;
   if (contract.googleDocId) {
-    const { getDocPlainText } = await import("@/lib/google/docs");
-    htmlContent = await getDocPlainText(contract.googleDocId);
+    try {
+      const { getDocPlainText } = await import("@/lib/google/docs");
+      htmlContent = await getDocPlainText(contract.googleDocId);
+    } catch (err) {
+      console.error("[runPassiveAnalysis] getDocPlainText falhou:", err);
+      return { findings: [], commentsCreated: 0, modelUsed: "drive-unavailable" };
+    }
   } else {
     htmlContent = params.htmlOverride || contract.htmlContent || "";
   }
+
+  // Skip-no-change por HASH DO CONTEÚDO ANALISADO — vale pra `open` E `edit`.
+  // Substitui o skip por ChangeLog do `edit`, que era duplamente errado:
+  // (a) edições no iframe do Drive não geram ChangeLog confiável, então
+  //     "sem changelog novo" fazia o poll de 90s skipar MUDANÇA REAL;
+  // (b) o `open` re-rodava Sonnet a cada abertura mesmo sem mudança alguma.
+  //
+  // O hash cobre texto E dataJson: os quickChecks e o prompt comparam os dois
+  // — mudar uma parcela na aba Dados sem tocar no texto TAMBÉM exige re-análise.
+  //
+  // Carimbo por TIER + hash:
+  //   `deep:`  — passe completo do open (Sonnet);
+  //   `light:` — passe do edit (Haiku) — não suprime o deep do próximo open;
+  //   `err:`   — LLM respondeu 200 mas ILEGÍVEL (JSON truncado): o poll de
+  //              90s para de re-pagar o LLM no mesmo conteúdo (edit skipa),
+  //              mas o próximo open re-tenta o passe deep (err ≠ deep).
+  // `approve` fica fora (gate roda quickChecks sempre; não carimba).
+  const contentHash = createHash("sha1")
+    .update(htmlContent)
+    .update("\0")
+    .update(JSON.stringify(contract.dataJson ?? null))
+    .digest("hex");
+  const stamped = contract.lastAnalyzedTextHash; // formato `${tier}:${hash}`
+  const stampedHash = stamped?.slice(stamped.indexOf(":") + 1) ?? null;
+  const stampedDeep = stamped?.startsWith("deep:") ?? false;
+  if (params.trigger === "edit" && stampedHash === contentHash) {
+    return { findings: [], commentsCreated: 0, modelUsed: "skipped-no-change" };
+  }
+  if (params.trigger === "open" && stampedDeep && stampedHash === contentHash) {
+    return { findings: [], commentsCreated: 0, modelUsed: "skipped-no-change" };
+  }
+
+  // Textos dos comentários pendentes (pro pendingBlock) — só no caminho em
+  // que a análise roda.
+  const unresolvedComments = await prisma.contractComment.findMany({
+    where: unresolvedFilter,
+    orderBy: { createdAt: "desc" },
+    select: { text: true },
+    take: MAX_AI_UNRESOLVED_COMMENTS,
+  });
 
   const quick: QuickFinding[] = quickChecks(contract.dataJson, htmlContent);
   const quickFindings: PassiveFinding[] = quick.map((q) => ({ ...q, source: "quickChecks" }));
 
   let llmFindings: PassiveFinding[] = [];
   let modelUsed = "quickChecks-only";
+  let llmFailed = false;
+  // Decide o TIER do carimbo: resposta parseada → deep/light; 200 com JSON
+  // truncado/ilegível → carimbo `err:` (corta o loop do poll sem suprimir o
+  // passe deep do próximo open). Ver o bloco de carimbo no fim da função.
+  let llmParsed = false;
+  // Idem pra persistência: findings computados mas upsert falho (Neon
+  // transiente) não podem carimbar — o próximo run re-tenta.
+  let upsertFailed = false;
 
   if (params.trigger === "approve") {
     // Nothing to do — /approve route handles validation
   } else {
+    // `open` = passe deep (default Sonnet), agora com env DEDICADO
+    // (ANTHROPIC_PASSIVE_OPEN_MODEL). Antes pegava carona no ANTHROPIC_MODEL
+    // (env do chat) — impossível ajustar o custo do passivo sem mexer no chat.
+    // O skip-por-hash acima já elimina o custo das reaberturas sem mudança —
+    // que era onde o dinheiro vazava.
+    // `||` (não `??`): env setada como string VAZIA não pode engolir o
+    // fallback pro ANTHROPIC_MODEL configurado.
     const passiveModel =
       params.trigger === "open"
-        ? resolveModel(process.env.ANTHROPIC_MODEL, SONNET_MODEL)
+        ? resolveModel(
+            process.env.ANTHROPIC_PASSIVE_OPEN_MODEL || process.env.ANTHROPIC_MODEL,
+            SONNET_MODEL
+          )
         : resolveModel(process.env.ANTHROPIC_PASSIVE_MODEL, HAIKU_MODEL);
     modelUsed = passiveModel;
 
@@ -911,12 +947,14 @@ export async function runPassiveAnalysis(
           try {
             const parsed = JSON.parse(match[0]) as { findings?: PassiveFinding[] };
             if (Array.isArray(parsed.findings)) {
+              llmParsed = true;
               llmFindings = parsed.findings
                 .filter((f) => f && f.selectedText && htmlContent.includes(f.selectedText))
                 .map((f) => ({ ...f, source: "llm" as const }));
             }
           } catch {
-            // Invalid JSON — ignore and fall through
+            // Invalid JSON — ignore and fall through (llmParsed fica false:
+            // resposta ilegível não pode carimbar o hash)
           }
         }
       }
@@ -935,6 +973,7 @@ export async function runPassiveAnalysis(
         errorMessage: err instanceof Error ? err.message : String(err),
       });
       console.error("[runPassiveAnalysis] LLM call failed:", err);
+      llmFailed = true;
     }
   }
 
@@ -969,6 +1008,7 @@ export async function runPassiveAnalysis(
       commentsCreated++;
     } catch (err) {
       console.error("[runPassiveAnalysis] Failed to upsert comment:", err);
+      upsertFailed = true;
     }
   }
 
@@ -988,6 +1028,27 @@ export async function runPassiveAnalysis(
       source: "ai",
     },
   });
+
+  // Carimba quando o LLM RESPONDEU e os upserts persistiram; nunca em run
+  // escopado (parcial) nem approve (não roda LLM). Falha de rede/5xx
+  // (llmFailed) não carimba — transitória, o próximo run re-tenta.
+  // Tier: open → `deep:`; edit → `light:` (raso não suprime o deep);
+  // 200 ILEGÍVEL (JSON truncado — pode ser DETERMINÍSTICO) → `err:`, que
+  // corta o loop do poll (edit skipa) mas deixa o open re-tentar (err ≠ deep).
+  // CAS: o updateMany condiciona no valor LIDO — duas análises concorrentes
+  // (duas abas) não deixam o hash de um texto mais VELHO sobrescrever o novo.
+  const isScoped = Boolean(params.scope?.changedText);
+  if (params.trigger !== "approve" && !isScoped && !llmFailed && !upsertFailed) {
+    const tier = !llmParsed ? "err" : params.trigger === "open" ? "deep" : "light";
+    await prisma.contract
+      .updateMany({
+        where: { id: params.contractId, lastAnalyzedTextHash: stamped },
+        data: { lastAnalyzedTextHash: `${tier}:${contentHash}` },
+      })
+      .catch((err) =>
+        console.error("[runPassiveAnalysis] hash update falhou:", err)
+      );
+  }
 
   return { findings: allFindings, commentsCreated, modelUsed };
 }
