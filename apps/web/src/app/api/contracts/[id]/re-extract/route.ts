@@ -143,12 +143,25 @@ export async function POST(
 
   const fieldsCount = Object.keys(extracted).length;
 
+  // GUARD extração vazia: o extractor engole erro do Gemini e devolve {} —
+  // uma indisponibilidade transitória não pode APAGAR os dados que o usuário
+  // já tem (SalesForm/Contract.dataJson viravam {} e a aba Dados esvaziava,
+  // com resposta ok:true). Sem dados novos, NADA é persistido.
+  if (fieldsCount === 0) {
+    return NextResponse.json(
+      {
+        error:
+          "A extração não retornou dados (falha temporária da IA ou documento ilegível). Nada foi alterado — tente novamente.",
+      },
+      { status: 502 }
+    );
+  }
+
   // Re-deriva o nome denormalizado do card (Deal.clientName) do dataJson novo.
   // Sem isto, uma re-extração que finalmente trouxe o comprador deixaria o
   // kanban com o nome velho/vazio (o card não lê mais o dataJson ao vivo).
-  // GUARD extração vazia: o extractor engole erro do Gemini e devolve {} —
-  // uma indisponibilidade transitória não pode APAGAR o nome do card (nem
-  // faz sentido derivar de {}). Com dados, grava o derivado (null limpa).
+  // Sempre grava o derivado (null limpa) — coerente com o dataJson, que é
+  // substituído na mesma transação.
   const deriveMeta =
     dealKind === "locacao" ? deriveLocacaoDealMetadata : deriveDealMetadata;
   const { clientName } = deriveMeta(extracted, {
@@ -171,14 +184,10 @@ export async function POST(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data: { dataJson: extracted as any },
     }),
-    ...(fieldsCount > 0
-      ? [
-          prisma.deal.update({
-            where: { id: contract.dealId },
-            data: { clientName },
-          }),
-        ]
-      : []),
+    prisma.deal.update({
+      where: { id: contract.dealId },
+      data: { clientName },
+    }),
   ]);
 
   await audit(

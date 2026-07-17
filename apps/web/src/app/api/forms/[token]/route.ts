@@ -213,13 +213,13 @@ export async function PATCH(
   }
 
   // Sincroniza o nome denormalizado do card (Deal.clientName) — o kanban não
-  // lê mais form.dataJson ao vivo. Helper compartilhado com locação e subtoken;
-  // só roda quando o PATCH trouxe dataJson (PATCH só de título não deriva nada).
-  if (body.dataJson) {
+  // lê mais form.dataJson ao vivo. Helper compartilhado com locação e subtoken.
+  // Roda quando o PATCH trouxe dataJson OU no finalize: o dedupConjuges do
+  // finalize muda o compradores[] persistido mesmo num PATCH só de status.
+  if (body.dataJson || isFinalizing) {
     await syncDealClientName({
       formId: form.id,
       schemaType: form.schemaType,
-      previousData: currentData,
       mergedData: mergedData as Record<string, unknown>,
     });
   }

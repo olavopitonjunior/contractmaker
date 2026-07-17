@@ -168,7 +168,6 @@ export async function PATCH(
     await syncDealClientName({
       formId: participant.formId,
       schemaType: participant.form.schemaType,
-      previousData: currentData,
       mergedData: mergeOutcome.merged as Record<string, unknown>,
     });
   }

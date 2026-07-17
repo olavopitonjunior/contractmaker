@@ -12,15 +12,18 @@ import {
  * precisa passar por aqui.
  *
  * - Deriva por schemaType (locacao_* → variante de locação).
- * - Sempre grava o derivado, inclusive null (comprador removido sai do card).
- * - SKIP quando o nome não mudou: é hot path anônimo (autosave por etapa) —
- *   comparar prev×next é CPU puro e evita um write de Deal por keystroke.
+ * - Sempre converge pro derivado, inclusive null (comprador removido sai do
+ *   card).
+ * - SKIP comparando com o clientName GRAVADO no Deal (leitura indexada por
+ *   formId @unique): hot path anônimo não ganha um write por keystroke, e a
+ *   comparação contra o estado real é AUTO-CURATIVA — um write anterior que
+ *   falhou (best-effort) é reparado no próximo autosave. (Comparar
+ *   prev×next do dataJson não cura: os dois derivam do que já persistiu.)
  * - Best-effort: nunca lança (autosave não pode falhar por causa do card).
  */
 export async function syncDealClientName(opts: {
   formId: string;
   schemaType?: string | null;
-  previousData: Record<string, unknown>;
   mergedData: Record<string, unknown>;
 }): Promise<void> {
   try {
@@ -28,10 +31,13 @@ export async function syncDealClientName(opts: {
       ? deriveLocacaoDealMetadata
       : deriveDealMetadata;
     const next = derive(opts.mergedData, { fallbackTitle: "" }).clientName;
-    const prev = derive(opts.previousData, { fallbackTitle: "" }).clientName;
-    if (next === prev) return;
-    await prisma.deal.updateMany({
+    const deal = await prisma.deal.findUnique({
       where: { formId: opts.formId },
+      select: { id: true, clientName: true },
+    });
+    if (!deal || deal.clientName === next) return;
+    await prisma.deal.update({
+      where: { id: deal.id },
       data: { clientName: next },
     });
   } catch (err) {

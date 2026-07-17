@@ -161,11 +161,10 @@ export async function PATCH(
 
   // Sincroniza Deal.clientName (locatário titular) — helper compartilhado
   // com a esteira de vendas e o subtoken por parte.
-  if (body.dataJson) {
+  if (body.dataJson || isFinalizing) {
     await syncDealClientName({
       formId: form.id,
       schemaType: form.schemaType,
-      previousData: currentData,
       mergedData: mergedData as Record<string, unknown>,
     });
   }
