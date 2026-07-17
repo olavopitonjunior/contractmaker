@@ -3,7 +3,7 @@ import { z } from "zod";
 import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 import {
-  signParticipantToken,
+  newParticipantToken,
   type ParticipantRole,
 } from "@/lib/forms/participant-token";
 import { audit } from "@/lib/security/audit";
@@ -83,14 +83,6 @@ export async function POST(
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
 
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) {
-    return NextResponse.json(
-      { error: "AUTH_SECRET não configurado" },
-      { status: 500 },
-    );
-  }
-
   const form = await prisma.salesForm.findFirst({
     where: { token: params.token, orgId: ctx.orgId },
     select: { id: true, token: true, schemaType: true },
@@ -136,29 +128,12 @@ export async function POST(
   const created: typeof existing = [];
 
   for (const role of toCreate) {
-    // Cria row vazio primeiro pra ter o `participant.id` que vai assinar
-    // o token (payload referencia o ID pra invalidação por regenerate).
-    const partial = await prisma.salesFormParticipant.create({
-      data: {
-        formId: form.id,
-        role,
-        partyIndex: 0,
-        token: "", // placeholder, atualiza na linha abaixo
-        tokenExp: new Date(),
-      },
-    });
-    const { token, exp } = signParticipantToken(
-      {
-        participantId: partial.id,
-        formId: form.id,
-        role,
-        partyIndex: 0,
-      },
-      secret,
-    );
-    const final = await prisma.salesFormParticipant.update({
-      where: { id: partial.id },
-      data: { token, tokenExp: exp },
+    // Um create só: o token não depende mais do `participant.id` (era o payload
+    // do JWT). Antes isso exigia criar com `token: ""` e atualizar em seguida —
+    // e como `token` é @unique, dois creates concorrentes colidiam no "".
+    const { token, exp } = newParticipantToken();
+    const final = await prisma.salesFormParticipant.create({
+      data: { formId: form.id, role, partyIndex: 0, token, tokenExp: exp },
     });
     created.push(final);
   }

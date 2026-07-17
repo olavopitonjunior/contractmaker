@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db/prisma";
 import { resolveAllRequiredFields } from "@/lib/forms/presets";
 import {
-  verifyParticipantToken,
+  resolveParticipantToken,
   type ParticipantRole,
 } from "@/lib/forms/participant-token";
 import {
@@ -19,24 +19,13 @@ export default async function PublicParticipantFormPage({
 }: {
   params: { subtoken: string };
 }) {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) {
-    // Sem AUTH_SECRET o JWT não pode ser verificado — devolve notFound em
-    // vez de 500 pra não vazar info de config.
-    return notFound();
-  }
+  const resolved = await resolveParticipantToken(params.subtoken);
+  if (!resolved.ok) return notFound();
 
-  const verify = verifyParticipantToken(params.subtoken, secret);
-  if (!verify.ok) return notFound();
-
-  const participant = await prisma.salesFormParticipant.findFirst({
-    where: {
-      id: verify.payload.participantId,
-      token: params.subtoken,
-    },
+  const participant = await prisma.salesFormParticipant.findUniqueOrThrow({
+    where: { id: resolved.participant.id },
     include: { form: true },
   });
-  if (!participant) return notFound();
 
   // O form-pai fechou: o link por parte para junto. (Diferente do
   // `participant.completedAt`, que só diz que ESTA parte terminou e continua

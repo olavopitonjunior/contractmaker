@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import {
-  signParticipantToken,
+  newParticipantToken,
   type ParticipantRole,
 } from "@/lib/forms/participant-token";
 import { formClosedResponse } from "@/lib/forms/form-gate";
@@ -37,14 +37,6 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { token: string } },
 ) {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) {
-    return NextResponse.json(
-      { error: "AUTH_SECRET não configurado" },
-      { status: 500 },
-    );
-  }
-
   const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
   const limited = await rateLimit({
     identifier: `participants-from-main:${params.token}:${ip}`,
@@ -107,22 +99,9 @@ export async function POST(
   const created: typeof existing = [];
 
   for (const role of requested.filter((r) => !existingRoles.has(r))) {
-    const partial = await prisma.salesFormParticipant.create({
-      data: {
-        formId: form.id,
-        role,
-        partyIndex: 0,
-        token: "",
-        tokenExp: new Date(),
-      },
-    });
-    const { token, exp } = signParticipantToken(
-      { participantId: partial.id, formId: form.id, role, partyIndex: 0 },
-      secret,
-    );
-    const final = await prisma.salesFormParticipant.update({
-      where: { id: partial.id },
-      data: { token, tokenExp: exp },
+    const { token, exp } = newParticipantToken();
+    const final = await prisma.salesFormParticipant.create({
+      data: { formId: form.id, role, partyIndex: 0, token, tokenExp: exp },
     });
     created.push(final);
   }
@@ -148,15 +127,7 @@ export async function POST(
   const all = await Promise.all(
     [...existing, ...created].map(async (p) => {
       if (p.tokenExp.getTime() > now) return p;
-      const { token, exp } = signParticipantToken(
-        {
-          participantId: p.id,
-          formId: form.id,
-          role: p.role as ParticipantRole,
-          partyIndex: p.partyIndex,
-        },
-        secret,
-      );
+      const { token, exp } = newParticipantToken();
       return prisma.salesFormParticipant.update({
         where: { id: p.id },
         data: { token, tokenExp: exp },
