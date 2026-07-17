@@ -57,11 +57,40 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       // Propaga o desfecho pro status da proposta (idempotente via CAS).
       if (result.remoteStatus === "closed" || result.remoteStatus === "finished") {
         await onProposalEnvelopeClosed(env.id);
-      } else if (
-        env.signers.some((s) => s.status === "refused") ||
-        result.remoteStatus === "canceled"
-      ) {
-        await onProposalEnvelopeRefused(env.id);
+      } else {
+        // Leitura FRESCA pós-sync: o syncEnvelopeState acabou de gravar os
+        // status dos signers — o env.signers em memória é o snapshot PRÉ-sync
+        // e não veria uma recusa recém-descoberta (o hint sairia null e a
+        // recusa seria atribuída ao proponente, terminal errado sem correção).
+        // Falha transiente no lookup NÃO vira erro do sync (que já deu
+        // certo) — mas também NÃO propaga recusa com hint null (num envelope
+        // canceled isso cravaria o terminal ERRADO, recusada_proponente, sem
+        // correção possível). Pula a propagação desta tentativa; o próximo
+        // sync re-tenta com o DB são.
+        let refusedSigner: { sourceKind: string | null } | null = null;
+        let lookupFailed = false;
+        try {
+          refusedSigner = await prisma.envelopeSigner.findFirst({
+            where: { envelopeId: env.id, status: "refused" },
+            select: { sourceKind: true },
+          });
+        } catch (err) {
+          lookupFailed = true;
+          console.error("[proposals/sync] lookup do signer recusado falhou:", err);
+        }
+        // Na via REDUZIDA o hint é irrelevante (refusedBy é sempre o
+        // proprietário) — lookup falho não pode adiar o terminal correto lá.
+        if (
+          refusedSigner ||
+          (result.remoteStatus === "canceled" &&
+            (env.via === "reduzida" || !lookupFailed))
+        ) {
+          // Mesmo hint do caminho de webhook: sourceKind desambigua a via
+          // ÚNICA (proprietário → recusada_vendedor).
+          await onProposalEnvelopeRefused(env.id, {
+            refusedSourceKind: refusedSigner?.sourceKind ?? null,
+          });
+        }
       }
       results.push({ envelopeId: env.id, via: env.via, ...result });
     } catch (err) {

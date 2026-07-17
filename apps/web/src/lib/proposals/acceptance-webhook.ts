@@ -3,6 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
 import { advanceProposalStatus } from "./status";
 import { buildAcceptanceProof, buildAcceptanceMessage } from "./acceptance-proof";
+import { notifyProposalMilestone } from "./notify-proposal";
 
 /**
  * Ponte webhook ClickSign → Proposal para o Aceite via WhatsApp
@@ -79,11 +80,11 @@ export async function processProposalAcceptanceEvent(
   const proposal = signer
     ? await prisma.proposal.findUnique({
         where: { id: signer.proposalId },
-        select: { id: true, title: true, token: true, instrument: true, validUntil: true },
+        select: { id: true, orgId: true, userId: true, status: true, title: true, token: true, instrument: true, validUntil: true },
       })
     : await prisma.proposal.findFirst({
         where: { acceptanceClicksignId: input.acceptanceId, ...orgScope },
-        select: { id: true, title: true, token: true, instrument: true, validUntil: true },
+        select: { id: true, orgId: true, userId: true, status: true, title: true, token: true, instrument: true, validUntil: true },
       });
   if (!proposal) {
     return { ok: true, handled: false, phase: input.phase, unknownAcceptance: true };
@@ -135,6 +136,39 @@ export async function processProposalAcceptanceEvent(
       // (terceiro) é registrado na linha dele, mas não redefine o desfecho —
       // antes, com 1 aceite de qualquer um a proposta virava "completa".
       if (!isProponente) {
+        // Sino por-signatário: um proprietário aceitou o termo dele. Suffix
+        // obrigatório — sem ele o aceite do 2º proprietário seria engolido
+        // pelo unique (type, batchId). GATE: bloqueia SÓ terminais NEGATIVOS
+        // (proposta morta) — aceite do proprietário DEPOIS de completa/
+        // convertida é a ordem normal do Aceite multi-termo (termos paralelos)
+        // e falha_envio segue viva/reenviável; nesses casos o sino toca.
+        const DEAD_FOR_PARTY_ACCEPT = new Set([
+          "cancelada",
+          "expirada",
+          "recusada_proponente",
+          "recusada_vendedor",
+        ]);
+        if (!DEAD_FOR_PARTY_ACCEPT.has(proposal.status)) {
+          // Body condiciona ao momento: pós-completa/convertida, "aguardando
+          // o proponente" seria falso — o aceite é confirmação de arquivo.
+          const afterCompletion =
+            proposal.status === "completa" || proposal.status === "convertida";
+          waitUntil(
+            notifyProposalMilestone({
+              proposalId: proposal.id,
+              orgId: proposal.orgId,
+              userId: proposal.userId,
+              kind: "accepted_party",
+              dedupeSuffix: signer!.id,
+              ...(afterCompletion
+                ? {
+                    bodyOverride:
+                      "Um participante registrou o aceite do termo dele. A proposta já está completa — aceite arquivado no histórico.",
+                  }
+                : {}),
+            })
+          );
+        }
         return { ok: true, handled: true, proposalId: proposal.id, phase: input.phase };
       }
 
@@ -145,14 +179,39 @@ export async function processProposalAcceptanceEvent(
       const acceptedAtReal = facts.completedAt ? new Date(facts.completedAt) : new Date();
       const acceptedAtValid = !Number.isNaN(acceptedAtReal.getTime());
       if (proposal.validUntil && acceptedAtValid && acceptedAtReal > proposal.validUntil) {
-        await advanceProposalStatus(proposal.id, "expirada", { expiredAt: new Date() });
+        const adv = await advanceProposalStatus(proposal.id, "expirada", { expiredAt: new Date() });
+        // Sino SÓ quando a transição de fato aconteceu: evento tardio/replay
+        // numa proposta cancelada/convertida não pode tocar sino falso (e
+        // consumiria o batchId de um marco legítimo futuro).
+        if (adv.moved) {
+          waitUntil(
+            notifyProposalMilestone({
+              proposalId: proposal.id,
+              orgId: proposal.orgId,
+              userId: proposal.userId,
+              kind: "expired",
+            })
+          );
+        }
         return { ok: true, handled: true, proposalId: proposal.id, phase: input.phase };
       }
 
       // O proponente aceitou dentro do prazo: proposta completa. Reusa as
       // transições existentes em vez de alargar ALLOWED_FROM.
       await advanceProposalStatus(proposal.id, "assinada_proponente");
-      await advanceProposalStatus(proposal.id, "completa", { completedAt: new Date() });
+      const advCompleta = await advanceProposalStatus(proposal.id, "completa", {
+        completedAt: new Date(),
+      });
+      if (advCompleta.moved) {
+        waitUntil(
+          notifyProposalMilestone({
+            proposalId: proposal.id,
+            orgId: proposal.orgId,
+            userId: proposal.userId,
+            kind: "completed",
+          })
+        );
+      }
 
       // Comprovante durável — o requisito central do modo Aceite. Fire-and-forget
       // (idempotente por dossierUrl). O texto aceito é reconstruído idêntico ao
@@ -184,14 +243,26 @@ export async function processProposalAcceptanceEvent(
       // comprador comprometido na mão → estado quente (recusada_vendedor).
       // Antes, sem o guard, a recusa de qualquer terceiro virava
       // "recusada_proponente" — atribuição errada do desfecho.
-      if (isProponente) {
-        await advanceProposalStatus(proposal.id, "recusada_proponente", {
-          refusedAt: new Date(),
-        });
-      } else {
-        await advanceProposalStatus(proposal.id, "recusada_vendedor", {
-          refusedAt: new Date(),
-        });
+      {
+        const refusedBy = isProponente ? ("proponente" as const) : ("vendedor" as const);
+        const advRef = await advanceProposalStatus(
+          proposal.id,
+          isProponente ? "recusada_proponente" : "recusada_vendedor",
+          { refusedAt: new Date() }
+        );
+        if (advRef.moved) {
+          // Suffix por signatário: recusas de partes diferentes = sinos distintos.
+          waitUntil(
+            notifyProposalMilestone({
+              proposalId: proposal.id,
+              orgId: proposal.orgId,
+              userId: proposal.userId,
+              kind: "refused",
+              refusedBy,
+              dedupeSuffix: signer?.id,
+            })
+          );
+        }
       }
       break;
 
@@ -200,7 +271,19 @@ export async function processProposalAcceptanceEvent(
       // O termo de um terceiro expirar não mata o negócio — o proponente ainda
       // pode aceitar. Sem o guard, a expiração de qualquer termo terminava tudo.
       if (isProponente) {
-        await advanceProposalStatus(proposal.id, "expirada", { expiredAt: new Date() });
+        const advExp = await advanceProposalStatus(proposal.id, "expirada", {
+          expiredAt: new Date(),
+        });
+        if (advExp.moved) {
+          waitUntil(
+            notifyProposalMilestone({
+              proposalId: proposal.id,
+              orgId: proposal.orgId,
+              userId: proposal.userId,
+              kind: "expired",
+            })
+          );
+        }
       }
       break;
 
