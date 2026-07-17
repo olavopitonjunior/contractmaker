@@ -119,11 +119,12 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // Título gravado TRIMADO — o dup-check compara contra o armazenado.
       const result = await prisma.$transaction(async (tx) => {
         const form = await tx.salesForm.create({
           data: {
             orgId: ctx.orgId,
-            title: d.title || null,
+            title: trimmedTitle || null,
             schemaType,
             status: "rascunho",
             // Config fiscal/comissão (operador-only) já pré-gravada — o auto-save do
@@ -145,7 +146,7 @@ export async function POST(req: NextRequest) {
             formId: form.id,
             kind: "locacao",
             sourceChannel: DEAL_SOURCE_CHANNEL.FORM_PUBLICO,
-            title: d.title || `Locação - ${form.token.slice(0, 8)}`,
+            title: trimmedTitle || `Locação - ${form.token.slice(0, 8)}`,
             position: dealsInStage,
           },
         });

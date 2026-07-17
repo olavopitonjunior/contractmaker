@@ -38,41 +38,48 @@ export default function NewFormPage() {
 
   async function handleCreate() {
     setLoading(true);
-    let { res, data } = await postForm(idemKey, false);
+    try {
+      let { res, data } = await postForm(idemKey, false);
 
-    // Soft-block do servidor: já existe negócio com este título criado há
-    // pouco (recriação manual de card duplicado). Confirmar cria mesmo assim
-    // — com key NOVA, senão o 409 cacheado na key antiga é replayado.
-    if (res.status === 409 && data?.error === "duplicate_recent") {
-      const createdAt = data.existing?.createdAt
-        ? new Date(data.existing.createdAt)
-        : null;
-      const mins = createdAt
-        ? Math.max(1, Math.round((Date.now() - createdAt.getTime()) / 60000))
-        : null;
-      const proceed = window.confirm(
-        `Já existe um negócio "${data.existing?.title ?? title}" criado há ${
-          mins ?? "poucos"
-        } minuto(s). Deseja criar outro mesmo assim?`,
-      );
-      if (!proceed) {
-        setLoading(false);
-        return;
+      // Soft-block do servidor: já existe negócio com este título criado há
+      // pouco (recriação manual de card duplicado). A key atual acabou de
+      // cachear o 409 — rotaciona JÁ, independente da escolha: sem isso, um
+      // "Cancelar" deixaria toda tentativa seguinte (mesmo com outro título)
+      // replayando o 409 stale por 24h.
+      if (res.status === 409 && data?.error === "duplicate_recent") {
+        const freshKey = crypto.randomUUID();
+        setIdemKey(freshKey);
+        const createdAt = data.existing?.createdAt
+          ? new Date(data.existing.createdAt)
+          : null;
+        const mins = createdAt
+          ? Math.max(1, Math.round((Date.now() - createdAt.getTime()) / 60000))
+          : null;
+        const proceed = window.confirm(
+          `Já existe um negócio "${data.existing?.title ?? title}" criado há ${
+            mins ?? "poucos"
+          } minuto(s). Deseja criar outro mesmo assim?`,
+        );
+        if (!proceed) return;
+        ({ res, data } = await postForm(freshKey, true));
       }
-      const freshKey = crypto.randomUUID();
-      setIdemKey(freshKey);
-      ({ res, data } = await postForm(freshKey, true));
-    }
 
-    setLoading(false);
-
-    if (res.ok) {
-      const fullUrl = `${window.location.origin}/f/${data.token}`;
-      setCreatedUrl(fullUrl);
-      setCreatedToken(data.token);
-      toast.success("Formulário criado!");
-    } else {
-      toast.error(data.error || "Erro ao criar formulário");
+      if (res.ok) {
+        const fullUrl = `${window.location.origin}/f/${data.token}`;
+        setCreatedUrl(fullUrl);
+        setCreatedToken(data.token);
+        toast.success("Formulário criado!");
+      } else {
+        // Qualquer erro pode ter sido cacheado sob a key — rotaciona pra
+        // próxima tentativa não replayar a resposta stale.
+        setIdemKey(crypto.randomUUID());
+        toast.error(data.error || "Erro ao criar formulário");
+      }
+    } catch {
+      setIdemKey(crypto.randomUUID());
+      toast.error("Erro de conexão ao criar formulário");
+    } finally {
+      setLoading(false);
     }
   }
 

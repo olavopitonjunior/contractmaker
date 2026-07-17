@@ -12,10 +12,21 @@ import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { assertFeatureEnabled, ModuleDisabledError } from "@/lib/modules/guard";
 import { FEATURE, MODULE } from "@/lib/modules/catalog";
+import { z } from "zod";
 
 // Janela do soft-block de título repetido (recriação manual de card).
 // Não-exportado: route.ts só pode exportar handlers/config no App Router.
 const DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
+
+// Validação Zod (convenção do repo). passthrough: clientes antigos (Newton)
+// podem mandar campos extras sem quebrar.
+const postBodySchema = z
+  .object({
+    title: z.string().optional(),
+    // Confirma a criação apesar do soft-block de título repetido (409).
+    force: z.boolean().optional(),
+  })
+  .passthrough();
 
 export async function POST(request: NextRequest) {
   const auth = await requireApiAuth(request, { scope: "documents:rw" });
@@ -32,7 +43,21 @@ export async function POST(request: NextRequest) {
     throw e;
   }
 
-  const body = await request.json().catch(() => ({}));
+  const rawBody = await request.json().catch(() => ({}));
+  const parsedBody = postBodySchema.safeParse(rawBody);
+  if (!parsedBody.success) {
+    return NextResponse.json(
+      {
+        error: "invalid_body",
+        issues: parsedBody.error.issues.map((i) => ({
+          path: i.path.join("."),
+          message: i.message,
+        })),
+      },
+      { status: 400 },
+    );
+  }
+  const body = parsedBody.data;
   const idempotencyKey = request.headers.get("x-idempotency-key");
 
   const result = await withIdempotency({
@@ -53,9 +78,12 @@ export async function POST(request: NextRequest) {
       // "intenção" nova). Com título repetido em janela curta, devolve 409 pro
       // cliente confirmar; re-POST com `force: true` (e key NOVA — o 409 fica
       // cacheado na key antiga) cria mesmo assim.
-      const trimmedTitle =
-        typeof body.title === "string" ? body.title.trim() : "";
-      if (trimmedTitle && body.force !== true && pipeline) {
+      //
+      // Só pra clientes INTERATIVOS (sessão): callers bearer (Newton) não têm
+      // o confirm de UI — pra eles o contrato "POST sempre cria" se mantém.
+      const trimmedTitle = body.title?.trim() ?? "";
+      const isInteractiveCaller = auth.actor.via !== "newton";
+      if (trimmedTitle && body.force !== true && isInteractiveCaller && pipeline) {
         const recentDup = await prisma.deal.findFirst({
           where: {
             pipelineId: pipeline.id,
@@ -74,10 +102,12 @@ export async function POST(request: NextRequest) {
         }
       }
 
+      // Título gravado TRIMADO — o dup-check compara contra o armazenado; um
+      // espaço acidental no input não pode furar o soft-block.
       const form = await prisma.salesForm.create({
         data: {
           orgId: auth.org.id,
-          title: body.title || null,
+          title: trimmedTitle || null,
           schemaType: "compra_venda_v1",
           dataJson: {},
           status: "rascunho",
@@ -100,8 +130,7 @@ export async function POST(request: NextRequest) {
             userId: auth.actor.effectiveUserId,
             formId: form.id,
             sourceChannel: DEAL_SOURCE_CHANNEL.FORM_PUBLICO,
-            title:
-              body.title || `Negocio - ${form.token.slice(0, 8)}`,
+            title: trimmedTitle || `Negocio - ${form.token.slice(0, 8)}`,
             position: dealsInStage,
           },
         });
