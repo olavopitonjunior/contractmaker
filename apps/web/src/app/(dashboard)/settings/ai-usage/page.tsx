@@ -25,7 +25,7 @@ export default async function AIUsagePage() {
   return (
     <div className="space-y-6">
       <AiBudgetCard
-        initial={{ budgetUsd: budget.budgetUsd, spentUsd: budget.spentUsd, pct: budget.pct }}
+        initial={{ budgetUsd: budget.budgetUsd, spentUsd: budget.spentUsd }}
         canEdit={canEditBudget}
       />
       <AIUsageClient />

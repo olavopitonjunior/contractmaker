@@ -15,7 +15,7 @@ export function AiBudgetCard({
   initial,
   canEdit,
 }: {
-  initial: { budgetUsd: number | null; spentUsd: number; pct: number };
+  initial: { budgetUsd: number | null; spentUsd: number };
   canEdit: boolean;
 }) {
   const [budgetUsd, setBudgetUsd] = useState<number | null>(initial.budgetUsd);

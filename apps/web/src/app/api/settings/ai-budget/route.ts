@@ -62,7 +62,7 @@ export async function PUT(req: NextRequest) {
   await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
     action: "AGENT_CONFIG_UPDATE",
     result: "SUCCESS",
-    resourceType: "OrgFinancialSettings",
+    resourceType: "Organization",
     resource: org.id,
     metadata: { field: "aiMonthlyBudgetUsd", value: parsed.data.budgetUsd },
   });

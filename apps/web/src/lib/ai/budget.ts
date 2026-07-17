@@ -77,9 +77,9 @@ export async function getContractBudgetStatus(contractId: string): Promise<Budge
 
 // ────────────────────────────────────────────────────────────────────────────
 // Budget MENSAL da org em USD (E2 governança) — teto configurável em
-// OrgFinancialSettings.aiMonthlyBudgetUsd (null = sem teto). Complementa o
-// budget por contrato: o por-contrato limita um contrato "guloso"; o por-org
-// limita o gasto agregado do tenant no mês.
+// Organization.aiMonthlyBudgetUsd (null = sem teto). Complementa o budget por
+// contrato: o por-contrato limita um contrato "guloso"; o por-org limita o
+// gasto agregado do tenant no mês.
 // ────────────────────────────────────────────────────────────────────────────
 
 /**
@@ -109,7 +109,15 @@ export interface OrgAiBudgetStatus {
   pct: number;
 }
 
-export async function getOrgAiBudgetStatus(orgId: string): Promise<OrgAiBudgetStatus> {
+export async function getOrgAiBudgetStatus(
+  orgId: string,
+  opts: {
+    /** Hot path (assertContractBudget): sem teto → NÃO calcula o gasto (o
+     *  aggregate mensal correria 4×/turn à toa). A UI de settings NÃO passa
+     *  isto — precisa do gasto real mesmo sem teto. Default false. */
+    skipSpendWhenNoCap?: boolean;
+  } = {}
+): Promise<OrgAiBudgetStatus> {
   const org = await prisma.organization.findUnique({
     where: { id: orgId },
     select: { aiMonthlyBudgetUsd: true },
@@ -117,10 +125,7 @@ export async function getOrgAiBudgetStatus(orgId: string): Promise<OrgAiBudgetSt
   const budgetUsd =
     org?.aiMonthlyBudgetUsd != null ? Number(org.aiMonthlyBudgetUsd) : null;
 
-  // Sem teto configurado (caso comum): PULA o aggregate mensal — senão toda
-  // chamada de specialist (até 4/turn) somaria AIUsage do mês inteiro da org
-  // à toa, no caminho quente do chat.
-  if (budgetUsd == null || budgetUsd <= 0) {
+  if ((budgetUsd == null || budgetUsd <= 0) && opts.skipSpendWhenNoCap) {
     return { budgetUsd, spentUsd: 0, pct: 0 };
   }
 
@@ -131,7 +136,7 @@ export async function getOrgAiBudgetStatus(orgId: string): Promise<OrgAiBudgetSt
     _sum: { estimatedCostUsd: true },
   });
   const spentUsd = Number(agg._sum.estimatedCostUsd ?? 0);
-  const pct = Math.min(1, spentUsd / budgetUsd);
+  const pct = budgetUsd && budgetUsd > 0 ? Math.min(1, spentUsd / budgetUsd) : 0;
   return { budgetUsd, spentUsd, pct };
 }
 
@@ -189,7 +194,7 @@ export async function assertContractBudget(contractId: string): Promise<BudgetSt
     });
     const orgId = contract?.deal?.pipeline?.orgId;
     if (orgId) {
-      const orgStatus = await getOrgAiBudgetStatus(orgId);
+      const orgStatus = await getOrgAiBudgetStatus(orgId, { skipSpendWhenNoCap: true });
       await maybeNotifyOrgAiBudget(orgId, orgStatus);
       if (orgStatus.budgetUsd && orgStatus.pct >= 1) {
         throw new OrgAiBudgetExceededError(orgStatus.spentUsd, orgStatus.budgetUsd);
