@@ -10,7 +10,10 @@ import {
   STEP_REQUIRED_FIELDS_LEGACY,
 } from "@/lib/forms/validation";
 import { collectPartyFormatIssues } from "@/lib/forms/field-formats";
-import { SharePartyLinkButton } from "@/components/forms/PartyLinksPanel";
+import {
+  PartyLinksPanel,
+  SharePartyLinkButton,
+} from "@/components/forms/PartyLinksPanel";
 import {
   effectiveRequiredPaths,
   findMissingRequired,
@@ -872,6 +875,15 @@ export function SalesFormWizard({
         />
 
         <Separator />
+
+        {/* Links por parte visíveis de dentro do próprio form (token
+            principal): o painel nasce colapsado em 1 linha + botão "Gerar
+            links por parte" — os SharePartyLinkButton por step continuam
+            como atalho contextual. Subtoken não mostra (finalizeMode
+            "participant" não gera links). */}
+        {finalizeMode === "main" && !readOnly && (
+          <PartyLinksPanel formToken={token} roles={["vendedor", "comprador"]} />
+        )}
       </div>
 
       {/* Sticky bolha de pendências — value-driven (some conforme preenche).

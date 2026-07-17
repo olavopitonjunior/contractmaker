@@ -12,6 +12,21 @@ import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { assertFeatureEnabled, ModuleDisabledError } from "@/lib/modules/guard";
 import { FEATURE, MODULE } from "@/lib/modules/catalog";
+import { z } from "zod";
+
+// Janela do soft-block de título repetido (recriação manual de card).
+// Não-exportado: route.ts só pode exportar handlers/config no App Router.
+const DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
+
+// Validação Zod (convenção do repo). passthrough: clientes antigos (Newton)
+// podem mandar campos extras sem quebrar.
+const postBodySchema = z
+  .object({
+    title: z.string().optional(),
+    // Confirma a criação apesar do soft-block de título repetido (409).
+    force: z.boolean().optional(),
+  })
+  .passthrough();
 
 export async function POST(request: NextRequest) {
   const auth = await requireApiAuth(request, { scope: "documents:rw" });
@@ -28,7 +43,21 @@ export async function POST(request: NextRequest) {
     throw e;
   }
 
-  const body = await request.json().catch(() => ({}));
+  const rawBody = await request.json().catch(() => ({}));
+  const parsedBody = postBodySchema.safeParse(rawBody);
+  if (!parsedBody.success) {
+    return NextResponse.json(
+      {
+        error: "invalid_body",
+        issues: parsedBody.error.issues.map((i) => ({
+          path: i.path.join("."),
+          message: i.message,
+        })),
+      },
+      { status: 400 },
+    );
+  }
+  const body = parsedBody.data;
   const idempotencyKey = request.headers.get("x-idempotency-key");
 
   const result = await withIdempotency({
@@ -37,10 +66,48 @@ export async function POST(request: NextRequest) {
     method: "POST",
     path: "/api/forms",
     handler: async (): Promise<{ status: number; body: unknown }> => {
+      // Form de vendas → pipeline de vendas (kind="venda"). getPipelineByKind
+      // evita pegar o pipeline de locação em orgs com os dois módulos.
+      const pipeline = await getPipelineByKind(auth.org.id, MODULE.VENDAS, {
+        include: { stages: { orderBy: { position: "asc" } } },
+      });
+
+      // Soft-block anti-duplicação: o padrão real observado em prod (caso
+      // "Alexandre Gonçalves", 2026-07-16) é o operador recriar o form minutos
+      // depois — a idempotency key não pega isso (cada tentativa é uma
+      // "intenção" nova). Com título repetido em janela curta, devolve 409 pro
+      // cliente confirmar; re-POST com `force: true` (e key NOVA — o 409 fica
+      // cacheado na key antiga) cria mesmo assim.
+      //
+      // Só pra clientes INTERATIVOS (sessão): callers bearer (Newton) não têm
+      // o confirm de UI — pra eles o contrato "POST sempre cria" se mantém.
+      const trimmedTitle = body.title?.trim() ?? "";
+      const isInteractiveCaller = auth.actor.via !== "newton";
+      if (trimmedTitle && body.force !== true && isInteractiveCaller && pipeline) {
+        const recentDup = await prisma.deal.findFirst({
+          where: {
+            pipelineId: pipeline.id,
+            title: trimmedTitle,
+            archivedAt: null,
+            createdAt: { gte: new Date(Date.now() - DUPLICATE_WINDOW_MS) },
+          },
+          select: { id: true, title: true, createdAt: true },
+          orderBy: { createdAt: "desc" },
+        });
+        if (recentDup) {
+          return {
+            status: 409,
+            body: { error: "duplicate_recent", existing: recentDup },
+          };
+        }
+      }
+
+      // Título gravado TRIMADO — o dup-check compara contra o armazenado; um
+      // espaço acidental no input não pode furar o soft-block.
       const form = await prisma.salesForm.create({
         data: {
           orgId: auth.org.id,
-          title: body.title || null,
+          title: trimmedTitle || null,
           schemaType: "compra_venda_v1",
           dataJson: {},
           status: "rascunho",
@@ -48,12 +115,6 @@ export async function POST(request: NextRequest) {
       });
 
       let dealId: string | null = null;
-      // Form de vendas → pipeline de vendas (kind="venda"). getPipelineByKind
-      // evita pegar o pipeline de locação em orgs com os dois módulos.
-      const pipeline = await getPipelineByKind(auth.org.id, MODULE.VENDAS, {
-        include: { stages: { orderBy: { position: "asc" } } },
-      });
-
       if (pipeline && pipeline.stages.length > 0) {
         const formularioStage =
           pipeline.stages.find((s) => s.name === "Formulário") ??
@@ -69,8 +130,7 @@ export async function POST(request: NextRequest) {
             userId: auth.actor.effectiveUserId,
             formId: form.id,
             sourceChannel: DEAL_SOURCE_CHANNEL.FORM_PUBLICO,
-            title:
-              body.title || `Negocio - ${form.token.slice(0, 8)}`,
+            title: trimmedTitle || `Negocio - ${form.token.slice(0, 8)}`,
             position: dealsInStage,
           },
         });

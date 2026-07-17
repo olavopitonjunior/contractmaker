@@ -16,24 +16,70 @@ export default function NewFormPage() {
   const [loading, setLoading] = useState(false);
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
   const [createdToken, setCreatedToken] = useState<string | null>(null);
+  // Key por INTENÇÃO (mount / "Criar Outro"), não por clique: duplo-clique e
+  // retry de rede replayam a mesma resposta 201 no servidor em vez de criar
+  // um segundo form + deal.
+  const [idemKey, setIdemKey] = useState(() => crypto.randomUUID());
+
+  async function postForm(key: string, force: boolean) {
+    const res = await fetch("/api/forms", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-idempotency-key": key,
+      },
+      body: JSON.stringify({
+        title: title || undefined,
+        ...(force ? { force: true } : {}),
+      }),
+    });
+    return { res, data: await res.json() };
+  }
 
   async function handleCreate() {
     setLoading(true);
-    const res = await fetch("/api/forms", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title: title || undefined }),
-    });
-    const data = await res.json();
-    setLoading(false);
+    try {
+      let { res, data } = await postForm(idemKey, false);
 
-    if (res.ok) {
-      const fullUrl = `${window.location.origin}/f/${data.token}`;
-      setCreatedUrl(fullUrl);
-      setCreatedToken(data.token);
-      toast.success("Formulário criado!");
-    } else {
-      toast.error(data.error || "Erro ao criar formulário");
+      // Soft-block do servidor: já existe negócio com este título criado há
+      // pouco (recriação manual de card duplicado). A key atual acabou de
+      // cachear o 409 — rotaciona JÁ, independente da escolha: sem isso, um
+      // "Cancelar" deixaria toda tentativa seguinte (mesmo com outro título)
+      // replayando o 409 stale por 24h.
+      if (res.status === 409 && data?.error === "duplicate_recent") {
+        const freshKey = crypto.randomUUID();
+        setIdemKey(freshKey);
+        const createdAt = data.existing?.createdAt
+          ? new Date(data.existing.createdAt)
+          : null;
+        const mins = createdAt
+          ? Math.max(1, Math.round((Date.now() - createdAt.getTime()) / 60000))
+          : null;
+        const proceed = window.confirm(
+          `Já existe um negócio "${data.existing?.title ?? title}" criado há ${
+            mins ?? "poucos"
+          } minuto(s). Deseja criar outro mesmo assim?`,
+        );
+        if (!proceed) return;
+        ({ res, data } = await postForm(freshKey, true));
+      }
+
+      if (res.ok) {
+        const fullUrl = `${window.location.origin}/f/${data.token}`;
+        setCreatedUrl(fullUrl);
+        setCreatedToken(data.token);
+        toast.success("Formulário criado!");
+      } else {
+        // Qualquer erro pode ter sido cacheado sob a key — rotaciona pra
+        // próxima tentativa não replayar a resposta stale.
+        setIdemKey(crypto.randomUUID());
+        toast.error(data.error || "Erro ao criar formulário");
+      }
+    } catch {
+      setIdemKey(crypto.randomUUID());
+      toast.error("Erro de conexão ao criar formulário");
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -129,6 +175,8 @@ export default function NewFormPage() {
                   setCreatedUrl(null);
                   setCreatedToken(null);
                   setTitle("");
+                  // Nova intenção de criação → nova key de idempotência.
+                  setIdemKey(crypto.randomUUID());
                 }}
               >
                 Criar Outro

@@ -56,7 +56,11 @@ export function NovoFormularioLocacaoDialog({
   const [formToken, setFormToken] = useState<string | null>(null);
   const [dealId, setDealId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  // Key por INTENÇÃO (mount/reset), não por clique: duplo-clique e retry de
+  // rede replayam a mesma resposta no servidor em vez de criar 2 forms+deals.
+  const [idemKey, setIdemKey] = useState(() => crypto.randomUUID());
 
+  const [title, setTitle] = useState("");
   const [finalidade, setFinalidade] = useState("residencial");
   const [taxaAdmin, setTaxaAdmin] = useState(10);
   const [taxaLocacao, setTaxaLocacao] = useState(0);
@@ -69,36 +73,71 @@ export function NovoFormularioLocacaoDialog({
     setFormToken(null);
     setDealId(null);
     setCopied(false);
+    setTitle("");
+    // Nova intenção de criação → nova key de idempotência.
+    setIdemKey(crypto.randomUUID());
+  };
+
+  const postForm = async (key: string, force: boolean) => {
+    const res = await fetch("/api/locacao/forms", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-idempotency-key": key,
+      },
+      body: JSON.stringify({
+        finalidade,
+        title: title.trim() || undefined,
+        ...(force ? { force: true } : {}),
+        fiscal: {
+          taxa_admin_percent: taxaAdmin,
+          regime_ir: regimeIr,
+          regime_cobranca: regimeCobranca,
+          emitir_nfse: emitirNfse,
+        },
+        comissao: { taxa_locacao_percent: taxaLocacao, angariadores: [] },
+      }),
+    });
+    // Body lido UMA vez — reler depois lança "body already consumed" e
+    // mascara a mensagem real do erro.
+    const data = await res.json().catch(() => ({}) as Record<string, unknown>);
+    return { res, data };
   };
 
   const handleCreate = async () => {
     setSubmitting(true);
     try {
-      const res = await fetch("/api/locacao/forms", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          finalidade,
-          fiscal: {
-            taxa_admin_percent: taxaAdmin,
-            regime_ir: regimeIr,
-            regime_cobranca: regimeCobranca,
-            emitir_nfse: emitirNfse,
-          },
-          comissao: { taxa_locacao_percent: taxaLocacao, angariadores: [] },
-        }),
-      });
+      let { res, data } = await postForm(idemKey, false);
+
+      // Soft-block do servidor: título repetido criado há pouco. A key atual
+      // acabou de cachear o 409 — rotaciona JÁ (um "Cancelar" não pode deixar
+      // a próxima tentativa replayando o 409 stale).
+      if (res.status === 409 && data?.error === "duplicate_recent") {
+        const freshKey = crypto.randomUUID();
+        setIdemKey(freshKey);
+        const proceed = window.confirm(
+          `Já existe um negócio "${(data.existing as { title?: string })?.title ?? title}" criado há poucos minutos. Deseja criar outro mesmo assim?`,
+        );
+        if (!proceed) return;
+        ({ res, data } = await postForm(freshKey, true));
+      }
+
       if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        toast.error(err.error || "Falha ao criar o formulário.");
+        // Erros ficam cacheados sob a key (ex.: 412 pipeline não seedada) —
+        // rotaciona pra próxima tentativa no MESMO dialog não replayar o stale.
+        setIdemKey(crypto.randomUUID());
+        toast.error(
+          (typeof data?.error === "string" && data.error) ||
+            "Falha ao criar o formulário.",
+        );
         return;
       }
-      const data = await res.json();
       const fullUrl = `${window.location.origin}${data.url}`;
       setLink(fullUrl);
-      setFormToken(data.token ?? null);
-      setDealId(data.dealId);
+      setFormToken((data.token as string) ?? null);
+      setDealId(data.dealId as string);
     } catch {
+      setIdemKey(crypto.randomUUID());
       toast.error("Falha ao criar o formulário.");
     } finally {
       setSubmitting(false);
@@ -139,6 +178,20 @@ export function NovoFormularioLocacaoDialog({
 
         {!link ? (
           <div className="space-y-4 py-2">
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-sm" htmlFor="locacao-form-title">
+                Título (opcional)
+              </Label>
+              <Input
+                id="locacao-form-title"
+                placeholder="Ex: Locação Apto 302 - Ed. Floresta"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Identifica o negócio no pipeline e evita cards duplicados.
+              </p>
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-1.5">
                 <Label className="text-sm">Finalidade</Label>
