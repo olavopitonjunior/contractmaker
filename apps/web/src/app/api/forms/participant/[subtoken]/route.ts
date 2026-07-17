@@ -9,6 +9,7 @@ import {
   mergeSalesFormDataJson,
   FormNotFoundError,
 } from "@/lib/forms/atomic-merge";
+import { syncDealClientName } from "@/lib/forms/sync-deal-client-name";
 import { formClosedResponse } from "@/lib/forms/form-gate";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { waitUntil } from "@vercel/functions";
@@ -168,6 +169,18 @@ export async function PATCH(
       },
     );
   }
+
+  // Comprador/locatário titular pode ser preenchido EXCLUSIVAMENTE por este
+  // link por parte — sem o sync aqui, o card no kanban ficava sem nome até
+  // alguém salvar pelo token principal ou gerar o contrato.
+  if (body.dataJson) {
+    await syncDealClientName({
+      formId: participant.formId,
+      schemaType: participant.form.schemaType,
+      mergedData: mergeOutcome.finalData as Record<string, unknown>,
+    });
+  }
+
 
   if (markCompleted && !participant.completedAt) {
     audit(

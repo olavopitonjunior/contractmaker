@@ -21,15 +21,6 @@ import {
   Sparkles,
 } from "lucide-react";
 
-/** Extrai o nome do 1º comprador do dataJson do form (best-effort, null-safe). */
-function extractClientName(dataJson: unknown): string | null {
-  if (!dataJson || typeof dataJson !== "object") return null;
-  const compradores = (dataJson as { compradores?: unknown }).compradores;
-  if (!Array.isArray(compradores) || compradores.length === 0) return null;
-  const nome = (compradores[0] as { nome?: unknown })?.nome;
-  return typeof nome === "string" && nome.trim() ? nome.trim() : null;
-}
-
 export default async function PipelinePage({
   searchParams,
 }: {
@@ -54,6 +45,9 @@ export default async function PipelinePage({
             where: includeArchived ? undefined : { archivedAt: null },
             orderBy: { position: "asc" },
             include: {
+              // NÃO selecionar form.dataJson aqui: é o payload inteiro do
+              // formulário por deal só pra derivar um nome — o nome vive
+              // denormalizado em Deal.clientName (backfill + write-points).
               form: {
                 select: {
                   id: true,
@@ -61,7 +55,6 @@ export default async function PipelinePage({
                   token: true,
                   createdAt: true,
                   completedAt: true,
-                  dataJson: true,
                 },
               },
               contracts: {
@@ -124,7 +117,7 @@ export default async function PipelinePage({
       title: deal.title,
       value: deal.value,
       createdAt: deal.createdAt.toISOString(),
-      clientName: extractClientName(deal.form?.dataJson),
+      clientName: deal.clientName,
       formStatus: deal.form?.status || null,
       formToken: deal.form?.token || null,
       hasContract: deal.contracts.length > 0,

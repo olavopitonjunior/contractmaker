@@ -517,6 +517,11 @@ model Deal {
   // Canal de entrada (funil por origem) — capturado na criação. Nullable:
   // deals pré-migration ficam null. Valores em lib/pipeline/source-channel.ts.
   sourceChannel    String?
+  // Nome do cliente denormalizado (comprador/locatário titular) — evita
+  // carregar form.dataJson inteiro no kanban só pra derivar o nome. Escrito
+  // por deriveDealMetadata nos pontos que atualizam o deal; backfill na
+  // migration deal_client_name. Null = form sem titular ainda.
+  clientName       String?
   position         Int       @default(0)
   // SLA pós-assinatura — datas terminais do funil.
   // commissionPaidAt: setado pelo botão "Marcar comissão paga" no DealDetail.
@@ -1412,6 +1417,9 @@ model ContractChangeLog {
 
   @@index([contractId, createdAt(sort: Desc)])
   @@index([sessionId])
+  // Cron de retenção deleta ruído (google_doc_updated/validation) em batches
+  // filtrando action+createdAt — sem este índice cada batch é seq-scan.
+  @@index([action, createdAt])
 }
 
 // ============================================
@@ -1650,6 +1658,11 @@ model AIUsage {
   // gasto virava órfão sem contrato. Mantendo só o id, a atribuição histórica
   // sobrevive à deleção do contrato (id fica "dangling", mas rastreável).
   contractId       String?
+  // Dimensões analíticas (mesma filosofia: id simples, sem FK — sobrevivem à
+  // deleção do registro-pai). sessionId = ChatSession do turn (chat/specialists);
+  // dealId = negócio associado. Nullable: operações sem chat/deal ficam null.
+  sessionId        String?
+  dealId           String?
   provider         String // "anthropic" | "gemini" | "voyage"
   model            String
   operation        String // union canônico em lib/ai/usage.ts::AIOperation (chat, passive_*, ocr_*, embed_*, specialist_*, sentinel_classify, intent_classify, ...)

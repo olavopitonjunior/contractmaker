@@ -4,6 +4,10 @@ import { prisma } from "@/lib/db/prisma";
 import { downloadBufferFromUrl } from "@/lib/storage/s3";
 import { extractCcvDataJson } from "@/lib/extraction/ccv-extractor";
 import { extractLocacaoContractDataJson } from "@/lib/extraction/locacao-extractor";
+import {
+  deriveDealMetadata,
+  deriveLocacaoDealMetadata,
+} from "@/lib/contracts/derive-deal-metadata";
 import { exportDocAsPdf } from "@/lib/google/docs";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
@@ -139,6 +143,48 @@ export async function POST(
 
   const fieldsCount = Object.keys(extracted).length;
 
+  // GUARD extração vazia: o extractor engole erro do Gemini e devolve {} —
+  // uma indisponibilidade transitória não pode APAGAR os dados que o usuário
+  // já tem (SalesForm/Contract.dataJson viravam {} e a aba Dados esvaziava,
+  // com resposta ok:true). Sem dados novos, NADA é persistido.
+  if (fieldsCount === 0) {
+    // Audita a tentativa mesmo sem persistir nada — a chamada Gemini custou
+    // (AIUsage registra) e um admin investigando gasto/reclamação precisa do
+    // rastro no AuditLog.
+    await audit(
+      extractAuditContextFromRequest(req, org.id, session.user.id),
+      {
+        action: "CONTRACT_REEXTRACT",
+        result: "FAILURE",
+        resource: contract.id,
+        resourceType: "Contract",
+        metadata: {
+          attachmentId: sourceAttachment.id,
+          fieldsCount: 0,
+          reason: "empty_extraction",
+        },
+      }
+    );
+    return NextResponse.json(
+      {
+        error:
+          "A extração não retornou dados (falha temporária da IA ou documento ilegível). Nada foi alterado — tente novamente.",
+      },
+      { status: 502 }
+    );
+  }
+
+  // Re-deriva o nome denormalizado do card (Deal.clientName) do dataJson novo.
+  // Sem isto, uma re-extração que finalmente trouxe o comprador deixaria o
+  // kanban com o nome velho/vazio (o card não lê mais o dataJson ao vivo).
+  // Sempre grava o derivado (null limpa) — coerente com o dataJson, que é
+  // substituído na mesma transação.
+  const deriveMeta =
+    dealKind === "locacao" ? deriveLocacaoDealMetadata : deriveDealMetadata;
+  const { clientName } = deriveMeta(extracted, {
+    fallbackTitle: contract.deal.title,
+  });
+
   // Atualiza ambos: SalesForm (alimenta a aba Dados) e Contract (snapshot do
   // dataJson usado por find_similar_contracts e enrich futuro).
   await prisma.$transaction([
@@ -154,6 +200,10 @@ export async function POST(
       where: { id: contract.id },
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       data: { dataJson: extracted as any },
+    }),
+    prisma.deal.update({
+      where: { id: contract.dealId },
+      data: { clientName },
     }),
   ]);
 

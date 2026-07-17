@@ -10,6 +10,8 @@ export interface AgentContext {
   templateName?: string;
   /** "venda" | "locacao" — discrimina o domínio do agente (prompts/contexto). */
   dealKind?: string;
+  /** Deal do contrato — atribuição analítica (AIUsage.dealId). */
+  dealId?: string | null;
   activeClauses: { id: string; clauseId: string; title: string; category: string; position: number; isActive: boolean }[];
   /** Quando setado, o conteúdo do contrato vive em um Google Doc; tools de
    *  edição roteiam via Docs API em vez de mutar `htmlContent`. */

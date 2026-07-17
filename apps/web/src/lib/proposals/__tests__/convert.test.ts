@@ -55,6 +55,25 @@ describe("convertProposalToDeal", () => {
     );
   });
 
+  it("locação: valor do deal vem de locacao.valor_aluguel (shape da proposta)", async () => {
+    pFindUnique.mockResolvedValue({
+      ...BASE_PROPOSAL,
+      dataJson: {
+        locatarios: [{ nome: "Marcia" }],
+        locacao: { valor_aluguel: 3200 },
+      },
+    });
+    await convertProposalToDeal({ proposalId: "p1", orgId: "org1", actorUserId: "x" });
+    expect(dealCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          value: 3200,
+          clientName: "Marcia",
+        }),
+      })
+    );
+  });
+
   it("copia anexos (mesmo blob) para o deal", async () => {
     pFindUnique.mockResolvedValue(BASE_PROPOSAL);
     attFind.mockResolvedValue([

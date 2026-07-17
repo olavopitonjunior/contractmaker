@@ -114,6 +114,10 @@ export interface RecordUsageParams {
   orgId: string;
   userId?: string | null;
   contractId?: string | null;
+  /** ChatSession do turn (chat/specialists). Null em operações sem chat. */
+  sessionId?: string | null;
+  /** Deal associado à operação. Null quando não há negócio em escopo. */
+  dealId?: string | null;
   provider: AIProvider;
   model: string;
   operation: AIOperation;
@@ -160,6 +164,8 @@ export function recordAIUsage(params: RecordUsageParams): void {
         orgId: params.orgId,
         userId: params.userId ?? null,
         contractId: params.contractId ?? null,
+        sessionId: params.sessionId ?? null,
+        dealId: params.dealId ?? null,
         provider: params.provider,
         model: params.model,
         operation: params.operation,
