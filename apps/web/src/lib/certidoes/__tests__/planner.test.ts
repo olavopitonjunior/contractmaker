@@ -375,6 +375,10 @@ describe("planCertidoesForDeal — dados faltando", () => {
     const matric = plan.jobs.find((j) => j.endpoint === "registradores/matric/pedido");
     expect(matric).toBeDefined();
     expect(matric?.requestPayload.matricula).toBe("54321");
+    // ONR exige `finalidade` NUMÉRICA (a API faz to_i; texto livre → 0 → 606).
+    // Genérico "compra e venda" = 1, configurável via ONR_MATRIC_FINALIDADE.
+    expect(matric?.requestPayload.finalidade).toBe(1);
+    expect(typeof matric?.requestPayload.finalidade).toBe("number");
   });
 
   it("pesquisa de bens ONR (mapa): aparece para vendedor com onrActive (tier pesquisa, sem expandAll); skip sem credencial", () => {
