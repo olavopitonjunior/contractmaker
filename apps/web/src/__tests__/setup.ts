@@ -83,6 +83,10 @@ vi.mock("@/lib/db/prisma", () => {
       findUnique: vi.fn(),
       upsert: vi.fn(),
     },
+    platformAgentDefaults: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn().mockResolvedValue({}),
+    },
     formAttachment: {
       findUnique: vi.fn(),
       findFirst: vi.fn().mockResolvedValue(null),
