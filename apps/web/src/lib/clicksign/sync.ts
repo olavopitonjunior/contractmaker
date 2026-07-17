@@ -150,6 +150,8 @@ export async function syncEnvelopeState(
       orgId: envelope.orgId,
       source: envelope.source,
       dealId: envelope.dealId,
+      // Pro bounce de PROPOSTA: evita 1 re-query por signatário bounced.
+      proposalId: envelope.proposalId,
       linkUrl,
     };
     await Promise.all([

@@ -80,11 +80,11 @@ export async function processProposalAcceptanceEvent(
   const proposal = signer
     ? await prisma.proposal.findUnique({
         where: { id: signer.proposalId },
-        select: { id: true, orgId: true, title: true, token: true, instrument: true, validUntil: true },
+        select: { id: true, orgId: true, userId: true, title: true, token: true, instrument: true, validUntil: true },
       })
     : await prisma.proposal.findFirst({
         where: { acceptanceClicksignId: input.acceptanceId, ...orgScope },
-        select: { id: true, orgId: true, title: true, token: true, instrument: true, validUntil: true },
+        select: { id: true, orgId: true, userId: true, title: true, token: true, instrument: true, validUntil: true },
       });
   if (!proposal) {
     return { ok: true, handled: false, phase: input.phase, unknownAcceptance: true };
@@ -139,12 +139,15 @@ export async function processProposalAcceptanceEvent(
         // Sino por-signatário: um proprietário aceitou o termo dele. Suffix
         // obrigatório — sem ele o aceite do 2º proprietário seria engolido
         // pelo unique (type, batchId).
-        await notifyProposalMilestone({
-          proposalId: proposal.id,
-          orgId: proposal.orgId,
-          kind: "accepted_party",
-          dedupeSuffix: signer!.id,
-        });
+        waitUntil(
+          notifyProposalMilestone({
+            proposalId: proposal.id,
+            orgId: proposal.orgId,
+            userId: proposal.userId,
+            kind: "accepted_party",
+            dedupeSuffix: signer!.id,
+          })
+        );
         return { ok: true, handled: true, proposalId: proposal.id, phase: input.phase };
       }
 
@@ -155,24 +158,39 @@ export async function processProposalAcceptanceEvent(
       const acceptedAtReal = facts.completedAt ? new Date(facts.completedAt) : new Date();
       const acceptedAtValid = !Number.isNaN(acceptedAtReal.getTime());
       if (proposal.validUntil && acceptedAtValid && acceptedAtReal > proposal.validUntil) {
-        await advanceProposalStatus(proposal.id, "expirada", { expiredAt: new Date() });
-        await notifyProposalMilestone({
-          proposalId: proposal.id,
-          orgId: proposal.orgId,
-          kind: "expired",
-        });
+        const adv = await advanceProposalStatus(proposal.id, "expirada", { expiredAt: new Date() });
+        // Sino SÓ quando a transição de fato aconteceu: evento tardio/replay
+        // numa proposta cancelada/convertida não pode tocar sino falso (e
+        // consumiria o batchId de um marco legítimo futuro).
+        if (adv.moved) {
+          waitUntil(
+            notifyProposalMilestone({
+              proposalId: proposal.id,
+              orgId: proposal.orgId,
+              userId: proposal.userId,
+              kind: "expired",
+            })
+          );
+        }
         return { ok: true, handled: true, proposalId: proposal.id, phase: input.phase };
       }
 
       // O proponente aceitou dentro do prazo: proposta completa. Reusa as
       // transições existentes em vez de alargar ALLOWED_FROM.
       await advanceProposalStatus(proposal.id, "assinada_proponente");
-      await advanceProposalStatus(proposal.id, "completa", { completedAt: new Date() });
-      await notifyProposalMilestone({
-        proposalId: proposal.id,
-        orgId: proposal.orgId,
-        kind: "completed",
+      const advCompleta = await advanceProposalStatus(proposal.id, "completa", {
+        completedAt: new Date(),
       });
+      if (advCompleta.moved) {
+        waitUntil(
+          notifyProposalMilestone({
+            proposalId: proposal.id,
+            orgId: proposal.orgId,
+            userId: proposal.userId,
+            kind: "completed",
+          })
+        );
+      }
 
       // Comprovante durável — o requisito central do modo Aceite. Fire-and-forget
       // (idempotente por dossierUrl). O texto aceito é reconstruído idêntico ao
@@ -204,23 +222,27 @@ export async function processProposalAcceptanceEvent(
       // comprador comprometido na mão → estado quente (recusada_vendedor).
       // Antes, sem o guard, a recusa de qualquer terceiro virava
       // "recusada_proponente" — atribuição errada do desfecho.
-      if (isProponente) {
-        await advanceProposalStatus(proposal.id, "recusada_proponente", {
-          refusedAt: new Date(),
-        });
-      } else {
-        await advanceProposalStatus(proposal.id, "recusada_vendedor", {
-          refusedAt: new Date(),
-        });
+      {
+        const refusedBy = isProponente ? ("proponente" as const) : ("vendedor" as const);
+        const advRef = await advanceProposalStatus(
+          proposal.id,
+          isProponente ? "recusada_proponente" : "recusada_vendedor",
+          { refusedAt: new Date() }
+        );
+        if (advRef.moved) {
+          // Suffix por signatário: recusas de partes diferentes = sinos distintos.
+          waitUntil(
+            notifyProposalMilestone({
+              proposalId: proposal.id,
+              orgId: proposal.orgId,
+              userId: proposal.userId,
+              kind: "refused",
+              refusedBy,
+              dedupeSuffix: signer?.id,
+            })
+          );
+        }
       }
-      // Suffix por signatário: recusas de partes diferentes são sinos distintos.
-      await notifyProposalMilestone({
-        proposalId: proposal.id,
-        orgId: proposal.orgId,
-        kind: "refused",
-        refusedBy: isProponente ? "proponente" : "vendedor",
-        dedupeSuffix: signer?.id,
-      });
       break;
 
     case "expired":
@@ -228,12 +250,19 @@ export async function processProposalAcceptanceEvent(
       // O termo de um terceiro expirar não mata o negócio — o proponente ainda
       // pode aceitar. Sem o guard, a expiração de qualquer termo terminava tudo.
       if (isProponente) {
-        await advanceProposalStatus(proposal.id, "expirada", { expiredAt: new Date() });
-        await notifyProposalMilestone({
-          proposalId: proposal.id,
-          orgId: proposal.orgId,
-          kind: "expired",
+        const advExp = await advanceProposalStatus(proposal.id, "expirada", {
+          expiredAt: new Date(),
         });
+        if (advExp.moved) {
+          waitUntil(
+            notifyProposalMilestone({
+              proposalId: proposal.id,
+              orgId: proposal.orgId,
+              userId: proposal.userId,
+              kind: "expired",
+            })
+          );
+        }
       }
       break;
 

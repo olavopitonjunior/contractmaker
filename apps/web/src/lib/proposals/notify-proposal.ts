@@ -7,6 +7,11 @@ import { emitNotification } from "@/lib/notifications/emit";
  * lote, aceite/recusa/expiração de proposta passavam sem nenhum rastro pro
  * operador além do status na lista.
  *
+ * ESCOPO POR DONO: proposta é owner-scoped (canAccessProposal — corretor vê
+ * só as dele; a página 404a pra terceiros). O sino vai pro `userId` dono, e
+ * NÃO org-wide — broadcast vazaria atividade que o RBAC esconde e o link
+ * quebraria pra quem não pode ver.
+ *
  * Kinds:
  *   - completed:      proponente aceitou / todas as vias assinadas → proposta
  *                     completa (o marco que pede ação: converter em negócio)
@@ -19,8 +24,8 @@ import { emitNotification } from "@/lib/notifications/emit";
  *                     signerId (senão o 2º bounce é engolido pelo unique)
  *
  * Dedupe pela `@@unique([type, batchId])` do Notification:
- * batchId = `proposal:{proposalId}:{kind}[:{suffix}]` — webhook reentregue
- * ou sync repetido não duplica o sino. Fire-and-forget: NUNCA lança.
+ * batchId = `proposal:{proposalId}:{kind}[:{suffix}]`. `emitNotification`
+ * nunca lança (engole P2002 e erros) — sino nunca quebra webhook/sync.
  */
 export type ProposalNotifKind =
   | "completed"
@@ -57,7 +62,7 @@ const TEXT: Record<ProposalNotifKind, { type: string; title: string; body: strin
   },
 };
 
-const REFUSED_BODY: Record<string, string> = {
+const REFUSED_BODY: Record<"proponente" | "vendedor", string> = {
   proponente: "O proponente recusou a proposta.",
   vendedor:
     "O proprietário recusou — há um comprador comprometido aguardando. Priorize o contato.",
@@ -66,32 +71,26 @@ const REFUSED_BODY: Record<string, string> = {
 export async function notifyProposalMilestone(params: {
   proposalId: string;
   orgId: string;
+  /** Dono da proposta (Proposal.userId) — o sino é dele, não da org inteira. */
+  userId: string;
   kind: ProposalNotifKind;
   /** Quem recusou (só pra kind="refused") — ajusta o body. */
   refusedBy?: "proponente" | "vendedor";
   /** Discriminador extra do batchId (signerId em accepted_party/email_failed). */
   dedupeSuffix?: string;
 }): Promise<void> {
-  const { proposalId, orgId, kind, refusedBy, dedupeSuffix } = params;
-  try {
-    const t = TEXT[kind];
-    const body =
-      kind === "refused" && refusedBy ? REFUSED_BODY[refusedBy] ?? t.body : t.body;
-    const batchId = `proposal:${proposalId}:${kind}${dedupeSuffix ? `:${dedupeSuffix}` : ""}`;
-    await emitNotification({
-      orgId,
-      type: t.type,
-      title: t.title,
-      body,
-      linkUrl: `/pipeline/propostas/${proposalId}`,
-      batchId,
-      metadata: { proposalId, ...(refusedBy ? { refusedBy } : {}) },
-    });
-  } catch (err) {
-    // Sino nunca quebra webhook/sync.
-    console.error(
-      "[proposals/notify] falhou:",
-      err instanceof Error ? err.message : String(err)
-    );
-  }
+  const { proposalId, orgId, userId, kind, refusedBy, dedupeSuffix } = params;
+  const t = TEXT[kind];
+  const body = kind === "refused" && refusedBy ? REFUSED_BODY[refusedBy] : t.body;
+  const batchId = `proposal:${proposalId}:${kind}${dedupeSuffix ? `:${dedupeSuffix}` : ""}`;
+  await emitNotification({
+    orgId,
+    userId,
+    type: t.type,
+    title: t.title,
+    body,
+    linkUrl: `/pipeline/propostas/${proposalId}`,
+    batchId,
+    metadata: { proposalId, ...(refusedBy ? { refusedBy } : {}) },
+  });
 }

@@ -78,24 +78,37 @@ export async function notifyEnvelopeMilestone(params: {
   kind: EnvelopeNotifKind;
   /** Discriminador extra do batchId (ex.: signerId pro bounce por signatário). */
   dedupeSuffix?: string;
+  /** Pra envelope de PROPOSTA: id já em mãos do chamador evita re-query por
+   *  signatário bounced (o sync chama N vezes pro mesmo envelope). */
+  proposalId?: string | null;
 }): Promise<void> {
   const { envelopeId, orgId, source, dealId, linkUrl, kind, dedupeSuffix } = params;
   if (source === "proposal" && kind === "email_failed") {
-    // Bounce em envelope de PROPOSTA: delega pro sino de proposta (wording e
-    // link certos). Resolve o proposalId aqui — o chamador (sync) só tem o
-    // envelope. Best-effort como todo o resto.
+    // Bounce em envelope de PROPOSTA: delega pro sino de proposta (wording,
+    // link e DONO certos). Best-effort como todo o resto.
     try {
-      const env = await prisma.envelope.findUnique({
-        where: { id: envelopeId },
-        select: { proposalId: true },
-      });
-      if (env?.proposalId) {
-        await notifyProposalMilestone({
-          proposalId: env.proposalId,
-          orgId,
-          kind: "email_failed",
-          dedupeSuffix,
+      const proposalId =
+        params.proposalId ??
+        (
+          await prisma.envelope.findUnique({
+            where: { id: envelopeId },
+            select: { proposalId: true },
+          })
+        )?.proposalId;
+      if (proposalId) {
+        const proposal = await prisma.proposal.findUnique({
+          where: { id: proposalId },
+          select: { userId: true },
         });
+        if (proposal) {
+          await notifyProposalMilestone({
+            proposalId,
+            orgId,
+            userId: proposal.userId,
+            kind: "email_failed",
+            dedupeSuffix,
+          });
+        }
       }
     } catch (err) {
       console.error(

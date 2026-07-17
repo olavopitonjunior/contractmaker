@@ -242,8 +242,11 @@ export async function processClickSignWebhookPayload(
         });
       }
       // Proposta: recusa move o status (proponente vs proprietário). No-op p/
-      // envelope de contrato/attachment.
-      await onProposalEnvelopeRefused(envelope.id);
+      // envelope de contrato/attachment. O sourceKind do signatário resolvido
+      // desambigua a via ÚNICA (proponente e proprietário no mesmo envelope).
+      await onProposalEnvelopeRefused(envelope.id, {
+        refusedSourceKind: signer?.sourceKind ?? null,
+      });
       await notifyEnvelopeMilestone({
         envelopeId: envelope.id,
         orgId: envelope.orgId,
