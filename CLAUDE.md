@@ -41,7 +41,7 @@ Plataforma de gestão de vendas e contratos imobiliários. Esteira: Lead/form p�
 1. **Novo formulário (link público)** → `/forms/new` cria SalesForm + Deal vazio → token `/f/[token]` pro cliente preencher → finalize dispara `generateContractForDeal`
 2. **Cadastro rápido com upload** → `/deals/new-from-upload`: corretor sobe CCV pronto (PDF/DOCX, ≤20MB) + stage destino. Pipeline: `uploadFileAsGoogleDoc` (Drive auto-converte) → Gemini extrai `DadosContrato` parcial → cria SalesForm `vinculado` + Deal + Contract `templateId=null` + DealAttachment `category=contrato_original, source=upload`. Editor abre direto
 
-Contrato importado: `template === null`, UI mostra "Contrato importado", CTA "Abrir contrato", aba Dados ganha "Re-extrair dados".
+Contrato importado: `template === null`, UI "Contrato importado", aba Dados ganha "Re-extrair dados".
 
 ## Pipeline kanban (7 stages)
 
@@ -126,7 +126,7 @@ System prompt (`prompts.ts`) tem 19 regras. Destaques: 10 obriga markdown estrut
 
 ## Análise automática (passive)
 
-`useAutoAnalyze.ts` — server lê `getDocPlainText` direto do Drive. On-mount `trigger=open` (deep, Sonnet via `ANTHROPIC_PASSIVE_OPEN_MODEL || ANTHROPIC_MODEL`); polling 90s `trigger=edit` (Haiku via `ANTHROPIC_PASSIVE_MODEL`). **Skip-no-change por hash**: `Contract.lastAnalyzedTextHash = "{deep|light}:{sha1(texto+dataJson)}"` — edit skipa com qualquer tier, open só com `deep:` (o passe raso não suprime o deep); carimbo só quando LLM parseou E upserts persistiram, nunca em run escopado; CAS via updateMany condicionado. Drive fora → `drive-unavailable` (200, sem loop de 500). **Quick checks** (`quickChecks.ts`, zero LLM): soma parcelas, CPF/CNPJ checksum, refs internas, duplicação qualificação. **Dedupe** via `ContractComment.dedupeKey = FNV-1a(authorType+category+selectedText)` + `@@unique([contractId, dedupeKey])`. **Cap:** 50 unresolved/contrato, `max_tokens` 1024, `analysisInput` 8000 chars, 3 findings/run. **Backoff:** `lastAttemptAt` setado ANTES da request. Cleanup: `cleanup-stale-ai-comments.ts --apply --contractId=<id>`.
+`useAutoAnalyze.ts` — server lê `getDocPlainText` do Drive. On-mount `open` (deep, Sonnet via `ANTHROPIC_PASSIVE_OPEN_MODEL || ANTHROPIC_MODEL`); poll 90s `edit` (Haiku via `ANTHROPIC_PASSIVE_MODEL`). **Skip por hash**: `Contract.lastAnalyzedTextHash = "{deep|light|err}:{sha1(texto+dataJson)}"` — edit skipa com qualquer tier, open só com `deep:`; carimbo só com LLM parseado + upserts ok, nunca escopado; CAS. Cap/budget antes do Drive; Drive fora → `drive-unavailable` 200. **Quick checks** zero-LLM (`quickChecks.ts`). **Dedupe** `dedupeKey = FNV-1a(authorType+category+selectedText)` + `@@unique`. **Cap:** 50 unresolved, `max_tokens` 1024, input 8000, 3 findings/run. Cleanup: `cleanup-stale-ai-comments.ts --apply`.
 
 ## Editor — Google Docs
 

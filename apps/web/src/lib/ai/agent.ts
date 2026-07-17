@@ -756,52 +756,10 @@ export async function runPassiveAnalysis(
     ? PASSIVE_SYSTEM_PROMPT_LOCACAO
     : PASSIVE_SYSTEM_PROMPT;
 
-  // Texto vivo GUARDADO: uma falha do Drive (OAuth invalid_grant recorrente,
-  // 429 de quota) não pode virar 500 em loop no poll de 90s de cada aba
-  // aberta — retorna 200 "drive-unavailable" e o próximo poll tenta de novo.
-  let htmlContent: string;
-  if (contract.googleDocId) {
-    try {
-      const { getDocPlainText } = await import("@/lib/google/docs");
-      htmlContent = await getDocPlainText(contract.googleDocId);
-    } catch (err) {
-      console.error("[runPassiveAnalysis] getDocPlainText falhou:", err);
-      return { findings: [], commentsCreated: 0, modelUsed: "drive-unavailable" };
-    }
-  } else {
-    htmlContent = params.htmlOverride || contract.htmlContent || "";
-  }
-
-  // Skip-no-change por HASH DO CONTEÚDO ANALISADO — vale pra `open` E `edit`.
-  // Substitui o skip por ChangeLog do `edit`, que era duplamente errado:
-  // (a) edições no iframe do Drive não geram ChangeLog confiável, então
-  //     "sem changelog novo" fazia o poll de 90s skipar MUDANÇA REAL;
-  // (b) o `open` re-rodava Sonnet a cada abertura mesmo sem mudança alguma.
-  //
-  // O hash cobre texto E dataJson: os quickChecks e o prompt comparam os dois
-  // — mudar uma parcela na aba Dados sem tocar no texto TAMBÉM exige re-análise.
-  //
-  // Carimbo por TIER (`deep:`/`light:` + hash): o passe raso do edit (Haiku)
-  // não pode suprimir o passe deep do open (Sonnet) — open só skipa quando o
-  // MESMO conteúdo já passou pelo deep; edit skipa com qualquer tier.
-  // `approve` fica fora (gate roda quickChecks sempre; não carimba).
-  // Roda ANTES do cap/budget: no caminho comum (nada mudou, a cada 90s) essas
-  // queries seriam jogadas fora.
-  const contentHash = createHash("sha1")
-    .update(htmlContent)
-    .update(" ")
-    .update(JSON.stringify(contract.dataJson ?? null))
-    .digest("hex");
-  const stamped = contract.lastAnalyzedTextHash; // formato `${tier}:${hash}`
-  const stampedHash = stamped?.slice(stamped.indexOf(":") + 1) ?? null;
-  const stampedDeep = stamped?.startsWith("deep:") ?? false;
-  if (params.trigger === "edit" && stampedHash === contentHash) {
-    return { findings: [], commentsCreated: 0, modelUsed: "skipped-no-change" };
-  }
-  if (params.trigger === "open" && stampedDeep && stampedHash === contentHash) {
-    return { findings: [], commentsCreated: 0, modelUsed: "skipped-no-change" };
-  }
-
+  // Cap e budget ANTES do fetch do Drive: são 2 queries baratas de Postgres,
+  // e um contrato no cap/estourado NÃO pode pagar uma leitura de Drive por
+  // poll de 90s por aba aberta pra sempre (quota compartilhada com export/
+  // versão/PDF).
   const unresolvedComments = await prisma.contractComment.findMany({
     where: {
       contractId: params.contractId,
@@ -832,6 +790,53 @@ export async function runPassiveAnalysis(
       };
     }
     throw err;
+  }
+
+  // Texto vivo GUARDADO: uma falha do Drive (OAuth invalid_grant recorrente,
+  // 429 de quota) não pode virar 500 em loop no poll de 90s de cada aba
+  // aberta — retorna 200 "drive-unavailable" e o próximo poll tenta de novo.
+  let htmlContent: string;
+  if (contract.googleDocId) {
+    try {
+      const { getDocPlainText } = await import("@/lib/google/docs");
+      htmlContent = await getDocPlainText(contract.googleDocId);
+    } catch (err) {
+      console.error("[runPassiveAnalysis] getDocPlainText falhou:", err);
+      return { findings: [], commentsCreated: 0, modelUsed: "drive-unavailable" };
+    }
+  } else {
+    htmlContent = params.htmlOverride || contract.htmlContent || "";
+  }
+
+  // Skip-no-change por HASH DO CONTEÚDO ANALISADO — vale pra `open` E `edit`.
+  // Substitui o skip por ChangeLog do `edit`, que era duplamente errado:
+  // (a) edições no iframe do Drive não geram ChangeLog confiável, então
+  //     "sem changelog novo" fazia o poll de 90s skipar MUDANÇA REAL;
+  // (b) o `open` re-rodava Sonnet a cada abertura mesmo sem mudança alguma.
+  //
+  // O hash cobre texto E dataJson: os quickChecks e o prompt comparam os dois
+  // — mudar uma parcela na aba Dados sem tocar no texto TAMBÉM exige re-análise.
+  //
+  // Carimbo por TIER + hash:
+  //   `deep:`  — passe completo do open (Sonnet);
+  //   `light:` — passe do edit (Haiku) — não suprime o deep do próximo open;
+  //   `err:`   — LLM respondeu 200 mas ILEGÍVEL (JSON truncado): o poll de
+  //              90s para de re-pagar o LLM no mesmo conteúdo (edit skipa),
+  //              mas o próximo open re-tenta o passe deep (err ≠ deep).
+  // `approve` fica fora (gate roda quickChecks sempre; não carimba).
+  const contentHash = createHash("sha1")
+    .update(htmlContent)
+    .update("\0")
+    .update(JSON.stringify(contract.dataJson ?? null))
+    .digest("hex");
+  const stamped = contract.lastAnalyzedTextHash; // formato `${tier}:${hash}`
+  const stampedHash = stamped?.slice(stamped.indexOf(":") + 1) ?? null;
+  const stampedDeep = stamped?.startsWith("deep:") ?? false;
+  if (params.trigger === "edit" && stampedHash === contentHash) {
+    return { findings: [], commentsCreated: 0, modelUsed: "skipped-no-change" };
+  }
+  if (params.trigger === "open" && stampedDeep && stampedHash === contentHash) {
+    return { findings: [], commentsCreated: 0, modelUsed: "skipped-no-change" };
   }
 
   const quick: QuickFinding[] = quickChecks(contract.dataJson, htmlContent);
@@ -1028,14 +1033,13 @@ export async function runPassiveAnalysis(
   // CAS: o updateMany condiciona no valor LIDO — duas análises concorrentes
   // (duas abas) não deixam o hash de um texto mais VELHO sobrescrever o novo.
   const isScoped = Boolean(params.scope?.changedText);
-  if (
-    params.trigger !== "approve" &&
-    !isScoped &&
-    !llmFailed &&
-    llmParsed &&
-    !upsertFailed
-  ) {
-    const tier = params.trigger === "open" ? "deep" : "light";
+  if (params.trigger !== "approve" && !isScoped && !llmFailed && !upsertFailed) {
+    // 200 ILEGÍVEL (JSON truncado, prosa) pode ser DETERMINÍSTICO — sem
+    // carimbo nenhum, o poll de 90s re-pagaria o LLM no mesmo conteúdo até
+    // estourar o budget do contrato. `err:` corta o loop (edit skipa), mas
+    // NÃO suprime o passe deep: o próximo open re-tenta (err ≠ deep).
+    // Falha de rede/5xx (llmFailed) segue sem carimbo — é transitória.
+    const tier = !llmParsed ? "err" : params.trigger === "open" ? "deep" : "light";
     await prisma.contract
       .updateMany({
         where: { id: params.contractId, lastAnalyzedTextHash: stamped },
