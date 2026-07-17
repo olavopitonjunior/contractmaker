@@ -2,7 +2,11 @@ import { prisma } from "@/lib/db/prisma";
 import { DEAL_SOURCE_CHANNEL } from "@/lib/pipeline/source-channel";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { moduleForSchemaType } from "@/lib/modules/resolve";
-import { deriveDealMetadata } from "@/lib/contracts/derive-deal-metadata";
+import type { Prisma } from "@prisma/client";
+import {
+  deriveDealMetadata,
+  deriveLocacaoDealMetadata,
+} from "@/lib/contracts/derive-deal-metadata";
 
 export class ProposalConvertError extends Error {
   constructor(
@@ -77,7 +81,41 @@ export async function convertProposalToDeal(input: {
     );
   }
   const firstStage = pipeline.stages[0];
-  const meta = deriveDealMetadata(dataJson, {
+
+  // Normaliza o shape da proposta pro shape do FORM antes de copiar: a
+  // proposta guarda o aluguel em `locacao.valor_aluguel` (NovaPropostaDialog),
+  // mas o form/templates/derive leem `aluguel.valor`. Normalizando NA CÓPIA,
+  // todos os consumidores downstream (card, geração do contrato de locação,
+  // cláusula de aluguel) enxergam o valor — não só este call-site.
+  let normalizedData = dataJson;
+  if (proposal.kind === "locacao") {
+    const aluguel =
+      (dataJson.aluguel as Record<string, unknown> | undefined) ?? {};
+    const proposalAluguel = Number(
+      (dataJson.locacao as { valor_aluguel?: unknown } | undefined)
+        ?.valor_aluguel ?? 0
+    );
+    // Injeta quando aluguel.valor está ausente/vazio OU é zero explícito
+    // (aluguel R$ 0 nunca é legítimo — trata como faltante). NÃO injeta sobre
+    // valor não-numérico (ex.: "3.100,00" formatado por outro caminho): esse
+    // é um valor real que a proposta não pode sobrescrever.
+    const raw = aluguel.valor;
+    const isAbsent =
+      raw === undefined || raw === null || raw === "" || raw === 0 || raw === "0";
+    if (isAbsent && proposalAluguel > 0) {
+      normalizedData = {
+        ...dataJson,
+        aluguel: { ...aluguel, valor: proposalAluguel },
+      };
+    }
+  }
+
+  // Derive por kind — a variante de venda sobre dataJson de locação devolve
+  // value/clientName null (lê compradores/pagamento; locação usa locatarios/
+  // aluguel). Mesmo fix já aplicado no apply de anexos e no import.
+  const deriveMeta =
+    proposal.kind === "locacao" ? deriveLocacaoDealMetadata : deriveDealMetadata;
+  const meta = deriveMeta(normalizedData, {
     formTitle: proposal.title,
     fallbackTitle: proposal.title,
   });
@@ -94,7 +132,7 @@ export async function convertProposalToDeal(input: {
         // schemaType herdado — SEM isto, locação convertida viraria form de
         // compra e venda (default do campo) e o contrato sairia errado.
         schemaType: proposal.schemaType,
-        dataJson: proposal.dataJson ?? {},
+        dataJson: normalizedData as Prisma.InputJsonValue,
         status: "completo",
         completedAt: new Date(),
       },
@@ -110,9 +148,10 @@ export async function convertProposalToDeal(input: {
         sourceChannel: DEAL_SOURCE_CHANNEL.PROPOSTA,
         title: meta.title,
         value: meta.value,
+        clientName: meta.clientName,
         // default "venda"; sem isto toda locação viraria deal de venda.
         kind: proposal.kind,
-        dataJson: proposal.dataJson ?? {},
+        dataJson: normalizedData as Prisma.InputJsonValue,
         stageEnteredAt: new Date(),
       },
     });

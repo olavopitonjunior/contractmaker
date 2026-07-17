@@ -190,18 +190,16 @@ export async function embed(
   const sorted = [...data.data].sort((a, b) => a.index - b.index);
   const vectors = sorted.map((d) => d.embedding);
 
-  // Valida a dimensão — um vetor com tamanho inesperado (modelo trocado por
-  // engano, resposta corrompida) quebraria o INSERT no pgvector (coluna
-  // vector(1024)) ou, pior, entraria com dimensão errada e degradaria o RAG
-  // silenciosamente. Só validamos quando o modelo é o default 1024d.
-  if (model === DEFAULT_MODEL) {
-    for (const v of vectors) {
-      if (!Array.isArray(v) || v.length !== EMBEDDING_DIMENSION) {
-        throw new VoyageError({
-          code: "invalid_response",
-          message: `Embedding com dimensão inesperada: ${v?.length ?? "?"} (esperado ${EMBEDDING_DIMENSION})`,
-        });
-      }
+  // Valida a dimensão SEMPRE — a coluna pgvector é vector(1024) fixa, então
+  // qualquer modelo (inclusive um VOYAGE_EMBED_MODEL custom com outra
+  // dimensão) quebraria o INSERT ou, pior, degradaria o RAG silenciosamente.
+  // Antes o check só rodava no modelo default, deixando o custom passar cru.
+  for (const v of vectors) {
+    if (!Array.isArray(v) || v.length !== EMBEDDING_DIMENSION) {
+      throw new VoyageError({
+        code: "invalid_response",
+        message: `Embedding com dimensão inesperada: ${v?.length ?? "?"} (esperado ${EMBEDDING_DIMENSION}; modelo ${model})`,
+      });
     }
   }
 

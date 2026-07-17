@@ -6,6 +6,7 @@ import { matchDealGroup } from "@/lib/newton/group-match";
 import { generateLocacaoContractForDeal } from "@/lib/services/contract-generation";
 import { emitNotification } from "@/lib/notifications/emit";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
+import { syncDealClientName } from "@/lib/forms/sync-deal-client-name";
 import { formClosedResponse } from "@/lib/forms/form-gate";
 import {
   schemaForLocacaoType,
@@ -156,6 +157,16 @@ export async function PATCH(
 
   if (typeof body.title === "string" && body.title.trim() && body.title !== form.title) {
     await prisma.deal.updateMany({ where: { formId: form.id }, data: { title: body.title } });
+  }
+
+  // Sincroniza Deal.clientName (locatário titular) — helper compartilhado
+  // com a esteira de vendas e o subtoken por parte.
+  if (body.dataJson || isFinalizing) {
+    await syncDealClientName({
+      formId: form.id,
+      schemaType: form.schemaType,
+      mergedData: mergedData as Record<string, unknown>,
+    });
   }
 
   let contractId: string | null = null;

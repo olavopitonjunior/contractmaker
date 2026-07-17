@@ -21,6 +21,7 @@ import { matchDealGroup } from "@/lib/newton/group-match";
 import { generateContractForDeal } from "@/lib/services/contract-generation";
 import { emitNotification } from "@/lib/notifications/emit";
 import { dedupConjuges } from "@/lib/forms/dedup-conjuges";
+import { syncDealClientName } from "@/lib/forms/sync-deal-client-name";
 import { dadosContratoSchema } from "@/lib/forms/validation";
 import { sendFormSummary } from "@/lib/forms/form-summary-mailer";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
@@ -208,6 +209,18 @@ export async function PATCH(
     await prisma.deal.updateMany({
       where: { formId: form.id },
       data: { title: body.title },
+    });
+  }
+
+  // Sincroniza o nome denormalizado do card (Deal.clientName) — o kanban não
+  // lê mais form.dataJson ao vivo. Helper compartilhado com locação e subtoken.
+  // Roda quando o PATCH trouxe dataJson OU no finalize: o dedupConjuges do
+  // finalize muda o compradores[] persistido mesmo num PATCH só de status.
+  if (body.dataJson || isFinalizing) {
+    await syncDealClientName({
+      formId: form.id,
+      schemaType: form.schemaType,
+      mergedData: mergedData as Record<string, unknown>,
     });
   }
 
