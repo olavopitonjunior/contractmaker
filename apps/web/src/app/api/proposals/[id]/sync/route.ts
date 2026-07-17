@@ -78,7 +78,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           lookupFailed = true;
           console.error("[proposals/sync] lookup do signer recusado falhou:", err);
         }
-        if (refusedSigner || (result.remoteStatus === "canceled" && !lookupFailed)) {
+        // Na via REDUZIDA o hint é irrelevante (refusedBy é sempre o
+        // proprietário) — lookup falho não pode adiar o terminal correto lá.
+        if (
+          refusedSigner ||
+          (result.remoteStatus === "canceled" &&
+            (env.via === "reduzida" || !lookupFailed))
+        ) {
           // Mesmo hint do caminho de webhook: sourceKind desambigua a via
           // ÚNICA (proprietário → recusada_vendedor).
           await onProposalEnvelopeRefused(env.id, {
