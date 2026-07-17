@@ -756,21 +756,19 @@ export async function runPassiveAnalysis(
     ? PASSIVE_SYSTEM_PROMPT_LOCACAO
     : PASSIVE_SYSTEM_PROMPT;
 
-  // Cap e budget ANTES do fetch do Drive: são 2 queries baratas de Postgres,
-  // e um contrato no cap/estourado NÃO pode pagar uma leitura de Drive por
-  // poll de 90s por aba aberta pra sempre (quota compartilhada com export/
-  // versão/PDF).
-  const unresolvedComments = await prisma.contractComment.findMany({
-    where: {
-      contractId: params.contractId,
-      authorType: "ai",
-      resolved: false,
-    },
-    orderBy: { createdAt: "desc" },
-    select: { text: true },
-    take: MAX_AI_UNRESOLVED_COMMENTS,
+  // Cap e budget ANTES do fetch do Drive: um contrato no cap/estourado NÃO
+  // pode pagar uma leitura de Drive por poll de 90s por aba aberta pra sempre
+  // (quota compartilhada com export/versão/PDF). O cap usa count() — os TEXTOS
+  // dos comentários só são buscados depois do hash-skip, quando a análise vai
+  // rodar de fato (alimentam o pendingBlock do prompt).
+  const unresolvedFilter = {
+    contractId: params.contractId,
+    authorType: "ai",
+    resolved: false,
+  } as const;
+  const existingUnresolved = await prisma.contractComment.count({
+    where: unresolvedFilter,
   });
-  const existingUnresolved = unresolvedComments.length;
   if (existingUnresolved >= MAX_AI_UNRESOLVED_COMMENTS) {
     return {
       findings: [],
@@ -839,15 +837,24 @@ export async function runPassiveAnalysis(
     return { findings: [], commentsCreated: 0, modelUsed: "skipped-no-change" };
   }
 
+  // Textos dos comentários pendentes (pro pendingBlock) — só no caminho em
+  // que a análise roda.
+  const unresolvedComments = await prisma.contractComment.findMany({
+    where: unresolvedFilter,
+    orderBy: { createdAt: "desc" },
+    select: { text: true },
+    take: MAX_AI_UNRESOLVED_COMMENTS,
+  });
+
   const quick: QuickFinding[] = quickChecks(contract.dataJson, htmlContent);
   const quickFindings: PassiveFinding[] = quick.map((q) => ({ ...q, source: "quickChecks" }));
 
   let llmFindings: PassiveFinding[] = [];
   let modelUsed = "quickChecks-only";
   let llmFailed = false;
-  // Só carimba o hash quando a resposta do LLM foi PARSEADA de fato: um 200
-  // com JSON truncado/inválido cai silencioso no fluxo e, sem esta flag,
-  // carimbaria o hash e silenciaria a análise pra sempre naquele texto.
+  // Decide o TIER do carimbo: resposta parseada → deep/light; 200 com JSON
+  // truncado/ilegível → carimbo `err:` (corta o loop do poll sem suprimir o
+  // passe deep do próximo open). Ver o bloco de carimbo no fim da função.
   let llmParsed = false;
   // Idem pra persistência: findings computados mas upsert falho (Neon
   // transiente) não podem carimbar — o próximo run re-tenta.
@@ -1022,23 +1029,16 @@ export async function runPassiveAnalysis(
     },
   });
 
-  // Carimba o hash SÓ quando a análise rodou POR INTEIRO e persistiu:
-  //   - LLM não lançou (llmFailed) e a resposta foi parseada (llmParsed) —
-  //     falha/JSON ilegível deixam o hash antigo e o próximo run re-tenta;
-  //   - todos os upserts de comentário persistiram (upsertFailed);
-  //   - run NÃO escopado (scope.changedText analisa só ±500 chars — carimbar
-  //     o doc inteiro suprimiria o passe deep do próximo open);
-  //   - trigger !== approve (não roda LLM).
-  // Tier: open → `deep:`; edit → `light:` (o raso não suprime o deep).
+  // Carimba quando o LLM RESPONDEU e os upserts persistiram; nunca em run
+  // escopado (parcial) nem approve (não roda LLM). Falha de rede/5xx
+  // (llmFailed) não carimba — transitória, o próximo run re-tenta.
+  // Tier: open → `deep:`; edit → `light:` (raso não suprime o deep);
+  // 200 ILEGÍVEL (JSON truncado — pode ser DETERMINÍSTICO) → `err:`, que
+  // corta o loop do poll (edit skipa) mas deixa o open re-tentar (err ≠ deep).
   // CAS: o updateMany condiciona no valor LIDO — duas análises concorrentes
   // (duas abas) não deixam o hash de um texto mais VELHO sobrescrever o novo.
   const isScoped = Boolean(params.scope?.changedText);
   if (params.trigger !== "approve" && !isScoped && !llmFailed && !upsertFailed) {
-    // 200 ILEGÍVEL (JSON truncado, prosa) pode ser DETERMINÍSTICO — sem
-    // carimbo nenhum, o poll de 90s re-pagaria o LLM no mesmo conteúdo até
-    // estourar o budget do contrato. `err:` corta o loop (edit skipa), mas
-    // NÃO suprime o passe deep: o próximo open re-tenta (err ≠ deep).
-    // Falha de rede/5xx (llmFailed) segue sem carimbo — é transitória.
     const tier = !llmParsed ? "err" : params.trigger === "open" ? "deep" : "light";
     await prisma.contract
       .updateMany({
