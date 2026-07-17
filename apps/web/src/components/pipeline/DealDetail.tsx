@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot, Pencil, Check, CheckCircle2, X, Archive, ArchiveRestore, Lock, LockOpen, ShieldAlert } from "lucide-react";
+import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot, Pencil, Check, CheckCircle2, X, Archive, ArchiveRestore, Lock, LockOpen, ShieldAlert, Users } from "lucide-react";
 import { SendAttachmentEnvelopeDialog } from "@/components/pipeline/SendAttachmentEnvelopeDialog";
 import { AddDocumentsCard } from "@/components/pipeline/AddDocumentsCard";
 import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
@@ -745,6 +745,17 @@ export function DealDetail({ deal, newtonEnabled = false }: DealDetailProps) {
               >
                 <Copy className="h-4 w-4 mr-1" />
                 Copiar link
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                asChild
+                title="Links individuais por parte (vendedor/comprador) com status de preenchimento"
+              >
+                <Link href={`/forms/${deal.form.id}/share`}>
+                  <Users className="h-4 w-4 mr-1" />
+                  Links por parte
+                </Link>
               </Button>
               <Button
                 variant="outline"

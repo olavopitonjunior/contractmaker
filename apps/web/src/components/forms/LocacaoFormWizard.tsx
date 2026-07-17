@@ -11,7 +11,10 @@ import {
   stepLabelsForLocacaoType,
 } from "@/lib/forms/validation-locacao";
 import { PrivacyConsent } from "@/components/legal/PrivacyConsent";
-import { SharePartyLinkButton } from "@/components/forms/PartyLinksPanel";
+import {
+  PartyLinksPanel,
+  SharePartyLinkButton,
+} from "@/components/forms/PartyLinksPanel";
 import type { ParticipantRole } from "@/lib/forms/participant-token";
 import { LocacaoParteStep } from "@/components/forms/steps/locacao/_PartyFields";
 import { DocumentosStep } from "@/components/forms/steps/DocumentosStep";
@@ -344,6 +347,30 @@ export function LocacaoFormWizard({
           ))}
         </div>
         <Separator />
+
+        {/* Links por parte visíveis de dentro do próprio form (token
+            principal). Fiador só entra quando a garantia é fiador — mesma
+            regra do LocacaoDadosTab. `watch` (não getValues) pra re-renderizar
+            quando a garantia muda durante a sessão; a `key` remonta o painel
+            quando o conjunto de roles muda — ele cacheia os links gerados e
+            ignoraria o fiador novo (from-main é idempotente, regenerar é
+            barato). */}
+        {finalizeMode === "main" && !readOnly && (() => {
+          const isFiador =
+            (form.watch("garantia.tipo" as never) as unknown) === "fiador";
+          const roles = [
+            "locador" as const,
+            "locatario" as const,
+            ...(isFiador ? (["fiador"] as const) : []),
+          ];
+          return (
+            <PartyLinksPanel
+              key={roles.join(",")}
+              formToken={token}
+              roles={roles}
+            />
+          );
+        })()}
       </div>
 
       <fieldset disabled={readOnly} className="m-0 border-0 p-0 min-w-0 disabled:opacity-70">
