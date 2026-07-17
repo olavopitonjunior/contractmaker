@@ -106,12 +106,14 @@ export async function notifyProposalMilestone(params: {
       select: { id: true },
     });
     if (!member) {
-      // Guard de REPLAY antes do fan-out: os batchIds por destinatário
-      // (:u:{userId}) não colidem com o batchId base de uma emissão anterior
-      // — sem esta checagem, um webhook reentregue depois do dono sair
-      // re-tocaria o sino pra todos os admins.
+      // Guard de REPLAY antes do fan-out: IGUALDADE no batchId base — só a
+      // emissão escopada no dono (feita quando ele ainda era membro) usa o
+      // base; se ela existe, o marco já foi entregue e o webhook reentregue
+      // não re-toca pros admins. Igualdade (não startsWith): os :u: do
+      // próprio fan-out são deduplicados pelo unique [type, batchId] de cada
+      // um — um replay do fan-out vira P2002 engolido, não duplicata.
       const alreadyEmitted = await prisma.notification.findFirst({
-        where: { orgId, type: t.type, batchId: { startsWith: batchId } },
+        where: { orgId, type: t.type, batchId },
         select: { id: true },
       });
       if (alreadyEmitted) return;
@@ -119,14 +121,20 @@ export async function notifyProposalMilestone(params: {
         where: { orgId, role: { in: ["owner", "admin"] } },
         select: { userId: true },
       });
-      if (admins.length > 0) {
-        recipients = admins.map((a) => ({
-          userId: a.userId,
-          batchSuffix: `:u:${a.userId}`,
-        }));
+      if (admins.length === 0) {
+        // Estado degenerado (org sem owner/admin): NÃO emite nada — uma
+        // emissão invisível com o batchId base bloquearia o fan-out quando
+        // um admin fosse adicionado e o webhook reentregue.
+        console.warn(
+          "[proposals/notify] org sem owner/admin — sino de marco pulado",
+          { orgId, proposalId, kind }
+        );
+        return;
       }
-      // Sem owner/admin (estado degenerado): mantém o dono original — o
-      // sino fica invisível, mas não vaza.
+      recipients = admins.map((a) => ({
+        userId: a.userId,
+        batchSuffix: `:u:${a.userId}`,
+      }));
     }
   } catch {
     // mantém escopado no dono

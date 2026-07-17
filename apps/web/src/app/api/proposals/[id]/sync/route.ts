@@ -62,15 +62,23 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         // status dos signers — o env.signers em memória é o snapshot PRÉ-sync
         // e não veria uma recusa recém-descoberta (o hint sairia null e a
         // recusa seria atribuída ao proponente, terminal errado sem correção).
-        // .catch: falha transiente aqui não pode transformar um sync que JÁ
-        // deu certo num erro na UI — sem hint, cai no default.
-        const refusedSigner = await prisma.envelopeSigner
-          .findFirst({
+        // Falha transiente no lookup NÃO vira erro do sync (que já deu
+        // certo) — mas também NÃO propaga recusa com hint null (num envelope
+        // canceled isso cravaria o terminal ERRADO, recusada_proponente, sem
+        // correção possível). Pula a propagação desta tentativa; o próximo
+        // sync re-tenta com o DB são.
+        let refusedSigner: { sourceKind: string | null } | null = null;
+        let lookupFailed = false;
+        try {
+          refusedSigner = await prisma.envelopeSigner.findFirst({
             where: { envelopeId: env.id, status: "refused" },
             select: { sourceKind: true },
-          })
-          .catch(() => null);
-        if (refusedSigner || result.remoteStatus === "canceled") {
+          });
+        } catch (err) {
+          lookupFailed = true;
+          console.error("[proposals/sync] lookup do signer recusado falhou:", err);
+        }
+        if (refusedSigner || (result.remoteStatus === "canceled" && !lookupFailed)) {
           // Mesmo hint do caminho de webhook: sourceKind desambigua a via
           // ÚNICA (proprietário → recusada_vendedor).
           await onProposalEnvelopeRefused(env.id, {
