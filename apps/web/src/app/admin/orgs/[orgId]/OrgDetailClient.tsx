@@ -329,6 +329,23 @@ function ActionsPanel({
     }
   }
 
+  async function seedClauses() {
+    setBusy("seed-clauses");
+    try {
+      const res = await fetch(`/api/admin/orgs/${orgId}/seed-clauses`, { method: "POST" });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(d.message ?? d.error ?? "Falha ao semear cláusulas");
+        return;
+      }
+      toast.success(`Cláusulas semeadas: ${d.created} criadas, ${d.skipped} já existiam.`);
+    } catch {
+      toast.error("Falha de rede.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function resetOnboarding() {
     setBusy("reset-onboarding");
     try {
@@ -375,6 +392,9 @@ function ActionsPanel({
             </Button>
             <Button variant="outline" disabled={busy === "reset-onboarding"} onClick={resetOnboarding}>
               {busy === "reset-onboarding" ? "…" : "Reabrir onboarding"}
+            </Button>
+            <Button variant="outline" disabled={busy === "seed-clauses"} onClick={seedClauses}>
+              {busy === "seed-clauses" ? "…" : "Semear cláusulas padrão"}
             </Button>
           </div>
         </CardContent>

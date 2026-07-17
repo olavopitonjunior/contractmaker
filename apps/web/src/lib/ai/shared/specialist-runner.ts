@@ -19,7 +19,15 @@ import { executeToolHandler } from "../tool-handlers";
 import { mapToolToAction, summarizeToolResult, type ToolOutput } from "./tool-mapping";
 import { capturePreSnapshot, capturePostSnapshot } from "./snapshot";
 import { recordAIUsage, type AIOperation } from "../usage";
-import { assertContractBudget, ContractBudgetExceededError } from "../budget";
+import {
+  assertContractBudget,
+  ContractBudgetExceededError,
+  OrgAiBudgetExceededError,
+} from "../budget";
+import {
+  getTenantAgentInstructions,
+  buildTenantInstructionsBlock,
+} from "../specialists/platform-defaults";
 import type { AgentContext } from "../types";
 import type {
   SpecialistName,
@@ -82,6 +90,11 @@ export async function runSpecialist(
   try {
     await assertContractBudget(contractId);
   } catch (err) {
+    // Org-level (USD): a mensagem carrega o remédio certo (Config → Uso de
+    // IA) — checar a subclasse ANTES do contrato.
+    if (err instanceof OrgAiBudgetExceededError) {
+      return { text: `⚠️ ${err.message}`, toolCalls: [] };
+    }
     if (err instanceof ContractBudgetExceededError) {
       return {
         text: `⚠️ Budget de IA atingido neste contrato. Não foi possível executar o ${agentName}.`,
@@ -91,10 +104,20 @@ export async function runSpecialist(
     throw err;
   }
 
+  // Instruções adicionais da imobiliária (AgentConfig.systemPrompt do tenant)
+  // entram como bloco DELIMITADO no fim do system prompt. Ponto único: cobre
+  // os 4 specialists sem tocar em cada call-site. Best-effort com cache 60s
+  // (o loader nunca lança). O cache_control continua efetivo: o prompt vira
+  // por-org, mas dentro da org o texto é estável entre turns.
+  const tenantInstructions = await getTenantAgentInstructions(orgId);
+  const effectiveSystemPrompt = tenantInstructions
+    ? `${systemPrompt}${buildTenantInstructionsBlock(tenantInstructions)}`
+    : systemPrompt;
+
   const systemBlocks = [
     {
       type: "text" as const,
-      text: systemPrompt,
+      text: effectiveSystemPrompt,
       cache_control: { type: "ephemeral" as const },
     },
   ] as unknown as Anthropic.TextBlockParam[];

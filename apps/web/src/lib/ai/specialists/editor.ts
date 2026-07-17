@@ -14,7 +14,11 @@
  */
 
 import { AGENT_TOOLS } from "../tools";
-import { SONNET_MODEL } from "../shared/anthropic-client";
+import { SONNET_MODEL, resolveModel } from "../shared/anthropic-client";
+import {
+  getPlatformAgentDefaults,
+  buildPlatformPromptOverrideBlock,
+} from "./platform-defaults";
 import { runSpecialist, type ToolUseGuard } from "../shared/specialist-runner";
 import { applyPolicy } from "../sentinel/middleware";
 import { pickSpecialistPrompt } from "./prompts-locacao";
@@ -69,10 +73,20 @@ export async function runEditor(state: OrchestratorState): Promise<SpecialistOut
 
   const userPrompt = buildEditorPrompt(state, wantsDirectEdit);
 
+  const overrides = await getPlatformAgentDefaults();
+
   return runSpecialist({
     agentName: "editor",
-    model: SONNET_MODEL,
-    systemPrompt: pickSpecialistPrompt("editor", state.contractContext),
+    // Overrides de plataforma (/admin/agent-defaults) — null = hardcoded.
+    model: resolveModel(overrides.editorModel ?? undefined, SONNET_MODEL),
+    // Prompt override é APÊNDICE ao base por-domínio (venda×locação) — não
+    // substitui, senão a variante de locação sumiria (singleton só tem o
+    // baseline de venda). Modelo, esse sim, substitui.
+    systemPrompt:
+      pickSpecialistPrompt("editor", state.contractContext) +
+      (overrides.editorPrompt
+        ? buildPlatformPromptOverrideBlock(overrides.editorPrompt)
+        : ""),
     tools,
     maxIterations: 3,
     userPrompt,
