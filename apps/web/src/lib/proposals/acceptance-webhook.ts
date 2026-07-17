@@ -3,6 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
 import { advanceProposalStatus } from "./status";
 import { buildAcceptanceProof, buildAcceptanceMessage } from "./acceptance-proof";
+import { notifyProposalMilestone } from "./notify-proposal";
 
 /**
  * Ponte webhook ClickSign → Proposal para o Aceite via WhatsApp
@@ -79,11 +80,11 @@ export async function processProposalAcceptanceEvent(
   const proposal = signer
     ? await prisma.proposal.findUnique({
         where: { id: signer.proposalId },
-        select: { id: true, title: true, token: true, instrument: true, validUntil: true },
+        select: { id: true, orgId: true, title: true, token: true, instrument: true, validUntil: true },
       })
     : await prisma.proposal.findFirst({
         where: { acceptanceClicksignId: input.acceptanceId, ...orgScope },
-        select: { id: true, title: true, token: true, instrument: true, validUntil: true },
+        select: { id: true, orgId: true, title: true, token: true, instrument: true, validUntil: true },
       });
   if (!proposal) {
     return { ok: true, handled: false, phase: input.phase, unknownAcceptance: true };
@@ -135,6 +136,15 @@ export async function processProposalAcceptanceEvent(
       // (terceiro) é registrado na linha dele, mas não redefine o desfecho —
       // antes, com 1 aceite de qualquer um a proposta virava "completa".
       if (!isProponente) {
+        // Sino por-signatário: um proprietário aceitou o termo dele. Suffix
+        // obrigatório — sem ele o aceite do 2º proprietário seria engolido
+        // pelo unique (type, batchId).
+        await notifyProposalMilestone({
+          proposalId: proposal.id,
+          orgId: proposal.orgId,
+          kind: "accepted_party",
+          dedupeSuffix: signer!.id,
+        });
         return { ok: true, handled: true, proposalId: proposal.id, phase: input.phase };
       }
 
@@ -146,6 +156,11 @@ export async function processProposalAcceptanceEvent(
       const acceptedAtValid = !Number.isNaN(acceptedAtReal.getTime());
       if (proposal.validUntil && acceptedAtValid && acceptedAtReal > proposal.validUntil) {
         await advanceProposalStatus(proposal.id, "expirada", { expiredAt: new Date() });
+        await notifyProposalMilestone({
+          proposalId: proposal.id,
+          orgId: proposal.orgId,
+          kind: "expired",
+        });
         return { ok: true, handled: true, proposalId: proposal.id, phase: input.phase };
       }
 
@@ -153,6 +168,11 @@ export async function processProposalAcceptanceEvent(
       // transições existentes em vez de alargar ALLOWED_FROM.
       await advanceProposalStatus(proposal.id, "assinada_proponente");
       await advanceProposalStatus(proposal.id, "completa", { completedAt: new Date() });
+      await notifyProposalMilestone({
+        proposalId: proposal.id,
+        orgId: proposal.orgId,
+        kind: "completed",
+      });
 
       // Comprovante durável — o requisito central do modo Aceite. Fire-and-forget
       // (idempotente por dossierUrl). O texto aceito é reconstruído idêntico ao
@@ -193,6 +213,14 @@ export async function processProposalAcceptanceEvent(
           refusedAt: new Date(),
         });
       }
+      // Suffix por signatário: recusas de partes diferentes são sinos distintos.
+      await notifyProposalMilestone({
+        proposalId: proposal.id,
+        orgId: proposal.orgId,
+        kind: "refused",
+        refusedBy: isProponente ? "proponente" : "vendedor",
+        dedupeSuffix: signer?.id,
+      });
       break;
 
     case "expired":
@@ -201,6 +229,11 @@ export async function processProposalAcceptanceEvent(
       // pode aceitar. Sem o guard, a expiração de qualquer termo terminava tudo.
       if (isProponente) {
         await advanceProposalStatus(proposal.id, "expirada", { expiredAt: new Date() });
+        await notifyProposalMilestone({
+          proposalId: proposal.id,
+          orgId: proposal.orgId,
+          kind: "expired",
+        });
       }
       break;
 

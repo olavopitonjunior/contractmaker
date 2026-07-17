@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import { advanceProposalStatus } from "./status";
+import { notifyProposalMilestone } from "./notify-proposal";
 
 /**
  * Ponte webhook ClickSign → Proposal, para envelopes com `source="proposal"`.
@@ -19,7 +20,7 @@ export async function onProposalEnvelopeClosed(
 
   const proposal = await prisma.proposal.findUnique({
     where: { id: env.proposalId },
-    select: { hiddenPaths: true },
+    select: { orgId: true, hiddenPaths: true },
   });
   if (!proposal) return;
   const hasHidden = proposal.hiddenPaths.length > 0;
@@ -27,6 +28,11 @@ export async function onProposalEnvelopeClosed(
   if (env.via === "reduzida") {
     // Via do proprietário fechou → tudo assinado.
     await advanceProposalStatus(env.proposalId, "completa", { completedAt: new Date() });
+    await notifyProposalMilestone({
+      proposalId: env.proposalId,
+      orgId: proposal.orgId,
+      kind: "completed",
+    });
     return;
   }
 
@@ -36,6 +42,11 @@ export async function onProposalEnvelopeClosed(
   if (!hasHidden) {
     // Via única: proponente + proprietário no mesmo envelope → completa.
     await advanceProposalStatus(env.proposalId, "completa", { completedAt: new Date() });
+    await notifyProposalMilestone({
+      proposalId: env.proposalId,
+      orgId: proposal.orgId,
+      kind: "completed",
+    });
     return;
   }
 
@@ -61,12 +72,21 @@ export async function onProposalEnvelopeRefused(
 ): Promise<void> {
   const env = await prisma.envelope.findUnique({
     where: { id: envelopeId },
-    select: { source: true, proposalId: true, via: true },
+    select: { source: true, proposalId: true, via: true, orgId: true },
   });
   if (env?.source !== "proposal" || !env.proposalId) return;
 
   // Recusa na via reduzida = proprietário recusou (o desfecho quente: há um
   // comprador já comprometido). Na via completa/única = proponente recusou.
-  const to = env.via === "reduzida" ? "recusada_vendedor" : "recusada_proponente";
+  const refusedBy = env.via === "reduzida" ? ("vendedor" as const) : ("proponente" as const);
+  const to = refusedBy === "vendedor" ? "recusada_vendedor" : "recusada_proponente";
   await advanceProposalStatus(env.proposalId, to, { refusedAt: new Date() });
+  await notifyProposalMilestone({
+    proposalId: env.proposalId,
+    orgId: env.orgId,
+    kind: "refused",
+    refusedBy,
+    // Suffix por via: recusas nas duas vias são sinos distintos.
+    dedupeSuffix: env.via ?? undefined,
+  });
 }

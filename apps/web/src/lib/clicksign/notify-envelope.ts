@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import { emitNotification } from "@/lib/notifications/emit";
+import { notifyProposalMilestone } from "@/lib/proposals/notify-proposal";
 
 /**
  * Emite Notification (sino) pros marcos críticos de assinatura, que antes
@@ -8,11 +9,12 @@ import { emitNotification } from "@/lib/notifications/emit";
  * padrão das notificações de certidões).
  *
  * SÓ pra envelope de contrato/attachment: um envelope de PROPOSTA (pré-negócio,
- * source="proposal", sem deal no kanban) NÃO entra aqui. A wording é de
- * contrato ("Contrato assinado", "pasta do negócio") e proposta tem máquina de
- * status própria (onProposalEnvelope*). Marcos de proposta (incl. bounce) são
- * feature separada do módulo de propostas — BACKLOG, não regressão: antes deste
- * lote proposta nunca teve sino de marco de envelope.
+ * source="proposal", sem deal no kanban) NÃO usa a wording daqui ("Contrato
+ * assinado", "pasta do negócio") — os marcos semânticos (aceite/recusa/
+ * expiração) são emitidos pela máquina de status própria (webhook-hooks +
+ * acceptance-webhook → lib/proposals/notify-proposal.ts). EXCEÇÃO: o BOUNCE
+ * de e-mail é detectado aqui embaixo (sync per-signer, agnóstico de source) e
+ * é DELEGADO pro sino de proposta — sem isso, o bounce de proposta sumia.
  *
  * `linkUrl` é resolvido pelo CHAMADOR (uma vez por envelope) e passado pronto —
  * a query da esteira NÃO fica dentro do try do emit (senão um erro de DB no
@@ -78,6 +80,31 @@ export async function notifyEnvelopeMilestone(params: {
   dedupeSuffix?: string;
 }): Promise<void> {
   const { envelopeId, orgId, source, dealId, linkUrl, kind, dedupeSuffix } = params;
+  if (source === "proposal" && kind === "email_failed") {
+    // Bounce em envelope de PROPOSTA: delega pro sino de proposta (wording e
+    // link certos). Resolve o proposalId aqui — o chamador (sync) só tem o
+    // envelope. Best-effort como todo o resto.
+    try {
+      const env = await prisma.envelope.findUnique({
+        where: { id: envelopeId },
+        select: { proposalId: true },
+      });
+      if (env?.proposalId) {
+        await notifyProposalMilestone({
+          proposalId: env.proposalId,
+          orgId,
+          kind: "email_failed",
+          dedupeSuffix,
+        });
+      }
+    } catch (err) {
+      console.error(
+        "[clicksign/notify-envelope] delegação de bounce de proposta falhou:",
+        err instanceof Error ? err.message : String(err)
+      );
+    }
+    return;
+  }
   if (source !== "contract" && source !== "attachment") return;
   try {
     const t = TEXT[kind];
