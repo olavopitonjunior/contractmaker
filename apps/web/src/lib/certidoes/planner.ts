@@ -315,6 +315,19 @@ interface DealDataLike {
 // -------------------------------------------------------------------
 
 const DEFAULT_FINALIDADE = "Instrucao de compra e venda de imovel";
+// ONR/ARISP `registradores/matric/pedido` — a `finalidade` NÃO é texto livre como
+// no e-SAJ (TJSP/TJRJ): a API faz `to_i` do valor, então o texto acima chegava
+// como `0` e a Infosimples recusava com 606 ("O parâmetro 'finalidade' deve estar
+// preenchido"). É um ENUM NUMÉRICO cujos códigos não estão na doc pública (só na
+// área autenticada Infosimples / no dropdown do portal ARISP). A finalidade é só
+// o "motivo declarado" da visualização — NÃO altera a matrícula retornada — então
+// o default genérico (1 = compra e venda, 1º item do dropdown) serve pra qualquer
+// pedido. Configurável por env ONR_MATRIC_FINALIDADE pra ajustar sem redeploy caso
+// o código correto seja outro. Ver [[project_shared_blob_refcount_delete]] vizinho
+// (mesma investigação de certidões).
+const ONR_MATRIC_FINALIDADE = Number(
+  process.env.ONR_MATRIC_FINALIDADE?.trim() || "1"
+);
 // Fallback de ÚLTIMO caso: o caminho real passa o e-mail de login do operador
 // (route.ts → dealEmail). O e-SAJ (TJSP/TJRJ) VALIDA a entregabilidade desse
 // e-mail — domínio inexistente/sem MX é recusado com code 608 ("Favor preencher
@@ -1261,7 +1274,8 @@ export function planCertidoesForDeal(
         jobs.push(
           buildJob(ep, kind, index, label, {
             matricula,
-            finalidade: DEFAULT_FINALIDADE,
+            // ONR quer código numérico, não o texto do e-SAJ (senão 606).
+            finalidade: ONR_MATRIC_FINALIDADE,
             email,
             ...(cartorio ? { cartorio } : {}),
             ...(imovel.cidade ? { municipio: imovel.cidade } : {}),
