@@ -62,10 +62,14 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         // status dos signers — o env.signers em memória é o snapshot PRÉ-sync
         // e não veria uma recusa recém-descoberta (o hint sairia null e a
         // recusa seria atribuída ao proponente, terminal errado sem correção).
-        const refusedSigner = await prisma.envelopeSigner.findFirst({
-          where: { envelopeId: env.id, status: "refused" },
-          select: { sourceKind: true },
-        });
+        // .catch: falha transiente aqui não pode transformar um sync que JÁ
+        // deu certo num erro na UI — sem hint, cai no default.
+        const refusedSigner = await prisma.envelopeSigner
+          .findFirst({
+            where: { envelopeId: env.id, status: "refused" },
+            select: { sourceKind: true },
+          })
+          .catch(() => null);
         if (refusedSigner || result.remoteStatus === "canceled") {
           // Mesmo hint do caminho de webhook: sourceKind desambigua a via
           // ÚNICA (proprietário → recusada_vendedor).

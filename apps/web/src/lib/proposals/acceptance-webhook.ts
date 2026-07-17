@@ -149,6 +149,10 @@ export async function processProposalAcceptanceEvent(
           "recusada_vendedor",
         ]);
         if (!DEAD_FOR_PARTY_ACCEPT.has(proposal.status)) {
+          // Body condiciona ao momento: pós-completa/convertida, "aguardando
+          // o proponente" seria falso — o aceite é confirmação de arquivo.
+          const afterCompletion =
+            proposal.status === "completa" || proposal.status === "convertida";
           waitUntil(
             notifyProposalMilestone({
               proposalId: proposal.id,
@@ -156,6 +160,12 @@ export async function processProposalAcceptanceEvent(
               userId: proposal.userId,
               kind: "accepted_party",
               dedupeSuffix: signer!.id,
+              ...(afterCompletion
+                ? {
+                    bodyOverride:
+                      "Um participante registrou o aceite do termo dele. A proposta já está completa — aceite arquivado no histórico.",
+                  }
+                : {}),
             })
           );
         }

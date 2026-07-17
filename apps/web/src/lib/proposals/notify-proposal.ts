@@ -82,10 +82,13 @@ export async function notifyProposalMilestone(params: {
   refusedBy?: "proponente" | "vendedor";
   /** Discriminador extra do batchId (signerId em accepted_party/email_failed). */
   dedupeSuffix?: string;
+  /** Body específico do contexto (ex.: accepted_party pós-completa). */
+  bodyOverride?: string;
 }): Promise<void> {
-  const { proposalId, orgId, userId, kind, refusedBy, dedupeSuffix } = params;
+  const { proposalId, orgId, userId, kind, refusedBy, dedupeSuffix, bodyOverride } = params;
   const t = TEXT[kind];
-  const body = kind === "refused" && refusedBy ? REFUSED_BODY[refusedBy] : t.body;
+  const body =
+    bodyOverride ?? (kind === "refused" && refusedBy ? REFUSED_BODY[refusedBy] : t.body);
   const batchId = `proposal:${proposalId}:${kind}${dedupeSuffix ? `:${dedupeSuffix}` : ""}`;
 
   // Dono que SAIU da org: o sino escopado iria pra alguém que não vê mais
@@ -103,6 +106,15 @@ export async function notifyProposalMilestone(params: {
       select: { id: true },
     });
     if (!member) {
+      // Guard de REPLAY antes do fan-out: os batchIds por destinatário
+      // (:u:{userId}) não colidem com o batchId base de uma emissão anterior
+      // — sem esta checagem, um webhook reentregue depois do dono sair
+      // re-tocaria o sino pra todos os admins.
+      const alreadyEmitted = await prisma.notification.findFirst({
+        where: { orgId, type: t.type, batchId: { startsWith: batchId } },
+        select: { id: true },
+      });
+      if (alreadyEmitted) return;
       const admins = await prisma.orgMembership.findMany({
         where: { orgId, role: { in: ["owner", "admin"] } },
         select: { userId: true },
