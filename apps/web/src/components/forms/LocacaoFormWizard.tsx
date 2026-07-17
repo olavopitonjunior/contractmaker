@@ -11,7 +11,10 @@ import {
   stepLabelsForLocacaoType,
 } from "@/lib/forms/validation-locacao";
 import { PrivacyConsent } from "@/components/legal/PrivacyConsent";
-import { SharePartyLinkButton } from "@/components/forms/PartyLinksPanel";
+import {
+  PartyLinksPanel,
+  SharePartyLinkButton,
+} from "@/components/forms/PartyLinksPanel";
 import type { ParticipantRole } from "@/lib/forms/participant-token";
 import { LocacaoParteStep } from "@/components/forms/steps/locacao/_PartyFields";
 import { DocumentosStep } from "@/components/forms/steps/DocumentosStep";
@@ -344,6 +347,23 @@ export function LocacaoFormWizard({
           ))}
         </div>
         <Separator />
+
+        {/* Links por parte visíveis de dentro do próprio form (token
+            principal). Fiador só entra quando a garantia é fiador — mesma
+            regra do LocacaoDadosTab. */}
+        {finalizeMode === "main" && !readOnly && (
+          <PartyLinksPanel
+            formToken={token}
+            roles={[
+              "locador",
+              "locatario",
+              ...((form.getValues("garantia.tipo" as never) as unknown) ===
+              "fiador"
+                ? (["fiador"] as const)
+                : []),
+            ]}
+          />
+        )}
       </div>
 
       <fieldset disabled={readOnly} className="m-0 border-0 p-0 min-w-0 disabled:opacity-70">
