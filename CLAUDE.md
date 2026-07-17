@@ -61,9 +61,9 @@ Auto-transições têm guard `linearOrder.includes(currentStageName)` — webhoo
 
 **Endpoints manuais** (UI session-based):
 - `POST .../mark-commission-paid` — aceita "Cobrança emitida" ou "Contrato assinado"
-- `POST .../mark-lost` — Zod `{ reason, category? }`. Categorias: `desistencia | imovel_vendido | financiamento_negado | outro`. Bloqueia terminal
-- `POST .../reopen` — sai de Lost, restaura stage anterior via `AuditLog DEAL_STAGE_CHANGE { kind:"lost", previousStageId }`. Fallback "Confecção de Contrato"
-- `mark-signed` (legado Newton) aponta pra "Comissão paga". Aceita "Enviado para assinatura", "Contrato assinado" ou "Cobrança emitida"
+- `POST .../mark-lost` — Zod `{ reason, category? }` (`desistencia|imovel_vendido|financiamento_negado|outro`). Bloqueia terminal
+- `POST .../reopen` — sai de Lost, restaura stage via `AuditLog DEAL_STAGE_CHANGE { kind:"lost", previousStageId }`; fallback "Confecção de Contrato"
+- `mark-signed` (legado Newton) → "Comissão paga"; aceita os 3 stages intermediários
 
 
 ## DadosContrato
@@ -126,7 +126,7 @@ System prompt (`prompts.ts`) tem 19 regras. Destaques: 10 obriga markdown estrut
 
 ## Análise automática (passive)
 
-`useAutoAnalyze.ts` — server lê `getDocPlainText` do Drive. On-mount `open` (deep, Sonnet via `ANTHROPIC_PASSIVE_OPEN_MODEL || ANTHROPIC_MODEL`); poll 90s `edit` (Haiku via `ANTHROPIC_PASSIVE_MODEL`). **Skip por hash**: `Contract.lastAnalyzedTextHash = "{deep|light|err}:{sha1(texto+dataJson)}"` — edit skipa com qualquer tier, open só com `deep:`; parseado→deep/light, 200 ilegível→`err:` (corta loop do poll, open re-tenta); nunca escopado; CAS. Cap/budget antes do Drive; Drive fora → `drive-unavailable` 200. **Quick checks** zero-LLM (`quickChecks.ts`). **Dedupe** `dedupeKey = FNV-1a(authorType+category+selectedText)` + `@@unique`. **Cap:** 50 unresolved, `max_tokens` 1024, input 8000, 3 findings/run. Cleanup: `cleanup-stale-ai-comments.ts --apply`.
+`useAutoAnalyze.ts` — server lê `getDocPlainText` do Drive. On-mount `open` (deep, Sonnet via `ANTHROPIC_PASSIVE_OPEN_MODEL || ANTHROPIC_MODEL`); poll 90s `edit` (Haiku via `ANTHROPIC_PASSIVE_MODEL`). **Skip por hash**: `Contract.lastAnalyzedTextHash = "{deep|light|err}:{sha1(texto+dataJson)}"` — edit skipa com qualquer tier, open só com `deep:`; parseado + upserts ok→deep/light, 200 ilegível→`err:` (corta loop do poll, open re-tenta); nunca escopado; CAS. Cap/budget antes do Drive; Drive fora → `drive-unavailable` 200. **Quick checks** zero-LLM (`quickChecks.ts`). **Dedupe** `dedupeKey = FNV-1a(authorType+category+selectedText)` + `@@unique`. **Cap:** 50 unresolved, `max_tokens` 1024, input 8000, 3 findings/run. Cleanup: `cleanup-stale-ai-comments.ts --apply`.
 
 ## Editor — Google Docs
 
