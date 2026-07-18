@@ -17,6 +17,10 @@ import {
   completeInspectionOnEnvelopeClosed,
   revertInspectionOnEnvelopeCanceled,
 } from "@/lib/locacao/inspection-signature";
+import {
+  onProposalEnvelopeClosed,
+  onProposalEnvelopeRefused,
+} from "@/lib/proposals/webhook-hooks";
 
 /**
  * Reconcilia o estado de UM envelope com a ClickSign v3 — fonte canônica de
@@ -73,6 +77,11 @@ export async function syncEnvelopeState(
   let signersUpdated = 0;
   const bouncedSignerIds: string[] = [];
   let refusedNewly = false;
+  // sourceKind do signatário que o feed /events mostra como recusado — hint pro
+  // onProposalEnvelopeRefused desambiguar a via ÚNICA (proprietário vs
+  // proponente). Lido do `local` (o sourceKind é estático) contra o sinal
+  // fresco do remote: sem query extra e sem a corrida da leitura pós-sync.
+  let refusedSourceKind: string | null = null;
   for (const local of envelope.signers) {
     const byKey = local.clicksignId
       ? stateBySigner.get(local.clicksignId)
@@ -88,6 +97,7 @@ export async function syncEnvelopeState(
     const updates: Prisma.EnvelopeSignerUpdateInput = {};
 
     if (remote.refusedAt) {
+      refusedSourceKind = local.sourceKind;
       if (local.status !== "refused") {
         updates.status = "refused";
         refusedNewly = true;
@@ -227,6 +237,26 @@ export async function syncEnvelopeState(
     if (signedUrl) {
       await downloadSignedPdf(envelope.id, signedUrl);
       envelopeUpdated = true;
+    }
+  }
+
+  // Propaga o desfecho pra máquina de status da PROPOSTA. Centralizado aqui (não
+  // na rota de sync) pra que TODO caller do reconciler — botão Atualizar, cron
+  // diário, sync de deal — dispare o avanço de status e os sinos. Sem isto, um
+  // webhook `close` perdido reconciliado pelo cron fechava o envelope mas deixava
+  // a proposta travada em "enviada", e como o envelope virava `closed` saía do
+  // sweep seguinte (só `running`), derrotando a redundância. Os hooks são
+  // idempotentes (advanceProposalStatus CAS + sino dedupado) e no-op fora de
+  // proposta; best-effort pra nunca abortar o resto da reconciliação (contratos).
+  if (envelope.source === "proposal" && envelope.proposalId) {
+    try {
+      if (remoteStatus === "closed" || remoteStatus === "finished") {
+        await onProposalEnvelopeClosed(envelope.id);
+      } else if (refusedNewly || remoteStatus === "canceled") {
+        await onProposalEnvelopeRefused(envelope.id, { refusedSourceKind });
+      }
+    } catch (err) {
+      console.error("[envelope sync] propagação de status da proposta falhou:", err);
     }
   }
 
