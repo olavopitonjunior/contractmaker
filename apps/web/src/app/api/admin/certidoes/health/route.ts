@@ -1,11 +1,75 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { requireOrgAdmin } from "@/lib/security/org-scope";
 import { callInfosimples } from "@/lib/certidoes/infosimples";
 import { checkOnrAuth } from "@/lib/certidoes/onr-auth";
+import { isOnrLoginFailure } from "@/lib/certidoes/error-codes";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
+
+interface OnrHealth {
+  active: boolean;
+  mode: "cert_a1" | "login_senha" | null;
+  error?: string;
+  /** true = login autenticou; false = portal recusou o login (608 + msg de login). */
+  loginOk?: boolean;
+  /** Mensagem crua da Infosimples quando o login falha. */
+  loginError?: string;
+  /** Login OK mas houve outro 6xx (ex.: 606 lista params/tipo_login aceitos). */
+  note?: string;
+  resultCode?: number;
+  /** Só as CHAVES do 1º item de data[] (sem valores/PII) — revela o campo de protocolo do ONR. */
+  sampleShape?: string[];
+}
+
+/**
+ * Probe de login ONR/ARISP. Usa `registradores/matric/lista` — endpoint
+ * INFORMATIVO que **não consome saldo do portal ONR** (só ~R$0,04 de crédito
+ * Infosimples) — pra exercer o login real e revelar o shape da resposta.
+ * Classifica por MENSAGEM (608 é genérico "params recusados"; o motivo login
+ * está no texto). Nunca lança — devolve o estado.
+ */
+async function probeOnrLogin(): Promise<OnrHealth> {
+  const onrAuth = await checkOnrAuth();
+  if (!onrAuth.active) {
+    return { active: false, mode: null, ...(onrAuth.error ? { error: onrAuth.error } : {}) };
+  }
+  try {
+    const resp = await callInfosimples("registradores/matric/lista", {});
+    const msg = [resp.code_message, ...(resp.errors ?? [])].filter(Boolean).join(" ");
+    if (resp.code === 200) {
+      const first = resp.data?.[0];
+      const sampleShape =
+        first && typeof first === "object" ? Object.keys(first) : [];
+      return { active: true, mode: onrAuth.mode, loginOk: true, resultCode: 200, sampleShape };
+    }
+    if (isOnrLoginFailure(msg)) {
+      return {
+        active: true,
+        mode: onrAuth.mode,
+        loginOk: false,
+        loginError: msg || "Não foi possível realizar o login no portal ONR/ARISP.",
+        resultCode: resp.code,
+      };
+    }
+    // Login OK, mas outro 6xx (ex.: 606 "faltam params" lista os aceitos).
+    return {
+      active: true,
+      mode: onrAuth.mode,
+      loginOk: true,
+      note: msg || `Código ${resp.code}`,
+      resultCode: resp.code,
+    };
+  } catch (err) {
+    return {
+      active: true,
+      mode: onrAuth.mode,
+      loginOk: false,
+      loginError: err instanceof Error ? err.message : "erro desconhecido no probe ONR",
+    };
+  }
+}
 
 /**
  * GET /api/admin/certidoes/health
@@ -28,7 +92,7 @@ export const maxDuration = 30;
  * UX esperada: chamar antes de disparar um batch grande — se provider fora,
  * avisar usuário antes de gastar.
  */
-export async function GET() {
+export async function GET(req: NextRequest) {
   const session = await auth();
   if (!session?.user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -39,6 +103,20 @@ export async function GET() {
   const org = await getUserOrg(session.user.id);
   if (!org) {
     return NextResponse.json({ error: "No organization" }, { status: 400 });
+  }
+
+  // ?onr=1 → só o probe de login ONR (pula CNPJ + GOV.BR). Iteração barata de
+  // tipo_login/senha sem gastar o probe CNPJ a cada tentativa.
+  const onrOnly = req.nextUrl.searchParams.get("onr") === "1";
+  if (onrOnly) {
+    if (!process.env.INFOSIMPLES_TOKEN) {
+      return NextResponse.json(
+        { onr: { active: false, mode: null, error: "INFOSIMPLES_TOKEN não configurado" } },
+        { status: 503 }
+      );
+    }
+    const onr = await probeOnrLogin();
+    return NextResponse.json({ onr, checkedAt: new Date().toISOString() });
   }
 
   const token = process.env.INFOSIMPLES_TOKEN;
@@ -140,14 +218,9 @@ export async function GET() {
   }
 
   // --- 3. ONR/ARISP (credenciais do portal de Registradores) ---
-  // Env-based (não há endpoint admin de status). Indica se matrícula + pesquisa
-  // de bens estão habilitadas.
-  const onrAuth = await checkOnrAuth();
-  const onrStatus = {
-    active: onrAuth.active,
-    mode: onrAuth.mode,
-    ...(onrAuth.error ? { error: onrAuth.error } : {}),
-  };
+  // Probe de login REAL (matric/lista, não consome saldo do portal ONR) — testa
+  // a credencial de fato e captura o shape da resposta. Só roda se configurado.
+  const onrStatus = await probeOnrLogin();
 
   return NextResponse.json({
     infosimples: infosimplesStatus,

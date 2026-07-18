@@ -325,9 +325,14 @@ const DEFAULT_FINALIDADE = "Instrucao de compra e venda de imovel";
 // pedido. Configurável por env ONR_MATRIC_FINALIDADE pra ajustar sem redeploy caso
 // o código correto seja outro. Ver [[project_shared_blob_refcount_delete]] vizinho
 // (mesma investigação de certidões).
-const ONR_MATRIC_FINALIDADE = Number(
-  process.env.ONR_MATRIC_FINALIDADE?.trim() || "1"
-);
+// Guard de NaN: `Number("compra")` → NaN → enviado como "NaN" → volta o 606 que
+// acabamos de matar. 0 é o sentinela inválido (to_i de texto vazio → 0 → 606).
+// Só aceita número finito positivo; qualquer outra coisa (NaN, 0, negativo) cai
+// no default 1.
+const ONR_MATRIC_FINALIDADE = (() => {
+  const n = Number(process.env.ONR_MATRIC_FINALIDADE?.trim());
+  return Number.isFinite(n) && n > 0 ? n : 1;
+})();
 // Fallback de ÚLTIMO caso: o caminho real passa o e-mail de login do operador
 // (route.ts → dealEmail). O e-SAJ (TJSP/TJRJ) VALIDA a entregabilidade desse
 // e-mail — domínio inexistente/sem MX é recusado com code 608 ("Favor preencher

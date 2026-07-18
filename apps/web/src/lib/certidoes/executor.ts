@@ -730,11 +730,20 @@ export async function runSingleJob(
       // (a Certidão de Distribuição já volta com o número), com fallback no
       // dados_solicitacao.protocolo. O obter usa esse valor (ver pollPortalJob).
       const dadosSolic = d.dados_solicitacao as Record<string, unknown> | undefined;
+      // Fallback amplo: o shape do ONR matrícula (`matric/pedido`) nunca foi
+      // validado ao vivo (o login sempre falhou antes — 608). Candidatos ONR
+      // prováveis (`protocolo`/`numero_protocolo`/`codigo`) adicionados
+      // defensivamente — usados só quando os campos e-SAJ/TRF3 faltam, então
+      // zero risco de regressão. Ajustar pro campo exato após ver o `sampleShape`
+      // real do probe (health `?onr=1`). Ver [[project_certidoes_onr_imovel]].
       const numeroPedido =
         (d.numero_pedido as string) ??
         (d.numero_requerimento as string) ??
         (d.numero_certidao as string) ??
         (dadosSolic?.protocolo as string) ??
+        (d.protocolo as string) ??
+        (d.numero_protocolo as string) ??
+        (d.codigo as string) ??
         null;
       // pedido_data: o obter do e-SAJ (TJSP/TJRJ) exige a DATA do pedido além
       // do numero_pedido. A resposta do pedido raramente traz, então usamos a

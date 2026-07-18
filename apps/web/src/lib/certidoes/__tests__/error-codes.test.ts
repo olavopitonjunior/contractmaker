@@ -8,8 +8,34 @@ import {
   friendlySourceUnavailableMessage,
   isReceitaCertidaoNaoEmitida,
   isDataDivergente,
+  isOnrLoginFailure,
   mapInfosimplesCodeToCategory,
 } from "../error-codes";
+
+describe("isOnrLoginFailure (probe ONR — detecta login por mensagem, não por 608)", () => {
+  it("casa 'Não foi possível realizar o login' (608 ONR real)", () => {
+    expect(isOnrLoginFailure("Não foi possível realizar o login")).toBe(true);
+  });
+  it("casa variações de credencial/senha inválida", () => {
+    expect(isOnrLoginFailure("Login inválido para o portal")).toBe(true);
+    expect(isOnrLoginFailure("Falha no login: credenciais recusadas")).toBe(true);
+    expect(isOnrLoginFailure("Autenticação recusada pelo portal ONR")).toBe(true);
+    expect(isOnrLoginFailure("Senha incorreta")).toBe(true);
+  });
+  it("NÃO casa 608 de parâmetro obrigatório (missing_input legítimo)", () => {
+    expect(
+      isOnrLoginFailure("Parâmetros obrigatórios: finalidade")
+    ).toBe(false);
+    expect(
+      isOnrLoginFailure("O parâmetro 'finalidade' deve estar preenchido")
+    ).toBe(false);
+  });
+  it("nulo/vazio → false", () => {
+    expect(isOnrLoginFailure(null)).toBe(false);
+    expect(isOnrLoginFailure(undefined)).toBe(false);
+    expect(isOnrLoginFailure("")).toBe(false);
+  });
+});
 
 describe("isDataDivergente + 608 divergência → inconsistent_input (não missing)", () => {
   it("casa 'divergente da constante na base' (Receita CPF 608 real)", () => {
