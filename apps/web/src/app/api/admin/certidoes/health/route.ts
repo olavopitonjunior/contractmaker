@@ -4,6 +4,7 @@ import { requireOrgAdmin } from "@/lib/security/org-scope";
 import { callInfosimples } from "@/lib/certidoes/infosimples";
 import { checkOnrAuth } from "@/lib/certidoes/onr-auth";
 import { isOnrLoginFailure } from "@/lib/certidoes/error-codes";
+import { isOrgInfosimplesBlocked } from "@/lib/certidoes/executor";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -12,11 +13,15 @@ interface OnrHealth {
   active: boolean;
   mode: "cert_a1" | "login_senha" | null;
   error?: string;
-  /** true = login autenticou; false = portal recusou o login (608 + msg de login). */
+  /**
+   * true = login autenticou (SÓ com code 200); false = portal recusou o login
+   * (mensagem explícita de login). undefined = inconclusivo (6xx ambíguo, portal
+   * fora, rede, org bloqueada) — NUNCA presumir login OK sem 200.
+   */
   loginOk?: boolean;
   /** Mensagem crua da Infosimples quando o login falha. */
   loginError?: string;
-  /** Login OK mas houve outro 6xx (ex.: 606 lista params/tipo_login aceitos). */
+  /** Contexto quando inconclusivo (6xx ambíguo, ex.: 606 lista tipo_login aceitos; ou org bloqueada). */
   note?: string;
   resultCode?: number;
   /** Só as CHAVES do 1º item de data[] (sem valores/PII) — revela o campo de protocolo do ONR. */
@@ -27,16 +32,43 @@ interface OnrHealth {
  * Probe de login ONR/ARISP. Usa `registradores/matric/lista` — endpoint
  * INFORMATIVO que **não consome saldo do portal ONR** (só ~R$0,04 de crédito
  * Infosimples) — pra exercer o login real e revelar o shape da resposta.
- * Classifica por MENSAGEM (608 é genérico "params recusados"; o motivo login
- * está no texto). Nunca lança — devolve o estado.
+ *
+ * Classificação CONSERVADORA: só afirma `loginOk:true` com **code 200** (prova
+ * positiva de autenticação). Falha de login só com mensagem explícita
+ * (isOnrLoginFailure). Qualquer outro 6xx / rede / org bloqueada → `loginOk`
+ * undefined (inconclusivo) com a mensagem crua no `note` — nunca pinta verde sem
+ * 200 nem vermelho por causa de outage transitório. Nunca lança.
+ *
+ * Guarda o breaker/orçamento (isOrgInfosimplesBlocked) e usa timeout curto
+ * (< maxDuration do route) sem retry, pra não estourar o serverless nem gastar
+ * crédito com a org já congelada.
  */
-async function probeOnrLogin(): Promise<OnrHealth> {
+async function probeOnrLogin(orgId: string): Promise<OnrHealth> {
   const onrAuth = await checkOnrAuth();
   if (!onrAuth.active) {
     return { active: false, mode: null, ...(onrAuth.error ? { error: onrAuth.error } : {}) };
   }
+  // Respeita o mesmo guard que runSingleJob/pollPortalJob: não gasta crédito se
+  // a org estourou o orçamento mensal ou o breaker de crédito (603) está tripado.
+  const blocked = await isOrgInfosimplesBlocked(orgId);
+  if (blocked.blocked) {
+    return {
+      active: true,
+      mode: onrAuth.mode,
+      note:
+        blocked.reason === "credit"
+          ? "Conta Infosimples sem crédito (breaker ativo) — teste não executado."
+          : "Orçamento mensal de certidões esgotado — teste não executado.",
+    };
+  }
   try {
-    const resp = await callInfosimples("registradores/matric/lista", {});
+    // Timeout curto (< maxDuration=30s) e sem retry: o probe não pode estourar o
+    // serverless nem dobrar a latência num portal ONR lento.
+    const resp = await callInfosimples(
+      "registradores/matric/lista",
+      {},
+      { timeoutMs: 20_000, retryOnNetworkError: false }
+    );
     const msg = [resp.code_message, ...(resp.errors ?? [])].filter(Boolean).join(" ");
     if (resp.code === 200) {
       const first = resp.data?.[0];
@@ -53,20 +85,24 @@ async function probeOnrLogin(): Promise<OnrHealth> {
         resultCode: resp.code,
       };
     }
-    // Login OK, mas outro 6xx (ex.: 606 "faltam params" lista os aceitos).
+    // 6xx ambíguo (608 genérico "params recusados", 615 portal fora, 606 "faltam
+    // params" listando tipo_login aceitos, 603/604 conta): INCONCLUSIVO. Mostra a
+    // mensagem crua pra diagnóstico, sem afirmar que o login passou.
     return {
       active: true,
       mode: onrAuth.mode,
-      loginOk: true,
       note: msg || `Código ${resp.code}`,
       resultCode: resp.code,
     };
   } catch (err) {
+    // callInfosimples só lança em rede/5xx (não em 6xx de negócio). Isso é
+    // problema de TRANSPORTE, não de credencial → inconclusivo, não "login falhou".
     return {
       active: true,
       mode: onrAuth.mode,
-      loginOk: false,
-      loginError: err instanceof Error ? err.message : "erro desconhecido no probe ONR",
+      note: `Não foi possível testar o login (${
+        err instanceof Error ? err.message : "erro de rede/provedor"
+      }). Tente novamente.`,
     };
   }
 }
@@ -115,7 +151,7 @@ export async function GET(req: NextRequest) {
         { status: 503 }
       );
     }
-    const onr = await probeOnrLogin();
+    const onr = await probeOnrLogin(org.id);
     return NextResponse.json({ onr, checkedAt: new Date().toISOString() });
   }
 
@@ -218,9 +254,16 @@ export async function GET(req: NextRequest) {
   }
 
   // --- 3. ONR/ARISP (credenciais do portal de Registradores) ---
-  // Probe de login REAL (matric/lista, não consome saldo do portal ONR) — testa
-  // a credencial de fato e captura o shape da resposta. Só roda se configurado.
-  const onrStatus = await probeOnrLogin();
+  // Env-only aqui (instantâneo, custo zero) — indica só se a credencial está
+  // configurada. O teste de login AO VIVO (pago, matric/lista) fica no botão
+  // dedicado "Testar login ONR" (?onr=1), pra "Verificar API agora" não gastar
+  // crédito extra a cada clique nem arriscar estourar o maxDuration.
+  const onrAuth = await checkOnrAuth();
+  const onrStatus: OnrHealth = {
+    active: onrAuth.active,
+    mode: onrAuth.mode,
+    ...(onrAuth.error ? { error: onrAuth.error } : {}),
+  };
 
   return NextResponse.json({
     infosimples: infosimplesStatus,

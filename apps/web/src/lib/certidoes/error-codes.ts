@@ -263,7 +263,10 @@ export function isDataDivergente(message: string | null | undefined): boolean {
  */
 export function isOnrLoginFailure(message: string | null | undefined): boolean {
   if (!message) return false;
-  return /n[ãa]o\s+foi\s+poss[íi]vel.*log|falha.*login|login.*(inv[áa]lid|incorret|recusad)|autentica[çc][ãa]o.*(falh|recusad|inv[áa]lid)|credenci|senha.*(inv[áa]lid|incorret)/i.test(
+  // "credenci" NÃO pode ser alternativa solta — casaria "informe as credenciais"
+  // / "credenciais aceitas" (mensagens de param, não de falha). Exige um termo
+  // de invalidez/recusa junto.
+  return /n[ãa]o\s+foi\s+poss[íi]vel.*log(in|ar)|falha.*(no\s+)?login|login.*(inv[áa]lid|incorret|recusad|negad)|autentica[çc][ãa]o.*(falh|recusad|inv[áa]lid|negad)|credenci\w*.*(inv[áa]lid|incorret|recusad|negad|expirad)|senha.*(inv[áa]lid|incorret)/i.test(
     message
   );
 }

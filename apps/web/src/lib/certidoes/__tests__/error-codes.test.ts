@@ -30,6 +30,10 @@ describe("isOnrLoginFailure (probe ONR — detecta login por mensagem, não por 
       isOnrLoginFailure("O parâmetro 'finalidade' deve estar preenchido")
     ).toBe(false);
   });
+  it("NÃO casa 'credenci' sem termo de invalidez (mensagem de param, não de falha)", () => {
+    expect(isOnrLoginFailure("Informe as credenciais de acesso")).toBe(false);
+    expect(isOnrLoginFailure("Valores de credenciais aceitas: cpf, email")).toBe(false);
+  });
   it("nulo/vazio → false", () => {
     expect(isOnrLoginFailure(null)).toBe(false);
     expect(isOnrLoginFailure(undefined)).toBe(false);

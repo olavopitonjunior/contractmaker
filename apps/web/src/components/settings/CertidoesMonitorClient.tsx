@@ -145,6 +145,9 @@ export function CertidoesMonitorClient({ problems }: { problems: ProblemRow[] })
         if (data.onr?.loginOk === true) toast.success("Login ONR OK");
         else if (data.onr?.loginOk === false)
           toast.error(data.onr?.loginError || "Login ONR falhou");
+        else
+          // Inconclusivo (6xx ambíguo, portal fora, org bloqueada): mostra a msg crua.
+          toast.info(data.onr?.note || data.onr?.error || "Resultado do teste ONR inconclusivo");
       } else {
         toast.error(data.onr?.error || data.error || "Falha no teste ONR");
       }
@@ -268,20 +271,25 @@ export function CertidoesMonitorClient({ problems }: { problems: ProblemRow[] })
  * tipo_login/senha) e o sampleShape (campos do ONR pra validar o protocolo).
  */
 function OnrBadge({ onr }: { onr: NonNullable<HealthResponse["onr"]> }) {
-  const hasProbe = onr.loginOk != null;
-  const color = !onr.active
-    ? "border-amber-500 text-amber-700"
-    : onr.loginOk
-    ? "border-green-500 text-green-700"
-    : hasProbe
-    ? "border-red-500 text-red-700"
-    : "border-amber-500 text-amber-700";
+  // Inconclusivo = houve probe (resultCode/note) mas sem 200 nem falha explícita.
+  const inconclusive =
+    onr.loginOk == null && (onr.resultCode != null || onr.note != null);
+  const color =
+    onr.loginOk === true
+      ? "border-green-500 text-green-700"
+      : onr.loginOk === false
+      ? "border-red-500 text-red-700"
+      : !onr.active || inconclusive
+      ? "border-amber-500 text-amber-700"
+      : "border-muted-foreground/40 text-muted-foreground";
   const label = !onr.active
     ? "ONR não configurado"
-    : onr.loginOk
+    : onr.loginOk === true
     ? "ONR login OK"
-    : hasProbe
+    : onr.loginOk === false
     ? "ONR login falhou"
+    : inconclusive
+    ? "ONR inconclusivo"
     : `ONR ${onr.mode ?? "configurado"}`;
   return (
     <span className="inline-flex items-center gap-2">
