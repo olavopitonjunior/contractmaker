@@ -247,6 +247,30 @@ export function isDataDivergente(message: string | null | undefined): boolean {
   );
 }
 
+/**
+ * 2026-07-17 — Detecção de FALHA DE LOGIN no portal ONR/ARISP (Registradores)
+ * pela MENSAGEM, não pelo código. A Infosimples devolve code 608 ("Os parâmetros
+ * foram recusados pelo site ou aplicativo de origem") — genérico, mapeado como
+ * `missing_input` no CODE_MAP — mas o motivo real ("Não foi possível realizar o
+ * login") vem no `errors[]`/`code_message`. Classificar login por código puro
+ * seria frágil: um 608 de "falta parâmetro" viraria "falha de login" e vice-versa.
+ *
+ * Usado SÓ pelo probe de diagnóstico ONR (health endpoint) — NÃO altera o
+ * classifier de jobs reais (608 segue missing_input → failed_permanent + portalUrl,
+ * que já dá o CTA manual correto). Casa "não foi possível logar/login inválido/
+ * autenticação recusada/credencial/senha incorreta"; NÃO casa "parâmetros
+ * obrigatórios: finalidade" (isso é missing_input legítimo).
+ */
+export function isOnrLoginFailure(message: string | null | undefined): boolean {
+  if (!message) return false;
+  // "credenci" NÃO pode ser alternativa solta — casaria "informe as credenciais"
+  // / "credenciais aceitas" (mensagens de param, não de falha). Exige um termo
+  // de invalidez/recusa junto.
+  return /n[ãa]o\s+foi\s+poss[íi]vel.*log(in|ar)|falha.*(no\s+)?login|login.*(inv[áa]lid|incorret|recusad|negad)|autentica[çc][ãa]o.*(falh|recusad|inv[áa]lid|negad)|credenci\w*.*(inv[áa]lid|incorret|recusad|negad|expirad)|senha.*(inv[áa]lid|incorret)/i.test(
+    message
+  );
+}
+
 export function mapInfosimplesCodeToCategory(
   code: number,
   codeMessage?: string | null

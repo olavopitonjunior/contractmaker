@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { planCertidoesForDeal, diligentedPersonToInput } from "../planner";
 
 const VENDEDOR_PF_SP = {
@@ -375,6 +375,10 @@ describe("planCertidoesForDeal — dados faltando", () => {
     const matric = plan.jobs.find((j) => j.endpoint === "registradores/matric/pedido");
     expect(matric).toBeDefined();
     expect(matric?.requestPayload.matricula).toBe("54321");
+    // ONR exige `finalidade` NUMÉRICA (a API faz to_i; texto livre → 0 → 606).
+    // Genérico "compra e venda" = 1, configurável via ONR_MATRIC_FINALIDADE.
+    expect(matric?.requestPayload.finalidade).toBe(1);
+    expect(typeof matric?.requestPayload.finalidade).toBe("number");
   });
 
   it("pesquisa de bens ONR (mapa): aparece para vendedor com onrActive (tier pesquisa, sem expandAll); skip sem credencial", () => {
@@ -1194,5 +1198,51 @@ describe("planCertidoesForDeal — diligentedPersonId só no diligenciado (fix F
     const dilig = plan.jobs.filter((j) => j.targetKind === "diligenciado");
     expect(dilig.length).toBeGreaterThan(0);
     dilig.forEach((j) => expect(j.diligentedPersonId).toBe("pessoaA"));
+  });
+});
+
+describe("ONR_MATRIC_FINALIDADE — guard de NaN", () => {
+  afterEach(() => {
+    delete process.env.ONR_MATRIC_FINALIDADE;
+    vi.resetModules();
+  });
+
+  async function planMatricComEnv(val: string | undefined) {
+    if (val === undefined) delete process.env.ONR_MATRIC_FINALIDADE;
+    else process.env.ONR_MATRIC_FINALIDADE = val;
+    vi.resetModules();
+    // Import fresco pra reavaliar o const de módulo com o env atual.
+    const mod = await import("../planner");
+    const plan = mod.planCertidoesForDeal(
+      {
+        vendedores: [VENDEDOR_PF_SP],
+        compradores: [],
+        imoveis: [
+          { rua: "Rua X", cidade: "Sao Paulo", uf: "SP", matricula: "54321", cartorio: "1 RI SP" },
+        ],
+      },
+      undefined,
+      undefined,
+      { onrActive: true }
+    );
+    return plan.jobs.find(
+      (j: { endpoint: string }) => j.endpoint === "registradores/matric/pedido"
+    );
+  }
+
+  it("env com lixo ('compra') → fallback pra 1 (não NaN)", async () => {
+    const matric = await planMatricComEnv("compra");
+    expect(matric?.requestPayload.finalidade).toBe(1);
+    expect(typeof matric?.requestPayload.finalidade).toBe("number");
+  });
+
+  it("env '0' (sentinela inválido) → fallback pra 1", async () => {
+    const matric = await planMatricComEnv("0");
+    expect(matric?.requestPayload.finalidade).toBe(1);
+  });
+
+  it("env numérica válida ('3') é respeitada", async () => {
+    const matric = await planMatricComEnv("3");
+    expect(matric?.requestPayload.finalidade).toBe(3);
   });
 });

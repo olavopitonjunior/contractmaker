@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db/prisma";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
 import { ensureLocacaoAccess, isRouteError } from "@/lib/locacao/route-helpers";
-import { uploadBufferToStorage, deleteFromStorage } from "@/lib/storage/s3";
+import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { persistLeaseClientDocument } from "@/lib/locacao/client-attachments";
 
 export const runtime = "nodejs";
@@ -114,8 +114,12 @@ export async function DELETE(
   }
 
   await prisma.leaseClientAttachment.delete({ where: { id: attachmentId } });
-  // Best-effort: remove do storage (não bloqueia se falhar).
-  await deleteFromStorage(attachment.url).catch(() => {});
+  // Best-effort: remove do storage só se ninguém mais referencia (o blob pode ter
+  // sido copiado por referência pra um DealAttachment na conversão da locação).
+  const { deleteBlobIfUnreferenced } = await import(
+    "@/lib/contracts/delete-cleanup"
+  );
+  await deleteBlobIfUnreferenced(prisma, attachment.url);
 
   return NextResponse.json({ ok: true });
 }

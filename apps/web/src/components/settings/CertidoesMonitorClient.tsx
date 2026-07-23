@@ -13,6 +13,7 @@ import {
   RefreshCw,
   ExternalLink,
   Loader2,
+  KeyRound,
 } from "lucide-react";
 
 export interface ProblemRow {
@@ -48,7 +49,16 @@ interface AttemptsResponse {
 interface HealthResponse {
   infosimples?: { ok: boolean; latencyMs?: number; errorMessage?: string };
   govbr?: { active: boolean; identifier?: string; expiresAt?: string };
-  onr?: { active: boolean; mode?: string | null; error?: string };
+  onr?: {
+    active: boolean;
+    mode?: string | null;
+    error?: string;
+    loginOk?: boolean;
+    loginError?: string;
+    note?: string;
+    resultCode?: number;
+    sampleShape?: string[];
+  };
   checkedAt?: string;
 }
 
@@ -60,6 +70,7 @@ export function CertidoesMonitorClient({ problems }: { problems: ProblemRow[] })
   const [retrying, setRetrying] = useState<string | null>(null);
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [checkingHealth, setCheckingHealth] = useState(false);
+  const [checkingOnr, setCheckingOnr] = useState(false);
 
   async function toggleRow(jobId: string) {
     if (expanded === jobId) {
@@ -121,9 +132,36 @@ export function CertidoesMonitorClient({ problems }: { problems: ProblemRow[] })
     }
   }
 
+  // Probe dedicado de login ONR (?onr=1) — só testa a credencial do portal de
+  // Registradores. ~R$0,04 de crédito Infosimples, NÃO gasta saldo do portal ONR.
+  async function checkOnr() {
+    setCheckingOnr(true);
+    try {
+      const res = await fetch(`/api/admin/certidoes/health?onr=1`);
+      const data = await res.json();
+      if (res.ok) {
+        // Mescla só o bloco onr no health atual pra não apagar infosimples/govbr.
+        setHealth((prev) => ({ ...(prev ?? {}), onr: data.onr, checkedAt: data.checkedAt }));
+        if (data.onr?.loginOk === true) toast.success("Login ONR OK");
+        else if (data.onr?.loginOk === false)
+          toast.error(data.onr?.loginError || "Login ONR falhou");
+        else
+          // Inconclusivo (6xx ambíguo, portal fora, org bloqueada): mostra a msg crua.
+          toast.info(data.onr?.note || data.onr?.error || "Resultado do teste ONR inconclusivo");
+      } else {
+        toast.error(data.onr?.error || data.error || "Falha no teste ONR");
+      }
+    } catch {
+      toast.error("Falha no teste ONR");
+    } finally {
+      setCheckingOnr(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
-      {/* Verificação ao vivo da API (sob demanda — gasta ~R$ 0,04) */}
+      {/* Verificação ao vivo da API (sob demanda — cada botão gasta ~R$ 0,04 de
+          crédito Infosimples; o teste ONR NÃO consome saldo do portal ONR). */}
       <div className="flex items-center gap-3 flex-wrap">
         <Button size="sm" variant="outline" onClick={checkHealth} disabled={checkingHealth}>
           {checkingHealth ? (
@@ -133,41 +171,50 @@ export function CertidoesMonitorClient({ problems }: { problems: ProblemRow[] })
           )}
           Verificar API agora
         </Button>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={checkOnr}
+          disabled={checkingOnr}
+          title="Testa o login no portal ONR/ARISP (~R$ 0,04 de crédito Infosimples; não gasta saldo do portal ONR)"
+        >
+          {checkingOnr ? (
+            <Loader2 className="h-4 w-4 mr-1 animate-spin" />
+          ) : (
+            <KeyRound className="h-4 w-4 mr-1" />
+          )}
+          Testar login ONR
+        </Button>
         {health && (
-          <div className="text-xs flex items-center gap-3">
-            <Badge
-              variant="outline"
-              className={
-                health.infosimples?.ok
-                  ? "border-green-500 text-green-700"
-                  : "border-red-500 text-red-700"
-              }
-            >
-              Infosimples {health.infosimples?.ok ? "OK" : "indisponível"}
-              {health.infosimples?.latencyMs != null
-                ? ` · ${Math.round(health.infosimples.latencyMs)}ms`
-                : ""}
-            </Badge>
-            <Badge
-              variant="outline"
-              className={
-                health.govbr?.active
-                  ? "border-green-500 text-green-700"
-                  : "border-amber-500 text-amber-700"
-              }
-            >
-              GOV.BR {health.govbr?.active ? "ativo" : "inativo"}
-            </Badge>
-            <Badge
-              variant="outline"
-              className={
-                health.onr?.active
-                  ? "border-green-500 text-green-700"
-                  : "border-amber-500 text-amber-700"
-              }
-            >
-              ONR {health.onr?.active ? "ativo" : "inativo"}
-            </Badge>
+          <div className="text-xs flex items-center gap-3 flex-wrap">
+            {health.infosimples && (
+              <Badge
+                variant="outline"
+                className={
+                  health.infosimples?.ok
+                    ? "border-green-500 text-green-700"
+                    : "border-red-500 text-red-700"
+                }
+              >
+                Infosimples {health.infosimples?.ok ? "OK" : "indisponível"}
+                {health.infosimples?.latencyMs != null
+                  ? ` · ${Math.round(health.infosimples.latencyMs)}ms`
+                  : ""}
+              </Badge>
+            )}
+            {health.govbr && (
+              <Badge
+                variant="outline"
+                className={
+                  health.govbr?.active
+                    ? "border-green-500 text-green-700"
+                    : "border-amber-500 text-amber-700"
+                }
+              >
+                GOV.BR {health.govbr?.active ? "ativo" : "inativo"}
+              </Badge>
+            )}
+            {health.onr && <OnrBadge onr={health.onr} />}
             {health.infosimples?.errorMessage && (
               <span className="text-red-700 font-mono">
                 {health.infosimples.errorMessage}
@@ -214,6 +261,61 @@ export function CertidoesMonitorClient({ problems }: { problems: ProblemRow[] })
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Badge de status ONR com o resultado do probe de login. Sem probe (só
+ * `active`) → âmbar refletindo presença de env. Com probe → verde "login OK" /
+ * vermelho "login falhou" + o erro/nota crus da Infosimples (insumo pra corrigir
+ * tipo_login/senha) e o sampleShape (campos do ONR pra validar o protocolo).
+ */
+function OnrBadge({ onr }: { onr: NonNullable<HealthResponse["onr"]> }) {
+  // Inconclusivo = houve probe (resultCode/note) mas sem 200 nem falha explícita.
+  const inconclusive =
+    onr.loginOk == null && (onr.resultCode != null || onr.note != null);
+  const color =
+    onr.loginOk === true
+      ? "border-green-500 text-green-700"
+      : onr.loginOk === false
+      ? "border-red-500 text-red-700"
+      : !onr.active || inconclusive
+      ? "border-amber-500 text-amber-700"
+      : "border-muted-foreground/40 text-muted-foreground";
+  const label = !onr.active
+    ? "ONR não configurado"
+    : onr.loginOk === true
+    ? "ONR login OK"
+    : onr.loginOk === false
+    ? "ONR login falhou"
+    : inconclusive
+    ? "ONR inconclusivo"
+    : `ONR ${onr.mode ?? "configurado"}`;
+  return (
+    <span className="inline-flex items-center gap-2">
+      <Badge variant="outline" className={color}>
+        {label}
+        {onr.resultCode != null ? ` · ${onr.resultCode}` : ""}
+      </Badge>
+      {onr.loginError && (
+        <span className="text-red-700 font-mono max-w-[360px] truncate" title={onr.loginError}>
+          {onr.loginError}
+        </span>
+      )}
+      {onr.note && (
+        <span className="text-amber-700 font-mono max-w-[360px] truncate" title={onr.note}>
+          {onr.note}
+        </span>
+      )}
+      {onr.sampleShape && onr.sampleShape.length > 0 && (
+        <span
+          className="text-muted-foreground font-mono max-w-[360px] truncate"
+          title={`Campos ONR: ${onr.sampleShape.join(", ")}`}
+        >
+          campos: {onr.sampleShape.join(", ")}
+        </span>
+      )}
+    </span>
   );
 }
 

@@ -832,6 +832,11 @@ export async function runPassiveAnalysis(
   //              90s para de re-pagar o LLM no mesmo conteúdo (edit skipa),
   //              mas o próximo open re-tenta o passe deep (err ≠ deep).
   // `approve` fica fora (gate roda quickChecks sempre; não carimba).
+  //
+  // INVARIANTE: `deep:<hash>` afirma que os findings desse conteúdo já estão
+  // materializados como comentários. Deletar um comentário de IA fora de banda
+  // quebra isso — por isso o DELETE de comentário zera este carimbo (ver
+  // api/contracts/[id]/comments/[commentId] DELETE), forçando o re-passe.
   const contentHash = createHash("sha1")
     .update(htmlContent)
     .update("\0")

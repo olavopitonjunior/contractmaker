@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Wallet, CheckCircle2, XCircle, Clock, AlertTriangle, ShieldCheck, ShieldAlert, ExternalLink } from "lucide-react";
 import { endpointInfo } from "@/lib/certidoes/endpoints";
 import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
+import { checkOnrAuth } from "@/lib/certidoes/onr-auth";
 import { mapInfosimplesCodeToCategory, CATEGORY_LABEL } from "@/lib/certidoes/error-codes";
 import { CertidoesMonitorClient, type ProblemRow } from "@/components/settings/CertidoesMonitorClient";
 
@@ -168,6 +169,11 @@ export default async function CertidoesSettingsPage() {
   // Afeta quais endpoints ficam disponíveis (CENPROT nacional etc).
   const govbr = await checkGovBrAuth();
 
+  // ONR/ARISP (Registradores) — presença de credencial (env). O teste de login
+  // AO VIVO fica no botão "Testar login ONR" (gasta ~R$0,04); aqui é só o estado
+  // estático pra não custar a cada page-load.
+  const onr = await checkOnrAuth();
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
@@ -229,6 +235,61 @@ export default async function CertidoesSettingsPage() {
                 className="inline-flex items-center gap-1 text-xs text-blue-700 hover:underline mt-1"
               >
                 Abrir portal Infosimples <ExternalLink className="h-3 w-3" />
+              </a>
+            </>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Status ONR/ARISP (Registradores) — habilita matrícula + pesquisa de bens */}
+      <Card className={onr.active ? "border-green-300" : "border-amber-300 bg-amber-50/30"}>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center gap-2">
+            {onr.active ? (
+              <>
+                <ShieldCheck className="h-4 w-4 text-green-600" />
+                Credencial ONR/ARISP configurada
+              </>
+            ) : (
+              <>
+                <ShieldAlert className="h-4 w-4 text-amber-600" />
+                Credencial ONR/ARISP ausente
+              </>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm space-y-1">
+          {onr.active ? (
+            <>
+              <p>
+                <span className="text-muted-foreground">Modo:</span>{" "}
+                <span className="font-medium">
+                  {onr.mode === "cert_a1" ? "Certificado A1" : "Login e senha"}
+                </span>
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Habilita matrícula (inteiro teor) e pesquisa de bens (Mapa do Registro).
+                Clique em <strong>Testar login ONR</strong> abaixo para validar a credencial
+                ao vivo (não gasta o saldo do portal ONR).
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="text-amber-900">
+                {onr.error ??
+                  "Credenciais ONR/ARISP não configuradas (INFOSIMPLES_ONR_*)."}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Sem credencial, matrícula e pesquisa de bens no ONR ficam puladas.
+                Configure login/senha ou certificado A1 do portal de Registradores.
+              </p>
+              <a
+                href="https://www.registradores.org.br/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 text-xs text-blue-700 hover:underline mt-1"
+              >
+                Abrir portal ONR/Registradores <ExternalLink className="h-3 w-3" />
               </a>
             </>
           )}

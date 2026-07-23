@@ -126,6 +126,29 @@ export async function DELETE(
   }
 
   await prisma.contractComment.delete({ where: { id: params.commentId } });
+
+  // Deletar um comentário de IA fora de banda quebra o invariante do
+  // skip-no-change da análise passiva: o carimbo `deep:<hash>` afirma que os
+  // findings daquele conteúdo já estão materializados como comentários. Sem
+  // zerar o carimbo, o próximo `open` com o MESMO texto pularia a re-análise e
+  // o risco (agora sem comentário) nunca voltaria à tela. Só pra IA — deletar
+  // comentário de humano não afeta a saída do passe deep. Resolver (PATCH
+  // resolved) NÃO precisa disto: a row e o dedupeKey ficam, então a re-análise
+  // dedupa e não recria. (best-effort: falhar aqui não pode derrubar o delete)
+  if (existing.authorType === "ai") {
+    await prisma.contract
+      .update({
+        where: { id: params.id },
+        data: { lastAnalyzedTextHash: null },
+      })
+      .catch((err) =>
+        console.error(
+          "[comments DELETE] falha ao invalidar hash de análise:",
+          err
+        )
+      );
+  }
+
   return NextResponse.json({ ok: true });
 }
 
