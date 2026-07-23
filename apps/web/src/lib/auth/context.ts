@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getUserOrg } from "./auth";
+import { sessionSubdomainHint } from "./subdomain-hint";
 import { authOrBearer, hasScope, type ResolvedAuth } from "./auth-or-bearer";
 import { resolveNewtonActor, isRejection, type NewtonActorContext } from "@/lib/audit/newton";
 import { prisma } from "@/lib/db/prisma";
@@ -140,6 +141,10 @@ export async function requireAuth(
   // Substitui `actor.effectiveUserId` pelo target se: bearer + scope + same org.
   let delegatedFromUserId: string | undefined;
   let effectiveActor: NewtonActorContext = actor;
+  // Org efetiva quando há delegação: a org VALIDADA do dono do token (na qual o
+  // target também é membro), NÃO a 1ª membership do target — senão um target
+  // multi-org escalaria pra uma org onde o dono do token nem entrou.
+  let delegationOrg: Awaited<ReturnType<typeof getUserOrg>> = null;
   if (delegationEnabled() && ident.via === "bearer") {
     const actAsHeader = req.headers.get(DELEGATION_HEADER);
     if (actAsHeader) {
@@ -150,8 +155,11 @@ export async function requireAuth(
           `[delegation] X-Act-As-User present but token ${ident.tokenId} lacks scope ${DELEGATION_SCOPE}`
         );
       } else {
-        // Resolve org do dono do token (pra validar mesma org)
-        const tokenOwnerOrg = await getUserOrg(ident.userId);
+        // Resolve org do dono do token (pra validar mesma org). subdomainHint:null
+        // DE PROPÓSITO: é máquina (bearer) — a org vem do token, não do Host, que
+        // um cliente controla. Sem o pin, apontar pra um subdomínio mudaria a org
+        // validada ou daria 403 falso.
+        const tokenOwnerOrg = await getUserOrg(ident.userId, { subdomainHint: null });
         if (!tokenOwnerOrg) {
           return {
             ok: false,
@@ -199,9 +207,11 @@ export async function requireAuth(
             ),
           };
         }
-        // OK: switch effective actor
+        // OK: switch effective actor. A org efetiva é a do dono do token
+        // (validada acima), não a resolução independente do target.
         delegatedFromUserId = ident.userId;
         effectiveActor = { ...actor, effectiveUserId: target.id };
+        delegationOrg = tokenOwnerOrg;
         // Fire-and-forget audit (não bloqueia request)
         audit(
           {
@@ -224,11 +234,14 @@ export async function requireAuth(
     }
   }
 
-  // Fase 1a: o middleware injeta x-org-subdomain quando o request chega por um
-  // subdomínio de tenant. Resolve a org por esse hint (validando membership);
-  // sem hint (apex/API), cai no comportamento legado (primeira membership).
-  const subdomainHint = req.headers.get("x-org-subdomain");
-  const org = await getUserOrg(effectiveActor.effectiveUserId, { subdomainHint });
+  // Delegação → org validada do dono do token. Senão, resolve pela regra única
+  // sessionSubdomainHint (sessão em rota sanitizada lê o subdomínio; máquina e
+  // rotas fora do matcher pinam token-based) — mesma regra do require-auth.ts.
+  const org = delegationOrg
+    ? delegationOrg
+    : await getUserOrg(effectiveActor.effectiveUserId, {
+        subdomainHint: sessionSubdomainHint(req, ident.via === "session"),
+      });
   if (!org) {
     return {
       ok: false,

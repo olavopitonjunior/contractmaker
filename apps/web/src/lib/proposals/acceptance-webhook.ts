@@ -38,6 +38,13 @@ function factsFromPayload(payload: unknown): {
   completedAt?: string;
 } {
   const p = payload as {
+    // Shape REAL da ClickSign v3: o termo vem em `acceptance` no topo.
+    acceptance?: {
+      signer_name?: string;
+      signer_phone?: string;
+      sent_at?: string;
+      completed_at?: string;
+    };
     event?: {
       data?: {
         acceptance_term?: {
@@ -52,12 +59,13 @@ function factsFromPayload(payload: unknown): {
       occurred_at?: string;
     };
   };
+  const acc = p.acceptance;
   const a = p.event?.data?.acceptance_term;
   return {
-    signerName: a?.signer_name ?? p.event?.data?.signer_name,
-    signerPhone: a?.signer_phone ?? p.event?.data?.signer_phone,
-    sentAt: a?.sent_at,
-    completedAt: a?.completed_at ?? p.event?.occurred_at,
+    signerName: acc?.signer_name ?? a?.signer_name ?? p.event?.data?.signer_name,
+    signerPhone: acc?.signer_phone ?? a?.signer_phone ?? p.event?.data?.signer_phone,
+    sentAt: acc?.sent_at ?? a?.sent_at,
+    completedAt: acc?.completed_at ?? a?.completed_at ?? p.event?.occurred_at,
   };
 }
 

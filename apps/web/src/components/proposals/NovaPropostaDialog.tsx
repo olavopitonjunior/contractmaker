@@ -22,11 +22,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, Building2 } from "lucide-react";
+import { Plus, Building2, UsersRound, X } from "lucide-react";
 import {
   IListPickerDialog,
   type IListImportPayload,
 } from "@/components/ilist/IListPickerDialog";
+import {
+  WitnessPicker,
+  pickNewWitnesses,
+  type PickedWitness,
+  type RegistryWitness,
+} from "@/components/pipeline/WitnessPicker";
+import { computeDedupeKey } from "@/lib/proposals/signer-dedupe";
 
 const SCHEMA_BY_TIPO: Record<string, { label: string; value: string }[]> = {
   venda: [{ label: "Compra e venda", value: "compra_venda_v1" }],
@@ -46,6 +53,8 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [schemaType, setSchemaType] = useState(SCHEMA_BY_TIPO[tipo][0].value);
+  const [witnessPickerOpen, setWitnessPickerOpen] = useState(false);
+  const [witnesses, setWitnesses] = useState<PickedWitness[]>([]);
   const [form, setForm] = useState({
     proponente: "",
     proponenteEmail: "",
@@ -66,6 +75,28 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
 
   function set(k: keyof typeof form, v: string) {
     setForm((f) => ({ ...f, [k]: v }));
+  }
+
+  // Pré-filtro do picker (UX): não deixa escolher quem já é proponente/vendedor
+  // ou já foi escolhido. `w.documentation` já vem só-dígitos de pickNewWitnesses.
+  // O dedup AUTORITATIVO acontece no submit, com o mesmo computeDedupeKey do
+  // servidor (evita colisão P2002 e duplo-envio independente da ordem de digitação).
+  const witnessExistingKeys = [
+    form.proponenteEmail.trim().toLowerCase(),
+    form.vendedorEmail.trim().toLowerCase(),
+    ...witnesses.map((w) => w.email.trim().toLowerCase()),
+    ...witnesses.map((w) => w.documentation),
+  ].filter(Boolean);
+
+  function addWitnessesFromRegistry(selected: RegistryWitness[]) {
+    setWitnesses((prev) => [
+      ...prev,
+      ...pickNewWitnesses(selected, witnessExistingKeys),
+    ]);
+  }
+
+  function removeWitness(email: string) {
+    setWitnesses((prev) => prev.filter((w) => w.email !== email));
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -120,6 +151,42 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
           signingGroup: 2,
         });
       }
+      // Testemunhas escolhidas do cadastro (scope proposta) — assinam junto com
+      // os proprietários (grupo 2). Dedup AUTORITATIVO aqui com o MESMO
+      // computeDedupeKey do servidor: descarta testemunha que colide com
+      // proponente/vendedor/outra testemunha (senão o @@unique(proposalId,
+      // dedupeKey) estoura P2002 e derruba a proposta inteira) e ignora
+      // testemunha sem e-mail (canal e-mail → o preflight bloquearia o envio).
+      const seenKeys = new Set(
+        signers.map((s) =>
+          computeDedupeKey({
+            name: String(s.name ?? ""),
+            email: (s.email as string | null) ?? null,
+            cpf: (s.cpf as string | null) ?? null,
+            phone: (s.phone as string | null) ?? null,
+          })
+        )
+      );
+      for (const w of witnesses) {
+        if (!w.email.trim()) continue;
+        const key = computeDedupeKey({
+          name: w.name,
+          email: w.email,
+          cpf: w.documentation || null,
+          phone: w.phone || null,
+        });
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        signers.push({
+          role: "testemunha",
+          name: w.name,
+          email: w.email,
+          cpf: w.documentation || null,
+          phone: w.phone || null,
+          notifyChannel: "email",
+          signingGroup: 2,
+        });
+      }
 
       const res = await fetch("/api/proposals", {
         method: "POST",
@@ -138,6 +205,7 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
       }
       const { proposal } = await res.json();
       toast.success("Proposta criada");
+      setWitnesses([]);
       setOpen(false);
       router.push(`/pipeline/propostas/${proposal.id}`);
     } catch (err) {
@@ -222,6 +290,40 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
               />
             </div>
           </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label>Testemunhas (opcional)</Label>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setWitnessPickerOpen(true)}
+              >
+                <UsersRound className="mr-1 h-3.5 w-3.5" />
+                Selecionar testemunhas
+              </Button>
+            </div>
+            {witnesses.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {witnesses.map((w) => (
+                  <span
+                    key={w.email}
+                    className="inline-flex items-center gap-1 rounded-full border bg-muted/40 px-2 py-0.5 text-xs"
+                  >
+                    {w.name}
+                    <button
+                      type="button"
+                      onClick={() => removeWitness(w.email)}
+                      className="text-muted-foreground hover:text-destructive"
+                      aria-label={`Remover ${w.name}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="space-y-1">
             <Label>Imóvel</Label>
             <div className="flex gap-2">
@@ -303,6 +405,14 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
             </Button>
           </DialogFooter>
         </form>
+
+        <WitnessPicker
+          open={witnessPickerOpen}
+          onOpenChange={setWitnessPickerOpen}
+          scope="proposta"
+          existingKeys={witnessExistingKeys}
+          onConfirm={addWitnessesFromRegistry}
+        />
       </DialogContent>
     </Dialog>
   );

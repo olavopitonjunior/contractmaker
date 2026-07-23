@@ -73,13 +73,19 @@ export function getAcceptanceEventFromPayload(
   const raw = getRawEventName(payload);
   if (!raw || !raw.startsWith("acceptance_term")) return null;
   const phase = raw.replace(/^acceptance_term[_.]?/, "") || "unknown";
-  // O id do termo pode vir em vários pontos conforme a versão do payload.
+  // O id do termo pode vir em vários pontos conforme a versão do payload. O
+  // payload REAL da ClickSign (v3) traz o termo em `acceptance.key` no topo —
+  // sem essa entrada o id saía null e o Aceite caía no lookup de envelope
+  // (unknownEnvelope) e sumia silenciosamente, sem avançar o status.
   const p = payload as unknown as {
     event?: { data?: { acceptance_term?: { id?: string }; id?: string } };
+    acceptance?: { id?: string; key?: string };
     acceptance_term?: { id?: string; key?: string };
     data?: { id?: string };
   };
   const acceptanceId =
+    p.acceptance?.key ||
+    p.acceptance?.id ||
     p.event?.data?.acceptance_term?.id ||
     p.event?.data?.id ||
     p.acceptance_term?.id ||

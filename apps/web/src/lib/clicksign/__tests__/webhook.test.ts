@@ -131,4 +131,19 @@ describe("getAcceptanceEventFromPayload", () => {
       } as never)
     ).toBeNull();
   });
+
+  // Regressão do bug de produção (2026-07): o payload REAL da ClickSign traz o
+  // termo em `acceptance.key` no topo (não em event.data.acceptance_term). Sem
+  // essa entrada o id saía null, o Aceite caía no lookup de envelope
+  // (unknownEnvelope) e o aceite do proponente NUNCA avançava o status.
+  it("shape REAL da ClickSign: acceptance.key no topo + event.name", () => {
+    const r = getAcceptanceEventFromPayload({
+      event: { name: "acceptance_term_completed", data: { user: {}, account: {} } },
+      acceptance: { key: "ccd2a8d3-ce6f-4ff0-9d54-ee69d68da433", status: "completed" },
+    } as never);
+    expect(r).toEqual({
+      acceptanceId: "ccd2a8d3-ce6f-4ff0-9d54-ee69d68da433",
+      phase: "completed",
+    });
+  });
 });
