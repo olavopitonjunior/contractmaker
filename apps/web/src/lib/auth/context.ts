@@ -227,10 +227,14 @@ export async function requireAuth(
     }
   }
 
-  // Fase 1a: o middleware injeta x-org-subdomain quando o request chega por um
-  // subdomínio de tenant. Resolve a org por esse hint (validando membership);
-  // sem hint (apex/API), cai no comportamento legado (primeira membership).
-  const subdomainHint = req.headers.get("x-org-subdomain");
+  // Fase 1a + sweep multi-org: só a superfície de SESSÃO (UI humana) resolve por
+  // subdomínio — o middleware injeta x-org-subdomain e getUserOrg valida a
+  // membership no tenant. Bearer/Newton (MÁQUINA) pina token-based: a org vem do
+  // dono do token, não de um Host que o cliente controla — senão apontar a
+  // integração pra um subdomínio steer-aria o orgId de todo o escopo de dados e
+  // audit. Espelha o mesmo pin em require-auth.ts e na delegação acima.
+  const subdomainHint =
+    ident.via === "session" ? req.headers.get("x-org-subdomain") : null;
   const org = await getUserOrg(effectiveActor.effectiveUserId, { subdomainHint });
   if (!org) {
     return {
