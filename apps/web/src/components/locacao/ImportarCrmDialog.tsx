@@ -15,7 +15,8 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { DownloadCloud, Search } from "lucide-react";
+import { DownloadCloud, Search, Building2 } from "lucide-react";
+import { IListPickerDialog, type IListImportPayload } from "@/components/ilist/IListPickerDialog";
 
 type Entity = "cliente" | "imovel";
 
@@ -37,6 +38,7 @@ export function ImportarCrmDialog({ entity }: { entity: Entity }) {
   const [loading, setLoading] = useState(false);
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<LookupResult | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   const noun = entity === "cliente" ? "cliente" : "imóvel";
 
@@ -64,6 +66,7 @@ export function ImportarCrmDialog({ entity }: { entity: Entity }) {
       }
       if (!res.ok) {
         toast.error(d.message ?? `HTTP ${res.status}`);
+        if (res.status === 404) setResult(null);
       }
     } catch {
       toast.error("Erro de conexão");
@@ -77,14 +80,19 @@ export function ImportarCrmDialog({ entity }: { entity: Entity }) {
     setImporting(true);
     try {
       const endpoint = entity === "cliente" ? "/api/locacao/clients" : "/api/locacao/properties";
+      // Ordem do spread: os `fields` do conector (iList) já trazem source/crmId
+      // corretos e têm precedência; o fallback usa o ID digitado no input.
       const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...result.fields, source: "crm", crmId: crmId.trim() }),
+        body: JSON.stringify({ source: "crm", crmId: crmId.trim() || undefined, ...result.fields }),
       });
       if (!res.ok) {
-        const d = await res.json().catch(() => ({}));
-        throw new Error(d.error ?? `HTTP ${res.status}`);
+        const d = (await res.json().catch(() => ({}))) as {
+          error?: string;
+          message?: string;
+        };
+        throw new Error(d.message ?? d.error ?? `HTTP ${res.status}`);
       }
       toast.success(`${noun[0].toUpperCase()}${noun.slice(1)} importado do CRM`);
       setOpen(false);
@@ -134,6 +142,30 @@ export function ImportarCrmDialog({ entity }: { entity: Entity }) {
             {loading ? "Buscando..." : "Buscar"}
           </Button>
         </form>
+
+        {entity === "imovel" && (
+          <Button
+            type="button"
+            variant="secondary"
+            className="w-full"
+            onClick={() => setPickerOpen(true)}
+          >
+            <Building2 className="mr-1 h-4 w-4" />
+            Buscar no catálogo iList (RE/MAX)
+          </Button>
+        )}
+
+        {entity === "imovel" && (
+          <IListPickerDialog
+            open={pickerOpen}
+            onOpenChange={setPickerOpen}
+            transactionType="locacao"
+            onSelect={(payload: IListImportPayload) => {
+              setCrmId(payload.ilistId);
+              setResult({ configured: true, fields: payload.locacaoFields });
+            }}
+          />
+        )}
 
         {result && !result.configured && (
           <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">

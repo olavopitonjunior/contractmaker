@@ -360,6 +360,11 @@ model Organization {
   clicksignAccount  ClickSignAccount?
   signatureSettings OrgSignatureSettings?
   proposals         Proposal[]
+
+  // iList/RexAPI (Gryphtech RE/MAX) — conexão região+offices por tenant e
+  // espelho local de listings (a RexAPI não tem busca textual nem webhooks).
+  ilistConnection IListConnection?
+  ilistListings   IListListing[]
 }
 
 /// Conta Google conectada pela imobiliária (OAuth offline). Os Docs de template
@@ -3015,6 +3020,11 @@ model Property {
   valorAluguelSugerido Float?
   // Envelope (ClickSign) da autorização de captação — scalar, sem FK.
   captacaoEnvelopeId   String?
+  // Origem externa (import de CRM): "ilist" quando importado da RexAPI RE/MAX.
+  // `crmId` = IListListing.ilistId (Property.ID da RexAPI, string composta) —
+  // chave de dedupe do import (re-importar o mesmo listing → 409).
+  source               String?
+  crmId                String?
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
@@ -3028,6 +3038,100 @@ model Property {
   proposals         Proposal[]
 
   @@index([orgId, status])
+  @@index([orgId, source, crmId])
+}
+
+/// iList/RexAPI (Gryphtech RE/MAX) — vínculo do tenant com sua região e
+/// office(s). Provisionado EXCLUSIVAMENTE pelo super-admin (/admin): a
+/// credencial da RexAPI é global da plataforma (env ILIST_*) e o token acessa
+/// todas as regiões, então o isolamento entre tenants é 100% server-side a
+/// partir desta row. Sem row (ou enabled=false) a org não vê nada do iList.
+model IListConnection {
+  id             String    @id @default(cuid())
+  orgId          String    @unique
+  regionId       Int // região RE/MAX (56..96; 71 = QA Gryphtech)
+  // OfficeIDs (GryphTech) selecionados pelo admin. PUT exige min 1 — o default
+  // vazio existe só pra evitar drift de array (feedback_prisma_array_default_drift).
+  officeIds      Int[]     @default([])
+  enabled        Boolean   @default(true) // kill-switch sem apagar o espelho
+  syncStatus     String    @default("pending") // pending | syncing | ok | error
+  lastSyncAt     DateTime?
+  lastSyncError  String?   @db.Text
+  // Maior ModifiedDate visto no delta-sync (cursor incremental).
+  lastCursor     DateTime?
+  // Última reconciliação completa (marca deletedAt nos listings ausentes).
+  lastFullSyncAt DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  org      Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  listings IListListing[]
+}
+
+/// Espelho local org-scoped dos listings da RexAPI — índice de busca do picker
+/// (a API não tem busca textual). `raw` guarda o Property bruto do LIST
+/// endpoint (nunca associates — respostas de associate contêm IListCredentials
+/// com senha em claro e são redigidas no client). Descrição/fotos são buscadas
+/// lazy no momento do import, não no sync.
+model IListListing {
+  id              String    @id @default(cuid())
+  orgId           String
+  connectionId    String
+  // Property.ID da RexAPI — STRING composta (ex. "710031017-6"), estável;
+  // chave de dedupe. ExternalID pode ser vazio/duplicado — nunca unique.
+  ilistId         String
+  externalId      String?
+  listingCode     String? // ListingID público (o código que o corretor conhece)
+  officeId        Int
+  associateId     Int?
+  transactionType Int // 261 For Sale | 260 For Rent/Lease
+  listingStatus   Int // 160 Active, 168 Sale Agreed, 169 Sold, 167 Rented, 161 Cancelled...
+  propertyTypeUid Int?
+  price           Decimal?  @db.Decimal(14, 2) // null quando sentinela -999
+  currency        String?
+  bedrooms        Int?
+  bathrooms       Int?
+  builtArea       Float?
+  lotSizeM2       Float?
+  parkingSpaces   Int?
+  yearBuilt       Int?
+  comTotalPct     Float?
+  comBuyAgentPct  Float?
+  // Desnormalizado pro card/busca (resolvido no sync)
+  streetName      String?
+  streetNumber    String?
+  postalCode      String?
+  cityId          Int?
+  city            String? // resolvido via IListGeoCity (o Property só tem CityID)
+  uf              String? // sigla via PROVINCE_TO_UF; sem match → null (nunca chutar)
+  associateName   String?
+  associateCreci  String? // SalesLicenseNumber
+  coverImageUrl   String? // preenchida lazy no primeiro import (cache)
+  // lower(listingCode + endereço + cidade + corretor) — busca via contains.
+  searchText      String    @db.Text
+  raw             Json
+  modifiedAt      DateTime?
+  deletedAt       DateTime? // marcado no full resync quando some da API
+  syncedAt        DateTime  @default(now())
+
+  connection IListConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  org        Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, ilistId])
+  @@index([orgId, transactionType, listingStatus, deletedAt])
+  @@index([orgId, listingCode])
+}
+
+/// Cache global de geodata da RexAPI (dado público da região, não org-scoped).
+/// Populado por warmGeoCache(regionId) no provisioning/full-sync.
+model IListGeoCity {
+  regionId     Int
+  cityId       Int
+  cityName     String
+  provinceName String
+  uf           String?
+
+  @@id([regionId, cityId])
 }
 
 // Contrato de locação ATIVO (distinto do `Contract`/Google Doc, que é o

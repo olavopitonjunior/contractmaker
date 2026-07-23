@@ -82,6 +82,11 @@ export type AuditAction =
   | "ORG_DELETED"
   | "ORG_BRANDING_UPDATED"
   | "ORG_FEES_UPDATED"
+  // iList/RexAPI (integração RE/MAX) — provisioning super-admin + sync + import
+  | "ILIST_CONNECTION_UPDATED"
+  | "ILIST_CONNECTION_REMOVED"
+  | "ILIST_SYNC_RUN"
+  | "ILIST_LISTING_IMPORTED"
   | "PLATFORM_ROLE_GRANTED"
   | "PLATFORM_ROLE_REVOKED"
   | "IMPERSONATION_STARTED"

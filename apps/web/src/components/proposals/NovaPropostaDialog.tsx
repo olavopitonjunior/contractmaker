@@ -22,7 +22,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus, UsersRound, X } from "lucide-react";
+import { Plus, Building2, UsersRound, X } from "lucide-react";
+import {
+  IListPickerDialog,
+  type IListImportPayload,
+} from "@/components/ilist/IListPickerDialog";
 import {
   WitnessPicker,
   pickNewWitnesses,
@@ -62,6 +66,12 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
     valor: "",
     validadeDias: "5",
   });
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // Snapshot completo do listing iList escolhido — entra em dataJson.imoveis[0]
+  // (endereço + código + preço + ilistId) em vez do snapshot mínimo {endereco}.
+  const [ilistSnapshot, setIlistSnapshot] = useState<
+    IListImportPayload["proposalSnapshot"] | null
+  >(null);
 
   function set(k: keyof typeof form, v: string) {
     setForm((f) => ({ ...f, [k]: v }));
@@ -100,7 +110,12 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
       const isVenda = tipo === "venda";
       const valor = form.valor ? parseMoneyBR(form.valor) : undefined;
       const dataJson: Record<string, unknown> = {
-        imoveis: form.imovel ? [{ endereco: form.imovel }] : [],
+        imoveis:
+          ilistSnapshot && ilistSnapshot.endereco === form.imovel
+            ? [ilistSnapshot]
+            : form.imovel
+              ? [{ endereco: form.imovel }]
+              : [],
       };
       if (isVenda) {
         dataJson.compradores = [{ nome: form.proponente }];
@@ -311,12 +326,43 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
           </div>
           <div className="space-y-1">
             <Label>Imóvel</Label>
-            <Input
-              value={form.imovel}
-              onChange={(e) => set("imovel", e.target.value)}
-              placeholder="Endereço do imóvel"
-            />
+            <div className="flex gap-2">
+              <Input
+                value={form.imovel}
+                onChange={(e) => set("imovel", e.target.value)}
+                placeholder="Endereço do imóvel"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                title="Buscar no catálogo iList (RE/MAX)"
+                onClick={() => setPickerOpen(true)}
+              >
+                <Building2 className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
+          <IListPickerDialog
+            open={pickerOpen}
+            onOpenChange={setPickerOpen}
+            transactionType={tipo}
+            onSelect={(payload: IListImportPayload) => {
+              setIlistSnapshot(payload.proposalSnapshot);
+              setForm((f) => ({
+                ...f,
+                imovel: payload.proposalSnapshot.endereco,
+                // Preço do listing pré-preenche o valor quando ainda vazio.
+                valor:
+                  f.valor ||
+                  (payload.proposalSnapshot.preco != null
+                    ? payload.proposalSnapshot.preco.toLocaleString("pt-BR", {
+                        minimumFractionDigits: 2,
+                      })
+                    : f.valor),
+              }));
+            }}
+          />
           {SCHEMA_BY_TIPO[tipo].length > 1 && (
             <div className="space-y-1">
               <Label>Modelo</Label>
