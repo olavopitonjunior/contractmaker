@@ -5,20 +5,9 @@ import { prisma } from "@/lib/db/prisma";
 import { can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { loadScopedProposal } from "@/lib/proposals/route-helpers";
+import { DELETABLE_STATUSES } from "@/lib/proposals/status-sets";
 import { sanitizeHiddenPaths } from "@/lib/proposals/hidden-fields";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
-
-// Estados FRIOS onde excluir é seguro (sem envelope/aceite ativo). Qualquer
-// estado de assinatura em curso (enviada/entregue/…/completa) ou convertida é
-// bloqueado — cancele antes.
-const DELETABLE_STATUSES = new Set([
-  "rascunho",
-  "falha_envio",
-  "cancelada",
-  "expirada",
-  "recusada_proponente",
-  "recusada_vendedor",
-]);
 
 // GET /api/proposals/[id]
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {

@@ -23,7 +23,7 @@ export interface ProposalRow {
   firstViewedAt: string | null;
   convertedDealId: string | null;
   responsible: { name: string; isNonUser: boolean; image: string | null };
-  resumo: { imovel: string | null; valor: number | null };
+  resumo: { proponente: string | null; imovel: string | null; valor: number | null };
 }
 
 const OPEN_STATUSES = new Set([
@@ -139,9 +139,9 @@ export function ProposalsListClient({
                         >
                           {p.title}
                         </Link>
-                        {p.resumo.imovel && (
+                        {(p.resumo.proponente || p.resumo.imovel) && (
                           <div className="truncate text-xs text-muted-foreground">
-                            {p.resumo.imovel}
+                            {[p.resumo.proponente, p.resumo.imovel].filter(Boolean).join(" · ")}
                           </div>
                         )}
                       </TableCell>

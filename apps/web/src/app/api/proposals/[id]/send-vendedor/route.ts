@@ -42,16 +42,30 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     );
   }
 
-  // Confirma que a via reduzida foi criada (ou já existia) — senão não havia
-  // vendedor / nada a encadear.
+  // Confirma que a via reduzida foi criada (ou já existia). Se não, distingue o
+  // motivo: sem vendedor (409) vs vendedor com dados inválidos que a
+  // sendVendedorEnvelope abortou no preflight sem lançar (422 acionável) — em vez
+  // de um 409 genérico "sem vendedor ou já processado" que impede o diagnóstico.
   const env = await prisma.envelope.findFirst({
     where: { proposalId: proposal.id, via: "reduzida", status: { in: ["running", "closed"] } },
     select: { id: true },
   });
   if (!env) {
+    const vendedores = await prisma.proposalSigner.count({
+      where: { proposalId: proposal.id, included: true, role: "vendedor" },
+    });
+    if (vendedores === 0) {
+      return NextResponse.json(
+        { error: "Esta proposta não tem vendedor/proprietário para acionar." },
+        { status: 409 }
+      );
+    }
     return NextResponse.json(
-      { error: "Nada a enviar (sem vendedor ou já processado)." },
-      { status: 409 }
+      {
+        error:
+          "Não foi possível enviar ao vendedor — confira os dados do vendedor (nome completo, e-mail/telefone) e tente novamente.",
+      },
+      { status: 422 }
     );
   }
 

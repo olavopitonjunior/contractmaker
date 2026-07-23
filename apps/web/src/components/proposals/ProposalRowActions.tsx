@@ -32,6 +32,12 @@ import {
   AlertDialogAction,
 } from "@/components/ui/alert-dialog";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  CANCELLABLE_STATUSES,
+  DELETABLE_STATUSES,
+  REMINDABLE_STATUSES,
+  CONVERTABLE_STATUSES,
+} from "@/lib/proposals/status-sets";
 
 export interface ProposalPermissions {
   send: boolean;
@@ -49,31 +55,6 @@ export interface RowProposal {
   convertedDealId: string | null;
 }
 
-const TERMINAL = new Set([
-  "convertida",
-  "recusada_proponente",
-  "recusada_vendedor",
-  "expirada",
-  "cancelada",
-  "completa",
-]);
-const DELETABLE = new Set([
-  "rascunho",
-  "falha_envio",
-  "cancelada",
-  "expirada",
-  "recusada_proponente",
-  "recusada_vendedor",
-]);
-const REMINDABLE = new Set([
-  "enviada",
-  "entregue",
-  "visualizada",
-  "assinada_proponente",
-  "aguardando_vendedor",
-]);
-const CONVERTABLE = new Set(["completa", "assinada_proponente", "aguardando_vendedor"]);
-
 export function ProposalRowActions({
   proposal,
   permissions,
@@ -87,12 +68,14 @@ export function ProposalRowActions({
   const [reason, setReason] = useState("");
 
   const canRemind =
-    permissions.resend && REMINDABLE.has(proposal.status) && proposal.instrument === "envelope";
+    permissions.resend &&
+    REMINDABLE_STATUSES.has(proposal.status) &&
+    proposal.instrument === "envelope";
   const canSendVendedor = permissions.send && proposal.status === "aguardando_vendedor";
-  const canConvert = permissions.convert && CONVERTABLE.has(proposal.status);
-  const canCancel = permissions.cancel && !TERMINAL.has(proposal.status);
+  const canConvert = permissions.convert && CONVERTABLE_STATUSES.has(proposal.status);
+  const canCancel = permissions.cancel && CANCELLABLE_STATUSES.has(proposal.status);
   const canDelete =
-    permissions.delete && DELETABLE.has(proposal.status) && !proposal.convertedDealId;
+    permissions.delete && DELETABLE_STATUSES.has(proposal.status) && !proposal.convertedDealId;
 
   async function run(url: string, init: RequestInit, okMsg: string) {
     setBusy(true);

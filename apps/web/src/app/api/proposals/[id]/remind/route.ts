@@ -1,22 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { loadScopedProposal, proposalFeatureGuard } from "@/lib/proposals/route-helpers";
+import { REMINDABLE_STATUSES } from "@/lib/proposals/status-sets";
 import { resendSignerAction } from "@/lib/clicksign/signer-actions";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-// Estados em que ainda faz sentido lembrar (aguardando cliente/proprietário).
-const REMINDABLE = new Set([
-  "enviada",
-  "entregue",
-  "visualizada",
-  "assinada_proponente",
-  "aguardando_vendedor",
-]);
+const bodySchema = z.object({ sourceKind: z.string().min(1).optional() });
 
 /**
  * POST /api/proposals/[id]/remind — reenvia a notificação de assinatura para os
@@ -35,7 +30,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const feat = await proposalFeatureGuard(auth.org.id, proposal.kind);
   if (feat) return feat;
 
-  if (!REMINDABLE.has(proposal.status)) {
+  if (!REMINDABLE_STATUSES.has(proposal.status)) {
     return NextResponse.json(
       { error: "Não há assinatura pendente para lembrar." },
       { status: 409 }
@@ -51,9 +46,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     );
   }
 
-  const body = (await req.json().catch(() => ({}))) as { sourceKind?: string };
-  const sourceKind =
-    typeof body.sourceKind === "string" ? body.sourceKind : undefined;
+  const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return NextResponse.json({ error: parsed.error.message }, { status: 400 });
+  }
+  const sourceKind = parsed.data.sourceKind;
 
   const signers = await prisma.envelopeSigner.findMany({
     where: {
@@ -71,17 +68,23 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
 
   let sent = 0;
-  const errors: string[] = [];
+  const errs: { status: number; error: string }[] = [];
   for (const s of signers) {
     const res = await resendSignerAction(s);
     if (res.ok) sent++;
-    else errors.push(res.error);
+    else errs.push({ status: res.status, error: res.error });
   }
   if (sent === 0) {
-    // Todos em cooldown / limite → 429 com a mensagem do helper.
+    // Propaga o status REAL do helper (não colapsa tudo em 429): 502 ClickSign
+    // fora, 400 signatário em estado inválido, 429 cooldown/limite. Prioriza o
+    // erro mais "duro" pra não mascarar uma falha real como rate-limit.
+    const worst =
+      errs.find((e) => e.status === 502) ??
+      errs.find((e) => e.status === 400) ??
+      errs[0] ?? { status: 429, error: "Não foi possível reenviar agora." };
     return NextResponse.json(
-      { error: errors[0] ?? "Não foi possível reenviar agora.", errors },
-      { status: 429 }
+      { error: worst.error, errors: errs.map((e) => e.error) },
+      { status: worst.status }
     );
   }
 
@@ -102,9 +105,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       result: "SUCCESS",
       resource: proposal.id,
       resourceType: "Proposal",
-      metadata: { sent, skipped: errors.length, sourceKind: sourceKind ?? null },
+      metadata: { sent, skipped: errs.length, sourceKind: sourceKind ?? null },
     }
   ).catch(() => {});
 
-  return NextResponse.json({ ok: true, sent, skipped: errors.length });
+  return NextResponse.json({ ok: true, sent, skipped: errs.length });
 }

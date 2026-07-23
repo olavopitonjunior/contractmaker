@@ -17,32 +17,13 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import type { ProposalPermissions } from "./ProposalRowActions";
-
-const TERMINAL = new Set([
-  "convertida",
-  "recusada_proponente",
-  "recusada_vendedor",
-  "expirada",
-  "cancelada",
-  "completa",
-]);
-const DELETABLE = new Set([
-  "rascunho",
-  "falha_envio",
-  "cancelada",
-  "expirada",
-  "recusada_proponente",
-  "recusada_vendedor",
-]);
-const REMINDABLE = new Set([
-  "enviada",
-  "entregue",
-  "visualizada",
-  "assinada_proponente",
-  "aguardando_vendedor",
-]);
-const CONVERTABLE = new Set(["completa", "assinada_proponente", "aguardando_vendedor"]);
-const CONVERT_UNSIGNED = new Set(["enviada", "entregue", "visualizada", "rascunho"]);
+import {
+  CANCELLABLE_STATUSES,
+  DELETABLE_STATUSES,
+  REMINDABLE_STATUSES,
+  CONVERTABLE_STATUSES,
+  CONVERT_UNSIGNED_STATUSES,
+} from "@/lib/proposals/status-sets";
 
 export function ProposalActionBar({
   proposal,
@@ -59,12 +40,14 @@ export function ProposalActionBar({
   const { status, instrument } = proposal;
   const canSend = permissions.send && (status === "rascunho" || status === "falha_envio");
   const canSendVendedor = permissions.send && status === "aguardando_vendedor";
-  const canRemind = permissions.resend && REMINDABLE.has(status) && instrument === "envelope";
-  const canConvert = permissions.convert && CONVERTABLE.has(status);
+  const canRemind =
+    permissions.resend && REMINDABLE_STATUSES.has(status) && instrument === "envelope";
+  const canConvert = permissions.convert && CONVERTABLE_STATUSES.has(status);
   const canConvertUnsigned =
-    permissions.convert && !canConvert && CONVERT_UNSIGNED.has(status);
-  const canCancel = permissions.cancel && !TERMINAL.has(status);
-  const canDelete = permissions.delete && DELETABLE.has(status) && !proposal.convertedDealId;
+    permissions.convert && !canConvert && CONVERT_UNSIGNED_STATUSES.has(status);
+  const canCancel = permissions.cancel && CANCELLABLE_STATUSES.has(status);
+  const canDelete =
+    permissions.delete && DELETABLE_STATUSES.has(status) && !proposal.convertedDealId;
 
   async function run(
     url: string,

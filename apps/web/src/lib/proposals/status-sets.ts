@@ -1,0 +1,66 @@
+/**
+ * Conjuntos de status que gateiam AÇÕES da proposta — fonte ÚNICA usada tanto
+ * pelas rotas (guard do servidor) quanto pelos componentes (mostra/esconde
+ * botão). Antes viviam triplicados (server + 2 clients) e divergiam (botão morto
+ * ou 409). Client-safe (sem import de prisma). O guard final de transição
+ * continua no CAS de `advanceProposalStatus`; estes só evitam oferecer o que a
+ * API rejeitaria.
+ */
+
+/** Terminais (nenhuma ação de progressão). Espelha `isTerminal` em status.ts. */
+export const TERMINAL_STATUSES = new Set<string>([
+  "convertida",
+  "recusada_proponente",
+  "recusada_vendedor",
+  "expirada",
+  "cancelada",
+  "completa",
+]);
+
+/**
+ * De onde `cancelar` é válido — espelha `ALLOWED_FROM.cancelada` em status.ts
+ * (NÃO inclui `falha_envio`, que não é predecessor válido, nem os terminais).
+ */
+export const CANCELLABLE_STATUSES = new Set<string>([
+  "rascunho",
+  "aguardando_aprovacao",
+  "enviada",
+  "entregue",
+  "visualizada",
+  "assinada_proponente",
+  "aguardando_vendedor",
+]);
+
+/** Estados FRIOS (sem envelope/aceite ativo) onde excluir é seguro. */
+export const DELETABLE_STATUSES = new Set<string>([
+  "rascunho",
+  "falha_envio",
+  "cancelada",
+  "expirada",
+  "recusada_proponente",
+  "recusada_vendedor",
+]);
+
+/** Aguardando cliente/proprietário — faz sentido lembrar/reenviar. */
+export const REMINDABLE_STATUSES = new Set<string>([
+  "enviada",
+  "entregue",
+  "visualizada",
+  "assinada_proponente",
+  "aguardando_vendedor",
+]);
+
+/** Convertível em negócio (assinatura concluída o suficiente). */
+export const CONVERTABLE_STATUSES = new Set<string>([
+  "completa",
+  "assinada_proponente",
+  "aguardando_vendedor",
+]);
+
+/** Convertível SEM assinatura (com motivo). */
+export const CONVERT_UNSIGNED_STATUSES = new Set<string>([
+  "enviada",
+  "entregue",
+  "visualizada",
+  "rascunho",
+]);

@@ -5,7 +5,8 @@ import { prisma } from "@/lib/db/prisma";
 import { can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { loadScopedProposal, proposalFeatureGuard } from "@/lib/proposals/route-helpers";
-import { advanceProposalStatus, isTerminal } from "@/lib/proposals/status";
+import { advanceProposalStatus } from "@/lib/proposals/status";
+import { CANCELLABLE_STATUSES } from "@/lib/proposals/status-sets";
 import { runEnvelopeCancel } from "@/lib/clicksign/cancel-action";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
@@ -16,8 +17,10 @@ const bodySchema = z.object({ reason: z.string().min(3).max(500) });
 
 /**
  * POST /api/proposals/[id]/cancel — encerra a proposta (status `cancelada`) sem
- * excluir. Cancela best-effort os envelopes ClickSign em curso. `cancelada` é um
- * alvo válido de quase todo estado ativo (ALLOWED_FROM.cancelada).
+ * excluir. Cancela os envelopes ClickSign em curso PRIMEIRO e só marca
+ * `cancelada` se todos forem cancelados — senão retorna 409 e mantém a proposta
+ * ativa (um envelope que a ClickSign recusar cancelar ainda pode ser assinado, e
+ * marcar `cancelada` antes deixaria um contrato assinado preso em terminal).
  */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const r = await loadScopedProposal(req, params.id);
@@ -30,8 +33,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   const feat = await proposalFeatureGuard(auth.org.id, proposal.kind);
   if (feat) return feat;
 
-  if (isTerminal(proposal.status)) {
-    return NextResponse.json({ error: "Proposta já encerrada." }, { status: 409 });
+  if (!CANCELLABLE_STATUSES.has(proposal.status)) {
+    return NextResponse.json(
+      { error: "Não é possível cancelar neste estado." },
+      { status: 409 }
+    );
   }
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
@@ -39,25 +45,38 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   }
   const { reason } = parsed.data;
 
+  // Cancela os envelopes em curso ANTES de mudar o status. Se algum não cancelar
+  // na ClickSign, aborta (409) sem tocar o status — o envelope ainda é assinável.
+  const envelopes = await prisma.envelope.findMany({
+    where: { proposalId: proposal.id, status: "running", clicksignId: { not: null } },
+    select: { id: true },
+  });
+  for (const env of envelopes) {
+    const res = await runEnvelopeCancel({
+      envelopeId: env.id,
+      reason,
+      actorUserId: auth.actor.effectiveUserId,
+    }).catch((err) => ({
+      status: 502,
+      body: { error: err instanceof Error ? err.message : String(err) },
+    }));
+    if (res.status >= 400) {
+      const msg =
+        (res.body as { error?: string } | undefined)?.error ?? `HTTP ${res.status}`;
+      return NextResponse.json(
+        { error: `Não foi possível cancelar a assinatura na ClickSign: ${msg}` },
+        { status: 409 }
+      );
+    }
+  }
+
+  // Todos os envelopes cancelados (ou nenhum ativo) → marca a proposta.
   const adv = await advanceProposalStatus(proposal.id, "cancelada", { canceledAt: new Date() });
   if (!adv.moved && adv.reason === "illegal") {
     return NextResponse.json(
       { error: "Não é possível cancelar neste estado." },
       { status: 409 }
     );
-  }
-
-  // Best-effort: cancela na ClickSign os envelopes em curso (nunca aborta o cancel).
-  const envelopes = await prisma.envelope.findMany({
-    where: { proposalId: proposal.id, status: "running", clicksignId: { not: null } },
-    select: { id: true },
-  });
-  for (const env of envelopes) {
-    await runEnvelopeCancel({
-      envelopeId: env.id,
-      reason,
-      actorUserId: auth.actor.effectiveUserId,
-    }).catch(() => {});
   }
 
   await prisma.proposalEvent
@@ -78,7 +97,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       result: "SUCCESS",
       resource: proposal.id,
       resourceType: "Proposal",
-      metadata: { reason, from: proposal.status },
+      metadata: { reason, from: proposal.status, envelopes: envelopes.length },
     }
   ).catch(() => {});
 
