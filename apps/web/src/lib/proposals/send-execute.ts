@@ -12,6 +12,8 @@ import {
 import { createAcceptanceWhatsapp } from "@/lib/clicksign/acceptance";
 import { getSignatureSettings, resolveClickSignCreds } from "@/lib/clicksign/account";
 import type { ClickSignCreds } from "@/lib/clicksign/account";
+import { getMonthlySpendCents } from "@/lib/clicksign/executor";
+import { getMonthlyBudgetCents } from "@/lib/clicksign/costs";
 import { ClicksignError } from "@/lib/clicksign/client";
 import { STAGING_MODE } from "@/lib/env/staging";
 import { buildAcceptanceMessage } from "./acceptance-proof";
@@ -576,17 +578,11 @@ export async function sendVendedorEnvelope(proposalId: string): Promise<void> {
   }
   const settings = await getSignatureSettings(proposal.orgId);
 
-  // Preflight dos vendedores (nome/CPF/telefone/e-mail). Falhou → registra e para
-  // (o operador corrige o contato e o /sync re-dispara). Não gasta.
-  const issues = checkProposalReadiness(
-    rows.map((r) => ({ name: r.name, email: r.email, cpf: r.cpf, phone: r.phone, notifyChannel: r.notifyChannel }))
-  );
-  if (issues.length > 0) {
-    await logProposalEvent(proposalId, "chained_envelope2_preflight_failed", { issues });
-    return;
-  }
-
-  // Canal por vendedor: whatsapp só se a conta é Plus e há telefone; senão email.
+  // Canal por vendedor RESOLVIDO antes do preflight: whatsapp só se a conta é Plus
+  // e há telefone; senão email. Validar contra o canal cru (r.notifyChannel)
+  // deixava passar um vendedor whatsapp-só-telefone (sem e-mail); rebaixado pra
+  // email ele geraria envelope sem endereço → ClickSign 422 → proposta travada em
+  // aguardando_vendedor (o reconcile re-tentaria com a mesma falha).
   const plus = settings.whatsappSignatureAvailable ?? false;
   const specs: EnvSignerSpec[] = rows.map((r) => ({
     role: "vendedor",
@@ -597,6 +593,17 @@ export async function sendVendedorEnvelope(proposalId: string): Promise<void> {
     signingGroup: r.signingGroup,
     channel: r.notifyChannel === "whatsapp" && plus && r.phone ? "whatsapp" : "email",
   }));
+
+  // Preflight dos vendedores contra o canal RESOLVIDO (nome/CPF/telefone/e-mail).
+  // Falhou → registra e para (o operador corrige o contato e o /sync re-dispara).
+  // Não gasta.
+  const issues = checkProposalReadiness(
+    specs.map((s) => ({ name: s.name, email: s.email, cpf: s.cpf, phone: s.phone, notifyChannel: s.channel }))
+  );
+  if (issues.length > 0) {
+    await logProposalEvent(proposalId, "chained_envelope2_preflight_failed", { issues });
+    return;
+  }
 
   // Conteúdo: reduzida (comissão oculta) quando há hiddenPaths; senão completa.
   const contentVia = proposal.hiddenPaths.length > 0 ? "reduzida" : "completa";
@@ -620,6 +627,23 @@ export async function sendVendedorEnvelope(proposalId: string): Promise<void> {
     signerCount: specs.length,
     costOverrides: settings.costOverridesJson as Record<string, unknown> | null,
   });
+
+  // Budget mensal (mesmo cap do envio inicial em send.ts): o split enviou só os
+  // proponentes primeiro, então o custo do vendedor NÃO foi contado adiantado. Sem
+  // este gate, o 2º envelope estouraria o teto que a plataforma promete (402). Sub-
+  // teto de propostas tem precedência sobre o mensal. Estourou → registra e para
+  // (o reconcile re-tenta quando houver saldo; a proposta fica em aguardando_vendedor).
+  const budgetCents =
+    settings.proposalBudgetCents ?? getMonthlyBudgetCents(settings.monthlyBudgetCents);
+  const spentCents = await getMonthlySpendCents(proposal.orgId);
+  if (spentCents + costCents > budgetCents) {
+    await logProposalEvent(proposalId, "chained_envelope2_budget_exceeded", {
+      spentCents,
+      budgetCents,
+      costCents,
+    });
+    return;
+  }
 
   try {
     await runClickSignEnvelope({

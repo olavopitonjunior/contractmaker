@@ -28,7 +28,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         select: {
           id: true,
           name: true,
-          role: true,
+          // Papel EXIBÍVEL vem do sourceKind (domínio PT: vendedor/comprador),
+          // não de `role` (qualificação ClickSign em inglês: seller/buyer).
+          sourceKind: true,
           notifyChannel: true,
           status: true,
           signingGroup: true,
@@ -47,7 +49,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       id: s.id,
       via: e.via,
       name: s.name,
-      role: s.role,
+      role: s.sourceKind,
       channel: s.notifyChannel,
       status: s.status,
       signingGroup: s.signingGroup,
