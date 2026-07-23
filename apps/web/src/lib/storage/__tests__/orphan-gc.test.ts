@@ -93,6 +93,55 @@ describe("runOrphanBlobGc", () => {
     expect(r.deleted).toBe(2);
   });
 
+  it("FAIL-SAFE: uploadedAt inválido (NaN) → pulado como recente, NUNCA apaga", async () => {
+    const d = deps({
+      listStorage: makeList("deal-attachments/", [
+        { url: "https://s/deal-attachments/x.pdf", pathname: "deal-attachments/x.pdf", uploadedAt: new Date("invalid") },
+      ]),
+      isReferenced: vi.fn(async () => false),
+    });
+    const r = await runOrphanBlobGc(d, { prefixes: ["deal-attachments/"], apply: true });
+    expect(r.tooFresh).toBe(1);
+    expect(r.orphans).toBe(0);
+    expect(d.deleteBlob).not.toHaveBeenCalled();
+  });
+
+  it("includeStagingLayout=false (prod) NÃO varre staging/ ; true varre", async () => {
+    const seen: string[] = [];
+    const listStorage = vi.fn(async ({ prefix }: { prefix?: string }) => {
+      if (prefix) seen.push(prefix);
+      return { items: [], cursor: null, hasMore: false };
+    });
+    await runOrphanBlobGc(deps({ listStorage }), {
+      prefixes: ["deal-attachments/"],
+      apply: false,
+    });
+    expect(seen).toEqual(["deal-attachments/"]); // sem staging/
+
+    seen.length = 0;
+    await runOrphanBlobGc(deps({ listStorage }), {
+      prefixes: ["deal-attachments/"],
+      includeStagingLayout: true,
+      apply: false,
+    });
+    expect(seen).toContain("deal-attachments/");
+    expect(seen).toContain("staging/deal-attachments/");
+  });
+
+  it("startOffset rotaciona o prefixo inicial (fairness cross-run)", async () => {
+    const seen: string[] = [];
+    const listStorage = vi.fn(async ({ prefix }: { prefix?: string }) => {
+      if (prefix) seen.push(prefix);
+      return { items: [], cursor: null, hasMore: false };
+    });
+    await runOrphanBlobGc(deps({ listStorage }), {
+      prefixes: ["a/", "b/", "c/"],
+      startOffset: 1,
+      apply: false,
+    });
+    expect(seen).toEqual(["b/", "c/", "a/"]); // começou em b/
+  });
+
   it("respeita o time budget → exhausted, para cedo", async () => {
     let t = NOW;
     const d = deps({
