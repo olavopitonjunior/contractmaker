@@ -5,6 +5,7 @@ import {
   isOwnerOAuthConfigured,
 } from "./client";
 import { resolveOwnerAuth, getOwnerDriveForAuth } from "./org-oauth";
+import { markProgrammaticDocEdit } from "./doc-edit-marker";
 
 export interface ShareOrgResult {
   shared: string[];
@@ -43,6 +44,9 @@ export async function ensureAnyonePermission(
     return;
   }
   try {
+    // Mudança de permissão dispara "update" no watch sem mudar conteúdo — marca
+    // como programática pro webhook não registrar edição manual fantasma.
+    await markProgrammaticDocEdit(docId);
     // Permissions são criadas pelo DONO do arquivo: docs criados na conta da
     // org precisam da credencial da org (a global não tem acesso a eles).
     const drive = getOwnerDriveForAuth(await resolveOwnerAuth(orgId));
@@ -106,6 +110,10 @@ export async function shareDocWithOrgMembers(
     );
     return result;
   }
+
+  // Grants de permissão disparam "update" no watch sem mudar conteúdo — marca
+  // como programática (fecha o "Manual" fantasma em contrato recém-gerado).
+  await markProgrammaticDocEdit(docId);
 
   const memberships = await prisma.orgMembership.findMany({
     where: { orgId, user: { deletedAt: null } },
