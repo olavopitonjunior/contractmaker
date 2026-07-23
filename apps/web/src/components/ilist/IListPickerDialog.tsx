@@ -81,6 +81,8 @@ export function IListPickerDialog({
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [selectingId, setSelectingId] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
   const abortRef = useRef<AbortController | null>(null);
 
   const effectiveFilter = transactionType ?? filter;
@@ -96,6 +98,7 @@ export function IListPickerDialog({
     const controller = new AbortController();
     abortRef.current = controller;
     setLoading(true);
+    setLoadError(null);
     const params = new URLSearchParams({ transactionType: effectiveFilter, take: "30" });
     if (debouncedQ) params.set("q", debouncedQ);
     fetch(`/api/ilist/listings?${params}`, { signal: controller.signal })
@@ -110,13 +113,13 @@ export function IListPickerDialog({
       })
       .catch((err) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
-        toast.error(err instanceof Error ? err.message : "Erro ao buscar imóveis");
+        setLoadError(err instanceof Error ? err.message : "Erro ao buscar imóveis");
       })
       .finally(() => {
         if (!controller.signal.aborted) setLoading(false);
       });
     return () => controller.abort();
-  }, [open, debouncedQ, effectiveFilter]);
+  }, [open, debouncedQ, effectiveFilter, retryTick]);
 
   async function handleSelect(item: IListListingItem) {
     setSelectingId(item.id);
@@ -187,6 +190,15 @@ export function IListPickerDialog({
                 </div>
               )}
             </div>
+
+            {loadError && (
+              <div className="flex items-center justify-between rounded-md border border-red-300 bg-red-50 p-3 text-sm text-red-900 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
+                <span>{loadError}</span>
+                <Button size="sm" variant="outline" onClick={() => setRetryTick((t) => t + 1)}>
+                  Tentar novamente
+                </Button>
+              </div>
+            )}
 
             <div className="max-h-[380px] space-y-2 overflow-y-auto pr-1">
               {loading && !items && (

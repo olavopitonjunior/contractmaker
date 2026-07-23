@@ -23,12 +23,16 @@ export const runtime = "nodejs";
  *   - `{ configured: true, entity, crmId, fields }` no sucesso.
  */
 export async function POST(req: NextRequest) {
-  const ctx = await ensureLocacaoAccess(PERMISSION.CLIENT_VIEW);
-  if (isRouteError(ctx)) return ctx;
-
   const parsed = await parseJsonBody(req, crmLookupSchema);
   if (!parsed.ok) return parsed.response;
   const { entity, crmId } = parsed.data;
+
+  // Permission por entity: lookup de imóvel expõe payload de import de imóvel
+  // (não de cliente) — gateia em PROPERTY_VIEW.
+  const ctx = await ensureLocacaoAccess(
+    entity === "imovel" ? PERMISSION.PROPERTY_VIEW : PERMISSION.CLIENT_VIEW,
+  );
+  if (isRouteError(ctx)) return ctx;
 
   const notConfigured = (message: string) =>
     NextResponse.json({ configured: false, entity, crmId, message }, { status: 501 });

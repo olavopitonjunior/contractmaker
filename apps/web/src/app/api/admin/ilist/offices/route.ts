@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
 
   try {
     const client = createIListClient(regionId);
-    const offices: Array<{ id: number; name: string; city?: string }> = [];
+    const offices: Array<{ id: number; name: string }> = [];
     let page = 1;
     for (;;) {
       const res = await client.offices.list({ page, take: 100 });

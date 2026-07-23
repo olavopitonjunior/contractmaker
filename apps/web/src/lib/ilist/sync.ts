@@ -29,14 +29,22 @@ interface AssociateInfo {
   creci?: string;
 }
 
+class SyncTimeBudgetExceeded extends Error {}
+
+function assertBudget(startedAt: number): void {
+  if (Date.now() - startedAt > TIME_BUDGET_MS) throw new SyncTimeBudgetExceeded();
+}
+
 async function loadAssociateMap(
   client: IListClient,
   officeIds: number[],
+  startedAt: number,
 ): Promise<Map<number, AssociateInfo>> {
   const map = new Map<number, AssociateInfo>();
   for (const officeID of officeIds) {
     let page = 1;
     for (;;) {
+      assertBudget(startedAt);
       const res = await client.associates.list({ page, take: PAGE_SIZE, all: true, officeID });
       for (const a of res.Items as IListAssociate[]) {
         map.set(a.ID, { name: a.AgentName, creci: a.SalesLicenseNumber || undefined });
@@ -126,12 +134,20 @@ export async function syncOrgListings(
   });
 
   try {
-    // Geodata: warm no full ou quando o cache da região está vazio.
+    // Geodata: warm no full ou quando o cache da região está vazio. A fase de
+    // preparação (geodata + associates) também respeita o budget de tempo —
+    // sem isso, uma org grande estouraria o maxDuration da Vercel antes do
+    // catch e deixaria syncStatus travado em "syncing" sem erro registrado.
     const cached = await prisma.iListGeoCity.count({ where: { regionId: conn.regionId } });
     if (full || cached === 0) await warmGeoCache(client);
+    assertBudget(startedAt);
     const geo = await loadGeoCacheMap(conn.regionId);
-    const associates = await loadAssociateMap(client, conn.officeIds);
+    const associates = await loadAssociateMap(client, conn.officeIds, startedAt);
 
+    // TODO(escala): full sync parcial recomeça do zero no próximo tick (sem
+    // cursor de retomada por office/página). Aceitável no volume atual
+    // (região 71 ≈ 1.9k listings cabe no budget); antes de provisionar tenant
+    // com catálogo muito maior, persistir progresso por (officeID, page).
     const startDate =
       !full && conn.lastCursor ? new Date(conn.lastCursor.getTime() - CURSOR_OVERLAP_MS) : undefined;
 
@@ -205,6 +221,14 @@ export async function syncOrgListings(
 
     return { ok: true, upserted, markedDeleted, partial };
   } catch (err) {
+    if (err instanceof SyncTimeBudgetExceeded) {
+      // Budget estourou na preparação — não é erro: persiste "syncing" e o
+      // próximo tick (cron/botão) continua.
+      await prisma.iListConnection
+        .update({ where: { id: conn.id }, data: { syncStatus: "syncing" } })
+        .catch(() => {});
+      return { ok: true, upserted: 0, markedDeleted: 0, partial: true };
+    }
     const message = err instanceof Error ? err.message : String(err);
     await prisma.iListConnection
       .update({
