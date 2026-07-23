@@ -25,6 +25,7 @@ import { notifyProposalMilestone } from "../notify-proposal";
 const envFind = prisma.envelope.findUnique as unknown as ReturnType<typeof vi.fn>;
 const propFind = prisma.proposal.findUnique as unknown as ReturnType<typeof vi.fn>;
 const signerCount = prisma.proposalSigner.count as unknown as ReturnType<typeof vi.fn>;
+const envSignerFind = prisma.envelopeSigner.findFirst as unknown as ReturnType<typeof vi.fn>;
 const advance = advanceProposalStatus as unknown as ReturnType<typeof vi.fn>;
 const sendVend = sendVendedorEnvelope as unknown as ReturnType<typeof vi.fn>;
 const notify = notifyProposalMilestone as unknown as ReturnType<typeof vi.fn>;
@@ -35,6 +36,7 @@ describe("onProposalEnvelopeClosed", () => {
     advance.mockResolvedValue({ moved: true });
     sendVend.mockResolvedValue(undefined);
     signerCount.mockResolvedValue(0);
+    envSignerFind.mockResolvedValue(null);
     propFind.mockResolvedValue({ orgId: "org1", userId: "u1" });
   });
 
@@ -65,6 +67,19 @@ describe("onProposalEnvelopeClosed", () => {
     expect(dests).toEqual(["assinada_proponente", "aguardando_vendedor"]);
     expect(dests).not.toContain("completa");
     expect(sendVend).toHaveBeenCalledWith("p1");
+  });
+
+  it("completa combinada LEGADO (vendedor já no envelope) → completa, SEM 2º envelope", async () => {
+    // Migração: envelope único comprador+vendedor em voo no deploy. Ao fechar, o
+    // vendedor já assinou aqui → não pode encadear/re-cobrar um 2º envelope.
+    envFind.mockResolvedValue({ source: "proposal", proposalId: "p1", via: "completa" });
+    envSignerFind.mockResolvedValue({ id: "es1" }); // vendedor presente no envelope
+    signerCount.mockResolvedValue(1); // o plano também tem vendedor — mas não deve importar
+    await onProposalEnvelopeClosed("e1");
+    const dests = advance.mock.calls.map((c) => c[1]);
+    expect(dests).toEqual(["assinada_proponente", "completa"]);
+    expect(dests).not.toContain("aguardando_vendedor");
+    expect(sendVend).not.toHaveBeenCalled();
   });
 
   it("via reduzida (proprietário) fecha → completa", async () => {

@@ -43,7 +43,7 @@ export default async function PropostaDetailPage({
     notFound();
   }
 
-  const [signers, events, attachments, memberRows] = await Promise.all([
+  const [planSigners, events, attachments, memberRows, envelopes] = await Promise.all([
     prisma.proposalSigner.findMany({
       where: { proposalId: params.id },
       orderBy: { signingGroup: "asc" },
@@ -59,7 +59,42 @@ export default async function PropostaDetailPage({
       select: { user: { select: { id: true, name: true } } },
       orderBy: { user: { name: "asc" } },
     }),
+    prisma.envelope.findMany({
+      where: { proposalId: params.id, source: "proposal", status: { notIn: ["failed"] } },
+      select: {
+        via: true,
+        signers: {
+          select: { id: true, name: true, role: true, notifyChannel: true, status: true },
+          orderBy: { signingGroup: "asc" },
+        },
+      },
+      orderBy: { via: "asc" },
+    }),
   ]);
+
+  // Status REAL por signatário vem do EnvelopeSigner (onde vive sign/view/refuse),
+  // não do ProposalSigner (plano). Sem isso o status por-linha sumia em propostas
+  // terminais (polling off) — ex.: numa recusada não dava pra ver quem recusou. Só
+  // cai no plano quando ainda não há envelope (rascunho/aprovação).
+  const envelopeSigners = envelopes.flatMap((e) =>
+    e.signers.map((s) => ({
+      id: s.id,
+      name: s.name,
+      role: s.role ?? "",
+      channel: s.notifyChannel,
+      status: s.status,
+    }))
+  );
+  const signers =
+    envelopeSigners.length > 0
+      ? envelopeSigners.filter((s) => s.status !== "removed")
+      : planSigners.map((s) => ({
+          id: s.id,
+          name: s.name,
+          role: s.role ?? "",
+          channel: s.notifyChannel,
+          status: "",
+        }));
 
   const d = (proposal.dataJson ?? {}) as Record<string, unknown>;
   const resp = responsibleDisplay({
@@ -106,8 +141,8 @@ export default async function PropostaDetailPage({
         id: s.id,
         name: s.name,
         role: s.role,
-        channel: s.notifyChannel,
-        status: "—",
+        channel: s.channel,
+        status: s.status,
       }))}
       events={events.map((e) => ({
         id: e.id,
