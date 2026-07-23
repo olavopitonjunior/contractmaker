@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { loadScopedProposal } from "@/lib/proposals/route-helpers";
 import { TERMINAL_STATUSES, AWAITING_SIGNATURE_STATUSES } from "@/lib/proposals/status-sets";
+import { clicksignRoleLabel } from "@/lib/clicksign/roles";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -28,9 +29,7 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
         select: {
           id: true,
           name: true,
-          // Papel EXIBÍVEL vem do sourceKind (domínio PT: vendedor/comprador),
-          // não de `role` (qualificação ClickSign em inglês: seller/buyer).
-          sourceKind: true,
+          role: true,
           notifyChannel: true,
           status: true,
           signingGroup: true,
@@ -49,7 +48,9 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
       id: s.id,
       via: e.via,
       name: s.name,
-      role: s.sourceKind,
+      // Papel EXIBÍVEL em PT: traduz a qualificação ClickSign (inglês: seller/
+      // buyer/witness/party) — inclui testemunha, que o sourceKind colapsaria.
+      role: clicksignRoleLabel(s.role),
       channel: s.notifyChannel,
       status: s.status,
       signingGroup: s.signingGroup,

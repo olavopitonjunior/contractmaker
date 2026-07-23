@@ -136,6 +136,21 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
         : { envelopeId: env.id, ok: true }
     );
   }
+  // Se ALGUM cancelamento falhou, NÃO exclui: a cascata apagaria o Envelope local
+  // e deixaria o remoto vivo/cobrável órfão (sem rastro pra reconciliar uma
+  // assinatura posterior). 409. Não é beco sem saída: o cron reconcile sincroniza
+  // o Envelope stale (sai de 'running') e a exclusão passa numa próxima tentativa.
+  const failed = cancelOutcomes.filter((o) => !o.ok);
+  if (failed.length > 0) {
+    return NextResponse.json(
+      {
+        error:
+          "A assinatura ainda está ativa na ClickSign e não pôde ser cancelada agora. Tente novamente em alguns minutos.",
+        details: failed,
+      },
+      { status: 409 }
+    );
+  }
 
   await prisma.proposal.delete({ where: { id: params.id } });
   await audit(

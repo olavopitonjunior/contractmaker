@@ -8,6 +8,7 @@ import {
 } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { responsibleDisplay } from "@/lib/proposals/status-view";
+import { clicksignRoleLabel } from "@/lib/clicksign/roles";
 import { ProposalDetailClient } from "@/components/proposals/ProposalDetailClient";
 
 export const dynamic = "force-dynamic";
@@ -64,8 +65,7 @@ export default async function PropostaDetailPage({
       select: {
         via: true,
         signers: {
-          // sourceKind (domínio PT) pro papel exibível, não `role` (inglês ClickSign).
-          select: { id: true, name: true, sourceKind: true, notifyChannel: true, status: true },
+          select: { id: true, name: true, role: true, notifyChannel: true, status: true },
           orderBy: { signingGroup: "asc" },
         },
       },
@@ -75,17 +75,22 @@ export default async function PropostaDetailPage({
 
   // Status REAL por signatário vem do EnvelopeSigner (onde vive sign/view/refuse),
   // não do ProposalSigner (plano). Sem isso o status por-linha sumia em propostas
-  // terminais (polling off) — ex.: numa recusada não dava pra ver quem recusou. Só
-  // cai no plano quando ainda não há envelope (rascunho/aprovação).
+  // terminais (polling off) — ex.: numa recusada não dava pra ver quem recusou.
+  // Papel exibível: traduz a qualificação ClickSign (inglês) → PT via
+  // clicksignRoleLabel (inclui testemunha; sourceKind colapsaria pra comprador).
   const envelopeSigners = envelopes.flatMap((e) =>
     e.signers.map((s) => ({
       id: s.id,
       name: s.name,
-      role: s.sourceKind ?? "",
+      role: clicksignRoleLabel(s.role) ?? "",
       channel: s.notifyChannel,
       status: s.status,
     }))
   );
+  // Fallback pro ProposalSigner quando NÃO há envelope: propostas via Aceite
+  // (WhatsApp) não criam Envelope, então o status por-signatário vive em
+  // ProposalSigner.acceptanceStatus — sem isto o Aceite perdia a visibilidade de
+  // quem aceitou/recusou. Também cobre rascunho (acceptanceStatus vazio → sem badge).
   const signers =
     envelopeSigners.length > 0
       ? envelopeSigners.filter((s) => s.status !== "removed")
@@ -94,7 +99,7 @@ export default async function PropostaDetailPage({
           name: s.name,
           role: s.role ?? "",
           channel: s.notifyChannel,
-          status: "",
+          status: s.acceptanceStatus ?? "",
         }));
 
   const d = (proposal.dataJson ?? {}) as Record<string, unknown>;
