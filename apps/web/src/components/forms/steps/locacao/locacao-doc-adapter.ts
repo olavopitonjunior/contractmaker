@@ -121,5 +121,23 @@ export const locacaoDocAdapter: DocumentosStepAdapter = {
     return null;
   },
   kindLabel: (kind) => KIND_LABELS[kind] ?? kind,
+  topKeyForKind(kind) {
+    switch (kind) {
+      case "locador":
+      case "representante_locador":
+        return "locadores";
+      case "locatario":
+      case "representante_locatario":
+        return "locatarios";
+      // Singular no schema de locação; casa com ROLE_PATHS.locador = [..,"imovel"].
+      case "imovel":
+        return "imovel";
+      // Fiador qualifica-se dentro de `garantia` (ROLE_PATHS.fiador = ["garantia"]).
+      case "fiador":
+        return "garantia";
+      default:
+        return null;
+    }
+  },
   // Sem applyFicha: ficha-resumo declara papéis de venda; em locação cai em "outro".
 };

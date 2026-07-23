@@ -785,7 +785,7 @@ export function SalesFormWizard({
   }
 
   const stepComponents = [
-    <DocumentosStep key="step-0" form={form} token={token} />,
+    <DocumentosStep key="step-0" form={form} token={token} allowedTopKeys={pathScope} />,
     <VendedorStep key="step-1" form={form} />,
     <CompradorStep key="step-2" form={form} />,
     <ImovelStep key="step-3" form={form} />,
