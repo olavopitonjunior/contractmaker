@@ -18,16 +18,21 @@ import type { StorageListPage } from "./s3";
  *    protege blob recém-subido cuja row ainda está sendo criada.
  *  - **Match por URL EXATA** contra o banco (nunca reconstrói keys — sufixo
  *    aleatório).
- *  - **Stores separados por ambiente** (prod ≠ staging) → cada GC lista só o
- *    próprio store e casa contra o próprio banco; sem risco cross-env.
+ *  - **Stores SEPARADOS por ambiente** (verificado: prod ≠ staging) é a
+ *    INVARIANTE que garante segurança cross-env: cada GC lista só o próprio
+ *    store e casa contra o próprio banco. É PRÉ-CONDIÇÃO de BLOB_GC_DELETE=true —
+ *    num store COMPARTILHADO entre prod e staging, os blobs de anexo escritos por
+ *    `put` direto / client-direct ficam no prefixo BASE (sem `staging/`, pois
+ *    bypassam o normalizeKey) e seriam indistinguíveis por prefixo, então o GC
+ *    de um ambiente apagaria os blobs vivos do outro. O gate includeStagingLayout
+ *    é defesa-em-profundidade PARCIAL (cobre só o subconjunto `staging/`), NÃO a
+ *    garantia — não afrouxe assumindo que ele fecha o cross-env sozinho.
  *  - **Dry-run por padrão** (apply=false): só reporta candidatos. Deleção real
  *    exige BLOB_GC_DELETE=true no cron.
  */
 
-// Prefixos de key varridos. Incluem os dois layouts: base (prod, e uploads
-// `put` direto no staging) e `staging/` (uploads via s3.ts no staging, que
-// passam por normalizeKey). Stores são separados por ambiente, então listar o
-// layout do outro ambiente simplesmente volta vazio.
+// Prefixos de key varridos. Layout base (`<prefix>`); as variantes `staging/`
+// (uploads via s3.ts no staging) só são varridas quando includeStagingLayout.
 export const GC_ATTACHMENT_PREFIXES = [
   "deal-attachments/",
   "imports/",

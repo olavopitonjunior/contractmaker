@@ -36,6 +36,9 @@ const DEFAULT_STAGING_CRON_ALLOWLIST = new Set<string>([
   // Só expirar propostas é DB-only e seguro em staging. remind (manda mensagem
   // real) e reconcile (pode disparar envelope) ficam OFF por padrão.
   "/api/cron/proposals/expire",
+  // Roda em staging pra validar o GC de blobs órfãos contra dados reais — é
+  // dry-run lá (BLOB_GC_DELETE não é setado em staging), então não apaga nada.
+  "/api/cron/blob-gc",
 ]);
 
 /**
