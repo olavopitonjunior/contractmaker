@@ -49,6 +49,29 @@ export default async function PropostasPage({
   const statusList = statusesForFilter(searchParams.status);
   const responsibleUserId = searchParams.responsibleUserId || undefined;
 
+  // Busca `q`: proponente e imóvel vivem no dataJson (JSON), onde o `contains` do
+  // Prisma não alcança. Antes o filtro rodava em memória DEPOIS de `take: 200`, então
+  // só buscava nas 200 mais recentes (matches mais antigos sumiam silenciosamente).
+  // Agora resolvemos os IDs no banco (título + dataJson::text) e hidratamos por id —
+  // o escopo (orgId/corretor) é re-aplicado no findMany. Fallback pro modo antigo se
+  // o raw falhar (nunca quebra a listagem).
+  let searchIdFilter: { id: { in: string[] } } | undefined;
+  let searchRawFailed = false;
+  if (qLower) {
+    try {
+      const like = `%${qLower}%`;
+      const matched = await prisma.$queryRaw<{ id: string }[]>`
+        SELECT "id" FROM "Proposal"
+        WHERE "orgId" = ${orgId}
+          AND lower("title" || ' ' || COALESCE("dataJson"::text, '')) LIKE ${like}
+        ORDER BY "createdAt" DESC
+        LIMIT 500`;
+      searchIdFilter = { id: { in: matched.map((m) => m.id) } };
+    } catch {
+      searchRawFailed = true; // cai no post-filter em memória abaixo
+    }
+  }
+
   const [proposals, memberRows] = await Promise.all([
     prisma.proposal.findMany({
       where: {
@@ -56,9 +79,7 @@ export default async function PropostasPage({
         kind: tipo === "venda" ? "venda" : "locacao",
         ...(statusList ? { status: { in: statusList } } : {}),
         ...(responsibleUserId ? { responsibleUserId } : {}),
-        // A busca `q` é aplicada em memória (post-filter): proponente e imóvel
-        // vivem no dataJson (JSON), onde `contains` do Prisma não é portável.
-        // Filtrar só por `title` no banco escondia matches de proponente/imóvel.
+        ...(searchIdFilter ?? {}),
       },
       select: {
         id: true,
@@ -78,7 +99,8 @@ export default async function PropostasPage({
         responsibleUser: { select: { id: true, name: true, image: true } },
       },
       orderBy: { createdAt: "desc" },
-      take: 200,
+      // Busca resolvida no banco → hidrata os ≤500 ids casados. Sem busca → 200 recentes.
+      take: searchIdFilter ? 500 : 200,
     }),
     prisma.orgMembership.findMany({
       where: { orgId },
@@ -122,7 +144,9 @@ export default async function PropostasPage({
       };
     })
     .filter((r) => {
-      if (!qLower) return true;
+      // Busca já resolvida no banco (searchIdFilter). O post-filter em memória só
+      // roda no FALLBACK (raw falhou) — aí sobre as 200 recentes, como antes.
+      if (!qLower || !searchRawFailed) return true;
       const hay = [r.title, r.resumo.imovel, r.resumo.proponente]
         .filter(Boolean)
         .join(" ")

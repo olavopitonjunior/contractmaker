@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { prisma } from "@/lib/db/prisma";
 import { can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { loadScopedProposal, proposalFeatureGuard } from "@/lib/proposals/route-helpers";
@@ -33,40 +32,61 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     );
   }
 
-  try {
-    await sendVendedorEnvelope(proposal.id);
-  } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Falha ao enviar ao vendedor." },
-      { status: 502 }
-    );
-  }
+  // Resultado ESTRUTURADO: distingue o motivo real em vez de inferir por presença
+  // de envelope (que escondia budget/lock atrás de um 422 "confira os dados").
+  const result = await sendVendedorEnvelope(proposal.id).catch(
+    (err): Awaited<ReturnType<typeof sendVendedorEnvelope>> => ({
+      ok: false,
+      reason: "error",
+      detail: err instanceof Error ? err.message : String(err),
+    })
+  );
 
-  // Confirma que a via reduzida foi criada (ou já existia). Se não, distingue o
-  // motivo: sem vendedor (409) vs vendedor com dados inválidos que a
-  // sendVendedorEnvelope abortou no preflight sem lançar (422 acionável) — em vez
-  // de um 409 genérico "sem vendedor ou já processado" que impede o diagnóstico.
-  const env = await prisma.envelope.findFirst({
-    where: { proposalId: proposal.id, via: "reduzida", status: { in: ["running", "closed"] } },
-    select: { id: true },
-  });
-  if (!env) {
-    const vendedores = await prisma.proposalSigner.count({
-      where: { proposalId: proposal.id, included: true, role: "vendedor" },
-    });
-    if (vendedores === 0) {
-      return NextResponse.json(
-        { error: "Esta proposta não tem vendedor/proprietário para acionar." },
-        { status: 409 }
-      );
+  if (!result.ok) {
+    switch (result.reason) {
+      case "already":
+        // Já enviado/em voo — idempotente, trata como sucesso.
+        break;
+      case "no_vendedor":
+        return NextResponse.json(
+          { error: "Esta proposta não tem vendedor/proprietário para acionar." },
+          { status: 409 }
+        );
+      case "no_creds":
+        return NextResponse.json(
+          { error: "Conta ClickSign não configurada para esta imobiliária." },
+          { status: 422 }
+        );
+      case "preflight":
+        return NextResponse.json(
+          {
+            error:
+              "Confira os dados do vendedor (nome completo, e-mail/telefone) e tente novamente.",
+            detail: result.detail,
+          },
+          { status: 422 }
+        );
+      case "budget":
+        return NextResponse.json(
+          {
+            error:
+              "Orçamento mensal de assinaturas atingido — libere saldo ou ajuste o limite em Configurações.",
+          },
+          { status: 402 }
+        );
+      case "locked":
+        return NextResponse.json(
+          { error: "Envio ao vendedor já em andamento. Aguarde alguns segundos." },
+          { status: 409 }
+        );
+      case "not_found":
+        return NextResponse.json({ error: "Proposta não encontrada." }, { status: 404 });
+      default:
+        return NextResponse.json(
+          { error: result.detail ?? "Falha ao enviar ao vendedor." },
+          { status: 502 }
+        );
     }
-    return NextResponse.json(
-      {
-        error:
-          "Não foi possível enviar ao vendedor — confira os dados do vendedor (nome completo, e-mail/telefone) e tente novamente.",
-      },
-      { status: 422 }
-    );
   }
 
   await audit(
@@ -76,9 +96,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       result: "SUCCESS",
       resource: proposal.id,
       resourceType: "Proposal",
-      metadata: { envelopeId: env.id },
     }
   ).catch(() => {});
 
-  return NextResponse.json({ ok: true, envelopeId: env.id });
+  return NextResponse.json({ ok: true });
 }

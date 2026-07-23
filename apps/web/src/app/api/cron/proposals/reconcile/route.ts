@@ -45,12 +45,18 @@ export async function GET(req: NextRequest) {
     include: { signers: true },
     take: 50,
   });
+  // IDs cujo envelope o step 1 acabou de fechar → onProposalEnvelopeClosed já
+  // encadeia o 2º envelope (via waitUntil). Excluir do step 2 evita que ele
+  // redispare a MESMA proposta no mesmo run (o lock em sendVendedorEnvelope já
+  // serializa, mas não fazer a chamada redundante é mais barato e claro).
+  const chainedInStep1 = new Set<string>();
   for (const env of envelopes) {
     try {
       const r = await syncEnvelopeState(env, { actorVia: "cron-reconcile" });
       result.synced++;
       if (r.remoteStatus === "closed" || r.remoteStatus === "finished") {
         await onProposalEnvelopeClosed(env.id);
+        if (env.proposalId) chainedInStep1.add(env.proposalId);
         result.closedPropagated++;
       } else if (r.remoteStatus === "canceled") {
         await onProposalEnvelopeRefused(env.id);
@@ -60,11 +66,13 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // 2. aguardando_vendedor sem reduzida viva → redispara.
+  // 2. aguardando_vendedor sem reduzida viva → redispara. `none` inclui `draft`:
+  // um draft (envio em voo de um run/gatilho anterior) NÃO deve ser redisparado.
   const stuck = await prisma.proposal.findMany({
     where: {
       status: "aguardando_vendedor",
-      envelopes: { none: { via: "reduzida", status: { in: ["running", "closed"] } } },
+      envelopes: { none: { via: "reduzida", status: { in: ["running", "closed", "draft"] } } },
+      ...(chainedInStep1.size > 0 ? { id: { notIn: [...chainedInStep1] } } : {}),
     },
     select: { id: true },
     take: 50,
