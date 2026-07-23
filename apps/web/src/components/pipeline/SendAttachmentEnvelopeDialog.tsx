@@ -23,9 +23,12 @@ import {
   Send,
   Trash2,
   UserPlus,
+  UsersRound,
 } from "lucide-react";
 import { CLICKSIGN_ROLE_OPTIONS, type ClicksignRole } from "@/lib/clicksign/roles";
 import { suggestEmailDomain } from "@/lib/forms/email-typo";
+import { WitnessPicker, pickNewWitnesses, type RegistryWitness } from "./WitnessPicker";
+import type { WitnessScope } from "@/lib/clicksign/witness-scope";
 
 interface AttachmentPick {
   id: string;
@@ -52,6 +55,8 @@ interface SendAttachmentEnvelopeDialogProps {
   /** Pré-seleciona este anexo (PDF) ao abrir — usado quando aberto a partir
    *  do botão "Enviar para assinatura" de um card específico. */
   preselectAttachmentId?: string;
+  /** Scope do cadastro de testemunhas (deriva do módulo do deal). Default venda. */
+  witnessScope?: WitnessScope;
   onSent: () => void;
 }
 
@@ -60,8 +65,9 @@ interface SignerDraft {
   name: string;
   email: string;
   documentation: string;
+  phone?: string;
   role: ClicksignRole;
-  sourceKind?: "vendedor" | "comprador" | "outro";
+  sourceKind?: "vendedor" | "comprador" | "testemunha" | "outro";
   sourceIndex?: number;
 }
 
@@ -86,6 +92,7 @@ export function SendAttachmentEnvelopeDialog({
   attachments,
   partySuggestions,
   preselectAttachmentId,
+  witnessScope = "venda",
   onSent,
 }: SendAttachmentEnvelopeDialogProps) {
   const pdfAttachments = useMemo(
@@ -104,6 +111,7 @@ export function SendAttachmentEnvelopeDialog({
   const [signers, setSigners] = useState<SignerDraft[]>([]);
   const [orderEnabled, setOrderEnabled] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [witnessPickerOpen, setWitnessPickerOpen] = useState(false);
   const [sigConfig, setSigConfig] = useState<{
     configured: boolean;
     defaultAuthMethod: string;
@@ -186,6 +194,37 @@ export function SendAttachmentEnvelopeDialog({
     ]);
   }
 
+  const digitsOf = (v: string | null | undefined) => (v ?? "").replace(/\D/g, "");
+  const witnessExistingKeys = useMemo(
+    () =>
+      signers.flatMap((s) =>
+        [s.email.trim().toLowerCase(), digitsOf(s.documentation)].filter(Boolean)
+      ),
+    [signers]
+  );
+
+  function addWitnessesFromRegistry(selected: RegistryWitness[]) {
+    setSigners((prev) => {
+      const existingKeys = prev.flatMap((s) =>
+        [s.email.trim().toLowerCase(), digitsOf(s.documentation)].filter(Boolean)
+      );
+      let n = prev.filter((s) => s.sourceKind === "testemunha").length;
+      const fresh: SignerDraft[] = pickNewWitnesses(selected, existingKeys).map(
+        (w) => ({
+          id: Math.random().toString(36).slice(2),
+          name: w.name,
+          email: w.email,
+          documentation: w.documentation,
+          phone: w.phone,
+          role: "witness" as ClicksignRole,
+          sourceKind: "testemunha",
+          sourceIndex: n++,
+        })
+      );
+      return fresh.length > 0 ? [...prev, ...fresh] : prev;
+    });
+  }
+
   async function handleSubmit() {
     if (!attachmentId) {
       toast.error("Selecione um documento");
@@ -210,6 +249,7 @@ export function SendAttachmentEnvelopeDialog({
             name: s.name.trim(),
             email: s.email.trim(),
             documentation: s.documentation.trim() || undefined,
+            phone: s.phone?.trim() || undefined,
             role: s.role,
             // Ordem ON: grupo = posição na lista (1-based). OFF: paralelo.
             group: orderEnabled ? idx + 1 : undefined,
@@ -296,10 +336,21 @@ export function SendAttachmentEnvelopeDialog({
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label>Signatários</Label>
-              <Button type="button" size="sm" variant="outline" onClick={addSigner}>
-                <Plus className="h-3.5 w-3.5 mr-1" />
-                Adicionar
-              </Button>
+              <div className="flex items-center gap-1.5">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setWitnessPickerOpen(true)}
+                >
+                  <UsersRound className="h-3.5 w-3.5 mr-1" />
+                  Testemunhas
+                </Button>
+                <Button type="button" size="sm" variant="outline" onClick={addSigner}>
+                  <Plus className="h-3.5 w-3.5 mr-1" />
+                  Adicionar
+                </Button>
+              </div>
             </div>
 
             {/* Chips de auto-fill a partir das partes do deal */}
@@ -510,6 +561,14 @@ export function SendAttachmentEnvelopeDialog({
           </Button>
         </DialogFooter>
       </DialogContent>
+
+      <WitnessPicker
+        open={witnessPickerOpen}
+        onOpenChange={setWitnessPickerOpen}
+        scope={witnessScope}
+        existingKeys={witnessExistingKeys}
+        onConfirm={addWitnessesFromRegistry}
+      />
     </Dialog>
   );
 }

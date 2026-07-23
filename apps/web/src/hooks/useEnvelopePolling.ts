@@ -14,6 +14,7 @@ export interface EnvelopeSignerRow {
   name: string;
   email: string;
   documentation: string | null;
+  phone: string | null;
   authMethod: string;
   status:
     | "pending"

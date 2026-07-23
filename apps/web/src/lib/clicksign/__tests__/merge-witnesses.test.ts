@@ -52,4 +52,22 @@ describe("mergeDefaultWitnesses — testemunhas padrão forçadas no servidor", 
     const out = await mergeDefaultWitnesses("org", [{ name: "A", email: "a@x.com" }]);
     expect(out).toHaveLength(1);
   });
+
+  it("filtra o cadastro pelo scope quando informado", async () => {
+    witFind.mockResolvedValue([
+      { nome: "Loc", email: "loc@x.com", cpf: null, mobilePhone: null },
+    ]);
+    await mergeDefaultWitnesses("org", [{ name: "A", email: "a@x.com" }], "locacao");
+    expect(witFind).toHaveBeenCalledWith({
+      where: { orgId: "org", isDefault: true, scope: "locacao" },
+    });
+  });
+
+  it("sem scope, não filtra por scope (retrocompat)", async () => {
+    witFind.mockResolvedValue([]);
+    await mergeDefaultWitnesses("org", [{ name: "A", email: "a@x.com" }]);
+    expect(witFind).toHaveBeenCalledWith({
+      where: { orgId: "org", isDefault: true },
+    });
+  });
 });
