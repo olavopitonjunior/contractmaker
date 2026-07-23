@@ -143,6 +143,7 @@ export async function cleanupOrphanPlaceholders(docId: string): Promise<string[]
     const text = await getDocPlainText(docId);
     const orphans = Array.from(new Set(text.match(/\{\{[^{}\n]+\}\}/g) || []));
     if (orphans.length > 0) {
+      await markProgrammaticDocEdit(docId); // batchUpdate raw — marca p/ o eco (#5)
       await docs.documents.batchUpdate({
         documentId: docId,
         requestBody: {

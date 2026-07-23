@@ -19,12 +19,12 @@
  * errado).
  */
 
-// Janela do eco: cobre a latência típica do watch do Drive após a última edição
-// programática (o marcador é REFRESCADO a cada batchUpdateDoc, então conta a
-// partir da ÚLTIMA edição do app). Curta de propósito — editar manualmente dentro
-// dessa janela após uma edição programática é (conservadoramente) tratado como
-// eco e NÃO atribuído; janela maior perderia mais edições humanas legítimas.
-const ECHO_TTL_SECONDS = 60;
+// Janela do eco: cobre a latência do watch do Drive após a última edição
+// programática (refrescada a cada batchUpdateDoc, conta da ÚLTIMA edição do app).
+// 180s porque o Drive é best-effort e pode atrasar/agrupar pings por mais de um
+// minuto — sem diff, um FALSO "manual" (eco atrasado da IA virando "humano") é
+// pior que perder um timestamp humano dentro da janela. Erra pro conservador.
+const ECHO_TTL_SECONDS = 180;
 const REDIS_TIMEOUT_MS = 2000;
 
 let _redis:
