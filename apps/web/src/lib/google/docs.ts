@@ -7,6 +7,7 @@ import {
   getServiceAccountEmail,
   isOwnerOAuthConfigured,
 } from "./client";
+import { markProgrammaticDocEdit } from "./doc-edit-marker";
 
 export interface CreateDocFromTemplateInput {
   templateDocId: string;
@@ -213,6 +214,9 @@ export async function addDocPermission(
       "Owner OAuth não configurado — compartilhamento por email exige GOOGLE_OWNER_REFRESH_TOKEN."
     );
   }
+  // Mudança de permissão dispara "update" no watch sem mudar conteúdo — marca
+  // como programática pra o webhook não registrar edição manual fantasma (#4).
+  await markProgrammaticDocEdit(docId);
   const ownerDrive = getOwnerDriveClient();
   const res = await ownerDrive.permissions.create({
     fileId: docId,
@@ -233,6 +237,7 @@ export async function addDocPermission(
 
 /** Remove uma permissão pelo permissionId (vindo de listDocPermissions). */
 export async function removeDocPermission(docId: string, permissionId: string): Promise<void> {
+  await markProgrammaticDocEdit(docId); // metadados → não é edição manual (#4)
   const drive = getDriveClient();
   await drive.permissions.delete({
     fileId: docId,
@@ -243,6 +248,7 @@ export async function removeDocPermission(docId: string, permissionId: string): 
 
 /** Revoga permissões de escrita do doc, deixando apenas owner com write. */
 export async function makeDocReadOnly(docId: string): Promise<void> {
+  await markProgrammaticDocEdit(docId); // metadados → não é edição manual (#4)
   const drive = getDriveClient();
   const list = await drive.permissions.list({
     fileId: docId,
@@ -324,7 +330,6 @@ export async function batchUpdateDoc(
   // como edição manual humana. Awaited (não fire-and-forget) pra garantir que o
   // marcador exista antes da mutação disparar o watch. markProgrammaticDocEdit
   // nunca lança e tem timeout próprio. Ver lib/google/doc-edit-marker.
-  const { markProgrammaticDocEdit } = await import("./doc-edit-marker");
   await markProgrammaticDocEdit(docId);
   const docs = getDocsClient();
   return docs.documents.batchUpdate({

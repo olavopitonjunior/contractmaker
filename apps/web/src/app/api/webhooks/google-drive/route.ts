@@ -87,8 +87,9 @@ export async function POST(req: NextRequest) {
 
   // Atribuição IA×humano: se o Doc NÃO foi editado programaticamente há pouco
   // (sem marcador), este ping é edição MANUAL humana no iframe → registra uma
-  // entry atribuída. "echo" (edição do app/IA, já logada como source:"ai") e
-  // "unknown" (Redis indisponível — fail-safe) NÃO viram atribuição humana.
+  // entry atribuída (sem diff — ver human-doc-edit). "echo" (edição do app/IA, já
+  // logada como source:"ai") e "unknown" (Redis indisponível — fail-safe) NÃO
+  // viram atribuição humana.
   if (resourceState === "update" && contract.googleDocId) {
     try {
       const { checkDocEcho } = await import("@/lib/google/doc-edit-marker");
@@ -96,14 +97,9 @@ export async function POST(req: NextRequest) {
         const { recordHumanDocEdit } = await import(
           "@/lib/contracts/human-doc-edit"
         );
-        const { getDocPlainText } = await import("@/lib/google/docs");
         await recordHumanDocEdit(
-          { db: prisma, getDocText: getDocPlainText, now: () => new Date() },
-          {
-            contractId: contract.id,
-            googleDocId: contract.googleDocId,
-            details: { channelId, resourceId },
-          }
+          { db: prisma, now: () => new Date() },
+          { contractId: contract.id, details: { channelId, resourceId } }
         );
       }
     } catch (err) {
