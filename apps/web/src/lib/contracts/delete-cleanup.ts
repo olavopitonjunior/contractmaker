@@ -62,6 +62,12 @@ export async function deleteContractMemories(
  * Por isso apagar o blob ao deletar UMA row órfãva o arquivo de todas as irmãs
  * (bug: matrícula/IPTU davam 404 no download). Conte antes de apagar.
  */
+// ⚠️ ENUMERAÇÃO MANUAL das colunas que guardam blob URL POR REFERÊNCIA. Não há
+// como descobri-las automaticamente (colunas string espalhadas por N models).
+// AO ADICIONAR uma feature nova que copie uma blob URL pra outra tabela (ex.:
+// Garantia.documentoPdfUrl, ApolioSeguro.pdfUrl, Proposal.dossierUrl), INCLUA a
+// contagem AQUI — senão deletar o anexo-irmão conta 0 referências e apaga um
+// blob que a tabela nova ainda serve (reintroduz o 404 de blob compartilhado).
 export async function countBlobUrlReferences(db: Db, url: string): Promise<number> {
   if (!url) return 0;
   const [deal, form, proposal, leaseClient, lead, envelope, inspection, chat] =
@@ -118,11 +124,12 @@ export async function deleteBlobIfUnreferenced(
  */
 export async function deleteBlobs(urls: string[], db: Db): Promise<number> {
   if (urls.length === 0) return 0;
-  // Concorrência limitada: cada URL dispara 8 count queries + 1 delete. Em batch
-  // grande (delete de deal com dezenas de anexos) o loop serial O(N) poderia
-  // estourar o orçamento do waitUntil e deixar blobs sem avaliar. Processa em
-  // lotes de CONCURRENCY sem inundar o pool do Neon.
-  const CONCURRENCY = 5;
+  // Concorrência limitada. CADA URL faz fan-out de 8 count queries + 1 delete,
+  // então o total em voo é ~9×CONCURRENCY. Com CONCURRENCY=3 são ~27 queries
+  // simultâneas por lote — o suficiente pra não serializar O(N) o delete de um
+  // deal com dezenas de anexos (estouraria o orçamento do waitUntil), mas sem
+  // saturar o pool do Neon como faria um lote de 5 (45 em voo).
+  const CONCURRENCY = 3;
   let deleted = 0;
   for (let i = 0; i < urls.length; i += CONCURRENCY) {
     const batch = urls.slice(i, i + CONCURRENCY);

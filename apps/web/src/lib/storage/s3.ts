@@ -228,7 +228,11 @@ export async function downloadBufferFromUrl(storageUrl: string): Promise<Buffer>
       throw err;
     }
     if (!response.Body) {
-      throw new StorageObjectNotFoundError(storageUrl);
+      // Body ausente com GetObject BEM-SUCEDIDO (sem NoSuchKey/404) é uma
+      // condição transitória/anômala do SDK, NÃO um objeto removido — o objeto
+      // existe (a chamada não lançou). Erro genérico → 500 retryável, não o 404
+      // "reenvie o documento" (que induziria re-upload duplicado de algo intacto).
+      throw new Error(`S3 GetObject retornou sem Body para ${storageUrl}`);
     }
     const chunks: Buffer[] = [];
     const stream = response.Body as AsyncIterable<Uint8Array>;

@@ -146,6 +146,12 @@ export async function DELETE(
   // só remove do storage quando nenhuma outra row referencia a URL.
   await prisma.dealAttachment.delete({ where: { id: attachment.id } });
 
+  // Inline (não waitUntil) DE PROPÓSITO: quanto menor a janela entre a contagem
+  // de referências e o delete no storage, menor a chance de um finalize de form
+  // concorrente copiar a URL pra um DealAttachment novo bem no meio (TOCTOU).
+  // Adiar pra waitUntil alargaria essa janela. O resíduo é raro e recuperável
+  // (um anexo dá 404, re-upload resolve); o fix definitivo é um cron de GC de
+  // órfãos com carência, no backlog.
   const { deleteBlobIfUnreferenced } = await import(
     "@/lib/contracts/delete-cleanup"
   );
