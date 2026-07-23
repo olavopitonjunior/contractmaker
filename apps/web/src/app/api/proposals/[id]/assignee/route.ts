@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
-import { loadScopedProposal } from "@/lib/proposals/route-helpers";
+import { loadScopedProposal, proposalFeatureGuard } from "@/lib/proposals/route-helpers";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
 export const runtime = "nodejs";
@@ -28,6 +28,11 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   if (!can(eff, PERMISSION.PROPOSAL_ASSIGN)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  // Feature gate (vendas.propostas / locacao.propostas) — igual a cancel/remind/
+  // send-vendedor; sem isto uma org com o módulo desligado ainda reatribuía.
+  const feat = await proposalFeatureGuard(auth.org.id, proposal.kind);
+  if (feat) return feat;
+
   const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.message }, { status: 400 });

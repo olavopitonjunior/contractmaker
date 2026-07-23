@@ -74,7 +74,7 @@ export function ProposalDetailClient({
   permissions,
 }: {
   proposal: Proposal;
-  signers: { id: string; name: string; role: string; channel: string }[];
+  signers: { id: string; name: string; role: string; channel: string; status: string }[];
   events: { id: string; eventName: string; receivedAt: string }[];
   attachments: { id: string; filename: string; category: string | null; url: string }[];
   members: { id: string; name: string }[];
@@ -259,7 +259,7 @@ export function ProposalDetailClient({
                 ? live.signers
                     .filter((s) => s.status !== "removed")
                     .map((s) => ({ id: s.id, name: s.name, role: s.role ?? "", channel: s.channel, status: s.status, sent: true }))
-                : signers.map((s) => ({ id: s.id, name: s.name, role: s.role, channel: s.channel, status: "", sent: false }));
+                : signers.map((s) => ({ id: s.id, name: s.name, role: s.role, channel: s.channel, status: s.status, sent: false }));
             if (rows.length === 0) {
               return <p className="text-sm text-muted-foreground">Nenhum signatário definido ainda.</p>;
             }

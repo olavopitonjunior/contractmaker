@@ -539,11 +539,26 @@ async function sendEnvelope(
  * Idempotente pelo `@@unique([proposalId, via])` + guard de existência.
  */
 export async function sendVendedorEnvelope(proposalId: string): Promise<void> {
+  // Idempotência anti-race: além de running/closed (já enviado de fato), conta um
+  // draft RECENTE como "em voo". Sem isso, dois gatilhos concorrentes (webhook via
+  // waitUntil + botão /send-vendedor + cron reconcile) passavam ambos pela guarda —
+  // e o deleteMany de draft dentro de runClickSignEnvelope apagava o draft do outro,
+  // resultando em DOIS envelopes ClickSign criados (cobrança dobrada). O limite de
+  // tempo evita travar pra sempre num draft de uma tentativa que crashou no meio: um
+  // draft velho não bloqueia — runClickSignEnvelope limpa draft/failed e recria.
+  const inFlightCutoff = new Date(Date.now() - 5 * 60_000);
   const existing = await prisma.envelope.findFirst({
-    where: { proposalId, via: "reduzida", status: { in: ["running", "closed"] } },
+    where: {
+      proposalId,
+      via: "reduzida",
+      OR: [
+        { status: { in: ["running", "closed"] } },
+        { status: "draft", createdAt: { gt: inFlightCutoff } },
+      ],
+    },
     select: { id: true },
   });
-  if (existing) return; // já enviado
+  if (existing) return; // já enviado ou em voo
 
   const proposal = await prisma.proposal.findUnique({ where: { id: proposalId } });
   if (!proposal) return;

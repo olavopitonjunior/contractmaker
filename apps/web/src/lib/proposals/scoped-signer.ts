@@ -41,13 +41,19 @@ export async function loadScopedProposalSigner(
   }
   const proposal = await prisma.proposal.findUnique({
     where: { id: proposalId },
-    select: { userId: true },
+    select: { userId: true, responsibleUserId: true },
   });
   const eff = await getEffectivePermissions(auth.actor.effectiveUserId, auth.org.id);
   if (
     !proposal ||
     !eff ||
-    !canAccessProposal({ effective: eff, ownerUserId: proposal.userId }) ||
+    !canAccessProposal({
+      effective: eff,
+      ownerUserId: proposal.userId,
+      // Espelha loadScopedProposal: o responsável atribuído também acessa (senão
+      // um corretor atribuído-mas-não-criador tomava 403 só nas rotas de signer).
+      responsibleUserId: proposal.responsibleUserId,
+    }) ||
     !can(eff, PERMISSION.PROPOSAL_SEND)
   ) {
     return { fail: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
