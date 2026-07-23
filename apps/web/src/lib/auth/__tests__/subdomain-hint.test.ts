@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { sessionSubdomainHint } from "../subdomain-hint";
+import {
+  sessionSubdomainHint,
+  isMiddlewareSanitizedPath,
+} from "../subdomain-hint";
 
 function reqWith(url: string, subdomain?: string): Request {
   const headers = new Headers();
@@ -31,5 +34,31 @@ describe("sessionSubdomainHint", () => {
   it("máquina em /api/auth → null (dupla proteção)", () => {
     const req = reqWith("https://imobpro.ia.br/api/auth/permissions", "x");
     expect(sessionSubdomainHint(req, false)).toBeNull();
+  });
+
+  it("sessão em outras rotas fora do matcher (/f, /p, /api/forms) → null", () => {
+    for (const path of ["/f/tok", "/p/tok", "/api/forms/tok"]) {
+      const req = reqWith(`https://remax-trio.imobpro.ia.br${path}`, "remax-trio");
+      expect(sessionSubdomainHint(req, true)).toBeNull();
+    }
+  });
+});
+
+describe("isMiddlewareSanitizedPath", () => {
+  it("rotas do matcher → true", () => {
+    for (const p of ["/pipeline", "/api/contracts/x", "/settings", "/api/deals/1"]) {
+      expect(isMiddlewareSanitizedPath(p)).toBe(true);
+    }
+  });
+
+  it("prefixos excluídos do matcher → false (espelha middleware.ts)", () => {
+    for (const p of [
+      "/api/auth/permissions",
+      "/api/forms/tok",
+      "/f/tok",
+      "/p/tok",
+    ]) {
+      expect(isMiddlewareSanitizedPath(p)).toBe(false);
+    }
   });
 });
