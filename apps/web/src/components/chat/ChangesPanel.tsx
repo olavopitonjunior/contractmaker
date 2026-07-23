@@ -194,6 +194,20 @@ export function ChangesPanel({
   );
 }
 
+/** Rótulo de autor da edição a partir de source/action. */
+function authorBadge(item: ChangeLogItem): { label: string; className: string } {
+  if (item.action === "human_doc_edit")
+    return { label: "Manual", className: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300" };
+  switch (item.source) {
+    case "ai":
+      return { label: "IA", className: "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300" };
+    case "user":
+      return { label: "Você", className: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300" };
+    default:
+      return { label: "Sistema", className: "bg-muted text-muted-foreground" };
+  }
+}
+
 function ChangeItem({
   item,
   expanded,
@@ -207,6 +221,7 @@ function ChangeItem({
     hour: "2-digit",
     minute: "2-digit",
   });
+  const author = authorBadge(item);
   return (
     <div className="rounded-md border bg-card">
       <button
@@ -221,6 +236,14 @@ function ChangeItem({
         )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5">
+            <span
+              className={cn(
+                "text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0",
+                author.className
+              )}
+            >
+              {author.label}
+            </span>
             <span className="text-xs font-medium truncate">{item.action}</span>
             <span className="text-[10px] text-muted-foreground shrink-0">{time}</span>
           </div>

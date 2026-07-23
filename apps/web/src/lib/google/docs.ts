@@ -319,6 +319,13 @@ export async function batchUpdateDoc(
   docId: string,
   requests: import("googleapis").docs_v1.Schema$Request[]
 ) {
+  // Marca esta edição como PROGRAMÁTICA (chave por docId, TTL curto) ANTES de
+  // tocar o Doc — assim o eco do webhook do Drive é reconhecido e NÃO atribuído
+  // como edição manual humana. Awaited (não fire-and-forget) pra garantir que o
+  // marcador exista antes da mutação disparar o watch. markProgrammaticDocEdit
+  // nunca lança e tem timeout próprio. Ver lib/google/doc-edit-marker.
+  const { markProgrammaticDocEdit } = await import("./doc-edit-marker");
+  await markProgrammaticDocEdit(docId);
   const docs = getDocsClient();
   return docs.documents.batchUpdate({
     documentId: docId,
