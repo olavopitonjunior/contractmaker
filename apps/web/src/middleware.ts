@@ -15,14 +15,17 @@ export default auth((req) => {
   // e getUserOrg o honraria. O header só é confiável se for exclusivamente escrito
   // aqui.
   //
-  // MÁQUINA: requests com Authorization: Bearer (integrações Newton/API) NÃO
-  // recebem o hint — a org de um token vem do dono, não de um Host controlável
-  // pelo cliente. Isso resolve a classe inteira de "máquina subdomain-steerable"
-  // na raiz, sem pinar cada call-site bare de getUserOrg (events, attachments…).
+  // MÁQUINA: requests de integração (Bearer SEM sessão NextAuth) NÃO recebem o
+  // hint — a org de um token vem do dono, não de um Host controlável pelo cliente.
+  // Resolve a classe inteira de "máquina subdomain-steerable" na raiz, sem pinar
+  // cada call-site bare de getUserOrg (events, attachments…). Checa `req.auth`
+  // (sessão já resolvida pelo wrapper `auth`) pra NÃO tirar o hint de uma SESSÃO
+  // que por acaso carregue um Authorization header (proxy/extensão).
   const isBearer = /^bearer /i.test(req.headers.get("authorization") ?? "");
+  const isMachine = isBearer && !req.auth?.user;
   const subdomain = extractSubdomain(req.headers.get("host"));
   requestHeaders.delete("x-org-subdomain");
-  if (subdomain && !isBearer) requestHeaders.set("x-org-subdomain", subdomain);
+  if (subdomain && !isMachine) requestHeaders.set("x-org-subdomain", subdomain);
   return NextResponse.next({
     request: { headers: requestHeaders },
   });

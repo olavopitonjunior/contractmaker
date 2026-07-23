@@ -31,15 +31,27 @@ vi.mock("@/lib/db/prisma", () => ({
 
 import { getUserOrg } from "../user-org";
 
+/** Simula os headers de request: x-pathname (setado pelo middleware nas rotas do
+ *  matcher) e x-org-subdomain. Sem path → simula rota fora do matcher. */
+function setHeaders(opts: { path?: string | null; subdomain?: string | null }) {
+  mockHeaderGet.mockImplementation((k: string) =>
+    k === "x-pathname"
+      ? opts.path ?? null
+      : k === "x-org-subdomain"
+        ? opts.subdomain ?? null
+        : null
+  );
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mockImpersonation.mockResolvedValue(null); // sem impersonation por padrão
-  mockHeaderGet.mockReturnValue(null); // apex por padrão
+  setHeaders({ path: null, subdomain: null }); // apex/fora do matcher por padrão
 });
 
 describe("getUserOrg — sweep multi-org", () => {
-  it("(a) header presente + user é membro → org do subdomínio", async () => {
-    mockHeaderGet.mockReturnValue("remaxtrio");
+  it("(a) header presente (rota sanitizada) + user é membro → org do subdomínio", async () => {
+    setHeaders({ path: "/pipeline", subdomain: "remaxtrio" });
     mockMembershipFindFirst.mockResolvedValue({ org: { id: "org-trio", subdomain: "remaxtrio" } });
 
     const org = await getUserOrg("u1");
@@ -54,7 +66,7 @@ describe("getUserOrg — sweep multi-org", () => {
   });
 
   it("(b) header presente + user NÃO é membro do tenant → null (sem acesso)", async () => {
-    mockHeaderGet.mockReturnValue("outratenant");
+    setHeaders({ path: "/pipeline", subdomain: "outratenant" });
     mockMembershipFindFirst.mockResolvedValue(null); // não é membro daquele subdomínio
 
     const org = await getUserOrg("u1");
@@ -63,7 +75,7 @@ describe("getUserOrg — sweep multi-org", () => {
   });
 
   it("(c) sem header (apex) → primeira membership com orderBy determinístico", async () => {
-    mockHeaderGet.mockReturnValue(null);
+    setHeaders({ path: "/pipeline", subdomain: null });
     mockMembershipFindFirst.mockResolvedValue({ org: { id: "org-first" } });
 
     const org = await getUserOrg("u1");
@@ -74,6 +86,32 @@ describe("getUserOrg — sweep multi-org", () => {
         where: { userId: "u1" },
         orderBy: [{ invitedAt: "asc" }, { id: "asc" }],
       })
+    );
+  });
+
+  it("(c2) x-pathname AUSENTE (rota fora do matcher) → ignora x-org-subdomain forjado, cai no fallback", async () => {
+    // Simula um header forjado numa rota onde o middleware não roda (sem x-pathname).
+    setHeaders({ path: null, subdomain: "remaxtrio" });
+    mockMembershipFindFirst.mockResolvedValue({ org: { id: "org-first" } });
+
+    const org = await getUserOrg("u1");
+
+    expect(org).toEqual({ id: "org-first" });
+    // NÃO escopou por subdomínio (o header não é confiável fora do matcher)
+    expect(mockMembershipFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: "u1" } })
+    );
+  });
+
+  it("(c3) rota /api/auth (não sanitizada) → ignora x-org-subdomain, fallback", async () => {
+    setHeaders({ path: "/api/auth/permissions", subdomain: "remaxtrio" });
+    mockMembershipFindFirst.mockResolvedValue({ org: { id: "org-first" } });
+
+    const org = await getUserOrg("u1");
+
+    expect(org).toEqual({ id: "org-first" });
+    expect(mockMembershipFindFirst).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: "u1" } })
     );
   });
 
