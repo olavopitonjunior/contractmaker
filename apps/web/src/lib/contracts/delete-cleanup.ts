@@ -62,38 +62,70 @@ export async function deleteContractMemories(
  * Por isso apagar o blob ao deletar UMA row órfãva o arquivo de todas as irmãs
  * (bug: matrícula/IPTU davam 404 no download). Conte antes de apagar.
  */
-// ⚠️ ENUMERAÇÃO MANUAL das colunas que guardam blob URL POR REFERÊNCIA. Não há
-// como descobri-las automaticamente (colunas string espalhadas por N models).
-// AO ADICIONAR uma feature nova que copie uma blob URL pra outra tabela (ex.:
-// Garantia.documentoPdfUrl, ApolioSeguro.pdfUrl, Proposal.dossierUrl), INCLUA a
-// contagem AQUI — senão deletar o anexo-irmão conta 0 referências e apaga um
-// blob que a tabela nova ainda serve (reintroduz o 404 de blob compartilhado).
+// ⚠️ ENUMERAÇÃO MANUAL de TODAS as colunas ESCALARES que guardam uma URL do NOSSO
+// storage (Vercel Blob / S3). Não há registro central de blobs — são colunas
+// string espalhadas por N models. AO ADICIONAR uma feature que persista uma blob
+// URL numa coluna nova, INCLUA a contagem AQUI. Duas consequências de esquecer:
+//   1. o delete de anexo compartilhado apaga um blob que a coluna nova serve
+//      (reintroduz o 404 de blob compartilhado — bug do PR #150);
+//   2. o cron de GC de órfãos (blob-gc) trata o blob como órfão e o APAGA.
+//
+// NÃO cobre blobs referenciados só em campos JSON/HTML (não dá pra `count` por
+// coluna): `Inspection.ambientesJson` (fotos/áudio de vistoria, prefixo
+// `inspections/`) e imagens de contrato embedadas no HTML (prefixo
+// `contracts/<id>/images/`). Por isso o GC EXCLUI esses prefixos do sweep.
+// Fonte ÚNICA das checagens de referência (uma por coluna de storage). Cada thunk
+// conta rows que referenciam `url`. Usado por countBlobUrlReferences (paralelo,
+// contagem exata — path de delete) E por isBlobReferenced (sequencial com
+// short-circuit — o GC de órfãos, mais eficiente pro caso comum "referenciado").
+const BLOB_REF_CHECKS: Array<(db: Db, url: string) => Promise<number>> = [
+  // Anexos (compartilhados por referência entre si — o finalize copia a URL)
+  (db, url) => db.dealAttachment.count({ where: { url } }),
+  (db, url) => db.formAttachment.count({ where: { url } }),
+  (db, url) => db.proposalAttachment.count({ where: { url } }),
+  (db, url) => db.leaseClientAttachment.count({ where: { url } }),
+  (db, url) => db.leadAttachment.count({ where: { url } }),
+  (db, url) => db.chatAttachment.count({ where: { blobUrl: url } }),
+  // Envelope ClickSign: PDF enviado E o assinado (legalmente crítico) — o
+  // assinado é espelhado como DealAttachment com a MESMA url (signed-pdf.ts).
+  (db, url) =>
+    db.envelope.count({
+      where: { OR: [{ documentUrl: url }, { signedDocumentUrl: url }] },
+    }),
+  // Artefatos derivados / docs com coluna própria (NÃO estavam no ref-check
+  // original — o GC os apagaria como órfãos sem estas contagens):
+  (db, url) => db.inspection.count({ where: { laudoPdfUrl: url } }), // laudo vistoria
+  (db, url) => db.export.count({ where: { url } }), // PDF/DOCX exportado
+  (db, url) => db.document.count({ where: { s3Url: url } }), // /documents/upload
+  (db, url) => db.proposal.count({ where: { dossierUrl: url } }), // dossiê proposta
+  (db, url) => db.guarantee.count({ where: { documentoPdfUrl: url } }), // garantia
+  (db, url) => db.insurancePolicy.count({ where: { pdfUrl: url } }), // apólice seguro
+  (db, url) => db.dimobExport.count({ where: { fileUrl: url } }), // TXT fiscal DIMOB
+  (db, url) =>
+    db.brandingSettings.count({
+      where: { OR: [{ logoUrl: url }, { faviconUrl: url }] },
+    }), // logo/favicon de branding
+  (db, url) => db.orgFinancialSettings.count({ where: { brandLogoUrl: url } }), // logo legado
+];
+
 export async function countBlobUrlReferences(db: Db, url: string): Promise<number> {
   if (!url) return 0;
-  const [deal, form, proposal, leaseClient, lead, envelope, inspection, chat] =
-    await Promise.all([
-      db.dealAttachment.count({ where: { url } }),
-      db.formAttachment.count({ where: { url } }),
-      db.proposalAttachment.count({ where: { url } }),
-      db.leaseClientAttachment.count({ where: { url } }),
-      db.leadAttachment.count({ where: { url } }),
-      // Envelope ClickSign: o PDF assinado é gravado em `signedDocumentUrl` E
-      // espelhado como DealAttachment com a MESMA url (signed-pdf.ts). Deletar o
-      // anexo espelho NÃO pode apagar o blob que o envelope ainda serve no botão
-      // "Baixar assinado" — senão perde-se um contrato assinado legalmente.
-      db.envelope.count({
-        where: { OR: [{ documentUrl: url }, { signedDocumentUrl: url }] },
-      }),
-      // Laudo de vistoria (locação): a versão assinada vira `Inspection.laudoPdfUrl`
-      // apontando pro mesmo blob do envelope/anexo.
-      db.inspection.count({ where: { laudoPdfUrl: url } }),
-      // ChatAttachment usa `blobUrl` — namespace próprio, mas incluído por
-      // completude (o delete de contrato trata blobUrl como apagável).
-      db.chatAttachment.count({ where: { blobUrl: url } }),
-    ]);
-  return (
-    deal + form + proposal + leaseClient + lead + envelope + inspection + chat
-  );
+  const counts = await Promise.all(BLOB_REF_CHECKS.map((f) => f(db, url)));
+  return counts.reduce((a, b) => a + b, 0);
+}
+
+/**
+ * Existe alguma row referenciando este blob URL? Short-circuit — para na primeira
+ * coluna que casa (barato pro caso comum "referenciado"). Semanticamente
+ * equivalente a `countBlobUrlReferences(...) > 0`, mas sem contar tudo. Usado
+ * pelo GC de órfãos, que checa milhares de blobs.
+ */
+export async function isBlobReferenced(db: Db, url: string): Promise<boolean> {
+  if (!url) return false;
+  for (const f of BLOB_REF_CHECKS) {
+    if ((await f(db, url)) > 0) return true;
+  }
+  return false;
 }
 
 /**
@@ -108,7 +140,7 @@ export async function deleteBlobIfUnreferenced(
 ): Promise<"deleted" | "kept" | "skipped"> {
   if (!url) return "skipped";
   try {
-    if ((await countBlobUrlReferences(db, url)) > 0) return "kept";
+    if (await isBlobReferenced(db, url)) return "kept";
     const { deleteFromStorage } = await import("@/lib/storage/s3");
     return (await deleteFromStorage(url)) ? "deleted" : "skipped";
   } catch {

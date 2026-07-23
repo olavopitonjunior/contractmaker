@@ -1,0 +1,153 @@
+import type { StorageListPage } from "./s3";
+
+/**
+ * GC de blobs órfãos no storage. Fecha o resíduo TOCTOU do PR #150: um finalize
+ * de form concorrente pode copiar uma blob URL pra um DealAttachment novo bem na
+ * janela entre a contagem de referências e o delete inline, deixando um blob que
+ * uma row ainda referencia (ou o inverso). O GC não decide no calor da corrida:
+ * varre o storage e só apaga blobs que estão órfãos HÁ MAIS que a carência.
+ *
+ * SEGURANÇA (a razão de o escopo ser conservador):
+ *  - **Escopo por prefixo de anexo puro** (GC_ATTACHMENT_PREFIXES): esses blobs
+ *    mapeiam SÓ pras colunas escalares de anexo, que o ref-check cobre. EXCLUI
+ *    `inspections/` e `contracts/<id>/images/` (referências vivem em JSON/HTML,
+ *    não em coluna — um sweep apagaria fotos/imagens vivas) e os derivados
+ *    legalmente críticos (`envelopes/`, `proposals/`) por precaução inicial.
+ *  - **Ref-check abrangente** (isBlobReferenced, 17 colunas) como defesa extra.
+ *  - **Carência** por `uploadedAt` (blob tem que ser mais velho que graceMs) —
+ *    protege blob recém-subido cuja row ainda está sendo criada.
+ *  - **Match por URL EXATA** contra o banco (nunca reconstrói keys — sufixo
+ *    aleatório).
+ *  - **Stores separados por ambiente** (prod ≠ staging) → cada GC lista só o
+ *    próprio store e casa contra o próprio banco; sem risco cross-env.
+ *  - **Dry-run por padrão** (apply=false): só reporta candidatos. Deleção real
+ *    exige BLOB_GC_DELETE=true no cron.
+ */
+
+// Prefixos de key varridos. Incluem os dois layouts: base (prod, e uploads
+// `put` direto no staging) e `staging/` (uploads via s3.ts no staging, que
+// passam por normalizeKey). Stores são separados por ambiente, então listar o
+// layout do outro ambiente simplesmente volta vazio.
+export const GC_ATTACHMENT_PREFIXES = [
+  "deal-attachments/",
+  "imports/",
+  "deal-certidoes/",
+  "form-attachments/",
+  "client-docs/",
+  "client-certidoes/",
+] as const;
+
+const STAGING_LAYOUT_PREFIXES = GC_ATTACHMENT_PREFIXES.map((p) => `staging/${p}`);
+
+export interface OrphanGcDeps {
+  listStorage: (p: {
+    prefix?: string;
+    cursor?: string;
+    limit?: number;
+  }) => Promise<StorageListPage>;
+  isReferenced: (url: string) => Promise<boolean>;
+  deleteBlob: (url: string) => Promise<boolean>;
+  now: () => number;
+}
+
+export interface OrphanGcOptions {
+  prefixes?: readonly string[];
+  graceMs?: number; // default 48h
+  timeBudgetMs?: number; // default 45s
+  pageLimit?: number; // itens por página do list
+  apply: boolean; // false = dry-run (só reporta)
+  maxSampleUrls?: number; // amostra de URLs órfãs no resultado
+}
+
+export interface OrphanGcResult {
+  apply: boolean;
+  scanned: number;
+  tooFresh: number; // pulados pela carência
+  referenced: number; // mantidos (ainda referenciados)
+  orphans: number; // candidatos (órfãos + velhos que a carência)
+  deleted: number; // apagados (0 em dry-run)
+  exhausted: boolean; // estourou o time budget — próxima execução continua
+  byPrefix: Record<string, { scanned: number; orphans: number; deleted: number }>;
+  sampleOrphanUrls: string[];
+}
+
+const DEFAULT_GRACE_MS = 48 * 60 * 60 * 1000;
+const DEFAULT_TIME_BUDGET_MS = 45_000;
+const DEFAULT_PAGE_LIMIT = 1000;
+const DEFAULT_SAMPLE = 20;
+
+export async function runOrphanBlobGc(
+  deps: OrphanGcDeps,
+  opts: OrphanGcOptions
+): Promise<OrphanGcResult> {
+  const basePrefixes = opts.prefixes ?? GC_ATTACHMENT_PREFIXES;
+  const prefixes = [...basePrefixes, ...basePrefixes.map((p) => `staging/${p}`)];
+  const graceMs = opts.graceMs ?? DEFAULT_GRACE_MS;
+  const pageLimit = opts.pageLimit ?? DEFAULT_PAGE_LIMIT;
+  const sampleCap = opts.maxSampleUrls ?? DEFAULT_SAMPLE;
+  const deadline = deps.now() + (opts.timeBudgetMs ?? DEFAULT_TIME_BUDGET_MS);
+  const graceCutoff = deps.now() - graceMs;
+
+  const result: OrphanGcResult = {
+    apply: opts.apply,
+    scanned: 0,
+    tooFresh: 0,
+    referenced: 0,
+    orphans: 0,
+    deleted: 0,
+    exhausted: false,
+    byPrefix: {},
+    sampleOrphanUrls: [],
+  };
+
+  outer: for (const prefix of prefixes) {
+    const bucket = { scanned: 0, orphans: 0, deleted: 0 };
+    let cursor: string | undefined;
+    do {
+      const page = await deps.listStorage({ prefix, cursor, limit: pageLimit });
+      for (const item of page.items) {
+        // Time budget checado a CADA item (antes de processar) — o custo caro é
+        // o isReferenced (até N counts), que roda pra todo item não-recente. Sem
+        // isso, um bucket todo-referenciado nunca checaria o deadline e estouraria
+        // o teto de 60s serverless. (Sem cursor cross-run: a próxima execução
+        // re-lista do começo; ok no volume atual — o delete encolhe o conjunto.)
+        if (deps.now() >= deadline) {
+          result.exhausted = true;
+          if (bucket.scanned > 0) result.byPrefix[prefix] = bucket;
+          break outer;
+        }
+        result.scanned++;
+        bucket.scanned++;
+        // Carência: só considera blobs mais velhos que graceMs (protege o
+        // upload-then-create — blob subido mas row ainda em voo).
+        if (item.uploadedAt.getTime() >= graceCutoff) {
+          result.tooFresh++;
+          continue;
+        }
+        if (await deps.isReferenced(item.url)) {
+          result.referenced++;
+          continue;
+        }
+        // Órfão confirmado (0 referências + mais velho que a carência).
+        result.orphans++;
+        bucket.orphans++;
+        if (result.sampleOrphanUrls.length < sampleCap) {
+          result.sampleOrphanUrls.push(item.url);
+        }
+        if (opts.apply) {
+          if (await deps.deleteBlob(item.url)) {
+            result.deleted++;
+            bucket.deleted++;
+          }
+        }
+      }
+      cursor = page.hasMore ? page.cursor ?? undefined : undefined;
+    } while (cursor);
+    if (bucket.scanned > 0) result.byPrefix[prefix] = bucket;
+  }
+
+  return result;
+}
+
+/** GC_STAGING_LAYOUT_PREFIXES exportado só pra teste/documentação. */
+export { STAGING_LAYOUT_PREFIXES };
