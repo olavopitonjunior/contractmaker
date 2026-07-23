@@ -19,10 +19,12 @@
  * errado).
  */
 
-// Janela do eco: cobre a duração de um turn de edição + a latência do watch do
-// Drive (segundos a ~1-2min). Editar manualmente dentro dessa janela após uma
-// edição programática é (conservadoramente) tratado como eco.
-const ECHO_TTL_SECONDS = 180;
+// Janela do eco: cobre a latência típica do watch do Drive após a última edição
+// programática (o marcador é REFRESCADO a cada batchUpdateDoc, então conta a
+// partir da ÚLTIMA edição do app). Curta de propósito — editar manualmente dentro
+// dessa janela após uma edição programática é (conservadoramente) tratado como
+// eco e NÃO atribuído; janela maior perderia mais edições humanas legítimas.
+const ECHO_TTL_SECONDS = 60;
 const REDIS_TIMEOUT_MS = 2000;
 
 let _redis:
