@@ -26,6 +26,18 @@ describe("toClicksignPhone", () => {
     expect(toClicksignPhone(null)).toBeUndefined();
     expect(toClicksignPhone("")).toBeUndefined();
   });
+
+  // Regressão do bug de entrega do Aceite via WhatsApp (prod, 2026-07): o caminho
+  // do Aceite mandava `toE164BR(phone).replace("+","")` = "5511…", e a ClickSign
+  // (que prepende o DDI +55 sozinha) lia o "55" como DDD e truncava o número — a
+  // mensagem ia pro número errado. O correto é o formato NACIONAL (DDD+número).
+  it("número real de prod (11 98126-8060) → nacional, nunca 55…", () => {
+    expect(toClicksignPhone("11981268060")).toBe("11981268060");
+    expect(toClicksignPhone("+5511981268060")).toBe("11981268060");
+    expect(toClicksignPhone("5511981268060")).toBe("11981268060");
+    // o valor errado que ia pra ClickSign no Aceite NÃO pode reaparecer:
+    expect(toClicksignPhone("11981268060")).not.toBe("5511981268060");
+  });
 });
 
 describe("channelToAuth", () => {

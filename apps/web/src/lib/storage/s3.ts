@@ -305,3 +305,49 @@ export async function deleteFromStorage(storageUrl: string | null | undefined): 
     return false;
   }
 }
+
+export interface StorageListItem {
+  url: string;
+  pathname: string;
+  uploadedAt: Date;
+}
+export interface StorageListPage {
+  items: StorageListItem[];
+  cursor: string | null;
+  hasMore: boolean;
+}
+
+/**
+ * Lista objetos do storage sob um prefixo (paginado). Usado pelo cron de GC de
+ * blobs órfãos. Só implementado pro Vercel Blob (backend de produção); S3/local
+ * retornam vazio — o GC só opera com Blob (guarda no próprio cron).
+ *
+ * `prefix` filtra por pathname; `cursor`/`hasMore` paginam. As URLs retornadas
+ * são as canônicas (com sufixo aleatório) — o GC casa por URL EXATA contra o
+ * banco, nunca reconstrói keys.
+ */
+export async function listStorage(params: {
+  prefix?: string;
+  cursor?: string;
+  limit?: number;
+}): Promise<StorageListPage> {
+  if (process.env.BLOB_READ_WRITE_TOKEN) {
+    const { list } = await import('@vercel/blob');
+    const res = await list({
+      token: process.env.BLOB_READ_WRITE_TOKEN,
+      prefix: params.prefix,
+      cursor: params.cursor,
+      limit: params.limit ?? 1000,
+    });
+    return {
+      items: res.blobs.map((b) => ({
+        url: b.url,
+        pathname: b.pathname,
+        uploadedAt: b.uploadedAt instanceof Date ? b.uploadedAt : new Date(b.uploadedAt),
+      })),
+      cursor: res.cursor ?? null,
+      hasMore: res.hasMore,
+    };
+  }
+  return { items: [], cursor: null, hasMore: false };
+}

@@ -231,7 +231,12 @@ async function sendAceite(
       if (row.role === "proponente") proponenteAcceptanceId = row.acceptanceClicksignId;
       continue;
     }
-    const phone = toE164BR(s.phone)?.replace("+", "") ?? "";
+    // A ClickSign prepende o DDI +55 sozinha e espera DÍGITOS NACIONAIS (DDD +
+    // número) no signer_phone do Aceite. Mandar "55…" (E.164 sem o "+") faz o
+    // "55" ser lido como DDD e o restante ser truncado — a mensagem vai pro
+    // número errado (bug de entrega observado em prod). Mesmo formato nacional do
+    // phone_number do envelope (toClicksignPhone), que é o comprovadamente correto.
+    const phone = toClicksignPhone(s.phone) ?? "";
     if (!phone) continue;
 
     // try/catch por signatário: uma falha no signatário N não perde os 1..N-1
