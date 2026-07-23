@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db/prisma";
 import { renderProposalVia } from "@/lib/proposals/render";
 import { selectPropostaTemplate } from "@/lib/proposals/template-select";
+import { ViewBeacon } from "./ViewBeacon";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -105,6 +106,8 @@ export default async function PublicProposalPage({
         </div>
       )}
       <div dangerouslySetInnerHTML={{ __html: html }} />
+      {/* Beacon: só um browser real (humano) marca "visualizada"; crawlers não. */}
+      {!expired && <ViewBeacon token={params.token} />}
     </main>
   );
 }

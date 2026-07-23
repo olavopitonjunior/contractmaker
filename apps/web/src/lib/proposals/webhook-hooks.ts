@@ -1,6 +1,7 @@
 import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
 import { advanceProposalStatus } from "./status";
+import { sendVendedorEnvelope } from "./send-execute";
 import { notifyProposalMilestone } from "./notify-proposal";
 
 /**
@@ -27,10 +28,9 @@ export async function onProposalEnvelopeClosed(
 
   const proposal = await prisma.proposal.findUnique({
     where: { id: proposalId },
-    select: { orgId: true, userId: true, hiddenPaths: true },
+    select: { orgId: true, userId: true },
   });
   if (!proposal) return;
-  const hasHidden = proposal.hiddenPaths.length > 0;
 
   const notifyCompleted = () =>
     waitUntil(
@@ -51,11 +51,16 @@ export async function onProposalEnvelopeClosed(
     return;
   }
 
-  // via === "completa" (ou null em via única).
+  // via === "completa": os proponentes assinaram.
   await advanceProposalStatus(proposalId, "assinada_proponente");
 
-  if (!hasHidden) {
-    // Via única: proponente + proprietário no mesmo envelope → completa.
+  // Há proprietário/vendedor pra assinar? (decisão do usuário: SEMPRE 2º envelope
+  // encadeado pro vendedor — reduzida se esconder comissão, completa se não.)
+  const vendedores = await prisma.proposalSigner.count({
+    where: { proposalId, included: true, role: "vendedor" },
+  });
+  if (vendedores === 0) {
+    // Só proponentes → proposta completa.
     const adv = await advanceProposalStatus(proposalId, "completa", {
       completedAt: new Date(),
     });
@@ -63,20 +68,14 @@ export async function onProposalEnvelopeClosed(
     return;
   }
 
-  // Duas vias: falta disparar o envelope 2 (reduzida). A criação depende do
-  // executor de envio de proposta (lib/proposals/send — vem com POST /send).
-  // Aqui registramos a pendência; o /send/reconcile cria o envelope 2 e o
-  // @@unique([proposalId, via]) garante idempotência.
+  // Encadeia: aguarda o vendedor e DISPARA o 2º envelope (idempotente pelo
+  // @@unique([proposalId, via]) + guard de existência dentro de sendVendedorEnvelope).
   await advanceProposalStatus(proposalId, "aguardando_vendedor");
-  await prisma.proposalEvent
-    .create({
-      data: {
-        proposalId,
-        eventName: "chained_envelope2_pending",
-        source: "webhook",
-      },
+  waitUntil(
+    sendVendedorEnvelope(proposalId).catch((err) => {
+      console.error("[proposals] sendVendedorEnvelope falhou:", err);
     })
-    .catch(() => {});
+  );
 }
 
 /**

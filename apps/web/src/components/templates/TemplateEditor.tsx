@@ -40,6 +40,12 @@ import { Save, Trash2, ArrowLeft, Eye } from "lucide-react";
 import Link from "next/link";
 import { TemplatePreview } from "./TemplatePreview";
 
+const PROPOSTA_MODALIDADES: { value: string; label: string }[] = [
+  { value: "proposta_venda", label: "Proposta de Compra (venda)" },
+  { value: "proposta_locacao_residencial", label: "Proposta de Locação Residencial" },
+  { value: "proposta_locacao_comercial", label: "Proposta de Locação Comercial" },
+];
+
 interface TemplateEditorProps {
   template?: {
     id: string;
@@ -77,6 +83,15 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
   const [isDefault, setIsDefault] = useState(template?.isDefault || false);
   const [version, setVersion] = useState(template?.version || "1.0.0");
 
+  // Tipo de documento: contrato (categoria) ou proposta (modalidade proposta_*).
+  const initialIsProposta = template?.modalidade?.startsWith("proposta_") ?? false;
+  const [docType, setDocType] = useState<"contrato" | "proposta">(
+    initialIsProposta ? "proposta" : "contrato"
+  );
+  const [propostaModalidade, setPropostaModalidade] = useState(
+    initialIsProposta ? (template!.modalidade as string) : PROPOSTA_MODALIDADES[0].value
+  );
+
   // Modalidade (grupo) derivada da categoria — usada no preview e nos labels.
   const modalidade = modalidadeForCategory(category);
   const groupLabel = GROUP_LABELS[CATEGORY_TO_GROUP[category]];
@@ -97,7 +112,10 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
 
     setSaving(true);
     try {
-      const payload = { name, description, handlebarsSource, category, isDefault, version };
+      const payload =
+        docType === "proposta"
+          ? { name, description, handlebarsSource, modalidade: propostaModalidade, isDefault, version }
+          : { name, description, handlebarsSource, category, isDefault, version };
 
       const url = mode === "create" ? "/api/templates" : `/api/templates/${template!.id}`;
       const method = mode === "create" ? "POST" : "PATCH";
@@ -159,29 +177,64 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
           <Input id="version" value={version} onChange={(e) => setVersion(e.target.value)} placeholder="1.0.0" />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="category">Categoria (forma de pagamento)</Label>
-          <Select value={category} onValueChange={(v) => setCategory(v as TemplateCategory)}>
+          <Label>Tipo de documento</Label>
+          <Select
+            value={docType}
+            onValueChange={(v) => setDocType(v as "contrato" | "proposta")}
+            disabled={mode === "edit"}
+          >
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectGroup>
-                <SelectLabel>{GROUP_LABELS.sem_alienacao}</SelectLabel>
-                {TEMPLATE_CATEGORIES.filter((c) => CATEGORY_TO_GROUP[c] === "sem_alienacao").map((c) => (
-                  <SelectItem key={c} value={c}>{CATEGORY_LABELS[c]}</SelectItem>
-                ))}
-              </SelectGroup>
-              <SelectGroup>
-                <SelectLabel>{GROUP_LABELS.com_alienacao}</SelectLabel>
-                {TEMPLATE_CATEGORIES.filter((c) => CATEGORY_TO_GROUP[c] === "com_alienacao").map((c) => (
-                  <SelectItem key={c} value={c}>{CATEGORY_LABELS[c]}</SelectItem>
-                ))}
-              </SelectGroup>
+              <SelectItem value="contrato">Contrato</SelectItem>
+              <SelectItem value="proposta">Proposta (oferta pré-contrato)</SelectItem>
             </SelectContent>
           </Select>
-          <p className="text-xs text-muted-foreground">
-            Grupo: {groupLabel}. A forma de pagamento do negócio puxa esta categoria automaticamente.
-          </p>
+          {docType === "proposta" ? (
+            <>
+              <Label htmlFor="prop-modalidade" className="pt-2 block">Modelo de proposta</Label>
+              <Select value={propostaModalidade} onValueChange={setPropostaModalidade}>
+                <SelectTrigger id="prop-modalidade">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PROPOSTA_MODALIDADES.map((m) => (
+                    <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                A proposta usa este modelo por (imobiliária, tipo). Marque como principal pra ser o padrão.
+              </p>
+            </>
+          ) : (
+            <>
+              <Label htmlFor="category" className="pt-2 block">Categoria (forma de pagamento)</Label>
+              <Select value={category} onValueChange={(v) => setCategory(v as TemplateCategory)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectLabel>{GROUP_LABELS.sem_alienacao}</SelectLabel>
+                    {TEMPLATE_CATEGORIES.filter((c) => CATEGORY_TO_GROUP[c] === "sem_alienacao").map((c) => (
+                      <SelectItem key={c} value={c}>{CATEGORY_LABELS[c]}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                  <SelectGroup>
+                    <SelectLabel>{GROUP_LABELS.com_alienacao}</SelectLabel>
+                    {TEMPLATE_CATEGORIES.filter((c) => CATEGORY_TO_GROUP[c] === "com_alienacao").map((c) => (
+                      <SelectItem key={c} value={c}>{CATEGORY_LABELS[c]}</SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Grupo: {groupLabel}. A forma de pagamento do negócio puxa esta categoria automaticamente.
+              </p>
+            </>
+          )}
         </div>
         <div className="flex items-start gap-3 pt-6">
           <Switch id="isDefault" checked={isDefault} onCheckedChange={setIsDefault} />

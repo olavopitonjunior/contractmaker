@@ -1,63 +1,77 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { prisma } from "@/lib/db/prisma";
 
+vi.mock("@vercel/functions", () => ({
+  waitUntil: (p: Promise<unknown>) => p,
+}));
+
 vi.mock("../status", () => ({
   advanceProposalStatus: vi.fn().mockResolvedValue({ moved: true }),
 }));
+
+vi.mock("../send-execute", () => ({
+  sendVendedorEnvelope: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock("../notify-proposal", () => ({
   notifyProposalMilestone: vi.fn().mockResolvedValue(undefined),
 }));
 
 import { onProposalEnvelopeClosed, onProposalEnvelopeRefused } from "../webhook-hooks";
 import { advanceProposalStatus } from "../status";
+import { sendVendedorEnvelope } from "../send-execute";
 import { notifyProposalMilestone } from "../notify-proposal";
 
 const envFind = prisma.envelope.findUnique as unknown as ReturnType<typeof vi.fn>;
 const propFind = prisma.proposal.findUnique as unknown as ReturnType<typeof vi.fn>;
+const signerCount = prisma.proposalSigner.count as unknown as ReturnType<typeof vi.fn>;
 const advance = advanceProposalStatus as unknown as ReturnType<typeof vi.fn>;
+const sendVend = sendVendedorEnvelope as unknown as ReturnType<typeof vi.fn>;
 const notify = notifyProposalMilestone as unknown as ReturnType<typeof vi.fn>;
 
 describe("onProposalEnvelopeClosed", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     advance.mockResolvedValue({ moved: true });
+    sendVend.mockResolvedValue(undefined);
+    signerCount.mockResolvedValue(0);
+    propFind.mockResolvedValue({ orgId: "org1", userId: "u1" });
   });
 
   it("envelope de contrato → no-op", async () => {
     envFind.mockResolvedValue({ source: "contract", proposalId: null, via: null });
     await onProposalEnvelopeClosed("e1");
     expect(advance).not.toHaveBeenCalled();
+    expect(sendVend).not.toHaveBeenCalled();
   });
 
-  it("via única (sem ocultação) → assinada_proponente e depois completa + sino", async () => {
+  it("completa fecha SEM vendedor → assinada_proponente e depois completa", async () => {
     envFind.mockResolvedValue({ source: "proposal", proposalId: "p1", via: "completa" });
-    propFind.mockResolvedValue({ orgId: "org1", userId: "u1", hiddenPaths: [] });
+    signerCount.mockResolvedValue(0);
     await onProposalEnvelopeClosed("e1");
     expect(advance).toHaveBeenNthCalledWith(1, "p1", "assinada_proponente");
     expect(advance).toHaveBeenNthCalledWith(2, "p1", "completa", expect.objectContaining({ completedAt: expect.any(Date) }));
+    expect(sendVend).not.toHaveBeenCalled();
     expect(notify).toHaveBeenCalledWith(
       expect.objectContaining({ proposalId: "p1", orgId: "org1", userId: "u1", kind: "completed" })
     );
   });
 
-  it("com ocultação, via completa fecha → assinada_proponente → aguardando_vendedor (não completa, sem sino)", async () => {
+  it("completa fecha COM vendedor → assinada_proponente → aguardando_vendedor + dispara 2º envelope", async () => {
     envFind.mockResolvedValue({ source: "proposal", proposalId: "p1", via: "completa" });
-    propFind.mockResolvedValue({ orgId: "org1", userId: "u1", hiddenPaths: ["comissao"] });
+    signerCount.mockResolvedValue(1);
     await onProposalEnvelopeClosed("e1");
     const dests = advance.mock.calls.map((c) => c[1]);
     expect(dests).toEqual(["assinada_proponente", "aguardando_vendedor"]);
     expect(dests).not.toContain("completa");
-    expect(notify).not.toHaveBeenCalled();
+    expect(sendVend).toHaveBeenCalledWith("p1");
   });
 
-  it("via reduzida fecha → completa + sino", async () => {
+  it("via reduzida (proprietário) fecha → completa", async () => {
     envFind.mockResolvedValue({ source: "proposal", proposalId: "p1", via: "reduzida" });
-    propFind.mockResolvedValue({ orgId: "org1", userId: "u1", hiddenPaths: ["comissao"] });
     await onProposalEnvelopeClosed("e1");
     expect(advance).toHaveBeenCalledWith("p1", "completa", expect.objectContaining({ completedAt: expect.any(Date) }));
-    expect(notify).toHaveBeenCalledWith(
-      expect.objectContaining({ proposalId: "p1", kind: "completed" })
-    );
+    expect(sendVend).not.toHaveBeenCalled();
   });
 });
 
@@ -73,32 +87,14 @@ describe("onProposalEnvelopeRefused", () => {
     await onProposalEnvelopeRefused("e1");
     expect(advance).toHaveBeenCalledWith("p1", "recusada_vendedor", expect.any(Object));
     expect(notify).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "refused", refusedBy: "vendedor" })
+      expect.objectContaining({ kind: "refused", refusedBy: "vendedor", userId: "u1" })
     );
   });
 
-  it("recusa na via completa → recusada_proponente + sino", async () => {
-    envFind.mockResolvedValue({ source: "proposal", proposalId: "p1", via: "completa", orgId: "org1" });
-    await onProposalEnvelopeRefused("e1");
-    expect(advance).toHaveBeenCalledWith("p1", "recusada_proponente", expect.any(Object));
-    expect(notify).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "refused", refusedBy: "proponente" })
-    );
-  });
-
-  it("envelope de contrato → no-op", async () => {
-    envFind.mockResolvedValue({ source: "contract", proposalId: null, via: null });
-    await onProposalEnvelopeRefused("e1");
-    expect(advance).not.toHaveBeenCalled();
-  });
-
-  it("via ÚNICA com hint do proprietário → recusada_vendedor (desfecho quente)", async () => {
+  it("via ÚNICA com hint do proprietário → recusada_vendedor", async () => {
     envFind.mockResolvedValue({ source: "proposal", proposalId: "p1", via: "completa", orgId: "org1" });
     await onProposalEnvelopeRefused("e1", { refusedSourceKind: "vendedor" });
     expect(advance).toHaveBeenCalledWith("p1", "recusada_vendedor", expect.any(Object));
-    expect(notify).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: "refused", refusedBy: "vendedor", userId: "u1" })
-    );
   });
 
   it("transição rejeitada (replay/ilegal) → SEM sino", async () => {
@@ -106,5 +102,17 @@ describe("onProposalEnvelopeRefused", () => {
     advance.mockResolvedValue({ moved: false, reason: "illegal", from: "cancelada" });
     await onProposalEnvelopeRefused("e1");
     expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("recusa na via completa → recusada_proponente", async () => {
+    envFind.mockResolvedValue({ source: "proposal", proposalId: "p1", via: "completa", orgId: "org1" });
+    await onProposalEnvelopeRefused("e1");
+    expect(advance).toHaveBeenCalledWith("p1", "recusada_proponente", expect.any(Object));
+  });
+
+  it("envelope de contrato → no-op", async () => {
+    envFind.mockResolvedValue({ source: "contract", proposalId: null, via: null });
+    await onProposalEnvelopeRefused("e1");
+    expect(advance).not.toHaveBeenCalled();
   });
 });

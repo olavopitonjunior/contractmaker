@@ -124,6 +124,12 @@ export const PERMISSION = {
   PROPOSAL_CREATE: "proposal.create",
   PROPOSAL_SEND: "proposal.send",
   PROPOSAL_CONVERT: "proposal.convert",
+  // Controle da proposta. CANCEL/RESEND/ASSIGN espelham CHARGE_CANCEL /
+  // CHARGE_RESEND_NOTIFICATION; DELETE é destrutivo (só gestor/owner/admin).
+  PROPOSAL_CANCEL: "proposal.cancel",
+  PROPOSAL_DELETE: "proposal.delete",
+  PROPOSAL_RESEND: "proposal.resend",
+  PROPOSAL_ASSIGN: "proposal.assign",
 } as const;
 
 export type PermissionKey =
@@ -251,6 +257,10 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionKey[]> = {
     PERMISSION.PROPOSAL_CREATE,
     PERMISSION.PROPOSAL_SEND,
     PERMISSION.PROPOSAL_CONVERT,
+    PERMISSION.PROPOSAL_CANCEL,
+    PERMISSION.PROPOSAL_DELETE,
+    PERMISSION.PROPOSAL_RESEND,
+    PERMISSION.PROPOSAL_ASSIGN,
   ],
 };
 
@@ -353,4 +363,8 @@ export const PERMISSION_LABELS_PT: Record<PermissionKey, string> = {
   [PERMISSION.PROPOSAL_CREATE]: "Criar proposta",
   [PERMISSION.PROPOSAL_SEND]: "Enviar proposta para assinatura",
   [PERMISSION.PROPOSAL_CONVERT]: "Converter proposta em negócio",
+  [PERMISSION.PROPOSAL_CANCEL]: "Cancelar proposta",
+  [PERMISSION.PROPOSAL_DELETE]: "Excluir proposta",
+  [PERMISSION.PROPOSAL_RESEND]: "Reenviar/lembrar proposta",
+  [PERMISSION.PROPOSAL_ASSIGN]: "Atribuir responsável da proposta",
 };
