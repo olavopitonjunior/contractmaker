@@ -119,7 +119,7 @@ export async function DELETE(
   });
 
   const { waitUntil } = await import("@vercel/functions");
-  waitUntil(deleteBlobs(blobUrls));
+  waitUntil(deleteBlobs(blobUrls, prisma));
 
   await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
     action: "CONTRACT_DELETE_BULK",

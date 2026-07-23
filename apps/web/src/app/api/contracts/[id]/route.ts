@@ -189,7 +189,7 @@ export async function DELETE(
 
   // Blobs órfãos: deleta pós-commit (best-effort, não segura a resposta).
   const { waitUntil } = await import("@vercel/functions");
-  waitUntil(deleteBlobs(blobUrls));
+  waitUntil(deleteBlobs(blobUrls, prisma));
 
   await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
     action: "CONTRACT_DELETE",

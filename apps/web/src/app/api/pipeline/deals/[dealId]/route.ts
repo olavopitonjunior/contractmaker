@@ -292,7 +292,7 @@ export async function DELETE(
   // Pós-commit em waitUntil (como as rotas irmãs de contrato) — deletar dezenas
   // de PDFs sequencialmente inline poderia estourar o timeout e devolver 504
   // com as rows já commitadas.
-  waitUntil(deleteBlobs(urlsToDelete));
+  waitUntil(deleteBlobs(urlsToDelete, prisma));
 
   await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
     action: "DEAL_DELETE",

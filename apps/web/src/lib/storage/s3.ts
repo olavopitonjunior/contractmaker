@@ -2,6 +2,20 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
+/**
+ * Objeto ausente no storage (Blob 404 / S3 NoSuchKey / filesystem ENOENT). As
+ * rotas `/file` distinguem isto de um erro transitório (401/403/408/timeout):
+ * um objeto removido vira 404 "reenvie o documento"; o resto segue 500. Antes o
+ * mapeamento era por regex `/HTTP 40\d/` na mensagem — só pegava o branch Blob e
+ * confundia 403/408 com "removido".
+ */
+export class StorageObjectNotFoundError extends Error {
+  constructor(public readonly storageUrl: string) {
+    super(`Objeto não encontrado no storage: ${storageUrl}`);
+    this.name = 'StorageObjectNotFoundError';
+  }
+}
+
 let s3Client: any = null;
 
 function getS3Client() {
@@ -179,6 +193,11 @@ export async function uploadStringToStorage(params: {
 export async function downloadBufferFromUrl(storageUrl: string): Promise<Buffer> {
   if (storageUrl.startsWith('http://') || storageUrl.startsWith('https://')) {
     const res = await fetch(storageUrl);
+    // 404 = objeto removido → erro tipado (vira 404 amigável na rota). Outros
+    // status (401/403/408/5xx) são transitórios/permissão → erro genérico (500).
+    if (res.status === 404) {
+      throw new StorageObjectNotFoundError(storageUrl);
+    }
     if (!res.ok) {
       throw new Error(`Falha ao baixar ${storageUrl}: HTTP ${res.status}`);
     }
@@ -194,9 +213,26 @@ export async function downloadBufferFromUrl(storageUrl: string): Promise<Buffer>
     const stripped = storageUrl.replace('s3://', '');
     const [bucket, ...rest] = stripped.split('/');
     const key = rest.join('/');
-    const response = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    let response;
+    try {
+      response = await client.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+    } catch (err: any) {
+      // S3 sinaliza objeto ausente por name (NoSuchKey/NotFound) ou 404.
+      if (
+        err?.name === 'NoSuchKey' ||
+        err?.name === 'NotFound' ||
+        err?.$metadata?.httpStatusCode === 404
+      ) {
+        throw new StorageObjectNotFoundError(storageUrl);
+      }
+      throw err;
+    }
     if (!response.Body) {
-      throw new Error('S3 object body missing');
+      // Body ausente com GetObject BEM-SUCEDIDO (sem NoSuchKey/404) é uma
+      // condição transitória/anômala do SDK, NÃO um objeto removido — o objeto
+      // existe (a chamada não lançou). Erro genérico → 500 retryável, não o 404
+      // "reenvie o documento" (que induziria re-upload duplicado de algo intacto).
+      throw new Error(`S3 GetObject retornou sem Body para ${storageUrl}`);
     }
     const chunks: Buffer[] = [];
     const stream = response.Body as AsyncIterable<Uint8Array>;
@@ -206,12 +242,17 @@ export async function downloadBufferFromUrl(storageUrl: string): Promise<Buffer>
     return Buffer.concat(chunks);
   }
 
-  if (storageUrl.startsWith('file://')) {
-    const filePath = fileURLToPath(storageUrl);
+  try {
+    const filePath = storageUrl.startsWith('file://')
+      ? fileURLToPath(storageUrl)
+      : storageUrl;
     return fs.readFileSync(filePath);
+  } catch (err: any) {
+    if (err?.code === 'ENOENT') {
+      throw new StorageObjectNotFoundError(storageUrl);
+    }
+    throw err;
   }
-
-  return fs.readFileSync(storageUrl);
 }
 
 /**

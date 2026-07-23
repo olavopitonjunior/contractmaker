@@ -139,13 +139,24 @@ export async function DELETE(
     );
   }
 
-  // Best-effort: remove o objeto de storage despachando por backend (Vercel
-  // Blob / S3 / filesystem). Antes só limpava Vercel Blob — URLs s3://, file://
-  // ficavam órfãs.
-  const { deleteFromStorage } = await import("@/lib/storage/s3");
-  const blobDeleted = await deleteFromStorage(attachment.url);
-
+  // Deleta a ROW primeiro; só então avalia se o blob ficou órfão. O blob é
+  // compartilhado por referência (FormAttachment/ProposalAttachment/duplicatas
+  // de DealAttachment apontam pra mesma URL) — apagar incondicionalmente órfãva
+  // o arquivo das irmãs (bug: matrícula/IPTU davam 404). `deleteBlobIfUnreferenced`
+  // só remove do storage quando nenhuma outra row referencia a URL.
   await prisma.dealAttachment.delete({ where: { id: attachment.id } });
+
+  // Inline (não waitUntil) DE PROPÓSITO: quanto menor a janela entre a contagem
+  // de referências e o delete no storage, menor a chance de um finalize de form
+  // concorrente copiar a URL pra um DealAttachment novo bem no meio (TOCTOU).
+  // Adiar pra waitUntil alargaria essa janela. O resíduo é raro e recuperável
+  // (um anexo dá 404, re-upload resolve); o fix definitivo é um cron de GC de
+  // órfãos com carência, no backlog.
+  const { deleteBlobIfUnreferenced } = await import(
+    "@/lib/contracts/delete-cleanup"
+  );
+  const blobOutcome = await deleteBlobIfUnreferenced(prisma, attachment.url);
+  const blobDeleted = blobOutcome === "deleted";
 
   await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
     action: "ATTACHMENT_DELETE",
@@ -157,6 +168,7 @@ export async function DELETE(
       filename: attachment.filename,
       category: attachment.category,
       blobDeleted,
+      blobOutcome,
     },
   });
 

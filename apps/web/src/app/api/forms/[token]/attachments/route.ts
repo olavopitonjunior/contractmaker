@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "crypto";
 import { Prisma } from "@prisma/client";
-import { put, del } from "@vercel/blob";
+import { put } from "@vercel/blob";
 import { prisma } from "@/lib/db/prisma";
 import { resolveFormScope, formLockedResponse } from "@/lib/forms/resolve-form-scope";
 import { formClosedResponse } from "@/lib/forms/form-gate";
@@ -291,15 +291,16 @@ export async function DELETE(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const blobToken = process.env.BLOB_READ_WRITE_TOKEN;
-  if (blobToken && attachment.url.startsWith("https://")) {
-    try {
-      await del(attachment.url, { token: blobToken });
-    } catch (err) {
-      console.warn("[form attachment delete blob]", err);
-    }
-  }
-
+  // Deleta a ROW primeiro; só remove o blob se ninguém mais o referenciar. O
+  // finalize copia FormAttachment.url pro DealAttachment.url (mesmo objeto, sem
+  // re-upload) — apagar o blob aqui incondicionalmente órfãva a matrícula/RG já
+  // copiados pro deal. `deleteBlobIfUnreferenced` faz o ref-count antes.
   await prisma.formAttachment.delete({ where: { id } });
+
+  const { deleteBlobIfUnreferenced } = await import(
+    "@/lib/contracts/delete-cleanup"
+  );
+  await deleteBlobIfUnreferenced(prisma, attachment.url);
+
   return NextResponse.json({ ok: true });
 }
