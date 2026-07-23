@@ -59,9 +59,12 @@ export async function onProposalEnvelopeClosed(
   // assinou aqui (o envelope fechou). Encadear um 2º envelope re-convidaria e
   // cobraria o vendedor de novo (R$/signer) e travaria a proposta fora de
   // 'completa'. Como o envelope está fechado, todos os seus signers assinaram →
-  // a presença de um signer role="vendedor" basta pra fechar a proposta aqui.
+  // a presença de um signer do vendedor basta pra fechar a proposta aqui.
+  // NB: filtra por `sourceKind` (domínio: "vendedor"), NÃO por `role` — este
+  // guarda a qualificação ClickSign em inglês ("seller"), então role:"vendedor"
+  // nunca casaria (dead code) e o double-charge continuaria.
   const vendedorNoEnvelope = await prisma.envelopeSigner.findFirst({
-    where: { envelopeId, role: "vendedor" },
+    where: { envelopeId, sourceKind: "vendedor" },
     select: { id: true },
   });
   if (vendedorNoEnvelope) {

@@ -7,7 +7,12 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { loadScopedProposal } from "@/lib/proposals/route-helpers";
 import { DELETABLE_STATUSES } from "@/lib/proposals/status-sets";
 import { sanitizeHiddenPaths } from "@/lib/proposals/hidden-fields";
+import { runEnvelopeCancel } from "@/lib/clicksign/cancel-action";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+
+// DELETE cancela envelopes ClickSign vivos antes de excluir → precisa de node + tempo.
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
 // GET /api/proposals/[id]
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
@@ -103,20 +108,32 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       { status: 409 }
     );
   }
-  // Invariante da plataforma (igual ao delete de contrato): nunca excluir com um
-  // Envelope ClickSign ainda VIVO — a cascata apagaria a linha local mas deixaria
-  // o envelope ativo e cobrável na ClickSign, e assinaturas/webhooks posteriores
-  // não resolveriam mais a proposta. Ex.: 'expirada' (o cron marca o status mas o
-  // envelope pode seguir running) ou 'recusada_proponente' com o vendedor ainda
-  // pendente. Cancele primeiro (POST /cancel cancela o remoto).
-  const liveEnvelope = await prisma.envelope.findFirst({
+  // Invariante da plataforma: não deixar um Envelope ClickSign VIVO órfão — a
+  // cascata apagaria a linha local mas o envelope seguiria ativo/cobrável, e
+  // assinaturas/webhooks posteriores não resolveriam mais a proposta. Cancela os
+  // running best-effort ANTES de excluir. Não dá pra só bloquear com 409 "cancele
+  // primeiro": 'expirada' não é cancelável (fora de CANCELLABLE_STATUSES) e o cron
+  // de expiração deixa o Envelope local 'running' até o reconcile sincronizar —
+  // seria um beco sem saída. O DELETE é uma ação explícita do usuário; cancelamos
+  // o que der e registramos o resultado.
+  const liveEnvelopes = await prisma.envelope.findMany({
     where: { proposalId: params.id, status: "running", clicksignId: { not: null } },
     select: { id: true },
   });
-  if (liveEnvelope) {
-    return NextResponse.json(
-      { error: "Cancele a assinatura antes de excluir." },
-      { status: 409 }
+  const cancelOutcomes: { envelopeId: string; ok: boolean; error?: string }[] = [];
+  for (const env of liveEnvelopes) {
+    const res = await runEnvelopeCancel({
+      envelopeId: env.id,
+      reason: "Proposta excluída",
+      actorUserId: auth.actor.effectiveUserId,
+    }).catch((err) => ({
+      status: 502,
+      body: { error: err instanceof Error ? err.message : String(err) },
+    }));
+    cancelOutcomes.push(
+      res.status >= 400
+        ? { envelopeId: env.id, ok: false, error: (res.body as { error?: string })?.error }
+        : { envelopeId: env.id, ok: true }
     );
   }
 
@@ -128,7 +145,11 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       result: "SUCCESS",
       resource: params.id,
       resourceType: "Proposal",
-      metadata: { status: proposal.status, title: proposal.title },
+      metadata: {
+        status: proposal.status,
+        title: proposal.title,
+        ...(cancelOutcomes.length > 0 ? { canceledEnvelopes: cancelOutcomes } : {}),
+      },
     }
   ).catch(() => {});
   return NextResponse.json({ ok: true });
