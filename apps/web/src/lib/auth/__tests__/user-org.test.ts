@@ -21,10 +21,14 @@ vi.mock("../impersonation", () => ({
 }));
 
 const mockOrgFindUnique = vi.fn();
+const mockOrgCount = vi.fn();
 const mockMembershipFindFirst = vi.fn();
 vi.mock("@/lib/db/prisma", () => ({
   prisma: {
-    organization: { findUnique: (a: unknown) => mockOrgFindUnique(a) },
+    organization: {
+      findUnique: (a: unknown) => mockOrgFindUnique(a),
+      count: (a: unknown) => mockOrgCount(a),
+    },
     orgMembership: { findFirst: (a: unknown) => mockMembershipFindFirst(a) },
   },
 }));
@@ -46,6 +50,7 @@ function setHeaders(opts: { path?: string | null; subdomain?: string | null }) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockImpersonation.mockResolvedValue(null); // sem impersonation por padrão
+  mockOrgCount.mockResolvedValue(1); // subdomínio = tenant real por padrão
   setHeaders({ path: null, subdomain: null }); // apex/fora do matcher por padrão
 });
 
@@ -65,13 +70,31 @@ describe("getUserOrg — sweep multi-org", () => {
     );
   });
 
-  it("(b) header presente + user NÃO é membro do tenant → null (sem acesso)", async () => {
+  it("(b) header presente + tenant REAL + user NÃO é membro → null (sem acesso)", async () => {
     setHeaders({ path: "/pipeline", subdomain: "outratenant" });
     mockMembershipFindFirst.mockResolvedValue(null); // não é membro daquele subdomínio
+    mockOrgCount.mockResolvedValue(1); // mas a org existe → tenant real
 
     const org = await getUserOrg("u1");
 
     expect(org).toBeNull();
+  });
+
+  it("(b2) FAIL-SAFE: subdomínio desconhecido (nenhuma org) → fallback, não lockout", async () => {
+    // Ex.: label de infra 'staging' num env sem ROOT_DOMAIN próprio.
+    setHeaders({ path: "/pipeline", subdomain: "staging" });
+    mockMembershipFindFirst
+      .mockResolvedValueOnce(null) // não é membro do subdomínio 'staging'
+      .mockResolvedValueOnce({ org: { id: "org-first" } }); // fallback 1ª membership
+    mockOrgCount.mockResolvedValue(0); // NENHUMA org tem subdomain 'staging'
+
+    const org = await getUserOrg("u1");
+
+    expect(org).toEqual({ id: "org-first" });
+    // Caiu no fallback determinístico (tratou como apex)
+    expect(mockMembershipFindFirst).toHaveBeenLastCalledWith(
+      expect.objectContaining({ orderBy: [{ invitedAt: "asc" }, { id: "asc" }] })
+    );
   });
 
   it("(c) sem header (apex) → primeira membership com orderBy determinístico", async () => {

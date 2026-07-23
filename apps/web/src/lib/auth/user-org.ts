@@ -98,7 +98,18 @@ export async function getUserOrg(
       where: { userId, org: { subdomain } },
       include: { org: true },
     });
-    return scoped?.org ?? null;
+    if (scoped) return scoped.org;
+    // Sem membership nesse subdomínio. FAIL-SAFE: distingue
+    //  (a) subdomínio de TENANT real, mas o user não é membro → null (nega, sem
+    //      acesso ao tenant — isolamento);
+    //  (b) subdomínio que não bate com NENHUMA org (label de infra tipo
+    //      "staging", typo, env sem ROOT_DOMAIN próprio) → NÃO é tenant: trata
+    //      como apex e cai no fallback de primeira membership, evitando lockout
+    //      app-wide de um membro legítimo.
+    const isRealTenant =
+      (await prisma.organization.count({ where: { subdomain } })) > 0;
+    if (isRealTenant) return null;
+    // senão: cai no fallback abaixo (subdomínio desconhecido ≈ apex)
   }
   const membership = await prisma.orgMembership.findFirst({
     where: { userId },
