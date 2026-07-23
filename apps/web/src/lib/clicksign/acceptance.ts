@@ -15,7 +15,9 @@ export interface CreateAcceptanceInput {
   /** Texto aceito (≤1500 chars). Deve conter a frase de vinculação + o link. */
   message: string;
   signerName: string;
-  /** E.164 sem o '+', como o resto da integração (ver formatação no caller). */
+  /** Dígitos NACIONAIS (DDD + número, SEM o DDI 55) — a ClickSign prepende o +55.
+   *  Mandar "55…" faz o DDI ser lido como DDD e trunca o número. Ver toClicksignPhone
+   *  no caller (mesmo formato do phone_number do envelope). */
   signerPhone: string;
   /** "account_name" usa o nome da conta ClickSign como remetente. */
   senderNameOption?: string;
