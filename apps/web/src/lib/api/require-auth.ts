@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { authOrBearer, hasScope, type ResolvedAuth } from "@/lib/auth/auth-or-bearer";
 import { getUserOrg } from "@/lib/auth/auth";
+import { sessionSubdomainHint } from "@/lib/auth/subdomain-hint";
 import {
   resolveNewtonActor,
   isRejection,
@@ -138,13 +139,12 @@ export async function requireApiAuth(
   }
 
   const requireOrg = opts.requireOrg ?? true;
-  // Sessão (UI humana) → lê o x-org-subdomain (resolve a org do tenant que o
-  // usuário está navegando). Bearer/Newton (máquina) → pina token-based: a org
-  // vem do dono do token, não de um Host controlável pelo cliente.
-  const org = await getUserOrg(
-    actorResult.effectiveUserId,
-    ident.via === "session" ? undefined : { subdomainHint: null }
-  );
+  // Regra única (sessionSubdomainHint, espelhada em context.ts): sessão em rota
+  // sanitizada lê o subdomínio; máquina/bearer e rotas fora do matcher pinam
+  // token-based. A org vem do dono do token, não de um Host controlável.
+  const org = await getUserOrg(actorResult.effectiveUserId, {
+    subdomainHint: sessionSubdomainHint(req, ident.via === "session"),
+  });
   if (!org) {
     if (requireOrg) {
       return {

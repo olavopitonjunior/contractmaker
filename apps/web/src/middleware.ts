@@ -14,9 +14,15 @@ export default auth((req) => {
   // forjado no apex (onde extractSubdomain→null e o set não roda) passaria intacto
   // e getUserOrg o honraria. O header só é confiável se for exclusivamente escrito
   // aqui.
+  //
+  // MÁQUINA: requests com Authorization: Bearer (integrações Newton/API) NÃO
+  // recebem o hint — a org de um token vem do dono, não de um Host controlável
+  // pelo cliente. Isso resolve a classe inteira de "máquina subdomain-steerable"
+  // na raiz, sem pinar cada call-site bare de getUserOrg (events, attachments…).
+  const isBearer = /^bearer /i.test(req.headers.get("authorization") ?? "");
   const subdomain = extractSubdomain(req.headers.get("host"));
   requestHeaders.delete("x-org-subdomain");
-  if (subdomain) requestHeaders.set("x-org-subdomain", subdomain);
+  if (subdomain && !isBearer) requestHeaders.set("x-org-subdomain", subdomain);
   return NextResponse.next({
     request: { headers: requestHeaders },
   });
