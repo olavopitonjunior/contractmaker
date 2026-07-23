@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { requireAnyFeaturePage } from "@/lib/modules/page-guard";
 import { FEATURE } from "@/lib/modules/catalog";
@@ -60,12 +61,27 @@ export default async function PropostasPage({
   if (qLower) {
     try {
       const like = `%${qLower}%`;
-      const matched = await prisma.$queryRaw<{ id: string }[]>`
-        SELECT "id" FROM "Proposal"
-        WHERE "orgId" = ${orgId}
-          AND lower("title" || ' ' || COALESCE("dataJson"::text, '')) LIKE ${like}
-        ORDER BY "createdAt" DESC
-        LIMIT 500`;
+      const kindVal = tipo === "venda" ? "venda" : "locacao";
+      // TODOS os filtros do escopo entram no raw (não só orgId): senão o LIMIT 500
+      // pegava os 500 mais recentes DA ORG e, ao re-aplicar o escopo do corretor
+      // (VIEW_OWN) na hidratação, um match ANTIGO dele podia cair fora. Aplicando
+      // aqui, o teto vale sobre o conjunto que ele realmente vê.
+      const conds: Prisma.Sql[] = [
+        Prisma.sql`"orgId" = ${orgId}`,
+        Prisma.sql`"kind" = ${kindVal}`,
+        Prisma.sql`lower("title" || ' ' || COALESCE("dataJson"::text, '')) LIKE ${like}`,
+      ];
+      if (!can(eff, PERMISSION.PROPOSAL_VIEW_ALL)) {
+        conds.push(Prisma.sql`("userId" = ${userId} OR "responsibleUserId" = ${userId})`);
+      }
+      if (statusList) conds.push(Prisma.sql`"status" = ANY(${statusList})`);
+      if (responsibleUserId) conds.push(Prisma.sql`"responsibleUserId" = ${responsibleUserId}`);
+      const matched = await prisma.$queryRaw<{ id: string }[]>(
+        Prisma.sql`SELECT "id" FROM "Proposal" WHERE ${Prisma.join(
+          conds,
+          " AND "
+        )} ORDER BY "createdAt" DESC LIMIT 500`
+      );
       searchIdFilter = { id: { in: matched.map((m) => m.id) } };
     } catch {
       searchRawFailed = true; // cai no post-filter em memória abaixo

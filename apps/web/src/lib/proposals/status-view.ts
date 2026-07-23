@@ -165,6 +165,17 @@ const NEGATIVE_TERMINALS = new Set([
   "cancelada",
 ]);
 
+// Terminais negativos NÃO estão no TIMELINE_INDEX (não são nós da jornada), mas o
+// componente precisa saber ONDE a proposta morreu pra pintar o nó certo de vermelho
+// — senão colapsava tudo no nó 0 ("morreu na criação"), escondendo o histórico.
+// Índice inferido do PONTO em que o status implica que ela chegou.
+const NEGATIVE_REACHED: Record<string, number> = {
+  recusada_proponente: 4, // recusou no passo do proponente
+  recusada_vendedor: 5, // proponente já assinou; recusou no passo do vendedor
+  expirada: 1, // ao menos foi enviada (expiração é timeout pós-envio)
+  cancelada: 1, // cancelamento é permitido de enviada+ (min. razoável)
+};
+
 /**
  * Índice do nó mais avançado alcançado + se a proposta morreu num terminal
  * negativo (recusa/expiração/cancelamento) — o componente pinta o fim de vermelho.
@@ -174,7 +185,7 @@ export function proposalTimelineStage(status: string): {
   negative: boolean;
 } {
   return {
-    reachedIndex: TIMELINE_INDEX[status] ?? 0,
+    reachedIndex: TIMELINE_INDEX[status] ?? NEGATIVE_REACHED[status] ?? 0,
     negative: NEGATIVE_TERMINALS.has(status),
   };
 }

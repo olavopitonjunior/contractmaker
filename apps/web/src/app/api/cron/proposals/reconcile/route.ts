@@ -66,12 +66,16 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // 2. aguardando_vendedor sem reduzida viva → redispara. `none` inclui `draft`:
-  // um draft (envio em voo de um run/gatilho anterior) NÃO deve ser redisparado.
+  // 2. aguardando_vendedor sem reduzida viva → redispara. `none` cobre só
+  // running/closed (NÃO draft): um draft VELHO significa que o envio crashou no
+  // meio e PRECISA ser retentado — excluí-lo abandonava a proposta pra sempre.
+  // Redisparar é seguro: sendVendedorEnvelope é serializado pelo lock e a guarda
+  // interna trata draft recente (em voo) como no-op. Só excluímos as propostas que
+  // o step 1 acabou de encadear NESTE run (o waitUntil delas já está a caminho).
   const stuck = await prisma.proposal.findMany({
     where: {
       status: "aguardando_vendedor",
-      envelopes: { none: { via: "reduzida", status: { in: ["running", "closed", "draft"] } } },
+      envelopes: { none: { via: "reduzida", status: { in: ["running", "closed"] } } },
       ...(chainedInStep1.size > 0 ? { id: { notIn: [...chainedInStep1] } } : {}),
     },
     select: { id: true },

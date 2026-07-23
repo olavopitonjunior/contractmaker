@@ -14,7 +14,12 @@ import { ProposalAssigneeControl } from "./ProposalAssigneeControl";
 import { ProposalActionBar } from "./ProposalActionBar";
 import type { ProposalPermissions } from "./ProposalRowActions";
 
-// Rótulo/cor do EnvelopeSigner.status (vindo do polling — sign/view real).
+// Rótulo/cor por signatário. Duas fontes de vocabulário DISJUNTAS:
+//  - EnvelopeSigner.status (polling/envelope): pending/notified/viewed/signed/
+//    refused/email_failed/removed
+//  - ProposalSigner.acceptanceStatus (Aceite/WhatsApp, sem envelope): completed/
+//    sent/expired/canceled (+ refused, que coincide)
+// Ambos mapeados aqui pra o Aceite não renderizar o token cru em inglês.
 const SIGNER_STATUS_LABEL: Record<string, string> = {
   pending: "Pendente",
   notified: "Notificado",
@@ -23,6 +28,11 @@ const SIGNER_STATUS_LABEL: Record<string, string> = {
   refused: "Recusou",
   email_failed: "Falha no e-mail",
   removed: "Removido",
+  // Vocabulário do Aceite (acceptanceStatus):
+  completed: "Assinou",
+  sent: "Aguardando",
+  expired: "Expirou",
+  canceled: "Cancelado",
 };
 
 interface Proposal {
@@ -268,14 +278,17 @@ export function ProposalDetailClient({
                 {rows.map((s) => {
                   const badge = s.status ? SIGNER_STATUS_LABEL[s.status] ?? s.status : null;
                   const badgeCls =
-                    s.status === "signed"
+                    s.status === "signed" || s.status === "completed"
                       ? "text-success"
                       : s.status === "refused" || s.status === "email_failed"
                         ? "text-destructive"
                         : s.status === "viewed"
                           ? "text-info"
-                          : "text-muted-foreground";
-                  const actionable = s.sent && !["signed", "removed"].includes(s.status);
+                          : s.status === "sent"
+                            ? "text-info"
+                            : "text-muted-foreground";
+                  const actionable =
+                    s.sent && !["signed", "completed", "removed"].includes(s.status);
                   return (
                     <li key={s.id} className="space-y-1">
                       <div className="flex justify-between gap-2">
