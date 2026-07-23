@@ -49,8 +49,16 @@ export async function GET(
     where: {
       contractId: params.id,
       ...(sessionId ? { sessionId } : {}),
+      // onlyDiffs: entries com snapshot (write tools) OU edições manuais humanas
+      // (human_doc_edit) — estas aparecem atribuídas mesmo se a captura do diff
+      // falhou (a atribuição em si é o valor).
       ...(onlyDiffs
-        ? { htmlBefore: { not: null }, htmlAfter: { not: null } }
+        ? {
+            OR: [
+              { htmlBefore: { not: null }, htmlAfter: { not: null } },
+              { action: "human_doc_edit" },
+            ],
+          }
         : {}),
     },
     orderBy: { createdAt: "desc" },
