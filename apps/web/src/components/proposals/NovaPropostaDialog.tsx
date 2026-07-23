@@ -29,6 +29,7 @@ import {
   type PickedWitness,
   type RegistryWitness,
 } from "@/components/pipeline/WitnessPicker";
+import { computeDedupeKey } from "@/lib/proposals/signer-dedupe";
 
 const SCHEMA_BY_TIPO: Record<string, { label: string; value: string }[]> = {
   venda: [{ label: "Compra e venda", value: "compra_venda_v1" }],
@@ -66,14 +67,15 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
     setForm((f) => ({ ...f, [k]: v }));
   }
 
-  const digits = (v: string) => v.replace(/\D/g, "");
-  // Chaves já usadas (proponente/vendedor + testemunhas escolhidas) pra o picker
-  // não permitir duplicata.
+  // Pré-filtro do picker (UX): não deixa escolher quem já é proponente/vendedor
+  // ou já foi escolhido. `w.documentation` já vem só-dígitos de pickNewWitnesses.
+  // O dedup AUTORITATIVO acontece no submit, com o mesmo computeDedupeKey do
+  // servidor (evita colisão P2002 e duplo-envio independente da ordem de digitação).
   const witnessExistingKeys = [
     form.proponenteEmail.trim().toLowerCase(),
     form.vendedorEmail.trim().toLowerCase(),
     ...witnesses.map((w) => w.email.trim().toLowerCase()),
-    ...witnesses.map((w) => digits(w.documentation)),
+    ...witnesses.map((w) => w.documentation),
   ].filter(Boolean);
 
   function addWitnessesFromRegistry(selected: RegistryWitness[]) {
@@ -85,11 +87,6 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
 
   function removeWitness(email: string) {
     setWitnesses((prev) => prev.filter((w) => w.email !== email));
-  }
-
-  function handleOpenChange(next: boolean) {
-    setOpen(next);
-    if (!next) setWitnesses([]);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -140,12 +137,35 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
         });
       }
       // Testemunhas escolhidas do cadastro (scope proposta) — assinam junto com
-      // os proprietários (grupo 2).
+      // os proprietários (grupo 2). Dedup AUTORITATIVO aqui com o MESMO
+      // computeDedupeKey do servidor: descarta testemunha que colide com
+      // proponente/vendedor/outra testemunha (senão o @@unique(proposalId,
+      // dedupeKey) estoura P2002 e derruba a proposta inteira) e ignora
+      // testemunha sem e-mail (canal e-mail → o preflight bloquearia o envio).
+      const seenKeys = new Set(
+        signers.map((s) =>
+          computeDedupeKey({
+            name: String(s.name ?? ""),
+            email: (s.email as string | null) ?? null,
+            cpf: (s.cpf as string | null) ?? null,
+            phone: (s.phone as string | null) ?? null,
+          })
+        )
+      );
       for (const w of witnesses) {
+        if (!w.email.trim()) continue;
+        const key = computeDedupeKey({
+          name: w.name,
+          email: w.email,
+          cpf: w.documentation || null,
+          phone: w.phone || null,
+        });
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
         signers.push({
           role: "testemunha",
           name: w.name,
-          email: w.email || null,
+          email: w.email,
           cpf: w.documentation || null,
           phone: w.phone || null,
           notifyChannel: "email",
@@ -181,7 +201,7 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={handleOpenChange}>
+    <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm">
           <Plus className="mr-1 h-4 w-4" /> Nova proposta
