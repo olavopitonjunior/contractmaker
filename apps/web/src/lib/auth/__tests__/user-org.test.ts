@@ -72,7 +72,7 @@ describe("getUserOrg — sweep multi-org", () => {
     expect(mockMembershipFindFirst).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { userId: "u1" },
-        orderBy: { invitedAt: "asc" },
+        orderBy: [{ invitedAt: "asc" }, { id: "asc" }],
       })
     );
   });
@@ -88,8 +88,21 @@ describe("getUserOrg — sweep multi-org", () => {
     expect(org).toEqual({ id: "org-first" });
     // Caiu no ramo de primeira membership (sem subdomínio)
     expect(mockMembershipFindFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ orderBy: { invitedAt: "asc" } })
+      expect.objectContaining({ orderBy: [{ invitedAt: "asc" }, { id: "asc" }] })
     );
+  });
+
+  it("(d2) headers() lança DynamicServerError → RE-LANÇA (não engole o sinal do Next)", async () => {
+    const dyn = Object.assign(new Error("Dynamic server usage"), {
+      digest: "DYNAMIC_SERVER_USAGE",
+    });
+    mockHeaderGet.mockImplementation(() => {
+      throw dyn;
+    });
+
+    await expect(getUserOrg("u1")).rejects.toBe(dyn);
+    // Não caiu no fallback: a rota tem que virar dinâmica, não resolver org errada
+    expect(mockMembershipFindFirst).not.toHaveBeenCalled();
   });
 
   it("(e) opts.subdomainHint explícito vence o header do request", async () => {
@@ -116,7 +129,7 @@ describe("getUserOrg — sweep multi-org", () => {
     expect(org).toEqual({ id: "org-first" });
     expect(mockHeaderGet).not.toHaveBeenCalled();
     expect(mockMembershipFindFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { userId: "u1" }, orderBy: { invitedAt: "asc" } })
+      expect.objectContaining({ where: { userId: "u1" }, orderBy: [{ invitedAt: "asc" }, { id: "asc" }] })
     );
   });
 

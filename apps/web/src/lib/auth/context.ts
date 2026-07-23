@@ -150,8 +150,11 @@ export async function requireAuth(
           `[delegation] X-Act-As-User present but token ${ident.tokenId} lacks scope ${DELEGATION_SCOPE}`
         );
       } else {
-        // Resolve org do dono do token (pra validar mesma org)
-        const tokenOwnerOrg = await getUserOrg(ident.userId);
+        // Resolve org do dono do token (pra validar mesma org). subdomainHint:null
+        // DE PROPÓSITO: é máquina (bearer) — a org vem do token, não do Host, que
+        // um cliente controla. Sem o pin, apontar pra um subdomínio mudaria a org
+        // validada ou daria 403 falso.
+        const tokenOwnerOrg = await getUserOrg(ident.userId, { subdomainHint: null });
         if (!tokenOwnerOrg) {
           return {
             ok: false,

@@ -22,7 +22,21 @@ async function readRequestSubdomainHint(): Promise<string | null> {
   try {
     const { headers } = await import("next/headers");
     return headers().get("x-org-subdomain");
-  } catch {
+  } catch (err) {
+    // `headers()` lança DynamicServerError (digest DYNAMIC_SERVER_USAGE) durante
+    // o prerender estático pra sinalizar ao Next que a rota tem que ser dinâmica.
+    // RE-LANÇAR: engolir mascararia o sinal e poderia deixar a rota prerenderar
+    // estática com hint nulo (org resolvida errada e cacheada). Na prática todo
+    // caller já chamou auth()→cookies() (já dinâmico), mas não dependemos disso.
+    if (
+      err &&
+      typeof err === "object" &&
+      "digest" in err &&
+      (err as { digest?: unknown }).digest === "DYNAMIC_SERVER_USAGE"
+    ) {
+      throw err;
+    }
+    // Fora de request scope (script/CLI/init) → sem hint, fallback legado.
     return null;
   }
 }
@@ -33,11 +47,18 @@ async function readRequestSubdomainHint(): Promise<string | null> {
 // primeira membership.
 //
 // SWEEP MULTI-ORG: o hint é resolvido de UMA fonte só. As ~196 chamadas
-// `getUserOrg(userId)` (page-guards, layouts, páginas, org-scope, require-auth)
-// não passam opts → lêem o header AQUI dentro, ficando consistentes com os 2
-// call-sites que já passam hint explícito (context.ts/requireAuth e o layout do
-// dashboard). Isso elimina o split-brain (gate numa org, página noutra) sem tocar
-// em cada chamador — ver memória project_multiorg_subdomain_resolution.
+// `getUserOrg(userId)` da superfície de SESSÃO/PÁGINA (page-guards, layouts,
+// páginas, org-scope) não passam opts → lêem o header AQUI dentro, ficando
+// consistentes com os 2 call-sites que já passam hint explícito
+// (context.ts/requireAuth e o layout do dashboard). Isso elimina o split-brain
+// (gate numa org, página noutra) sem tocar em cada chamador.
+//
+// Os paths de MÁQUINA (bearer/Newton em require-auth.ts, delegação em context.ts)
+// pinam `{ subdomainHint: null }` DE PROPÓSITO: a org do token vem do dono, não de
+// um Host controlável pelo cliente — senão apontar a integração pra um subdomínio
+// mudaria a org (ou daria 403). O overlay de impersonation cobre o super_admin
+// "testando como" tenant; admin genuíno opera no apex (header ausente → home org).
+// Ver memória project_multiorg_subdomain_resolution.
 export async function getUserOrg(
   userId: string,
   opts?: { subdomainHint?: string | null }
@@ -68,8 +89,11 @@ export async function getUserOrg(
     where: { userId },
     include: { org: true },
     // Determinístico: a primeira org em que o user entrou (era ordem arbitrária
-    // do Postgres). Não desambigua multi-org no apex — lá não há sinal de tenant.
-    orderBy: { invitedAt: "asc" },
+    // do Postgres). `invitedAt` é @default(now()) e NÃO é único (memberships
+    // criadas na mesma transação/seed colidem), então desempata por `id` — sem
+    // ele o Postgres tie-break voltaria a ser arbitrário. Não desambigua multi-org
+    // no apex — lá não há sinal de tenant.
+    orderBy: [{ invitedAt: "asc" }, { id: "asc" }],
   });
   return membership?.org ?? null;
 }
