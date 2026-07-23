@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { authOrBearer, hasScope, type ResolvedAuth } from "@/lib/auth/auth-or-bearer";
 import { getUserOrg } from "@/lib/auth/auth";
+import { sessionSubdomainHint } from "@/lib/auth/subdomain-hint";
 import {
   resolveNewtonActor,
   isRejection,
@@ -113,7 +114,12 @@ export async function requireApiAuth(
     // Spoofing de header — auditar com orgId da request best-effort
     // (org do user dono do token, se bearer; nada se session).
     if (ident.via === "bearer") {
-      const userOrg = await getUserOrg(ident.userId).catch(() => null);
+      // subdomainHint:null → org do token (home), não do Host. Sem o pin, um
+      // spoof vindo de um subdomínio de que o dono não é membro resolveria null
+      // e o audit do spoof seria silenciosamente pulado.
+      const userOrg = await getUserOrg(ident.userId, { subdomainHint: null }).catch(
+        () => null
+      );
       if (userOrg) {
         await audit(
           extractAuditContextFromRequest(req, userOrg.id, ident.userId),
@@ -133,7 +139,12 @@ export async function requireApiAuth(
   }
 
   const requireOrg = opts.requireOrg ?? true;
-  const org = await getUserOrg(actorResult.effectiveUserId);
+  // Regra única (sessionSubdomainHint, espelhada em context.ts): sessão em rota
+  // sanitizada lê o subdomínio; máquina/bearer e rotas fora do matcher pinam
+  // token-based. A org vem do dono do token, não de um Host controlável.
+  const org = await getUserOrg(actorResult.effectiveUserId, {
+    subdomainHint: sessionSubdomainHint(req, ident.via === "session"),
+  });
   if (!org) {
     if (requireOrg) {
       return {

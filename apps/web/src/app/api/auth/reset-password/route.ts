@@ -104,8 +104,11 @@ export async function POST(req: NextRequest) {
   // válido até expirar, mas próximas autenticações usam senha nova.
   await prisma.session.deleteMany({ where: { userId: user.id } }).catch(() => {});
 
-  // Audit log — busca org do user (best-effort, opcional)
-  const org = await getUserOrg(user.id).catch(() => null);
+  // Audit log — busca org do user (best-effort, opcional). subdomainHint:null DE
+  // PROPÓSITO: `api/auth/*` está FORA do matcher do middleware, então o
+  // x-org-subdomain NÃO é sanitizado aqui e um valor forjado pelo cliente
+  // chegaria a getUserOrg. O audit quer a home org do user, não um Host forjado.
+  const org = await getUserOrg(user.id, { subdomainHint: null }).catch(() => null);
   await audit(
     {
       orgId: org?.id ?? "system",

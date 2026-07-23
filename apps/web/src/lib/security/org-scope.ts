@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getUserOrg } from "@/lib/auth/auth";
+import { isDynamicServerError } from "@/lib/auth/user-org";
 
 /**
  * Escopo multitenant deny-by-default para recursos aninhados.
@@ -76,7 +77,10 @@ export async function resolveUserOrgId(
   try {
     const org = await getUserOrg(userId);
     return org?.id ?? null;
-  } catch {
+  } catch (err) {
+    // Não engolir o sinal de dynamic-render do Next (senão prerender estático
+    // com org errada). Ver isDynamicServerError.
+    if (isDynamicServerError(err)) throw err;
     return null;
   }
 }
@@ -106,7 +110,10 @@ export async function requireOrgAdmin(
       res: NextResponse.json({ error: "Unauthorized" }, { status: 401 }),
     };
   }
-  const org = await getUserOrg(userId).catch(() => null);
+  const org = await getUserOrg(userId).catch((err) => {
+    if (isDynamicServerError(err)) throw err;
+    return null;
+  });
   if (!org) {
     return {
       ok: false,

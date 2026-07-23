@@ -1,0 +1,125 @@
+import { prisma } from "@/lib/db/prisma";
+import { getImpersonationFor } from "./impersonation";
+
+/**
+ * Resolução da org do usuário autenticado, respeitando o subdomínio de tenant.
+ *
+ * Fica em módulo próprio (fora de auth.ts, que boota NextAuth no top-level) pra
+ * ser testável sem instanciar o NextAuth e pra desacoplar da config de auth.
+ * `auth.ts` re-exporta `getUserOrg` — o import path `@/lib/auth/auth` continua
+ * válido pros ~196 call-sites.
+ */
+
+/**
+ * Lê o hint de subdomínio de tenant (`x-org-subdomain`, injetado pelo middleware
+ * a partir do host) dos request headers. Import DINÂMICO de `next/headers` de
+ * propósito: este módulo é alcançado pelo grafo de imports do `middleware.ts`
+ * (edge runtime), onde um import estático de `next/headers` quebraria o bundle.
+ * Fora de request scope (script/CLI/init) `headers()` lança → retorna null →
+ * `getUserOrg` cai no fallback legado (primeira membership). Seguro.
+ */
+/**
+ * O `headers()`/`cookies()` do Next lançam um DynamicServerError (digest
+ * DYNAMIC_SERVER_USAGE) durante o prerender estático pra SINALIZAR que a rota tem
+ * que ser dinâmica. Esse erro é control-flow do Next e NÃO pode ser engolido por
+ * catch genérico — senão a rota prerenderaria estática com dado errado cacheado.
+ * Exportado pra que os catch-all que envolvem getUserOrg (org-scope) o re-lancem.
+ */
+export function isDynamicServerError(err: unknown): boolean {
+  return (
+    !!err &&
+    typeof err === "object" &&
+    "digest" in err &&
+    (err as { digest?: unknown }).digest === "DYNAMIC_SERVER_USAGE"
+  );
+}
+
+async function readRequestSubdomainHint(): Promise<string | null> {
+  try {
+    const { headers } = await import("next/headers");
+    const h = headers();
+    // Guarda de rota (mesma regra do sessionSubdomainHint pros wrappers): o
+    // x-pathname é setado pelo middleware, então sua PRESENÇA prova que o
+    // middleware rodou = rota dentro do matcher = header sanitizado. Ausente
+    // (rota fora do matcher, ex. /api/auth) → NÃO confia no x-org-subdomain
+    // (seria forjável), cai no fallback legado. (Bare calls em /api/auth, como
+    // reset-password, também pinam {subdomainHint:null} explicitamente.)
+    if (h.get("x-pathname") == null) return null;
+    return h.get("x-org-subdomain");
+  } catch (err) {
+    // RE-LANÇAR o sinal de dynamic-render (ver isDynamicServerError). Na prática
+    // todo caller já chamou auth()→cookies() (já dinâmico), mas não dependemos
+    // disso.
+    if (isDynamicServerError(err)) throw err;
+    // Fora de request scope (script/CLI/init) → sem hint, fallback legado.
+    return null;
+  }
+}
+
+// Resolve a org do usuário respeitando o subdomínio de tenant. Com hint
+// (x-org-subdomain via middleware) valida a membership NAQUELE tenant — se o user
+// não for membro, retorna null (sem acesso). Sem subdomínio (apex) cai no legado:
+// primeira membership.
+//
+// SWEEP MULTI-ORG: o hint é resolvido de UMA fonte só. As ~196 chamadas
+// `getUserOrg(userId)` da superfície de SESSÃO/PÁGINA (page-guards, layouts,
+// páginas, org-scope) não passam opts → lêem o header AQUI dentro, ficando
+// consistentes com os 2 call-sites que já passam hint explícito
+// (context.ts/requireAuth e o layout do dashboard). Isso elimina o split-brain
+// (gate numa org, página noutra) sem tocar em cada chamador.
+//
+// Os paths de MÁQUINA (bearer/Newton em require-auth.ts, delegação em context.ts)
+// pinam `{ subdomainHint: null }` DE PROPÓSITO: a org do token vem do dono, não de
+// um Host controlável pelo cliente — senão apontar a integração pra um subdomínio
+// mudaria a org (ou daria 403). O overlay de impersonation cobre o super_admin
+// "testando como" tenant; admin genuíno opera no apex (header ausente → home org).
+// Ver memória project_multiorg_subdomain_resolution.
+export async function getUserOrg(
+  userId: string,
+  opts?: { subdomainHint?: string | null }
+) {
+  // Overlay de impersonation: super_admin "testando como" o dono de um tenant
+  // enxerga a org impersonada (ignora o subdomainHint). auth() não é sobreposto,
+  // então `userId` aqui é sempre o admin real — a validação mora em getImpersonationFor.
+  const imp = await getImpersonationFor(userId);
+  if (imp) {
+    return prisma.organization.findUnique({ where: { id: imp.orgId } });
+  }
+
+  // opts presente → hint explícito verbatim (não relê headers; o `null` do apex
+  // já é intencional). opts ausente → lê o header do request scope atual.
+  const subdomain =
+    opts !== undefined
+      ? opts.subdomainHint ?? null
+      : await readRequestSubdomainHint();
+
+  if (subdomain) {
+    const scoped = await prisma.orgMembership.findFirst({
+      where: { userId, org: { subdomain } },
+      include: { org: true },
+    });
+    if (scoped) return scoped.org;
+    // Sem membership nesse subdomínio. FAIL-SAFE: distingue
+    //  (a) subdomínio de TENANT real, mas o user não é membro → null (nega, sem
+    //      acesso ao tenant — isolamento);
+    //  (b) subdomínio que não bate com NENHUMA org (label de infra tipo
+    //      "staging", typo, env sem ROOT_DOMAIN próprio) → NÃO é tenant: trata
+    //      como apex e cai no fallback de primeira membership, evitando lockout
+    //      app-wide de um membro legítimo.
+    const isRealTenant =
+      (await prisma.organization.count({ where: { subdomain } })) > 0;
+    if (isRealTenant) return null;
+    // senão: cai no fallback abaixo (subdomínio desconhecido ≈ apex)
+  }
+  const membership = await prisma.orgMembership.findFirst({
+    where: { userId },
+    include: { org: true },
+    // Determinístico: a primeira org em que o user entrou (era ordem arbitrária
+    // do Postgres). `invitedAt` é @default(now()) e NÃO é único (memberships
+    // criadas na mesma transação/seed colidem), então desempata por `id` — sem
+    // ele o Postgres tie-break voltaria a ser arbitrário. Não desambigua multi-org
+    // no apex — lá não há sinal de tenant.
+    orderBy: [{ invitedAt: "asc" }, { id: "asc" }],
+  });
+  return membership?.org ?? null;
+}
