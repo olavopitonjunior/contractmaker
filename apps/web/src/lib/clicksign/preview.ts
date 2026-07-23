@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import { dealDataToSigners, leaseDataToSigners } from "@/lib/clicksign/mapping";
-import { moduleForDealKind } from "@/lib/modules/resolve";
+import { moduleForDealKind, pipelineKind } from "@/lib/modules/resolve";
 import { MODULE } from "@/lib/modules/catalog";
 import { envelopeCostCents, getMonthlyBudgetCents } from "@/lib/clicksign/costs";
 import { getMonthlySpendCents, mergeDefaultWitnesses } from "@/lib/clicksign/executor";
@@ -73,7 +73,8 @@ export async function buildEnvelopeSendPreview(args: {
       status: 422,
     };
   }
-  // Reflete no preview as testemunhas padrão que o servidor vai forçar no envio.
+  // Preview do caminho DERIVADO (Bearer/Newton): reflete as testemunhas padrão
+  // do scope do módulo que o servidor vai injetar no envio real.
   const signers = await mergeDefaultWitnesses(
     args.orgId,
     derived.map((s) => ({
@@ -84,7 +85,8 @@ export async function buildEnvelopeSendPreview(args: {
       sourceKind: s.sourceKind,
       sourceIndex: s.sourceIndex,
       subKind: s.subKind,
-    }))
+    })),
+    pipelineKind(moduleForDealKind(contract.deal?.pipeline?.kind))
   );
   if (signers.length === 0) {
     return {

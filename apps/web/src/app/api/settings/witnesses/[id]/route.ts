@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import { WITNESS_SCOPES } from "@/lib/clicksign/witness-scope";
 
 export const runtime = "nodejs";
 
@@ -11,6 +12,7 @@ const patchSchema = z.object({
   email: z.string().email("E-mail inválido").optional(),
   mobilePhone: z.string().max(20).optional().nullable(),
   isDefault: z.boolean().optional(),
+  scope: z.enum(WITNESS_SCOPES).optional(),
 });
 
 const onlyDigits = (s: string | null | undefined): string | null => {
@@ -64,6 +66,7 @@ export async function PATCH(
         ? { mobilePhone: onlyDigits(data.mobilePhone) }
         : {}),
       ...(data.isDefault !== undefined ? { isDefault: data.isDefault } : {}),
+      ...(data.scope !== undefined ? { scope: data.scope } : {}),
     },
   });
   return NextResponse.json({ witness: updated });
