@@ -113,7 +113,12 @@ export async function requireApiAuth(
     // Spoofing de header — auditar com orgId da request best-effort
     // (org do user dono do token, se bearer; nada se session).
     if (ident.via === "bearer") {
-      const userOrg = await getUserOrg(ident.userId).catch(() => null);
+      // subdomainHint:null → org do token (home), não do Host. Sem o pin, um
+      // spoof vindo de um subdomínio de que o dono não é membro resolveria null
+      // e o audit do spoof seria silenciosamente pulado.
+      const userOrg = await getUserOrg(ident.userId, { subdomainHint: null }).catch(
+        () => null
+      );
       if (userOrg) {
         await audit(
           extractAuditContextFromRequest(req, userOrg.id, ident.userId),
@@ -133,7 +138,13 @@ export async function requireApiAuth(
   }
 
   const requireOrg = opts.requireOrg ?? true;
-  const org = await getUserOrg(actorResult.effectiveUserId);
+  // Sessão (UI humana) → lê o x-org-subdomain (resolve a org do tenant que o
+  // usuário está navegando). Bearer/Newton (máquina) → pina token-based: a org
+  // vem do dono do token, não de um Host controlável pelo cliente.
+  const org = await getUserOrg(
+    actorResult.effectiveUserId,
+    ident.via === "session" ? undefined : { subdomainHint: null }
+  );
   if (!org) {
     if (requireOrg) {
       return {

@@ -7,7 +7,6 @@ import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { sendEmail } from "@/lib/email/client";
 import { MagicLinkEmail } from "@/lib/email/templates/magic-link";
-import { getImpersonationFor } from "./impersonation";
 
 const loginSchema = z.object({
   email: z.string().email(),
@@ -130,37 +129,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   },
 });
 
-// Helper to get current user's org.
-// Fase 1a: com subdomainHint (vindo do header x-org-subdomain via middleware),
-// resolve a org pelo subdomínio E valida que o user é membro dela — se não for,
-// retorna null (sem acesso àquele tenant). Sem hint (apex), mantém o
-// comportamento legado: primeira membership.
-export async function getUserOrg(
-  userId: string,
-  opts?: { subdomainHint?: string | null }
-) {
-  // Overlay de impersonation: super_admin "testando como" o dono de um tenant
-  // enxerga a org impersonada (ignora o subdomainHint). auth() não é sobreposto,
-  // então `userId` aqui é sempre o admin real — a validação mora em getImpersonationFor.
-  const imp = await getImpersonationFor(userId);
-  if (imp) {
-    return prisma.organization.findUnique({ where: { id: imp.orgId } });
-  }
-
-  const subdomain = opts?.subdomainHint;
-  if (subdomain) {
-    const scoped = await prisma.orgMembership.findFirst({
-      where: { userId, org: { subdomain } },
-      include: { org: true },
-    });
-    return scoped?.org ?? null;
-  }
-  const membership = await prisma.orgMembership.findFirst({
-    where: { userId },
-    include: { org: true },
-  });
-  return membership?.org ?? null;
-}
+// getUserOrg mora em ./user-org (fora deste módulo que boota NextAuth) pra ser
+// testável sem instanciar o NextAuth. Re-exportado aqui: o import path
+// `@/lib/auth/auth` segue válido pros call-sites existentes.
+export { getUserOrg } from "./user-org";
 
 // Legacy helper preserved for backward compat
 export async function verifyOrBootstrapUser(
