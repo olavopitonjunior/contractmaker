@@ -213,6 +213,24 @@ export async function addRequirement(
   });
 }
 
+/**
+ * Remove um requirement (auth `provide_evidence` ou qualificação `agree`) de um
+ * envelope. Usado ao TROCAR o tipo de assinatura ou o papel de um signatário já
+ * criado: como a v3 não tem PATCH de requirement, deleta-se o antigo e recria-se
+ * o novo. Tolerar 404 no chamador (requirement já removido).
+ */
+export async function removeRequirement(
+  envelopeId: string,
+  requirementId: string,
+  creds?: ClicksignCreds
+) {
+  return clicksignRequest<void>({
+    method: "DELETE",
+    path: `/api/v3/envelopes/${envelopeId}/requirements/${requirementId}`,
+    creds,
+  });
+}
+
 export async function activateEnvelope(
   envelopeId: string,
   creds?: ClicksignCreds

@@ -40,6 +40,14 @@ function maskCpfCnpj(raw: string): string {
     .replace(/(\d{4})(\d)/, "$1-$2");
 }
 
+function maskPhone(raw: string): string {
+  const d = raw.replace(/\D/g, "").slice(0, 11);
+  if (d.length <= 10) {
+    return d.replace(/^(\d{2})(\d)/, "($1) $2").replace(/(\d{4})(\d)/, "$1-$2");
+  }
+  return d.replace(/^(\d{2})(\d)/, "($1) $2").replace(/(\d{5})(\d)/, "$1-$2");
+}
+
 export function AddSignerDialog({
   open,
   onOpenChange,
@@ -49,6 +57,7 @@ export function AddSignerDialog({
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [documentation, setDocumentation] = useState("");
+  const [phone, setPhone] = useState("");
   const [role, setRole] = useState<ClicksignRole>("sign");
   const [submitting, setSubmitting] = useState(false);
 
@@ -57,6 +66,7 @@ export function AddSignerDialog({
       setName("");
       setEmail("");
       setDocumentation("");
+      setPhone("");
       setRole("sign");
       setSubmitting(false);
     }
@@ -85,6 +95,7 @@ export function AddSignerDialog({
           name: name.trim(),
           email: email.trim(),
           documentation: docDigits || undefined,
+          phone: phone.replace(/\D/g, "") || undefined,
           role,
           sourceKind: "outro",
           sourceIndex: 0,
@@ -134,15 +145,27 @@ export function AddSignerDialog({
               placeholder="email@exemplo.com"
             />
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="add-signer-doc">CPF/CNPJ (opcional)</Label>
-            <Input
-              id="add-signer-doc"
-              value={maskCpfCnpj(documentation)}
-              onChange={(e) => setDocumentation(e.target.value.replace(/\D/g, ""))}
-              placeholder="000.000.000-00"
-              disabled={submitting}
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="add-signer-phone">Celular (opcional)</Label>
+              <Input
+                id="add-signer-phone"
+                value={maskPhone(phone)}
+                onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))}
+                placeholder="(11) 90000-0000"
+                disabled={submitting}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="add-signer-doc">CPF/CNPJ (opcional)</Label>
+              <Input
+                id="add-signer-doc"
+                value={maskCpfCnpj(documentation)}
+                onChange={(e) => setDocumentation(e.target.value.replace(/\D/g, ""))}
+                placeholder="000.000.000-00"
+                disabled={submitting}
+              />
+            </div>
           </div>
           <div className="space-y-1.5">
             <Label>Assina como</Label>

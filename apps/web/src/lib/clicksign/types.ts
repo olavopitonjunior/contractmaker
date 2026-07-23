@@ -18,7 +18,15 @@ export type SignerStatus =
   // `tracking_notification_error` da ClickSign (só no feed REST `/events`).
   | "email_failed";
 
-export type AuthMethod = "email" | "whatsapp" | "selfie" | "icp_brasil";
+/** Tupla runtime dos métodos de autenticação — fonte pra z.enum nas rotas. */
+export const CLICKSIGN_AUTH_METHODS = [
+  "email",
+  "whatsapp",
+  "selfie",
+  "icp_brasil",
+] as const;
+
+export type AuthMethod = (typeof CLICKSIGN_AUTH_METHODS)[number];
 
 export type SourceKind =
   | "vendedor"
