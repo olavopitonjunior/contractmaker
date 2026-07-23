@@ -20,6 +20,7 @@ import {
   readPersistedAssignment,
   type DocumentosStepAdapter,
 } from "@/components/forms/steps/doc-step-adapter";
+import { MAX_ASSIGNMENT_INDEX } from "@/lib/forms/assignment-scope";
 import { mapAttachmentStatusToCard } from "@/lib/forms/attachment-status";
 
 interface DocumentosStepProps {
@@ -596,6 +597,12 @@ export function DocumentosStep({
   const ensureSlot = useCallback(
     (kind: DocumentKind, index: number) => {
       if (kind === "outro") return;
+      // Guard de sanidade: índice fora de [0,MAX] cresceria o array sem limite
+      // (trava a aba). Os callers já saneiam (readPersistedAssignment/suggest),
+      // isto é defesa em profundidade contra qualquer índice inesperado.
+      if (!Number.isInteger(index) || index < 0 || index > MAX_ASSIGNMENT_INDEX) {
+        return;
+      }
       const target = adapter.fieldKeyForKind(kind);
       if (!target) return;
       const current = (form.getValues(target.key) as any[] | undefined) ?? [];

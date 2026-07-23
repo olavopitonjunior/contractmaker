@@ -11,19 +11,21 @@ import {
   type FichaResumoData,
   type ProcessedDocHint,
 } from "@/lib/forms/extracted-to-form";
+import { parseAssignment } from "@/lib/forms/assignment-scope";
 
 /**
  * Valida o shape de `extractedData.assignment` persistido (PATCH em handleApply)
  * antes de confiar nele como assignment do card (Fix 1: reflexão da escolha da
  * parte no restore). Doc antigo pode não ter o campo → retorna null.
+ *
+ * Delega a `parseAssignment`: além de checar `{kind,index}`, valida `kind`
+ * contra o conjunto conhecido e limita `index` a [0, MAX] — o assignment agora
+ * é auto-aplicado (Fix 3), então índice gigante travaria o `ensureSlot`.
  */
 export function readPersistedAssignment(extracted: unknown): Assignment | null {
   if (!extracted || typeof extracted !== "object") return null;
-  const a = (extracted as { assignment?: unknown }).assignment;
-  if (!a || typeof a !== "object") return null;
-  const { kind, index } = a as { kind?: unknown; index?: unknown };
-  if (typeof kind !== "string" || typeof index !== "number") return null;
-  return { kind: kind as DocumentKind, index };
+  const parsed = parseAssignment((extracted as { assignment?: unknown }).assignment);
+  return parsed ? { kind: parsed.kind as DocumentKind, index: parsed.index } : null;
 }
 
 /**
