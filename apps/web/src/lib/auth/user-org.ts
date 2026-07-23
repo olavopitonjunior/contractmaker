@@ -18,24 +18,31 @@ import { getImpersonationFor } from "./impersonation";
  * Fora de request scope (script/CLI/init) `headers()` lança → retorna null →
  * `getUserOrg` cai no fallback legado (primeira membership). Seguro.
  */
+/**
+ * O `headers()`/`cookies()` do Next lançam um DynamicServerError (digest
+ * DYNAMIC_SERVER_USAGE) durante o prerender estático pra SINALIZAR que a rota tem
+ * que ser dinâmica. Esse erro é control-flow do Next e NÃO pode ser engolido por
+ * catch genérico — senão a rota prerenderaria estática com dado errado cacheado.
+ * Exportado pra que os catch-all que envolvem getUserOrg (org-scope) o re-lancem.
+ */
+export function isDynamicServerError(err: unknown): boolean {
+  return (
+    !!err &&
+    typeof err === "object" &&
+    "digest" in err &&
+    (err as { digest?: unknown }).digest === "DYNAMIC_SERVER_USAGE"
+  );
+}
+
 async function readRequestSubdomainHint(): Promise<string | null> {
   try {
     const { headers } = await import("next/headers");
     return headers().get("x-org-subdomain");
   } catch (err) {
-    // `headers()` lança DynamicServerError (digest DYNAMIC_SERVER_USAGE) durante
-    // o prerender estático pra sinalizar ao Next que a rota tem que ser dinâmica.
-    // RE-LANÇAR: engolir mascararia o sinal e poderia deixar a rota prerenderar
-    // estática com hint nulo (org resolvida errada e cacheada). Na prática todo
-    // caller já chamou auth()→cookies() (já dinâmico), mas não dependemos disso.
-    if (
-      err &&
-      typeof err === "object" &&
-      "digest" in err &&
-      (err as { digest?: unknown }).digest === "DYNAMIC_SERVER_USAGE"
-    ) {
-      throw err;
-    }
+    // RE-LANÇAR o sinal de dynamic-render (ver isDynamicServerError). Na prática
+    // todo caller já chamou auth()→cookies() (já dinâmico), mas não dependemos
+    // disso.
+    if (isDynamicServerError(err)) throw err;
     // Fora de request scope (script/CLI/init) → sem hint, fallback legado.
     return null;
   }
