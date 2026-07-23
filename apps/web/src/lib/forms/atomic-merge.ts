@@ -1,6 +1,7 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { deepMergeAtPaths, type DeepMergeResult } from "./dataJson-merge";
+import { filterBlankPartyArrays } from "./blank-party";
 
 /**
  * Merge atômico de `SalesForm.dataJson`.
@@ -44,6 +45,14 @@ export interface AtomicMergeArgs {
   /** Allowlist top-level (ROLE_PATHS[role] nos subtokens). */
   allowedTopKeys?: readonly string[];
   /**
+   * Chaves de arrays de partes protegidas contra eco de template: quando o
+   * `incoming[key]` é 100% partes template-vazias e o estado FRESCO (lido sob
+   * o lock) já tem parte com conteúdo, a chave é descartada e reportada em
+   * `skippedBlankArrayKeys`. Ver lib/forms/blank-party.ts. Ausente = merge
+   * idêntico ao comportamento anterior.
+   */
+  protectBlankPartyArrays?: readonly string[];
+  /**
    * Pós-processamento síncrono do merged DENTRO do lock (ex.: dedupConjuges
    * no finalize) — roda sobre a leitura fresca, o que gravamos é o retorno.
    * Recebe também a linha fresca pra decisões que dependem do estado atual
@@ -68,6 +77,8 @@ export interface AtomicMergeArgs {
 }
 
 export interface AtomicMergeResult extends DeepMergeResult {
+  /** Chaves descartadas pelo guard `protectBlankPartyArrays` (vazio sem ele). */
+  skippedBlankArrayKeys: string[];
   updated: {
     id: string;
     status: string;
@@ -107,9 +118,19 @@ export async function mergeSalesFormDataJson(
 
       const fresh = rows[0];
       const current = (fresh.dataJson ?? {}) as Record<string, unknown>;
+      // Guard contra eco de template (CPU puro, sem I/O no lock): compara o
+      // incoming contra o estado FRESCO — comparar contra a leitura stale do
+      // caller reabriria exatamente a janela que este lock fecha.
+      const guarded = args.protectBlankPartyArrays?.length
+        ? filterBlankPartyArrays(
+            current,
+            args.incoming,
+            args.protectBlankPartyArrays,
+          )
+        : { incoming: args.incoming, skippedKeys: [] as string[] };
       const outcome = deepMergeAtPaths(
         current,
-        args.incoming,
+        guarded.incoming,
         args.allowedTopKeys,
       );
       const finalData = args.transform
@@ -134,6 +155,7 @@ export async function mergeSalesFormDataJson(
       return {
         merged: outcome.merged,
         rejectedPaths: outcome.rejectedPaths,
+        skippedBlankArrayKeys: guarded.skippedKeys,
         updated,
         finalData,
       };

@@ -21,9 +21,11 @@ export interface UseAutoSaveOptions {
    * essas chaves de `data` vão no PATCH — server-side `deepMergeAtPaths`
    * (PR 1) aplica filtro adicional. Default `undefined` (manda tudo).
    *
-   * Usado por subtokens vendedor (`["vendedores","imoveis"]`) e comprador
-   * (`["compradores"]`) pra evitar mandar defaults vazios que poderiam
-   * sobrescrever dados da outra parte se o server falhasse.
+   * Os wizards passam o escopo dinâmico de useDirtyTopLevelScope (chaves que
+   * ESTE cliente sujou, ∩ ROLE_PATHS no subtoken): uma aba parada não fabrica
+   * escrita em fatia alheia — foi assim que o token principal apagou os
+   * `vendedores` gravados por um link individual (lost update 2026-07-23).
+   * Scope vazio ⇒ slice `{}` ⇒ nenhum PATCH sai.
    */
   pathScope?: readonly string[];
   debounceMs?: number;
@@ -95,6 +97,7 @@ export function useAutoSave(
       const sliced = slice(dataToSave);
       const serialized = JSON.stringify(sliced);
       if (serialized === lastSavedRef.current) return;
+      if (serialized === "{}") return; // scope vazio — nada a persistir
       if (stoppedRef.current) return;
 
       setStatus("saving");
@@ -108,6 +111,15 @@ export function useAutoSave(
         if (!mountedRef.current) return;
 
         if (res.ok) {
+          // Guard server-side pode ter descartado chaves (eco de template —
+          // ver blank-party.ts). Loga pra diagnóstico: a pill mostra "salvo",
+          // mas o servidor manteve o conteúdo antigo daquelas chaves.
+          const body = await res.json().catch(() => null);
+          if (body?.skippedBlankArrayKeys?.length) {
+            console.warn("[auto-save] servidor manteve chaves protegidas", {
+              skippedBlankArrayKeys: body.skippedBlankArrayKeys,
+            });
+          }
           lastSavedRef.current = serialized;
           setStatus("saved");
           setTimeout(() => {
