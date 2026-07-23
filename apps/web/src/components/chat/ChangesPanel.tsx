@@ -194,6 +194,27 @@ export function ChangesPanel({
   );
 }
 
+/** Rótulo de autor da edição a partir de source/action. */
+function authorBadge(item: ChangeLogItem): { label: string; className: string } {
+  if (item.action === "human_doc_edit")
+    return { label: "Manual", className: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300" };
+  switch (item.source) {
+    case "ai":
+      return { label: "IA", className: "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300" };
+    case "user":
+      return { label: "Você", className: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300" };
+    default:
+      return { label: "Sistema", className: "bg-muted text-muted-foreground" };
+  }
+}
+
+/** Rótulo PT-BR pra actions que aparecem crus. Só as user-facing importam; as
+ *  demais (snake_case da IA) já existiam e ficam como estão. */
+function actionLabel(action: string): string {
+  if (action === "human_doc_edit") return "Edição manual";
+  return action;
+}
+
 function ChangeItem({
   item,
   expanded,
@@ -207,29 +228,56 @@ function ChangeItem({
     hour: "2-digit",
     minute: "2-digit",
   });
+  const author = authorBadge(item);
+  // Expansível só quando há diff REAL: ambos snapshots não-nulos E diferentes.
+  // Inclui inserção em doc vazio (htmlBefore="" ≠ conteúdo — o `!!` do servidor
+  // excluiria); exclui no-op (antes==depois) e human_doc_edit (snapshots nulos).
+  const hasDiff =
+    item.htmlBefore !== null &&
+    item.htmlAfter !== null &&
+    item.htmlBefore !== item.htmlAfter;
+
+  const header = (
+    <>
+      <div className="flex items-center gap-1.5">
+        <span
+          className={cn(
+            "text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0",
+            author.className
+          )}
+        >
+          {author.label}
+        </span>
+        <span className="text-xs font-medium truncate">{actionLabel(item.action)}</span>
+        <span className="text-[10px] text-muted-foreground shrink-0">{time}</span>
+      </div>
+      <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
+        {item.summary}
+      </p>
+    </>
+  );
+
   return (
     <div className="rounded-md border bg-card">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex w-full items-start gap-2 p-2.5 text-left hover:bg-muted/40 transition-colors"
-      >
-        {expanded ? (
-          <ChevronDown className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
-        )}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs font-medium truncate">{item.action}</span>
-            <span className="text-[10px] text-muted-foreground shrink-0">{time}</span>
-          </div>
-          <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
-            {item.summary}
-          </p>
+      {hasDiff ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex w-full items-start gap-2 p-2.5 text-left hover:bg-muted/40 transition-colors"
+        >
+          {expanded ? (
+            <ChevronDown className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
+          )}
+          <div className="flex-1 min-w-0">{header}</div>
+        </button>
+      ) : (
+        <div className="flex w-full items-start gap-2 p-2.5">
+          <div className="flex-1 min-w-0">{header}</div>
         </div>
-      </button>
-      {expanded && item.htmlBefore !== null && item.htmlAfter !== null && (
+      )}
+      {hasDiff && expanded && item.htmlBefore !== null && item.htmlAfter !== null && (
         <div className="border-t bg-muted/20 p-2">
           <DiffView before={item.htmlBefore} after={item.htmlAfter} />
         </div>

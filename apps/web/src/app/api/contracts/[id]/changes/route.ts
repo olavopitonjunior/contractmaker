@@ -48,10 +48,27 @@ export async function GET(
   const logs = await prisma.contractChangeLog.findMany({
     where: {
       contractId: params.id,
-      ...(sessionId ? { sessionId } : {}),
-      ...(onlyDiffs
-        ? { htmlBefore: { not: null }, htmlAfter: { not: null } }
-        : {}),
+      // AND de dois OR (Prisma não aceita duas chaves `OR` no mesmo nível).
+      AND: [
+        // Filtro de sessão: human_doc_edit não tem sessionId (vem do webhook do
+        // Drive, fora de qualquer chat) — ainda assim deve aparecer na visão
+        // "Esta sessão" (senão a atribuição manual só apareceria em "Todas").
+        ...(sessionId
+          ? [{ OR: [{ sessionId }, { action: "human_doc_edit" }] }]
+          : []),
+        // onlyDiffs: entries com snapshot (write tools) OU edições manuais
+        // humanas (human_doc_edit é atribuição sem diff — o valor é o "quem/quando").
+        ...(onlyDiffs
+          ? [
+              {
+                OR: [
+                  { htmlBefore: { not: null }, htmlAfter: { not: null } },
+                  { action: "human_doc_edit" },
+                ],
+              },
+            ]
+          : []),
+      ],
     },
     orderBy: { createdAt: "desc" },
     take: 100,

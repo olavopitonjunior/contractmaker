@@ -68,6 +68,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true, unmatched: true });
   }
 
+  // Ping cru (mantido — outras partes contam com google_doc_updated pra "doc
+  // mudou"; a retention limpa em 90d).
   await prisma.contractChangeLog.create({
     data: {
       contractId: contract.id,
@@ -82,6 +84,29 @@ export async function POST(req: NextRequest) {
       source: "system",
     },
   });
+
+  // Atribuição IA×humano: se o Doc NÃO foi editado programaticamente há pouco
+  // (sem marcador), este ping é edição MANUAL humana no iframe → registra uma
+  // entry atribuída (sem diff — ver human-doc-edit). "echo" (edição do app/IA, já
+  // logada como source:"ai") e "unknown" (Redis indisponível — fail-safe) NÃO
+  // viram atribuição humana.
+  if (resourceState === "update" && contract.googleDocId) {
+    try {
+      const { checkDocEcho } = await import("@/lib/google/doc-edit-marker");
+      if ((await checkDocEcho(contract.googleDocId)) === "manual") {
+        const { recordHumanDocEdit } = await import(
+          "@/lib/contracts/human-doc-edit"
+        );
+        await recordHumanDocEdit(
+          { db: prisma, now: () => new Date() },
+          { contractId: contract.id, details: { channelId, resourceId } }
+        );
+      }
+    } catch (err) {
+      // Nunca derruba o webhook por causa da atribuição.
+      console.error("[drive-webhook] atribuição humana falhou:", err);
+    }
+  }
 
   return NextResponse.json({ ok: true });
 }

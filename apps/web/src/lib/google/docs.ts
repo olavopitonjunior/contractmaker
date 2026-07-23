@@ -7,6 +7,7 @@ import {
   getServiceAccountEmail,
   isOwnerOAuthConfigured,
 } from "./client";
+import { markProgrammaticDocEdit } from "./doc-edit-marker";
 
 export interface CreateDocFromTemplateInput {
   templateDocId: string;
@@ -142,6 +143,7 @@ export async function cleanupOrphanPlaceholders(docId: string): Promise<string[]
     const text = await getDocPlainText(docId);
     const orphans = Array.from(new Set(text.match(/\{\{[^{}\n]+\}\}/g) || []));
     if (orphans.length > 0) {
+      void markProgrammaticDocEdit(docId); // batchUpdate raw — marca p/ o eco (#5)
       await docs.documents.batchUpdate({
         documentId: docId,
         requestBody: {
@@ -213,6 +215,9 @@ export async function addDocPermission(
       "Owner OAuth não configurado — compartilhamento por email exige GOOGLE_OWNER_REFRESH_TOKEN."
     );
   }
+  // Mudança de permissão dispara "update" no watch sem mudar conteúdo — marca
+  // como programática pra o webhook não registrar edição manual fantasma (#4).
+  void markProgrammaticDocEdit(docId);
   const ownerDrive = getOwnerDriveClient();
   const res = await ownerDrive.permissions.create({
     fileId: docId,
@@ -233,6 +238,7 @@ export async function addDocPermission(
 
 /** Remove uma permissão pelo permissionId (vindo de listDocPermissions). */
 export async function removeDocPermission(docId: string, permissionId: string): Promise<void> {
+  void markProgrammaticDocEdit(docId); // metadados → não é edição manual (#4)
   const drive = getDriveClient();
   await drive.permissions.delete({
     fileId: docId,
@@ -243,6 +249,7 @@ export async function removeDocPermission(docId: string, permissionId: string): 
 
 /** Revoga permissões de escrita do doc, deixando apenas owner com write. */
 export async function makeDocReadOnly(docId: string): Promise<void> {
+  void markProgrammaticDocEdit(docId); // metadados → não é edição manual (#4)
   const drive = getDriveClient();
   const list = await drive.permissions.list({
     fileId: docId,
@@ -319,6 +326,12 @@ export async function batchUpdateDoc(
   docId: string,
   requests: import("googleapis").docs_v1.Schema$Request[]
 ) {
+  // Marca esta edição como PROGRAMÁTICA (chave por docId, TTL) pra o eco do
+  // webhook do Drive NÃO ser atribuído como edição manual. Fire-and-forget (void):
+  // roda concorrente com a mutação (que é mais lenta) → o marcador fica pronto
+  // antes do ping do Drive (segundos depois) sem bloquear a geração. Dedup
+  // in-memory capa o custo a 1 SET/docId/10s. Ver lib/google/doc-edit-marker.
+  void markProgrammaticDocEdit(docId);
   const docs = getDocsClient();
   return docs.documents.batchUpdate({
     documentId: docId,

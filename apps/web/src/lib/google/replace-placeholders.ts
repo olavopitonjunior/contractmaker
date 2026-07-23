@@ -1,4 +1,5 @@
 import { getDocsClient } from "./client";
+import { markProgrammaticDocEdit } from "./doc-edit-marker";
 
 /**
  * Aplica `replaceAllText` em batchUpdate para substituir placeholders simples
@@ -98,6 +99,7 @@ export async function replacePlaceholdersInDoc(
     return { totalRequests: 0, occurrencesByToken: {} };
   }
 
+  void markProgrammaticDocEdit(input.docId); // batchUpdate raw — marca p/ o eco (#5)
   const res = await docs.documents.batchUpdate({
     documentId: input.docId,
     requestBody: { requests },
