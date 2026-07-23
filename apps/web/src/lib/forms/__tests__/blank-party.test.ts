@@ -57,6 +57,9 @@ describe("isBlankParty", () => {
     expect(isBlankParty({ razao_social: "ACME LTDA" })).toBe(false);
     expect(isBlankParty({ cnpj: "00000000000191" })).toBe(false);
     expect(isBlankParty({ rg: "48478909" })).toBe(false);
+    expect(isBlankParty({ ...TEMPLATE_VENDA, mobile_phone: "11999998888" })).toBe(
+      false,
+    );
   });
 
   it("string só de whitespace conta como vazia", () => {

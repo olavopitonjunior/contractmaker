@@ -30,9 +30,17 @@ export const PARTY_IDENTIFIER_FIELDS = [
   "razao_social",
   "email",
   "rg",
+  "mobile_phone",
 ] as const;
 
-/** Chaves top-level de arrays de partes nas duas esteiras (venda + locação). */
+/**
+ * Chaves top-level de arrays de partes nas duas esteiras (venda + locação).
+ *
+ * Lacuna conhecida: `imoveis` (venda) e `imovel` (locação) NÃO têm guard —
+ * o shape é outro (endereço/matrícula/cep, sem os identificadores de pessoa)
+ * e `isBlankParty` não se aplica. O eco de template nessas chaves fica
+ * coberto só pela camada 1 (dirty-scope do cliente).
+ */
 export const PARTY_ARRAY_KEYS = [
   "vendedores",
   "compradores",

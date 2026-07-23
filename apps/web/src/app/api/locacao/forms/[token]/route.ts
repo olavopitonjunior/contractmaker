@@ -329,5 +329,6 @@ export async function PATCH(
     contractId,
     dealId,
     validationIssues,
+    skippedBlankArrayKeys: mergeOutcome.skippedBlankArrayKeys,
   });
 }

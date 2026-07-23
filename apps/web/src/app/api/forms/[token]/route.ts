@@ -510,6 +510,9 @@ export async function PATCH(
     updatedAt: updated.updatedAt,
     contractId,
     dealId,
+    // Chaves que o guard anti eco de template descartou — o cliente loga pra
+    // diagnóstico (a UI mostraria "salvo" com dados que o servidor manteve).
+    skippedBlankArrayKeys: mergeOutcome.skippedBlankArrayKeys,
     // A6: problemas de validação detectados no finalize (não bloqueiam a
     // geração, mas o cliente pode exibir e o contrato gerado terá os findings
     // do render linter). Vazio quando os dados passam no dadosContratoSchema.

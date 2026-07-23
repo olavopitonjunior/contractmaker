@@ -709,13 +709,26 @@ export function DocumentosStep({
         form as UseFormReturn<Record<string, unknown>>,
         { skipIfDirty: true }
       );
-      fetch(`/api/forms/${token}/attachments?id=${d.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ assignment: selfAssignment }),
-      }).catch(() => {
-        /* non-blocking — o card local já reflete a atribuição */
-      });
+      // Persistência é o que faz o doc refletir no form principal (Fix 3) —
+      // como aqui não há clique do usuário pra "tentar de novo", uma falha
+      // transitória de rede ganha 1 retry antes de desistir.
+      const persistAssignment = () =>
+        fetch(`/api/forms/${token}/attachments?id=${d.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ assignment: selfAssignment }),
+        });
+      persistAssignment()
+        .then((res) => {
+          if (!res.ok) throw new Error(`assignment PATCH ${res.status}`);
+        })
+        .catch(() => {
+          setTimeout(() => {
+            persistAssignment().catch(() => {
+              /* non-blocking — o card local já reflete a atribuição */
+            });
+          }, 3000);
+        });
     }
     setDocs((prev) =>
       prev.map((d) =>

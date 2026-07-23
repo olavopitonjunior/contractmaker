@@ -245,5 +245,6 @@ export async function PATCH(
     completedAt:
       (participant.completedAt ?? completedNow)?.toISOString() ?? null,
     rejectedPaths: mergeOutcome.rejectedPaths,
+    skippedBlankArrayKeys: mergeOutcome.skippedBlankArrayKeys,
   });
 }

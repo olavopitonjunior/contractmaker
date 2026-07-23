@@ -111,6 +111,15 @@ export function useAutoSave(
         if (!mountedRef.current) return;
 
         if (res.ok) {
+          // Guard server-side pode ter descartado chaves (eco de template —
+          // ver blank-party.ts). Loga pra diagnóstico: a pill mostra "salvo",
+          // mas o servidor manteve o conteúdo antigo daquelas chaves.
+          const body = await res.json().catch(() => null);
+          if (body?.skippedBlankArrayKeys?.length) {
+            console.warn("[auto-save] servidor manteve chaves protegidas", {
+              skippedBlankArrayKeys: body.skippedBlankArrayKeys,
+            });
+          }
           lastSavedRef.current = serialized;
           setStatus("saved");
           setTimeout(() => {
