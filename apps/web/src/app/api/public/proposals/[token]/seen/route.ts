@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createHash } from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
 import { advanceProposalStatus } from "@/lib/proposals/status";
+import { rateLimit } from "@/lib/security/ratelimit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -32,6 +33,16 @@ export async function POST(req: NextRequest, { params }: { params: { token: stri
     .update(ip + (process.env.AUTH_SECRET ?? ""))
     .digest("hex")
     .slice(0, 32);
+
+  // Rate-limit por (token, ip): a rota é pública e sem isto qualquer um com o link
+  // scriptava POSTs inflando viewCount e floodando ProposalEvent. 12/min cobre
+  // remounts/refreshes legítimos; excesso vira 200 silencioso (beacon nunca erra).
+  const rl = await rateLimit({
+    identifier: `proposal-seen:${params.token}:${ipHash}`,
+    limit: 12,
+    window: "1 m",
+  });
+  if (!rl.success) return NextResponse.json({ ok: true });
 
   await prisma.proposalEvent
     .create({

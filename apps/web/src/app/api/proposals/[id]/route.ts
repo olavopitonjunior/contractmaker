@@ -103,6 +103,22 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       { status: 409 }
     );
   }
+  // Invariante da plataforma (igual ao delete de contrato): nunca excluir com um
+  // Envelope ClickSign ainda VIVO — a cascata apagaria a linha local mas deixaria
+  // o envelope ativo e cobrável na ClickSign, e assinaturas/webhooks posteriores
+  // não resolveriam mais a proposta. Ex.: 'expirada' (o cron marca o status mas o
+  // envelope pode seguir running) ou 'recusada_proponente' com o vendedor ainda
+  // pendente. Cancele primeiro (POST /cancel cancela o remoto).
+  const liveEnvelope = await prisma.envelope.findFirst({
+    where: { proposalId: params.id, status: "running", clicksignId: { not: null } },
+    select: { id: true },
+  });
+  if (liveEnvelope) {
+    return NextResponse.json(
+      { error: "Cancele a assinatura antes de excluir." },
+      { status: 409 }
+    );
+  }
 
   await prisma.proposal.delete({ where: { id: params.id } });
   await audit(
