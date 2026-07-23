@@ -229,11 +229,13 @@ function ChangeItem({
     minute: "2-digit",
   });
   const author = authorBadge(item);
-  // Só entries COM diff (write tools) são expansíveis. Usa o `hasDiff` do servidor
-  // (que já exige htmlBefore !== htmlAfter) — não recomputar só por não-null, senão
-  // um no-op (antes==depois) mostraria chevron + diff vazio. human_doc_edit (sem
-  // diff) e no-ops → linha estática.
-  const hasDiff = item.hasDiff;
+  // Expansível só quando há diff REAL: ambos snapshots não-nulos E diferentes.
+  // Inclui inserção em doc vazio (htmlBefore="" ≠ conteúdo — o `!!` do servidor
+  // excluiria); exclui no-op (antes==depois) e human_doc_edit (snapshots nulos).
+  const hasDiff =
+    item.htmlBefore !== null &&
+    item.htmlAfter !== null &&
+    item.htmlBefore !== item.htmlAfter;
 
   const header = (
     <>

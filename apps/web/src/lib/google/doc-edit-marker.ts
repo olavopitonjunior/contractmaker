@@ -98,9 +98,16 @@ export async function markProgrammaticDocEdit(docId: string): Promise<void> {
   const now = Date.now();
   const last = lastMarkedAt.get(docId);
   if (last !== undefined && now - last < MARK_DEDUP_MS) return; // já setei há pouco
-  // Poda: entradas mais velhas que a janela de dedup são inúteis (o check acima
-  // já as trata como expiradas). Evita crescimento monotônico do Map numa
-  // instância longeva. O(n) só quando o Map cresce além do cap.
+  // Dedup-before: registra o timestamp ANTES do SET pra CAPAR o custo a 1 SET por
+  // docId a cada 10s. Crucial na geração (expandLoops chama isto dezenas de vezes
+  // pro mesmo doc) — os callers usam `void` (fire-and-forget), então o SET roda
+  // concorrente com a mutação, sem bloquear, e um Redis lento não vira dezenas de
+  // esperas de 2s. Resíduo aceito: se o SET falhar/atrasar sob Redis degradado, o
+  // marcador pode faltar e gerar um "Manual" espúrio — RARO e cosmético (a IA já
+  // loga source:"ai"; sem perda de dado).
+  lastMarkedAt.set(docId, now);
+  // Poda: entradas mais velhas que a janela de dedup são inúteis. Evita
+  // crescimento monotônico do Map. O(n) só quando cresce além do cap.
   if (lastMarkedAt.size > 200) {
     for (const [k, t] of lastMarkedAt) {
       if (now - t >= MARK_DEDUP_MS) lastMarkedAt.delete(k);
@@ -109,15 +116,9 @@ export async function markProgrammaticDocEdit(docId: string): Promise<void> {
   try {
     const redis = await getRedis();
     if (!redis) return;
-    const res = await raceTimeout(redis.set(key(docId), "1", { ex: ECHO_TTL_SECONDS }));
-    // Só registra o dedup se o SET CONFIRMOU — senão (timeout/erro) o marcador
-    // pode não ter sido escrito, e pular os retries por 10s deixaria o eco de uma
-    // edição programática sem marcador (phantom "Manual").
-    if (res !== TIMEOUT) lastMarkedAt.set(docId, now);
+    await raceTimeout(redis.set(key(docId), "1", { ex: ECHO_TTL_SECONDS }));
   } catch {
-    // best-effort — no pior caso o webhook trata o ping como manual (a IA já
-    // logou a própria edição como source:"ai", então no máximo há uma entry
-    // "manual" espúria, não perda de dado).
+    // best-effort — ver resíduo aceito acima.
   }
 }
 
