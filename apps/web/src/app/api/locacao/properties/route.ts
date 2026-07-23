@@ -39,6 +39,25 @@ export async function POST(req: NextRequest) {
   const parsed = await parseJsonBody(req, propertyCreateSchema);
   if (!parsed.ok) return parsed.response;
 
+  // Dedupe de import externo: mesmo registro do CRM já importado → 409 com o
+  // id existente (a UI oferece abrir o cadastro em vez de duplicar).
+  if (parsed.data.crmId) {
+    const existing = await prisma.property.findFirst({
+      where: { orgId: ctx.orgId, crmId: parsed.data.crmId },
+      select: { id: true },
+    });
+    if (existing) {
+      return NextResponse.json(
+        {
+          error: "ALREADY_IMPORTED",
+          message: "Este imóvel já foi importado do CRM.",
+          propertyId: existing.id,
+        },
+        { status: 409 }
+      );
+    }
+  }
+
   const property = await prisma.property.create({
     data: { ...parsed.data, orgId: ctx.orgId },
   });

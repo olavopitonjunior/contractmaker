@@ -88,6 +88,10 @@ export const propertyCreateSchema = z.object({
   fotos: z.array(z.string().url()).default([]),
   descricaoIa: z.string().optional(),
   valorAluguelSugerido: z.number().nonnegative().optional(),
+  // Origem externa (import de CRM — hoje iList/RexAPI). O ImportarCrmDialog já
+  // enviava esses campos; agora persistem e alimentam o dedupe (409 na rota).
+  source: z.enum(["crm", "ilist"]).optional(),
+  crmId: z.string().max(120).optional(),
 });
 
 export const propertyUpdateSchema = propertyCreateSchema.partial();
