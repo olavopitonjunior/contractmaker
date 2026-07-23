@@ -98,11 +98,22 @@ export async function markProgrammaticDocEdit(docId: string): Promise<void> {
   const now = Date.now();
   const last = lastMarkedAt.get(docId);
   if (last !== undefined && now - last < MARK_DEDUP_MS) return; // já setei há pouco
-  lastMarkedAt.set(docId, now);
+  // Poda: entradas mais velhas que a janela de dedup são inúteis (o check acima
+  // já as trata como expiradas). Evita crescimento monotônico do Map numa
+  // instância longeva. O(n) só quando o Map cresce além do cap.
+  if (lastMarkedAt.size > 200) {
+    for (const [k, t] of lastMarkedAt) {
+      if (now - t >= MARK_DEDUP_MS) lastMarkedAt.delete(k);
+    }
+  }
   try {
     const redis = await getRedis();
     if (!redis) return;
-    await raceTimeout(redis.set(key(docId), "1", { ex: ECHO_TTL_SECONDS }));
+    const res = await raceTimeout(redis.set(key(docId), "1", { ex: ECHO_TTL_SECONDS }));
+    // Só registra o dedup se o SET CONFIRMOU — senão (timeout/erro) o marcador
+    // pode não ter sido escrito, e pular os retries por 10s deixaria o eco de uma
+    // edição programática sem marcador (phantom "Manual").
+    if (res !== TIMEOUT) lastMarkedAt.set(docId, now);
   } catch {
     // best-effort — no pior caso o webhook trata o ping como manual (a IA já
     // logou a própria edição como source:"ai", então no máximo há uma entry
