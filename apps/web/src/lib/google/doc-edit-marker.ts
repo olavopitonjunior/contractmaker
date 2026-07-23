@@ -60,24 +60,33 @@ async function getRedis() {
 const TIMEOUT = Symbol("redis-timeout");
 
 /** Race com um sentinela DISTINTO de `null` — o get do Redis devolve null quando
- *  a chave não existe, e precisamos separar isso de "timeout/indisponível". */
+ *  a chave não existe, e precisamos separar isso de "timeout/indisponível".
+ *  clearTimeout no caminho vencedor pra não deixar timers de 2s pendurados
+ *  (markProgrammaticDocEdit é chamado dezenas de vezes na geração). */
 function raceTimeout<T>(p: Promise<T>): Promise<T | typeof TIMEOUT> {
-  return Promise.race([
-    p,
-    new Promise<typeof TIMEOUT>((resolve) =>
-      setTimeout(() => resolve(TIMEOUT), REDIS_TIMEOUT_MS)
-    ),
-  ]);
+  let timer: ReturnType<typeof setTimeout>;
+  const timeout = new Promise<typeof TIMEOUT>((resolve) => {
+    timer = setTimeout(() => resolve(TIMEOUT), REDIS_TIMEOUT_MS);
+  });
+  return Promise.race([p, timeout]).finally(() => clearTimeout(timer));
 }
+
+// Dedup por instância: durante a geração, expandLoops chama batchUpdateDoc (e o
+// mark) dezenas de vezes pro MESMO docId em segundos. Como o TTL (180s) >> esta
+// janela, basta setar o Redis uma vez por docId a cada MARK_DEDUP_MS — o resto é
+// no-op in-memory. Mantém o `await` (ordem garantida) sem N writes sequenciais.
+const MARK_DEDUP_MS = 10_000;
+const lastMarkedAt = new Map<string, number>();
 
 function key(docId: string): string {
   const prefix = process.env.REDIS_KEY_PREFIX ?? "";
   return `${prefix}prog-doc-edit:${docId}`;
 }
 
-/** Só pra teste: reseta o singleton do client. */
+/** Só pra teste: reseta o singleton do client + o dedup in-memory. */
 export function __resetDocEditMarkerClientForTests() {
   _redis = undefined;
+  lastMarkedAt.clear();
 }
 
 /**
@@ -86,6 +95,10 @@ export function __resetDocEditMarkerClientForTests() {
  */
 export async function markProgrammaticDocEdit(docId: string): Promise<void> {
   if (!docId) return;
+  const now = Date.now();
+  const last = lastMarkedAt.get(docId);
+  if (last !== undefined && now - last < MARK_DEDUP_MS) return; // já setei há pouco
+  lastMarkedAt.set(docId, now);
   try {
     const redis = await getRedis();
     if (!redis) return;

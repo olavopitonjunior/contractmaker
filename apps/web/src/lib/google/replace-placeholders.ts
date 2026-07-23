@@ -99,7 +99,7 @@ export async function replacePlaceholdersInDoc(
     return { totalRequests: 0, occurrencesByToken: {} };
   }
 
-  void markProgrammaticDocEdit(input.docId); // batchUpdate raw — marca p/ o eco (#5)
+  await markProgrammaticDocEdit(input.docId); // batchUpdate raw — marca p/ o eco (#5)
   const res = await docs.documents.batchUpdate({
     documentId: input.docId,
     requestBody: { requests },

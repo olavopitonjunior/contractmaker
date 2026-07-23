@@ -208,6 +208,13 @@ function authorBadge(item: ChangeLogItem): { label: string; className: string } 
   }
 }
 
+/** Rótulo PT-BR pra actions que aparecem crus. Só as user-facing importam; as
+ *  demais (snake_case da IA) já existiam e ficam como estão. */
+function actionLabel(action: string): string {
+  if (action === "human_doc_edit") return "Edição manual";
+  return action;
+}
+
 function ChangeItem({
   item,
   expanded,
@@ -222,37 +229,51 @@ function ChangeItem({
     minute: "2-digit",
   });
   const author = authorBadge(item);
+  // Só entries COM diff (write tools) são expansíveis. human_doc_edit é
+  // atribuição sem diff → linha estática, sem chevron/expansão vazia.
+  const hasDiff = item.htmlBefore !== null && item.htmlAfter !== null;
+
+  const header = (
+    <>
+      <div className="flex items-center gap-1.5">
+        <span
+          className={cn(
+            "text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0",
+            author.className
+          )}
+        >
+          {author.label}
+        </span>
+        <span className="text-xs font-medium truncate">{actionLabel(item.action)}</span>
+        <span className="text-[10px] text-muted-foreground shrink-0">{time}</span>
+      </div>
+      <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
+        {item.summary}
+      </p>
+    </>
+  );
+
   return (
     <div className="rounded-md border bg-card">
-      <button
-        type="button"
-        onClick={onToggle}
-        className="flex w-full items-start gap-2 p-2.5 text-left hover:bg-muted/40 transition-colors"
-      >
-        {expanded ? (
-          <ChevronDown className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
-        )}
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5">
-            <span
-              className={cn(
-                "text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0",
-                author.className
-              )}
-            >
-              {author.label}
-            </span>
-            <span className="text-xs font-medium truncate">{item.action}</span>
-            <span className="text-[10px] text-muted-foreground shrink-0">{time}</span>
-          </div>
-          <p className="text-xs text-muted-foreground line-clamp-2 mt-0.5">
-            {item.summary}
-          </p>
+      {hasDiff ? (
+        <button
+          type="button"
+          onClick={onToggle}
+          className="flex w-full items-start gap-2 p-2.5 text-left hover:bg-muted/40 transition-colors"
+        >
+          {expanded ? (
+            <ChevronDown className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 mt-0.5 shrink-0 text-muted-foreground" />
+          )}
+          <div className="flex-1 min-w-0">{header}</div>
+        </button>
+      ) : (
+        <div className="flex w-full items-start gap-2 p-2.5">
+          <div className="flex-1 min-w-0">{header}</div>
         </div>
-      </button>
-      {expanded && item.htmlBefore !== null && item.htmlAfter !== null && (
+      )}
+      {hasDiff && expanded && item.htmlBefore !== null && item.htmlAfter !== null && (
         <div className="border-t bg-muted/20 p-2">
           <DiffView before={item.htmlBefore} after={item.htmlAfter} />
         </div>
