@@ -20,10 +20,12 @@ import {
   Plus,
   Send,
   Trash2,
+  UsersRound,
   Wallet,
 } from "lucide-react";
 import { CLICKSIGN_ROLE_OPTIONS, type ClicksignRole } from "@/lib/clicksign/roles";
 import { suggestEmailDomain } from "@/lib/forms/email-typo";
+import { WitnessPicker, type RegistryWitness } from "./WitnessPicker";
 
 interface Conjuge {
   nome?: string;
@@ -324,14 +326,6 @@ function buildInitialRows(
   return rows;
 }
 
-interface DefaultWitness {
-  id: string;
-  nome: string;
-  cpf: string | null;
-  email: string;
-  mobilePhone: string | null;
-}
-
 const AUTH_METHOD_LABELS: Record<string, string> = {
   email: "E-mail (token)",
   whatsapp: "WhatsApp",
@@ -364,8 +358,10 @@ export function SendEnvelopeDialog({
   const [rows, setRows] = useState<EditableRow[]>([]);
   const [sigConfig, setSigConfig] = useState<SignatureConfig | null>(null);
   const [authMethod, setAuthMethod] = useState("email");
+  const [witnessPickerOpen, setWitnessPickerOpen] = useState(false);
 
-  // Reset + carrega partes e testemunhas padrão quando o dialog abre.
+  // Reset quando o dialog abre. Testemunhas NÃO são mais auto-injetadas: o
+  // operador as escolhe pelo botão "Selecionar testemunhas" (WitnessPicker).
   useEffect(() => {
     if (!open) return;
     const base = buildInitialRows(vendedores, compradores, testemunhas, comissao);
@@ -384,54 +380,6 @@ export function SendEnvelopeDialog({
         }
       })
       .catch(() => {});
-
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch("/api/settings/witnesses?default=1");
-        if (!res.ok) return;
-        const data = await res.json().catch(() => ({}));
-        const witnesses: DefaultWitness[] = data.witnesses ?? [];
-        if (cancelled || witnesses.length === 0) return;
-        // Anexa as testemunhas padrão SEM duplicar as que já vieram do form
-        // (match por e-mail ou CPF) e com sourceIndex contíguo entre testemunhas.
-        setRows((prev) => {
-          const witnessRows = prev.filter((r) => r.sourceKind === "testemunha");
-          const seen = new Set(
-            witnessRows.flatMap((r) =>
-              [r.email.toLowerCase(), r.documentation].filter(Boolean)
-            )
-          );
-          let nextIdx = witnessRows.length;
-          const fresh = witnesses
-            .filter((w) => {
-              const email = (w.email ?? "").toLowerCase();
-              const cpf = onlyDigits(w.cpf ?? "");
-              if (email && seen.has(email)) return false;
-              if (cpf && seen.has(cpf)) return false;
-              return true;
-            })
-            .map((w) => ({
-              rowId: `testemunha-default-${w.id}`,
-              sourceKind: "testemunha" as RowKind,
-              sourceIndex: nextIdx++,
-              subKind: "titular" as SubKind,
-              name: w.nome,
-              email: w.email,
-              documentation: onlyDigits(w.cpf ?? ""),
-              phone: onlyDigits(w.mobilePhone ?? ""),
-              addedDuringDialog: false,
-              clicksignRole: defaultRoleFor("testemunha", "titular"),
-            }));
-          return fresh.length > 0 ? [...prev, ...fresh] : prev;
-        });
-      } catch {
-        /* testemunhas padrão são best-effort */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
     // Só re-inicializa quando o dialog ABRE (lê os props mais recentes nesse
     // momento). Depender dos arrays de partes resetaria as edições do operador
     // se o pai re-renderizasse (ex.: polling/refresh) com a popup aberta.
@@ -481,6 +429,47 @@ export function SendEnvelopeDialog({
         clicksignRole: "sign",
       },
     ]);
+  };
+
+  // Chaves (e-mail/CPF) já presentes — o picker desabilita testemunhas repetidas.
+  const witnessExistingKeys = useMemo(
+    () =>
+      rows.flatMap((r) =>
+        [r.email.trim().toLowerCase(), onlyDigits(r.documentation)].filter(Boolean)
+      ),
+    [rows]
+  );
+
+  const addWitnessesFromRegistry = (selected: RegistryWitness[]) => {
+    setRows((prev) => {
+      const seen = new Set(
+        prev.flatMap((r) =>
+          [r.email.trim().toLowerCase(), onlyDigits(r.documentation)].filter(Boolean)
+        )
+      );
+      let nextIdx = prev.filter((r) => r.sourceKind === "testemunha").length;
+      const fresh: EditableRow[] = [];
+      for (const w of selected) {
+        const email = (w.email ?? "").trim().toLowerCase();
+        const cpf = onlyDigits(w.cpf ?? "");
+        if ((email && seen.has(email)) || (cpf && seen.has(cpf))) continue;
+        if (email) seen.add(email);
+        if (cpf) seen.add(cpf);
+        fresh.push({
+          rowId: `testemunha-cadastro-${w.id}`,
+          sourceKind: "testemunha",
+          sourceIndex: nextIdx++,
+          subKind: "titular",
+          name: w.nome,
+          email: w.email,
+          documentation: cpf,
+          phone: onlyDigits(w.mobilePhone ?? ""),
+          addedDuringDialog: true,
+          clicksignRole: defaultRoleFor("testemunha", "titular"),
+        });
+      }
+      return fresh.length > 0 ? [...prev, ...fresh] : prev;
+    });
   };
 
   const handleContinue = () => {
@@ -592,16 +581,28 @@ export function SendEnvelopeDialog({
               />
             ))}
 
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={addAvulso}
-              className="w-full border-dashed"
-            >
-              <Plus className="h-3.5 w-3.5 mr-1.5" />
-              Adicionar assinante avulso
-            </Button>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setWitnessPickerOpen(true)}
+                className="flex-1 border-dashed"
+              >
+                <UsersRound className="h-3.5 w-3.5 mr-1.5" />
+                Selecionar testemunhas
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={addAvulso}
+                className="flex-1 border-dashed"
+              >
+                <Plus className="h-3.5 w-3.5 mr-1.5" />
+                Adicionar assinante avulso
+              </Button>
+            </div>
 
             {sigConfig && !sigConfig.configured && (
               <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
@@ -724,6 +725,14 @@ export function SendEnvelopeDialog({
           )}
         </DialogFooter>
       </DialogContent>
+
+      <WitnessPicker
+        open={witnessPickerOpen}
+        onOpenChange={setWitnessPickerOpen}
+        scope="venda"
+        existingKeys={witnessExistingKeys}
+        onConfirm={addWitnessesFromRegistry}
+      />
     </Dialog>
   );
 }
