@@ -1,196 +1,214 @@
-# RexAPI (iList) — Lacunas de API e problemas técnicos para o projeto Contractmaker
+# Integração iList × Contractmaker — Especificação de necessidades de API
 
-> **Destinatário:** equipe técnica Gryphtech (a/c Felipe).
+> **Destinatário:** Gryphtech (a/c Felipe) — times de produto e engenharia.
 > **Autor:** equipe Contractmaker / imobpro.
-> **Data:** 2026-07-23.
-> **Base da análise:** integração real da Fase 1 (catálogo de imóveis + provisionamento por região/office) já em funcionamento, mais validação empírica de leitura **e** escrita contra o ambiente de homologação (`rexapi.stage.gryphtech.com`), região **71** (ambiente de teste) e produção (`iconnect.rexapi.gryphtech.com`).
-
-Este documento tem dois objetivos: **(1)** listar as capacidades de API que o projeto precisa e que **hoje não existem** na RexAPI, cada uma com o caso de uso concreto que a motiva; e **(2)** relatar **problemas técnicos observados** na API atual que impactam a integração — vários com implicação de segurança/LGPD. Tudo aqui foi verificado na prática, não é especulação.
-
----
-
-## 0. O que já integramos (contexto)
-
-O Contractmaker é uma plataforma de gestão de vendas e locação imobiliária (esteira: lead → formulário → contrato → assinatura eletrônica → cobrança). Na Fase 1 conectamos a RexAPI para **puxar o cadastro de imóveis** de cada imobiliária RE/MAX para dentro dos fluxos de contrato:
-
-- Provisionamento por **(região, office)** — o administrador vincula um tenant à sua região e aos seus offices.
-- **Sincronização** dos listings (`GET properties` paginado, incremental por `ModifiedDate`, com resolução de `associates` e `geodata`) para um catálogo local de busca.
-- **Picker de imóvel** em três fluxos: confecção de contrato de venda, cadastro de imóvel de locação e proposta comercial.
-
-Endpoints usados hoje: `oauth/token`, `offices`, `associates`, `properties` (list + detail), `propertydescriptions`, `propertyImages`, `geodata`, `lookups`. A integração funciona — o que segue é o que **falta** para completar a visão do produto, e o que **atrapalha** no que existe.
+> **Data:** 2026-07-23 (v2 — reescrito com foco de negócio).
+> **Base da análise:** integração real da Fase 1 **já em funcionamento** (catálogo de imóveis por região/office + uso nos fluxos de contrato), mais validação empírica de leitura e escrita contra homologação (região 71) e produção (`iconnect.rexapi.gryphtech.com`).
+> **Benchmark de referência:** API pública do **Vista CRM (Loft)** — padrão de mercado no Brasil para integração de CRM imobiliário.
 
 ---
 
-## 1. Lacunas de API (capacidades ausentes)
+## 1. O contexto de negócio — por que esta integração existe
 
-Prioridades: **P0** = bloqueia um pilar do produto; **P1** = degrada muito a experiência / exige workaround custoso; **P2** = desejável.
+A jornada de uma imobiliária RE/MAX passa por dois mundos:
 
-### 1.1 [P0] API de Leads / Contatos (CRUD + push)
+```
+CAPTAÇÃO ─► ANÚNCIO ─► LEAD ─► NEGOCIAÇÃO ─► CONTRATO ─► ASSINATURA ─► COMISSÃO ─► ROYALTIES
+└────────────── iList (CRM/catálogo) ─────────────┘ └────────── Contractmaker (transação) ──────────┘
+```
 
-**Situação:** o iList tem gestão de leads e contatos (a própria comunicação de marketing do produto destaca "responder a novos leads do site de qualquer lugar"), mas **não há endpoint REST** para eles na RexAPI. A superfície pública cobre apenas listings/associates/offices.
+- O **iList** é a fonte de verdade do CRM: imóveis captados, corretores, agências, leads e o relacionamento comercial.
+- O **Contractmaker** é a fonte de verdade da transação: o contrato (compra e venda ou locação), a assinatura eletrônica, a due diligence documental, a cobrança e a liquidação da comissão (split entre corretores via conta de pagamentos).
 
-**Caso de uso:** a esteira do Contractmaker nasce num lead. Sem API de leads não conseguimos: (a) originar um negócio a partir de um lead já existente no iList do corretor; (b) devolver ao iList o lead que chega pelos nossos formulários públicos; (c) manter o CRM do corretor como fonte única de contatos.
+O valor da integração está no **ciclo completo**: os dados do CRM alimentam a transação sem redigitação, e **tudo que a transação produz volta ao CRM** — status da negociação, contrato assinado, comissão distribuída, imóvel vendido/alugado. Sem a volta, o iList fica cego a partir do momento em que a negociação começa, e a franqueadora perde a base para relatórios e royalties.
 
-**Pedido:** endpoints de leads/contatos com CRUD e, idealmente, webhook de criação/atualização. Campos mínimos: nome, telefone(s), e-mail, origem, corretor responsável, status, e o imóvel/associate de interesse.
-
-### 1.2 [P0] Status de negócio / Transações (transaction management)
-
-**Situação:** a RexAPI não expõe o módulo de transações do iList. O único sinal de "andamento" disponível é o `ListingStatus` do imóvel (Active → Sale Agreed → Sold / Rented / Cancelled).
-
-**Caso de uso:** quando um contrato é assinado ou uma comissão é paga na nossa plataforma, isso deveria refletir no iList. Hoje o único caminho é **escrever o status no próprio listing** (`PATCH .../properties/{id}` mudando `ListingStatus` para `168 Sale Agreed` / `169 Sold` / `167 Rented`) — o que é um *workaround*, não uma integração de transação: não carrega valor negociado, partes, datas de fechamento nem comissão.
-
-**Pedido:** endpoints de transação (criar/atualizar um negócio vinculado a um listing, com estágio, valor, partes e datas), ou ao menos documentação oficial confirmando que o write-back de `ListingStatus`/`SoldDate` é a via suportada para sinalizar fechamento.
-
-### 1.3 [P1] Webhooks / notificações de mudança
-
-**Situação:** a integração é **100% pull**. Não há webhook de "listing criado/alterado", "associate desligado", etc. Detectamos mudanças relendo tudo com filtro `startDate`/`endDate` sobre `ModifiedDate`.
-
-**Caso de uso:** para manter o catálogo local fresco sem latência, hoje rodamos um cron a cada 6 horas. Um imóvel novo ou uma mudança de preço leva até 6h para aparecer. Webhooks eliminariam a defasagem e o custo de varredura.
-
-**Pedido:** webhooks configuráveis por integrador (listing/associate/office created|updated|deleted), com HMAC de assinatura.
-
-### 1.4 [P1] Busca textual / filtragem server-side de listings
-
-**Situação:** `GET properties` só filtra por `officeID`/`associateID` e data de modificação. Não há busca por texto (endereço, código público `ListingID`, bairro), faixa de preço, número de dormitórios, tipo, etc.
-
-**Caso de uso:** o corretor busca "o apê da Rua X" ou "código 1234". Sem busca na API, tivemos que **espelhar o catálogo inteiro localmente** e indexar por conta própria só para permitir a busca. Isso funciona, mas obriga a sincronização completa e o armazenamento de todos os listings de cada office.
-
-**Pedido:** parâmetros de busca/filtro em `GET properties` (texto livre, `listingId`, faixa de preço, quartos, `transactionType`, `propertyType`, cidade).
-
-### 1.5 [P2] Relatórios / agregações
-
-**Situação:** não há endpoints de relatório (ex.: nº de listings ativos por office, por corretor, tempo médio até Sold).
-
-**Caso de uso:** painéis gerenciais do tenant. Hoje derivamos o que dá do catálogo espelhado; métricas de transação/tempo dependem de 1.2.
-
-### 1.6 [P1] Campos cadastrais brasileiros no imóvel
-
-**Situação:** o `Property` não tem **matrícula do registro de imóveis, cartório, inscrição de IPTU/SQL** — dados essenciais para um contrato de compra e venda no Brasil.
-
-**Caso de uso:** ao importar um imóvel do iList para um contrato, esses campos ficam vazios e o corretor preenche à mão. Não é bloqueante (o formulário completa), mas é retrabalho e fonte de erro.
-
-**Pedido:** campos opcionais de registro (matrícula, cartório, inscrição municipal/IPTU, SQL para SP) no modelo de Property, ou um bloco de "documentação do imóvel".
-
-### 1.7 [P1] Credencial com escopo e perfil read-only
-
-**Situação:** a credencial fornecida (`apiKey` + `secretKey`) gera um token que **acessa todas as regiões** e permite **escrita**. Ver detalhe no problema 2.2.
-
-**Caso de uso:** para uma integração de leitura de catálogo, precisaríamos de uma credencial **read-only** e **restrita à(s) região(ões)** do integrador. Hoje, por segurança, temos que garantir todo o isolamento no nosso lado.
-
-**Pedido:** credenciais com escopo por região e um perfil somente-leitura.
-
-### 1.8 [P2] Suporte a agentes conversacionais (WhatsApp / assistentes)
-
-**Situação/Caso de uso:** operamos assistentes digitais que atendem corretores (consulta de imóveis, geração de proposta, acompanhamento de negócio) e fazem análise de crédito/seguro-fiança para locação. Para os tenants RE/MAX, esses assistentes precisam consultar o portfólio do corretor e o andamento do negócio. As lacunas 1.1–1.4 são o que limita esses assistentes hoje; um canal de eventos (1.3) e a API de leads (1.1) os destravam. *(Detalhamento interno à parte.)*
+**O estado atual da RexAPI é uma via de mão única e parcial:** ela entrega bem o catálogo (imóveis, corretores, agências), entrega nada de clientes/negociações, e o único caminho de devolução é sobrescrever o status do anúncio. Este documento especifica, domínio por domínio, o que o negócio precisa que a API **entregue** e **receba de volta** — e por quê.
 
 ---
 
-## 2. Problemas técnicos observados (todos verificados na prática)
+## 2. Modelo de dados requerido — domínio a domínio
 
-Ordenados por severidade.
+Formato de cada item: **O que é · Por que o negócio precisa · O que a RexAPI oferece hoje (verificado) · O que falta · Fluxo desejado (ida ↔ volta) · Benchmark Vista**.
 
-### 2.1 [CRÍTICO / LGPD] Credenciais de usuário do iList retornam em texto claro
+### 2.1 Usuários e perfis
 
-`GET offices` e `GET associates` retornam, para cada registro, um objeto **`IListCredentials { Username, Password }` com a senha em texto claro** do usuário iList correspondente.
+- **O que é:** as pessoas que operam o sistema — corretor, gerente/coordenador, administrativo, dono da agência — com papel e permissões.
+- **Por quê:** o Contractmaker espelha o acesso por perfil (quem vê quais negócios, quem aprova contrato, quem emite cobrança). Sem saber o papel do associate no iList, todo provisionamento de acesso é manual e diverge com o tempo. Além disso, um negócio precisa ser **atribuído** ao corretor certo — e o corretor precisa ser reconhecido nos dois sistemas como a mesma pessoa.
+- **Hoje:** `associates` traz nome, e-mail, telefone, CRECI (`SalesLicenseNumber`), office e flags soltas (`IsSalesAssociate`, `BrokerLicensed`). Não há papel/perfil utilizável, e o único vínculo de "login" retornado é o bloco `IListCredentials` — que expõe a senha em texto claro (Apêndice A.1) e não serve como identidade de integração.
+- **Falta:** papel/perfil do usuário (corretor, gerente, adm, owner), status de acesso, e um identificador de identidade estável para SSO/matching (e-mail verificado ou ID federado).
+- **Fluxo desejado:** *ida* — perfis e papéis junto do associate; *volta* — nada obrigatório (gestão de usuários permanece no iList).
+- **Vista:** clientes e imóveis vêm com corretor e agência aninhados; a chave de API é emitida por gestor de contrato, separando identidade de integração de credencial de usuário.
 
-- **Evidência:** validado na região 71 — cada office/associate traz o bloco preenchido (ex.: um associate retornou `IListCredentials` com `Username` e `Password` legíveis).
-- **Impacto:** qualquer integrador com o token consegue coletar senhas de usuários reais do iList. É exposição de credencial de terceiros — risco direto de LGPD e de comprometimento de contas. No nosso lado, redigimos o campo no cliente HTTP antes de qualquer log/persistência, mas **a API não deveria devolvê-lo**.
-- **Pedido:** remover `IListCredentials` das respostas (ou, no mínimo, torná-lo opcional e desligado por padrão para credenciais de integração).
+### 2.2 Agências e multi-office
 
-### 2.2 [ALTO] Token global sem escopo — um integrador acessa dados de todos
+- **O que é:** a estrutura organizacional — região master → grupo econômico → offices — e corretores que atuam em mais de um office.
+- **Por quê:** comissão, relatório e royalty são calculados **no office certo**. Um grupo com 5 offices precisa consolidar visão sem misturar tenants; um corretor multi-office precisa ter cada negócio atribuído ao office da captação/venda.
+- **Hoje:** `offices` funciona bem (validado). Os payloads trazem `MacroOfficeID` e `AdditionalOfficeList` — sinais de que a estrutura existe — mas **sem documentação nem semântica** utilizável.
+- **Falta:** documentação/semântica de `MacroOfficeID` (grupo econômico?) e `AdditionalOfficeList` (multi-office do corretor?); endpoint de hierarquia (região → grupos → offices).
+- **Fluxo desejado:** *ida* — hierarquia completa; *volta* — nada.
+- **Vista:** busca de clientes e imóveis "por agência" é nativa; a agência é entidade de primeira classe nas consultas.
 
-O token emitido por `oauth/token` **não é restrito à região do integrador**. Com a mesma credencial, uma chamada a `integrator/71001/...` e a `integrator/60001/...` retorna dados reais de ambas as regiões (validamos: a credencial de teste leu o catálogo real da região 60).
+### 2.3 Clientes de venda (compradores e vendedores)
 
-- **Impacto:** o `integrator_id` na rota é apenas um seletor, não um limite de autorização. Todo o isolamento entre integradores fica por conta do consumidor. Combinado com 2.1, o risco é sistêmico.
-- **Pedido:** vincular o token à(s) região(ões) autorizada(s) da credencial e rejeitar `integrator_id` fora do escopo.
+- **O que é:** o cadastro de pessoas do funil de venda — proprietário-vendedor (dono do imóvel captado) e comprador/interessado (lead que evolui).
+- **Por quê:** todo contrato de compra e venda começa e termina em pessoas. Na ida, o corretor não deveria redigitar o vendedor que já está no CRM desde a captação. Na volta, o comprador que o Contractmaker qualificou (com CPF, estado civil, endereço, documentos validados para o contrato) é um ativo de CRM valiosíssimo — hoje ele **não volta** para o iList, e o CRM do corretor empobrece a cada venda fechada.
+- **Hoje:** **inexistente.** A RexAPI não expõe clientes, leads nem o proprietário do imóvel (o listing não referencia o vendedor).
+- **Falta:** recurso completo de clientes/contatos: CRUD, vínculo com imóvel (proprietário de, interessado em), vínculo com corretor responsável, origem do lead, histórico de interações.
+- **Fluxo desejado:** *ida* — proprietário junto do listing + leads/interessados; *volta* — `POST/PATCH` de cliente com dados qualificados na transação (comprador que fechou, vendedor com cadastro completado) + evento "negócio fechado com o cliente X".
+- **Vista:** é o segundo pilar da API — clientes com busca por corretor e por agência, detalhe, **histórico**, imóveis favoritos, criação/atualização e **recepção de leads** via API.
 
-### 2.3 [ALTO] Homologação (stage) contém dados reais de produção
+### 2.4 Clientes de locação (locadores, locatários e pretendentes)
 
-O ambiente `rexapi.stage.gryphtech.com` serve **dados reais** de regiões de produção (ex.: região 60 — RE/MAX São Paulo Capital, com nomes de imobiliárias e corretores reais), não apenas a região de teste 71.
+- **O que é:** o mesmo domínio, no funil de aluguel — proprietário-locador, pretendente (candidato a locatário, que passa por análise de crédito/seguro-fiança) e locatário efetivado.
+- **Por quê:** a locação é metade da operação de várias agências RE/MAX. O Contractmaker roda a esteira completa (ficha do pretendente → análise de crédito → garantia → contrato → administração), e cada etapa gera dado de CRM que hoje morre fora do iList: o pretendente reprovado numa análise é lead para outro imóvel; o locatário ativo é cliente recorrente (renovação, compra futura).
+- **Hoje:** inexistente (o listing de locação existe — `TransactionType 260`, validado — mas sem pessoas associadas).
+- **Falta:** o mesmo recurso de clientes de 2.3, com papéis de locação (locador/pretendente/locatário) e status da relação (em análise, aprovado, contrato ativo, encerrado).
+- **Fluxo desejado:** *ida* — locador junto do listing + pretendentes; *volta* — resultado da análise (aprovado/reprovado, sem dados sensíveis de crédito), contrato ativo, encerramento.
+- **Vista:** o modelo de clientes é único e serve aos dois funis; a finalidade (venda/locação) vive no imóvel e no relacionamento.
 
-- **Impacto:** qualquer teste em "stage" está tocando PII de produção. Para nós, isso obriga a tratar o stage com o mesmo rigor de LGPD que produção e a restringir QA à região 71.
-- **Pedido:** stage com dados sintéticos, ou segregação clara do que é dado de teste.
+### 2.5 Documentos e anexos
 
-### 2.4 [MÉDIO] Criação de listing publica imediatamente no site público
+- **O que é:** os arquivos que sustentam a operação: do **imóvel** (matrícula, IPTU, habite-se, convenção), do **cliente** (RG/CPF, comprovantes, certidões), da **captação** (autorização de venda/locação assinada) e do **negócio** (proposta aceita, contrato assinado, distrato).
+- **Por quê:** a due diligence é o coração do risco imobiliário — o Contractmaker coleta e valida esses documentos (OCR, certidões automáticas). E o produto final da transação — **o contrato assinado eletronicamente** — hoje não tem para onde voltar no iList: o corretor fecha a venda e o CRM não guarda o instrumento.
+- **Hoje:** só **imagens de divulgação** do imóvel (`propertyImages`, validado). Nenhum outro tipo de anexo, em nenhuma entidade.
+- **Falta:** anexos genéricos (arquivo + tipo + entidade vinculada) em imóvel, cliente, captação e negociação.
+- **Fluxo desejado:** *ida* — documentos já arquivados no iList na captação; *volta* — `POST` de documento (contrato assinado em PDF, autorização de captação assinada, laudo de vistoria) vinculado ao listing/negociação.
+- **Vista:** a API de imóveis documenta **anexos de documentos** além de fotos — exatamente o padrão pedido aqui.
 
-Um `POST properties` com `ListingStatus = 160 (Active)` faz o imóvel **aparecer imediatamente no site público** (`IsOnPublicWebSite: true` na resposta), sem etapa de rascunho/revisão.
+### 2.6 Informações dos imóveis
 
-- **Impacto:** integrações de escrita precisam de muito cuidado; não há "staging" de um listing antes de publicar. No nosso desenho, por isso, não criamos listings — só sinalizamos status de listings existentes.
-- **Pedido:** suporte a criar em rascunho (`Draft` = 4812) por padrão, publicando só sob ação explícita.
+- **O que é:** a ficha completa do imóvel — física, comercial e **registral**.
+- **Por quê:** é a parte que já usamos em produção (o formulário do contrato nasce preenchido a partir do listing). O que falta é o que o contrato brasileiro exige e o anúncio não: **matrícula, cartório, inscrição de IPTU/SQL**. Sem eles, o corretor completa à mão — retrabalho e risco de erro no documento mais importante da transação.
+- **Hoje:** bom: preço, tipo, quartos/vagas/áreas, endereço (rua/número/CEP + `CityID`), fotos, descrições multilíngues, corretor, `ContractType`, comissão do anúncio. Verificado e em uso.
+- **Falta:** campos registrais BR (matrícula, cartório, inscrição municipal/IPTU, SQL); cidade/UF **textuais** no payload (hoje só o `CityID` numérico, resolvido via geodata — que tem seus próprios problemas, Apêndice A.7/A.8); vínculo com o proprietário (2.3).
+- **Fluxo desejado:** *ida* — ficha completa; *volta* — `PATCH` dos campos registrais que o Contractmaker apurou na due diligence (matrícula confirmada em certidão, por exemplo) — devolvendo qualidade de dado ao catálogo.
+- **Vista:** ficha com campos dinâmicos (endpoint de "campos disponíveis"), fotos, anexos, histórico e proprietário — o modelo de completude a mirar.
 
-### 2.5 [MÉDIO] Campos obrigatórios não documentados
+### 2.7 Negociações — informações, status e devolução
 
-Alguns campos obrigatórios não constam na documentação e só foram descobertos por tentativa/erro:
+- **O que é:** a entidade que representa **o negócio em andamento**: imóvel + partes + valor + estágio (proposta → contraproposta → aceite → contrato → assinado → fechado / perdido) + datas.
+- **Por quê (o item mais importante deste documento):** é aqui que os dois sistemas se encontram. O corretor gerencia o funil no iList; a execução (proposta formal, contrato, assinatura) acontece no Contractmaker. Sem uma entidade de negociação na API: (a) o funil do iList congela no momento em que a proposta vira contrato; (b) gerentes perdem visão de pipeline; (c) relatórios e royalties (2.9/2.10) ficam sem base de cálculo; (d) o corretor faz dupla digitação de status — que na prática ele não faz, e os dados divergem.
+- **Hoje:** **não existe negociação.** O ciclo de status disponível é o do anúncio (`ListingStatus`: Active → Sale Agreed → Sold / Rented...), que validamos conseguir escrever via `PATCH` no listing. É um workaround: sinaliza o desfecho, mas não carrega valor negociado, partes, datas intermediárias nem quem participou.
+- **Falta:** recurso de negociação/transação com CRUD + transições de estágio.
+- **Fluxo desejado (detalhado, porque é o coração da devolução):**
+  - *ida* — negociações abertas no iList (lead qualificado → visita → proposta verbal) para o Contractmaker dar sequência formal;
+  - *volta* — a cada marco da transação, o Contractmaker devolve um evento estruturado:
+    | Marco no Contractmaker | Devolução ao iList |
+    |---|---|
+    | Proposta formal enviada | negociação em "proposta", valor ofertado, validade |
+    | Proposta aceita | "aceite", valor acordado |
+    | Contrato gerado/em assinatura | "contrato", partes confirmadas |
+    | Contrato assinado (100%) | "assinado", data, **PDF anexado** (2.5) |
+    | Comissão liquidada | "fechado", VGV final, comissão bruta (base de 2.8/2.9) |
+    | Negócio perdido | "perdido", motivo |
+  - Cada escrita idempotente (chave externa nossa), com `ListingStatus` do anúncio atualizado como consequência **pelo próprio iList** — não por nós.
+- **Vista:** o modelo público cobre imóvel+cliente+histórico; a lição do benchmark aqui é o **histórico por entidade** (todo evento tem onde ser registrado).
 
-- `POST associates` exige `InternationalID` **e** `MainSpecialization` (sem eles: HTTP 400 `ModelState`).
-- `POST properties` exige `ContractType` válido — o valor default `0` retorna `400 "ContractType error(s): Invalid value 0"`.
+### 2.8 Distribuição de comissão
 
-**Pedido:** documentar os campos obrigatórios reais de cada `POST`.
+- **O que é:** como a comissão da transação se divide — captador, corretor vendedor, coordenador, a própria agência, eventualmente um parceiro externo.
+- **Por quê:** o Contractmaker **executa** essa distribuição de verdade (split bancário via conta de pagamentos, com liquidação individual). O iList define as regras comerciais na origem (percentual do anúncio, papéis). Hoje a ida é parcial e a volta é zero — a agência não consegue ver no CRM quem recebeu o quê.
+- **Hoje:** o listing traz `ComTotalPct` e `ComBuyAgentPct` (verificado — inclusive já usamos o `ComTotalPct` para semear a comissão do contrato). Nada além disso.
+- **Falta:** *ida* — a regra de split completa por papel (se existir no iList); *volta* — endpoint para registrar a comissão **realizada**: valor bruto, divisão por participante (corretor A 40%, corretor B 40%, casa 20%), datas de liquidação.
+- **Fluxo desejado:** ida da regra → execução no Contractmaker → devolução do realizado vinculado à negociação (2.7).
 
-### 2.6 [MÉDIO] Fluxo de token não-padrão e frágil
+### 2.9 Cálculo de royalties
 
-O `POST oauth/token` **exige que o corpo comece com um caractere `=`** seguido dos parâmetros URL-encoded (ex.: `=grant_type%3D...`). Sem o `=` inicial, a autenticação falha silenciosamente. Além disso:
+- **O que é:** o percentual devido à franqueadora/máster sobre a produção (comissão bruta/VGV) de cada office.
+- **Por quê:** é a razão de ser da rede. O cálculo exige exatamente o dado que hoje não circula: **transações fechadas com valor e comissão por office**. Se a devolução de 2.7+2.8 existir, o iList (ou a franqueadora) passa a ter a base auditável de royalties sem depender de planilha manual das agências — ganho direto para a Gryphtech e para as regiões master.
+- **Hoje:** nada (não há transações na API).
+- **Falta/Fluxo desejado:** ou (a) o iList expõe a **tabela de royalties** (percentuais por região/office/faixa) e o Contractmaker pré-calcula e devolve o valor junto do fechamento; ou (b) o Contractmaker devolve apenas VGV + comissão bruta (2.7) e o cálculo fica no lado iList/franqueadora. Recomendamos (b) como mínimo — é só consequência da devolução de negociações.
 
-- Não há **refresh token** — o `access_token` vale 48h e precisa ser reobtido do zero.
-- O cabeçalho de autenticação é `Authorization: OAUTH oauth_token="...", api_key="..."` (formato próprio; `Bearer` retorna 401 enganoso).
+### 2.10 Relatórios
 
-**Pedido:** aceitar `application/x-www-form-urlencoded` padrão (sem o `=` inicial), documentar o formato do header, e considerar refresh token.
+- **O que é/Por quê:** a visão gerencial que agência, região e franqueadora precisam: **produção por corretor e por office** (VGV, nº de transações, comissão), **funil de negociações** (conversão por estágio), **aging de captação** (tempo em carteira, vencimento de exclusividade), **comissões e royalties por período**.
+- **Hoje:** nenhum endpoint de relatório/agregação. Derivamos o que dá do catálogo espelhado (listings ativos por corretor); tudo que envolve transação é impossível sem 2.7.
+- **Falta/Fluxo desejado:** não pedimos endpoints de BI prontos — pedimos **os dados-fonte** (negociações, comissões, captações com datas). Com eles, cada lado monta seus relatórios. Endpoints agregados são bem-vindos, mas são P2 se os dados-fonte existirem.
 
-### 2.7 [ALTO] Geodata sem filtro devolve a tabela MUNDIAL de cidades
+### 2.11 Captações (agenciamento)
 
-`GET integrator/{id}/geodata?geoLevel=cities` **sem** `clientRegionID` retorna **1.500.763 cidades em 15.008 páginas** — a base geográfica global inteira (as primeiras páginas trazem cidades do Irã/Afeganistão), não as cidades da região do integrador. Com `clientRegionID={região}` o resultado cai para as ~5.797 cidades do Brasil (58 páginas).
+- **O que é:** o contrato entre proprietário e imobiliária que autoriza a venda/locação — com **exclusividade (ou não), prazo de vigência e documento assinado**.
+- **Por quê:** a captação é o estoque da imobiliária. Exclusividade e prazo determinam prioridade comercial e disputa de comissão; o vencimento é um evento de negócio (renovar ou perder a carteira). E o instrumento em si — a autorização assinada — é exatamente o tipo de documento que o Contractmaker gera e assina eletronicamente hoje, sem ter para onde devolvê-lo.
+- **Hoje (parcial, verificado):** o listing traz `ContractType` (lookup com Exclusive, Exclusive Agency, Sole, Open, Semi-exclusive, Dual — bom vocabulário!) e `ExpiryDate`. É o embrião do domínio.
+- **Falta:** estrutura de vigência (início, fim, renovação) além do `ExpiryDate` solto; o **documento da captação anexado** (2.5); histórico de renovações; e escrita: hoje esses campos são graváveis no listing, mas sem semântica de "captação" documentada.
+- **Fluxo desejado:** *ida* — captação com exclusividade/prazo/documento; *volta* — autorização gerada e assinada no Contractmaker anexada ao listing + atualização de vigência na renovação.
 
-- **Impacto:** um consumidor que siga a documentação (que lista `clientRegionID` como *opcional*) entra num download de 1,5 milhão de linhas. Foi exatamente o que travou nosso primeiro sync.
-- **Pedido:** default do endpoint escopado à região do integrador (ou `clientRegionID` obrigatório), e documentação corrigida.
+### 2.12 Mecânica de entrega e devolução (transversal)
 
-### 2.8 [MÉDIO] Qualidade dos dados de geodata
+Para os fluxos acima funcionarem em produção:
 
-- Nomes de cidade retornam com **padding de espaços à direita** (`"Vitoria                    "`).
-- Hierarquia inconsistente: para parte do Brasil, `ProvinceName` traz o nome correto do estado ("São Paulo", "Espírito Santo"), mas em outros casos vem uma **cidade no lugar do estado** (ex.: `RegionName: "Região Centro-oeste"`, `ProvinceName: "Cuiabá"`).
-- **Impacto:** resolução de UF/estado por província não é confiável em todo o território; consumidores precisam de trim + mapa tolerante a falhas.
-
-### 2.9 [BAIXO] Inconsistências de payload
-
-- **Sentinela `-999`:** campos numéricos "vazios" voltam como `-999` (ex.: `CurrentListingPrice: -999`, `ContractType: -999`) em vez de `null`. Consumidores precisam normalizar.
-- **Typo `ExternaID`:** a resposta de `properties` traz `ExternaID` (sem o "l") **além** de `ExternalID`.
-- **`SoldDate` sem hora:** ao gravar `SoldDate` com timestamp, a leitura retorna apenas a data (date-only).
-- **Documentação de ajuda desatualizada:** as páginas de help (`/Web/help/...`) não refletem os campos obrigatórios reais nem a lista completa de `ListingStatus`/lookups que a API efetivamente retorna.
+1. **Webhooks** (iList → Contractmaker): listing/associate/office/cliente/negociação criados ou alterados, com assinatura HMAC. Hoje somos 100% *pull* (varremos por `ModifiedDate` a cada 6h) — funcional, mas com defasagem e custo.
+2. **Endpoints de escrita idempotentes** (Contractmaker → iList): todos os `POST/PATCH` de devolução aceitando uma chave externa nossa, para reenvio seguro.
+3. **Credencial com escopo**: por região (hoje o token acessa todas — Apêndice A.2) e com perfil read-only para consumo de catálogo. A devolução usaria a credencial de escrita, escopada.
+4. **Busca/filtragem server-side** nos recursos de leitura (texto, código, faixa de preço) — reduziria nossa necessidade de espelhar catálogos inteiros. O Vista oferece filtros avançados (AND/OR), ordenação, paginação e seleção de campos em todas as consultas.
 
 ---
 
-## 3. Pedidos priorizados (resumo)
+## 3. Resumo — RexAPI hoje × benchmark Vista × necessário
 
-| # | Item | Prioridade | Tipo |
-|---|------|-----------|------|
-| 2.1 | Parar de retornar `IListCredentials` (senha em claro) | **CRÍTICO** | Segurança |
-| 2.2 | Token com escopo por região + rejeitar `integrator_id` fora do escopo | **ALTO** | Segurança |
-| 1.1 | API de Leads/Contatos (CRUD + webhook) | **P0** | Capacidade |
-| 1.2 | API de Transações / status de negócio | **P0** | Capacidade |
-| 2.3 | Stage sem dados reais de produção | ALTO | Segurança |
-| 1.3 | Webhooks de mudança | P1 | Capacidade |
-| 1.4 | Busca/filtragem server-side de listings | P1 | Capacidade |
-| 1.7 | Credencial read-only | P1 | Segurança |
-| 1.6 | Campos cadastrais BR no imóvel | P1 | Capacidade |
-| 2.7 | Geodata escopado por região (sem `clientRegionID` vem o mundo — 1,5M linhas) | ALTO | Comportamento |
-| 2.4 | Criar listing em rascunho | MÉDIO | Comportamento |
-| 2.5 | Documentar campos obrigatórios | MÉDIO | Documentação |
-| 2.6 | Fluxo de token padrão + refresh | MÉDIO | Robustez |
-| 2.8 | Qualidade do geodata (padding, província errada) | MÉDIO | Qualidade |
-| 1.5 | Relatórios/agregações | P2 | Capacidade |
-| 2.9 | Sentinela -999, typo `ExternaID`, doc desatualizada | BAIXO | Qualidade |
+| Domínio | RexAPI hoje | Vista (Loft) | Necessário (prioridade) |
+|---|---|---|---|
+| 2.1 Usuários e perfis | Associates sem papel/perfil | Corretor/agência aninhados nas entidades | Papéis + identidade estável (**P1**) |
+| 2.2 Multi-office | Offices ok; `MacroOfficeID` sem semântica | Busca por agência nativa | Hierarquia documentada (**P1**) |
+| 2.3 Clientes de venda | **Inexistente** | Recurso completo (histórico, leads, favoritos) | CRUD + vínculo imóvel/corretor + leads (**P0**) |
+| 2.4 Clientes de locação | **Inexistente** | Mesmo recurso, dois funis | Idem, com papéis de locação (**P0**) |
+| 2.5 Documentos/anexos | Só fotos de divulgação | **Anexos de documentos no imóvel** | Anexos em imóvel/cliente/captação/negociação (**P0** p/ negociação, P1 demais) |
+| 2.6 Ficha do imóvel | Boa; sem campos registrais BR | Campos dinâmicos + proprietário + histórico | Matrícula/cartório/IPTU/SQL + proprietário (**P1**) |
+| 2.7 Negociações | **Inexistente** (só status do anúncio) | Histórico por entidade | Entidade de negociação + escrita por marco (**P0 — o coração**) |
+| 2.8 Comissão | `ComTotalPct`/`ComBuyAgentPct` (ida parcial) | — | Regra de split (ida) + realizado (volta) (**P1**) |
+| 2.9 Royalties | Nada | — | Consequência de 2.7+2.8 (**P1**) |
+| 2.10 Relatórios | Nada | Filtros/agregação nas consultas | Dados-fonte primeiro; agregados P2 |
+| 2.11 Captações | `ContractType` + `ExpiryDate` (embrião) | — | Vigência estruturada + documento anexado (**P1**) |
+| 2.12 Mecânica | Pull-only, token global | Filtros ricos, chave gerenciada | Webhooks + escrita idempotente + escopo (**P0/P1**) |
 
 ---
 
-## 4. Perguntas para a Gryphtech
+## 4. Pedidos priorizados
 
-1. Existe uma **API de leads/contatos** e/ou de **transações** do iList fora da RexAPI Web? Se sim, como obtemos acesso? (destrava 1.1 e 1.2)
-2. Há **webhooks/push** de mudanças, ou o desenho é intencionalmente pull-only? (1.3)
-3. As credenciais que recebemos têm permissão de **escrita em produção**? Existe credencial **read-only** e com **escopo por região**? (1.7 / 2.2)
-4. O retorno de `IListCredentials` com senha em texto claro é intencional? Pode ser desativado para o nosso `client_id`? (2.1)
-5. Quais são os **rate limits** e o SLA da API? (não documentados)
-6. Qual a **semântica correta de `InternationalID`** ao cadastrar um associate novo? (2.5)
-7. O **write-back de `ListingStatus`/`SoldDate`** é a via oficial suportada para sinalizar fechamento de negócio, ou há um endpoint de transação? (1.2)
+| # | Pedido | Prioridade | Motivo de negócio |
+|---|---|---|---|
+| 1 | **Entidade de negociação** com escrita por marco (2.7) | **P0** | Fecha o ciclo; base de funil, relatórios e royalties |
+| 2 | **Clientes** (venda e locação) com CRUD + leads (2.3/2.4) | **P0** | Origem e devolução do ativo de CRM |
+| 3 | **Anexos** ao menos em negociação/listing (2.5) | **P0** | Contrato assinado e autorização de captação de volta ao CRM |
+| 4 | Corrigir **`IListCredentials`** (senha em claro — A.1) | **P0 (segurança)** | Exposição de credencial de terceiros / LGPD |
+| 5 | **Webhooks** + escrita idempotente (2.12) | P1 | Tempo real e confiabilidade da devolução |
+| 6 | Credencial com **escopo por região** + read-only (2.12/A.2) | P1 | Isolamento entre integradores |
+| 7 | Campos **registrais BR** no imóvel + proprietário (2.6) | P1 | Contrato sem redigitação |
+| 8 | **Comissão**: regra de split (ida) + realizado (volta) (2.8) | P1 | Transparência da distribuição no CRM |
+| 9 | Semântica **multi-office** documentada (2.2) | P1 | Grupos econômicos e corretor multi-office |
+| 10 | **Captação** estruturada com documento (2.11) | P1 | Gestão de carteira e renovação de exclusividade |
+| 11 | Perfis/papéis de usuário (2.1) | P1 | Espelhamento de acesso |
+| 12 | Busca server-side; relatórios agregados (2.10/2.12) | P2 | Conveniência sobre os dados-fonte |
+
+## 5. Perguntas objetivas para a Gryphtech
+
+1. Existe (ou está no roadmap) uma API de **clientes/leads** e de **negociações/transações** fora da RexAPI Web? Como obtemos acesso? *(destrava os três P0 de capacidade)*
+2. Há **webhooks/push**, ou o desenho é intencionalmente pull-only?
+3. O **write-back de `ListingStatus`/`SoldDate`** é a via oficial para sinalizar fechamento enquanto não há entidade de negociação?
+4. O retorno de **`IListCredentials`** com senha em claro é intencional? Pode ser desligado para o nosso `client_id`?
+5. Existe credencial **read-only** e **com escopo por região**? As nossas têm escrita em produção?
+6. Qual a semântica de **`MacroOfficeID`** e **`AdditionalOfficeList`**?
+7. Existe regra de **split de comissão** e tabela de **royalties** no iList que possam ser expostas?
+8. **Rate limits** e SLA da API?
 
 ---
 
-*Anexo técnico com as transcrições das chamadas de validação (leitura e escrita, região 71) disponível sob demanda.*
+## Apêndice A — Problemas técnicos verificados na API atual
+
+Todos reproduzidos na prática durante a integração (evidências e transcrições disponíveis).
+
+| Ref. | Problema | Severidade |
+|---|---|---|
+| A.1 | `GET offices`/`associates` retornam **`IListCredentials { Username, Password }` com senha em texto claro** de usuários reais | **Crítico / LGPD** |
+| A.2 | **Token global sem escopo**: a mesma credencial lê (e escreve) em todas as regiões — o `integrator_id` da rota é só um seletor | Alto |
+| A.3 | **Stage contém dados reais de produção** (ex.: região 60 com imobiliárias/corretores reais) — obriga tratar homologação como produção | Alto |
+| A.4 | `geodata?geoLevel=cities` **sem `clientRegionID` retorna a base mundial: 1.500.763 cidades em 15.008 páginas** (doc lista o filtro como opcional); com o filtro: ~5.797 cidades BR em 58 páginas | Alto |
+| A.5 | `POST properties` com `ListingStatus Active` **publica imediatamente no site** (`IsOnPublicWebSite: true`), sem rascunho | Médio |
+| A.6 | Campos obrigatórios não documentados: `POST associates` exige `InternationalID` + `MainSpecialization`; `POST properties` exige `ContractType` válido (default 0 → 400) | Médio |
+| A.7 | Fluxo de token não-padrão: o body do `POST oauth/token` **precisa começar com `=`**; sem refresh token (48h); header proprietário `OAUTH oauth_token=...` (Bearer → 401 enganoso) | Médio |
+| A.8 | Qualidade do geodata: nomes com **padding** (`"Vitoria    "`); hierarquia inconsistente (ex.: `ProvinceName: "Cuiabá"` sob `RegionName: "Região Centro-oeste"`) — resolução de UF não confiável | Médio |
+| A.9 | Sentinela **`-999`** em numéricos vazios; typo **`ExternaID`** duplicando `ExternalID`; `SoldDate` date-only; páginas de help desatualizadas vs comportamento real | Baixo |
+
+---
+
+*Documentos relacionados (internos Contractmaker): estudo técnico da RexAPI (`ilist-rexapi-study.md`) e visão de assistentes/agentes (`ilist-visao-agentes.md`).*
