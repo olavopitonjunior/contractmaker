@@ -5,16 +5,20 @@
  * pro ClickSign no requirement `action:"agree"` (`attributes.role`) — todos
  * existem no enum de qualificações da ClickSign v3.
  */
-export type ClicksignRole =
-  | "sign"
-  | "buyer"
-  | "seller"
-  | "intervening"
-  | "realestate"
-  | "witness"
-  | "consenting"
-  | "attorney"
-  | "party";
+/** Tupla runtime das qualificações — fonte pra z.enum nas rotas. */
+export const CLICKSIGN_ROLES = [
+  "sign",
+  "buyer",
+  "seller",
+  "intervening",
+  "realestate",
+  "witness",
+  "consenting",
+  "attorney",
+  "party",
+] as const;
+
+export type ClicksignRole = (typeof CLICKSIGN_ROLES)[number];
 
 /** Opções exibidas no dropdown "Assina como" (ordem amigável pro corretor). */
 export const CLICKSIGN_ROLE_OPTIONS: Array<{ value: ClicksignRole; label: string }> = [

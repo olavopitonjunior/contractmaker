@@ -821,6 +821,7 @@ function SignerRow({
         onOpenChange={setEditOpen}
         basePath={basePath}
         signer={signer}
+        envelopeStatus={envelope.status}
         onSaved={onChange}
       />
     </div>

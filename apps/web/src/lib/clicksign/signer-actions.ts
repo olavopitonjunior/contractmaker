@@ -4,11 +4,12 @@ import {
   addRequirement,
   addSigner,
   notifySigner,
+  removeRequirement,
   removeSigner,
   updateSigner,
 } from "./envelopes";
-import { ClicksignError } from "./client";
-import { resolveClickSignCreds } from "./account";
+import { ClicksignError, type ClicksignCreds } from "./client";
+import { getSignatureSettings, resolveClickSignCreds } from "./account";
 import type { ClicksignRole } from "./roles";
 import type { AuthMethod } from "./types";
 
@@ -76,9 +77,63 @@ export interface SignerUpdate {
   email?: string;
   documentation?: string;
   phone?: string;
+  /** Qualificação ClickSign ("Assina como"). Trocar recria o requirement `agree`. */
+  role?: ClicksignRole;
+  /** Tipo de assinatura (auth). Trocar recria o requirement `provide_evidence`. */
+  authMethod?: AuthMethod;
 }
 
-/** Edita nome/email/documento/telefone de um signatário ainda não assinado. */
+/**
+ * Recria os 2 requirements do signatário (auth `provide_evidence` + qualificação
+ * `agree`) a partir do estado desejado. A v3 não tem PATCH de requirement, então
+ * deleta-se os antigos (`requirementIds`) e cria-se os novos. Retorna os novos
+ * ids pra persistir no row. Idempotente quanto a 404 no delete.
+ */
+async function recreateSignerRequirements(args: {
+  envelopeClicksignId: string;
+  documentClicksignId: string;
+  signerClicksignId: string;
+  oldRequirementIds: string[];
+  role: ClicksignRole;
+  auth: AuthMethod;
+  creds: ClicksignCreds;
+}): Promise<string[]> {
+  for (const reqId of args.oldRequirementIds) {
+    try {
+      await removeRequirement(args.envelopeClicksignId, reqId, args.creds);
+    } catch (err) {
+      // 404 = já removido; qualquer outro erro propaga pro chamador tratar.
+      if (!(err instanceof ClicksignError && err.status === 404)) throw err;
+    }
+  }
+  const authReq = await addRequirement(
+    {
+      envelopeId: args.envelopeClicksignId,
+      documentClicksignId: args.documentClicksignId,
+      signerClicksignId: args.signerClicksignId,
+      action: "provide_evidence",
+      auth: args.auth,
+    },
+    args.creds
+  );
+  const agreeReq = await addRequirement(
+    {
+      envelopeId: args.envelopeClicksignId,
+      documentClicksignId: args.documentClicksignId,
+      signerClicksignId: args.signerClicksignId,
+      action: "agree",
+      role: args.role,
+    },
+    args.creds
+  );
+  return [pickId(authReq), pickId(agreeReq)].filter(Boolean) as string[];
+}
+
+/**
+ * Edita um signatário que ainda não assinou, num envelope não-concluído.
+ * Perfil (nome/email/documento/telefone) via `updateSigner`; papel ("assina
+ * como") e tipo de assinatura (auth) recriam os requirements na ClickSign.
+ */
 export async function updateSignerAction(
   signer: SignerWithEnvelope,
   updates: SignerUpdate
@@ -90,32 +145,80 @@ export async function updateSignerAction(
   if (envStatus !== "draft" && envStatus !== "running") {
     return { ok: false, status: 400, error: "Envelope não permite edição neste estado" };
   }
-  if (
-    updates.name === undefined &&
-    updates.email === undefined &&
-    updates.documentation === undefined &&
-    updates.phone === undefined
-  ) {
-    return { ok: false, status: 400, error: "Nenhum campo informado" };
+  const hasProfile =
+    updates.name !== undefined ||
+    updates.email !== undefined ||
+    updates.documentation !== undefined ||
+    updates.phone !== undefined;
+  const roleChanged = updates.role !== undefined && updates.role !== signer.role;
+  const authChanged =
+    updates.authMethod !== undefined && updates.authMethod !== signer.authMethod;
+  if (!hasProfile && !roleChanged && !authChanged) {
+    return { ok: false, status: 400, error: "Nenhuma alteração informada" };
+  }
+
+  // Tipo de assinatura precisa estar na allow-list da org (defense-in-depth).
+  if (authChanged) {
+    const settings = await getSignatureSettings(signer.envelope.orgId);
+    if (
+      settings.allowedAuthMethods.length > 0 &&
+      !settings.allowedAuthMethods.includes(updates.authMethod as string)
+    ) {
+      return {
+        ok: false,
+        status: 400,
+        error: `Tipo de assinatura "${updates.authMethod}" não está habilitado nas preferências da imobiliária.`,
+      };
+    }
   }
 
   const creds = await resolveClickSignCreds(signer.envelope.orgId);
-  if (signer.envelope.clicksignId && signer.clicksignId && creds) {
+  const remoteReady = Boolean(
+    signer.envelope.clicksignId && signer.clicksignId && creds
+  );
+
+  // Novos requirementIds quando recria; undefined = mantém os atuais.
+  let newRequirementIds: string[] | undefined;
+
+  if (remoteReady) {
     try {
-      await updateSigner(
-        {
-          envelopeId: signer.envelope.clicksignId,
-          signerId: signer.clicksignId,
-          name: updates.name,
-          email: updates.email,
-          documentation: updates.documentation,
-          phoneNumber: updates.phone,
-        },
-        creds
-      );
+      if (hasProfile) {
+        await updateSigner(
+          {
+            envelopeId: signer.envelope.clicksignId!,
+            signerId: signer.clicksignId!,
+            name: updates.name,
+            email: updates.email,
+            documentation: updates.documentation,
+            phoneNumber: updates.phone,
+          },
+          creds!
+        );
+      }
+      if ((roleChanged || authChanged) && signer.envelope.documentClicksignId) {
+        newRequirementIds = await recreateSignerRequirements({
+          envelopeClicksignId: signer.envelope.clicksignId!,
+          documentClicksignId: signer.envelope.documentClicksignId,
+          signerClicksignId: signer.clicksignId!,
+          oldRequirementIds: signer.requirementIds,
+          role: (updates.role ?? (signer.role as ClicksignRole)) ?? "sign",
+          auth: (updates.authMethod ??
+            (signer.authMethod as AuthMethod)) ?? "email",
+          creds: creds!,
+        });
+      }
     } catch (err) {
       if (err instanceof ClicksignError) {
-        return { ok: false, status: 502, error: `Clicksign: ${err.message}` };
+        // Recusa comum: envelope `running` não aceita mexer no requirement.
+        const hint =
+          (roleChanged || authChanged) && envStatus === "running"
+            ? " Talvez seja necessário cancelar o envelope e reenviar para trocar o tipo de assinatura ou o papel."
+            : "";
+        return {
+          ok: false,
+          status: 502,
+          error: `Clicksign: ${err.message}.${hint}`,
+        };
       }
       throw err;
     }
@@ -130,6 +233,9 @@ export async function updateSignerAction(
         ? { documentation: updates.documentation || null }
         : {}),
       ...(updates.phone !== undefined ? { phone: updates.phone || null } : {}),
+      ...(roleChanged ? { role: updates.role } : {}),
+      ...(authChanged ? { authMethod: updates.authMethod } : {}),
+      ...(newRequirementIds ? { requirementIds: newRequirementIds } : {}),
     },
   });
   return { ok: true, data: updated };
