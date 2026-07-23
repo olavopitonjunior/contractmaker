@@ -64,7 +64,8 @@ export default async function PropostaDetailPage({
       select: {
         via: true,
         signers: {
-          select: { id: true, name: true, role: true, notifyChannel: true, status: true },
+          // sourceKind (domínio PT) pro papel exibível, não `role` (inglês ClickSign).
+          select: { id: true, name: true, sourceKind: true, notifyChannel: true, status: true },
           orderBy: { signingGroup: "asc" },
         },
       },
@@ -80,7 +81,7 @@ export default async function PropostaDetailPage({
     e.signers.map((s) => ({
       id: s.id,
       name: s.name,
-      role: s.role ?? "",
+      role: s.sourceKind ?? "",
       channel: s.notifyChannel,
       status: s.status,
     }))
