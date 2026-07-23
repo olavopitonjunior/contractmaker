@@ -57,6 +57,16 @@ describe("doc-edit-marker", () => {
     );
   });
 
+  it("dedup: mark 2x mesmo docId em <10s → Redis SET só 1x; docId diferente → 2x", async () => {
+    withRedis();
+    mockSet.mockResolvedValue("OK");
+    await markProgrammaticDocEdit("docA");
+    await markProgrammaticDocEdit("docA"); // dedup in-memory → não seta de novo
+    expect(mockSet).toHaveBeenCalledTimes(1);
+    await markProgrammaticDocEdit("docB"); // outro doc → seta
+    expect(mockSet).toHaveBeenCalledTimes(2);
+  });
+
   it("checkDocEcho: chave presente → 'echo'", async () => {
     withRedis();
     mockGet.mockResolvedValue("1");

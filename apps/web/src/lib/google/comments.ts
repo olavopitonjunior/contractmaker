@@ -1,6 +1,5 @@
 import { getDriveClient } from "./client";
 import { getDocStructure } from "./docs";
-import { markProgrammaticDocEdit } from "./doc-edit-marker";
 
 export interface CreateCommentInput {
   docId: string;
@@ -40,9 +39,6 @@ export async function createAnchoredComment(input: CreateCommentInput): Promise<
     ],
   });
 
-  // Comentário é recurso separado do conteúdo, mas se disparar o watch do arquivo
-  // o eco seria atribuído como edição manual — marca como programático (defesa).
-  void markProgrammaticDocEdit(input.docId);
   const res = await drive.comments.create({
     fileId: input.docId,
     fields: "id, resolved",
@@ -59,7 +55,6 @@ export async function createAnchoredComment(input: CreateCommentInput): Promise<
 }
 
 export async function resolveComment(docId: string, commentId: string) {
-  void markProgrammaticDocEdit(docId); // eco de comentário não é edição manual (#1)
   const drive = getDriveClient();
   await drive.comments.update({
     fileId: docId,
@@ -70,7 +65,6 @@ export async function resolveComment(docId: string, commentId: string) {
 }
 
 export async function deleteComment(docId: string, commentId: string) {
-  void markProgrammaticDocEdit(docId); // eco de comentário não é edição manual (#1)
   const drive = getDriveClient();
   await drive.comments.delete({ fileId: docId, commentId });
 }
