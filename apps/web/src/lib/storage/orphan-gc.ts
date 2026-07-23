@@ -37,8 +37,6 @@ export const GC_ATTACHMENT_PREFIXES = [
   "client-certidoes/",
 ] as const;
 
-const STAGING_LAYOUT_PREFIXES = GC_ATTACHMENT_PREFIXES.map((p) => `staging/${p}`);
-
 export interface OrphanGcDeps {
   listStorage: (p: {
     prefix?: string;
@@ -52,6 +50,18 @@ export interface OrphanGcDeps {
 
 export interface OrphanGcOptions {
   prefixes?: readonly string[];
+  // Varre também as variantes `staging/<prefix>`? Só o AMBIENTE staging deve
+  // (uploads via s3.ts lá ganham `staging/`). Em prod fica false: prod não tem
+  // blobs sob `staging/`, e varrê-las contra o DB de prod apagaria blobs de
+  // staging caso o token do Blob seja compartilhado (defesa vs cross-env — o GC
+  // com BLOB_GC_DELETE exige stores SEPARADOS por ambiente de qualquer forma).
+  includeStagingLayout?: boolean;
+  // Rotação do prefixo inicial (fairness entre runs, sem estado): sem cursor
+  // cross-run, um prefixo grande que esgota o budget faria os seguintes nunca
+  // serem varridos. Rodar o início por semana garante que cada prefixo tenha a
+  // vez. NÃO resolve um único prefixo maior que o budget (>~4500 blobs vivos) —
+  // aí é preciso persistir cursor (TODO de escala; o volume atual varre inteiro).
+  startOffset?: number;
   graceMs?: number; // default 48h
   timeBudgetMs?: number; // default 45s
   pageLimit?: number; // itens por página do list
@@ -81,7 +91,14 @@ export async function runOrphanBlobGc(
   opts: OrphanGcOptions
 ): Promise<OrphanGcResult> {
   const basePrefixes = opts.prefixes ?? GC_ATTACHMENT_PREFIXES;
-  const prefixes = [...basePrefixes, ...basePrefixes.map((p) => `staging/${p}`)];
+  const allPrefixes = opts.includeStagingLayout
+    ? [...basePrefixes, ...basePrefixes.map((p) => `staging/${p}`)]
+    : [...basePrefixes];
+  // Rotação stateless do início (fairness — ver OrphanGcOptions.startOffset).
+  const off =
+    (((opts.startOffset ?? 0) % allPrefixes.length) + allPrefixes.length) %
+    allPrefixes.length;
+  const prefixes = [...allPrefixes.slice(off), ...allPrefixes.slice(0, off)];
   const graceMs = opts.graceMs ?? DEFAULT_GRACE_MS;
   const pageLimit = opts.pageLimit ?? DEFAULT_PAGE_LIMIT;
   const sampleCap = opts.maxSampleUrls ?? DEFAULT_SAMPLE;
@@ -109,8 +126,9 @@ export async function runOrphanBlobGc(
         // Time budget checado a CADA item (antes de processar) — o custo caro é
         // o isReferenced (até N counts), que roda pra todo item não-recente. Sem
         // isso, um bucket todo-referenciado nunca checaria o deadline e estouraria
-        // o teto de 60s serverless. (Sem cursor cross-run: a próxima execução
-        // re-lista do começo; ok no volume atual — o delete encolhe o conjunto.)
+        // o teto de 60s serverless. Sem cursor cross-run, a próxima execução
+        // re-lista do começo (a rotação de startOffset dá a vez a cada prefixo);
+        // no volume atual o bucket inteiro varre numa run só.
         if (deps.now() >= deadline) {
           result.exhausted = true;
           if (bucket.scanned > 0) result.byPrefix[prefix] = bucket;
@@ -118,9 +136,12 @@ export async function runOrphanBlobGc(
         }
         result.scanned++;
         bucket.scanned++;
-        // Carência: só considera blobs mais velhos que graceMs (protege o
-        // upload-then-create — blob subido mas row ainda em voo).
-        if (item.uploadedAt.getTime() >= graceCutoff) {
+        // Carência: só considera blobs MAIS VELHOS que graceMs (protege o
+        // upload-then-create — blob subido mas row ainda em voo). FAIL-SAFE: se
+        // uploadedAt for inválido (getTime NaN), NÃO trata como velho — pula (o
+        // `!(ts < cutoff)` cobre o NaN, que num `<` também dá false → protegido).
+        const ts = item.uploadedAt.getTime();
+        if (!(ts < graceCutoff)) {
           result.tooFresh++;
           continue;
         }
@@ -148,6 +169,3 @@ export async function runOrphanBlobGc(
 
   return result;
 }
-
-/** GC_STAGING_LAYOUT_PREFIXES exportado só pra teste/documentação. */
-export { STAGING_LAYOUT_PREFIXES };

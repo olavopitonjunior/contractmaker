@@ -30,6 +30,12 @@ export async function GET(req: NextRequest) {
   }
 
   const apply = process.env.BLOB_GC_DELETE === "true";
+  // Só o ambiente staging varre as variantes `staging/<prefix>`. Em prod, varrer
+  // `staging/` apagaria blobs de staging se o token do Blob fosse compartilhado
+  // (defesa cross-env — ver orphan-gc.ts). Rotação semanal do prefixo inicial
+  // pra fairness sem estado.
+  const includeStagingLayout = process.env.STAGING_MODE === "true";
+  const startOffset = Math.floor(Date.now() / (7 * 24 * 60 * 60 * 1000));
 
   const result = await runOrphanBlobGc(
     {
@@ -38,7 +44,7 @@ export async function GET(req: NextRequest) {
       deleteBlob: (url) => deleteFromStorage(url),
       now: () => Date.now(),
     },
-    { apply }
+    { apply, includeStagingLayout, startOffset }
   );
 
   if (result.orphans > 0) {

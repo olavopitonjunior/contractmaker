@@ -119,6 +119,10 @@ export async function countBlobUrlReferences(db: Db, url: string): Promise<numbe
  * coluna que casa (barato pro caso comum "referenciado"). Semanticamente
  * equivalente a `countBlobUrlReferences(...) > 0`, mas sem contar tudo. Usado
  * pelo GC de órfãos, que checa milhares de blobs.
+ *
+ * Um ÓRFÃO paga as N checagens em série (nenhuma casa). É de propósito: no GC,
+ * órfão é RARO por design (só o resíduo TOCTOU), então o caso comum
+ * (referenciado, short-circuit rápido) domina; paralelizar encareceria o comum.
  */
 export async function isBlobReferenced(db: Db, url: string): Promise<boolean> {
   if (!url) return false;
