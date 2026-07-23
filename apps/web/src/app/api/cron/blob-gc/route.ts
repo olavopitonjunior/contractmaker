@@ -21,6 +21,11 @@ export const maxDuration = 60;
  * DRY-RUN por padrão: só reporta os candidatos. Deleção real exige
  * `BLOB_GC_DELETE=true` — assim o deploy do cron NÃO apaga nada até revisar o que
  * ele reportaria. Só opera com Vercel Blob (listStorage retorna vazio em S3/local).
+ *
+ * ⚠️ PRÉ-CONDIÇÃO de BLOB_GC_DELETE=true: o Blob store DESTE ambiente NÃO pode ser
+ * compartilhado com outro (prod ≠ staging hoje). Num store compartilhado o GC de
+ * um ambiente apagaria blobs vivos do outro (ver orphan-gc.ts). Rollout: rodar
+ * dry-run, revisar os candidatos reportados, e só então setar BLOB_GC_DELETE.
  */
 export async function GET(req: NextRequest) {
   const cronDenied = requireCronAuth(req);
