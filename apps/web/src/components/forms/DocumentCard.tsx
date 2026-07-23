@@ -30,6 +30,13 @@ export interface DocumentCardData {
   confidence: number | null;
   error?: string | null;
   assignment: Assignment;
+  /**
+   * true = `assignment` veio de `extractedData.assignment` persistido (escolha
+   * humana explícita anterior, ex.: a parte atribuiu+aplicou no link dela), não
+   * do heurístico `suggest`. Habilita a auto-aplicação aos campos no restore
+   * (DocumentosStep) — só reaplicamos automaticamente o que já foi categorizado.
+   */
+  assignmentPersisted?: boolean;
   applied?: boolean;
   /** Epoch ms quando entrou em extracting; UI mostra aviso se > 60s */
   extractingSince?: number | null;

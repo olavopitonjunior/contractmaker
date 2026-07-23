@@ -9,14 +9,18 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
 import type { SelectGroup } from "@/components/forms/NativeSelect";
 import {
+  type Assignment,
   type DocumentKind,
   type FichaResumoData,
   type ProcessedDocHint,
 } from "@/lib/forms/extracted-to-form";
 import {
   createVendaAdapter,
+  filterAssignmentOptionsByScope,
+  readPersistedAssignment,
   type DocumentosStepAdapter,
 } from "@/components/forms/steps/doc-step-adapter";
+import { MAX_ASSIGNMENT_INDEX } from "@/lib/forms/assignment-scope";
 import { mapAttachmentStatusToCard } from "@/lib/forms/attachment-status";
 
 interface DocumentosStepProps {
@@ -28,6 +32,13 @@ interface DocumentosStepProps {
    * O encanamento de upload/polling é o mesmo pras duas esteiras.
    */
   adapter?: DocumentosStepAdapter;
+  /**
+   * Escopo por papel nos links por parte (`ROLE_PATHS[role]`). Quando presente,
+   * os slots de atribuição e a auto-sugestão ficam restritos às chaves top-level
+   * do papel — a parte não atribui um doc a um slot fora do escopo (o autofill
+   * seria descartado no save). undefined = token principal (todos os slots).
+   */
+  allowedTopKeys?: readonly string[];
 }
 
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -289,7 +300,12 @@ function buildAssignmentOptions(
   return groups;
 }
 
-export function DocumentosStep({ form, token, adapter: adapterProp }: DocumentosStepProps) {
+export function DocumentosStep({
+  form,
+  token,
+  adapter: adapterProp,
+  allowedTopKeys,
+}: DocumentosStepProps) {
   const adapter = useMemo(
     () => adapterProp ?? createVendaAdapter(buildAssignmentOptions),
     [adapterProp]
@@ -301,6 +317,36 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
   // Tracking de ficha-resumo já auto-aplicada (Fase E). Evita loop quando
   // a aplicação altera o snapshot do form e re-dispara o effect.
   const appliedFichasRef = useRef<Set<string>>(new Set());
+  // Docs cujo assignment PERSISTIDO já foi auto-aplicado aos campos (Fix 3).
+  // Evita loop e reaplicações repetidas do mesmo doc.
+  const autoAppliedRef = useRef<Set<string>>(new Set());
+
+  // Estabilidade referencial do escopo pra deps de effects/callbacks.
+  const allowedKey = allowedTopKeys ? allowedTopKeys.join("|") : "";
+
+  // Auto-sugestão escopada por papel (Fix 2): nos links por parte, uma sugestão
+  // que caia fora do `allowedTopKeys` é rebaixada pra "outro" — a pessoa escolhe
+  // um slot do próprio papel no dropdown (já filtrado). No token principal
+  // (allowedTopKeys undefined) é um passthrough do adapter.suggest.
+  const scopedSuggest = useCallback(
+    (
+      category: string | null,
+      fields: Record<string, unknown>,
+      snapshot: Record<string, unknown>,
+      siblings: ProcessedDocHint[] = []
+    ): Assignment => {
+      const a = adapter.suggest(category, fields, snapshot, siblings);
+      if (!allowedTopKeys) return a;
+      const topKey = adapter.topKeyForKind(a.kind);
+      if (topKey !== null && !allowedTopKeys.includes(topKey)) {
+        return { kind: "outro", index: 0 };
+      }
+      return a;
+    },
+    // allowedTopKeys capturado via allowedKey pra estabilidade referencial.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [adapter, allowedKey]
+  );
 
   // Restore previously uploaded attachments. Documents without extractedData
   // are marked as "failed" (instead of the misleading "uploading") so the user
@@ -318,7 +364,13 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
         const restored: DocumentCardData[] = (data.attachments || []).map((a: any) => {
           const extracted = a.extractedData || {};
           const fields = extracted.fields || null;
-          const assignment = adapter.suggest(a.category, fields || {}, snapshot);
+          // Fix 1: prefere o assignment PERSISTIDO (escolha da parte, salvo pelo
+          // PATCH em handleApply) em vez de re-sugerir — assim a categorização
+          // feita no link individual reflete no principal e o doc não cai em
+          // "outro". Sem persistido, cai no heurístico (escopado por papel).
+          const persisted = readPersistedAssignment(extracted);
+          const assignment =
+            persisted ?? scopedSuggest(a.category, fields || {}, snapshot);
           // Mapeamento canônico server → card em lib/forms/attachment-status
           // (compartilhado com polling e doUpload — não duplicar aqui).
           const cardStatus = mapAttachmentStatusToCard(a.status, !!fields);
@@ -340,6 +392,7 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
             fields,
             confidence: typeof extracted.confidence === "number" ? extracted.confidence : null,
             assignment,
+            assignmentPersisted: persisted !== null,
             extractingSince,
             error:
               cardStatus === "failed"
@@ -356,7 +409,7 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
       cancelled = true;
     };
 
-  }, [token, adapter]);
+  }, [token, adapter, scopedSuggest]);
 
   // Phase F.I-α + F.II polling — enquanto houver cards em status não-final
   // (uploading/extracting/failed), busca GET /attachments a cada 3s e
@@ -407,10 +460,16 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
                   fields: other.fields,
                   assignment: other.assignment,
                 }));
+              // Recomputa o assignment só quando o card estava "failed" (não
+              // tinha um bom valor). Prefere o persistido (escolha da parte);
+              // senão o heurístico escopado. Card já ok mantém sua escolha.
+              const persisted = readPersistedAssignment(extracted);
               const assignment =
                 d.status === "failed"
-                  ? adapter.suggest(a.category, fields, snapshot, siblings)
+                  ? persisted ?? scopedSuggest(a.category, fields, snapshot, siblings)
                   : d.assignment;
+              const assignmentPersisted =
+                d.status === "failed" ? persisted !== null : d.assignmentPersisted;
               return {
                 ...d,
                 status: "ready",
@@ -420,6 +479,7 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
                   typeof extracted.confidence === "number" ? extracted.confidence : null,
                 error: null,
                 assignment,
+                assignmentPersisted,
                 extractingSince: null,
               };
             }
@@ -455,7 +515,7 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
       cancelled = true;
       clearInterval(interval);
     };
-  }, [docs, token, form, adapter]);
+  }, [docs, token, form, adapter, scopedSuggest]);
 
   // Fase E — quando uma ficha-resumo fica ready, auto-aplica os dados no form
   // (cria/preenche slots de vendedores/compradores/cônjuges/representantes/
@@ -507,7 +567,7 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
           d.category !== "outro" &&
           d.assignment.kind === "outro"
         ) {
-          const newAssignment = adapter.suggest(
+          const newAssignment = scopedSuggest(
             d.category,
             d.fields,
             snapshot,
@@ -537,6 +597,12 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
   const ensureSlot = useCallback(
     (kind: DocumentKind, index: number) => {
       if (kind === "outro") return;
+      // Guard de sanidade: índice fora de [0,MAX] cresceria o array sem limite
+      // (trava a aba). Os callers já saneiam (readPersistedAssignment/suggest),
+      // isto é defesa em profundidade contra qualquer índice inesperado.
+      if (!Number.isInteger(index) || index < 0 || index > MAX_ASSIGNMENT_INDEX) {
+        return;
+      }
       const target = adapter.fieldKeyForKind(kind);
       if (!target) return;
       const current = (form.getValues(target.key) as any[] | undefined) ?? [];
@@ -549,6 +615,41 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
     },
     [form, adapter]
   );
+
+  // Fix 3 — auto-aplica aos campos os docs cujo assignment foi PERSISTIDO pela
+  // parte (escolha explícita anterior, ex.: atribuiu+aplicou no link individual).
+  // Espelha o auto-apply da ficha-resumo: só reaplicamos o que já foi
+  // categorizado, com `skipIfDirty` (nunca sobrescreve digitação manual) e
+  // idempotente via `autoAppliedRef`. Assim a OCR feita no link individual
+  // reflete nos campos do form principal sem exigir novo clique. Docs sem
+  // atribuição explícita seguem exigindo "Aplicar aos campos" (gate H.5).
+  useEffect(() => {
+    if (!hydrated) return;
+    const pending = docs.filter(
+      (d) =>
+        d.status === "ready" &&
+        d.fields &&
+        d.assignmentPersisted &&
+        d.assignment.kind !== "outro" &&
+        !autoAppliedRef.current.has(d.id)
+    );
+    if (pending.length === 0) return;
+    for (const d of pending) {
+      autoAppliedRef.current.add(d.id);
+      ensureSlot(d.assignment.kind, d.assignment.index);
+      adapter.apply(
+        { category: d.category, fields: d.fields || {}, confidence: d.confidence ?? 0 },
+        d.assignment,
+        form as UseFormReturn<Record<string, unknown>>,
+        { skipIfDirty: true }
+      );
+    }
+    setDocs((prev) =>
+      prev.map((d) =>
+        autoAppliedRef.current.has(d.id) ? { ...d, applied: true } : d
+      )
+    );
+  }, [docs, hydrated, form, adapter, ensureSlot]);
 
   // Applies the OCR result for a single attachment to its card. Runs inside
   // a setDocs callback so parallel calls see the freshest state — prevents
@@ -569,7 +670,7 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
             fields: d.fields,
             assignment: d.assignment,
           }));
-        const assignment = adapter.suggest(category, fields, snapshot, siblings);
+        const assignment = scopedSuggest(category, fields, snapshot, siblings);
         ensureSlot(assignment.kind, assignment.index);
         return prev.map((d) =>
           d.id === attachmentId
@@ -580,12 +681,15 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
                 fields,
                 confidence,
                 assignment,
+                // Sugestão heurística fresca — não é escolha persistida da parte,
+                // então não entra na auto-aplicação (Fix 3); segue o "Aplicar".
+                assignmentPersisted: false,
               }
             : d
         );
       });
     },
-    [form, ensureSlot, adapter]
+    [form, ensureSlot, scopedSuggest]
   );
 
   // Single-doc retry — usa novo endpoint /retry que libera lock e reenfileira.
@@ -836,7 +940,15 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
         index = Number(rawIdx) || 0;
         ensureSlot(kind, index);
       }
-      updateDoc(id, { assignment: { kind, index }, applied: false });
+      // Troca manual tira o doc do trilho de auto-aplicação persistida (Fix 3):
+      // a escolha agora é do operador na sessão atual, aplicada via "Aplicar aos
+      // campos". `assignmentPersisted:false` impede o effect de reaplicar sozinho.
+      autoAppliedRef.current.delete(id);
+      updateDoc(id, {
+        assignment: { kind, index },
+        applied: false,
+        assignmentPersisted: false,
+      });
     },
     [updateDoc, form, ensureSlot, adapter]
   );
@@ -896,7 +1008,12 @@ export function DocumentosStep({ form, token, adapter: adapterProp }: Documentos
   }, [docs, form, token, updateDoc, adapter]);
 
   const snapshot = form.getValues();
-  const assignmentOptions = adapter.buildOptions(snapshot, docs);
+  // Fix 2: nos links por parte, só oferece slots do papel (allowedTopKeys).
+  const assignmentOptions = filterAssignmentOptionsByScope(
+    adapter.buildOptions(snapshot, docs),
+    allowedTopKeys,
+    adapter.topKeyForKind
+  );
   const readyCount = docs.filter((d) => d.status === "ready").length;
   // Only block "Aplicar aos campos" while files are still UPLOADING. Extractions
   // can take up to 60s per file (Gemini) and one failed extraction should not

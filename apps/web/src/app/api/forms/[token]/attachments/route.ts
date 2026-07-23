@@ -7,9 +7,27 @@ import { resolveFormScope, formLockedResponse } from "@/lib/forms/resolve-form-s
 import { formClosedResponse } from "@/lib/forms/form-gate";
 import { signatureMatchesMime } from "@/lib/security/file-signature";
 import { RateLimits } from "@/lib/security/ratelimit";
+import {
+  parseAssignment,
+  assignmentAllowedForRole,
+  esteiraFromSchemaType,
+} from "@/lib/forms/assignment-scope";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
+
+/**
+ * O cache de OCR é por conteúdo (SHA-256) e cruza deals/forms da MESMA org. O
+ * `assignment` ({kind,index}) é POR REGISTRO/contexto (qual slot deste deal),
+ * NÃO derivado do conteúdo — reusá-lo aplicaria o slot de um deal antigo no
+ * atual (ex.: mesmo RG de um cliente recorrente em dois negócios). Remove antes
+ * de copiar os campos extraídos pro anexo novo.
+ */
+function stripAssignment(ed: unknown): Prisma.InputJsonValue | undefined {
+  if (!ed || typeof ed !== "object") return undefined;
+  const { assignment: _drop, ...rest } = ed as Record<string, unknown>;
+  return rest as Prisma.InputJsonValue;
+}
 
 const MAX_BYTES = 10 * 1024 * 1024;
 const ALLOWED_MIMES = [
@@ -175,7 +193,7 @@ export async function POST(
         mime: file.type,
         url: blob.url,
         category: cached?.category ?? null,
-        extractedData: (cached?.extractedData as Prisma.InputJsonValue) ?? undefined,
+        extractedData: cached ? stripAssignment(cached.extractedData) : undefined,
         contentHash,
         byteSize: buffer.byteLength,
         status: initialStatus,
@@ -197,7 +215,7 @@ export async function POST(
         createdAt: attachment.createdAt,
         cached: cached !== null,
         category: cached?.category ?? null,
-        extractedData: cached?.extractedData ?? null,
+        extractedData: cached ? stripAssignment(cached.extractedData) ?? null : null,
       },
       { status: 202 }
     );
@@ -240,9 +258,30 @@ export async function PATCH(
   }
 
   const body = await req.json().catch(() => ({}));
-  const assignment = body?.assignment;
-  if (!assignment || typeof assignment !== "object") {
-    return NextResponse.json({ error: "assignment obrigatorio" }, { status: 400 });
+  // Sanitiza o assignment: kind ∈ conjunto conhecido, index inteiro [0,MAX].
+  // Descarta qualquer prop extra injetada. O assignment é auto-aplicado no lado
+  // do admin (Fix 3), então precisa ser tratado como entrada não-confiável.
+  const assignment = parseAssignment(body?.assignment);
+  if (!assignment) {
+    return NextResponse.json({ error: "assignment inválido" }, { status: 400 });
+  }
+  // Subtoken só pode atribuir dentro do próprio papel — senão a parte forjaria
+  // um slot de outra parte (`{kind:"vendedor"}` num link de comprador) que o
+  // auto-apply gravaria em dados alheios sem revisão. `filterAssignmentOptions`
+  // no cliente é só UX; esta é a invariante de verdade.
+  if (
+    scope.participantId &&
+    scope.role &&
+    !assignmentAllowedForRole(
+      assignment.kind,
+      scope.role,
+      esteiraFromSchemaType(scope.schemaType),
+    )
+  ) {
+    return NextResponse.json(
+      { error: "assignment fora do escopo do papel" },
+      { status: 403 },
+    );
   }
 
   const current = (attachment.extractedData as Record<string, unknown>) || {};

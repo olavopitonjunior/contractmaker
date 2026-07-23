@@ -276,7 +276,7 @@ export function LocacaoFormWizard({
 
   const steps = comercial
     ? [
-        <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} />,
+        <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} allowedTopKeys={pathScope} />,
         <LocacaoParteStep key="s1" form={form} listKey="locadores" singular="Locador" />,
         <LocacaoParteStep key="s2" form={form} listKey="locatarios" singular="Locatário" />,
         <ImovelLocacaoStep key="s3" form={form} comercial />,
@@ -285,7 +285,7 @@ export function LocacaoFormWizard({
         <ConfirmacaoStep key="s6" form={form} />,
       ]
     : [
-        <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} />,
+        <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} allowedTopKeys={pathScope} />,
         <LocacaoParteStep key="s1" form={form} listKey="locadores" singular="Locador" />,
         <LocacaoParteStep key="s2" form={form} listKey="locatarios" singular="Locatário" />,
         <ImovelLocacaoStep key="s3" form={form} />,
