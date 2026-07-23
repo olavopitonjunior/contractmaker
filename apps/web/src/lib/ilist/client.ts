@@ -249,11 +249,16 @@ export function createIListClient(regionId: number, envOverride?: IListEnv) {
     },
 
     geodata: {
-      /** Multi-criteria paginado — usado pra baixar todas as cidades da região. */
+      /**
+       * Multi-criteria paginado — cidades relevantes pra região do cliente.
+       * `clientRegionID` é OBRIGATÓRIO na prática: sem ele o endpoint devolve a
+       * tabela MUNDIAL de cidades (1,5 MILHÃO de linhas / 15k páginas — validado
+       * na região 71). Com o filtro: ~5,8k cidades BR em 58 páginas.
+       */
       cities: (page: number, take = 100) =>
         rawGet<IListPagedResponse<IListGeoCityRow>>(
           env,
-          `${base}/geodata?page=${page}&take=${take}&geoLevel=cities`,
+          `${base}/geodata?page=${page}&take=${take}&geoLevel=cities&clientRegionID=${regionId}`,
         ),
     },
 

@@ -71,11 +71,12 @@ export async function warmGeoCache(
   for (;;) {
     onProgress?.();
     const res = await client.geodata.cities(page, 100);
-    const rows = res.Items.filter((r) => r.CityID && r.CityName).map((r) => ({
+    // trim: a API devolve nomes com padding à direita ("Vitoria    ").
+    const rows = res.Items.filter((r) => r.CityID && r.CityName?.trim()).map((r) => ({
       regionId: client.regionId,
       cityId: r.CityID,
-      cityName: r.CityName,
-      provinceName: r.ProvinceName ?? "",
+      cityName: r.CityName.trim(),
+      provinceName: (r.ProvinceName ?? "").trim(),
       uf: ufForProvince(r.ProvinceName),
     }));
     if (rows.length) {
