@@ -22,6 +22,10 @@
       "schedule": "0 6 * * *"
     },
     {
+      "path": "/api/cron/ilist/sync-listings",
+      "schedule": "0 */6 * * *"
+    },
+    {
       "path": "/api/cron/google-watches/renew",
       "schedule": "0 */6 * * *"
     },
