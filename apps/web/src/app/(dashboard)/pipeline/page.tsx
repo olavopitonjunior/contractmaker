@@ -19,7 +19,9 @@ import {
   FileText,
   Upload,
   Sparkles,
+  Building2,
 } from "lucide-react";
+import { getIListConnection } from "@/lib/ilist/connection";
 
 export default async function PipelinePage({
   searchParams,
@@ -33,6 +35,10 @@ export default async function PipelinePage({
 
   // ?arquivados=1 mostra também os deals arquivados (recuperação). Default oculta.
   const includeArchived = searchParams?.arquivados === "1";
+
+  // iList (RE/MAX): entrada extra no dropdown só quando o tenant tem conexão
+  // provisionada pelo super-admin (gating por existência — ver lib/ilist/connection.ts).
+  const hasIList = (await getIListConnection(orgId)) !== null;
 
   // Filtra SEMPRE por kind="venda" (getPipelineByKind) — evita o footgun de
   // findFirst({ orgId }) sem kind, que pegaria o pipeline de locação.
@@ -203,6 +209,23 @@ export default async function PipelinePage({
                 </div>
               </Link>
             </DropdownMenuItem>
+            {hasIList && (
+              <DropdownMenuItem asChild>
+                <Link
+                  href="/deals/new-from-ilist"
+                  className="flex items-start gap-3 py-2"
+                >
+                  <Building2 className="h-4 w-4 mt-0.5 shrink-0" />
+                  <div className="flex flex-col gap-0.5">
+                    <span className="font-medium">Novo contrato do iList</span>
+                    <span className="text-xs text-muted-foreground">
+                      Busca o imóvel no catálogo RE/MAX e abre o formulário com
+                      imóvel e comissão pré-preenchidos.
+                    </span>
+                  </div>
+                </Link>
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

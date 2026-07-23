@@ -22,6 +22,8 @@ export const DEAL_SOURCE_CHANNEL = {
   LEAD: "lead",
   /** Wizard de contrato de locação. */
   WIZARD: "wizard",
+  /** Imóvel importado do catálogo iList (RE/MAX). */
+  ILIST: "ilist",
 } as const;
 
 export type DealSourceChannel =
@@ -36,4 +38,5 @@ export const DEAL_SOURCE_CHANNEL_LABEL: Record<DealSourceChannel, string> = {
   proposta: "Proposta convertida",
   lead: "Lead convertido",
   wizard: "Wizard de locação",
+  ilist: "Importado do iList",
 };

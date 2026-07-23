@@ -376,6 +376,7 @@ function ActionsPanel({
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2">
         <Button variant="outline" asChild><Link href={`/admin/orgs/${orgId}/modules`}>Gerenciar módulos</Link></Button>
+        <Button variant="outline" asChild><Link href={`/admin/orgs/${orgId}/ilist`}>Integração iList</Link></Button>
         <Button variant="outline" asChild><Link href="/admin/platform-roles">Gerenciar staff de plataforma</Link></Button>
         <BrandingFeesEditor orgId={orgId} />
       </div>

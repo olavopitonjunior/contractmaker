@@ -23,7 +23,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Trash2, UserPlus } from "lucide-react";
+import { Plus, Trash2, UserPlus, Building2 } from "lucide-react";
+import {
+  IListPickerDialog,
+  type IListImportPayload,
+} from "@/components/ilist/IListPickerDialog";
 
 const SCHEMA_BY_TIPO: Record<string, { label: string; value: string }[]> = {
   venda: [{ label: "Compra e venda", value: "compra_venda_v1" }],
@@ -62,6 +66,12 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
   const [validadeDias, setValidadeDias] = useState("5");
   const [comissao, setComissao] = useState(false);
   const [esconderComissao, setEsconderComissao] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // Snapshot completo do listing iList escolhido — entra em dataJson.imoveis[0]
+  // (endereço + código + preço + ilistId) em vez do snapshot mínimo {endereco}.
+  const [ilistSnapshot, setIlistSnapshot] = useState<
+    IListImportPayload["proposalSnapshot"] | null
+  >(null);
 
   const proponenteLabel = isVenda ? "Comprador" : "Locatário";
   const vendedorLabel = isVenda ? "Proprietário / Vendedor" : "Locador";
@@ -90,7 +100,12 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
       // correto (master/ALTO-1).
       const valorNum = valor ? parseMoneyBR(valor) : undefined;
       const dataJson: Record<string, unknown> = {
-        imoveis: imovel ? [{ endereco: imovel }] : [],
+        imoveis:
+          ilistSnapshot && ilistSnapshot.endereco === imovel
+            ? [ilistSnapshot]
+            : imovel
+              ? [{ endereco: imovel }]
+              : [],
       };
       const propNomes = validProponentes.map((p) => ({ nome: p.name }));
       const vendNomes = validVendedores.map((p) => ({ nome: p.name }));
@@ -269,12 +284,42 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
 
           <div className="space-y-1">
             <Label>Imóvel</Label>
-            <Input
-              value={imovel}
-              onChange={(e) => setImovel(e.target.value)}
-              placeholder="Endereço do imóvel"
-            />
+            <div className="flex gap-2">
+              <Input
+                value={imovel}
+                onChange={(e) => setImovel(e.target.value)}
+                placeholder="Endereço do imóvel"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                title="Buscar no catálogo iList (RE/MAX)"
+                onClick={() => setPickerOpen(true)}
+              >
+                <Building2 className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
+          <IListPickerDialog
+            open={pickerOpen}
+            onOpenChange={setPickerOpen}
+            transactionType={tipo}
+            onSelect={(payload: IListImportPayload) => {
+              setIlistSnapshot(payload.proposalSnapshot);
+              setImovel(payload.proposalSnapshot.endereco);
+              // Preço do listing pré-preenche o valor quando ainda vazio.
+              if (payload.proposalSnapshot.preco != null) {
+                setValor((v) =>
+                  v ||
+                  payload.proposalSnapshot.preco!.toLocaleString("pt-BR", {
+                    minimumFractionDigits: 2,
+                  }),
+                );
+              }
+            }}
+          />
+
 
           {SCHEMA_BY_TIPO[tipo].length > 1 && (
             <div className="space-y-1">
