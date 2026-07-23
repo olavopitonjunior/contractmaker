@@ -128,4 +128,20 @@ describe("readPersistedAssignment", () => {
       readPersistedAssignment({ assignment: { kind: 1, index: "x" } })
     ).toBeNull();
   });
+
+  it("null pra kind desconhecido e índice perigoso (não auto-aplica lixo)", () => {
+    // Vetores do code review: kind fora do conjunto e índice sem limite.
+    expect(
+      readPersistedAssignment({ assignment: { kind: "hacker", index: 0 } })
+    ).toBeNull();
+    expect(
+      readPersistedAssignment({ assignment: { kind: "comprador", index: Infinity } })
+    ).toBeNull();
+    expect(
+      readPersistedAssignment({ assignment: { kind: "comprador", index: 1e12 } })
+    ).toBeNull();
+    expect(
+      readPersistedAssignment({ assignment: { kind: "comprador", index: -1 } })
+    ).toBeNull();
+  });
 });
