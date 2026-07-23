@@ -1,6 +1,5 @@
 import { prisma } from "@/lib/db/prisma";
 import { getImpersonationFor } from "./impersonation";
-import { isMiddlewareSanitizedPath } from "./subdomain-hint";
 
 /**
  * Resolução da org do usuário autenticado, respeitando o subdomínio de tenant.
@@ -42,10 +41,10 @@ async function readRequestSubdomainHint(): Promise<string | null> {
     // Guarda de rota (mesma regra do sessionSubdomainHint pros wrappers): o
     // x-pathname é setado pelo middleware, então sua PRESENÇA prova que o
     // middleware rodou = rota dentro do matcher = header sanitizado. Ausente
-    // (rota fora do matcher, ex. /api/auth) ou prefixo não-sanitizado → NÃO
-    // confia no x-org-subdomain (seria forjável), cai no fallback legado.
-    const path = h.get("x-pathname");
-    if (!path || !isMiddlewareSanitizedPath(path)) return null;
+    // (rota fora do matcher, ex. /api/auth) → NÃO confia no x-org-subdomain
+    // (seria forjável), cai no fallback legado. (Bare calls em /api/auth, como
+    // reset-password, também pinam {subdomainHint:null} explicitamente.)
+    if (h.get("x-pathname") == null) return null;
     return h.get("x-org-subdomain");
   } catch (err) {
     // RE-LANÇAR o sinal de dynamic-render (ver isDynamicServerError). Na prática

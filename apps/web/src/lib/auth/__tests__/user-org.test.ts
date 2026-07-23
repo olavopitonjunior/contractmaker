@@ -103,15 +103,17 @@ describe("getUserOrg — sweep multi-org", () => {
     );
   });
 
-  it("(c3) rota /api/auth (não sanitizada) → ignora x-org-subdomain, fallback", async () => {
-    setHeaders({ path: "/api/auth/permissions", subdomain: "remaxtrio" });
-    mockMembershipFindFirst.mockResolvedValue({ org: { id: "org-first" } });
+  it("(c3) rota FUNDA do matcher (ex. /api/forms/[token]/lock) → confia no header (não regride)", async () => {
+    // Regressão do round 5: a lista de prefixos larga derrubava o hint aqui.
+    // Com a guarda por presença de x-pathname, rota do matcher é confiada.
+    setHeaders({ path: "/api/forms/abc/lock", subdomain: "remaxtrio" });
+    mockMembershipFindFirst.mockResolvedValue({ org: { id: "org-trio", subdomain: "remaxtrio" } });
 
     const org = await getUserOrg("u1");
 
-    expect(org).toEqual({ id: "org-first" });
+    expect(org).toEqual({ id: "org-trio", subdomain: "remaxtrio" });
     expect(mockMembershipFindFirst).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { userId: "u1" } })
+      expect.objectContaining({ where: { userId: "u1", org: { subdomain: "remaxtrio" } } })
     );
   });
 
