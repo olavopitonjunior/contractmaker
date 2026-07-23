@@ -136,7 +136,20 @@ O `POST oauth/token` **exige que o corpo comece com um caractere `=`** seguido d
 
 **Pedido:** aceitar `application/x-www-form-urlencoded` padrão (sem o `=` inicial), documentar o formato do header, e considerar refresh token.
 
-### 2.7 [BAIXO] Inconsistências de payload
+### 2.7 [ALTO] Geodata sem filtro devolve a tabela MUNDIAL de cidades
+
+`GET integrator/{id}/geodata?geoLevel=cities` **sem** `clientRegionID` retorna **1.500.763 cidades em 15.008 páginas** — a base geográfica global inteira (as primeiras páginas trazem cidades do Irã/Afeganistão), não as cidades da região do integrador. Com `clientRegionID={região}` o resultado cai para as ~5.797 cidades do Brasil (58 páginas).
+
+- **Impacto:** um consumidor que siga a documentação (que lista `clientRegionID` como *opcional*) entra num download de 1,5 milhão de linhas. Foi exatamente o que travou nosso primeiro sync.
+- **Pedido:** default do endpoint escopado à região do integrador (ou `clientRegionID` obrigatório), e documentação corrigida.
+
+### 2.8 [MÉDIO] Qualidade dos dados de geodata
+
+- Nomes de cidade retornam com **padding de espaços à direita** (`"Vitoria                    "`).
+- Hierarquia inconsistente: para parte do Brasil, `ProvinceName` traz o nome correto do estado ("São Paulo", "Espírito Santo"), mas em outros casos vem uma **cidade no lugar do estado** (ex.: `RegionName: "Região Centro-oeste"`, `ProvinceName: "Cuiabá"`).
+- **Impacto:** resolução de UF/estado por província não é confiável em todo o território; consumidores precisam de trim + mapa tolerante a falhas.
+
+### 2.9 [BAIXO] Inconsistências de payload
 
 - **Sentinela `-999`:** campos numéricos "vazios" voltam como `-999` (ex.: `CurrentListingPrice: -999`, `ContractType: -999`) em vez de `null`. Consumidores precisam normalizar.
 - **Typo `ExternaID`:** a resposta de `properties` traz `ExternaID` (sem o "l") **além** de `ExternalID`.
@@ -158,11 +171,13 @@ O `POST oauth/token` **exige que o corpo comece com um caractere `=`** seguido d
 | 1.4 | Busca/filtragem server-side de listings | P1 | Capacidade |
 | 1.7 | Credencial read-only | P1 | Segurança |
 | 1.6 | Campos cadastrais BR no imóvel | P1 | Capacidade |
+| 2.7 | Geodata escopado por região (sem `clientRegionID` vem o mundo — 1,5M linhas) | ALTO | Comportamento |
 | 2.4 | Criar listing em rascunho | MÉDIO | Comportamento |
 | 2.5 | Documentar campos obrigatórios | MÉDIO | Documentação |
 | 2.6 | Fluxo de token padrão + refresh | MÉDIO | Robustez |
+| 2.8 | Qualidade do geodata (padding, província errada) | MÉDIO | Qualidade |
 | 1.5 | Relatórios/agregações | P2 | Capacidade |
-| 2.7 | Sentinela -999, typo `ExternaID`, doc desatualizada | BAIXO | Qualidade |
+| 2.9 | Sentinela -999, typo `ExternaID`, doc desatualizada | BAIXO | Qualidade |
 
 ---
 
