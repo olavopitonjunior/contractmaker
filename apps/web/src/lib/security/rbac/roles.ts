@@ -113,11 +113,15 @@ function salesAccess(): PermissionMap {
     [PERMISSION.CUSTOMER_VIEW_OWN_DEALS]: true,
     [PERMISSION.FEES_VIEW]: true,
     // Corretor: opera as PRÓPRIAS propostas ponta a ponta (cria, envia,
-    // converte), mas só enxerga as dele. Sem PROPOSAL_VIEW_ALL de propósito.
+    // converte, cancela, reenvia, atribui), mas só enxerga as dele/atribuídas.
+    // Sem PROPOSAL_VIEW_ALL nem PROPOSAL_DELETE de propósito (delete é destrutivo).
     [PERMISSION.PROPOSAL_VIEW_OWN_ONLY]: true,
     [PERMISSION.PROPOSAL_CREATE]: true,
     [PERMISSION.PROPOSAL_SEND]: true,
     [PERMISSION.PROPOSAL_CONVERT]: true,
+    [PERMISSION.PROPOSAL_CANCEL]: true,
+    [PERMISSION.PROPOSAL_RESEND]: true,
+    [PERMISSION.PROPOSAL_ASSIGN]: true,
   };
 }
 
@@ -186,6 +190,10 @@ function gestorLocacaoAccess(): PermissionMap {
     [PERMISSION.PROPOSAL_CREATE]: true,
     [PERMISSION.PROPOSAL_SEND]: true,
     [PERMISSION.PROPOSAL_CONVERT]: true,
+    [PERMISSION.PROPOSAL_CANCEL]: true,
+    [PERMISSION.PROPOSAL_DELETE]: true,
+    [PERMISSION.PROPOSAL_RESEND]: true,
+    [PERMISSION.PROPOSAL_ASSIGN]: true,
   };
 }
 

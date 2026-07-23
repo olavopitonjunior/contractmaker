@@ -72,18 +72,24 @@ export function canAccessCharge(params: {
 /**
  * Checa se o user pode acessar UMA proposta específica.
  * VIEW_ALL (gestor/owner/admin/viewer) → qualquer uma da org.
- * VIEW_OWN_ONLY (corretor) → só as que ele criou.
+ * VIEW_OWN_ONLY (corretor) → as que ele criou OU as em que é o responsável
+ * atribuído (`responsibleUserId`). Combina com a atribuição de responsável:
+ * quem cria E quem recebe enxergam a proposta.
  *
  * O `orgId` é responsabilidade do caller (o scopeWhere abaixo já injeta).
  */
 export function canAccessProposal(params: {
   effective: EffectivePermissions;
   ownerUserId: string; // Proposal.userId (quem criou)
+  responsibleUserId?: string | null; // Proposal.responsibleUserId (corretor atribuído)
 }): boolean {
-  const { effective, ownerUserId } = params;
+  const { effective, ownerUserId, responsibleUserId } = params;
   if (can(effective, PERMISSION.PROPOSAL_VIEW_ALL)) return true;
   if (can(effective, PERMISSION.PROPOSAL_VIEW_OWN_ONLY)) {
-    return effective.userId === ownerUserId;
+    return (
+      effective.userId === ownerUserId ||
+      (!!responsibleUserId && effective.userId === responsibleUserId)
+    );
   }
   return false;
 }
@@ -101,13 +107,21 @@ export function canAccessProposal(params: {
  */
 export function proposalScopeWhere(
   effective: EffectivePermissions | null
-): { orgId: string } | { orgId: string; userId: string } | null {
+):
+  | { orgId: string }
+  | { orgId: string; OR: [{ userId: string }, { responsibleUserId: string }] }
+  | null {
   if (!effective) return null;
   if (can(effective, PERMISSION.PROPOSAL_VIEW_ALL)) {
     return { orgId: effective.orgId };
   }
   if (can(effective, PERMISSION.PROPOSAL_VIEW_OWN_ONLY)) {
-    return { orgId: effective.orgId, userId: effective.userId };
+    // Criador OU responsável atribuído. Nome de não-usuário (responsibleName)
+    // é só rótulo — não entra no scope.
+    return {
+      orgId: effective.orgId,
+      OR: [{ userId: effective.userId }, { responsibleUserId: effective.userId }],
+    };
   }
   return null;
 }

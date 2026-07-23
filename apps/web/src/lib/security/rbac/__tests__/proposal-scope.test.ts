@@ -35,11 +35,11 @@ describe("proposalScopeWhere — o filtro que evita IDOR", () => {
     expect(proposalScopeWhere(eff("viewer"))).toEqual({ orgId: "org1" });
   });
 
-  it("sales/corretor (VIEW_OWN_ONLY) → escopo por org E userId", () => {
-    // É a linha que impede o corretor A de listar/exportar as propostas do B.
+  it("sales/corretor (VIEW_OWN_ONLY) → escopo por org E (criador OU responsável)", () => {
+    // Impede o corretor A de ver as do B, mas inclui as que lhe foram atribuídas.
     expect(proposalScopeWhere(eff("sales", "corretorA"))).toEqual({
       orgId: "org1",
-      userId: "corretorA",
+      OR: [{ userId: "corretorA" }, { responsibleUserId: "corretorA" }],
     });
   });
 
@@ -64,6 +64,24 @@ describe("canAccessProposal — acesso a uma proposta específica", () => {
     ).toBe(true);
     expect(
       canAccessProposal({ effective: corretor, ownerUserId: "corretorB" })
+    ).toBe(false);
+  });
+
+  it("corretor acessa proposta em que é o RESPONSÁVEL (mesmo não sendo o criador)", () => {
+    const corretor = eff("sales", "corretorA");
+    expect(
+      canAccessProposal({
+        effective: corretor,
+        ownerUserId: "corretorB",
+        responsibleUserId: "corretorA",
+      })
+    ).toBe(true);
+    expect(
+      canAccessProposal({
+        effective: corretor,
+        ownerUserId: "corretorB",
+        responsibleUserId: "corretorC",
+      })
     ).toBe(false);
   });
 
@@ -95,5 +113,20 @@ describe("presets — quem opera propostas", () => {
     const p = resolvePermissions("owner");
     expect(p[PERMISSION.PROPOSAL_VIEW_ALL]).toBe(true);
     expect(p[PERMISSION.PROPOSAL_CONVERT]).toBe(true);
+    expect(p[PERMISSION.PROPOSAL_DELETE]).toBe(true);
+  });
+
+  it("corretor cancela/reenvia/atribui, mas NÃO exclui (destrutivo)", () => {
+    const p = resolvePermissions("sales");
+    expect(p[PERMISSION.PROPOSAL_CANCEL]).toBe(true);
+    expect(p[PERMISSION.PROPOSAL_RESEND]).toBe(true);
+    expect(p[PERMISSION.PROPOSAL_ASSIGN]).toBe(true);
+    expect(p[PERMISSION.PROPOSAL_DELETE]).toBeUndefined();
+  });
+
+  it("gestor_locacao pode excluir e atribuir", () => {
+    const p = resolvePermissions("gestor_locacao");
+    expect(p[PERMISSION.PROPOSAL_DELETE]).toBe(true);
+    expect(p[PERMISSION.PROPOSAL_ASSIGN]).toBe(true);
   });
 });

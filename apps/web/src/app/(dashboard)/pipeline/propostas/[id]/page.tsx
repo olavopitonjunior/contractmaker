@@ -4,7 +4,10 @@ import { redirect, notFound } from "next/navigation";
 import {
   getEffectivePermissions,
   canAccessProposal,
+  can,
 } from "@/lib/security/rbac/check";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { responsibleDisplay } from "@/lib/proposals/status-view";
 import { ProposalDetailClient } from "@/components/proposals/ProposalDetailClient";
 
 export const dynamic = "force-dynamic";
@@ -19,15 +22,28 @@ export default async function PropostaDetailPage({
   const org = await getUserOrg(session.user.id);
   if (!org) redirect("/pipeline");
 
-  const proposal = await prisma.proposal.findUnique({ where: { id: params.id } });
+  const proposal = await prisma.proposal.findUnique({
+    where: { id: params.id },
+    include: {
+      user: { select: { id: true, name: true } },
+      responsibleUser: { select: { id: true, name: true, image: true } },
+    },
+  });
   if (!proposal || proposal.orgId !== org.id) notFound();
 
   const eff = await getEffectivePermissions(session.user.id, org.id);
-  if (!eff || !canAccessProposal({ effective: eff, ownerUserId: proposal.userId })) {
+  if (
+    !eff ||
+    !canAccessProposal({
+      effective: eff,
+      ownerUserId: proposal.userId,
+      responsibleUserId: proposal.responsibleUserId,
+    })
+  ) {
     notFound();
   }
 
-  const [signers, events, attachments] = await Promise.all([
+  const [signers, events, attachments, memberRows] = await Promise.all([
     prisma.proposalSigner.findMany({
       where: { proposalId: params.id },
       orderBy: { signingGroup: "asc" },
@@ -35,12 +51,31 @@ export default async function PropostaDetailPage({
     prisma.proposalEvent.findMany({
       where: { proposalId: params.id },
       orderBy: { receivedAt: "desc" },
-      take: 30,
+      take: 50,
     }),
     prisma.proposalAttachment.findMany({ where: { proposalId: params.id } }),
+    prisma.orgMembership.findMany({
+      where: { orgId: org.id },
+      select: { user: { select: { id: true, name: true } } },
+      orderBy: { user: { name: "asc" } },
+    }),
   ]);
 
   const d = (proposal.dataJson ?? {}) as Record<string, unknown>;
+  const resp = responsibleDisplay({
+    responsibleName: proposal.responsibleName,
+    responsibleUser: proposal.responsibleUser,
+    user: proposal.user,
+  });
+
+  const permissions = {
+    send: can(eff, PERMISSION.PROPOSAL_SEND),
+    convert: can(eff, PERMISSION.PROPOSAL_CONVERT),
+    cancel: can(eff, PERMISSION.PROPOSAL_CANCEL),
+    delete: can(eff, PERMISSION.PROPOSAL_DELETE),
+    resend: can(eff, PERMISSION.PROPOSAL_RESEND),
+    assign: can(eff, PERMISSION.PROPOSAL_ASSIGN),
+  };
 
   return (
     <ProposalDetailClient
@@ -49,10 +84,23 @@ export default async function PropostaDetailPage({
         title: proposal.title,
         status: proposal.status,
         kind: proposal.kind,
+        instrument: proposal.instrument,
         validUntil: proposal.validUntil?.toISOString() ?? null,
         createdAt: proposal.createdAt.toISOString(),
+        sentAt: proposal.sentAt?.toISOString() ?? null,
+        deliveredAt: proposal.deliveredAt?.toISOString() ?? null,
+        firstViewedAt: proposal.firstViewedAt?.toISOString() ?? null,
+        viewCount: proposal.viewCount,
+        lastReminderAt: proposal.lastReminderAt?.toISOString() ?? null,
+        reminderCount: proposal.reminderCount,
+        completedAt: proposal.completedAt?.toISOString() ?? null,
+        convertedAt: proposal.convertedAt?.toISOString() ?? null,
+        convertedDealId: proposal.convertedDealId,
         dossierUrl: proposal.dossierUrl,
         resumo: summarize(d, proposal.kind),
+        responsible: resp,
+        responsibleUserId: proposal.responsibleUserId,
+        responsibleName: proposal.responsibleName,
       }}
       signers={signers.map((s) => ({
         id: s.id,
@@ -72,6 +120,8 @@ export default async function PropostaDetailPage({
         category: a.category,
         url: a.url,
       }))}
+      members={memberRows.map((m) => ({ id: m.user.id, name: m.user.name ?? "Sem nome" }))}
+      permissions={permissions}
     />
   );
 }

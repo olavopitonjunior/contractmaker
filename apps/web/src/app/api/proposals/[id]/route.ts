@@ -2,34 +2,27 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import {
-  requireApiAuth,
-  isAuthFailure,
-  authFailureResponse,
-} from "@/lib/api/require-auth";
-import { getEffectivePermissions, canAccessProposal } from "@/lib/security/rbac/check";
+import { can } from "@/lib/security/rbac/check";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { loadScopedProposal } from "@/lib/proposals/route-helpers";
 import { sanitizeHiddenPaths } from "@/lib/proposals/hidden-fields";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
-async function loadScoped(req: NextRequest, id: string) {
-  const auth = await requireApiAuth(req, { scope: "proposals:rw" });
-  if (isAuthFailure(auth)) return { fail: authFailureResponse(auth) };
-
-  const proposal = await prisma.proposal.findUnique({ where: { id } });
-  if (!proposal || proposal.orgId !== auth.org.id) {
-    return { fail: NextResponse.json({ error: "Não encontrada" }, { status: 404 }) };
-  }
-  const eff = await getEffectivePermissions(auth.actor.effectiveUserId, auth.org.id);
-  if (!eff || !canAccessProposal({ effective: eff, ownerUserId: proposal.userId })) {
-    // 404 (não 403) pra não vazar existência a quem não tem escopo.
-    return { fail: NextResponse.json({ error: "Não encontrada" }, { status: 404 }) };
-  }
-  return { auth, proposal };
-}
+// Estados FRIOS onde excluir é seguro (sem envelope/aceite ativo). Qualquer
+// estado de assinatura em curso (enviada/entregue/…/completa) ou convertida é
+// bloqueado — cancele antes.
+const DELETABLE_STATUSES = new Set([
+  "rascunho",
+  "falha_envio",
+  "cancelada",
+  "expirada",
+  "recusada_proponente",
+  "recusada_vendedor",
+]);
 
 // GET /api/proposals/[id]
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  const r = await loadScoped(req, params.id);
+  const r = await loadScopedProposal(req, params.id);
   if ("fail" in r) return r.fail;
   const [signers, events, attachments, envelopes] = await Promise.all([
     prisma.proposalSigner.findMany({ where: { proposalId: params.id } }),
@@ -57,7 +50,7 @@ const patchSchema = z.object({
 
 // PATCH /api/proposals/[id] — só em rascunho.
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
-  const r = await loadScoped(req, params.id);
+  const r = await loadScopedProposal(req, params.id);
   if ("fail" in r) return r.fail;
   if (r.proposal.status !== "rascunho") {
     return NextResponse.json(
@@ -97,4 +90,41 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     }
   ).catch(() => {});
   return NextResponse.json({ proposal: updated });
+}
+
+// DELETE /api/proposals/[id] — exclui a proposta (cascata remove signers/events/
+// attachments/envelopes). Só em estado frio e nunca depois de virar negócio.
+export async function DELETE(req: NextRequest, { params }: { params: { id: string } }) {
+  const r = await loadScopedProposal(req, params.id);
+  if ("fail" in r) return r.fail;
+  const { auth, eff, proposal } = r;
+
+  if (!can(eff, PERMISSION.PROPOSAL_DELETE)) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+  if (proposal.convertedDealId) {
+    return NextResponse.json(
+      { error: "Proposta já virou negócio; exclua o negócio no pipeline." },
+      { status: 409 }
+    );
+  }
+  if (!DELETABLE_STATUSES.has(proposal.status)) {
+    return NextResponse.json(
+      { error: "Cancele a assinatura antes de excluir." },
+      { status: 409 }
+    );
+  }
+
+  await prisma.proposal.delete({ where: { id: params.id } });
+  await audit(
+    extractAuditContextFromRequest(req, auth.org.id, auth.actor.effectiveUserId),
+    {
+      action: "PROPOSAL_DELETE",
+      result: "SUCCESS",
+      resource: params.id,
+      resourceType: "Proposal",
+      metadata: { status: proposal.status, title: proposal.title },
+    }
+  ).catch(() => {});
+  return NextResponse.json({ ok: true });
 }

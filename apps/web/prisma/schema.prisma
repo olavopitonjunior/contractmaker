@@ -70,6 +70,7 @@ model User {
   reconciliationMatches  BankReconciliation[]
   commissionChargeDrafts CommissionChargeDraft[]
   proposals              Proposal[]
+  proposalsResponsible   Proposal[]               @relation("ProposalResponsible")
 
   // Pagadoria — Multi-account (capabilities granulares por conta bancária)
   accountPermissions      AsaasAccountPermission[] @relation("AccountPermissionUser")
@@ -2571,8 +2572,15 @@ model EnvelopeEvent {
 model Proposal {
   id              String    @id @default(cuid())
   orgId           String
-  // Dono da proposta. Sustenta a regra "corretor vê só as dele".
+  // Dono da proposta. Sustenta a regra "corretor vê só as dele". IMUTÁVEL (o
+  // criador), diferente do responsável comercial abaixo (reatribuível).
   userId          String
+  // Responsável comercial (corretor). Editável e independente do criador.
+  // responsibleUserId = corretor que é usuário da plataforma; responsibleName =
+  // corretor NÃO-usuário (nome livre). Mutuamente exclusivos na prática.
+  // Precedência de exibição: responsibleName ?? responsibleUser.name ?? user.name.
+  responsibleUserId String?
+  responsibleName   String?
   // Discriminador CANÔNICO. Não usar `kind` sozinho: SalesForm.schemaType tem
   // default "compra_venda_v1", então sem isto toda proposta de locação
   // convertida viraria um form de compra e venda (→ template errado → CCV
@@ -2691,6 +2699,7 @@ model Proposal {
 
   org            Organization         @relation(fields: [orgId], references: [id], onDelete: Cascade)
   user           User                 @relation(fields: [userId], references: [id])
+  responsibleUser User?               @relation("ProposalResponsible", fields: [responsibleUserId], references: [id], onDelete: SetNull)
   template       ContractTemplate?    @relation(fields: [templateId], references: [id])
   property       Property?            @relation(fields: [propertyId], references: [id], onDelete: SetNull)
   leaseClient    LeaseClient?         @relation(fields: [leaseClientId], references: [id], onDelete: SetNull)
@@ -2705,6 +2714,7 @@ model Proposal {
 
   @@index([orgId, status])
   @@index([orgId, userId])
+  @@index([orgId, responsibleUserId])
   @@index([status, validUntil])
   @@index([propertyId, status])
   @@index([parentProposalId])
