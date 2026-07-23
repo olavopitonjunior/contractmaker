@@ -5,33 +5,25 @@
  * getUserOrg (via `readRequestSubdomainHint` em user-org.ts) — pra não
  * divergirem. Divergência reintroduz split-brain / forge.
  *
- * O x-org-subdomain é um conceito de SESSÃO (UI humana num subdomínio de tenant)
- * e só é confiável se o middleware o sanitizou (delete + re-set). Fora do matcher
- * do middleware o header não é tocado → seria forjável, então NÃO é confiado lá.
+ * SINAL DE SANITIZAÇÃO = presença do header `x-pathname`. O middleware o seta em
+ * TODA rota do seu matcher (middleware.ts::config), então sua presença prova que
+ * o middleware rodou e sanitizou o x-org-subdomain (delete + re-set). Ausente =
+ * rota FORA do matcher → o header não foi tocado → NÃO é confiável (forjável).
+ * Usar a presença do x-pathname (e não uma lista de prefixos) evita ter que
+ * espelhar o regex do matcher — uma lista de prefixos erra fácil (ex.: excluir
+ * `/api/forms` inteiro derruba `/api/forms/[token]/lock`, que É rota do matcher).
  */
 
-/**
- * Prefixos de rota EXCLUÍDOS do matcher do middleware (ver middleware.ts::config)
- * onde o x-org-subdomain NÃO é sanitizado. Precisa espelhar o matcher — se um
- * novo prefixo for excluído lá, some aqui. `/api/auth` é a única superfície de
- * SESSÃO fora do matcher hoje (permissions, reset-password); os demais (`/f`,
- * `/p`, `/api/forms`) são públicos/anônimos mas listados por robustez, caso um
- * getUserOrg de sessão seja adicionado neles no futuro.
- */
-const UNSANITIZED_PREFIXES = ["/api/auth", "/api/forms", "/f/", "/p/"] as const;
-
-/** true quando o middleware roda na rota (e portanto sanitizou o header). */
-export function isMiddlewareSanitizedPath(pathname: string): boolean {
-  return !UNSANITIZED_PREFIXES.some(
-    (p) => pathname === p || pathname.startsWith(p)
-  );
-}
+const AUTH_PREFIX = "/api/auth";
 
 /**
  * Hint pra resolução de org na superfície de SESSÃO. Regras:
  *  - Máquina (bearer/newton, viaSession=false): null — a org vem do dono do
  *    token, não de um Host controlável pelo cliente.
- *  - Rota fora do matcher (header não sanitizado): null — seria forjável.
+ *  - Rota fora do matcher (sem x-pathname → header não sanitizado): null.
+ *  - `/api/auth/*`: null. É a única superfície de SESSÃO fora do matcher
+ *    (permissions, reset-password); guarda reliable (via req.url) caso um
+ *    x-pathname forjado tente burlar o check de presença.
  *  - Sessão em rota sanitizada: o header (já limpo pelo middleware).
  */
 export function sessionSubdomainHint(
@@ -39,12 +31,12 @@ export function sessionSubdomainHint(
   viaSession: boolean
 ): string | null {
   if (!viaSession) return null;
-  let path: string;
+  // Middleware rodou? (x-pathname presente ⟺ rota do matcher ⟺ sanitizada)
+  if (req.headers.get("x-pathname") == null) return null;
   try {
-    path = new URL(req.url).pathname;
+    if (new URL(req.url).pathname.startsWith(AUTH_PREFIX)) return null;
   } catch {
     return null;
   }
-  if (!isMiddlewareSanitizedPath(path)) return null;
   return req.headers.get("x-org-subdomain");
 }
