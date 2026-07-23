@@ -135,6 +135,11 @@ export async function PATCH(
     mergeOutcome = await mergeSalesFormDataJson({
       where: { token: params.token },
       incoming: (body.dataJson ?? {}) as Record<string, unknown>,
+      // Cinto contra o eco de template do auto-save: uma aba stale do form
+      // principal não pode regravar arrays de partes 100% vazios por cima do
+      // que um link individual preencheu. `testemunhas` entra — o default do
+      // wizard traz 2 entradas vazias (mesmo vetor).
+      protectBlankPartyArrays: ["vendedores", "compradores", "testemunhas"],
       transform: (merged, fresh) =>
         decideFinalize(fresh).isFinalizing ? dedupConjuges(merged) : merged,
       extraData: (fresh) => {
@@ -202,6 +207,25 @@ export async function PATCH(
         resource: form.id,
         resourceType: "SalesForm",
         metadata: { rejectedPaths: mergeOutcome.rejectedPaths },
+      },
+    );
+  }
+
+  if (mergeOutcome.skippedBlankArrayKeys.length > 0) {
+    // Guard de eco de template agiu — não bloqueia o save (as demais chaves
+    // mergearam), mas fica visível pra diagnóstico.
+    console.warn("[forms PATCH] blank party arrays skipped", {
+      token: params.token,
+      skippedKeys: mergeOutcome.skippedBlankArrayKeys,
+    });
+    audit(
+      extractAuditContextFromRequest(req, form.orgId, null),
+      {
+        action: "FORM_PATCH_BLANK_ARRAY_SKIPPED",
+        result: "DENIED",
+        resource: form.id,
+        resourceType: "SalesForm",
+        metadata: { skippedKeys: mergeOutcome.skippedBlankArrayKeys },
       },
     );
   }

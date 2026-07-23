@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { useAutoSave } from "@/hooks/use-auto-save";
+import { useDirtyTopLevelScope } from "@/hooks/use-dirty-scope";
 import {
   LOCACAO_COMERCIAL_SCHEMA_TYPE,
   stepLabelsForLocacaoType,
@@ -18,6 +19,7 @@ import {
 import type { ParticipantRole } from "@/lib/forms/participant-token";
 import { LocacaoParteStep } from "@/components/forms/steps/locacao/_PartyFields";
 import { DocumentosStep } from "@/components/forms/steps/DocumentosStep";
+import type { Assignment } from "@/lib/forms/extracted-to-form";
 import { locacaoDocAdapter } from "@/components/forms/steps/locacao/locacao-doc-adapter";
 import { ImovelLocacaoStep } from "@/components/forms/steps/locacao/ImovelLocacaoStep";
 import { AluguelStep } from "@/components/forms/steps/locacao/AluguelStep";
@@ -34,6 +36,11 @@ interface LocacaoFormWizardProps {
   endpoint?: string;
   /** Allowlist de chaves top-level (ROLE_PATHS[role]) pro auto-save/finalize. */
   pathScope?: readonly string[];
+  /**
+   * Link individual: slot do próprio participante (role + partyIndex) pro
+   * auto-assign/auto-apply de OCR no DocumentosStep (Fix 4).
+   */
+  selfAssignment?: Assignment;
   /** "participant" marca completedAt do participante; não finaliza o form. */
   finalizeMode?: "main" | "participant";
   /**
@@ -106,6 +113,7 @@ export function LocacaoFormWizard({
   stepIndexes,
   endpoint: endpointProp,
   pathScope,
+  selfAssignment,
   finalizeMode = "main",
   readOnly = false,
 }: LocacaoFormWizardProps) {
@@ -130,9 +138,13 @@ export function LocacaoFormWizard({
 
   const watchedData = useWatch({ control: form.control }) as Record<string, unknown>;
   const endpoint = endpointProp ?? `/api/locacao/forms/${token}`;
+  // Escopo por dirty-keys — ver comentário no SalesFormWizard: a aba do token
+  // principal não pode ecoar locadores/locatarios template-vazios por cima do
+  // que um link individual gravou.
+  const autoSaveScope = useDirtyTopLevelScope(form.control, pathScope);
   const { status: saveStatus } = useAutoSave(token, watchedData, {
     endpoint,
-    pathScope,
+    pathScope: autoSaveScope,
     // Ver SalesFormWizard: pós-finalize o PATCH público responde 403, e um
     // auto-save pendente sujaria a tela de sucesso com "erro".
     enabled: !readOnly && !isComplete,
@@ -276,7 +288,7 @@ export function LocacaoFormWizard({
 
   const steps = comercial
     ? [
-        <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} allowedTopKeys={pathScope} />,
+        <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} allowedTopKeys={pathScope} selfAssignment={selfAssignment} />,
         <LocacaoParteStep key="s1" form={form} listKey="locadores" singular="Locador" />,
         <LocacaoParteStep key="s2" form={form} listKey="locatarios" singular="Locatário" />,
         <ImovelLocacaoStep key="s3" form={form} comercial />,
@@ -285,7 +297,7 @@ export function LocacaoFormWizard({
         <ConfirmacaoStep key="s6" form={form} />,
       ]
     : [
-        <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} allowedTopKeys={pathScope} />,
+        <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} allowedTopKeys={pathScope} selfAssignment={selfAssignment} />,
         <LocacaoParteStep key="s1" form={form} listKey="locadores" singular="Locador" />,
         <LocacaoParteStep key="s2" form={form} listKey="locatarios" singular="Locatário" />,
         <ImovelLocacaoStep key="s3" form={form} />,

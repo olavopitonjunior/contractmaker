@@ -110,6 +110,11 @@ export async function PATCH(
     mergeOutcome = await mergeSalesFormDataJson({
       where: { token: params.token },
       incoming: (body.dataJson ?? {}) as Record<string, unknown>,
+      // Cinto contra o eco de template do auto-save (ver /api/forms/[token]):
+      // aba stale não regrava locadores/locatarios 100% vazios por cima do
+      // que um link individual preencheu. Fiador fica fora — mora dentro do
+      // objeto `garantia` (deep-merge de objeto, não substituição de array).
+      protectBlankPartyArrays: ["locadores", "locatarios"],
       extraData: (fresh) => {
         const newStatus = requestedStatus ?? fresh.status;
         const isFinalizing =
@@ -144,6 +149,24 @@ export async function PATCH(
   const isFinalizing = finalizedNow;
   const mergedData = mergeOutcome.finalData;
   const updated = mergeOutcome.updated;
+
+  if (mergeOutcome.skippedBlankArrayKeys.length > 0) {
+    // Guard de eco de template agiu — não bloqueia o save; fica visível.
+    console.warn("[locacao forms PATCH] blank party arrays skipped", {
+      token: params.token,
+      skippedKeys: mergeOutcome.skippedBlankArrayKeys,
+    });
+    audit(
+      extractAuditContextFromRequest(req, form.orgId, null),
+      {
+        action: "FORM_PATCH_BLANK_ARRAY_SKIPPED",
+        result: "DENIED",
+        resource: form.id,
+        resourceType: "SalesForm",
+        metadata: { kind: "locacao", skippedKeys: mergeOutcome.skippedBlankArrayKeys },
+      },
+    );
+  }
 
   // Validação server-side no finalize (form público é burlável). Não bloqueia a
   // geração — materializa os problemas na resposta pra correção no editor.

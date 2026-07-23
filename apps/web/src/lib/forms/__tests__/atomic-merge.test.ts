@@ -235,6 +235,102 @@ describe("mergeSalesFormDataJson", () => {
     ).rejects.toBeInstanceOf(FormNotFoundError);
   });
 
+  it("protectBlankPartyArrays: PATCH stale com template vazio não apaga o que o participante gravou (bug prod 2026-07-23)", async () => {
+    const TEMPLATE = {
+      tipo_pessoa: "fisica",
+      nome: "",
+      nacionalidade: "Brasileiro(a)",
+      cpf: "",
+      rg: "",
+      email: "",
+    };
+    const { db } = setupFakeDb({ dataJson: {} });
+
+    // 1) Participante (link individual) grava a própria fatia.
+    await mergeSalesFormDataJson({
+      where: { id: "form-1" },
+      incoming: { vendedores: [{ ...TEMPLATE, nome: "Francielly", cpf: "40019343884" }] },
+      allowedTopKeys: ["vendedores", "imoveis"],
+      protectBlankPartyArrays: ["vendedores"],
+    });
+
+    // 2) Aba stale do token principal auto-salva o estado inteiro, com
+    // vendedores ainda no template vazio do wizard.
+    const result = await mergeSalesFormDataJson({
+      where: { token: "tok-1" },
+      incoming: {
+        vendedores: [{ ...TEMPLATE }],
+        pagamento: { valor_total: 100 },
+      },
+      protectBlankPartyArrays: ["vendedores", "compradores", "testemunhas"],
+    });
+
+    expect(result.skippedBlankArrayKeys).toEqual(["vendedores"]);
+    expect(db.dataJson).toEqual({
+      vendedores: [{ ...TEMPLATE, nome: "Francielly", cpf: "40019343884" }],
+      pagamento: { valor_total: 100 },
+    });
+  });
+
+  it("protectBlankPartyArrays: remoção legítima de parte continua passando", async () => {
+    const { db } = setupFakeDb({
+      dataJson: { vendedores: [{ nome: "João" }, { nome: "Ana" }] },
+    });
+
+    const result = await mergeSalesFormDataJson({
+      where: { id: "form-1" },
+      incoming: { vendedores: [{ nome: "João" }] },
+      protectBlankPartyArrays: ["vendedores"],
+    });
+
+    expect(result.skippedBlankArrayKeys).toEqual([]);
+    expect(db.dataJson).toEqual({ vendedores: [{ nome: "João" }] });
+  });
+
+  it("sem protectBlankPartyArrays o comportamento é o anterior (array substitui)", async () => {
+    const { db } = setupFakeDb({ dataJson: { vendedores: [{ nome: "João" }] } });
+
+    const result = await mergeSalesFormDataJson({
+      where: { id: "form-1" },
+      incoming: { vendedores: [{ nome: "" }] },
+    });
+
+    expect(result.skippedBlankArrayKeys).toEqual([]);
+    expect(db.dataJson).toEqual({ vendedores: [{ nome: "" }] });
+  });
+
+  it("protectBlankPartyArrays: concorrência participante×principal em qualquer ordem preserva a fatia", async () => {
+    const { db } = setupFakeDb({ dataJson: {} });
+
+    await Promise.all([
+      mergeSalesFormDataJson({
+        where: { id: "form-1" },
+        incoming: { vendedores: [{ nome: "Francielly", cpf: "40019343884" }] },
+        allowedTopKeys: ["vendedores", "imoveis"],
+        protectBlankPartyArrays: ["vendedores"],
+      }),
+      mergeSalesFormDataJson({
+        where: { token: "tok-1" },
+        incoming: {
+          vendedores: [{ nome: "", cpf: "", rg: "", email: "" }],
+          pagamento: { valor_total: 500 },
+        },
+        protectBlankPartyArrays: ["vendedores", "compradores"],
+      }),
+    ]);
+
+    // Em qualquer ordem da fila FIFO: se o principal entra primeiro, o form
+    // ainda está vazio e o template passa (primeiro save legítimo) — mas o
+    // participante grava DEPOIS e vence. Se o participante entra primeiro, o
+    // guard descarta o template do principal. Nos dois casos a fatia fica.
+    expect(
+      (db.dataJson as { vendedores: Array<{ nome: string }> }).vendedores[0].nome,
+    ).toBe("Francielly");
+    expect(
+      (db.dataJson as { pagamento?: { valor_total: number } }).pagamento,
+    ).toEqual({ valor_total: 500 });
+  });
+
   it("dataJson null no banco vira base vazia (form recém-criado)", async () => {
     const { db } = setupFakeDb({ dataJson: null });
 

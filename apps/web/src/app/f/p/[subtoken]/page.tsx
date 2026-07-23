@@ -63,6 +63,7 @@ export default async function PublicParticipantFormPage({
       requiredFieldsByStep={requiredFieldsByStep}
       stepIndexes={Array.from(ROLE_STEP_INDEXES[role])}
       pathScope={Array.from(ROLE_PATHS[role])}
+      partyIndex={participant.partyIndex}
       formTitle={participant.form.title}
       completedAt={participant.completedAt?.toISOString() ?? null}
       locked={Boolean(participant.form.lockedAt)}
