@@ -13,6 +13,14 @@ import { ProposalDetailClient } from "@/components/proposals/ProposalDetailClien
 
 export const dynamic = "force-dynamic";
 
+// Rótulo PT do papel de domínio do ProposalSigner (fallback Aceite, sem envelope).
+const PLAN_ROLE_LABEL: Record<string, string> = {
+  proponente: "Proponente",
+  vendedor: "Vendedor",
+  testemunha: "Testemunha",
+  corretora: "Corretora",
+};
+
 export default async function PropostaDetailPage({
   params,
 }: {
@@ -97,7 +105,10 @@ export default async function PropostaDetailPage({
       : planSigners.map((s) => ({
           id: s.id,
           name: s.name,
-          role: s.role ?? "",
+          // Papel de domínio (proponente/vendedor/testemunha) rotulado em PT
+          // capitalizado — mesmo formato do ramo de envelope (que traduz via
+          // clicksignRoleLabel), pra não misturar "· proponente" com "· Vendedor".
+          role: PLAN_ROLE_LABEL[s.role ?? ""] ?? s.role ?? "",
           channel: s.notifyChannel,
           status: s.acceptanceStatus ?? "",
         }));
