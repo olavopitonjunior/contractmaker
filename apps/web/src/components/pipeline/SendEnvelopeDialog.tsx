@@ -25,7 +25,7 @@ import {
 } from "lucide-react";
 import { CLICKSIGN_ROLE_OPTIONS, type ClicksignRole } from "@/lib/clicksign/roles";
 import { suggestEmailDomain } from "@/lib/forms/email-typo";
-import { WitnessPicker, type RegistryWitness } from "./WitnessPicker";
+import { WitnessPicker, pickNewWitnesses, type RegistryWitness } from "./WitnessPicker";
 
 interface Conjuge {
   nome?: string;
@@ -442,32 +442,24 @@ export function SendEnvelopeDialog({
 
   const addWitnessesFromRegistry = (selected: RegistryWitness[]) => {
     setRows((prev) => {
-      const seen = new Set(
-        prev.flatMap((r) =>
-          [r.email.trim().toLowerCase(), onlyDigits(r.documentation)].filter(Boolean)
-        )
+      const existingKeys = prev.flatMap((r) =>
+        [r.email.trim().toLowerCase(), onlyDigits(r.documentation)].filter(Boolean)
       );
       let nextIdx = prev.filter((r) => r.sourceKind === "testemunha").length;
-      const fresh: EditableRow[] = [];
-      for (const w of selected) {
-        const email = (w.email ?? "").trim().toLowerCase();
-        const cpf = onlyDigits(w.cpf ?? "");
-        if ((email && seen.has(email)) || (cpf && seen.has(cpf))) continue;
-        if (email) seen.add(email);
-        if (cpf) seen.add(cpf);
-        fresh.push({
-          rowId: `testemunha-cadastro-${w.id}`,
+      const fresh: EditableRow[] = pickNewWitnesses(selected, existingKeys).map(
+        (w, i) => ({
+          rowId: `testemunha-cadastro-${nextIdx + i}-${w.email}`,
           sourceKind: "testemunha",
           sourceIndex: nextIdx++,
           subKind: "titular",
-          name: w.nome,
+          name: w.name,
           email: w.email,
-          documentation: cpf,
-          phone: onlyDigits(w.mobilePhone ?? ""),
+          documentation: w.documentation,
+          phone: w.phone,
           addedDuringDialog: true,
           clicksignRole: defaultRoleFor("testemunha", "titular"),
-        });
-      }
+        })
+      );
       return fresh.length > 0 ? [...prev, ...fresh] : prev;
     });
   };

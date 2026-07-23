@@ -27,7 +27,7 @@ import {
 } from "lucide-react";
 import { CLICKSIGN_ROLE_OPTIONS, type ClicksignRole } from "@/lib/clicksign/roles";
 import { suggestEmailDomain } from "@/lib/forms/email-typo";
-import { WitnessPicker, type RegistryWitness } from "./WitnessPicker";
+import { WitnessPicker, pickNewWitnesses, type RegistryWitness } from "./WitnessPicker";
 import type { WitnessScope } from "@/lib/clicksign/witness-scope";
 
 interface AttachmentPick {
@@ -205,30 +205,22 @@ export function SendAttachmentEnvelopeDialog({
 
   function addWitnessesFromRegistry(selected: RegistryWitness[]) {
     setSigners((prev) => {
-      const seen = new Set(
-        prev.flatMap((s) =>
-          [s.email.trim().toLowerCase(), digitsOf(s.documentation)].filter(Boolean)
-        )
+      const existingKeys = prev.flatMap((s) =>
+        [s.email.trim().toLowerCase(), digitsOf(s.documentation)].filter(Boolean)
       );
       let n = prev.filter((s) => s.sourceKind === "testemunha").length;
-      const fresh: SignerDraft[] = [];
-      for (const w of selected) {
-        const email = (w.email ?? "").trim().toLowerCase();
-        const cpf = digitsOf(w.cpf);
-        if ((email && seen.has(email)) || (cpf && seen.has(cpf))) continue;
-        if (email) seen.add(email);
-        if (cpf) seen.add(cpf);
-        fresh.push({
+      const fresh: SignerDraft[] = pickNewWitnesses(selected, existingKeys).map(
+        (w) => ({
           id: Math.random().toString(36).slice(2),
-          name: w.nome,
+          name: w.name,
           email: w.email,
-          documentation: cpf,
-          phone: digitsOf(w.mobilePhone),
-          role: "witness",
+          documentation: w.documentation,
+          phone: w.phone,
+          role: "witness" as ClicksignRole,
           sourceKind: "testemunha",
           sourceIndex: n++,
-        });
-      }
+        })
+      );
       return fresh.length > 0 ? [...prev, ...fresh] : prev;
     });
   }

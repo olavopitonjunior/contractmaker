@@ -42,6 +42,43 @@ interface WitnessPickerProps {
 
 const digits = (v: string | null | undefined) => (v ?? "").replace(/\D/g, "");
 
+/** Testemunha do cadastro normalizada pra virar linha de signatário. */
+export interface PickedWitness {
+  name: string;
+  email: string;
+  documentation: string;
+  phone: string;
+}
+
+/**
+ * Regra ÚNICA de dedupe + normalização das testemunhas escolhidas (antes cada
+ * diálogo tinha sua cópia, com risco de divergir e admitir duplicata = cobrança
+ * dobrada). Descarta as que colidem por e-mail (lowercase) ou CPF (dígitos) com
+ * `existingKeys` OU entre si dentro da própria seleção. Cada diálogo mapeia o
+ * resultado pro seu shape de linha e atribui o sourceIndex.
+ */
+export function pickNewWitnesses(
+  selected: RegistryWitness[],
+  existingKeys: string[]
+): PickedWitness[] {
+  const seen = new Set(existingKeys.map((k) => k.trim().toLowerCase()));
+  const out: PickedWitness[] = [];
+  for (const w of selected) {
+    const email = (w.email ?? "").trim().toLowerCase();
+    const cpf = digits(w.cpf);
+    if ((email && seen.has(email)) || (cpf && seen.has(cpf))) continue;
+    if (email) seen.add(email);
+    if (cpf) seen.add(cpf);
+    out.push({
+      name: w.nome,
+      email: w.email,
+      documentation: cpf,
+      phone: digits(w.mobilePhone),
+    });
+  }
+  return out;
+}
+
 export function WitnessPicker({
   open,
   onOpenChange,

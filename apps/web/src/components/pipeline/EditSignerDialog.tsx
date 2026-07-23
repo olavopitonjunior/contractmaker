@@ -79,14 +79,17 @@ export function EditSignerDialog({
   envelopeStatus,
   onSaved,
 }: EditSignerDialogProps) {
+  // Fallbacks estáveis pra inicialização E pra detecção de mudança (signers
+  // legados podem ter role/authMethod nulos).
+  const initialRole: ClicksignRole = (signer.role as ClicksignRole) || "sign";
+  const initialAuth = signer.authMethod || "email";
+
   const [name, setName] = useState(signer.name);
   const [email, setEmail] = useState(signer.email);
   const [documentation, setDocumentation] = useState(signer.documentation || "");
   const [phone, setPhone] = useState(signer.phone || "");
-  const [role, setRole] = useState<ClicksignRole>(
-    (signer.role as ClicksignRole) || "sign"
-  );
-  const [authMethod, setAuthMethod] = useState(signer.authMethod || "email");
+  const [role, setRole] = useState<ClicksignRole>(initialRole);
+  const [authMethod, setAuthMethod] = useState(initialAuth);
   const [config, setConfig] = useState<SignatureConfig | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -145,8 +148,11 @@ export function EditSignerDialog({
         body.documentation = docDigits;
       }
       if (phoneDigits !== (signer.phone || "")) body.phone = phoneDigits;
-      if (role !== (signer.role || "")) body.role = role;
-      if (authMethod !== (signer.authMethod || "")) body.authMethod = authMethod;
+      // Compara contra o MESMO fallback usado pra inicializar o estado — senão um
+      // signer legado com role/authMethod nulos dispararia recriação de
+      // requirement em toda edição de perfil (bug do review).
+      if (role !== initialRole) body.role = role;
+      if (authMethod !== initialAuth) body.authMethod = authMethod;
 
       if (Object.keys(body).length === 1) {
         toast.info("Nenhuma alteração");
@@ -173,8 +179,7 @@ export function EditSignerDialog({
     }
   };
 
-  const roleOrAuthChanged =
-    role !== (signer.role || "") || authMethod !== (signer.authMethod || "");
+  const roleOrAuthChanged = role !== initialRole || authMethod !== initialAuth;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
