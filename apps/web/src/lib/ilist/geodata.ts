@@ -61,21 +61,33 @@ export function ufForProvince(provinceName: string | undefined | null): string |
  *
  * `onProgress` é chamado a cada página para o chamador poder abortar por budget
  * de tempo (lança) antes de a função varrer a região inteira.
+ *
+ * Retomável de forma barata: se um full-sync anterior abortou por budget no meio
+ * do warm, o cache já tem parte das cidades. Na primeira página lemos o
+ * `TotalCount` da API; se o cache já cobre a região inteira, retornamos com 1
+ * única chamada em vez de re-baixar as ~58 páginas a cada retry.
  */
 export async function warmGeoCache(
   client: IListClient,
   onProgress?: () => void,
 ): Promise<number> {
+  const alreadyCached = await prisma.iListGeoCity.count({ where: { regionId: client.regionId } });
   let page = 1;
   let total = 0;
   for (;;) {
     onProgress?.();
     const res = await client.geodata.cities(page, 100);
+    // Cache já completo (cobre o TotalCount da região) → nada a fazer.
+    if (page === 1 && res.TotalCount > 0 && alreadyCached >= res.TotalCount) {
+      return alreadyCached;
+    }
     // trim: a API devolve nomes com padding à direita ("Vitoria    ").
     const rows = res.Items.filter((r) => r.CityID && r.CityName?.trim()).map((r) => ({
       regionId: client.regionId,
       cityId: r.CityID,
       cityName: r.CityName.trim(),
+      // `ufForProvince` normaliza (e trima) internamente, então não depende
+      // deste trim — que serve só ao `provinceName` que persistimos.
       provinceName: (r.ProvinceName ?? "").trim(),
       uf: ufForProvince(r.ProvinceName),
     }));

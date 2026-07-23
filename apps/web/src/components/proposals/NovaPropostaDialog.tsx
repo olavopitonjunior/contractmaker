@@ -23,11 +23,18 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Plus, Trash2, UserPlus, Building2 } from "lucide-react";
+import { Plus, Trash2, UserPlus, Building2, UsersRound, X } from "lucide-react";
 import {
   IListPickerDialog,
   type IListImportPayload,
 } from "@/components/ilist/IListPickerDialog";
+import {
+  WitnessPicker,
+  pickNewWitnesses,
+  type PickedWitness,
+  type RegistryWitness,
+} from "@/components/pipeline/WitnessPicker";
+import { computeDedupeKey } from "@/lib/proposals/signer-dedupe";
 
 const SCHEMA_BY_TIPO: Record<string, { label: string; value: string }[]> = {
   venda: [{ label: "Compra e venda", value: "compra_venda_v1" }],
@@ -49,9 +56,10 @@ const emptyParty = (): Party => ({ name: "", email: "", phone: "", canal: "email
 /**
  * Criação de proposta numa tela só, com N proponentes + N proprietários, cada um
  * com seu canal de assinatura (e-mail/WhatsApp — pode misturar, e >1 por
- * WhatsApp). Monta o dataJson no shape que a conversão e os templates esperam
- * (compradores/vendedores ou locatarios/locadores), então o negócio nasce sem
- * retradução. O backend (`/api/proposals`) já aceita o array de signers.
+ * WhatsApp), + testemunhas do cadastro. Monta o dataJson no shape que a conversão
+ * e os templates esperam (compradores/vendedores ou locatarios/locadores), então
+ * o negócio nasce sem retradução. O backend (`/api/proposals`) já aceita o array
+ * de signers.
  */
 export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
   const router = useRouter();
@@ -66,6 +74,8 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
   const [validadeDias, setValidadeDias] = useState("5");
   const [comissao, setComissao] = useState(false);
   const [esconderComissao, setEsconderComissao] = useState(false);
+  const [witnessPickerOpen, setWitnessPickerOpen] = useState(false);
+  const [witnesses, setWitnesses] = useState<PickedWitness[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   // Snapshot completo do listing iList escolhido — entra em dataJson.imoveis[0]
   // (endereço + código + preço + ilistId) em vez do snapshot mínimo {endereco}.
@@ -83,6 +93,25 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
     patch: Partial<Party>
   ) {
     setList(list.map((p, i) => (i === idx ? { ...p, ...patch } : p)));
+  }
+
+  // Pré-filtro do picker (UX): não deixa escolher quem já é proponente/vendedor
+  // ou já foi escolhido. `w.documentation` já vem só-dígitos de pickNewWitnesses.
+  // O dedup AUTORITATIVO acontece no submit, com o mesmo computeDedupeKey do
+  // servidor (evita colisão P2002 e duplo-envio independente da ordem de digitação).
+  const witnessExistingKeys = [
+    ...proponentes.map((p) => p.email.trim().toLowerCase()),
+    ...vendedores.map((p) => p.email.trim().toLowerCase()),
+    ...witnesses.map((w) => w.email.trim().toLowerCase()),
+    ...witnesses.map((w) => w.documentation),
+  ].filter(Boolean);
+
+  function addWitnessesFromRegistry(selected: RegistryWitness[]) {
+    setWitnesses((prev) => [...prev, ...pickNewWitnesses(selected, witnessExistingKeys)]);
+  }
+
+  function removeWitness(email: string) {
+    setWitnesses((prev) => prev.filter((w) => w.email !== email));
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -143,6 +172,43 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
         })),
       ];
 
+      // Testemunhas escolhidas do cadastro (scope proposta) — assinam junto com
+      // os proprietários (grupo 2). Dedup AUTORITATIVO aqui com o MESMO
+      // computeDedupeKey do servidor: descarta testemunha que colide com
+      // proponente/vendedor/outra testemunha (senão o @@unique(proposalId,
+      // dedupeKey) estoura P2002 e derruba a proposta inteira) e ignora
+      // testemunha sem e-mail (canal e-mail → o preflight bloquearia o envio).
+      const seenKeys = new Set(
+        signers.map((s) =>
+          computeDedupeKey({
+            name: String(s.name ?? ""),
+            email: (s.email as string | null) ?? null,
+            cpf: null,
+            phone: (s.phone as string | null) ?? null,
+          })
+        )
+      );
+      for (const w of witnesses) {
+        if (!w.email.trim()) continue;
+        const key = computeDedupeKey({
+          name: w.name,
+          email: w.email,
+          cpf: w.documentation || null,
+          phone: w.phone || null,
+        });
+        if (seenKeys.has(key)) continue;
+        seenKeys.add(key);
+        signers.push({
+          role: "testemunha",
+          name: w.name,
+          email: w.email,
+          cpf: w.documentation || null,
+          phone: w.phone || null,
+          notifyChannel: "email",
+          signingGroup: 2,
+        });
+      }
+
       const title = `${validProponentes[0].name}${imovel ? ` — ${imovel}` : ""}`;
       // Esconder a comissão só faz sentido com comissão incluída + proprietário
       // assinando (2ª via reduzida). hiddenPaths não-vazio dispara a via reduzida.
@@ -166,6 +232,7 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
       }
       const { proposal } = await res.json();
       toast.success("Proposta criada");
+      setWitnesses([]);
       setOpen(false);
       router.push(`/pipeline/propostas/${proposal.id}`);
     } catch (err) {
@@ -282,6 +349,42 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
             )}
           </div>
 
+          {/* Testemunhas (cadastro, scope proposta) */}
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label>Testemunhas (opcional)</Label>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setWitnessPickerOpen(true)}
+              >
+                <UsersRound className="mr-1 h-3.5 w-3.5" />
+                Selecionar testemunhas
+              </Button>
+            </div>
+            {witnesses.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {witnesses.map((w) => (
+                  <span
+                    key={w.email}
+                    className="inline-flex items-center gap-1 rounded-full border bg-muted/40 px-2 py-0.5 text-xs"
+                  >
+                    {w.name}
+                    <button
+                      type="button"
+                      onClick={() => removeWitness(w.email)}
+                      className="text-muted-foreground hover:text-destructive"
+                      aria-label={`Remover ${w.name}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="space-y-1">
             <Label>Imóvel</Label>
             <div className="flex gap-2">
@@ -319,7 +422,6 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
               }
             }}
           />
-
 
           {SCHEMA_BY_TIPO[tipo].length > 1 && (
             <div className="space-y-1">
@@ -382,6 +484,14 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
             </Button>
           </DialogFooter>
         </form>
+
+        <WitnessPicker
+          open={witnessPickerOpen}
+          onOpenChange={setWitnessPickerOpen}
+          scope="proposta"
+          existingKeys={witnessExistingKeys}
+          onConfirm={addWitnessesFromRegistry}
+        />
       </DialogContent>
     </Dialog>
   );

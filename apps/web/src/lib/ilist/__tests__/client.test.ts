@@ -98,6 +98,21 @@ describe("ilist client", () => {
     expect(tokenCalls).toHaveLength(1);
   });
 
+  it("geodata.cities força clientRegionID (sem ele a API devolve a base mundial)", async () => {
+    fetchMock
+      .mockResolvedValueOnce(tokenResponse())
+      .mockResolvedValueOnce(jsonResponse({ Items: [], TotalCount: 0, HasNextPage: false }));
+
+    const client = createIListClient(71, ENV);
+    await client.geodata.cities(1, 100);
+
+    const [url] = fetchMock.mock.calls[1];
+    expect(url).toContain("/integrator/71001/geodata?");
+    expect(url).toContain("geoLevel=cities");
+    // O parâmetro crítico: sem clientRegionID a API retorna ~1,5M cidades.
+    expect(url).toContain("clientRegionID=71");
+  });
+
   it("re-auth única em 401 (token expirado na fronteira)", async () => {
     fetchMock
       .mockResolvedValueOnce(tokenResponse("tok-velho"))
