@@ -229,9 +229,11 @@ function ChangeItem({
     minute: "2-digit",
   });
   const author = authorBadge(item);
-  // Só entries COM diff (write tools) são expansíveis. human_doc_edit é
-  // atribuição sem diff → linha estática, sem chevron/expansão vazia.
-  const hasDiff = item.htmlBefore !== null && item.htmlAfter !== null;
+  // Só entries COM diff (write tools) são expansíveis. Usa o `hasDiff` do servidor
+  // (que já exige htmlBefore !== htmlAfter) — não recomputar só por não-null, senão
+  // um no-op (antes==depois) mostraria chevron + diff vazio. human_doc_edit (sem
+  // diff) e no-ops → linha estática.
+  const hasDiff = item.hasDiff;
 
   const header = (
     <>
