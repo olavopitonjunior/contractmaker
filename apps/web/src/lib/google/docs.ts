@@ -143,7 +143,7 @@ export async function cleanupOrphanPlaceholders(docId: string): Promise<string[]
     const text = await getDocPlainText(docId);
     const orphans = Array.from(new Set(text.match(/\{\{[^{}\n]+\}\}/g) || []));
     if (orphans.length > 0) {
-      await markProgrammaticDocEdit(docId); // batchUpdate raw — marca p/ o eco (#5)
+      void markProgrammaticDocEdit(docId); // batchUpdate raw — marca p/ o eco (#5)
       await docs.documents.batchUpdate({
         documentId: docId,
         requestBody: {
@@ -217,7 +217,7 @@ export async function addDocPermission(
   }
   // Mudança de permissão dispara "update" no watch sem mudar conteúdo — marca
   // como programática pra o webhook não registrar edição manual fantasma (#4).
-  await markProgrammaticDocEdit(docId);
+  void markProgrammaticDocEdit(docId);
   const ownerDrive = getOwnerDriveClient();
   const res = await ownerDrive.permissions.create({
     fileId: docId,
@@ -238,7 +238,7 @@ export async function addDocPermission(
 
 /** Remove uma permissão pelo permissionId (vindo de listDocPermissions). */
 export async function removeDocPermission(docId: string, permissionId: string): Promise<void> {
-  await markProgrammaticDocEdit(docId); // metadados → não é edição manual (#4)
+  void markProgrammaticDocEdit(docId); // metadados → não é edição manual (#4)
   const drive = getDriveClient();
   await drive.permissions.delete({
     fileId: docId,
@@ -249,7 +249,7 @@ export async function removeDocPermission(docId: string, permissionId: string): 
 
 /** Revoga permissões de escrita do doc, deixando apenas owner com write. */
 export async function makeDocReadOnly(docId: string): Promise<void> {
-  await markProgrammaticDocEdit(docId); // metadados → não é edição manual (#4)
+  void markProgrammaticDocEdit(docId); // metadados → não é edição manual (#4)
   const drive = getDriveClient();
   const list = await drive.permissions.list({
     fileId: docId,
@@ -326,12 +326,12 @@ export async function batchUpdateDoc(
   docId: string,
   requests: import("googleapis").docs_v1.Schema$Request[]
 ) {
-  // Marca esta edição como PROGRAMÁTICA (chave por docId, TTL curto) ANTES de
-  // tocar o Doc — assim o eco do webhook do Drive é reconhecido e NÃO atribuído
-  // como edição manual humana. Awaited (não fire-and-forget) pra garantir que o
-  // marcador exista antes da mutação disparar o watch. markProgrammaticDocEdit
-  // nunca lança e tem timeout próprio. Ver lib/google/doc-edit-marker.
-  await markProgrammaticDocEdit(docId);
+  // Marca esta edição como PROGRAMÁTICA (chave por docId, TTL) pra o eco do
+  // webhook do Drive NÃO ser atribuído como edição manual. Fire-and-forget (void):
+  // o Redis SET roda concorrente com a mutação — que é mais lenta — então o
+  // marcador fica pronto bem antes do ping do Drive (que vem segundos depois). Não
+  // bloqueia (importa na geração: expandLoops chama isto dezenas de vezes).
+  void markProgrammaticDocEdit(docId);
   const docs = getDocsClient();
   return docs.documents.batchUpdate({
     documentId: docId,
