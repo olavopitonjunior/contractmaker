@@ -22,6 +22,7 @@ import { selectPropostaTemplate } from "./template-select";
 import { checkProposalReadiness } from "./clicksign-readiness";
 import { plannedProposalCostCents } from "./cost";
 import { prepareSend, type PrepareResult } from "./send";
+import { withVendedorSendLock } from "./send-lock";
 import { ensureProposalDefaultWitnesses } from "./witnesses";
 import { advanceProposalStatus } from "./status";
 import { toE164BR } from "./clicksign-readiness";
@@ -540,14 +541,41 @@ async function sendEnvelope(
  * CONTEÚDO é reduzido (comissão oculta) quando há `hiddenPaths`, senão completo.
  * Idempotente pelo `@@unique([proposalId, via])` + guard de existência.
  */
-export async function sendVendedorEnvelope(proposalId: string): Promise<void> {
-  // Idempotência anti-race: além de running/closed (já enviado de fato), conta um
-  // draft RECENTE como "em voo". Sem isso, dois gatilhos concorrentes (webhook via
-  // waitUntil + botão /send-vendedor + cron reconcile) passavam ambos pela guarda —
-  // e o deleteMany de draft dentro de runClickSignEnvelope apagava o draft do outro,
-  // resultando em DOIS envelopes ClickSign criados (cobrança dobrada). O limite de
-  // tempo evita travar pra sempre num draft de uma tentativa que crashou no meio: um
-  // draft velho não bloqueia — runClickSignEnvelope limpa draft/failed e recria.
+export type SendVendedorResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason:
+        | "already" // já enviado (running/closed) ou em voo — no-op idempotente
+        | "not_found"
+        | "no_vendedor"
+        | "no_creds"
+        | "preflight"
+        | "budget"
+        | "locked" // outro processo está enviando agora (lock)
+        | "error";
+      detail?: string;
+    };
+
+export async function sendVendedorEnvelope(
+  proposalId: string
+): Promise<SendVendedorResult> {
+  // Serializa com um lock distribuído: webhook (waitUntil) + botão + cron podem
+  // disparar concorrentemente e a guarda de existência sozinha é TOCTOU (ambos
+  // checam antes de qualquer draft existir). Lock ausente (sem Redis) → fail-open.
+  return withVendedorSendLock(
+    proposalId,
+    () => sendVendedorEnvelopeLocked(proposalId),
+    { ok: false, reason: "locked" }
+  );
+}
+
+async function sendVendedorEnvelopeLocked(
+  proposalId: string
+): Promise<SendVendedorResult> {
+  // Idempotência (2ª linha de defesa, dentro do lock): running/closed = já enviado;
+  // draft RECENTE = em voo. Draft velho (tentativa que crashou) NÃO bloqueia —
+  // runClickSignEnvelope limpa draft/failed e recria.
   const inFlightCutoff = new Date(Date.now() - 5 * 60_000);
   const existing = await prisma.envelope.findFirst({
     where: {
@@ -560,21 +588,21 @@ export async function sendVendedorEnvelope(proposalId: string): Promise<void> {
     },
     select: { id: true },
   });
-  if (existing) return; // já enviado ou em voo
+  if (existing) return { ok: false, reason: "already" };
 
   const proposal = await prisma.proposal.findUnique({ where: { id: proposalId } });
-  if (!proposal) return;
+  if (!proposal) return { ok: false, reason: "not_found" };
 
   const rows = await prisma.proposalSigner.findMany({
     where: { proposalId, included: true, role: "vendedor" },
     orderBy: { signingGroup: "asc" },
   });
-  if (rows.length === 0) return; // sem vendedor → nada a encadear
+  if (rows.length === 0) return { ok: false, reason: "no_vendedor" };
 
   const creds = await resolveClickSignCreds(proposal.orgId);
   if (!creds) {
     await logProposalEvent(proposalId, "chained_envelope2_no_creds");
-    return;
+    return { ok: false, reason: "no_creds" };
   }
   const settings = await getSignatureSettings(proposal.orgId);
 
@@ -602,7 +630,7 @@ export async function sendVendedorEnvelope(proposalId: string): Promise<void> {
   );
   if (issues.length > 0) {
     await logProposalEvent(proposalId, "chained_envelope2_preflight_failed", { issues });
-    return;
+    return { ok: false, reason: "preflight", detail: issues.join("; ") };
   }
 
   // Conteúdo: reduzida (comissão oculta) quando há hiddenPaths; senão completa.
@@ -642,7 +670,7 @@ export async function sendVendedorEnvelope(proposalId: string): Promise<void> {
       budgetCents,
       costCents,
     });
-    return;
+    return { ok: false, reason: "budget" };
   }
 
   try {
@@ -659,10 +687,11 @@ export async function sendVendedorEnvelope(proposalId: string): Promise<void> {
       costCents,
     });
     await logProposalEvent(proposalId, "chained_envelope2_sent");
+    return { ok: true };
   } catch (err) {
-    await logProposalEvent(proposalId, "chained_envelope2_failed", {
-      error: err instanceof Error ? err.message : String(err),
-    });
+    const detail = err instanceof Error ? err.message : String(err);
+    await logProposalEvent(proposalId, "chained_envelope2_failed", { error: detail });
+    return { ok: false, reason: "error", detail };
   }
 }
 
