@@ -139,7 +139,7 @@ export async function syncOrgListings(
     // sem isso, uma org grande estouraria o maxDuration da Vercel antes do
     // catch e deixaria syncStatus travado em "syncing" sem erro registrado.
     const cached = await prisma.iListGeoCity.count({ where: { regionId: conn.regionId } });
-    if (full || cached === 0) await warmGeoCache(client);
+    if (full || cached === 0) await warmGeoCache(client, () => assertBudget(startedAt));
     assertBudget(startedAt);
     const geo = await loadGeoCacheMap(conn.regionId);
     const associates = await loadAssociateMap(client, conn.officeIds, startedAt);

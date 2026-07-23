@@ -52,32 +52,35 @@ export function ufForProvince(provinceName: string | undefined | null): string |
 }
 
 /**
- * Baixa todas as cidades da região (multi-criteria paginado) e faz upsert no
- * cache global. Chamado no provisioning e no início do full sync.
+ * Baixa todas as cidades da região (multi-criteria paginado) e grava no cache
+ * global em LOTE. Uma região RE/MAX referencia milhares de cidades (a 71 tem
+ * ~2000); com upsert um-a-um o warm sozinho estoura o maxDuration de 300s da
+ * Vercel (2000 × ~200ms). Por isso: `createMany({ skipDuplicates })` por página
+ * (1 round-trip por página em vez de 100). Nome de cidade praticamente nunca
+ * muda — inserir-e-ignorar-duplicata é suficiente para um cache.
+ *
+ * `onProgress` é chamado a cada página para o chamador poder abortar por budget
+ * de tempo (lança) antes de a função varrer a região inteira.
  */
-export async function warmGeoCache(client: IListClient): Promise<number> {
+export async function warmGeoCache(
+  client: IListClient,
+  onProgress?: () => void,
+): Promise<number> {
   let page = 1;
   let total = 0;
   for (;;) {
+    onProgress?.();
     const res = await client.geodata.cities(page, 100);
-    for (const row of res.Items) {
-      if (!row.CityID || !row.CityName) continue;
-      await prisma.iListGeoCity.upsert({
-        where: { regionId_cityId: { regionId: client.regionId, cityId: row.CityID } },
-        create: {
-          regionId: client.regionId,
-          cityId: row.CityID,
-          cityName: row.CityName,
-          provinceName: row.ProvinceName ?? "",
-          uf: ufForProvince(row.ProvinceName),
-        },
-        update: {
-          cityName: row.CityName,
-          provinceName: row.ProvinceName ?? "",
-          uf: ufForProvince(row.ProvinceName),
-        },
-      });
-      total++;
+    const rows = res.Items.filter((r) => r.CityID && r.CityName).map((r) => ({
+      regionId: client.regionId,
+      cityId: r.CityID,
+      cityName: r.CityName,
+      provinceName: r.ProvinceName ?? "",
+      uf: ufForProvince(r.ProvinceName),
+    }));
+    if (rows.length) {
+      const res2 = await prisma.iListGeoCity.createMany({ data: rows, skipDuplicates: true });
+      total += res2.count;
     }
     if (!res.HasNextPage) break;
     page++;
