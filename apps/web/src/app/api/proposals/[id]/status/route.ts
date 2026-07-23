@@ -1,11 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
-import {
-  requireApiAuth,
-  isAuthFailure,
-  authFailureResponse,
-} from "@/lib/api/require-auth";
-import { getEffectivePermissions, canAccessProposal } from "@/lib/security/rbac/check";
+import { loadScopedProposal } from "@/lib/proposals/route-helpers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -13,35 +8,17 @@ export const dynamic = "force-dynamic";
 /**
  * GET /api/proposals/[id]/status — leitura RÁPIDA do estado atual pra polling em
  * tempo real (não chama a ClickSign; lê o DB que o webhook atualiza em ~1-3s).
- * Retorna o status da proposta + o status por signatário (dos EnvelopeSigner,
- * onde vive o sign/view real) + dossiê/conversão. Alvo do `useProposalPolling`.
+ * Retorna o status da proposta + status por signatário (EnvelopeSigner, onde vive
+ * o sign/view real) + dossiê/conversão + lembretes. Alvo do `useProposalPolling`.
+ * Scope garantido pelo loadScopedProposal (criador ou responsável atribuído).
  */
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
-  const auth = await requireApiAuth(req, { scope: "proposals:rw" });
-  if (isAuthFailure(auth)) return authFailureResponse(auth);
-
-  const proposal = await prisma.proposal.findUnique({
-    where: { id: params.id },
-    select: {
-      id: true,
-      orgId: true,
-      userId: true,
-      status: true,
-      dossierUrl: true,
-      convertedDealId: true,
-      updatedAt: true,
-    },
-  });
-  if (!proposal || proposal.orgId !== auth.org.id) {
-    return NextResponse.json({ error: "Não encontrada" }, { status: 404 });
-  }
-  const eff = await getEffectivePermissions(auth.actor.effectiveUserId, auth.org.id);
-  if (!eff || !canAccessProposal({ effective: eff, ownerUserId: proposal.userId })) {
-    return NextResponse.json({ error: "Não encontrada" }, { status: 404 });
-  }
+  const r = await loadScopedProposal(req, params.id);
+  if ("fail" in r) return r.fail;
+  const { proposal } = r;
 
   const envelopes = await prisma.envelope.findMany({
-    where: { proposalId: params.id, status: { notIn: ["failed"] } },
+    where: { proposalId: proposal.id, status: { notIn: ["failed"] } },
     select: {
       id: true,
       via: true,
@@ -90,6 +67,8 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
     status: proposal.status,
     dossierUrl: proposal.dossierUrl,
     convertedDealId: proposal.convertedDealId,
+    lastReminderAt: proposal.lastReminderAt?.toISOString() ?? null,
+    reminderCount: proposal.reminderCount,
     envelopes: envelopes.map((e) => ({ id: e.id, via: e.via, status: e.status })),
     signers,
     active,

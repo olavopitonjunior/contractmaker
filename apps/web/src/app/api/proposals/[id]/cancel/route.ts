@@ -1,71 +1,86 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import {
-  requireApiAuth,
-  isAuthFailure,
-  authFailureResponse,
-} from "@/lib/api/require-auth";
-import { getEffectivePermissions, canAccessProposal, can } from "@/lib/security/rbac/check";
+import { can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
-import { cancelEnvelopeFlow } from "@/lib/clicksign/executor";
+import { loadScopedProposal, proposalFeatureGuard } from "@/lib/proposals/route-helpers";
 import { advanceProposalStatus, isTerminal } from "@/lib/proposals/status";
+import { runEnvelopeCancel } from "@/lib/clicksign/cancel-action";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+const bodySchema = z.object({ reason: z.string().min(3).max(500) });
+
 /**
- * POST /api/proposals/[id]/cancel — cancela a proposta INTEIRA: cancela cada
- * envelope vivo na ClickSign (resiliente via cancelEnvelopeFlow) e marca a
- * proposta `cancelada`. Bloqueia se já completa/convertida (terminal) ou se um
- * envelope já fechou (assinado) — nesse caso cancelEnvelopeFlow lança 409.
+ * POST /api/proposals/[id]/cancel — encerra a proposta (status `cancelada`) sem
+ * excluir. Cancela best-effort os envelopes ClickSign em curso. `cancelada` é um
+ * alvo válido de quase todo estado ativo (ALLOWED_FROM.cancelada).
  */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
-  const auth = await requireApiAuth(req, { scope: "proposals:rw" });
-  if (isAuthFailure(auth)) return authFailureResponse(auth);
+  const r = await loadScopedProposal(req, params.id);
+  if ("fail" in r) return r.fail;
+  const { auth, eff, proposal } = r;
 
-  const proposal = await prisma.proposal.findUnique({ where: { id: params.id } });
-  if (!proposal || proposal.orgId !== auth.org.id) {
-    return NextResponse.json({ error: "Não encontrada" }, { status: 404 });
-  }
-  const eff = await getEffectivePermissions(auth.actor.effectiveUserId, auth.org.id);
-  if (
-    !eff ||
-    !canAccessProposal({ effective: eff, ownerUserId: proposal.userId }) ||
-    !can(eff, PERMISSION.PROPOSAL_SEND)
-  ) {
+  if (!can(eff, PERMISSION.PROPOSAL_CANCEL)) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  const feat = await proposalFeatureGuard(auth.org.id, proposal.kind);
+  if (feat) return feat;
+
   if (isTerminal(proposal.status)) {
+    return NextResponse.json({ error: "Proposta já encerrada." }, { status: 409 });
+  }
+  const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Informe o motivo do cancelamento." }, { status: 400 });
+  }
+  const { reason } = parsed.data;
+
+  const adv = await advanceProposalStatus(proposal.id, "cancelada", { canceledAt: new Date() });
+  if (!adv.moved && adv.reason === "illegal") {
     return NextResponse.json(
-      { error: "Esta proposta já está encerrada e não pode ser cancelada." },
+      { error: "Não é possível cancelar neste estado." },
       { status: 409 }
     );
   }
 
-  // Cancela cada envelope vivo. Um envelope já `closed` (assinado) faz
-  // cancelEnvelopeFlow lançar — aí a proposta não pode ser cancelada.
+  // Best-effort: cancela na ClickSign os envelopes em curso (nunca aborta o cancel).
   const envelopes = await prisma.envelope.findMany({
-    where: { proposalId: params.id, status: { in: ["draft", "running"] } },
+    where: { proposalId: proposal.id, status: "running", clicksignId: { not: null } },
     select: { id: true },
   });
-  try {
-    for (const e of envelopes) {
-      await cancelEnvelopeFlow(e.id);
-    }
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    return NextResponse.json(
-      { error: `Não foi possível cancelar: ${msg}` },
-      { status: 409 }
-    );
+  for (const env of envelopes) {
+    await runEnvelopeCancel({
+      envelopeId: env.id,
+      reason,
+      actorUserId: auth.actor.effectiveUserId,
+    }).catch(() => {});
   }
 
-  const moved = await advanceProposalStatus(params.id, "cancelada", { canceledAt: new Date() });
+  await prisma.proposalEvent
+    .create({
+      data: {
+        proposalId: proposal.id,
+        eventName: "canceled",
+        source: "system",
+        payload: { reason } as Prisma.InputJsonValue,
+      },
+    })
+    .catch(() => {});
+
   await audit(
     extractAuditContextFromRequest(req, auth.org.id, auth.actor.effectiveUserId),
-    { action: "PROPOSAL_CANCEL", result: "SUCCESS", resource: params.id, resourceType: "Proposal", metadata: { scope: "proposal", envelopes: envelopes.length } }
+    {
+      action: "PROPOSAL_CANCEL",
+      result: "SUCCESS",
+      resource: proposal.id,
+      resourceType: "Proposal",
+      metadata: { reason, from: proposal.status },
+    }
   ).catch(() => {});
 
-  return NextResponse.json({ ok: true, status: "cancelada", moved: moved.moved });
+  return NextResponse.json({ ok: true, status: "cancelada" });
 }

@@ -31,7 +31,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: "Não encontrada" }, { status: 404 });
   }
   const eff = await getEffectivePermissions(auth.actor.effectiveUserId, auth.org.id);
-  if (!eff || !canAccessProposal({ effective: eff, ownerUserId: proposal.userId })) {
+  if (!eff || !canAccessProposal({ effective: eff, ownerUserId: proposal.userId, responsibleUserId: proposal.responsibleUserId })) {
     return NextResponse.json({ error: "Não encontrada" }, { status: 404 });
   }
   // /sync dispara chamadas REST à ClickSign + muta status → é ação de escrita,
