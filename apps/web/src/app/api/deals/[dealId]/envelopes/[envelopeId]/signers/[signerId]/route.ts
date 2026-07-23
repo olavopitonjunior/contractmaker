@@ -7,6 +7,8 @@ import {
   updateSignerAction,
   removeSignerAction,
 } from "@/lib/clicksign/signer-actions";
+import { CLICKSIGN_ROLES } from "@/lib/clicksign/roles";
+import { CLICKSIGN_AUTH_METHODS } from "@/lib/clicksign/types";
 
 export const runtime = "nodejs";
 
@@ -39,6 +41,8 @@ const patchSchema = z.discriminatedUnion("action", [
       })
       .optional(),
     phone: z.string().max(20).optional(),
+    role: z.enum(CLICKSIGN_ROLES).optional(),
+    authMethod: z.enum(CLICKSIGN_AUTH_METHODS).optional(),
   }),
 ]);
 

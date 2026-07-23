@@ -22,7 +22,7 @@ import {
   requireClickSignCreds,
   resolveClickSignCreds,
 } from "./account";
-import { moduleForDealKind } from "@/lib/modules/resolve";
+import { moduleForDealKind, pipelineKind } from "@/lib/modules/resolve";
 import { MODULE } from "@/lib/modules/catalog";
 import {
   CLICKSIGN_COST_CENTS,
@@ -175,6 +175,16 @@ async function createEnvelopeFromBuffer(input: {
   creds: ClicksignCreds;
   /** Preferências de assinatura da org (padrões de envelope + custo). */
   settings: OrgSignatureSettings;
+  /**
+   * Injetar testemunhas padrão do cadastro no servidor. `true` (default) só nos
+   * caminhos DERIVADOS/headless (Newton/bearer, lease-direta, preview), onde não
+   * há UI pra escolher testemunhas. Nos caminhos AUTORITATIVOS (popup de envio,
+   * avulso), a lista de signers já reflete a escolha do operador — re-injetar
+   * força testemunhas removidas/trocadas de volta (bug reportado). Ver Fase 0.
+   */
+  applyDefaultWitnesses?: boolean;
+  /** Scope do cadastro de testemunhas a considerar ("venda"|"locacao"|"proposta"). */
+  witnessScope?: string;
 }) {
   const {
     orgId,
@@ -192,10 +202,15 @@ async function createEnvelopeFromBuffer(input: {
     settings,
   } = input;
 
-  // Testemunhas padrão da imobiliária são FORÇADAS no servidor (merge + dedupe),
-  // valendo em TODOS os caminhos — popup, Newton/bearer e avulsos. Antes a
-  // injeção só existia client-side e sumia fora do diálogo (bug reportado).
-  const signers = await mergeDefaultWitnesses(orgId, input.signers);
+  // Testemunhas padrão só são injetadas no servidor nos caminhos DERIVADOS
+  // (Newton/bearer, lease-direta, preview), onde não há UI pra escolhê-las. Nos
+  // caminhos AUTORITATIVOS (popup, avulso) a lista já reflete a escolha do
+  // operador — re-injetar forçava de volta testemunhas removidas/trocadas
+  // (bug reportado). Ver `applyDefaultWitnesses`.
+  const signers =
+    input.applyDefaultWitnesses === false
+      ? input.signers
+      : await mergeDefaultWitnesses(orgId, input.signers, input.witnessScope);
 
   if (signers.length === 0) {
     throw new Error("Nenhum signatário válido encontrado");
@@ -581,6 +596,11 @@ export async function sendEnvelopeForContract(input: SendEnvelopeInput) {
       group: s.group,
     })),
     signerRoles: input.signerRoles,
+    // Popup manda lista explícita (autoritativa) → não re-injeta testemunhas no
+    // servidor. Sem lista explícita (Newton/bearer, lease-direta) → injeta as
+    // padrão do scope do módulo (venda/locação).
+    applyDefaultWitnesses: !(input.signers && input.signers.length > 0),
+    witnessScope: pipelineKind(moduleForDealKind(contract.deal?.pipeline?.kind)),
     pdfBuffer,
     filename,
     storageKeyPrefix: `envelopes/${contract.id}/`,
@@ -618,7 +638,7 @@ export async function sendEnvelopeForAttachment(
   const attachment = await prisma.dealAttachment.findUnique({
     where: { id: input.attachmentId },
     include: {
-      deal: { include: { pipeline: { select: { orgId: true } } } },
+      deal: { include: { pipeline: { select: { orgId: true, kind: true } } } },
     },
   });
   if (!attachment) throw new Error("Documento não encontrado");
@@ -689,6 +709,9 @@ export async function sendEnvelopeForAttachment(
     authMethod,
     deadlineAt: input.deadlineAt ?? null,
     signers: input.signers,
+    // Avulso vem 100% do diálogo (autoritativo) → não re-injeta testemunhas.
+    applyDefaultWitnesses: false,
+    witnessScope: pipelineKind(moduleForDealKind(attachment.deal.pipeline.kind)),
     pdfBuffer,
     filename: attachment.filename,
     storageKeyPrefix: `envelopes/attachment/${attachment.id}/`,
@@ -898,19 +921,21 @@ async function listSigners(envelopeId: string) {
 const onlyDigits = (v?: string | null) => (v ?? "").replace(/\D/g, "");
 
 /**
- * Testemunhas padrão da imobiliária FORÇADAS no servidor. Lê DefaultWitness
- * (isDefault) da org e mescla nos signers, dedupando por e-mail (lowercase) ou
- * CPF (dígitos) contra quem já está no envelope. Vale em TODOS os caminhos de
- * envio — antes a injeção só existia no diálogo e sumia no Newton/bearer e nos
- * avulsos (bug "assinantes padrão não funcionam"). Testemunhas sem e-mail são
- * ignoradas (não dá pra notificar).
+ * Testemunhas padrão do cadastro da imobiliária, injetadas nos caminhos
+ * DERIVADOS/headless (Newton/bearer, lease-direta, preview). Lê DefaultWitness
+ * (isDefault, opcionalmente filtrado por `scope`) da org e mescla nos signers,
+ * dedupando por e-mail (lowercase) ou CPF (dígitos) contra quem já está no
+ * envelope. NÃO é chamada nos caminhos autoritativos (popup/avulso), onde a
+ * lista de signers já reflete a escolha do operador — ver `applyDefaultWitnesses`
+ * em createEnvelopeFromBuffer. Testemunhas sem e-mail são ignoradas.
  */
 export async function mergeDefaultWitnesses(
   orgId: string,
-  signers: EnvelopeSignerInput[]
+  signers: EnvelopeSignerInput[],
+  scope?: string
 ): Promise<EnvelopeSignerInput[]> {
   const defaults = await prisma.defaultWitness.findMany({
-    where: { orgId, isDefault: true },
+    where: { orgId, isDefault: true, ...(scope ? { scope } : {}) },
   });
   if (defaults.length === 0) return signers;
 

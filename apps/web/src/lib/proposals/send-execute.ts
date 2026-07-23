@@ -17,6 +17,7 @@ import { buildAcceptanceMessage } from "./acceptance-proof";
 import { renderProposalVia } from "./render";
 import { selectPropostaTemplate } from "./template-select";
 import { prepareSend, type PrepareResult } from "./send";
+import { ensureProposalDefaultWitnesses } from "./witnesses";
 import { advanceProposalStatus } from "./status";
 import { toE164BR } from "./clicksign-readiness";
 import type { ClicksignRole } from "@/lib/clicksign/roles";
@@ -97,6 +98,11 @@ export function blockToResponse(block: PrepareResult): { status: number; body: u
  * Só o caminho FELIZ cria recursos pagos; qualquer bloqueio retorna sem gastar.
  */
 export async function executeProposalSend(proposalId: string): Promise<SendResult> {
+  // Padronização de testemunhas da proposta (scope "proposta") ANTES da decisão
+  // — materializa as padrão como ProposalSigner (idempotente) pra entrarem no
+  // preflight/dedupe/envio. No-op quando a org não marcou testemunhas padrão.
+  await ensureProposalDefaultWitnesses(proposalId);
+
   const decision = await prepareSend(proposalId);
   if (!("ok" in decision)) return { ok: false, block: decision };
 

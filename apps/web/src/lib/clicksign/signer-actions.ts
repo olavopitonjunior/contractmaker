@@ -4,11 +4,12 @@ import {
   addRequirement,
   addSigner,
   notifySigner,
+  removeRequirement,
   removeSigner,
   updateSigner,
 } from "./envelopes";
-import { ClicksignError } from "./client";
-import { resolveClickSignCreds } from "./account";
+import { ClicksignError, type ClicksignCreds } from "./client";
+import { getSignatureSettings, resolveClickSignCreds } from "./account";
 import type { ClicksignRole } from "./roles";
 import type { AuthMethod } from "./types";
 
@@ -76,9 +77,96 @@ export interface SignerUpdate {
   email?: string;
   documentation?: string;
   phone?: string;
+  /** Qualificação ClickSign ("Assina como"). Trocar recria o requirement `agree`. */
+  role?: ClicksignRole;
+  /** Tipo de assinatura (auth). Trocar recria o requirement `provide_evidence`. */
+  authMethod?: AuthMethod;
 }
 
-/** Edita nome/email/documento/telefone de um signatário ainda não assinado. */
+/**
+ * Recria os 2 requirements do signatário (auth `provide_evidence` + qualificação
+ * `agree`). A v3 não tem PATCH de requirement, então cria os NOVOS e depois
+ * remove os antigos.
+ *
+ * Ordem ADD-THEN-DELETE (não delete-then-add) de propósito: se um `add` falhar
+ * (transiente, ou a ClickSign recusar em `running`), fazemos rollback só do que
+ * criamos e os requirements ANTIGOS seguem intactos — o envelope nunca fica sem
+ * requirement e o DB continua consistente com a ClickSign (falha limpa, sem
+ * estado parcial). Só quando os dois novos estão criados removemos os velhos.
+ */
+async function recreateSignerRequirements(args: {
+  envelopeClicksignId: string;
+  documentClicksignId: string;
+  signerClicksignId: string;
+  oldRequirementIds: string[];
+  role: ClicksignRole;
+  auth: AuthMethod;
+  creds: ClicksignCreds;
+}): Promise<string[]> {
+  const created: string[] = [];
+  try {
+    const authReq = await addRequirement(
+      {
+        envelopeId: args.envelopeClicksignId,
+        documentClicksignId: args.documentClicksignId,
+        signerClicksignId: args.signerClicksignId,
+        action: "provide_evidence",
+        auth: args.auth,
+      },
+      args.creds
+    );
+    const authId = pickId(authReq);
+    if (!authId) throw new Error("Resposta sem id de requirement (auth)");
+    created.push(authId);
+
+    const agreeReq = await addRequirement(
+      {
+        envelopeId: args.envelopeClicksignId,
+        documentClicksignId: args.documentClicksignId,
+        signerClicksignId: args.signerClicksignId,
+        action: "agree",
+        role: args.role,
+      },
+      args.creds
+    );
+    const agreeId = pickId(agreeReq);
+    if (!agreeId) throw new Error("Resposta sem id de requirement (agree)");
+    created.push(agreeId);
+  } catch (err) {
+    // Rollback dos novos; os antigos nunca foram tocados → estado íntegro.
+    for (const id of created) {
+      try {
+        await removeRequirement(args.envelopeClicksignId, id, args.creds);
+      } catch {
+        /* best-effort */
+      }
+    }
+    throw err;
+  }
+
+  // Dois novos criados — remove os antigos (best-effort; órfão é inofensivo,
+  // não deixa o fluxo falhar depois de já termos os novos válidos).
+  for (const reqId of args.oldRequirementIds) {
+    try {
+      await removeRequirement(args.envelopeClicksignId, reqId, args.creds);
+    } catch (err) {
+      if (!(err instanceof ClicksignError && err.status === 404)) {
+        console.error("[clicksign] falha ao remover requirement antigo:", err);
+      }
+    }
+  }
+  return created;
+}
+
+/**
+ * Edita um signatário que ainda não assinou, num envelope não-concluído.
+ * Perfil (nome/email/documento/telefone) via `updateSigner`; papel ("assina
+ * como") e tipo de assinatura (auth) recriam os requirements na ClickSign.
+ *
+ * Consistência DB×ClickSign: o perfil é persistido no DB LOGO após o
+ * `updateSigner` (nunca se perde se a recriação de requirement falhar depois);
+ * papel/auth só são persistidos quando a recriação confirma na ClickSign.
+ */
 export async function updateSignerAction(
   signer: SignerWithEnvelope,
   updates: SignerUpdate
@@ -90,48 +178,139 @@ export async function updateSignerAction(
   if (envStatus !== "draft" && envStatus !== "running") {
     return { ok: false, status: 400, error: "Envelope não permite edição neste estado" };
   }
-  if (
-    updates.name === undefined &&
-    updates.email === undefined &&
-    updates.documentation === undefined &&
-    updates.phone === undefined
-  ) {
-    return { ok: false, status: 400, error: "Nenhum campo informado" };
+  const hasProfile =
+    updates.name !== undefined ||
+    updates.email !== undefined ||
+    updates.documentation !== undefined ||
+    updates.phone !== undefined;
+  const roleChanged = updates.role !== undefined && updates.role !== signer.role;
+  const authChanged =
+    updates.authMethod !== undefined && updates.authMethod !== signer.authMethod;
+  if (!hasProfile && !roleChanged && !authChanged) {
+    return { ok: false, status: 400, error: "Nenhuma alteração informada" };
+  }
+
+  // Tipo de assinatura precisa estar na allow-list da org (defense-in-depth).
+  if (authChanged) {
+    const settings = await getSignatureSettings(signer.envelope.orgId);
+    if (
+      settings.allowedAuthMethods.length > 0 &&
+      !settings.allowedAuthMethods.includes(updates.authMethod as string)
+    ) {
+      return {
+        ok: false,
+        status: 400,
+        error: `Tipo de assinatura "${updates.authMethod}" não está habilitado nas preferências da imobiliária.`,
+      };
+    }
   }
 
   const creds = await resolveClickSignCreds(signer.envelope.orgId);
-  if (signer.envelope.clicksignId && signer.clicksignId && creds) {
+  const remoteReady = Boolean(
+    signer.envelope.clicksignId && signer.clicksignId && creds
+  );
+
+  // Só é possível trocar papel/auth quando há como recriar os requirements
+  // remotos: exige envelope+signer+documento na ClickSign. Sem isso NÃO
+  // persistimos papel/auth (senão o DB divergiria do que a ClickSign assina).
+  if (
+    (roleChanged || authChanged) &&
+    remoteReady &&
+    !signer.envelope.documentClicksignId
+  ) {
+    return {
+      ok: false,
+      status: 409,
+      error:
+        "Não é possível alterar o tipo de assinatura ou o papel neste envelope. Cancele e reenvie.",
+    };
+  }
+
+  // Perfil aplicado na ClickSign, persistido imediatamente (nunca se perde).
+  const profileData: Prisma.EnvelopeSignerUpdateInput = {};
+  if (updates.name !== undefined) profileData.name = updates.name;
+  if (updates.email !== undefined) profileData.email = updates.email;
+  if (updates.documentation !== undefined)
+    profileData.documentation = updates.documentation || null;
+  if (updates.phone !== undefined) profileData.phone = updates.phone || null;
+
+  if (remoteReady && hasProfile) {
     try {
-      await updateSigner(
+      const resp = await updateSigner(
         {
-          envelopeId: signer.envelope.clicksignId,
-          signerId: signer.clicksignId,
+          envelopeId: signer.envelope.clicksignId!,
+          signerId: signer.clicksignId!,
           name: updates.name,
           email: updates.email,
           documentation: updates.documentation,
           phoneNumber: updates.phone,
         },
-        creds
+        creds!
       );
+      // Quirk v3: PATCH do signer pode ROTACIONAR a key (remove+add). Se a
+      // resposta trouxer um id novo, adotamos e re-persistimos — senão as
+      // recriações de requirement e ações futuras (resend/remove) mirariam
+      // uma key morta. Ver feedback_clicksign_v3_quirks.
+      const rotatedId = pickId(resp);
+      if (rotatedId && rotatedId !== signer.clicksignId) {
+        profileData.clicksignId = rotatedId;
+        signer.clicksignId = rotatedId;
+      }
     } catch (err) {
       if (err instanceof ClicksignError) {
         return { ok: false, status: 502, error: `Clicksign: ${err.message}` };
       }
       throw err;
     }
+    // Persiste o perfil já aplicado ANTES de mexer em requirements: se a
+    // recriação falhar a seguir, o DB continua batendo com a ClickSign.
+    await prisma.envelopeSigner.update({
+      where: { id: signer.id },
+      data: profileData,
+    });
   }
 
-  const updated = await prisma.envelopeSigner.update({
-    where: { id: signer.id },
-    data: {
-      ...(updates.name !== undefined ? { name: updates.name } : {}),
-      ...(updates.email !== undefined ? { email: updates.email } : {}),
-      ...(updates.documentation !== undefined
-        ? { documentation: updates.documentation || null }
-        : {}),
-      ...(updates.phone !== undefined ? { phone: updates.phone || null } : {}),
-    },
-  });
+  let newRequirementIds: string[] | undefined;
+  if (remoteReady && (roleChanged || authChanged)) {
+    try {
+      newRequirementIds = await recreateSignerRequirements({
+        envelopeClicksignId: signer.envelope.clicksignId!,
+        documentClicksignId: signer.envelope.documentClicksignId!,
+        signerClicksignId: signer.clicksignId!,
+        oldRequirementIds: signer.requirementIds,
+        role: (updates.role ?? (signer.role as ClicksignRole)) ?? "sign",
+        auth: (updates.authMethod ?? (signer.authMethod as AuthMethod)) ?? "email",
+        creds: creds!,
+      });
+    } catch (err) {
+      if (err instanceof ClicksignError) {
+        const hint =
+          envStatus === "running"
+            ? " Talvez seja necessário cancelar o envelope e reenviar para trocar o tipo de assinatura ou o papel."
+            : "";
+        // Perfil (se houve) já foi aplicado + persistido acima; papel/auth NÃO
+        // são persistidos, mantendo DB×ClickSign consistentes.
+        return { ok: false, status: 502, error: `Clicksign: ${err.message}.${hint}` };
+      }
+      throw err;
+    }
+  }
+
+  // Persiste o restante: papel/auth (confirmados na ClickSign ou modo local) +
+  // perfil quando NÃO houve chamada remota (envelope local-only).
+  const finalData: Prisma.EnvelopeSignerUpdateInput = {};
+  if (!remoteReady) Object.assign(finalData, profileData);
+  if (roleChanged) finalData.role = updates.role;
+  if (authChanged) finalData.authMethod = updates.authMethod;
+  if (newRequirementIds) finalData.requirementIds = newRequirementIds;
+
+  const updated =
+    Object.keys(finalData).length > 0
+      ? await prisma.envelopeSigner.update({
+          where: { id: signer.id },
+          data: finalData,
+        })
+      : (await prisma.envelopeSigner.findUnique({ where: { id: signer.id } }))!;
   return { ok: true, data: updated };
 }
 

@@ -9,6 +9,12 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Plus, Trash2, Loader2, UsersRound } from "lucide-react";
+import { cn } from "@/lib/utils";
+import {
+  WITNESS_SCOPES,
+  WITNESS_SCOPE_LABEL,
+  type WitnessScope,
+} from "@/lib/clicksign/witness-scope";
 
 interface Witness {
   id: string;
@@ -17,6 +23,7 @@ interface Witness {
   email: string;
   mobilePhone: string | null;
   isDefault: boolean;
+  scope: string;
 }
 
 function maskCpf(raw: string): string {
@@ -32,6 +39,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 export function DefaultWitnessesClient({
   embedded = false,
 }: { embedded?: boolean } = {}) {
+  const [scope, setScope] = useState<WitnessScope>("venda");
   const [witnesses, setWitnesses] = useState<Witness[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -43,10 +51,10 @@ export function DefaultWitnessesClient({
     isDefault: true,
   });
 
-  async function load() {
+  async function load(currentScope: WitnessScope) {
     setLoading(true);
     try {
-      const res = await fetch("/api/settings/witnesses");
+      const res = await fetch(`/api/settings/witnesses?scope=${currentScope}`);
       const data = await res.json().catch(() => ({}));
       if (res.ok) setWitnesses(data.witnesses ?? []);
       else toast.error(data.error || "Erro ao carregar testemunhas");
@@ -58,8 +66,8 @@ export function DefaultWitnessesClient({
   }
 
   useEffect(() => {
-    load();
-  }, []);
+    load(scope);
+  }, [scope]);
 
   async function handleAdd() {
     if (draft.nome.trim().length < 2) {
@@ -75,13 +83,13 @@ export function DefaultWitnessesClient({
       const res = await fetch("/api/settings/witnesses", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(draft),
+        body: JSON.stringify({ ...draft, scope }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) {
         toast.success("Testemunha cadastrada");
         setDraft({ nome: "", cpf: "", email: "", mobilePhone: "", isDefault: true });
-        load();
+        load(scope);
       } else {
         toast.error(data.error || "Erro ao cadastrar");
       }
@@ -121,9 +129,10 @@ export function DefaultWitnessesClient({
     <div className="space-y-6">
       {embedded ? (
         <p className="text-sm text-muted-foreground">
-          Cadastre as testemunhas que assinam os contratos por padrão. As
-          marcadas como <strong>padrão</strong> são incluídas automaticamente em
-          todos os envios para assinatura.
+          Cadastre as testemunhas que assinam por padrão, separadas por módulo.
+          Na hora do envio, você as escolhe pelo botão{" "}
+          <strong>Selecionar testemunhas</strong> — sem redigitar. As marcadas
+          como <strong>padrão</strong> já vêm pré-marcadas no seletor.
         </p>
       ) : (
         <div>
@@ -134,15 +143,34 @@ export function DefaultWitnessesClient({
             </Link>
           </Button>
           <h1 className="font-display tracking-tight text-2xl font-semibold">
-            Testemunhas padrão
+            Cadastro de testemunhas
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Cadastre as testemunhas que assinam os contratos por padrão. As
-            marcadas como <strong>padrão</strong> já vêm pré-selecionadas na popup
-            de envio para assinatura.
+            Cadastre as testemunhas que assinam por padrão, separadas por módulo.
+            Na hora do envio, você as escolhe pelo botão{" "}
+            <strong>Selecionar testemunhas</strong> — sem redigitar. As marcadas
+            como <strong>padrão</strong> já vêm pré-marcadas no seletor.
           </p>
         </div>
       )}
+
+      <div className="inline-flex rounded-lg border bg-muted/40 p-0.5 gap-0.5">
+        {WITNESS_SCOPES.map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => setScope(s)}
+            className={cn(
+              "px-3 py-1.5 text-sm rounded-md transition-colors",
+              scope === s
+                ? "bg-background shadow-sm font-medium"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            {WITNESS_SCOPE_LABEL[s]}
+          </button>
+        ))}
+      </div>
 
       <Card>
         <CardHeader>
