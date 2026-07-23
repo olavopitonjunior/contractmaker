@@ -22,7 +22,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Plus } from "lucide-react";
+import { Plus, UsersRound, X } from "lucide-react";
+import {
+  WitnessPicker,
+  pickNewWitnesses,
+  type PickedWitness,
+  type RegistryWitness,
+} from "@/components/pipeline/WitnessPicker";
 
 const SCHEMA_BY_TIPO: Record<string, { label: string; value: string }[]> = {
   venda: [{ label: "Compra e venda", value: "compra_venda_v1" }],
@@ -42,6 +48,8 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [schemaType, setSchemaType] = useState(SCHEMA_BY_TIPO[tipo][0].value);
+  const [witnessPickerOpen, setWitnessPickerOpen] = useState(false);
+  const [witnesses, setWitnesses] = useState<PickedWitness[]>([]);
   const [form, setForm] = useState({
     proponente: "",
     proponenteEmail: "",
@@ -56,6 +64,32 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
 
   function set(k: keyof typeof form, v: string) {
     setForm((f) => ({ ...f, [k]: v }));
+  }
+
+  const digits = (v: string) => v.replace(/\D/g, "");
+  // Chaves já usadas (proponente/vendedor + testemunhas escolhidas) pra o picker
+  // não permitir duplicata.
+  const witnessExistingKeys = [
+    form.proponenteEmail.trim().toLowerCase(),
+    form.vendedorEmail.trim().toLowerCase(),
+    ...witnesses.map((w) => w.email.trim().toLowerCase()),
+    ...witnesses.map((w) => digits(w.documentation)),
+  ].filter(Boolean);
+
+  function addWitnessesFromRegistry(selected: RegistryWitness[]) {
+    setWitnesses((prev) => [
+      ...prev,
+      ...pickNewWitnesses(selected, witnessExistingKeys),
+    ]);
+  }
+
+  function removeWitness(email: string) {
+    setWitnesses((prev) => prev.filter((w) => w.email !== email));
+  }
+
+  function handleOpenChange(next: boolean) {
+    setOpen(next);
+    if (!next) setWitnesses([]);
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -105,6 +139,19 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
           signingGroup: 2,
         });
       }
+      // Testemunhas escolhidas do cadastro (scope proposta) — assinam junto com
+      // os proprietários (grupo 2).
+      for (const w of witnesses) {
+        signers.push({
+          role: "testemunha",
+          name: w.name,
+          email: w.email || null,
+          cpf: w.documentation || null,
+          phone: w.phone || null,
+          notifyChannel: "email",
+          signingGroup: 2,
+        });
+      }
 
       const res = await fetch("/api/proposals", {
         method: "POST",
@@ -123,6 +170,7 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
       }
       const { proposal } = await res.json();
       toast.success("Proposta criada");
+      setWitnesses([]);
       setOpen(false);
       router.push(`/pipeline/propostas/${proposal.id}`);
     } catch (err) {
@@ -133,7 +181,7 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
         <Button size="sm">
           <Plus className="mr-1 h-4 w-4" /> Nova proposta
@@ -207,6 +255,40 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
               />
             </div>
           </div>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label>Testemunhas (opcional)</Label>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => setWitnessPickerOpen(true)}
+              >
+                <UsersRound className="mr-1 h-3.5 w-3.5" />
+                Selecionar testemunhas
+              </Button>
+            </div>
+            {witnesses.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {witnesses.map((w) => (
+                  <span
+                    key={w.email}
+                    className="inline-flex items-center gap-1 rounded-full border bg-muted/40 px-2 py-0.5 text-xs"
+                  >
+                    {w.name}
+                    <button
+                      type="button"
+                      onClick={() => removeWitness(w.email)}
+                      className="text-muted-foreground hover:text-destructive"
+                      aria-label={`Remover ${w.name}`}
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="space-y-1">
             <Label>Imóvel</Label>
             <Input
@@ -257,6 +339,14 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
             </Button>
           </DialogFooter>
         </form>
+
+        <WitnessPicker
+          open={witnessPickerOpen}
+          onOpenChange={setWitnessPickerOpen}
+          scope="proposta"
+          existingKeys={witnessExistingKeys}
+          onConfirm={addWitnessesFromRegistry}
+        />
       </DialogContent>
     </Dialog>
   );
