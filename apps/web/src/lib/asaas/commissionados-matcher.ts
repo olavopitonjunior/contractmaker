@@ -43,11 +43,11 @@ export interface MatchResult {
   matchedBy?: "cpf_cnpj" | "name";
 }
 
-function normalizeDoc(raw: string | null | undefined): string {
+export function normalizeDoc(raw: string | null | undefined): string {
   return (raw ?? "").replace(/\D/g, "");
 }
 
-function normalizeName(raw: string | null | undefined): string {
+export function normalizeName(raw: string | null | undefined): string {
   return (raw ?? "")
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")

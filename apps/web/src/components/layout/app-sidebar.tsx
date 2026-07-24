@@ -31,6 +31,7 @@ import {
   LogOut,
   Wallet,
   Building2,
+  Handshake,
   BarChart3,
   ChevronRight,
   type LucideIcon,
@@ -126,6 +127,7 @@ const NAV: NavEntry[] = [
     ],
   },
   { kind: "item", title: "Templates", url: "/templates", icon: FileStack },
+  { kind: "item", title: "Corretores", url: "/corretores", icon: Handshake },
   {
     kind: "group",
     title: "Relatórios",

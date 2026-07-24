@@ -12,6 +12,7 @@ import {
 } from "@/lib/forms/atomic-merge";
 import { syncDealClientName } from "@/lib/forms/sync-deal-client-name";
 import { formClosedResponse } from "@/lib/forms/form-gate";
+import { autoRegisterFormCommissioners } from "@/lib/forms/auto-register-commissioners";
 import {
   schemaForLocacaoType,
   collectLocacaoFinalizeIssues,
@@ -312,6 +313,13 @@ export async function PATCH(
 
       waitUntil(matchDealGroup(deal.id).catch(() => {}));
     }
+
+    // Auto-cadastro de corretores (paridade com vendas): no-op quando o form
+    // de locação não tem comissao.comissionados. Depois da geração do contrato
+    // de propósito — o helper reescreve o dataJson do form.
+    waitUntil(
+      autoRegisterFormCommissioners({ formId: form.id, orgId: form.orgId })
+    );
   }
 
   audit(extractAuditContextFromRequest(req, form.orgId, null), {

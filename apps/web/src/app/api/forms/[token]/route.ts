@@ -30,6 +30,7 @@ import {
   FormNotFoundError,
 } from "@/lib/forms/atomic-merge";
 import { formClosedResponse } from "@/lib/forms/form-gate";
+import { autoRegisterFormCommissioners } from "@/lib/forms/auto-register-commissioners";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
 // GET: public - fetch form data by token
@@ -502,6 +503,14 @@ export async function PATCH(
     // Partes preenchidas → tenta auto-vincular o grupo de WhatsApp do negócio
     // (cruza telefones das partes com os grupos conhecidos). Best-effort.
     if (dealId) waitUntil(matchDealGroup(dealId).catch(() => {}));
+
+    // Auto-cadastro de corretores: comissionados sem splitRecipientId viram
+    // (ou casam com) SplitRecipient kind="commissioner" + backfill do id no
+    // dataJson. Depois da geração do contrato de propósito — o helper reescreve
+    // o dataJson do form e não pode competir com o read do generate.
+    waitUntil(
+      autoRegisterFormCommissioners({ formId: form.id, orgId: form.orgId })
+    );
   }
 
   return NextResponse.json({
