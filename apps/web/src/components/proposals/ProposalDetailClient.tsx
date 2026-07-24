@@ -65,7 +65,13 @@ function money(v: number | null): string {
 }
 function fmt(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  // timeZone explícito: server (UTC) e client (BRT) precisam formatar igual, senão
+  // a HORA diverge (22:16 vs 19:16) → React #418 (hydration mismatch) a cada load.
+  return new Date(iso).toLocaleString("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+    timeZone: "America/Sao_Paulo",
+  });
 }
 function prazoLabel(validUntil: string | null): { label: string; danger: boolean } {
   if (!validUntil) return { label: "sem prazo", danger: false };
@@ -246,7 +252,11 @@ export function ProposalDetailClient({
             <span className="text-muted-foreground">Validade</span>
             <span className="font-medium">
               {fmt(proposal.validUntil)}{" "}
-              <span className={pz.danger ? "text-destructive" : "text-muted-foreground"}>
+              {/* prazo relativo (Date.now) → suppressHydrationWarning evita #418 no limite de dia. */}
+              <span
+                suppressHydrationWarning
+                className={pz.danger ? "text-destructive" : "text-muted-foreground"}
+              >
                 ({pz.label})
               </span>
             </span>
