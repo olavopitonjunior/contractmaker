@@ -21,7 +21,7 @@ export async function PATCH(
   const scoped = await loadScopedProposalSigner(req, params.id, params.signerId);
   if ("fail" in scoped) return scoped.fail;
 
-  const parsed = patchSchema.safeParse(await req.json());
+  const parsed = patchSchema.safeParse(await req.json().catch(() => null));
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.message }, { status: 400 });
   }

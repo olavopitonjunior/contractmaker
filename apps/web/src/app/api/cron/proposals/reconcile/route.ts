@@ -3,10 +3,6 @@ import { prisma } from "@/lib/db/prisma";
 import { requireCronAuth } from "@/lib/security/cron-auth";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
 import { syncEnvelopeState } from "@/lib/clicksign/sync";
-import {
-  onProposalEnvelopeClosed,
-  onProposalEnvelopeRefused,
-} from "@/lib/proposals/webhook-hooks";
 import { sendVendedorEnvelope } from "@/lib/proposals/send-execute";
 import { buildDossier } from "@/lib/proposals/dossier";
 
@@ -45,21 +41,19 @@ export async function GET(req: NextRequest) {
     include: { signers: true },
     take: 50,
   });
-  // IDs cujo envelope o step 1 acabou de fechar → onProposalEnvelopeClosed já
-  // encadeia o 2º envelope (via waitUntil). Excluir do step 2 evita que ele
-  // redispare a MESMA proposta no mesmo run (o lock em sendVendedorEnvelope já
-  // serializa, mas não fazer a chamada redundante é mais barato e claro).
+  // IDs cujo envelope o step 1 acabou de fechar → o syncEnvelopeState JÁ propagou
+  // (onProposalEnvelopeClosed, que encadeia o 2º envelope via waitUntil). NÃO
+  // chamar de novo aqui: a dupla-chamada agendava DOIS sendVendedorEnvelope e, com
+  // Redis fora (lock fail-open), ambos passavam o guard TOCTOU → cobrança dobrada.
+  // Só contabiliza e marca pro step 2 não redisparar.
   const chainedInStep1 = new Set<string>();
   for (const env of envelopes) {
     try {
       const r = await syncEnvelopeState(env, { actorVia: "cron-reconcile" });
       result.synced++;
       if (r.remoteStatus === "closed" || r.remoteStatus === "finished") {
-        await onProposalEnvelopeClosed(env.id);
         if (env.proposalId) chainedInStep1.add(env.proposalId);
         result.closedPropagated++;
-      } else if (r.remoteStatus === "canceled") {
-        await onProposalEnvelopeRefused(env.id);
       }
     } catch {
       result.errors++;
