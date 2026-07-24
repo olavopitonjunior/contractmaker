@@ -6,6 +6,7 @@ import {
 } from "@/lib/locacao/route-helpers";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
 
 export const runtime = "nodejs";
 
@@ -73,6 +74,8 @@ export async function POST(
       toStage: formularioStage.id,
     },
   });
+
+  queueSurveyDispatch(deal.id, formularioStage.name);
 
   return NextResponse.json({
     status: "ficha_aprovada",

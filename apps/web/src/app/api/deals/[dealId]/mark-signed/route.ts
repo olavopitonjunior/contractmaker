@@ -7,6 +7,7 @@ import {
 } from "@/lib/api/require-auth";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
+import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
 
 export const runtime = "nodejs";
 
@@ -88,6 +89,8 @@ export async function POST(
       ),
     }
   );
+
+  queueSurveyDispatch(deal.id, targetStage.name);
 
   return NextResponse.json({
     status: "comissao_paga",

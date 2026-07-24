@@ -4,6 +4,7 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { z } from "zod";
+import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
 
 export async function GET(
   _req: NextRequest,
@@ -121,6 +122,11 @@ export async function PATCH(
       ...(parsed.data.title !== undefined ? { changedTitle: true } : {}),
     },
   });
+
+  // Pesquisas: só quando o stage realmente mudou (o PATCH também salva título/datas).
+  if (parsed.data.stageId && deal.stage.name !== existing.stage.name) {
+    queueSurveyDispatch(deal.id, deal.stage.name);
+  }
 
   return NextResponse.json(deal);
 }
