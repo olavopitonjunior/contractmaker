@@ -73,9 +73,12 @@ const pessoaFisicaSchema = z.object({
     cep: z.string().optional().default(""),
     // Flag default true: helper getEnderecoEfetivo lê endereço do titular
     endereco_igual_ao_titular: z.boolean().optional().default(true),
-    // Opt-in pra incluir o cônjuge como signatário ClickSign separado.
-    // Marcado pelo popup de envio (ou no form quando email já existir).
-    incluir_como_signatario: z.boolean().optional().default(false),
+    // Inclusão do cônjuge como signatário ClickSign separado. É OPT-OUT:
+    // ausente/`true` inclui, só `false` explícito exclui (gravado quando o
+    // operador remove a linha na popup de envio). SEM `.default(false)` de
+    // propósito — se algum caller passasse a persistir a saída do parse, o
+    // default materializaria `false` em toda parte e anularia o opt-out.
+    incluir_como_signatario: z.boolean().optional(),
   }).optional(),
   procurador: z.object({
     nome: z.string().optional().default(""),
@@ -90,9 +93,9 @@ const pessoaFisicaSchema = z.object({
     numero: z.string().optional().default(""),
     cidade: z.string().optional().default(""),
     uf: z.string().optional().default(""),
-    // Opt-in pra incluir o procurador como signatário ClickSign separado.
-    // Marcado pelo popup de envio (default true quando há procurador no form).
-    incluir_como_signatario: z.boolean().optional().default(false),
+    // Opt-out, igual ao cônjuge — ver comentário acima. A inclusão real ainda
+    // depende de `tem_procurador !== false` em `dealDataToSigners`.
+    incluir_como_signatario: z.boolean().optional(),
   }).optional(),
 });
 

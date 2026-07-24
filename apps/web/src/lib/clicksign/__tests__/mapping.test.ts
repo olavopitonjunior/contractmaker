@@ -292,6 +292,78 @@ describe("dealDataToSigners", () => {
     expect(semProcurador.signers).toHaveLength(1);
   });
 
+  it("ex-cônjuge não assina quando o estado civil deixou de ser casado", () => {
+    // O form esconde o bloco ao trocar pra "Divorciado(a)", mas NÃO apaga o
+    // sub-objeto do dataJson.
+    const result = dealDataToSigners({
+      vendedores: [
+        {
+          nome: "V",
+          email: "v@x.com",
+          estado_civil: "Divorciado(a)",
+          conjuge: { nome: "Ex", email: "ex@x.com" },
+        },
+      ],
+    });
+    expect(result.signers).toHaveLength(1);
+  });
+
+  it("estado civil ausente ou em variante do OCR não derruba a outorga", () => {
+    // O gate é leniente: só exclui quem DECLAROU não ter cônjuge. Um dataJson
+    // legado (sem estado_civil) ou vindo do OCR ("União estável" minúsculo,
+    // como o prompt do Gemini pede) mantém o cônjuge assinando.
+    for (const estado_civil of [undefined, "União estável", "Uniao Estavel"]) {
+      const result = dealDataToSigners({
+        vendedores: [
+          {
+            nome: "V",
+            email: "v@x.com",
+            estado_civil,
+            conjuge: { nome: "Companheira", email: "c@x.com" },
+          },
+        ],
+      });
+      expect(
+        result.signers.some((s) => s.subKind === "conjuge"),
+        String(estado_civil)
+      ).toBe(true);
+    }
+  });
+
+  it("procurador descartado (tem_procurador: false) não assina", () => {
+    // Desmarcar "Possui procurador" esconde os campos mas mantém o objeto —
+    // sem o guard, um terceiro descartado receberia o CCV real pra assinar.
+    const result = dealDataToSigners({
+      vendedores: [
+        {
+          nome: "V",
+          email: "v@x.com",
+          tem_procurador: false,
+          procurador: { nome: "Descartado", email: "desc@x.com" },
+        },
+      ],
+    });
+    expect(result.signers).toHaveLength(1);
+  });
+
+  it("não duplica signatário quando o cônjuge também é parte autônoma", () => {
+    const result = dealDataToSigners({
+      vendedores: [
+        {
+          nome: "Odair",
+          email: "odair@x.com",
+          estado_civil: "Casado(a)",
+          conjuge: { nome: "Elenira", email: "ELENIRA@x.com" },
+        },
+        { nome: "Elenira", email: "elenira@x.com" },
+      ],
+    });
+    // Titular 0, titular 1 — e o cônjuge suprimido por e-mail repetido
+    // (comparação case-insensitive).
+    expect(result.signers).toHaveLength(2);
+    expect(result.signers.some((s) => s.subKind === "conjuge")).toBe(false);
+  });
+
   it("PJ ignora cônjuge e procurador sujos no dataJson", () => {
     const result = dealDataToSigners({
       vendedores: [

@@ -81,6 +81,23 @@ describe("template parity (A0.1)", () => {
     expect(leftover, `Variáveis sem fonte no template ${file}: ${leftover.join(", ")}`).toEqual([]);
   });
 
+  // Outorga uxória em locação (2026-07-24). O `leftoverMustaches` acima não
+  // pegaria a ausência: Handlebars renderiza bloco não-satisfeito como string
+  // vazia — HTML limpo, CI verde, contrato sem a anuência do cônjuge.
+  it("locacao_residencial_v3: cônjuge de parte casada aparece na qualificação e nas assinaturas", () => {
+    const tpl = readFileSync(templatePath("locacao_residencial_v3.hbs"), "utf-8");
+    const enriched = enrichLocacaoData(
+      JSON.parse(JSON.stringify(previewSampleDataLocacao))
+    );
+    const html = renderContratoHTML(tpl, enriched as Record<string, unknown>);
+
+    // Locatário "Casado(a)" com cônjuge preenchido na sample.
+    expect(html).toContain("casado(a) com Beatriz Almeida Nogueira");
+    expect(html).toContain("CÔNJUGE DA PARTE LOCATÁRIA");
+    // Locadora "Viúvo(a)" e PJ não geram outorga.
+    expect(html).not.toContain("CÔNJUGE DA PARTE LOCADORA");
+  });
+
   // Form novo NÃO manda mais foro/config/desistencia/assinatura: esses campos
   // saíram da última etapa e viraram padrão da org, aplicado por
   // `enrichContractData`. Estes casos simulam esse dataJson e provam que o

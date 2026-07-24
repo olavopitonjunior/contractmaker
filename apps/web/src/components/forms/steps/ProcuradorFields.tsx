@@ -7,6 +7,7 @@ import { Separator } from "@/components/ui/separator";
 import { UFSelect } from "@/components/forms/UFSelect";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import { maskCPF, maskTelefone } from "@/lib/forms/field-formats";
+import { getByPath } from "@/lib/forms/party-required";
 
 function FieldError({ error }: { error?: { message?: string } }) {
   if (!error?.message) return null;
@@ -32,10 +33,12 @@ function FormField({
 
 interface ProcuradorFieldsProps {
   form: UseFormReturn<any>;
-  index: number;
-  /** Path prefix do titular, ex: "vendedores.0" — sub-obj `procurador` é apenso. */
+  /**
+   * Path prefix do titular, ex: "vendedores.0" — o sub-obj `procurador` é
+   * apenso, e os erros também são lidos por aqui (mesmo padrão de
+   * `ConjugeFields`, que serve qualquer lista).
+   */
   prefix: string;
-  listKey: "vendedores" | "compradores";
 }
 
 /**
@@ -44,13 +47,10 @@ interface ProcuradorFieldsProps {
  * schema já os aceitava e `dealDataToSigners` exige e-mail pro procurador
  * assinar, mas não havia campo na tela — ele chegava sempre vazio no envelope.
  */
-export function ProcuradorFields({
-  form,
-  index,
-  prefix,
-  listKey,
-}: ProcuradorFieldsProps) {
-  const errors = (form.formState.errors as any)?.[listKey]?.[index]?.procurador;
+export function ProcuradorFields({ form, prefix }: ProcuradorFieldsProps) {
+  const errors = getByPath(form.formState.errors, `${prefix}.procurador`) as
+    | Record<string, { message?: string }>
+    | undefined;
 
   return (
     <>

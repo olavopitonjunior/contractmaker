@@ -226,12 +226,7 @@ function PessoaFisicaFields({
       </div>
 
       {temProcurador && (
-        <ProcuradorFields
-          form={form}
-          index={index}
-          prefix={prefix}
-          listKey="compradores"
-        />
+        <ProcuradorFields form={form} prefix={prefix} />
       )}
 
       {/* Phase F.II-δ — "Sou sócio de PJ" — gera DiligentedPerson auto no finalize */}

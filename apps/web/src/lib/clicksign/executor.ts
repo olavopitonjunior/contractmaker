@@ -419,7 +419,12 @@ async function createEnvelopeFromBuffer(input: {
         },
         creds
       );
-      // Role já resolvido e persistido no row (input → override → default).
+      // Role já resolvido e persistido no row (input → override → default),
+      // então o fallback abaixo é inalcançável na prática — o que é bom,
+      // porque `EnvelopeSigner` NÃO persiste `subKind` (é transiente, resolvido
+      // em memória na criação) e daqui não dá pra recuperar que este signer é
+      // cônjuge/procurador. Se um dia o role puder chegar null aqui, a correção
+      // é persistir o subKind, não passar um argumento que não existe.
       const role: ClicksignRole =
         (localSigner.role as ClicksignRole | null) ??
         defaultRoleForSourceKind(localSigner.sourceKind);

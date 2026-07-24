@@ -83,6 +83,7 @@ describe("leaseDataToSigners", () => {
           nome: "Ana",
           cpf: "111.444.777-35",
           email: "ana@example.com",
+          estado_civil: "Casado(a)",
           conjuge: { nome: "Caio", email: "caio@example.com", incluir_como_signatario: false },
         },
       ],
@@ -92,6 +93,7 @@ describe("leaseDataToSigners", () => {
           nome: "Bruno",
           cpf: "529.982.247-25",
           email: "b@x.com",
+          estado_civil: "Casado(a)",
           conjuge: { nome: "Sem e-mail" },
         },
       ],
@@ -131,6 +133,42 @@ describe("leaseDataToSigners", () => {
       name: "Cônjuge do Fiador",
       email: "cf@x.com",
     });
+  });
+
+  it("ex-cônjuge não assina e cônjuge duplicado não vira 2 signatários", () => {
+    const semCasamento = leaseDataToSigners({
+      locadores: [
+        {
+          tipo_pessoa: "fisica",
+          nome: "Ana",
+          cpf: "111.444.777-35",
+          email: "ana@x.com",
+          estado_civil: "Divorciado(a)",
+          conjuge: { nome: "Ex", email: "ex@x.com" },
+        },
+      ],
+      locatarios: [],
+    });
+    expect(semCasamento.signers).toHaveLength(1);
+
+    // Cônjuge que também foi cadastrado como locador (co-proprietário).
+    // Locação não roda dedupConjuges — signatário repetido é 422 na ClickSign.
+    const duplicado = leaseDataToSigners({
+      locadores: [
+        {
+          tipo_pessoa: "fisica",
+          nome: "Ana",
+          cpf: "111.444.777-35",
+          email: "ana@x.com",
+          estado_civil: "Casado(a)",
+          conjuge: { nome: "Caio", email: "CAIO@x.com" },
+        },
+        { tipo_pessoa: "fisica", nome: "Caio", cpf: "529.982.247-25", email: "caio@x.com" },
+      ],
+      locatarios: [],
+    });
+    expect(duplicado.signers).toHaveLength(2);
+    expect(duplicado.signers.some((s) => s.subKind === "conjuge")).toBe(false);
   });
 
   it("PJ não gera linha de cônjuge", () => {

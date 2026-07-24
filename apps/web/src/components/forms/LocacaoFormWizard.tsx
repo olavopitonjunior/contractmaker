@@ -176,14 +176,33 @@ export function LocacaoFormWizard({
   // que assinam mas estão sem e-mail. Só aviso — o bloqueio de avanço continua
   // sendo só nome/razão social. Locação não usa o sistema de presets de venda,
   // então o cálculo mora aqui.
-  const sigRecoList = PARTY_STEP[currentTrueIdx]?.list ?? null;
-  const sigRecoPartyLabel =
-    sigRecoList === "locadores" ? "Locador" : "Locatário";
+  //
+  // A etapa de garantia entra junto: o fiador casado é justamente o caso em que
+  // a outorga é indispensável (art. 1.647, III CC). Ele não é array, então vira
+  // uma lista sintética de 1 elemento com prefixo próprio.
+  const isGarantiaStep =
+    currentTrueIdx === 5 &&
+    (getByPath(watchedData, "garantia.tipo") as unknown) === "fiador";
+  const sigRecoList = isGarantiaStep
+    ? "garantia"
+    : (PARTY_STEP[currentTrueIdx]?.list ?? null);
+  const sigRecoPartyLabel = isGarantiaStep
+    ? "Fiador"
+    : sigRecoList === "locadores"
+      ? "Locador"
+      : "Locatário";
   const signatureRecommendations = sigRecoList
     ? findSignatureRecommendations(
-        sigRecoList,
-        ((getByPath(watchedData, sigRecoList) as unknown[]) ?? []).length,
-        (path) => getByPath(watchedData, path),
+        // `garantia.fiador` ocupa a posição 0 de uma lista de um só item.
+        isGarantiaStep ? "garantia" : sigRecoList,
+        isGarantiaStep
+          ? 1
+          : ((getByPath(watchedData, sigRecoList) as unknown[]) ?? []).length,
+        (path) =>
+          getByPath(
+            watchedData,
+            isGarantiaStep ? path.replace(/^garantia\.0\./, "garantia.fiador.") : path,
+          ),
       )
     : [];
   const sigRecoByParty = new Map<number, string[]>();
@@ -430,7 +449,7 @@ export function LocacaoFormWizard({
             {Array.from(sigRecoByParty.entries()).map(([idx, subs]) => (
               <li key={idx}>
                 <span className="font-medium">
-                  {sigRecoPartyLabel} {idx + 1}:{" "}
+                  {isGarantiaStep ? sigRecoPartyLabel : `${sigRecoPartyLabel} ${idx + 1}`}:{" "}
                 </span>
                 {subs.join(", ")}
               </li>

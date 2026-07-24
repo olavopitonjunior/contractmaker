@@ -540,10 +540,19 @@ export async function updateSigner(
   if (input.name !== undefined) attributes.name = input.name;
   if (input.email !== undefined) attributes.email = input.email;
   if (input.documentation !== undefined) {
-    attributes.documentation = input.documentation
-      ? formatCpfCnpj(input.documentation)
-      : input.documentation;
-    attributes.has_documentation = Boolean(input.documentation);
+    // Mesmo guard de CNPJ do `addSigner` (ver comentário lá): 14 dígitos → a
+    // ClickSign devolve 422 "documentation não está em um formato válido",
+    // porque quem assina é sempre PF. Sem isso, editar o signatário de uma
+    // parte PJ que só tem CNPJ (sem CPF do representante) trava o PATCH.
+    const digits = input.documentation.replace(/\D/g, "");
+    if (digits.length === 14) {
+      attributes.has_documentation = false;
+    } else {
+      attributes.documentation = input.documentation
+        ? formatCpfCnpj(input.documentation)
+        : input.documentation;
+      attributes.has_documentation = Boolean(input.documentation);
+    }
   }
   if (input.phoneNumber !== undefined) attributes.phone_number = input.phoneNumber;
   if (input.birthday !== undefined) attributes.birthday = input.birthday;

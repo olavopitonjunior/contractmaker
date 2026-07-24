@@ -130,6 +130,9 @@ function suggestionsForList(
       return;
     }
 
+    // Mudança de UX deliberada: os builders antigos criavam o chip mesmo sem
+    // nome, com placeholder `Vendedor 1`. Um chip que não preenche nada além
+    // de um rótulo genérico só gera trabalho — parte sem nome fica de fora.
     const name = partyName(p);
     if (name) {
       out.push({

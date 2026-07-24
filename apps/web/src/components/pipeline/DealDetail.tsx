@@ -11,6 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot, Pencil, Check, CheckCircle2, X, Archive, ArchiveRestore, Lock, LockOpen, ShieldAlert, Users } from "lucide-react";
 import { SendAttachmentEnvelopeDialog } from "@/components/pipeline/SendAttachmentEnvelopeDialog";
 import { buildPartySuggestions } from "@/lib/clicksign/party-suggestions";
+import { isMarried } from "@/lib/forms/estado-civil";
 import { AddDocumentsCard } from "@/components/pipeline/AddDocumentsCard";
 import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
 import { LostDealBanner } from "@/components/pipeline/LostDealBanner";
@@ -69,8 +70,15 @@ type Parte = {
     mobile_phone?: string;
     incluir_como_signatario?: boolean;
   };
+  tem_procurador?: boolean;
   // Dependentes do vendedor diligenciados junto nas certidões (2026-05-22).
-  procurador?: { nome?: string; cpf?: string; email?: string; mobile_phone?: string };
+  procurador?: {
+    nome?: string;
+    cpf?: string;
+    email?: string;
+    mobile_phone?: string;
+    incluir_como_signatario?: boolean;
+  };
   representante?: { nome?: string; cpf?: string; email?: string; mobile_phone?: string };
 };
 
@@ -156,15 +164,31 @@ function PartyDetails({ p }: { p: Parte }) {
       {p.representante?.nome && (
         <PartySubPerson label="Representante (PJ)" person={p.representante} signs />
       )}
+      {/* `signs` espelha exatamente o gate de `dealDataToSigners`: opt-out +
+          e-mail presente + a sub-parte ser aplicável à parte. Antes o badge
+          lia só a flag (semântica opt-in) e mentia pro operador — um cônjuge
+          vindo do form público assinava sem mostrar "• assina". */}
       {p.conjuge?.nome && (
         <PartySubPerson
           label="Cônjuge"
           person={p.conjuge}
-          signs={p.conjuge.incluir_como_signatario}
+          signs={
+            isMarried(p.estado_civil) &&
+            p.conjuge.incluir_como_signatario !== false &&
+            Boolean(p.conjuge.email)
+          }
         />
       )}
       {p.procurador?.nome && (
-        <PartySubPerson label="Procurador" person={p.procurador} />
+        <PartySubPerson
+          label="Procurador"
+          person={p.procurador}
+          signs={
+            p.tem_procurador !== false &&
+            p.procurador.incluir_como_signatario !== false &&
+            Boolean(p.procurador.email)
+          }
+        />
       )}
     </div>
   );

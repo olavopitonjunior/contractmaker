@@ -171,6 +171,58 @@ describe("paridade blocos compostos × locacao_residencial_v3.hbs", () => {
     const qual = qualificacaoPessoas(enriched.locadores as unknown[]);
     expect(htmlPlano).toContain(qual.split("; ")[0]);
   });
+
+  // O fixture acima tem locadora viúva e garantia por título, então o sufixo de
+  // outorga resolve vazio dos dois lados e a asserção de substring passaria sem
+  // exercitar nada dele. Este caso força uma parte casada.
+  it("outorga do cônjuge: composed-blocks e o .hbs produzem o MESMO texto", () => {
+    const comConjuge = {
+      ...JSON.parse(JSON.stringify(locacaoBase)),
+      locadores: [
+        {
+          tipo_pessoa: "fisica",
+          nome: "Helena Castro Vilaboim",
+          nacionalidade: "brasileira",
+          estado_civil: "Casado(a)",
+          profissao: "engenheira",
+          cpf: "11144477735",
+          email: "helena@example.com",
+          conjuge: { nome: "Ricardo Vilaboim", cpf: "52998224725" },
+        },
+      ],
+    };
+    const enriched = enrichLocacaoData(comConjuge);
+    const htmlPlano = htmlToPlainText(renderContratoHTML(loadTemplate(), enriched));
+    const qual = qualificacaoPessoas(enriched.locadores as unknown[]);
+
+    expect(qual).toContain("casado(a) com Ricardo Vilaboim");
+    // A paridade real: o fragmento montado em composed-blocks tem que aparecer
+    // literalmente no contrato renderizado a partir do .hbs.
+    expect(htmlPlano).toContain(qual.split("; ")[0]);
+  });
+
+  it("ex-cônjuge deixado no dataJson não é qualificado", () => {
+    const divorciado = {
+      ...JSON.parse(JSON.stringify(locacaoBase)),
+      locadores: [
+        {
+          tipo_pessoa: "fisica",
+          nome: "Helena Castro Vilaboim",
+          estado_civil: "Divorciado(a)",
+          cpf: "11144477735",
+          // Trocar o estado civil no form esconde o bloco, mas não apaga isto.
+          conjuge: { nome: "Ricardo Vilaboim", cpf: "52998224725" },
+        },
+      ],
+    };
+    const enriched = enrichLocacaoData(divorciado);
+    const htmlPlano = htmlToPlainText(renderContratoHTML(loadTemplate(), enriched));
+
+    expect(qualificacaoPessoas(enriched.locadores as unknown[])).not.toContain(
+      "Ricardo Vilaboim"
+    );
+    expect(htmlPlano).not.toContain("Ricardo Vilaboim");
+  });
 });
 
 describe("buildVendaPlaceholderMap", () => {
