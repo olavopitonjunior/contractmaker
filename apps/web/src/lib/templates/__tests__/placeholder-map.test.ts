@@ -10,7 +10,12 @@ import {
   buildVendaPlaceholderMap,
 } from "../placeholder-map";
 import { catalogForModalidade } from "../placeholder-catalog";
-import { clausulaGarantia, qualificacaoPessoas, htmlToPlainText } from "../composed-blocks";
+import {
+  clausulaGarantia,
+  qualificacaoPessoas,
+  htmlToPlainText,
+  CONJUGE_SUFFIX_HBS,
+} from "../composed-blocks";
 import { renderContratoHTML } from "@/lib/render/handlebars";
 import { enrichLocacaoData } from "@/lib/locacao/enrich";
 
@@ -170,6 +175,75 @@ describe("paridade blocos compostos × locacao_residencial_v3.hbs", () => {
     }
     const qual = qualificacaoPessoas(enriched.locadores as unknown[]);
     expect(htmlPlano).toContain(qual.split("; ")[0]);
+  });
+
+  // O fixture acima tem locadora viúva e garantia por título, então o sufixo de
+  // outorga resolve vazio dos dois lados e a asserção de substring passaria sem
+  // exercitar nada dele. Este caso força uma parte casada.
+  // Trava a paridade na FONTE, não só no render: uma edição manual num .hbs
+  // que reordene as condições pode manter o render igual em alguns casos e
+  // deixar o teste de substring verde.
+  it.each([
+    "locacao_residencial_v3.hbs",
+    "locacao_comercial_v3.hbs",
+    "administracao_locacao_v1.hbs",
+  ])("%s contém o fragmento de outorga literal de composed-blocks", (file) => {
+    const candidates = [
+      path.join(process.cwd(), "..", "..", "templates", file),
+      path.join(process.cwd(), "templates", file),
+    ];
+    const tpl = candidates.find((c) => fs.existsSync(c));
+    expect(tpl, `${file} não encontrado`).toBeDefined();
+    expect(fs.readFileSync(tpl!, "utf-8")).toContain(CONJUGE_SUFFIX_HBS);
+  });
+
+  it("outorga do cônjuge: composed-blocks e o .hbs produzem o MESMO texto", () => {
+    const comConjuge = {
+      ...JSON.parse(JSON.stringify(locacaoBase)),
+      locadores: [
+        {
+          tipo_pessoa: "fisica",
+          nome: "Helena Castro Vilaboim",
+          nacionalidade: "brasileira",
+          estado_civil: "Casado(a)",
+          profissao: "engenheira",
+          cpf: "11144477735",
+          email: "helena@example.com",
+          conjuge: { nome: "Ricardo Vilaboim", cpf: "52998224725" },
+        },
+      ],
+    };
+    const enriched = enrichLocacaoData(comConjuge);
+    const htmlPlano = htmlToPlainText(renderContratoHTML(loadTemplate(), enriched));
+    const qual = qualificacaoPessoas(enriched.locadores as unknown[]);
+
+    expect(qual).toContain("casado(a) com Ricardo Vilaboim");
+    // A paridade real: o fragmento montado em composed-blocks tem que aparecer
+    // literalmente no contrato renderizado a partir do .hbs.
+    expect(htmlPlano).toContain(qual.split("; ")[0]);
+  });
+
+  it("ex-cônjuge deixado no dataJson não é qualificado", () => {
+    const divorciado = {
+      ...JSON.parse(JSON.stringify(locacaoBase)),
+      locadores: [
+        {
+          tipo_pessoa: "fisica",
+          nome: "Helena Castro Vilaboim",
+          estado_civil: "Divorciado(a)",
+          cpf: "11144477735",
+          // Trocar o estado civil no form esconde o bloco, mas não apaga isto.
+          conjuge: { nome: "Ricardo Vilaboim", cpf: "52998224725" },
+        },
+      ],
+    };
+    const enriched = enrichLocacaoData(divorciado);
+    const htmlPlano = htmlToPlainText(renderContratoHTML(loadTemplate(), enriched));
+
+    expect(qualificacaoPessoas(enriched.locadores as unknown[])).not.toContain(
+      "Ricardo Vilaboim"
+    );
+    expect(htmlPlano).not.toContain("Ricardo Vilaboim");
   });
 });
 

@@ -75,6 +75,12 @@ export async function POST(
       new Set(
         signers
           .filter((s) => s.sourceKind === "vendedor" || s.sourceKind === "comprador")
+          // Só quem representa a parte: o titular PF e o representante legal
+          // da PJ. Cônjuge e procurador assinam o contrato, mas o resumo do
+          // formulário é dado da negociação e vai só pras partes — desde que
+          // `dealDataToSigners` virou opt-out (2026-07-24) eles entrariam aqui
+          // por efeito colateral.
+          .filter((s) => (s.subKind ?? "titular") === "titular" || s.subKind === "representante")
           .map((s) => s.email.trim().toLowerCase())
           .filter((e) => e && isValidEmail(e))
       )

@@ -18,7 +18,9 @@ import {
   effectiveRequiredPaths,
   findMissingRequired,
   findCertidaoRecommendations,
+  findSignatureRecommendations,
   CERTIDAO_FIELD_LABELS,
+  PARTY_SUB_LABELS,
   isValueEmpty,
   getByPath,
 } from "@/lib/forms/party-required";
@@ -542,6 +544,24 @@ export function SalesFormWizard({
     certRecoList === "vendedores" ? "Vendedor" : "Comprador";
   const certRecoMultiple = ((readValue(certRecoList ?? "") as unknown[]) ?? []).length > 1;
 
+  // Segunda guarda híbrida: e-mail das SUB-PARTES (cônjuge/procurador/
+  // representante). Elas assinam o contrato como signatárias próprias na
+  // ClickSign; sem e-mail não recebem o link e alguém tem que caçar o dado
+  // depois. Também não bloqueia — o titular segue sendo o único e-mail duro.
+  const signatureRecommendations = certRecoList
+    ? findSignatureRecommendations(
+        certRecoList,
+        ((readValue(certRecoList) as unknown[]) ?? []).length,
+        readValue,
+      )
+    : [];
+  const sigRecoByParty = new Map<number, string[]>();
+  for (const r of signatureRecommendations) {
+    const arr = sigRecoByParty.get(r.idx) ?? [];
+    arr.push(PARTY_SUB_LABELS[r.sub]);
+    sigRecoByParty.set(r.idx, arr);
+  }
+
   /**
    * Navega para o step target. Pra forward (target > current), revalida cada
    * step intermediário; primeiro fail interrompe e pousa o usuário no step
@@ -937,6 +957,35 @@ export function SalesFormWizard({
                   </span>
                 ) : null}
                 {fields.join(", ")}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Recomendação NÃO-bloqueante de e-mail das sub-partes. Elas assinam o
+          contrato junto com o titular; sem e-mail não recebem o link da
+          ClickSign e o envio fica travado até alguém completar o dado. */}
+      {sigRecoByParty.size > 0 && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-950/40">
+          <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+            Recomendado para a assinatura
+          </p>
+          <p className="mt-0.5 text-xs text-amber-800/80 dark:text-amber-300/80">
+            Não é obrigatório para gerar o contrato, mas quem assina precisa de
+            e-mail: sem ele, estas pessoas não recebem o link da ClickSign e
+            terão que ser completadas manualmente antes do envio. Falta o e-mail
+            de:
+          </p>
+          <ul className="mt-2 space-y-0.5 text-xs text-amber-900 dark:text-amber-200">
+            {Array.from(sigRecoByParty.entries()).map(([idx, subs]) => (
+              <li key={idx}>
+                {certRecoMultiple ? (
+                  <span className="font-medium">
+                    {certRecoPartyLabel} {idx + 1}:{" "}
+                  </span>
+                ) : null}
+                {subs.join(", ")}
               </li>
             ))}
           </ul>

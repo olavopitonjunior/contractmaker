@@ -15,14 +15,27 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, ArrowLeft, Plus, Send, Trash2, UsersRound, Wallet } from "lucide-react";
-import { CLICKSIGN_ROLE_OPTIONS, type ClicksignRole } from "@/lib/clicksign/roles";
+import {
+  CLICKSIGN_ROLE_OPTIONS,
+  defaultRoleForSourceKind,
+  type ClicksignRole,
+} from "@/lib/clicksign/roles";
 import { WitnessPicker, pickNewWitnesses, type RegistryWitness } from "@/components/pipeline/WitnessPicker";
+import { isExplicitlyUnmarried } from "@/lib/forms/estado-civil";
 
 interface Representante {
   nome?: string;
   cpf?: string;
   email?: string;
   mobile_phone?: string;
+}
+
+interface Conjuge {
+  nome?: string;
+  cpf?: string;
+  email?: string;
+  mobile_phone?: string;
+  incluir_como_signatario?: boolean;
 }
 
 interface LeaseParte {
@@ -33,7 +46,9 @@ interface LeaseParte {
   cnpj?: string;
   email?: string;
   mobile_phone?: string;
+  estado_civil?: string;
   representante?: Representante;
+  conjuge?: Conjuge;
 }
 
 export interface LeaseSignerData {
@@ -65,7 +80,7 @@ type RowKind =
   | "testemunha"
   | "avulso"
   | "imobiliaria";
-type SubKind = "titular" | "representante" | "avulso";
+type SubKind = "titular" | "conjuge" | "representante" | "avulso";
 
 const ROLE_OPTIONS = CLICKSIGN_ROLE_OPTIONS;
 const COST_PER_SIGNER_CENTS = 150;
@@ -92,21 +107,9 @@ function kindLabel(sourceKind: RowKind, variant: LeaseEnvelopeVariant): string {
   return map[sourceKind] ?? sourceKind;
 }
 
-function defaultRoleFor(sourceKind: RowKind): ClicksignRole {
-  switch (sourceKind) {
-    case "fiador":
-      return "consenting";
-    case "testemunha":
-      return "witness";
-    case "imobiliaria":
-      return "realestate";
-    case "locador":
-    case "locatario":
-      return "party";
-    default:
-      return "sign";
-  }
-}
+/** Papel default — fonte única em lib/clicksign/roles.ts (server usa a mesma). */
+const defaultRoleFor = (sourceKind: RowKind, subKind?: SubKind): ClicksignRole =>
+  defaultRoleForSourceKind(sourceKind, subKind);
 
 interface EditableRow {
   rowId: string;
@@ -153,40 +156,75 @@ function maskPhone(raw: string): string {
   return d.replace(/^(\d{2})(\d)/, "($1) $2").replace(/(\d{5})(\d)/, "$1-$2");
 }
 
-function buildPartyRow(
+/**
+ * Linhas de uma parte: o titular (ou o representante legal, quando PJ) e, em
+ * PF casada, o cônjuge — que assina a outorga uxória com o mesmo
+ * `sourceIndex`, desambiguado por `subKind`.
+ */
+function buildPartyRows(
   sourceKind: RowKind,
   p: LeaseParte,
   idx: number
-): EditableRow {
+): EditableRow[] {
   const isPJ = p.tipo_pessoa === "juridica";
   if (isPJ) {
     const rep = p.representante ?? {};
-    return {
-      rowId: `${sourceKind}-${idx}-rep`,
+    return [
+      {
+        rowId: `${sourceKind}-${idx}-rep`,
+        sourceKind,
+        sourceIndex: idx,
+        subKind: "representante",
+        name: (rep.nome || "").trim() || partyName(p),
+        email: (rep.email ?? "").trim(),
+        // CPF do representante; CNPJ da PJ como fallback (a ClickSign recusa
+        // CNPJ como documentation, mas é melhor que campo vazio na revisão).
+        documentation: onlyDigits(rep.cpf) || onlyDigits(p.cnpj),
+        phone: onlyDigits(rep.mobile_phone),
+        isPJ: true,
+        addedDuringDialog: false,
+        clicksignRole: defaultRoleFor(sourceKind, "representante"),
+      },
+    ];
+  }
+
+  const rows: EditableRow[] = [
+    {
+      rowId: `${sourceKind}-${idx}`,
       sourceKind,
       sourceIndex: idx,
-      subKind: "representante",
-      name: (rep.nome || "").trim() || partyName(p),
-      email: (rep.email ?? "").trim(),
-      documentation: onlyDigits(rep.cpf),
-      phone: onlyDigits(rep.mobile_phone),
-      isPJ: true,
+      subKind: "titular",
+      name: partyName(p),
+      email: (p.email ?? "").trim(),
+      documentation: onlyDigits(p.cpf),
+      phone: onlyDigits(p.mobile_phone),
       addedDuringDialog: false,
-      clicksignRole: defaultRoleFor(sourceKind),
-    };
+      clicksignRole: defaultRoleFor(sourceKind, "titular"),
+    },
+  ];
+
+  // Mesmos gates da popup de venda: a lista daqui é autoritativa e pula o
+  // `leaseDataToSigners`, então sem eles um ex-cônjuge voltaria pré-marcado.
+  const conjugeName = (p.conjuge?.nome ?? "").trim();
+  if (
+    conjugeName &&
+    !isExplicitlyUnmarried(p.estado_civil) &&
+    p.conjuge?.incluir_como_signatario !== false
+  ) {
+    rows.push({
+      rowId: `${sourceKind}-${idx}-conjuge`,
+      sourceKind,
+      sourceIndex: idx,
+      subKind: "conjuge",
+      name: conjugeName,
+      email: (p.conjuge?.email ?? "").trim(),
+      documentation: onlyDigits(p.conjuge?.cpf),
+      phone: onlyDigits(p.conjuge?.mobile_phone),
+      addedDuringDialog: false,
+      clicksignRole: defaultRoleFor(sourceKind, "conjuge"),
+    });
   }
-  return {
-    rowId: `${sourceKind}-${idx}`,
-    sourceKind,
-    sourceIndex: idx,
-    subKind: "titular",
-    name: partyName(p),
-    email: (p.email ?? "").trim(),
-    documentation: onlyDigits(p.cpf),
-    phone: onlyDigits(p.mobile_phone),
-    addedDuringDialog: false,
-    clicksignRole: defaultRoleFor(sourceKind),
-  };
+  return rows;
 }
 
 function buildInitialRows(
@@ -196,7 +234,7 @@ function buildInitialRows(
 ): EditableRow[] {
   const rows: EditableRow[] = [];
   (data.locadores ?? []).forEach((p, i) =>
-    rows.push(buildPartyRow("locador", p, i))
+    rows.push(...buildPartyRows("locador", p, i))
   );
   if (variant === "administracao") {
     // Administração: proprietários + representante da imobiliária. E-mail e
@@ -219,10 +257,10 @@ function buildInitialRows(
     return rows;
   }
   (data.locatarios ?? []).forEach((p, i) =>
-    rows.push(buildPartyRow("locatario", p, i))
+    rows.push(...buildPartyRows("locatario", p, i))
   );
   if (data.garantia?.tipo === "fiador" && data.garantia.fiador) {
-    rows.push(buildPartyRow("fiador", data.garantia.fiador, 0));
+    rows.push(...buildPartyRows("fiador", data.garantia.fiador, 0));
   }
   return rows;
 }
@@ -740,12 +778,13 @@ function ReviewStep({
 }
 
 function labelFor(row: EditableRow, variant: LeaseEnvelopeVariant = "locacao"): string {
+  const isRep = row.subKind === "representante" && row.sourceKind !== "imobiliaria";
   if (row.name.trim()) {
-    if (row.subKind === "representante" && row.sourceKind !== "imobiliaria")
-      return `${row.name.trim()} (representante)`;
+    if (isRep) return `${row.name.trim()} (representante)`;
+    if (row.subKind === "conjuge") return `${row.name.trim()} (cônjuge)`;
     return row.name.trim();
   }
-  if (row.subKind === "representante" && row.sourceKind !== "imobiliaria")
-    return "Representante";
+  if (isRep) return "Representante";
+  if (row.subKind === "conjuge") return "Cônjuge";
   return `${kindLabel(row.sourceKind, variant)} ${row.sourceIndex + 1}`;
 }

@@ -9,6 +9,7 @@ import { Separator } from "@/components/ui/separator";
 import { UFSelect } from "@/components/forms/UFSelect";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import { ConjugeFields } from "@/components/forms/steps/ConjugeFields";
+import { ProcuradorFields } from "@/components/forms/steps/ProcuradorFields";
 import { RepresentanteFields } from "@/components/forms/steps/RepresentanteFields";
 import {
   PIX_TIPO_CHAVE_LABELS,
@@ -301,7 +302,7 @@ function PessoaFisicaFields({
       </div>
 
       {showConjuge && (
-        <ConjugeFields form={form} index={index} prefix={prefix} listKey="vendedores" />
+        <ConjugeFields form={form} prefix={prefix} />
       )}
 
       <div className="flex items-center gap-2">
@@ -317,64 +318,7 @@ function PessoaFisicaFields({
       </div>
 
       {temProcurador && (
-        <>
-          <Separator />
-          <p className="text-sm font-semibold text-foreground">Dados do Procurador</p>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField label="Nome do Procurador" className="md:col-span-2">
-              <Input
-                {...form.register(`${prefix}.procurador.nome`)}
-                placeholder="Nome completo"
-              />
-            </FormField>
-            <FormField label="CPF do Procurador">
-              <Input
-                {...form.register(`${prefix}.procurador.cpf`)}
-                placeholder="000.000.000-00"
-              />
-            </FormField>
-            <FormField label="RG do Procurador">
-              <Input {...form.register(`${prefix}.procurador.rg`)} placeholder="RG" />
-            </FormField>
-            <FormField label="Sexo do Procurador">
-              <NativeSelect
-                value={form.watch(`${prefix}.procurador.sexo`) || ""}
-                onChange={(v) =>
-                  form.setValue(`${prefix}.procurador.sexo`, v, { shouldDirty: true })
-                }
-                options={[
-                  { value: "", label: "Não informado" },
-                  { value: "M", label: "Masculino" },
-                  { value: "F", label: "Feminino" },
-                ]}
-              />
-            </FormField>
-            <FormField label="Endereço do Procurador" className="md:col-span-2">
-              <Input
-                {...form.register(`${prefix}.procurador.endereco`)}
-                placeholder="Logradouro"
-              />
-            </FormField>
-            <FormField label="Número">
-              <Input
-                {...form.register(`${prefix}.procurador.numero`)}
-                placeholder="123"
-              />
-            </FormField>
-            <FormField label="Cidade">
-              <Input
-                {...form.register(`${prefix}.procurador.cidade`)}
-                placeholder="Cidade"
-              />
-            </FormField>
-            <FormField label="UF">
-              <UFSelect
-                value={form.watch(`${prefix}.procurador.uf`)}
-                onChange={(v) => form.setValue(`${prefix}.procurador.uf`, v, { shouldDirty: true })}
-              />
-            </FormField>
-          </div>
-        </>
+        <ProcuradorFields form={form} prefix={prefix} />
       )}
 
       {/* Phase F.II-δ — "Sou sócio de PJ" — gera DiligentedPerson auto no finalize */}

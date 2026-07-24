@@ -10,6 +10,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot, Pencil, Check, CheckCircle2, ClipboardCheck, X, Archive, ArchiveRestore, Lock, LockOpen, ShieldAlert, Users, BellRing } from "lucide-react";
 import { SendAttachmentEnvelopeDialog } from "@/components/pipeline/SendAttachmentEnvelopeDialog";
+import { buildPartySuggestions } from "@/lib/clicksign/party-suggestions";
+import { isExplicitlyUnmarried } from "@/lib/forms/estado-civil";
 import { AddDocumentsCard } from "@/components/pipeline/AddDocumentsCard";
 import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
 import { LostDealBanner } from "@/components/pipeline/LostDealBanner";
@@ -72,8 +74,15 @@ type Parte = {
     mobile_phone?: string;
     incluir_como_signatario?: boolean;
   };
+  tem_procurador?: boolean;
   // Dependentes do vendedor diligenciados junto nas certidões (2026-05-22).
-  procurador?: { nome?: string; cpf?: string; email?: string; mobile_phone?: string };
+  procurador?: {
+    nome?: string;
+    cpf?: string;
+    email?: string;
+    mobile_phone?: string;
+    incluir_como_signatario?: boolean;
+  };
   representante?: { nome?: string; cpf?: string; email?: string; mobile_phone?: string };
 };
 
@@ -159,15 +168,34 @@ function PartyDetails({ p }: { p: Parte }) {
       {p.representante?.nome && (
         <PartySubPerson label="Representante (PJ)" person={p.representante} signs />
       )}
+      {/* `signs` espelha exatamente o gate de `dealDataToSigners`: opt-out +
+          e-mail presente + a sub-parte ser aplicável à parte. Antes o badge
+          lia só a flag (semântica opt-in) e mentia pro operador — um cônjuge
+          vindo do form público assinava sem mostrar "• assina". */}
       {p.conjuge?.nome && (
         <PartySubPerson
           label="Cônjuge"
           person={p.conjuge}
-          signs={p.conjuge.incluir_como_signatario}
+          signs={
+            // `isExplicitlyUnmarried`, não `isMarried`: o mapper é leniente
+            // (estado civil ausente ainda inclui), e um badge estrito voltaria
+            // a mentir — só que na direção oposta.
+            !isExplicitlyUnmarried(p.estado_civil) &&
+            p.conjuge.incluir_como_signatario !== false &&
+            Boolean(p.conjuge.email)
+          }
         />
       )}
       {p.procurador?.nome && (
-        <PartySubPerson label="Procurador" person={p.procurador} />
+        <PartySubPerson
+          label="Procurador"
+          person={p.procurador}
+          signs={
+            p.tem_procurador !== false &&
+            p.procurador.incluir_como_signatario !== false &&
+            Boolean(p.procurador.email)
+          }
+        />
       )}
     </div>
   );
@@ -1735,22 +1763,9 @@ function DocumentsTab({
   const signablePdfs = manualFallback
     .filter((a) => a.mime === "application/pdf")
     .map((a) => ({ id: a.id, filename: a.filename, mime: a.mime, category: a.category }));
-  const partySuggestions = [
-    ...vendedores.map((v, i) => ({
-      sourceKind: "vendedor" as const,
-      sourceIndex: i,
-      name: v.nome || v.razao_social || `Vendedor ${i + 1}`,
-      email: v.email ?? null,
-      documentation: v.cpf || v.cnpj || null,
-    })),
-    ...compradores.map((c, i) => ({
-      sourceKind: "comprador" as const,
-      sourceIndex: i,
-      name: c.nome || c.razao_social || `Comprador ${i + 1}`,
-      email: c.email ?? null,
-      documentation: c.cpf || c.cnpj || null,
-    })),
-  ].filter((p) => p.name);
+  // Titular + cônjuge + procurador + representante legal da PJ, com papel
+  // default já resolvido. Ver lib/clicksign/party-suggestions.ts.
+  const partySuggestions = buildPartySuggestions(vendedores, compradores);
 
   const hasAnyContent =
     hasFormAttachments ||

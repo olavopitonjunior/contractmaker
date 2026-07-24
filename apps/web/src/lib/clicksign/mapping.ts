@@ -1,4 +1,5 @@
 import type { AuthMethod, SignerInput, SourceKind } from "./types";
+import { isExplicitlyUnmarried } from "@/lib/forms/estado-civil";
 
 interface Conjuge {
   nome?: string;
@@ -33,6 +34,8 @@ interface Parte {
   email?: string;
   telefone?: string;
   mobile_phone?: string;
+  estado_civil?: string;
+  tem_procurador?: boolean;
   conjuge?: Conjuge;
   procurador?: Procurador;
   representante?: Representante;
@@ -87,6 +90,13 @@ export interface MissingEmailEntry {
 export interface MappingResult {
   signers: SignerInput[];
   missing: MissingEmailEntry[];
+  /**
+   * Sub-partes descartadas por e-mail repetido. Campo aditivo — consumidores
+   * antigos destruturam só `{ signers, missing }`. Existe pra o descarte não
+   * ser silencioso: quem some daqui continua com linha de assinatura no PDF,
+   * e o operador precisa ver isso na revisão do envelope.
+   */
+  dropped: SignerInput[];
 }
 
 const onlyDigits = (s: string | undefined | null): string | undefined => {
@@ -165,12 +175,26 @@ export function dealDataToSigners(
         }
       }
 
-      // Cônjuge: opt-in via flag incluir_como_signatario. Não gera entrada
-      // em `missing` quando dados faltam — sinal de que não foi escolhido
-      // pra assinar. subKind="conjuge" desambigua o override de papel vindo
-      // da UI (mesmo sourceIndex do titular; sem @@unique no schema).
+      // Cônjuge: OPT-OUT (2026-07-24). Entra sempre que tem nome + e-mail,
+      // salvo quando a flag foi explicitamente marcada `false` — que é o que
+      // a popup de envio grava ao remover a linha (`unsetRemoved` em
+      // SendEnvelopeDialog). Antes era opt-in exigindo `=== true`, mas nenhuma
+      // UI do formulário público seta a flag: no caminho derivado (Newton/
+      // bearer e preview) o cônjuge tinha linha de assinatura no PDF e sumia
+      // do envelope. Mesma regra que `leaseDataToSigners` já usava.
+      //
+      // Sem e-mail continua fora e SEM entrada em `missing` — `missing`
+      // bloqueia o envio inteiro, e a base legada raramente tem esse dado.
+      // subKind="conjuge" desambigua o override de papel vindo da UI (mesmo
+      // sourceIndex do titular; sem @@unique no schema).
+      //
+      // O gate por `estado_civil` é o que impede um EX-cônjuge de assinar:
+      // trocar "Casado(a)" por "Divorciado(a)" no form não apaga o sub-objeto
+      // `conjuge` do dataJson, só esconde os campos da tela. É leniente de
+      // propósito (só sai quem DECLAROU não ter cônjuge) — ver
+      // `isExplicitlyUnmarried`, e os templates usam o mesmo critério.
       const conjuge = p.conjuge;
-      if (conjuge?.incluir_como_signatario) {
+      if (conjuge && !isExplicitlyUnmarried(p.estado_civil) && conjuge.incluir_como_signatario !== false) {
         const conjugeName = (conjuge.nome ?? "").trim();
         const conjugeEmail = (conjuge.email ?? "").trim();
         if (conjugeName && conjugeEmail) {
@@ -187,9 +211,12 @@ export function dealDataToSigners(
         }
       }
 
-      // Procurador (PF): signatário adicional, opt-in via incluir_como_signatario.
+      // Procurador (PF): signatário adicional, mesmo opt-out do cônjuge, com
+      // o gate equivalente ao do estado civil — desmarcar "Possui procurador"
+      // esconde os campos mas NÃO limpa `p.procurador` do dataJson, e sem esse
+      // guard um procurador descartado receberia o CCV real pra assinar.
       const proc = p.procurador;
-      if (proc?.incluir_como_signatario) {
+      if (proc && p.tem_procurador !== false && proc.incluir_como_signatario !== false) {
         const procName = (proc.nome ?? "").trim();
         const procEmail = (proc.email ?? "").trim();
         if (procName && procEmail) {
@@ -270,11 +297,56 @@ export function dealDataToSigners(
     }
   }
 
-  return { signers, missing };
+  const { kept, dropped } = dropDuplicateSubParties(signers);
+  return { signers: kept, missing, dropped };
 }
 
 export function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+/**
+ * Remove sub-partes (cônjuge/procurador) cujo e-mail já pertence a outro
+ * signatário. O cônjuge frequentemente também é parte autônoma — co-proprietário
+ * cadastrado como 2º vendedor/locador — e a ClickSign devolve 422 em signatário
+ * repetido, além de cobrar o dobro. `dedupConjuges` cobre isso no finalize do
+ * form de venda, mas não em contrato importado por OCR, nem em dataJson editado
+ * à mão, nem em locação (que pula o dedup por design).
+ *
+ * Roda no fim, sobre a lista pronta: o titular pode aparecer DEPOIS do cônjuge
+ * (ele é a parte seguinte do array), então checar "já vi este e-mail" durante a
+ * construção não pegaria o caso. A parte titular sempre vence.
+ */
+function dropDuplicateSubParties(signers: SignerInput[]): {
+  kept: SignerInput[];
+  dropped: SignerInput[];
+} {
+  const isSub = (s: SignerInput) =>
+    s.subKind === "conjuge" || s.subKind === "procurador";
+  const primaryEmails = new Set(
+    signers.filter((s) => !isSub(s)).map((s) => s.email.toLowerCase())
+  );
+  const seenSub = new Set<string>();
+  const kept: SignerInput[] = [];
+  const dropped: SignerInput[] = [];
+  for (const s of signers) {
+    if (!isSub(s)) {
+      // Titulares repetidos NÃO são filtrados de propósito: dois titulares com
+      // o mesmo e-mail são duas pessoas distintas dividindo uma caixa, e
+      // descartar um perderia uma assinatura de verdade. A ClickSign recusa o
+      // envelope com 422 — falha barulhenta é melhor que contrato incompleto.
+      kept.push(s);
+      continue;
+    }
+    const email = s.email.toLowerCase();
+    if (primaryEmails.has(email) || seenSub.has(email)) {
+      dropped.push(s);
+      continue;
+    }
+    seenSub.add(email);
+    kept.push(s);
+  }
+  return { kept, dropped };
 }
 
 // ============================================================================
@@ -303,6 +375,8 @@ interface LeaseParte {
   mobile_phone?: string;
   telefone?: string;
   representante?: LeaseRepresentante;
+  estado_civil?: string;
+  conjuge?: Conjuge;
   incluir_como_signatario?: boolean;
 }
 
@@ -351,6 +425,40 @@ export function leaseDataToSigners(
   const signers: SignerInput[] = [];
   const missing: MissingEmailEntry[] = [];
 
+  /**
+   * Cônjuge de parte PF casada — outorga uxória. Mesmo `sourceIndex` do
+   * titular, desambiguado por `subKind`. Opt-out como o resto de locação:
+   * entra com nome + e-mail, salvo flag explicitamente `false`. Sem e-mail
+   * fica de fora sem entrar em `missing` (que bloquearia o envelope inteiro).
+   *
+   * O gate por `estado_civil` impede que um ex-cônjuge deixado no dataJson
+   * volte a assinar. Cônjuge que também é parte autônoma (co-proprietário) é
+   * removido no fim, por `dropDuplicateSubParties`.
+   */
+  const pushConjuge = (
+    sourceKind: SourceKind,
+    sourceIndex: number,
+    p: LeaseParte
+  ) => {
+    if (p.tipo_pessoa === "juridica") return;
+    if (isExplicitlyUnmarried(p.estado_civil)) return;
+    const conjuge = p.conjuge;
+    if (!conjuge || conjuge.incluir_como_signatario === false) return;
+    const name = (conjuge.nome ?? "").trim();
+    const email = (conjuge.email ?? "").trim();
+    if (!name || !email) return;
+    signers.push({
+      sourceKind,
+      sourceIndex,
+      subKind: "conjuge",
+      name,
+      email,
+      documentation: onlyDigits(conjuge.cpf),
+      phone: onlyDigits(conjuge.mobile_phone ?? conjuge.telefone),
+      authMethod,
+    });
+  };
+
   const collect = (sourceKind: SourceKind, partes: LeaseParte[] | undefined) => {
     (partes ?? []).forEach((p, idx) => {
       // Locador/locatário entram por default (incluir_como_signatario default
@@ -359,6 +467,8 @@ export function leaseDataToSigners(
       const { name, email, documentation, phone, subKind } = resolveLeaseSigner(p);
       if (!name) return;
       if (!email) {
+        // `missing` aborta o envio inteiro (executor lança, preview devolve
+        // 422), então não adianta empurrar o cônjuge aqui.
         missing.push({ sourceKind, sourceIndex: idx, name });
         return;
       }
@@ -372,6 +482,7 @@ export function leaseDataToSigners(
         phone,
         authMethod,
       });
+      pushConjuge(sourceKind, idx, p);
     });
   };
 
@@ -399,10 +510,17 @@ export function leaseDataToSigners(
             phone,
             authMethod,
           });
+          // Outorga do cônjuge do fiador — o art. 1.647, III do Código Civil
+          // exige a anuência conjugal na fiança, então ela vale ainda mais
+          // aqui. Fica DENTRO do else pelo mesmo motivo do `collect`: com o
+          // fiador em `missing` o envio aborta, e um cônjuge solto na lista só
+          // confundiria a revisão do preview.
+          pushConjuge("fiador", 0, f);
         }
       }
     }
   }
 
-  return { signers, missing };
+  const { kept, dropped } = dropDuplicateSubParties(signers);
+  return { signers: kept, missing, dropped };
 }

@@ -26,6 +26,7 @@ import {
   UsersRound,
 } from "lucide-react";
 import { CLICKSIGN_ROLE_OPTIONS, type ClicksignRole } from "@/lib/clicksign/roles";
+import type { PartySuggestion } from "@/lib/clicksign/party-suggestions";
 import { suggestEmailDomain } from "@/lib/forms/email-typo";
 import { WitnessPicker, pickNewWitnesses, type RegistryWitness } from "./WitnessPicker";
 import type { WitnessScope } from "@/lib/clicksign/witness-scope";
@@ -35,14 +36,6 @@ interface AttachmentPick {
   filename: string;
   mime: string;
   category?: string | null;
-}
-
-interface PartySuggestion {
-  sourceKind: "vendedor" | "comprador";
-  sourceIndex: number;
-  name: string;
-  email: string | null;
-  documentation?: string | null;
 }
 
 interface SendAttachmentEnvelopeDialogProps {
@@ -175,10 +168,6 @@ export function SendAttachmentEnvelopeDialog({
     });
   }
 
-  function roleForKind(kind: PartySuggestion["sourceKind"]): ClicksignRole {
-    return kind === "vendedor" ? "seller" : "buyer";
-  }
-
   function addFromSuggestion(p: PartySuggestion) {
     setSigners((prev) => [
       ...prev,
@@ -187,7 +176,10 @@ export function SendAttachmentEnvelopeDialog({
         name: p.name,
         email: p.email ?? "",
         documentation: p.documentation ?? "",
-        role: roleForKind(p.sourceKind),
+        phone: p.phone ?? undefined,
+        // Papel default já resolvido pelo helper (Anuente pro cônjuge,
+        // Procurador pro procurador, papel da parte pro representante).
+        role: p.role,
         sourceKind: p.sourceKind,
         sourceIndex: p.sourceIndex,
       },
@@ -361,7 +353,9 @@ export function SendAttachmentEnvelopeDialog({
                 </span>
                 {partySuggestions.map((p, i) => (
                   <Button
-                    key={`${p.sourceKind}-${p.sourceIndex}-${i}`}
+                    // subKind entra na key: titular e cônjuge da mesma parte
+                    // compartilham (sourceKind, sourceIndex).
+                    key={`${p.sourceKind}-${p.sourceIndex}-${p.subKind}-${i}`}
                     type="button"
                     size="sm"
                     variant="ghost"
@@ -371,7 +365,7 @@ export function SendAttachmentEnvelopeDialog({
                     <UserPlus className="h-3 w-3 mr-1" />
                     {p.name}
                     <Badge variant="outline" className="ml-1 text-[9px]">
-                      {p.sourceKind}
+                      {p.subLabel ?? p.sourceKind}
                     </Badge>
                   </Button>
                 ))}

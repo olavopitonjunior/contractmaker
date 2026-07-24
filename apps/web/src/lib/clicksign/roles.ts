@@ -40,3 +40,42 @@ export function clicksignRoleLabel(role: string | null | undefined): string | nu
   if (!role) return null;
   return ROLE_LABEL.get(role as ClicksignRole) ?? role;
 }
+
+/**
+ * Papel default de um signatário. Fonte ÚNICA — o executor (server), as duas
+ * popups de envio (venda e locação) e o helper de sugestões importam daqui;
+ * antes cada um mantinha a sua cópia e elas divergiam.
+ *
+ * Papéis derivados da parte têm qualificação própria independente do
+ * `sourceKind`. O representante (PJ) assina NO LUGAR da parte, então herda o
+ * papel dela e cai no switch.
+ */
+export function defaultRoleForSourceKind(
+  sourceKind: string,
+  subKind?: "titular" | "conjuge" | "procurador" | "representante" | "avulso"
+): ClicksignRole {
+  if (subKind === "conjuge") return "consenting";
+  if (subKind === "procurador") return "attorney";
+  switch (sourceKind) {
+    case "vendedor":
+      return "seller";
+    case "comprador":
+      return "buyer";
+    case "testemunha":
+      return "witness";
+    case "corretora":
+      return "intervening";
+    case "imobiliaria":
+      return "realestate";
+    // Locação — usar só qualificações já existentes no enum ClicksignRole
+    // (role desconhecido → 422 na ClickSign).
+    case "locador":
+      return "party";
+    case "locatario":
+      return "party";
+    case "fiador":
+      return "consenting";
+    default:
+      return "sign";
+  }
+}
