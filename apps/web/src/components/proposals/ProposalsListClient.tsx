@@ -34,7 +34,13 @@ function money(v: number | null): string {
 
 function shortDate(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  // timeZone explícito: o server roda em UTC e o client em BRT — sem fixar o fuso,
+  // o toLocale diverge entre SSR e hidratação → React #418 (hydration mismatch).
+  return new Date(iso).toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "America/Sao_Paulo",
+  });
 }
 
 function prazo(validUntil: string | null): { label: string; tone: "" | "warn" | "danger" } {
@@ -171,6 +177,10 @@ export function ProposalsListClient({
                         </div>
                       </TableCell>
                       <TableCell
+                        // prazo deriva de Date.now() (relativo) → pode divergir SSR×
+                        // hidratação num limite de dia. suppressHydrationWarning mantém
+                        // o valor do client sem disparar React #418.
+                        suppressHydrationWarning
                         className={
                           pz.tone === "danger"
                             ? "text-destructive font-medium"
