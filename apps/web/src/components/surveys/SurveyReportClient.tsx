@@ -83,7 +83,11 @@ export function SurveyReportClient({
           onValueChange={(v) => navigate(v)}
         >
           <SelectTrigger className="w-72">
-            <SelectValue placeholder="Escolha a pesquisa" />
+            {/* children explícito: SelectValue sozinho rende vazio no SSR
+                (registro de items do Radix só existe no client). */}
+            <SelectValue placeholder="Escolha a pesquisa">
+              {family?.name ?? "Escolha a pesquisa"}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             {families.map((f) => (
