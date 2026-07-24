@@ -14,9 +14,10 @@ import {
   type DealNotifEvent,
 } from "@/lib/notifications/deal-events-shared";
 
+/** Mesmo shape de ResolvedNotificationConfig.events (API GET). */
 export type MatrixValues = Record<
   DealNotifEvent,
-  { email: boolean; whatsapp: boolean }
+  { broker: { email: boolean; whatsapp: boolean } }
 >;
 
 export function EventChannelMatrix({
@@ -64,14 +65,14 @@ export function EventChannelMatrix({
           </span>
           <span className="w-16 flex justify-center">
             <Switch
-              checked={values[ev].email}
+              checked={values[ev].broker.email}
               disabled={disabled}
               onCheckedChange={(v) => onToggle(ev, "email", v)}
             />
           </span>
           <span className="w-16 flex justify-center">
             <Switch
-              checked={values[ev].whatsapp}
+              checked={values[ev].broker.whatsapp}
               disabled={disabled}
               onCheckedChange={(v) => onToggle(ev, "whatsapp", v)}
             />
