@@ -4,6 +4,7 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
 import {
   ensureLocacaoAccess,
+  ensureLocacaoApiAccess,
   isRouteError,
   parseJsonBody,
 } from "@/lib/locacao/route-helpers";
@@ -19,7 +20,7 @@ export const dynamic = "force-dynamic";
  * e um resumo das análises (Serasa + fiança por seguradora) pra badge.
  */
 export async function GET(req: NextRequest) {
-  const ctx = await ensureLocacaoAccess(PERMISSION.CLIENT_VIEW);
+  const ctx = await ensureLocacaoApiAccess(req, PERMISSION.CLIENT_VIEW, { scope: "locacao:r" });
   if (isRouteError(ctx)) return ctx;
 
   const q = new URL(req.url).searchParams.get("q")?.trim() ?? "";

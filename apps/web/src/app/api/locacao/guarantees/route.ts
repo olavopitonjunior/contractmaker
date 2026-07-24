@@ -3,13 +3,13 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
-import { ensureLocacaoAccess, isRouteError, parseJsonBody } from "@/lib/locacao/route-helpers";
+import { ensureLocacaoApiAccess, isRouteError, parseJsonBody } from "@/lib/locacao/route-helpers";
 import { guaranteeCreateSchema, type GuaranteeCreateInput } from "@/lib/locacao/validators";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const ctx = await ensureLocacaoAccess(PERMISSION.GUARANTEE_VIEW);
+  const ctx = await ensureLocacaoApiAccess(req, PERMISSION.GUARANTEE_VIEW, { scope: "locacao:r" });
   if (isRouteError(ctx)) return ctx;
   const url = new URL(req.url);
   const leaseContractId = url.searchParams.get("leaseContractId");
@@ -89,7 +89,7 @@ function toGuaranteeData(data: GuaranteeCreateInput) {
 }
 
 export async function POST(req: NextRequest) {
-  const ctx = await ensureLocacaoAccess(PERMISSION.GUARANTEE_MANAGE);
+  const ctx = await ensureLocacaoApiAccess(req, PERMISSION.GUARANTEE_MANAGE, { scope: "locacao:rw" });
   if (isRouteError(ctx)) return ctx;
 
   const parsed = await parseJsonBody(req, guaranteeCreateSchema);

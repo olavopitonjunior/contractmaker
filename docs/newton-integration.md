@@ -292,3 +292,40 @@ Rollback: `prisma/rollback/20260503120000_add_newton_integration_down.sql`. **AP
 ### UI
 
 - [ ] Página `/settings/api-tokens` para gerar/listar/revogar tokens. Mostrar `rawToken` em modal com botão copy + alerta de "salve agora".
+
+## 8. Locação (Max) — 2026-07-24
+
+Scopes novos `locacao:r` / `locacao:rw` (par por módulo; `rw ⊇ r`). Rate limits:
+300/min (r), 60/min (rw). Granularidade fina vem do **RBAC do usuário dono do
+token** (role de serviço do Max precisa de: `LEASE_VIEW`, `CLIENT_VIEW`,
+`CLIENT_UPDATE`, `GUARANTEE_VIEW`, `GUARANTEE_MANAGE`, `INSURANCE_VIEW`,
+`INSURANCE_MANAGE`, `INSPECTION_VIEW`, `RENT_VIEW`) + entitlement do módulo
+locação do tenant. Helper: `ensureLocacaoApiAccess` em
+`lib/locacao/route-helpers.ts` — aplicado só à allowlist abaixo; as demais
+rotas `/api/locacao/*` continuam session-only.
+
+**Leitura (`locacao:r`):** `GET /api/locacao/leases` (novo, filtros
+status/propertyId/tenant) · `GET /api/locacao/leases/{id}` (novo; sem
+repasseSplitJson) · `GET clients` + `clients/{id}` ·
+`GET clients/{id}/insurer-analyses` · `GET guarantees` · `GET insurance` ·
+`GET inspections` · `GET rent-charges` ·
+`GET locacao/deals/{dealId}/insurance-newton?leaseContractId=`.
+
+**Escrita (`locacao:rw`, direta com audit — registros reversíveis):**
+`POST/PATCH clients/{id}/insurer-analyses` · `POST guarantees` +
+`PATCH guarantees/{id}` · `POST insurance` + `PATCH insurance/{id}` ·
+`POST locacao/deals/{dealId}/insurance-newton` (ramos incendio | fianca |
+credito, idempotente por externalRef — canal preferido pros resultados do
+max-fianca).
+
+**Session-only (decisão):** `POST serasa-consent` (consentimento LGPD é ato
+humano), `POST inspections` e `POST expenses` (fase futura, HITL
+`INSPECTION_SCHEDULE` / `EXPENSE_CREATE_FROM_OCR` — executores já registrados),
+`POST clients/{id}/credit-analysis` (dispara Serasa — custo), deletes.
+
+**Tools MCP (grupo Max):** `list_lease_contracts`, `get_lease_contract`,
+`list_lease_clients`, `get_lease_client`, `list_insurer_analyses`,
+`list_lease_guarantees`, `list_insurance_policies`, `list_lease_inspections`,
+`list_rent_charges`, `upsert_insurer_analysis`, `create_lease_guarantee`,
+`update_lease_guarantee`, `create_insurance_policy` + os pré-existentes
+`record_insurance_quote`, `get_deal_insurance`, `record_credit_analysis`.

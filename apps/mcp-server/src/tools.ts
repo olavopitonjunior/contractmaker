@@ -2002,4 +2002,458 @@ export const tools: Tool[] = [
       return r.body;
     },
   },
+
+  // ───────────── Seguros / fiança (locação) ─────────────
+  {
+    name: "record_insurance_quote",
+    description:
+      "Registra no ImobPro o resultado de seguro de um contrato de locação. ramo='incendio' grava/atualiza a cotação (InsurancePolicy, status 'cotacao'); ramo='fianca' grava a fiança consolidada (Guarantee = fonte-da-verdade, com o comparativo SegurosJá+Alpop em consolidado). Idempotente por externalRef. Precisa do leaseContractId (use get_deal_insurance/get_deal).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        leaseContractId: { type: "string" },
+        ramo: { type: "string", enum: ["incendio", "fianca"] },
+        seguradora: { type: "string", description: "(incendio) nome da seguradora." },
+        provider: { type: "string", description: "(fianca) fonte escolhida (ex: SegurosJá / Alpop)." },
+        status: { type: "string", description: "Status do ramo (incendio: cotacao|ativa|...; fianca: em_analise|aprovada|...)." },
+        premioMensal: { type: "number" },
+        coberturaMeses: { type: "number", description: "(fianca) meses de cobertura." },
+        coberturaJson: { type: "object", description: "(incendio) coberturas/tiers.", additionalProperties: true },
+        consolidado: { type: "object", description: "(fianca) comparativo consolidado SegurosJá+Alpop.", additionalProperties: true },
+        custoJson: { type: "object", description: "(fianca) custo da opção escolhida.", additionalProperties: true },
+        vigenciaInicio: { type: "string", description: "(incendio) ISO date." },
+        vigenciaFim: { type: "string", description: "(incendio) ISO date." },
+        responsavelPagamento: { type: "string", enum: ["imobiliaria", "locatario", "proprietario"] },
+        externalRef: { type: "string", description: "Id da cotação/análise na fonte (idempotência)." },
+      },
+      required: ["dealId", "leaseContractId", "ramo"],
+    },
+    handler: async (args) => {
+      const dealId = String(args.dealId);
+      const { dealId: _omit, ...body } = args as Record<string, unknown>;
+      const r = await callApi({
+        method: "POST",
+        path: `/api/locacao/deals/${encodeURIComponent(dealId)}/insurance-newton`,
+        body,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "get_deal_insurance",
+    description:
+      "Lê os seguros de um contrato de locação: apólices (incêndio/conteúdo) + a garantia de fiança (Guarantee) com o comparativo consolidado. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        leaseContractId: { type: "string" },
+      },
+      required: ["dealId", "leaseContractId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/locacao/deals/${encodeURIComponent(String(args.dealId))}/insurance-newton`,
+        query: { leaseContractId: args.leaseContractId as string },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "record_credit_analysis",
+    description:
+      "Grava no ImobPro a análise de crédito de um pretendente (CreditAnalysis) — veredito do underwriting consolidado SegurosJá/Alpop (Serasa fora de escopo). Uma por pretendente; o veredito de nível-deal é o pior caso entre os pretendentes. Idempotente por (tenant, deal).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string", description: "Deal de locação (contexto + leaseDealId)." },
+        tenantId: { type: "string", description: "Id do pretendente (Tenant) no ImobPro." },
+        status: {
+          type: "string",
+          enum: ["pendente", "aprovado", "aprovado_com_garantia", "analise_manual", "recusado"],
+        },
+        decisionJson: { type: "object", description: "Comparativo consolidado SegurosJá+Alpop.", additionalProperties: true },
+        scoreInterno: { type: "number" },
+        externalRef: { type: "string" },
+      },
+      required: ["dealId", "tenantId", "status"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/locacao/deals/${encodeURIComponent(String(args.dealId))}/insurance-newton`,
+        body: {
+          ramo: "credito",
+          tenantId: args.tenantId,
+          leaseDealId: args.dealId,
+          status: args.status,
+          decisionJson: args.decisionJson,
+          scoreInterno: args.scoreInterno,
+          externalRef: args.externalRef,
+        },
+      });
+      return r.body;
+    },
+  },
+
+  // ───────────── Locação — leitura (Max, scope locacao:r) ─────────────
+  {
+    name: "list_lease_contracts",
+    description:
+      "Lista contratos de locação da org (LeaseContract) com imóvel, locatários e garantia. Filtros: status, propertyId, tenant (nome ou CPF/CNPJ).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          enum: ["rascunho", "assinatura", "ativo", "renovacao", "rescisao", "encerrado"],
+        },
+        propertyId: { type: "string" },
+        tenant: { type: "string", description: "Nome (contains) ou CPF/CNPJ do locatário" },
+        offset: { type: "number" },
+        limit: { type: "number", description: "1-100, default 50" },
+      },
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/locacao/leases",
+        query: {
+          status: args.status as string | undefined,
+          propertyId: args.propertyId as string | undefined,
+          tenant: args.tenant as string | undefined,
+          offset: args.offset ? String(args.offset) : undefined,
+          limit: args.limit ? String(args.limit) : undefined,
+        },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "get_lease_contract",
+    description:
+      "Detalhe de um contrato de locação: imóvel, locatários (com CPF/contato), garantia completa e apólices. Sem dados bancários de repasse.",
+    inputSchema: {
+      type: "object",
+      properties: { leaseContractId: { type: "string" } },
+      required: ["leaseContractId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/locacao/leases/${encodeURIComponent(args.leaseContractId as string)}`,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "list_lease_clients",
+    description:
+      "Lista clientes/prospects de locação (LeaseClient — pretendentes em análise, ≠ Tenant). Filtro q busca por nome/documento.",
+    inputSchema: {
+      type: "object",
+      properties: { q: { type: "string", description: "Busca por nome/documento" } },
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/locacao/clients",
+        query: args.q ? { q: args.q as string } : undefined,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "get_lease_client",
+    description:
+      "Detalhe de um cliente/prospect de locação (ficha, análise de crédito, consentimento Serasa).",
+    inputSchema: {
+      type: "object",
+      properties: { clientId: { type: "string" } },
+      required: ["clientId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/locacao/clients/${encodeURIComponent(args.clientId as string)}`,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "list_insurer_analyses",
+    description:
+      "Lista as análises de fiança por seguradora (InsurerAnalysis) de um cliente de locação — status por seguradora (SegurosJá, Alpop...).",
+    inputSchema: {
+      type: "object",
+      properties: { clientId: { type: "string" } },
+      required: ["clientId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/locacao/clients/${encodeURIComponent(args.clientId as string)}/insurer-analyses`,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "list_lease_guarantees",
+    description:
+      "Lista garantias locatícias (Guarantee: fiador, seguro_fianca, titulo_capitalizacao, caucao...). Filtro opcional por leaseContractId.",
+    inputSchema: {
+      type: "object",
+      properties: { leaseContractId: { type: "string" } },
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/locacao/guarantees",
+        query: args.leaseContractId
+          ? { leaseContractId: args.leaseContractId as string }
+          : undefined,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "list_insurance_policies",
+    description:
+      "Lista apólices/cotações de seguro de locação (InsurancePolicy). Filtros: status, tipo, leaseContractId, expiringInDays (renovações).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          enum: ["cotacao", "em_analise", "pendente", "ativa", "vencida", "cancelada"],
+        },
+        tipo: {
+          type: "string",
+          enum: ["seguro_incendio", "seguro_fianca", "conteudo", "rd"],
+        },
+        leaseContractId: { type: "string" },
+        expiringInDays: { type: "number" },
+      },
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/locacao/insurance",
+        query: {
+          status: args.status as string | undefined,
+          tipo: args.tipo as string | undefined,
+          leaseContractId: args.leaseContractId as string | undefined,
+          expiringInDays: args.expiringInDays ? String(args.expiringInDays) : undefined,
+        },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "list_lease_inspections",
+    description: "Lista vistorias de locação (Inspection). Filtro opcional por status.",
+    inputSchema: {
+      type: "object",
+      properties: { status: { type: "string" } },
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/locacao/inspections",
+        query: args.status ? { status: args.status as string } : undefined,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "list_rent_charges",
+    description:
+      "Lista cobranças de aluguel (RentCharge). Filtros: leaseContractId, competencia (YYYY-MM), status.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        leaseContractId: { type: "string" },
+        competencia: { type: "string", description: "YYYY-MM" },
+        status: { type: "string" },
+      },
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/locacao/rent-charges",
+        query: {
+          leaseContractId: args.leaseContractId as string | undefined,
+          competencia: args.competencia as string | undefined,
+          status: args.status as string | undefined,
+        },
+      });
+      return r.body;
+    },
+  },
+
+  // ───────────── Locação — escrita (Max, scope locacao:rw) ─────────────
+  {
+    name: "upsert_insurer_analysis",
+    description:
+      "Registra/atualiza a análise de fiança de UMA seguradora pra um cliente de locação (InsurerAnalysis). Usar após consultar a seguradora via max-fianca. analysisId presente = atualiza (PATCH); ausente = cria (POST).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        clientId: { type: "string" },
+        analysisId: { type: "string", description: "Presente = atualizar existente" },
+        seguradora: { type: "string" },
+        status: {
+          type: "string",
+          description: "pendente | aprovado | aprovado_com_ressalva | recusado | erro",
+        },
+        premioMensal: { type: "number" },
+        externalRef: { type: "string" },
+        resultJson: { type: "object", additionalProperties: true },
+      },
+      required: ["clientId", "seguradora"],
+    },
+    handler: async (args) => {
+      const base = `/api/locacao/clients/${encodeURIComponent(args.clientId as string)}/insurer-analyses`;
+      const body = {
+        seguradora: args.seguradora,
+        status: args.status,
+        premioMensal: args.premioMensal,
+        externalRef: args.externalRef,
+        resultJson: args.resultJson,
+      };
+      const r = args.analysisId
+        ? await callApi({
+            method: "PATCH",
+            path: base,
+            body: { ...body, analysisId: args.analysisId },
+          })
+        : await callApi({ method: "POST", path: base, body });
+      return r.body;
+    },
+  },
+  {
+    name: "create_lease_guarantee",
+    description:
+      "Cria garantia locatícia (Guarantee). tipo='seguro_fianca'/'garantia_digital'/'titulo_capitalizacao' exigem provider; tipo='fiador' exige objeto fiador; tipo='caucao' exige subtipo/valor em extra. Pra fiança consolidada SegurosJá+Alpop preferir record_insurance_quote (ramo fianca).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tipo: {
+          type: "string",
+          enum: [
+            "fiador",
+            "seguro_fianca",
+            "titulo_capitalizacao",
+            "caucao",
+            "garantia_digital",
+            "cessao_fiduciaria",
+          ],
+        },
+        leaseContractId: { type: "string" },
+        provider: { type: "string" },
+        premioMensal: { type: "number" },
+        coberturaMeses: { type: "number" },
+        fiador: { type: "object", additionalProperties: true },
+        extra: {
+          type: "object",
+          description: "Campos adicionais do tipo (valorTitulo, caucaoSubtipo...)",
+          additionalProperties: true,
+        },
+      },
+      required: ["tipo", "leaseContractId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: "/api/locacao/guarantees",
+        body: {
+          tipo: args.tipo,
+          leaseContractId: args.leaseContractId,
+          provider: args.provider,
+          premioMensal: args.premioMensal,
+          coberturaMeses: args.coberturaMeses,
+          fiador: args.fiador,
+          ...((args.extra as Record<string, unknown>) ?? {}),
+        },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "update_lease_guarantee",
+    description:
+      "Atualiza garantia locatícia existente (status, provider, coberturaMeses, custoJson, dadosJson).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        guaranteeId: { type: "string" },
+        status: { type: "string" },
+        provider: { type: "string" },
+        coberturaMeses: { type: "number" },
+        externalRef: { type: "string" },
+        custoJson: { type: "object", additionalProperties: true },
+        dadosJson: { type: "object", additionalProperties: true },
+      },
+      required: ["guaranteeId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "PATCH",
+        path: `/api/locacao/guarantees/${encodeURIComponent(args.guaranteeId as string)}`,
+        body: {
+          status: args.status,
+          provider: args.provider,
+          coberturaMeses: args.coberturaMeses,
+          externalRef: args.externalRef,
+          custoJson: args.custoJson,
+          dadosJson: args.dadosJson,
+        },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "create_insurance_policy",
+    description:
+      "Cria apólice/cotação de seguro de locação (InsurancePolicy) direto. Pra cotação de incêndio vinda do max-fianca preferir record_insurance_quote (idempotente por externalRef).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        leaseContractId: { type: "string" },
+        tipo: {
+          type: "string",
+          enum: ["seguro_incendio", "seguro_fianca", "conteudo", "rd"],
+        },
+        seguradora: { type: "string" },
+        apoliceNumero: { type: "string" },
+        premioMensal: { type: "number" },
+        vigenciaInicio: { type: "string", description: "ISO 8601 (obrigatório)" },
+        vigenciaFim: { type: "string", description: "ISO 8601 (obrigatório, > início)" },
+        responsavelPagamento: {
+          type: "string",
+          enum: ["imobiliaria", "locatario", "proprietario"],
+        },
+      },
+      required: ["leaseContractId", "tipo", "seguradora", "vigenciaInicio", "vigenciaFim"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: "/api/locacao/insurance",
+        body: {
+          leaseContractId: args.leaseContractId,
+          tipo: args.tipo,
+          seguradora: args.seguradora,
+          apoliceNumero: args.apoliceNumero,
+          premioMensal: args.premioMensal,
+          vigenciaInicio: args.vigenciaInicio,
+          vigenciaFim: args.vigenciaFim,
+          responsavelPagamento: args.responsavelPagamento,
+        },
+      });
+      return r.body;
+    },
+  },
 ];
