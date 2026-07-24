@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 vi.mock("@/lib/email/client", () => ({
   sendEmail: vi.fn().mockResolvedValue({ ok: true, id: "email-1" }),
@@ -15,6 +15,7 @@ import { sendEmail } from "@/lib/email/client";
 import { isNewtonEnabledForDeal } from "@/lib/newton/gate";
 import { triggerNewtonForRequest } from "@/lib/newton/trigger";
 import {
+  isWithinWhatsappWindow,
   sendSurveyInvite,
   whatsappTargetPhone,
 } from "./channels";
@@ -36,10 +37,26 @@ function makeInvite(overrides: Partial<Parameters<typeof sendSurveyInvite>[0]["i
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Relógio fixo DENTRO da janela 7h-22h SP (12:00 BRT) — o braço whatsapp
+  // checa o horário real; sem isso a suite falharia rodando de madrugada.
+  vi.useFakeTimers({ now: new Date("2026-07-24T15:00:00Z"), toFake: ["Date"] });
   vi.mocked(isNewtonEnabledForDeal).mockResolvedValue(true);
   vi.mocked(sendEmail).mockResolvedValue({ ok: true, id: "email-1" } as never);
   vi.mocked(prisma.newtonRequest.findFirst).mockResolvedValue(null as never);
   vi.mocked(prisma.newtonRequest.create).mockResolvedValue({ id: "nr-1" } as never);
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe("isWithinWhatsappWindow", () => {
+  it("respeita os limites 7h e 22h em America/Sao_Paulo", () => {
+    expect(isWithinWhatsappWindow(new Date("2026-07-24T10:00:00Z"))).toBe(true); // 07:00 SP
+    expect(isWithinWhatsappWindow(new Date("2026-07-24T09:59:00Z"))).toBe(false); // 06:59 SP
+    expect(isWithinWhatsappWindow(new Date("2026-07-25T00:59:00Z"))).toBe(true); // 21:59 SP
+    expect(isWithinWhatsappWindow(new Date("2026-07-25T01:00:00Z"))).toBe(false); // 22:00 SP
+  });
 });
 
 describe("whatsappTargetPhone", () => {
@@ -152,6 +169,20 @@ describe("sendSurveyInvite — canal whatsapp", () => {
       isReminder: true,
     });
     expect(result.ok).toBe(false);
+    expect(prisma.surveyInvite.update).not.toHaveBeenCalled();
+  });
+
+  it("fora da janela 7h-22h: deferred — sem NewtonRequest, sem email, sem failed", async () => {
+    vi.setSystemTime(new Date("2026-07-25T02:00:00Z")); // 23:00 SP
+    const result = await sendSurveyInvite({
+      invite: makeInvite(),
+      templateName: "Pesquisa",
+      orgId: "org-1",
+      deal: DEAL,
+    });
+    expect(result).toMatchObject({ ok: false, deferred: true });
+    expect(prisma.newtonRequest.create).not.toHaveBeenCalled();
+    expect(sendEmail).not.toHaveBeenCalled();
     expect(prisma.surveyInvite.update).not.toHaveBeenCalled();
   });
 

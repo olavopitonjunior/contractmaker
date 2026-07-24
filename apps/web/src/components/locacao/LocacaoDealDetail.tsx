@@ -155,6 +155,9 @@ export function LocacaoDealDetail({
     "vistoria",
     "seguros",
     "cobranca",
+    // Deep-link ?tab=pesquisas (paridade com vendas) — só quando a feature
+    // está ligada, senão cai no default.
+    ...(surveysEnabled ? ["pesquisas"] : []),
   ];
   const [tab, setTab] = useState(
     tabParam && VALID_TABS.includes(tabParam) ? tabParam : "dados"

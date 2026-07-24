@@ -333,10 +333,16 @@ function SendSurveyDialogContent({
         }
       } else if (created.length > 0) {
         const fellBack = created.filter((r: { fellBack?: boolean }) => r.fellBack);
+        const deferred = created.filter((r: { deferred?: boolean }) => r.deferred);
         toast.success(`${created.length} pesquisa(s) enviada(s)`);
         if (fellBack.length > 0) {
           toast.info(
             `${fellBack.length} destinatário(s) sem WhatsApp viável — enviado(s) por e-mail`
+          );
+        }
+        if (deferred.length > 0) {
+          toast.info(
+            `${deferred.length} envio(s) fora da janela 7h–22h — o WhatsApp sai automaticamente quando a janela abrir`
           );
         }
       }

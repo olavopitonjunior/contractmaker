@@ -61,7 +61,26 @@ export type SendInviteResult =
   | { ok: true; channel: "email"; fellBack?: boolean }
   | { ok: true; channel: "whatsapp"; newtonRequestId: string }
   | { ok: true; channel: "manual" }
-  | { ok: false; reason: string };
+  // deferred: fora da janela 7h-22h SP — invite fica pending e o cron de
+  // dispatch (15min) reenvia quando a janela abrir. NÃO cai pra email.
+  | { ok: false; reason: string; deferred?: boolean };
+
+/**
+ * Janela de horário comercial do WhatsApp (7h-22h America/Sao_Paulo) —
+ * espelha a regra do sidecar pra mensagens agendadas (cron-window.ts), mas
+ * aplicada ao disparo IMEDIATO: automação que casa de madrugada não acorda o
+ * cliente; o invite espera o cron dentro da janela.
+ */
+export function isWithinWhatsappWindow(date: Date = new Date()): boolean {
+  const hour = Number(
+    new Intl.DateTimeFormat("pt-BR", {
+      timeZone: "America/Sao_Paulo",
+      hour: "2-digit",
+      hour12: false,
+    }).format(date)
+  );
+  return hour >= 7 && hour < 22;
+}
 
 /**
  * Envia (ou reenvia) um invite pelo canal dele e atualiza o status. Nunca
@@ -85,6 +104,9 @@ export async function sendSurveyInvite(
   if (invite.channel === "whatsapp") {
     const result = await sendViaWhatsapp(args);
     if (result.ok) return result;
+    // Fora da janela NÃO é falha nem fallback: o invite segue pending/sent e
+    // o cron re-tenta dentro da janela.
+    if (result.deferred) return result;
     // Fallback automático pra email (decisão de produto). Sem email → falha.
     if (invite.recipientEmail) {
       const emailResult = await sendViaEmail(args);
@@ -168,6 +190,16 @@ async function sendViaWhatsapp(args: SendInviteArgs): Promise<SendInviteResult> 
   const phone = whatsappTargetPhone(invite.recipientPhone);
   if (!phone) {
     return { ok: false, reason: "telefone inválido pra WhatsApp" };
+  }
+
+  // Depois das checagens de viabilidade (inviável cai pra email na hora);
+  // viável fora da janela espera o cron — não é falha.
+  if (!isWithinWhatsappWindow()) {
+    return {
+      ok: false,
+      deferred: true,
+      reason: "fora da janela 7h–22h — envio automático quando a janela abrir",
+    };
   }
 
   const attempt = (invite.remindersSent ?? 0) + 1;

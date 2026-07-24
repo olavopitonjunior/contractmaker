@@ -144,6 +144,15 @@ export function SurveyPublicClient({
             <Button className="mt-6 h-11 w-full text-base" onClick={() => setStarted(true)}>
               Começar
             </Button>
+            {/* Opt-out também pra quem chegou por WhatsApp/link manual (o
+                rodapé de e-mail não cobre esses canais). GET marca o invite
+                como optout e volta pra esta página com a confirmação. */}
+            <a
+              href={`/api/public/surveys/${token}/optout`}
+              className="mt-4 inline-block text-xs text-muted-foreground underline hover:text-foreground"
+            >
+              Não quero receber pesquisas
+            </a>
           </div>
         </div>
       </main>
