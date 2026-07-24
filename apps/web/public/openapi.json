@@ -2657,6 +2657,402 @@
           }
         }
       }
+    },
+    "/api/deals/{dealId}/mark-lost": {
+      "post": {
+        "description": "Bearer twin do mark-lost legado: move deal pra 'Negócio perdido' com motivo (categoria + texto). Reversível via /reopen — sem HITL.",
+        "tags": [
+          "Deals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "deals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500
+                  },
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "desistencia",
+                      "imovel_vendido",
+                      "financiamento_negado",
+                      "imovel_alugado",
+                      "garantia_recusada",
+                      "credito_reprovado",
+                      "outro"
+                    ]
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deal marcado como perdido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stage terminal ou payload inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Deal não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/reopen": {
+      "post": {
+        "description": "Bearer twin do reopen legado: tira o deal de 'Negócio perdido' e restaura a stage anterior (histórico de audit; fallback por kind).",
+        "tags": [
+          "Deals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "deals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deal reaberto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Deal não está em 'Negócio perdido'",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Deal não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/archive": {
+      "post": {
+        "description": "Bearer twin do archive legado: arquiva/desarquiva o deal (Deal.archivedAt). Idempotente e reversível.",
+        "tags": [
+          "Deals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "deals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "archived": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Estado de arquivamento atualizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Deal não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/generate-contract": {
+      "post": {
+        "description": "Bearer twin do generate-contract legado: gera contrato do deal (Handlebars → Google Doc; locação usa gerador próprio). Cria rascunho — aprovação é HITL separado.",
+        "tags": [
+          "Contracts"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "contracts:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Contrato gerado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Falha na geração (dados incompletos, template ausente)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Deal não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/certidoes": {
+      "get": {
+        "description": "Lista CertidaoJobs do deal (status da batch). Bearer `documents:r` — Newton acompanha após dispatch via certidoes-newton.",
+        "tags": [
+          "Certidoes"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "documents:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "batchId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Jobs da batch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "latestBatchId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "MODULE_DISABLED ou cross-org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Deal não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/certidoes/{jobId}": {
+      "get": {
+        "description": "Status de UM CertidaoJob (sem resultData cru). Bearer `documents:r` — acompanhar two-step (awaiting_portal).",
+        "tags": [
+          "Certidoes"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "documents:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "jobId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "webhooks": {}

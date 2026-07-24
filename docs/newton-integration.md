@@ -203,6 +203,22 @@ Tools MCP: `list_proposals`, `get_proposal`, `get_proposal_status`,
 `create_proposal`, `send_proposal`, `send_proposal_vendedor`, `convert_proposal`,
 `cancel_proposal`, `remind_proposal`, `assign_proposal`, `sync_proposal`.
 
+### 4.8 Twins de pipeline + certidões por job (2026-07-24)
+
+Twins Bearer das rotas session-only de `/api/pipeline/deals/*` (padrão do
+`mark-signed`): `POST /api/deals/{dealId}/mark-lost` (`deals:rw`), `.../reopen`
+(`deals:rw`), `.../archive` (`deals:rw`), `.../generate-contract`
+(`contracts:rw`). Sem HITL — todos reversíveis ou geram rascunho deletável.
+**Não existe twin de `mark-commission-paid`**: o `mark-signed` já move pra
+"Comissão paga" e seta `commissionPaidAt`.
+
+Certidões (leitura, `documents:r`): `GET /api/deals/{dealId}/certidoes`
+(?batchId) e `GET .../certidoes/{jobId}` (payload enxuto, sem `resultData`).
+Dispatch continua HITL via `/certidoes-newton`; report/zip são session-only.
+
+Tools MCP: `mark_deal_lost`, `reopen_deal`, `archive_deal`,
+`generate_deal_contract`, `list_deal_certidoes`, `get_certidao_job`.
+
 ## 5. Auditoria
 
 Toda ação de Newton precisa registrar em `AuditLog` com `metadata.via = "newton"`. Helper:

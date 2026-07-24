@@ -1594,6 +1594,144 @@ export const tools: Tool[] = [
     },
   },
 
+  // ───────────── Pipeline twins (Bearer) ─────────────
+  {
+    name: "mark_deal_lost",
+    description:
+      "Move deal pra 'Negócio perdido' (terminal alternativo) com motivo. Reversível via reopen_deal — sem HITL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        reason: { type: "string", minLength: 3, maxLength: 500 },
+        category: {
+          type: "string",
+          enum: [
+            "desistencia",
+            "imovel_vendido",
+            "financiamento_negado",
+            "imovel_alugado",
+            "garantia_recusada",
+            "credito_reprovado",
+            "outro",
+          ],
+        },
+      },
+      required: ["dealId", "reason"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/deals/${encodeURIComponent(args.dealId as string)}/mark-lost`,
+        body: { reason: args.reason, category: args.category },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "reopen_deal",
+    description:
+      "Reabre deal em 'Negócio perdido', restaurando a stage anterior (via histórico de audit; fallback por tipo de pipeline).",
+    inputSchema: {
+      type: "object",
+      properties: { dealId: { type: "string" } },
+      required: ["dealId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/deals/${encodeURIComponent(args.dealId as string)}/reopen`,
+        body: {},
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "archive_deal",
+    description:
+      "Arquiva (ou desarquiva com archived=false) um deal — some do kanban sem apagar nada. Idempotente e reversível.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        archived: {
+          type: "boolean",
+          description: "true arquiva (default), false desarquiva",
+        },
+      },
+      required: ["dealId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/deals/${encodeURIComponent(args.dealId as string)}/archive`,
+        body: { archived: args.archived },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "generate_deal_contract",
+    description:
+      "Gera o contrato do deal (Handlebars → Google Doc; locação usa gerador próprio). Cria rascunho deletável — a APROVAÇÃO do contrato é que passa por HITL (approve_contract).",
+    inputSchema: {
+      type: "object",
+      properties: { dealId: { type: "string" } },
+      required: ["dealId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/deals/${encodeURIComponent(args.dealId as string)}/generate-contract`,
+        body: {},
+      });
+      return r.body;
+    },
+  },
+
+  // ───────────── Certidões (status) ─────────────
+  {
+    name: "list_deal_certidoes",
+    description:
+      "Lista os CertidaoJobs de um deal (status da batch disparada via request_certidao). Filtro opcional por batchId.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        batchId: { type: "string" },
+      },
+      required: ["dealId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/deals/${encodeURIComponent(args.dealId as string)}/certidoes`,
+        query: args.batchId ? { batchId: args.batchId as string } : undefined,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "get_certidao_job",
+    description:
+      "Status de UM CertidaoJob (endpoint, status, resultCode, retries, portalUrl, anexo). Usar pra acompanhar jobs two-step (awaiting_portal).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        jobId: { type: "string" },
+      },
+      required: ["dealId", "jobId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/deals/${encodeURIComponent(args.dealId as string)}/certidoes/${encodeURIComponent(args.jobId as string)}`,
+      });
+      return r.body;
+    },
+  },
+
   // ───────────── Propostas ─────────────
   {
     name: "list_proposals",
