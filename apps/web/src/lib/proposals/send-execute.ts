@@ -630,7 +630,9 @@ async function sendVendedorEnvelopeLocked(
   );
   if (issues.length > 0) {
     await logProposalEvent(proposalId, "chained_envelope2_preflight_failed", { issues });
-    return { ok: false, reason: "preflight", detail: issues.join("; ") };
+    // issues são objetos ReadinessIssue — extrai a razão legível (senão o detail
+    // vira "[object Object]" no 422 que o operador/cron lê).
+    return { ok: false, reason: "preflight", detail: issues.map((i) => i.reason).join("; ") };
   }
 
   // Conteúdo: reduzida (comissão oculta) quando há hiddenPaths; senão completa.
