@@ -108,7 +108,9 @@ export async function POST(req: NextRequest) {
     throw e;
   }
 
-  const result = await withIdempotency({
+  let result;
+  try {
+    result = await withIdempotency({
     userId: auth.actor.effectiveUserId,
     key: req.headers.get("x-idempotency-key"),
     method: "POST",
@@ -168,6 +170,22 @@ export async function POST(req: NextRequest) {
       ).catch(() => {});
       return { status: 201, body: { proposal } };
     },
-  });
+    });
+  } catch (err) {
+    // dedupeKey colide quando dois signatários têm o MESMO contato (ex.: casal
+    // comprador com um e-mail só e sem CPF) → @@unique([proposalId, dedupeKey]).
+    // 409 acionável em vez de 500: cada signatário precisa de contato distinto
+    // (e-mail ou CPF) pra assinar separadamente na ClickSign.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return NextResponse.json(
+        {
+          error:
+            "Dois signatários têm o mesmo contato. Informe e-mail ou CPF distinto para cada um (cada pessoa assina separadamente).",
+        },
+        { status: 409 }
+      );
+    }
+    throw err;
+  }
   return NextResponse.json(result.body, { status: result.status });
 }
