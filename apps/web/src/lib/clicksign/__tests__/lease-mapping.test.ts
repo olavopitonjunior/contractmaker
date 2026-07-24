@@ -39,6 +39,155 @@ describe("leaseDataToSigners", () => {
     });
   });
 
+  it("inclui o cônjuge do locador PF casado (outorga uxória)", () => {
+    const { signers, missing } = leaseDataToSigners({
+      locadores: [
+        {
+          tipo_pessoa: "fisica",
+          nome: "Ana Locadora",
+          cpf: "111.444.777-35",
+          email: "ana@example.com",
+          estado_civil: "Casado(a)",
+          conjuge: {
+            nome: "Caio Locador",
+            cpf: "222.333.444-05",
+            email: "caio@example.com",
+            mobile_phone: "(11) 98888-0000",
+          },
+        },
+      ],
+      locatarios: [
+        { tipo_pessoa: "fisica", nome: "Bruno", cpf: "529.982.247-25", email: "b@x.com" },
+      ],
+    });
+
+    expect(missing).toHaveLength(0);
+    expect(signers).toHaveLength(3);
+    const conjuge = signers.find((s) => s.subKind === "conjuge");
+    expect(conjuge).toMatchObject({
+      sourceKind: "locador",
+      // Mesmo sourceIndex do titular — desambiguação por subKind.
+      sourceIndex: 0,
+      name: "Caio Locador",
+      email: "caio@example.com",
+      documentation: "22233344405",
+      phone: "11988880000",
+    });
+  });
+
+  it("cônjuge com incluir_como_signatario: false fica de fora; sem e-mail também", () => {
+    const { signers, missing } = leaseDataToSigners({
+      locadores: [
+        {
+          tipo_pessoa: "fisica",
+          nome: "Ana",
+          cpf: "111.444.777-35",
+          email: "ana@example.com",
+          estado_civil: "Casado(a)",
+          conjuge: { nome: "Caio", email: "caio@example.com", incluir_como_signatario: false },
+        },
+      ],
+      locatarios: [
+        {
+          tipo_pessoa: "fisica",
+          nome: "Bruno",
+          cpf: "529.982.247-25",
+          email: "b@x.com",
+          estado_civil: "Casado(a)",
+          conjuge: { nome: "Sem e-mail" },
+        },
+      ],
+    });
+
+    expect(missing).toHaveLength(0);
+    expect(signers).toHaveLength(2);
+    expect(signers.some((s) => s.subKind === "conjuge")).toBe(false);
+  });
+
+  it("inclui o cônjuge do fiador (art. 1.647, III CC)", () => {
+    const { signers } = leaseDataToSigners({
+      locadores: [
+        { tipo_pessoa: "fisica", nome: "Ana", cpf: "111.444.777-35", email: "ana@x.com" },
+      ],
+      locatarios: [
+        { tipo_pessoa: "fisica", nome: "Bruno", cpf: "529.982.247-25", email: "b@x.com" },
+      ],
+      garantia: {
+        tipo: "fiador",
+        fiador: {
+          tipo_pessoa: "fisica",
+          nome: "Fiador Fulano",
+          cpf: "222.333.444-05",
+          email: "fiador@x.com",
+          estado_civil: "Casado(a)",
+          conjuge: { nome: "Cônjuge do Fiador", cpf: "111.444.777-35", email: "cf@x.com" },
+        },
+      },
+    });
+
+    const conjugeFiador = signers.find(
+      (s) => s.sourceKind === "fiador" && s.subKind === "conjuge"
+    );
+    expect(conjugeFiador).toMatchObject({
+      sourceIndex: 0,
+      name: "Cônjuge do Fiador",
+      email: "cf@x.com",
+    });
+  });
+
+  it("ex-cônjuge não assina e cônjuge duplicado não vira 2 signatários", () => {
+    const semCasamento = leaseDataToSigners({
+      locadores: [
+        {
+          tipo_pessoa: "fisica",
+          nome: "Ana",
+          cpf: "111.444.777-35",
+          email: "ana@x.com",
+          estado_civil: "Divorciado(a)",
+          conjuge: { nome: "Ex", email: "ex@x.com" },
+        },
+      ],
+      locatarios: [],
+    });
+    expect(semCasamento.signers).toHaveLength(1);
+
+    // Cônjuge que também foi cadastrado como locador (co-proprietário).
+    // Locação não roda dedupConjuges — signatário repetido é 422 na ClickSign.
+    const duplicado = leaseDataToSigners({
+      locadores: [
+        {
+          tipo_pessoa: "fisica",
+          nome: "Ana",
+          cpf: "111.444.777-35",
+          email: "ana@x.com",
+          estado_civil: "Casado(a)",
+          conjuge: { nome: "Caio", email: "CAIO@x.com" },
+        },
+        { tipo_pessoa: "fisica", nome: "Caio", cpf: "529.982.247-25", email: "caio@x.com" },
+      ],
+      locatarios: [],
+    });
+    expect(duplicado.signers).toHaveLength(2);
+    expect(duplicado.signers.some((s) => s.subKind === "conjuge")).toBe(false);
+  });
+
+  it("PJ não gera linha de cônjuge", () => {
+    const { signers } = leaseDataToSigners({
+      locadores: [
+        {
+          tipo_pessoa: "juridica",
+          razao_social: "Imob Ltda",
+          cnpj: "11.222.333/0001-44",
+          representante: { nome: "Rep", cpf: "111.444.777-35", email: "rep@x.com" },
+          conjuge: { nome: "Não deveria assinar", email: "nao@x.com" },
+        },
+      ],
+      locatarios: [],
+    });
+    expect(signers).toHaveLength(1);
+    expect(signers[0].subKind).toBe("representante");
+  });
+
   it("usa o representante como signatário quando a parte é PJ", () => {
     const { signers, missing } = leaseDataToSigners({
       locadores: [

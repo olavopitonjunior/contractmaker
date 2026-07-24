@@ -20,6 +20,8 @@
  *    o path "guarda-chuva" `vendedores`) passam intactos.
  */
 
+import { isMarried } from "@/lib/forms/estado-civil";
+
 const PARTY_PATH_RE = /^(vendedores|compradores)\.(\d+)\.(.+)$/;
 
 // Campos exclusivos de Pessoa Física — não têm equivalente em PJ.
@@ -206,6 +208,90 @@ export function findCertidaoRecommendations(
     for (const field of CERTIDAO_RECOMMENDED_PARTY_FIELDS) {
       if (isValueEmpty(getValue(`${list}.${idx}.${field}`))) {
         out.push({ list, idx, field });
+      }
+    }
+  }
+  return out;
+}
+
+// -------------------------------------------------------------------
+// Segunda guarda híbrida (2026-07-24): e-mail das SUB-PARTES.
+//
+// Cônjuge, procurador e representante legal viram signatários próprios na
+// ClickSign (subKind no envelope), e sem e-mail eles não recebem o link — a
+// popup de envio trava exigindo o dado que ninguém coletou. Aqui a exigência
+// é RECOMENDAÇÃO, não bloqueio: o titular continua sendo o único e-mail duro
+// do preset, porque o cliente nem sempre sabe o e-mail do cônjuge na hora.
+//
+// Só recomenda para sub-parte que JÁ FOI PREENCHIDA e que é aplicável ao tipo
+// da parte — senão vira "pendência fantasma" (aviso sobre campo que a tela
+// nem renderiza), o mesmo problema que effectiveRequiredPaths evita.
+// -------------------------------------------------------------------
+
+export type PartySubKey = "conjuge" | "procurador" | "representante";
+
+export const PARTY_SUB_LABELS: Record<PartySubKey, string> = {
+  conjuge: "cônjuge",
+  procurador: "procurador",
+  representante: "representante legal",
+};
+
+export interface SignatureRecommendation {
+  /** "vendedores" | "compradores" | "locadores" | "locatarios" | "garantia" */
+  list: string;
+  idx: number;
+  sub: PartySubKey;
+  field: "email";
+}
+
+/**
+ * A sub-parte existe na ficha desta parte? Espelha as condições de render dos
+ * steps: cônjuge só em PF casada/união estável, representante só em PJ,
+ * procurador só quando o checkbox "Possui procurador" está marcado.
+ *
+ * `tipo_pessoa` é comparado por `!== "juridica"` (e não `=== "fisica"`) porque
+ * dataJson de OCR/legado às vezes chega sem o campo, e o default do form é PF.
+ */
+export function isPartySubApplicable(
+  prefix: string,
+  sub: PartySubKey,
+  getValue: (path: string) => unknown,
+): boolean {
+  const isPJ = getValue(`${prefix}.tipo_pessoa`) === "juridica";
+  switch (sub) {
+    case "representante":
+      return isPJ;
+    case "conjuge":
+      return !isPJ && isMarried(getValue(`${prefix}.estado_civil`));
+    case "procurador":
+      return !isPJ && getValue(`${prefix}.tem_procurador`) === true;
+  }
+}
+
+const ALL_PARTY_SUBS: readonly PartySubKey[] = [
+  "conjuge",
+  "procurador",
+  "representante",
+];
+
+/**
+ * Sub-partes preenchidas (têm `nome`) e aplicáveis que estão sem e-mail.
+ * `list` é `string` de propósito — locação reusa a mesma função com
+ * `locadores`/`locatarios` e não tem sistema de presets.
+ */
+export function findSignatureRecommendations(
+  list: string,
+  count: number,
+  getValue: (path: string) => unknown,
+): SignatureRecommendation[] {
+  const out: SignatureRecommendation[] = [];
+  for (let idx = 0; idx < count; idx++) {
+    const prefix = `${list}.${idx}`;
+    for (const sub of ALL_PARTY_SUBS) {
+      if (!isPartySubApplicable(prefix, sub, getValue)) continue;
+      if (isValueEmpty(getValue(`${prefix}.${sub}.nome`))) continue;
+      if (isValueEmpty(getValue(`${prefix}.${sub}.email`))) {
+        out.push({ list, idx, sub, field: "email" });
       }
     }
   }

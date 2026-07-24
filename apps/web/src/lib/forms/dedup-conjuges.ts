@@ -21,6 +21,8 @@
  * usuário/OCR preencheu primeiro).
  */
 
+import { isMarried } from "@/lib/forms/estado-civil";
+
 type Parte = Record<string, unknown> & {
   tipo_pessoa?: string;
   cpf?: string;
@@ -51,9 +53,6 @@ function normalizeNome(s: unknown): string | null {
   return t.replace(/\s+/g, " ");
 }
 
-function isMarried(estadoCivil: unknown): boolean {
-  return estadoCivil === "Casado(a)" || estadoCivil === "União Estável";
-}
 
 function fillEmpty<T extends Record<string, unknown>>(target: T, source: Record<string, unknown>, keys: string[]) {
   for (const k of keys) {

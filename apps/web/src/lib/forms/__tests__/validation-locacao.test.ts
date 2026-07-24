@@ -143,6 +143,82 @@ describe("collectLocacaoFinalizeIssues", () => {
     expect(p).toContain("locadores.0.cpf");
   });
 
+  it("exige nome e CPF do cônjuge quando a parte PF é casada (outorga uxória)", () => {
+    const p = paths({
+      ...finalizeValid,
+      locadores: [
+        {
+          tipo_pessoa: "fisica",
+          nome: "João Locador",
+          cpf: "39053344705",
+          estado_civil: "Casado(a)",
+        },
+      ],
+    });
+    expect(p).toEqual(
+      expect.arrayContaining(["locadores.0.conjuge.nome", "locadores.0.conjuge.cpf"])
+    );
+  });
+
+  it("aceita união estável com cônjuge completo e não exige e-mail dele", () => {
+    expect(
+      collectLocacaoFinalizeIssues({
+        ...finalizeValid,
+        locadores: [
+          {
+            tipo_pessoa: "fisica",
+            nome: "João Locador",
+            cpf: "39053344705",
+            estado_civil: "União Estável",
+            // Sem e-mail de propósito: e-mail do cônjuge é recomendação no
+            // wizard, nunca bloqueio de finalize.
+            conjuge: { nome: "Ana Companheira", cpf: "11144477735" },
+          },
+        ],
+      })
+    ).toEqual([]);
+  });
+
+  it("não exige cônjuge de parte solteira nem de PJ", () => {
+    const p = paths({
+      ...finalizeValid,
+      locadores: [
+        {
+          tipo_pessoa: "juridica",
+          razao_social: "Imob Ltda",
+          cnpj: "11222333000181",
+          estado_civil: "Casado(a)",
+        },
+      ],
+      locatarios: [
+        { tipo_pessoa: "fisica", nome: "Maria Locatária", estado_civil: "Solteiro(a)" },
+      ],
+    });
+    expect(p.filter((path) => path.includes("conjuge"))).toEqual([]);
+  });
+
+  it("exige cônjuge do fiador casado (art. 1.647, III CC)", () => {
+    const p = paths({
+      ...finalizeValid,
+      garantia: {
+        tipo: "fiador",
+        fiador: {
+          tipo_pessoa: "fisica",
+          nome: "Carlos Fiador",
+          cpf: "39053344705",
+          endereco: "Rua X, 10",
+          estado_civil: "Casado(a)",
+        },
+      },
+    });
+    expect(p).toEqual(
+      expect.arrayContaining([
+        "garantia.fiador.conjuge.nome",
+        "garantia.fiador.conjuge.cpf",
+      ])
+    );
+  });
+
   it("exige CPF e endereço do fiador quando garantia é fiador", () => {
     const p = paths({
       ...finalizeValid,

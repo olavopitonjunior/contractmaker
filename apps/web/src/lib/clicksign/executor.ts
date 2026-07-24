@@ -16,6 +16,7 @@ import {
   listEnvelopeSigners,
   type ClicksignRole,
 } from "./envelopes";
+import { defaultRoleForSourceKind } from "./roles";
 import { ClicksignError, type ClicksignCreds } from "./client";
 import { dealDataToSigners, leaseDataToSigners } from "./mapping";
 import {
@@ -420,7 +421,12 @@ async function createEnvelopeFromBuffer(input: {
         },
         creds
       );
-      // Role já resolvido e persistido no row (input → override → default).
+      // Role já resolvido e persistido no row (input → override → default),
+      // então o fallback abaixo é inalcançável na prática — o que é bom,
+      // porque `EnvelopeSigner` NÃO persiste `subKind` (é transiente, resolvido
+      // em memória na criação) e daqui não dá pra recuperar que este signer é
+      // cônjuge/procurador. Se um dia o role puder chegar null aqui, a correção
+      // é persistir o subKind, não passar um argumento que não existe.
       const role: ClicksignRole =
         (localSigner.role as ClicksignRole | null) ??
         defaultRoleForSourceKind(localSigner.sourceKind);
@@ -896,37 +902,6 @@ function pickResourceId(resp: unknown): string | null {
 // + `activateEnvelope`. WhatsApp/SMS são modeladas como Auth requirements
 // (POST /requirements com action="provide_evidence", auth=whatsapp), não
 // como canal de comunicação do signer.
-
-function defaultRoleForSourceKind(
-  sourceKind: string,
-  subKind?: "titular" | "conjuge" | "procurador" | "representante" | "avulso"
-): ClicksignRole {
-  // Papéis derivados da parte têm qualificação própria, independente do
-  // sourceKind. Representante (PJ) assina NO LUGAR da parte → mantém o papel
-  // da parte (cai no switch abaixo).
-  if (subKind === "conjuge") return "consenting";
-  if (subKind === "procurador") return "attorney";
-  switch (sourceKind) {
-    case "vendedor":
-      return "seller";
-    case "comprador":
-      return "buyer";
-    case "testemunha":
-      return "witness";
-    case "corretora":
-      return "intervening";
-    // Locação — usar só qualificações já existentes no enum ClicksignRole
-    // (role desconhecido → 422 na ClickSign).
-    case "locador":
-      return "party";
-    case "locatario":
-      return "party";
-    case "fiador":
-      return "consenting";
-    default:
-      return "sign";
-  }
-}
 
 async function listSigners(envelopeId: string) {
   return prisma.envelopeSigner.findMany({

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { UFSelect } from "@/components/forms/UFSelect";
 import { NativeSelect } from "@/components/forms/NativeSelect";
+import { ConjugeFields } from "@/components/forms/steps/ConjugeFields";
 import { maskCPF, maskCNPJ, maskCEP, maskTelefone } from "@/lib/forms/field-formats";
 
 // Campos de parte (locador/locatário/fiador) bindados ao parteLocacaoSchema de
@@ -52,6 +53,10 @@ export function PessoaFisicaLocacaoFields({
   form: UseFormReturn<any>;
   prefix: string;
 }) {
+  const estadoCivil = form.watch(`${prefix}.estado_civil`);
+  const showConjuge =
+    estadoCivil === "Casado(a)" || estadoCivil === "União Estável";
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -149,6 +154,12 @@ export function PessoaFisicaLocacaoFields({
           />
         </FormField>
       </div>
+
+      {/* Outorga uxória: cônjuge de parte casada assina junto. Um único ponto
+          de render cobre locador, locatário e fiador — os três passam por aqui. */}
+      {showConjuge && (
+        <ConjugeFields form={form} prefix={prefix} variant="locacao" />
+      )}
     </div>
   );
 }

@@ -63,7 +63,7 @@ export async function buildEnvelopeSendPreview(args: {
 
   const dataSource =
     (contract.dataJson as Record<string, unknown> | null) ?? null;
-  const { signers: derived, missing } =
+  const { signers: derived, missing, dropped } =
     moduleForDealKind(contract.deal?.pipeline?.kind) === MODULE.LOCACAO
       ? leaseDataToSigners(dataSource, authMethod)
       : dealDataToSigners(dataSource, authMethod);
@@ -103,8 +103,16 @@ export async function buildEnvelopeSendPreview(args: {
   const budget = getMonthlyBudgetCents(settings.monthlyBudgetCents);
   const spent = await getMonthlySpendCents(args.orgId);
 
+  // Descartes por e-mail repetido não podem passar em silêncio: quem sai da
+  // lista continua com linha de assinatura no PDF, e quem aprova o envio
+  // precisa ver isso antes de confirmar.
+  const droppedNote =
+    dropped.length > 0
+      ? ` Não entram por e-mail repetido: ${dropped.map((d) => d.name).join(", ")}.`
+      : "";
+
   return {
-    summary: `Enviar envelope ClickSign com ${signers.length} signatário(s) via ${authMethod} (custo R$ ${(planCost / 100).toFixed(2)})`,
+    summary: `Enviar envelope ClickSign com ${signers.length} signatário(s) via ${authMethod} (custo R$ ${(planCost / 100).toFixed(2)}).${droppedNote}`,
     details: {
       contractId: contract.id,
       authMethod,

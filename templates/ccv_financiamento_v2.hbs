@@ -26,7 +26,7 @@ CPF: nº {{cpf this.cpf}}<br>
 Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}{{#if this.bairro}}, Bairro: {{this.bairro}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
 </p>
 
-{{#if (or (eq this.estado_civil "Casado(a)") (eq this.estado_civil "União Estável"))}}
+{{#if this.conjuge.nome}}{{#if (temConjuge this.estado_civil)}}
 <p><em>(Cônjuge/Companheiro)</em></p>
 <p>
 Nome Completo: {{this.conjuge.nome}}<br>
@@ -37,7 +37,7 @@ Profissão: {{this.conjuge.profissao}}{{#if (existe this.conjuge.email)}}<br>
 E-mail: {{this.conjuge.email}}{{/if}}{{#if (existe this.conjuge.mobile_phone)}}<br>
 Telefone: {{this.conjuge.mobile_phone}}{{/if}}
 </p>
-{{/if}}
+{{/if}}{{/if}}
 
 {{#if this.tem_procurador}}
 <p><em>Representado(a) por seu(sua) procurador(a):</em></p>
@@ -86,7 +86,7 @@ CPF: nº {{cpf this.cpf}}<br>
 Endereço: {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, Complemento: {{this.complemento}}{{/if}}{{#if this.bairro}}, Bairro: {{this.bairro}}{{/if}}, Cidade: {{this.cidade}}-{{this.uf}}, CEP {{cep this.cep}}
 </p>
 
-{{#if (or (eq this.estado_civil "Casado(a)") (eq this.estado_civil "União Estável"))}}
+{{#if this.conjuge.nome}}{{#if (temConjuge this.estado_civil)}}
 <p><em>(Cônjuge/Companheiro)</em></p>
 <p>
 Nome Completo: {{this.conjuge.nome}}<br>
@@ -97,7 +97,7 @@ Profissão: {{this.conjuge.profissao}}{{#if (existe this.conjuge.email)}}<br>
 E-mail: {{this.conjuge.email}}{{/if}}{{#if (existe this.conjuge.mobile_phone)}}<br>
 Telefone: {{this.conjuge.mobile_phone}}{{/if}}
 </p>
-{{/if}}
+{{/if}}{{/if}}
 
 {{#if this.tem_procurador}}
 <p><em>Representado(a) por seu(sua) procurador(a):</em></p>
@@ -451,17 +451,17 @@ Descrição: {{this.descricao}}
 <h3>PROMITENTE(S) VENDEDOR(ES)</h3>
 {{#each vendedores}}
 <p>_______________________________<br>{{this.nome}}<br>CPF: {{cpf this.cpf}}</p>
-{{#if (or (eq this.estado_civil "Casado(a)") (eq this.estado_civil "União Estável"))}}
+{{#if this.conjuge.nome}}{{#if (temConjuge this.estado_civil)}}
 <p>_______________________________<br>{{this.conjuge.nome}}<br>CPF: {{cpf this.conjuge.cpf}}<br>(Cônjuge/Companheiro(a))</p>
-{{/if}}
+{{/if}}{{/if}}
 {{/each}}
 
 <h3>PROMISSÁRIO(S) COMPRADOR(ES)</h3>
 {{#each compradores}}
 <p>_______________________________<br>{{this.nome}}<br>CPF: {{cpf this.cpf}}</p>
-{{#if (or (eq this.estado_civil "Casado(a)") (eq this.estado_civil "União Estável"))}}
+{{#if this.conjuge.nome}}{{#if (temConjuge this.estado_civil)}}
 <p>_______________________________<br>{{this.conjuge.nome}}<br>CPF: {{cpf this.conjuge.cpf}}<br>(Cônjuge/Companheiro(a))</p>
-{{/if}}
+{{/if}}{{/if}}
 {{/each}}
 
 <h3>INTERMEDIADORA{{#if comissao.comissionados.length}}{{#if (gt comissao.comissionados.length 1)}}S{{/if}}{{/if}}</h3>

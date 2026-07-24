@@ -23,8 +23,13 @@ import {
   UsersRound,
   Wallet,
 } from "lucide-react";
-import { CLICKSIGN_ROLE_OPTIONS, type ClicksignRole } from "@/lib/clicksign/roles";
+import {
+  CLICKSIGN_ROLE_OPTIONS,
+  defaultRoleForSourceKind,
+  type ClicksignRole,
+} from "@/lib/clicksign/roles";
 import { suggestEmailDomain } from "@/lib/forms/email-typo";
+import { isExplicitlyUnmarried } from "@/lib/forms/estado-civil";
 import { WitnessPicker, pickNewWitnesses, type RegistryWitness } from "./WitnessPicker";
 
 interface Conjuge {
@@ -58,6 +63,8 @@ interface Parte {
   cnpj?: string;
   email?: string;
   mobile_phone?: string;
+  estado_civil?: string;
+  tem_procurador?: boolean;
   conjuge?: Conjuge;
   procurador?: Procurador;
   representante?: Representante;
@@ -112,22 +119,9 @@ const ROLE_OPTIONS = CLICKSIGN_ROLE_OPTIONS;
 const COST_PER_SIGNER_CENTS = 150;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function defaultRoleFor(sourceKind: RowKind, subKind: SubKind): ClicksignRole {
-  if (subKind === "conjuge") return "consenting";
-  if (subKind === "procurador") return "attorney";
-  switch (sourceKind) {
-    case "vendedor":
-      return "seller";
-    case "comprador":
-      return "buyer";
-    case "corretora":
-      return "intervening";
-    case "testemunha":
-      return "witness";
-    default:
-      return "sign";
-  }
-}
+/** Papel default — fonte única em lib/clicksign/roles.ts (server usa a mesma). */
+const defaultRoleFor = (sourceKind: RowKind, subKind: SubKind): ClicksignRole =>
+  defaultRoleForSourceKind(sourceKind, subKind);
 
 interface EditableRow {
   rowId: string;
@@ -207,7 +201,10 @@ function buildInitialRows(
           subKind: "representante",
           name: (rep.nome || "").trim() || partyName(p),
           email: (rep.email ?? "").trim(),
-          documentation: onlyDigits(rep.cpf),
+          // CPF do representante primeiro, CNPJ da PJ como fallback — mesma
+          // regra de `dealDataToSigners`. Sem o fallback a linha nascia sem
+          // documento quando só o CNPJ tinha sido preenchido no form.
+          documentation: onlyDigits(rep.cpf) || onlyDigits(p.cnpj),
           phone: onlyDigits(rep.mobile_phone),
           isPJ: true,
           addedDuringDialog: false,
@@ -228,9 +225,18 @@ function buildInitialRows(
         addedDuringDialog: false,
         clicksignRole: defaultRoleFor(sourceKind, "titular"),
       });
-      // Cônjuge — só quando o form trouxe nome.
+      // Cônjuge — nome preenchido, estado civil que não negue o casamento e
+      // opt-out respeitado. Sem esses dois últimos gates a popup reintroduzia
+      // exatamente o que o mapper barra: a lista daqui é AUTORITATIVA
+      // (`input.signers` em executor.ts pula `dealDataToSigners` inteiro), então
+      // um ex-cônjuge ou uma linha que o operador já removeu num envelope
+      // anterior voltava pré-marcada — e ele pagava e reenviava sem perceber.
       const conjugeName = (p.conjuge?.nome ?? "").trim();
-      if (conjugeName) {
+      if (
+        conjugeName &&
+        !isExplicitlyUnmarried(p.estado_civil) &&
+        p.conjuge?.incluir_como_signatario !== false
+      ) {
         rows.push({
           rowId: `${sourceKind}-${idx}-conjuge`,
           sourceKind,
@@ -244,9 +250,15 @@ function buildInitialRows(
           clicksignRole: defaultRoleFor(sourceKind, "conjuge"),
         });
       }
-      // Procurador — só quando o form trouxe nome.
+      // Procurador — mesmos gates do cônjuge; `tem_procurador === false` é o
+      // operador tendo desmarcado "Possui procurador" (que esconde os campos
+      // mas não limpa o objeto).
       const procName = (p.procurador?.nome ?? "").trim();
-      if (procName) {
+      if (
+        procName &&
+        p.tem_procurador !== false &&
+        p.procurador?.incluir_como_signatario !== false
+      ) {
         rows.push({
           rowId: `${sourceKind}-${idx}-procurador`,
           sourceKind,

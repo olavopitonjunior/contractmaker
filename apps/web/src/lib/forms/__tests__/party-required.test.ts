@@ -6,6 +6,8 @@ import {
   effectiveRequiredPaths,
   findMissingRequired,
   findCertidaoRecommendations,
+  findSignatureRecommendations,
+  isPartySubApplicable,
 } from "../party-required";
 
 // Helper: getValue sobre um objeto de valores do form.
@@ -276,6 +278,102 @@ describe("findMissingRequired — Pessoa Física", () => {
     expect(findMissingRequired(required, reader(values))).toEqual([
       "vendedores.0.cpf",
       "vendedores.0.estado_civil",
+    ]);
+  });
+});
+
+describe("isPartySubApplicable — gates por tipo de parte", () => {
+  const get = reader({
+    vendedores: [
+      // 0: PF casada com procurador
+      { tipo_pessoa: "fisica", estado_civil: "Casado(a)", tem_procurador: true },
+      // 1: PF solteira sem procurador
+      { tipo_pessoa: "fisica", estado_civil: "Solteiro(a)" },
+      // 2: PJ
+      { tipo_pessoa: "juridica" },
+      // 3: sem tipo_pessoa (dataJson de OCR/legado) em união estável
+      { estado_civil: "União Estável" },
+    ],
+  });
+
+  it("cônjuge só em PF casada ou em união estável", () => {
+    expect(isPartySubApplicable("vendedores.0", "conjuge", get)).toBe(true);
+    expect(isPartySubApplicable("vendedores.1", "conjuge", get)).toBe(false);
+    expect(isPartySubApplicable("vendedores.2", "conjuge", get)).toBe(false);
+    // tipo_pessoa ausente conta como PF (default do form).
+    expect(isPartySubApplicable("vendedores.3", "conjuge", get)).toBe(true);
+  });
+
+  it("representante só em PJ", () => {
+    expect(isPartySubApplicable("vendedores.2", "representante", get)).toBe(true);
+    expect(isPartySubApplicable("vendedores.0", "representante", get)).toBe(false);
+  });
+
+  it("procurador só quando tem_procurador é true e a parte é PF", () => {
+    expect(isPartySubApplicable("vendedores.0", "procurador", get)).toBe(true);
+    expect(isPartySubApplicable("vendedores.1", "procurador", get)).toBe(false);
+    expect(isPartySubApplicable("vendedores.2", "procurador", get)).toBe(false);
+  });
+});
+
+describe("findSignatureRecommendations — e-mail das sub-partes", () => {
+  it("recomenda só para sub-parte preenchida, aplicável e sem e-mail", () => {
+    const get = reader({
+      vendedores: [
+        {
+          tipo_pessoa: "fisica",
+          estado_civil: "Casado(a)",
+          tem_procurador: true,
+          conjuge: { nome: "Elenira" }, // sem e-mail → recomenda
+          procurador: { nome: "Fulano", email: "fulano@x.com" }, // ok
+        },
+        {
+          tipo_pessoa: "juridica",
+          representante: { nome: "Ana" }, // sem e-mail → recomenda
+          // cônjuge sujo no dataJson de uma PJ não deve virar recomendação
+          conjuge: { nome: "Não aplicável" },
+        },
+      ],
+    });
+
+    expect(findSignatureRecommendations("vendedores", 2, get)).toEqual([
+      { list: "vendedores", idx: 0, sub: "conjuge", field: "email" },
+      { list: "vendedores", idx: 1, sub: "representante", field: "email" },
+    ]);
+  });
+
+  it("não recomenda sub-parte em branco (ninguém preencheu)", () => {
+    const get = reader({
+      locadores: [{ tipo_pessoa: "fisica", estado_civil: "Casado(a)" }],
+    });
+    expect(findSignatureRecommendations("locadores", 1, get)).toEqual([]);
+  });
+
+  it("não recomenda procurador quando o checkbox está desmarcado", () => {
+    const get = reader({
+      compradores: [
+        {
+          tipo_pessoa: "fisica",
+          tem_procurador: false,
+          procurador: { nome: "Sobrou do rascunho" },
+        },
+      ],
+    });
+    expect(findSignatureRecommendations("compradores", 1, get)).toEqual([]);
+  });
+
+  it("serve locação com o mesmo contrato (list é string livre)", () => {
+    const get = reader({
+      locatarios: [
+        {
+          tipo_pessoa: "fisica",
+          estado_civil: "União Estável",
+          conjuge: { nome: "Caio" },
+        },
+      ],
+    });
+    expect(findSignatureRecommendations("locatarios", 1, get)).toEqual([
+      { list: "locatarios", idx: 0, sub: "conjuge", field: "email" },
     ]);
   });
 });

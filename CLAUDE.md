@@ -230,11 +230,11 @@ Envelope vincula a UM de dois (CHECK XOR): Contract aprovado (`source="contract"
 
 **Custo:** `Envelope.costCents`. Budget mensal `getMonthlyBudgetCents()` soma `running + closed` do mês. POST retorna 402 se estouraria.
 
-**Diálogo de envio (`SendEnvelopeDialog.tsx`):** linhas editáveis Nome/Email/CPF agrupadas por origem. Vendedor + Comprador titulares sempre signers; **Cônjuges, Corretora(s) e Testemunhas opt-in**. Linhas com `addedDuringDialog=true` em aprovado mostram banner amarelo: aparecem só no certificado ClickSign, não no PDF congelado.
+**Diálogo de envio (`SendEnvelopeDialog.tsx`):** linhas editáveis Nome/Email/CPF agrupadas por origem. Vendedor + Comprador titulares sempre signers; **Corretora(s) e Testemunhas opt-in**. Linhas com `addedDuringDialog=true` em aprovado mostram banner amarelo: aparecem só no certificado ClickSign, não no PDF congelado.
 
 - **Múltiplos comissionados:** itera `comissao.comissionados[]` (canônico); array vazio → fallback hidrata 1 row do legado `imobiliaria_*`
-- **Cônjuges:** com `conjuge.nome` aparecem como sub-linha opt-in. `sourceIndex = idx + 1000`
-- **Submit:** `PATCH /api/contracts/[id]/signers-data` (whitelist regex — emails, `conjuge.{email,nome,cpf,incluir_como_signatario}`, `comissao.comissionados`, `testemunhas`) → `POST /api/contracts/[id]/envelopes`. `SourceKind = "vendedor" | "comprador" | "testemunha" | "corretora"`
+- **Sub-partes:** cônjuge/procurador/representante usam o `sourceIndex` do titular + `subKind`; papel em `roles.ts`. **Opt-out** — ver [[project_signers_subpartes_2026_07]]
+- **Submit:** `PATCH .../signers-data` (whitelist regex: contatos do titular e das sub-partes, `comissao.comissionados`, `testemunhas`) → `POST .../envelopes`. `SourceKind = vendedor|comprador|testemunha|corretora`
 
 **Quirks v3** (memória [feedback_clicksign_v3_quirks]): host `app.clicksign.com` + `?access_token=` query (Bearer dá 401 enganoso); `documentation` com máscara (helper `formatCpfCnpj`); requirement `action="agree"`+`role` (mapping em `executor.ts::defaultRoleForSourceKind`); `communicate_by` removido — email via `signer.email`+`activateEnvelope`; status canônico em `/events` (não `/signers`); webhook sem `envelope.id` — lookup por `documentClicksignId === document.key`; match signer por key + fallback email lowercase (PATCH gera `remove+add_signer` com key novo).
 
