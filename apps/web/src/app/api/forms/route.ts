@@ -25,6 +25,11 @@ const postBodySchema = z
     title: z.string().optional(),
     // Confirma a criação apesar do soft-block de título repetido (409).
     force: z.boolean().optional(),
+    // Corretores pré-selecionados do registry (SplitRecipient commissioner):
+    // pré-seedam comissao.comissionados no dataJson e viram brokerIds do deal.
+    corretorIds: z.array(z.string().min(1)).max(10).optional(),
+    // false → Deal.notificationsJson.muted (nenhuma atualização deste negócio).
+    sendUpdates: z.boolean().optional(),
   })
   .passthrough();
 
@@ -135,6 +140,57 @@ export async function POST(request: NextRequest) {
           },
         });
         dealId = deal.id;
+      }
+
+      // Corretores pré-selecionados na criação + opt-out de atualizações.
+      // Org-scoped: ids alheios são silenciosamente descartados pelo where.
+      if ((body.corretorIds?.length ?? 0) > 0 || body.sendUpdates === false) {
+        const recipients = body.corretorIds?.length
+          ? await prisma.splitRecipient.findMany({
+              where: {
+                id: { in: body.corretorIds },
+                orgId: auth.org.id,
+                kind: "commissioner",
+              },
+            })
+          : [];
+
+        if (recipients.length > 0) {
+          // Pré-seed da etapa 7: o cliente vê os corretores já preenchidos
+          // (linha verde via splitRecipientId) e só ajusta percentuais.
+          const comissionados = recipients.map((r) => {
+            const doc = (r.cpfCnpj ?? "").replace(/\D/g, "");
+            const isPj = r.tipoPessoa === "juridica" || doc.length === 14;
+            return {
+              tipo_pessoa: isPj ? "juridica" : "fisica",
+              nome: r.label,
+              ...(isPj ? { cnpj: doc || undefined } : { cpf: doc || undefined }),
+              creci: r.creci ?? undefined,
+              papel: r.papel ?? "captador",
+              email: r.email ?? undefined,
+              mobile_phone: r.phone ?? undefined,
+              splitRecipientId: r.id,
+            };
+          });
+          await prisma.salesForm.update({
+            where: { id: form.id },
+            data: { dataJson: { comissao: { comissionados } } },
+          });
+        }
+
+        if (dealId) {
+          await prisma.deal.update({
+            where: { id: dealId },
+            data: {
+              notificationsJson: {
+                ...(recipients.length > 0
+                  ? { brokerIds: recipients.map((r) => r.id) }
+                  : {}),
+                ...(body.sendUpdates === false ? { muted: true } : {}),
+              },
+            },
+          });
+        }
       }
 
       await audit(

@@ -1,14 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
-import { Copy, ExternalLink } from "lucide-react";
+import { Copy, ExternalLink, X } from "lucide-react";
 import { PartyLinksPanel } from "@/components/forms/PartyLinksPanel";
+
+interface CorretorOption {
+  id: string;
+  label: string;
+  email: string | null;
+}
 
 export default function NewFormPage() {
   const router = useRouter();
@@ -16,10 +24,42 @@ export default function NewFormPage() {
   const [loading, setLoading] = useState(false);
   const [createdUrl, setCreatedUrl] = useState<string | null>(null);
   const [createdToken, setCreatedToken] = useState<string | null>(null);
+  // Corretores envolvidos (pré-seed da etapa 7 + destinatários de atualizações)
+  const [corretores, setCorretores] = useState<CorretorOption[]>([]);
+  const [corretorQuery, setCorretorQuery] = useState("");
+  const [corretorOptions, setCorretorOptions] = useState<CorretorOption[]>([]);
+  const [sendUpdates, setSendUpdates] = useState(true);
   // Key por INTENÇÃO (mount / "Criar Outro"), não por clique: duplo-clique e
   // retry de rede replayam a mesma resposta 201 no servidor em vez de criar
   // um segundo form + deal.
   const [idemKey, setIdemKey] = useState(() => crypto.randomUUID());
+
+  useEffect(() => {
+    const q = corretorQuery.trim();
+    if (q.length < 2) {
+      setCorretorOptions([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      const res = await fetch(
+        `/api/financeiro/split-recipients?kind=commissioner&q=${encodeURIComponent(q)}`,
+        { credentials: "include" }
+      );
+      if (!res.ok) return;
+      const data = await res.json();
+      const chosen = new Set(corretores.map((c) => c.id));
+      setCorretorOptions(
+        (data.recipients ?? [])
+          .filter((r: { id: string }) => !chosen.has(r.id))
+          .map((r: { id: string; label: string; email: string | null }) => ({
+            id: r.id,
+            label: r.label,
+            email: r.email,
+          }))
+      );
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [corretorQuery, corretores]);
 
   async function postForm(key: string, force: boolean) {
     const res = await fetch("/api/forms", {
@@ -30,6 +70,10 @@ export default function NewFormPage() {
       },
       body: JSON.stringify({
         title: title || undefined,
+        ...(corretores.length > 0
+          ? { corretorIds: corretores.map((c) => c.id) }
+          : {}),
+        ...(sendUpdates ? {} : { sendUpdates: false }),
         ...(force ? { force: true } : {}),
       }),
     });
@@ -135,6 +179,80 @@ export default function NewFormPage() {
             </p>
           </div>
 
+          <div className="space-y-2">
+            <Label htmlFor="corretores">Corretores envolvidos (opcional)</Label>
+            {corretores.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {corretores.map((c) => (
+                  <Badge key={c.id} variant="secondary" className="gap-1 pr-1">
+                    {c.label}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setCorretores((prev) => prev.filter((x) => x.id !== c.id))
+                      }
+                      className="hover:text-red-600"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </Badge>
+                ))}
+              </div>
+            )}
+            <div className="relative">
+              <Input
+                id="corretores"
+                placeholder="Buscar corretor cadastrado por nome, CPF/CNPJ ou CRECI"
+                value={corretorQuery}
+                onChange={(e) => setCorretorQuery(e.target.value)}
+                disabled={!!createdUrl}
+              />
+              {corretorOptions.length > 0 && (
+                <div className="absolute z-10 mt-1 w-full border rounded-md bg-popover shadow-md max-h-56 overflow-y-auto">
+                  {corretorOptions.map((o) => (
+                    <button
+                      key={o.id}
+                      type="button"
+                      className="w-full text-left px-3 py-2 text-sm hover:bg-accent"
+                      onClick={() => {
+                        setCorretores((prev) => [...prev, o]);
+                        setCorretorQuery("");
+                        setCorretorOptions([]);
+                      }}
+                    >
+                      <span className="font-medium">{o.label}</span>
+                      {o.email && (
+                        <span className="text-muted-foreground"> · {o.email}</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Já entram preenchidos na etapa de Comissão do formulário. Corretor
+              ainda não cadastrado pode ser informado no próprio formulário — o
+              cadastro é automático no envio.
+            </p>
+          </div>
+
+          <div className="flex items-center justify-between border rounded-md p-3">
+            <div>
+              <p className="text-sm font-medium">Enviar atualizações do processo</p>
+              <p className="text-xs text-muted-foreground">
+                Corretores envolvidos recebem os marcos do negócio (formulário,
+                contrato, assinatura, cobrança) por e-mail/WhatsApp conforme o
+                padrão da imobiliária. Dá pra ajustar depois na aba Notificações
+                do negócio.
+              </p>
+            </div>
+            <Switch
+              checked={sendUpdates}
+              onCheckedChange={setSendUpdates}
+              disabled={!!createdUrl}
+            />
+          </div>
+
           {!createdUrl ? (
             <Button onClick={handleCreate} disabled={loading} className="w-full">
               {loading ? "Criando..." : "Criar Formulário"}
@@ -175,6 +293,8 @@ export default function NewFormPage() {
                   setCreatedUrl(null);
                   setCreatedToken(null);
                   setTitle("");
+                  setCorretores([]);
+                  setSendUpdates(true);
                   // Nova intenção de criação → nova key de idempotência.
                   setIdemKey(crypto.randomUUID());
                 }}

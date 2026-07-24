@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import {
+  notifyDealEvent,
+  stageChangeDedupeKey,
+} from "@/lib/notifications/deal-events";
 
 export async function POST(
   _req: NextRequest,
@@ -61,6 +66,18 @@ export async function POST(
       commissionPaidAt: new Date(),
     },
   });
+
+  // Notificação do processo (endpoint manual legado — sem evento semântico
+  // equivalente cobrindo este salto).
+  waitUntil(
+    notifyDealEvent({
+      dealId: deal.id,
+      orgId: org.id,
+      event: "stage_change",
+      dedupeKey: stageChangeDedupeKey(targetStage.id),
+      context: { stageName: targetStage.name },
+    })
+  );
 
   return NextResponse.json({ status: "comissao_paga", stageId: targetStage.id });
 }

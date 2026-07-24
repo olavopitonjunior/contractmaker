@@ -29,6 +29,17 @@ import {
 } from "./deal-events-config";
 import { resolveDealBrokers, type BrokerRecipient } from "./deal-brokers";
 
+/**
+ * dedupeKey de stage_change: 1 notificação por (stage destino, dia UTC) —
+ * re-drag pro mesmo stage no mesmo dia não re-envia; dia seguinte sim.
+ */
+export function stageChangeDedupeKey(stageId: string, when = new Date()): string {
+  const y = when.getUTCFullYear();
+  const m = String(when.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(when.getUTCDate()).padStart(2, "0");
+  return `${stageId}:${y}${m}${d}`;
+}
+
 export interface NotifyDealEventParams {
   dealId: string;
   orgId: string;

@@ -1,5 +1,9 @@
 import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
+import {
+  notifyDealEvent,
+  stageChangeDedupeKey,
+} from "@/lib/notifications/deal-events";
 import { validateContractData } from "@/lib/ai/validators";
 import { createContractMemory } from "@/lib/ai/memory";
 import { enqueueCuratorAnalysis } from "@/lib/ai/curator-autorun";
@@ -226,6 +230,18 @@ export async function runContractApproval(
           where: { id: deal.id },
           data: { stageId: assinaturaStage.id, stageEnteredAt: new Date() },
         });
+        // Notificação do processo: aprovação avançou o stage. O evento
+        // contract_sent (envio real do envelope) é outro momento — dispara no
+        // executor ClickSign.
+        waitUntil(
+          notifyDealEvent({
+            dealId: deal.id,
+            orgId: deal.pipeline.orgId,
+            event: "stage_change",
+            dedupeKey: stageChangeDedupeKey(assinaturaStage.id),
+            context: { stageName: assinaturaStage.name },
+          })
+        );
       }
     }
   }
