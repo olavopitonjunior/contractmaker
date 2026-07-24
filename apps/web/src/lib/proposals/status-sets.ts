@@ -55,6 +55,18 @@ export const AWAITING_SIGNATURE_STATUSES = new Set<string>([
   "aguardando_vendedor",
 ]);
 
+/**
+ * "Em aberto" — proposta enviada e ainda em curso (nem terminal nem rascunho).
+ * Base dos KPIs da lista e do polling de tempo real. Fonte única (server + client).
+ */
+export const OPEN_STATUSES = new Set<string>([
+  "enviada",
+  "entregue",
+  "visualizada",
+  "assinada_proponente",
+  "aguardando_vendedor",
+]);
+
 /** Aguardando cliente/proprietário — faz sentido lembrar/reenviar. */
 export const REMINDABLE_STATUSES = new Set<string>([
   "enviada",

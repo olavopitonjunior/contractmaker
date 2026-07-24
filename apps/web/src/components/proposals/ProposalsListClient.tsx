@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { proposalStatusView, initials } from "@/lib/proposals/status-view";
+import { OPEN_STATUSES } from "@/lib/proposals/status-sets";
 import { NovaPropostaDialog } from "./NovaPropostaDialog";
 import { ProposalFilters, type ListFilters } from "./ProposalFilters";
 import { ProposalRowActions, type ProposalPermissions } from "./ProposalRowActions";
@@ -25,14 +26,6 @@ export interface ProposalRow {
   responsible: { name: string; isNonUser: boolean; image: string | null };
   resumo: { proponente: string | null; imovel: string | null; valor: number | null };
 }
-
-const OPEN_STATUSES = new Set([
-  "enviada",
-  "entregue",
-  "visualizada",
-  "assinada_proponente",
-  "aguardando_vendedor",
-]);
 
 function money(v: number | null): string {
   if (v == null) return "—";
@@ -59,6 +52,7 @@ export function ProposalsListClient({
   members,
   permissions,
   filters,
+  kpis,
 }: {
   proposals: ProposalRow[];
   tipo: "venda" | "locacao";
@@ -66,6 +60,8 @@ export function ProposalsListClient({
   members: { id: string; name: string }[];
   permissions: ProposalPermissions;
   filters: ListFilters;
+  /** Totais da ORG (independentes dos filtros da tabela) — evita KPI subcontado. */
+  kpis: { open: number; converted: number; expiring: number };
 }) {
   const router = useRouter();
 
@@ -78,11 +74,9 @@ export function ProposalsListClient({
     return () => clearInterval(t);
   }, [hasOpen, router]);
 
-  const emAberto = proposals.filter((p) => OPEN_STATUSES.has(p.status)).length;
-  const convertidas = proposals.filter((p) => p.status === "convertida").length;
-  const expirando = proposals.filter(
-    (p) => OPEN_STATUSES.has(p.status) && prazo(p.validUntil).tone !== ""
-  ).length;
+  // Totais da ORG (do servidor), NÃO do array filtrado/capado — senão filtrar a
+  // tabela pra "Concluídas" zerava "Em aberto" e o take:200 subcontava.
+  const { open: emAberto, converted: convertidas, expiring: expirando } = kpis;
 
   return (
     <div className="space-y-4 p-4 md:p-6">

@@ -11,6 +11,7 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { redirect } from "next/navigation";
 import { ProposalsListClient } from "@/components/proposals/ProposalsListClient";
 import { statusesForFilter } from "@/lib/proposals/list-filters";
+import { OPEN_STATUSES } from "@/lib/proposals/status-sets";
 import { responsibleDisplay } from "@/lib/proposals/status-view";
 
 export const dynamic = "force-dynamic";
@@ -72,7 +73,7 @@ export default async function PropostasPage({
       const conds: Prisma.Sql[] = [
         Prisma.sql`"orgId" = ${orgId}`,
         Prisma.sql`"kind" = ${kindVal}`,
-        Prisma.sql`lower("title" || ' ' || COALESCE("dataJson"::text, '')) LIKE ${like} ESCAPE '\'`,
+        Prisma.sql`lower("title" || ' ' || COALESCE("dataJson"::text, '')) LIKE ${like} ESCAPE '\\'`,
       ];
       if (!can(eff, PERMISSION.PROPOSAL_VIEW_ALL)) {
         conds.push(Prisma.sql`("userId" = ${userId} OR "responsibleUserId" = ${userId})`);
@@ -128,6 +129,21 @@ export default async function PropostasPage({
     }),
   ]);
 
+  // KPIs = totais da ORG (escopo + tipo), independentes dos filtros de busca/status
+  // da tabela — senão filtrar pra "Concluídas" zerava "Em aberto"/"Expirando", e o
+  // take:200 subcontava. "Expirando" = aberta com validUntil em ≤2 dias (inclui
+  // vencida), espelhando o prazo() do client (tone warn/danger).
+  const kpiWhere = { ...scope, kind: tipo === "venda" ? "venda" : "locacao" };
+  const expiringCutoff = new Date(Date.now() + 2 * 86_400_000);
+  const openList = [...OPEN_STATUSES];
+  const [openCount, convertedCount, expiringCount] = await Promise.all([
+    prisma.proposal.count({ where: { ...kpiWhere, status: { in: openList } } }),
+    prisma.proposal.count({ where: { ...kpiWhere, status: "convertida" } }),
+    prisma.proposal.count({
+      where: { ...kpiWhere, status: { in: openList }, validUntil: { not: null, lte: expiringCutoff } },
+    }),
+  ]);
+
   const members = memberRows
     .map((m) => ({ id: m.user.id, name: m.user.name ?? "Sem nome" }))
     .filter((m) => m.id);
@@ -176,6 +192,7 @@ export default async function PropostasPage({
   return (
     <ProposalsListClient
       proposals={rows}
+      kpis={{ open: openCount, converted: convertedCount, expiring: expiringCount }}
       tipo={tipo}
       showTabs={vendasOn && locacaoOn}
       members={members}

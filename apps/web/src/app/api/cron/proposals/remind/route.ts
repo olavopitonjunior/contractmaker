@@ -39,10 +39,39 @@ export async function GET(req: NextRequest) {
 
   let reminded = 0;
   let skipped = 0;
+  const remindedProposals = new Set<string>();
   for (const s of signers) {
     const r = await resendSignerAction(s).catch(() => ({ ok: false as const }));
-    if (r.ok) reminded++;
-    else skipped++;
+    if (r.ok) {
+      reminded++;
+      if (s.envelope.proposalId) remindedProposals.add(s.envelope.proposalId);
+    } else {
+      skipped++;
+    }
   }
-  return NextResponse.json({ ok: true, candidates: signers.length, reminded, skipped });
+
+  // Persiste o marco por proposta lembrada — igual ao /remind manual. Sem isto o
+  // "Último lembrete (Nx)" e o histórico ("Lembrete enviado") ficavam mudos e o
+  // operador não via que o cron mandou lembretes.
+  for (const proposalId of remindedProposals) {
+    await prisma.proposal
+      .update({
+        where: { id: proposalId },
+        data: { lastReminderAt: new Date(), reminderCount: { increment: 1 } },
+      })
+      .catch(() => {});
+    await prisma.proposalEvent
+      .create({
+        data: { proposalId, eventName: "reminder_sent", source: "system" },
+      })
+      .catch(() => {});
+  }
+
+  return NextResponse.json({
+    ok: true,
+    candidates: signers.length,
+    reminded,
+    skipped,
+    proposals: remindedProposals.size,
+  });
 }
