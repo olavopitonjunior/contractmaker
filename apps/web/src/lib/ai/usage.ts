@@ -108,7 +108,9 @@ export type AIOperation =
   | "sentinel_classify"
   // Classificador de intenção (fallback do orquestrador). Antes entrava como
   // `as never` em intent-fallback e sumia de qualquer filtro por operação.
-  | "intent_classify";
+  | "intent_classify"
+  // Pesquisas de satisfação — resumo Haiku das respostas abertas de um lote
+  | "survey_summary";
 
 export interface RecordUsageParams {
   orgId: string;

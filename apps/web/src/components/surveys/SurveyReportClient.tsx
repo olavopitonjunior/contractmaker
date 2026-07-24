@@ -1,8 +1,19 @@
 "use client";
 
 import Link from "next/link";
+import { useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Gauge, MessageSquareText, Percent, Star, Users } from "lucide-react";
+import { toast } from "sonner";
+import {
+  Gauge,
+  Loader2,
+  MessageSquareText,
+  Percent,
+  Sparkles,
+  Star,
+  Users,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -15,6 +26,7 @@ import {
 import { KpiCard, BarRow, LineChart } from "@/components/admin/charts";
 import { cn } from "@/lib/utils";
 import type { SurveyReport } from "@/lib/surveys/report";
+import { SUMMARY_MIN_TEXT_RESPONSES as MIN_TEXT_RESPONSES } from "@/lib/surveys/types";
 
 interface FamilyOption {
   familyId: string;
@@ -36,6 +48,123 @@ const ROLE_LABEL: Record<string, string> = {
   locatario: "Locatário",
   corretor: "Corretor",
 };
+
+
+/** Render leve do markdown do resumo (bold + bullets — sem lib). */
+function SummaryText({ text }: { text: string }) {
+  return (
+    <div className="space-y-1.5 text-sm leading-relaxed">
+      {text.split("\n").map((line, i) => {
+        const trimmed = line.trim();
+        if (!trimmed) return null;
+        const content = trimmed.replace(/^[-*]\s+/, "");
+        const parts = content.split(/\*\*(.+?)\*\*/g);
+        const rendered = parts.map((part, j) =>
+          j % 2 === 1 ? <strong key={j}>{part}</strong> : part
+        );
+        return trimmed.startsWith("-") || trimmed.startsWith("*") ? (
+          <p key={i} className="pl-4">
+            • {rendered}
+          </p>
+        ) : (
+          <p key={i}>{rendered}</p>
+        );
+      })}
+    </div>
+  );
+}
+
+function AiSummaryCard({
+  report,
+  onGenerated,
+}: {
+  report: SurveyReport;
+  onGenerated: () => void;
+}) {
+  const [generating, setGenerating] = useState(false);
+  const [fresh, setFresh] = useState<SurveyReport["aiSummary"]>(null);
+
+  const summary = fresh ?? report.aiSummary;
+  const canGenerate = report.textResponseCount >= MIN_TEXT_RESPONSES;
+  const hasNew =
+    summary !== null && report.textResponseCount > summary.responseCount;
+
+  async function generate() {
+    setGenerating(true);
+    try {
+      const res = await fetch(`/api/surveys/reports/${report.template.id}/summary`, {
+        method: "POST",
+        credentials: "same-origin",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error ?? "Falha ao gerar o resumo");
+        return;
+      }
+      setFresh(data.summary);
+      if (data.cached) toast.info("Sem respostas novas — resumo atual mantido");
+      else {
+        toast.success("Resumo gerado");
+        onGenerated();
+      }
+    } finally {
+      setGenerating(false);
+    }
+  }
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <CardTitle className="flex items-center gap-2 text-sm">
+            <Sparkles className="h-4 w-4" />
+            Resumo IA das observações
+          </CardTitle>
+          <Button
+            size="sm"
+            variant={summary ? "outline" : "default"}
+            disabled={generating || !canGenerate}
+            title={
+              canGenerate
+                ? undefined
+                : `Disponível a partir de ${MIN_TEXT_RESPONSES} respostas de texto`
+            }
+            onClick={generate}
+          >
+            {generating ? (
+              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Sparkles className="mr-1 h-3.5 w-3.5" />
+            )}
+            {summary ? (hasNew ? "Atualizar resumo" : "Regerar") : "Gerar resumo"}
+          </Button>
+        </div>
+      </CardHeader>
+      <CardContent>
+        {summary ? (
+          <>
+            <SummaryText text={summary.text} />
+            <p className="mt-3 text-xs text-muted-foreground">
+              Gerado em{" "}
+              {new Date(summary.generatedAt).toLocaleDateString("pt-BR", {
+                timeZone: "America/Sao_Paulo",
+              })}{" "}
+              · {summary.responseCount} resposta(s) de texto · Haiku
+              {hasNew &&
+                ` · ${report.textResponseCount - summary.responseCount} nova(s) desde então`}
+            </p>
+          </>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            {canGenerate
+              ? "Gere um resumo dos pontos fortes, atenções e ações sugeridas a partir das observações escritas deste lote."
+              : `O resumo fica disponível a partir de ${MIN_TEXT_RESPONSES} respostas de texto (este lote tem ${report.textResponseCount}).`}
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 export function SurveyReportClient({
   families,
@@ -262,6 +391,9 @@ export function SurveyReportClient({
               </CardContent>
             </Card>
           )}
+
+          {/* Resumo IA das observações escritas (Haiku, cache por lote) */}
+          <AiSummaryCard report={report} onGenerated={() => router.refresh()} />
 
           {/* Cards das observações escritas */}
           <Card>

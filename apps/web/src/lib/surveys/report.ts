@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db/prisma";
 import { npsFromDistribution } from "./scores";
 import { parseTemplateQuestions, type SurveyQuestion } from "./types";
+import type { SurveyAiSummary } from "./summary";
 
 /**
  * Agregação do relatório de UM lote (templateId concreto). O sistema nunca
@@ -56,6 +57,10 @@ export interface SurveyReport {
   }>;
   /** Respostas por semana (ISO date do início) pro line chart. */
   weekly: Array<{ week: string; count: number }>;
+  /** Resumo IA cacheado do lote (settingsJson.aiSummary), se já gerado. */
+  aiSummary: SurveyAiSummary | null;
+  /** Total de respostas de texto do lote (habilita/atualiza o botão de resumo). */
+  textResponseCount: number;
 }
 
 type AnswerRow = { questionId: string; type: string; value: unknown };
@@ -74,6 +79,7 @@ export async function buildSurveyReport(
       status: true,
       createdAt: true,
       questionsJson: true,
+      settingsJson: true,
     },
   });
   if (!template) return null;
@@ -239,5 +245,10 @@ export async function buildSurveyReport(
     weekly: Array.from(weekly.entries())
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([week, count]) => ({ week, count })),
+    aiSummary:
+      ((template.settingsJson as Record<string, unknown> | null)?.aiSummary as
+        | SurveyAiSummary
+        | undefined) ?? null,
+    textResponseCount: commentRows.length,
   };
 }
