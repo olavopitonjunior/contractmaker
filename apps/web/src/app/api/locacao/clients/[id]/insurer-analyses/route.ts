@@ -3,7 +3,7 @@ import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { audit } from "@/lib/security/audit";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
-import { ensureLocacaoAccess, isRouteError, parseJsonBody } from "@/lib/locacao/route-helpers";
+import { ensureLocacaoApiAccess, isRouteError, parseJsonBody } from "@/lib/locacao/route-helpers";
 import {
   insurerAnalysisCreateSchema,
   insurerAnalysisUpdateSchema,
@@ -18,10 +18,10 @@ async function assertClient(id: string, orgId: string) {
 
 /** GET — lista as análises de fiança por seguradora do cliente. */
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const ctx = await ensureLocacaoAccess(PERMISSION.CLIENT_VIEW);
+  const ctx = await ensureLocacaoApiAccess(req, PERMISSION.CLIENT_VIEW, { scope: "locacao:r" });
   if (isRouteError(ctx)) return ctx;
   if (!(await assertClient(params.id, ctx.orgId))) {
     return NextResponse.json({ error: "Não encontrado" }, { status: 404 });
@@ -38,7 +38,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const ctx = await ensureLocacaoAccess(PERMISSION.CLIENT_UPDATE);
+  const ctx = await ensureLocacaoApiAccess(req, PERMISSION.CLIENT_UPDATE, { scope: "locacao:rw" });
   if (isRouteError(ctx)) return ctx;
   if (!(await assertClient(params.id, ctx.orgId))) {
     return NextResponse.json({ error: "Não encontrado" }, { status: 404 });
@@ -75,7 +75,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const ctx = await ensureLocacaoAccess(PERMISSION.CLIENT_UPDATE);
+  const ctx = await ensureLocacaoApiAccess(req, PERMISSION.CLIENT_UPDATE, { scope: "locacao:rw" });
   if (isRouteError(ctx)) return ctx;
   if (!(await assertClient(params.id, ctx.orgId))) {
     return NextResponse.json({ error: "Não encontrado" }, { status: 404 });

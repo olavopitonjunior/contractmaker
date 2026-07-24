@@ -2,13 +2,14 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
-import { ensureLocacaoAccess, isRouteError, parseJsonBody } from "@/lib/locacao/route-helpers";
+import { ensureLocacaoAccess,
+  ensureLocacaoApiAccess, isRouteError, parseJsonBody } from "@/lib/locacao/route-helpers";
 import { inspectionCreateSchema } from "@/lib/locacao/validators";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const ctx = await ensureLocacaoAccess(PERMISSION.INSPECTION_VIEW);
+  const ctx = await ensureLocacaoApiAccess(req, PERMISSION.INSPECTION_VIEW, { scope: "locacao:r" });
   if (isRouteError(ctx)) return ctx;
   const url = new URL(req.url);
   const status = url.searchParams.get("status");

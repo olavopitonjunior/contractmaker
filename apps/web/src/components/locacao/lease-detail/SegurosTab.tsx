@@ -17,6 +17,7 @@ import { Shield, FileText, Upload, Trash2, AlertTriangle, ExternalLink } from "l
 import Link from "next/link";
 import { INSURANCE_STATUS_LABELS } from "@/lib/locacao/validators";
 import { ContratarSeguroWizard } from "./ContratarSeguroWizard";
+import { FiancaComparativoCard, type FiancaConsolidado } from "./FiancaComparativoCard";
 
 export interface PolicyView {
   id: string;
@@ -36,6 +37,8 @@ interface Props {
   leaseContractId: string;
   valorAluguel: number;
   policies: PolicyView[];
+  /** Comparativo consolidado de fiança (Guarantee.dadosJson gravado pelo Max). Opcional. */
+  fiancaConsolidado?: FiancaConsolidado | null;
 }
 
 const TIPO_LABEL: Record<string, string> = {
@@ -239,7 +242,7 @@ function PolicyCard({ policy }: { policy: PolicyView }) {
   );
 }
 
-export function SegurosTab({ leaseContractId, valorAluguel, policies }: Props) {
+export function SegurosTab({ leaseContractId, valorAluguel, policies, fiancaConsolidado }: Props) {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -255,6 +258,8 @@ export function SegurosTab({ leaseContractId, valorAluguel, policies }: Props) {
           <ContratarSeguroWizard leaseContractId={leaseContractId} valorAluguel={valorAluguel} />
         </div>
       </div>
+
+      {fiancaConsolidado && <FiancaComparativoCard consolidado={fiancaConsolidado} />}
 
       {policies.length === 0 ? (
         <Card>

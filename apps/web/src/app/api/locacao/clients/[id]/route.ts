@@ -4,6 +4,7 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
 import {
   ensureLocacaoAccess,
+  ensureLocacaoApiAccess,
   isRouteError,
   parseJsonBody,
 } from "@/lib/locacao/route-helpers";
@@ -19,10 +20,10 @@ async function findScoped(id: string, orgId: string) {
 }
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const ctx = await ensureLocacaoAccess(PERMISSION.CLIENT_VIEW);
+  const ctx = await ensureLocacaoApiAccess(req, PERMISSION.CLIENT_VIEW, { scope: "locacao:r" });
   if (isRouteError(ctx)) return ctx;
 
   const client = await prisma.leaseClient.findUnique({

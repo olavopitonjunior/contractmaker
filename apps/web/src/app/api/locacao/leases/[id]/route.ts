@@ -3,13 +3,100 @@ import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit, type AuditAction } from "@/lib/security/audit";
-import { ensureLocacaoAccess, isRouteError, parseJsonBody } from "@/lib/locacao/route-helpers";
+import {
+  ensureLocacaoAccess,
+  ensureLocacaoApiAccess,
+  isRouteError,
+  parseJsonBody,
+} from "@/lib/locacao/route-helpers";
 import { materializeLeaseParties } from "@/lib/locacao/materialize-parties";
 
 export const dynamic = "force-dynamic";
 
 interface Params {
   params: Promise<{ id: string }>;
+}
+
+/**
+ * GET /api/locacao/leases/:id — detalhe do contrato de locação. Session (UI)
+ * ou Bearer `locacao:r` (Max). Sem repasseSplitJson (dados bancários de
+ * terceiros não saem pra M2M de leitura).
+ */
+export async function GET(req: NextRequest, { params }: Params) {
+  const ctx = await ensureLocacaoApiAccess(req, PERMISSION.LEASE_VIEW, {
+    scope: "locacao:r",
+  });
+  if (isRouteError(ctx)) return ctx;
+  const { id } = await params;
+
+  const lease = await prisma.leaseContract.findFirst({
+    where: { id, orgId: ctx.orgId },
+    include: {
+      property: {
+        select: {
+          id: true,
+          kind: true,
+          status: true,
+          rua: true,
+          numero: true,
+          complemento: true,
+          bairro: true,
+          cidade: true,
+          uf: true,
+          cep: true,
+          matricula: true,
+        },
+      },
+      tenants: {
+        select: {
+          tipo: true,
+          tenant: {
+            select: {
+              id: true,
+              nome: true,
+              tipoPessoa: true,
+              cpfCnpj: true,
+              email: true,
+              phone: true,
+            },
+          },
+        },
+      },
+      // SELECT explícito: dadosJson (dados bancários de caução),
+      // fiadorPartyJson (CPF/RG/renda do fiador) e historicoJson NÃO saem
+      // pra M2M — mesma regra do repasseSplitJson no nível do lease.
+      guarantee: {
+        select: {
+          id: true,
+          tipo: true,
+          caucaoSubtipo: true,
+          status: true,
+          provider: true,
+          coberturaMeses: true,
+          custoJson: true,
+          externalRef: true,
+          createdAt: true,
+        },
+      },
+      insurancePolicies: {
+        select: {
+          id: true,
+          tipo: true,
+          seguradora: true,
+          status: true,
+          vigenciaInicio: true,
+          vigenciaFim: true,
+          premioMensal: true,
+        },
+      },
+    },
+  });
+  if (!lease) {
+    return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
+  }
+
+  const { repasseSplitJson: _split, dataJson: _data, ...safe } = lease;
+  return NextResponse.json({ lease: safe });
 }
 
 const leasePatchSchema = z.object({

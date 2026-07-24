@@ -1,6 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { getEffectiveUserId } from "@/lib/auth/impersonation";
+import {
+  requireApiAuth,
+  isAuthFailure,
+  authFailureResponse,
+  type ApiAuthSuccess,
+} from "@/lib/api/require-auth";
 import { getEffectivePermissions, can } from "@/lib/security/rbac/check";
 import { PERMISSION, PermissionKey } from "@/lib/security/rbac/permissions";
 import { assertModuleEnabled, assertFeatureEnabled, ModuleDisabledError } from "@/lib/modules/guard";
@@ -95,6 +101,71 @@ export async function ensureLocacaoAccess(
 
 export function isRouteError(r: RouteResult): r is NextResponse {
   return r instanceof NextResponse;
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Variante Bearer-aware (Max/Newton) — opt-in por rota
+// ───────────────────────────────────────────────────────────────────────────
+
+export interface ApiRouteContext extends RouteContext {
+  /** "session" (UI) ou "bearer" (Max/Newton via UserApiToken). */
+  via: "session" | "bearer";
+  /** Contexto completo do requireApiAuth — passar como `ctx` em requireApproval. */
+  auth: ApiAuthSuccess;
+}
+
+export type ApiRouteResult = ApiRouteContext | NextResponse;
+
+/**
+ * Twin Bearer-aware do `ensureLocacaoAccess`, aplicado SÓ às rotas da allowlist
+ * M2M (Max). Encadeia: requireApiAuth (Bearer exige `opts.scope`; session passa
+ * + rate-limit + Newton actor + delegação) → gate módulo/feature (mesma regra
+ * PERMISSION_FEATURE) → id efetivo → RBAC.
+ *
+ * Id efetivo: session preserva impersonation ("testar como", getEffectiveUserId);
+ * bearer usa SEMPRE o dono do token (`auth.actor.effectiveUserId`). A delegação
+ * `X-Act-As-User` NÃO é suportada neste caminho — ela vive só no `requireAuth`
+ * legado (lib/auth/context.ts); aqui o header é ignorado. O RBAC do usuário
+ * dono do token é a granularidade real — scope só separa leitura (`locacao:r`)
+ * de escrita (`locacao:rw`).
+ *
+ * As demais rotas /api/locacao/* continuam no `ensureLocacaoAccess` session-only.
+ */
+export async function ensureLocacaoApiAccess(
+  req: NextRequest,
+  permission: PermissionKey,
+  opts: { scope: "locacao:r" | "locacao:rw"; feature?: FeatureKey }
+): Promise<ApiRouteResult> {
+  const apiAuth = await requireApiAuth(req, { scope: opts.scope });
+  if (isAuthFailure(apiAuth)) return authFailureResponse(apiAuth);
+
+  const effectiveFeature = opts.feature ?? PERMISSION_FEATURE[permission];
+  try {
+    if (effectiveFeature) {
+      await assertFeatureEnabled(apiAuth.org.id, effectiveFeature);
+    } else {
+      await assertModuleEnabled(apiAuth.org.id, MODULE.LOCACAO);
+    }
+  } catch (e) {
+    if (e instanceof ModuleDisabledError) {
+      return NextResponse.json({ error: e.code }, { status: e.status });
+    }
+    throw e;
+  }
+
+  const via = apiAuth.ident.via;
+  const effUserId =
+    via === "session"
+      ? await getEffectiveUserId(apiAuth.actor.effectiveUserId)
+      : apiAuth.actor.effectiveUserId;
+  const permissions = await getEffectivePermissions(effUserId, apiAuth.org.id);
+  if (!permissions || !can(permissions, permission)) {
+    return NextResponse.json(
+      { error: `Sem permissão (${permission})` },
+      { status: 403 }
+    );
+  }
+  return { userId: effUserId, orgId: apiAuth.org.id, permissions, via, auth: apiAuth };
 }
 
 /**
