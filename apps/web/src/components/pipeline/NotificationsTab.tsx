@@ -123,6 +123,26 @@ export function NotificationsTab({ dealId }: { dealId: string }) {
     return () => clearTimeout(timer);
   }, [query]);
 
+  const [sendingReminder, setSendingReminder] = useState(false);
+  async function sendFormReminder() {
+    setSendingReminder(true);
+    try {
+      const res = await fetch(`/api/deals/${dealId}/notifications/form-reminder`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data.error ?? "Falha ao enviar lembrete");
+        return;
+      }
+      toast.success("Lembrete enviado aos corretores do negócio");
+      await load();
+    } finally {
+      setSendingReminder(false);
+    }
+  }
+
   if (!state) {
     return <p className="text-sm text-muted-foreground">Carregando...</p>;
   }
@@ -265,7 +285,18 @@ export function NotificationsTab({ dealId }: { dealId: string }) {
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-base">Histórico de envios</CardTitle>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-base">Histórico de envios</CardTitle>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void sendFormReminder()}
+              disabled={sendingReminder || muted}
+              title="Envia agora o lembrete de preenchimento do formulário aos corretores"
+            >
+              {sendingReminder ? "Enviando..." : "Enviar lembrete do formulário"}
+            </Button>
+          </div>
           <p className="text-sm text-muted-foreground">
             E-mails e WhatsApp enviados aos corretores. WhatsApp marcado como
             &quot;enviado&quot; = encaminhado ao assistente (sem confirmação de
