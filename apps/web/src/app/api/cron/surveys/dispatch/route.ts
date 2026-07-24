@@ -62,14 +62,17 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Re-tenta envios que falharam (falha transitória de SMTP/sidecar no
-  // disparo inicial). O sendSurveyInvite re-marca "failed" se falhar de novo,
-  // então cada sweep faz no máximo 1 tentativa por invite. WhatsApp re-tenta
-  // whatsapp e cai pro fallback email se continuar inviável.
+  // Re-tenta envios que falharam (falha transitória de SMTP/sidecar) E os
+  // WhatsApp deferidos pela janela 7h-22h (ficam "pending" até a janela
+  // abrir). O sendSurveyInvite re-marca/re-adia se preciso, então cada sweep
+  // faz no máximo 1 tentativa por invite; o dedupeTag do NewtonRequest
+  // garante zero duplicata.
   const failed = await prisma.surveyInvite.findMany({
     where: {
-      status: "failed",
-      channel: { in: ["email", "whatsapp"] },
+      OR: [
+        { status: "failed", channel: { in: ["email", "whatsapp"] } },
+        { status: "pending", channel: "whatsapp" },
+      ],
       tokenExp: { gt: new Date() },
     },
     select: {

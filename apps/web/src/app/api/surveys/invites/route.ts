@@ -157,6 +157,8 @@ export async function POST(req: NextRequest) {
     inviteId?: string;
     reason?: string;
     fellBack?: boolean;
+    /** WhatsApp fora da janela 7h-22h: criado e agendado (cron envia). */
+    deferred?: boolean;
   }> = [];
 
   for (const recipient of parsed.data.recipients) {
@@ -245,14 +247,17 @@ export async function POST(req: NextRequest) {
       deal: dealContext,
     });
 
+    const deferred = !sent.ok && sent.deferred === true;
     results.push({
       recipient: recipient.name,
-      status: sent.ok ? "created" : "failed",
+      // Deferido pela janela não é falha: o invite existe e o cron envia.
+      status: sent.ok || deferred ? "created" : "failed",
       inviteId: invite.id,
       url: surveyUrl(invite.token),
       reason: sent.ok ? undefined : sent.reason,
       // Sinaliza pro dialog que o WhatsApp caiu pro fallback email.
       fellBack: sent.ok && sent.channel === "email" && sent.fellBack ? true : undefined,
+      deferred: deferred || undefined,
     });
   }
 
