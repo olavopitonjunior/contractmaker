@@ -3,6 +3,7 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { LOST_STAGE_NAME, stageConfigForKind } from "@/lib/pipeline/stage-config";
+import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
 
 /**
  * POST /api/pipeline/deals/:dealId/reopen
@@ -106,6 +107,8 @@ export async function POST(
       restoredFromAuditId: lastLostAudit?.id ?? null,
     },
   });
+
+  queueSurveyDispatch(deal.id, targetStage.name);
 
   return NextResponse.json({
     status: "reaberto",

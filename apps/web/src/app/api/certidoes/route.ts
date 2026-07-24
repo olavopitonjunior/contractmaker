@@ -32,7 +32,7 @@ const querySchema = z.object({
 });
 
 export async function GET(req: NextRequest) {
-  const authResult = await requireAuth(req);
+  const authResult = await requireAuth(req, { scope: "documents:r" });
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
 

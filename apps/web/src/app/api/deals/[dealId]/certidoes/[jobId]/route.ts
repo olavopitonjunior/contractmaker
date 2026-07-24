@@ -2,8 +2,67 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import {
+  requireApiAuth,
+  isAuthFailure,
+  authFailureResponse,
+} from "@/lib/api/require-auth";
 
 export const runtime = "nodejs";
+
+/**
+ * GET /api/deals/:dealId/certidoes/:jobId
+ *
+ * Status de UM CertidaoJob (Bearer `documents:r` ou session). Newton usa pra
+ * acompanhar um job específico após o dispatch (two-step awaiting_portal etc.)
+ * sem puxar a batch inteira. Sem `resultData` cru — payload enxuto.
+ */
+export async function GET(
+  req: NextRequest,
+  { params }: { params: { dealId: string; jobId: string } }
+) {
+  const apiAuth = await requireApiAuth(req, { scope: "documents:r" });
+  if (isAuthFailure(apiAuth)) return authFailureResponse(apiAuth);
+
+  const job = await prisma.certidaoJob.findUnique({
+    where: { id: params.jobId },
+    include: {
+      deal: { include: { pipeline: { select: { orgId: true } } } },
+      attachment: { select: { id: true, filename: true, mime: true } },
+    },
+  });
+  if (!job || job.dealId !== params.dealId || !job.deal) {
+    return NextResponse.json({ error: "Job not found" }, { status: 404 });
+  }
+  if (job.deal.pipeline.orgId !== apiAuth.org.id) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  return NextResponse.json({
+    job: {
+      id: job.id,
+      batchId: job.batchId,
+      endpoint: job.endpoint,
+      label: job.label,
+      targetKind: job.targetKind,
+      targetIndex: job.targetIndex,
+      status: job.status,
+      resultCode: job.resultCode,
+      errorMessage: job.errorMessage,
+      missingFields: job.missingFields,
+      retryCount: job.retryCount,
+      maxRetries: job.maxRetries,
+      portalUrl: job.portalUrl,
+      costCents: job.costCents,
+      createdAt: job.createdAt,
+      startedAt: job.startedAt,
+      finishedAt: job.finishedAt,
+      expectedReadyAt: job.expectedReadyAt,
+      nextRetryAt: job.nextRetryAt,
+      attachment: job.attachment,
+    },
+  });
+}
 
 // Estados terminais que podem ser deletados. Só `pending`/`fetching` ficam de
 // fora — esses precisam ser recuperados (sweep) antes, senão deletamos um job

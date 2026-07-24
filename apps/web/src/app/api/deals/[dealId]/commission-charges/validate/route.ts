@@ -78,7 +78,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ dealId: string }> }
 ) {
-  const authResult = await requireAuth(req);
+  const authResult = await requireAuth(req, { scope: "charges:rw" });
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
   const { dealId } = await params;

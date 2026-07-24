@@ -3,6 +3,8 @@ import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { DealDetail } from "@/components/pipeline/DealDetail";
 import { isNewtonEnabledForDeal } from "@/lib/newton/gate";
+import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
+import { surveyFeatureForKind } from "@/lib/modules/catalog";
 
 export default async function DealPage({
   params,
@@ -49,7 +51,20 @@ export default async function DealPage({
 
   if (!deal) notFound();
 
-  const newtonEnabled = await isNewtonEnabledForDeal(deal.pipeline.orgId, deal.kind);
+  const [newtonEnabled, modulesView] = await Promise.all([
+    isNewtonEnabledForDeal(deal.pipeline.orgId, deal.kind),
+    getOrgModules(deal.pipeline.orgId),
+  ]);
+  const surveysEnabled = isFeatureEnabled(
+    modulesView,
+    surveyFeatureForKind(deal.kind)
+  );
 
-  return <DealDetail deal={deal} newtonEnabled={newtonEnabled} />;
+  return (
+    <DealDetail
+      deal={deal}
+      newtonEnabled={newtonEnabled}
+      surveysEnabled={surveysEnabled}
+    />
+  );
 }

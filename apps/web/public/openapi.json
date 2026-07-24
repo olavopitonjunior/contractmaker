@@ -1959,6 +1959,1101 @@
         }
       }
     },
+    "/api/proposals": {
+      "get": {
+        "description": "Lista propostas da org (escopo RBAC: corretor vê só as próprias/atribuídas).",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "status",
+            "in": "query",
+            "description": "rascunho | aguardando_aprovacao | enviada | aguardando_vendedor | aceita | recusada | expirada | cancelada | convertida | falha_envio"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "venda",
+                "locacao"
+              ]
+            },
+            "name": "kind",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista de propostas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "proposals": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope proposals:rw ou RBAC negado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "description": "Cria proposta em rascunho. schemaType decide venda/locação; feature gate vendas.propostas / locacao.propostas.",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "schemaType": {
+                    "type": "string",
+                    "enum": [
+                      "compra_venda_v1",
+                      "locacao_residencial_v1",
+                      "locacao_comercial_v1"
+                    ]
+                  },
+                  "dataJson": {
+                    "type": "object"
+                  },
+                  "validUntil": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "signers": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                },
+                "required": [
+                  "title",
+                  "schemaType"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Proposta criada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Payload inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Feature desabilitada ou RBAC negado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/{id}": {
+      "get": {
+        "description": "Detalhe completo da proposta.",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Proposta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrada (ou fora do escopo RBAC)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/{id}/status": {
+      "get": {
+        "description": "Leitura rápida do estado atual (status + assinaturas) — para polling.",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status da proposta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/{id}/send": {
+      "post": {
+        "description": "Envia pra assinatura (envelope) ou Aceite WhatsApp. Session executa; Bearer cria ActionIntent (202).",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enviada (session)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Bearer: ActionIntent criada — precisa de aprovação humana em approvalUrl",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntentPendingResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Proposta já enviada / estado inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/{id}/send-vendedor": {
+      "post": {
+        "description": "Dispara a 2ª via (envelope do vendedor/proprietário) em `aguardando_vendedor`. Session executa; Bearer cria ActionIntent (202).",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enviada ao vendedor (session)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Bearer: ActionIntent criada — precisa de aprovação humana em approvalUrl",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntentPendingResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Proposta não está aguardando o vendedor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/{id}/convert": {
+      "post": {
+        "description": "Converte proposta em Deal + SalesForm. Session executa; Bearer cria ActionIntent (202). allowUnsigned exige unsignedReason.",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "allowUnsigned": {
+                    "type": "boolean"
+                  },
+                  "unsignedReason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Deal criado (session)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Bearer: ActionIntent criada — precisa de aprovação humana em approvalUrl",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntentPendingResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Já convertida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/{id}/cancel": {
+      "post": {
+        "description": "Cancela a proposta (cancela envelopes ClickSign em curso primeiro). Session executa; Bearer cria ActionIntent PROPOSAL_CANCEL (202).",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cancelada (session)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "cancelada"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Bearer: ActionIntent criada — precisa de aprovação humana em approvalUrl",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntentPendingResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Estado não cancelável ou ClickSign recusou cancelamento",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/{id}/remind": {
+      "post": {
+        "description": "Reenvia notificação de assinatura aos signatários pendentes. Sem HITL (barato, rate-limited).",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sourceKind": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Lembretes enviados",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/{id}/assignee": {
+      "patch": {
+        "description": "Define/troca o responsável (responsibleUserId) ou limpa com clear=true.",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "responsibleUserId": {
+                    "type": "string"
+                  },
+                  "responsibleName": {
+                    "type": "string"
+                  },
+                  "clear": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Responsável atualizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/{id}/sync": {
+      "post": {
+        "description": "Reconcilia envelopes da proposta contra a ClickSign (status de assinaturas).",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sincronizada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/mark-lost": {
+      "post": {
+        "description": "Bearer twin do mark-lost legado: move deal pra 'Negócio perdido' com motivo (categoria + texto). Reversível via /reopen — sem HITL.",
+        "tags": [
+          "Deals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "deals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500
+                  },
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "desistencia",
+                      "imovel_vendido",
+                      "financiamento_negado",
+                      "imovel_alugado",
+                      "garantia_recusada",
+                      "credito_reprovado",
+                      "outro"
+                    ]
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deal marcado como perdido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stage terminal ou payload inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Deal não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/reopen": {
+      "post": {
+        "description": "Bearer twin do reopen legado: tira o deal de 'Negócio perdido' e restaura a stage anterior (histórico de audit; fallback por kind).",
+        "tags": [
+          "Deals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "deals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deal reaberto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Deal não está em 'Negócio perdido'",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Deal não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/archive": {
+      "post": {
+        "description": "Bearer twin do archive legado: arquiva/desarquiva o deal (Deal.archivedAt). Idempotente e reversível.",
+        "tags": [
+          "Deals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "deals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "archived": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Estado de arquivamento atualizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Deal não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/generate-contract": {
+      "post": {
+        "description": "Bearer twin do generate-contract legado: gera contrato do deal (Handlebars → Google Doc; locação usa gerador próprio). Cria rascunho — aprovação é HITL separado.",
+        "tags": [
+          "Contracts"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "contracts:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Contrato gerado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Falha na geração (dados incompletos, template ausente)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Deal não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/certidoes": {
+      "get": {
+        "description": "Lista CertidaoJobs do deal (status da batch). Bearer `documents:r` — Newton acompanha após dispatch via certidoes-newton.",
+        "tags": [
+          "Certidoes"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "documents:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "batchId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Jobs da batch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "latestBatchId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "MODULE_DISABLED ou cross-org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Deal não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/certidoes/{jobId}": {
+      "get": {
+        "description": "Status de UM CertidaoJob (sem resultData cru). Bearer `documents:r` — acompanhar two-step (awaiting_portal).",
+        "tags": [
+          "Certidoes"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "documents:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "jobId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/locacao/leases": {
       "get": {
         "description": "Lista contratos de locação (LeaseContract) com imóvel, locatários e garantia. RBAC LEASE_VIEW + módulo locação habilitado.",

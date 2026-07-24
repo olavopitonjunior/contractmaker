@@ -6,6 +6,7 @@ import {
   COMMISSION_PAID_ALLOWED_FROM,
   COMMISSION_PAID_TARGET_STAGE,
 } from "@/lib/contracts/auto-promote-commission";
+import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
 
 /**
  * POST /api/pipeline/deals/:dealId/mark-commission-paid
@@ -86,6 +87,8 @@ export async function POST(
       toStage: targetStage.id,
     },
   });
+
+  queueSurveyDispatch(deal.id, targetStage.name);
 
   return NextResponse.json({
     status: "comissao_paga",

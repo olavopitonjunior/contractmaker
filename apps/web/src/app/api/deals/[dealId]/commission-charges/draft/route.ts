@@ -23,7 +23,7 @@ const upsertSchema = z.object({
 });
 
 async function authorize(req: NextRequest, dealId: string) {
-  const authResult = await requireAuth(req);
+  const authResult = await requireAuth(req, { scope: "charges:rw" });
   if (!authResult.ok) return { error: authResult.response };
   const { ctx } = authResult;
 
