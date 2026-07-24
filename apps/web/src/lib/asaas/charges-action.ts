@@ -2,6 +2,7 @@ import { Prisma } from "@prisma/client";
 import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
 import { audit } from "@/lib/security/audit";
+import { notifyDealEvent } from "@/lib/notifications/deal-events";
 import { AsaasError } from "@/lib/asaas/errors";
 import { upsertCustomer } from "@/lib/asaas/customers";
 import { getAccountWithApiKey } from "@/lib/asaas/account";
@@ -424,6 +425,21 @@ export async function runCreateCommissionCharge(
         orgId: input.orgId,
       })
     );
+
+    // Notificação do processo → corretores (email/WhatsApp). O SINO deste
+    // evento pertence ao notifyChargeEvent acima (OWNS_BELL=false no motor).
+    // Só kind="commission" — avulsa/aluguel não é cobrança de comissão.
+    if ((input.kind ?? "commission") === "commission") {
+      waitUntil(
+        notifyDealEvent({
+          dealId: deal.id,
+          orgId: input.orgId,
+          event: "charge_created",
+          dedupeKey: charge.id,
+          context: { extra: { chargeId: charge.id } },
+        })
+      );
+    }
 
     return {
       status: 200,

@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot, Pencil, Check, CheckCircle2, X, Archive, ArchiveRestore, Lock, LockOpen, ShieldAlert, Users } from "lucide-react";
+import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot, Pencil, Check, CheckCircle2, X, Archive, ArchiveRestore, Lock, LockOpen, ShieldAlert, Users, BellRing } from "lucide-react";
 import { SendAttachmentEnvelopeDialog } from "@/components/pipeline/SendAttachmentEnvelopeDialog";
 import { AddDocumentsCard } from "@/components/pipeline/AddDocumentsCard";
 import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
@@ -25,6 +25,7 @@ import { CertidoesTab } from "@/components/pipeline/CertidoesTab";
 import { SignaturesTab } from "@/components/pipeline/SignaturesTab";
 import { SendFormSummaryDialog } from "@/components/forms/SendFormSummaryDialog";
 import { NewtonRequestsTab } from "@/components/pipeline/NewtonRequestsTab";
+import { NotificationsTab } from "@/components/pipeline/NotificationsTab";
 import { CommissionChargeDialog } from "@/components/pipeline/CommissionChargeDialog";
 import { CommissionChargeList } from "@/components/pipeline/CommissionChargeList";
 import { DealProgressTimeline } from "@/components/pipeline/DealProgressTimeline";
@@ -1078,6 +1079,10 @@ export function DealDetail({ deal, newtonEnabled = false }: DealDetailProps) {
             <Wallet className="h-3.5 w-3.5 mr-1" />
             Pagamentos
           </TabsTrigger>
+          <TabsTrigger value="notificacoes">
+            <BellRing className="h-3.5 w-3.5 mr-1" />
+            Notificações
+          </TabsTrigger>
           {newtonEnabled && (
             <TabsTrigger value="newton">
               <Bot className="h-3.5 w-3.5 mr-1" />
@@ -1457,6 +1462,10 @@ export function DealDetail({ deal, newtonEnabled = false }: DealDetailProps) {
             </div>
             <CommissionChargeList key={chargeRefreshKey} dealId={deal.id} />
           </div>
+        </TabsContent>
+
+        <TabsContent value="notificacoes" className="mt-4">
+          <NotificationsTab dealId={deal.id} />
         </TabsContent>
 
         {newtonEnabled && (

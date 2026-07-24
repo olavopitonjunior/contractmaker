@@ -73,7 +73,7 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
       { key: FEATURE.VENDAS_CERTIDOES, label: "Certidões", default: true },
       { key: FEATURE.VENDAS_PAGADORIA, label: "Pagadoria / comissão", default: true },
       { key: FEATURE.VENDAS_NEWTON, label: "Newton (agente WhatsApp) — vendas", default: false },
-      { key: FEATURE.VENDAS_PROPOSTAS, label: "Propostas — vendas", default: false },
+      { key: FEATURE.VENDAS_PROPOSTAS, label: "Propostas — vendas", default: true },
     ],
   },
   {
@@ -90,7 +90,7 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
       { key: FEATURE.LOCACAO_SEGUROS, label: "Seguros", default: false },
       { key: FEATURE.LOCACAO_PESSOAS, label: "Pessoas", default: true },
       { key: FEATURE.LOCACAO_NEWTON, label: "Newton (agente WhatsApp) — locação", default: false },
-      { key: FEATURE.LOCACAO_PROPOSTAS, label: "Propostas — locação", default: false },
+      { key: FEATURE.LOCACAO_PROPOSTAS, label: "Propostas — locação", default: true },
     ],
   },
 ] as const;
@@ -147,7 +147,8 @@ export function newtonFeatureForDealKind(kind: string): FeatureKey {
   return kind === "locacao" ? FEATURE.LOCACAO_NEWTON : FEATURE.VENDAS_NEWTON;
 }
 
-/** Feature de Propostas por kind. Default OFF nos dois (rollout gradual). */
+/** Feature de Propostas por kind. Default ON nos dois desde 2026-07-24 (graduou do
+ *  rollout gradual — PR #166 estabilizou a rodada-2). Org pode desligar via override. */
 export function proposalFeatureForKind(kind: string): FeatureKey {
   return kind === "locacao" ? FEATURE.LOCACAO_PROPOSTAS : FEATURE.VENDAS_PROPOSTAS;
 }

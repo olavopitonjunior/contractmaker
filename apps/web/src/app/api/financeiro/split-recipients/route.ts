@@ -11,6 +11,7 @@ import {
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
 import { detectPixKeyType } from "@/lib/asaas/pix";
+import { findCommissionerMatch } from "@/lib/asaas/commissioner-registry";
 
 const baseSchema = z.object({
   label: z.string().trim().min(1).max(120),
@@ -48,6 +49,10 @@ const baseSchema = z.object({
   bankAccountType: z.enum(["corrente", "poupanca"]).nullable().optional(),
   bankHolderName: z.string().trim().max(200).nullable().optional(),
   bankHolderDoc: z.string().trim().max(18).nullable().optional(),
+  // Preferências de notificação do corretor (2026-07). Aditivo.
+  notifyByEmail: z.boolean().optional(),
+  notifyByWhatsapp: z.boolean().optional(),
+  notifyOptOut: z.boolean().optional(),
 });
 
 const walletSchema = baseSchema.extend({
@@ -82,8 +87,24 @@ export async function GET(req: NextRequest) {
     throw err;
   }
 
+  // Filtros opcionais: ?kind=commissioner (tela /corretores e autocompletes
+  // autenticados) e ?q= busca por nome/doc/CRECI.
+  const { searchParams } = new URL(req.url);
+  const kind = searchParams.get("kind");
+  const q = (searchParams.get("q") ?? "").trim();
+  const where: Prisma.SplitRecipientWhereInput = { orgId: ctx.orgId };
+  if (kind === "commissioner" || kind === "other") where.kind = kind;
+  if (q) {
+    where.OR = [
+      { label: { contains: q, mode: "insensitive" } },
+      { cpfCnpj: { contains: q.replace(/\D/g, "") } },
+      { ownerCpfCnpj: { contains: q.replace(/\D/g, "") } },
+      { creci: { contains: q, mode: "insensitive" } },
+    ];
+  }
+
   const recipients = await prisma.splitRecipient.findMany({
-    where: { orgId: ctx.orgId },
+    where,
     orderBy: [{ active: "desc" }, { label: "asc" }],
   });
 
@@ -140,6 +161,27 @@ export async function POST(req: NextRequest) {
     }
   }
 
+  // Dedupe de corretor por CPF/CNPJ: o partial unique do banco só cobre
+  // commissioners ATIVOS — rascunhos (pendingFields) dependem deste pre-check.
+  // Só doc (nome homônimo é plausível entre pessoas distintas). Inclui
+  // inativos de propósito: recriar um desativado deve virar reativação.
+  if ((data.kind ?? "commissioner") === "commissioner" && data.cpfCnpj) {
+    const dup = await findCommissionerMatch(ctx.orgId, {
+      nome: null,
+      cpf: data.tipoPessoa === "juridica" ? null : data.cpfCnpj,
+      cnpj: data.tipoPessoa === "juridica" ? data.cpfCnpj : null,
+    });
+    if (dup) {
+      return NextResponse.json(
+        {
+          error: `Já existe um corretor cadastrado com este CPF/CNPJ ("${dup.label}"${dup.active ? "" : ", inativo — reative-o"})`,
+          existingId: dup.id,
+        },
+        { status: 409 }
+      );
+    }
+  }
+
   // Para PIX, detectar tipo da chave automaticamente (apenas quando preenchida)
   let pixKeyType: string | null = null;
   if (isPix && data.pixAddressKey && data.pixAddressKey.trim() !== "") {
@@ -163,7 +205,8 @@ export async function POST(req: NextRequest) {
         pixKeyType: pixKeyType,
         ownerName: isPix ? data.ownerName : null,
         ownerCpfCnpj: isPix ? data.ownerCpfCnpj : null,
-        cpfCnpj: data.cpfCnpj ?? null,
+        // Digits-only: o partial unique de commissioner compara normalizado.
+        cpfCnpj: data.cpfCnpj ? data.cpfCnpj.replace(/\D/g, "") || null : null,
         description: data.description ?? null,
         email: data.email && data.email !== "" ? data.email : null,
         pendingFields,
@@ -181,6 +224,9 @@ export async function POST(req: NextRequest) {
         bankAccountType: data.bankAccountType ?? undefined,
         bankHolderName: data.bankHolderName ?? undefined,
         bankHolderDoc: data.bankHolderDoc ?? undefined,
+        notifyByEmail: data.notifyByEmail ?? undefined,
+        notifyByWhatsapp: data.notifyByWhatsapp ?? undefined,
+        notifyOptOut: data.notifyOptOut ?? undefined,
       },
     });
 
@@ -203,8 +249,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ recipient: created }, { status: 201 });
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
-      const target = (err.meta?.target as string[] | undefined) ?? [];
-      const dupField = target.includes("pixAddressKey") ? "Chave PIX" : "Wallet ID";
+      const target = (err.meta?.target as string[] | string | undefined) ?? [];
+      const targetStr = Array.isArray(target) ? target.join(",") : String(target);
+      const dupField = targetStr.includes("pixAddressKey")
+        ? "Chave PIX"
+        : targetStr.includes("cpf") || targetStr.includes("commissioner")
+          ? "CPF/CNPJ (corretor)"
+          : "Wallet ID";
       return NextResponse.json(
         { error: `${dupField} já cadastrado nesta organização` },
         { status: 409 }

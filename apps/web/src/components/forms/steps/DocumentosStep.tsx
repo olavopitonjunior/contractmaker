@@ -39,6 +39,16 @@ interface DocumentosStepProps {
    * seria descartado no save). undefined = token principal (todos os slots).
    */
   allowedTopKeys?: readonly string[];
+  /**
+   * Link individual: o slot do PRÓPRIO participante (role + partyIndex).
+   * Quando presente, um doc de identidade extraído cuja sugestão heurística
+   * não casou (kind "outro" — o form da parte costuma estar vazio) é
+   * atribuído automaticamente a este slot e aplicado com skipIfDirty (Fix 4).
+   * Sem isso, o gate H.5 desabilitava "Aplicar aos campos" e a parte saía com
+   * a OCR pronta mas nenhum campo preenchido (caso real prod 2026-07-23).
+   * undefined = token principal (fluxo manual inalterado).
+   */
+  selfAssignment?: Assignment;
 }
 
 const MAX_BYTES = 10 * 1024 * 1024;
@@ -300,11 +310,25 @@ function buildAssignmentOptions(
   return groups;
 }
 
+/**
+ * Categorias elegíveis pro auto-assign do link individual (Fix 4): documentos
+ * DA PRÓPRIA pessoa. Procuração fica fora — descreve um representante, não o
+ * titular do link. Ficha-resumo tem fluxo próprio (applyFicha).
+ */
+const SELF_ASSIGN_CATEGORIES = new Set([
+  "rg",
+  "cpf",
+  "cnh",
+  "comprovante_residencia",
+  "certidao_casamento",
+]);
+
 export function DocumentosStep({
   form,
   token,
   adapter: adapterProp,
   allowedTopKeys,
+  selfAssignment,
 }: DocumentosStepProps) {
   const adapter = useMemo(
     () => adapterProp ?? createVendaAdapter(buildAssignmentOptions),
@@ -320,6 +344,8 @@ export function DocumentosStep({
   // Docs cujo assignment PERSISTIDO já foi auto-aplicado aos campos (Fix 3).
   // Evita loop e reaplicações repetidas do mesmo doc.
   const autoAppliedRef = useRef<Set<string>>(new Set());
+  // Docs já auto-atribuídos ao próprio participante (Fix 4) — idempotência.
+  const selfAssignedRef = useRef<Set<string>>(new Set());
 
   // Estabilidade referencial do escopo pra deps de effects/callbacks.
   const allowedKey = allowedTopKeys ? allowedTopKeys.join("|") : "";
@@ -650,6 +676,71 @@ export function DocumentosStep({
       )
     );
   }, [docs, hydrated, form, adapter, ensureSlot]);
+
+  // Fix 4 — link individual: doc de identidade extraído cuja sugestão não
+  // casou com ninguém (form da parte vazio ⇒ suggestAssignment cai em "outro"
+  // e o gate H.5 desabilitaria o "Aplicar") é do PRÓPRIO participante:
+  // atribui ao slot dele, aplica com skipIfDirty (nunca sobrescreve o que a
+  // pessoa já digitou) e persiste o assignment — que também habilita o
+  // auto-reapply (Fix 3) quando o operador abrir o form principal. Cobre os 3
+  // caminhos de chegada (restore, polling e resposta direta do /retry) por
+  // observar `docs` em vez de cada um deles.
+  useEffect(() => {
+    if (!hydrated || !selfAssignment) return;
+    const pending = docs.filter(
+      (d) =>
+        d.status === "ready" &&
+        d.fields &&
+        d.category &&
+        SELF_ASSIGN_CATEGORIES.has(d.category) &&
+        d.assignment.kind === "outro" &&
+        !selfAssignedRef.current.has(d.id)
+    );
+    if (pending.length === 0) return;
+    for (const d of pending) {
+      selfAssignedRef.current.add(d.id);
+      // Entra no set do Fix 3 também: o assignment agora é persistido e o
+      // effect de auto-reapply não deve reaplicar em cima.
+      autoAppliedRef.current.add(d.id);
+      ensureSlot(selfAssignment.kind, selfAssignment.index);
+      adapter.apply(
+        { category: d.category, fields: d.fields || {}, confidence: d.confidence ?? 0 },
+        selfAssignment,
+        form as UseFormReturn<Record<string, unknown>>,
+        { skipIfDirty: true }
+      );
+      // Persistência é o que faz o doc refletir no form principal (Fix 3) —
+      // como aqui não há clique do usuário pra "tentar de novo", uma falha
+      // transitória de rede ganha 1 retry antes de desistir.
+      const persistAssignment = () =>
+        fetch(`/api/forms/${token}/attachments?id=${d.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ assignment: selfAssignment }),
+        });
+      persistAssignment()
+        .then((res) => {
+          if (!res.ok) throw new Error(`assignment PATCH ${res.status}`);
+        })
+        .catch(() => {
+          setTimeout(() => {
+            persistAssignment().catch(() => {
+              /* non-blocking — o card local já reflete a atribuição */
+            });
+          }, 3000);
+        });
+    }
+    setDocs((prev) =>
+      prev.map((d) =>
+        selfAssignedRef.current.has(d.id) && d.assignment.kind === "outro"
+          ? { ...d, assignment: selfAssignment, assignmentPersisted: true, applied: true }
+          : d
+      )
+    );
+    toast.success(
+      `${pending.length} documento(s) aplicado(s) automaticamente aos seus dados`
+    );
+  }, [docs, hydrated, selfAssignment, form, adapter, ensureSlot, token]);
 
   // Applies the OCR result for a single attachment to its card. Runs inside
   // a setDocs callback so parallel calls see the freshest state — prevents

@@ -1,4 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
+import { waitUntil } from "@vercel/functions";
+import { notifyDealEvent } from "@/lib/notifications/deal-events";
 import { withOrgBudgetLock } from "@/lib/security/budget-lock";
 import { uploadBufferToStorage, downloadBufferFromUrl } from "@/lib/storage/s3";
 import { generateContractPdfBuffer } from "@/lib/render/contract-pdf";
@@ -466,6 +468,21 @@ async function createEnvelopeFromBuffer(input: {
       where: { envelopeId: envelope.id, status: "pending" },
       data: { status: "notified", notifiedAt: new Date() },
     });
+
+    // Notificação do processo: contrato enviado pra assinatura (só source=
+    // "contract" — envelope avulso de anexo tem semântica própria).
+    // dedupeKey=envelope.id: reenvio cria envelope novo e notifica de novo.
+    if (source === "contract") {
+      waitUntil(
+        notifyDealEvent({
+          dealId,
+          orgId,
+          event: "contract_sent",
+          dedupeKey: envelope.id,
+          context: { extra: { envelopeId: envelope.id } },
+        })
+      );
+    }
 
     return { ...updated, signers: await listSigners(envelope.id) };
   } catch (err) {

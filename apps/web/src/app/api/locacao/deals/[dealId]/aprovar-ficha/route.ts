@@ -6,6 +6,11 @@ import {
 } from "@/lib/locacao/route-helpers";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { waitUntil } from "@vercel/functions";
+import {
+  notifyDealEvent,
+  stageChangeDedupeKey,
+} from "@/lib/notifications/deal-events";
 
 export const runtime = "nodejs";
 
@@ -73,6 +78,17 @@ export async function POST(
       toStage: formularioStage.id,
     },
   });
+
+  // Notificação do processo: ficha aprovada avança pra "Formulário".
+  waitUntil(
+    notifyDealEvent({
+      dealId: deal.id,
+      orgId: ctx.orgId,
+      event: "stage_change",
+      dedupeKey: stageChangeDedupeKey(formularioStage.id),
+      context: { stageName: formularioStage.name },
+    })
+  );
 
   return NextResponse.json({
     status: "ficha_aprovada",

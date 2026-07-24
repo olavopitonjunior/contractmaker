@@ -1,9 +1,11 @@
 "use client";
 
+import { useMemo } from "react";
 import { SalesFormWizard } from "@/components/forms/SalesFormWizard";
 import { LocacaoFormWizard } from "@/components/forms/LocacaoFormWizard";
 import { BrandMark } from "@/components/layout/brand-mark";
 import type { ParticipantRole } from "@/lib/forms/participant-token";
+import type { Assignment } from "@/lib/forms/extracted-to-form";
 
 interface SubtokenFormClientProps {
   subtoken: string;
@@ -14,11 +16,25 @@ interface SubtokenFormClientProps {
   requiredFieldsByStep: readonly (readonly string[])[];
   stepIndexes: readonly number[];
   pathScope: readonly string[];
+  /** SalesFormParticipant.partyIndex — slot do próprio participante. */
+  partyIndex?: number;
   formTitle: string | null;
   completedAt: string | null;
   /** Form travado (SalesForm.lockedAt) → wizard somente-leitura. */
   locked?: boolean;
 }
+
+/**
+ * Roles cujo link individual tem um slot de parte próprio pro auto-assign de
+ * OCR (Fix 4 do DocumentosStep). Fiador fica fora — os dados moram no objeto
+ * `garantia`, não num array de partes.
+ */
+const SELF_ASSIGN_KIND: Partial<Record<ParticipantRole, Assignment["kind"]>> = {
+  vendedor: "vendedor",
+  comprador: "comprador",
+  locador: "locador",
+  locatario: "locatario",
+};
 
 const ROLE_LABELS: Record<ParticipantRole, string> = {
   vendedor: "Vendedor(a)",
@@ -36,6 +52,7 @@ export function SubtokenFormClient({
   requiredFieldsByStep,
   stepIndexes,
   pathScope,
+  partyIndex = 0,
   formTitle,
   completedAt,
   locked,
@@ -43,6 +60,12 @@ export function SubtokenFormClient({
   const roleLabel = ROLE_LABELS[role] ?? role;
   const isLocacao = schemaType.startsWith("locacao");
   const participantEndpoint = `/api/forms/participant/${subtoken}`;
+  const selfKind = SELF_ASSIGN_KIND[role];
+  // Referência estável — vira dep de effect no DocumentosStep.
+  const selfAssignment = useMemo<Assignment | undefined>(
+    () => (selfKind ? { kind: selfKind, index: partyIndex } : undefined),
+    [selfKind, partyIndex],
+  );
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -92,6 +115,7 @@ export function SubtokenFormClient({
             stepIndexes={stepIndexes}
             endpoint={participantEndpoint}
             pathScope={pathScope}
+            selfAssignment={selfAssignment}
             finalizeMode="participant"
             readOnly={locked}
           />
@@ -103,6 +127,7 @@ export function SubtokenFormClient({
             stepIndexes={stepIndexes}
             endpoint={participantEndpoint}
             pathScope={pathScope}
+            selfAssignment={selfAssignment}
             finalizeMode="participant"
             readOnly={locked}
           />

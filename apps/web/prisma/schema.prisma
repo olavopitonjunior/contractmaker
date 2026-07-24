@@ -266,6 +266,8 @@ model Organization {
   pipelines           Pipeline[]
   forms               SalesForm[]
   formSettings        OrgFormSettings?
+  notificationSettings OrgNotificationSettings?
+  dealNotificationLogs DealNotificationLog[]
   templates           ContractTemplate[]
   clauses             Clause[]
   agentConfig         AgentConfig?
@@ -562,6 +564,10 @@ model Deal {
   // archivedAt. Independente de stage terminal — o operador arquiva quando
   // quer "tirar da frente" (perdido/pago ou qualquer outro). null = ativo.
   archivedAt       DateTime?
+  // Notificações do processo (2026-07) — override por deal do padrão da org.
+  // Mesmo shape de OrgNotificationSettings.settingsJson (só as chaves
+  // divergentes; ausente = herda). Ver lib/notifications/deal-events-config.ts.
+  notificationsJson Json?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
@@ -578,6 +584,7 @@ model Deal {
   commissionChargeDrafts CommissionChargeDraft[]
   envelopes              Envelope[]
   newtonRequests         NewtonRequest[]
+  notificationLogs       DealNotificationLog[]
   groupLink              DealGroupLink?
   // Proposta que originou este deal (conversão). Null = deal criado direto.
   fromProposal           Proposal?               @relation("ProposalConvertedDeal")
@@ -820,6 +827,45 @@ model Notification {
   @@unique([type, batchId])
   @@index([orgId, read, createdAt])
   @@index([userId, read, createdAt])
+}
+
+// Notificações do processo (2026-07) — padrão da org. Um único blob JSON com
+// defaults resolvidos em código (mesmo padrão de OrgFormSettings.
+// contractDefaultsJson): matriz evento × público × canal + config do lembrete
+// de preenchimento. Shape em lib/notifications/deal-events-config.ts.
+model OrgNotificationSettings {
+  id           String   @id @default(cuid())
+  orgId        String   @unique
+  settingsJson Json     @default("{}")
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// Log de envios EXTERNOS (email/whatsapp) das notificações do processo por
+// deal. O unique é o chokepoint de idempotência: o motor faz insert-first e
+// P2002 = já enviado (pula). Sino (Notification) NÃO entra aqui — já tem
+// dedupe próprio por (type, batchId). A aba Notificações do deal lê este log.
+model DealNotificationLog {
+  id             String   @id @default(cuid())
+  orgId          String
+  dealId         String
+  event          String // DealNotifEvent (stage_change | form_completed | ...)
+  channel        String // email | whatsapp
+  audience       String   @default("broker") // broker | party (v2)
+  recipientKey   String // splitRecipientId do corretor
+  recipientLabel String?
+  dedupeKey      String // por evento: stageId+dia, contractId, envelopeId, chargeId, formId+marco
+  status         String   @default("sent") // pending (claim) | sent | skipped | failed
+  detail         Json?
+  createdAt      DateTime @default(now())
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  deal Deal         @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@unique([dealId, event, channel, recipientKey, dedupeKey], map: "DealNotificationLog_dedupe_key")
+  @@index([orgId, dealId, createdAt])
 }
 
 // NewtonRequest — fila de "pedidos ao Newton" ancorada num Deal.
@@ -2281,12 +2327,22 @@ model SplitRecipient {
   bankAccountType    String? // corrente | poupanca
   bankHolderName     String?
   bankHolderDoc      String?
+  // Preferências de notificação do corretor (feature "atualizações do processo",
+  // 2026-07). Consumidas por lib/notifications/deal-events.ts. WhatsApp é opt-in
+  // (depende do gate Newton por org); notifyOptOut silencia todos os canais.
+  notifyByEmail      Boolean   @default(true)
+  notifyByWhatsapp   Boolean   @default(false)
+  notifyOptOut       Boolean   @default(false)
   createdAt          DateTime  @default(now())
   updatedAt          DateTime  @updatedAt
 
   org       Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
   transfers AsaasTransfer[]
 
+  // Além dos uniques abaixo há um partial unique index só em SQL (Prisma não
+  // expressa índice parcial): UNIQUE (orgId, cpfCnpj) WHERE kind='commissioner'
+  // AND active=true AND cpfCnpj IS NOT NULL — garante corretor sem duplicata.
+  // Ver migration 20260724*_split_recipient_notify_dedupe.
   @@unique([orgId, walletId])
   @@unique([orgId, pixAddressKey])
   @@index([orgId, active])

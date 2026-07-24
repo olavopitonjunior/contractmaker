@@ -5,6 +5,10 @@ import { prisma } from "@/lib/db/prisma";
 import { formClosedResponse } from "@/lib/forms/form-gate";
 import { audit } from "@/lib/security/audit";
 import { detectPixKeyType } from "@/lib/asaas/pix";
+import {
+  createCommissioner,
+  findCommissionerMatch,
+} from "@/lib/asaas/commissioner-registry";
 
 export const runtime = "nodejs";
 
@@ -181,71 +185,77 @@ export async function POST(
     }
   }
 
-  // recipientType deriva: pix_external se PIX, senão asaas_wallet (placeholder
-  // pendingFields="walletId"). Org poderá completar via admin depois.
-  const recipientType = hasPix ? "pix_external" : "asaas_wallet";
-  const pendingFields: string[] = [];
-  if (!hasPix && !hasBank) {
-    // Rascunho completo — sem nenhum meio de recebimento.
-    pendingFields.push(recipientType === "pix_external" ? "pixAddressKey" : "walletId");
+  // Dedupe antes de criar: match por doc/nome no registry (inclui rascunhos
+  // inativos — o partial unique do banco só cobre commissioners ativos).
+  const registryInput = {
+    nome: data.label,
+    cpf: data.tipoPessoa === "fisica" ? data.cpfCnpj : null,
+    cnpj: data.tipoPessoa === "juridica" ? data.cpfCnpj : null,
+    tipo_pessoa: data.tipoPessoa,
+    email: data.email && data.email !== "" ? data.email : null,
+    mobile_phone: data.phone ?? null,
+    creci: data.creci ?? null,
+    papel: data.papel,
+  };
+  const preexisting = await findCommissionerMatch(form.orgId, registryInput);
+  if (preexisting) {
+    return NextResponse.json(
+      {
+        recipient: {
+          id: preexisting.id,
+          label: preexisting.label,
+          tipoPessoa: preexisting.tipoPessoa,
+          doc: maskDoc(preexisting.cpfCnpj),
+          creci: preexisting.creci,
+          papel: preexisting.papel,
+          email: preexisting.email,
+          phone: preexisting.phone,
+        },
+        existed: true,
+      },
+      { status: 200 }
+    );
   }
-  const isDraft = pendingFields.length > 0;
 
   let created;
+  let isDraft: boolean;
   try {
-    created = await prisma.splitRecipient.create({
-      data: {
-        orgId: form.orgId,
-        label: data.label,
-        recipientType,
-        walletId: null,
-        pixAddressKey: hasPix ? data.pix!.chave! : null,
-        pixKeyType,
-        ownerName: data.pix?.titularNome ?? null,
-        ownerCpfCnpj: data.pix?.titularCpfCnpj ?? null,
-        cpfCnpj: data.cpfCnpj,
-        email: data.email && data.email !== "" ? data.email : null,
-        pendingFields,
-        active: !isDraft,
-        kind: "commissioner",
-        tipoPessoa: data.tipoPessoa,
-        creci: data.creci ?? null,
-        papel: data.papel,
-        phone: data.phone ?? null,
-        bankName: data.banco?.nome ?? null,
-        bankBranch: data.banco?.agencia ?? null,
-        bankAccount: data.banco?.conta ?? null,
-        bankAccountType: data.banco?.tipoConta ?? null,
-        bankHolderName: data.banco?.titularNome ?? null,
-        bankHolderDoc: data.banco?.titularDoc ?? null,
-      },
+    created = await createCommissioner(form.orgId, registryInput, {
+      pix: hasPix
+        ? {
+            chave: data.pix!.chave!,
+            keyType: pixKeyType!,
+            titularNome: data.pix?.titularNome ?? null,
+            titularCpfCnpj: data.pix?.titularCpfCnpj ?? null,
+          }
+        : undefined,
+      banco: hasBank ? data.banco : undefined,
     });
+    isDraft = created.pendingFields.length > 0;
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
-      // Já cadastrado — retornar o existente pra UI prosseguir sem erro.
-      const existing = await prisma.splitRecipient.findFirst({
-        where: {
-          orgId: form.orgId,
-          OR: [
-            data.pix?.chave ? { pixAddressKey: data.pix.chave } : { id: "_none" },
-            { cpfCnpj: data.cpfCnpj },
-          ],
-        },
-        select: {
-          id: true,
-          label: true,
-          tipoPessoa: true,
-          cpfCnpj: true,
-          creci: true,
-          papel: true,
-          email: true,
-          phone: true,
-        },
-      });
+      // Corrida: outra criação venceu (partial unique de cpfCnpj, walletId
+      // ou pixAddressKey). Retornar o existente pra UI prosseguir sem erro.
+      const existing =
+        (await findCommissionerMatch(form.orgId, registryInput)) ??
+        (data.pix?.chave
+          ? await prisma.splitRecipient.findFirst({
+              where: { orgId: form.orgId, pixAddressKey: data.pix.chave },
+            })
+          : null);
       if (existing) {
         return NextResponse.json(
           {
-            recipient: { ...existing, doc: maskDoc(existing.cpfCnpj) },
+            recipient: {
+              id: existing.id,
+              label: existing.label,
+              tipoPessoa: existing.tipoPessoa,
+              doc: maskDoc(existing.cpfCnpj),
+              creci: existing.creci,
+              papel: existing.papel,
+              email: existing.email,
+              phone: existing.phone,
+            },
             existed: true,
           },
           { status: 200 }

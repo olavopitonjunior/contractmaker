@@ -9,6 +9,7 @@ import {
   mergeSalesFormDataJson,
   FormNotFoundError,
 } from "@/lib/forms/atomic-merge";
+import { PARTY_ARRAY_KEYS } from "@/lib/forms/blank-party";
 import { syncDealClientName } from "@/lib/forms/sync-deal-client-name";
 import { formClosedResponse } from "@/lib/forms/form-gate";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
@@ -128,6 +129,12 @@ export async function PATCH(
       where: { id: participant.formId },
       incoming,
       allowedTopKeys: ROLE_PATHS[role],
+      // Um subtoken recém-aberto também ecoa a própria fatia template-vazia
+      // no mount — o guard impede que isso apague o que o operador (ou outra
+      // sessão da mesma parte) já preencheu naquela chave.
+      protectBlankPartyArrays: ROLE_PATHS[role].filter((k) =>
+        (PARTY_ARRAY_KEYS as readonly string[]).includes(k),
+      ),
       also: async (tx) => {
         await tx.salesFormParticipant.update({
           where: { id: participant.id },
@@ -165,6 +172,27 @@ export async function PATCH(
         metadata: {
           role,
           rejectedPaths: mergeOutcome.rejectedPaths,
+        },
+      },
+    );
+  }
+
+  if (mergeOutcome.skippedBlankArrayKeys.length > 0) {
+    console.warn("[participant PATCH] blank party arrays skipped", {
+      participantId: participant.id,
+      role,
+      skippedKeys: mergeOutcome.skippedBlankArrayKeys,
+    });
+    audit(
+      extractAuditContextFromRequest(req, participant.form.orgId, null),
+      {
+        action: "FORM_PATCH_BLANK_ARRAY_SKIPPED",
+        result: "DENIED",
+        resourceType: "SalesFormParticipant",
+        resource: participant.id,
+        metadata: {
+          role,
+          skippedKeys: mergeOutcome.skippedBlankArrayKeys,
         },
       },
     );
@@ -218,5 +246,6 @@ export async function PATCH(
     completedAt:
       (participant.completedAt ?? completedNow)?.toISOString() ?? null,
     rejectedPaths: mergeOutcome.rejectedPaths,
+    skippedBlankArrayKeys: mergeOutcome.skippedBlankArrayKeys,
   });
 }

@@ -86,8 +86,8 @@ describe("proposalFeatureForKind", () => {
     expect(proposalFeatureForKind("compra_venda_v1")).toBe(FEATURE.VENDAS_PROPOSTAS);
   });
 
-  it("propostas nasce OFF nos dois módulos (o gating da API depende disso)", () => {
-    expect(featureDefault(FEATURE.VENDAS_PROPOSTAS)).toBe(false);
-    expect(featureDefault(FEATURE.LOCACAO_PROPOSTAS)).toBe(false);
+  it("propostas nasce ON nos dois módulos (graduou do rollout gradual em 2026-07-24)", () => {
+    expect(featureDefault(FEATURE.VENDAS_PROPOSTAS)).toBe(true);
+    expect(featureDefault(FEATURE.LOCACAO_PROPOSTAS)).toBe(true);
   });
 });

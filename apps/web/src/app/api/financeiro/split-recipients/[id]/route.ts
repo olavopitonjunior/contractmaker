@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 import {
@@ -44,6 +45,10 @@ const patchSchema = z.object({
   bankAccountType: z.enum(["corrente", "poupanca"]).nullable().optional(),
   bankHolderName: z.string().trim().max(200).nullable().optional(),
   bankHolderDoc: z.string().trim().max(18).nullable().optional(),
+  // Preferências de notificação do corretor (2026-07). Aditivo.
+  notifyByEmail: z.boolean().optional(),
+  notifyByWhatsapp: z.boolean().optional(),
+  notifyOptOut: z.boolean().optional(),
 });
 
 export async function PATCH(
@@ -84,10 +89,32 @@ export async function PATCH(
     return NextResponse.json({ error: "Recipient não encontrado" }, { status: 404 });
   }
 
-  const updated = await prisma.splitRecipient.update({
-    where: { id },
-    data: parsed.data,
-  });
+  const patchData = { ...parsed.data };
+  if (typeof patchData.cpfCnpj === "string") {
+    // Digits-only: o partial unique de commissioner compara normalizado.
+    patchData.cpfCnpj = patchData.cpfCnpj.replace(/\D/g, "") || null;
+  }
+
+  let updated;
+  try {
+    updated = await prisma.splitRecipient.update({
+      where: { id },
+      data: patchData,
+    });
+  } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2002"
+    ) {
+      // Reativar/editar colidiu com outro commissioner ativo de mesmo CPF/CNPJ
+      // (partial unique) ou com walletId/pixAddressKey existente.
+      return NextResponse.json(
+        { error: "Já existe um cadastro ativo com este CPF/CNPJ, wallet ou chave PIX" },
+        { status: 409 }
+      );
+    }
+    throw err;
+  }
 
   await audit(
     { orgId: ctx.orgId, userId: ctx.userId, ipAddress: ctx.ipAddress, userAgent: ctx.userAgent },

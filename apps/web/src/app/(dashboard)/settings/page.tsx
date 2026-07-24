@@ -6,7 +6,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
 import { AgentSettings } from "@/components/settings/AgentSettings";
-import { BookOpen, Palette, Lightbulb, ShieldCheck, Sparkles, KeyRound, Users, UsersRound, Split, FileSignature, Wallet, ListChecks, UserRound, Receipt, FileText, Rocket, type LucideIcon } from "lucide-react";
+import { BellRing, BookOpen, Palette, Lightbulb, ShieldCheck, Sparkles, KeyRound, Users, UsersRound, Split, FileSignature, Wallet, ListChecks, UserRound, Receipt, FileText, Rocket, type LucideIcon } from "lucide-react";
 
 type SettingsLink = { href: string; label: string; icon: LucideIcon };
 const SETTINGS_GROUPS: { title: string; items: SettingsLink[] }[] = [
@@ -25,6 +25,7 @@ const SETTINGS_GROUPS: { title: string; items: SettingsLink[] }[] = [
       { href: "/settings/knowledge-base", label: "Base de conhecimento", icon: BookOpen },
       { href: "/settings/document-styles", label: "Estilos de documento", icon: Palette },
       { href: "/settings/formulario", label: "Formulário", icon: ListChecks },
+      { href: "/settings/notificacoes", label: "Notificações do processo", icon: BellRing },
       { href: "/clauses/proposals", label: "Propostas de cláusulas", icon: Lightbulb },
     ],
   },

@@ -24,7 +24,9 @@ import {
 } from "@/lib/forms/party-required";
 import { toast } from "sonner";
 import { useAutoSave } from "@/hooks/use-auto-save";
+import { useDirtyTopLevelScope } from "@/hooks/use-dirty-scope";
 import { DocumentosStep } from "@/components/forms/steps/DocumentosStep";
+import type { Assignment } from "@/lib/forms/extracted-to-form";
 import { VendedorStep } from "@/components/forms/steps/VendedorStep";
 import { CompradorStep } from "@/components/forms/steps/CompradorStep";
 import { ImovelStep } from "@/components/forms/steps/ImovelStep";
@@ -79,6 +81,11 @@ interface SalesFormWizardProps {
    * pra mandar apenas keys autorizadas.
    */
   pathScope?: readonly string[];
+  /**
+   * Link individual: slot do próprio participante (role + partyIndex) pro
+   * auto-assign/auto-apply de OCR no DocumentosStep (Fix 4).
+   */
+  selfAssignment?: Assignment;
   /**
    * Finalize do subtoken (PR 4): em vez de PATCH `status: "completo"` no
    * form principal (que dispara geração de contrato), PATCH no subtoken
@@ -421,6 +428,7 @@ export function SalesFormWizard({
   stepIndexes,
   endpoint,
   pathScope,
+  selfAssignment,
   finalizeMode = "main",
   readOnly = false,
 }: SalesFormWizardProps) {
@@ -467,9 +475,15 @@ export function SalesFormWizard({
 
   const watchedData = useWatch({ control: form.control }) as Record<string, unknown>;
   const autoSaveEndpoint = endpoint ?? `/api/forms/${token}`;
+  // Auto-save escopado pelas chaves top-level que ESTE cliente sujou: uma aba
+  // do token principal hidratada antes de um participante salvar não ecoa mais
+  // o template vazio de vendedores/compradores por cima do que a parte gravou
+  // (arrays substituem inteiros no merge). O finalize continua full-state — é
+  // ação explícita e a validação server roda sobre o merged completo.
+  const autoSaveScope = useDirtyTopLevelScope(form.control, pathScope);
   const { status: saveStatus } = useAutoSave(token, watchedData, {
     endpoint: autoSaveEndpoint,
-    pathScope,
+    pathScope: autoSaveScope,
     // Depois do finalize o form fecha e o PATCH público passa a responder 403.
     // Sem desligar aqui, um auto-save com debounce pendente cai DEPOIS do
     // finalize e a tela de sucesso nasce com a pill em "erro".
@@ -785,7 +799,13 @@ export function SalesFormWizard({
   }
 
   const stepComponents = [
-    <DocumentosStep key="step-0" form={form} token={token} allowedTopKeys={pathScope} />,
+    <DocumentosStep
+      key="step-0"
+      form={form}
+      token={token}
+      allowedTopKeys={pathScope}
+      selfAssignment={selfAssignment}
+    />,
     <VendedorStep key="step-1" form={form} />,
     <CompradorStep key="step-2" form={form} />,
     <ImovelStep key="step-3" form={form} />,
