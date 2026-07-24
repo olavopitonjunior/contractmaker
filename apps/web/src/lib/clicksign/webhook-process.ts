@@ -25,6 +25,7 @@ import { resolveClickSignCreds } from "@/lib/clicksign/account";
 import type { WebhookPayload } from "@/lib/clicksign/types";
 import { autoPromoteDealOnContractSigned } from "@/lib/contracts/auto-promote-signed";
 import { notifyEnvelopeMilestone, resolveDealLink } from "@/lib/clicksign/notify-envelope";
+import { notifyDealEvent } from "@/lib/notifications/deal-events";
 import {
   completeInspectionOnEnvelopeClosed,
   revertInspectionOnEnvelopeCanceled,
@@ -277,6 +278,20 @@ export async function processClickSignWebhookPayload(
         linkUrl: await resolveDealLink(envelope.dealId),
         kind: "signed",
       });
+      // Fan-out pros corretores (email/WhatsApp). O SINO deste evento pertence
+      // ao notifyEnvelopeMilestone acima — o motor não re-emite (OWNS_BELL).
+      // dedupeKey=envelope.id: webhook reentregue não re-envia.
+      if (envelope.source === "contract" && envelope.dealId) {
+        waitUntil(
+          notifyDealEvent({
+            dealId: envelope.dealId,
+            orgId: envelope.orgId,
+            event: "contract_signed",
+            dedupeKey: envelope.id,
+            context: { extra: { envelopeId: envelope.id } },
+          })
+        );
+      }
       triggerSignedPdfDownload(envelope, payload);
       break;
     }

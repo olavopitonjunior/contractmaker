@@ -19,6 +19,7 @@ import {
 import { dispatchExternalSplits } from "./splitDispatcher";
 import { notifyChargeEvent, type ChargeEvent } from "@/lib/financeiro/notifications";
 import { autoPromoteDealOnCommissionPaid } from "@/lib/contracts/auto-promote-commission";
+import { notifyDealEvent } from "@/lib/notifications/deal-events";
 
 export function validateWebhookToken(headerToken: string | null): boolean {
   const expected = process.env.ASAAS_WEBHOOK_TOKEN;
@@ -314,6 +315,20 @@ export async function applyWebhookToCharge(
       chargeId: charge.id,
       event: notifEvent,
       orgId: charge.orgId,
+    });
+  }
+
+  // Notificação do processo → corretores: comissão paga. SINO pertence ao
+  // notifyChargeEvent acima (OWNS_BELL=false). Só kind="commission" — avulsa/
+  // aluguel paga não é "comissão paga". Inline pela razão serverless acima;
+  // notifyDealEvent nunca lança. dedupeKey=charge.id (webhook reentregue no-op).
+  if (notifEvent === "paid" && charge.kind === "commission" && charge.dealId) {
+    await notifyDealEvent({
+      dealId: charge.dealId,
+      orgId: charge.orgId,
+      event: "charge_paid",
+      dedupeKey: charge.id,
+      context: { extra: { chargeId: charge.id } },
     });
   }
 
