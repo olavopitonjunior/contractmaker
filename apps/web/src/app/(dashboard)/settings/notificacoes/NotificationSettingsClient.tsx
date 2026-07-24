@@ -66,7 +66,7 @@ export default function NotificationSettingsClient() {
       ...resolved,
       events: {
         ...resolved.events,
-        [ev]: { ...resolved.events[ev], [channel]: value },
+        [ev]: { broker: { ...resolved.events[ev].broker, [channel]: value } },
       },
     });
     const ok = await patch({ events: { [ev]: { broker: { [channel]: value } } } });
