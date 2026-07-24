@@ -33,7 +33,10 @@ export async function POST(
 
   const invite = await prisma.surveyInvite.findFirst({
     where: { id: params.inviteId, orgId: auth.org.id },
-    include: { template: { select: { name: true, status: true } } },
+    include: {
+      template: { select: { name: true, status: true } },
+      deal: { select: { id: true, kind: true, userId: true } },
+    },
   });
   if (!invite) {
     return NextResponse.json({ error: "Envio não encontrado" }, { status: 404 });
@@ -44,9 +47,9 @@ export async function POST(
       { status: 409 }
     );
   }
-  if (invite.channel !== "email") {
+  if (invite.channel !== "email" && invite.channel !== "whatsapp") {
     return NextResponse.json(
-      { error: "Reenvio disponível apenas pra envios por e-mail" },
+      { error: "Reenvio disponível apenas pra envios por e-mail ou WhatsApp" },
       { status: 400 }
     );
   }
@@ -64,6 +67,13 @@ export async function POST(
     invite: refreshed,
     templateName: invite.template.name,
     orgId: auth.org.id,
+    deal: invite.deal
+      ? {
+          id: invite.deal.id,
+          kind: invite.deal.kind === "locacao" ? "locacao" : "venda",
+          userId: invite.deal.userId,
+        }
+      : null,
   });
   if (!sent.ok) {
     return NextResponse.json({ error: sent.reason }, { status: 502 });

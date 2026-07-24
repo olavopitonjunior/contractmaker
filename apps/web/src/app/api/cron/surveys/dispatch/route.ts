@@ -4,6 +4,7 @@ import { requireCronAuth } from "@/lib/security/cron-auth";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
 import { dispatchSurveysForDeal } from "@/lib/surveys/dispatch";
 import { sendSurveyInvite } from "@/lib/surveys/channels";
+import { appendEvent } from "@/lib/newton/requests";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -61,15 +62,15 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Re-tenta envios de e-mail que falharam (falha transitória de SMTP no
+  // Re-tenta envios que falharam (falha transitória de SMTP/sidecar no
   // disparo inicial). O sendSurveyInvite re-marca "failed" se falhar de novo,
-  // então cada sweep faz no máximo 1 tentativa por invite.
+  // então cada sweep faz no máximo 1 tentativa por invite. WhatsApp re-tenta
+  // whatsapp e cai pro fallback email se continuar inviável.
   const failed = await prisma.surveyInvite.findMany({
     where: {
       status: "failed",
-      channel: "email",
+      channel: { in: ["email", "whatsapp"] },
       tokenExp: { gt: new Date() },
-      recipientEmail: { not: null },
     },
     select: {
       id: true,
@@ -81,6 +82,7 @@ export async function GET(req: NextRequest) {
       recipientPhone: true,
       remindersSent: true,
       template: { select: { name: true } },
+      deal: { select: { id: true, kind: true, userId: true } },
     },
     take: 100,
   });
@@ -90,8 +92,42 @@ export async function GET(req: NextRequest) {
       invite,
       templateName: invite.template.name,
       orgId: invite.orgId,
+      deal: invite.deal
+        ? {
+            id: invite.deal.id,
+            kind: invite.deal.kind === "locacao" ? "locacao" : "venda",
+            userId: invite.deal.userId,
+          }
+        : null,
     });
     if (sent.ok) retried++;
+  }
+
+  // Higiene anti-spam: NewtonRequests de pesquisa são one-shot (o ask instrui
+  // o agente a marcar fulfilled após enviar). Se o agente não fechou em 24h,
+  // cancelamos aqui — senão o sweep de NewtonRequests re-cobraria o cliente
+  // diariamente com a mesma pesquisa.
+  const staleRequests = await prisma.newtonRequest.findMany({
+    where: {
+      ask: { startsWith: "[survey_" },
+      status: { in: ["open", "chasing", "awaiting_reply"] },
+      createdAt: { lt: new Date(Date.now() - 24 * 60 * 60 * 1000) },
+    },
+    select: { id: true, eventsJson: true },
+    take: 50,
+  });
+  for (const request of staleRequests) {
+    await prisma.newtonRequest.update({
+      where: { id: request.id },
+      data: {
+        status: "cancelled",
+        eventsJson: appendEvent(request.eventsJson, {
+          actor: "sistema",
+          type: "survey_one_shot_expired",
+          note: "cancelado pela higiene do cron de pesquisas (one-shot >24h)",
+        }),
+      },
+    });
   }
 
   // Expira invites vencidos ainda em aberto (pending/sent/failed).
