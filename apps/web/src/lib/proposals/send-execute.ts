@@ -557,6 +557,62 @@ export type SendVendedorResult =
       detail?: string;
     };
 
+/**
+ * Mapeia SendVendedorResult pra { status, body } HTTP. Compartilhado entre a
+ * rota POST /send-vendedor (session) e o executor de intent PROPOSAL_SEND
+ * com `via: "vendedor"` (bearer pós-aprovação). "already" é tratado como
+ * sucesso (idempotente).
+ */
+export function vendedorResultToResponse(
+  result: SendVendedorResult
+): { status: number; body: Record<string, unknown> } {
+  if (result.ok) return { status: 200, body: { ok: true } };
+  switch (result.reason) {
+    case "already":
+      // Já enviado/em voo — idempotente, trata como sucesso.
+      return { status: 200, body: { ok: true, already: true } };
+    case "no_vendedor":
+      return {
+        status: 409,
+        body: { error: "Esta proposta não tem vendedor/proprietário para acionar." },
+      };
+    case "no_creds":
+      return {
+        status: 422,
+        body: { error: "Conta ClickSign não configurada para esta imobiliária." },
+      };
+    case "preflight":
+      return {
+        status: 422,
+        body: {
+          error:
+            "Confira os dados do vendedor (nome completo, e-mail/telefone) e tente novamente.",
+          detail: result.detail,
+        },
+      };
+    case "budget":
+      return {
+        status: 402,
+        body: {
+          error:
+            "Orçamento mensal de assinaturas atingido — libere saldo ou ajuste o limite em Configurações.",
+        },
+      };
+    case "locked":
+      return {
+        status: 409,
+        body: { error: "Envio ao vendedor já em andamento. Aguarde alguns segundos." },
+      };
+    case "not_found":
+      return { status: 404, body: { error: "Proposta não encontrada." } };
+    default:
+      return {
+        status: 502,
+        body: { error: result.detail ?? "Falha ao enviar ao vendedor." },
+      };
+  }
+}
+
 export async function sendVendedorEnvelope(
   proposalId: string
 ): Promise<SendVendedorResult> {
