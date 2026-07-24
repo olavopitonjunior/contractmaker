@@ -76,7 +76,7 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
       { key: FEATURE.VENDAS_PAGADORIA, label: "Pagadoria / comissão", default: true },
       { key: FEATURE.VENDAS_NEWTON, label: "Newton (agente WhatsApp) — vendas", default: false },
       { key: FEATURE.VENDAS_PROPOSTAS, label: "Propostas — vendas", default: true },
-      { key: FEATURE.VENDAS_PESQUISAS, label: "Pesquisas de satisfação — vendas", default: false },
+      { key: FEATURE.VENDAS_PESQUISAS, label: "Pesquisas de satisfação — vendas", default: true },
     ],
   },
   {
@@ -94,7 +94,7 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
       { key: FEATURE.LOCACAO_PESSOAS, label: "Pessoas", default: true },
       { key: FEATURE.LOCACAO_NEWTON, label: "Newton (agente WhatsApp) — locação", default: false },
       { key: FEATURE.LOCACAO_PROPOSTAS, label: "Propostas — locação", default: true },
-      { key: FEATURE.LOCACAO_PESQUISAS, label: "Pesquisas de satisfação — locação", default: false },
+      { key: FEATURE.LOCACAO_PESQUISAS, label: "Pesquisas de satisfação — locação", default: true },
     ],
   },
 ] as const;
@@ -158,7 +158,9 @@ export function proposalFeatureForKind(kind: string): FeatureKey {
 }
 
 /** Feature de Pesquisas de satisfação por kind (transversal, como o Newton).
- *  Default OFF nas duas — tenant liga no painel super-admin. */
+ *  Default ON nas duas desde 2026-07-24 (validada em staging + prod; PRs
+ *  #172/#179/#180). Org pode desligar via override. O CANAL WhatsApp continua
+ *  gateado pela feature do Newton (default OFF) — sem Newton, cai pra email. */
 export function surveyFeatureForKind(kind: string): FeatureKey {
   return kind === "locacao" ? FEATURE.LOCACAO_PESQUISAS : FEATURE.VENDAS_PESQUISAS;
 }
