@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import { isFormFinished } from "@/lib/forms/form-status";
 
 /**
  * Gate de acesso ao formulário público DEPOIS que ele foi enviado.
@@ -65,8 +66,7 @@ export interface FormGateSubject {
  *    sempre — o oposto do objetivo.
  */
 export function isFormClosed(form: FormGateSubject): boolean {
-  const finished = Boolean(form.completedAt) || form.status === "vinculado";
-  return finished && !form.reopenedAt;
+  return isFormFinished(form) && !form.reopenedAt;
 }
 
 /**

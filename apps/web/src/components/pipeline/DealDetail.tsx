@@ -15,6 +15,8 @@ import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
 import { LostDealBanner } from "@/components/pipeline/LostDealBanner";
 import { cn } from "@/lib/utils";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
+import { ReopenFormButton } from "@/components/forms/ReopenFormButton";
+import { isFormFinished } from "@/lib/forms/form-status";
 import type { SelectGroup } from "@/components/forms/NativeSelect";
 import type { Assignment, DocumentKind } from "@/lib/forms/extracted-to-form";
 import {
@@ -192,6 +194,7 @@ interface DealDetailProps {
       createdAt: Date;
       completedAt: Date | null;
       lockedAt: Date | null;
+      reopenedAt: Date | null;
       attachments: {
         id: string;
         filename: string;
@@ -262,7 +265,15 @@ export function DealDetail({
   const [formLockedAt, setFormLockedAt] = useState<string | null>(
     deal.form?.lockedAt ? deal.form.lockedAt.toISOString() : null,
   );
-  const [linkBusy, setLinkBusy] = useState<"lock" | "rotate" | null>(null);
+  // Form enviado pelo cliente (finalize) OU nascido preso a um contrato pronto
+  // (import/upload/proposta = "vinculado"). Só esses podem ser reabertos.
+  const formSubmitted = deal.form
+    ? isFormFinished({
+        completedAt: deal.form.completedAt,
+        status: deal.form.status,
+      })
+    : false;
+  const [linkBusy, setLinkBusy] = useState<"lock" | "rotate" | "reopen" | null>(null);
   const [confirmDuplicateOpen, setConfirmDuplicateOpen] = useState(false);
   const [chargeDialogOpen, setChargeDialogOpen] = useState(false);
   const [chargeDialogMode, setChargeDialogMode] = useState<
@@ -790,6 +801,18 @@ export function DealDetail({
                 )}
                 {formLockedAt ? "Destravar" : "Travar"}
               </Button>
+              <ReopenFormButton
+                token={formToken}
+                submitted={formSubmitted}
+                reopenedAt={
+                  deal.form.reopenedAt
+                    ? deal.form.reopenedAt.toISOString()
+                    : null
+                }
+                disabled={linkBusy !== null}
+                onReopened={() => setFormLockedAt(null)}
+                onBusyChange={(b) => setLinkBusy(b ? "reopen" : null)}
+              />
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button
