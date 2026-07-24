@@ -11,7 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot, Pencil, Check, CheckCircle2, X, Archive, ArchiveRestore, Lock, LockOpen, ShieldAlert, Users } from "lucide-react";
 import { SendAttachmentEnvelopeDialog } from "@/components/pipeline/SendAttachmentEnvelopeDialog";
 import { buildPartySuggestions } from "@/lib/clicksign/party-suggestions";
-import { isMarried } from "@/lib/forms/estado-civil";
+import { isExplicitlyUnmarried } from "@/lib/forms/estado-civil";
 import { AddDocumentsCard } from "@/components/pipeline/AddDocumentsCard";
 import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
 import { LostDealBanner } from "@/components/pipeline/LostDealBanner";
@@ -173,7 +173,10 @@ function PartyDetails({ p }: { p: Parte }) {
           label="Cônjuge"
           person={p.conjuge}
           signs={
-            isMarried(p.estado_civil) &&
+            // `isExplicitlyUnmarried`, não `isMarried`: o mapper é leniente
+            // (estado civil ausente ainda inclui), e um badge estrito voltaria
+            // a mentir — só que na direção oposta.
+            !isExplicitlyUnmarried(p.estado_civil) &&
             p.conjuge.incluir_como_signatario !== false &&
             Boolean(p.conjuge.email)
           }

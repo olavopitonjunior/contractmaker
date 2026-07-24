@@ -546,6 +546,10 @@ export async function updateSigner(
     // parte PJ que só tem CNPJ (sem CPF do representante) trava o PATCH.
     const digits = input.documentation.replace(/\D/g, "");
     if (digits.length === 14) {
+      // `null` explícito limpa um CPF que já estivesse lá — sem isso, trocar um
+      // CPF por um CNPJ deixaria o documento antigo na ClickSign enquanto o DB
+      // local passa a guardar o CNPJ (signer-actions.ts), e os dois divergem.
+      attributes.documentation = null;
       attributes.has_documentation = false;
     } else {
       attributes.documentation = input.documentation

@@ -9,6 +9,7 @@ import { enrichContractData } from "@/lib/services/contract-generation";
 import { DEFAULT_CONTRACT_SETTINGS } from "@/lib/contracts/default-config";
 import { enrichLocacaoData } from "@/lib/locacao/enrich";
 import { renderContratoHTML } from "@/lib/render/handlebars";
+import { dealDataToSigners } from "@/lib/clicksign/mapping";
 import {
   previewSampleDataAVista,
   previewSampleDataFinanciamento,
@@ -79,6 +80,50 @@ describe("template parity (A0.1)", () => {
     const html = renderContratoHTML(tpl, enriched as Record<string, unknown>);
     const leftover = leftoverMustaches(html);
     expect(leftover, `Variáveis sem fonte no template ${file}: ${leftover.join(", ")}`).toEqual([]);
+  });
+
+  // Quem assina TEM que ser quem o contrato qualifica. Cada camada tinha a sua
+  // lista literal de rótulos de estado civil, e elas discordavam: com "União
+  // estável" (minúsculo — o que os prompts do Gemini pedem ao OCR) o cônjuge
+  // recebia um CCV real da ClickSign para assinar um documento em que não era
+  // qualificado nem tinha linha de assinatura. Hoje as duas pontas consultam
+  // `isExplicitlyUnmarried`, o template via helper `temConjuge`.
+  it.each([
+    undefined,
+    "Casado(a)",
+    "União Estável",
+    "União estável",
+    "Uniao Estavel",
+    "Outro",
+    "Solteiro(a)",
+    "Divorciado(a)",
+    "Viúvo(a)",
+    "viúva",
+  ])("estado_civil=%s: mapper e template concordam sobre o cônjuge", (estado_civil) => {
+    const parte = {
+      tipo_pessoa: "fisica",
+      nome: "Odair",
+      cpf: "11144477735",
+      email: "odair@x.com",
+      estado_civil,
+      conjuge: { nome: "Elenira", cpf: "52998224725", email: "elenira@x.com" },
+    };
+    const { signers } = dealDataToSigners({ vendedores: [parte], compradores: [] });
+    const assina = signers.some((s) => s.subKind === "conjuge");
+
+    const tpl = readFileSync(templatePath("ccv_a_vista_v2.hbs"), "utf-8");
+    const html = renderContratoHTML(tpl, {
+      vendedores: [parte],
+      compradores: [],
+      imoveis: [],
+      pagamento: {},
+      comissao: {},
+      config: {},
+    } as Record<string, unknown>);
+
+    expect(assina, `assina=${assina}, no contrato=${html.includes("Elenira")}`).toBe(
+      html.includes("Elenira")
+    );
   });
 
   // Outorga uxória em locação (2026-07-24). O `leftoverMustaches` acima não

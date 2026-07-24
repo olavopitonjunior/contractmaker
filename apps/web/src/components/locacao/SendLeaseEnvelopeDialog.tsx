@@ -21,6 +21,7 @@ import {
   type ClicksignRole,
 } from "@/lib/clicksign/roles";
 import { WitnessPicker, pickNewWitnesses, type RegistryWitness } from "@/components/pipeline/WitnessPicker";
+import { isExplicitlyUnmarried } from "@/lib/forms/estado-civil";
 
 interface Representante {
   nome?: string;
@@ -45,6 +46,7 @@ interface LeaseParte {
   cnpj?: string;
   email?: string;
   mobile_phone?: string;
+  estado_civil?: string;
   representante?: Representante;
   conjuge?: Conjuge;
 }
@@ -201,8 +203,14 @@ function buildPartyRows(
     },
   ];
 
+  // Mesmos gates da popup de venda: a lista daqui é autoritativa e pula o
+  // `leaseDataToSigners`, então sem eles um ex-cônjuge voltaria pré-marcado.
   const conjugeName = (p.conjuge?.nome ?? "").trim();
-  if (conjugeName) {
+  if (
+    conjugeName &&
+    !isExplicitlyUnmarried(p.estado_civil) &&
+    p.conjuge?.incluir_como_signatario !== false
+  ) {
     rows.push({
       rowId: `${sourceKind}-${idx}-conjuge`,
       sourceKind,

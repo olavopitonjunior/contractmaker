@@ -20,6 +20,8 @@
  *    o path "guarda-chuva" `vendedores`) passam intactos.
  */
 
+import { isMarried } from "@/lib/forms/estado-civil";
+
 const PARTY_PATH_RE = /^(vendedores|compradores)\.(\d+)\.(.+)$/;
 
 // Campos exclusivos de Pessoa Física — não têm equivalente em PJ.
@@ -234,10 +236,8 @@ export const PARTY_SUB_LABELS: Record<PartySubKey, string> = {
   representante: "representante legal",
 };
 
-const ESTADOS_CIVIS_COM_CONJUGE = new Set(["Casado(a)", "União Estável"]);
-
 export interface SignatureRecommendation {
-  /** "vendedores" | "compradores" | "locadores" | "locatarios" | "garantia.fiador" */
+  /** "vendedores" | "compradores" | "locadores" | "locatarios" | "garantia" */
   list: string;
   idx: number;
   sub: PartySubKey;
@@ -262,10 +262,7 @@ export function isPartySubApplicable(
     case "representante":
       return isPJ;
     case "conjuge":
-      return (
-        !isPJ &&
-        ESTADOS_CIVIS_COM_CONJUGE.has(String(getValue(`${prefix}.estado_civil`) ?? ""))
-      );
+      return !isPJ && isMarried(getValue(`${prefix}.estado_civil`));
     case "procurador":
       return !isPJ && getValue(`${prefix}.tem_procurador`) === true;
   }

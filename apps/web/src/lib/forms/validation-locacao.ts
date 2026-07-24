@@ -3,6 +3,7 @@ import {
   collectPartyFormatIssues,
   isValidBirthdate,
 } from "@/lib/forms/field-formats";
+import { isMarried } from "@/lib/forms/estado-civil";
 
 // ============================================================================
 // Locação — schema Zod (schemaType "locacao_residencial_v1").
@@ -495,8 +496,6 @@ export function collectLocacaoFinalizeIssues(
   return issues;
 }
 
-const ESTADOS_CIVIS_COM_CONJUGE = new Set(["Casado(a)", "União Estável"]);
-
 /**
  * Nome + CPF do cônjuge quando a parte PF é casada ou vive em união estável.
  * Sem a outorga do cônjuge a locação de imóvel comum é anulável — mesma regra
@@ -504,7 +503,7 @@ const ESTADOS_CIVIS_COM_CONJUGE = new Set(["Casado(a)", "União Estável"]);
  */
 function collectConjugeIssues(parte: Record<string, unknown>): FinalizeIssue[] {
   if (parte.tipo_pessoa === "juridica") return [];
-  if (!ESTADOS_CIVIS_COM_CONJUGE.has(String(parte.estado_civil ?? ""))) return [];
+  if (!isMarried(parte.estado_civil)) return [];
   const conjuge = (parte.conjuge as Record<string, unknown> | undefined) ?? {};
   const out: FinalizeIssue[] = [];
   if (isBlankStr(conjuge.nome)) {

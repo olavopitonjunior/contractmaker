@@ -90,6 +90,13 @@ export interface MissingEmailEntry {
 export interface MappingResult {
   signers: SignerInput[];
   missing: MissingEmailEntry[];
+  /**
+   * Sub-partes descartadas por e-mail repetido. Campo aditivo — consumidores
+   * antigos destruturam só `{ signers, missing }`. Existe pra o descarte não
+   * ser silencioso: quem some daqui continua com linha de assinatura no PDF,
+   * e o operador precisa ver isso na revisão do envelope.
+   */
+  dropped: SignerInput[];
 }
 
 const onlyDigits = (s: string | undefined | null): string | undefined => {
@@ -290,7 +297,8 @@ export function dealDataToSigners(
     }
   }
 
-  return { signers: dropDuplicateSubParties(signers), missing };
+  const { kept, dropped } = dropDuplicateSubParties(signers);
+  return { signers: kept, missing, dropped };
 }
 
 export function isValidEmail(email: string): boolean {
@@ -309,20 +317,36 @@ export function isValidEmail(email: string): boolean {
  * (ele é a parte seguinte do array), então checar "já vi este e-mail" durante a
  * construção não pegaria o caso. A parte titular sempre vence.
  */
-function dropDuplicateSubParties(signers: SignerInput[]): SignerInput[] {
+function dropDuplicateSubParties(signers: SignerInput[]): {
+  kept: SignerInput[];
+  dropped: SignerInput[];
+} {
   const isSub = (s: SignerInput) =>
     s.subKind === "conjuge" || s.subKind === "procurador";
   const primaryEmails = new Set(
     signers.filter((s) => !isSub(s)).map((s) => s.email.toLowerCase())
   );
   const seenSub = new Set<string>();
-  return signers.filter((s) => {
-    if (!isSub(s)) return true;
+  const kept: SignerInput[] = [];
+  const dropped: SignerInput[] = [];
+  for (const s of signers) {
+    if (!isSub(s)) {
+      // Titulares repetidos NÃO são filtrados de propósito: dois titulares com
+      // o mesmo e-mail são duas pessoas distintas dividindo uma caixa, e
+      // descartar um perderia uma assinatura de verdade. A ClickSign recusa o
+      // envelope com 422 — falha barulhenta é melhor que contrato incompleto.
+      kept.push(s);
+      continue;
+    }
     const email = s.email.toLowerCase();
-    if (primaryEmails.has(email) || seenSub.has(email)) return false;
+    if (primaryEmails.has(email) || seenSub.has(email)) {
+      dropped.push(s);
+      continue;
+    }
     seenSub.add(email);
-    return true;
-  });
+    kept.push(s);
+  }
+  return { kept, dropped };
 }
 
 // ============================================================================
@@ -486,13 +510,17 @@ export function leaseDataToSigners(
             phone,
             authMethod,
           });
+          // Outorga do cônjuge do fiador — o art. 1.647, III do Código Civil
+          // exige a anuência conjugal na fiança, então ela vale ainda mais
+          // aqui. Fica DENTRO do else pelo mesmo motivo do `collect`: com o
+          // fiador em `missing` o envio aborta, e um cônjuge solto na lista só
+          // confundiria a revisão do preview.
+          pushConjuge("fiador", 0, f);
         }
-        // Outorga do cônjuge do fiador — o art. 1.647, III do Código Civil
-        // exige a anuência conjugal na fiança, então ela vale ainda mais aqui.
-        pushConjuge("fiador", 0, f);
       }
     }
   }
 
-  return { signers: dropDuplicateSubParties(signers), missing };
+  const { kept, dropped } = dropDuplicateSubParties(signers);
+  return { signers: kept, missing, dropped };
 }

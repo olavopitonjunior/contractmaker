@@ -1,12 +1,16 @@
 /**
  * Estado civil que exige outorga do cônjuge.
  *
- * Existia como `Set(["Casado(a)", "União Estável"])` copiado em 5 lugares
- * (validation, validation-locacao, party-required, dedup-conjuges, mappers),
- * e nenhuma cópia batia com o que o OCR devolve: os prompts do Gemini pedem
- * `"União estável"` (minúsculo) em `ccv-extractor.ts` e `locacao-extractor.ts`.
- * Um deal importado por OCR não disparava nem a exigência do cônjuge, nem a
- * recomendação de e-mail, nem o render do bloco de outorga.
+ * Fonte única. A regra vivia como `Set(["Casado(a)", "União Estável"])` copiada
+ * em `validation.ts`, `validation-locacao.ts`, `party-required.ts`,
+ * `dedup-conjuges.ts` e nos templates Handlebars — e nenhuma cópia batia com o
+ * que o OCR devolve: os prompts do Gemini pedem `"União estável"` (minúsculo)
+ * em `ccv-extractor.ts` e `locacao-extractor.ts`. Um deal importado por OCR não
+ * disparava a exigência do cônjuge, nem a recomendação de e-mail, nem o dedup —
+ * e as camadas discordavam entre si sobre quem é casado, a ponto de o cônjuge
+ * assinar um contrato em que não aparecia qualificado.
+ *
+ * Os templates consomem via helper `temConjuge` (lib/render/handlebars.ts).
  *
  * A normalização (lowercase + sem acento + sem sufixo de gênero) resolve as
  * variantes conhecidas: "Casado(a)", "casado", "Casada", "União Estável",

@@ -29,6 +29,7 @@ import {
   type ClicksignRole,
 } from "@/lib/clicksign/roles";
 import { suggestEmailDomain } from "@/lib/forms/email-typo";
+import { isExplicitlyUnmarried } from "@/lib/forms/estado-civil";
 import { WitnessPicker, pickNewWitnesses, type RegistryWitness } from "./WitnessPicker";
 
 interface Conjuge {
@@ -62,6 +63,8 @@ interface Parte {
   cnpj?: string;
   email?: string;
   mobile_phone?: string;
+  estado_civil?: string;
+  tem_procurador?: boolean;
   conjuge?: Conjuge;
   procurador?: Procurador;
   representante?: Representante;
@@ -222,9 +225,18 @@ function buildInitialRows(
         addedDuringDialog: false,
         clicksignRole: defaultRoleFor(sourceKind, "titular"),
       });
-      // Cônjuge — só quando o form trouxe nome.
+      // Cônjuge — nome preenchido, estado civil que não negue o casamento e
+      // opt-out respeitado. Sem esses dois últimos gates a popup reintroduzia
+      // exatamente o que o mapper barra: a lista daqui é AUTORITATIVA
+      // (`input.signers` em executor.ts pula `dealDataToSigners` inteiro), então
+      // um ex-cônjuge ou uma linha que o operador já removeu num envelope
+      // anterior voltava pré-marcada — e ele pagava e reenviava sem perceber.
       const conjugeName = (p.conjuge?.nome ?? "").trim();
-      if (conjugeName) {
+      if (
+        conjugeName &&
+        !isExplicitlyUnmarried(p.estado_civil) &&
+        p.conjuge?.incluir_como_signatario !== false
+      ) {
         rows.push({
           rowId: `${sourceKind}-${idx}-conjuge`,
           sourceKind,
@@ -238,9 +250,15 @@ function buildInitialRows(
           clicksignRole: defaultRoleFor(sourceKind, "conjuge"),
         });
       }
-      // Procurador — só quando o form trouxe nome.
+      // Procurador — mesmos gates do cônjuge; `tem_procurador === false` é o
+      // operador tendo desmarcado "Possui procurador" (que esconde os campos
+      // mas não limpa o objeto).
       const procName = (p.procurador?.nome ?? "").trim();
-      if (procName) {
+      if (
+        procName &&
+        p.tem_procurador !== false &&
+        p.procurador?.incluir_como_signatario !== false
+      ) {
         rows.push({
           rowId: `${sourceKind}-${idx}-procurador`,
           sourceKind,

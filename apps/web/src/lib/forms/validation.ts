@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { collectPartyFormatIssues } from "@/lib/forms/field-formats";
+import { isMarried } from "@/lib/forms/estado-civil";
 
 /**
  * Teto das observações gerais do formulário. Existe por dois motivos além de
@@ -398,8 +399,10 @@ export const step7Schema = z.object({
 // are mandatory. This mirrors the server-side validator in lib/ai/validators.ts
 // so the error surfaces during the form flow (on submit) instead of only at
 // contract approval time, where the user would have lost context.
-const requiresConjuge = (estadoCivil?: string) =>
-  estadoCivil === "Casado(a)" || estadoCivil === "União Estável";
+// Fonte única em lib/forms/estado-civil.ts — a comparação literal por rótulo
+// vivia copiada em 5 arquivos e nenhuma cópia reconhecia "União estável"
+// minúsculo, que é o que os prompts do Gemini pedem ao OCR.
+const requiresConjuge = isMarried;
 
 export const dadosContratoSchema = step1Schema
   .merge(step2Schema)

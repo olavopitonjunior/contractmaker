@@ -1,4 +1,5 @@
 ﻿import Handlebars from 'handlebars';
+import { isExplicitlyUnmarried } from '@/lib/forms/estado-civil';
 
 function valorPorExtenso(valor: number): string {
   if (Number.isNaN(valor) || valor === null || valor === undefined) return '';
@@ -210,6 +211,21 @@ export function registerHandlebarsHelpers(): void {
   Handlebars.registerHelper('gt', (a, b) => a > b);
 
   Handlebars.registerHelper('existe', (val) => val !== null && val !== undefined && val !== '');
+
+  /**
+   * `temConjuge estado_civil` — outorga uxória. Compartilha a implementação com
+   * `dealDataToSigners`/`leaseDataToSigners` (lib/forms/estado-civil.ts), que é
+   * o ponto: antes cada camada tinha a sua lista de rótulos, e elas discordavam.
+   * O `(or (eq ... "Casado(a)") ...)` literal é case-sensitive e não normaliza
+   * acento, então `"União estável"` — que é justamente o que os prompts do
+   * Gemini pedem ao OCR — fazia o cônjuge assinar um contrato onde ele não
+   * aparecia qualificado nem tinha linha de assinatura.
+   *
+   * Leniente de propósito: só nega para quem DECLAROU não ter cônjuge.
+   */
+  Handlebars.registerHelper('temConjuge', (estadoCivil: unknown) =>
+    !isExplicitlyUnmarried(estadoCivil)
+  );
 }
 
 let helpersRegistered = false;

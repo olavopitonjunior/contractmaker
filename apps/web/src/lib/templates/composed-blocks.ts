@@ -43,15 +43,18 @@ const PESSOA_HBS = `{{#if (eq this.tipo_pessoa "fisica")}}{{this.nome}}{{#if (ex
 // `qualificacaoPessoas` seja substring do contrato renderizado.
 // O gate por estado civil evita que um ex-cônjuge deixado no dataJson volte a
 // ser qualificado — trocar o estado civil no form esconde os campos mas não
-// apaga o sub-objeto. É deliberadamente LENIENTE (`unless` sobre os estados de
-// não-casado, em vez de `if` sobre os de casado): estado civil ausente ou fora
-// da lista canônica — dataJson legado, variante do OCR ("União estável"
-// minúsculo) — continua qualificando. Omitir a outorga de quem é casado de
-// verdade invalida o contrato; exibir a de quem esqueceu de limpar o campo, não.
-const NAO_CASADO_HBS = (p: string) =>
-  `{{#unless (or (eq ${p}.estado_civil "Solteiro(a)") (eq ${p}.estado_civil "Divorciado(a)") (eq ${p}.estado_civil "Viúvo(a)") (eq ${p}.estado_civil "Separado(a)"))}}`;
+// apaga o sub-objeto. Usa o helper `temConjuge`, que compartilha a
+// implementação com os mappers ClickSign (lib/forms/estado-civil.ts): manter a
+// regra escrita em Handlebars literal fazia as camadas discordarem sobre quem
+// é casado, e o cônjuge assinava um contrato onde não era qualificado.
+const TEM_CONJUGE_HBS = (p: string) => `{{#if (temConjuge ${p}.estado_civil)}}`;
 
-const CONJUGE_SUFFIX_HBS = `{{#if this.conjuge.nome}}${NAO_CASADO_HBS("this")}, casado(a) com {{this.conjuge.nome}}{{#if (existe this.conjuge.cpf)}}, inscrito(a) no CPF/MF sob nº {{cpf this.conjuge.cpf}}{{/if}}{{/unless}}{{/if}}`;
+/**
+ * Exportado pra `placeholder-map.test.ts` travar a paridade com os `.hbs`:
+ * o teste de substring do render passaria mesmo se as duas fontes divergissem
+ * em ordem de condições.
+ */
+export const CONJUGE_SUFFIX_HBS = `{{#if this.conjuge.nome}}${TEM_CONJUGE_HBS("this")}, casado(a) com {{this.conjuge.nome}}{{#if (existe this.conjuge.cpf)}}, inscrito(a) no CPF/MF sob nº {{cpf this.conjuge.cpf}}{{/if}}{{/if}}{{/if}}`;
 
 const PESSOA_COM_CONJUGE_HBS = `${PESSOA_HBS}${CONJUGE_SUFFIX_HBS}`;
 
@@ -72,7 +75,7 @@ export function qualificacaoPessoasVenda(pessoas: unknown[]): string {
   return renderBlock(PESSOAS_VENDA_HBS, { pessoas });
 }
 
-const FIADOR_HBS = `{{#if (eq garantia.tipo "fiador")}}{{#if (eq garantia.fiador.tipo_pessoa "juridica")}}{{garantia.fiador.razao_social}}, pessoa jurídica de direito privado, inscrita no CNPJ/MF sob nº {{cnpj garantia.fiador.cnpj}}{{else}}{{garantia.fiador.nome}}{{#if (existe garantia.fiador.nacionalidade)}}, {{garantia.fiador.nacionalidade}}{{/if}}{{#if (existe garantia.fiador.estado_civil)}}, {{garantia.fiador.estado_civil}}{{/if}}{{#if (existe garantia.fiador.rg)}}, portador(a) da cédula de identidade RG nº {{garantia.fiador.rg}}{{/if}}{{#if (existe garantia.fiador.cpf)}}, inscrito(a) no CPF/MF sob nº {{cpf garantia.fiador.cpf}}{{/if}}{{#if (existe garantia.fiador.endereco)}}, residente e domiciliado(a) na {{garantia.fiador.endereco}}, nº {{garantia.fiador.numero}}, {{garantia.fiador.cidade}}/{{garantia.fiador.uf}}{{/if}}{{#if garantia.fiador.conjuge.nome}}${NAO_CASADO_HBS("garantia.fiador")}, casado(a) com {{garantia.fiador.conjuge.nome}}{{#if (existe garantia.fiador.conjuge.cpf)}}, inscrito(a) no CPF/MF sob nº {{cpf garantia.fiador.conjuge.cpf}}{{/if}}{{/unless}}{{/if}}{{/if}}{{/if}}`;
+const FIADOR_HBS = `{{#if (eq garantia.tipo "fiador")}}{{#if (eq garantia.fiador.tipo_pessoa "juridica")}}{{garantia.fiador.razao_social}}, pessoa jurídica de direito privado, inscrita no CNPJ/MF sob nº {{cnpj garantia.fiador.cnpj}}{{else}}{{garantia.fiador.nome}}{{#if (existe garantia.fiador.nacionalidade)}}, {{garantia.fiador.nacionalidade}}{{/if}}{{#if (existe garantia.fiador.estado_civil)}}, {{garantia.fiador.estado_civil}}{{/if}}{{#if (existe garantia.fiador.rg)}}, portador(a) da cédula de identidade RG nº {{garantia.fiador.rg}}{{/if}}{{#if (existe garantia.fiador.cpf)}}, inscrito(a) no CPF/MF sob nº {{cpf garantia.fiador.cpf}}{{/if}}{{#if (existe garantia.fiador.endereco)}}, residente e domiciliado(a) na {{garantia.fiador.endereco}}, nº {{garantia.fiador.numero}}, {{garantia.fiador.cidade}}/{{garantia.fiador.uf}}{{/if}}{{#if garantia.fiador.conjuge.nome}}${TEM_CONJUGE_HBS("garantia.fiador")}, casado(a) com {{garantia.fiador.conjuge.nome}}{{#if (existe garantia.fiador.conjuge.cpf)}}, inscrito(a) no CPF/MF sob nº {{cpf garantia.fiador.conjuge.cpf}}{{/if}}{{/if}}{{/if}}{{/if}}{{/if}}`;
 
 export function qualificacaoFiador(data: Record<string, unknown>): string {
   return renderBlock(FIADOR_HBS, data);
@@ -120,9 +123,9 @@ export function blocoAdministradora(data: Record<string, unknown>): string {
 // LOCATÁRIA") e com `style`; aqui não há paridade literal exigida, porque
 // `blocoAssinaturas` só alimenta os templates de engine `google_docs` (o texto
 // é achatado por htmlToPlainText antes de virar placeholder).
-const ASSINATURA_CONJUGE_HBS = `{{#if this.conjuge.nome}}${NAO_CASADO_HBS("this")}<p>____________________________________________<br>{{this.conjuge.nome}}<br>CÔNJUGE</p>{{/unless}}{{/if}}`;
+const ASSINATURA_CONJUGE_HBS = `{{#if this.conjuge.nome}}${TEM_CONJUGE_HBS("this")}<p>____________________________________________<br>{{this.conjuge.nome}}<br>CÔNJUGE</p>{{/if}}{{/if}}`;
 
-const ASSINATURAS_HBS = `{{#each locatarios}}<p>____________________________________________<br>{{#if (eq this.tipo_pessoa "fisica")}}{{this.nome}}{{else}}{{this.razao_social}}{{/if}}<br>PARTE LOCATÁRIA</p>${ASSINATURA_CONJUGE_HBS}{{/each}}{{#each locadores}}<p>____________________________________________<br>{{#if (eq this.tipo_pessoa "fisica")}}{{this.nome}}{{else}}{{this.razao_social}}{{/if}}<br>PARTE LOCADORA</p>${ASSINATURA_CONJUGE_HBS}{{/each}}{{#if (eq garantia.tipo "fiador")}}<p>____________________________________________<br>{{#if (eq garantia.fiador.tipo_pessoa "juridica")}}{{garantia.fiador.razao_social}}{{else}}{{garantia.fiador.nome}}{{/if}}<br>FIADOR(A)</p>{{#if garantia.fiador.conjuge.nome}}${NAO_CASADO_HBS("garantia.fiador")}<p>____________________________________________<br>{{garantia.fiador.conjuge.nome}}<br>CÔNJUGE DO(A) FIADOR(A)</p>{{/unless}}{{/if}}{{/if}}<p>____________________________________________<br>Nome:<br>CPF:<br>Testemunha</p><p>____________________________________________<br>Nome:<br>CPF:<br>Testemunha</p>`;
+const ASSINATURAS_HBS = `{{#each locatarios}}<p>____________________________________________<br>{{#if (eq this.tipo_pessoa "fisica")}}{{this.nome}}{{else}}{{this.razao_social}}{{/if}}<br>PARTE LOCATÁRIA</p>${ASSINATURA_CONJUGE_HBS}{{/each}}{{#each locadores}}<p>____________________________________________<br>{{#if (eq this.tipo_pessoa "fisica")}}{{this.nome}}{{else}}{{this.razao_social}}{{/if}}<br>PARTE LOCADORA</p>${ASSINATURA_CONJUGE_HBS}{{/each}}{{#if (eq garantia.tipo "fiador")}}<p>____________________________________________<br>{{#if (eq garantia.fiador.tipo_pessoa "juridica")}}{{garantia.fiador.razao_social}}{{else}}{{garantia.fiador.nome}}{{/if}}<br>FIADOR(A)</p>{{#if garantia.fiador.conjuge.nome}}${TEM_CONJUGE_HBS("garantia.fiador")}<p>____________________________________________<br>{{garantia.fiador.conjuge.nome}}<br>CÔNJUGE DO(A) FIADOR(A)</p>{{/if}}{{/if}}{{/if}}<p>____________________________________________<br>Nome:<br>CPF:<br>Testemunha</p><p>____________________________________________<br>Nome:<br>CPF:<br>Testemunha</p>`;
 
 export function blocoAssinaturas(data: Record<string, unknown>): string {
   return renderBlock(ASSINATURAS_HBS, data);

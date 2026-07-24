@@ -10,7 +10,12 @@ import {
   buildVendaPlaceholderMap,
 } from "../placeholder-map";
 import { catalogForModalidade } from "../placeholder-catalog";
-import { clausulaGarantia, qualificacaoPessoas, htmlToPlainText } from "../composed-blocks";
+import {
+  clausulaGarantia,
+  qualificacaoPessoas,
+  htmlToPlainText,
+  CONJUGE_SUFFIX_HBS,
+} from "../composed-blocks";
 import { renderContratoHTML } from "@/lib/render/handlebars";
 import { enrichLocacaoData } from "@/lib/locacao/enrich";
 
@@ -175,6 +180,23 @@ describe("paridade blocos compostos × locacao_residencial_v3.hbs", () => {
   // O fixture acima tem locadora viúva e garantia por título, então o sufixo de
   // outorga resolve vazio dos dois lados e a asserção de substring passaria sem
   // exercitar nada dele. Este caso força uma parte casada.
+  // Trava a paridade na FONTE, não só no render: uma edição manual num .hbs
+  // que reordene as condições pode manter o render igual em alguns casos e
+  // deixar o teste de substring verde.
+  it.each([
+    "locacao_residencial_v3.hbs",
+    "locacao_comercial_v3.hbs",
+    "administracao_locacao_v1.hbs",
+  ])("%s contém o fragmento de outorga literal de composed-blocks", (file) => {
+    const candidates = [
+      path.join(process.cwd(), "..", "..", "templates", file),
+      path.join(process.cwd(), "templates", file),
+    ];
+    const tpl = candidates.find((c) => fs.existsSync(c));
+    expect(tpl, `${file} não encontrado`).toBeDefined();
+    expect(fs.readFileSync(tpl!, "utf-8")).toContain(CONJUGE_SUFFIX_HBS);
+  });
+
   it("outorga do cônjuge: composed-blocks e o .hbs produzem o MESMO texto", () => {
     const comConjuge = {
       ...JSON.parse(JSON.stringify(locacaoBase)),
