@@ -70,7 +70,9 @@ export function ProposalActionBar({
           d.error === "budget" ? "Orçamento de assinaturas excedido." : d.error ?? `HTTP ${res.status}`
         );
       }
-      toast.success(okMsg);
+      // Distingue o canal real no envio: só /send devolve `instrument`. Aceite via
+      // WhatsApp ≠ envelope de assinatura — não anunciar "Enviado para assinatura".
+      toast.success(d.instrument === "aceite" ? "Enviado por Aceite via WhatsApp" : okMsg);
       setDialog(null);
       setReason("");
       if (opts.redirectPath) router.push(opts.redirectPath);
