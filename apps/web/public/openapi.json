@@ -2038,7 +2038,7 @@
     },
     "/api/locacao/leases/{id}": {
       "get": {
-        "description": "Detalhe do contrato de locação (partes, garantia, apólices). Sem dados bancários de repasse (repasseSplitJson omitido).",
+        "description": "Detalhe do contrato de locação (partes, garantia sanitizada, apólices). Omitidos da superfície M2M: repasseSplitJson, dataJson, e na garantia dadosJson/fiadorPartyJson/historicoJson.",
         "tags": [
           "Locacao"
         ],
@@ -2464,7 +2464,7 @@
         }
       },
       "post": {
-        "description": "Cria garantia (discriminated union por tipo: fiador | seguro_fianca | titulo_capitalizacao | caucao | sem_garantia). RBAC GUARANTEE_MANAGE.",
+        "description": "Cria garantia (discriminated union por tipo: fiador | seguro_fianca | titulo_capitalizacao | caucao | garantia_digital | cessao_fiduciaria). RBAC GUARANTEE_MANAGE.",
         "tags": [
           "Locacao"
         ],

@@ -123,9 +123,11 @@ export type ApiRouteResult = ApiRouteContext | NextResponse;
  * PERMISSION_FEATURE) → id efetivo → RBAC.
  *
  * Id efetivo: session preserva impersonation ("testar como", getEffectiveUserId);
- * bearer usa `auth.actor.effectiveUserId` (dono do token ou delegado via
- * X-Act-As-User). O RBAC do usuário dono do token é a granularidade real —
- * scope só separa leitura (`locacao:r`) de escrita (`locacao:rw`).
+ * bearer usa SEMPRE o dono do token (`auth.actor.effectiveUserId`). A delegação
+ * `X-Act-As-User` NÃO é suportada neste caminho — ela vive só no `requireAuth`
+ * legado (lib/auth/context.ts); aqui o header é ignorado. O RBAC do usuário
+ * dono do token é a granularidade real — scope só separa leitura (`locacao:r`)
+ * de escrita (`locacao:rw`).
  *
  * As demais rotas /api/locacao/* continuam no `ensureLocacaoAccess` session-only.
  */

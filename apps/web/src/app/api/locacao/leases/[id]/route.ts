@@ -62,7 +62,22 @@ export async function GET(req: NextRequest, { params }: Params) {
           },
         },
       },
-      guarantee: true,
+      // SELECT explícito: dadosJson (dados bancários de caução),
+      // fiadorPartyJson (CPF/RG/renda do fiador) e historicoJson NÃO saem
+      // pra M2M — mesma regra do repasseSplitJson no nível do lease.
+      guarantee: {
+        select: {
+          id: true,
+          tipo: true,
+          caucaoSubtipo: true,
+          status: true,
+          provider: true,
+          coberturaMeses: true,
+          custoJson: true,
+          externalRef: true,
+          createdAt: true,
+        },
+      },
       insurancePolicies: {
         select: {
           id: true,
