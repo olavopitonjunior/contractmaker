@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import { getUserOrg } from "./auth";
 import { sessionSubdomainHint } from "./subdomain-hint";
 import { authOrBearer, hasScope, type ResolvedAuth } from "./auth-or-bearer";
@@ -104,30 +105,37 @@ export async function requireAuth(
   // maior que a documentada no OpenAPI. Rotas destinadas a agentes declaram
   // `{ scope }`; as demais ficam session-only por default.
   if (ident.via === "bearer" && !opts.scope) {
-    void (async () => {
-      const membership = await prisma.orgMembership
-        .findFirst({ where: { userId: ident.userId }, select: { orgId: true } })
-        .catch(() => null);
-      if (!membership) return;
-      await audit(
-        {
-          orgId: membership.orgId,
-          userId: ident.userId,
-          ipAddress: extractIpAddress(req),
-          userAgent: req.headers.get("user-agent"),
-        },
-        {
-          action: "API_TOKEN_AUTH_FAILED",
-          result: "DENIED",
-          metadata: {
-            via: "newton",
-            tokenId: ident.tokenId,
-            reason: "bearer_on_unscoped_route",
-            path: new URL(req.url).pathname,
+    // waitUntil (não `void promise()`): audit de negação de segurança precisa
+    // sobreviver ao envio da response — Vercel cancela promises soltas.
+    waitUntil(
+      (async () => {
+        // findFirst pega uma membership arbitrária se o dono do token for
+        // multi-org (tokens de agente são de bot single-org hoje; se isso
+        // mudar, resolver org pelo token, não pela 1ª membership).
+        const membership = await prisma.orgMembership
+          .findFirst({ where: { userId: ident.userId }, select: { orgId: true } })
+          .catch(() => null);
+        if (!membership) return;
+        await audit(
+          {
+            orgId: membership.orgId,
+            userId: ident.userId,
+            ipAddress: extractIpAddress(req),
+            userAgent: req.headers.get("user-agent"),
           },
-        }
-      );
-    })();
+          {
+            action: "API_TOKEN_AUTH_FAILED",
+            result: "DENIED",
+            metadata: {
+              via: "newton",
+              tokenId: ident.tokenId,
+              reason: "bearer_on_unscoped_route",
+              path: new URL(req.url).pathname,
+            },
+          }
+        );
+      })()
+    );
     return {
       ok: false,
       response: NextResponse.json(

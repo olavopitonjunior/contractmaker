@@ -65,7 +65,7 @@ Scope check: handlers chamam `hasScope(ident, "...")`. Para auth via session, to
 | `GET /api/contracts/[id]/envelopes` | `signatures:r` |
 | `GET /api/deals/[dealId]/envelopes` | `signatures:r` |
 | `PATCH /api/deals/[dealId]/envelopes/[envelopeId]` | `signatures:rw` |
-| `GET/PUT /api/deals/[dealId]/commission-charges/draft` | `charges:rw` |
+| `GET/POST/DELETE /api/deals/[dealId]/commission-charges/draft` | `charges:rw` |
 | `POST /api/deals/[dealId]/commission-charges/validate` | `charges:rw` |
 
 ## 2. Header `X-Newton-Actor`
