@@ -79,6 +79,20 @@ describe("cancelEnvelope (v3: cancela por documento)", () => {
     expect(patches[0][0].path).toBe("/api/v3/envelopes/env-1/documents/doc-2");
   });
 
+  it("aceita `data` como objeto único (JSON:API permite não-array)", async () => {
+    requestMock
+      .mockResolvedValueOnce({
+        data: { id: "doc-1", attributes: { status: "running" } },
+      })
+      .mockResolvedValue({});
+
+    await cancelEnvelope("env-1");
+
+    const patches = requestMock.mock.calls.filter((c) => c[0].method === "PATCH");
+    expect(patches).toHaveLength(1);
+    expect(patches[0][0].path).toBe("/api/v3/envelopes/env-1/documents/doc-1");
+  });
+
   it("envelope sem documentos → ClicksignError 422 (não silencia)", async () => {
     requestMock.mockResolvedValueOnce({ data: [] });
 

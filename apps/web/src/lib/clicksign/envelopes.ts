@@ -327,9 +327,11 @@ export async function cancelEnvelope(
 ) {
   const docs = await listEnvelopeDocuments(envelopeId, creds);
   const data = (docs as {
-    data?: Array<{ id?: string; attributes?: { status?: string } }>;
+    data?:
+      | Array<{ id?: string; attributes?: { status?: string } }>
+      | { id?: string; attributes?: { status?: string } };
   }).data;
-  const list = Array.isArray(data) ? data : [];
+  const list = Array.isArray(data) ? data : data ? [data] : [];
   if (list.length === 0) {
     throw new ClicksignError(
       "Clicksign: envelope sem documentos — nada a cancelar via API.",

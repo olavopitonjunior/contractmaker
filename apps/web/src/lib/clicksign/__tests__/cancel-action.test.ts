@@ -64,6 +64,16 @@ describe("runEnvelopeCancel", () => {
     expect(envelopeDb.update).not.toHaveBeenCalled();
   });
 
+  it("404 remoto (envelope já removido) → idempotente: persiste canceled", async () => {
+    const { ClicksignError } = await import("../client");
+    cancelMock.mockRejectedValue(new ClicksignError("não encontrado", 404));
+
+    const result = await runEnvelopeCancel(baseArgs);
+
+    expect(result.status).toBe(200);
+    expect(envelopeDb.update).toHaveBeenCalled();
+  });
+
   it("já cancelado → 200 idempotente sem chamada remota", async () => {
     envelopeDb.findUnique = vi.fn().mockResolvedValue({
       id: "env-db-1",

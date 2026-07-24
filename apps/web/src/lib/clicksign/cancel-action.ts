@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db/prisma";
+import { ClicksignError } from "./client";
 import { cancelEnvelope } from "./envelopes";
 import { resolveClickSignCreds } from "./account";
 
@@ -70,14 +71,19 @@ export async function runEnvelopeCancel(
   try {
     await cancelEnvelope(envelope.clicksignId, creds);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return {
-      status: 502,
-      body: {
-        error: `ClickSign cancel failed: ${message}`,
-        envelopeId: args.envelopeId,
-      },
-    };
+    // 404 = envelope/documentos já removidos na ClickSign → idempotente,
+    // segue pro update local (mesma semântica do cancelEnvelopeFlow).
+    const gone = err instanceof ClicksignError && err.status === 404;
+    if (!gone) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        status: 502,
+        body: {
+          error: `ClickSign cancel failed: ${message}`,
+          envelopeId: args.envelopeId,
+        },
+      };
+    }
   }
 
   const updated = await prisma.envelope.update({

@@ -826,6 +826,9 @@ export async function cancelEnvelopeFlow(envelopeId: string): Promise<void> {
           }
           if (decision === "force") {
             // Envelope `running` sem signers (morto): força cancelamento local.
+            // Com o cancelamento por documento, isso pode deixar o remoto com
+            // docs parcialmente cancelados (nunca cascateia pra `canceled`) —
+            // drift aceito: envelope sem signatários nunca será assinado.
             lastError =
               err instanceof Error ? err.message : String(err);
           } else if (decision !== "reconcile") {
