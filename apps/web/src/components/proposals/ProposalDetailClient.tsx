@@ -61,7 +61,10 @@ interface Proposal {
 
 function money(v: number | null): string {
   if (v == null) return "—";
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+  // "R$ " manual + grouping do número (determinístico): o style:"currency" do ICU
+  // emite um espaço variável (U+00A0/U+202F) entre símbolo e número que difere
+  // Node×browser → hydration mismatch (React #418). O grouping "500.000" é estável.
+  return "R$ " + v.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
 }
 function fmt(iso: string | null): string {
   if (!iso) return "—";
