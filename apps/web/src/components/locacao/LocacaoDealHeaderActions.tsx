@@ -39,6 +39,7 @@ import {
 import { AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { ReopenFormButton } from "@/components/forms/ReopenFormButton";
+import { isFormFinished } from "@/lib/forms/form-status";
 
 interface LocacaoDealHeaderActionsProps {
   dealId: string;
@@ -83,10 +84,13 @@ export function LocacaoDealHeaderActions({
   const [formLockedAt, setFormLockedAt] = useState<string | null>(
     initialFormLockedAt,
   );
-  const [linkBusy, setLinkBusy] = useState<"lock" | "rotate" | null>(null);
+  const [linkBusy, setLinkBusy] = useState<"lock" | "rotate" | "reopen" | null>(null);
   // Form enviado pelo cliente (finalize) OU nascido preso a um contrato pronto
   // (import/upload = "vinculado"). Só esses podem ser reabertos.
-  const formSubmitted = Boolean(formCompletedAt) || formStatus === "vinculado";
+  const formSubmitted = isFormFinished({
+    completedAt: formCompletedAt,
+    status: formStatus,
+  });
 
   async function toggleFormLock() {
     if (!formToken) return;
@@ -356,6 +360,7 @@ export function LocacaoDealHeaderActions({
               reopenedAt={formReopenedAt}
               disabled={linkBusy !== null}
               onReopened={() => setFormLockedAt(null)}
+              onBusyChange={(b) => setLinkBusy(b ? "reopen" : null)}
             />
             <AlertDialog>
               <AlertDialogTrigger asChild>

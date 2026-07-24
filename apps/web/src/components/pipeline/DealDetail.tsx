@@ -16,6 +16,7 @@ import { LostDealBanner } from "@/components/pipeline/LostDealBanner";
 import { cn } from "@/lib/utils";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
 import { ReopenFormButton } from "@/components/forms/ReopenFormButton";
+import { isFormFinished } from "@/lib/forms/form-status";
 import type { SelectGroup } from "@/components/forms/NativeSelect";
 import type { Assignment, DocumentKind } from "@/lib/forms/extracted-to-form";
 import {
@@ -253,9 +254,13 @@ export function DealDetail({ deal, newtonEnabled = false }: DealDetailProps) {
   );
   // Form enviado pelo cliente (finalize) OU nascido preso a um contrato pronto
   // (import/upload/proposta = "vinculado"). Só esses podem ser reabertos.
-  const formSubmitted =
-    Boolean(deal.form?.completedAt) || deal.form?.status === "vinculado";
-  const [linkBusy, setLinkBusy] = useState<"lock" | "rotate" | null>(null);
+  const formSubmitted = deal.form
+    ? isFormFinished({
+        completedAt: deal.form.completedAt,
+        status: deal.form.status,
+      })
+    : false;
+  const [linkBusy, setLinkBusy] = useState<"lock" | "rotate" | "reopen" | null>(null);
   const [confirmDuplicateOpen, setConfirmDuplicateOpen] = useState(false);
   const [chargeDialogOpen, setChargeDialogOpen] = useState(false);
   const [chargeDialogMode, setChargeDialogMode] = useState<
@@ -793,6 +798,7 @@ export function DealDetail({ deal, newtonEnabled = false }: DealDetailProps) {
                 }
                 disabled={linkBusy !== null}
                 onReopened={() => setFormLockedAt(null)}
+                onBusyChange={(b) => setLinkBusy(b ? "reopen" : null)}
               />
               <AlertDialog>
                 <AlertDialogTrigger asChild>

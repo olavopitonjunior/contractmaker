@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,13 @@ interface ReopenFormButtonProps {
    * (some o badge "Travado", volta pra "Travar").
    */
   onReopened?: () => void;
+  /**
+   * Sinaliza ao header que uma reabertura está em voo. Sem isto, os botões
+   * irmãos (Travar/Trocar link) — que só desabilitam pelo `linkBusy` do pai —
+   * seguiriam clicáveis durante o POST de reabertura, permitindo uma corrida
+   * lock↔reopen que deixa o form em estado contraditório.
+   */
+  onBusyChange?: (busy: boolean) => void;
 }
 
 /**
@@ -55,10 +62,19 @@ export function ReopenFormButton({
   reopenedAt: initialReopenedAt,
   disabled,
   onReopened,
+  onBusyChange,
 }: ReopenFormButtonProps) {
   const router = useRouter();
   const [reopenedAt, setReopenedAt] = useState<string | null>(initialReopenedAt);
   const [busy, setBusy] = useState(false);
+
+  // O estado local é otimista (feedback imediato no clique), mas o prop é a
+  // fonte de verdade: quando o server revalida (router.refresh após reabrir, ou
+  // depois que o cliente reenvia e o finalize zera `reopenedAt`), reconcilia —
+  // senão o badge "Reaberto" ficaria eternamente preso mostrando status falso.
+  useEffect(() => {
+    setReopenedAt(initialReopenedAt);
+  }, [initialReopenedAt]);
 
   // Já reaberto: nada a reabrir, só sinaliza o estado. O próximo envio re-trava.
   if (reopenedAt) {
@@ -75,6 +91,7 @@ export function ReopenFormButton({
 
   async function handleReopen() {
     setBusy(true);
+    onBusyChange?.(true);
     try {
       const res = await fetch(`/api/forms/${token}/lock`, {
         method: "POST",
@@ -97,6 +114,7 @@ export function ReopenFormButton({
       toast.error("Erro de conexão");
     } finally {
       setBusy(false);
+      onBusyChange?.(false);
     }
   }
 
