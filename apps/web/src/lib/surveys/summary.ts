@@ -10,7 +10,7 @@ import {
   getOrgAiBudgetStatus,
   OrgAiBudgetExceededError,
 } from "@/lib/ai/budget";
-import { parseTemplateQuestions } from "./types";
+import { parseTemplateQuestions, SUMMARY_MIN_TEXT_RESPONSES } from "./types";
 
 /**
  * Resumo IA das respostas abertas de UM lote (SurveyTemplate concreto).
@@ -21,9 +21,26 @@ import { parseTemplateQuestions } from "./types";
  * invalidador natural.
  */
 
-export const MIN_TEXT_RESPONSES = 3;
+export const MIN_TEXT_RESPONSES = SUMMARY_MIN_TEXT_RESPONSES;
 const MAX_RESPONSES = 100;
 const MAX_INPUT_CHARS = 24_000;
+
+/**
+ * Redação leve de PII antes do texto ir pro provedor de IA (LGPD): o
+ * respondente pode digitar CPF/telefone/email no campo livre. A instrução do
+ * system prompt limita o que o modelo DEVOLVE; isto limita o que ele RECEBE.
+ */
+export function redactPii(text: string): string {
+  return text
+    .replace(/\b\d{3}\.?\d{3}\.?\d{3}-?\d{2}\b/g, "[CPF]")
+    .replace(/\b\d{2}\.?\d{3}\.?\d{3}\/?\d{4}-?\d{2}\b/g, "[CNPJ]")
+    .replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, "[e-mail]")
+    .replace(/(?:\+?55\s?)?(?:\(?\d{2}\)?\s?)?9?\d{4}[-\s]?\d{4}\b/g, (m) =>
+      // Só troca o que parece telefone BR (8+ dígitos) — números curtos
+      // legítimos ("3 quartos", "10 dias") ficam intactos.
+      m.replace(/\D/g, "").length >= 10 ? "[telefone]" : m
+    );
+}
 
 export interface SurveyAiSummary {
   text: string;
@@ -86,7 +103,7 @@ export async function buildSummaryInput(
         .filter(Boolean)
         .join(" · ");
       entries.push(
-        `[${scores || "sem nota"}] ${answer.value.trim().slice(0, 1500)}`
+        `[${scores || "sem nota"}] ${redactPii(answer.value.trim()).slice(0, 1500)}`
       );
     }
   }

@@ -36,6 +36,10 @@ export const AUDIENCE_BY_KIND: Record<string, readonly SurveyRecipientRole[]> = 
 export const SURVEY_CHANNELS = ["email", "whatsapp", "manual"] as const;
 export type SurveyChannel = (typeof SURVEY_CHANNELS)[number];
 
+/** Mínimo de respostas de texto pro resumo IA do lote — fonte única
+ *  (server valida, client gateia o botão). Arquivo client-safe. */
+export const SUMMARY_MIN_TEXT_RESPONSES = 3;
+
 /**
  * Stages elegíveis como gatilho de automação, por kind (nomes canônicos —
  * mesma fonte nominal de lib/pipeline/stage-config.ts e auto-promote-signed).
