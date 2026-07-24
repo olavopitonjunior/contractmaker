@@ -273,6 +273,16 @@ export function registerIntentExecutor(
   EXECUTORS.set(action, executor);
 }
 
+/**
+ * Actions com executor registrado — pro preflight validar que TODO
+ * HIGH_RISK_ACTION tem executor (uma action sem executor cria intents que
+ * falham só na aprovação, com `no_executor`). Caller deve garantir
+ * `ensureIntentExecutorsRegistered()` antes.
+ */
+export function getRegisteredIntentActions(): IntentAction[] {
+  return [...EXECUTORS.keys()];
+}
+
 export class IntentExecutionError extends Error {
   constructor(
     public readonly code:

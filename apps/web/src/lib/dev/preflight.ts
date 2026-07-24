@@ -437,6 +437,77 @@ async function checkDeals(orgId: string | null): Promise<CheckResult> {
  * Roda todos os checks de preflight e retorna relatório estruturado.
  * Não modifica state. Usa libs existentes (pingAsaas, prisma).
  */
+/**
+ * Superfície M2M (Newton/Max):
+ *  1. Todo HIGH_RISK_ACTION tem executor registrado — sem executor, a intent
+ *     cria normal (202) mas a aprovação humana falha com `no_executor`.
+ *  2. Chaves de SCOPE_LIMITS existem no catálogo de scopes (ou são a forma
+ *     `:r` de um `:rw` do catálogo) — typo numa chave cai SILENCIOSAMENTE
+ *     no rate limit default.
+ */
+export async function checkM2mSurface(): Promise<CheckResult[]> {
+  const results: CheckResult[] = [];
+  const t0 = Date.now();
+
+  try {
+    const { HIGH_RISK_ACTIONS, getRegisteredIntentActions } = await import(
+      "@/lib/api/intents"
+    );
+    const { ensureIntentExecutorsRegistered } = await import(
+      "@/lib/api/intent-executors"
+    );
+    ensureIntentExecutorsRegistered();
+    const registered = new Set(getRegisteredIntentActions());
+    const missing = HIGH_RISK_ACTIONS.filter((a) => !registered.has(a));
+    results.push({
+      category: "m2m",
+      key: "intent_executors",
+      severity: missing.length ? "blocker" : "ok",
+      message: missing.length
+        ? `HIGH_RISK_ACTIONS sem executor registrado: ${missing.join(", ")} — intents dessas actions falham na aprovação (no_executor)`
+        : `Todos os ${HIGH_RISK_ACTIONS.length} HIGH_RISK_ACTIONS têm executor registrado`,
+      durationMs: Date.now() - t0,
+    });
+  } catch (err) {
+    results.push({
+      category: "m2m",
+      key: "intent_executors",
+      severity: "blocker",
+      message: `Falha ao carregar executores de intent: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
+
+  try {
+    const { API_TOKEN_SCOPES } = await import("@/lib/auth/api-token");
+    const { SCOPE_LIMITS } = await import("@/lib/security/ratelimit");
+    const valid = new Set<string>(API_TOKEN_SCOPES);
+    // `X:rw` no catálogo legitima a chave de leitura `X:r` (hierarquia hasScope).
+    for (const s of API_TOKEN_SCOPES) {
+      if (s.endsWith(":rw")) valid.add(s.slice(0, -1));
+    }
+    const unknown = Object.keys(SCOPE_LIMITS).filter(
+      (k) => k !== "default" && !valid.has(k)
+    );
+    results.push({
+      category: "m2m",
+      key: "scope_limits_keys",
+      severity: unknown.length ? "warning" : "ok",
+      message: unknown.length
+        ? `SCOPE_LIMITS com chave fora do catálogo de scopes (typo? cai no default silenciosamente): ${unknown.join(", ")}`
+        : "Chaves de SCOPE_LIMITS consistentes com o catálogo de scopes",
+    });
+  } catch (err) {
+    results.push({
+      category: "m2m",
+      key: "scope_limits_keys",
+      severity: "warning",
+      message: `Falha ao validar SCOPE_LIMITS: ${err instanceof Error ? err.message : String(err)}`,
+    });
+  }
+
+  return results;
+}
+
 export async function runPreflight(orgId: string | null): Promise<PreflightReport> {
   const checks: CheckResult[] = [];
 
@@ -449,6 +520,7 @@ export async function runPreflight(orgId: string | null): Promise<PreflightRepor
   checks.push(await checkEmail());
   checks.push(await checkUpstash());
   checks.push(await checkDeals(orgId));
+  checks.push(...(await checkM2mSurface()));
 
   const blockersCount = checks.filter((c) => c.severity === "blocker").length;
   const warningsCount = checks.filter((c) => c.severity === "warning").length;
