@@ -77,10 +77,29 @@ Tools de leitura + ações low-risk executam imediatamente:
 - `get_contract_summary`, `lookup_user_by_phone`, `get_infosimples_budget`
 - `list_envelopes`, `list_pending_intents`, `get_intent_status`
 
+## Grupos de tools (2026-07-24 — 80 tools no server)
+
+Inventário completo em `apps/mcp-server/src/tools.ts`; superfície REST em
+`docs/newton-integration.md` (§4.7 Propostas, §4.8 pipeline/certidões, §8 Locação).
+
+- **Propostas** (`proposals:rw`): 11 tools; `send/send_vendedor/convert/cancel`
+  são HITL (202 → aprovação em `/intents/<id>`).
+- **Pipeline twins** (`deals:rw`/`contracts:rw`): `mark_deal_lost`, `reopen_deal`,
+  `archive_deal`, `generate_deal_contract` — sem HITL (reversíveis).
+- **Certidões (leitura)** (`documents:r`): `list_deal_certidoes`, `get_certidao_job`.
+- **Locação — Max** (`locacao:r`/`locacao:rw`): 16 tools (leitura da carteira +
+  registro de análises/garantias/apólices; `record_insurance_quote` idempotente
+  por `externalRef` é o canal preferido pros resultados de fiança).
+
+Regra desde 2026-07-24: **Bearer só entra em rota com scope declarado** — rota
+session-only responde 403 `bearer_on_unscoped_route`.
+
 ## Rate limits
 
 Per-token, sliding window 1min:
 - `metrics:r`: 600 req/min (polling-friendly)
+- `locacao:r`: 300 req/min
+- `locacao:rw`: 60 req/min
 - `documents:rw` (certidões): 30 req/min
 - Demais: 100 req/min
 

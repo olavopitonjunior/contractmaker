@@ -193,8 +193,12 @@ export const RateLimits = {
     rateLimit({ identifier: `api-session:${userId}`, limit: 600, window: "1 m" }),
 } as const;
 
-/** Limites por scope (Newton). Default genérico aplicado a scopes não listados. */
-const SCOPE_LIMITS: Record<string, { limit: number; window: Window }> = {
+/**
+ * Limites por scope (Newton). Default genérico aplicado a scopes não listados.
+ * Exportado pro preflight validar as chaves contra o catálogo de scopes —
+ * uma chave com typo aqui nunca casa e cai SILENCIOSAMENTE no default.
+ */
+export const SCOPE_LIMITS: Record<string, { limit: number; window: Window }> = {
   "metrics:r": { limit: 600, window: "1 m" },
   "documents:rw": { limit: 30, window: "1 m" },
   // Locação (Max): leitura generosa (polling de lease/análises); escrita contida.
