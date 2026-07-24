@@ -230,6 +230,11 @@ export type BulkRequirementOp =
  * É o ÚNICO caminho aceito pela ClickSign pra mexer em requirements de envelope
  * já ativado (`running`) — o `POST /requirements` simples responde "envelope não
  * está no status draft". Todas as operações aplicam ou nenhuma aplica.
+ *
+ * Confirmado contra a conta real em 2026-07-24 (envelope c35744d4…): aceita o
+ * `Content-Type: application/vnd.api+json` padrão do client (sem o parâmetro
+ * `ext=` da spec atomic operations) e responde `atomic:results` com os
+ * requirements criados (id/type/attributes) na ordem das operações.
  */
 export async function bulkRequirements(
   envelopeId: string,

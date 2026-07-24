@@ -473,12 +473,11 @@ export function EnvelopeCard({
   const [editOpen, setEditOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
 
-  const canEdit = envelope.status === "draft" || envelope.status === "running";
   // Em `running` os requirements do novo signatário vão via bulk_requirements
   // (único caminho pós-ativação) e ele é notificado na hora — quem já assinou
-  // não é afetado.
-  const canAddSigner =
-    envelope.status === "draft" || envelope.status === "running";
+  // não é afetado. Editar e adicionar seguem a MESMA regra de status.
+  const canEdit = envelope.status === "draft" || envelope.status === "running";
+  const canAddSigner = canEdit;
 
   const handleCancel = async () => {
     if (!confirm("Cancelar este envelope? Os signatários não conseguirão mais assinar."))

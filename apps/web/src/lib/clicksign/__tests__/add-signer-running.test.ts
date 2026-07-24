@@ -20,7 +20,7 @@ vi.mock("../account", () => ({
   getSignatureSettings: vi.fn().mockResolvedValue({ allowedAuthMethods: [] }),
 }));
 
-import { addSignerToEnvelope } from "../signer-actions";
+import { addSignerToEnvelope, updateSignerAction } from "../signer-actions";
 import { ClicksignError } from "../client";
 import {
   addRequirement,
@@ -158,6 +158,108 @@ describe("addSignerToEnvelope em envelope running", () => {
         data: expect.objectContaining({ status: "pending", notifiedAt: null }),
       })
     );
+  });
+});
+
+describe("addSignerToEnvelope — bulk aplicado sem confirmação de IDs", () => {
+  it("desfaz a inclusão (remove remoto + local) e retorna 502 acionável", async () => {
+    // atomic:results ausente E diff sempre vazio (before == after) → não dá
+    // pra confirmar os IDs; a inclusão é desfeita pra não ficar signer sem
+    // requirement rastreado.
+    bulkMock.mockResolvedValue({});
+    listReqMock.mockResolvedValue({ data: [{ id: "r-preexistente" }] });
+
+    const result = await addSignerToEnvelope(makeEnvelope(), addData);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.status).toBe(502);
+      expect(result.error).toContain("não foi possível confirmar");
+    }
+    expect(removeSignerMock).toHaveBeenCalledWith("cs-env", "cs-sig", expect.anything());
+    expect(signerDb.delete).toHaveBeenCalledWith({ where: { id: "local-1" } });
+    expect(notifyMock).not.toHaveBeenCalled();
+  }, 15000);
+});
+
+describe("updateSignerAction (trocar papel) em envelope running", () => {
+  function makeSigner(over: Record<string, unknown> = {}) {
+    return {
+      id: "sgn-db-1",
+      clicksignId: "cs-sig-1",
+      status: "notified",
+      role: "sign",
+      authMethod: "email",
+      requirementIds: ["r-old-1", "r-old-2"],
+      name: "Parte",
+      email: "parte@example.com",
+      documentation: null,
+      phone: null,
+      envelope: {
+        id: "env-db-1",
+        orgId: "org-1",
+        status: "running",
+        clicksignId: "cs-env",
+        documentClicksignId: "cs-doc",
+      },
+      ...over,
+    } as never;
+  }
+
+  it("recria requirements via bulk atômico: 2 adds + removes dos antigos", async () => {
+    bulkMock.mockResolvedValue({
+      "atomic:results": [
+        { data: { type: "requirements", id: "r-new-1" } },
+        { data: { type: "requirements", id: "r-new-2" } },
+      ],
+    });
+
+    const result = await updateSignerAction(makeSigner(), { role: "witness" });
+
+    expect(result.ok).toBe(true);
+    expect(addReqMock).not.toHaveBeenCalled();
+    expect(bulkMock).toHaveBeenCalledTimes(1);
+    const ops = bulkMock.mock.calls[0][1];
+    expect(ops).toEqual([
+      expect.objectContaining({ op: "add", action: "provide_evidence", auth: "email" }),
+      expect.objectContaining({ op: "add", action: "agree", role: "witness" }),
+      { op: "remove", requirementId: "r-old-1" },
+      { op: "remove", requirementId: "r-old-2" },
+    ]);
+    expect(signerDb.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          role: "witness",
+          requirementIds: ["r-new-1", "r-new-2"],
+        }),
+      })
+    );
+  });
+
+  it("bulk aplicado sem confirmação de IDs: persiste papel com requirementIds vazio", async () => {
+    // O remoto JÁ mudou — não persistir o papel deixaria o DB mentindo e um
+    // retry miraria IDs mortos. requirementIds vazio sinaliza "desconhecidos".
+    bulkMock.mockResolvedValue({});
+    listReqMock.mockResolvedValue({ data: [{ id: "r-old-1" }, { id: "r-old-2" }] });
+
+    const result = await updateSignerAction(makeSigner(), { role: "witness" });
+
+    expect(result.ok).toBe(true);
+    expect(signerDb.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ role: "witness", requirementIds: [] }),
+      })
+    );
+  }, 15000);
+
+  it("ClicksignError no bulk (nada aplicou): 502 sem persistir papel", async () => {
+    bulkMock.mockRejectedValue(new ClicksignError("recusado", 400));
+
+    const result = await updateSignerAction(makeSigner(), { role: "witness" });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.status).toBe(502);
+    expect(signerDb.update).not.toHaveBeenCalled();
   });
 });
 

@@ -86,6 +86,21 @@ export interface SignerUpdate {
   authMethod?: AuthMethod;
 }
 
+/**
+ * O POST atômico APLICOU na ClickSign, mas não conseguimos confirmar os IDs
+ * dos requirements novos (atomic:results incompleto E diff falhou/ambíguo).
+ * Semântica distinta de ClicksignError (que significa "nada aplicou"): quem
+ * captura decide como reconciliar sabendo que o lado remoto JÁ mudou.
+ */
+class BulkRequirementsUnconfirmedError extends Error {
+  constructor(public readonly found: number) {
+    super(
+      `bulk_requirements aplicado, mas IDs novos não confirmados (esperado 2, encontrei ${found})`
+    );
+    this.name = "BulkRequirementsUnconfirmedError";
+  }
+}
+
 /** IDs de requirements criados numa resposta `atomic:results` (bulk). */
 function pickAtomicRequirementIds(resp: unknown): string[] {
   if (!resp || typeof resp !== "object") return [];
@@ -128,9 +143,14 @@ async function listRequirementIds(
  * pra rollback).
  *
  * Retorna os IDs dos requirements criados: extraídos de `atomic:results`
- * quando a resposta traz, senão por diff do conjunto de IDs antes/depois
- * (a listagem v3 não expõe relationship com signer — diff é o fallback
- * determinístico).
+ * (caminho confirmado contra a conta real em 2026-07-24 — a resposta traz os
+ * requirements criados com id/type), senão por diff do conjunto de IDs
+ * antes/depois (a listagem v3 não expõe relationship com signer). Ambos os
+ * caminhos exigem EXATAMENTE 2 IDs novos — contagem diferente indica corrida
+ * com outra mutação no mesmo envelope ou consistência eventual, e persistir
+ * um conjunto contaminado poderia, numa edição futura, remover o requirement
+ * de um TERCEIRO signatário. Nesse caso: 1 retry do diff e, persistindo a
+ * ambiguidade, `BulkRequirementsUnconfirmedError` (o remoto JÁ aplicou).
  */
 async function bulkRecreateRequirements(args: {
   envelopeClicksignId: string;
@@ -162,13 +182,25 @@ async function bulkRecreateRequirements(args: {
       requirementId,
     })),
   ];
+  // ClicksignError aqui = NADA aplicou (a chamada é atômica) — propaga limpo.
   const resp = await bulkRequirements(args.envelopeClicksignId, ops, args.creds);
 
   const atomicIds = pickAtomicRequirementIds(resp).filter((id) => !before.has(id));
-  if (atomicIds.length >= 2) return atomicIds;
+  if (atomicIds.length === 2) return atomicIds;
 
-  const after = await listRequirementIds(args.envelopeClicksignId, args.creds);
-  return [...after].filter((id) => !before.has(id));
+  let found = atomicIds.length;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 750));
+    try {
+      const after = await listRequirementIds(args.envelopeClicksignId, args.creds);
+      const fresh = [...after].filter((id) => !before.has(id));
+      if (fresh.length === 2) return fresh;
+      found = fresh.length;
+    } catch {
+      // GET transiente — o retry cobre; se persistir, cai no Unconfirmed.
+    }
+  }
+  throw new BulkRequirementsUnconfirmedError(found);
 }
 
 /**
@@ -388,16 +420,30 @@ export async function updateSignerAction(
         envelopeStatus: envStatus,
       });
     } catch (err) {
-      if (err instanceof ClicksignError) {
+      if (err instanceof BulkRequirementsUnconfirmedError) {
+        // O bulk APLICOU (papel/auth novos já valem na ClickSign) — só não
+        // confirmamos os IDs novos. Persistimos papel/auth pra não divergir
+        // do que a ClickSign passou a exigir; `requirementIds` fica vazio
+        // (numa próxima troca não haverá o que remover — pode duplicar
+        // requirement na ClickSign, aceitável vs. exibir papel errado e
+        // gerar retry que falharia mirando IDs mortos).
+        console.error(
+          `[clicksign] requirements recriados sem confirmação de IDs (signer ${signer.clicksignId}, envelope ${signer.envelope.clicksignId}):`,
+          err.message
+        );
+        newRequirementIds = [];
+      } else if (err instanceof ClicksignError) {
         const hint =
           envStatus === "running"
             ? " Talvez seja necessário cancelar o envelope e reenviar para trocar o tipo de assinatura ou o papel."
             : "";
-        // Perfil (se houve) já foi aplicado + persistido acima; papel/auth NÃO
-        // são persistidos, mantendo DB×ClickSign consistentes.
+        // ClicksignError no bulk/draft = nada aplicou. Perfil (se houve) já
+        // foi aplicado + persistido acima; papel/auth NÃO são persistidos,
+        // mantendo DB×ClickSign consistentes.
         return { ok: false, status: 502, error: `Clicksign: ${err.message}.${hint}` };
+      } else {
+        throw err;
       }
-      throw err;
     }
   }
 
@@ -587,15 +633,30 @@ export async function addSignerToEnvelope(
     } catch (err) {
       // Rollback completo: signer remoto (se chegou a existir) + row local.
       // Sem requirement o signer remoto não assina, mas apareceria no
-      // certificado — remove pra não divergir do DB.
+      // certificado — remove pra não divergir do DB. Remover o signer também
+      // remove os requirements dele, então cobre inclusive o caso
+      // "bulk aplicou mas não confirmamos os IDs".
       if (signerId) {
         try {
           await removeSigner(envelope.clicksignId, signerId, creds);
-        } catch {
-          /* best-effort */
+        } catch (rollbackErr) {
+          // Signer órfão na ClickSign sem representação local — loga alto pra
+          // dar visibilidade operacional (não dá pra desfazer daqui).
+          console.error(
+            `[clicksign] rollback: falha ao remover signer ${signerId} do envelope ${envelope.clicksignId} — signer órfão na ClickSign:`,
+            rollbackErr
+          );
         }
       }
       await prisma.envelopeSigner.delete({ where: { id: localSigner.id } });
+      if (err instanceof BulkRequirementsUnconfirmedError) {
+        return {
+          ok: false,
+          status: 502,
+          error:
+            "A ClickSign aceitou o signatário, mas não foi possível confirmar os requisitos de assinatura — a inclusão foi desfeita. Tente novamente.",
+        };
+      }
       if (err instanceof ClicksignError) {
         const hint =
           envelope.status === "running"
