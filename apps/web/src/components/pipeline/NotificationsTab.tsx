@@ -55,6 +55,10 @@ interface NotifState {
 
 const STATUS_LABEL: Record<string, { text: string; cls: string }> = {
   sent: { text: "enviado", cls: "text-green-700 border-green-300 bg-green-50" },
+  pending: {
+    text: "em envio",
+    cls: "text-muted-foreground border-border bg-muted/40",
+  },
   skipped: { text: "pulado", cls: "text-amber-800 border-amber-300 bg-amber-50" },
   failed: { text: "falhou", cls: "text-red-700 border-red-300 bg-red-50" },
 };
@@ -161,8 +165,13 @@ export function NotificationsTab({ dealId }: { dealId: string }) {
             <CardTitle className="text-base flex items-center gap-2">
               <BellRing className="h-4 w-4" /> Atualizações aos corretores
             </CardTitle>
-            <div className="flex items-center gap-2 text-sm">
-              <span className="text-muted-foreground">Silenciar este negócio</span>
+            <div
+              className="flex items-center gap-2 text-sm"
+              title="Interrompe e-mail/WhatsApp aos corretores deste negócio. O sino interno da equipe não é afetado."
+            >
+              <span className="text-muted-foreground">
+                Silenciar envios aos corretores
+              </span>
               <Switch
                 checked={muted}
                 onCheckedChange={(v) => void patch({ muted: v })}

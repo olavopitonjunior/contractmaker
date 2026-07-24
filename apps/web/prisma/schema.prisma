@@ -857,7 +857,7 @@ model DealNotificationLog {
   recipientKey   String // splitRecipientId do corretor
   recipientLabel String?
   dedupeKey      String // por evento: stageId+dia, contractId, envelopeId, chargeId, formId+marco
-  status         String   @default("sent") // sent | skipped | failed
+  status         String   @default("sent") // pending (claim) | sent | skipped | failed
   detail         Json?
   createdAt      DateTime @default(now())
 

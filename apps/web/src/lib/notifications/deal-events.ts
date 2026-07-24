@@ -30,13 +30,16 @@ import {
 import { resolveDealBrokers, type BrokerRecipient } from "./deal-brokers";
 
 /**
- * dedupeKey de stage_change: 1 notificação por (stage destino, dia UTC) —
+ * dedupeKey de stage_change: 1 notificação por (stage destino, dia BRT) —
  * re-drag pro mesmo stage no mesmo dia não re-envia; dia seguinte sim.
+ * Dia em America/Sao_Paulo (UTC-3 fixo, Brasil aboliu o DST): bucketing UTC
+ * dividiria a noite de trabalho às 21h BRT.
  */
 export function stageChangeDedupeKey(stageId: string, when = new Date()): string {
-  const y = when.getUTCFullYear();
-  const m = String(when.getUTCMonth() + 1).padStart(2, "0");
-  const d = String(when.getUTCDate()).padStart(2, "0");
+  const brt = new Date(when.getTime() - 3 * 3_600_000);
+  const y = brt.getUTCFullYear();
+  const m = String(brt.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(brt.getUTCDate()).padStart(2, "0");
   return `${stageId}:${y}${m}${d}`;
 }
 
@@ -127,7 +130,9 @@ function buildTexts(params: {
 
 /**
  * Insert-first no log (chokepoint de idempotência). Retorna o id da linha ou
- * null quando já existia (P2002) — caller pula o envio.
+ * null quando já existia (P2002) — caller pula o envio. Nasce "pending" e o
+ * caller assenta sent/failed/skipped — assim o histórico não afirma "enviado"
+ * se a function morrer entre o claim e o envio real.
  */
 async function claimLogRow(params: {
   orgId: string;
@@ -148,7 +153,7 @@ async function claimLogRow(params: {
         recipientKey: params.broker.splitRecipientId,
         recipientLabel: params.broker.label,
         dedupeKey: params.dedupeKey,
-        status: "sent",
+        status: "pending",
       },
     });
     return row.id;
@@ -275,7 +280,9 @@ export async function notifyDealEvent(
               { name: "event", value: event },
             ],
           });
-          if (!result.ok) {
+          if (result.ok) {
+            await settleLogRow(logId, "sent", { emailId: result.id });
+          } else {
             await settleLogRow(logId, "failed", {
               error: result.error ?? "envio recusado",
             });

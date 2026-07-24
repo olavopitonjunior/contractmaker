@@ -151,12 +151,19 @@ export async function PATCH(
   const existing =
     (deal.notificationsJson as Record<string, unknown> | null) ?? {};
   const existingEvents =
-    (existing.events as Record<string, unknown> | undefined) ?? {};
+    (existing.events as Record<string, Record<string, unknown>> | undefined) ??
+    {};
 
-  const mergedEvents: Record<string, unknown> = {
-    ...existingEvents,
-    ...(parsed.data.events ?? {}),
-  };
+  // Merge POR CANAL — merge raso por evento perderia o override do canal
+  // irmão já salvo (ligar whatsapp e depois desligar email apagaria o
+  // whatsapp deste evento).
+  const mergedEvents: Record<string, unknown> = { ...existingEvents };
+  for (const [ev, toggles] of Object.entries(parsed.data.events ?? {})) {
+    if (!toggles) continue;
+    const curBroker =
+      (existingEvents[ev]?.broker as Record<string, unknown> | undefined) ?? {};
+    mergedEvents[ev] = { broker: { ...curBroker, ...toggles.broker } };
+  }
   for (const ev of parsed.data.clearEvents ?? []) {
     delete mergedEvents[ev];
   }

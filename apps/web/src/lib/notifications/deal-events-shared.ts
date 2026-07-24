@@ -44,7 +44,9 @@ export interface NotificationConfigJson {
   formReminder?: { enabled?: boolean; days?: number[] };
   /** Só deal: corretores explícitos além dos comissionados do form. */
   brokerIds?: string[];
-  /** Só deal: silencia todos os eventos deste deal. */
+  /** Só deal: silencia os envios EXTERNOS (email/WhatsApp aos corretores)
+   *  deste deal. O sino interno (usuários da plataforma) não é afetado —
+   *  form_completed etc. já existiam antes da feature e são do time. */
   muted?: boolean;
 }
 

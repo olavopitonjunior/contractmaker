@@ -71,7 +71,9 @@ export async function autoRegisterFormCommissioners(params: {
       changed = true;
 
       if (!result.existed) {
-        audit(
+        // await de propósito: este helper roda dentro de waitUntil e o audit
+        // não está encadeado na promise — sem await, teardown pode cortá-lo.
+        await audit(
           { orgId, userId: null, ipAddress: null, userAgent: null },
           {
             action: "SPLIT_RECIPIENT_CREATED",

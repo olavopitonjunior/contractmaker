@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 import {
@@ -103,18 +104,30 @@ export async function PATCH(req: NextRequest) {
     );
   }
 
-  // Merge raso preservando chaves não enviadas (mesma semântica de
-  // Deal.complianceJson): events funde por evento; formReminder substitui.
+  // Merge preservando chaves não enviadas (mesma semântica de
+  // Deal.complianceJson). Events fundem POR CANAL — merge raso por evento
+  // perderia o override do canal irmão (ligar whatsapp e depois desligar
+  // email apagaria o whatsapp salvo). formReminder funde por campo.
   const existing = await ensureRow(ctx.orgId);
   const current =
     (existing.settingsJson as Record<string, unknown> | null) ?? {};
   const currentEvents =
-    (current.events as Record<string, unknown> | undefined) ?? {};
+    (current.events as Record<string, Record<string, unknown>> | undefined) ??
+    {};
+  let mergedEvents: Record<string, unknown> | undefined;
+  if (parsed.data.events !== undefined) {
+    mergedEvents = { ...currentEvents };
+    for (const [ev, toggles] of Object.entries(parsed.data.events)) {
+      if (!toggles) continue;
+      const curBroker =
+        (currentEvents[ev]?.broker as Record<string, unknown> | undefined) ??
+        {};
+      mergedEvents[ev] = { broker: { ...curBroker, ...toggles.broker } };
+    }
+  }
   const next = {
     ...current,
-    ...(parsed.data.events !== undefined
-      ? { events: { ...currentEvents, ...parsed.data.events } }
-      : {}),
+    ...(mergedEvents !== undefined ? { events: mergedEvents } : {}),
     ...(parsed.data.formReminder !== undefined
       ? {
           formReminder: {
@@ -127,7 +140,7 @@ export async function PATCH(req: NextRequest) {
 
   const updated = await prisma.orgNotificationSettings.update({
     where: { orgId: ctx.orgId },
-    data: { settingsJson: next },
+    data: { settingsJson: next as Prisma.InputJsonValue },
   });
 
   audit(
