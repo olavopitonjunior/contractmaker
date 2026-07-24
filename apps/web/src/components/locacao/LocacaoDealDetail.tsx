@@ -34,6 +34,7 @@ import {
   type InspectionView,
 } from "@/components/locacao/lease-detail/VistoriaTab";
 import { FileText, ExternalLink, Receipt, Building2, FileSignature } from "lucide-react";
+import { DealSurveysTab } from "@/components/surveys/DealSurveysTab";
 import { toast } from "sonner";
 
 type ContractProp = React.ComponentProps<typeof ContractEditorPage>["contract"];
@@ -87,6 +88,8 @@ interface LocacaoDealDetailProps {
   /** Modo simplificado (LOCACAO_SIMPLIFIED_MODE): mostra só Dados, Contrato,
    *  Documentos e Assinaturas; esconde as abas de administração. */
   simplified?: boolean;
+  /** Pesquisas de satisfação habilitadas (feature locacao.pesquisas, default OFF). */
+  surveysEnabled?: boolean;
 }
 
 const BRL = (v: number) =>
@@ -133,6 +136,7 @@ export function LocacaoDealDetail({
   serasaConsent = false,
   serasaJobs = [],
   simplified = false,
+  surveysEnabled = false,
 }: LocacaoDealDetailProps) {
   const router = useRouter();
   // Tab inicial via ?tab= (paridade com o DealDetail de vendas) — permite
@@ -323,6 +327,7 @@ export function LocacaoDealDetail({
           <TabsTrigger value="vistoria">Vistoria</TabsTrigger>
           <TabsTrigger value="seguros">Seguros</TabsTrigger>
           {!simplified && <TabsTrigger value="cobranca">Cobrança</TabsTrigger>}
+          {surveysEnabled && <TabsTrigger value="pesquisas">Pesquisas</TabsTrigger>}
         </TabsList>
 
         {/* DADOS — visão do form.dataJson (paridade com a aba Dados de vendas) */}
@@ -499,6 +504,11 @@ export function LocacaoDealDetail({
             </CardContent>
           </Card>
         </TabsContent>
+        {surveysEnabled && (
+          <TabsContent value="pesquisas" className="mt-4">
+            <DealSurveysTab dealId={deal.id} />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

@@ -33,6 +33,7 @@ export const FEATURE = {
   VENDAS_PAGADORIA: "vendas.pagadoria",
   VENDAS_NEWTON: "vendas.newton",
   VENDAS_PROPOSTAS: "vendas.propostas",
+  VENDAS_PESQUISAS: "vendas.pesquisas",
 
   // Módulo Locação
   LOCACAO_PIPELINE: "locacao.pipeline",
@@ -46,6 +47,7 @@ export const FEATURE = {
   LOCACAO_PESSOAS: "locacao.pessoas",
   LOCACAO_NEWTON: "locacao.newton",
   LOCACAO_PROPOSTAS: "locacao.propostas",
+  LOCACAO_PESQUISAS: "locacao.pesquisas",
 } as const;
 
 export type FeatureKey = (typeof FEATURE)[keyof typeof FEATURE];
@@ -74,6 +76,7 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
       { key: FEATURE.VENDAS_PAGADORIA, label: "Pagadoria / comissão", default: true },
       { key: FEATURE.VENDAS_NEWTON, label: "Newton (agente WhatsApp) — vendas", default: false },
       { key: FEATURE.VENDAS_PROPOSTAS, label: "Propostas — vendas", default: true },
+      { key: FEATURE.VENDAS_PESQUISAS, label: "Pesquisas de satisfação — vendas", default: false },
     ],
   },
   {
@@ -91,6 +94,7 @@ export const MODULE_CATALOG: readonly ModuleDef[] = [
       { key: FEATURE.LOCACAO_PESSOAS, label: "Pessoas", default: true },
       { key: FEATURE.LOCACAO_NEWTON, label: "Newton (agente WhatsApp) — locação", default: false },
       { key: FEATURE.LOCACAO_PROPOSTAS, label: "Propostas — locação", default: true },
+      { key: FEATURE.LOCACAO_PESQUISAS, label: "Pesquisas de satisfação — locação", default: false },
     ],
   },
 ] as const;
@@ -151,6 +155,12 @@ export function newtonFeatureForDealKind(kind: string): FeatureKey {
  *  rollout gradual — PR #166 estabilizou a rodada-2). Org pode desligar via override. */
 export function proposalFeatureForKind(kind: string): FeatureKey {
   return kind === "locacao" ? FEATURE.LOCACAO_PROPOSTAS : FEATURE.VENDAS_PROPOSTAS;
+}
+
+/** Feature de Pesquisas de satisfação por kind (transversal, como o Newton).
+ *  Default OFF nas duas — tenant liga no painel super-admin. */
+export function surveyFeatureForKind(kind: string): FeatureKey {
+  return kind === "locacao" ? FEATURE.LOCACAO_PESQUISAS : FEATURE.VENDAS_PESQUISAS;
 }
 
 /** Definição completa de um módulo. */
