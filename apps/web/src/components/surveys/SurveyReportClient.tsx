@@ -26,6 +26,7 @@ import {
 import { KpiCard, BarRow, LineChart } from "@/components/admin/charts";
 import { cn } from "@/lib/utils";
 import type { SurveyReport } from "@/lib/surveys/report";
+import { SUMMARY_MIN_TEXT_RESPONSES as MIN_TEXT_RESPONSES } from "@/lib/surveys/types";
 
 interface FamilyOption {
   familyId: string;
@@ -48,7 +49,6 @@ const ROLE_LABEL: Record<string, string> = {
   corretor: "Corretor",
 };
 
-const MIN_TEXT_RESPONSES = 3;
 
 /** Render leve do markdown do resumo (bold + bullets — sem lib). */
 function SummaryText({ text }: { text: string }) {

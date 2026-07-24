@@ -12,7 +12,7 @@ vi.mock("@/lib/db/prisma", () => ({
   },
 }));
 
-import { buildSummaryInput } from "./summary";
+import { buildSummaryInput, redactPii } from "./summary";
 
 const QUESTIONS = [
   { id: "nps", type: "nps", label: "Recomendaria?", required: true },
@@ -109,5 +109,39 @@ describe("buildSummaryInput", () => {
   it("template inexistente retorna null", async () => {
     surveyTemplateFindFirst.mockResolvedValue(null);
     expect(await buildSummaryInput("org-1", "nope")).toBeNull();
+  });
+
+  it("redige PII antes de montar o prompt", async () => {
+    surveyResponseFindMany.mockResolvedValue([
+      makeResponse([
+        {
+          questionId: "obs",
+          type: "text",
+          value:
+            "Meu CPF é 123.456.789-00, me liguem no (11) 91234-5678 ou joao@exemplo.com",
+        },
+      ]),
+    ]);
+    const input = await buildSummaryInput("org-1", "tpl-1");
+    expect(input!.entries[0]).toContain("[CPF]");
+    expect(input!.entries[0]).toContain("[telefone]");
+    expect(input!.entries[0]).toContain("[e-mail]");
+    expect(input!.entries[0]).not.toContain("123.456.789-00");
+    expect(input!.entries[0]).not.toContain("91234-5678");
+    expect(input!.entries[0]).not.toContain("joao@exemplo.com");
+  });
+});
+
+describe("redactPii", () => {
+  it("preserva números curtos legítimos", () => {
+    expect(redactPii("Apartamento de 3 quartos, prazo de 45 dias")).toBe(
+      "Apartamento de 3 quartos, prazo de 45 dias"
+    );
+  });
+
+  it("redige CNPJ e telefone com DDI", () => {
+    const out = redactPii("Empresa 12.345.678/0001-90, tel +55 11 98765-4321");
+    expect(out).toContain("[CNPJ]");
+    expect(out).toContain("[telefone]");
   });
 });
