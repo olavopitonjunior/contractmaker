@@ -54,7 +54,19 @@ X-Idempotency-Key: <uuid-v4>      (POST/PATCH/DELETE — uma key por intenção)
 | `documents:rw` | Anexos, OCR |
 | `metrics:r` | Read-only de métricas, lookup por telefone |
 
-Scope check: handlers chamam `hasScope(ident, "...")`. Para auth via session, todos os scopes são considerados presentes.
+Scope check: handlers chamam `hasScope(ident, "...")`. Para auth via session, todos os scopes são considerados presentes. Hierarquia `X:rw ⊇ X:r`: endpoint que exige `deals:r` aceita token com `deals:rw`.
+
+**Bearer exige rota com scope declarado (2026-07-24).** `requireAuth` (legado, `lib/auth/context.ts`) retorna **403** para Bearer em rota que não declara `{ scope }` — essas rotas são session-only por definição. Antes, qualquer token válido da org acessava toda a superfície `requireAuth(req)` sem scope (financeiro, DIMOB, dual-approvals), muito além do documentado aqui. A tentativa é auditada como `API_TOKEN_AUTH_FAILED` com `reason: bearer_on_unscoped_route`. Rotas que agentes consomem foram escopadas explicitamente:
+
+| Rota | Scope |
+|---|---|
+| `GET /api/certidoes` | `documents:r` |
+| `GET /api/financeiro/charges` | `charges:r` |
+| `GET /api/contracts/[id]/envelopes` | `signatures:r` |
+| `GET /api/deals/[dealId]/envelopes` | `signatures:r` |
+| `PATCH /api/deals/[dealId]/envelopes/[envelopeId]` | `signatures:rw` |
+| `GET/PUT /api/deals/[dealId]/commission-charges/draft` | `charges:rw` |
+| `POST /api/deals/[dealId]/commission-charges/validate` | `charges:rw` |
 
 ## 2. Header `X-Newton-Actor`
 

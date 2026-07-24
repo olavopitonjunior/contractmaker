@@ -98,6 +98,48 @@ export async function requireAuth(
     };
   }
 
+  // Bearer só entra em rota que declara scope explícito. Sem isso, qualquer
+  // token válido da org acessava toda rota `requireAuth(req)` sem scope
+  // (financeiro, dimob, dual-approvals...) — superfície M2M implícita muito
+  // maior que a documentada no OpenAPI. Rotas destinadas a agentes declaram
+  // `{ scope }`; as demais ficam session-only por default.
+  if (ident.via === "bearer" && !opts.scope) {
+    void (async () => {
+      const membership = await prisma.orgMembership
+        .findFirst({ where: { userId: ident.userId }, select: { orgId: true } })
+        .catch(() => null);
+      if (!membership) return;
+      await audit(
+        {
+          orgId: membership.orgId,
+          userId: ident.userId,
+          ipAddress: extractIpAddress(req),
+          userAgent: req.headers.get("user-agent"),
+        },
+        {
+          action: "API_TOKEN_AUTH_FAILED",
+          result: "DENIED",
+          metadata: {
+            via: "newton",
+            tokenId: ident.tokenId,
+            reason: "bearer_on_unscoped_route",
+            path: new URL(req.url).pathname,
+          },
+        }
+      );
+    })();
+    return {
+      ok: false,
+      response: NextResponse.json(
+        {
+          error: "Forbidden",
+          reason: "bearer tokens require a scoped endpoint (session-only route)",
+        },
+        { status: 403 }
+      ),
+    };
+  }
+
   // Rate limit per-token (bearer) ou per-session (UI). Sliding window por scope.
   const rl =
     ident.via === "bearer"

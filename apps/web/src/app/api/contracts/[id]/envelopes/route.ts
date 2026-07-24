@@ -96,7 +96,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { id: string } }
 ) {
-  const authResult = await requireAuth(req);
+  const authResult = await requireAuth(req, { scope: "signatures:r" });
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
 
