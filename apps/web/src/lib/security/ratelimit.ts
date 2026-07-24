@@ -197,5 +197,8 @@ export const RateLimits = {
 const SCOPE_LIMITS: Record<string, { limit: number; window: Window }> = {
   "metrics:r": { limit: 600, window: "1 m" },
   "documents:rw": { limit: 30, window: "1 m" },
+  // Locação (Max): leitura generosa (polling de lease/análises); escrita contida.
+  "locacao:r": { limit: 300, window: "1 m" },
+  "locacao:rw": { limit: 60, window: "1 m" },
   default: { limit: 100, window: "1 m" },
 };

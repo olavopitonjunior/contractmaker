@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
-import { ensureLocacaoAccess, isRouteError } from "@/lib/locacao/route-helpers";
+import { ensureLocacaoApiAccess, isRouteError } from "@/lib/locacao/route-helpers";
 import {
   insurancePolicyCreateSchema,
   insuranceWizardSchema,
@@ -12,7 +12,7 @@ import {
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
-  const ctx = await ensureLocacaoAccess(PERMISSION.INSURANCE_VIEW);
+  const ctx = await ensureLocacaoApiAccess(req, PERMISSION.INSURANCE_VIEW, { scope: "locacao:r" });
   if (isRouteError(ctx)) return ctx;
   const url = new URL(req.url);
   const status = url.searchParams.get("status");
@@ -86,7 +86,7 @@ function buildMonthlyExpenses(data: InsuranceWizardInput, orgId: string) {
 }
 
 export async function POST(req: NextRequest) {
-  const ctx = await ensureLocacaoAccess(PERMISSION.INSURANCE_MANAGE);
+  const ctx = await ensureLocacaoApiAccess(req, PERMISSION.INSURANCE_MANAGE, { scope: "locacao:rw" });
   if (isRouteError(ctx)) return ctx;
 
   const raw = await req.json().catch(() => null);

@@ -1958,6 +1958,1151 @@
           }
         }
       }
+    },
+    "/api/locacao/leases": {
+      "get": {
+        "description": "Lista contratos de locação (LeaseContract) com imóvel, locatários e garantia. RBAC LEASE_VIEW + módulo locação habilitado.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "status",
+            "in": "query",
+            "description": "rascunho|assinatura|ativo|renovacao|rescisao|encerrado"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "propertyId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "tenant",
+            "in": "query",
+            "description": "Nome (contains) ou CPF/CNPJ do locatário"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "limit",
+            "in": "query",
+            "description": "1-100, default 50"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista paginada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/leases/{id}": {
+      "get": {
+        "description": "Detalhe do contrato de locação (partes, garantia, apólices). Sem dados bancários de repasse (repasseSplitJson omitido).",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lease",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/clients": {
+      "get": {
+        "description": "Lista clientes/prospects de locação (LeaseClient). RBAC CLIENT_VIEW.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "q",
+            "in": "query",
+            "description": "Busca por nome/documento"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/clients/{id}": {
+      "get": {
+        "description": "Detalhe do cliente/prospect (ficha, análise de crédito, consentimento Serasa).",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cliente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/clients/{id}/insurer-analyses": {
+      "get": {
+        "description": "Análises de fiança por seguradora do cliente (InsurerAnalysis).",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Análises",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "description": "Registra análise de fiança de uma seguradora. RBAC CLIENT_UPDATE.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "seguradora": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "premioMensal": {
+                    "type": "number"
+                  },
+                  "externalRef": {
+                    "type": "string"
+                  },
+                  "resultJson": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "seguradora"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Criada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validação",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "description": "Atualiza análise existente — body traz `analysisId`.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "analysisId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "resultJson": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "analysisId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Atualizada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/guarantees": {
+      "get": {
+        "description": "Lista garantias locatícias (Guarantee). RBAC GUARANTEE_VIEW.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "leaseContractId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "description": "Cria garantia (discriminated union por tipo: fiador | seguro_fianca | titulo_capitalizacao | caucao | sem_garantia). RBAC GUARANTEE_MANAGE.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:rw"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tipo": {
+                    "type": "string"
+                  },
+                  "leaseContractId": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "premioMensal": {
+                    "type": "number"
+                  },
+                  "fiador": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "tipo",
+                  "leaseContractId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Criada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validação",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/guarantees/{id}": {
+      "patch": {
+        "description": "Atualiza garantia (status, provider, coberturaMeses, custoJson, dadosJson).",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "coberturaMeses": {
+                    "type": "number"
+                  },
+                  "custoJson": {
+                    "type": "object"
+                  },
+                  "dadosJson": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Atualizada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/insurance": {
+      "get": {
+        "description": "Lista apólices/cotações de seguro (InsurancePolicy). RBAC INSURANCE_VIEW.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "tipo",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "leaseContractId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "expiringInDays",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "description": "Cria apólice/cotação (vigenciaInicio/Fim obrigatórias). RBAC INSURANCE_MANAGE. Preferir /insurance-newton (ramo incendio) pra resultados do Max — idempotente por externalRef.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:rw"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "leaseContractId": {
+                    "type": "string"
+                  },
+                  "propertyId": {
+                    "type": "string"
+                  },
+                  "tipo": {
+                    "type": "string"
+                  },
+                  "seguradora": {
+                    "type": "string"
+                  },
+                  "vigenciaInicio": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "vigenciaFim": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "premioMensal": {
+                    "type": "number"
+                  },
+                  "responsavelPagamento": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "tipo",
+                  "seguradora",
+                  "vigenciaInicio",
+                  "vigenciaFim"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Criada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validação",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/insurance/{id}": {
+      "patch": {
+        "description": "Atualiza apólice (status, vigências, prêmio). RBAC INSURANCE_MANAGE.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string"
+                  },
+                  "premioMensal": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Atualizada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/inspections": {
+      "get": {
+        "description": "Lista vistorias (Inspection). RBAC INSPECTION_VIEW. Agendamento via Bearer é fase futura (HITL INSPECTION_SCHEDULE).",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "status",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/rent-charges": {
+      "get": {
+        "description": "Lista cobranças de aluguel (RentCharge). RBAC RENT_VIEW + feature locacao.cobrancas.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "leaseContractId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "competencia",
+            "in": "query",
+            "description": "YYYY-MM"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "status",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/deals/{dealId}/insurance-newton": {
+      "get": {
+        "description": "Lê apólices + garantia de um contrato de locação (?leaseContractId=). Scope locacao:r.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "leaseContractId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seguros do contrato",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "leaseContractId obrigatório",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "description": "Grava resultado de seguro do Max — body discrimina por ramo: incendio (InsurancePolicy), fianca (Guarantee consolidada SegurosJá+Alpop), credito (CreditAnalysis). Idempotente por externalRef. RBAC por ramo (INSURANCE_MANAGE / GUARANTEE_MANAGE / CLIENT_UPDATE).",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ramo": {
+                    "type": "string",
+                    "enum": [
+                      "incendio",
+                      "fianca",
+                      "credito"
+                    ]
+                  }
+                },
+                "required": [
+                  "ramo"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Registrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validação",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "webhooks": {}

@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
+import { PERMISSION, type PermissionKey } from "@/lib/security/rbac/permissions";
 import {
-  requireApiAuth,
-  isAuthFailure,
-  authFailureResponse,
-} from "@/lib/api/require-auth";
+  ensureLocacaoApiAccess,
+  isRouteError,
+} from "@/lib/locacao/route-helpers";
 import { audit } from "@/lib/security/audit";
 import {
   recordIncendioQuote,
@@ -22,8 +22,12 @@ export const runtime = "nodejs";
  *   (Guarantee = fonte-da-verdade). Body discrimina por `ramo`.
  * GET  — lê apólices + garantia de um contrato (?leaseContractId=...).
  *
- * Auth: Bearer scope `documents:rw` (mesmo trilho de attachments-newton). O `dealId`
- * do path é contexto/auditoria; o vínculo real é via `leaseContractId` (validado contra a org).
+ * Auth: Bearer scope `locacao:rw` (POST) / `locacao:r` (GET) via
+ * ensureLocacaoApiAccess — RBAC por ramo (INSURANCE_MANAGE / GUARANTEE_MANAGE /
+ * CLIENT_UPDATE) + entitlement do módulo locação. Migrado de `documents:rw`
+ * (2026-07-24, antes do esquema locacao:*; nada consumia em prod). O `dealId`
+ * do path é contexto/auditoria; o vínculo real é via `leaseContractId`
+ * (validado contra a org).
  */
 
 const incendioSchema = z.object({
@@ -65,16 +69,25 @@ const creditoSchema = z.object({
 
 const bodySchema = z.discriminatedUnion("ramo", [incendioSchema, fiancaSchema, creditoSchema]);
 
-export async function POST(req: NextRequest, { params }: { params: { dealId: string } }) {
-  const auth = await requireApiAuth(req, { scope: "documents:rw" });
-  if (isAuthFailure(auth)) return authFailureResponse(auth);
+const PERM_BY_RAMO: Record<"incendio" | "fianca" | "credito", PermissionKey> = {
+  incendio: PERMISSION.INSURANCE_MANAGE,
+  fianca: PERMISSION.GUARANTEE_MANAGE,
+  credito: PERMISSION.CLIENT_UPDATE,
+};
 
+export async function POST(req: NextRequest, { params }: { params: { dealId: string } }) {
   const raw = await req.json().catch(() => null);
   const parsed = bodySchema.safeParse(raw);
   if (!parsed.success) {
     return NextResponse.json({ error: "Validation failed", details: parsed.error.flatten() }, { status: 422 });
   }
   const data = parsed.data;
+
+  const ctx = await ensureLocacaoApiAccess(req, PERM_BY_RAMO[data.ramo], {
+    scope: "locacao:rw",
+  });
+  if (isRouteError(ctx)) return ctx;
+  const auth = ctx.auth;
 
   const result =
     data.ramo === "incendio"
@@ -104,8 +117,11 @@ export async function POST(req: NextRequest, { params }: { params: { dealId: str
 }
 
 export async function GET(req: NextRequest) {
-  const auth = await requireApiAuth(req, { scope: "documents:rw" });
-  if (isAuthFailure(auth)) return authFailureResponse(auth);
+  const ctx = await ensureLocacaoApiAccess(req, PERMISSION.INSURANCE_VIEW, {
+    scope: "locacao:r",
+  });
+  if (isRouteError(ctx)) return ctx;
+  const auth = ctx.auth;
 
   const leaseContractId = new URL(req.url).searchParams.get("leaseContractId");
   if (!leaseContractId) {

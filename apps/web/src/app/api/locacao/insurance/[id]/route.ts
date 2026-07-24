@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
-import { ensureLocacaoAccess, isRouteError, parseJsonBody } from "@/lib/locacao/route-helpers";
+import { ensureLocacaoAccess,
+  ensureLocacaoApiAccess, isRouteError, parseJsonBody } from "@/lib/locacao/route-helpers";
 import { insurancePolicyUpdateSchema } from "@/lib/locacao/validators";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +12,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const ctx = await ensureLocacaoAccess(PERMISSION.INSURANCE_MANAGE);
+  const ctx = await ensureLocacaoApiAccess(req, PERMISSION.INSURANCE_MANAGE, { scope: "locacao:rw" });
   if (isRouteError(ctx)) return ctx;
   const { id } = await params;
 
