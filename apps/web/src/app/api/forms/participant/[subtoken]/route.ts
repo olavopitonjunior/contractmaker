@@ -210,6 +210,7 @@ export async function PATCH(
     });
   }
 
+
   if (markCompleted && !participant.completedAt) {
     audit(
       extractAuditContextFromRequest(req, participant.form.orgId, null),

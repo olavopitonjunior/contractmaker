@@ -10,12 +10,15 @@ import {
   deleteDraftEnvelope,
 } from "@/lib/clicksign/envelopes";
 import { createAcceptanceWhatsapp } from "@/lib/clicksign/acceptance";
-import { getSignatureSettings } from "@/lib/clicksign/account";
+import { getSignatureSettings, resolveClickSignCreds } from "@/lib/clicksign/account";
+import type { ClickSignCreds } from "@/lib/clicksign/account";
 import { ClicksignError } from "@/lib/clicksign/client";
 import { STAGING_MODE } from "@/lib/env/staging";
 import { buildAcceptanceMessage } from "./acceptance-proof";
 import { renderProposalVia } from "./render";
 import { selectPropostaTemplate } from "./template-select";
+import { checkProposalReadiness } from "./clicksign-readiness";
+import { plannedProposalCostCents } from "./cost";
 import { prepareSend, type PrepareResult } from "./send";
 import { ensureProposalDefaultWitnesses } from "./witnesses";
 import { advanceProposalStatus } from "./status";
@@ -292,39 +295,76 @@ async function sendAceite(
   return { ok: true, instrument: "aceite" };
 }
 
-async function sendEnvelope(
-  proposal: { id: string; orgId: string; title: string; validUntil: Date | null },
-  decision: Extract<PrepareResult, { ok: true }>,
-  html: string
-): Promise<SendResult> {
-  const pdf = await exportPdfToBuffer(html, "A4", null);
+interface EnvSignerSpec {
+  role: string;
+  name: string;
+  email: string | null | undefined;
+  cpf: string | null | undefined;
+  phone: string | null | undefined;
+  signingGroup: number;
+  channel: string; // canal JÁ resolvido (email|whatsapp)
+}
 
-  // Paridade com o path de contrato (executor.ts): lê os defaults da org em vez
-  // de hardcodar locale/autoClose/refusable/auth.
-  const settings = await getSignatureSettings(proposal.orgId);
-  const defaultAuth = (settings.defaultAuthMethod as AuthMethod) ?? "email";
-  const rawName = `Proposta — ${proposal.title}`;
+type SigSettings = Awaited<ReturnType<typeof getSignatureSettings>>;
+
+/** Resolve placeholders da mensagem/assunto customizável da org. */
+function fillPlaceholders(
+  tpl: string | null | undefined,
+  p: { proposalId: string; title: string; specs: EnvSignerSpec[] }
+): string | null {
+  if (!tpl) return null;
+  const proponente = p.specs.find((s) => s.role !== "vendedor")?.name ?? "";
+  const imovel = p.title.includes(" — ") ? p.title.split(" — ").slice(1).join(" — ") : "";
+  return tpl
+    .replace(/\{\{\s*numero\s*\}\}/g, p.proposalId.slice(-8))
+    .replace(/\{\{\s*titulo\s*\}\}/g, p.title)
+    .replace(/\{\{\s*proponente\s*\}\}/g, proponente)
+    .replace(/\{\{\s*imovel\s*\}\}/g, imovel);
+}
+
+/**
+ * CORE reusável: cria UM envelope ClickSign (`via`) com os signatários dados +
+ * o PDF do `html`, roda a sequência v3 (create→addDocument→per-signer
+ * addSigner+2 requirements→activate) e marca a row local `running`. Retry-safe
+ * pelo `deleteMany(via, draft/failed)`. NÃO mexe no status da proposta — quem
+ * chama decide (proponente = enviada; vendedor = via webhook). Lança em falha
+ * (limpa o rascunho remoto + marca a row `failed`).
+ */
+async function runClickSignEnvelope(p: {
+  proposalId: string;
+  orgId: string;
+  title: string;
+  via: string;
+  specs: EnvSignerSpec[];
+  html: string;
+  creds: ClickSignCreds;
+  settings: SigSettings;
+  deadlineAt: Date | null;
+  costCents: number;
+}): Promise<{ envelopeId: string }> {
+  const pdf = await exportPdfToBuffer(p.html, "A4", null);
+  const defaultAuth = (p.settings.defaultAuthMethod as AuthMethod) ?? "email";
+  const rawName = `Proposta — ${p.title}${p.via === "reduzida" ? " (proprietário)" : ""}`;
   const name = STAGING_MODE ? `[STAGING] ${rawName}` : rawName;
+  // Mensagem/assunto customizável da org, com placeholders resolvidos.
+  const subject = fillPlaceholders(p.settings.proposalEmailSubject, p);
+  const message = fillPlaceholders(p.settings.proposalEmailMessage, p);
 
-  // Retry-safe: uma tentativa anterior que falhou ANTES de ativar deixa uma row
-  // draft/failed com o mesmo (proposalId, via) — o @@unique bloquearia o novo
-  // create. Limpa as tentativas mortas (nunca uma running/closed).
   await prisma.envelope.deleteMany({
-    where: { proposalId: proposal.id, via: "completa", status: { in: ["draft", "failed"] } },
+    where: { proposalId: p.proposalId, via: p.via, status: { in: ["draft", "failed"] } },
   });
 
-  // Row local (draft) + signers.
   const envelope = await prisma.envelope.create({
     data: {
-      proposalId: proposal.id,
-      orgId: proposal.orgId,
+      proposalId: p.proposalId,
+      orgId: p.orgId,
       source: "proposal",
-      via: "completa",
+      via: p.via,
       name,
       status: "draft",
       authMethod: defaultAuth,
       signers: {
-        create: decision.signers.map((s, i) => ({
+        create: p.specs.map((s, i) => ({
           sourceKind: s.role === "vendedor" ? "vendedor" : "comprador",
           sourceIndex: i,
           role: clicksignRole(s.role),
@@ -333,7 +373,7 @@ async function sendEnvelope(
           email: s.email ?? null,
           documentation: s.cpf ?? null,
           phone: toE164BR(s.phone) ?? null,
-          notifyChannel: decision.resolvedChannels[i] ?? "email",
+          notifyChannel: s.channel,
         })),
       },
     },
@@ -345,18 +385,20 @@ async function sendEnvelope(
     const envResp = await createEnvelope(
       {
         name: envelope.name,
-        autoClose: settings.autoClose,
-        locale: settings.defaultLocale === "en-US" ? "en-US" : "pt-BR",
-        deadlineAt: proposal.validUntil ?? undefined,
+        autoClose: p.settings.autoClose,
+        locale: p.settings.defaultLocale === "en-US" ? "en-US" : "pt-BR",
+        deadlineAt: p.deadlineAt ?? undefined,
+        defaultSubject: subject,
+        defaultMessage: message,
       },
-      decision.creds
+      p.creds
     );
     clicksignId = extractId(envResp);
     if (!clicksignId) throw new Error("Envelope sem id");
 
     const docResp = await addDocument(
       { envelopeId: clicksignId, filename: "proposta.pdf", contentBase64: pdf.toString("base64") },
-      decision.creds
+      p.creds
     );
     const documentClicksignId = extractId(docResp);
     if (!documentClicksignId) throw new Error("Documento sem id");
@@ -370,30 +412,29 @@ async function sendEnvelope(
           documentation: local.documentation ?? undefined,
           phoneNumber: toClicksignPhone(local.phone),
           hasDocumentation: Boolean(local.documentation),
-          refusable: settings.refusable,
+          refusable: p.settings.refusable,
           group: local.signingGroup ?? undefined,
           notifyChannel: (local.notifyChannel as "email" | "whatsapp" | "sms") ?? "email",
         },
-        decision.creds
+        p.creds
       );
       const signerId = extractId(sResp);
       if (!signerId) throw new Error("Signer sem id");
 
-      // Autenticação coerente com o canal (whatsapp→whatsapp), com fallback pro
-      // padrão da org se a ClickSign recusar o método (422) — sem derrubar o
-      // envelope inteiro por causa do auth.
+      // Auth coerente com o canal (whatsapp→whatsapp), com fallback pro padrão da
+      // org se a ClickSign recusar (422) — sem derrubar o envelope por causa do auth.
       const preferredAuth = channelToAuth(local.notifyChannel, defaultAuth);
       let authReq;
       try {
         authReq = await addRequirement(
           { envelopeId: clicksignId, documentClicksignId, signerClicksignId: signerId, action: "provide_evidence", auth: preferredAuth },
-          decision.creds
+          p.creds
         );
       } catch (e) {
         if (e instanceof ClicksignError && e.status === 422 && preferredAuth !== defaultAuth) {
           authReq = await addRequirement(
             { envelopeId: clicksignId, documentClicksignId, signerClicksignId: signerId, action: "provide_evidence", auth: defaultAuth },
-            decision.creds
+            p.creds
           );
         } else {
           throw e;
@@ -401,7 +442,7 @@ async function sendEnvelope(
       }
       const signReq = await addRequirement(
         { envelopeId: clicksignId, documentClicksignId, signerClicksignId: signerId, action: "agree", role: (local.role as ClicksignRole) ?? "party" },
-        decision.creds
+        p.creds
       );
       await prisma.envelopeSigner.update({
         where: { id: local.id },
@@ -413,7 +454,7 @@ async function sendEnvelope(
       });
     }
 
-    await activateEnvelope(clicksignId, decision.creds);
+    await activateEnvelope(clicksignId, p.creds);
 
     await prisma.envelope.update({
       where: { id: envelope.id },
@@ -422,27 +463,183 @@ async function sendEnvelope(
         documentClicksignId,
         status: "running",
         sentAt: new Date(),
-        costCents: decision.planCostCents,
+        costCents: p.costCents,
       },
     });
     await prisma.envelopeSigner.updateMany({
       where: { envelopeId: envelope.id, status: "pending" },
       data: { status: "notified", notifiedAt: new Date() },
     });
-    await prisma.proposal.update({
-      where: { id: proposal.id },
-      data: { instrument: "envelope", sentAt: new Date(), reservedCostCents: decision.planCostCents },
-    });
-    await advanceProposalStatus(proposal.id, "enviada", { sentAt: new Date() });
-
-    return { ok: true, instrument: "envelope", envelopeId: envelope.id };
+    return { envelopeId: envelope.id };
   } catch (err) {
-    console.error("[proposals] falha no envio:", err);
-    if (clicksignId) await deleteDraftEnvelope(clicksignId, decision.creds).catch(() => {});
+    console.error("[proposals] falha no envio do envelope:", err);
+    if (clicksignId) await deleteDraftEnvelope(clicksignId, p.creds).catch(() => {});
     await prisma.envelope.update({
       where: { id: envelope.id },
       data: { status: "failed", lastError: err instanceof Error ? err.message : String(err) },
     });
     throw err;
   }
+}
+
+/**
+ * 1º envelope: SÓ os proponentes (via completa). Os vendedores/proprietários,
+ * se houver, entram num 2º envelope encadeado depois que os proponentes assinam
+ * (sendVendedorEnvelope, disparado pelo webhook). Assim o proponente não espera
+ * o dono, e o dono pode receber uma via com a comissão oculta.
+ */
+async function sendEnvelope(
+  proposal: { id: string; orgId: string; title: string; validUntil: Date | null },
+  decision: Extract<PrepareResult, { ok: true }>,
+  html: string
+): Promise<SendResult> {
+  const settings = await getSignatureSettings(proposal.orgId);
+  const specs: EnvSignerSpec[] = decision.signers.map((s, i) => ({
+    role: s.role,
+    name: s.name,
+    email: s.email,
+    cpf: s.cpf,
+    phone: s.phone,
+    signingGroup: s.signingGroup,
+    channel: decision.resolvedChannels[i] ?? "email",
+  }));
+  const proponentes = specs.filter((s) => s.role !== "vendedor");
+  const first = proponentes.length > 0 ? proponentes : specs; // fallback defensivo
+  const costCents = plannedProposalCostCents({
+    signerCount: first.length,
+    costOverrides: settings.costOverridesJson as Record<string, unknown> | null,
+  });
+
+  const { envelopeId } = await runClickSignEnvelope({
+    proposalId: proposal.id,
+    orgId: proposal.orgId,
+    title: proposal.title,
+    via: "completa",
+    specs: first,
+    html,
+    creds: decision.creds,
+    settings,
+    deadlineAt: proposal.validUntil ?? null,
+    costCents,
+  });
+
+  await prisma.proposal.update({
+    where: { id: proposal.id },
+    data: { instrument: "envelope", sentAt: new Date(), reservedCostCents: decision.planCostCents },
+  });
+  await advanceProposalStatus(proposal.id, "enviada", { sentAt: new Date() });
+  return { ok: true, instrument: "envelope", envelopeId };
+}
+
+/**
+ * 2º envelope ENCADEADO do proprietário/vendedor — disparado quando o envelope
+ * completo (proponentes) fecha e há signatários role="vendedor". Via física
+ * "reduzida" (o webhook usa isso pra fechar a proposta em `completa`); o
+ * CONTEÚDO é reduzido (comissão oculta) quando há `hiddenPaths`, senão completo.
+ * Idempotente pelo `@@unique([proposalId, via])` + guard de existência.
+ */
+export async function sendVendedorEnvelope(proposalId: string): Promise<void> {
+  const existing = await prisma.envelope.findFirst({
+    where: { proposalId, via: "reduzida", status: { in: ["running", "closed"] } },
+    select: { id: true },
+  });
+  if (existing) return; // já enviado
+
+  const proposal = await prisma.proposal.findUnique({ where: { id: proposalId } });
+  if (!proposal) return;
+
+  const rows = await prisma.proposalSigner.findMany({
+    where: { proposalId, included: true, role: "vendedor" },
+    orderBy: { signingGroup: "asc" },
+  });
+  if (rows.length === 0) return; // sem vendedor → nada a encadear
+
+  const creds = await resolveClickSignCreds(proposal.orgId);
+  if (!creds) {
+    await logProposalEvent(proposalId, "chained_envelope2_no_creds");
+    return;
+  }
+  const settings = await getSignatureSettings(proposal.orgId);
+
+  // Preflight dos vendedores (nome/CPF/telefone/e-mail). Falhou → registra e para
+  // (o operador corrige o contato e o /sync re-dispara). Não gasta.
+  const issues = checkProposalReadiness(
+    rows.map((r) => ({ name: r.name, email: r.email, cpf: r.cpf, phone: r.phone, notifyChannel: r.notifyChannel }))
+  );
+  if (issues.length > 0) {
+    await logProposalEvent(proposalId, "chained_envelope2_preflight_failed", { issues });
+    return;
+  }
+
+  // Canal por vendedor: whatsapp só se a conta é Plus e há telefone; senão email.
+  const plus = settings.whatsappSignatureAvailable ?? false;
+  const specs: EnvSignerSpec[] = rows.map((r) => ({
+    role: "vendedor",
+    name: r.name,
+    email: r.email,
+    cpf: r.cpf,
+    phone: r.phone,
+    signingGroup: r.signingGroup,
+    channel: r.notifyChannel === "whatsapp" && plus && r.phone ? "whatsapp" : "email",
+  }));
+
+  // Conteúdo: reduzida (comissão oculta) quando há hiddenPaths; senão completa.
+  const contentVia = proposal.hiddenPaths.length > 0 ? "reduzida" : "completa";
+  const tpl = proposal.templateId
+    ? await prisma.contractTemplate.findUnique({ where: { id: proposal.templateId } })
+    : (await selectPropostaTemplate(proposal.orgId, proposal.schemaType))?.template ?? null;
+  const dataJson = (proposal.dataJson ?? {}) as Record<string, unknown>;
+  const html = tpl?.handlebarsSource
+    ? renderProposalVia({
+        templateSource: tpl.handlebarsSource,
+        schemaType: proposal.schemaType,
+        dataJson,
+        hiddenPaths: proposal.hiddenPaths,
+        via: contentVia,
+        numero: proposal.id.slice(-8),
+        comissaoIncluida: proposal.comissaoIncluida,
+      })
+    : (proposal.sentSnapshotHtml ?? `<h1>${proposal.title}</h1>`);
+
+  const costCents = plannedProposalCostCents({
+    signerCount: specs.length,
+    costOverrides: settings.costOverridesJson as Record<string, unknown> | null,
+  });
+
+  try {
+    await runClickSignEnvelope({
+      proposalId,
+      orgId: proposal.orgId,
+      title: proposal.title,
+      via: "reduzida",
+      specs,
+      html,
+      creds,
+      settings,
+      deadlineAt: proposal.validUntil ?? null,
+      costCents,
+    });
+    await logProposalEvent(proposalId, "chained_envelope2_sent");
+  } catch (err) {
+    await logProposalEvent(proposalId, "chained_envelope2_failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+async function logProposalEvent(
+  proposalId: string,
+  eventName: string,
+  payload?: Record<string, unknown>
+): Promise<void> {
+  await prisma.proposalEvent
+    .create({
+      data: {
+        proposalId,
+        eventName,
+        source: "system",
+        ...(payload ? { payload: payload as never } : {}),
+      },
+    })
+    .catch(() => {});
 }

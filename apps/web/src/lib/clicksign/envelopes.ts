@@ -11,6 +11,10 @@ interface CreateEnvelopeInput {
   deadlineAt?: Date | null;
   autoClose?: boolean;
   locale?: "pt-BR" | "en-US";
+  /** Assunto/mensagem da notificação de assinatura (v3 `default_subject`/
+   *  `default_message`). Omitidos = template padrão da conta ClickSign. */
+  defaultSubject?: string | null;
+  defaultMessage?: string | null;
 }
 
 export async function createEnvelope(
@@ -25,6 +29,8 @@ export async function createEnvelope(
   if (input.deadlineAt) {
     attributes.deadline_at = input.deadlineAt.toISOString();
   }
+  if (input.defaultSubject) attributes.default_subject = input.defaultSubject;
+  if (input.defaultMessage) attributes.default_message = input.defaultMessage;
   return clicksignRequest<ClicksignResponse>({
     method: "POST",
     path: "/api/v3/envelopes",

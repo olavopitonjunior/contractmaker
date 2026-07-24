@@ -14,18 +14,26 @@ import { safeFetch } from "@/lib/security/ssrf";
  * que o Aceite usa pro comprovante). NÃO usar `dossierBuiltAt` como guard: um
  * timestamp de tentativa transforma falha transitória em corrupção permanente.
  *
- * Só roda quando TODOS os envelopes da proposta têm `signedDocumentUrl` — chamado
- * no fim de `persistSignedPdf`, o único ponto onde essa pré-condição é verdadeira.
+ * Gate por `status === "completa"`: a proposta só chega a `completa` quando o
+ * ÚLTIMO envelope esperado fecha (a reduzida do proprietário, quando há
+ * encadeamento). Sem esse gate havia uma corrida — o `persistSignedPdf` do
+ * envelope completo (proponente) rodava `buildDossier` ANTES do 2º envelope
+ * (reduzida) existir, montando um dossiê incompleto e travando o rebuild pelo
+ * guard de `dossierUrl`. Com o gate, só monta depois que a reduzida fecha e o
+ * `onProposalEnvelopeClosed` move pra `completa` (awaited antes do buildDossier).
  */
 export async function buildDossier(
   proposalId: string
 ): Promise<{ url: string } | { skipped: "already_built" | "pending" | "empty" }> {
   const proposal = await prisma.proposal.findUnique({
     where: { id: proposalId },
-    select: { id: true, dossierUrl: true },
+    select: { id: true, dossierUrl: true, status: true },
   });
   if (!proposal) return { skipped: "empty" };
   if (proposal.dossierUrl) return { skipped: "already_built" };
+  // Ainda há via pendente (ex.: proponente assinou mas o proprietário não) →
+  // não montar até a proposta estar completa.
+  if (proposal.status !== "completa") return { skipped: "pending" };
 
   const envelopes = await prisma.envelope.findMany({
     where: { proposalId, source: "proposal" },
