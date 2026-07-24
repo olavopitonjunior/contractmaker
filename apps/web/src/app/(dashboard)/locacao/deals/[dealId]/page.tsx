@@ -3,6 +3,8 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { LocacaoDealDetail } from "@/components/locacao/LocacaoDealDetail";
 import { LOCACAO_SIMPLIFIED_MODE } from "@/lib/env/staging";
+import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
+import { FEATURE } from "@/lib/modules/catalog";
 import type { AgentEvent } from "@/lib/ai/types";
 
 export const dynamic = "force-dynamic";
@@ -184,8 +186,12 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
   const contractProp = toContractProp(contract, "Contrato de locação");
   const adminContractProp = toContractProp(adminContract, "Contrato de administração");
 
+  const modulesView = await getOrgModules(org.id);
+  const surveysEnabled = isFeatureEnabled(modulesView, FEATURE.LOCACAO_PESQUISAS);
+
   return (
     <LocacaoDealDetail
+      surveysEnabled={surveysEnabled}
       deal={{
         id: deal.id,
         title: deal.title,

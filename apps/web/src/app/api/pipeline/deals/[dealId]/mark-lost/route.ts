@@ -4,6 +4,7 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { LOST_STAGE_NAME, stageConfigForKind } from "@/lib/pipeline/stage-config";
+import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
 
 const Body = z.object({
   reason: z.string().min(3).max(500),
@@ -121,6 +122,8 @@ export async function POST(
       toStage: targetStage.id,
     },
   });
+
+  queueSurveyDispatch(deal.id, targetStage.name);
 
   return NextResponse.json({
     status: "perdido",

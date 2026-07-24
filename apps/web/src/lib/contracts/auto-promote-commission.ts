@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/db/prisma";
 import { WON_STAGE_BY_KIND } from "@/lib/pipeline/stage-config";
 import { audit } from "@/lib/security/audit";
+import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
 
 /**
  * Promove o deal pra "Comissão paga" (+ popula `commissionPaidAt`) quando o
@@ -93,6 +94,8 @@ export async function autoPromoteDealOnCommissionPaid(
         },
       }
     ).catch(() => {});
+
+    queueSurveyDispatch(deal.id, targetStage.name);
 
     return {
       promoted: true,

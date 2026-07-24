@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import { audit } from "@/lib/security/audit";
+import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
 
 const ACTIVE_CHARGE_STATUSES_NEGATED = [
   "CANCELLED",
@@ -90,6 +91,8 @@ export async function regressDealStageAfterChargeCancel(
       },
     }
   ).catch(() => {});
+
+  queueSurveyDispatch(deal.id, targetStage.name);
 
   return {
     regressed: true,
