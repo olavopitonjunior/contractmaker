@@ -94,6 +94,10 @@ model User {
   // Newton — pedidos de cobrança de informação criados pela negociadora
   newtonRequests NewtonRequest[]
 
+  // Notificações do sistema em canal externo (WhatsApp via Newton)
+  notificationPrefs      UserNotificationPreference[]
+  notificationDeliveries UserNotificationDelivery[]
+
   // Multitenant Fase 0a — identidade de plataforma (super-admin)
   platformRole PlatformRole?
 }
@@ -268,6 +272,8 @@ model Organization {
   formSettings        OrgFormSettings?
   notificationSettings OrgNotificationSettings?
   dealNotificationLogs DealNotificationLog[]
+  userNotificationPrefs      UserNotificationPreference[]
+  userNotificationDeliveries UserNotificationDelivery[]
   templates           ContractTemplate[]
   clauses             Clause[]
   agentConfig         AgentConfig?
@@ -834,6 +840,10 @@ model Notification {
   @@unique([type, batchId])
   @@index([orgId, read, createdAt])
   @@index([userId, read, createdAt])
+  // Sweep do canal WhatsApp pro usuário (lib/notifications/user-channels.ts):
+  // varre por `type IN (allowlist) AND createdAt >= now()-30min`. Os índices
+  // acima começam por orgId/userId e não servem pra essa varredura global.
+  @@index([type, createdAt])
 }
 
 // Notificações do processo (2026-07) — padrão da org. Um único blob JSON com
@@ -873,6 +883,62 @@ model DealNotificationLog {
 
   @@unique([dealId, event, channel, recipientKey, dedupeKey], map: "DealNotificationLog_dedupe_key")
   @@index([orgId, dealId, createdAt])
+}
+
+// Preferências de canal externo do USUÁRIO da plataforma, por org — o mesmo
+// User pode ser membro de N orgs e consentir em uma só (User.phone é @unique
+// GLOBAL). Default de código = WhatsApp OFF; a org só pode DESLIGAR (kill
+// switch em OrgNotificationSettings.settingsJson.userChannels), nunca ligar
+// pelo usuário: o número é PII pessoal dele, não cadastro comercial — o
+// oposto do SplitRecipient, onde a org liga e o corretor desliga.
+// Shape do settingsJson em lib/notifications/user-channels-shared.ts.
+model UserNotificationPreference {
+  id     String @id @default(cuid())
+  userId String
+  orgId  String
+  // { events?: { [UserNotifCategory]: { whatsapp?: boolean } } }
+  settingsJson    Json      @default("{}")
+  // Consentimento explícito (LGPD). Null = nunca houve opt-in → nenhum envio,
+  // mesmo que um toggle apareça ligado por bug ou migração futura.
+  whatsappOptInAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, orgId])
+  @@index([orgId])
+}
+
+// Chokepoint de idempotência dos envios externos de notificação de SISTEMA a
+// usuários da plataforma. Espelha DealNotificationLog, mas SEM âncora em Deal
+// — a maioria das notificações não tem deal (ai_budget_threshold,
+// support_answered). O dedupeKey canônico é `n:${notificationId}`, que cobre
+// o caso de Notification.batchId null. Claim-first "pending" → settle.
+model UserNotificationDelivery {
+  id             String  @id @default(cuid())
+  orgId          String
+  userId         String
+  notificationId String?
+  type           String // Notification.type
+  category       String // UserNotifCategory
+  channel        String  @default("whatsapp")
+  dedupeKey      String
+  // pending (claim) | sent | skipped | failed | deferred (fora da janela)
+  status         String    @default("pending")
+  detail         Json?
+  createdAt      DateTime  @default(now())
+  settledAt      DateTime?
+
+  org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, channel, dedupeKey], map: "UserNotificationDelivery_dedupe_key")
+  @@index([orgId, createdAt])
+  @@index([notificationId])
+  // Rate cap por usuário/hora: count de status='sent' na última hora.
+  @@index([userId, status, createdAt])
 }
 
 // NewtonRequest — fila de "pedidos ao Newton" ancorada num Deal.

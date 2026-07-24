@@ -14,6 +14,10 @@ import {
   DEAL_NOTIF_EVENTS,
   resolveEffectiveNotificationConfig,
 } from "@/lib/notifications/deal-events-config";
+import {
+  USER_NOTIF_CATEGORIES,
+  type UserNotifCategory,
+} from "@/lib/notifications/user-channels-shared";
 
 /**
  * Padrão da org das notificações do processo → corretores (espelha o padrão
@@ -50,6 +54,23 @@ const settingsPatchSchema = z
       .object({
         enabled: z.boolean().optional(),
         days: z.array(z.number().int().min(1).max(60)).max(10).optional(),
+      })
+      .strict()
+      .optional(),
+    // Kill switch do canal WhatsApp → USUÁRIOS da plataforma. Só DESLIGA: quem
+    // liga é cada usuário no próprio perfil (opt-in com consentimento datado).
+    // Chave ausente = "não interfere"; `false` = bloqueia.
+    userChannels: z
+      .object({
+        enabled: z.boolean().optional(),
+        events: z
+          .object(
+            Object.fromEntries(
+              USER_NOTIF_CATEGORIES.map((c) => [c, z.boolean().optional()])
+            ) as Record<UserNotifCategory, z.ZodOptional<z.ZodBoolean>>
+          )
+          .strict()
+          .optional(),
       })
       .strict()
       .optional(),
@@ -133,6 +154,29 @@ export async function PATCH(req: NextRequest) {
           formReminder: {
             ...((current.formReminder as object | undefined) ?? {}),
             ...parsed.data.formReminder,
+          },
+        }
+      : {}),
+    // Igual a events: funde por categoria, senão desligar uma apagaria as
+    // outras já bloqueadas.
+    ...(parsed.data.userChannels !== undefined
+      ? {
+          userChannels: {
+            ...((current.userChannels as Record<string, unknown> | undefined) ??
+              {}),
+            ...parsed.data.userChannels,
+            ...(parsed.data.userChannels.events !== undefined
+              ? {
+                  events: {
+                    ...(((
+                      current.userChannels as
+                        | { events?: Record<string, unknown> }
+                        | undefined
+                    )?.events) ?? {}),
+                    ...parsed.data.userChannels.events,
+                  },
+                }
+              : {}),
           },
         }
       : {}),

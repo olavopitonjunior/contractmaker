@@ -12,6 +12,7 @@ export const CRON_CATALOG = [
   { path: "/api/cron/clicksign/sync-envelopes", label: "ClickSign sync (fallback)", schedule: "0 6 * * *", realMoney: false },
   { path: "/api/cron/ilist/sync-listings", label: "iList listings sync", schedule: "0 */6 * * *", realMoney: false },
   { path: "/api/cron/newton-requests/sweep", label: "Newton sweep", schedule: "0 * * * *", realMoney: true },
+  { path: "/api/cron/notifications/user-whatsapp", label: "Notificações → WhatsApp do usuário", schedule: "*/5 * * * *", realMoney: true },
   { path: "/api/cron/newton-requests/group-match", label: "Newton group-match", schedule: "30 * * * *", realMoney: false },
   { path: "/api/cron/certidoes/poll-portal", label: "Certidões poll portal", schedule: "*/5 * * * *", realMoney: true },
   { path: "/api/cron/certidoes/problem-digest", label: "Certidões digest email", schedule: "0 13 * * *", realMoney: true },

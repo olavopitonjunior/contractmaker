@@ -21,6 +21,9 @@ export default function NotificationSettingsClient() {
   const [resolved, setResolved] = useState<ResolvedConfig | null>(null);
   const [daysText, setDaysText] = useState("");
   const [savingDays, setSavingDays] = useState(false);
+  // Kill switch do canal WhatsApp da equipe. Só existe como divergência no
+  // blob cru — ausente significa "não interfere", daí o default true.
+  const [userChannelsEnabled, setUserChannelsEnabled] = useState(true);
 
   async function load() {
     const res = await fetch("/api/org/notification-settings", {
@@ -33,6 +36,9 @@ export default function NotificationSettingsClient() {
     const data = await res.json();
     setResolved(data.resolved);
     setDaysText((data.resolved?.formReminder?.days ?? []).join(", "));
+    setUserChannelsEnabled(
+      data.settings?.settingsJson?.userChannels?.enabled !== false
+    );
   }
 
   useEffect(() => {
@@ -149,6 +155,35 @@ export default function NotificationSettingsClient() {
             >
               {savingDays ? "Salvando..." : "Salvar"}
             </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">
+            Avisos no WhatsApp da equipe
+          </CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Cada pessoa da equipe ativa os próprios avisos no perfil dela — a
+            imobiliária não liga por ninguém, porque o número é pessoal. Aqui
+            você só pode <strong>desligar</strong> o canal para todo mundo.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <div className="flex items-center justify-between">
+            <span className="text-sm">
+              Permitir que a equipe receba avisos por WhatsApp
+            </span>
+            <Switch
+              checked={userChannelsEnabled}
+              onCheckedChange={(v) => {
+                setUserChannelsEnabled(v);
+                void patch({ userChannels: { enabled: v } }).then((ok) => {
+                  if (!ok) setUserChannelsEnabled(!v);
+                });
+              }}
+            />
           </div>
         </CardContent>
       </Card>
