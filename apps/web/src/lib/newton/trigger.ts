@@ -104,6 +104,10 @@ export async function triggerNewtonForRequest(a: TriggerArgs): Promise<void> {
       body: JSON.stringify({
         caller: { phone: TRIGGER_PHONE, name: "Sistema" },
         text: buildText(a),
+        // Tenant de origem. O gate `isNewtonEnabledForOrg` acima é config e pode
+        // ser ligado por engano noutro tenant; mandar o orgId deixa o sidecar
+        // recusar sozinho (allowlist determinística), sem depender deste flag.
+        orgId: a.orgId,
       }),
       signal: controller.signal,
     });
