@@ -60,7 +60,10 @@ export default async function PropostasPage({
   let searchRawFailed = false;
   if (qLower) {
     try {
-      const like = `%${qLower}%`;
+      // Escapa os curingas do LIKE (\ % _) — senão "AP_02"/"50%" viravam padrão
+      // curinga e casavam demais. O ESCAPE '\' no SQL abaixo casa com este escape.
+      const escaped = qLower.replace(/[\\%_]/g, (c) => `\\${c}`);
+      const like = `%${escaped}%`;
       const kindVal = tipo === "venda" ? "venda" : "locacao";
       // TODOS os filtros do escopo entram no raw (não só orgId): senão o LIMIT 500
       // pegava os 500 mais recentes DA ORG e, ao re-aplicar o escopo do corretor
@@ -69,7 +72,7 @@ export default async function PropostasPage({
       const conds: Prisma.Sql[] = [
         Prisma.sql`"orgId" = ${orgId}`,
         Prisma.sql`"kind" = ${kindVal}`,
-        Prisma.sql`lower("title" || ' ' || COALESCE("dataJson"::text, '')) LIKE ${like}`,
+        Prisma.sql`lower("title" || ' ' || COALESCE("dataJson"::text, '')) LIKE ${like} ESCAPE '\'`,
       ];
       if (!can(eff, PERMISSION.PROPOSAL_VIEW_ALL)) {
         conds.push(Prisma.sql`("userId" = ${userId} OR "responsibleUserId" = ${userId})`);

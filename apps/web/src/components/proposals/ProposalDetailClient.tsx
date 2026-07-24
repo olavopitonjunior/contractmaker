@@ -287,8 +287,20 @@ export function ProposalDetailClient({
                           : s.status === "sent"
                             ? "text-info"
                             : "text-muted-foreground";
+                  // Só oferece Reenviar/Editar/Remover enquanto o desfecho está EM
+                  // ABERTO. Exclui os terminais de ambos os vocabulários (envelope +
+                  // aceite): assinou/recusou/expirou/cancelou/removido/falhou.
                   const actionable =
-                    s.sent && !["signed", "completed", "removed"].includes(s.status);
+                    s.sent &&
+                    ![
+                      "signed",
+                      "completed",
+                      "removed",
+                      "refused",
+                      "expired",
+                      "canceled",
+                      "email_failed",
+                    ].includes(s.status);
                   return (
                     <li key={s.id} className="space-y-1">
                       <div className="flex justify-between gap-2">
