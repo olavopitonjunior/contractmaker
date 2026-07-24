@@ -180,21 +180,18 @@ async function sendViaWhatsapp(args: SendInviteArgs): Promise<SendInviteResult> 
     ? `${tag} Lembrete de pesquisa de satisfação: envie UMA única mensagem curta e cordial a ${firstName} lembrando da pesquisa "${templateName}" com o link ${link}. Não insista além desta mensagem e marque este pedido como fulfilled imediatamente após enviar.`
     : `${tag} Pesquisa de satisfação: envie UMA única mensagem cordial a ${firstName} convidando a responder a pesquisa "${templateName}" pelo link ${link} (leva menos de 2 minutos). Não insista, não re-cobre; marque este pedido como fulfilled imediatamente após enviar.`;
 
-  // Dedupe defensivo por tag (padrão dos executores de locação) — retry do
-  // sweep ou corrida não cria pedido duplicado pro mesmo invite/tentativa.
-  const existing = await prisma.newtonRequest.findFirst({
-    where: { orgId, ask: { startsWith: tag } },
-    select: { id: true },
-  });
-
-  let requestId = existing?.id;
-  if (!requestId) {
+  // Dedupe ATÔMICO por tag: unique no banco (NewtonRequest.dedupeTag) —
+  // corrida entre cron de retry e "Reenviar" manual nunca cria dois pedidos
+  // (nem duas mensagens de WhatsApp) pro mesmo invite/tentativa.
+  let requestId: string;
+  try {
     const created = await prisma.newtonRequest.create({
       data: {
         orgId,
         dealId: deal.id,
         createdBy: deal.userId,
         ask,
+        dedupeTag: tag,
         targetType: "contact",
         targetRef: phone,
         targetLabel: invite.recipientName,
@@ -209,6 +206,16 @@ async function sendViaWhatsapp(args: SendInviteArgs): Promise<SendInviteResult> 
       select: { id: true },
     });
     requestId = created.id;
+  } catch (e) {
+    if ((e as { code?: string })?.code !== "P2002") throw e;
+    const existing = await prisma.newtonRequest.findUnique({
+      where: { dedupeTag: tag },
+      select: { id: true },
+    });
+    if (!existing) {
+      return { ok: false, reason: "corrida no dedupe do pedido Newton" };
+    }
+    requestId = existing.id;
   }
 
   // Fire-and-forget interno (nunca lança); sem sidecar configurado o sweep de
@@ -234,7 +241,9 @@ async function markSent(args: SendInviteArgs): Promise<void> {
     where: { id: invite.id },
     data: isReminder
       ? {
-          remindersSent: (invite.remindersSent ?? 0) + 1,
+          // increment atômico — leitura+escrita separada duplicaria contagem
+          // sob concorrência (cron de reminders × retry de failed).
+          remindersSent: { increment: 1 },
           lastReminderAt: new Date(),
         }
       : { status: "sent", sentAt: new Date() },
