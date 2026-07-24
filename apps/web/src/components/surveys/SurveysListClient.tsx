@@ -8,6 +8,7 @@ import { Archive, BarChart3, GitBranch, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { SurveyAutomationDialog } from "./SurveyAutomationDialog";
 
 export interface SurveyListRow {
   id: string;
@@ -93,6 +94,7 @@ export function SurveysListClient({ rows }: { rows: SurveyListRow[] }) {
               )}
             </div>
             <div className="flex shrink-0 items-center gap-2">
+              <SurveyAutomationDialog familyId={row.familyId} surveyName={row.name} />
               <Button variant="outline" size="sm" asChild>
                 <Link href={`/pesquisas/relatorios?family=${row.familyId}&lote=${row.id}`}>
                   <BarChart3 className="mr-1 h-3.5 w-3.5" /> Relatório

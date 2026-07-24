@@ -10,6 +10,14 @@
       "schedule": "*/5 * * * *"
     },
     {
+      "path": "/api/cron/surveys/dispatch",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/surveys/remind",
+      "schedule": "0 13 * * *"
+    },
+    {
       "path": "/api/cron/ocr-queue",
       "schedule": "*/1 * * * *"
     },

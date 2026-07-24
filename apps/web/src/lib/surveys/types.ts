@@ -36,6 +36,24 @@ export const AUDIENCE_BY_KIND: Record<string, readonly SurveyRecipientRole[]> = 
 export const SURVEY_CHANNELS = ["email", "whatsapp", "manual"] as const;
 export type SurveyChannel = (typeof SURVEY_CHANNELS)[number];
 
+/**
+ * Stages elegíveis como gatilho de automação, por kind (nomes canônicos —
+ * mesma fonte nominal de lib/pipeline/stage-config.ts e auto-promote-signed).
+ * Client-safe: o form de automação renderiza o select a partir daqui.
+ */
+export const TRIGGER_STAGES_BY_KIND: Record<string, readonly string[]> = {
+  venda: [
+    "Formulário",
+    "Confecção de Contrato",
+    "Enviado para assinatura",
+    "Contrato assinado",
+    "Cobrança emitida",
+    "Comissão paga",
+    "Negócio perdido",
+  ],
+  locacao: ["Em Aprovação", "Formulário", "Em contrato", "Assinado", "ADM"],
+};
+
 export const SURVEY_INVITE_STATUSES = [
   "pending",
   "sent",

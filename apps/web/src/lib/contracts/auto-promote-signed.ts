@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/db/prisma";
 import { audit } from "@/lib/security/audit";
+import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
 
 // Os nomes de stage diferem por tipo de pipeline. Mapas por `pipeline.kind`
 // com fallback "venda" (kind null/legado) — não regride o fluxo de venda.
@@ -132,6 +133,8 @@ export async function autoPromoteDealOnContractSigned(
         },
       }
     ).catch(() => {});
+
+    queueSurveyDispatch(deal.id, targetStage.name);
 
     return {
       promoted: true,
