@@ -64,7 +64,7 @@ export function SurveyAutomationDialog({
   const [dealKind, setDealKind] = useState<"venda" | "locacao">("venda");
   const [stage, setStage] = useState<string>("");
   const [audience, setAudience] = useState<Set<string>>(new Set(["comprador"]));
-  const [channel, setChannel] = useState<"email" | "manual">("email");
+  const [channel, setChannel] = useState<"email" | "manual" | "whatsapp">("email");
   const [offsets, setOffsets] = useState("2, 5");
   const [saving, setSaving] = useState(false);
 
@@ -178,7 +178,11 @@ export function SurveyAutomationDialog({
                   </div>
                   <p className="mt-0.5 text-xs text-muted-foreground">
                     {row.audience.map((r) => ROLE_LABEL[r] ?? r).join(", ")} ·{" "}
-                    {row.channel === "email" ? "e-mail" : "link manual"}
+                    {row.channel === "email"
+                      ? "e-mail"
+                      : row.channel === "whatsapp"
+                        ? "WhatsApp"
+                        : "link manual"}
                     {row.reminderOffsetsDays.length > 0 &&
                       ` · lembretes D+${row.reminderOffsetsDays.join(", D+")}`}
                   </p>
@@ -258,13 +262,14 @@ export function SurveyAutomationDialog({
                 <div className="grid grid-cols-2 gap-2">
                   <Select
                     value={channel}
-                    onValueChange={(v) => setChannel(v as "email" | "manual")}
+                    onValueChange={(v) => setChannel(v as "email" | "manual" | "whatsapp")}
                   >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="email">E-mail automático</SelectItem>
+                      <SelectItem value="whatsapp">WhatsApp (fallback e-mail)</SelectItem>
                       <SelectItem value="manual">Só gerar link</SelectItem>
                     </SelectContent>
                   </Select>
@@ -276,8 +281,9 @@ export function SurveyAutomationDialog({
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  WhatsApp automático chega com a integração Newton/Max — por ora
-                  e-mail ou link manual.
+                  {channel === "whatsapp"
+                    ? "WhatsApp requer o agente Newton habilitado pra org; sem telefone válido o envio cai automaticamente pra e-mail."
+                    : "Lembretes automáticos seguem o mesmo canal do envio."}
                 </p>
 
                 <div className="flex justify-end gap-2">

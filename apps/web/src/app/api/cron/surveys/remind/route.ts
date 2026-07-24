@@ -25,10 +25,13 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ skipped: "staging" });
   }
 
+  // Lembrete segue o CANAL do envio original (decisão de produto): whatsapp
+  // relembra por whatsapp (com fallback email dentro do sendSurveyInvite).
+  // Envio manual (link copiado) não recebe lembrete automático.
   const candidates = await prisma.surveyInvite.findMany({
     where: {
       status: "sent",
-      channel: "email",
+      channel: { in: ["email", "whatsapp"] },
       sentAt: { not: null },
       tokenExp: { gt: new Date() },
     },
@@ -44,6 +47,7 @@ export async function GET(req: NextRequest) {
       remindersSent: true,
       automationId: true,
       template: { select: { name: true } },
+      deal: { select: { id: true, kind: true, userId: true } },
     },
     take: 500,
   });
@@ -88,6 +92,13 @@ export async function GET(req: NextRequest) {
       invite,
       templateName: invite.template.name,
       orgId: invite.orgId,
+      deal: invite.deal
+        ? {
+            id: invite.deal.id,
+            kind: invite.deal.kind === "locacao" ? "locacao" : "venda",
+            userId: invite.deal.userId,
+          }
+        : null,
       isReminder: true,
     });
     if (sent.ok) reminded++;

@@ -20,7 +20,7 @@ export const dynamic = "force-dynamic";
 const patchSchema = z
   .object({
     audience: z.array(z.enum(SURVEY_RECIPIENT_ROLES)).min(1).optional(),
-    channel: z.enum(["email", "manual"]).optional(),
+    channel: z.enum(["email", "manual", "whatsapp"]).optional(),
     enabled: z.boolean().optional(),
     reminderOffsetsDays: z.array(z.number().int().min(0).max(60)).max(5).optional(),
   })
