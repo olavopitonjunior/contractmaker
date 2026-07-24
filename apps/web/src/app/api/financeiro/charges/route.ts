@@ -26,7 +26,7 @@ const querySchema = z.object({
  * Sales só vê charges de próprios deals (scope lockdown).
  */
 export async function GET(req: NextRequest) {
-  const authResult = await requireAuth(req);
+  const authResult = await requireAuth(req, { scope: "charges:r" });
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
 
