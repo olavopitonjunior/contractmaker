@@ -8,6 +8,8 @@ import {
 import { ModuleDisabledError } from "@/lib/modules/guard";
 import { assertAnySurveyFeature } from "@/lib/surveys/guard";
 import { resolveDealRecipients } from "@/lib/surveys/recipients";
+import { whatsappTargetPhone } from "@/lib/surveys/channels";
+import { isNewtonEnabledForDeal } from "@/lib/newton/gate";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -37,6 +39,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Negócio não encontrado" }, { status: 404 });
   }
 
+  const newtonEnabled = await isNewtonEnabledForDeal(
+    auth.org.id,
+    resolved.dealKind
+  ).catch(() => false);
+
   const [templates, optouts] = await Promise.all([
     prisma.surveyTemplate.findMany({
       where: { orgId: auth.org.id, isLatest: true, status: "active" },
@@ -53,11 +60,15 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     dealKind: resolved.dealKind,
+    // Habilita o botão de canal WhatsApp no dialog (agente Newton por org+kind).
+    newtonEnabled,
     // `optedOut`: o destinatário pediu pra não receber — o dialog avisa e não
     // pré-seleciona; o envio manual segue possível (decisão do operador).
+    // `phoneValid`: telefone conversível pro formato do WhatsApp.
     recipients: resolved.recipients.map((r) => ({
       ...r,
       optedOut: r.email ? optedOut.has(r.email) : false,
+      phoneValid: whatsappTargetPhone(r.phone) !== null,
     })),
     templates,
   });

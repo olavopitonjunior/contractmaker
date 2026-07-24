@@ -7,6 +7,7 @@ import {
   Link2,
   Loader2,
   Mail,
+  MessageCircle,
   RefreshCw,
   Send,
   Star,
@@ -50,6 +51,8 @@ interface SuggestedRecipient {
   email: string | null;
   phone: string | null;
   optedOut?: boolean;
+  /** Telefone conversível pro formato do WhatsApp (E.164 BR). */
+  phoneValid?: boolean;
 }
 
 const STATUS_META: Record<string, { label: string; className: string }> = {
@@ -173,9 +176,11 @@ export function DealSurveysTab({ dealId }: { dealId: string }) {
                 {invite.template.name} (v{invite.template.version})
                 {invite.channel === "email" && invite.recipientEmail
                   ? ` · ${invite.recipientEmail}`
-                  : invite.channel === "manual"
-                    ? " · link manual"
-                    : ""}
+                  : invite.channel === "whatsapp"
+                    ? " · WhatsApp"
+                    : invite.channel === "manual"
+                      ? " · link manual"
+                      : ""}
                 {invite.remindersSent > 0 && ` · ${invite.remindersSent} lembrete(s)`}
               </p>
               {invite.response && (
@@ -211,7 +216,7 @@ export function DealSurveysTab({ dealId }: { dealId: string }) {
               >
                 <Copy className="h-3.5 w-3.5" />
               </Button>
-              {invite.channel === "email" &&
+              {(invite.channel === "email" || invite.channel === "whatsapp") &&
                 invite.status !== "responded" &&
                 invite.status !== "optout" && (
                   <Button
@@ -246,8 +251,9 @@ function SendSurveyDialogContent({
     Array<{ id: string; name: string; version: number }>
   >([]);
   const [recipients, setRecipients] = useState<SuggestedRecipient[]>([]);
+  const [newtonEnabled, setNewtonEnabled] = useState(false);
   const [templateId, setTemplateId] = useState<string>("");
-  const [channel, setChannel] = useState<"email" | "manual">("email");
+  const [channel, setChannel] = useState<"email" | "manual" | "whatsapp">("email");
   const [checked, setChecked] = useState<Set<number>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [manualLinks, setManualLinks] = useState<Array<{ recipient: string; url: string }>>([]);
@@ -262,6 +268,7 @@ function SendSurveyDialogContent({
         const data = await res.json();
         setTemplates(data.templates);
         setRecipients(data.recipients);
+        setNewtonEnabled(Boolean(data.newtonEnabled));
         setTemplateId(data.templates[0]?.id ?? "");
         setChecked(
           new Set(
@@ -325,12 +332,18 @@ function SendSurveyDialogContent({
           return; // mantém o dialog aberto mostrando os links
         }
       } else if (created.length > 0) {
+        const fellBack = created.filter((r: { fellBack?: boolean }) => r.fellBack);
         toast.success(`${created.length} pesquisa(s) enviada(s)`);
+        if (fellBack.length > 0) {
+          toast.info(
+            `${fellBack.length} destinatário(s) sem WhatsApp viável — enviado(s) por e-mail`
+          );
+        }
       }
       if (dupes.length > 0) {
         toast.info(`${dupes.length} destinatário(s) já tinham recebido este lote`);
       }
-      if (channel === "email" || created.length === 0) onSent();
+      if (channel !== "manual" || created.length === 0) onSent();
     } finally {
       setSubmitting(false);
     }
@@ -411,7 +424,13 @@ function SendSurveyDialogContent({
                         return next;
                       })
                     }
-                    disabled={channel === "email" && !recipient.email}
+                    disabled={
+                      channel === "email"
+                        ? !recipient.email
+                        : channel === "whatsapp"
+                          ? !recipient.phoneValid && !recipient.email
+                          : false
+                    }
                   />
                   <span className="min-w-0 flex-1 truncate">
                     {recipient.name}
@@ -422,6 +441,16 @@ function SendSurveyDialogContent({
                         : channel === "email"
                           ? " · sem e-mail"
                           : ""}
+                      {channel === "whatsapp" &&
+                        (recipient.phoneValid ? (
+                          ` · ${recipient.phone}`
+                        ) : recipient.email ? (
+                          <span className="ml-1 text-amber-600">
+                            · sem WhatsApp — irá por e-mail
+                          </span>
+                        ) : (
+                          " · sem telefone nem e-mail"
+                        ))}
                       {recipient.optedOut && (
                         <span className="ml-1 text-amber-600">
                           · cancelou recebimento
@@ -439,20 +468,33 @@ function SendSurveyDialogContent({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button
               variant={channel === "email" ? "default" : "outline"}
               size="sm"
               onClick={() => setChannel("email")}
             >
-              <Mail className="mr-1 h-3.5 w-3.5" /> Enviar por e-mail
+              <Mail className="mr-1 h-3.5 w-3.5" /> E-mail
+            </Button>
+            <Button
+              variant={channel === "whatsapp" ? "default" : "outline"}
+              size="sm"
+              disabled={!newtonEnabled}
+              title={
+                newtonEnabled
+                  ? "Envio pelo agente Newton; sem telefone válido cai pra e-mail"
+                  : "Requer o agente Newton habilitado pra esta organização"
+              }
+              onClick={() => setChannel("whatsapp")}
+            >
+              <MessageCircle className="mr-1 h-3.5 w-3.5" /> WhatsApp
             </Button>
             <Button
               variant={channel === "manual" ? "default" : "outline"}
               size="sm"
               onClick={() => setChannel("manual")}
             >
-              <Link2 className="mr-1 h-3.5 w-3.5" /> Gerar link manual
+              <Link2 className="mr-1 h-3.5 w-3.5" /> Gerar link
             </Button>
           </div>
 
@@ -463,10 +505,12 @@ function SendSurveyDialogContent({
           >
             {submitting ? (
               <Loader2 className="h-4 w-4 animate-spin" />
-            ) : channel === "email" ? (
-              `Enviar pra ${selected.length} destinatário(s)`
-            ) : (
+            ) : channel === "manual" ? (
               `Gerar ${selected.length} link(s)`
+            ) : channel === "whatsapp" ? (
+              `Enviar por WhatsApp pra ${selected.length} destinatário(s)`
+            ) : (
+              `Enviar pra ${selected.length} destinatário(s)`
             )}
           </Button>
         </div>

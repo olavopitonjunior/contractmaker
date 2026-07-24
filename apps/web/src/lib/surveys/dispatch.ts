@@ -60,6 +60,7 @@ export async function dispatchSurveysForDeal(
     select: {
       id: true,
       kind: true,
+      userId: true,
       stage: { select: { name: true } },
       pipeline: { select: { orgId: true } },
     },
@@ -87,15 +88,17 @@ export async function dispatchSurveysForDeal(
   const resolved = await resolveDealRecipients(dealId);
   if (!resolved) return { matchedAutomations: automations.length, created: 0, skipped: 0 };
 
-  // E-mails com opt-out anterior na org não recebem disparo automático.
+  // Contatos com opt-out anterior na org não recebem disparo automático —
+  // por e-mail E por telefone (invite de whatsapp que virou optout).
+  const optedOutInvites = await prisma.surveyInvite.findMany({
+    where: { orgId, status: "optout" },
+    select: { recipientEmail: true, recipientPhone: true },
+  });
   const optedOutEmails = new Set(
-    (
-      await prisma.surveyInvite.findMany({
-        where: { orgId, status: "optout", recipientEmail: { not: null } },
-        select: { recipientEmail: true },
-        distinct: ["recipientEmail"],
-      })
-    ).map((i) => i.recipientEmail as string)
+    optedOutInvites.map((i) => i.recipientEmail).filter((e): e is string => !!e)
+  );
+  const optedOutPhones = new Set(
+    optedOutInvites.map((i) => i.recipientPhone).filter((p): p is string => !!p)
   );
 
   let created = 0;
@@ -126,11 +129,20 @@ export async function dispatchSurveysForDeal(
         skipped++;
         continue;
       }
+      // Email estrito exige email; whatsapp tem fallback pra email, então
+      // basta UM contato viável (telefone ou email).
       if (automation.channel === "email" && !target.email) {
         skipped++;
         continue;
       }
-      if (target.email && optedOutEmails.has(target.email)) {
+      if (automation.channel === "whatsapp" && !target.phone && !target.email) {
+        skipped++;
+        continue;
+      }
+      if (
+        (target.email && optedOutEmails.has(target.email)) ||
+        (target.phone && optedOutPhones.has(target.phone))
+      ) {
         skipped++;
         continue;
       }
@@ -192,6 +204,7 @@ export async function dispatchSurveysForDeal(
         invite,
         templateName: template.name,
         orgId,
+        deal: { id: deal.id, kind: dealKind, userId: deal.userId },
       });
       if (sent.ok) {
         void audit(

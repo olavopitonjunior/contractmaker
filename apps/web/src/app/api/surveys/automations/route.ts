@@ -24,7 +24,8 @@ const automationSchema = z
     dealKind: z.enum(["venda", "locacao"]),
     triggerStageName: z.string().min(1),
     audience: z.array(z.enum(SURVEY_RECIPIENT_ROLES)).min(1),
-    channel: z.enum(["email", "manual"]), // whatsapp entra quando o Newton integrar
+    // whatsapp = via agente Newton, com fallback automático pra email.
+    channel: z.enum(["email", "manual", "whatsapp"]),
     enabled: z.boolean().default(true),
     reminderOffsetsDays: z
       .array(z.number().int().min(0).max(60))

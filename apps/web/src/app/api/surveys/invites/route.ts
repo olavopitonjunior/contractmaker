@@ -29,12 +29,24 @@ const recipientSchema = z.object({
   phone: z.string().max(20).optional().nullable(),
 });
 
-const createSchema = z.object({
-  templateId: z.string().min(1),
-  dealId: z.string().min(1).optional(),
-  channel: z.enum(["email", "manual"]),
-  recipients: z.array(recipientSchema).min(1).max(20),
-});
+const createSchema = z
+  .object({
+    templateId: z.string().min(1),
+    dealId: z.string().min(1).optional(),
+    // whatsapp = via Newton, fallback email; exige deal (NewtonRequest é
+    // ancorado em Deal).
+    channel: z.enum(["email", "manual", "whatsapp"]),
+    recipients: z.array(recipientSchema).min(1).max(20),
+  })
+  .superRefine((data, ctx) => {
+    if (data.channel === "whatsapp" && !data.dealId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["dealId"],
+        message: "Envio por WhatsApp requer um negócio vinculado",
+      });
+    }
+  });
 
 // GET /api/surveys/invites?dealId= — envios de um deal (aba Pesquisas).
 export async function GET(req: NextRequest) {
@@ -111,17 +123,23 @@ export async function POST(req: NextRequest) {
 
   // Gate por kind quando escopado a deal; senão anyOf.
   let dealId: string | null = null;
+  let dealContext: { id: string; kind: string; userId: string } | null = null;
   try {
     if (parsed.data.dealId) {
       const deal = await prisma.deal.findFirst({
         where: { id: parsed.data.dealId, pipeline: { orgId: auth.org.id } },
-        select: { id: true, kind: true },
+        select: { id: true, kind: true, userId: true },
       });
       if (!deal) {
         return NextResponse.json({ error: "Negócio não encontrado" }, { status: 404 });
       }
       await assertFeatureEnabled(auth.org.id, surveyFeatureForKind(deal.kind));
       dealId = deal.id;
+      dealContext = {
+        id: deal.id,
+        kind: deal.kind === "locacao" ? "locacao" : "venda",
+        userId: deal.userId,
+      };
     } else {
       await assertAnySurveyFeature(auth.org.id);
     }
@@ -138,6 +156,7 @@ export async function POST(req: NextRequest) {
     url?: string;
     inviteId?: string;
     reason?: string;
+    fellBack?: boolean;
   }> = [];
 
   for (const recipient of parsed.data.recipients) {
@@ -148,6 +167,16 @@ export async function POST(req: NextRequest) {
         recipient: recipient.name,
         status: "failed",
         reason: "sem e-mail",
+      });
+      continue;
+    }
+    // WhatsApp precisa de ao menos UM contato viável (telefone, ou email pro
+    // fallback automático).
+    if (parsed.data.channel === "whatsapp" && !phone && !email) {
+      results.push({
+        recipient: recipient.name,
+        status: "failed",
+        reason: "sem telefone nem e-mail",
       });
       continue;
     }
@@ -213,6 +242,7 @@ export async function POST(req: NextRequest) {
       invite,
       templateName: template.name,
       orgId: auth.org.id,
+      deal: dealContext,
     });
 
     results.push({
@@ -221,6 +251,8 @@ export async function POST(req: NextRequest) {
       inviteId: invite.id,
       url: surveyUrl(invite.token),
       reason: sent.ok ? undefined : sent.reason,
+      // Sinaliza pro dialog que o WhatsApp caiu pro fallback email.
+      fellBack: sent.ok && sent.channel === "email" && sent.fellBack ? true : undefined,
     });
   }
 
