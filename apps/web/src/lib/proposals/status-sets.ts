@@ -41,6 +41,32 @@ export const DELETABLE_STATUSES = new Set<string>([
   "recusada_vendedor",
 ]);
 
+/**
+ * Assinatura EM CURSO — o polling em tempo real deve continuar mesmo quando não
+ * há envelope `running` naquele instante. Cobre a janela entre o envelope dos
+ * proponentes fechar (assinada_proponente/aguardando_vendedor) e o 2º envelope do
+ * vendedor ser criado — sem isto o poller parava e a página ficava presa.
+ */
+export const AWAITING_SIGNATURE_STATUSES = new Set<string>([
+  "enviada",
+  "entregue",
+  "visualizada",
+  "assinada_proponente",
+  "aguardando_vendedor",
+]);
+
+/**
+ * "Em aberto" — proposta enviada e ainda em curso (nem terminal nem rascunho).
+ * Base dos KPIs da lista e do polling de tempo real. Fonte única (server + client).
+ */
+export const OPEN_STATUSES = new Set<string>([
+  "enviada",
+  "entregue",
+  "visualizada",
+  "assinada_proponente",
+  "aguardando_vendedor",
+]);
+
 /** Aguardando cliente/proprietário — faz sentido lembrar/reenviar. */
 export const REMINDABLE_STATUSES = new Set<string>([
   "enviada",

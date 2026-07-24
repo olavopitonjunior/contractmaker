@@ -7,7 +7,12 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { loadScopedProposal } from "@/lib/proposals/route-helpers";
 import { DELETABLE_STATUSES } from "@/lib/proposals/status-sets";
 import { sanitizeHiddenPaths } from "@/lib/proposals/hidden-fields";
+import { runEnvelopeCancel } from "@/lib/clicksign/cancel-action";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+
+// DELETE cancela envelopes ClickSign vivos antes de excluir → precisa de node + tempo.
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
 // GET /api/proposals/[id]
 export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
@@ -103,6 +108,49 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       { status: 409 }
     );
   }
+  // Invariante da plataforma: não deixar um Envelope ClickSign VIVO órfão — a
+  // cascata apagaria a linha local mas o envelope seguiria ativo/cobrável, e
+  // assinaturas/webhooks posteriores não resolveriam mais a proposta. Cancela os
+  // running best-effort ANTES de excluir. Não dá pra só bloquear com 409 "cancele
+  // primeiro": 'expirada' não é cancelável (fora de CANCELLABLE_STATUSES) e o cron
+  // de expiração deixa o Envelope local 'running' até o reconcile sincronizar —
+  // seria um beco sem saída. O DELETE é uma ação explícita do usuário; cancelamos
+  // o que der e registramos o resultado.
+  const liveEnvelopes = await prisma.envelope.findMany({
+    where: { proposalId: params.id, status: "running", clicksignId: { not: null } },
+    select: { id: true },
+  });
+  const cancelOutcomes: { envelopeId: string; ok: boolean; error?: string }[] = [];
+  for (const env of liveEnvelopes) {
+    const res = await runEnvelopeCancel({
+      envelopeId: env.id,
+      reason: "Proposta excluída",
+      actorUserId: auth.actor.effectiveUserId,
+    }).catch((err) => ({
+      status: 502,
+      body: { error: err instanceof Error ? err.message : String(err) },
+    }));
+    cancelOutcomes.push(
+      res.status >= 400
+        ? { envelopeId: env.id, ok: false, error: (res.body as { error?: string })?.error }
+        : { envelopeId: env.id, ok: true }
+    );
+  }
+  // Se ALGUM cancelamento falhou, NÃO exclui: a cascata apagaria o Envelope local
+  // e deixaria o remoto vivo/cobrável órfão (sem rastro pra reconciliar uma
+  // assinatura posterior). 409. Não é beco sem saída: o cron reconcile sincroniza
+  // o Envelope stale (sai de 'running') e a exclusão passa numa próxima tentativa.
+  const failed = cancelOutcomes.filter((o) => !o.ok);
+  if (failed.length > 0) {
+    return NextResponse.json(
+      {
+        error:
+          "A assinatura ainda está ativa na ClickSign e não pôde ser cancelada agora. Tente novamente em alguns minutos.",
+        details: failed,
+      },
+      { status: 409 }
+    );
+  }
 
   await prisma.proposal.delete({ where: { id: params.id } });
   await audit(
@@ -112,7 +160,11 @@ export async function DELETE(req: NextRequest, { params }: { params: { id: strin
       result: "SUCCESS",
       resource: params.id,
       resourceType: "Proposal",
-      metadata: { status: proposal.status, title: proposal.title },
+      metadata: {
+        status: proposal.status,
+        title: proposal.title,
+        ...(cancelOutcomes.length > 0 ? { canceledEnvelopes: cancelOutcomes } : {}),
+      },
     }
   ).catch(() => {});
   return NextResponse.json({ ok: true });

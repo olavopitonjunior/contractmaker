@@ -14,7 +14,12 @@ import { ProposalAssigneeControl } from "./ProposalAssigneeControl";
 import { ProposalActionBar } from "./ProposalActionBar";
 import type { ProposalPermissions } from "./ProposalRowActions";
 
-// Rótulo/cor do EnvelopeSigner.status (vindo do polling — sign/view real).
+// Rótulo/cor por signatário. Duas fontes de vocabulário DISJUNTAS:
+//  - EnvelopeSigner.status (polling/envelope): pending/notified/viewed/signed/
+//    refused/email_failed/removed
+//  - ProposalSigner.acceptanceStatus (Aceite/WhatsApp, sem envelope): completed/
+//    sent/expired/canceled (+ refused, que coincide)
+// Ambos mapeados aqui pra o Aceite não renderizar o token cru em inglês.
 const SIGNER_STATUS_LABEL: Record<string, string> = {
   pending: "Pendente",
   notified: "Notificado",
@@ -23,6 +28,11 @@ const SIGNER_STATUS_LABEL: Record<string, string> = {
   refused: "Recusou",
   email_failed: "Falha no e-mail",
   removed: "Removido",
+  // Vocabulário do Aceite (acceptanceStatus):
+  completed: "Assinou",
+  sent: "Aguardando",
+  expired: "Expirou",
+  canceled: "Cancelado",
 };
 
 interface Proposal {
@@ -51,11 +61,20 @@ interface Proposal {
 
 function money(v: number | null): string {
   if (v == null) return "—";
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+  // "R$ " manual + grouping do número (determinístico): o style:"currency" do ICU
+  // emite um espaço variável (U+00A0/U+202F) entre símbolo e número que difere
+  // Node×browser → hydration mismatch (React #418). O grouping "500.000" é estável.
+  return "R$ " + v.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
 }
 function fmt(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" });
+  // timeZone explícito: server (UTC) e client (BRT) precisam formatar igual, senão
+  // a HORA diverge (22:16 vs 19:16) → React #418 (hydration mismatch) a cada load.
+  return new Date(iso).toLocaleString("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+    timeZone: "America/Sao_Paulo",
+  });
 }
 function prazoLabel(validUntil: string | null): { label: string; danger: boolean } {
   if (!validUntil) return { label: "sem prazo", danger: false };
@@ -74,7 +93,7 @@ export function ProposalDetailClient({
   permissions,
 }: {
   proposal: Proposal;
-  signers: { id: string; name: string; role: string; channel: string }[];
+  signers: { id: string; name: string; role: string; channel: string; status: string }[];
   events: { id: string; eventName: string; receivedAt: string }[];
   attachments: { id: string; filename: string; category: string | null; url: string }[];
   members: { id: string; name: string }[];
@@ -236,7 +255,11 @@ export function ProposalDetailClient({
             <span className="text-muted-foreground">Validade</span>
             <span className="font-medium">
               {fmt(proposal.validUntil)}{" "}
-              <span className={pz.danger ? "text-destructive" : "text-muted-foreground"}>
+              {/* prazo relativo (Date.now) → suppressHydrationWarning evita #418 no limite de dia. */}
+              <span
+                suppressHydrationWarning
+                className={pz.danger ? "text-destructive" : "text-muted-foreground"}
+              >
                 ({pz.label})
               </span>
             </span>
@@ -259,7 +282,7 @@ export function ProposalDetailClient({
                 ? live.signers
                     .filter((s) => s.status !== "removed")
                     .map((s) => ({ id: s.id, name: s.name, role: s.role ?? "", channel: s.channel, status: s.status, sent: true }))
-                : signers.map((s) => ({ id: s.id, name: s.name, role: s.role, channel: s.channel, status: "", sent: false }));
+                : signers.map((s) => ({ id: s.id, name: s.name, role: s.role, channel: s.channel, status: s.status, sent: false }));
             if (rows.length === 0) {
               return <p className="text-sm text-muted-foreground">Nenhum signatário definido ainda.</p>;
             }
@@ -268,14 +291,29 @@ export function ProposalDetailClient({
                 {rows.map((s) => {
                   const badge = s.status ? SIGNER_STATUS_LABEL[s.status] ?? s.status : null;
                   const badgeCls =
-                    s.status === "signed"
+                    s.status === "signed" || s.status === "completed"
                       ? "text-success"
                       : s.status === "refused" || s.status === "email_failed"
                         ? "text-destructive"
                         : s.status === "viewed"
                           ? "text-info"
-                          : "text-muted-foreground";
-                  const actionable = s.sent && !["signed", "removed"].includes(s.status);
+                          : s.status === "sent"
+                            ? "text-info"
+                            : "text-muted-foreground";
+                  // Só oferece Reenviar/Editar/Remover enquanto o desfecho está EM
+                  // ABERTO. Exclui os terminais de ambos os vocabulários (envelope +
+                  // aceite): assinou/recusou/expirou/cancelou/removido/falhou.
+                  const actionable =
+                    s.sent &&
+                    ![
+                      "signed",
+                      "completed",
+                      "removed",
+                      "refused",
+                      "expired",
+                      "canceled",
+                      "email_failed",
+                    ].includes(s.status);
                   return (
                     <li key={s.id} className="space-y-1">
                       <div className="flex justify-between gap-2">

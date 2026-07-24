@@ -8,9 +8,18 @@ import {
 } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { responsibleDisplay } from "@/lib/proposals/status-view";
+import { clicksignRoleLabel } from "@/lib/clicksign/roles";
 import { ProposalDetailClient } from "@/components/proposals/ProposalDetailClient";
 
 export const dynamic = "force-dynamic";
+
+// Rótulo PT do papel de domínio do ProposalSigner (fallback Aceite, sem envelope).
+const PLAN_ROLE_LABEL: Record<string, string> = {
+  proponente: "Proponente",
+  vendedor: "Vendedor",
+  testemunha: "Testemunha",
+  corretora: "Corretora",
+};
 
 export default async function PropostaDetailPage({
   params,
@@ -43,7 +52,7 @@ export default async function PropostaDetailPage({
     notFound();
   }
 
-  const [signers, events, attachments, memberRows] = await Promise.all([
+  const [planSigners, events, attachments, memberRows, envelopes] = await Promise.all([
     prisma.proposalSigner.findMany({
       where: { proposalId: params.id },
       orderBy: { signingGroup: "asc" },
@@ -59,7 +68,50 @@ export default async function PropostaDetailPage({
       select: { user: { select: { id: true, name: true } } },
       orderBy: { user: { name: "asc" } },
     }),
+    prisma.envelope.findMany({
+      where: { proposalId: params.id, source: "proposal", status: { notIn: ["failed"] } },
+      select: {
+        via: true,
+        signers: {
+          select: { id: true, name: true, role: true, notifyChannel: true, status: true },
+          orderBy: { signingGroup: "asc" },
+        },
+      },
+      orderBy: { via: "asc" },
+    }),
   ]);
+
+  // Status REAL por signatário vem do EnvelopeSigner (onde vive sign/view/refuse),
+  // não do ProposalSigner (plano). Sem isso o status por-linha sumia em propostas
+  // terminais (polling off) — ex.: numa recusada não dava pra ver quem recusou.
+  // Papel exibível: traduz a qualificação ClickSign (inglês) → PT via
+  // clicksignRoleLabel (inclui testemunha; sourceKind colapsaria pra comprador).
+  const envelopeSigners = envelopes.flatMap((e) =>
+    e.signers.map((s) => ({
+      id: s.id,
+      name: s.name,
+      role: clicksignRoleLabel(s.role) ?? "",
+      channel: s.notifyChannel,
+      status: s.status,
+    }))
+  );
+  // Fallback pro ProposalSigner quando NÃO há envelope: propostas via Aceite
+  // (WhatsApp) não criam Envelope, então o status por-signatário vive em
+  // ProposalSigner.acceptanceStatus — sem isto o Aceite perdia a visibilidade de
+  // quem aceitou/recusou. Também cobre rascunho (acceptanceStatus vazio → sem badge).
+  const signers =
+    envelopeSigners.length > 0
+      ? envelopeSigners.filter((s) => s.status !== "removed")
+      : planSigners.map((s) => ({
+          id: s.id,
+          name: s.name,
+          // Papel de domínio (proponente/vendedor/testemunha) rotulado em PT
+          // capitalizado — mesmo formato do ramo de envelope (que traduz via
+          // clicksignRoleLabel), pra não misturar "· proponente" com "· Vendedor".
+          role: PLAN_ROLE_LABEL[s.role ?? ""] ?? s.role ?? "",
+          channel: s.notifyChannel,
+          status: s.acceptanceStatus ?? "",
+        }));
 
   const d = (proposal.dataJson ?? {}) as Record<string, unknown>;
   const resp = responsibleDisplay({
@@ -106,8 +158,8 @@ export default async function PropostaDetailPage({
         id: s.id,
         name: s.name,
         role: s.role,
-        channel: s.notifyChannel,
-        status: "—",
+        channel: s.channel,
+        status: s.status,
       }))}
       events={events.map((e) => ({
         id: e.id,

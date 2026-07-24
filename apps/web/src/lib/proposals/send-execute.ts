@@ -12,6 +12,8 @@ import {
 import { createAcceptanceWhatsapp } from "@/lib/clicksign/acceptance";
 import { getSignatureSettings, resolveClickSignCreds } from "@/lib/clicksign/account";
 import type { ClickSignCreds } from "@/lib/clicksign/account";
+import { getMonthlySpendCents } from "@/lib/clicksign/executor";
+import { getMonthlyBudgetCents } from "@/lib/clicksign/costs";
 import { ClicksignError } from "@/lib/clicksign/client";
 import { STAGING_MODE } from "@/lib/env/staging";
 import { buildAcceptanceMessage } from "./acceptance-proof";
@@ -20,6 +22,7 @@ import { selectPropostaTemplate } from "./template-select";
 import { checkProposalReadiness } from "./clicksign-readiness";
 import { plannedProposalCostCents } from "./cost";
 import { prepareSend, type PrepareResult } from "./send";
+import { withVendedorSendLock } from "./send-lock";
 import { ensureProposalDefaultWitnesses } from "./witnesses";
 import { advanceProposalStatus } from "./status";
 import { toE164BR } from "./clicksign-readiness";
@@ -538,40 +541,76 @@ async function sendEnvelope(
  * CONTEÚDO é reduzido (comissão oculta) quando há `hiddenPaths`, senão completo.
  * Idempotente pelo `@@unique([proposalId, via])` + guard de existência.
  */
-export async function sendVendedorEnvelope(proposalId: string): Promise<void> {
+export type SendVendedorResult =
+  | { ok: true }
+  | {
+      ok: false;
+      reason:
+        | "already" // já enviado (running/closed) ou em voo — no-op idempotente
+        | "not_found"
+        | "no_vendedor"
+        | "no_creds"
+        | "preflight"
+        | "budget"
+        | "locked" // outro processo está enviando agora (lock)
+        | "error";
+      detail?: string;
+    };
+
+export async function sendVendedorEnvelope(
+  proposalId: string
+): Promise<SendVendedorResult> {
+  // Serializa com um lock distribuído: webhook (waitUntil) + botão + cron podem
+  // disparar concorrentemente e a guarda de existência sozinha é TOCTOU (ambos
+  // checam antes de qualquer draft existir). Lock ausente (sem Redis) → fail-open.
+  return withVendedorSendLock(
+    proposalId,
+    () => sendVendedorEnvelopeLocked(proposalId),
+    { ok: false, reason: "locked" }
+  );
+}
+
+async function sendVendedorEnvelopeLocked(
+  proposalId: string
+): Promise<SendVendedorResult> {
+  // Idempotência (2ª linha de defesa, dentro do lock): running/closed = já enviado;
+  // draft RECENTE = em voo. Draft velho (tentativa que crashou) NÃO bloqueia —
+  // runClickSignEnvelope limpa draft/failed e recria.
+  const inFlightCutoff = new Date(Date.now() - 5 * 60_000);
   const existing = await prisma.envelope.findFirst({
-    where: { proposalId, via: "reduzida", status: { in: ["running", "closed"] } },
+    where: {
+      proposalId,
+      via: "reduzida",
+      OR: [
+        { status: { in: ["running", "closed"] } },
+        { status: "draft", createdAt: { gt: inFlightCutoff } },
+      ],
+    },
     select: { id: true },
   });
-  if (existing) return; // já enviado
+  if (existing) return { ok: false, reason: "already" };
 
   const proposal = await prisma.proposal.findUnique({ where: { id: proposalId } });
-  if (!proposal) return;
+  if (!proposal) return { ok: false, reason: "not_found" };
 
   const rows = await prisma.proposalSigner.findMany({
     where: { proposalId, included: true, role: "vendedor" },
     orderBy: { signingGroup: "asc" },
   });
-  if (rows.length === 0) return; // sem vendedor → nada a encadear
+  if (rows.length === 0) return { ok: false, reason: "no_vendedor" };
 
   const creds = await resolveClickSignCreds(proposal.orgId);
   if (!creds) {
     await logProposalEvent(proposalId, "chained_envelope2_no_creds");
-    return;
+    return { ok: false, reason: "no_creds" };
   }
   const settings = await getSignatureSettings(proposal.orgId);
 
-  // Preflight dos vendedores (nome/CPF/telefone/e-mail). Falhou → registra e para
-  // (o operador corrige o contato e o /sync re-dispara). Não gasta.
-  const issues = checkProposalReadiness(
-    rows.map((r) => ({ name: r.name, email: r.email, cpf: r.cpf, phone: r.phone, notifyChannel: r.notifyChannel }))
-  );
-  if (issues.length > 0) {
-    await logProposalEvent(proposalId, "chained_envelope2_preflight_failed", { issues });
-    return;
-  }
-
-  // Canal por vendedor: whatsapp só se a conta é Plus e há telefone; senão email.
+  // Canal por vendedor RESOLVIDO antes do preflight: whatsapp só se a conta é Plus
+  // e há telefone; senão email. Validar contra o canal cru (r.notifyChannel)
+  // deixava passar um vendedor whatsapp-só-telefone (sem e-mail); rebaixado pra
+  // email ele geraria envelope sem endereço → ClickSign 422 → proposta travada em
+  // aguardando_vendedor (o reconcile re-tentaria com a mesma falha).
   const plus = settings.whatsappSignatureAvailable ?? false;
   const specs: EnvSignerSpec[] = rows.map((r) => ({
     role: "vendedor",
@@ -582,6 +621,19 @@ export async function sendVendedorEnvelope(proposalId: string): Promise<void> {
     signingGroup: r.signingGroup,
     channel: r.notifyChannel === "whatsapp" && plus && r.phone ? "whatsapp" : "email",
   }));
+
+  // Preflight dos vendedores contra o canal RESOLVIDO (nome/CPF/telefone/e-mail).
+  // Falhou → registra e para (o operador corrige o contato e o /sync re-dispara).
+  // Não gasta.
+  const issues = checkProposalReadiness(
+    specs.map((s) => ({ name: s.name, email: s.email, cpf: s.cpf, phone: s.phone, notifyChannel: s.channel }))
+  );
+  if (issues.length > 0) {
+    await logProposalEvent(proposalId, "chained_envelope2_preflight_failed", { issues });
+    // issues são objetos ReadinessIssue — extrai a razão legível (senão o detail
+    // vira "[object Object]" no 422 que o operador/cron lê).
+    return { ok: false, reason: "preflight", detail: issues.map((i) => i.reason).join("; ") };
+  }
 
   // Conteúdo: reduzida (comissão oculta) quando há hiddenPaths; senão completa.
   const contentVia = proposal.hiddenPaths.length > 0 ? "reduzida" : "completa";
@@ -606,6 +658,23 @@ export async function sendVendedorEnvelope(proposalId: string): Promise<void> {
     costOverrides: settings.costOverridesJson as Record<string, unknown> | null,
   });
 
+  // Budget mensal (mesmo cap do envio inicial em send.ts): o split enviou só os
+  // proponentes primeiro, então o custo do vendedor NÃO foi contado adiantado. Sem
+  // este gate, o 2º envelope estouraria o teto que a plataforma promete (402). Sub-
+  // teto de propostas tem precedência sobre o mensal. Estourou → registra e para
+  // (o reconcile re-tenta quando houver saldo; a proposta fica em aguardando_vendedor).
+  const budgetCents =
+    settings.proposalBudgetCents ?? getMonthlyBudgetCents(settings.monthlyBudgetCents);
+  const spentCents = await getMonthlySpendCents(proposal.orgId);
+  if (spentCents + costCents > budgetCents) {
+    await logProposalEvent(proposalId, "chained_envelope2_budget_exceeded", {
+      spentCents,
+      budgetCents,
+      costCents,
+    });
+    return { ok: false, reason: "budget" };
+  }
+
   try {
     await runClickSignEnvelope({
       proposalId,
@@ -620,10 +689,11 @@ export async function sendVendedorEnvelope(proposalId: string): Promise<void> {
       costCents,
     });
     await logProposalEvent(proposalId, "chained_envelope2_sent");
+    return { ok: true };
   } catch (err) {
-    await logProposalEvent(proposalId, "chained_envelope2_failed", {
-      error: err instanceof Error ? err.message : String(err),
-    });
+    const detail = err instanceof Error ? err.message : String(err);
+    await logProposalEvent(proposalId, "chained_envelope2_failed", { error: detail });
+    return { ok: false, reason: "error", detail };
   }
 }
 

@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { proposalStatusView, initials } from "@/lib/proposals/status-view";
+import { OPEN_STATUSES } from "@/lib/proposals/status-sets";
 import { NovaPropostaDialog } from "./NovaPropostaDialog";
 import { ProposalFilters, type ListFilters } from "./ProposalFilters";
 import { ProposalRowActions, type ProposalPermissions } from "./ProposalRowActions";
@@ -26,22 +27,22 @@ export interface ProposalRow {
   resumo: { proponente: string | null; imovel: string | null; valor: number | null };
 }
 
-const OPEN_STATUSES = new Set([
-  "enviada",
-  "entregue",
-  "visualizada",
-  "assinada_proponente",
-  "aguardando_vendedor",
-]);
-
 function money(v: number | null): string {
   if (v == null) return "—";
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+  // "R$ " manual + grouping do número (determinístico) — evita o espaço variável do
+  // style:"currency" do ICU (U+00A0/U+202F) que difere Node×browser → React #418.
+  return "R$ " + v.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
 }
 
 function shortDate(iso: string | null): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit" });
+  // timeZone explícito: o server roda em UTC e o client em BRT — sem fixar o fuso,
+  // o toLocale diverge entre SSR e hidratação → React #418 (hydration mismatch).
+  return new Date(iso).toLocaleDateString("pt-BR", {
+    day: "2-digit",
+    month: "2-digit",
+    timeZone: "America/Sao_Paulo",
+  });
 }
 
 function prazo(validUntil: string | null): { label: string; tone: "" | "warn" | "danger" } {
@@ -59,6 +60,7 @@ export function ProposalsListClient({
   members,
   permissions,
   filters,
+  kpis,
 }: {
   proposals: ProposalRow[];
   tipo: "venda" | "locacao";
@@ -66,6 +68,8 @@ export function ProposalsListClient({
   members: { id: string; name: string }[];
   permissions: ProposalPermissions;
   filters: ListFilters;
+  /** Totais da ORG (independentes dos filtros da tabela) — evita KPI subcontado. */
+  kpis: { open: number; converted: number; expiring: number };
 }) {
   const router = useRouter();
 
@@ -78,11 +82,9 @@ export function ProposalsListClient({
     return () => clearInterval(t);
   }, [hasOpen, router]);
 
-  const emAberto = proposals.filter((p) => OPEN_STATUSES.has(p.status)).length;
-  const convertidas = proposals.filter((p) => p.status === "convertida").length;
-  const expirando = proposals.filter(
-    (p) => OPEN_STATUSES.has(p.status) && prazo(p.validUntil).tone !== ""
-  ).length;
+  // Totais da ORG (do servidor), NÃO do array filtrado/capado — senão filtrar a
+  // tabela pra "Concluídas" zerava "Em aberto" e o take:200 subcontava.
+  const { open: emAberto, converted: convertidas, expiring: expirando } = kpis;
 
   return (
     <div className="space-y-4 p-4 md:p-6">
@@ -177,6 +179,10 @@ export function ProposalsListClient({
                         </div>
                       </TableCell>
                       <TableCell
+                        // prazo deriva de Date.now() (relativo) → pode divergir SSR×
+                        // hidratação num limite de dia. suppressHydrationWarning mantém
+                        // o valor do client sem disparar React #418.
+                        suppressHydrationWarning
                         className={
                           pz.tone === "danger"
                             ? "text-destructive font-medium"

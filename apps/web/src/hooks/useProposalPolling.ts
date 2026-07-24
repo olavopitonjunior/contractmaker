@@ -26,6 +26,11 @@ export interface ProposalStatusPayload {
 }
 
 const POLL_INTERVAL_MS = 3500;
+// Erros transitórios (blip de rede, 500, 401 durante refresh de token) não podem
+// matar o polling pro resto da vida da página. Reagenda com backoff até um teto de
+// falhas consecutivas — aí desiste (o operador recarrega). Zera a cada sucesso.
+const MAX_CONSECUTIVE_ERRORS = 8;
+const ERROR_BACKOFF_MS = 8000;
 
 /**
  * Polling em tempo real do estado de uma proposta (molde do `useEnvelopePolling`
@@ -43,6 +48,7 @@ export function useProposalPolling(
   const [error, setError] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const cancelledRef = useRef(false);
+  const errorCountRef = useRef(0);
   const lastStatusRef = useRef<string | null>(null);
   const onChangeRef = useRef(opts.onStatusChange);
   onChangeRef.current = opts.onStatusChange;
@@ -56,6 +62,7 @@ export function useProposalPolling(
       const json = (await res.json()) as ProposalStatusPayload;
       setData(json);
       setError(null);
+      errorCountRef.current = 0;
 
       if (lastStatusRef.current !== null && lastStatusRef.current !== json.status) {
         onChangeRef.current?.(json.status);
@@ -68,6 +75,13 @@ export function useProposalPolling(
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao buscar status");
+      // Reagenda no erro (com backoff) — um blip não pode parar o polling pra
+      // sempre. Só desiste após MAX_CONSECUTIVE_ERRORS falhas seguidas.
+      errorCountRef.current += 1;
+      if (!cancelledRef.current && errorCountRef.current < MAX_CONSECUTIVE_ERRORS) {
+        if (timerRef.current) clearTimeout(timerRef.current);
+        timerRef.current = setTimeout(fetchStatus, ERROR_BACKOFF_MS);
+      }
     } finally {
       setLoading(false);
     }

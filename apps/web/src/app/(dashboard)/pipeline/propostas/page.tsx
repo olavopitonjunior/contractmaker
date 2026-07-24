@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { requireAnyFeaturePage } from "@/lib/modules/page-guard";
 import { FEATURE } from "@/lib/modules/catalog";
@@ -10,6 +11,7 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { redirect } from "next/navigation";
 import { ProposalsListClient } from "@/components/proposals/ProposalsListClient";
 import { statusesForFilter } from "@/lib/proposals/list-filters";
+import { OPEN_STATUSES } from "@/lib/proposals/status-sets";
 import { responsibleDisplay } from "@/lib/proposals/status-view";
 
 export const dynamic = "force-dynamic";
@@ -49,6 +51,47 @@ export default async function PropostasPage({
   const statusList = statusesForFilter(searchParams.status);
   const responsibleUserId = searchParams.responsibleUserId || undefined;
 
+  // Busca `q`: proponente e imóvel vivem no dataJson (JSON), onde o `contains` do
+  // Prisma não alcança. Antes o filtro rodava em memória DEPOIS de `take: 200`, então
+  // só buscava nas 200 mais recentes (matches mais antigos sumiam silenciosamente).
+  // Agora resolvemos os IDs no banco (título + dataJson::text) e hidratamos por id —
+  // o escopo (orgId/corretor) é re-aplicado no findMany. Fallback pro modo antigo se
+  // o raw falhar (nunca quebra a listagem).
+  let searchIdFilter: { id: { in: string[] } } | undefined;
+  let searchRawFailed = false;
+  if (qLower) {
+    try {
+      // Escapa os curingas do LIKE (\ % _) — senão "AP_02"/"50%" viravam padrão
+      // curinga e casavam demais. O ESCAPE '\' no SQL abaixo casa com este escape.
+      const escaped = qLower.replace(/[\\%_]/g, (c) => `\\${c}`);
+      const like = `%${escaped}%`;
+      const kindVal = tipo === "venda" ? "venda" : "locacao";
+      // TODOS os filtros do escopo entram no raw (não só orgId): senão o LIMIT 500
+      // pegava os 500 mais recentes DA ORG e, ao re-aplicar o escopo do corretor
+      // (VIEW_OWN) na hidratação, um match ANTIGO dele podia cair fora. Aplicando
+      // aqui, o teto vale sobre o conjunto que ele realmente vê.
+      const conds: Prisma.Sql[] = [
+        Prisma.sql`"orgId" = ${orgId}`,
+        Prisma.sql`"kind" = ${kindVal}`,
+        Prisma.sql`lower("title" || ' ' || COALESCE("dataJson"::text, '')) LIKE ${like} ESCAPE '\\'`,
+      ];
+      if (!can(eff, PERMISSION.PROPOSAL_VIEW_ALL)) {
+        conds.push(Prisma.sql`("userId" = ${userId} OR "responsibleUserId" = ${userId})`);
+      }
+      if (statusList) conds.push(Prisma.sql`"status" = ANY(${statusList})`);
+      if (responsibleUserId) conds.push(Prisma.sql`"responsibleUserId" = ${responsibleUserId}`);
+      const matched = await prisma.$queryRaw<{ id: string }[]>(
+        Prisma.sql`SELECT "id" FROM "Proposal" WHERE ${Prisma.join(
+          conds,
+          " AND "
+        )} ORDER BY "createdAt" DESC LIMIT 500`
+      );
+      searchIdFilter = { id: { in: matched.map((m) => m.id) } };
+    } catch {
+      searchRawFailed = true; // cai no post-filter em memória abaixo
+    }
+  }
+
   const [proposals, memberRows] = await Promise.all([
     prisma.proposal.findMany({
       where: {
@@ -56,9 +99,7 @@ export default async function PropostasPage({
         kind: tipo === "venda" ? "venda" : "locacao",
         ...(statusList ? { status: { in: statusList } } : {}),
         ...(responsibleUserId ? { responsibleUserId } : {}),
-        // A busca `q` é aplicada em memória (post-filter): proponente e imóvel
-        // vivem no dataJson (JSON), onde `contains` do Prisma não é portável.
-        // Filtrar só por `title` no banco escondia matches de proponente/imóvel.
+        ...(searchIdFilter ?? {}),
       },
       select: {
         id: true,
@@ -78,12 +119,28 @@ export default async function PropostasPage({
         responsibleUser: { select: { id: true, name: true, image: true } },
       },
       orderBy: { createdAt: "desc" },
-      take: 200,
+      // Busca resolvida no banco → hidrata os ≤500 ids casados. Sem busca → 200 recentes.
+      take: searchIdFilter ? 500 : 200,
     }),
     prisma.orgMembership.findMany({
       where: { orgId },
       select: { user: { select: { id: true, name: true } } },
       orderBy: { user: { name: "asc" } },
+    }),
+  ]);
+
+  // KPIs = totais da ORG (escopo + tipo), independentes dos filtros de busca/status
+  // da tabela — senão filtrar pra "Concluídas" zerava "Em aberto"/"Expirando", e o
+  // take:200 subcontava. "Expirando" = aberta com validUntil em ≤2 dias (inclui
+  // vencida), espelhando o prazo() do client (tone warn/danger).
+  const kpiWhere = { ...scope, kind: tipo === "venda" ? "venda" : "locacao" };
+  const expiringCutoff = new Date(Date.now() + 2 * 86_400_000);
+  const openList = [...OPEN_STATUSES];
+  const [openCount, convertedCount, expiringCount] = await Promise.all([
+    prisma.proposal.count({ where: { ...kpiWhere, status: { in: openList } } }),
+    prisma.proposal.count({ where: { ...kpiWhere, status: "convertida" } }),
+    prisma.proposal.count({
+      where: { ...kpiWhere, status: { in: openList }, validUntil: { not: null, lte: expiringCutoff } },
     }),
   ]);
 
@@ -122,7 +179,9 @@ export default async function PropostasPage({
       };
     })
     .filter((r) => {
-      if (!qLower) return true;
+      // Busca já resolvida no banco (searchIdFilter). O post-filter em memória só
+      // roda no FALLBACK (raw falhou) — aí sobre as 200 recentes, como antes.
+      if (!qLower || !searchRawFailed) return true;
       const hay = [r.title, r.resumo.imovel, r.resumo.proponente]
         .filter(Boolean)
         .join(" ")
@@ -133,6 +192,7 @@ export default async function PropostasPage({
   return (
     <ProposalsListClient
       proposals={rows}
+      kpis={{ open: openCount, converted: convertedCount, expiring: expiringCount }}
       tipo={tipo}
       showTabs={vendasOn && locacaoOn}
       members={members}
