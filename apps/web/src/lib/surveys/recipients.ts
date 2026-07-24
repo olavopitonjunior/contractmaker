@@ -22,6 +22,9 @@ interface PartyLike {
   nome?: string;
   razao_social?: string;
   email?: string;
+  // O form de vendas usa `mobile_phone` (canônico); `telefone` é legado —
+  // mesma ordem de fallback do clicksign/mapping.ts (`mobile_phone ?? telefone`).
+  mobile_phone?: string;
   telefone?: string;
 }
 
@@ -61,7 +64,7 @@ function fromParties(
   for (const raw of parties as PartyLike[]) {
     const name = (raw?.nome ?? raw?.razao_social ?? "").trim();
     const email = normalizeEmail(raw?.email);
-    const phone = normalizePhone(raw?.telefone);
+    const phone = normalizePhone(raw?.mobile_phone || raw?.telefone);
     if (!name && !email && !phone) continue;
     out.push({ role, name: name || "(sem nome)", email, phone });
   }

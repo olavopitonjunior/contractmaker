@@ -155,15 +155,27 @@ describe("sendSurveyInvite — canal whatsapp", () => {
     expect(prisma.surveyInvite.update).not.toHaveBeenCalled();
   });
 
-  it("dedupe por tag: pedido existente não cria duplicata", async () => {
-    vi.mocked(prisma.newtonRequest.findFirst).mockResolvedValue({ id: "nr-existente" } as never);
+  it("dedupe atômico: P2002 no create reusa o pedido existente pela dedupeTag", async () => {
+    vi.mocked(prisma.newtonRequest.create).mockRejectedValue(
+      Object.assign(new Error("unique"), { code: "P2002" }) as never
+    );
+    vi.mocked(prisma.newtonRequest.findUnique).mockResolvedValue({
+      id: "nr-existente",
+    } as never);
     const result = await sendSurveyInvite({
       invite: makeInvite(),
       templateName: "Pesquisa",
       orgId: "org-1",
       deal: DEAL,
     });
-    expect(result).toMatchObject({ ok: true, channel: "whatsapp", newtonRequestId: "nr-existente" });
-    expect(prisma.newtonRequest.create).not.toHaveBeenCalled();
+    expect(result).toMatchObject({
+      ok: true,
+      channel: "whatsapp",
+      newtonRequestId: "nr-existente",
+    });
+    const createArg = vi.mocked(prisma.newtonRequest.create).mock.calls[0][0] as {
+      data: { dedupeTag: string };
+    };
+    expect(createArg.data.dedupeTag).toBe("[survey_invite][inv-1]");
   });
 });

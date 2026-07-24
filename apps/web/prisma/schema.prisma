@@ -892,6 +892,10 @@ model NewtonRequest {
   dealId         String
   createdBy      String // userId da negociadora que abriu o pedido
   ask            String    @db.Text // o que falta obter ("matrícula atualizada do imóvel")
+  // Dedupe ATÔMICO pra criadores programáticos (pesquisas: [survey_invite][id],
+  // [survey_reminder][id][n]). Null nos pedidos manuais/da UI — Postgres permite
+  // múltiplos NULLs em unique. Criar com try/catch P2002 em vez de find+create.
+  dedupeTag      String?   @unique
   targetType     String // "contact" | "group"
   targetRef      String? // phone E.164 sem '+' (contact) | groupJid (group). Null em group ainda não resolvido.
   targetLabel    String? // rótulo humano: "vendedor Yamamoto", "grupo do negócio"
