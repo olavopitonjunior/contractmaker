@@ -3880,8 +3880,9 @@ model SurveyAutomation {
 // Um envio (ou link manual) da pesquisa para um destinatário. Token opaco
 // (padrão participant-token: randomBytes base64url — URL curta p/ WhatsApp).
 // dedupeKey = `${dealId}:${templateId}:${recipientRole}:${contatoNormalizado}`
-// (manual sem deal usa o id do invite no lugar do dealId) — unique no banco
-// garante que hook + cron concorrentes nunca dupliquem envio.
+// (sem deal usa a constante "manual": mesmo lote + mesmo contato = 1 invite;
+// manual sem contato usa o token como chave). Unique no banco garante que
+// hook + cron concorrentes nunca dupliquem envio.
 model SurveyInvite {
   id             String    @id @default(cuid())
   orgId          String
