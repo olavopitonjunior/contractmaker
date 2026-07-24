@@ -3,10 +3,13 @@ import { prisma } from "@/lib/db/prisma";
 import {
   addRequirement,
   addSigner,
+  bulkRequirements,
+  listEnvelopeRequirements,
   notifySigner,
   removeRequirement,
   removeSigner,
   updateSigner,
+  type BulkRequirementOp,
 } from "./envelopes";
 import { ClicksignError, type ClicksignCreds } from "./client";
 import { getSignatureSettings, resolveClickSignCreds } from "./account";
@@ -83,16 +86,104 @@ export interface SignerUpdate {
   authMethod?: AuthMethod;
 }
 
+/** IDs de requirements criados numa resposta `atomic:results` (bulk). */
+function pickAtomicRequirementIds(resp: unknown): string[] {
+  if (!resp || typeof resp !== "object") return [];
+  const results = (resp as Record<string, unknown>)["atomic:results"];
+  if (!Array.isArray(results)) return [];
+  const ids: string[] = [];
+  for (const entry of results) {
+    const data = (entry as { data?: { type?: string; id?: string } | null })
+      ?.data;
+    if (data?.id && (!data.type || data.type === "requirements")) {
+      ids.push(data.id);
+    }
+  }
+  return ids;
+}
+
+/** IDs de todos os requirements do envelope (pra diff antes/depois do bulk). */
+async function listRequirementIds(
+  envelopeClicksignId: string,
+  creds: ClicksignCreds
+): Promise<Set<string>> {
+  const resp = await listEnvelopeRequirements(envelopeClicksignId, creds);
+  const data = (resp as { data?: unknown })?.data;
+  const ids = new Set<string>();
+  if (Array.isArray(data)) {
+    for (const item of data) {
+      const id = (item as { id?: string })?.id;
+      if (id) ids.add(id);
+    }
+  }
+  return ids;
+}
+
+/**
+ * Cria os 2 requirements do signatário (auth + qualificação) e opcionalmente
+ * remove os antigos, TUDO numa única chamada atômica `bulk_requirements`.
+ * É o único caminho que a ClickSign aceita em envelope `running` — o
+ * `POST /requirements` simples responde "envelope não está no status draft".
+ * Atomicidade é da própria API: ou tudo aplica, ou nada (não há estado parcial
+ * pra rollback).
+ *
+ * Retorna os IDs dos requirements criados: extraídos de `atomic:results`
+ * quando a resposta traz, senão por diff do conjunto de IDs antes/depois
+ * (a listagem v3 não expõe relationship com signer — diff é o fallback
+ * determinístico).
+ */
+async function bulkRecreateRequirements(args: {
+  envelopeClicksignId: string;
+  documentClicksignId: string;
+  signerClicksignId: string;
+  removeRequirementIds: string[];
+  role: ClicksignRole;
+  auth: AuthMethod;
+  creds: ClicksignCreds;
+}): Promise<string[]> {
+  const before = await listRequirementIds(args.envelopeClicksignId, args.creds);
+  const ops: BulkRequirementOp[] = [
+    {
+      op: "add",
+      action: "provide_evidence",
+      auth: args.auth,
+      documentClicksignId: args.documentClicksignId,
+      signerClicksignId: args.signerClicksignId,
+    },
+    {
+      op: "add",
+      action: "agree",
+      role: args.role,
+      documentClicksignId: args.documentClicksignId,
+      signerClicksignId: args.signerClicksignId,
+    },
+    ...args.removeRequirementIds.map<BulkRequirementOp>((requirementId) => ({
+      op: "remove",
+      requirementId,
+    })),
+  ];
+  const resp = await bulkRequirements(args.envelopeClicksignId, ops, args.creds);
+
+  const atomicIds = pickAtomicRequirementIds(resp).filter((id) => !before.has(id));
+  if (atomicIds.length >= 2) return atomicIds;
+
+  const after = await listRequirementIds(args.envelopeClicksignId, args.creds);
+  return [...after].filter((id) => !before.has(id));
+}
+
 /**
  * Recria os 2 requirements do signatário (auth `provide_evidence` + qualificação
  * `agree`). A v3 não tem PATCH de requirement, então cria os NOVOS e depois
  * remove os antigos.
  *
- * Ordem ADD-THEN-DELETE (não delete-then-add) de propósito: se um `add` falhar
- * (transiente, ou a ClickSign recusar em `running`), fazemos rollback só do que
- * criamos e os requirements ANTIGOS seguem intactos — o envelope nunca fica sem
- * requirement e o DB continua consistente com a ClickSign (falha limpa, sem
- * estado parcial). Só quando os dois novos estão criados removemos os velhos.
+ * Em envelope `running` delega pro `bulkRecreateRequirements` (única forma que
+ * a ClickSign aceita pós-ativação; atômico por natureza).
+ *
+ * Em `draft`, ordem ADD-THEN-DELETE (não delete-then-add) de propósito: se um
+ * `add` falhar (transiente), fazemos rollback só do que criamos e os
+ * requirements ANTIGOS seguem intactos — o envelope nunca fica sem requirement
+ * e o DB continua consistente com a ClickSign (falha limpa, sem estado
+ * parcial). Só quando os dois novos estão criados removemos os velhos.
  */
 async function recreateSignerRequirements(args: {
   envelopeClicksignId: string;
@@ -102,7 +193,20 @@ async function recreateSignerRequirements(args: {
   role: ClicksignRole;
   auth: AuthMethod;
   creds: ClicksignCreds;
+  envelopeStatus: string;
 }): Promise<string[]> {
+  if (args.envelopeStatus === "running") {
+    return bulkRecreateRequirements({
+      envelopeClicksignId: args.envelopeClicksignId,
+      documentClicksignId: args.documentClicksignId,
+      signerClicksignId: args.signerClicksignId,
+      removeRequirementIds: args.oldRequirementIds,
+      role: args.role,
+      auth: args.auth,
+      creds: args.creds,
+    });
+  }
+
   const created: string[] = [];
   try {
     const authReq = await addRequirement(
@@ -281,6 +385,7 @@ export async function updateSignerAction(
         role: (updates.role ?? (signer.role as ClicksignRole)) ?? "sign",
         auth: (updates.authMethod ?? (signer.authMethod as AuthMethod)) ?? "email",
         creds: creds!,
+        envelopeStatus: envStatus,
       });
     } catch (err) {
       if (err instanceof ClicksignError) {
@@ -357,24 +462,21 @@ export interface AddSignerData {
 }
 
 /** Adiciona um signatário a um envelope draft/running (cria signer +
- *  requirements de auth e qualificação na ClickSign). */
+ *  requirements de auth e qualificação na ClickSign).
+ *
+ *  Em `running` (envelope já enviado, ainda não concluído): o `POST /signers`
+ *  é aceito normalmente; os requirements vão via `bulk_requirements` (única
+ *  forma pós-ativação) e o novo signatário é NOTIFICADO na hora — quem já
+ *  assinou não é afetado. Em `draft` a notificação fica pro activate. */
 export async function addSignerToEnvelope(
   envelope: Envelope,
   data: AddSignerData
 ): Promise<ActionResult<Signer>> {
-  // ClickSign v3 só aceita ADICIONAR signatário enquanto o envelope está
-  // `draft`. Depois de ativado (`running`), a API rejeita ("envelope não está
-  // no status draft") — antes esse erro cru vazava pro usuário como 502. Para
-  // novo signatário exigimos draft e devolvemos orientação acionável.
-  // (Editar/remover signatário existente em `running` segue em editSignerAction.)
-  if (envelope.status !== "draft") {
+  if (envelope.status !== "draft" && envelope.status !== "running") {
     return {
       ok: false,
       status: 409,
-      error:
-        envelope.status === "running"
-          ? "Este envelope já foi enviado para assinatura e não aceita novos signatários. Cancele o envio e reenvie incluindo a nova pessoa (testemunha, cônjuge etc.)."
-          : "Envelope não permite adicionar signatários neste estado",
+      error: "Envelope não permite adicionar signatários neste estado",
     };
   }
 
@@ -403,6 +505,7 @@ export async function addSignerToEnvelope(
 
   const creds = await resolveClickSignCreds(envelope.orgId);
   if (envelope.clicksignId && envelope.documentClicksignId && creds) {
+    let signerId: string | null = null;
     try {
       const signerResp = await addSigner(
         {
@@ -416,46 +519,89 @@ export async function addSignerToEnvelope(
         },
         creds
       );
-      const signerId = pickId(signerResp);
+      signerId = pickId(signerResp);
       if (!signerId) throw new Error("Resposta sem id de signer");
 
-      const authReq = await addRequirement(
-        {
-          envelopeId: envelope.clicksignId,
+      let reqIds: string[];
+      if (envelope.status === "running") {
+        // Pós-ativação a ClickSign só aceita requirements via bulk atômico.
+        reqIds = await bulkRecreateRequirements({
+          envelopeClicksignId: envelope.clicksignId,
           documentClicksignId: envelope.documentClicksignId,
           signerClicksignId: signerId,
-          action: "provide_evidence",
-          auth: authMethod,
-        },
-        creds
-      );
-      const signReq = await addRequirement(
-        {
-          envelopeId: envelope.clicksignId,
-          documentClicksignId: envelope.documentClicksignId,
-          signerClicksignId: signerId,
-          action: "agree",
+          removeRequirementIds: [],
           role,
-        },
-        creds
-      );
-      const reqIds = [pickId(authReq), pickId(signReq)].filter(Boolean) as string[];
+          auth: authMethod,
+          creds,
+        });
+      } else {
+        const authReq = await addRequirement(
+          {
+            envelopeId: envelope.clicksignId,
+            documentClicksignId: envelope.documentClicksignId,
+            signerClicksignId: signerId,
+            action: "provide_evidence",
+            auth: authMethod,
+          },
+          creds
+        );
+        const signReq = await addRequirement(
+          {
+            envelopeId: envelope.clicksignId,
+            documentClicksignId: envelope.documentClicksignId,
+            signerClicksignId: signerId,
+            action: "agree",
+            role,
+          },
+          creds
+        );
+        reqIds = [pickId(authReq), pickId(signReq)].filter(Boolean) as string[];
+      }
+
+      // Em `running` não haverá activate — notifica o novo signatário agora.
+      // Falha aqui NÃO desfaz nada: signer + requirements já estão válidos na
+      // ClickSign; o botão "Reenviar notificação" cobre o gap.
+      let notified = false;
+      if (envelope.status === "running") {
+        try {
+          await notifySigner(envelope.clicksignId, signerId, creds);
+          notified = true;
+        } catch (notifyErr) {
+          console.error(
+            "[clicksign] novo signatário criado, mas a notificação falhou:",
+            notifyErr
+          );
+        }
+      }
 
       await prisma.envelopeSigner.update({
         where: { id: localSigner.id },
         data: {
           clicksignId: signerId,
           requirementIds: reqIds,
-          // Envelope garantidamente `draft` aqui (guard acima) — signatário
-          // só é notificado quando o envelope for ativado.
-          status: "pending",
-          notifiedAt: null,
+          // Draft: notificação fica pro activate. Running: notificado agora.
+          status: notified ? "notified" : "pending",
+          notifiedAt: notified ? new Date() : null,
         },
       });
     } catch (err) {
+      // Rollback completo: signer remoto (se chegou a existir) + row local.
+      // Sem requirement o signer remoto não assina, mas apareceria no
+      // certificado — remove pra não divergir do DB.
+      if (signerId) {
+        try {
+          await removeSigner(envelope.clicksignId, signerId, creds);
+        } catch {
+          /* best-effort */
+        }
+      }
       await prisma.envelopeSigner.delete({ where: { id: localSigner.id } });
       if (err instanceof ClicksignError) {
-        return { ok: false, status: 502, error: `Clicksign: ${err.message}` };
+        const hint =
+          envelope.status === "running"
+            ? " Se o erro persistir, cancele o envelope e reenvie incluindo a nova pessoa."
+            : "";
+        return { ok: false, status: 502, error: `Clicksign: ${err.message}${hint}` };
       }
       throw err;
     }

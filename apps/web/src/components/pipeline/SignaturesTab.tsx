@@ -474,9 +474,11 @@ export function EnvelopeCard({
   const [addOpen, setAddOpen] = useState(false);
 
   const canEdit = envelope.status === "draft" || envelope.status === "running";
-  // ClickSign só aceita NOVO signatário enquanto o envelope está em rascunho.
-  // Depois de enviado (running) o caminho é cancelar + reenviar.
-  const canAddSigner = envelope.status === "draft";
+  // Em `running` os requirements do novo signatário vão via bulk_requirements
+  // (único caminho pós-ativação) e ele é notificado na hora — quem já assinou
+  // não é afetado.
+  const canAddSigner =
+    envelope.status === "draft" || envelope.status === "running";
 
   const handleCancel = async () => {
     if (!confirm("Cancelar este envelope? Os signatários não conseguirão mais assinar."))
@@ -564,18 +566,6 @@ export function EnvelopeCard({
           ))}
       </div>
 
-      {envelope.status === "running" && (
-        <div className="px-3 py-2 bg-amber-50 border-b text-xs text-amber-800 flex items-start gap-2">
-          <AlertTriangle className="h-3.5 w-3.5 mt-0.5 shrink-0" />
-          <span className="break-words">
-            Este envelope já foi enviado. Para incluir novos signatários
-            (testemunha, cônjuge, corretora), use{" "}
-            <strong>Cancelar envelope</strong> e reenvie marcando as pessoas
-            antes do envio.
-          </span>
-        </div>
-      )}
-
       <div className="px-3 py-2 border-t flex items-center justify-end gap-2">
         {canAddSigner && (
           <Button
@@ -644,6 +634,7 @@ export function EnvelopeCard({
         onOpenChange={setAddOpen}
         basePath={basePath}
         onAdded={onChange}
+        envelopeStatus={envelope.status}
       />
     </div>
   );

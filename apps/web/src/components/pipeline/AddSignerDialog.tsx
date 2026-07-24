@@ -23,6 +23,8 @@ interface AddSignerDialogProps {
   /** Base do envelope (`/api/.../envelopes/{eid}`); POST em `${basePath}/signers`. */
   basePath: string;
   onAdded: () => void;
+  /** Status do envelope — em `running` o novo signatário é notificado na hora. */
+  envelopeStatus?: string;
 }
 
 function maskCpfCnpj(raw: string): string {
@@ -53,6 +55,7 @@ export function AddSignerDialog({
   onOpenChange,
   basePath,
   onAdded,
+  envelopeStatus,
 }: AddSignerDialogProps) {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -120,6 +123,8 @@ export function AddSignerDialog({
           <DialogTitle>Adicionar signatário</DialogTitle>
           <DialogDescription>
             Inclui um novo signatário no envelope. Custo adicional de R$ 1,50.
+            {envelopeStatus === "running" &&
+              " O envelope já está em circulação: a nova pessoa será notificada imediatamente e as assinaturas já feitas são mantidas."}
           </DialogDescription>
         </DialogHeader>
 
