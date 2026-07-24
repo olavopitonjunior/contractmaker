@@ -210,6 +210,7 @@ export type AuditAction =
   | "SURVEY_INVITE_SENT"
   | "SURVEY_RESPONSE_RECEIVED"
   | "SURVEY_OPTOUT"
+  | "SURVEY_SUMMARY_GENERATED"
   // ActionIntent (HITL para Bearer high-risk)
   | "INTENT_CREATED"
   | "INTENT_APPROVED"
