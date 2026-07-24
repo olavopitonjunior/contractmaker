@@ -30,6 +30,8 @@ import {
   FormNotFoundError,
 } from "@/lib/forms/atomic-merge";
 import { formClosedResponse } from "@/lib/forms/form-gate";
+import { autoRegisterFormCommissioners } from "@/lib/forms/auto-register-commissioners";
+import { notifyDealEvent } from "@/lib/notifications/deal-events";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
 // GET: public - fetch form data by token
@@ -366,18 +368,9 @@ export async function PATCH(
         }
       }
 
-      // Sino: avisa a equipe que o cliente finalizou o form (o corretor não
-      // descobre mais só olhando o kanban). batchId=form.id deduplica
-      // re-finalizações. waitUntil: void após o response é cancelado na Vercel.
-      waitUntil(emitNotification({
-        orgId: form.orgId,
-        type: "form_completed",
-        title: "Formulário finalizado pelo cliente",
-        body: `"${form.title || deal.title}" foi preenchido até o fim — contrato em geração.`,
-        linkUrl: `/deals/${deal.id}`,
-        metadata: { dealId: deal.id, formId: form.id },
-        batchId: form.id,
-      }));
+      // Notificação de form_completed é disparada no fim do bloco isFinalizing,
+      // ENCADEADA após o auto-cadastro de corretores — senão o fan-out não
+      // encontraria um corretor recém-informado no form.
 
       try {
         const formAttachments = await prisma.formAttachment.findMany({
@@ -502,6 +495,28 @@ export async function PATCH(
     // Partes preenchidas → tenta auto-vincular o grupo de WhatsApp do negócio
     // (cruza telefones das partes com os grupos conhecidos). Best-effort.
     if (dealId) waitUntil(matchDealGroup(dealId).catch(() => {}));
+
+    // Auto-cadastro de corretores: comissionados sem splitRecipientId viram
+    // (ou casam com) SplitRecipient kind="commissioner" + backfill do id no
+    // dataJson. Depois da geração do contrato de propósito — o helper reescreve
+    // o dataJson do form e não pode competir com o read do generate. Em
+    // seguida (encadeado), a notificação de form_completed: sino (mesmo
+    // type+batchId=form.id do sino legado — re-finalize segue deduplicado) +
+    // fan-out pros corretores. waitUntil: void após o response é cancelado.
+    waitUntil(
+      autoRegisterFormCommissioners({ formId: form.id, orgId: form.orgId }).then(
+        () =>
+          dealId
+            ? notifyDealEvent({
+                dealId,
+                orgId: form.orgId,
+                event: "form_completed",
+                dedupeKey: form.id,
+                context: { formId: form.id, extra: { formId: form.id } },
+              })
+            : undefined
+      )
+    );
   }
 
   return NextResponse.json({

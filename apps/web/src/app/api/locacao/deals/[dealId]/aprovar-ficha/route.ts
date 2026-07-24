@@ -6,6 +6,11 @@ import {
 } from "@/lib/locacao/route-helpers";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { waitUntil } from "@vercel/functions";
+import {
+  notifyDealEvent,
+  stageChangeDedupeKey,
+} from "@/lib/notifications/deal-events";
 import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
 
 export const runtime = "nodejs";
@@ -75,6 +80,16 @@ export async function POST(
     },
   });
 
+  // Notificação do processo: ficha aprovada avança pra "Formulário".
+  waitUntil(
+    notifyDealEvent({
+      dealId: deal.id,
+      orgId: ctx.orgId,
+      event: "stage_change",
+      dedupeKey: stageChangeDedupeKey(formularioStage.id),
+      context: { stageName: formularioStage.name },
+    })
+  );
   queueSurveyDispatch(deal.id, formularioStage.name);
 
   return NextResponse.json({

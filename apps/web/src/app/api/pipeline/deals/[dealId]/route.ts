@@ -3,6 +3,10 @@ import { waitUntil } from "@vercel/functions";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import {
+  notifyDealEvent,
+  stageChangeDedupeKey,
+} from "@/lib/notifications/deal-events";
 import { z } from "zod";
 import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
 
@@ -122,6 +126,21 @@ export async function PATCH(
       ...(parsed.data.title !== undefined ? { changedTitle: true } : {}),
     },
   });
+
+  // Notificação do processo: drag pra stage diferente. Perdido fica fora da
+  // v1 (mark-lost tem endpoint próprio, sem hook de propósito). dedupeKey por
+  // (stage, dia) — re-drag no mesmo dia não re-envia.
+  if (parsed.data.stageId && parsed.data.stageId !== existing.stageId) {
+    waitUntil(
+      notifyDealEvent({
+        dealId: deal.id,
+        orgId: org.id,
+        event: "stage_change",
+        dedupeKey: stageChangeDedupeKey(deal.stageId),
+        context: { stageName: deal.stage.name },
+      })
+    );
+  }
 
   // Pesquisas: só quando o stage realmente mudou (o PATCH também salva título/datas).
   if (parsed.data.stageId && deal.stage.name !== existing.stage.name) {

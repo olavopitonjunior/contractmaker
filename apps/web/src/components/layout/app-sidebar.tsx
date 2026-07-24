@@ -31,6 +31,7 @@ import {
   LogOut,
   Wallet,
   Building2,
+  Handshake,
   BarChart3,
   ClipboardCheck,
   ChevronRight,
@@ -127,6 +128,7 @@ const NAV: NavEntry[] = [
     ],
   },
   { kind: "item", title: "Templates", url: "/templates", icon: FileStack },
+  { kind: "item", title: "Corretores", url: "/corretores", icon: Handshake },
   {
     kind: "group",
     title: "Relatórios",
@@ -174,6 +176,7 @@ const NAV: NavEntry[] = [
       { title: "Base de conhecimento", url: "/settings/knowledge-base" },
       { title: "Estilos de documento", url: "/settings/document-styles" },
       { title: "Formulário", url: "/settings/formulario" },
+      { title: "Notificações", url: "/settings/notificacoes" },
       { title: "Contas bancárias", url: "/settings/pagamentos/contas" },
       { title: "Destinatários de split", url: "/settings/pagamentos/split-recipients" },
       { title: "Assinaturas", url: "/settings/signatures" },

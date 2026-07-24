@@ -12,6 +12,8 @@ import {
 } from "@/lib/forms/atomic-merge";
 import { syncDealClientName } from "@/lib/forms/sync-deal-client-name";
 import { formClosedResponse } from "@/lib/forms/form-gate";
+import { autoRegisterFormCommissioners } from "@/lib/forms/auto-register-commissioners";
+import { notifyDealEvent } from "@/lib/notifications/deal-events";
 import {
   schemaForLocacaoType,
   collectLocacaoFinalizeIssues,
@@ -268,18 +270,8 @@ export async function PATCH(
         }
       }
 
-      // Sino: avisa a equipe que o cliente finalizou o form (paridade com
-      // vendas). batchId=form.id deduplica re-finalizações. waitUntil: void
-      // após o response é cancelado na Vercel.
-      waitUntil(emitNotification({
-        orgId: form.orgId,
-        type: "form_completed",
-        title: "Formulário de locação finalizado",
-        body: `"${form.title || deal.title}" foi preenchido até o fim — contrato em geração.`,
-        linkUrl: `/locacao/deals/${deal.id}`,
-        metadata: { dealId: deal.id, formId: form.id },
-        batchId: form.id,
-      }));
+      // Notificação de form_completed é disparada no fim do bloco isFinalizing,
+      // encadeada após o auto-cadastro de corretores (paridade com vendas).
 
       // Copia FormAttachment → DealAttachment (dedupe por URL).
       try {
@@ -312,6 +304,26 @@ export async function PATCH(
 
       waitUntil(matchDealGroup(deal.id).catch(() => {}));
     }
+
+    // Auto-cadastro de corretores (paridade com vendas): no-op quando o form
+    // de locação não tem comissao.comissionados. Depois da geração do contrato
+    // de propósito — o helper reescreve o dataJson do form. Em seguida
+    // (encadeado), a notificação de form_completed: sino (mesmo type+batchId=
+    // form.id do sino legado) + fan-out pros corretores.
+    waitUntil(
+      autoRegisterFormCommissioners({ formId: form.id, orgId: form.orgId }).then(
+        () =>
+          dealId
+            ? notifyDealEvent({
+                dealId,
+                orgId: form.orgId,
+                event: "form_completed",
+                dedupeKey: form.id,
+                context: { formId: form.id, extra: { formId: form.id } },
+              })
+            : undefined
+      )
+    );
   }
 
   audit(extractAuditContextFromRequest(req, form.orgId, null), {

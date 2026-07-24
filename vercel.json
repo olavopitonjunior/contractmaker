@@ -70,6 +70,10 @@
       "schedule": "0 12 * * *"
     },
     {
+      "path": "/api/cron/forms/fill-reminder",
+      "schedule": "0 14 * * *"
+    },
+    {
       "path": "/api/cron/drafts/cleanup",
       "schedule": "0 3 * * *"
     },
