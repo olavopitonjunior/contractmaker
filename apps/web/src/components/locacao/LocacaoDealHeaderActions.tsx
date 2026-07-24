@@ -38,6 +38,8 @@ import {
 } from "lucide-react";
 import { AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
+import { ReopenFormButton } from "@/components/forms/ReopenFormButton";
+import { isFormFinished } from "@/lib/forms/form-status";
 
 interface LocacaoDealHeaderActionsProps {
   dealId: string;
@@ -45,6 +47,9 @@ interface LocacaoDealHeaderActionsProps {
   stageName: string | null;
   formToken: string | null;
   formLockedAt: string | null;
+  formStatus: string | null;
+  formCompletedAt: string | null;
+  formReopenedAt: string | null;
   hasContract: boolean;
   isLost: boolean;
   archivedAt: string | null;
@@ -61,6 +66,9 @@ export function LocacaoDealHeaderActions({
   stageName,
   formToken: initialFormToken,
   formLockedAt: initialFormLockedAt,
+  formStatus,
+  formCompletedAt,
+  formReopenedAt,
   hasContract,
   isLost,
   archivedAt,
@@ -76,7 +84,13 @@ export function LocacaoDealHeaderActions({
   const [formLockedAt, setFormLockedAt] = useState<string | null>(
     initialFormLockedAt,
   );
-  const [linkBusy, setLinkBusy] = useState<"lock" | "rotate" | null>(null);
+  const [linkBusy, setLinkBusy] = useState<"lock" | "rotate" | "reopen" | null>(null);
+  // Form enviado pelo cliente (finalize) OU nascido preso a um contrato pronto
+  // (import/upload = "vinculado"). Só esses podem ser reabertos.
+  const formSubmitted = isFormFinished({
+    completedAt: formCompletedAt,
+    status: formStatus,
+  });
 
   async function toggleFormLock() {
     if (!formToken) return;
@@ -340,6 +354,14 @@ export function LocacaoDealHeaderActions({
               )}
               {formLockedAt ? "Destravar" : "Travar"}
             </Button>
+            <ReopenFormButton
+              token={formToken}
+              submitted={formSubmitted}
+              reopenedAt={formReopenedAt}
+              disabled={linkBusy !== null}
+              onReopened={() => setFormLockedAt(null)}
+              onBusyChange={(b) => setLinkBusy(b ? "reopen" : null)}
+            />
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button

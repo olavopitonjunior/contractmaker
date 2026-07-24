@@ -8,6 +8,7 @@ import {
   stageChangeDedupeKey,
 } from "@/lib/notifications/deal-events";
 import { z } from "zod";
+import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
 
 export async function GET(
   _req: NextRequest,
@@ -139,6 +140,11 @@ export async function PATCH(
         context: { stageName: deal.stage.name },
       })
     );
+  }
+
+  // Pesquisas: só quando o stage realmente mudou (o PATCH também salva título/datas).
+  if (parsed.data.stageId && deal.stage.name !== existing.stage.name) {
+    queueSurveyDispatch(deal.id, deal.stage.name);
   }
 
   return NextResponse.json(deal);

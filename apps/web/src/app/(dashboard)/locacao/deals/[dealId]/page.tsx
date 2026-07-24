@@ -3,6 +3,8 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { LocacaoDealDetail } from "@/components/locacao/LocacaoDealDetail";
 import { LOCACAO_SIMPLIFIED_MODE } from "@/lib/env/staging";
+import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
+import { FEATURE } from "@/lib/modules/catalog";
 import type { AgentEvent } from "@/lib/ai/types";
 
 export const dynamic = "force-dynamic";
@@ -26,6 +28,7 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
           createdAt: true,
           completedAt: true,
           lockedAt: true,
+          reopenedAt: true,
         },
       },
       pipeline: { select: { orgId: true } },
@@ -184,8 +187,12 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
   const contractProp = toContractProp(contract, "Contrato de locação");
   const adminContractProp = toContractProp(adminContract, "Contrato de administração");
 
+  const modulesView = await getOrgModules(org.id);
+  const surveysEnabled = isFeatureEnabled(modulesView, FEATURE.LOCACAO_PESQUISAS);
+
   return (
     <LocacaoDealDetail
+      surveysEnabled={surveysEnabled}
       deal={{
         id: deal.id,
         title: deal.title,
@@ -193,6 +200,7 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
         formStatus: deal.form?.status ?? null,
         formToken: deal.form?.token ?? null,
         formLockedAt: deal.form?.lockedAt?.toISOString() ?? null,
+        formReopenedAt: deal.form?.reopenedAt?.toISOString() ?? null,
         dataJson: (deal.form?.dataJson as Record<string, unknown>) ?? {},
         lostAt: deal.lostAt?.toISOString() ?? null,
         lostReason: deal.lostReason ?? null,

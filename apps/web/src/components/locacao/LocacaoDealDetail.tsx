@@ -25,6 +25,7 @@ import { DealProgressTimeline } from "@/components/pipeline/DealProgressTimeline
 import { LostDealBanner } from "@/components/pipeline/LostDealBanner";
 import { Field } from "@/components/locacao/lease-detail/LeaseSection";
 import { SegurosTab, type PolicyView } from "@/components/locacao/lease-detail/SegurosTab";
+import type { FiancaConsolidado } from "@/components/locacao/lease-detail/FiancaComparativoCard";
 import {
   GarantiasTab,
   type GuaranteeView,
@@ -34,6 +35,7 @@ import {
   type InspectionView,
 } from "@/components/locacao/lease-detail/VistoriaTab";
 import { FileText, ExternalLink, Receipt, Building2, FileSignature } from "lucide-react";
+import { DealSurveysTab } from "@/components/surveys/DealSurveysTab";
 import { toast } from "sonner";
 
 type ContractProp = React.ComponentProps<typeof ContractEditorPage>["contract"];
@@ -62,6 +64,7 @@ interface LocacaoDealDetailProps {
     formStatus: string | null;
     formToken: string | null;
     formLockedAt: string | null;
+    formReopenedAt: string | null;
     dataJson: Record<string, unknown>;
     lostAt: string | null;
     lostReason: string | null;
@@ -87,6 +90,8 @@ interface LocacaoDealDetailProps {
   /** Modo simplificado (LOCACAO_SIMPLIFIED_MODE): mostra só Dados, Contrato,
    *  Documentos e Assinaturas; esconde as abas de administração. */
   simplified?: boolean;
+  /** Pesquisas de satisfação habilitadas (feature locacao.pesquisas, default OFF). */
+  surveysEnabled?: boolean;
 }
 
 const BRL = (v: number) =>
@@ -133,6 +138,7 @@ export function LocacaoDealDetail({
   serasaConsent = false,
   serasaJobs = [],
   simplified = false,
+  surveysEnabled = false,
 }: LocacaoDealDetailProps) {
   const router = useRouter();
   // Tab inicial via ?tab= (paridade com o DealDetail de vendas) — permite
@@ -149,6 +155,9 @@ export function LocacaoDealDetail({
     "vistoria",
     "seguros",
     "cobranca",
+    // Deep-link ?tab=pesquisas (paridade com vendas) — só quando a feature
+    // está ligada, senão cai no default.
+    ...(surveysEnabled ? ["pesquisas"] : []),
   ];
   const [tab, setTab] = useState(
     tabParam && VALID_TABS.includes(tabParam) ? tabParam : "dados"
@@ -217,6 +226,9 @@ export function LocacaoDealDetail({
             stageName={deal.stageName}
             formToken={deal.formToken}
             formLockedAt={deal.formLockedAt}
+            formStatus={deal.formStatus}
+            formCompletedAt={deal.formCompletedAt}
+            formReopenedAt={deal.formReopenedAt}
             hasContract={contract !== null}
             isLost={isLost}
             archivedAt={deal.archivedAt}
@@ -323,6 +335,7 @@ export function LocacaoDealDetail({
           <TabsTrigger value="vistoria">Vistoria</TabsTrigger>
           <TabsTrigger value="seguros">Seguros</TabsTrigger>
           {!simplified && <TabsTrigger value="cobranca">Cobrança</TabsTrigger>}
+          {surveysEnabled && <TabsTrigger value="pesquisas">Pesquisas</TabsTrigger>}
         </TabsList>
 
         {/* DADOS — visão do form.dataJson (paridade com a aba Dados de vendas) */}
@@ -433,6 +446,11 @@ export function LocacaoDealDetail({
               leaseContractId={lease.id}
               valorAluguel={lease.valorAluguel}
               policies={lease.insurancePolicies}
+              fiancaConsolidado={
+                lease.guarantee?.tipo === "seguro_fianca"
+                  ? (lease.guarantee.dadosJson as FiancaConsolidado | null)
+                  : null
+              }
             />
           ) : (
             <SemLeaseCard />
@@ -499,6 +517,11 @@ export function LocacaoDealDetail({
             </CardContent>
           </Card>
         </TabsContent>
+        {surveysEnabled && (
+          <TabsContent value="pesquisas" className="mt-4">
+            <DealSurveysTab dealId={deal.id} />
+          </TabsContent>
+        )}
       </Tabs>
     </div>
   );

@@ -8,13 +8,15 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
-import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot, Pencil, Check, CheckCircle2, X, Archive, ArchiveRestore, Lock, LockOpen, ShieldAlert, Users, BellRing } from "lucide-react";
+import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot, Pencil, Check, CheckCircle2, ClipboardCheck, X, Archive, ArchiveRestore, Lock, LockOpen, ShieldAlert, Users, BellRing } from "lucide-react";
 import { SendAttachmentEnvelopeDialog } from "@/components/pipeline/SendAttachmentEnvelopeDialog";
 import { AddDocumentsCard } from "@/components/pipeline/AddDocumentsCard";
 import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
 import { LostDealBanner } from "@/components/pipeline/LostDealBanner";
 import { cn } from "@/lib/utils";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
+import { ReopenFormButton } from "@/components/forms/ReopenFormButton";
+import { isFormFinished } from "@/lib/forms/form-status";
 import type { SelectGroup } from "@/components/forms/NativeSelect";
 import type { Assignment, DocumentKind } from "@/lib/forms/extracted-to-form";
 import {
@@ -26,6 +28,7 @@ import { SignaturesTab } from "@/components/pipeline/SignaturesTab";
 import { SendFormSummaryDialog } from "@/components/forms/SendFormSummaryDialog";
 import { NewtonRequestsTab } from "@/components/pipeline/NewtonRequestsTab";
 import { NotificationsTab } from "@/components/pipeline/NotificationsTab";
+import { DealSurveysTab } from "@/components/surveys/DealSurveysTab";
 import { CommissionChargeDialog } from "@/components/pipeline/CommissionChargeDialog";
 import { CommissionChargeList } from "@/components/pipeline/CommissionChargeList";
 import { DealProgressTimeline } from "@/components/pipeline/DealProgressTimeline";
@@ -191,6 +194,7 @@ interface DealDetailProps {
       createdAt: Date;
       completedAt: Date | null;
       lockedAt: Date | null;
+      reopenedAt: Date | null;
       attachments: {
         id: string;
         filename: string;
@@ -221,6 +225,8 @@ interface DealDetailProps {
    * porque este componente é client e não pode ler `getOrgModules`.
    */
   newtonEnabled?: boolean;
+  /** Pesquisas de satisfação habilitadas (feature vendas.pesquisas, default OFF). */
+  surveysEnabled?: boolean;
 }
 
 const BASE_TABS = [
@@ -232,14 +238,23 @@ const BASE_TABS = [
   "pagamentos",
 ] as const;
 
-export function DealDetail({ deal, newtonEnabled = false }: DealDetailProps) {
+export function DealDetail({
+  deal,
+  newtonEnabled = false,
+  surveysEnabled = false,
+}: DealDetailProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
   // `?tab=newton` num tenant sem Newton cai no default em vez de abrir uma aba morta.
   const validTabs = useMemo(
-    () => new Set<string>(newtonEnabled ? [...BASE_TABS, "newton"] : [...BASE_TABS]),
-    [newtonEnabled]
+    () =>
+      new Set<string>([
+        ...BASE_TABS,
+        ...(newtonEnabled ? ["newton"] : []),
+        ...(surveysEnabled ? ["pesquisas"] : []),
+      ]),
+    [newtonEnabled, surveysEnabled]
   );
   const initialTab = tabParam && validTabs.has(tabParam) ? tabParam : "dados";
   const [activeTab, setActiveTab] = useState(initialTab);
@@ -250,7 +265,15 @@ export function DealDetail({ deal, newtonEnabled = false }: DealDetailProps) {
   const [formLockedAt, setFormLockedAt] = useState<string | null>(
     deal.form?.lockedAt ? deal.form.lockedAt.toISOString() : null,
   );
-  const [linkBusy, setLinkBusy] = useState<"lock" | "rotate" | null>(null);
+  // Form enviado pelo cliente (finalize) OU nascido preso a um contrato pronto
+  // (import/upload/proposta = "vinculado"). Só esses podem ser reabertos.
+  const formSubmitted = deal.form
+    ? isFormFinished({
+        completedAt: deal.form.completedAt,
+        status: deal.form.status,
+      })
+    : false;
+  const [linkBusy, setLinkBusy] = useState<"lock" | "rotate" | "reopen" | null>(null);
   const [confirmDuplicateOpen, setConfirmDuplicateOpen] = useState(false);
   const [chargeDialogOpen, setChargeDialogOpen] = useState(false);
   const [chargeDialogMode, setChargeDialogMode] = useState<
@@ -778,6 +801,18 @@ export function DealDetail({ deal, newtonEnabled = false }: DealDetailProps) {
                 )}
                 {formLockedAt ? "Destravar" : "Travar"}
               </Button>
+              <ReopenFormButton
+                token={formToken}
+                submitted={formSubmitted}
+                reopenedAt={
+                  deal.form.reopenedAt
+                    ? deal.form.reopenedAt.toISOString()
+                    : null
+                }
+                disabled={linkBusy !== null}
+                onReopened={() => setFormLockedAt(null)}
+                onBusyChange={(b) => setLinkBusy(b ? "reopen" : null)}
+              />
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <Button
@@ -1087,6 +1122,12 @@ export function DealDetail({ deal, newtonEnabled = false }: DealDetailProps) {
             <TabsTrigger value="newton">
               <Bot className="h-3.5 w-3.5 mr-1" />
               Pedidos ao Newton
+            </TabsTrigger>
+          )}
+          {surveysEnabled && (
+            <TabsTrigger value="pesquisas">
+              <ClipboardCheck className="h-3.5 w-3.5 mr-1" />
+              Pesquisas
             </TabsTrigger>
           )}
         </TabsList>
@@ -1471,6 +1512,11 @@ export function DealDetail({ deal, newtonEnabled = false }: DealDetailProps) {
         {newtonEnabled && (
           <TabsContent value="newton" className="mt-4">
             <NewtonRequestsTab dealId={deal.id} />
+          </TabsContent>
+        )}
+        {surveysEnabled && (
+          <TabsContent value="pesquisas" className="mt-4">
+            <DealSurveysTab dealId={deal.id} />
           </TabsContent>
         )}
       </Tabs>

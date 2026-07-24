@@ -44,6 +44,9 @@ export const HIGH_RISK_ACTIONS = [
   // (mutação estrutural). Via Bearer (Max), ambos exigem aprovação humana.
   "PROPOSAL_SEND",
   "PROPOSAL_CONVERT",
+  // Cancelar destrói envelopes ClickSign em curso — irreversível (re-enviar
+  // gasta orçamento de novo). Session cancela direto; Bearer exige aprovação.
+  "PROPOSAL_CANCEL",
 ] as const;
 
 export type IntentAction = (typeof HIGH_RISK_ACTIONS)[number];
@@ -268,6 +271,16 @@ export function registerIntentExecutor(
   executor: IntentExecutor
 ): void {
   EXECUTORS.set(action, executor);
+}
+
+/**
+ * Actions com executor registrado — pro preflight validar que TODO
+ * HIGH_RISK_ACTION tem executor (uma action sem executor cria intents que
+ * falham só na aprovação, com `no_executor`). Caller deve garantir
+ * `ensureIntentExecutorsRegistered()` antes.
+ */
+export function getRegisteredIntentActions(): IntentAction[] {
+  return [...EXECUTORS.keys()];
 }
 
 export class IntentExecutionError extends Error {

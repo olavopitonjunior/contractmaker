@@ -1958,6 +1958,2246 @@
           }
         }
       }
+    },
+    "/api/proposals": {
+      "get": {
+        "description": "Lista propostas da org (escopo RBAC: corretor vê só as próprias/atribuídas).",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "status",
+            "in": "query",
+            "description": "rascunho | aguardando_aprovacao | enviada | aguardando_vendedor | aceita | recusada | expirada | cancelada | convertida | falha_envio"
+          },
+          {
+            "schema": {
+              "type": "string",
+              "enum": [
+                "venda",
+                "locacao"
+              ]
+            },
+            "name": "kind",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista de propostas",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "proposals": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope proposals:rw ou RBAC negado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "description": "Cria proposta em rascunho. schemaType decide venda/locação; feature gate vendas.propostas / locacao.propostas.",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string"
+                  },
+                  "schemaType": {
+                    "type": "string",
+                    "enum": [
+                      "compra_venda_v1",
+                      "locacao_residencial_v1",
+                      "locacao_comercial_v1"
+                    ]
+                  },
+                  "dataJson": {
+                    "type": "object"
+                  },
+                  "validUntil": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "signers": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    }
+                  }
+                },
+                "required": [
+                  "title",
+                  "schemaType"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Proposta criada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Payload inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Feature desabilitada ou RBAC negado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/{id}": {
+      "get": {
+        "description": "Detalhe completo da proposta.",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Proposta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrada (ou fora do escopo RBAC)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/{id}/status": {
+      "get": {
+        "description": "Leitura rápida do estado atual (status + assinaturas) — para polling.",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Status da proposta",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/{id}/send": {
+      "post": {
+        "description": "Envia pra assinatura (envelope) ou Aceite WhatsApp. Session executa; Bearer cria ActionIntent (202).",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enviada (session)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Bearer: ActionIntent criada — precisa de aprovação humana em approvalUrl",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntentPendingResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Proposta já enviada / estado inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/{id}/send-vendedor": {
+      "post": {
+        "description": "Dispara a 2ª via (envelope do vendedor/proprietário) em `aguardando_vendedor`. Session executa; Bearer cria ActionIntent (202).",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Enviada ao vendedor (session)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Bearer: ActionIntent criada — precisa de aprovação humana em approvalUrl",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntentPendingResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Proposta não está aguardando o vendedor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/{id}/convert": {
+      "post": {
+        "description": "Converte proposta em Deal + SalesForm. Session executa; Bearer cria ActionIntent (202). allowUnsigned exige unsignedReason.",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "allowUnsigned": {
+                    "type": "boolean"
+                  },
+                  "unsignedReason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Deal criado (session)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Bearer: ActionIntent criada — precisa de aprovação humana em approvalUrl",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntentPendingResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Já convertida",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/{id}/cancel": {
+      "post": {
+        "description": "Cancela a proposta (cancela envelopes ClickSign em curso primeiro). Session executa; Bearer cria ActionIntent PROPOSAL_CANCEL (202).",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Cancelada (session)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "ok": {
+                      "type": "boolean"
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "cancelada"
+                      ]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "202": {
+            "description": "Bearer: ActionIntent criada — precisa de aprovação humana em approvalUrl",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IntentPendingResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Estado não cancelável ou ClickSign recusou cancelamento",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/{id}/remind": {
+      "post": {
+        "description": "Reenvia notificação de assinatura aos signatários pendentes. Sem HITL (barato, rate-limited).",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "sourceKind": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Lembretes enviados",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/{id}/assignee": {
+      "patch": {
+        "description": "Define/troca o responsável (responsibleUserId) ou limpa com clear=true.",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "responsibleUserId": {
+                    "type": "string"
+                  },
+                  "responsibleName": {
+                    "type": "string"
+                  },
+                  "clear": {
+                    "type": "boolean"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Responsável atualizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/proposals/{id}/sync": {
+      "post": {
+        "description": "Reconcilia envelopes da proposta contra a ClickSign (status de assinaturas).",
+        "tags": [
+          "Proposals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "proposals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Sincronizada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/mark-lost": {
+      "post": {
+        "description": "Bearer twin do mark-lost legado: move deal pra 'Negócio perdido' com motivo (categoria + texto). Reversível via /reopen — sem HITL.",
+        "tags": [
+          "Deals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "deals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "minLength": 3,
+                    "maxLength": 500
+                  },
+                  "category": {
+                    "type": "string",
+                    "enum": [
+                      "desistencia",
+                      "imovel_vendido",
+                      "financiamento_negado",
+                      "imovel_alugado",
+                      "garantia_recusada",
+                      "credito_reprovado",
+                      "outro"
+                    ]
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Deal marcado como perdido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Stage terminal ou payload inválido",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Deal não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/reopen": {
+      "post": {
+        "description": "Bearer twin do reopen legado: tira o deal de 'Negócio perdido' e restaura a stage anterior (histórico de audit; fallback por kind).",
+        "tags": [
+          "Deals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "deals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deal reaberto",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Deal não está em 'Negócio perdido'",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Deal não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/archive": {
+      "post": {
+        "description": "Bearer twin do archive legado: arquiva/desarquiva o deal (Deal.archivedAt). Idempotente e reversível.",
+        "tags": [
+          "Deals"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "deals:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "archived": {
+                    "type": "boolean",
+                    "default": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Estado de arquivamento atualizado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Deal não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/generate-contract": {
+      "post": {
+        "description": "Bearer twin do generate-contract legado: gera contrato do deal (Handlebars → Google Doc; locação usa gerador próprio). Cria rascunho — aprovação é HITL separado.",
+        "tags": [
+          "Contracts"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "contracts:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "Contrato gerado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Falha na geração (dados incompletos, template ausente)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Deal não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/certidoes": {
+      "get": {
+        "description": "Lista CertidaoJobs do deal (status da batch). Bearer `documents:r` — Newton acompanha após dispatch via certidoes-newton.",
+        "tags": [
+          "Certidoes"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "documents:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "batchId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Jobs da batch",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "jobs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object"
+                      }
+                    },
+                    "latestBatchId": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "MODULE_DISABLED ou cross-org",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Deal não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deals/{dealId}/certidoes/{jobId}": {
+      "get": {
+        "description": "Status de UM CertidaoJob (sem resultData cru). Bearer `documents:r` — acompanhar two-step (awaiting_portal).",
+        "tags": [
+          "Certidoes"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "documents:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "jobId",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Job",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Job não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/leases": {
+      "get": {
+        "description": "Lista contratos de locação (LeaseContract) com imóvel, locatários e garantia. RBAC LEASE_VIEW + módulo locação habilitado.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "status",
+            "in": "query",
+            "description": "rascunho|assinatura|ativo|renovacao|rescisao|encerrado"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "propertyId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "tenant",
+            "in": "query",
+            "description": "Nome (contains) ou CPF/CNPJ do locatário"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "offset",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "limit",
+            "in": "query",
+            "description": "1-100, default 50"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista paginada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/leases/{id}": {
+      "get": {
+        "description": "Detalhe do contrato de locação (partes, garantia sanitizada, apólices). Omitidos da superfície M2M: repasseSplitJson, dataJson, e na garantia dadosJson/fiadorPartyJson/historicoJson.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lease",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/clients": {
+      "get": {
+        "description": "Lista clientes/prospects de locação (LeaseClient). RBAC CLIENT_VIEW.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "q",
+            "in": "query",
+            "description": "Busca por nome/documento"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/clients/{id}": {
+      "get": {
+        "description": "Detalhe do cliente/prospect (ficha, análise de crédito, consentimento Serasa).",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Cliente",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/clients/{id}/insurer-analyses": {
+      "get": {
+        "description": "Análises de fiança por seguradora do cliente (InsurerAnalysis).",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Análises",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "description": "Registra análise de fiança de uma seguradora. RBAC CLIENT_UPDATE.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "seguradora": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "premioMensal": {
+                    "type": "number"
+                  },
+                  "externalRef": {
+                    "type": "string"
+                  },
+                  "resultJson": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "seguradora"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Criada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validação",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "description": "Atualiza análise existente — body traz `analysisId`.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "analysisId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "resultJson": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "analysisId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Atualizada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/guarantees": {
+      "get": {
+        "description": "Lista garantias locatícias (Guarantee). RBAC GUARANTEE_VIEW.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "leaseContractId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "description": "Cria garantia (discriminated union por tipo: fiador | seguro_fianca | titulo_capitalizacao | caucao | garantia_digital | cessao_fiduciaria). RBAC GUARANTEE_MANAGE.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:rw"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "tipo": {
+                    "type": "string"
+                  },
+                  "leaseContractId": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "premioMensal": {
+                    "type": "number"
+                  },
+                  "fiador": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "tipo",
+                  "leaseContractId"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Criada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validação",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/guarantees/{id}": {
+      "patch": {
+        "description": "Atualiza garantia (status, provider, coberturaMeses, custoJson, dadosJson).",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "coberturaMeses": {
+                    "type": "number"
+                  },
+                  "custoJson": {
+                    "type": "object"
+                  },
+                  "dadosJson": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Atualizada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/insurance": {
+      "get": {
+        "description": "Lista apólices/cotações de seguro (InsurancePolicy). RBAC INSURANCE_VIEW.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "status",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "tipo",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "leaseContractId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "expiringInDays",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "description": "Cria apólice/cotação (vigenciaInicio/Fim obrigatórias). RBAC INSURANCE_MANAGE. Preferir /insurance-newton (ramo incendio) pra resultados do Max — idempotente por externalRef.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:rw"
+            ]
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "leaseContractId": {
+                    "type": "string"
+                  },
+                  "propertyId": {
+                    "type": "string"
+                  },
+                  "tipo": {
+                    "type": "string"
+                  },
+                  "seguradora": {
+                    "type": "string"
+                  },
+                  "vigenciaInicio": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "vigenciaFim": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "premioMensal": {
+                    "type": "number"
+                  },
+                  "responsavelPagamento": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "tipo",
+                  "seguradora",
+                  "vigenciaInicio",
+                  "vigenciaFim"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Criada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validação",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/insurance/{id}": {
+      "patch": {
+        "description": "Atualiza apólice (status, vigências, prêmio). RBAC INSURANCE_MANAGE.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "status": {
+                    "type": "string"
+                  },
+                  "premioMensal": {
+                    "type": "number"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Atualizada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Não encontrada",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/inspections": {
+      "get": {
+        "description": "Lista vistorias (Inspection). RBAC INSPECTION_VIEW. Agendamento via Bearer é fase futura (HITL INSPECTION_SCHEDULE).",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "status",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/rent-charges": {
+      "get": {
+        "description": "Lista cobranças de aluguel (RentCharge). RBAC RENT_VIEW + feature locacao.cobrancas.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "leaseContractId",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "competencia",
+            "in": "query",
+            "description": "YYYY-MM"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "status",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Lista",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/locacao/deals/{dealId}/insurance-newton": {
+      "get": {
+        "description": "Lê apólices + garantia de um contrato de locação (?leaseContractId=). Scope locacao:r.",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:r"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "name": "leaseContractId",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Seguros do contrato",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "leaseContractId obrigatório",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "description": "Grava resultado de seguro do Max — body discrimina por ramo: incendio (InsurancePolicy), fianca (Guarantee consolidada SegurosJá+Alpop), credito (CreditAnalysis). Idempotente por externalRef. RBAC por ramo (INSURANCE_MANAGE / GUARANTEE_MANAGE / CLIENT_UPDATE).",
+        "tags": [
+          "Locacao"
+        ],
+        "security": [
+          {
+            "bearerAuth": [
+              "locacao:rw"
+            ]
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "dealId",
+            "in": "path"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "ramo": {
+                    "type": "string",
+                    "enum": [
+                      "incendio",
+                      "fianca",
+                      "credito"
+                    ]
+                  }
+                },
+                "required": [
+                  "ramo"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Registrado",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Sem scope locacao:* / RBAC negado / MODULE_DISABLED",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validação",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "webhooks": {}

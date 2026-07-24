@@ -20,6 +20,10 @@ export const API_TOKEN_SCOPES = [
   "signatures:rw",
   "documents:rw",
   "proposals:rw",
+  // Locação (Max) — par por módulo; granularidade fina vem do RBAC do usuário
+  // dono do token + entitlement do tenant + HITL. `locacao:rw ⊇ locacao:r`.
+  "locacao:r",
+  "locacao:rw",
   "metrics:r",
   // Newton — delegação Bearer via header X-Act-As-User (Fase A RBAC
   // hardening). Token com esse scope pode operar como qualquer user da

@@ -1593,4 +1593,867 @@ export const tools: Tool[] = [
       return r.body;
     },
   },
+
+  // ───────────── Pipeline twins (Bearer) ─────────────
+  {
+    name: "mark_deal_lost",
+    description:
+      "Move deal pra 'Negócio perdido' (terminal alternativo) com motivo. Reversível via reopen_deal — sem HITL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        reason: { type: "string", minLength: 3, maxLength: 500 },
+        category: {
+          type: "string",
+          enum: [
+            "desistencia",
+            "imovel_vendido",
+            "financiamento_negado",
+            "imovel_alugado",
+            "garantia_recusada",
+            "credito_reprovado",
+            "outro",
+          ],
+        },
+      },
+      required: ["dealId", "reason"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/deals/${encodeURIComponent(args.dealId as string)}/mark-lost`,
+        body: { reason: args.reason, category: args.category },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "reopen_deal",
+    description:
+      "Reabre deal em 'Negócio perdido', restaurando a stage anterior (via histórico de audit; fallback por tipo de pipeline).",
+    inputSchema: {
+      type: "object",
+      properties: { dealId: { type: "string" } },
+      required: ["dealId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/deals/${encodeURIComponent(args.dealId as string)}/reopen`,
+        body: {},
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "archive_deal",
+    description:
+      "Arquiva (ou desarquiva com archived=false) um deal — some do kanban sem apagar nada. Idempotente e reversível.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        archived: {
+          type: "boolean",
+          description: "true arquiva (default), false desarquiva",
+        },
+      },
+      required: ["dealId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/deals/${encodeURIComponent(args.dealId as string)}/archive`,
+        body: { archived: args.archived },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "generate_deal_contract",
+    description:
+      "Gera o contrato do deal (Handlebars → Google Doc; locação usa gerador próprio). Cria rascunho deletável — a APROVAÇÃO do contrato é que passa por HITL (approve_contract).",
+    inputSchema: {
+      type: "object",
+      properties: { dealId: { type: "string" } },
+      required: ["dealId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/deals/${encodeURIComponent(args.dealId as string)}/generate-contract`,
+        body: {},
+      });
+      return r.body;
+    },
+  },
+
+  // ───────────── Certidões (status) ─────────────
+  {
+    name: "list_deal_certidoes",
+    description:
+      "Lista os CertidaoJobs de um deal (status da batch disparada via request_certidao). Filtro opcional por batchId.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        batchId: { type: "string" },
+      },
+      required: ["dealId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/deals/${encodeURIComponent(args.dealId as string)}/certidoes`,
+        query: args.batchId ? { batchId: args.batchId as string } : undefined,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "get_certidao_job",
+    description:
+      "Status de UM CertidaoJob (endpoint, status, resultCode, retries, portalUrl, anexo). Usar pra acompanhar jobs two-step (awaiting_portal).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        jobId: { type: "string" },
+      },
+      required: ["dealId", "jobId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/deals/${encodeURIComponent(args.dealId as string)}/certidoes/${encodeURIComponent(args.jobId as string)}`,
+      });
+      return r.body;
+    },
+  },
+
+  // ───────────── Propostas ─────────────
+  {
+    name: "list_proposals",
+    description:
+      "Lista propostas da org (escopo RBAC: corretor vê só as próprias/atribuídas). Filtros opcionais por status e kind.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          description:
+            "rascunho | aguardando_aprovacao | enviada | aguardando_vendedor | aceita | recusada | expirada | cancelada | convertida | falha_envio",
+        },
+        kind: { type: "string", enum: ["venda", "locacao"] },
+      },
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/proposals",
+        query: {
+          status: args.status as string | undefined,
+          kind: args.kind as string | undefined,
+        },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "get_proposal",
+    description: "Detalhe completo de uma proposta (dataJson, signers, eventos).",
+    inputSchema: {
+      type: "object",
+      properties: { proposalId: { type: "string" } },
+      required: ["proposalId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}`,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "get_proposal_status",
+    description:
+      "Leitura rápida do estado atual da proposta (status + assinaturas). Barata — usar pra polling em vez de get_proposal.",
+    inputSchema: {
+      type: "object",
+      properties: { proposalId: { type: "string" } },
+      required: ["proposalId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/status`,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "create_proposal",
+    description:
+      "Cria proposta em rascunho. schemaType decide venda (compra_venda_v1) ou locação (locacao_residencial_v1 | locacao_comercial_v1). NÃO envia — usar send_proposal depois.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        schemaType: {
+          type: "string",
+          enum: ["compra_venda_v1", "locacao_residencial_v1", "locacao_comercial_v1"],
+        },
+        dataJson: {
+          type: "object",
+          description: "Campos da proposta (livre, validado pelo schema do form)",
+        },
+        validUntil: { type: "string", description: "ISO 8601, opcional" },
+        signers: {
+          type: "array",
+          description: "Signatários [{name,email,phone?,documentation?}]",
+          items: { type: "object" },
+        },
+      },
+      required: ["title", "schemaType"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: "/api/proposals",
+        body: {
+          title: args.title,
+          schemaType: args.schemaType,
+          dataJson: args.dataJson ?? {},
+          validUntil: args.validUntil,
+          signers: args.signers,
+        },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "send_proposal",
+    description:
+      "Envia proposta pra assinatura (envelope ClickSign) ou Aceite WhatsApp. **Cria ActionIntent** que precisa de aprovação humana (gasta orçamento ClickSign). SEMPRE confirma verbalmente com user antes.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        idempotencyKey: { type: "string", description: "UUID v4" },
+      },
+      required: ["proposalId", "idempotencyKey"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/send`,
+        body: {},
+        idempotencyKey: args.idempotencyKey as string,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "send_proposal_vendedor",
+    description:
+      "Dispara a 2ª via (envelope do vendedor/proprietário) de proposta em `aguardando_vendedor`. **Cria ActionIntent** que precisa de aprovação humana (gasta orçamento ClickSign).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        idempotencyKey: { type: "string", description: "UUID v4" },
+      },
+      required: ["proposalId", "idempotencyKey"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/send-vendedor`,
+        body: {},
+        idempotencyKey: args.idempotencyKey as string,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "convert_proposal",
+    description:
+      "Converte proposta aceita em Deal + SalesForm. **Cria ActionIntent** que precisa de aprovação humana. allowUnsigned exige unsignedReason (audit).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        allowUnsigned: {
+          type: "boolean",
+          description: "Converter sem assinatura concluída (exige unsignedReason)",
+        },
+        unsignedReason: { type: "string" },
+        idempotencyKey: { type: "string", description: "UUID v4" },
+      },
+      required: ["proposalId", "idempotencyKey"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/convert`,
+        body: {
+          allowUnsigned: args.allowUnsigned,
+          unsignedReason: args.unsignedReason,
+        },
+        idempotencyKey: args.idempotencyKey as string,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "cancel_proposal",
+    description:
+      "HITL. Cancela a proposta (destrói envelopes ClickSign em curso — re-enviar gasta orçamento de novo). **Cria ActionIntent** que precisa de aprovação humana. SEMPRE confirma verbalmente com user antes.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        reason: { type: "string", minLength: 3, maxLength: 500 },
+        idempotencyKey: { type: "string", description: "UUID v4" },
+      },
+      required: ["proposalId", "reason", "idempotencyKey"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/cancel`,
+        body: { reason: args.reason },
+        idempotencyKey: args.idempotencyKey as string,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "remind_proposal",
+    description:
+      "Reenvia a notificação de assinatura aos signatários pendentes da proposta. Barato, rate-limited — sem HITL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        sourceKind: {
+          type: "string",
+          description: "Opcional: lembra só signatários desse sourceKind",
+        },
+      },
+      required: ["proposalId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/remind`,
+        body: args.sourceKind ? { sourceKind: args.sourceKind } : {},
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "assign_proposal",
+    description:
+      "Define/troca o responsável pela proposta (responsibleUserId OU responsibleName pra nome avulso) ou limpa com clear=true.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        responsibleUserId: { type: "string" },
+        responsibleName: {
+          type: "string",
+          description: "Nome avulso (mutuamente exclusivo com responsibleUserId)",
+        },
+        clear: { type: "boolean" },
+      },
+      required: ["proposalId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "PATCH",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/assignee`,
+        body: {
+          responsibleUserId: args.responsibleUserId,
+          responsibleName: args.responsibleName,
+          clear: args.clear,
+        },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "sync_proposal",
+    description:
+      "Reconcilia os envelopes da proposta contra a ClickSign (status de assinaturas). Usar quando o status parece defasado.",
+    inputSchema: {
+      type: "object",
+      properties: { proposalId: { type: "string" } },
+      required: ["proposalId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/sync`,
+        body: {},
+      });
+      return r.body;
+    },
+  },
+
+  // ───────────── Seguros / fiança (locação) ─────────────
+  {
+    name: "record_insurance_quote",
+    description:
+      "Registra no ImobPro o resultado de seguro de um contrato de locação. ramo='incendio' grava/atualiza a cotação (InsurancePolicy, status 'cotacao'); ramo='fianca' grava a fiança consolidada (Guarantee = fonte-da-verdade, com o comparativo SegurosJá+Alpop em consolidado). Idempotente por externalRef. Precisa do leaseContractId (use get_deal_insurance/get_deal).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        leaseContractId: { type: "string" },
+        ramo: { type: "string", enum: ["incendio", "fianca"] },
+        seguradora: { type: "string", description: "(incendio) nome da seguradora." },
+        provider: { type: "string", description: "(fianca) fonte escolhida (ex: SegurosJá / Alpop)." },
+        status: { type: "string", description: "Status do ramo (incendio: cotacao|ativa|...; fianca: em_analise|aprovada|...)." },
+        premioMensal: { type: "number" },
+        coberturaMeses: { type: "number", description: "(fianca) meses de cobertura." },
+        coberturaJson: { type: "object", description: "(incendio) coberturas/tiers.", additionalProperties: true },
+        consolidado: { type: "object", description: "(fianca) comparativo consolidado SegurosJá+Alpop.", additionalProperties: true },
+        custoJson: { type: "object", description: "(fianca) custo da opção escolhida.", additionalProperties: true },
+        vigenciaInicio: { type: "string", description: "(incendio) ISO date." },
+        vigenciaFim: { type: "string", description: "(incendio) ISO date." },
+        responsavelPagamento: { type: "string", enum: ["imobiliaria", "locatario", "proprietario"] },
+        externalRef: { type: "string", description: "Id da cotação/análise na fonte (idempotência)." },
+      },
+      required: ["dealId", "leaseContractId", "ramo"],
+    },
+    handler: async (args) => {
+      const dealId = String(args.dealId);
+      const { dealId: _omit, ...body } = args as Record<string, unknown>;
+      const r = await callApi({
+        method: "POST",
+        path: `/api/locacao/deals/${encodeURIComponent(dealId)}/insurance-newton`,
+        body,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "get_deal_insurance",
+    description:
+      "Lê os seguros de um contrato de locação: apólices (incêndio/conteúdo) + a garantia de fiança (Guarantee) com o comparativo consolidado. Read-only.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        leaseContractId: { type: "string" },
+      },
+      required: ["dealId", "leaseContractId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/locacao/deals/${encodeURIComponent(String(args.dealId))}/insurance-newton`,
+        query: { leaseContractId: args.leaseContractId as string },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "record_credit_analysis",
+    description:
+      "Grava no ImobPro a análise de crédito de um pretendente (CreditAnalysis) — veredito do underwriting consolidado SegurosJá/Alpop (Serasa fora de escopo). Uma por pretendente; o veredito de nível-deal é o pior caso entre os pretendentes. Idempotente por (tenant, deal).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string", description: "Deal de locação (contexto + leaseDealId)." },
+        tenantId: { type: "string", description: "Id do pretendente (Tenant) no ImobPro." },
+        status: {
+          type: "string",
+          enum: ["pendente", "aprovado", "aprovado_com_garantia", "analise_manual", "recusado"],
+        },
+        decisionJson: { type: "object", description: "Comparativo consolidado SegurosJá+Alpop.", additionalProperties: true },
+        scoreInterno: { type: "number" },
+        externalRef: { type: "string" },
+      },
+      required: ["dealId", "tenantId", "status"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/locacao/deals/${encodeURIComponent(String(args.dealId))}/insurance-newton`,
+        body: {
+          ramo: "credito",
+          tenantId: args.tenantId,
+          leaseDealId: args.dealId,
+          status: args.status,
+          decisionJson: args.decisionJson,
+          scoreInterno: args.scoreInterno,
+          externalRef: args.externalRef,
+        },
+      });
+      return r.body;
+    },
+  },
+
+  // ───────────── Locação — leitura (Max, scope locacao:r) ─────────────
+  {
+    name: "list_lease_contracts",
+    description:
+      "Lista contratos de locação da org (LeaseContract) com imóvel, locatários e garantia. Filtros: status, propertyId, tenant (nome ou CPF/CNPJ).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          enum: ["rascunho", "assinatura", "ativo", "renovacao", "rescisao", "encerrado"],
+        },
+        propertyId: { type: "string" },
+        tenant: { type: "string", description: "Nome (contains) ou CPF/CNPJ do locatário" },
+        offset: { type: "number" },
+        limit: { type: "number", description: "1-100, default 50" },
+      },
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/locacao/leases",
+        query: {
+          status: args.status as string | undefined,
+          propertyId: args.propertyId as string | undefined,
+          tenant: args.tenant as string | undefined,
+          offset: args.offset ? String(args.offset) : undefined,
+          limit: args.limit ? String(args.limit) : undefined,
+        },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "get_lease_contract",
+    description:
+      "Detalhe de um contrato de locação: imóvel, locatários (com CPF/contato), garantia completa e apólices. Sem dados bancários de repasse.",
+    inputSchema: {
+      type: "object",
+      properties: { leaseContractId: { type: "string" } },
+      required: ["leaseContractId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/locacao/leases/${encodeURIComponent(args.leaseContractId as string)}`,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "list_lease_clients",
+    description:
+      "Lista clientes/prospects de locação (LeaseClient — pretendentes em análise, ≠ Tenant). Filtro q busca por nome/documento.",
+    inputSchema: {
+      type: "object",
+      properties: { q: { type: "string", description: "Busca por nome/documento" } },
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/locacao/clients",
+        query: args.q ? { q: args.q as string } : undefined,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "get_lease_client",
+    description:
+      "Detalhe de um cliente/prospect de locação (ficha, análise de crédito, consentimento Serasa).",
+    inputSchema: {
+      type: "object",
+      properties: { clientId: { type: "string" } },
+      required: ["clientId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/locacao/clients/${encodeURIComponent(args.clientId as string)}`,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "list_insurer_analyses",
+    description:
+      "Lista as análises de fiança por seguradora (InsurerAnalysis) de um cliente de locação — status por seguradora (SegurosJá, Alpop...).",
+    inputSchema: {
+      type: "object",
+      properties: { clientId: { type: "string" } },
+      required: ["clientId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/locacao/clients/${encodeURIComponent(args.clientId as string)}/insurer-analyses`,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "list_lease_guarantees",
+    description:
+      "Lista garantias locatícias (Guarantee: fiador, seguro_fianca, titulo_capitalizacao, caucao...). Filtro opcional por leaseContractId.",
+    inputSchema: {
+      type: "object",
+      properties: { leaseContractId: { type: "string" } },
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/locacao/guarantees",
+        query: args.leaseContractId
+          ? { leaseContractId: args.leaseContractId as string }
+          : undefined,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "list_insurance_policies",
+    description:
+      "Lista apólices/cotações de seguro de locação (InsurancePolicy). Filtros: status, tipo, leaseContractId, expiringInDays (renovações).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          enum: ["cotacao", "em_analise", "pendente", "ativa", "vencida", "cancelada"],
+        },
+        tipo: {
+          type: "string",
+          enum: ["seguro_incendio", "seguro_fianca", "conteudo", "rd"],
+        },
+        leaseContractId: { type: "string" },
+        expiringInDays: { type: "number" },
+      },
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/locacao/insurance",
+        query: {
+          status: args.status as string | undefined,
+          tipo: args.tipo as string | undefined,
+          leaseContractId: args.leaseContractId as string | undefined,
+          expiringInDays: args.expiringInDays ? String(args.expiringInDays) : undefined,
+        },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "list_lease_inspections",
+    description: "Lista vistorias de locação (Inspection). Filtro opcional por status.",
+    inputSchema: {
+      type: "object",
+      properties: { status: { type: "string" } },
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/locacao/inspections",
+        query: args.status ? { status: args.status as string } : undefined,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "list_rent_charges",
+    description:
+      "Lista cobranças de aluguel (RentCharge). Filtros: leaseContractId, competencia (YYYY-MM), status.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        leaseContractId: { type: "string" },
+        competencia: { type: "string", description: "YYYY-MM" },
+        status: { type: "string" },
+      },
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/locacao/rent-charges",
+        query: {
+          leaseContractId: args.leaseContractId as string | undefined,
+          competencia: args.competencia as string | undefined,
+          status: args.status as string | undefined,
+        },
+      });
+      return r.body;
+    },
+  },
+
+  // ───────────── Locação — escrita (Max, scope locacao:rw) ─────────────
+  {
+    name: "upsert_insurer_analysis",
+    description:
+      "Registra/atualiza a análise de fiança de UMA seguradora pra um cliente de locação (InsurerAnalysis). Usar após consultar a seguradora via max-fianca. analysisId presente = atualiza (PATCH); ausente = cria (POST).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        clientId: { type: "string" },
+        analysisId: { type: "string", description: "Presente = atualizar existente" },
+        seguradora: { type: "string" },
+        status: {
+          type: "string",
+          description: "pendente | aprovado | aprovado_com_ressalva | recusado | erro",
+        },
+        premioMensal: { type: "number" },
+        externalRef: { type: "string" },
+        resultJson: { type: "object", additionalProperties: true },
+      },
+      required: ["clientId", "seguradora"],
+    },
+    handler: async (args) => {
+      const base = `/api/locacao/clients/${encodeURIComponent(args.clientId as string)}/insurer-analyses`;
+      const body = {
+        seguradora: args.seguradora,
+        status: args.status,
+        premioMensal: args.premioMensal,
+        externalRef: args.externalRef,
+        resultJson: args.resultJson,
+      };
+      const r = args.analysisId
+        ? await callApi({
+            method: "PATCH",
+            path: base,
+            body: { ...body, analysisId: args.analysisId },
+          })
+        : await callApi({ method: "POST", path: base, body });
+      return r.body;
+    },
+  },
+  {
+    name: "create_lease_guarantee",
+    description:
+      "Cria garantia locatícia (Guarantee). tipo='seguro_fianca'/'garantia_digital'/'titulo_capitalizacao' exigem provider; tipo='fiador' exige objeto fiador; tipo='caucao' exige subtipo/valor em extra. Pra fiança consolidada SegurosJá+Alpop preferir record_insurance_quote (ramo fianca).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        tipo: {
+          type: "string",
+          enum: [
+            "fiador",
+            "seguro_fianca",
+            "titulo_capitalizacao",
+            "caucao",
+            "garantia_digital",
+            "cessao_fiduciaria",
+          ],
+        },
+        leaseContractId: { type: "string" },
+        provider: { type: "string" },
+        premioMensal: { type: "number" },
+        coberturaMeses: { type: "number" },
+        fiador: { type: "object", additionalProperties: true },
+        extra: {
+          type: "object",
+          description: "Campos adicionais do tipo (valorTitulo, caucaoSubtipo...)",
+          additionalProperties: true,
+        },
+      },
+      required: ["tipo", "leaseContractId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: "/api/locacao/guarantees",
+        body: {
+          tipo: args.tipo,
+          leaseContractId: args.leaseContractId,
+          provider: args.provider,
+          premioMensal: args.premioMensal,
+          coberturaMeses: args.coberturaMeses,
+          fiador: args.fiador,
+          ...((args.extra as Record<string, unknown>) ?? {}),
+        },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "update_lease_guarantee",
+    description:
+      "Atualiza garantia locatícia existente (status, provider, coberturaMeses, custoJson, dadosJson).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        guaranteeId: { type: "string" },
+        status: { type: "string" },
+        provider: { type: "string" },
+        coberturaMeses: { type: "number" },
+        externalRef: { type: "string" },
+        custoJson: { type: "object", additionalProperties: true },
+        dadosJson: { type: "object", additionalProperties: true },
+      },
+      required: ["guaranteeId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "PATCH",
+        path: `/api/locacao/guarantees/${encodeURIComponent(args.guaranteeId as string)}`,
+        body: {
+          status: args.status,
+          provider: args.provider,
+          coberturaMeses: args.coberturaMeses,
+          externalRef: args.externalRef,
+          custoJson: args.custoJson,
+          dadosJson: args.dadosJson,
+        },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "create_insurance_policy",
+    description:
+      "Cria apólice/cotação de seguro de locação (InsurancePolicy) direto. Pra cotação de incêndio vinda do max-fianca preferir record_insurance_quote (idempotente por externalRef).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        leaseContractId: { type: "string" },
+        tipo: {
+          type: "string",
+          enum: ["seguro_incendio", "seguro_fianca", "conteudo", "rd"],
+        },
+        seguradora: { type: "string" },
+        apoliceNumero: { type: "string" },
+        premioMensal: { type: "number" },
+        vigenciaInicio: { type: "string", description: "ISO 8601 (obrigatório)" },
+        vigenciaFim: { type: "string", description: "ISO 8601 (obrigatório, > início)" },
+        responsavelPagamento: {
+          type: "string",
+          enum: ["imobiliaria", "locatario", "proprietario"],
+        },
+      },
+      required: ["leaseContractId", "tipo", "seguradora", "vigenciaInicio", "vigenciaFim"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: "/api/locacao/insurance",
+        body: {
+          leaseContractId: args.leaseContractId,
+          tipo: args.tipo,
+          seguradora: args.seguradora,
+          apoliceNumero: args.apoliceNumero,
+          premioMensal: args.premioMensal,
+          vigenciaInicio: args.vigenciaInicio,
+          vigenciaFim: args.vigenciaFim,
+          responsavelPagamento: args.responsavelPagamento,
+        },
+      });
+      return r.body;
+    },
+  },
 ];

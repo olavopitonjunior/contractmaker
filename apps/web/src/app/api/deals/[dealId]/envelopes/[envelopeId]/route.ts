@@ -22,7 +22,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { dealId: string; envelopeId: string } }
 ) {
-  const authResult = await requireAuth(req);
+  const authResult = await requireAuth(req, { scope: "signatures:rw" });
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
 

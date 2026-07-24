@@ -33,6 +33,7 @@ import {
   Building2,
   Handshake,
   BarChart3,
+  ClipboardCheck,
   ChevronRight,
   type LucideIcon,
 } from "lucide-react";
@@ -138,6 +139,16 @@ const NAV: NavEntry[] = [
         url: "/relatorios/funil",
         requires: [FEATURE.VENDAS_PIPELINE, FEATURE.LOCACAO_PIPELINE],
       },
+    ],
+  },
+  {
+    kind: "group",
+    title: "Pesquisas",
+    icon: ClipboardCheck,
+    requires: [FEATURE.VENDAS_PESQUISAS, FEATURE.LOCACAO_PESQUISAS],
+    items: [
+      { title: "Modelos", url: "/pesquisas", exact: true },
+      { title: "Relatórios", url: "/pesquisas/relatorios" },
     ],
   },
   {

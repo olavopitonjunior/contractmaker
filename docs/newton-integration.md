@@ -54,7 +54,19 @@ X-Idempotency-Key: <uuid-v4>      (POST/PATCH/DELETE — uma key por intenção)
 | `documents:rw` | Anexos, OCR |
 | `metrics:r` | Read-only de métricas, lookup por telefone |
 
-Scope check: handlers chamam `hasScope(ident, "...")`. Para auth via session, todos os scopes são considerados presentes.
+Scope check: handlers chamam `hasScope(ident, "...")`. Para auth via session, todos os scopes são considerados presentes. Hierarquia `X:rw ⊇ X:r`: endpoint que exige `deals:r` aceita token com `deals:rw`.
+
+**Bearer exige rota com scope declarado (2026-07-24).** `requireAuth` (legado, `lib/auth/context.ts`) retorna **403** para Bearer em rota que não declara `{ scope }` — essas rotas são session-only por definição. Antes, qualquer token válido da org acessava toda a superfície `requireAuth(req)` sem scope (financeiro, DIMOB, dual-approvals), muito além do documentado aqui. A tentativa é auditada como `API_TOKEN_AUTH_FAILED` com `reason: bearer_on_unscoped_route`. Rotas que agentes consomem foram escopadas explicitamente:
+
+| Rota | Scope |
+|---|---|
+| `GET /api/certidoes` | `documents:r` |
+| `GET /api/financeiro/charges` | `charges:r` |
+| `GET /api/contracts/[id]/envelopes` | `signatures:r` |
+| `GET /api/deals/[dealId]/envelopes` | `signatures:r` |
+| `PATCH /api/deals/[dealId]/envelopes/[envelopeId]` | `signatures:rw` |
+| `GET/POST/DELETE /api/deals/[dealId]/commission-charges/draft` | `charges:rw` |
+| `POST /api/deals/[dealId]/commission-charges/validate` | `charges:rw` |
 
 ## 2. Header `X-Newton-Actor`
 
@@ -184,6 +196,41 @@ Response:
 
 Filtro automático por `orgId` do usuário autenticado. Outras orgs nunca aparecem.
 
+### 4.7 Propostas (2026-07-24)
+
+Superfície completa via Bearer (escopo `proposals:rw`), com RBAC por proposta
+(`canAccessProposal`: criador OU responsável atribuído) e feature gate
+`vendas.propostas` / `locacao.propostas`. Espelhada 1:1 em tools MCP.
+
+| Rota | HITL via Bearer? |
+|---|---|
+| `GET/POST /api/proposals` · `GET /{id}` · `GET /{id}/status` | — (leitura/rascunho) |
+| `POST /{id}/send` | **sim** (`PROPOSAL_SEND`) — gasta orçamento ClickSign |
+| `POST /{id}/send-vendedor` | **sim** (`PROPOSAL_SEND` com `via:"vendedor"`) |
+| `POST /{id}/convert` | **sim** (`PROPOSAL_CONVERT`) — cria Deal |
+| `POST /{id}/cancel` | **sim** (`PROPOSAL_CANCEL`) — destrói envelopes em curso |
+| `POST /{id}/remind` · `POST /{id}/assignee` · `POST /{id}/sync` | não (baratos/reversíveis) |
+
+Tools MCP: `list_proposals`, `get_proposal`, `get_proposal_status`,
+`create_proposal`, `send_proposal`, `send_proposal_vendedor`, `convert_proposal`,
+`cancel_proposal`, `remind_proposal`, `assign_proposal`, `sync_proposal`.
+
+### 4.8 Twins de pipeline + certidões por job (2026-07-24)
+
+Twins Bearer das rotas session-only de `/api/pipeline/deals/*` (padrão do
+`mark-signed`): `POST /api/deals/{dealId}/mark-lost` (`deals:rw`), `.../reopen`
+(`deals:rw`), `.../archive` (`deals:rw`), `.../generate-contract`
+(`contracts:rw`). Sem HITL — todos reversíveis ou geram rascunho deletável.
+**Não existe twin de `mark-commission-paid`**: o `mark-signed` já move pra
+"Comissão paga" e seta `commissionPaidAt`.
+
+Certidões (leitura, `documents:r`): `GET /api/deals/{dealId}/certidoes`
+(?batchId) e `GET .../certidoes/{jobId}` (payload enxuto, sem `resultData`).
+Dispatch continua HITL via `/certidoes-newton`; report/zip são session-only.
+
+Tools MCP: `mark_deal_lost`, `reopen_deal`, `archive_deal`,
+`generate_deal_contract`, `list_deal_certidoes`, `get_certidao_job`.
+
 ## 5. Auditoria
 
 Toda ação de Newton precisa registrar em `AuditLog` com `metadata.via = "newton"`. Helper:
@@ -245,3 +292,40 @@ Rollback: `prisma/rollback/20260503120000_add_newton_integration_down.sql`. **AP
 ### UI
 
 - [ ] Página `/settings/api-tokens` para gerar/listar/revogar tokens. Mostrar `rawToken` em modal com botão copy + alerta de "salve agora".
+
+## 8. Locação (Max) — 2026-07-24
+
+Scopes novos `locacao:r` / `locacao:rw` (par por módulo; `rw ⊇ r`). Rate limits:
+300/min (r), 60/min (rw). Granularidade fina vem do **RBAC do usuário dono do
+token** (role de serviço do Max precisa de: `LEASE_VIEW`, `CLIENT_VIEW`,
+`CLIENT_UPDATE`, `GUARANTEE_VIEW`, `GUARANTEE_MANAGE`, `INSURANCE_VIEW`,
+`INSURANCE_MANAGE`, `INSPECTION_VIEW`, `RENT_VIEW`) + entitlement do módulo
+locação do tenant. Helper: `ensureLocacaoApiAccess` em
+`lib/locacao/route-helpers.ts` — aplicado só à allowlist abaixo; as demais
+rotas `/api/locacao/*` continuam session-only.
+
+**Leitura (`locacao:r`):** `GET /api/locacao/leases` (novo, filtros
+status/propertyId/tenant) · `GET /api/locacao/leases/{id}` (novo; sem
+repasseSplitJson) · `GET clients` + `clients/{id}` ·
+`GET clients/{id}/insurer-analyses` · `GET guarantees` · `GET insurance` ·
+`GET inspections` · `GET rent-charges` ·
+`GET locacao/deals/{dealId}/insurance-newton?leaseContractId=`.
+
+**Escrita (`locacao:rw`, direta com audit — registros reversíveis):**
+`POST/PATCH clients/{id}/insurer-analyses` · `POST guarantees` +
+`PATCH guarantees/{id}` · `POST insurance` + `PATCH insurance/{id}` ·
+`POST locacao/deals/{dealId}/insurance-newton` (ramos incendio | fianca |
+credito, idempotente por externalRef — canal preferido pros resultados do
+max-fianca).
+
+**Session-only (decisão):** `POST serasa-consent` (consentimento LGPD é ato
+humano), `POST inspections` e `POST expenses` (fase futura, HITL
+`INSPECTION_SCHEDULE` / `EXPENSE_CREATE_FROM_OCR` — executores já registrados),
+`POST clients/{id}/credit-analysis` (dispara Serasa — custo), deletes.
+
+**Tools MCP (grupo Max):** `list_lease_contracts`, `get_lease_contract`,
+`list_lease_clients`, `get_lease_client`, `list_insurer_analyses`,
+`list_lease_guarantees`, `list_insurance_policies`, `list_lease_inspections`,
+`list_rent_charges`, `upsert_insurer_analysis`, `create_lease_guarantee`,
+`update_lease_guarantee`, `create_insurance_policy` + os pré-existentes
+`record_insurance_quote`, `get_deal_insurance`, `record_credit_analysis`.

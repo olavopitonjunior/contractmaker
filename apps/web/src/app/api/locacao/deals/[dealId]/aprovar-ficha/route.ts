@@ -11,6 +11,7 @@ import {
   notifyDealEvent,
   stageChangeDedupeKey,
 } from "@/lib/notifications/deal-events";
+import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
 
 export const runtime = "nodejs";
 
@@ -89,6 +90,7 @@ export async function POST(
       context: { stageName: formularioStage.name },
     })
   );
+  queueSurveyDispatch(deal.id, formularioStage.name);
 
   return NextResponse.json({
     status: "ficha_aprovada",
