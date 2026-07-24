@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { auth, getUserOrg } from "@/lib/auth/auth";
+import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 import { planCertidoesForDeal, diligentedPersonToInput } from "@/lib/certidoes/planner";
 import { runBatch, getMonthlySpend, getMonthlySpendByProvider } from "@/lib/certidoes/executor";
@@ -51,17 +52,52 @@ async function authorizeDeal(dealId: string) {
 }
 
 /**
+ * Variante Bearer-aware do authorizeDeal só pra LEITURA (Newton polla o status
+ * da batch após dispatch via certidoes-newton). Session preserva o comportamento
+ * da UI; Bearer exige scope `documents:r`. O POST de extração continua
+ * session-only (dispatch M2M é o HITL de /certidoes-newton).
+ */
+async function authorizeDealRead(req: NextRequest, dealId: string) {
+  const authResult = await requireAuth(req, { scope: "documents:r" });
+  if (!authResult.ok) return { response: authResult.response };
+  const { ctx } = authResult;
+  const modulesView = await getOrgModules(ctx.orgId);
+  if (!isFeatureEnabled(modulesView, FEATURE.VENDAS_CERTIDOES)) {
+    return {
+      response: NextResponse.json({ error: "MODULE_DISABLED" }, { status: 403 }),
+    };
+  }
+  const deal = await prisma.deal.findUnique({
+    where: { id: dealId },
+    include: {
+      form: { select: { orgId: true, dataJson: true } },
+      pipeline: { select: { orgId: true } },
+    },
+  });
+  if (!deal) {
+    return {
+      response: NextResponse.json({ error: "Deal not found" }, { status: 404 }),
+    };
+  }
+  if (deal.pipeline.orgId !== ctx.orgId) {
+    return {
+      response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
+    };
+  }
+  return { deal, ctx };
+}
+
+/**
  * GET /api/deals/:dealId/certidoes?batchId=xxx
- * Lists jobs (optionally scoped to a batch).
+ * Lists jobs (optionally scoped to a batch). Session (UI) ou Bearer
+ * (`documents:r` — Newton acompanha a batch que disparou).
  */
 export async function GET(
   req: NextRequest,
   { params }: { params: { dealId: string } }
 ) {
-  const authResult = await authorizeDeal(params.dealId);
-  if ("error" in authResult) {
-    return NextResponse.json({ error: authResult.error }, { status: authResult.status });
-  }
+  const authResult = await authorizeDealRead(req, params.dealId);
+  if ("response" in authResult) return authResult.response;
 
   const { searchParams } = new URL(req.url);
   const batchId = searchParams.get("batchId");
@@ -77,10 +113,39 @@ export async function GET(
     },
   });
 
+  // Bearer: payload enxuto, sem `resultData` cru (resposta Infosimples/Serasa)
+  // nem `requestPayload` (CPF/RG das partes) — mesma regra do GET por jobId.
+  // Session (UI) mantém o shape completo que o CertidoesTab consome.
+  const safeJobs =
+    authResult.ctx.via === "bearer"
+      ? jobs.map((j) => ({
+          id: j.id,
+          batchId: j.batchId,
+          endpoint: j.endpoint,
+          label: j.label,
+          targetKind: j.targetKind,
+          targetIndex: j.targetIndex,
+          status: j.status,
+          resultCode: j.resultCode,
+          errorMessage: j.errorMessage,
+          missingFields: j.missingFields,
+          retryCount: j.retryCount,
+          maxRetries: j.maxRetries,
+          portalUrl: j.portalUrl,
+          costCents: j.costCents,
+          createdAt: j.createdAt,
+          startedAt: j.startedAt,
+          finishedAt: j.finishedAt,
+          expectedReadyAt: j.expectedReadyAt,
+          nextRetryAt: j.nextRetryAt,
+          attachment: j.attachment,
+        }))
+      : jobs;
+
   // derive latest batch meta
   const latestBatchId = jobs[0]?.batchId;
   return NextResponse.json({
-    jobs,
+    jobs: safeJobs,
     latestBatchId,
   });
 }

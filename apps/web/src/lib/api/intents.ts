@@ -44,6 +44,9 @@ export const HIGH_RISK_ACTIONS = [
   // (mutação estrutural). Via Bearer (Max), ambos exigem aprovação humana.
   "PROPOSAL_SEND",
   "PROPOSAL_CONVERT",
+  // Cancelar destrói envelopes ClickSign em curso — irreversível (re-enviar
+  // gasta orçamento de novo). Session cancela direto; Bearer exige aprovação.
+  "PROPOSAL_CANCEL",
 ] as const;
 
 export type IntentAction = (typeof HIGH_RISK_ACTIONS)[number];

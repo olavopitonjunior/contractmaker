@@ -2,8 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { loadScopedProposal, proposalFeatureGuard } from "@/lib/proposals/route-helpers";
-import { sendVendedorEnvelope } from "@/lib/proposals/send-execute";
+import {
+  sendVendedorEnvelope,
+  vendedorResultToResponse,
+} from "@/lib/proposals/send-execute";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { requireApproval, approvalResponse } from "@/lib/api/intents";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -13,6 +17,10 @@ export const maxDuration = 60;
  * vendedor/proprietário) manualmente, nas propostas em `aguardando_vendedor`.
  * Reusa `sendVendedorEnvelope` (a mesma que o webhook encadeia automaticamente):
  * idempotente (`@@unique[proposalId, via]`), no-op sem vendedor.
+ *
+ * Session executa direto; Bearer cria ActionIntent (202) — gasta orçamento
+ * ClickSign. Reusa a action `PROPOSAL_SEND` com payload `{ via: "vendedor" }`
+ * (o executor roteia pro sendVendedorEnvelope pelo discriminador).
  */
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const r = await loadScopedProposal(req, params.id);
@@ -32,72 +40,40 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     );
   }
 
-  // Resultado ESTRUTURADO: distingue o motivo real em vez de inferir por presença
-  // de envelope (que escondia budget/lock atrás de um 422 "confira os dados").
-  const result = await sendVendedorEnvelope(proposal.id).catch(
-    (err): Awaited<ReturnType<typeof sendVendedorEnvelope>> => ({
-      ok: false,
-      reason: "error",
-      detail: err instanceof Error ? err.message : String(err),
-    })
-  );
-
-  if (!result.ok) {
-    switch (result.reason) {
-      case "already":
-        // Já enviado/em voo — idempotente, trata como sucesso.
-        break;
-      case "no_vendedor":
-        return NextResponse.json(
-          { error: "Esta proposta não tem vendedor/proprietário para acionar." },
-          { status: 409 }
-        );
-      case "no_creds":
-        return NextResponse.json(
-          { error: "Conta ClickSign não configurada para esta imobiliária." },
-          { status: 422 }
-        );
-      case "preflight":
-        return NextResponse.json(
+  const result = await requireApproval({
+    ctx: auth,
+    action: "PROPOSAL_SEND",
+    payload: { proposalId: proposal.id, via: "vendedor" },
+    preview: {
+      summary: `Enviar a 2ª via (vendedor/proprietário) da proposta "${proposal.title}"`,
+      details: { proposalId: proposal.id, status: proposal.status },
+    },
+    req,
+    idempotencyKey: req.headers.get("x-idempotency-key"),
+    run: async () => {
+      // Resultado ESTRUTURADO: distingue o motivo real em vez de inferir por
+      // presença de envelope (que escondia budget/lock atrás de um 422).
+      const sendResult = await sendVendedorEnvelope(proposal.id).catch(
+        (err): Awaited<ReturnType<typeof sendVendedorEnvelope>> => ({
+          ok: false,
+          reason: "error",
+          detail: err instanceof Error ? err.message : String(err),
+        })
+      );
+      const res = vendedorResultToResponse(sendResult);
+      if (res.status < 400) {
+        await audit(
+          extractAuditContextFromRequest(req, auth.org.id, auth.actor.effectiveUserId),
           {
-            error:
-              "Confira os dados do vendedor (nome completo, e-mail/telefone) e tente novamente.",
-            detail: result.detail,
-          },
-          { status: 422 }
-        );
-      case "budget":
-        return NextResponse.json(
-          {
-            error:
-              "Orçamento mensal de assinaturas atingido — libere saldo ou ajuste o limite em Configurações.",
-          },
-          { status: 402 }
-        );
-      case "locked":
-        return NextResponse.json(
-          { error: "Envio ao vendedor já em andamento. Aguarde alguns segundos." },
-          { status: 409 }
-        );
-      case "not_found":
-        return NextResponse.json({ error: "Proposta não encontrada." }, { status: 404 });
-      default:
-        return NextResponse.json(
-          { error: result.detail ?? "Falha ao enviar ao vendedor." },
-          { status: 502 }
-        );
-    }
-  }
-
-  await audit(
-    extractAuditContextFromRequest(req, auth.org.id, auth.actor.effectiveUserId),
-    {
-      action: "PROPOSAL_SEND_COUNTERPARTY",
-      result: "SUCCESS",
-      resource: proposal.id,
-      resourceType: "Proposal",
-    }
-  ).catch(() => {});
-
-  return NextResponse.json({ ok: true });
+            action: "PROPOSAL_SEND_COUNTERPARTY",
+            result: "SUCCESS",
+            resource: proposal.id,
+            resourceType: "Proposal",
+          }
+        ).catch(() => {});
+      }
+      return res;
+    },
+  });
+  return approvalResponse(result);
 }
