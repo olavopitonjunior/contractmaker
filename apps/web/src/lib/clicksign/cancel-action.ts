@@ -1,12 +1,13 @@
 import { prisma } from "@/lib/db/prisma";
-import { clicksignRequest } from "./client";
+import { ClicksignError } from "./client";
+import { cancelEnvelope } from "./envelopes";
 import { resolveClickSignCreds } from "./account";
 
 /**
  * Cancela envelope na ClickSign + atualiza Envelope local.
  *
- * ClickSign API v3: PATCH /api/v3/envelopes/{id} com `data.attributes.status =
- * "canceled"` (JSON:API). Após chamada bem-sucedida, marca `canceledAt` no
+ * A chamada remota é delegada a `envelopes.ts::cancelEnvelope` (v3 cancela POR
+ * DOCUMENTO — ver comentário lá). Após sucesso, marca `canceledAt` no
  * registro local + status="canceled".
  *
  * Caller (intent executor ou route) é responsável por: cross-user guard,
@@ -68,27 +69,21 @@ export async function runEnvelopeCancel(
   }
 
   try {
-    await clicksignRequest({
-      method: "PATCH",
-      path: `/api/v3/envelopes/${encodeURIComponent(envelope.clicksignId)}`,
-      body: {
-        data: {
-          type: "envelopes",
-          id: envelope.clicksignId,
-          attributes: { status: "canceled" },
-        },
-      },
-      creds,
-    });
+    await cancelEnvelope(envelope.clicksignId, creds);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    return {
-      status: 502,
-      body: {
-        error: `ClickSign cancel failed: ${message}`,
-        envelopeId: args.envelopeId,
-      },
-    };
+    // 404 = envelope/documentos já removidos na ClickSign → idempotente,
+    // segue pro update local (mesma semântica do cancelEnvelopeFlow).
+    const gone = err instanceof ClicksignError && err.status === 404;
+    if (!gone) {
+      const message = err instanceof Error ? err.message : String(err);
+      return {
+        status: 502,
+        body: {
+          error: `ClickSign cancel failed: ${message}`,
+          envelopeId: args.envelopeId,
+        },
+      };
+    }
   }
 
   const updated = await prisma.envelope.update({

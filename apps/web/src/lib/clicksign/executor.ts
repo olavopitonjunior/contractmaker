@@ -760,13 +760,14 @@ function remoteSignerCount(resp: unknown): number | null {
  * Casos tratados:
  *  - Remoto `closed` (já assinado) → lança 409 claro; NÃO marca cancelado.
  *  - Remoto `canceled`/404 (já removido) → idempotente, só sincroniza local.
- *  - Remoto `draft` → DELETE; `running` → PATCH status=canceled.
- *  - PATCH recusado (ex.: envelope `running` SEM signers, morto — o usuário
- *    removeu todos os assinantes antes de cancelar, e a ClickSign responde
- *    "status deve estar em: draft, running"): força cancelamento local +
- *    grava `lastError`, pois um envelope sem signatários nunca será assinado.
- *  - PATCH recusado num envelope ainda VIVO (running COM signers) → re-lança,
- *    pra não dessincronizar (o envelope continua ativo na ClickSign).
+ *  - Remoto `draft` → DELETE; `running` → cancela os DOCUMENTOS (v3 não aceita
+ *    mais PATCH status=canceled no envelope — ver `cancelEnvelope`).
+ *  - Cancelamento recusado em envelope `running` SEM signers (morto — o
+ *    usuário removeu todos os assinantes antes de cancelar): força
+ *    cancelamento local + grava `lastError`, pois um envelope sem
+ *    signatários nunca será assinado.
+ *  - Cancelamento recusado num envelope ainda VIVO (running COM signers) →
+ *    re-lança, pra não dessincronizar (o envelope continua ativo na ClickSign).
  */
 export async function cancelEnvelopeFlow(envelopeId: string): Promise<void> {
   const envelope = await prisma.envelope.findUnique({
@@ -825,6 +826,9 @@ export async function cancelEnvelopeFlow(envelopeId: string): Promise<void> {
           }
           if (decision === "force") {
             // Envelope `running` sem signers (morto): força cancelamento local.
+            // Com o cancelamento por documento, isso pode deixar o remoto com
+            // docs parcialmente cancelados (nunca cascateia pra `canceled`) —
+            // drift aceito: envelope sem signatários nunca será assinado.
             lastError =
               err instanceof Error ? err.message : String(err);
           } else if (decision !== "reconcile") {
