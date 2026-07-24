@@ -2544,7 +2544,7 @@
       }
     },
     "/api/proposals/{id}/assignee": {
-      "post": {
+      "patch": {
         "description": "Define/troca o responsável (responsibleUserId) ou limpa com clear=true.",
         "tags": [
           "Proposals"

@@ -10,6 +10,11 @@ export interface ProposalCancelArgs {
   orgId: string;
   reason: string;
   actorUserId: string;
+  /** Contexto de request pro audit (ip/UA). Executor de intent não tem req → omite. */
+  ipAddress?: string | null;
+  userAgent?: string | null;
+  /** true quando executado via ActionIntent aprovada (origem Bearer/Newton). */
+  viaNewton?: boolean;
 }
 
 export interface ProposalCancelResult {
@@ -29,7 +34,8 @@ export interface ProposalCancelResult {
 export async function runProposalCancel(
   args: ProposalCancelArgs
 ): Promise<ProposalCancelResult> {
-  const { proposalId, orgId, reason, actorUserId } = args;
+  const { proposalId, orgId, reason, actorUserId, ipAddress, userAgent, viaNewton } =
+    args;
 
   const proposal = await prisma.proposal.findUnique({ where: { id: proposalId } });
   if (!proposal || proposal.orgId !== orgId) {
@@ -90,13 +96,23 @@ export async function runProposalCancel(
     .catch(() => {});
 
   await audit(
-    { orgId, userId: actorUserId },
+    {
+      orgId,
+      userId: actorUserId,
+      ipAddress: ipAddress ?? null,
+      userAgent: userAgent ?? null,
+    },
     {
       action: "PROPOSAL_CANCEL",
       result: "SUCCESS",
       resource: proposal.id,
       resourceType: "Proposal",
-      metadata: { reason, from: proposal.status, envelopes: envelopes.length },
+      metadata: {
+        reason,
+        from: proposal.status,
+        envelopes: envelopes.length,
+        ...(viaNewton ? { via: "newton" } : {}),
+      },
     }
   ).catch(() => {});
 

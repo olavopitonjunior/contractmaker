@@ -62,6 +62,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         orgId: auth.org.id,
         reason,
         actorUserId: auth.actor.effectiveUserId,
+        ipAddress:
+          req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+          req.headers.get("x-real-ip"),
+        userAgent: req.headers.get("user-agent"),
       });
       return { status: res.status, body: res.body };
     },

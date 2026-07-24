@@ -1957,22 +1957,27 @@ export const tools: Tool[] = [
   {
     name: "assign_proposal",
     description:
-      "Define/troca o responsável pela proposta (responsibleUserId) ou limpa com clear=true.",
+      "Define/troca o responsável pela proposta (responsibleUserId OU responsibleName pra nome avulso) ou limpa com clear=true.",
     inputSchema: {
       type: "object",
       properties: {
         proposalId: { type: "string" },
         responsibleUserId: { type: "string" },
+        responsibleName: {
+          type: "string",
+          description: "Nome avulso (mutuamente exclusivo com responsibleUserId)",
+        },
         clear: { type: "boolean" },
       },
       required: ["proposalId"],
     },
     handler: async (args) => {
       const r = await callApi({
-        method: "POST",
+        method: "PATCH",
         path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/assignee`,
         body: {
           responsibleUserId: args.responsibleUserId,
+          responsibleName: args.responsibleName,
           clear: args.clear,
         },
       });

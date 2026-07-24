@@ -113,10 +113,39 @@ export async function GET(
     },
   });
 
+  // Bearer: payload enxuto, sem `resultData` cru (resposta Infosimples/Serasa)
+  // nem `requestPayload` (CPF/RG das partes) — mesma regra do GET por jobId.
+  // Session (UI) mantém o shape completo que o CertidoesTab consome.
+  const safeJobs =
+    authResult.ctx.via === "bearer"
+      ? jobs.map((j) => ({
+          id: j.id,
+          batchId: j.batchId,
+          endpoint: j.endpoint,
+          label: j.label,
+          targetKind: j.targetKind,
+          targetIndex: j.targetIndex,
+          status: j.status,
+          resultCode: j.resultCode,
+          errorMessage: j.errorMessage,
+          missingFields: j.missingFields,
+          retryCount: j.retryCount,
+          maxRetries: j.maxRetries,
+          portalUrl: j.portalUrl,
+          costCents: j.costCents,
+          createdAt: j.createdAt,
+          startedAt: j.startedAt,
+          finishedAt: j.finishedAt,
+          expectedReadyAt: j.expectedReadyAt,
+          nextRetryAt: j.nextRetryAt,
+          attachment: j.attachment,
+        }))
+      : jobs;
+
   // derive latest batch meta
   const latestBatchId = jobs[0]?.batchId;
   return NextResponse.json({
-    jobs,
+    jobs: safeJobs,
     latestBatchId,
   });
 }

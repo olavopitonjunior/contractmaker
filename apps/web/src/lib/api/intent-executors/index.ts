@@ -221,7 +221,7 @@ export function ensureIntentExecutorsRegistered(): void {
   // PROPOSAL_SEND — envia proposta pra assinatura/Aceite após aprovação humana.
   // `via: "vendedor"` no payload roteia pra 2ª via (envelope do vendedor,
   // rota /send-vendedor); sem discriminador é o envio principal (/send).
-  registerIntentExecutor("PROPOSAL_SEND", async (payload) => {
+  registerIntentExecutor("PROPOSAL_SEND", async (payload, ctx) => {
     const p = payload as { proposalId: string; via?: "vendedor" };
     const {
       executeProposalSend,
@@ -232,7 +232,24 @@ export function ensureIntentExecutorsRegistered(): void {
     try {
       if (p.via === "vendedor") {
         const r = await sendVendedorEnvelope(p.proposalId);
-        return vendedorResultToResponse(r);
+        const res = vendedorResultToResponse(r);
+        if (res.status < 400) {
+          // Espelha o audit específico do caminho session (a rota só audita
+          // dentro do `run`, que o executor bypassa) — senão o envio ao
+          // vendedor via Bearer só deixaria o INTENT_EXECUTED genérico.
+          const { audit } = await import("@/lib/security/audit");
+          await audit(
+            { orgId: ctx.orgId, userId: ctx.requestedBy },
+            {
+              action: "PROPOSAL_SEND_COUNTERPARTY",
+              result: "SUCCESS",
+              resource: p.proposalId,
+              resourceType: "Proposal",
+              metadata: { via: "newton", intentId: ctx.intentId },
+            }
+          ).catch(() => {});
+        }
+        return res;
       }
       const r = await executeProposalSend(p.proposalId);
       if (!r.ok) return blockToResponse(r.block);
@@ -253,6 +270,7 @@ export function ensureIntentExecutorsRegistered(): void {
       orgId: ctx.orgId,
       reason: p.reason,
       actorUserId: ctx.requestedBy,
+      viaNewton: true,
     });
   });
 
