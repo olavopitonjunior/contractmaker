@@ -219,12 +219,38 @@ export function ensureIntentExecutorsRegistered(): void {
   });
 
   // PROPOSAL_SEND — envia proposta pra assinatura/Aceite após aprovação humana.
-  registerIntentExecutor("PROPOSAL_SEND", async (payload) => {
-    const p = payload as { proposalId: string };
-    const { executeProposalSend, blockToResponse } = await import(
-      "@/lib/proposals/send-execute"
-    );
+  // `via: "vendedor"` no payload roteia pra 2ª via (envelope do vendedor,
+  // rota /send-vendedor); sem discriminador é o envio principal (/send).
+  registerIntentExecutor("PROPOSAL_SEND", async (payload, ctx) => {
+    const p = payload as { proposalId: string; via?: "vendedor" };
+    const {
+      executeProposalSend,
+      blockToResponse,
+      sendVendedorEnvelope,
+      vendedorResultToResponse,
+    } = await import("@/lib/proposals/send-execute");
     try {
+      if (p.via === "vendedor") {
+        const r = await sendVendedorEnvelope(p.proposalId);
+        const res = vendedorResultToResponse(r);
+        if (res.status < 400) {
+          // Espelha o audit específico do caminho session (a rota só audita
+          // dentro do `run`, que o executor bypassa) — senão o envio ao
+          // vendedor via Bearer só deixaria o INTENT_EXECUTED genérico.
+          const { audit } = await import("@/lib/security/audit");
+          await audit(
+            { orgId: ctx.orgId, userId: ctx.requestedBy },
+            {
+              action: "PROPOSAL_SEND_COUNTERPARTY",
+              result: "SUCCESS",
+              resource: p.proposalId,
+              resourceType: "Proposal",
+              metadata: { via: "newton", intentId: ctx.intentId },
+            }
+          ).catch(() => {});
+        }
+        return res;
+      }
       const r = await executeProposalSend(p.proposalId);
       if (!r.ok) return blockToResponse(r.block);
       return { status: 200, body: { ok: true, instrument: r.instrument } };
@@ -232,6 +258,20 @@ export function ensureIntentExecutorsRegistered(): void {
       const message = err instanceof Error ? err.message : String(err);
       return { status: 500, body: { error: message } };
     }
+  });
+
+  // PROPOSAL_CANCEL — cancela proposta (destrói envelopes ClickSign em curso)
+  // após aprovação humana. Lógica compartilhada com a rota /cancel (session).
+  registerIntentExecutor("PROPOSAL_CANCEL", async (payload, ctx) => {
+    const p = payload as { proposalId: string; reason: string };
+    const { runProposalCancel } = await import("@/lib/proposals/cancel-execute");
+    return runProposalCancel({
+      proposalId: p.proposalId,
+      orgId: ctx.orgId,
+      reason: p.reason,
+      actorUserId: ctx.requestedBy,
+      viaNewton: true,
+    });
   });
 
   // PROPOSAL_CONVERT — converte proposta em negócio após aprovação humana.

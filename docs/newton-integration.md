@@ -196,6 +196,41 @@ Response:
 
 Filtro automático por `orgId` do usuário autenticado. Outras orgs nunca aparecem.
 
+### 4.7 Propostas (2026-07-24)
+
+Superfície completa via Bearer (escopo `proposals:rw`), com RBAC por proposta
+(`canAccessProposal`: criador OU responsável atribuído) e feature gate
+`vendas.propostas` / `locacao.propostas`. Espelhada 1:1 em tools MCP.
+
+| Rota | HITL via Bearer? |
+|---|---|
+| `GET/POST /api/proposals` · `GET /{id}` · `GET /{id}/status` | — (leitura/rascunho) |
+| `POST /{id}/send` | **sim** (`PROPOSAL_SEND`) — gasta orçamento ClickSign |
+| `POST /{id}/send-vendedor` | **sim** (`PROPOSAL_SEND` com `via:"vendedor"`) |
+| `POST /{id}/convert` | **sim** (`PROPOSAL_CONVERT`) — cria Deal |
+| `POST /{id}/cancel` | **sim** (`PROPOSAL_CANCEL`) — destrói envelopes em curso |
+| `POST /{id}/remind` · `POST /{id}/assignee` · `POST /{id}/sync` | não (baratos/reversíveis) |
+
+Tools MCP: `list_proposals`, `get_proposal`, `get_proposal_status`,
+`create_proposal`, `send_proposal`, `send_proposal_vendedor`, `convert_proposal`,
+`cancel_proposal`, `remind_proposal`, `assign_proposal`, `sync_proposal`.
+
+### 4.8 Twins de pipeline + certidões por job (2026-07-24)
+
+Twins Bearer das rotas session-only de `/api/pipeline/deals/*` (padrão do
+`mark-signed`): `POST /api/deals/{dealId}/mark-lost` (`deals:rw`), `.../reopen`
+(`deals:rw`), `.../archive` (`deals:rw`), `.../generate-contract`
+(`contracts:rw`). Sem HITL — todos reversíveis ou geram rascunho deletável.
+**Não existe twin de `mark-commission-paid`**: o `mark-signed` já move pra
+"Comissão paga" e seta `commissionPaidAt`.
+
+Certidões (leitura, `documents:r`): `GET /api/deals/{dealId}/certidoes`
+(?batchId) e `GET .../certidoes/{jobId}` (payload enxuto, sem `resultData`).
+Dispatch continua HITL via `/certidoes-newton`; report/zip são session-only.
+
+Tools MCP: `mark_deal_lost`, `reopen_deal`, `archive_deal`,
+`generate_deal_contract`, `list_deal_certidoes`, `get_certidao_job`.
+
 ## 5. Auditoria
 
 Toda ação de Newton precisa registrar em `AuditLog` com `metadata.via = "newton"`. Helper:

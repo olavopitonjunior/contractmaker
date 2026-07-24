@@ -1593,4 +1593,413 @@ export const tools: Tool[] = [
       return r.body;
     },
   },
+
+  // ───────────── Pipeline twins (Bearer) ─────────────
+  {
+    name: "mark_deal_lost",
+    description:
+      "Move deal pra 'Negócio perdido' (terminal alternativo) com motivo. Reversível via reopen_deal — sem HITL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        reason: { type: "string", minLength: 3, maxLength: 500 },
+        category: {
+          type: "string",
+          enum: [
+            "desistencia",
+            "imovel_vendido",
+            "financiamento_negado",
+            "imovel_alugado",
+            "garantia_recusada",
+            "credito_reprovado",
+            "outro",
+          ],
+        },
+      },
+      required: ["dealId", "reason"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/deals/${encodeURIComponent(args.dealId as string)}/mark-lost`,
+        body: { reason: args.reason, category: args.category },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "reopen_deal",
+    description:
+      "Reabre deal em 'Negócio perdido', restaurando a stage anterior (via histórico de audit; fallback por tipo de pipeline).",
+    inputSchema: {
+      type: "object",
+      properties: { dealId: { type: "string" } },
+      required: ["dealId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/deals/${encodeURIComponent(args.dealId as string)}/reopen`,
+        body: {},
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "archive_deal",
+    description:
+      "Arquiva (ou desarquiva com archived=false) um deal — some do kanban sem apagar nada. Idempotente e reversível.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        archived: {
+          type: "boolean",
+          description: "true arquiva (default), false desarquiva",
+        },
+      },
+      required: ["dealId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/deals/${encodeURIComponent(args.dealId as string)}/archive`,
+        body: { archived: args.archived },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "generate_deal_contract",
+    description:
+      "Gera o contrato do deal (Handlebars → Google Doc; locação usa gerador próprio). Cria rascunho deletável — a APROVAÇÃO do contrato é que passa por HITL (approve_contract).",
+    inputSchema: {
+      type: "object",
+      properties: { dealId: { type: "string" } },
+      required: ["dealId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/deals/${encodeURIComponent(args.dealId as string)}/generate-contract`,
+        body: {},
+      });
+      return r.body;
+    },
+  },
+
+  // ───────────── Certidões (status) ─────────────
+  {
+    name: "list_deal_certidoes",
+    description:
+      "Lista os CertidaoJobs de um deal (status da batch disparada via request_certidao). Filtro opcional por batchId.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        batchId: { type: "string" },
+      },
+      required: ["dealId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/deals/${encodeURIComponent(args.dealId as string)}/certidoes`,
+        query: args.batchId ? { batchId: args.batchId as string } : undefined,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "get_certidao_job",
+    description:
+      "Status de UM CertidaoJob (endpoint, status, resultCode, retries, portalUrl, anexo). Usar pra acompanhar jobs two-step (awaiting_portal).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        dealId: { type: "string" },
+        jobId: { type: "string" },
+      },
+      required: ["dealId", "jobId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/deals/${encodeURIComponent(args.dealId as string)}/certidoes/${encodeURIComponent(args.jobId as string)}`,
+      });
+      return r.body;
+    },
+  },
+
+  // ───────────── Propostas ─────────────
+  {
+    name: "list_proposals",
+    description:
+      "Lista propostas da org (escopo RBAC: corretor vê só as próprias/atribuídas). Filtros opcionais por status e kind.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: {
+          type: "string",
+          description:
+            "rascunho | aguardando_aprovacao | enviada | aguardando_vendedor | aceita | recusada | expirada | cancelada | convertida | falha_envio",
+        },
+        kind: { type: "string", enum: ["venda", "locacao"] },
+      },
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: "/api/proposals",
+        query: {
+          status: args.status as string | undefined,
+          kind: args.kind as string | undefined,
+        },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "get_proposal",
+    description: "Detalhe completo de uma proposta (dataJson, signers, eventos).",
+    inputSchema: {
+      type: "object",
+      properties: { proposalId: { type: "string" } },
+      required: ["proposalId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}`,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "get_proposal_status",
+    description:
+      "Leitura rápida do estado atual da proposta (status + assinaturas). Barata — usar pra polling em vez de get_proposal.",
+    inputSchema: {
+      type: "object",
+      properties: { proposalId: { type: "string" } },
+      required: ["proposalId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "GET",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/status`,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "create_proposal",
+    description:
+      "Cria proposta em rascunho. schemaType decide venda (compra_venda_v1) ou locação (locacao_residencial_v1 | locacao_comercial_v1). NÃO envia — usar send_proposal depois.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        title: { type: "string" },
+        schemaType: {
+          type: "string",
+          enum: ["compra_venda_v1", "locacao_residencial_v1", "locacao_comercial_v1"],
+        },
+        dataJson: {
+          type: "object",
+          description: "Campos da proposta (livre, validado pelo schema do form)",
+        },
+        validUntil: { type: "string", description: "ISO 8601, opcional" },
+        signers: {
+          type: "array",
+          description: "Signatários [{name,email,phone?,documentation?}]",
+          items: { type: "object" },
+        },
+      },
+      required: ["title", "schemaType"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: "/api/proposals",
+        body: {
+          title: args.title,
+          schemaType: args.schemaType,
+          dataJson: args.dataJson ?? {},
+          validUntil: args.validUntil,
+          signers: args.signers,
+        },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "send_proposal",
+    description:
+      "Envia proposta pra assinatura (envelope ClickSign) ou Aceite WhatsApp. **Cria ActionIntent** que precisa de aprovação humana (gasta orçamento ClickSign). SEMPRE confirma verbalmente com user antes.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        idempotencyKey: { type: "string", description: "UUID v4" },
+      },
+      required: ["proposalId", "idempotencyKey"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/send`,
+        body: {},
+        idempotencyKey: args.idempotencyKey as string,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "send_proposal_vendedor",
+    description:
+      "Dispara a 2ª via (envelope do vendedor/proprietário) de proposta em `aguardando_vendedor`. **Cria ActionIntent** que precisa de aprovação humana (gasta orçamento ClickSign).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        idempotencyKey: { type: "string", description: "UUID v4" },
+      },
+      required: ["proposalId", "idempotencyKey"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/send-vendedor`,
+        body: {},
+        idempotencyKey: args.idempotencyKey as string,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "convert_proposal",
+    description:
+      "Converte proposta aceita em Deal + SalesForm. **Cria ActionIntent** que precisa de aprovação humana. allowUnsigned exige unsignedReason (audit).",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        allowUnsigned: {
+          type: "boolean",
+          description: "Converter sem assinatura concluída (exige unsignedReason)",
+        },
+        unsignedReason: { type: "string" },
+        idempotencyKey: { type: "string", description: "UUID v4" },
+      },
+      required: ["proposalId", "idempotencyKey"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/convert`,
+        body: {
+          allowUnsigned: args.allowUnsigned,
+          unsignedReason: args.unsignedReason,
+        },
+        idempotencyKey: args.idempotencyKey as string,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "cancel_proposal",
+    description:
+      "HITL. Cancela a proposta (destrói envelopes ClickSign em curso — re-enviar gasta orçamento de novo). **Cria ActionIntent** que precisa de aprovação humana. SEMPRE confirma verbalmente com user antes.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        reason: { type: "string", minLength: 3, maxLength: 500 },
+        idempotencyKey: { type: "string", description: "UUID v4" },
+      },
+      required: ["proposalId", "reason", "idempotencyKey"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/cancel`,
+        body: { reason: args.reason },
+        idempotencyKey: args.idempotencyKey as string,
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "remind_proposal",
+    description:
+      "Reenvia a notificação de assinatura aos signatários pendentes da proposta. Barato, rate-limited — sem HITL.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        sourceKind: {
+          type: "string",
+          description: "Opcional: lembra só signatários desse sourceKind",
+        },
+      },
+      required: ["proposalId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/remind`,
+        body: args.sourceKind ? { sourceKind: args.sourceKind } : {},
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "assign_proposal",
+    description:
+      "Define/troca o responsável pela proposta (responsibleUserId OU responsibleName pra nome avulso) ou limpa com clear=true.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        proposalId: { type: "string" },
+        responsibleUserId: { type: "string" },
+        responsibleName: {
+          type: "string",
+          description: "Nome avulso (mutuamente exclusivo com responsibleUserId)",
+        },
+        clear: { type: "boolean" },
+      },
+      required: ["proposalId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "PATCH",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/assignee`,
+        body: {
+          responsibleUserId: args.responsibleUserId,
+          responsibleName: args.responsibleName,
+          clear: args.clear,
+        },
+      });
+      return r.body;
+    },
+  },
+  {
+    name: "sync_proposal",
+    description:
+      "Reconcilia os envelopes da proposta contra a ClickSign (status de assinaturas). Usar quando o status parece defasado.",
+    inputSchema: {
+      type: "object",
+      properties: { proposalId: { type: "string" } },
+      required: ["proposalId"],
+    },
+    handler: async (args) => {
+      const r = await callApi({
+        method: "POST",
+        path: `/api/proposals/${encodeURIComponent(args.proposalId as string)}/sync`,
+        body: {},
+      });
+      return r.body;
+    },
+  },
 ];
