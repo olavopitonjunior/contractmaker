@@ -29,7 +29,9 @@ export interface ProposalRow {
 
 function money(v: number | null): string {
   if (v == null) return "—";
-  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL", maximumFractionDigits: 0 });
+  // "R$ " manual + grouping do número (determinístico) — evita o espaço variável do
+  // style:"currency" do ICU (U+00A0/U+202F) que difere Node×browser → React #418.
+  return "R$ " + v.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
 }
 
 function shortDate(iso: string | null): string {
