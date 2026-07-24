@@ -39,6 +39,14 @@ const API_TOKEN = process.env.CONTRACTMAKER_API_TOKEN;
 const WPP_BRIDGE_URL = process.env.WHATSAPP_BRIDGE_URL;
 const WPP_BRIDGE_TOKEN = process.env.WHATSAPP_BRIDGE_TOKEN;
 
+// Sidecar — opcional (F2). Se configurado, cada envio proativo (whatsapp_send)
+// é registrado no histórico de conversa do DM do destinatário, pra que uma
+// resposta dele a essa mensagem tenha contexto no /run do sidecar. No-op se
+// ausente — degrada limpo em dev/staging.
+const SIDECAR_URL = process.env.SIDECAR_URL;
+const SIDECAR_TOKEN = process.env.SIDECAR_TOKEN;
+const SIDECAR_AGENT_ID = process.env.SIDECAR_AGENT_ID ?? "main";
+
 if (!API_TOKEN) {
   console.error("ERROR: CONTRACTMAKER_API_TOKEN não definido em env");
   process.exit(1);
@@ -67,11 +75,21 @@ export async function callBridge(args: {
     body: args.body !== undefined ? JSON.stringify(args.body) : undefined,
   });
   const text = await res.text();
-  let body: unknown = text;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    /* keep text */
+  let body: unknown;
+  if (text.trim() === "") {
+    // F3: upstream devolveu corpo vazio. Não exponha um "" cru — o modelo lê
+    // isso como "resultado vazio". Marca explicitamente pra distinguir leitura
+    // degradada/vazia de uma lista realmente vazia ou um zero real.
+    body = res.ok
+      ? { _empty: true, status: res.status, note: "upstream returned empty body" }
+      : { _error: true, status: res.status, note: "upstream error with empty body" };
+  } else {
+    body = text;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      /* keep text */
+    }
   }
   return { status: res.status, body };
 }
@@ -115,13 +133,60 @@ export async function callApi(args: {
     body: args.body !== undefined ? JSON.stringify(args.body) : undefined,
   });
   const text = await res.text();
-  let body: unknown = text;
-  try {
-    body = JSON.parse(text);
-  } catch {
-    /* keep text */
+  let body: unknown;
+  if (text.trim() === "") {
+    // F3: upstream devolveu corpo vazio. Não exponha um "" cru — o modelo lê
+    // isso como "resultado vazio". Marca explicitamente pra distinguir leitura
+    // degradada/vazia de uma lista realmente vazia ou um zero real.
+    body = res.ok
+      ? { _empty: true, status: res.status, note: "upstream returned empty body" }
+      : { _error: true, status: res.status, note: "upstream error with empty body" };
+  } else {
+    body = text;
+    try {
+      body = JSON.parse(text);
+    } catch {
+      /* keep text */
+    }
   }
   return { status: res.status, body };
+}
+
+/**
+ * F2: registra um envio proativo (whatsapp_send) no histórico de conversa do
+ * sidecar, em `dm:<to>`, pra que uma resposta do usuário a essa mensagem
+ * proativa (briefing, cutuço, lembrete) tenha contexto no próximo /run.
+ *
+ * Best-effort: NUNCA quebra o envio (try/catch engole o erro). No-op se
+ * SIDECAR_URL/SIDECAR_TOKEN ausentes. `to` segue a convenção E.164 sem '+',
+ * idêntica ao caller.phone que o bridge usa pra montar o sessionKey do DM.
+ */
+export async function logProactiveOutbound(args: {
+  to: string;
+  content: string;
+}): Promise<void> {
+  if (!SIDECAR_URL || !SIDECAR_TOKEN) return;
+  const phone = String(args.to ?? "").trim();
+  if (!phone || !args.content) return;
+  try {
+    const url = new URL(`/agents/${SIDECAR_AGENT_ID}/conversations`, SIDECAR_URL);
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${SIDECAR_TOKEN}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ phone, role: "assistant", content: args.content }),
+    });
+    if (!res.ok) {
+      console.error(`[contractmaker-mcp] logProactiveOutbound ${res.status} (ignorado)`);
+    }
+  } catch (err) {
+    console.error(
+      "[contractmaker-mcp] logProactiveOutbound falhou (ignorado):",
+      err instanceof Error ? err.message : err,
+    );
+  }
 }
 
 const server = new Server(

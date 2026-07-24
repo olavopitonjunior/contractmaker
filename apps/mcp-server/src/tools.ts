@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { callApi, callBridge } from "./index.js";
+import { callApi, callBridge, logProactiveOutbound } from "./index.js";
 import { validateInWindow } from "./cron-window.js";
 
 export type ToolHandler = (args: Record<string, unknown>) => Promise<unknown>;
@@ -1081,6 +1081,11 @@ export const tools: Tool[] = [
         body.context = { message_id: args.replyToMessageId };
       }
       const r = await callBridge({ path: "/api/send", body });
+      // F2: loga o envio proativo no histórico do DM do destinatário (best-effort,
+      // só em envio bem-sucedido) pra que a resposta dele tenha contexto no /run.
+      if (r.status >= 200 && r.status < 300) {
+        await logProactiveOutbound({ to: String(args.to), content: String(args.body) });
+      }
       return r.body;
     },
   },
