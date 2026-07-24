@@ -8,6 +8,7 @@ import {
   resolveDealRecipients,
 } from "./recipients";
 import { sendSurveyInvite } from "./channels";
+import { isSurveyFeatureEnabledForKind } from "./guard";
 import type { SurveyRecipientRole } from "./types";
 
 /**
@@ -69,6 +70,12 @@ export async function dispatchSurveysForDeal(
   const dealKind = deal.kind === "locacao" ? "locacao" : "venda";
   const triggerStage = stageName ?? deal.stage?.name;
   if (!triggerStage) return { matchedAutomations: 0, created: 0, skipped: 0 };
+
+  // Feature desligada = automação morta, mesmo com SurveyAutomation rows vivas
+  // (super-admin pode desligar a qualquer momento; a UI some, o motor para).
+  if (!(await isSurveyFeatureEnabledForKind(orgId, dealKind))) {
+    return { matchedAutomations: 0, created: 0, skipped: 0 };
+  }
 
   const automations = await prisma.surveyAutomation.findMany({
     where: { orgId, dealKind, triggerStageName: triggerStage, enabled: true },

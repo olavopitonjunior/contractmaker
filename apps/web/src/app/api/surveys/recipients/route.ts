@@ -37,15 +37,28 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Negócio não encontrado" }, { status: 404 });
   }
 
-  const templates = await prisma.surveyTemplate.findMany({
-    where: { orgId: auth.org.id, isLatest: true, status: "active" },
-    orderBy: { updatedAt: "desc" },
-    select: { id: true, name: true, version: true },
-  });
+  const [templates, optouts] = await Promise.all([
+    prisma.surveyTemplate.findMany({
+      where: { orgId: auth.org.id, isLatest: true, status: "active" },
+      orderBy: { updatedAt: "desc" },
+      select: { id: true, name: true, version: true },
+    }),
+    prisma.surveyInvite.findMany({
+      where: { orgId: auth.org.id, status: "optout", recipientEmail: { not: null } },
+      select: { recipientEmail: true },
+      distinct: ["recipientEmail"],
+    }),
+  ]);
+  const optedOut = new Set(optouts.map((o) => o.recipientEmail));
 
   return NextResponse.json({
     dealKind: resolved.dealKind,
-    recipients: resolved.recipients,
+    // `optedOut`: o destinatário pediu pra não receber — o dialog avisa e não
+    // pré-seleciona; o envio manual segue possível (decisão do operador).
+    recipients: resolved.recipients.map((r) => ({
+      ...r,
+      optedOut: r.email ? optedOut.has(r.email) : false,
+    })),
     templates,
   });
 }

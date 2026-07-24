@@ -51,7 +51,15 @@ export const TRIGGER_STAGES_BY_KIND: Record<string, readonly string[]> = {
     "Comissão paga",
     "Negócio perdido",
   ],
-  locacao: ["Em Aprovação", "Formulário", "Em contrato", "Assinado", "ADM"],
+  locacao: [
+    "Em Aprovação",
+    "Formulário",
+    "Em contrato",
+    "Assinado",
+    "Cobrança Gerada",
+    "ADM",
+    "Negócio perdido",
+  ],
 };
 
 export const SURVEY_INVITE_STATUSES = [

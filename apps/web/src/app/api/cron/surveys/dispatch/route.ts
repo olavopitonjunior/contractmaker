@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db/prisma";
 import { requireCronAuth } from "@/lib/security/cron-auth";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
 import { dispatchSurveysForDeal } from "@/lib/surveys/dispatch";
+import { sendSurveyInvite } from "@/lib/surveys/channels";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,10 +61,43 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  // Expira invites vencidos ainda em aberto (pending/sent).
+  // Re-tenta envios de e-mail que falharam (falha transitória de SMTP no
+  // disparo inicial). O sendSurveyInvite re-marca "failed" se falhar de novo,
+  // então cada sweep faz no máximo 1 tentativa por invite.
+  const failed = await prisma.surveyInvite.findMany({
+    where: {
+      status: "failed",
+      channel: "email",
+      tokenExp: { gt: new Date() },
+      recipientEmail: { not: null },
+    },
+    select: {
+      id: true,
+      orgId: true,
+      token: true,
+      channel: true,
+      recipientName: true,
+      recipientEmail: true,
+      recipientPhone: true,
+      remindersSent: true,
+      template: { select: { name: true } },
+    },
+    take: 100,
+  });
+  let retried = 0;
+  for (const invite of failed) {
+    const sent = await sendSurveyInvite({
+      invite,
+      templateName: invite.template.name,
+      orgId: invite.orgId,
+    });
+    if (sent.ok) retried++;
+  }
+
+  // Expira invites vencidos ainda em aberto (pending/sent/failed).
   const expired = await prisma.surveyInvite.updateMany({
     where: {
-      status: { in: ["pending", "sent"] },
+      status: { in: ["pending", "sent", "failed"] },
       tokenExp: { lt: new Date() },
     },
     data: { status: "expired" },
@@ -72,6 +106,7 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     scanned: deals.length,
     dispatched: created,
+    retried,
     expired: expired.count,
   });
 }

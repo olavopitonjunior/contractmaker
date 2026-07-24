@@ -300,7 +300,11 @@ export function SurveyReportClient({
                         )}
                         {comment.dealId && (
                           <Link
-                            href={`/deals/${comment.dealId}`}
+                            href={
+                              comment.dealKind === "locacao"
+                                ? `/locacao/deals/${comment.dealId}`
+                                : `/deals/${comment.dealId}`
+                            }
                             className="underline hover:text-foreground"
                           >
                             {comment.dealTitle ?? "ver negócio"}

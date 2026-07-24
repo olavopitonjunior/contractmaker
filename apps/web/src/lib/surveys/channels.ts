@@ -96,10 +96,15 @@ export async function sendSurveyInvite(
   });
 
   if (!result.ok) {
-    await prisma.surveyInvite.update({
-      where: { id: invite.id },
-      data: { status: "failed" },
-    });
+    // Falha no ENVIO inicial → "failed" (o cron de reconciliação re-tenta).
+    // Falha num REMINDER não rebaixa o invite: ele continua "sent" e o cron
+    // de reminders tenta de novo no dia seguinte.
+    if (!isReminder) {
+      await prisma.surveyInvite.update({
+        where: { id: invite.id },
+        data: { status: "failed" },
+      });
+    }
     return { ok: false, reason: result.error ?? "falha no envio de e-mail" };
   }
 

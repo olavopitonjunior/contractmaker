@@ -62,39 +62,52 @@ export async function POST(
     );
   }
 
-  const created = await prisma.$transaction(async (tx) => {
-    // A versão-viva atual da família (pode não ser a row alvo do POST).
-    const latest = await tx.surveyTemplate.findFirst({
-      where: { orgId: auth.org.id, familyId: source.familyId, isLatest: true },
-      orderBy: { version: "desc" },
-    });
-    if (latest) {
-      await tx.surveyTemplate.update({
-        where: { id: latest.id },
-        data: { isLatest: false },
+  let created;
+  try {
+    created = await prisma.$transaction(async (tx) => {
+      // A versão-viva atual da família (pode não ser a row alvo do POST).
+      const latest = await tx.surveyTemplate.findFirst({
+        where: { orgId: auth.org.id, familyId: source.familyId, isLatest: true },
+        orderBy: { version: "desc" },
       });
-    }
-    return tx.surveyTemplate.create({
-      data: {
-        orgId: auth.org.id,
-        familyId: source.familyId,
-        version: (latest?.version ?? source.version) + 1,
-        isLatest: true,
-        parentVersionId: latest?.id ?? source.id,
-        name: parsed.data.name ?? source.name,
-        description:
-          parsed.data.description === undefined
-            ? source.description
-            : parsed.data.description,
-        status: "active",
-        questionsJson: parsed.data.questions,
-        settingsJson: (parsed.data.settings ??
-          source.settingsJson ??
-          {}) as Prisma.InputJsonValue,
-        createdBy: auth.actor.effectiveUserId,
-      },
+      if (latest) {
+        await tx.surveyTemplate.update({
+          where: { id: latest.id },
+          data: { isLatest: false },
+        });
+      }
+      return tx.surveyTemplate.create({
+        data: {
+          orgId: auth.org.id,
+          familyId: source.familyId,
+          version: (latest?.version ?? source.version) + 1,
+          isLatest: true,
+          parentVersionId: latest?.id ?? source.id,
+          name: parsed.data.name ?? source.name,
+          description:
+            parsed.data.description === undefined
+              ? source.description
+              : parsed.data.description,
+          status: "active",
+          questionsJson: parsed.data.questions,
+          settingsJson: (parsed.data.settings ??
+            source.settingsJson ??
+            {}) as Prisma.InputJsonValue,
+          createdBy: auth.actor.effectiveUserId,
+        },
+      });
     });
-  });
+  } catch (e) {
+    // Corrida de dois "nova versão" simultâneos: o índice único parcial
+    // (isLatest por família) derruba o perdedor com P2002 — 409 amigável.
+    if ((e as { code?: string })?.code === "P2002") {
+      return NextResponse.json(
+        { error: "Outra versão acabou de ser criada — recarregue e tente de novo" },
+        { status: 409 }
+      );
+    }
+    throw e;
+  }
 
   void audit(extractAuditContextFromRequest(req, auth.org.id, auth.actor.effectiveUserId), {
     action: "SURVEY_TEMPLATE_NEW_VERSION",

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { waitUntil } from "@vercel/functions";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { RateLimits } from "@/lib/security/ratelimit";
@@ -101,19 +102,22 @@ export async function POST(
     }
   );
 
-  // Régua pós-resposta (fire-and-forget): sino sempre; detrator ganha alerta
-  // dedicado + e-mail pro corretor responsável pelo deal.
-  void notifyAfterResponse({
-    orgId: invite.orgId,
-    dealId: invite.dealId,
-    responseId,
-    templateName: template.name,
-    respondentRole: invite.recipientRole,
-    respondentName: invite.recipientName,
-    npsScore,
-    csatScore,
-    comment: firstTextAnswer(validated.answers),
-  }).catch((e) => console.error("[surveys] notifyAfterResponse", e));
+  // Régua pós-resposta: sino sempre; detrator ganha alerta dedicado + e-mail
+  // pro corretor responsável. Em waitUntil — `void promise()` seria cancelado
+  // quando a response fecha (memória feedback_vercel_fire_and_forget).
+  waitUntil(
+    notifyAfterResponse({
+      orgId: invite.orgId,
+      dealId: invite.dealId,
+      responseId,
+      templateName: template.name,
+      respondentRole: invite.recipientRole,
+      respondentName: invite.recipientName,
+      npsScore,
+      csatScore,
+      comment: firstTextAnswer(validated.answers),
+    }).catch((e) => console.error("[surveys] notifyAfterResponse", e))
+  );
 
   return NextResponse.json({ ok: true });
 }

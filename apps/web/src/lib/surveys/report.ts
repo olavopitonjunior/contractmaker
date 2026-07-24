@@ -51,6 +51,7 @@ export interface SurveyReport {
     csatScore: number | null;
     dealId: string | null;
     dealTitle: string | null;
+    dealKind: string | null;
     createdAt: string;
   }>;
   /** Respostas por semana (ISO date do início) pro line chart. */
@@ -175,6 +176,7 @@ export async function buildSurveyReport(
         csatScore: r.csatScore,
         dealId: r.dealId,
         dealTitle: null as string | null,
+        dealKind: null as string | null,
         createdAt: r.createdAt.toISOString(),
       }));
   });
@@ -186,11 +188,15 @@ export async function buildSurveyReport(
   if (dealIds.length > 0) {
     const deals = await prisma.deal.findMany({
       where: { id: { in: dealIds } },
-      select: { id: true, title: true },
+      select: { id: true, title: true, kind: true },
     });
-    const titleById = new Map(deals.map((d) => [d.id, d.title]));
+    const dealById = new Map(deals.map((d) => [d.id, d]));
     for (const c of commentRows) {
-      if (c.dealId) c.dealTitle = titleById.get(c.dealId) ?? null;
+      if (c.dealId) {
+        const deal = dealById.get(c.dealId);
+        c.dealTitle = deal?.title ?? null;
+        c.dealKind = deal?.kind ?? null;
+      }
     }
   }
 

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db/prisma";
 import { requireCronAuth } from "@/lib/security/cron-auth";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
 import { sendSurveyInvite } from "@/lib/surveys/channels";
+import { isAnySurveyFeatureEnabled } from "@/lib/surveys/guard";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,10 +63,18 @@ export async function GET(req: NextRequest) {
     : [];
   const offsetsById = new Map(automations.map((a) => [a.id, a.reminderOffsetsDays]));
 
+  // Orgs que desligaram a feature não recebem mais reminders.
+  const orgIds = Array.from(new Set(candidates.map((c) => c.orgId)));
+  const enabledByOrg = new Map<string, boolean>();
+  for (const orgId of orgIds) {
+    enabledByOrg.set(orgId, await isAnySurveyFeatureEnabled(orgId).catch(() => false));
+  }
+
   let reminded = 0;
   const now = Date.now();
 
   for (const invite of candidates) {
+    if (!enabledByOrg.get(invite.orgId)) continue;
     const offsets = invite.automationId
       ? offsetsById.get(invite.automationId) ?? DEFAULT_OFFSETS
       : DEFAULT_OFFSETS;

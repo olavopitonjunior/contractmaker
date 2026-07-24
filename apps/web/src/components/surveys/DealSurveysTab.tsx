@@ -49,6 +49,7 @@ interface SuggestedRecipient {
   name: string;
   email: string | null;
   phone: string | null;
+  optedOut?: boolean;
 }
 
 const STATUS_META: Record<string, { label: string; className: string }> = {
@@ -265,7 +266,9 @@ function SendSurveyDialogContent({
         setChecked(
           new Set(
             data.recipients
-              .map((r: SuggestedRecipient, i: number) => (r.email ? i : -1))
+              .map((r: SuggestedRecipient, i: number) =>
+                r.email && !r.optedOut ? i : -1
+              )
               .filter((i: number) => i >= 0)
           )
         );
@@ -419,6 +422,11 @@ function SendSurveyDialogContent({
                         : channel === "email"
                           ? " · sem e-mail"
                           : ""}
+                      {recipient.optedOut && (
+                        <span className="ml-1 text-amber-600">
+                          · cancelou recebimento
+                        </span>
+                      )}
                     </span>
                   </span>
                 </label>

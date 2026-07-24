@@ -8,10 +8,29 @@ import { ModuleDisabledError } from "@/lib/modules/guard";
  * a um deal específico usam `assertFeatureEnabled(surveyFeatureForKind(kind))`.
  */
 export async function assertAnySurveyFeature(orgId: string): Promise<void> {
-  const view = await getOrgModules(orgId);
-  const vendas = isFeatureEnabled(view, FEATURE.VENDAS_PESQUISAS);
-  const locacao = isFeatureEnabled(view, FEATURE.LOCACAO_PESQUISAS);
-  if (!vendas && !locacao) {
+  if (!(await isAnySurveyFeatureEnabled(orgId))) {
     throw new ModuleDisabledError("vendas", FEATURE.VENDAS_PESQUISAS);
   }
+}
+
+/** Versão booleana pros caminhos automáticos (dispatch/crons): desligar a
+ *  feature TEM que parar disparos e reminders, não só esconder a UI. */
+export async function isAnySurveyFeatureEnabled(orgId: string): Promise<boolean> {
+  const view = await getOrgModules(orgId);
+  return (
+    isFeatureEnabled(view, FEATURE.VENDAS_PESQUISAS) ||
+    isFeatureEnabled(view, FEATURE.LOCACAO_PESQUISAS)
+  );
+}
+
+/** Feature por kind do deal (dispatch automático). */
+export async function isSurveyFeatureEnabledForKind(
+  orgId: string,
+  kind: string
+): Promise<boolean> {
+  const view = await getOrgModules(orgId);
+  return isFeatureEnabled(
+    view,
+    kind === "locacao" ? FEATURE.LOCACAO_PESQUISAS : FEATURE.VENDAS_PESQUISAS
+  );
 }
