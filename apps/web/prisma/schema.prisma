@@ -322,6 +322,12 @@ model Organization {
   // Newton — registro de grupos WhatsApp observados (p/ auto-link + candidatos)
   whatsappGroups WhatsappGroup[]
 
+  // Pesquisas de satisfação (NPS/CSAT) — templates imutáveis por lote
+  surveyTemplates   SurveyTemplate[]
+  surveyAutomations SurveyAutomation[]
+  surveyInvites     SurveyInvite[]
+  surveyResponses   SurveyResponse[]
+
   // Locação — módulo de administração de aluguéis (docs/locacao/spec.md)
   propertyOwners     PropertyOwner[]
   tenants            Tenant[]
@@ -578,6 +584,7 @@ model Deal {
   commissionChargeDrafts CommissionChargeDraft[]
   envelopes              Envelope[]
   newtonRequests         NewtonRequest[]
+  surveyInvites          SurveyInvite[]
   groupLink              DealGroupLink?
   // Proposta que originou este deal (conversão). Null = deal criado direto.
   fromProposal           Proposal?               @relation("ProposalConvertedDeal")
@@ -3811,6 +3818,124 @@ model DimobOverride {
 // DIMOB — vendas (dealId) ou locações (leaseId) excluídas da declaração por
 // (org, ano). Excluir tira o registro do TXT; "reconciliar" apaga a linha e volta.
 // XOR dealId|leaseId (validado no app). `reason` é opcional (audit).
+// ---------------------------------------------------------------------------
+// Pesquisas de satisfação (NPS/CSAT)
+// ---------------------------------------------------------------------------
+
+// IMUTÁVEL após criação: questionsJson NUNCA recebe PATCH. Cada row é um LOTE
+// com relatório próprio — "editar" = new-version (padrão Contract:
+// version/isLatest/parentVersionId). Invariante: no máx 1 isLatest=true por
+// (orgId, familyId) — índice único parcial `SurveyTemplate_familyId_isLatest_unique`.
+// familyId agrupa as versões da mesma pesquisa (na v1, familyId = id).
+model SurveyTemplate {
+  id              String   @id @default(cuid())
+  orgId           String
+  familyId        String
+  version         Int      @default(1)
+  isLatest        Boolean  @default(true)
+  parentVersionId String?
+  name            String
+  description     String?
+  status          String   @default("active") // active | archived
+  // [{ id, type: "nps"|"csat"|"single"|"multi"|"text", label, required, options? }]
+  // Máx 15 perguntas; máx 1 NPS e 1 CSAT (mantém npsScore/csatScore não-ambíguos).
+  questionsJson   Json
+  // { thankYouMessage?, anonymous? (reservado), aiSummary? (cache do resumo) }
+  settingsJson    Json     @default("{}")
+  createdBy       String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  org           Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  parentVersion SurveyTemplate?  @relation("SurveyTemplateVersions", fields: [parentVersionId], references: [id])
+  childVersions SurveyTemplate[] @relation("SurveyTemplateVersions")
+  invites       SurveyInvite[]
+  responses     SurveyResponse[]
+
+  @@index([orgId, familyId, version])
+  @@index([orgId, isLatest, status])
+}
+
+// Regra de disparo automático por etapa do pipeline. MUTÁVEL (não é lote).
+// Aponta pra FAMÍLIA do template; o dispatch resolve isLatest na hora — nova
+// versão redireciona os próximos envios pro novo lote sem tocar na automação.
+model SurveyAutomation {
+  id                  String   @id @default(cuid())
+  orgId               String
+  templateFamilyId    String
+  dealKind            String   // "venda" | "locacao"
+  triggerStageName    String   // nome canônico do stage (lib/pipeline/stage-config.ts)
+  audience            String[] @default([]) // vendedor|comprador|locador|locatario|corretor
+  channel             String   @default("email") // email | whatsapp | manual
+  enabled             Boolean  @default(true)
+  reminderOffsetsDays Int[]    @default([2, 5]) // dias após envio; para ao responder
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, dealKind, triggerStageName, enabled])
+}
+
+// Um envio (ou link manual) da pesquisa para um destinatário. Token opaco
+// (padrão participant-token: randomBytes base64url — URL curta p/ WhatsApp).
+// dedupeKey = `${dealId}:${templateId}:${recipientRole}:${contatoNormalizado}`
+// (manual sem deal usa o id do invite no lugar do dealId) — unique no banco
+// garante que hook + cron concorrentes nunca dupliquem envio.
+model SurveyInvite {
+  id             String    @id @default(cuid())
+  orgId          String
+  templateId     String    // versão CONCRETA = lote (congelada no disparo)
+  automationId   String?   // null = envio manual
+  dealId         String?
+  recipientRole  String    // vendedor|comprador|locador|locatario|corretor
+  recipientName  String?
+  recipientEmail String?
+  recipientPhone String?
+  channel        String    // email | whatsapp | manual
+  token          String    @unique
+  tokenExp       DateTime
+  status         String    @default("pending") // pending|sent|responded|expired|optout|failed
+  sentAt         DateTime?
+  respondedAt    DateTime?
+  remindersSent  Int       @default(0)
+  lastReminderAt DateTime?
+  dedupeKey      String    @unique
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  org      Organization    @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  template SurveyTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  deal     Deal?           @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  response SurveyResponse?
+
+  @@index([orgId, templateId, status])
+  @@index([dealId, createdAt])
+  @@index([status, sentAt])
+}
+
+model SurveyResponse {
+  id             String   @id @default(cuid())
+  orgId          String
+  templateId     String   // lote — agregação SQL direta, sem join
+  inviteId       String   @unique // idempotência do POST público
+  dealId         String?
+  respondentRole String
+  // [{ questionId, type, value }] — value: number (nps/csat), string (single/text), string[] (multi)
+  answersJson    Json
+  // Derivadas da pergunta nps/csat do template (máx 1 de cada) — agregação sem parse de Json
+  npsScore       Int?
+  csatScore      Int?
+  createdAt      DateTime @default(now())
+
+  org      Organization   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  template SurveyTemplate @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  invite   SurveyInvite   @relation(fields: [inviteId], references: [id], onDelete: Cascade)
+
+  @@index([orgId, templateId, createdAt])
+  @@index([dealId])
+}
+
 model DimobExclusion {
   id               String   @id @default(cuid())
   orgId            String
