@@ -170,7 +170,7 @@ describe("dealDataToSigners", () => {
     });
   });
 
-  it("inclui cônjuge como signer separado quando flag está marcada", () => {
+  it("inclui cônjuge como signer separado — com e sem a flag (opt-out)", () => {
     const result = dealDataToSigners({
       vendedores: [
         {
@@ -193,14 +193,15 @@ describe("dealDataToSigners", () => {
           cpf: "999.888.777-66",
           email: "rosangela@x.com",
           conjuge: {
-            // sem flag → ignora cônjuge
+            // Sem a flag: entra assim mesmo. Nenhuma UI do formulário público
+            // seta `incluir_como_signatario`, e o cônjuge já assina no PDF.
             nome: "Flávio",
             email: "flavio@x.com",
           },
         },
       ],
     });
-    expect(result.signers).toHaveLength(3);
+    expect(result.signers).toHaveLength(4);
     const conjugeVendedor = result.signers.find(
       (s) => s.sourceKind === "vendedor" && s.name === "Elenira"
     );
@@ -210,9 +211,33 @@ describe("dealDataToSigners", () => {
     expect(conjugeVendedor?.sourceIndex).toBe(0);
     expect(conjugeVendedor?.subKind).toBe("conjuge");
     expect(conjugeVendedor?.documentation).toBe("55566677788");
+
+    const conjugeComprador = result.signers.find(
+      (s) => s.sourceKind === "comprador" && s.name === "Flávio"
+    );
+    expect(conjugeComprador?.subKind).toBe("conjuge");
   });
 
-  it("cônjuge sem email/nome não vira signer mesmo com flag", () => {
+  it("cônjuge com incluir_como_signatario: false fica de fora", () => {
+    const result = dealDataToSigners({
+      vendedores: [
+        {
+          nome: "V",
+          email: "v@x.com",
+          conjuge: {
+            nome: "Removida na popup",
+            email: "removida@x.com",
+            incluir_como_signatario: false,
+          },
+        },
+      ],
+    });
+    expect(result.signers).toHaveLength(1);
+    expect(result.signers[0].subKind).toBe("titular");
+    expect(result.missing).toHaveLength(0);
+  });
+
+  it("cônjuge sem email/nome não vira signer nem entra em missing", () => {
     const result = dealDataToSigners({
       vendedores: [
         {
@@ -223,7 +248,65 @@ describe("dealDataToSigners", () => {
       ],
     });
     expect(result.signers).toHaveLength(1);
+    // `missing` bloqueia o envelope inteiro — cônjuge incompleto só é omitido.
     expect(result.missing).toHaveLength(0);
+  });
+
+  it("procurador entra sem a flag e sai com flag false", () => {
+    const comProcurador = dealDataToSigners({
+      vendedores: [
+        {
+          nome: "V",
+          email: "v@x.com",
+          tem_procurador: true,
+          procurador: {
+            nome: "Procurador Fulano",
+            cpf: "555.666.777-88",
+            email: "proc@x.com",
+          },
+        },
+      ],
+    });
+    expect(comProcurador.signers).toHaveLength(2);
+    const proc = comProcurador.signers.find((s) => s.subKind === "procurador");
+    expect(proc).toMatchObject({
+      name: "Procurador Fulano",
+      email: "proc@x.com",
+      documentation: "55566677788",
+      sourceIndex: 0,
+    });
+
+    const semProcurador = dealDataToSigners({
+      vendedores: [
+        {
+          nome: "V",
+          email: "v@x.com",
+          procurador: {
+            nome: "Procurador Fulano",
+            email: "proc@x.com",
+            incluir_como_signatario: false,
+          },
+        },
+      ],
+    });
+    expect(semProcurador.signers).toHaveLength(1);
+  });
+
+  it("PJ ignora cônjuge e procurador sujos no dataJson", () => {
+    const result = dealDataToSigners({
+      vendedores: [
+        {
+          tipo_pessoa: "juridica",
+          razao_social: "Empresa X",
+          cnpj: "11.222.333/0001-44",
+          representante: { nome: "Rep Legal", cpf: "111.222.333-44", email: "rep@x.com" },
+          conjuge: { nome: "Não deveria assinar", email: "nao@x.com" },
+          procurador: { nome: "Nem esse", email: "nem@x.com" },
+        },
+      ],
+    });
+    expect(result.signers).toHaveLength(1);
+    expect(result.signers[0].subKind).toBe("representante");
   });
 
   it("inclui apenas testemunhas marcadas com flag e dados completos", () => {

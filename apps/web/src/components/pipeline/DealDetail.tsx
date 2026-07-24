@@ -10,6 +10,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot, Pencil, Check, CheckCircle2, X, Archive, ArchiveRestore, Lock, LockOpen, ShieldAlert, Users } from "lucide-react";
 import { SendAttachmentEnvelopeDialog } from "@/components/pipeline/SendAttachmentEnvelopeDialog";
+import { buildPartySuggestions } from "@/lib/clicksign/party-suggestions";
 import { AddDocumentsCard } from "@/components/pipeline/AddDocumentsCard";
 import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
 import { LostDealBanner } from "@/components/pipeline/LostDealBanner";
@@ -1680,22 +1681,9 @@ function DocumentsTab({
   const signablePdfs = manualFallback
     .filter((a) => a.mime === "application/pdf")
     .map((a) => ({ id: a.id, filename: a.filename, mime: a.mime, category: a.category }));
-  const partySuggestions = [
-    ...vendedores.map((v, i) => ({
-      sourceKind: "vendedor" as const,
-      sourceIndex: i,
-      name: v.nome || v.razao_social || `Vendedor ${i + 1}`,
-      email: v.email ?? null,
-      documentation: v.cpf || v.cnpj || null,
-    })),
-    ...compradores.map((c, i) => ({
-      sourceKind: "comprador" as const,
-      sourceIndex: i,
-      name: c.nome || c.razao_social || `Comprador ${i + 1}`,
-      email: c.email ?? null,
-      documentation: c.cpf || c.cnpj || null,
-    })),
-  ].filter((p) => p.name);
+  // Titular + cônjuge + procurador + representante legal da PJ, com papel
+  // default já resolvido. Ver lib/clicksign/party-suggestions.ts.
+  const partySuggestions = buildPartySuggestions(vendedores, compradores);
 
   const hasAnyContent =
     hasFormAttachments ||

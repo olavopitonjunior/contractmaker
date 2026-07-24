@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { UFSelect } from "@/components/forms/UFSelect";
 import { NativeSelect } from "@/components/forms/NativeSelect";
+import { getByPath } from "@/lib/forms/party-required";
 
 function FieldError({ error }: { error?: { message?: string } }) {
   if (!error?.message) return null;
@@ -32,19 +33,32 @@ function FormField({
 
 interface ConjugeFieldsProps {
   form: UseFormReturn<any>;
-  index: number;
-  /** Path prefix do titular, ex: "vendedores.0" — sub-obj `conjuge` é apenso. */
+  /**
+   * Path prefix do titular, ex: "vendedores.0", "locadores.1" ou
+   * "garantia.fiador" — o sub-obj `conjuge` é apenso. Também é por onde os
+   * erros são lidos, então o componente serve qualquer lista (e o fiador de
+   * locação, que não é array e não tem índice).
+   */
   prefix: string;
-  listKey: "vendedores" | "compradores";
+  /**
+   * "venda" (default) mostra os campos que as certidões PF exigem
+   * (nome da mãe, sexo, naturalidade). "locacao" os omite — lá não há
+   * diligência de certidão sobre o cônjuge, e o titular também não os pede.
+   */
+  variant?: "venda" | "locacao";
 }
 
 /**
- * Bloco de cônjuge espelhando 100% os campos do titular (PF). Inclui flag
+ * Bloco de cônjuge espelhando os campos do titular (PF). Inclui flag
  * "Mora no mesmo endereço do titular" — quando ligado (default), endereço do
  * cônjuge é lido do titular pelo helper getEnderecoEfetivo. Quando desligado,
  * inputs de endereço aparecem.
  */
-export function ConjugeFields({ form, index, prefix, listKey }: ConjugeFieldsProps) {
+export function ConjugeFields({
+  form,
+  prefix,
+  variant = "venda",
+}: ConjugeFieldsProps) {
   const enderecoIgual = form.watch(`${prefix}.conjuge.endereco_igual_ao_titular`);
 
   // Default true — se o flag nunca foi tocado (legacy data ou primeiro render),
@@ -61,7 +75,10 @@ export function ConjugeFields({ form, index, prefix, listKey }: ConjugeFieldsPro
   }, [enderecoIgual, form, prefix]);
 
   const showEnderecoFields = enderecoIgual === false;
-  const errors = (form.formState.errors as any)?.[listKey]?.[index]?.conjuge;
+  const showCertidaoFields = variant === "venda";
+  const errors = getByPath(form.formState.errors, `${prefix}.conjuge`) as
+    | Record<string, { message?: string }>
+    | undefined;
 
   return (
     <>
@@ -70,8 +87,9 @@ export function ConjugeFields({ form, index, prefix, listKey }: ConjugeFieldsPro
         Dados do Cônjuge <span className="text-destructive">*</span>
       </p>
       <p className="text-xs text-muted-foreground -mt-3">
-        Obrigatórios quando o estado civil é Casado(a) ou União Estável. A
-        aprovação do contrato é bloqueada se faltarem nome e CPF.
+        Obrigatórios quando o estado civil é Casado(a) ou União Estável — sem
+        nome e CPF do cônjuge o contrato não avança. Informe também o e-mail se
+        ele for assinar.
       </p>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <FormField label="Nome do Cônjuge *" className="md:col-span-2">
@@ -97,37 +115,43 @@ export function ConjugeFields({ form, index, prefix, listKey }: ConjugeFieldsPro
             type="date"
           />
         </FormField>
-        <FormField label="Sexo do Cônjuge">
-          <NativeSelect
-            value={form.watch(`${prefix}.conjuge.sexo`) || ""}
-            onChange={(v) =>
-              form.setValue(`${prefix}.conjuge.sexo`, v, { shouldDirty: true })
-            }
-            options={[
-              { value: "", label: "Não informado" },
-              { value: "M", label: "Masculino" },
-              { value: "F", label: "Feminino" },
-            ]}
-          />
-        </FormField>
-        <FormField label="Nome da Mãe do Cônjuge" className="md:col-span-2">
-          <Input
-            {...form.register(`${prefix}.conjuge.nome_mae`)}
-            placeholder="Exigido pelas certidões PF (TJSP, PGFN, Antecedentes)"
-          />
-        </FormField>
+        {showCertidaoFields && (
+          <>
+            <FormField label="Sexo do Cônjuge">
+              <NativeSelect
+                value={form.watch(`${prefix}.conjuge.sexo`) || ""}
+                onChange={(v) =>
+                  form.setValue(`${prefix}.conjuge.sexo`, v, { shouldDirty: true })
+                }
+                options={[
+                  { value: "", label: "Não informado" },
+                  { value: "M", label: "Masculino" },
+                  { value: "F", label: "Feminino" },
+                ]}
+              />
+            </FormField>
+            <FormField label="Nome da Mãe do Cônjuge" className="md:col-span-2">
+              <Input
+                {...form.register(`${prefix}.conjuge.nome_mae`)}
+                placeholder="Exigido pelas certidões PF (TJSP, PGFN, Antecedentes)"
+              />
+            </FormField>
+          </>
+        )}
         <FormField label="Nacionalidade do Cônjuge">
           <Input
             {...form.register(`${prefix}.conjuge.nacionalidade`)}
             placeholder="Brasileiro(a)"
           />
         </FormField>
-        <FormField label="Naturalidade do Cônjuge">
-          <Input
-            {...form.register(`${prefix}.conjuge.naturalidade`)}
-            placeholder="Cidade/UF de nascimento"
-          />
-        </FormField>
+        {showCertidaoFields && (
+          <FormField label="Naturalidade do Cônjuge">
+            <Input
+              {...form.register(`${prefix}.conjuge.naturalidade`)}
+              placeholder="Cidade/UF de nascimento"
+            />
+          </FormField>
+        )}
         <FormField label="Profissão do Cônjuge">
           <Input
             {...form.register(`${prefix}.conjuge.profissao`)}

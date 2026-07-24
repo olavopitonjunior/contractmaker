@@ -17,6 +17,11 @@ import {
   SharePartyLinkButton,
 } from "@/components/forms/PartyLinksPanel";
 import type { ParticipantRole } from "@/lib/forms/participant-token";
+import {
+  findSignatureRecommendations,
+  getByPath,
+  PARTY_SUB_LABELS,
+} from "@/lib/forms/party-required";
 import { LocacaoParteStep } from "@/components/forms/steps/locacao/_PartyFields";
 import { DocumentosStep } from "@/components/forms/steps/DocumentosStep";
 import type { Assignment } from "@/lib/forms/extracted-to-form";
@@ -166,6 +171,27 @@ export function LocacaoFormWizard({
               (form.getValues("garantia.tipo" as never) as unknown) === "fiador"
             ? "fiador"
             : null;
+
+  // Guarda híbrida: sub-partes preenchidas (cônjuge de PF, representante de PJ)
+  // que assinam mas estão sem e-mail. Só aviso — o bloqueio de avanço continua
+  // sendo só nome/razão social. Locação não usa o sistema de presets de venda,
+  // então o cálculo mora aqui.
+  const sigRecoList = PARTY_STEP[currentTrueIdx]?.list ?? null;
+  const sigRecoPartyLabel =
+    sigRecoList === "locadores" ? "Locador" : "Locatário";
+  const signatureRecommendations = sigRecoList
+    ? findSignatureRecommendations(
+        sigRecoList,
+        ((getByPath(watchedData, sigRecoList) as unknown[]) ?? []).length,
+        (path) => getByPath(watchedData, path),
+      )
+    : [];
+  const sigRecoByParty = new Map<number, string[]>();
+  for (const r of signatureRecommendations) {
+    const arr = sigRecoByParty.get(r.idx) ?? [];
+    arr.push(PARTY_SUB_LABELS[r.sub]);
+    sigRecoByParty.set(r.idx, arr);
+  }
 
   // `step` aqui é o índice REAL (PARTY_STEP/STEP_REQUIRED são indexados pelo
   // schema completo de 7 etapas).
@@ -384,6 +410,34 @@ export function LocacaoFormWizard({
           );
         })()}
       </div>
+
+      {/* Recomendação NÃO-bloqueante de e-mail das sub-partes (cônjuge de PF,
+          representante legal de PJ). Elas assinam junto com o titular; sem
+          e-mail não recebem o link da ClickSign. Mesma guarda híbrida do
+          wizard de venda. */}
+      {sigRecoByParty.size > 0 && (
+        <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-800 dark:bg-amber-950/40">
+          <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
+            Recomendado para a assinatura
+          </p>
+          <p className="mt-0.5 text-xs text-amber-800/80 dark:text-amber-300/80">
+            Não é obrigatório para gerar o contrato, mas quem assina precisa de
+            e-mail: sem ele, estas pessoas não recebem o link da ClickSign e
+            terão que ser completadas manualmente antes do envio. Falta o e-mail
+            de:
+          </p>
+          <ul className="mt-2 space-y-0.5 text-xs text-amber-900 dark:text-amber-200">
+            {Array.from(sigRecoByParty.entries()).map(([idx, subs]) => (
+              <li key={idx}>
+                <span className="font-medium">
+                  {sigRecoPartyLabel} {idx + 1}:{" "}
+                </span>
+                {subs.join(", ")}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       <fieldset disabled={readOnly} className="m-0 border-0 p-0 min-w-0 disabled:opacity-70">
         {steps[visibleStepIndexes[currentStep] ?? currentStep]}

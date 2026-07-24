@@ -275,6 +275,18 @@ export const previewSampleDataLocacao = {
       cidade: "São Paulo",
       uf: "SP",
       cep: "01412-100",
+      // Casado(a) com cônjuge preenchido — exercita a outorga uxória na
+      // qualificação e a linha de assinatura do cônjuge.
+      conjuge: {
+        nome: "Beatriz Almeida Nogueira",
+        cpf: "890.123.456-77",
+        rg: "33.444.555-6",
+        nacionalidade: "Brasileira",
+        profissao: "Arquiteta",
+        email: "beatriz.nogueira@example.com",
+        mobile_phone: "(11) 97777-2222",
+        endereco_igual_ao_titular: true,
+      },
     },
   ],
   imovel: {

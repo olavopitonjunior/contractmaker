@@ -23,7 +23,11 @@ import {
   UsersRound,
   Wallet,
 } from "lucide-react";
-import { CLICKSIGN_ROLE_OPTIONS, type ClicksignRole } from "@/lib/clicksign/roles";
+import {
+  CLICKSIGN_ROLE_OPTIONS,
+  defaultRoleForSourceKind,
+  type ClicksignRole,
+} from "@/lib/clicksign/roles";
 import { suggestEmailDomain } from "@/lib/forms/email-typo";
 import { WitnessPicker, pickNewWitnesses, type RegistryWitness } from "./WitnessPicker";
 
@@ -112,22 +116,9 @@ const ROLE_OPTIONS = CLICKSIGN_ROLE_OPTIONS;
 const COST_PER_SIGNER_CENTS = 150;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-function defaultRoleFor(sourceKind: RowKind, subKind: SubKind): ClicksignRole {
-  if (subKind === "conjuge") return "consenting";
-  if (subKind === "procurador") return "attorney";
-  switch (sourceKind) {
-    case "vendedor":
-      return "seller";
-    case "comprador":
-      return "buyer";
-    case "corretora":
-      return "intervening";
-    case "testemunha":
-      return "witness";
-    default:
-      return "sign";
-  }
-}
+/** Papel default — fonte única em lib/clicksign/roles.ts (server usa a mesma). */
+const defaultRoleFor = (sourceKind: RowKind, subKind: SubKind): ClicksignRole =>
+  defaultRoleForSourceKind(sourceKind, subKind);
 
 interface EditableRow {
   rowId: string;
@@ -207,7 +198,10 @@ function buildInitialRows(
           subKind: "representante",
           name: (rep.nome || "").trim() || partyName(p),
           email: (rep.email ?? "").trim(),
-          documentation: onlyDigits(rep.cpf),
+          // CPF do representante primeiro, CNPJ da PJ como fallback — mesma
+          // regra de `dealDataToSigners`. Sem o fallback a linha nascia sem
+          // documento quando só o CNPJ tinha sido preenchido no form.
+          documentation: onlyDigits(rep.cpf) || onlyDigits(p.cnpj),
           phone: onlyDigits(rep.mobile_phone),
           isPJ: true,
           addedDuringDialog: false,

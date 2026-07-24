@@ -33,6 +33,31 @@ const pessoaFisicaLocacaoSchema = z.object({
   cep: z.string().optional().default(""),
   // Renda declarada (insumo da análise de crédito Fase 1: renda × aluguel).
   renda_mensal: z.number().optional().default(0),
+  // Cônjuge (2026-07-24). Locação não tinha outorga uxória em camada nenhuma:
+  // um locador casado assinava sozinho. Espelha o sub-objeto de venda menos os
+  // campos que só as certidões PF de venda usam (nome_mae/sexo/naturalidade).
+  // `incluir_como_signatario` default `true` como o resto de locação (venda
+  // nasceu opt-in por motivos históricos).
+  conjuge: z.object({
+    nome: z.string().optional().default(""),
+    cpf: z.string().optional().default(""),
+    rg: z.string().optional().default(""),
+    nacionalidade: z.string().optional().default(""),
+    profissao: z.string().optional().default(""),
+    data_nascimento: z.string().optional().default(""),
+    email: z.string().email("Email inválido").optional().or(z.literal("")),
+    mobile_phone: z.string().optional().default(""),
+    // Endereço próprio — só usado quando endereco_igual_ao_titular === false.
+    endereco: z.string().optional().default(""),
+    numero: z.string().optional().default(""),
+    complemento: z.string().optional().default(""),
+    bairro: z.string().optional().default(""),
+    cidade: z.string().optional().default(""),
+    uf: z.string().optional().default(""),
+    cep: z.string().optional().default(""),
+    endereco_igual_ao_titular: z.boolean().optional().default(true),
+    incluir_como_signatario: z.boolean().optional().default(true),
+  }).optional(),
   // Opt-in pra incluir como signatário ClickSign separado.
   incluir_como_signatario: z.boolean().optional().default(true),
 });
@@ -429,6 +454,13 @@ export function collectLocacaoFinalizeIssues(
     for (const issue of collectPartyFormatIssues(parte as Record<string, unknown>)) {
       issues.push({ path: `${prefix}.${issue.path}`, message: issue.message });
     }
+    // Outorga uxória: parte PF casada precisa de nome + CPF do cônjuge. Mesma
+    // regra que o superRefine de venda aplica (lib/forms/validation.ts). Fica
+    // aqui, e não nos dois superRefine de locação, pra não triplicar o código.
+    // E-mail do cônjuge NÃO entra: é recomendação no wizard, não bloqueio.
+    for (const issue of collectConjugeIssues(parte as Record<string, unknown>)) {
+      issues.push({ path: `${prefix}.${issue.path}`, message: issue.message });
+    }
   }
 
   // Fiador completo quando garantia = fiador (CPF + endereço, além do nome que
@@ -455,9 +487,39 @@ export function collectLocacaoFinalizeIssues(
     for (const issue of collectPartyFormatIssues(fiador)) {
       issues.push({ path: `garantia.fiador.${issue.path}`, message: issue.message });
     }
+    for (const issue of collectConjugeIssues(fiador)) {
+      issues.push({ path: `garantia.fiador.${issue.path}`, message: issue.message });
+    }
   }
 
   return issues;
+}
+
+const ESTADOS_CIVIS_COM_CONJUGE = new Set(["Casado(a)", "União Estável"]);
+
+/**
+ * Nome + CPF do cônjuge quando a parte PF é casada ou vive em união estável.
+ * Sem a outorga do cônjuge a locação de imóvel comum é anulável — mesma regra
+ * já aplicada em venda.
+ */
+function collectConjugeIssues(parte: Record<string, unknown>): FinalizeIssue[] {
+  if (parte.tipo_pessoa === "juridica") return [];
+  if (!ESTADOS_CIVIS_COM_CONJUGE.has(String(parte.estado_civil ?? ""))) return [];
+  const conjuge = (parte.conjuge as Record<string, unknown> | undefined) ?? {};
+  const out: FinalizeIssue[] = [];
+  if (isBlankStr(conjuge.nome)) {
+    out.push({
+      path: "conjuge.nome",
+      message: "Nome do cônjuge é obrigatório quando a parte é casada.",
+    });
+  }
+  if (isBlankStr(conjuge.cpf)) {
+    out.push({
+      path: "conjuge.cpf",
+      message: "CPF do cônjuge é obrigatório quando a parte é casada.",
+    });
+  }
+  return out;
 }
 
 export function stepLabelsForLocacaoType(schemaType: string) {

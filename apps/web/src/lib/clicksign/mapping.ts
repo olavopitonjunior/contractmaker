@@ -165,12 +165,20 @@ export function dealDataToSigners(
         }
       }
 
-      // Cônjuge: opt-in via flag incluir_como_signatario. Não gera entrada
-      // em `missing` quando dados faltam — sinal de que não foi escolhido
-      // pra assinar. subKind="conjuge" desambigua o override de papel vindo
-      // da UI (mesmo sourceIndex do titular; sem @@unique no schema).
+      // Cônjuge: OPT-OUT (2026-07-24). Entra sempre que tem nome + e-mail,
+      // salvo quando a flag foi explicitamente marcada `false` — que é o que
+      // a popup de envio grava ao remover a linha (`unsetRemoved` em
+      // SendEnvelopeDialog). Antes era opt-in exigindo `=== true`, mas nenhuma
+      // UI do formulário público seta a flag: no caminho derivado (Newton/
+      // bearer e preview) o cônjuge tinha linha de assinatura no PDF e sumia
+      // do envelope. Mesma regra que `leaseDataToSigners` já usava.
+      //
+      // Sem e-mail continua fora e SEM entrada em `missing` — `missing`
+      // bloqueia o envio inteiro, e a base legada raramente tem esse dado.
+      // subKind="conjuge" desambigua o override de papel vindo da UI (mesmo
+      // sourceIndex do titular; sem @@unique no schema).
       const conjuge = p.conjuge;
-      if (conjuge?.incluir_como_signatario) {
+      if (conjuge && conjuge.incluir_como_signatario !== false) {
         const conjugeName = (conjuge.nome ?? "").trim();
         const conjugeEmail = (conjuge.email ?? "").trim();
         if (conjugeName && conjugeEmail) {
@@ -187,9 +195,9 @@ export function dealDataToSigners(
         }
       }
 
-      // Procurador (PF): signatário adicional, opt-in via incluir_como_signatario.
+      // Procurador (PF): signatário adicional, mesmo opt-out do cônjuge.
       const proc = p.procurador;
-      if (proc?.incluir_como_signatario) {
+      if (proc && proc.incluir_como_signatario !== false) {
         const procName = (proc.nome ?? "").trim();
         const procEmail = (proc.email ?? "").trim();
         if (procName && procEmail) {
@@ -303,6 +311,7 @@ interface LeaseParte {
   mobile_phone?: string;
   telefone?: string;
   representante?: LeaseRepresentante;
+  conjuge?: Conjuge;
   incluir_como_signatario?: boolean;
 }
 
@@ -351,6 +360,35 @@ export function leaseDataToSigners(
   const signers: SignerInput[] = [];
   const missing: MissingEmailEntry[] = [];
 
+  /**
+   * Cônjuge de parte PF casada — outorga uxória. Mesmo `sourceIndex` do
+   * titular, desambiguado por `subKind`. Opt-out como o resto de locação:
+   * entra com nome + e-mail, salvo flag explicitamente `false`. Sem e-mail
+   * fica de fora sem entrar em `missing` (que bloquearia o envelope inteiro).
+   */
+  const pushConjuge = (
+    sourceKind: SourceKind,
+    sourceIndex: number,
+    p: LeaseParte
+  ) => {
+    if (p.tipo_pessoa === "juridica") return;
+    const conjuge = p.conjuge;
+    if (!conjuge || conjuge.incluir_como_signatario === false) return;
+    const name = (conjuge.nome ?? "").trim();
+    const email = (conjuge.email ?? "").trim();
+    if (!name || !email) return;
+    signers.push({
+      sourceKind,
+      sourceIndex,
+      subKind: "conjuge",
+      name,
+      email,
+      documentation: onlyDigits(conjuge.cpf),
+      phone: onlyDigits(conjuge.mobile_phone ?? conjuge.telefone),
+      authMethod,
+    });
+  };
+
   const collect = (sourceKind: SourceKind, partes: LeaseParte[] | undefined) => {
     (partes ?? []).forEach((p, idx) => {
       // Locador/locatário entram por default (incluir_como_signatario default
@@ -360,6 +398,8 @@ export function leaseDataToSigners(
       if (!name) return;
       if (!email) {
         missing.push({ sourceKind, sourceIndex: idx, name });
+        // Cônjuge não depende do e-mail do titular pra assinar.
+        pushConjuge(sourceKind, idx, p);
         return;
       }
       signers.push({
@@ -372,6 +412,7 @@ export function leaseDataToSigners(
         phone,
         authMethod,
       });
+      pushConjuge(sourceKind, idx, p);
     });
   };
 
@@ -400,6 +441,9 @@ export function leaseDataToSigners(
             authMethod,
           });
         }
+        // Outorga do cônjuge do fiador — o art. 1.647, III do Código Civil
+        // exige a anuência conjugal na fiança, então ela vale ainda mais aqui.
+        pushConjuge("fiador", 0, f);
       }
     }
   }

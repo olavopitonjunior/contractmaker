@@ -35,7 +35,17 @@ function renderBlock(src: string, data: Record<string, unknown>): string {
 // Fragmento de qualificação por pessoa — idêntico ao preâmbulo dos v3.
 const PESSOA_HBS = `{{#if (eq this.tipo_pessoa "fisica")}}{{this.nome}}{{#if (existe this.nacionalidade)}}, {{this.nacionalidade}}{{/if}}{{#if (existe this.estado_civil)}}, {{this.estado_civil}}{{/if}}{{#if (existe this.profissao)}}, {{this.profissao}}{{/if}}{{#if (existe this.rg)}}, portador(a) da cédula de identidade RG nº {{this.rg}}{{/if}}{{#if (existe this.cpf)}}, inscrito(a) no CPF/MF sob nº {{cpf this.cpf}}{{/if}}{{#if (existe this.endereco)}}, residente e domiciliado(a) na {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, {{this.complemento}}{{/if}}{{#if this.bairro}}, {{this.bairro}}{{/if}}{{#if (existe this.cep)}}, CEP {{cep this.cep}}{{/if}}{{#if (existe this.cidade)}}, {{this.cidade}}/{{this.uf}}{{/if}}{{/if}}{{#if (existe this.email)}}, endereço eletrônico e-mail {{this.email}}{{/if}}{{else}}{{this.razao_social}}, pessoa jurídica de direito privado, inscrita no CNPJ/MF sob nº {{cnpj this.cnpj}}{{#if (existe this.endereco)}}, com sede na {{this.endereco}}, nº {{this.numero}}{{#if this.complemento}}, {{this.complemento}}{{/if}}{{#if this.bairro}}, {{this.bairro}}{{/if}}{{#if (existe this.cep)}}, CEP {{cep this.cep}}{{/if}}{{#if (existe this.cidade)}}, {{this.cidade}}/{{this.uf}}{{/if}}{{/if}}{{#if this.representante.nome}}, neste ato representada por {{this.representante.nome}}, inscrito(a) no CPF/MF sob nº {{cpf this.representante.cpf}}{{/if}}{{/if}}`;
 
-const PESSOAS_HBS = `{{#each pessoas}}${PESSOA_HBS}{{#unless @last}}; {{/unless}}{{/each}}`;
+// Outorga uxória — sufixo apenso DEPOIS do bloco PF/PJ (PJ nunca tem
+// `conjuge.nome`, então o `if` fecha vazio lá). Desde 2026-07-24 vale também
+// pra locação: antes só venda qualificava o cônjuge, e um locador casado
+// assinava sem a anuência do consorte. Precisa ser idêntico ao sufixo que os
+// `.hbs` v3 usam — `placeholder-map.test.ts` exige que a saída de
+// `qualificacaoPessoas` seja substring do contrato renderizado.
+const CONJUGE_SUFFIX_HBS = `{{#if this.conjuge.nome}}, casado(a) com {{this.conjuge.nome}}{{#if (existe this.conjuge.cpf)}}, inscrito(a) no CPF/MF sob nº {{cpf this.conjuge.cpf}}{{/if}}{{/if}}`;
+
+const PESSOA_COM_CONJUGE_HBS = `${PESSOA_HBS}${CONJUGE_SUFFIX_HBS}`;
+
+const PESSOAS_HBS = `{{#each pessoas}}${PESSOA_COM_CONJUGE_HBS}{{#unless @last}}; {{/unless}}{{/each}}`;
 
 /** Qualificação narrativa de uma lista de partes (PF/PJ), separada por "; ". */
 export function qualificacaoPessoas(pessoas: unknown[]): string {
@@ -43,16 +53,16 @@ export function qualificacaoPessoas(pessoas: unknown[]): string {
   return renderBlock(PESSOAS_HBS, { pessoas });
 }
 
-// Cônjuge de venda: o shape de vendedores/compradores tem `conjuge` aninhado.
-const PESSOA_VENDA_HBS = `${PESSOA_HBS}{{#if this.conjuge.nome}}, casado(a) com {{this.conjuge.nome}}{{#if (existe this.conjuge.cpf)}}, inscrito(a) no CPF/MF sob nº {{cpf this.conjuge.cpf}}{{/if}}{{/if}}`;
-const PESSOAS_VENDA_HBS = `{{#each pessoas}}${PESSOA_VENDA_HBS}{{#unless @last}}; {{/unless}}{{/each}}`;
+// Venda e locação convergiram no mesmo fragmento; a função separada continua
+// existindo porque `placeholder-map.ts` usa nomes distintos por módulo.
+const PESSOAS_VENDA_HBS = PESSOAS_HBS;
 
 export function qualificacaoPessoasVenda(pessoas: unknown[]): string {
   if (!Array.isArray(pessoas) || pessoas.length === 0) return "";
   return renderBlock(PESSOAS_VENDA_HBS, { pessoas });
 }
 
-const FIADOR_HBS = `{{#if (eq garantia.tipo "fiador")}}{{#if (eq garantia.fiador.tipo_pessoa "juridica")}}{{garantia.fiador.razao_social}}, pessoa jurídica de direito privado, inscrita no CNPJ/MF sob nº {{cnpj garantia.fiador.cnpj}}{{else}}{{garantia.fiador.nome}}{{#if (existe garantia.fiador.nacionalidade)}}, {{garantia.fiador.nacionalidade}}{{/if}}{{#if (existe garantia.fiador.estado_civil)}}, {{garantia.fiador.estado_civil}}{{/if}}{{#if (existe garantia.fiador.rg)}}, portador(a) da cédula de identidade RG nº {{garantia.fiador.rg}}{{/if}}{{#if (existe garantia.fiador.cpf)}}, inscrito(a) no CPF/MF sob nº {{cpf garantia.fiador.cpf}}{{/if}}{{#if (existe garantia.fiador.endereco)}}, residente e domiciliado(a) na {{garantia.fiador.endereco}}, nº {{garantia.fiador.numero}}, {{garantia.fiador.cidade}}/{{garantia.fiador.uf}}{{/if}}{{/if}}{{/if}}`;
+const FIADOR_HBS = `{{#if (eq garantia.tipo "fiador")}}{{#if (eq garantia.fiador.tipo_pessoa "juridica")}}{{garantia.fiador.razao_social}}, pessoa jurídica de direito privado, inscrita no CNPJ/MF sob nº {{cnpj garantia.fiador.cnpj}}{{else}}{{garantia.fiador.nome}}{{#if (existe garantia.fiador.nacionalidade)}}, {{garantia.fiador.nacionalidade}}{{/if}}{{#if (existe garantia.fiador.estado_civil)}}, {{garantia.fiador.estado_civil}}{{/if}}{{#if (existe garantia.fiador.rg)}}, portador(a) da cédula de identidade RG nº {{garantia.fiador.rg}}{{/if}}{{#if (existe garantia.fiador.cpf)}}, inscrito(a) no CPF/MF sob nº {{cpf garantia.fiador.cpf}}{{/if}}{{#if (existe garantia.fiador.endereco)}}, residente e domiciliado(a) na {{garantia.fiador.endereco}}, nº {{garantia.fiador.numero}}, {{garantia.fiador.cidade}}/{{garantia.fiador.uf}}{{/if}}{{#if garantia.fiador.conjuge.nome}}, casado(a) com {{garantia.fiador.conjuge.nome}}{{#if (existe garantia.fiador.conjuge.cpf)}}, inscrito(a) no CPF/MF sob nº {{cpf garantia.fiador.conjuge.cpf}}{{/if}}{{/if}}{{/if}}{{/if}}`;
 
 export function qualificacaoFiador(data: Record<string, unknown>): string {
   return renderBlock(FIADOR_HBS, data);
@@ -95,7 +105,11 @@ export function blocoAdministradora(data: Record<string, unknown>): string {
   return renderBlock(ADMINISTRADORA_HBS, data);
 }
 
-const ASSINATURAS_HBS = `{{#each locatarios}}<p>____________________________________________<br>{{#if (eq this.tipo_pessoa "fisica")}}{{this.nome}}{{else}}{{this.razao_social}}{{/if}}<br>PARTE LOCATÁRIA</p>{{/each}}{{#each locadores}}<p>____________________________________________<br>{{#if (eq this.tipo_pessoa "fisica")}}{{this.nome}}{{else}}{{this.razao_social}}{{/if}}<br>PARTE LOCADORA</p>{{/each}}{{#if (eq garantia.tipo "fiador")}}<p>____________________________________________<br>{{#if (eq garantia.fiador.tipo_pessoa "juridica")}}{{garantia.fiador.razao_social}}{{else}}{{garantia.fiador.nome}}{{/if}}<br>FIADOR(A)</p>{{/if}}<p>____________________________________________<br>Nome:<br>CPF:<br>Testemunha</p><p>____________________________________________<br>Nome:<br>CPF:<br>Testemunha</p>`;
+// Linha de assinatura do cônjuge logo abaixo da do titular — outorga uxória.
+// Mesmo fragmento nos `.hbs` v3.
+const ASSINATURA_CONJUGE_HBS = `{{#if this.conjuge.nome}}<p>____________________________________________<br>{{this.conjuge.nome}}<br>CÔNJUGE</p>{{/if}}`;
+
+const ASSINATURAS_HBS = `{{#each locatarios}}<p>____________________________________________<br>{{#if (eq this.tipo_pessoa "fisica")}}{{this.nome}}{{else}}{{this.razao_social}}{{/if}}<br>PARTE LOCATÁRIA</p>${ASSINATURA_CONJUGE_HBS}{{/each}}{{#each locadores}}<p>____________________________________________<br>{{#if (eq this.tipo_pessoa "fisica")}}{{this.nome}}{{else}}{{this.razao_social}}{{/if}}<br>PARTE LOCADORA</p>${ASSINATURA_CONJUGE_HBS}{{/each}}{{#if (eq garantia.tipo "fiador")}}<p>____________________________________________<br>{{#if (eq garantia.fiador.tipo_pessoa "juridica")}}{{garantia.fiador.razao_social}}{{else}}{{garantia.fiador.nome}}{{/if}}<br>FIADOR(A)</p>{{#if garantia.fiador.conjuge.nome}}<p>____________________________________________<br>{{garantia.fiador.conjuge.nome}}<br>CÔNJUGE DO(A) FIADOR(A)</p>{{/if}}{{/if}}<p>____________________________________________<br>Nome:<br>CPF:<br>Testemunha</p><p>____________________________________________<br>Nome:<br>CPF:<br>Testemunha</p>`;
 
 export function blocoAssinaturas(data: Record<string, unknown>): string {
   return renderBlock(ASSINATURAS_HBS, data);

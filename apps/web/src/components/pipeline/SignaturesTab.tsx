@@ -33,20 +33,21 @@ import { EditEnvelopeDialog } from "./EditEnvelopeDialog";
 import { EditSignerDialog } from "./EditSignerDialog";
 import { AddSignerDialog } from "./AddSignerDialog";
 import { clicksignRoleLabel } from "@/lib/clicksign/roles";
+import { buildPartySuggestions, type PartyLike } from "@/lib/clicksign/party-suggestions";
 import { UserPlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-interface PartyLite {
-  tipo_pessoa?: string;
-  nome?: string;
-  razao_social?: string;
-  cpf?: string;
-  cnpj?: string;
-  email?: string;
+/**
+ * Parte do dataJson. Reusa `PartyLike` do helper de sugestões (que já cobre
+ * cônjuge/procurador/representante e celular) e acrescenta os campos que só
+ * esta aba consome. O tipo estreito anterior escondia as sub-partes.
+ */
+interface PartyLite extends PartyLike {
   conjuge?: {
     nome?: string;
     cpf?: string;
     email?: string;
+    mobile_phone?: string;
     incluir_como_signatario?: boolean;
   };
 }
@@ -231,22 +232,12 @@ function AttachmentEnvelopesSection({
     }
   };
 
-  const partySuggestions = useMemo(() => {
-    return [
-      ...vendedores.map((p, idx) => ({
-        sourceKind: "vendedor" as const,
-        sourceIndex: idx,
-        name: (p.nome || p.razao_social || `Vendedor ${idx + 1}`).trim(),
-        email: p.email?.trim() || null,
-      })),
-      ...compradores.map((p, idx) => ({
-        sourceKind: "comprador" as const,
-        sourceIndex: idx,
-        name: (p.nome || p.razao_social || `Comprador ${idx + 1}`).trim(),
-        email: p.email?.trim() || null,
-      })),
-    ];
-  }, [vendedores, compradores]);
+  // Titular + cônjuge + procurador + representante legal da PJ, com papel
+  // default já resolvido. Ver lib/clicksign/party-suggestions.ts.
+  const partySuggestions = useMemo(
+    () => buildPartySuggestions(vendedores, compradores),
+    [vendedores, compradores]
+  );
 
   // Filtra só envelopes attachment-based; os contract-based ficam nas seções
   // específicas de cada contrato logo abaixo.
