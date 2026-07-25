@@ -83,6 +83,9 @@ export async function triggerNewtonDealNotify(
       body: JSON.stringify({
         caller: { phone: TRIGGER_PHONE, name: "Sistema" },
         text: buildText(a),
+        // Tenant de origem — ver comentário em trigger.ts. Permite ao sidecar
+        // recusar turn de org não autorizada sem depender do gate por feature.
+        orgId: a.orgId,
       }),
       signal: controller.signal,
     });

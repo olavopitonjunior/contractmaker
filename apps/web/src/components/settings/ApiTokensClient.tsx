@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
+import type { ApiTokenScope } from "@/lib/auth/api-token";
 import {
   ArrowLeft,
   Copy,
@@ -50,11 +51,22 @@ const SCOPES = [
   { id: "charges:rw", label: "Cobranças Asaas (read/write)", description: "Criar e consultar cobranças e splits" },
   { id: "signatures:rw", label: "Assinaturas ClickSign (read/write)", description: "Criar envelopes e gerenciar signatários" },
   { id: "documents:rw", label: "Documentos e certidões (read/write)", description: "Anexos, OCR e disparo de certidões Infosimples" },
+  { id: "proposals:rw", label: "Propostas (read/write)", description: "Listar, criar, atribuir e sincronizar propostas. Enviar, converter e cancelar passam por aprovação humana (HITL)." },
+  { id: "locacao:r", label: "Locação (read-only) — Max", description: "Carteira de locação: contratos, clientes, garantias, apólices, vistorias e cobranças de aluguel." },
+  { id: "locacao:rw", label: "Locação (read/write) — Max", description: "Registrar análises de crédito, cotações de fiança, garantias e apólices. Inclui a leitura." },
   { id: "metrics:r", label: "Métricas (read-only)", description: "Saldos, contagens e atividade — sem dados pessoais" },
   { id: "users:delegate", label: "Delegar como outro usuário (Newton)", description: "Permite header X-Act-As-User pra agir como qualquer user da mesma org. Use SÓ em tokens de agentes (Newton)." },
 ] as const;
 
 type ScopeId = (typeof SCOPES)[number]["id"];
+
+// Guard de compilação: todo scope do catálogo precisa estar listado acima.
+// Sem isto, um scope novo entra em API_TOKEN_SCOPES (o backend passa a aceitar)
+// mas fica INVISÍVEL na UI — foi o que aconteceu com proposals:rw e locacao:*,
+// que ficaram impossíveis de conceder mesmo com as rotas já no ar.
+type MissingFromUi = Exclude<ApiTokenScope, ScopeId>;
+const _assertEveryScopeIsListed: MissingFromUi extends never ? true : never = true;
+void _assertEveryScopeIsListed;
 
 const VALIDITY_OPTIONS = [
   { id: "30", label: "30 dias", days: 30 },

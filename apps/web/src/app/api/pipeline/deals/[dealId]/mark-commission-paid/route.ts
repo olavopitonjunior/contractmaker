@@ -104,7 +104,6 @@ export async function POST(
       context: { stageName: targetStage.name },
     })
   );
-
   queueSurveyDispatch(deal.id, targetStage.name);
 
   return NextResponse.json({

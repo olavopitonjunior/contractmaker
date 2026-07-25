@@ -213,11 +213,75 @@ export async function addRequirement(
   });
 }
 
+/** Operação atômica de requirement (extensão atomic operations do JSON:API). */
+export type BulkRequirementOp =
+  | {
+      op: "add";
+      action: "agree" | "provide_evidence";
+      auth?: AuthMethod;
+      role?: ClicksignRole;
+      documentClicksignId: string;
+      signerClicksignId: string;
+    }
+  | { op: "remove"; requirementId: string };
+
+/**
+ * Cria/remove requirements em lote via `bulk_requirements` (atomic operations).
+ * É o ÚNICO caminho aceito pela ClickSign pra mexer em requirements de envelope
+ * já ativado (`running`) — o `POST /requirements` simples responde "envelope não
+ * está no status draft". Todas as operações aplicam ou nenhuma aplica.
+ *
+ * Confirmado contra a conta real em 2026-07-24 (envelope c35744d4…): aceita o
+ * `Content-Type: application/vnd.api+json` padrão do client (sem o parâmetro
+ * `ext=` da spec atomic operations) e responde `atomic:results` com os
+ * requirements criados (id/type/attributes) na ordem das operações.
+ */
+export async function bulkRequirements(
+  envelopeId: string,
+  operations: BulkRequirementOp[],
+  creds?: ClicksignCreds
+) {
+  const ops = operations.map((operation) => {
+    if (operation.op === "remove") {
+      return {
+        op: "remove",
+        ref: { type: "requirements", id: operation.requirementId },
+      };
+    }
+    const attributes: Record<string, unknown> = { action: operation.action };
+    if (operation.auth) attributes.auth = operation.auth;
+    if (operation.role) attributes.role = operation.role;
+    return {
+      op: "add",
+      data: {
+        type: "requirements",
+        attributes,
+        relationships: {
+          document: {
+            data: { type: "documents", id: operation.documentClicksignId },
+          },
+          signer: {
+            data: { type: "signers", id: operation.signerClicksignId },
+          },
+        },
+      },
+    };
+  });
+
+  return clicksignRequest<ClicksignResponse>({
+    method: "POST",
+    path: `/api/v3/envelopes/${envelopeId}/bulk_requirements`,
+    body: { "atomic:operations": ops },
+    creds,
+  });
+}
+
 /**
  * Remove um requirement (auth `provide_evidence` ou qualificação `agree`) de um
  * envelope. Usado ao TROCAR o tipo de assinatura ou o papel de um signatário já
  * criado: como a v3 não tem PATCH de requirement, deleta-se o antigo e recria-se
- * o novo. Tolerar 404 no chamador (requirement já removido).
+ * o novo. Tolerar 404 no chamador (requirement já removido). Só funciona em
+ * envelope `draft` — em `running`, usar `bulkRequirements`.
  */
 export async function removeRequirement(
   envelopeId: string,
@@ -249,22 +313,46 @@ export async function activateEnvelope(
   });
 }
 
+/**
+ * Cancela um envelope. ClickSign v3 (confirmado ao vivo 2026-07-24): o PATCH
+ * do envelope NÃO aceita mais `status:"canceled"` (400 "status deve estar em:
+ * draft, running", pointer `/data/attributes/status`) — o cancelamento passou
+ * a ser POR DOCUMENTO: `PATCH /api/v3/envelopes/{id}/documents/{docId}` com
+ * `status:"canceled"`. Cancelados todos os documentos, o envelope cascateia
+ * pra `canceled` sozinho.
+ */
 export async function cancelEnvelope(
   envelopeId: string,
   creds?: ClicksignCreds
 ) {
-  return clicksignRequest<ClicksignResponse>({
-    method: "PATCH",
-    path: `/api/v3/envelopes/${envelopeId}`,
-    body: {
-      data: {
-        id: envelopeId,
-        type: "envelopes",
-        attributes: { status: "canceled" },
+  const docs = await listEnvelopeDocuments(envelopeId, creds);
+  const data = (docs as {
+    data?:
+      | Array<{ id?: string; attributes?: { status?: string } }>
+      | { id?: string; attributes?: { status?: string } };
+  }).data;
+  const list = Array.isArray(data) ? data : data ? [data] : [];
+  if (list.length === 0) {
+    throw new ClicksignError(
+      "Clicksign: envelope sem documentos — nada a cancelar via API.",
+      422
+    );
+  }
+  for (const doc of list) {
+    if (!doc?.id || doc.attributes?.status === "canceled") continue;
+    await clicksignRequest<ClicksignResponse>({
+      method: "PATCH",
+      path: `/api/v3/envelopes/${envelopeId}/documents/${doc.id}`,
+      body: {
+        data: {
+          id: doc.id,
+          type: "documents",
+          attributes: { status: "canceled" },
+        },
       },
-    },
-    creds,
-  });
+      creds,
+    });
+  }
 }
 
 export async function deleteDraftEnvelope(

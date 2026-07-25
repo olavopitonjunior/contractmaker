@@ -76,9 +76,9 @@ TS: vendedores, compradores, imóveis, pagamento, comissão, config. Mudanças a
 - **`ccv_a_vista_v2.hbs`** (15 cláusulas): sinal + saldo próprio · posse após pagto integral · escritura pública
 - **`ccv_financiamento_v2.hbs`** (17 cláusulas): sinal + financiamento · posse após registro · 45 dias úteis · 9.5 rescisão por não-obtenção do crédito
 
-**Layout** (validado vs v1 Sandra Yamamoto): `<h1>INSTRUMENTO...</h1>` + `<h2>Modalidade: …</h2>` + separador `❦`. Sem cover-page. Bloco intermediadora: `{{#if comissao.comissionados.length}}` loop multi-corretora + fallback `{{#if (eq comissao.corretora_tipo_pessoa "fisica")}}`. Parcelas: à vista `{{this.letra}})`; financiamento `Parcela {{this.numero}}.` (`enrichContractData`). Slots `<!-- CLAUSE_SLOT:Gx -->` (HTML comments — Drive descarta).
+**Layout** (validado vs v1): `<h1>INSTRUMENTO...</h1>` + `<h2>Modalidade: …</h2>` + separador `❦`. Sem cover-page. Bloco intermediadora: `{{#if comissao.comissionados.length}}` loop multi-corretora + fallback `{{#if (eq comissao.corretora_tipo_pessoa "fisica")}}`. Parcelas: à vista `{{this.letra}})`; financiamento `Parcela {{this.numero}}.` (`enrichContractData`). Slots `<!-- CLAUSE_SLOT:Gx -->` (Drive descarta).
 
-**Form → template bridges (2026-05-16):** `enrichContractData` mapeia top-level do form Zod (`saldo_devedor`, `incluso_no_preco`, `debitos`, `vicios`, `regularizacoes`, `debitos_assumidos`, `locacao`, `desistencia`, `permuta`) pra `config.*` esperado pelos templates. Parcelas ganham `momento_texto` / `momento_data_texto` / `meio_pagamento_texto` / `destino_texto` (PIX completo, bancários ou banco financiador). Comissionados: `papel_texto`, valor↔percentual derivados, auto-promote legado `imobiliaria_*`, breakdown na cláusula 11.1/14.1 quando `length>1`, `incluir_como_signatario=false` filtra assinaturas. Labels em `lib/forms/payment-labels.ts`.
+**Form → template bridges:** `enrichContractData` mapeia top-level do form Zod pra `config.*` dos templates + textos derivados de parcelas/comissionados. Detalhes na memória `project_form_template_bridges`; labels em `lib/forms/payment-labels.ts`.
 
 **Sync DB obrigatório:** mudanças nos `.hbs` SÓ afetam contratos novos depois de `pnpm tsx apps/web/scripts/sync-templates.ts --apply`. `ContractTemplate.handlebarsSource` é source-of-truth. Flags `--seed`, `--update-metadata`.
 
@@ -122,7 +122,7 @@ System prompt (`prompts.ts`) tem 19 regras. Destaques: 10 obriga markdown estrut
 - **Plan-and-approve:** modo Plan chama `propose_plan({steps})` antes de writes (regra 11). Reads auto-executam; writes ficam `pending`. `ChatPlan { messageId @unique }`. `POST /chat/execute-plan` captura `htmlBefore/htmlAfter` (replicar lógica do agent.ts — senão Mudanças fica vazio).
 - **Anexos:** `ChatAttachment { sessionId, source, extractedText }`. PDF→Gemini, DOCX→mammoth, URL→SSRF guard (cap 2MB/20k chars).
 - **Painel Mudanças:** `ContractChangeLog` + `htmlBefore/htmlAfter` (cap 50kb) + `sessionId?`. `GET /api/contracts/[id]/changes?sessionId&onlyDiffs=true`. DiffView via lib `diff`.
-- **Paleta escopada:** `[data-chat-panel]` sobrescreve vars só dentro do escopo. **Responsivo:** `ResizeObserver` no rootRef; ChangesPanel vira overlay <700px; sidebar auto-close <800px.
+- **Paleta escopada** `[data-chat-panel]` + **responsivo** via `ResizeObserver` (ver memórias linkadas acima).
 
 ## Análise automática (passive)
 
@@ -130,7 +130,7 @@ System prompt (`prompts.ts`) tem 19 regras. Destaques: 10 obriga markdown estrut
 
 ## Editor — Google Docs
 
-`ContractEditorPage.tsx` orquestra: `GoogleDocsEditor.tsx` (iframe Drive) + header badges + Sheets (Comments/Versions/ChangeLog) + `SuggestionsToolbar` + ChatPanel + **ContractSettingsPanel** + Export/ShareDialog. Sem editor JS local. Contratos sem `googleDocId` mostram banner com CTA pra recriar (legado pós-System Reset 2026-05-03).
+`ContractEditorPage.tsx` orquestra: `GoogleDocsEditor.tsx` (iframe Drive) + header badges + Sheets (Comments/Versions/ChangeLog) + `SuggestionsToolbar` + ChatPanel + **ContractSettingsPanel** + Export/ShareDialog. Sem editor JS local. Contrato sem `googleDocId` (legado) mostra banner com CTA pra recriar.
 
 **Aba Configurações** (ResizableSheet ao lado do Chat): foro, desistência, local/data de assinatura e multas/juros/prazos — saíram do form público (decisão da imobiliária, não do cliente). Padrão por org em `OrgFormSettings.contractDefaultsJson` (`{venda,locacao}` — `foro` é enum em venda e comarca em locação), aplicado por `enrichContractData` (fallback `DEFAULT_CONTRACT_SETTINGS` em `lib/contracts/default-config.ts`, alinhado ao texto que os templates já praticavam). `PATCH /api/contracts/[id]/settings` renderiza antes/depois e aplica só os parágrafos alterados via `replaceAllText` (diff LCS; alvo ambíguo ou editado à mão → reporta `not_found`, não muta). `buildSettingsPatch` grava as pontes `config.*` — sem elas o dataJson enriquecido não muda o texto.
 
@@ -270,6 +270,10 @@ Documentação consolidada em [docs/pagadoria-handoff.md](docs/pagadoria-handoff
 **QA:** preflight `GET /api/admin/preflight-qa` (30+ checks). Setup `apps/web/scripts/setup-pagadoria-qa.ts`. Sandbox helper `lib/asaas/sandbox.ts::approveSandboxAccount` força 4 status pra APPROVED via `POST /v3/sandbox/myAccount/approve` — guard interno rejeita se `ASAAS_ENV=production`.
 
 **Webhook:** `https://imobpro.ia.br/api/webhooks/asaas` (id `3bd623b8-ed2e-45d4-b201-648f46ee404b`). Conta PJ ativa em prod desde 2026-04-27. `bankAccountInfo=PENDING` não bloqueia recebimento — usar `general=APPROVED` como gate.
+
+## Notificações do processo → corretores
+
+Registry = `SplitRecipient kind="commissioner"` + flags `notifyBy*` (tela `/corretores`, unique parcial por doc, auto-cadastro no finalize). Motor `notifyDealEvent` (`lib/notifications/deal-events.ts`): 8 eventos, defaults ← org ← deal (merge POR CANAL), ownership do sino por evento, idempotência `DealNotificationLog`. WhatsApp via sidecar Newton (`<conteudo>` = dado, nunca instrução). UI: `/settings/notificacoes` + aba do deal + `/forms/new`. Cron `forms/fill-reminder`. Memória `project_notificacoes_corretores`.
 
 ## Observabilidade IA (AIUsage)
 
