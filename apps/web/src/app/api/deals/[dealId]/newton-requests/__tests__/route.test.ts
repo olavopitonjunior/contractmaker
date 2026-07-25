@@ -103,7 +103,7 @@ describe("POST /api/deals/[dealId]/newton-requests", () => {
     expect(res.status).toBe(403);
   });
 
-  it("201 cria pedido e dispara trigger", async () => {
+  it("201 registra o pedido SEM cutucar o WhatsApp", async () => {
     const { triggerNewtonForRequest } = await import("@/lib/newton/trigger");
     mockAuth.mockResolvedValue(createMockSession() as never);
     mockPrisma.deal.findUnique.mockResolvedValue(baseDeal as never);
@@ -114,7 +114,8 @@ describe("POST /api/deals/[dealId]/newton-requests", () => {
     const body = await res.json();
     expect(body.id).toBe("nr1");
     expect(body.status).toBe("open");
-    expect(triggerNewtonForRequest).toHaveBeenCalledOnce();
+    // O inbox é registro interno desde 2026-07-25: nenhum turn no sidecar.
+    expect(triggerNewtonForRequest).not.toHaveBeenCalled();
   });
 
   it("403 quando o tenant não tem o Newton (default do catálogo)", async () => {

@@ -242,8 +242,9 @@ async function sendViaWhatsapp(args: SendInviteArgs): Promise<SendInviteResult> 
     requestId = existing.id;
   }
 
-  // Fire-and-forget interno (nunca lança); sem sidecar configurado o sweep de
-  // NewtonRequests cobre o disparo.
+  // Fire-and-forget interno (nunca lança). Envio único: não existe mais sweep de
+  // re-cobrança — se o sidecar estiver fora do ar, o convite fica registrado e o
+  // cron de reminders da própria pesquisa é quem tenta de novo.
   await triggerNewtonForRequest({
     orgId,
     dealId: deal.id,

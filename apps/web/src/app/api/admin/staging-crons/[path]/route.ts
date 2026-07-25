@@ -16,7 +16,6 @@ const KNOWN_CRON_PATHS = new Set<string>([
   "/api/cron/drafts/cleanup",
   "/api/cron/clicksign/sync-envelopes",
   "/api/cron/agent-runs/cleanup",
-  "/api/cron/newton-requests/sweep",
   "/api/cron/newton-requests/group-match",
   "/api/cron/certidoes/poll-portal",
   "/api/cron/certidoes/problem-digest",

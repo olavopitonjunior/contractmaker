@@ -213,7 +213,7 @@ export function NewtonRequestsTab({ dealId }: { dealId: string }) {
         const e = await res.json().catch(() => ({}));
         throw new Error(e.error ?? String(res.status));
       }
-      toast.success("Pedido enviado ao Newton — ele vai cobrar a informação");
+      toast.success("Pendência registrada no negócio");
       resetForm();
       setDialogOpen(false);
       load();
@@ -245,20 +245,20 @@ export function NewtonRequestsTab({ dealId }: { dealId: string }) {
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
           <Bot className="h-4 w-4" />
           <span>
-            Peça ao Newton para conseguir uma informação que falta — ele cobra o
-            contato ou o grupo do negócio por você.
+            Registre uma informação que falta e de quem ela depende. É uma anotação
+            do negócio — o Newton não cobra ninguém automaticamente.
           </span>
         </div>
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
           <DialogTrigger asChild>
             <Button size="sm">
               <Plus className="h-4 w-4 mr-1" />
-              Novo pedido ao Newton
+              Nova pendência
             </Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
-              <DialogTitle>Novo pedido ao Newton</DialogTitle>
+              <DialogTitle>Nova pendência do negócio</DialogTitle>
             </DialogHeader>
             <div className="space-y-4 py-2">
               <div className="space-y-1.5">
@@ -273,7 +273,7 @@ export function NewtonRequestsTab({ dealId }: { dealId: string }) {
               </div>
 
               <div className="space-y-1.5">
-                <Label>Cobrar de</Label>
+                <Label>Depende de</Label>
                 <Select
                   value={targetType}
                   onValueChange={(v) => setTargetType(v as "contact" | "group")}
@@ -313,7 +313,7 @@ export function NewtonRequestsTab({ dealId }: { dealId: string }) {
                     <p className="text-xs text-muted-foreground">Procurando grupos…</p>
                   ) : groupInfo?.linkedGroupId ? (
                     <p className="text-xs text-green-700 dark:text-green-400">
-                      Grupo vinculado ✓ — Newton vai cobrar nele.
+                      Grupo vinculado ✓
                     </p>
                   ) : groupInfo && groupInfo.candidates.length > 0 ? (
                     <div className="space-y-1">
@@ -336,8 +336,8 @@ export function NewtonRequestsTab({ dealId }: { dealId: string }) {
                     </div>
                   ) : (
                     <p className="text-xs text-muted-foreground">
-                      Sem grupo identificado ainda. O Newton confirma com você qual é o
-                      grupo quando for cobrar.
+                      Sem grupo identificado ainda — o vínculo aparece aqui quando as
+                      partes do negócio forem reconhecidas em algum grupo.
                     </p>
                   )}
                 </div>
@@ -379,7 +379,7 @@ export function NewtonRequestsTab({ dealId }: { dealId: string }) {
               </Button>
               <Button onClick={handleCreate} disabled={submitting}>
                 {submitting && <Loader2 className="h-4 w-4 mr-1 animate-spin" />}
-                Enviar ao Newton
+                Registrar
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -393,7 +393,7 @@ export function NewtonRequestsTab({ dealId }: { dealId: string }) {
       ) : requests.length === 0 ? (
         <Card>
           <CardContent className="py-10 text-center text-sm text-muted-foreground">
-            Nenhum pedido ao Newton ainda. Crie um quando faltar alguma informação
+            Nenhuma pendência registrada. Crie uma quando faltar alguma informação
             para o contrato.
           </CardContent>
         </Card>

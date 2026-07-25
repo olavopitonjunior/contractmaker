@@ -108,8 +108,7 @@ export async function GET(req: NextRequest) {
 
   // Higiene anti-spam: NewtonRequests de pesquisa são one-shot (o ask instrui
   // o agente a marcar fulfilled após enviar). Se o agente não fechou em 24h,
-  // cancelamos aqui — senão o sweep de NewtonRequests re-cobraria o cliente
-  // diariamente com a mesma pesquisa.
+  // cancelamos aqui pra não deixar pedido pendurado no inbox do negócio.
   const staleRequests = await prisma.newtonRequest.findMany({
     where: {
       ask: { startsWith: "[survey_" },

@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { waitUntil } from "@vercel/functions";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import {
@@ -8,18 +7,21 @@ import {
   authFailureResponse,
 } from "@/lib/api/require-auth";
 import { appendEvent, serializeRequest } from "@/lib/newton/requests";
-import { triggerNewtonForRequest } from "@/lib/newton/trigger";
 import { newtonDisabledResponse } from "@/lib/newton/gate";
 
 export const runtime = "nodejs";
 
 /**
- * Pedidos ao Newton ancorados num Deal. A negociadora (que pode não estar em
- * nenhum grupo de WhatsApp) registra o que falta e para quem cobrar; Newton vai
- * até o grupo/contato, cobra, agenda lembretes e fecha quando a info chega.
+ * Pedidos ancorados num Deal — registro do que falta para o contrato.
+ *
+ * Desde 2026-07-25 o Newton NÃO cobra mais informação por conta própria: o cron
+ * de sweep (re-cobrança horária) foi removido e a criação do pedido não dispara
+ * turn no sidecar. O inbox virou anotação interna da negociadora; quem for atrás
+ * da informação é uma pessoa. O Newton só age quando chamado direto com @ no
+ * grupo (hoje: criar formulário de negócio).
  *
  * GET  /api/deals/:dealId/newton-requests        — lista (UI do negócio)
- * POST /api/deals/:dealId/newton-requests        — cria + dispara o Newton na hora
+ * POST /api/deals/:dealId/newton-requests        — registra o pedido (não dispara nada)
  */
 
 const createSchema = z.object({
@@ -120,20 +122,6 @@ export async function POST(
       }),
     },
   });
-
-  // Dispara o Newton na hora (fire-and-forget — não bloqueia a resposta).
-  // waitUntil mantém o lambda vivo após o NextResponse; sem ele a Vercel
-  // cancela a promise e o trigger pode não chegar ao sidecar.
-  waitUntil(triggerNewtonForRequest({
-    orgId: guard.dealOrgId,
-    dealId: params.dealId,
-    requestId: created.id,
-    ask,
-    targetType,
-    targetRef: targetRef ?? null,
-    targetLabel: targetLabel ?? null,
-    kind: "create",
-  }));
 
   return NextResponse.json(serializeRequest(created), { status: 201 });
 }

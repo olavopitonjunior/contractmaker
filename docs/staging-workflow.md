@@ -117,7 +117,7 @@ Pra evitar: promove o OAuth client pra `In production` (precisa de Google review
 
 ## Newton (WhatsApp) desabilitado
 
-`NEWTON_DISABLED=true` em staging skipa `triggerNewtonForRequest`. Pedidos ficam `open` mas Newton nunca cobra. Audit log mostra "newton-disabled-staging".
+`NEWTON_DISABLED=true` em staging skipa `triggerNewtonForRequest` (hoje: envio de pesquisa por WhatsApp e cancelamento de lembrete legado). Audit log mostra "newton-disabled-staging". Desde 2026-07-25 criar pedido no inbox não dispara nada nem em prod — ver [docs/newton-integration.md §0](newton-integration.md).
 
 Quer testar Newton de verdade? Rode container sidecar separado no VPS (`agentId=staging`) e tire `NEWTON_DISABLED`. Custo Z-API por número.
 
