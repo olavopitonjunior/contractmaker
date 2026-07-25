@@ -16,6 +16,8 @@
  * envs do sidecar. Qualquer gate fechado → "skipped" (o chamador loga o motivo).
  */
 
+import { normalizeBrPhone } from "@/lib/validators/phone-br";
+
 const SIDECAR_URL = process.env.NEWTON_SIDECAR_URL;
 const SIDECAR_TOKEN = process.env.NEWTON_SIDECAR_TOKEN;
 const AGENT_ID = process.env.NEWTON_AGENT_ID ?? "main";
@@ -29,7 +31,11 @@ export type NotifyAudience = "deal_broker" | "platform_user";
 export interface NewtonNotifyArgs {
   orgId: string;
   audience: NotifyAudience;
-  /** Telefone do destinatário (formato livre do cadastro — o agente normaliza). */
+  /**
+   * Telefone do destinatário em formato livre — normalizado aqui. O cadastro
+   * do corretor guarda "11999063228"/"(11) 99906-3228" e o User.phone guarda
+   * E.164 COM "+"; `whatsapp_send` exige E.164 SEM "+" nos dois casos.
+   */
   phone: string;
   recipientName: string;
   /** Mensagem pronta em PT-BR (título + corpo da atualização). */
@@ -63,7 +69,7 @@ export function sanitizeUntrusted(raw: string, max: number): string {
     .slice(0, max);
 }
 
-function buildText(a: NewtonNotifyArgs): string {
+function buildText(a: NewtonNotifyArgs, phone: string): string {
   const nome = sanitizeUntrusted(a.recipientName, 120);
   const msg = sanitizeUntrusted(a.message, 600);
 
@@ -84,7 +90,7 @@ function buildText(a: NewtonNotifyArgs): string {
       `[user-notify · sistema] Aviso automático do sistema para um USUÁRIO ` +
       `INTERNO da plataforma${org ? ` (operador da imobiliária ${org})` : ""} ` +
       `— não é um cliente. ` +
-      `Envie via whatsapp_send UMA mensagem informativa pro telefone ${a.phone}. ` +
+      `Envie via whatsapp_send UMA mensagem informativa pro telefone ${phone}. ` +
       fence +
       link +
       `Envie SOMENTE para o telefone indicado acima. Não agende lembretes e não ` +
@@ -114,6 +120,19 @@ export async function triggerNewtonNotify(
     );
     return "skipped";
   }
+  // O agente NÃO normaliza sozinho: verificado em produção (#189), ele
+  // repassa o valor cru pro whatsapp_send e a mensagem não chega — em
+  // silêncio, porque o turn devolve ok. Vale pras duas audiências: o cadastro
+  // do corretor guarda formato livre e o User.phone guarda E.164 COM "+",
+  // e o whatsapp_send exige E.164 SEM "+".
+  const e164 = normalizeBrPhone(a.phone);
+  if (!e164) {
+    console.warn(
+      `[newton-notify] telefone inválido (${a.phone}) — WhatsApp pulado`
+    );
+    return "skipped";
+  }
+  const phone = e164.replace(/^\+/, "");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TRIGGER_TIMEOUT_MS);
   try {
@@ -125,7 +144,7 @@ export async function triggerNewtonNotify(
       },
       body: JSON.stringify({
         caller: { phone: TRIGGER_PHONE, name: "Sistema" },
-        text: buildText(a),
+        text: buildText(a, phone),
         // Tenant de origem — ver comentário em trigger.ts. Permite ao sidecar
         // recusar turn de org não autorizada sem depender do gate por feature.
         orgId: a.orgId,

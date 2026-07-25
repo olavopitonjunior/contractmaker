@@ -18,7 +18,7 @@ import {
 export interface DealNotifyTriggerArgs {
   orgId: string;
   dealId: string;
-  /** Telefone do corretor (formato livre do cadastro — o agente normaliza). */
+  /** Telefone do corretor, formato livre do cadastro — normalizado no trigger. */
   phone: string;
   recipientName: string;
   /** Mensagem pronta em PT-BR (título + corpo da atualização). */
