@@ -2,6 +2,40 @@
 
 > Documentação para consumidores externos que vão chamar a API do contractmaker em nome de um usuário (hoje: agente Newton via WhatsApp). Vivo conforme `apps/web/src/lib/auth/api-token.ts`, `auth-or-bearer.ts`, `audit/newton.ts`, `api/idempotency.ts`. Atualizar quando essas libs mudarem.
 
+## 0. Escopo atual do agente nos grupos (2026-07-25)
+
+**O Newton não captura mais informação por iniciativa própria.** Foram removidos:
+
+- `/api/cron/newton-requests/sweep` — cron horário que re-cobrava pedidos pendentes
+  no grupo/contato (1×/dia por pedido, janela 7h–22h SP). Saiu de `vercel.json`, do
+  `KNOWN_CRON_PATHS` do painel de staging-crons e do catálogo da UI.
+- O disparo imediato em `POST /api/deals/:dealId/newton-requests`. Criar pedido hoje
+  só grava a `NewtonRequest`; nenhum turn vai ao sidecar.
+
+O inbox (`NewtonRequest` + aba "Pendências" no negócio) virou **registro interno** da
+negociadora: serve pra saber o que falta e de quem depende. Quem vai atrás é pessoa.
+
+Sobrou de proativo, e é intencional:
+
+| Superfície | O que dispara | Por quê fica |
+|---|---|---|
+| `triggerNewtonForRequest({kind:"create"})` | `lib/surveys/channels.ts` | entrega de pesquisa de satisfação por WhatsApp, one-shot por convite |
+| `triggerNewtonForRequest({kind:"cancel"})` | `PATCH .../newton-requests/:id` | derruba lembretes que o Newton agendou no passado (`cronJobIds`) — o web não fala com o cron do gateway |
+| `notifyDealEvent` / sweep de `Notification` | eventos do processo | notificação a corretor/usuário que optou por WhatsApp, não captura de dado |
+| `/api/cron/newton-requests/group-match` | horário | só resolve deal↔grupo (`DealGroupLink`). Não envia mensagem |
+
+**Comportamento esperado no grupo:** o Newton responde quando é chamado direto com
+`@`, e o único fluxo de escrita esperado hoje é **criar formulário de negócio**
+(`create_form` / `create_deal`). Esse gate é do runtime do agente (openclaw na VPS),
+não deste repo — mudar `vercel.json` não silencia o agente por si só. O bloco de
+política pronto pra colar está em [newton-escopo-grupos.md](newton-escopo-grupos.md).
+
+**Efeito colateral conhecido:** os executores de locação
+(`lib/locacao/executors/{dunning,detect-late-payment,suggest-readjustment,approve-repasse,request-inspection-feedback}.ts`)
+criam `NewtonRequest` sem chamar o trigger — dependiam do sweep pra chegar ao
+WhatsApp. Sem o sweep, essas réguas **só registram no inbox**. Ambas as features do
+Newton (`vendas.newton`, `locacao.newton`) são default OFF no catálogo.
+
 ## 1. Autenticação por API token
 
 ### 1.1 Geração do token (UI / session-only)

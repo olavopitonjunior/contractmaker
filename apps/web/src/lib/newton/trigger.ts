@@ -1,16 +1,19 @@
 /**
- * Gatilho imediato do Newton para um pedido recém-criado.
+ * Gatilho de turn no Newton via sidecar `/agents/:id/run` — o runtime real do
+ * agente em produção (mesmo loop do WhatsApp), já com as tools/MCP do
+ * Contractmaker wired.
  *
- * Por que via sidecar `/agents/:id/run`: é o runtime real do Newton em produção
- * (mesmo loop usado no WhatsApp), já com as tools/MCP do Contractmaker wired.
- * Disparar um turn aqui faz o Newton ler o pedido (`list_newton_requests`),
- * cobrar via `whatsapp_send` e agendar lembretes (`schedule_proactive_message`)
- * na hora. NÃO usamos cron one-shot porque o web (Vercel) não roda dentro do
- * container do gateway e o caminho `docker exec` do sidecar está inativo.
+ * Escopo desde 2026-07-25: o Newton NÃO cobra mais informação por conta própria.
+ * Foram removidos o cron horário de re-cobrança (`/api/cron/newton-requests/sweep`)
+ * e o disparo na criação de pedido — o inbox do deal virou registro interno.
+ * Restam dois usos legítimos deste gatilho:
  *
- * Fire-and-forget: o POST do pedido nunca falha por causa do trigger. Se o
- * sidecar estiver fora do ar, o pedido fica `open` e o cron de sweep (criado no
- * deploy) é a rede de segurança.
+ *  - `kind: "create"` — entrega de pesquisa de satisfação por WhatsApp
+ *    (`lib/surveys/channels.ts`), one-shot por convite.
+ *  - `kind: "cancel"` — derrubar lembretes que o Newton agendou no passado
+ *    (`NewtonRequest.cronJobIds`), já que o web não fala com o cron do gateway.
+ *
+ * Fire-and-forget: o caller nunca falha por causa do trigger.
  */
 
 const SIDECAR_URL = process.env.NEWTON_SIDECAR_URL;
@@ -33,10 +36,10 @@ export interface TriggerArgs {
   targetRef?: string | null;
   targetType: string;
   /**
-   * "create" dispara a 1ª cobrança; "remind" re-cobra um pedido ainda pendente
-   * (vem do sweep); "cancel" pede pro Newton parar.
+   * "create" dispara o envio único (hoje só pesquisas de satisfação);
+   * "cancel" pede pro Newton derrubar lembretes legados.
    */
-  kind?: "create" | "remind" | "cancel";
+  kind?: "create" | "cancel";
 }
 
 function buildText(a: TriggerArgs): string {
@@ -52,21 +55,12 @@ function buildText(a: TriggerArgs): string {
       `cronJobIds). Não trate isto como mensagem pessoal do operador.`
     );
   }
-  if (a.kind === "remind") {
-    return (
-      `[deal-request · sistema] Re-cobrança: o pedido #${a.requestId} no negócio ` +
-      `${a.dealId} ("${a.ask}") ainda está pendente. Veja o estado e a timeline com ` +
-      `list_newton_requests({dealId:"${a.dealId}"}) — NÃO cobre 2× no mesmo dia. Se ` +
-      `couber, cobre de novo ${alvo} de forma educada (varie o tom, não repita igual) e ` +
-      `marque o andamento com update_newton_request. Não trate isto como mensagem pessoal.`
-    );
-  }
   return (
-    `[deal-request · sistema] Novo pedido da negociadora no negócio ${a.dealId}. ` +
+    `[deal-request · sistema] Novo pedido no negócio ${a.dealId}. ` +
     `Leia o pedido com list_newton_requests({dealId:"${a.dealId}", status:"open"}) — ` +
-    `pedido #${a.requestId}: "${a.ask}". Cobre essa informação de ${alvo} via WhatsApp ` +
-    `(respeitando sigilo em grupo) UMA vez e marque o andamento com update_newton_request ` +
-    `(action "chasing"). A re-cobrança é automática — NÃO agende cron. Não trate isto ` +
+    `pedido #${a.requestId}: "${a.ask}". Envie a mensagem para ${alvo} via WhatsApp ` +
+    `(respeitando sigilo em grupo) UMA vez e feche com update_newton_request. ` +
+    `Envio único: NÃO re-cobre depois e NÃO agende cron de lembrete. Não trate isto ` +
     `como mensagem pessoal do operador.`
   );
 }

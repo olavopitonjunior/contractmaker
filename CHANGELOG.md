@@ -4,6 +4,29 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-07-25 - Newton para de capturar informação nos grupos
+
+### Removido
+
+- **Cron `/api/cron/newton-requests/sweep`** (horário) — motor de re-cobrança que fazia o Newton voltar ao grupo/contato atrás de informação pendente. Saiu de `vercel.json`, do `KNOWN_CRON_PATHS` de `/api/admin/staging-crons/[path]` e do catálogo da UI de staging-crons. Rota e testes deletados.
+- **Disparo imediato em `POST /api/deals/:dealId/newton-requests`** — criar pedido agora só grava a `NewtonRequest`; nenhum turn vai ao sidecar.
+- `TriggerArgs.kind: "remind"` e o branch correspondente em `buildText` (só o sweep usava).
+
+### Alterado
+
+- O inbox de pedidos virou **registro interno**: aba do negócio renomeada de "Pedidos ao Newton" pra **"Pendências"**, copy do diálogo e toasts ajustados pra não prometer cobrança automática.
+- `triggerNewtonForRequest` fica restrito a dois usos: envio one-shot de pesquisa de satisfação (`lib/surveys/channels.ts`) e `kind:"cancel"` pra derrubar lembretes legados (`NewtonRequest.cronJobIds`).
+- Docs: nova seção `docs/newton-integration.md §0` com o escopo atual + efeito colateral nas réguas de locação; `docs/staging-workflow.md` atualizado.
+
+### Mantido de propósito
+
+- `/api/cron/newton-requests/group-match` — só resolve deal↔grupo (`DealGroupLink`), não envia mensagem.
+- `notifyDealEvent` e o sweep de `Notification` → WhatsApp: são notificação a corretor/usuário que optou, não captura de dado.
+
+### Pendente (fora deste repo)
+
+- Gate de comportamento no runtime do agente (openclaw na VPS): responder só quando chamado com `@` e limitar a escrita a criação de formulário de negócio. Bloco de política pronto em `docs/newton-escopo-grupos.md`.
+
 ## [Unreleased] - 2026-05-16 - Multi-agent orchestrator (F0-F5)
 
 ### Adicionado
