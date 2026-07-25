@@ -268,7 +268,23 @@ export async function GET(req: NextRequest) {
     types: prefsPorUser.get(m.userId) ?? {},
   }));
 
-  return NextResponse.json({ settings, resolved, recipientCandidates });
+  // A estrutura de avisos é da PLATAFORMA (vale pra qualquer imobiliária), mas
+  // o transporte de WhatsApp hoje é o Newton, que atende só um tenant. Sem
+  // este sinal, um admin de outra imobiliária marcaria WhatsApp e nada
+  // aconteceria — o envio viraria `skipped` num log que ele nunca vê.
+  //
+  // E-mail não depende de agente: funciona pra todo mundo.
+  const { isNewtonEnabledForOrg } = await import("@/lib/newton/gate");
+  const whatsappAgentAvailable = await isNewtonEnabledForOrg(ctx.orgId).catch(
+    () => false
+  );
+
+  return NextResponse.json({
+    settings,
+    resolved,
+    recipientCandidates,
+    whatsappAgentAvailable,
+  });
 }
 
 export async function PATCH(req: NextRequest) {
@@ -372,6 +388,25 @@ export async function PATCH(req: NextRequest) {
           },
           { status: 422 }
         );
+      }
+
+      // A imobiliária tem agente de WhatsApp? A estrutura de avisos é da
+      // plataforma, mas o transporte hoje é o Newton, que atende um tenant só.
+      // Aceitar a marcação sem agente produziria `skipped` silencioso.
+      const querWhatsapp = userIds.some((id) =>
+        Object.values(matriz[id]).some((c) => c.whatsapp === true)
+      );
+      if (querWhatsapp) {
+        const { isNewtonEnabledForOrg } = await import("@/lib/newton/gate");
+        if (!(await isNewtonEnabledForOrg(ctx.orgId))) {
+          return NextResponse.json(
+            {
+              error:
+                "Esta imobiliária ainda não tem agente de WhatsApp habilitado. Os avisos por e-mail funcionam normalmente.",
+            },
+            { status: 422 }
+          );
+        }
       }
 
       // Validação POR CANAL: bloquear e-mail por falta de telefone seria falso,

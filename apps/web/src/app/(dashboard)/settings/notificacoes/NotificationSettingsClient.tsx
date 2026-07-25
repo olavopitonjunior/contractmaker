@@ -69,6 +69,9 @@ export default function NotificationSettingsClient() {
   // blob cru — ausente significa "não interfere", daí o default true.
   const [userChannelsEnabled, setUserChannelsEnabled] = useState(true);
   const [candidatos, setCandidatos] = useState<Candidate[]>([]);
+  // A estrutura de avisos é da plataforma; o transporte de WhatsApp hoje é o
+  // Newton, que atende um tenant só. E-mail funciona pra qualquer imobiliária.
+  const [temAgenteWhatsapp, setTemAgenteWhatsapp] = useState(true);
   const [salvandoMatriz, setSalvandoMatriz] = useState(false);
   const [aberto, setAberto] = useState<string | null>(null);
   const [detalhado, setDetalhado] = useState<string | null>(null);
@@ -88,6 +91,7 @@ export default function NotificationSettingsClient() {
       data.settings?.settingsJson?.userChannels?.enabled !== false
     );
     setCandidatos(data.recipientCandidates ?? []);
+    setTemAgenteWhatsapp(data.whatsappAgentAvailable !== false);
   }
 
   useEffect(() => {
@@ -294,6 +298,15 @@ export default function NotificationSettingsClient() {
           </p>
         </CardHeader>
         <CardContent className="space-y-1">
+          {!temAgenteWhatsapp && (
+            // Sem este aviso, o admin marcaria WhatsApp e nada aconteceria: o
+            // envio viraria `skipped` num log que ele nunca vê.
+            <p className="mb-2 text-xs text-amber-600">
+              Esta imobiliaria ainda nao tem agente de WhatsApp habilitado,
+              entao esse canal fica indisponivel. Os avisos por e-mail
+              funcionam normalmente.
+            </p>
+          )}
           {candidatos.length === 0 ? (
             <p className="text-sm text-muted-foreground">Carregando...</p>
           ) : (
@@ -347,7 +360,9 @@ export default function NotificationSettingsClient() {
                                 {USER_NOTIF_CHANNELS.map((canal) => {
                                   const est = estadoCategoria(c.types, cat, canal);
                                   const podeCanal =
-                                    canal === "whatsapp" ? c.hasPhone : c.hasEmail;
+                                    canal === "whatsapp"
+                                      ? c.hasPhone && temAgenteWhatsapp
+                                      : c.hasEmail;
                                   return (
                                     <label
                                       key={canal}
@@ -410,7 +425,7 @@ export default function NotificationSettingsClient() {
                                       {USER_NOTIF_CHANNELS.map((canal) => {
                                         const podeCanal =
                                           canal === "whatsapp"
-                                            ? c.hasPhone
+                                            ? c.hasPhone && temAgenteWhatsapp
                                             : c.hasEmail;
                                         return (
                                           <label
