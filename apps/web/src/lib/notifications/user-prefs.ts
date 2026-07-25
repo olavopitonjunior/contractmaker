@@ -1,9 +1,14 @@
 /**
  * Resolução da preferência efetiva de canal externo por usuário.
  *
- * Duas camadas, ASSIMÉTRICAS de propósito:
- *   1. usuário  — única que LIGA (opt-in explícito + consentimento datado)
- *   2. org      — só DESLIGA (kill switch global ou por categoria)
+ * Duas camadas:
+ *   1. usuário  — o que ele recebe, por tipo e por canal
+ *   2. org      — kill switch, que só DESLIGA
+ *
+ * O consentimento datado (`whatsappOptInAt`) é exigido **só no WhatsApp**: o
+ * número é PII pessoal. E-mail corporativo é canal de trabalho e segue a regra
+ * do e-mail de corretor — a organização liga. Amarrar e-mail ao mesmo carimbo
+ * faria nenhum e-mail sair.
  *
  * Nunca lança: erro de DB → ninguém recebe (fail-closed). É o inverso do
  * deal-events-config.ts, que cai nos defaults em erro — lá o default é enviar
@@ -12,8 +17,10 @@
 
 import { prisma } from "@/lib/db/prisma";
 import {
+  prefAllows,
   type OrgUserChannelsJson,
   type UserNotifCategory,
+  type UserNotifChannel,
   type UserNotificationPrefsJson,
 } from "./user-channels-shared";
 
@@ -72,10 +79,12 @@ export async function isOrgUserChannelBlocked(
 export async function filterUsersOptedIn(params: {
   userIds: string[];
   orgId: string;
+  type: string;
   category: UserNotifCategory;
+  channel: UserNotifChannel;
   cache?: OrgChannelCache;
 }): Promise<Set<string>> {
-  const { userIds, orgId, category, cache } = params;
+  const { userIds, orgId, type, category, channel, cache } = params;
   if (userIds.length === 0) return new Set();
 
   try {
@@ -88,11 +97,12 @@ export async function filterUsersOptedIn(params: {
 
     const allowed = new Set<string>();
     for (const row of rows) {
-      // Consentimento datado é obrigatório: um toggle ligado sem ele (bug,
-      // backfill, migração futura) NÃO autoriza envio.
-      if (!row.whatsappOptInAt) continue;
+      // Consentimento datado é obrigatório NO WHATSAPP: um toggle ligado sem
+      // ele (bug, backfill, migração futura) não autoriza mandar mensagem pro
+      // celular de ninguém. E-mail não passa por aqui.
+      if (channel === "whatsapp" && !row.whatsappOptInAt) continue;
       const prefs = coerceUserPrefs(row.settingsJson);
-      if (prefs.events?.[category]?.whatsapp === true) allowed.add(row.userId);
+      if (prefAllows(prefs, type, channel, category)) allowed.add(row.userId);
     }
     return allowed;
   } catch (err) {

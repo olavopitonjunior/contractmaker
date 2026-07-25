@@ -41,6 +41,12 @@ import {
 } from "./user-channels-registry";
 import { filterUsersOptedIn, type OrgChannelCache } from "./user-prefs";
 import {
+  USER_NOTIF_CHANNELS,
+  type UserNotifChannel,
+} from "./user-channels-shared";
+import { sendEmail } from "@/lib/email/client";
+import { DealUpdateEmail } from "@/lib/email/templates/deal-update";
+import {
   resolveNotificationUsers,
   type NotificationRowLite,
   type UserRecipient,
@@ -131,6 +137,7 @@ async function claimDelivery(params: {
   notificationId: string;
   type: string;
   category: string;
+  channel: UserNotifChannel;
   dedupeKey: string;
 }): Promise<string | null> {
   const now = new Date();
@@ -138,7 +145,6 @@ async function claimDelivery(params: {
     const row = await prisma.userNotificationDelivery.create({
       data: {
         ...params,
-        channel: "whatsapp",
         status: "pending",
         attempts: 1,
         lastAttemptAt: now,
@@ -160,7 +166,7 @@ async function claimDelivery(params: {
     where: {
       userId_channel_dedupeKey: {
         userId: params.userId,
-        channel: "whatsapp",
+        channel: params.channel,
         dedupeKey: params.dedupeKey,
       },
     },
@@ -215,11 +221,15 @@ async function settleDelivery(
 }
 
 /** Já estourou o teto de mensagens desta hora? */
-async function isRateCapped(userId: string): Promise<boolean> {
+async function isRateCapped(
+  userId: string,
+  channel: UserNotifChannel
+): Promise<boolean> {
   try {
     const sent = await prisma.userNotificationDelivery.count({
       where: {
         userId,
+        channel,
         status: "sent",
         createdAt: { gte: new Date(Date.now() - 3_600_000) },
       },
@@ -233,13 +243,51 @@ async function isRateCapped(userId: string): Promise<boolean> {
   }
 }
 
+/**
+ * E-mail para usuário INTERNO. Reusa o mesmo template do aviso ao corretor
+ * (`DealUpdateEmail`) e o `orgId`, que faz o branding da imobiliária entrar
+ * sozinho (`lib/email/client.ts` → `renderWithBrand`).
+ *
+ * `forTeam` troca as duas frases que só fazem sentido pra corretor ("você
+ * participa como corretor(a)", "fale com a imobiliária") — sem isso o e-mail
+ * chegaria pra própria equipe dizendo que ela é parte externa.
+ */
+async function sendUserEmail(params: {
+  notification: NotificationRow;
+  user: UserRecipient;
+  orgName: string | null;
+}): Promise<{ ok: boolean; id: string | null; error?: string }> {
+  const { notification, user, orgName } = params;
+  const baseUrl = process.env.NEXTAUTH_URL ?? "https://imobpro.ia.br";
+  const ctaUrl = notification.linkUrl ? `${baseUrl}${notification.linkUrl}` : undefined;
+  return sendEmail({
+    to: user.email!,
+    subject: notification.title,
+    react: DealUpdateEmail({
+      recipientName: user.name ?? "",
+      eventTitle: notification.title,
+      eventBody: notification.body,
+      dealTitle: orgName ?? "",
+      ctaUrl,
+      ctaLabel: ctaUrl ? "Abrir no ImobPro" : undefined,
+      forTeam: true,
+    }),
+    orgId: notification.orgId,
+    tags: [
+      { name: "kind", value: "user-notify" },
+      { name: "type", value: notification.type },
+    ],
+  });
+}
+
 async function deliverToUser(params: {
   notification: NotificationRow;
   user: UserRecipient;
   category: string;
+  channel: UserNotifChannel;
   orgName: string | null;
 }): Promise<DeliveryStatus | "duplicate"> {
-  const { notification, user, category, orgName } = params;
+  const { notification, user, category, channel, orgName } = params;
 
   const deliveryId = await claimDelivery({
     orgId: notification.orgId,
@@ -247,21 +295,34 @@ async function deliverToUser(params: {
     notificationId: notification.id,
     type: notification.type,
     category,
+    channel,
     dedupeKey: `n:${notification.id}`,
   });
   if (!deliveryId) return "duplicate";
 
   // `deferred`, não `skipped`: a capacidade da hora se renova e o sweep
-  // retoma esta mesma linha depois.
-  if (await isRateCapped(user.userId)) {
+  // retoma esta mesma linha depois. Contado POR CANAL — o cap existe pra
+  // conter rajada no WhatsApp, e deixar o e-mail comer esse orçamento faria
+  // o canal intrusivo calar por causa do canal barato.
+  if (await isRateCapped(user.userId, channel)) {
     await settleDelivery(deliveryId, "deferred", { reason: "rate_cap" });
     return "deferred";
+  }
+
+  if (channel === "email") {
+    const r = await sendUserEmail({ notification, user, orgName });
+    if (!r.ok) {
+      await settleDelivery(deliveryId, "failed", { error: r.error ?? "sendEmail" });
+      return "failed";
+    }
+    await settleDelivery(deliveryId, "sent", { emailId: r.id });
+    return "sent";
   }
 
   const outcome = await triggerNewtonNotify({
     orgId: notification.orgId,
     audience: "platform_user",
-    phone: user.phone,
+    phone: user.phone!,
     recipientName: user.name ?? "",
     message: buildUserNotifyMessage(notification),
     orgName,
@@ -310,39 +371,46 @@ export async function dispatchUserNotification(params: {
     const policy = policyForType(notification.type);
     if (!policy) return zero; // fora da allowlist — no-op silencioso
 
-    // A categoria habilita a lista de destinatários escolhida pelo admin
-    // (settingsJson.userRecipients) — sem ela, só a cascata dono/admins roda.
-    const { users } = await resolveNotificationUsers(notification, policy.category);
-    if (users.length === 0) return zero;
-
-    const allowed = await filterUsersOptedIn({
-      userIds: users.map((u) => u.userId),
-      orgId: notification.orgId,
-      category: policy.category,
-      cache: cache.orgChannels,
-    });
-    const targets = users.filter((u) => allowed.has(u.userId));
-    if (targets.length === 0) return zero;
-
     const orgName = await orgNameOf(notification.orgId, cache);
-
     const result = { ...zero };
-    for (const user of targets) {
-      // A janela pode fechar no meio de um lote longo; checar por
-      // destinatário evita mandar mensagem às 22h01.
-      if (!isWithinWhatsappWindow()) {
-        result.deferred += 1;
-        continue;
-      }
-      const outcome = await deliverToUser({
-        notification,
-        user,
+
+    // Cada canal resolve seus próprios destinatários: o contato exigido é
+    // diferente (telefone vs e-mail) e a preferência é por canal, então quem
+    // recebe por e-mail não é necessariamente quem recebe por WhatsApp.
+    for (const channel of USER_NOTIF_CHANNELS) {
+      const { users } = await resolveNotificationUsers(notification, channel);
+      if (users.length === 0) continue;
+
+      const allowed = await filterUsersOptedIn({
+        userIds: users.map((u) => u.userId),
+        orgId: notification.orgId,
+        type: notification.type,
         category: policy.category,
-        orgName,
+        channel,
+        cache: cache.orgChannels,
       });
-      if (outcome === "sent") result.sent += 1;
-      else if (outcome === "skipped") result.skipped += 1;
-      else if (outcome === "deferred") result.deferred += 1;
+      const targets = users.filter((u) => allowed.has(u.userId));
+      if (targets.length === 0) continue;
+
+      for (const user of targets) {
+        // A janela vale só pro WhatsApp: e-mail não acorda ninguém às 23h, e
+        // adiá-lo até as 7h atrasaria por nada. Checado por destinatário
+        // porque a janela pode fechar no meio de um lote longo.
+        if (channel === "whatsapp" && !isWithinWhatsappWindow()) {
+          result.deferred += 1;
+          continue;
+        }
+        const outcome = await deliverToUser({
+          notification,
+          user,
+          category: policy.category,
+          channel,
+          orgName,
+        });
+        if (outcome === "sent") result.sent += 1;
+        else if (outcome === "skipped") result.skipped += 1;
+        else if (outcome === "deferred") result.deferred += 1;
+      }
     }
     return result;
   } catch (err) {

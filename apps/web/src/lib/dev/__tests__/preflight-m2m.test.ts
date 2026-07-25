@@ -3,13 +3,16 @@ import { checkM2mSurface } from "../preflight";
 import { HIGH_RISK_ACTIONS } from "@/lib/api/intents";
 
 describe("preflight — checkM2mSurface", () => {
+  // 20s: `checkM2mSurface` carrega os executores por import dinâmico e leva
+  // ~4s sozinho — encostado demais no default de 5s. Sob carga da suíte
+  // completa ele estoura e derruba o CI sem que nada tenha quebrado.
   it("todo HIGH_RISK_ACTION tem executor registrado (blocker se faltar)", async () => {
     const results = await checkM2mSurface();
     const exec = results.find((r) => r.key === "intent_executors");
     expect(exec).toBeDefined();
     expect(exec!.severity).toBe("ok");
     expect(exec!.message).toContain(String(HIGH_RISK_ACTIONS.length));
-  });
+  }, 20_000);
 
   it("chaves de SCOPE_LIMITS batem com o catálogo de scopes", async () => {
     const results = await checkM2mSurface();

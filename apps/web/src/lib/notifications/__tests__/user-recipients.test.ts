@@ -8,7 +8,12 @@ const dealFind = prisma.deal.findUnique as unknown as ReturnType<typeof vi.fn>;
 function member(userId: string, over: Record<string, unknown> = {}) {
   return {
     userId,
-    user: { name: `Nome ${userId}`, phone: "+5511987654321", deletedAt: null },
+    user: {
+      name: `Nome ${userId}`,
+      phone: "+5511987654321",
+      email: `${userId}@x.com`,
+      deletedAt: null,
+    },
     ...over,
   };
 }
@@ -177,15 +182,55 @@ describe("resolveNotificationUsers — destinatários escolhidos pelo admin", ()
     orgSettingsFind.mockResolvedValue(null);
   });
 
-  it("sem categoria não lê a lista — chamador antigo segue igual", async () => {
+  it("a lista deixou de ser por categoria — vale para qualquer aviso", async () => {
     comLista({ deal_updates: ["marcia"] });
     dealFind.mockResolvedValue({ userId: "dono", pipeline: { orgId: "org1" } });
-    comMembros(member("dono"));
+    comMembros(member("dono"), member("marcia"));
 
+    // Sem canal explícito, o default é whatsapp (compatível com o chamador antigo).
     const r = await resolveNotificationUsers(notif({ metadata: { dealId: "deal1" } }));
 
-    expect(r.rule).toBe("deal_owner");
-    expect(orgSettingsFind).not.toHaveBeenCalled();
+    expect(r.rule).toBe("org_selected");
+    expect(r.users.map((u) => u.userId).sort()).toEqual(["dono", "marcia"]);
+  });
+
+  it("forma legada (events.<categoria>) continua valendo — sem backfill", async () => {
+    // É exatamente o que está gravado em produção desde o #194.
+    comLista({ deal_updates: ["marcia"] });
+    dealFind.mockResolvedValue({ userId: "olavo", pipeline: { orgId: "org1" } });
+    comMembros(member("olavo"), member("marcia"));
+
+    const r = await resolveNotificationUsers(
+      notif({ metadata: { dealId: "deal1" } }),
+      "whatsapp"
+    );
+
+    expect(r.users.map((u) => u.userId)).toContain("marcia");
+  });
+
+  it("quem não tem telefone ainda recebe por E-MAIL", async () => {
+    // O contato exigido é o do canal. Filtrar e-mail por telefone faria sumir
+    // justamente quem só usa e-mail.
+    comLista({ deal_updates: ["semfone"] });
+    dealFind.mockResolvedValue({ userId: "dono", pipeline: { orgId: "org1" } });
+    comMembros(
+      member("dono"),
+      member("semfone", {
+        user: { name: "Sem Fone", phone: null, email: "s@x.com", deletedAt: null },
+      })
+    );
+
+    const wa = await resolveNotificationUsers(
+      notif({ metadata: { dealId: "deal1" } }),
+      "whatsapp"
+    );
+    expect(wa.users.map((u) => u.userId)).not.toContain("semfone");
+
+    const email = await resolveNotificationUsers(
+      notif({ metadata: { dealId: "deal1" } }),
+      "email"
+    );
+    expect(email.users.map((u) => u.userId)).toContain("semfone");
   });
 
   it("soma o escolhido ao dono do negócio", async () => {
@@ -195,7 +240,7 @@ describe("resolveNotificationUsers — destinatários escolhidos pelo admin", ()
 
     const r = await resolveNotificationUsers(
       notif({ metadata: { dealId: "deal1" } }),
-      "deal_updates"
+      "whatsapp"
     );
 
     expect(r.rule).toBe("org_selected");
@@ -209,7 +254,7 @@ describe("resolveNotificationUsers — destinatários escolhidos pelo admin", ()
 
     const r = await resolveNotificationUsers(
       notif({ metadata: { dealId: "deal-do-olavo" } }),
-      "deal_updates"
+      "whatsapp"
     );
 
     expect(r.users.map((u) => u.userId)).toContain("marcia");
@@ -222,7 +267,7 @@ describe("resolveNotificationUsers — destinatários escolhidos pelo admin", ()
 
     const r = await resolveNotificationUsers(
       notif({ metadata: { dealId: "deal1" } }),
-      "deal_updates"
+      "whatsapp"
     );
 
     expect(r.users.map((u) => u.userId)).toEqual(["marcia"]);
@@ -234,7 +279,7 @@ describe("resolveNotificationUsers — destinatários escolhidos pelo admin", ()
 
     const r = await resolveNotificationUsers(
       notif({ userId: "alvo", metadata: { dealId: "deal1" } }),
-      "deal_updates"
+      "whatsapp"
     );
 
     expect(r.rule).toBe("direct");
@@ -248,7 +293,7 @@ describe("resolveNotificationUsers — destinatários escolhidos pelo admin", ()
 
     const r = await resolveNotificationUsers(
       notif({ metadata: { dealId: "deal1" } }),
-      "deal_updates"
+      "whatsapp"
     );
 
     expect(r.users.map((u) => u.userId)).toEqual(["dono"]);
@@ -261,7 +306,7 @@ describe("resolveNotificationUsers — destinatários escolhidos pelo admin", ()
 
     const r = await resolveNotificationUsers(
       notif({ metadata: { dealId: "deal1" } }),
-      "deal_updates"
+      "whatsapp"
     );
 
     expect(r.users.map((u) => u.userId)).toEqual(["dono"]);
@@ -275,7 +320,7 @@ describe("resolveNotificationUsers — destinatários escolhidos pelo admin", ()
 
     const r = await resolveNotificationUsers(
       notif({ metadata: { dealId: "deal1" } }),
-      "deal_updates"
+      "whatsapp"
     );
 
     expect(r.users.map((u) => u.userId)).toEqual(["dono"]);
@@ -290,7 +335,7 @@ describe("resolveNotificationUsers — destinatários escolhidos pelo admin", ()
 
     const r = await resolveNotificationUsers(
       notif({ metadata: { dealId: "deal1" } }),
-      "deal_updates"
+      "whatsapp"
     );
 
     expect(r.users).toHaveLength(5);
@@ -308,7 +353,7 @@ describe("resolveNotificationUsers — destinatários escolhidos pelo admin", ()
 
     const r = await resolveNotificationUsers(
       notif({ metadata: { dealId: "deal1" } }),
-      "deal_updates"
+      "whatsapp"
     );
 
     expect(r.users.map((u) => u.userId)).toEqual(["dono"]);
@@ -321,7 +366,7 @@ describe("resolveNotificationUsers — destinatários escolhidos pelo admin", ()
       .mockResolvedValueOnce([])                 // busca de admins: nenhum
       .mockResolvedValue([member("marcia")]);    // loadEligible
 
-    const r = await resolveNotificationUsers(notif(), "deal_updates");
+    const r = await resolveNotificationUsers(notif(), "whatsapp");
 
     expect(r.rule).toBe("org_selected");
     expect(r.users.map((u) => u.userId)).toEqual(["marcia"]);

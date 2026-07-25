@@ -41,13 +41,38 @@ export const USER_NOTIF_CATEGORY_HINT: Record<UserNotifCategory, string> = {
     "Falha na geração de contrato, orçamento de IA e respostas do suporte.",
 };
 
-export interface UserChannelToggles {
-  whatsapp?: boolean;
+/** Canais externos configuráveis. O sino não entra: é sempre org-wide. */
+export const USER_NOTIF_CHANNELS = ["email", "whatsapp"] as const;
+export type UserNotifChannel = (typeof USER_NOTIF_CHANNELS)[number];
+
+export function isUserNotifChannel(v: unknown): v is UserNotifChannel {
+  return (
+    typeof v === "string" &&
+    (USER_NOTIF_CHANNELS as readonly string[]).includes(v)
+  );
 }
 
-/** Shape persistido em UserNotificationPreference.settingsJson. */
+export interface UserChannelToggles {
+  whatsapp?: boolean;
+  email?: boolean;
+}
+
+/**
+ * Shape persistido em UserNotificationPreference.settingsJson.
+ *
+ * Duas granularidades convivendo de propósito:
+ *
+ *  - `events` (categoria) — o que a própria pessoa liga no perfil dela, e o
+ *    que existia antes. 6 chaves, simples de decidir.
+ *  - `types` (tipo) — a matriz fina que o admin configura. 31 chaves.
+ *
+ * `types` VENCE sobre `events` quando ambos falam do mesmo tipo. É o que
+ * permite "a categoria toda, menos este tipo" sem inventar terceira estrutura,
+ * e o que mantém a configuração antiga valendo sem backfill.
+ */
 export interface UserNotificationPrefsJson {
   events?: Partial<Record<UserNotifCategory, UserChannelToggles>>;
+  types?: Record<string, UserChannelToggles>;
   /**
    * Quando o canal foi ligado por um ADMIN e não pela própria pessoa (ver
    * `userRecipients` abaixo). Sem isto, o `whatsappOptInAt` diria "ela
@@ -58,6 +83,23 @@ export interface UserNotificationPrefsJson {
   enabledBy?: Partial<
     Record<UserNotifCategory, { byUserId: string; at: string }>
   >;
+}
+
+/**
+ * A pessoa recebe `type` por `channel`?
+ *
+ * `types` vence; faltando, cai na categoria. Ausência em ambos = não recebe —
+ * o default é sempre "não manda", nunca "manda".
+ */
+export function prefAllows(
+  prefs: UserNotificationPrefsJson | null | undefined,
+  type: string,
+  channel: UserNotifChannel,
+  category: UserNotifCategory
+): boolean {
+  const porTipo = prefs?.types?.[type]?.[channel];
+  if (typeof porTipo === "boolean") return porTipo;
+  return prefs?.events?.[category]?.[channel] === true;
 }
 
 /**
@@ -73,6 +115,7 @@ export interface OrgUserChannelsJson {
 /** Default de código: nada ligado. Coerente com DEFAULT_EVENT do broker. */
 export const DEFAULT_USER_CHANNEL: Required<UserChannelToggles> = {
   whatsapp: false,
+  email: false,
 };
 
 /**
@@ -93,7 +136,16 @@ export const DEFAULT_USER_CHANNEL: Required<UserChannelToggles> = {
  * `SplitRecipient.id` de corretores. `User.id` ali é no-op silencioso.
  */
 export interface OrgUserRecipientsJson {
-  /** userIds por categoria. */
+  /**
+   * Quem tem alcance org-wide. Forma nova: lista simples.
+   *
+   * O "o quê" e "por qual canal" saíram daqui e foram pra preferência da
+   * pessoa (`UserNotificationPrefsJson.types`), que é onde já viviam as
+   * escolhas dela — deixar os dois lados descrevendo a mesma coisa criaria
+   * duas verdades para "essa pessoa recebe X?".
+   */
+  users?: string[];
+  /** Forma legada (`#194`): userIds por categoria. Lida, nunca escrita. */
   events?: Partial<Record<UserNotifCategory, string[]>>;
 }
 
@@ -113,16 +165,20 @@ export function coerceOrgUserRecipients(raw: unknown): OrgUserRecipientsJson {
   return ur as OrgUserRecipientsJson;
 }
 
-/** Os userIds escolhidos para uma categoria. Sempre array, sempre sem lixo. */
-export function orgSelectedUserIds(
-  settingsJson: unknown,
-  category: UserNotifCategory
-): string[] {
-  const list = coerceOrgUserRecipients(settingsJson).events?.[category];
+function limpaIds(list: unknown): string[] {
   if (!Array.isArray(list)) return [];
-  return [
-    ...new Set(
-      list.filter((id): id is string => typeof id === "string" && id.length > 0)
-    ),
-  ];
+  return list.filter(
+    (id): id is string => typeof id === "string" && id.length > 0
+  );
+}
+
+/**
+ * Quem tem alcance org-wide. Une a forma nova (`users`) com a legada
+ * (`events.<categoria>`), porque a configuração feita antes desta mudança
+ * continua valendo — não há backfill.
+ */
+export function orgSelectedUserIds(settingsJson: unknown): string[] {
+  const cfg = coerceOrgUserRecipients(settingsJson);
+  const legado = Object.values(cfg.events ?? {}).flatMap(limpaIds);
+  return [...new Set([...limpaIds(cfg.users), ...legado])];
 }
