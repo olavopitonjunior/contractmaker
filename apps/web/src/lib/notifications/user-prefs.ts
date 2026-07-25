@@ -31,17 +31,30 @@ function coerceOrgUserChannels(raw: unknown): OrgUserChannelsJson {
   return settings.userChannels as OrgUserChannelsJson;
 }
 
+/**
+ * Cache de kill switch por org, válido por execução do sweep. Sem ele, um
+ * lote de 200 notificações da mesma org faria 200 leituras idênticas.
+ * `null` = já consultei e a org não tem linha de settings.
+ */
+export type OrgChannelCache = Map<string, OrgUserChannelsJson | null>;
+
 /** A org bloqueou o canal (globalmente ou nesta categoria)? */
 export async function isOrgUserChannelBlocked(
   orgId: string,
-  category: UserNotifCategory
+  category: UserNotifCategory,
+  cache?: OrgChannelCache
 ): Promise<boolean> {
   try {
-    const row = await prisma.orgNotificationSettings.findUnique({
-      where: { orgId },
-      select: { settingsJson: true },
-    });
-    const cfg = coerceOrgUserChannels(row?.settingsJson);
+    let cfg: OrgUserChannelsJson | null | undefined = cache?.get(orgId);
+    if (cfg === undefined) {
+      const row = await prisma.orgNotificationSettings.findUnique({
+        where: { orgId },
+        select: { settingsJson: true },
+      });
+      cfg = coerceOrgUserChannels(row?.settingsJson);
+      cache?.set(orgId, cfg);
+    }
+    if (!cfg) return false;
     if (cfg.enabled === false) return true;
     return cfg.events?.[category] === false;
   } catch (err) {
@@ -60,12 +73,13 @@ export async function filterUsersOptedIn(params: {
   userIds: string[];
   orgId: string;
   category: UserNotifCategory;
+  cache?: OrgChannelCache;
 }): Promise<Set<string>> {
-  const { userIds, orgId, category } = params;
+  const { userIds, orgId, category, cache } = params;
   if (userIds.length === 0) return new Set();
 
   try {
-    if (await isOrgUserChannelBlocked(orgId, category)) return new Set();
+    if (await isOrgUserChannelBlocked(orgId, category, cache)) return new Set();
 
     const rows = await prisma.userNotificationPreference.findMany({
       where: { orgId, userId: { in: userIds } },

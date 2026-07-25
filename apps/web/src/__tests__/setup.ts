@@ -218,6 +218,8 @@ vi.mock("@/lib/db/prisma", () => {
     userNotificationDelivery: {
       create: vi.fn().mockResolvedValue({ id: "delivery-mock" }),
       update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      findUnique: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
       count: vi.fn().mockResolvedValue(0),
     },

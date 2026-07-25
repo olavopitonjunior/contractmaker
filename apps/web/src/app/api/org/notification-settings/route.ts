@@ -60,6 +60,10 @@ const settingsPatchSchema = z
     // Kill switch do canal WhatsApp → USUÁRIOS da plataforma. Só DESLIGA: quem
     // liga é cada usuário no próprio perfil (opt-in com consentimento datado).
     // Chave ausente = "não interfere"; `false` = bloqueia.
+    // A UI manda boolean (o toggle precisa poder DESFAZER o bloqueio), mas o
+    // que persiste é só a divergência: `true` remove a chave em vez de gravar.
+    // Assim o JSON salvo nunca contém `true` e ninguém lê o blob e conclui
+    // que a org consegue LIGAR o canal por um usuário — ela só desliga.
     userChannels: z
       .object({
         enabled: z.boolean().optional(),
@@ -76,6 +80,38 @@ const settingsPatchSchema = z
       .optional(),
   })
   .strict();
+
+/**
+ * Funde o kill switch preservando o que não veio no PATCH, e grava SÓ as
+ * divergências: `true` (= "não bloqueia") remove a chave em vez de persistir,
+ * mantendo a invariante de que a org só desliga. Ausência ≡ liberado.
+ */
+function mergeUserChannels(
+  current: unknown,
+  patch: { enabled?: boolean; events?: Record<string, boolean | undefined> }
+): Record<string, unknown> {
+  const cur =
+    (current as { enabled?: boolean; events?: Record<string, boolean> }) ?? {};
+  const next: Record<string, unknown> = { ...cur };
+
+  if (patch.enabled !== undefined) {
+    if (patch.enabled) delete next.enabled;
+    else next.enabled = false;
+  }
+
+  if (patch.events !== undefined) {
+    const events: Record<string, boolean> = { ...(cur.events ?? {}) };
+    for (const [category, blocked] of Object.entries(patch.events)) {
+      if (blocked === undefined) continue;
+      if (blocked) delete events[category];
+      else events[category] = false;
+    }
+    if (Object.keys(events).length > 0) next.events = events;
+    else delete next.events;
+  }
+
+  return next;
+}
 
 async function ensureRow(orgId: string) {
   const existing = await prisma.orgNotificationSettings.findUnique({
@@ -157,28 +193,8 @@ export async function PATCH(req: NextRequest) {
           },
         }
       : {}),
-    // Igual a events: funde por categoria, senão desligar uma apagaria as
-    // outras já bloqueadas.
     ...(parsed.data.userChannels !== undefined
-      ? {
-          userChannels: {
-            ...((current.userChannels as Record<string, unknown> | undefined) ??
-              {}),
-            ...parsed.data.userChannels,
-            ...(parsed.data.userChannels.events !== undefined
-              ? {
-                  events: {
-                    ...(((
-                      current.userChannels as
-                        | { events?: Record<string, unknown> }
-                        | undefined
-                    )?.events) ?? {}),
-                    ...parsed.data.userChannels.events,
-                  },
-                }
-              : {}),
-          },
-        }
+      ? { userChannels: mergeUserChannels(current.userChannels, parsed.data.userChannels) }
       : {}),
   };
 

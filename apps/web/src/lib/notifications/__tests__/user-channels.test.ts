@@ -20,6 +20,9 @@ const prefMany = prisma.userNotificationPreference.findMany as unknown as Return
 const delivCreate = prisma.userNotificationDelivery.create as unknown as ReturnType<typeof vi.fn>;
 const delivUpdate = prisma.userNotificationDelivery.update as unknown as ReturnType<typeof vi.fn>;
 const delivCount = prisma.userNotificationDelivery.count as unknown as ReturnType<typeof vi.fn>;
+const delivMany = prisma.userNotificationDelivery.findMany as unknown as ReturnType<typeof vi.fn>;
+const delivUpdateMany = prisma.userNotificationDelivery.updateMany as unknown as ReturnType<typeof vi.fn>;
+const delivFindUnique = prisma.userNotificationDelivery.findUnique as unknown as ReturnType<typeof vi.fn>;
 
 function notifRow(over: Record<string, unknown> = {}) {
   return {
@@ -70,6 +73,9 @@ describe("dispatchUserNotification", () => {
     delivCreate.mockResolvedValue({ id: "d1" });
     delivUpdate.mockResolvedValue({});
     delivCount.mockResolvedValue(0);
+    delivMany.mockResolvedValue([]);
+    delivUpdateMany.mockResolvedValue({ count: 0 });
+    delivFindUnique.mockResolvedValue(null);
     trigger.mockResolvedValue("sent");
   });
 
@@ -176,21 +182,80 @@ describe("dispatchUserNotification", () => {
     expect(trigger).not.toHaveBeenCalled();
   });
 
-  it("rate cap por usuário/hora pula o envio e registra o motivo", async () => {
+  it("rate cap adia (deferred), não descarta — a capacidade da hora se renova", async () => {
     delivCount.mockResolvedValue(6);
 
     const r = await dispatchUserNotification({ notificationId: "notif1" });
 
-    expect(r.skipped).toBe(1);
+    expect(r.deferred).toBe(1);
+    expect(r.skipped).toBe(0);
     expect(trigger).not.toHaveBeenCalled();
     expect(delivUpdate).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({
-          status: "skipped",
+          status: "deferred",
           detail: { reason: "rate_cap" },
         }),
       })
     );
+  });
+
+  it("retoma entrega que ficou deferred (claim reivindicável)", async () => {
+    // Já existe linha → P2002 no create; o CAS devolve count 1.
+    delivCreate.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("dup", {
+        code: "P2002",
+        clientVersion: "5.22.0",
+      })
+    );
+    delivFindUnique.mockResolvedValue({ id: "d-old", status: "deferred" });
+    delivUpdateMany.mockResolvedValue({ count: 1 });
+
+    const r = await dispatchUserNotification({ notificationId: "notif1" });
+
+    expect(r.sent).toBe(1);
+    expect(trigger).toHaveBeenCalledTimes(1);
+    // O CAS põe o status no where — duas execuções não reivindicam a mesma.
+    const where = delivUpdateMany.mock.calls[0][0].where;
+    expect(where.id).toBe("d-old");
+    expect(where.OR).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ status: { in: ["deferred", "failed"] } }),
+      ])
+    );
+  });
+
+  it("NÃO retoma entrega já concluída (sent é terminal)", async () => {
+    delivCreate.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("dup", {
+        code: "P2002",
+        clientVersion: "5.22.0",
+      })
+    );
+    delivFindUnique.mockResolvedValue({ id: "d-old", status: "sent" });
+    // O CAS não casa com status terminal.
+    delivUpdateMany.mockResolvedValue({ count: 0 });
+
+    const r = await dispatchUserNotification({ notificationId: "notif1" });
+
+    expect(r.sent).toBe(0);
+    expect(trigger).not.toHaveBeenCalled();
+  });
+
+  it("perde a corrida do CAS não envia (outra execução reivindicou)", async () => {
+    delivCreate.mockRejectedValue(
+      new Prisma.PrismaClientKnownRequestError("dup", {
+        code: "P2002",
+        clientVersion: "5.22.0",
+      })
+    );
+    delivFindUnique.mockResolvedValue({ id: "d-old", status: "deferred" });
+    delivUpdateMany.mockResolvedValue({ count: 0 });
+
+    const r = await dispatchUserNotification({ notificationId: "notif1" });
+
+    expect(trigger).not.toHaveBeenCalled();
+    expect(r.sent).toBe(0);
   });
 
   it("gate do Newton fechado assenta skipped, não sent", async () => {
@@ -241,6 +306,9 @@ describe("sweepUserNotifications", () => {
     delivCreate.mockResolvedValue({ id: "d1" });
     delivUpdate.mockResolvedValue({});
     delivCount.mockResolvedValue(0);
+    delivMany.mockResolvedValue([]);
+    delivUpdateMany.mockResolvedValue({ count: 0 });
+    delivFindUnique.mockResolvedValue(null);
     trigger.mockResolvedValue("sent");
   });
 
@@ -273,11 +341,66 @@ describe("sweepUserNotifications", () => {
   it("erro de query não propaga", async () => {
     notifMany.mockRejectedValue(new Error("db caiu"));
 
-    await expect(sweepUserNotifications()).resolves.toEqual({
+    await expect(sweepUserNotifications()).resolves.toMatchObject({
       scanned: 0,
       sent: 0,
-      skipped: 0,
-      deferred: 0,
     });
+  });
+
+  /**
+   * Regressão do gap noturno: o canal dorme das 22h às 7h. Com lookback fixo
+   * de 30 min, tudo que nascia durante a noite nunca entrava em query alguma
+   * — o sweep das 7h já não alcançava a notificação das 22h05.
+   */
+  it("às 7h o lookback cobre a noite inteira", async () => {
+    // 10h UTC = 07h em São Paulo, primeira hora da janela.
+    vi.setSystemTime(new Date("2026-07-24T10:00:00Z"));
+    notifMany.mockResolvedValue([]);
+
+    await sweepUserNotifications();
+
+    const gte = notifMany.mock.calls[0][0].where.createdAt.gte as Date;
+    const horasDeLookback = (Date.now() - gte.getTime()) / 3_600_000;
+    // Precisa alcançar as 22h do dia anterior (9h atrás), com folga.
+    expect(horasDeLookback).toBeGreaterThanOrEqual(9);
+  });
+
+  it("fora da primeira hora usa a janela curta (não redispara backlog)", async () => {
+    // 18h UTC = 15h em São Paulo.
+    vi.setSystemTime(new Date("2026-07-24T18:00:00Z"));
+    notifMany.mockResolvedValue([]);
+
+    await sweepUserNotifications();
+
+    const gte = notifMany.mock.calls[0][0].where.createdAt.gte as Date;
+    expect((Date.now() - gte.getTime()) / 60_000).toBeCloseTo(30, 0);
+  });
+
+  it("retoma entregas adiadas antes de olhar novidades", async () => {
+    delivMany.mockResolvedValue([{ notificationId: "notif-antiga" }]);
+    notifMany.mockResolvedValue([]);
+    notifFind.mockResolvedValue(notifRow({ id: "notif-antiga" }));
+
+    const r = await sweepUserNotifications();
+
+    expect(r.resumed).toBe(1);
+    expect(r.sent).toBe(1);
+    const where = delivMany.mock.calls[0][0].where;
+    expect(where.OR).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ status: { in: ["deferred", "failed"] } }),
+      ])
+    );
+  });
+
+  it("não duplica quando a mesma notificação está na retomada e nas novidades", async () => {
+    delivMany.mockResolvedValue([{ notificationId: "notif1" }]);
+    notifMany.mockResolvedValue([notifRow()]);
+    notifFind.mockResolvedValue(notifRow());
+
+    const r = await sweepUserNotifications();
+
+    expect(r.scanned).toBe(1);
+    expect(trigger).toHaveBeenCalledTimes(1);
   });
 });

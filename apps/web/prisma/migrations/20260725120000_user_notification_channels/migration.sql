@@ -36,8 +36,17 @@ CREATE TABLE IF NOT EXISTS "UserNotificationDelivery" (
   "detail"         JSONB,
   "createdAt"      TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
   "settledAt"      TIMESTAMP(3),
+  "attempts"       INTEGER NOT NULL DEFAULT 0,
+  "lastAttemptAt"  TIMESTAMP(3),
   CONSTRAINT "UserNotificationDelivery_pkey" PRIMARY KEY ("id")
 );
+
+-- Colunas de retomada: idempotente também para bancos que já receberam a
+-- versão anterior desta migration (staging pode ter aplicado antes do fix).
+ALTER TABLE "UserNotificationDelivery"
+  ADD COLUMN IF NOT EXISTS "attempts" INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE "UserNotificationDelivery"
+  ADD COLUMN IF NOT EXISTS "lastAttemptAt" TIMESTAMP(3);
 
 CREATE UNIQUE INDEX IF NOT EXISTS "UserNotificationDelivery_dedupe_key"
   ON "UserNotificationDelivery" ("userId", "channel", "dedupeKey");
@@ -50,6 +59,10 @@ CREATE INDEX IF NOT EXISTS "UserNotificationDelivery_notificationId_idx"
 
 CREATE INDEX IF NOT EXISTS "UserNotificationDelivery_userId_status_createdAt_idx"
   ON "UserNotificationDelivery" ("userId", "status", "createdAt");
+
+-- Repesca do sweep: entregas re-tentáveis (deferred/failed/pending órfão).
+CREATE INDEX IF NOT EXISTS "UserNotificationDelivery_status_lastAttemptAt_idx"
+  ON "UserNotificationDelivery" ("status", "lastAttemptAt");
 
 -- Sweep varre `type IN (allowlist) AND createdAt >= now()-30min`; os índices
 -- existentes de Notification começam por orgId/userId e não atendem.

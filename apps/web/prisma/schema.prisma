@@ -925,11 +925,20 @@ model UserNotificationDelivery {
   category       String // UserNotifCategory
   channel        String  @default("whatsapp")
   dedupeKey      String
-  // pending (claim) | sent | skipped | failed | deferred (fora da janela)
+  // TERMINAIS: sent | skipped (opt-out, gate off — não adianta insistir)
+  // RE-TENTÁVEIS: deferred (fora da janela / rate cap) | failed |
+  //   pending órfão (a function morreu entre o claim e o envio)
+  // O unique abaixo diz "já PROCESSEI esta notificação pra este usuário",
+  // não "já ENVIEI" — por isso o sweep reivindica de volta o que ficou em
+  // estado re-tentável, senão qualquer adiamento viraria perda definitiva.
   status         String    @default("pending")
   detail         Json?
   createdAt      DateTime  @default(now())
   settledAt      DateTime?
+  attempts       Int       @default(0)
+  // Marca cada reivindicação (não cada transição): é o que permite detectar
+  // "pending" órfão sem confundir com claim recém-feito.
+  lastAttemptAt  DateTime?
 
   org  Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
   user User         @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -939,6 +948,8 @@ model UserNotificationDelivery {
   @@index([notificationId])
   // Rate cap por usuário/hora: count de status='sent' na última hora.
   @@index([userId, status, createdAt])
+  // Repesca do sweep: status re-tentável ordenado por tentativa.
+  @@index([status, lastAttemptAt])
 }
 
 // NewtonRequest — fila de "pedidos ao Newton" ancorada num Deal.
