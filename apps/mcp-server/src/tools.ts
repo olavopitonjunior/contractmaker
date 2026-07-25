@@ -2,6 +2,35 @@ import { spawn } from "node:child_process";
 import { callApi, callBridge, logProactiveOutbound } from "./index.js";
 import { validateInWindow } from "./cron-window.js";
 
+/**
+ * Normaliza o destino do WhatsApp para E.164 sem '+'.
+ *
+ * A descrição da tool exige "5511987654321", mas **não se pode confiar no
+ * modelo pra isso**: verificado em produção (2026-07-25) que o agente recebeu
+ * a instrução com `5511999063228` e ainda assim chamou a tool com
+ * `11999063228`, sem o 55. A mensagem não chegou.
+ *
+ * E o modo de falha é silencioso em duas camadas: a bridge devolve o erro no
+ * CORPO com HTTP 200, e quem chama registra "enviado". Por isso a trava é
+ * aqui, determinística, e não no prompt.
+ *
+ * JID de grupo (`<id>-group`) passa intacto. Número que já parece E.164
+ * internacional também passa — normalizar só resolve o caso BR sem DDI, que é
+ * o observado.
+ */
+function normalizeWhatsappTo(raw: unknown): string {
+  const s = String(raw ?? "").trim();
+  if (/^\d{10,25}-group$/.test(s)) return s;
+  const d = s.replace(/\D/g, "");
+  // 10-11 dígitos = BR sem DDI (fixo ou celular com 9º) → prefixa 55.
+  if (d.length === 10 || d.length === 11) return `55${d}`;
+  // 12-13 começando com 55 = já normalizado.
+  if ((d.length === 12 || d.length === 13) && d.startsWith("55")) return d;
+  // Qualquer outra coisa passa como veio — não bloqueia internacional nem
+  // formato que a bridge saiba tratar.
+  return d || s;
+}
+
 export type ToolHandler = (args: Record<string, unknown>) => Promise<unknown>;
 
 /**
@@ -1102,8 +1131,9 @@ export const tools: Tool[] = [
       required: ["to", "body"],
     },
     handler: async (args) => {
+      const to = normalizeWhatsappTo(args.to);
       const body: Record<string, unknown> = {
-        to: args.to,
+        to,
         body: args.body,
       };
       if (args.replyToMessageId) {
@@ -1113,7 +1143,7 @@ export const tools: Tool[] = [
       // F2: loga o envio proativo no histórico do DM do destinatário (best-effort,
       // só em envio bem-sucedido) pra que a resposta dele tenha contexto no /run.
       if (r.status >= 200 && r.status < 300) {
-        await logProactiveOutbound({ to: String(args.to), content: String(args.body) });
+        await logProactiveOutbound({ to, content: String(args.body) });
       }
       return r.body;
     },
