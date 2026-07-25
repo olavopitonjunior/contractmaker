@@ -4,6 +4,30 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-07-25 - Newton calado nos grupos: runtime + tools
+
+Segunda metade da mudança abaixo. A primeira tirou a iniciativa automática do lado
+Contractmaker; esta fecha o comportamento do agente em si.
+
+### Adicionado
+
+- **Trava determinística contra envio proativo pra grupo** (`assertNotGroupTarget` em `apps/mcp-server/src/tools.ts`): `whatsapp_send` e `schedule_proactive_message` agora rejeitam JID de grupo (`<id>-group`) com erro. O `normalizeWhatsappTo` deixava passar intacto, então a proibição era 100% prompt — e o modelo ativo é nano-tier. Responder num grupo mencionado continua funcionando: essa resposta volta pelo webhook da bridge, não por essas tools.
+
+### Alterado
+
+- **Persona do agente (fora do repo, via Mission Control → Persona):** `SOUL.md` ganhou a subseção "Escopo de ação em grupo" e perdeu o bullet que autorizava responder sem `@`; `AGENTS.md` ganhou nota de precedência em "Group Chats" e um bloco absoluto em "Red Lines". Registro do que foi gravado, com os backups pra rollback, em `docs/newton-persona-snapshot-2026-07-25.md`.
+- **Descrições das tools MCP** (`apps/mcp-server/src/tools.ts`): `whatsapp_send`, `schedule_proactive_message`, `list_newton_requests`, `update_newton_request` e o comentário do bloco Newton Requests mandavam o agente cobrar informação, agendar lembretes e mandar DM ao fechar. Agora dizem o contrário — o inbox é registro interno, envio proativo é só DM e nunca re-cobrança.
+
+### Verificado
+
+- Crons do Newton auditados na aba Crons do MC: `morning-briefing` e `stale-deals`, ambos `telegram→` do Olavo, nenhum em grupo de WhatsApp, sem execução há ~1 mês. O agente Max não tem cron. **Não existia cron de relatório em grupo** — o incômodo vinha do sweep do Vercel, já removido.
+- Smoke no sandbox do MC: com a política só no `SOUL.md` o modelo ainda respondia sem `@` e se oferecia pra cobrar diariamente; com o bloco em "Red Lines", parou. O caminho positivo (`create_form`) fica inconclusivo — o sandbox interrompe na 1ª tool call.
+
+### Pendente
+
+- **Deploy do MCP server na VPS** (`scp dist/` + restart): sem isso as descrições novas das tools não chegam ao agente.
+- Validação temporal: 24h com pendência aberta no inbox e nenhuma mensagem no grupo.
+
 ## [Unreleased] - 2026-07-25 - Newton para de capturar informação nos grupos
 
 ### Removido
