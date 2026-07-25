@@ -38,6 +38,7 @@ import {
 } from "lucide-react";
 import { formatCpf } from "@/lib/validators/cpf";
 import { formatBrPhone } from "@/lib/validators/phone-br";
+import { NotificationChannelsCard } from "@/components/settings/NotificationChannelsCard";
 
 export interface ProfileInitial {
   id: string;
@@ -87,6 +88,7 @@ export function ProfileClient({ initial, twoFAStatus }: Props) {
       </header>
 
       <PersonalCard initial={initial} />
+      <NotificationChannelsCard />
       <AddressCard initial={initial} />
       <PasswordCard twoFAEnabled={twoFAStatus.enabled} />
       <SecurityShortcuts twoFAEnabled={twoFAStatus.enabled} />

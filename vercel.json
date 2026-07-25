@@ -14,6 +14,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/cron/notifications/user-whatsapp",
+      "schedule": "*/5 * * * *"
+    },
+    {
       "path": "/api/cron/surveys/remind",
       "schedule": "0 13 * * *"
     },

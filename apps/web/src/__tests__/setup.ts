@@ -204,7 +204,24 @@ vi.mock("@/lib/db/prisma", () => {
     },
     notification: {
       create: vi.fn().mockResolvedValue({}),
+      findUnique: vi.fn().mockResolvedValue(null),
+      findFirst: vi.fn().mockResolvedValue(null),
       findMany: vi.fn().mockResolvedValue([]),
+    },
+    // Canal externo das notificações do sistema → usuário (2026-07)
+    userNotificationPreference: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+      upsert: vi.fn().mockResolvedValue({}),
+      update: vi.fn().mockResolvedValue({}),
+    },
+    userNotificationDelivery: {
+      create: vi.fn().mockResolvedValue({ id: "delivery-mock" }),
+      update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      findUnique: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+      count: vi.fn().mockResolvedValue(0),
     },
     // Notificações do processo → corretores (2026-07)
     orgNotificationSettings: {
