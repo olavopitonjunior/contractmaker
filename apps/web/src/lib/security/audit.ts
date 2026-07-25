@@ -130,6 +130,8 @@ export type AuditAction =
   // Notificações do processo → corretores (2026-07)
   | "NOTIFICATION_SETTINGS_UPDATED"
   | "DEAL_NOTIFICATION_OVERRIDE_UPDATED"
+  // Canal externo das notificações do sistema → usuário (opt-in LGPD)
+  | "USER_NOTIFICATION_PREFS_UPDATE"
   | "FORM_REMINDER_SENT"
   | "FORM_PREFILLED_FROM_PROPOSAL"
   | "FORM_LINK_ROTATED"

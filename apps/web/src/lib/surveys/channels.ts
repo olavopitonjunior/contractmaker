@@ -2,6 +2,7 @@ import { prisma } from "@/lib/db/prisma";
 import { sendEmail } from "@/lib/email/client";
 import { SurveyInviteEmail } from "@/lib/email/templates/survey-invite";
 import { isNewtonEnabledForDeal } from "@/lib/newton/gate";
+import { isWithinWhatsappWindow } from "@/lib/newton/whatsapp-window";
 import { appendEvent } from "@/lib/newton/requests";
 import { triggerNewtonForRequest } from "@/lib/newton/trigger";
 import { normalizeBrPhone } from "@/lib/validators/phone-br";
@@ -66,21 +67,12 @@ export type SendInviteResult =
   | { ok: false; reason: string; deferred?: boolean };
 
 /**
- * Janela de horário comercial do WhatsApp (7h-22h America/Sao_Paulo) —
- * espelha a regra do sidecar pra mensagens agendadas (cron-window.ts), mas
- * aplicada ao disparo IMEDIATO: automação que casa de madrugada não acorda o
- * cliente; o invite espera o cron dentro da janela.
+ * Janela de horário comercial do WhatsApp (7h-22h America/Sao_Paulo) — mudou
+ * de casa pra lib/newton/whatsapp-window.ts quando o canal de notificação ao
+ * usuário passou a precisar da mesma regra. Re-exportado aqui porque é o
+ * import histórico (channels.test.ts e o cron de dispatch).
  */
-export function isWithinWhatsappWindow(date: Date = new Date()): boolean {
-  const hour = Number(
-    new Intl.DateTimeFormat("pt-BR", {
-      timeZone: "America/Sao_Paulo",
-      hour: "2-digit",
-      hour12: false,
-    }).format(date)
-  );
-  return hour >= 7 && hour < 22;
-}
+export { isWithinWhatsappWindow };
 
 /**
  * Envia (ou reenvia) um invite pelo canal dele e atualiza o status. Nunca

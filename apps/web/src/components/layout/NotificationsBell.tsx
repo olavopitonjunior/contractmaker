@@ -10,6 +10,9 @@ import {
   AlertTriangle,
   Wallet,
   LifeBuoy,
+  FileText,
+  Clock,
+  MessageCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -42,6 +45,43 @@ function iconForType(type: string) {
       return <XCircle className="h-4 w-4 text-red-600 shrink-0" />;
     case "support_answered":
       return <LifeBuoy className="h-4 w-4 text-primary shrink-0" />;
+    // Tipos que existiam sem ícone próprio e caíam no sino genérico.
+    case "certidao_problem":
+    case "certidao_data_missing":
+      return <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />;
+    case "form_completed":
+    case "participant_completed":
+      return <FileCheck2 className="h-4 w-4 text-emerald-600 shrink-0" />;
+    case "deal_stage_change":
+    case "deal_contract_ready":
+    case "deal_contract_sent":
+      return <FileText className="h-4 w-4 text-blue-600 shrink-0" />;
+    case "deal_form_reminder":
+      return <Clock className="h-4 w-4 text-amber-500 shrink-0" />;
+    case "envelope_signed":
+    case "proposal_completed":
+    case "proposal_accepted_party":
+      return <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />;
+    case "envelope_refused":
+    case "proposal_refused":
+      return <XCircle className="h-4 w-4 text-red-600 shrink-0" />;
+    case "envelope_email_failed":
+    case "proposal_email_failed":
+    case "contract_generation_failed":
+      return <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />;
+    case "proposal_expired":
+      return <Clock className="h-4 w-4 text-muted-foreground shrink-0" />;
+    case "charge_created":
+    case "charge_paid":
+      return <Wallet className="h-4 w-4 text-green-600 shrink-0" />;
+    case "charge_due_soon":
+      return <Clock className="h-4 w-4 text-amber-500 shrink-0" />;
+    case "ai_budget_threshold":
+      return <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />;
+    case "survey_detractor":
+      return <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />;
+    case "survey_response":
+      return <MessageCircle className="h-4 w-4 text-primary shrink-0" />;
     default:
       return <Bell className="h-4 w-4 text-muted-foreground shrink-0" />;
   }

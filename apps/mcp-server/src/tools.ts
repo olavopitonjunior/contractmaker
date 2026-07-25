@@ -94,6 +94,35 @@ export const tools: Tool[] = [
     },
   },
   {
+    name: "list_my_notifications",
+    description:
+      "Lista os avisos do sistema do usuário (formulário concluído, contrato assinado, certidão travada, cobrança paga...). Use quando perguntarem 'tenho algo pendente?', 'o que aconteceu hoje?' ou 'alguma novidade?'.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        unread: {
+          type: "boolean",
+          description: "Só os não lidos. Default: todos.",
+        },
+        limit: {
+          type: "number",
+          description: "Máximo de avisos (1-50). Default: 20.",
+        },
+      },
+    },
+    handler: async (args) => {
+      const query: Record<string, string> = {};
+      if (args.unread === true) query.unread = "1";
+      if (typeof args.limit === "number") query.limit = String(args.limit);
+      const r = await callApi({
+        method: "GET",
+        path: "/api/me/notifications",
+        query: Object.keys(query).length > 0 ? query : undefined,
+      });
+      return r.body;
+    },
+  },
+  {
     name: "get_my_activity",
     description: "Atividade recente do usuário (últimas N entradas do AuditLog).",
     inputSchema: {
