@@ -16,9 +16,12 @@ import {
 } from "@/lib/notifications/deal-events-config";
 import {
   USER_NOTIF_CATEGORIES,
+  USER_NOTIF_CHANNELS,
   type UserNotifCategory,
+  type UserNotifChannel,
   type UserNotificationPrefsJson,
 } from "@/lib/notifications/user-channels-shared";
+import { USER_CHANNEL_REGISTRY } from "@/lib/notifications/user-channels-registry";
 
 /**
  * Padrão da org das notificações do processo → corretores (espelha o padrão
@@ -79,36 +82,33 @@ const settingsPatchSchema = z
       })
       .strict()
       .optional(),
-    // Destinatários ESCOLHIDOS pelo admin, por categoria. Ao contrário do
-    // `userChannels` acima, este bloco **LIGA** o canal — é a exceção
-    // deliberada à regra "a org só desliga", decidida porque há quem precise
-    // saber de tudo sem ser dono de negócio nenhum (a negociadora).
+    // Matriz de avisos internos: por USUÁRIO, por TIPO, por CANAL.
     //
-    // O preço é registrado, não escondido: habilitar por aqui grava
+    // Ao contrário do `userChannels` acima, que só desliga, este bloco LIGA —
+    // exceção deliberada à regra "a org só desliga", decidida porque há quem
+    // precise saber de tudo sem ser dono de negócio nenhum (a negociadora).
+    //
+    // O preço fica registrado, não escondido: habilitar WhatsApp por aqui grava
     // `enabledBy` na preferência da pessoa, pra que ninguém leia um
-    // `whatsappOptInAt` e conclua que ela mesma consentiu. E ela continua
-    // podendo desligar no próprio perfil — o admin liga, o usuário desliga.
+    // `whatsappOptInAt` e conclua que ela mesma consentiu. E-mail não passa por
+    // esse carimbo — e-mail corporativo é canal de trabalho, não PII pessoal.
     //
-    // Lista completa por categoria (substitui, não soma): a UI é uma
-    // multi-seleção e manda o estado final.
+    // A pessoa continua podendo desligar no próprio perfil: o admin liga, o
+    // usuário desliga.
     userRecipients: z
-      .object({
-        events: z
-          .object(
-            Object.fromEntries(
-              USER_NOTIF_CATEGORIES.map((c) => [
-                c,
-                z.array(z.string().min(1)).max(20).optional(),
-              ])
-            ) as Record<
-              UserNotifCategory,
-              z.ZodOptional<z.ZodArray<z.ZodString>>
-            >
-          )
-          .strict()
-          .optional(),
-      })
-      .strict()
+      .record(
+        z.string().min(1), // userId
+        z.record(
+          z.string().min(1), // type
+          z
+            .object(
+              Object.fromEntries(
+                USER_NOTIF_CHANNELS.map((c) => [c, z.boolean().optional()])
+              ) as Record<UserNotifChannel, z.ZodOptional<z.ZodBoolean>>
+            )
+            .strict()
+        )
+      )
       .optional(),
   })
   .strict();
@@ -146,58 +146,69 @@ function mergeUserChannels(
 }
 
 /**
- * Habilita o canal WhatsApp de uma categoria em nome de quem o admin escolheu.
+ * Materializa na preferência da pessoa o que o admin escolheu.
  *
- * Sem isto, marcar alguém na lista não faria nada: `filterUsersOptedIn` exige
- * `whatsappOptInAt` datado E o toggle da categoria ligado. Ou seja, a escolha
- * do admin precisa materializar a preferência — senão vira silêncio, que é
- * exatamente o modo de falha que já custou caro neste fluxo.
+ * Sem isto, marcar alguém na matriz não faria nada: `filterUsersOptedIn` lê a
+ * preferência DELA, não a lista da org. A escolha do admin precisa virar
+ * preferência — senão vira silêncio, que é o modo de falha que já custou caro
+ * neste fluxo.
  *
- * `enabledBy` é o que mantém o registro honesto: a linha diz quem ligou e
- * quando, então `whatsappOptInAt` deixa de sugerir consentimento próprio.
+ * Assimetria deliberada entre canais:
+ *  - **WhatsApp** carimba `whatsappOptInAt` e grava `enabledBy`, pra que
+ *    ninguém leia a linha e conclua que ela mesma consentiu. Número é PII.
+ *  - **E-mail** não carimba nada: e-mail corporativo é canal de trabalho, e a
+ *    org já liga o e-mail de corretor do mesmo jeito.
  *
- * Idempotente: quem já está ligado não é tocado (não re-carimba o opt-in dela).
+ * Só sobrescreve os tipos que vieram no PATCH; o resto da preferência dela
+ * fica intacto — inclusive um opt-in próprio anterior.
  */
-async function enableChannelFor(params: {
-  userIds: string[];
+async function applyUserMatrix(params: {
   orgId: string;
-  category: UserNotifCategory;
   byUserId: string;
+  entradas: Array<{
+    userId: string;
+    porTipo: Record<string, { email?: boolean; whatsapp?: boolean }>;
+  }>;
 }): Promise<void> {
-  const { userIds, orgId, category, byUserId } = params;
+  const { orgId, byUserId, entradas } = params;
   const at = new Date();
-  for (const userId of userIds) {
+
+  for (const { userId, porTipo } of entradas) {
     const existing = await prisma.userNotificationPreference.findUnique({
       where: { userId_orgId: { userId, orgId } },
       select: { settingsJson: true, whatsappOptInAt: true },
     });
     const prefs =
       (existing?.settingsJson as UserNotificationPrefsJson | null) ?? {};
-    if (prefs.events?.[category]?.whatsapp === true && existing?.whatsappOptInAt) {
-      continue; // já recebe — não mexe no consentimento existente
+
+    const types = { ...(prefs.types ?? {}) };
+    const enabledBy = { ...(prefs.enabledBy ?? {}) };
+    let ligouWhatsapp = false;
+
+    for (const [tipo, canais] of Object.entries(porTipo)) {
+      types[tipo] = { ...(types[tipo] ?? {}), ...canais };
+      if (canais.whatsapp === true) {
+        ligouWhatsapp = true;
+        const cat = USER_CHANNEL_REGISTRY[tipo]?.category;
+        if (cat) enabledBy[cat] = { byUserId, at: at.toISOString() };
+      }
     }
-    const nextPrefs: UserNotificationPrefsJson = {
-      ...prefs,
-      events: {
-        ...(prefs.events ?? {}),
-        [category]: { ...(prefs.events?.[category] ?? {}), whatsapp: true },
-      },
-      enabledBy: {
-        ...(prefs.enabledBy ?? {}),
-        [category]: { byUserId, at: at.toISOString() },
-      },
-    };
+
+    const nextPrefs: UserNotificationPrefsJson = { ...prefs, types, enabledBy };
     await prisma.userNotificationPreference.upsert({
       where: { userId_orgId: { userId, orgId } },
       create: {
         userId,
         orgId,
         settingsJson: nextPrefs as Prisma.InputJsonValue,
-        whatsappOptInAt: at,
+        // Só o WhatsApp exige consentimento datado; ligar só e-mail não carimba.
+        whatsappOptInAt: ligouWhatsapp ? at : null,
       },
       update: {
         settingsJson: nextPrefs as Prisma.InputJsonValue,
-        ...(existing?.whatsappOptInAt ? {} : { whatsappOptInAt: at }),
+        ...(ligouWhatsapp && !existing?.whatsappOptInAt
+          ? { whatsappOptInAt: at }
+          : {}),
       },
     });
   }
@@ -219,10 +230,10 @@ export async function GET(req: NextRequest) {
   const settings = await ensureRow(ctx.orgId);
   const resolved = await resolveEffectiveNotificationConfig(ctx.orgId);
 
-  // Candidatos pra multi-seleção de "quem mais recebe". `hasPhone` é o que
-  // permite a UI avisar ANTES: marcar quem não tem telefone não produz efeito
-  // nenhum, e sem esse sinal o admin não teria como saber.
-  // Devolve só o booleano — o telefone é PII e não precisa trafegar.
+  // Candidatos da matriz. `hasPhone`/`hasEmail` permitem a UI avisar ANTES:
+  // marcar um canal sem o contato correspondente não produz efeito nenhum, e
+  // sem esse sinal o admin não teria como saber. Devolve só os booleanos — o
+  // telefone é PII e não precisa trafegar.
   const membros = await prisma.orgMembership.findMany({
     where: { orgId: ctx.orgId },
     select: {
@@ -232,15 +243,30 @@ export async function GET(req: NextRequest) {
     },
     orderBy: { invitedAt: "asc" },
   });
-  const recipientCandidates = membros
-    .filter((m) => !m.user?.deletedAt)
-    .map((m) => ({
-      userId: m.userId,
-      name: m.user?.name ?? null,
-      email: m.user?.email ?? null,
-      role: m.role,
-      hasPhone: Boolean(m.user?.phone),
-    }));
+  const vivos = membros.filter((m) => !m.user?.deletedAt);
+
+  // A matriz vive na preferência de cada pessoa (é lá que ela também desliga),
+  // então o GET agrega pra UI não precisar de N requisições.
+  const prefs = await prisma.userNotificationPreference.findMany({
+    where: { orgId: ctx.orgId, userId: { in: vivos.map((m) => m.userId) } },
+    select: { userId: true, settingsJson: true },
+  });
+  const prefsPorUser = new Map(
+    prefs.map((p) => [
+      p.userId,
+      (p.settingsJson as UserNotificationPrefsJson | null)?.types ?? {},
+    ])
+  );
+
+  const recipientCandidates = vivos.map((m) => ({
+    userId: m.userId,
+    name: m.user?.name ?? null,
+    email: m.user?.email ?? null,
+    role: m.role,
+    hasPhone: Boolean(m.user?.phone),
+    hasEmail: Boolean(m.user?.email),
+    types: prefsPorUser.get(m.userId) ?? {},
+  }));
 
   return NextResponse.json({ settings, resolved, recipientCandidates });
 }
@@ -296,28 +322,46 @@ export async function PATCH(req: NextRequest) {
       mergedEvents[ev] = { broker: { ...curBroker, ...toggles.broker } };
     }
   }
-  // Destinatários escolhidos: valida ANTES de gravar. Marcar quem não é membro
-  // ou não tem telefone falharia em silêncio no sweep — o admin marcaria e nada
-  // aconteceria, sem nunca saber por quê.
-  let mergedRecipients: Record<string, unknown> | undefined;
-  const toEnable: Array<{ category: UserNotifCategory; userIds: string[] }> = [];
-  if (parsed.data.userRecipients?.events !== undefined) {
-    const pedidos = parsed.data.userRecipients.events;
-    const todos = [
-      ...new Set(Object.values(pedidos).flatMap((l) => l ?? [])),
-    ];
+  // Matriz de avisos internos: valida ANTES de gravar. Marcar quem não é
+  // membro, ou marcar um canal sem o contato correspondente, falharia em
+  // silêncio no sweep — o admin marcaria e nada aconteceria, sem saber por quê.
+  let matrizGravada: Record<string, unknown> | undefined;
+  const aplicarPrefs: Array<{
+    userId: string;
+    porTipo: Record<string, { email?: boolean; whatsapp?: boolean }>;
+  }> = [];
 
-    if (todos.length > 0) {
+  if (parsed.data.userRecipients !== undefined) {
+    const matriz = parsed.data.userRecipients;
+    const userIds = Object.keys(matriz);
+
+    // Tipo desconhecido é erro, não no-op: um typo silencioso deixaria o admin
+    // achando que configurou algo que nunca vai disparar.
+    const tiposInvalidos = [
+      ...new Set(
+        Object.values(matriz).flatMap((porTipo) =>
+          Object.keys(porTipo).filter((t) => !USER_CHANNEL_REGISTRY[t])
+        )
+      ),
+    ];
+    if (tiposInvalidos.length > 0) {
+      return NextResponse.json(
+        { error: "Tipo de notificação desconhecido", tipos: tiposInvalidos },
+        { status: 400 }
+      );
+    }
+
+    if (userIds.length > 0) {
       const membros = await prisma.orgMembership.findMany({
-        where: { orgId: ctx.orgId, userId: { in: todos } },
+        where: { orgId: ctx.orgId, userId: { in: userIds } },
         select: {
           userId: true,
-          user: { select: { name: true, phone: true, deletedAt: true } },
+          user: { select: { name: true, phone: true, email: true, deletedAt: true } },
         },
       });
       const porId = new Map(membros.map((m) => [m.userId, m]));
 
-      const naoMembros = todos.filter(
+      const naoMembros = userIds.filter(
         (id) => !porId.has(id) || porId.get(id)!.user?.deletedAt
       );
       if (naoMembros.length > 0) {
@@ -330,7 +374,13 @@ export async function PATCH(req: NextRequest) {
         );
       }
 
-      const semTelefone = todos.filter((id) => !porId.get(id)!.user?.phone);
+      // Validação POR CANAL: bloquear e-mail por falta de telefone seria falso,
+      // e é justamente quem só usa e-mail que se perderia.
+      const semTelefone = userIds.filter(
+        (id) =>
+          !porId.get(id)!.user?.phone &&
+          Object.values(matriz[id]).some((c) => c.whatsapp === true)
+      );
       if (semTelefone.length > 0) {
         return NextResponse.json(
           {
@@ -344,32 +394,22 @@ export async function PATCH(req: NextRequest) {
       }
     }
 
-    const curRecipients =
-      ((current.userRecipients as { events?: Record<string, string[]> } | undefined)
-        ?.events) ?? {};
-    const nextEvents: Record<string, string[]> = { ...curRecipients };
-    for (const [category, lista] of Object.entries(pedidos)) {
-      if (lista === undefined) continue;
-      const antes = new Set(curRecipients[category] ?? []);
-      const depois = [...new Set(lista)];
-      if (depois.length > 0) nextEvents[category] = depois;
-      else delete nextEvents[category];
-      // Só os NOVOS têm o canal habilitado. Quem sai da lista NÃO é desligado:
-      // pode ter um opt-in próprio anterior, e apagá-lo seria desfazer uma
-      // escolha que não é do admin.
-      const novos = depois.filter((id) => !antes.has(id));
-      if (novos.length > 0) {
-        toEnable.push({ category: category as UserNotifCategory, userIds: novos });
-      }
+    // A org guarda só QUEM tem alcance org-wide. O "o quê" e "por qual canal"
+    // vivem na preferência da pessoa — que é onde ela também pode desligar.
+    const comAlgumCanal = userIds.filter((id) =>
+      Object.values(matriz[id]).some((c) => c.email === true || c.whatsapp === true)
+    );
+    matrizGravada = { users: comAlgumCanal };
+
+    for (const userId of userIds) {
+      aplicarPrefs.push({ userId, porTipo: matriz[userId] });
     }
-    mergedRecipients =
-      Object.keys(nextEvents).length > 0 ? { events: nextEvents } : {};
   }
 
   const next = {
     ...current,
     ...(mergedEvents !== undefined ? { events: mergedEvents } : {}),
-    ...(mergedRecipients !== undefined ? { userRecipients: mergedRecipients } : {}),
+    ...(matrizGravada !== undefined ? { userRecipients: matrizGravada } : {}),
     ...(parsed.data.formReminder !== undefined
       ? {
           formReminder: {
@@ -390,12 +430,11 @@ export async function PATCH(req: NextRequest) {
 
   // Depois de gravar a lista, materializa a preferência de quem entrou — senão
   // a escolha do admin não produz efeito nenhum.
-  for (const { category, userIds } of toEnable) {
-    await enableChannelFor({
-      userIds,
+  if (aplicarPrefs.length > 0) {
+    await applyUserMatrix({
       orgId: ctx.orgId,
-      category,
       byUserId: ctx.userId,
+      entradas: aplicarPrefs,
     });
   }
 
@@ -418,7 +457,9 @@ export async function PATCH(req: NextRequest) {
         formReminderPatched: parsed.data.formReminder !== undefined,
         // Quem foi habilitado por decisão do admin, e em qual categoria. É a
         // trilha que responde "quem ligou o WhatsApp dessa pessoa?".
-        canalHabilitadoPara: toEnable.length > 0 ? toEnable : undefined,
+        // Trilha que responde "quem ligou o aviso dessa pessoa?".
+        matrizAplicadaPara:
+          aplicarPrefs.length > 0 ? aplicarPrefs.map((e) => e.userId) : undefined,
       },
     }
   );

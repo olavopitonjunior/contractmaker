@@ -2,8 +2,13 @@ import * as React from "react";
 import { EmailLayout, ActionButton } from "./shared";
 
 /**
- * Template genérico de "atualização do processo" enviado a corretores.
+ * Template genérico de "atualização do processo".
  * O branding da imobiliária entra via sendEmail({ orgId }) — ver shared.tsx.
+ *
+ * Serve dois públicos, que diferem só em duas frases: o CORRETOR (externo, que
+ * "participa do negócio" e pede pra sair falando com a imobiliária) e a EQUIPE
+ * (interna, que configura o próprio aviso). Sem `forTeam`, o e-mail chegaria
+ * pra própria negociadora dizendo que ela é parte externa.
  */
 export interface DealUpdateEmailProps {
   recipientName: string;
@@ -17,6 +22,8 @@ export interface DealUpdateEmailProps {
   /** Link externo (CTA) — ex. link público do form no lembrete. Opcional. */
   ctaUrl?: string | null;
   ctaLabel?: string | null;
+  /** Destinatário é da equipe da imobiliária, não corretor externo. */
+  forTeam?: boolean;
 }
 
 const labelStyle: React.CSSProperties = {
@@ -35,6 +42,7 @@ export function DealUpdateEmail({
   stageName,
   ctaUrl,
   ctaLabel,
+  forTeam,
 }: DealUpdateEmailProps) {
   return (
     <EmailLayout title={eventTitle}>
@@ -42,8 +50,9 @@ export function DealUpdateEmail({
         {eventTitle}
       </h1>
       <p>
-        Olá {recipientName || ""}, temos uma atualização do negócio em que você
-        participa como corretor(a).
+        {forTeam
+          ? `Olá ${recipientName || ""}, tem novidade no acompanhamento dos negócios.`
+          : `Olá ${recipientName || ""}, temos uma atualização do negócio em que você participa como corretor(a).`}
       </p>
       <p style={{ fontSize: 15 }}>{eventBody}</p>
       <div style={{ marginTop: 16 }}>
@@ -66,8 +75,9 @@ export function DealUpdateEmail({
         </div>
       ) : null}
       <p style={{ fontSize: 12, color: "#737373", marginTop: 24 }}>
-        Você recebe estas atualizações porque está vinculado(a) a este negócio.
-        Para deixar de receber, fale com a imobiliária responsável.
+        {forTeam
+          ? "Você recebe estes avisos porque estão ligados no seu perfil. Para ajustar ou desligar, acesse Meu perfil no ImobPro."
+          : "Você recebe estas atualizações porque está vinculado(a) a este negócio. Para deixar de receber, fale com a imobiliária responsável."}
       </p>
     </EmailLayout>
   );

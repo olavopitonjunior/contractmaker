@@ -19,7 +19,7 @@
 import { prisma } from "@/lib/db/prisma";
 import {
   orgSelectedUserIds,
-  type UserNotifCategory,
+  type UserNotifChannel,
 } from "./user-channels-shared";
 
 /** Teto duro de destinatários por notificação. */
@@ -35,8 +35,10 @@ export type RecipientRule =
 export interface UserRecipient {
   userId: string;
   name: string | null;
-  /** E.164 (User.phone). Garantido não-nulo — quem não tem é filtrado antes. */
-  phone: string;
+  /** E.164 (User.phone). Não-nulo quando o canal é whatsapp. */
+  phone: string | null;
+  /** User.email — obrigatório no schema, então sempre presente. */
+  email: string | null;
 }
 
 export interface NotificationRowLite {
@@ -63,13 +65,14 @@ function dealIdFromLinkUrl(linkUrl: string | null): string | null {
 }
 
 /**
- * Carrega os usuários elegíveis: telefone preenchido, conta viva e membro
- * ATUAL da org. A checagem de membership é o que impede um ex-membro de
- * receber por uma notificação antiga ainda na janela do sweep.
+ * Carrega os usuários elegíveis: contato do CANAL preenchido, conta viva e
+ * membro ATUAL da org. A checagem de membership é o que impede um ex-membro
+ * de receber por uma notificação antiga ainda na janela do sweep.
  */
 async function loadEligible(
   userIds: string[],
-  orgId: string
+  orgId: string,
+  channel: UserNotifChannel
 ): Promise<UserRecipient[]> {
   const unique = [...new Set(userIds)].filter(Boolean);
   if (unique.length === 0) return [];
@@ -78,15 +81,24 @@ async function loadEligible(
     where: { orgId, userId: { in: unique } },
     select: {
       userId: true,
-      user: { select: { name: true, phone: true, deletedAt: true } },
+      user: { select: { name: true, phone: true, email: true, deletedAt: true } },
     },
   });
 
   const out: UserRecipient[] = [];
   for (const m of memberships) {
-    if (!m.user?.phone) continue;
-    if (m.user.deletedAt) continue;
-    out.push({ userId: m.userId, name: m.user.name, phone: m.user.phone });
+    if (m.user?.deletedAt) continue;
+    // O contato exigido é o DO CANAL. Filtrar e-mail por telefone faria sumir
+    // justamente quem só usa e-mail — e `User.email` é obrigatório no schema,
+    // então o canal e-mail nunca perde ninguém por falta de contato.
+    if (channel === "whatsapp" && !m.user?.phone) continue;
+    if (channel === "email" && !m.user?.email) continue;
+    out.push({
+      userId: m.userId,
+      name: m.user?.name ?? null,
+      phone: m.user?.phone ?? null,
+      email: m.user?.email ?? null,
+    });
   }
   return out;
 }
@@ -110,20 +122,16 @@ function capped(users: UserRecipient[], notificationId: string): UserRecipient[]
 }
 
 /**
- * Os userIds que o admin escolheu para esta categoria, nesta org. Nunca lança:
- * sem lista, ou erro de leitura, devolve vazio e a cascata segue sozinha.
+ * Os userIds com alcance org-wide nesta org. Nunca lança: sem lista, ou erro
+ * de leitura, devolve vazio e a cascata segue sozinha.
  */
-async function loadOrgSelected(
-  orgId: string,
-  category: UserNotifCategory | undefined
-): Promise<string[]> {
-  if (!category) return [];
+async function loadOrgSelected(orgId: string): Promise<string[]> {
   try {
     const row = await prisma.orgNotificationSettings.findUnique({
       where: { orgId },
       select: { settingsJson: true },
     });
-    return orgSelectedUserIds(row?.settingsJson, category);
+    return orgSelectedUserIds(row?.settingsJson);
   } catch (err) {
     console.error("[user-recipients] falha ao ler destinatários da org:", err);
     return [];
@@ -134,21 +142,22 @@ async function loadOrgSelected(
  * Resolve os destinatários de uma notificação. Nunca lança — erro de DB vira
  * `{ users: [], rule: "none" }` e o chamador registra o skip.
  *
- * `category` habilita a lista escolhida pelo admin; sem ela, só a cascata roda
- * (é o que mantém os chamadores antigos funcionando sem mudança).
+ * `channel` decide qual CONTATO é exigido (telefone no WhatsApp, e-mail no
+ * e-mail) — resolver os dois com o mesmo filtro faria quem só tem e-mail
+ * desaparecer do canal que ela de fato usa.
  */
 export async function resolveNotificationUsers(
   n: NotificationRowLite,
-  category?: UserNotifCategory
+  channel: UserNotifChannel = "whatsapp"
 ): Promise<{ users: UserRecipient[]; rule: RecipientRule }> {
   try {
-    const selected = await loadOrgSelected(n.orgId, category);
+    const selected = await loadOrgSelected(n.orgId);
 
     // 1. Notificação direcionada: o alvo já está declarado, e só ele.
     // Direcionada é privada (o sino esconde dos outros), então a lista da org
     // NÃO soma aqui — somar vazaria uma notificação pessoal pra terceiros.
     if (n.userId) {
-      const users = await loadEligible([n.userId], n.orgId);
+      const users = await loadEligible([n.userId], n.orgId, channel);
       return { users, rule: "direct" };
     }
 
@@ -161,7 +170,7 @@ export async function resolveNotificationUsers(
       });
       // Guard cross-org: a notificação não pode arrastar dono de outro tenant.
       if (deal?.userId && deal.pipeline.orgId === n.orgId) {
-        const users = await loadEligible([deal.userId, ...selected], n.orgId);
+        const users = await loadEligible([deal.userId, ...selected], n.orgId, channel);
         return {
           users: capped(users, n.id),
           rule: selected.length > 0 ? "org_selected" : "deal_owner",
@@ -178,7 +187,7 @@ export async function resolveNotificationUsers(
     });
     const orgWide = [...selected, ...admins.map((a) => a.userId)];
     if (orgWide.length > 0) {
-      const users = await loadEligible(orgWide, n.orgId);
+      const users = await loadEligible(orgWide, n.orgId, channel);
       return {
         users: capped(users, n.id),
         rule: selected.length > 0 ? "org_selected" : "org_admins",
@@ -188,7 +197,7 @@ export async function resolveNotificationUsers(
     // 4. Sem deal e sem admin, mas com lista escolhida — org sem owner/admin
     // vivo é raro, mas a lista não deve morrer por isso.
     if (selected.length > 0) {
-      const users = await loadEligible(selected, n.orgId);
+      const users = await loadEligible(selected, n.orgId, channel);
       if (users.length > 0) {
         return { users: capped(users, n.id), rule: "org_selected" };
       }
