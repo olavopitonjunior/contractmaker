@@ -2,17 +2,35 @@
  * Quem, entre os USUÁRIOS da plataforma, deve receber uma notificação em
  * canal externo.
  *
- * Cascata que PARA no primeiro passo que resolver — nunca soma passos, nunca
- * faz broadcast por OrgMembership. O pior caso é um punhado de admins, e só
- * quando a notificação é genuinamente org-wide e sem deal.
+ * Duas partes:
+ *
+ *  1. **Cascata**, que PARA no primeiro passo que resolver — nunca faz
+ *     broadcast por OrgMembership. O pior caso é um punhado de admins, e só
+ *     quando a notificação é genuinamente org-wide e sem deal.
+ *  2. **Lista escolhida pelo admin** (`settingsJson.userRecipients`), que SOMA
+ *     ao resultado da cascata, para qualquer negócio da org.
+ *
+ * A parte 2 existe porque a cascata resolve no dono do negócio, e há quem
+ * precise saber de tudo sem ser dono de nada — a negociadora que acompanha o
+ * processo inteiro é o caso que motivou. Continua não sendo broadcast: é uma
+ * lista explícita, finita e limitada pelo mesmo teto.
  */
 
 import { prisma } from "@/lib/db/prisma";
+import {
+  orgSelectedUserIds,
+  type UserNotifCategory,
+} from "./user-channels-shared";
 
 /** Teto duro de destinatários por notificação. */
 export const MAX_RECIPIENTS_PER_NOTIFICATION = 5;
 
-export type RecipientRule = "direct" | "deal_owner" | "org_admins" | "none";
+export type RecipientRule =
+  | "direct"
+  | "deal_owner"
+  | "org_admins"
+  | "org_selected"
+  | "none";
 
 export interface UserRecipient {
   userId: string;
@@ -74,20 +92,67 @@ async function loadEligible(
 }
 
 /**
+ * Aplica o teto de destinatários. Corte silencioso lê como "avisei todos"
+ * quando não avisou — então quem sobrou fica no log, nominalmente.
+ *
+ * `loadEligible` já deduplica por userId, então quem é dono do negócio E está
+ * na lista escolhida aparece uma vez só.
+ */
+function capped(users: UserRecipient[], notificationId: string): UserRecipient[] {
+  if (users.length <= MAX_RECIPIENTS_PER_NOTIFICATION) return users;
+  const kept = users.slice(0, MAX_RECIPIENTS_PER_NOTIFICATION);
+  const dropped = users.slice(MAX_RECIPIENTS_PER_NOTIFICATION);
+  console.warn(
+    `[user-recipients] notificação ${notificationId}: teto de ${MAX_RECIPIENTS_PER_NOTIFICATION} ` +
+      `destinatários atingido — ${dropped.length} fora: ${dropped.map((u) => u.userId).join(", ")}`
+  );
+  return kept;
+}
+
+/**
+ * Os userIds que o admin escolheu para esta categoria, nesta org. Nunca lança:
+ * sem lista, ou erro de leitura, devolve vazio e a cascata segue sozinha.
+ */
+async function loadOrgSelected(
+  orgId: string,
+  category: UserNotifCategory | undefined
+): Promise<string[]> {
+  if (!category) return [];
+  try {
+    const row = await prisma.orgNotificationSettings.findUnique({
+      where: { orgId },
+      select: { settingsJson: true },
+    });
+    return orgSelectedUserIds(row?.settingsJson, category);
+  } catch (err) {
+    console.error("[user-recipients] falha ao ler destinatários da org:", err);
+    return [];
+  }
+}
+
+/**
  * Resolve os destinatários de uma notificação. Nunca lança — erro de DB vira
  * `{ users: [], rule: "none" }` e o chamador registra o skip.
+ *
+ * `category` habilita a lista escolhida pelo admin; sem ela, só a cascata roda
+ * (é o que mantém os chamadores antigos funcionando sem mudança).
  */
 export async function resolveNotificationUsers(
-  n: NotificationRowLite
+  n: NotificationRowLite,
+  category?: UserNotifCategory
 ): Promise<{ users: UserRecipient[]; rule: RecipientRule }> {
   try {
+    const selected = await loadOrgSelected(n.orgId, category);
+
     // 1. Notificação direcionada: o alvo já está declarado, e só ele.
+    // Direcionada é privada (o sino esconde dos outros), então a lista da org
+    // NÃO soma aqui — somar vazaria uma notificação pessoal pra terceiros.
     if (n.userId) {
       const users = await loadEligible([n.userId], n.orgId);
       return { users, rule: "direct" };
     }
 
-    // 2. Ancorada num deal → dono do negócio.
+    // 2. Ancorada num deal → dono do negócio, MAIS os escolhidos pelo admin.
     const dealId = dealIdFromMetadata(n.metadata) ?? dealIdFromLinkUrl(n.linkUrl);
     if (dealId) {
       const deal = await prisma.deal.findUnique({
@@ -96,26 +161,37 @@ export async function resolveNotificationUsers(
       });
       // Guard cross-org: a notificação não pode arrastar dono de outro tenant.
       if (deal?.userId && deal.pipeline.orgId === n.orgId) {
-        const users = await loadEligible([deal.userId], n.orgId);
-        return { users, rule: "deal_owner" };
+        const users = await loadEligible([deal.userId, ...selected], n.orgId);
+        return {
+          users: capped(users, n.id),
+          rule: selected.length > 0 ? "org_selected" : "deal_owner",
+        };
       }
     }
 
-    // 3. Org-wide sem deal → owners/admins, limitado.
+    // 3. Org-wide sem deal → owners/admins, limitado. Os escolhidos entram
+    // junto: quem foi marcado deve receber mesmo que não seja admin.
     const admins = await prisma.orgMembership.findMany({
       where: { orgId: n.orgId, role: { in: ["owner", "admin"] } },
       select: { userId: true },
       take: MAX_RECIPIENTS_PER_NOTIFICATION,
     });
-    if (admins.length > 0) {
-      const users = await loadEligible(
-        admins.map((a) => a.userId),
-        n.orgId
-      );
+    const orgWide = [...selected, ...admins.map((a) => a.userId)];
+    if (orgWide.length > 0) {
+      const users = await loadEligible(orgWide, n.orgId);
       return {
-        users: users.slice(0, MAX_RECIPIENTS_PER_NOTIFICATION),
-        rule: "org_admins",
+        users: capped(users, n.id),
+        rule: selected.length > 0 ? "org_selected" : "org_admins",
       };
+    }
+
+    // 4. Sem deal e sem admin, mas com lista escolhida — org sem owner/admin
+    // vivo é raro, mas a lista não deve morrer por isso.
+    if (selected.length > 0) {
+      const users = await loadEligible(selected, n.orgId);
+      if (users.length > 0) {
+        return { users: capped(users, n.id), rule: "org_selected" };
+      }
     }
 
     return { users: [], rule: "none" };

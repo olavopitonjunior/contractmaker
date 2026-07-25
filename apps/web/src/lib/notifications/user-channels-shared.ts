@@ -48,6 +48,16 @@ export interface UserChannelToggles {
 /** Shape persistido em UserNotificationPreference.settingsJson. */
 export interface UserNotificationPrefsJson {
   events?: Partial<Record<UserNotifCategory, UserChannelToggles>>;
+  /**
+   * Quando o canal foi ligado por um ADMIN e não pela própria pessoa (ver
+   * `userRecipients` abaixo). Sem isto, o `whatsappOptInAt` diria "ela
+   * consentiu" numa linha em que ela não fez nada — o campo mentiria.
+   *
+   * Ausência = opt-in próprio, o caminho normal do /perfil.
+   */
+  enabledBy?: Partial<
+    Record<UserNotifCategory, { byUserId: string; at: string }>
+  >;
 }
 
 /**
@@ -65,9 +75,54 @@ export const DEFAULT_USER_CHANNEL: Required<UserChannelToggles> = {
   whatsapp: false,
 };
 
+/**
+ * Destinatários ESCOLHIDOS PELO ADMIN, dentro de
+ * OrgNotificationSettings.settingsJson.userRecipients.
+ *
+ * Por que existe: a cascata de user-recipients.ts resolve no dono do negócio, e
+ * há quem precise saber de tudo sem ser dono de nada — a negociadora que
+ * acompanha o processo inteiro é o caso que motivou isto. Esta lista SOMA à
+ * cascata, para qualquer negócio da org.
+ *
+ * Diferente do kill switch (`userChannels`), que só desliga, esta lista LIGA: o
+ * admin escolhe e o canal é habilitado em nome da pessoa, com registro em
+ * `UserNotificationPrefsJson.enabledBy`. A pessoa mantém o poder de desligar no
+ * próprio perfil — "o admin liga, o usuário desliga", simétrico ao inverso.
+ *
+ * NÃO confundir com `NotificationConfigJson.brokerIds`, que são
+ * `SplitRecipient.id` de corretores. `User.id` ali é no-op silencioso.
+ */
+export interface OrgUserRecipientsJson {
+  /** userIds por categoria. */
+  events?: Partial<Record<UserNotifCategory, string[]>>;
+}
+
 export function isUserNotifCategory(v: unknown): v is UserNotifCategory {
   return (
     typeof v === "string" &&
     (USER_NOTIF_CATEGORIES as readonly string[]).includes(v)
   );
+}
+
+/** Lê `settingsJson.userRecipients` tolerando lixo. Client-safe. */
+export function coerceOrgUserRecipients(raw: unknown): OrgUserRecipientsJson {
+  if (typeof raw !== "object" || raw === null) return {};
+  const settings = raw as { userRecipients?: unknown };
+  const ur = settings.userRecipients;
+  if (typeof ur !== "object" || ur === null) return {};
+  return ur as OrgUserRecipientsJson;
+}
+
+/** Os userIds escolhidos para uma categoria. Sempre array, sempre sem lixo. */
+export function orgSelectedUserIds(
+  settingsJson: unknown,
+  category: UserNotifCategory
+): string[] {
+  const list = coerceOrgUserRecipients(settingsJson).events?.[category];
+  if (!Array.isArray(list)) return [];
+  return [
+    ...new Set(
+      list.filter((id): id is string => typeof id === "string" && id.length > 0)
+    ),
+  ];
 }

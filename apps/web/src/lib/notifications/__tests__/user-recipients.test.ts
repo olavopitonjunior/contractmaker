@@ -136,3 +136,194 @@ describe("resolveNotificationUsers — cascata de destinatários", () => {
     ).resolves.toEqual({ users: [], rule: "none" });
   });
 });
+
+// ── Lista escolhida pelo admin (settingsJson.userRecipients) ────────────────
+//
+// O que estes testes protegem: a cascata resolve no DONO do negócio, e quem
+// acompanha o processo inteiro sem ser dono de nada (a negociadora) nunca era
+// alcançado. A lista soma — mas não pode somar em notificação direcionada, que
+// é privada no sino, nem furar o teto em silêncio.
+
+const orgSettingsFind = prisma.orgNotificationSettings
+  .findUnique as unknown as ReturnType<typeof vi.fn>;
+
+function comLista(events: Record<string, string[]>) {
+  orgSettingsFind.mockResolvedValue({ settingsJson: { userRecipients: { events } } });
+}
+
+/**
+ * Mock de orgMembership.findMany que RESPEITA o `where`. `loadEligible` confia
+ * no filtro da query (não filtra em memória), então um mock que devolve todo
+ * mundo esconderia exatamente o bug de vazar destinatário — foi o que quase
+ * passou aqui. Trata as duas formas usadas: filtro por `userId.in` (elegíveis)
+ * e por `role.in` (busca de admins).
+ */
+function comMembros(...ms: ReturnType<typeof member>[]) {
+  membershipMany.mockImplementation((args?: { where?: Record<string, unknown>; take?: number }) => {
+    const where = args?.where ?? {};
+    const ids = (where.userId as { in?: string[] } | undefined)?.in;
+    let out = ms;
+    if (ids) out = ms.filter((m) => ids.includes(m.userId));
+    else if (where.role) out = ms.filter((m) => (m as { role?: string }).role !== undefined);
+    return Promise.resolve(args?.take ? out.slice(0, args.take) : out);
+  });
+}
+
+describe("resolveNotificationUsers — destinatários escolhidos pelo admin", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    comMembros();
+    dealFind.mockResolvedValue(null);
+    orgSettingsFind.mockResolvedValue(null);
+  });
+
+  it("sem categoria não lê a lista — chamador antigo segue igual", async () => {
+    comLista({ deal_updates: ["marcia"] });
+    dealFind.mockResolvedValue({ userId: "dono", pipeline: { orgId: "org1" } });
+    comMembros(member("dono"));
+
+    const r = await resolveNotificationUsers(notif({ metadata: { dealId: "deal1" } }));
+
+    expect(r.rule).toBe("deal_owner");
+    expect(orgSettingsFind).not.toHaveBeenCalled();
+  });
+
+  it("soma o escolhido ao dono do negócio", async () => {
+    comLista({ deal_updates: ["marcia"] });
+    dealFind.mockResolvedValue({ userId: "dono", pipeline: { orgId: "org1" } });
+    comMembros(member("dono"), member("marcia"));
+
+    const r = await resolveNotificationUsers(
+      notif({ metadata: { dealId: "deal1" } }),
+      "deal_updates"
+    );
+
+    expect(r.rule).toBe("org_selected");
+    expect(r.users.map((u) => u.userId).sort()).toEqual(["dono", "marcia"]);
+  });
+
+  it("alcança o escolhido em negócio de OUTRO dono — o caso que motivou", async () => {
+    comLista({ deal_updates: ["marcia"] });
+    dealFind.mockResolvedValue({ userId: "olavo", pipeline: { orgId: "org1" } });
+    comMembros(member("olavo"), member("marcia"));
+
+    const r = await resolveNotificationUsers(
+      notif({ metadata: { dealId: "deal-do-olavo" } }),
+      "deal_updates"
+    );
+
+    expect(r.users.map((u) => u.userId)).toContain("marcia");
+  });
+
+  it("dono que também está na lista aparece uma vez só", async () => {
+    comLista({ deal_updates: ["marcia"] });
+    dealFind.mockResolvedValue({ userId: "marcia", pipeline: { orgId: "org1" } });
+    comMembros(member("marcia"));
+
+    const r = await resolveNotificationUsers(
+      notif({ metadata: { dealId: "deal1" } }),
+      "deal_updates"
+    );
+
+    expect(r.users.map((u) => u.userId)).toEqual(["marcia"]);
+  });
+
+  it("NÃO soma em notificação direcionada — ela é privada no sino", async () => {
+    comLista({ deal_updates: ["marcia"] });
+    comMembros(member("alvo"), member("marcia"));
+
+    const r = await resolveNotificationUsers(
+      notif({ userId: "alvo", metadata: { dealId: "deal1" } }),
+      "deal_updates"
+    );
+
+    expect(r.rule).toBe("direct");
+    expect(r.users.map((u) => u.userId)).toEqual(["alvo"]);
+  });
+
+  it("lista de outra categoria não vaza pra esta", async () => {
+    comLista({ financeiro: ["tesoureiro"] });
+    dealFind.mockResolvedValue({ userId: "dono", pipeline: { orgId: "org1" } });
+    comMembros(member("dono"));
+
+    const r = await resolveNotificationUsers(
+      notif({ metadata: { dealId: "deal1" } }),
+      "deal_updates"
+    );
+
+    expect(r.users.map((u) => u.userId)).toEqual(["dono"]);
+  });
+
+  it("quem não é membro da org é descartado pela elegibilidade", async () => {
+    comLista({ deal_updates: ["estranho"] });
+    dealFind.mockResolvedValue({ userId: "dono", pipeline: { orgId: "org1" } });
+    comMembros(member("dono")); // 'estranho' não volta
+
+    const r = await resolveNotificationUsers(
+      notif({ metadata: { dealId: "deal1" } }),
+      "deal_updates"
+    );
+
+    expect(r.users.map((u) => u.userId)).toEqual(["dono"]);
+  });
+
+  it("quem não tem telefone é descartado", async () => {
+    comLista({ deal_updates: ["semfone"] });
+    dealFind.mockResolvedValue({ userId: "dono", pipeline: { orgId: "org1" } });
+    comMembros(member("dono"),
+      member("semfone", { user: { name: "Sem Fone", phone: null, deletedAt: null } }),);
+
+    const r = await resolveNotificationUsers(
+      notif({ metadata: { dealId: "deal1" } }),
+      "deal_updates"
+    );
+
+    expect(r.users.map((u) => u.userId)).toEqual(["dono"]);
+  });
+
+  it("respeita o teto de 5 e AVISA quem ficou fora", async () => {
+    const escolhidos = ["u1", "u2", "u3", "u4", "u5", "u6"];
+    comLista({ deal_updates: escolhidos });
+    dealFind.mockResolvedValue({ userId: "dono", pipeline: { orgId: "org1" } });
+    comMembros(member("dono"), ...escolhidos.map((u) => member(u)));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const r = await resolveNotificationUsers(
+      notif({ metadata: { dealId: "deal1" } }),
+      "deal_updates"
+    );
+
+    expect(r.users).toHaveLength(5);
+    expect(warn).toHaveBeenCalled();
+    // O aviso nomeia quem sobrou — corte silencioso lê como "avisei todos".
+    expect(String(warn.mock.calls[0]?.[0])).toMatch(/fora:/);
+    warn.mockRestore();
+  });
+
+  it("erro lendo a lista não derruba a cascata", async () => {
+    orgSettingsFind.mockRejectedValue(new Error("db fora"));
+    dealFind.mockResolvedValue({ userId: "dono", pipeline: { orgId: "org1" } });
+    comMembros(member("dono"));
+    const err = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const r = await resolveNotificationUsers(
+      notif({ metadata: { dealId: "deal1" } }),
+      "deal_updates"
+    );
+
+    expect(r.users.map((u) => u.userId)).toEqual(["dono"]);
+    err.mockRestore();
+  });
+
+  it("sem deal e sem admin, a lista sozinha ainda entrega", async () => {
+    comLista({ deal_updates: ["marcia"] });
+    membershipMany
+      .mockResolvedValueOnce([])                 // busca de admins: nenhum
+      .mockResolvedValue([member("marcia")]);    // loadEligible
+
+    const r = await resolveNotificationUsers(notif(), "deal_updates");
+
+    expect(r.rule).toBe("org_selected");
+    expect(r.users.map((u) => u.userId)).toEqual(["marcia"]);
+  });
+});

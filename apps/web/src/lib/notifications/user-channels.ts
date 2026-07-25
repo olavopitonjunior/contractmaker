@@ -310,7 +310,9 @@ export async function dispatchUserNotification(params: {
     const policy = policyForType(notification.type);
     if (!policy) return zero; // fora da allowlist — no-op silencioso
 
-    const { users } = await resolveNotificationUsers(notification);
+    // A categoria habilita a lista de destinatários escolhida pelo admin
+    // (settingsJson.userRecipients) — sem ela, só a cascata dono/admins roda.
+    const { users } = await resolveNotificationUsers(notification, policy.category);
     if (users.length === 0) return zero;
 
     const allowed = await filterUsersOptedIn({
