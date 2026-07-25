@@ -7,6 +7,8 @@ import {
 } from "@/lib/api/require-auth";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
+import { notifyDealEvent, stageChangeDedupeKey } from "@/lib/notifications/deal-events";
+import { waitUntil } from "@vercel/functions";
 import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
 
 export const runtime = "nodejs";
@@ -88,6 +90,19 @@ export async function POST(
         apiAuth.actor
       ),
     }
+  );
+
+  // Notificação do processo — espelha o gêmeo de sessão em
+  // /api/pipeline/deals/[dealId]/mark-signed. A mudança de status importa por
+  // si; se foi o Newton ou um humano que marcou, o corretor não precisa saber.
+  waitUntil(
+    notifyDealEvent({
+      dealId: deal.id,
+      orgId: apiAuth.org.id,
+      event: "stage_change",
+      dedupeKey: stageChangeDedupeKey(targetStage.id),
+      context: { stageName: targetStage.name },
+    })
   );
 
   queueSurveyDispatch(deal.id, targetStage.name);

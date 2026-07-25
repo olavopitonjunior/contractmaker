@@ -10,6 +10,8 @@ import { etagFor } from "@/lib/api/etag";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { requireApproval, approvalResponse } from "@/lib/api/intents";
+import { notifyDealEvent, stageChangeDedupeKey } from "@/lib/notifications/deal-events";
+import { waitUntil } from "@vercel/functions";
 
 export const runtime = "nodejs";
 
@@ -143,6 +145,26 @@ export async function PATCH(
       ),
     }
   );
+
+  // Notificação do processo — MESMO hook do PATCH de sessão em
+  // /api/pipeline/deals/[dealId]:133. Antes só a rota de sessão notificava, o
+  // que fazia o corretor ser avisado quando um humano arrastava o card e NÃO
+  // quando o Newton movia o mesmo negócio via `move_deal_stage`. A mudança de
+  // status importa por si; quem a fez é irrelevante pro corretor.
+  //
+  // Mesmo dedupeKey (stage, dia BRT) das duas rotas, então mover pela API e
+  // arrastar o card no mesmo dia pro mesmo stage não notifica em dobro.
+  if (parsed.data.stageId && parsed.data.stageId !== deal.stageId) {
+    waitUntil(
+      notifyDealEvent({
+        dealId: updated.id,
+        orgId: apiAuth.org.id,
+        event: "stage_change",
+        dedupeKey: stageChangeDedupeKey(updated.stageId),
+        context: { stageName: updated.stage.name },
+      })
+    );
+  }
 
   return NextResponse.json({
     id: updated.id,
