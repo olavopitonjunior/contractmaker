@@ -89,21 +89,63 @@ Se quiser apertar mais, reduza os scopes do API token que o Newton usa
 Cortar os scopes vale para **todos** os canais do agente, inclusive 1:1 e as réguas de
 locação, então avalie antes.
 
-## Crons do lado Newton — auditados em 2026-07-25
+## O relatório em grupo: era o proposal-tracker do sidecar
 
-A aba Crons do MC (`/agents/newton/crons`, somente leitura) mostrava **2 jobs**, ambos
-para o **Telegram do Olavo**, nenhum para grupo de WhatsApp:
+> Correção de 2026-07-25. Uma versão anterior deste doc afirmava que "não existe cron
+> de relatório em grupo". **Falso** — existia, e a auditoria pela aba Crons não podia
+> tê-lo encontrado, porque ele não é um cron do openclaw.
 
-| job | schedule | destino | o que faz |
-|---|---|---|---|
-| `morning-briefing` | `30 7 * * 1-5` SP | `telegram→8720422159` | briefing matinal Newton → Olavo |
-| `stale-deals` | `0 10,14,18 * * 1-5` SP | `telegram→8720422159` | cutuca deals estagnados 3×/dia |
+O resumo `🗂️ Resumo de propostas — Negócios NC` que caía no grupo 2×/dia vinha de
+`/docker/openclaw-sidecar/src/proposal-tracker.js`, um scheduler próprio do **sidecar**
+(tick de 60s + dedup diário em `proposal-chaser.json`), configurado por env no
+`.env` do compose `/docker/openclaw-mvzp/`:
 
-Os dois apareciam como `ACTIVE` mas com "última 31-32d atrás · próxima 31d atrás" — ou
-seja, **o scheduler não os dispara há um mês**. O agente Max não tem cron nenhum.
+| env | valor | papel |
+|---|---|---|
+| `NC_PROP_GROUP_ID` | `120363407415575253-group` | grupo de destino e de ingestão |
+| `NC_PROP_CHASE_TIMES` | era `08:30,17:30` → **vazio** | horários do disparo |
+| `NC_PROP_SUMMARY_DMS` | 2 telefones | quem pode consultar (não é destino) |
 
-Conclusão: não existe cron de relatório em grupo. O que incomodava vinha do sweep do
-Vercel, já removido.
+A entrega era `cm.callTool("whatsapp_send", { to: gid, body: resumo })` — a mesma tool
+MCP que agora rejeita JID de grupo.
+
+**Ação tomada:** `NC_PROP_CHASE_TIMES` esvaziada (backup `.env.bak-prop-chase-off-*`),
+container `sidecar` recriado. O rastreador sobe mas nunca dispara; `isPropGroup()`
+continua valendo, então a consulta por `@` com as tools `prop_*` foi preservada — foi a
+escolha do Olavo entre desligar tudo e manter o sob demanda.
+
+**Patch junto:** `ingestGroupDelta` só era chamado dentro do `runChasePass`. Com os
+horários vazios, o banco pararia de incorporar propostas novas e o `@` responderia dado
+velho. `handlePropTool` passou a ingerir na hora, em `prop_resumo`/`prop_list` (backup
+`proposal-tracker.js.bak-preingest-*`).
+
+### Onde procurar da próxima vez
+
+Três lugares distintos, e a aba Crons só enxerga o primeiro:
+
+1. `cron/jobs.json` do openclaw → aba Crons do MC;
+2. **schedulers próprios do sidecar** (`proposal-tracker.js`, `nc-scheduler.js`,
+   `proactive-scheduler.js`, `balance-watcher.js`, `doc-collector-watcher.js`) →
+   configurados por env no `.env` do compose, invisíveis no MC;
+3. `vercel.json` do Contractmaker.
+
+### Crons do openclaw (auditados, sem relação com grupo)
+
+| job | schedule | destino |
+|---|---|---|
+| `morning-briefing` | `30 7 * * 1-5` SP | `telegram→` DM do Olavo |
+| `stale-deals` | `0 10,14,18 * * 1-5` SP | `telegram→` DM do Olavo |
+
+Ambos `ACTIVE` mas sem execução há ~1 mês. O agente Max não tem cron.
+
+### Ainda ativo, por decisão
+
+- `WATCH_DOC_COLLECTOR=1` — `doc-collector-watcher.js` observa grupos com
+  `group_config.watch_documents=1` (1 grupo hoje) e, ao ver documento novo, **pergunta
+  na DM da aprovadora**. Não posta no grupo e não anexa sozinho.
+- `WA_MENTION_ONLY_GROUPS` já inclui o grupo Negócios NC — o gate do `@` para ele é
+  infra do gateway, anterior e independente do que a persona diz.
+- `WATCH_DEAL_GROUP=0` — o vigia de grupo único já estava desligado.
 
 ## Checklist de smoke
 
