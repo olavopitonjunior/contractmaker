@@ -10,6 +10,7 @@ import {
   maskWalletId,
 } from "@/lib/asaas/account";
 import { AccountSwitcher } from "@/components/financeiro/AccountSwitcher";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,10 @@ export default async function FinanceiroLayout({
   const org = await getUserOrg(session.user.id);
   if (!org) redirect("/");
 
+  // Impersonation: sob "trocar de tenant", quem resolve membership/RBAC é o dono
+  // do tenant, não o super_admin (ver lib/auth/impersonation.ts).
+  const effUserId = await getEffectiveUserId(session.user.id);
+
   // Gate de módulo: financeiro/pagadoria pertence a Vendas. Tenant só-locação
   // (feature OFF) é redirecionado pra /locacao — antes de qualquer lookup Asaas.
   const modules = await getOrgModules(org.id);
@@ -41,7 +46,7 @@ export default async function FinanceiroLayout({
   const h = await headers();
   const pathname = h.get("x-pathname") ?? "";
 
-  const accessible = await listAccessibleAccounts(session.user.id, org.id);
+  const accessible = await listAccessibleAccounts(effUserId, org.id);
   const approved = accessible.some((a) => a.status === "APPROVED");
 
   if (!approved) {

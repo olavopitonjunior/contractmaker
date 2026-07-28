@@ -12,6 +12,8 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { DashboardHeader } from "@/components/layout/dashboard-header";
 import { AIAssistButton } from "@/components/ai-assist/AIAssistButton";
 import { ImpersonationBanner } from "@/components/admin/ImpersonationBanner";
+import { TenantSwitcher } from "@/components/admin/TenantSwitcher";
+import { getPlatformRole } from "@/lib/security/rbac/platform";
 
 export default async function DashboardLayout({
   children,
@@ -55,6 +57,39 @@ export default async function DashboardLayout({
       onboarding = await getOnboardingStatus(org.id);
     }
   }
+  // Switcher de tenant: só pra staff de plataforma com super_admin. A lista de
+  // orgs é montada aqui (server) — o header é client e não pode consultar
+  // PlatformRole. `homeOrg` é a org de origem do admin (1ª membership), pra onde
+  // o item "minha org" volta encerrando a impersonation.
+  const platform = await getPlatformRole(session.user.id);
+  let tenantSwitcher: React.ReactNode = null;
+  if (platform?.role === "super_admin") {
+    const [orgs, homeMembership] = await Promise.all([
+      prisma.organization.findMany({
+        select: { id: true, name: true, subdomain: true, suspendedAt: true },
+        orderBy: { name: "asc" },
+      }),
+      prisma.orgMembership.findFirst({
+        where: { userId: session.user.id },
+        select: { orgId: true },
+        orderBy: [{ invitedAt: "asc" }, { id: "asc" }],
+      }),
+    ]);
+    tenantSwitcher = (
+      <TenantSwitcher
+        orgs={orgs.map((o) => ({
+          id: o.id,
+          name: o.name,
+          subdomain: o.subdomain,
+          suspended: o.suspendedAt != null,
+        }))}
+        currentOrgId={org?.id ?? null}
+        homeOrgId={homeMembership?.orgId ?? null}
+        impersonating={impersonating}
+      />
+    );
+  }
+
   const tenantStyle: CSSProperties | undefined =
     branding && (branding.primaryHsl || branding.accentHsl)
       ? ({
@@ -83,8 +118,10 @@ export default async function DashboardLayout({
           brand={brand ? { logoUrl: brand.logoUrl, displayName: brand.displayName } : null}
         />
         <SidebarInset>
-          {impersonating && org && <ImpersonationBanner orgId={org.id} />}
-          <DashboardHeader />
+          {impersonating && org && (
+            <ImpersonationBanner orgId={org.id} orgName={org.name} />
+          )}
+          <DashboardHeader tenantSwitcher={tenantSwitcher} />
           <main id="main-content" tabIndex={-1} className="flex-1 p-4 sm:p-6">
             {children}
           </main>

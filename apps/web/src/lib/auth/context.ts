@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { getUserOrg } from "./auth";
+import { getImpersonationFor } from "./impersonation";
 import { sessionSubdomainHint } from "./subdomain-hint";
 import { authOrBearer, hasScope, type ResolvedAuth } from "./auth-or-bearer";
 import { resolveNewtonActor, isRejection, type NewtonActorContext } from "@/lib/audit/newton";
@@ -58,6 +59,13 @@ export interface AuthContext {
    * "como quem está agindo". `undefined` quando não há delegação ativa.
    */
   delegatedFromUserId?: string;
+  /**
+   * Quando o super_admin está operando um tenant via "trocar de tenant"
+   * (impersonation), guarda o userId REAL do admin. `userId` nesse caso é o dono
+   * do tenant — é ele que resolve membership/RBAC/escopo. `undefined` fora de
+   * impersonation.
+   */
+  impersonatedByUserId?: string;
 }
 
 export type AuthResult =
@@ -284,14 +292,31 @@ export async function requireAuth(
     }
   }
 
-  // Delegação → org validada do dono do token. Senão, resolve pela regra única
-  // sessionSubdomainHint (sessão em rota sanitizada lê o subdomínio; máquina e
-  // rotas fora do matcher pinam token-based) — mesma regra do require-auth.ts.
+  // Impersonation de tenant ("trocar de tenant" do super_admin). SÓ sessão web:
+  // bearer é máquina e a org vem do token, não de um cookie. O ator efetivo passa
+  // a ser o DONO do tenant — sem isso o admin entrava na org mas não tinha
+  // membership nela, e todo `requirePermission`/`can()` negava (403). O admin real
+  // fica em `impersonatedByUserId` e é carimbado em todo AuditLog (ver audit.ts).
+  const imp =
+    ident.via === "session" ? await getImpersonationFor(ident.userId) : null;
+  let impersonatedByUserId: string | undefined;
+  if (imp) {
+    impersonatedByUserId = ident.userId;
+    effectiveActor = { ...effectiveActor, effectiveUserId: imp.ownerUserId };
+  }
+
+  // Delegação → org validada do dono do token. Impersonation → a org impersonada
+  // (explícita, não a 1ª membership do dono, que pode ser multi-org). Senão,
+  // resolve pela regra única sessionSubdomainHint (sessão em rota sanitizada lê o
+  // subdomínio; máquina e rotas fora do matcher pinam token-based) — mesma regra
+  // do require-auth.ts.
   const org = delegationOrg
     ? delegationOrg
-    : await getUserOrg(effectiveActor.effectiveUserId, {
-        subdomainHint: sessionSubdomainHint(req, ident.via === "session"),
-      });
+    : imp
+      ? await prisma.organization.findUnique({ where: { id: imp.orgId } })
+      : await getUserOrg(effectiveActor.effectiveUserId, {
+          subdomainHint: sessionSubdomainHint(req, ident.via === "session"),
+        });
   if (!org) {
     return {
       ok: false,
@@ -307,7 +332,9 @@ export async function requireAuth(
   // condicional faz o throttle (escreve no máx. ~1x/5min por membro), sem leitura extra.
   // Fire-and-forget: roda antes do handler responder, então não sofre o cancelamento
   // pós-response do Vercel.
-  if (ident.via === "session") {
+  // `!imp`: sob impersonation o "último acesso" é do admin, não do dono do
+  // tenant — carimbar a membership dele mentiria no painel de membros.
+  if (ident.via === "session" && !imp) {
     const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
     prisma.orgMembership
       .updateMany({
@@ -325,7 +352,7 @@ export async function requireAuth(
   // leve (1 query) para preservar compatibilidade com callers que usam nome.
   let userEmail = "";
   let userName = "Usuário";
-  if (ident.via === "session") {
+  if (ident.via === "session" && !imp) {
     userEmail = ident.email ?? "";
     userName = userEmail || "Usuário";
   } else {
@@ -337,7 +364,11 @@ export async function requireAuth(
       .catch(() => null);
     userEmail = u?.email ?? "";
     userName =
-      u?.name ?? u?.email ?? `Newton (${effectiveActor.effectiveUserId.slice(0, 8)})`;
+      u?.name ??
+      u?.email ??
+      (imp
+        ? `Dono do tenant (${effectiveActor.effectiveUserId.slice(0, 8)})`
+        : `Newton (${effectiveActor.effectiveUserId.slice(0, 8)})`);
   }
 
   return {
@@ -353,6 +384,7 @@ export async function requireAuth(
       via: ident.via,
       actor: effectiveActor,
       delegatedFromUserId,
+      impersonatedByUserId,
     },
   };
 }

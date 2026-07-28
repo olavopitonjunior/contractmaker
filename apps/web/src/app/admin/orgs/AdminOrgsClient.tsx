@@ -280,7 +280,7 @@ export function AdminOrgsClient({ orgs, canCreate }: { orgs: OrgRow[]; canCreate
           <DialogHeader>
             <DialogTitle>Testar como {impersonateOrg?.name}</DialogTitle>
             <DialogDescription>
-              Você vai operar este tenant como o dono. A sessão é auditada e expira em 1h. Informe o motivo.
+              Você vai operar este tenant como o dono, com as permissões dele. A sessão é auditada (todo AuditLog carimba sua conta) e expira em 8h. Informe o motivo.
             </DialogDescription>
           </DialogHeader>
           <Input placeholder="Motivo (auditado)" value={reason} onChange={(e) => setReason(e.target.value)} autoFocus />

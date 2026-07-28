@@ -10,6 +10,7 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { responsibleDisplay } from "@/lib/proposals/status-view";
 import { clicksignRoleLabel } from "@/lib/clicksign/roles";
 import { ProposalDetailClient } from "@/components/proposals/ProposalDetailClient";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
 
 export const dynamic = "force-dynamic";
 
@@ -31,6 +32,10 @@ export default async function PropostaDetailPage({
   const org = await getUserOrg(session.user.id);
   if (!org) redirect("/pipeline");
 
+  // Impersonation: sob "trocar de tenant", quem resolve membership/RBAC é o dono
+  // do tenant, não o super_admin (ver lib/auth/impersonation.ts).
+  const effUserId = await getEffectiveUserId(session.user.id);
+
   const proposal = await prisma.proposal.findUnique({
     where: { id: params.id },
     include: {
@@ -40,7 +45,7 @@ export default async function PropostaDetailPage({
   });
   if (!proposal || proposal.orgId !== org.id) notFound();
 
-  const eff = await getEffectivePermissions(session.user.id, org.id);
+  const eff = await getEffectivePermissions(effUserId, org.id);
   if (
     !eff ||
     !canAccessProposal({

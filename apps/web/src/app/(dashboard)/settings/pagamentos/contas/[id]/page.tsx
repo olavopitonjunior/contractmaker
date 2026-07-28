@@ -12,6 +12,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, KeyRound, FileText } from "lucide-react";
 import { AccountKycLinkCard } from "@/components/settings/AccountKycLinkCard";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
 
 export const dynamic = "force-dynamic";
 
@@ -43,12 +44,16 @@ export default async function ContaDetailPage({
   const org = await getUserOrg(session.user.id);
   if (!org) redirect("/");
 
+  // Impersonation: sob "trocar de tenant", quem resolve membership/RBAC é o dono
+  // do tenant, não o super_admin (ver lib/auth/impersonation.ts).
+  const effUserId = await getEffectiveUserId(session.user.id);
+
   const { id } = await params;
-  const owner = await isOrgOwner(session.user.id, org.id);
+  const owner = await isOrgOwner(effUserId, org.id);
 
   // Non-owner precisa ter pelo menos cap "view"
   if (!owner) {
-    const canView = await userHasAccountCapability(session.user.id, id, "view");
+    const canView = await userHasAccountCapability(effUserId, id, "view");
     if (!canView) redirect("/settings/pagamentos/contas");
   }
 

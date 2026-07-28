@@ -11,10 +11,18 @@ import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const COOKIE = "mt_impersonate";
-const TTL_SECONDS = 60 * 60; // 1h
+import {
+  IMPERSONATION_COOKIE as COOKIE,
+  IMPERSONATION_TTL_SECONDS as TTL_SECONDS,
+} from "@/lib/auth/impersonation";
 
-const bodySchema = z.object({ reason: z.string().trim().min(3).max(500) });
+// `reason` opcional: o switcher de tenant do header troca com 1 clique e manda o
+// motivo padrão. O dialog do /admin/orgs continua mandando o motivo digitado —
+// ambos ficam auditados em IMPERSONATION_STARTED.
+const DEFAULT_REASON = "troca de tenant pelo switcher";
+const bodySchema = z.object({
+  reason: z.string().trim().min(3).max(500).optional(),
+});
 
 async function requireSuperAdmin(userId: string): Promise<NextResponse | null> {
   try {
@@ -43,13 +51,14 @@ export async function POST(
   const denied = await requireSuperAdmin(session.user.id);
   if (denied) return denied;
 
-  const parsed = bodySchema.safeParse(await req.json().catch(() => null));
+  const parsed = bodySchema.safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "reason obrigatório (3-500 chars)" },
+      { error: "reason inválido (3-500 chars)" },
       { status: 400 }
     );
   }
+  const reason = parsed.data.reason ?? DEFAULT_REASON;
 
   const org = await prisma.organization.findUnique({
     where: { id: params.orgId },
@@ -59,12 +68,20 @@ export async function POST(
     return NextResponse.json({ error: "Org não encontrada" }, { status: 404 });
   }
 
+  // Trocar de tenant A→B direto: encerra as sessões abertas em OUTRAS orgs antes
+  // de abrir a nova. Sem isso ficavam N sessões ativas e o carimbo de auditoria
+  // (getImpersonationAuditMeta) poderia casar com a sessão errada.
+  await prisma.tenantImpersonationSession.updateMany({
+    where: { adminUserId: session.user.id, endedAt: null },
+    data: { endedAt: new Date() },
+  });
+
   const endsAt = new Date(Date.now() + TTL_SECONDS * 1000);
   await prisma.tenantImpersonationSession.create({
     data: {
       adminUserId: session.user.id,
       orgId: org.id,
-      reason: parsed.data.reason,
+      reason,
       endsAt,
     },
   });
@@ -74,7 +91,7 @@ export async function POST(
     result: "SUCCESS",
     resourceType: "Organization",
     resource: org.id,
-    metadata: { impersonatedBy: session.user.id, reason: parsed.data.reason, endsAt },
+    metadata: { impersonatedBy: session.user.id, reason, endsAt },
   });
 
   const res = NextResponse.json({ ok: true, org, endsAt });
