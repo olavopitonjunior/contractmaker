@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { authOrBearer, hasScope, type ResolvedAuth } from "@/lib/auth/auth-or-bearer";
 import { getUserOrg } from "@/lib/auth/auth";
+import { getImpersonationFor } from "@/lib/auth/impersonation";
 import { sessionSubdomainHint } from "@/lib/auth/subdomain-hint";
 import {
   resolveNewtonActor,
@@ -41,6 +42,11 @@ export interface ApiAuthSuccess {
   ident: ResolvedAuth;
   actor: NewtonActorContext;
   org: { id: string };
+  /**
+   * userId REAL do super_admin quando a request roda sob "trocar de tenant"
+   * (impersonation). `actor.effectiveUserId` nesse caso é o dono do tenant.
+   */
+  impersonatedByUserId?: string;
 }
 
 export interface ApiAuthFailure {
@@ -139,12 +145,25 @@ export async function requireApiAuth(
   }
 
   const requireOrg = opts.requireOrg ?? true;
+
+  // Impersonation de tenant (super_admin trocou de tenant) — só sessão web.
+  // Espelha context.ts::requireAuth: ator efetivo vira o DONO do tenant (senão
+  // não há membership e o RBAC nega tudo), org vem explícita da impersonation.
+  const imp =
+    ident.via === "session" ? await getImpersonationFor(ident.userId) : null;
+  const actor: NewtonActorContext = imp
+    ? { ...actorResult, effectiveUserId: imp.ownerUserId }
+    : actorResult;
+  const impersonatedByUserId = imp ? ident.userId : undefined;
+
   // Regra única (sessionSubdomainHint, espelhada em context.ts): sessão em rota
   // sanitizada lê o subdomínio; máquina/bearer e rotas fora do matcher pinam
   // token-based. A org vem do dono do token, não de um Host controlável.
-  const org = await getUserOrg(actorResult.effectiveUserId, {
-    subdomainHint: sessionSubdomainHint(req, ident.via === "session"),
-  });
+  const org = imp
+    ? { id: imp.orgId }
+    : await getUserOrg(actor.effectiveUserId, {
+        subdomainHint: sessionSubdomainHint(req, ident.via === "session"),
+      });
   if (!org) {
     if (requireOrg) {
       return {
@@ -156,15 +175,17 @@ export async function requireApiAuth(
     // Caller pode lidar com ausência de org se needed
     return {
       ident,
-      actor: actorResult,
+      actor,
       org: { id: "" },
+      impersonatedByUserId,
     };
   }
 
   return {
     ident,
-    actor: actorResult,
+    actor,
     org: { id: org.id },
+    impersonatedByUserId,
   };
 }
 

@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { auth, getUserOrg } from "@/lib/auth/auth";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { getOrgModules, isModuleEnabled, isFeatureEnabled } from "./read";
 import type { ModuleKey, FeatureKey } from "./catalog";
 
@@ -21,6 +22,12 @@ import type { ModuleKey, FeatureKey } from "./catalog";
  * antigo (gate numa org, página noutra) nem loop de redirect. Não passar hint
  * aqui é intencional: a fonte é única, em getUserOrg. Ver memória
  * project_multiorg_subdomain_resolution.
+ *
+ * NOTA (impersonation): o `userId` devolvido é o EFETIVO — sob "trocar de tenant"
+ * é o dono da org impersonada, não o super_admin. Os call-sites usam esse id pra
+ * RBAC/escopo por membership (`getEffectivePermissions`, filtros por corretor);
+ * devolver o id cru fazia a página negar tudo dentro do tenant. Espelha
+ * requireAuth (lib/auth/context.ts). Ver lib/auth/impersonation.ts.
  */
 export async function requireModulePage(
   module: ModuleKey,
@@ -32,7 +39,7 @@ export async function requireModulePage(
   if (!org) redirect(fallback);
   const view = await getOrgModules(org.id);
   if (!isModuleEnabled(view, module)) redirect(fallback);
-  return { userId: session.user.id, orgId: org.id };
+  return { userId: await getEffectiveUserId(session.user.id), orgId: org.id };
 }
 
 export async function requireFeaturePage(
@@ -45,7 +52,7 @@ export async function requireFeaturePage(
   if (!org) redirect(fallback);
   const view = await getOrgModules(org.id);
   if (!isFeatureEnabled(view, feature)) redirect(fallback);
-  return { userId: session.user.id, orgId: org.id };
+  return { userId: await getEffectiveUserId(session.user.id), orgId: org.id };
 }
 
 /**
@@ -65,5 +72,5 @@ export async function requireAnyFeaturePage(
   const enabled: Record<string, boolean> = {};
   for (const f of features) enabled[f] = isFeatureEnabled(view, f);
   if (!features.some((f) => enabled[f])) redirect(fallback);
-  return { userId: session.user.id, orgId: org.id, enabled };
+  return { userId: await getEffectiveUserId(session.user.id), orgId: org.id, enabled };
 }

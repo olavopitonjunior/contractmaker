@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { getUserOrg } from "@/lib/auth/auth";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { isDynamicServerError } from "@/lib/auth/user-org";
 
 /**
@@ -120,13 +121,14 @@ export async function requireOrgAdmin(
       res: NextResponse.json({ error: "Sem org" }, { status: 403 }),
     };
   }
+  // Impersonation: o ator efetivo é o DONO do tenant (que tem membership), não o
+  // super_admin. O fallback "admin" continua como rede de segurança pro caso de
+  // o overlay estar ativo e a membership do dono não resolver.
+  const effUserId = await getEffectiveUserId(userId);
   const membership = await prisma.orgMembership.findFirst({
-    where: { orgId: org.id, userId },
+    where: { orgId: org.id, userId: effUserId },
     select: { role: true },
   });
-  // Impersonation: getUserOrg devolve a org impersonada, mas o super_admin
-  // não tem membership nela — o overlay já validou PlatformRole, então
-  // tratamos como admin da org impersonada.
   const role = membership?.role ?? "admin";
   if (membership && role !== "owner" && role !== "admin") {
     return {

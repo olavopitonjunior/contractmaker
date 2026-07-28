@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { AiInsightsConfigForm } from "@/components/settings/AiInsightsConfigForm";
 import { DEFAULT_CONFIG, type AiInsightsConfig } from "./types";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
 
 export const dynamic = "force-dynamic";
 
@@ -15,8 +16,12 @@ export default async function AiInsightsSettingsPage() {
   const org = await getUserOrg(session.user.id);
   if (!org) notFound();
 
+  // Impersonation: sob "trocar de tenant", quem resolve membership/RBAC é o dono
+  // do tenant, não o super_admin (ver lib/auth/impersonation.ts).
+  const effUserId = await getEffectiveUserId(session.user.id);
+
   const membership = await prisma.orgMembership.findFirst({
-    where: { userId: session.user.id, orgId: org.id },
+    where: { userId: effUserId, orgId: org.id },
     select: { role: true },
   });
   const isOwner = membership?.role === "owner";

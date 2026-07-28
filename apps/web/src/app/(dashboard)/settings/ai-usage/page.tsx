@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { AIUsageClient } from "@/components/settings/AIUsageClient";
 import { AiBudgetCard } from "@/components/settings/AiBudgetCard";
 import { getOrgAiBudgetStatus } from "@/lib/ai/budget";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
 
 export const dynamic = "force-dynamic";
 
@@ -14,8 +15,12 @@ export default async function AIUsagePage() {
   const org = await getUserOrg(session.user.id);
   if (!org) notFound();
 
+  // Impersonation: sob "trocar de tenant", quem resolve membership/RBAC é o dono
+  // do tenant, não o super_admin (ver lib/auth/impersonation.ts).
+  const effUserId = await getEffectiveUserId(session.user.id);
+
   const membership = await prisma.orgMembership.findFirst({
-    where: { userId: session.user.id, orgId: org.id },
+    where: { userId: effUserId, orgId: org.id },
     select: { role: true },
   });
   const canEditBudget = ["owner", "admin"].includes(membership?.role ?? "");

@@ -334,6 +334,26 @@ export async function audit(
   entry: AuditEntry
 ): Promise<void> {
   try {
+    // Impersonation de tenant: o `userId` gravado é o ator EFETIVO (dono do
+    // tenant). Sem este carimbo, a ação do super_admin ficaria indistinguível
+    // de uma ação do próprio dono. Import dinâmico pra não puxar next/headers
+    // (nem o ciclo audit→impersonation) em contexto de cron/script.
+    let metadata = entry.metadata;
+    try {
+      const { getImpersonationAuditMeta } = await import("@/lib/auth/impersonation");
+      const imp = await getImpersonationAuditMeta();
+      if (imp && (ctx.orgId == null || ctx.orgId === imp.orgId)) {
+        metadata = {
+          ...(metadata ?? {}),
+          impersonated: true,
+          impersonatedBy: imp.adminUserId,
+          impersonationSessionId: imp.sessionId,
+        };
+      }
+    } catch {
+      // Fora de request scope (cron/webhook) ou falha de leitura — segue sem carimbo.
+    }
+
     await prisma.auditLog.create({
       data: {
         orgId: ctx.orgId,
@@ -342,7 +362,7 @@ export async function audit(
         result: entry.result,
         resource: entry.resource ?? null,
         resourceType: entry.resourceType ?? null,
-        metadata: (entry.metadata as object) ?? undefined,
+        metadata: (metadata as object) ?? undefined,
         ipAddress: ctx.ipAddress ?? null,
         userAgent: ctx.userAgent ? ctx.userAgent.slice(0, 1000) : null,
       },

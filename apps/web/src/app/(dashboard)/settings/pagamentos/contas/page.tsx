@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Wallet, Plus, KeyRound, Archive, Settings as SettingsIcon } from "lucide-react";
 import { AccountsTableActions } from "@/components/settings/AccountsTableActions";
 import { RecoverOrphanButton } from "@/components/settings/RecoverOrphanButton";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
 
 export const dynamic = "force-dynamic";
 
@@ -32,8 +33,12 @@ export default async function ContasBancariasPage() {
   const org = await getUserOrg(session.user.id);
   if (!org) redirect("/");
 
-  const isOwner = await isOrgOwner(session.user.id, org.id);
-  const accounts = await listAccessibleAccounts(session.user.id, org.id);
+  // Impersonation: sob "trocar de tenant", quem resolve membership/RBAC é o dono
+  // do tenant, não o super_admin (ver lib/auth/impersonation.ts).
+  const effUserId = await getEffectiveUserId(session.user.id);
+
+  const isOwner = await isOrgOwner(effUserId, org.id);
+  const accounts = await listAccessibleAccounts(effUserId, org.id);
   const orgRow = await prisma.organization.findUnique({
     where: { id: org.id },
     select: { activeAsaasAccountId: true },

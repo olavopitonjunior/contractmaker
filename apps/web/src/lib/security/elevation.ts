@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import { SignJWT, jwtVerify } from "jose";
 import { prisma } from "@/lib/db/prisma";
+import { getImpersonationAuditMeta } from "@/lib/auth/impersonation";
 
 export type ElevationScope =
   | "TRANSFER"
@@ -122,7 +123,15 @@ export async function requireElevation(
     throw new ElevationRequiredError(scope);
   }
   if (payload.userId !== userId) {
-    throw new ElevationRequiredError(scope);
+    // Impersonation de tenant: `userId` aqui é o ator EFETIVO (dono do tenant),
+    // mas quem passou pelo 2FA foi o super_admin — a elevação é emitida em
+    // /api/security, superfície crua (RAW_PATH_PREFIXES), então o JWT leva o id
+    // real dele. Sem esta exceção o admin ficava em loop: elevava e a rota
+    // sensível continuava negando (o dono nunca elevou nada).
+    const imp = await getImpersonationAuditMeta().catch(() => null);
+    if (!imp || payload.userId !== imp.adminUserId) {
+      throw new ElevationRequiredError(scope);
+    }
   }
   if (!payload.scopes.includes(scope)) {
     throw new ElevationRequiredError(scope);

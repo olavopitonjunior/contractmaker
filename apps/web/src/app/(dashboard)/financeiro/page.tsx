@@ -23,6 +23,7 @@ import {
   maskWalletId,
 } from "@/lib/asaas/account";
 import { AccountSwitcher } from "@/components/financeiro/AccountSwitcher";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
 
 export const dynamic = "force-dynamic";
 
@@ -41,8 +42,12 @@ export default async function FinanceiroPage({
   const org = await getUserOrg(session.user.id);
   if (!org) redirect("/");
 
+  // Impersonation: sob "trocar de tenant", quem resolve membership/RBAC é o dono
+  // do tenant, não o super_admin (ver lib/auth/impersonation.ts).
+  const effUserId = await getEffectiveUserId(session.user.id);
+
   const sp = (await searchParams) ?? {};
-  const accessible = await listAccessibleAccounts(session.user.id, org.id);
+  const accessible = await listAccessibleAccounts(effUserId, org.id);
 
   // Sem nenhuma conta acessível APPROVED: mostra CTA bootstrap.
   const hasApproved = accessible.some((a) => a.status === "APPROVED");
@@ -89,7 +94,7 @@ export default async function FinanceiroPage({
 
   // Resolve a conta em foco — hint vence se válido + acessível com cap "view".
   const resolved = await resolveAsaasAccount({
-    userId: session.user.id,
+    userId: effUserId,
     orgId: org.id,
     hintAccountId: sp.accountId ?? null,
     requireCapability: "view",

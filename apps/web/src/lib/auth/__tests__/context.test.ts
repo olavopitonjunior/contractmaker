@@ -1,8 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { requireAuth } from "../context";
 import { auth, getUserOrg } from "@/lib/auth/auth";
+import { getImpersonationFor } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/db/prisma";
 import { createMockSession } from "@/__tests__/helpers";
+
+vi.mock("@/lib/auth/impersonation", () => ({
+  getImpersonationFor: vi.fn().mockResolvedValue(null),
+}));
 
 vi.mock("@/lib/security/ratelimit", () => ({
   RateLimits: {
@@ -14,9 +19,12 @@ vi.mock("@/lib/security/ratelimit", () => ({
 const mockAuth = vi.mocked(auth);
 const mockGetUserOrg = vi.mocked(getUserOrg);
 const mockPrisma = vi.mocked(prisma);
+const mockGetImpersonationFor = vi.mocked(getImpersonationFor);
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: sem impersonation (clearAllMocks zera o valor de retorno padrão).
+  mockGetImpersonationFor.mockResolvedValue(null);
 });
 
 function bearerReq(headers: Record<string, string> = {}) {
@@ -120,5 +128,56 @@ describe("requireAuth — bearer exige rota com scope declarado", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) throw new Error("unreachable");
     expect(result.ctx.via).toBe("session");
+  });
+});
+
+describe("requireAuth — impersonation de tenant (super_admin trocou de tenant)", () => {
+  it("session impersonando: ator efetivo vira o dono do tenant e a org é a impersonada", async () => {
+    mockAuth.mockResolvedValueOnce(createMockSession() as never);
+    mockGetImpersonationFor.mockResolvedValue({
+      orgId: "org-tenant",
+      ownerUserId: "owner-9",
+    });
+    mockPrisma.organization.findUnique.mockResolvedValueOnce({
+      id: "org-tenant",
+      name: "RE/MAX Trio",
+    } as never);
+    mockPrisma.user.findUnique.mockResolvedValueOnce({
+      email: "dono@remaxtrio.com",
+      name: "Dono",
+    } as never);
+
+    const result = await requireAuth(
+      new Request("http://localhost/api/financeiro/charges")
+    );
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    // O RBAC por membership resolve contra o DONO — sem isso todo can() negava.
+    expect(result.ctx.userId).toBe("owner-9");
+    expect(result.ctx.orgId).toBe("org-tenant");
+    // Rastro do admin real preservado pro audit.
+    expect(result.ctx.impersonatedByUserId).toBe("user-1");
+    // Org vem da impersonation, não da 1ª membership do dono.
+    expect(mockGetUserOrg).not.toHaveBeenCalled();
+    // Heartbeat não carimba a membership do dono com acesso que não foi dele.
+    expect(mockPrisma.orgMembership.updateMany).not.toHaveBeenCalled();
+  });
+
+  it("bearer NUNCA sofre overlay (org do token, não de cookie)", async () => {
+    mockValidToken(["charges:r"]);
+    mockGetUserOrg.mockResolvedValueOnce({ id: "org-1", name: "Org" } as never);
+    mockPrisma.user.findUnique.mockResolvedValueOnce({
+      email: "newton@bot.dev",
+      name: "Newton",
+    } as never);
+
+    const result = await requireAuth(bearerReq(), { scope: "charges:r" });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error("unreachable");
+    expect(result.ctx.orgId).toBe("org-1");
+    expect(result.ctx.impersonatedByUserId).toBeUndefined();
+    expect(mockGetImpersonationFor).not.toHaveBeenCalled();
   });
 });

@@ -88,7 +88,15 @@ function buildSegments(pathname: string): Segment[] {
   });
 }
 
-export function DashboardHeader() {
+export function DashboardHeader({
+  tenantSwitcher,
+}: {
+  /**
+   * Slot do seletor de tenant (super_admin). Vem pronto do layout (server) —
+   * este header é client e não deve consultar PlatformRole por conta própria.
+   */
+  tenantSwitcher?: React.ReactNode;
+}) {
   const pathname = usePathname();
   const segments = buildSegments(pathname);
   const isStaging = process.env.NEXT_PUBLIC_STAGING_MODE === "true";
@@ -133,6 +141,7 @@ export function DashboardHeader() {
       </Breadcrumb>
 
       <div className="ml-auto flex items-center gap-3">
+        {tenantSwitcher}
         <CommandTrigger />
         <ThemeToggle />
         <NotificationsBell />
