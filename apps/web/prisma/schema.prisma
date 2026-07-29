@@ -2613,7 +2613,14 @@ model Envelope {
   updatedAt           DateTime  @updatedAt
 
   contract   Contract?        @relation(fields: [contractId], references: [id], onDelete: Cascade)
-  attachment DealAttachment?  @relation(fields: [attachmentId], references: [id], onDelete: SetNull)
+  // Cascade (não SetNull): o CHECK `envelope_subject_xor` exige exatamente um
+  // de (contractId, attachmentId, proposalId) não-nulo, então anular o
+  // attachmentId de um envelope source="attachment" viola a constraint e o
+  // delete do anexo (ou do deal inteiro) estoura 23514. O envelope só existe
+  // por causa do anexo — sem ele não tem assunto. A rota DELETE do anexo
+  // bloqueia com 409 quando há envelope closed/running, então a cascata só
+  // alcança draft/canceled/failed.
+  attachment DealAttachment?  @relation(fields: [attachmentId], references: [id], onDelete: Cascade)
   deal       Deal?            @relation(fields: [dealId], references: [id], onDelete: Cascade)
   proposal   Proposal?        @relation(fields: [proposalId], references: [id], onDelete: Cascade)
   org        Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)

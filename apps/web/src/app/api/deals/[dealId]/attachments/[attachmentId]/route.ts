@@ -100,7 +100,11 @@ export async function PATCH(
  *
  * Apaga um documento (DealAttachment) específico do negócio. Best-effort
  * deleta o blob no Vercel Blob/S3. CertidaoJob com FK para o attachment
- * recebe SET NULL via schema.
+ * recebe SET NULL via schema; Envelope de assinatura do anexo cai na cascata
+ * (SET NULL violaria o CHECK envelope_subject_xor).
+ *
+ * Bloqueio: Envelope ClickSign closed/running → 409 (mesma regra do DELETE de
+ * contrato). Cancele o envelope antes de excluir o documento.
  */
 export async function DELETE(
   req: NextRequest,
@@ -136,6 +140,25 @@ export async function DELETE(
     return NextResponse.json(
       { error: "Forbidden", reason: "deal de outra organização" },
       { status: 403 }
+    );
+  }
+
+  // Bloqueio: envelope ClickSign ativo. Sem isso a cascata levaria junto uma
+  // assinatura em curso (ou o registro de uma já concluída).
+  const blockingEnvelope = await prisma.envelope.findFirst({
+    where: {
+      attachmentId: attachment.id,
+      status: { in: ["closed", "running"] },
+    },
+    select: { id: true, status: true },
+  });
+  if (blockingEnvelope) {
+    return NextResponse.json(
+      {
+        error: `Este documento está em um envelope ClickSign ${blockingEnvelope.status === "closed" ? "concluído" : "em andamento"}. Cancele o envelope antes de excluir.`,
+        envelopeId: blockingEnvelope.id,
+      },
+      { status: 409 }
     );
   }
 
