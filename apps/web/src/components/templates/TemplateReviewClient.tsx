@@ -27,6 +27,7 @@ import {
   Info,
   MousePointerClick,
 } from "lucide-react";
+import { matchCriteriaSummary, modalidadeLabel } from "@/lib/contracts/template-category";
 
 interface CatalogEntry {
   token: string;
@@ -53,6 +54,7 @@ interface TemplateInfo {
   id: string;
   name: string;
   modalidade: string;
+  matchCriteria?: unknown;
   status: string;
   isDefault: boolean;
   docId: string;
@@ -248,6 +250,24 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
               <CardTitle className="flex items-center justify-between text-sm">
                 <span>Status</span>
                 <span className="flex items-center gap-1.5">
+                  {/* A modalidade decide o catálogo de campos abaixo e qual
+                      esteira acha este template — deixá-la visível evita
+                      revisar um modelo de locação com campos de venda. */}
+                  <Badge variant="outline" className="text-xs">
+                    {modalidadeLabel(template.modalidade)}
+                  </Badge>
+                  {/* Variante: por qual escolha do formulário este modelo é
+                      escolhido dentro da modalidade. */}
+                  {matchCriteriaSummary(template.matchCriteria).map((label) => (
+                    <Badge
+                      key={label}
+                      variant="outline"
+                      className="text-xs border-sky-300 text-sky-700"
+                      title="Critério de seleção pelas escolhas do formulário"
+                    >
+                      {label}
+                    </Badge>
+                  ))}
                   <Badge variant={status === "active" ? "default" : "outline"}>
                     {status === "active" ? "Ativo" : status === "draft" ? "Rascunho" : status}
                   </Badge>

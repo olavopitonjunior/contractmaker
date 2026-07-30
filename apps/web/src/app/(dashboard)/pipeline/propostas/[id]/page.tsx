@@ -159,6 +159,10 @@ export default async function PropostaDetailPage({
         responsibleUserId: proposal.responsibleUserId,
         responsibleName: proposal.responsibleName,
       }}
+      // Documento congelado no envio. Vai inteiro pro client porque é ele que a
+      // janela "Documento" exibe quando a proposta já saiu — re-renderizar o
+      // template atual mostraria um texto que ninguém assinou.
+      sentSnapshotHtml={proposal.sentSnapshotHtml}
       signers={signers.map((s) => ({
         id: s.id,
         name: s.name,

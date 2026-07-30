@@ -4,6 +4,16 @@ import type { UseFormReturn } from "react-hook-form";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { NativeSelect } from "@/components/forms/NativeSelect";
+import { getByPath } from "@/lib/forms/party-required";
+import {
+  maskCPF,
+  maskTelefone,
+  cpfRule,
+  telefoneRule,
+  dataNascimentoRule,
+  nomeCompletoRule,
+  nomeMaeRule,
+} from "@/lib/forms/field-formats";
 
 const ESTADOS_CIVIS = [
   "Solteiro(a)",
@@ -13,6 +23,11 @@ const ESTADOS_CIVIS = [
   "União Estável",
   "Separado(a)",
 ];
+
+function FieldError({ error }: { error?: { message?: string } }) {
+  if (!error?.message) return null;
+  return <p className="text-xs text-destructive mt-1">{error.message}</p>;
+}
 
 function FormField({
   label,
@@ -43,19 +58,35 @@ interface RepresentanteFieldsProps {
  * Antecedentes PF do representante quando há diligência.
  */
 export function RepresentanteFields({ form, prefix }: RepresentanteFieldsProps) {
+  const errors = getByPath(form.formState.errors, `${prefix}.representante`) as
+    | Record<string, { message?: string }>
+    | undefined;
+
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       <FormField label="Nome do Representante" className="md:col-span-2">
         <Input
-          {...form.register(`${prefix}.representante.nome`)}
+          {...form.register(`${prefix}.representante.nome`, {
+            validate: nomeCompletoRule,
+          })}
           placeholder="Nome completo"
         />
+        <FieldError error={errors?.nome} />
       </FormField>
       <FormField label="CPF do Representante">
         <Input
-          {...form.register(`${prefix}.representante.cpf`)}
+          {...form.register(`${prefix}.representante.cpf`, {
+            validate: cpfRule,
+            onChange: (e) =>
+              form.setValue(`${prefix}.representante.cpf`, maskCPF(e.target.value), {
+                shouldDirty: true,
+                shouldValidate: true,
+              }),
+          })}
+          inputMode="numeric"
           placeholder="000.000.000-00"
         />
+        <FieldError error={errors?.cpf} />
       </FormField>
       <FormField label="RG do Representante">
         <Input
@@ -65,9 +96,12 @@ export function RepresentanteFields({ form, prefix }: RepresentanteFieldsProps) 
       </FormField>
       <FormField label="Data de Nascimento">
         <Input
-          {...form.register(`${prefix}.representante.data_nascimento`)}
+          {...form.register(`${prefix}.representante.data_nascimento`, {
+            validate: dataNascimentoRule,
+          })}
           type="date"
         />
+        <FieldError error={errors?.data_nascimento} />
       </FormField>
       <FormField label="Sexo">
         <NativeSelect
@@ -84,9 +118,12 @@ export function RepresentanteFields({ form, prefix }: RepresentanteFieldsProps) 
       </FormField>
       <FormField label="Nome da Mãe" className="md:col-span-2">
         <Input
-          {...form.register(`${prefix}.representante.nome_mae`)}
+          {...form.register(`${prefix}.representante.nome_mae`, {
+            validate: nomeMaeRule,
+          })}
           placeholder="Exigido pelas certidões PF do representante"
         />
+        <FieldError error={errors?.nome_mae} />
       </FormField>
       <FormField label="Naturalidade">
         <Input
@@ -127,10 +164,20 @@ export function RepresentanteFields({ form, prefix }: RepresentanteFieldsProps) 
       </FormField>
       <FormField label="Celular (com DDD)">
         <Input
-          {...form.register(`${prefix}.representante.mobile_phone`)}
+          {...form.register(`${prefix}.representante.mobile_phone`, {
+            validate: telefoneRule,
+            onChange: (e) =>
+              form.setValue(
+                `${prefix}.representante.mobile_phone`,
+                maskTelefone(e.target.value),
+                { shouldDirty: true, shouldValidate: true }
+              ),
+          })}
           type="tel"
+          inputMode="numeric"
           placeholder="(11) 99999-9999"
         />
+        <FieldError error={errors?.mobile_phone} />
       </FormField>
     </div>
   );

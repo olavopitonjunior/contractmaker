@@ -124,6 +124,11 @@ export async function POST(
 
   const contract = plan.session.contract;
   const orgId = contract.deal.pipeline.orgId;
+  // Autor das entries de ChangeLog = quem APROVOU o plano (ator da request,
+  // já resolvido pra identidade efetiva sob impersonation), não o dono do
+  // contrato — `contract.userId` fazia o histórico creditar sempre o mesmo
+  // usuário, independente de quem clicou.
+  const actorUserId = auth.actor.effectiveUserId;
 
   // Reconstroi AgentContext (mesma logica de loadContext em agent.ts).
   let htmlContent = contract.htmlContent || "";
@@ -323,7 +328,7 @@ export async function POST(
           await prisma.contractChangeLog.createMany({
             data: changeLogs.map((log) => ({
               contractId: params.id,
-              userId: contract.userId,
+              userId: actorUserId,
               action: log.action,
               summary: log.summary,
               details: log.details,

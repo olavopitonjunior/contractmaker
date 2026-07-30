@@ -22,15 +22,33 @@
 
 import { isMarried } from "@/lib/forms/estado-civil";
 
-const PARTY_PATH_RE = /^(vendedores|compradores)\.(\d+)\.(.+)$/;
+// 2026-07-28 — locadores/locatarios entram no regex: locação passou a ter
+// presets de obrigatoriedade próprios (lib/forms/presets.ts) e precisa do
+// mesmo remap PF/PJ. `garantia.fiador.*` fica de fora de propósito: não é
+// lista indexada e a obrigatoriedade do fiador é condicional ao tipo de
+// garantia (fica em collectLocacaoFinalizeIssues).
+const PARTY_PATH_RE =
+  /^(vendedores|compradores|locadores|locatarios)\.(\d+)\.(.+)$/;
+
+export type PartyListKey =
+  | "vendedores"
+  | "compradores"
+  | "locadores"
+  | "locatarios";
+
+const LOCACAO_LISTS: ReadonlySet<string> = new Set(["locadores", "locatarios"]);
 
 // Campos exclusivos de Pessoa Física — não têm equivalente em PJ.
+// `nacionalidade` entrou junto com locação: nem o bloco PJ de venda nem o de
+// locação renderizam esse campo no titular (em PJ ele só existe dentro de
+// `representante`), então exigi-lo geraria pendência fantasma.
 const PF_ONLY_PARTY_FIELDS = new Set([
   "estado_civil",
   "rg",
   "nome_mae",
   "data_nascimento",
   "naturalidade",
+  "nacionalidade",
   "profissao",
   "sexo",
 ]);
@@ -41,8 +59,18 @@ const PJ_IDENTITY_REMAP: Record<string, string> = {
   nome: "razao_social",
 };
 
+// Locação, PJ: e-mail e celular do titular não existem na ficha da empresa —
+// quem assina pela PJ é o representante legal, e é lá que o wizard renderiza
+// os campos. Sem este remap, exigir `locadores.0.email` numa PJ trava o avanço
+// num campo que não está na tela. Em VENDA o comportamento fica como estava
+// (o preset de venda já exigia `email` no titular há tempos).
+const PJ_LOCACAO_CONTACT_REMAP: Record<string, string> = {
+  email: "representante.email",
+  mobile_phone: "representante.mobile_phone",
+};
+
 export interface ParsedPartyPath {
-  list: "vendedores" | "compradores";
+  list: PartyListKey;
   idx: number;
   field: string;
 }
@@ -56,7 +84,7 @@ export function parsePartyPath(path: string): ParsedPartyPath | null {
   const m = PARTY_PATH_RE.exec(path);
   if (!m) return null;
   return {
-    list: m[1] as "vendedores" | "compradores",
+    list: m[1] as PartyListKey,
     idx: Number(m[2]),
     field: m[3],
   };
@@ -107,11 +135,7 @@ export function effectiveRequiredPaths(
   };
 
   // Aplica o remap PJ a UM (list, idx, field) e empurra o path resultante.
-  const pushPartyField = (
-    list: "vendedores" | "compradores",
-    idx: number,
-    field: string,
-  ) => {
+  const pushPartyField = (list: PartyListKey, idx: number, field: string) => {
     const base = `${list}.${idx}.${field}`;
     const isPJ = getValue(`${list}.${idx}.tipo_pessoa`) === "juridica";
     if (!isPJ) return push(base);
@@ -119,7 +143,10 @@ export function effectiveRequiredPaths(
     if (field.includes(".")) return push(base);
     // PF-only num PJ: simplesmente não é obrigatório.
     if (PF_ONLY_PARTY_FIELDS.has(field)) return;
-    const remapped = PJ_IDENTITY_REMAP[field];
+    const contact = LOCACAO_LISTS.has(list)
+      ? PJ_LOCACAO_CONTACT_REMAP[field]
+      : undefined;
+    const remapped = contact ?? PJ_IDENTITY_REMAP[field];
     push(`${list}.${idx}.${remapped ?? field}`);
   };
 

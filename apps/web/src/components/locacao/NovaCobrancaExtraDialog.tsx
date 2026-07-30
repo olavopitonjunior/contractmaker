@@ -23,6 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Plus } from "lucide-react";
+import { MoneyInput } from "@/components/forms/MoneyInput";
 
 interface Props {
   leaseContractId: string;
@@ -53,6 +54,11 @@ export function NovaCobrancaExtraDialog({ leaseContractId }: Props) {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // O MoneyInput não é um <input required>, então o valor é checado aqui.
+    if (!(Number(form.valorBase) > 0)) {
+      toast.error("Informe o valor da cobrança (maior que zero).");
+      return;
+    }
     setSaving(true);
     try {
       const res = await fetch("/api/locacao/rent-charges", {
@@ -120,23 +126,21 @@ export function NovaCobrancaExtraDialog({ leaseContractId }: Props) {
                 onChange={(e) => setForm({ ...form, competencia: e.target.value })}
               />
             </div>
+            {/* R$ pelo MoneyInput; o estado segue string (Number() no submit). */}
             <div className="space-y-1">
               <Label>Valor (R$)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                required
-                value={form.valorBase}
-                onChange={(e) => setForm({ ...form, valorBase: e.target.value })}
+              <MoneyInput
+                value={Number(form.valorBase) || 0}
+                onChange={(v) => setForm({ ...form, valorBase: String(v) })}
+                placeholder="Ex: 350,00"
               />
             </div>
             <div className="space-y-1">
               <Label>Encargos (R$)</Label>
-              <Input
-                type="number"
-                step="0.01"
-                value={form.encargos}
-                onChange={(e) => setForm({ ...form, encargos: e.target.value })}
+              <MoneyInput
+                value={Number(form.encargos) || 0}
+                onChange={(v) => setForm({ ...form, encargos: String(v) })}
+                placeholder="Ex: 0,00"
               />
             </div>
             <div className="col-span-2 space-y-1">

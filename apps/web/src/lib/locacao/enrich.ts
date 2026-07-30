@@ -3,6 +3,11 @@
 // Ver docs/locacao/spec.md §7. Mantém a lógica de timezone (âncora ao meio-dia)
 // usada no resto do app pra strings YYYY-MM-DD não deslizarem em UTC-3.
 
+import {
+  DEFAULT_LOCACAO_SETTINGS,
+  type LocacaoSettings,
+} from "@/lib/contracts/default-config";
+
 const MEIO_PAGAMENTO_ALUGUEL_TEXTO: Record<string, string> = {
   pix: "PIX",
   boleto: "boleto bancário registrado",
@@ -51,6 +56,14 @@ export interface EnrichLocacaoContext {
     creci?: string;
     endereco?: string;
   };
+  /**
+   * Padrão contratual de LOCAÇÃO da org (`contractDefaultsJson.locacao`).
+   * Sobrepõe o padrão de fábrica. Omitir é seguro: cai em
+   * `DEFAULT_LOCACAO_SETTINGS` — é por isso que o fallback mora aqui, e não na
+   * geração: preview de template, parity test e placeholder-map chamam este
+   * enrich sem ctx.
+   */
+  contractDefaults?: LocacaoSettings;
 }
 
 export function enrichLocacaoData(
@@ -60,11 +73,23 @@ export function enrichLocacaoData(
   const enriched = { ...data };
   const config = ((enriched.config as Record<string, unknown>) || {}) as Record<string, unknown>;
 
-  // Defaults da casa (caso venham de import/agente sem passar pelo Zod).
-  // Multa de atraso 10% — padrão do modelo NNI; Lei 8.245/91 não impõe 2%.
-  if (config.multa_atraso_percent == null) config.multa_atraso_percent = 10;
-  if (config.juros_mensais_atraso == null) config.juros_mensais_atraso = 1;
-  if (config.multa_rescisoria_meses == null) config.multa_rescisoria_meses = 3;
+  // Configurações contratuais: padrão da ORG > padrão de fábrica. Aditivo —
+  // dataJson que já tem o valor (form, import, agente) mantém o dele.
+  const settings = ctx?.contractDefaults ?? DEFAULT_LOCACAO_SETTINGS;
+  for (const [key, value] of Object.entries(settings.config)) {
+    if (config[key] == null) config[key] = value;
+  }
+  // Comarca e local/data do fecho só entram quando a org definiu algo — vazio
+  // deixa o template no fallback ("comarca de localização do imóvel").
+  if (settings.foro && (enriched.foro == null || enriched.foro === "")) {
+    enriched.foro = settings.foro;
+  }
+  if (
+    enriched.assinatura == null &&
+    (settings.assinatura.cidade || settings.assinatura.uf || settings.assinatura.data)
+  ) {
+    enriched.assinatura = { ...settings.assinatura };
+  }
 
   // Administradora da locação — idempotente: dataJson já preenchido vence.
   const adm = ctx?.administradora;

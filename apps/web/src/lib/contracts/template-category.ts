@@ -9,6 +9,7 @@
  *   Grupo "com alienação fiduciária" (modalidade financiamento):
  *     financiamento · fgts · consorcio
  */
+import { z } from "zod";
 import type { ContractTemplate } from "@prisma/client";
 // `prisma` é importado de forma lazy dentro de selectTemplateForDeal pra manter
 // este módulo client-safe (as constantes/labels são usadas na UI de templates).
@@ -153,6 +154,223 @@ export async function selectTemplateForDeal(
 }
 
 // ============================================================================
+// CRITÉRIO DE SELEÇÃO PELAS ESCOLHAS DO FORM (locação e proposta).
+//
+// Em venda o discriminador é a forma de pagamento (`category`). Em locação e
+// proposta a modalidade sozinha é ambígua: a mesma "proposta de locação
+// residencial" tem variantes por garantia (com fiador × sem), pela natureza do
+// locatário/proponente (PF × PJ) e pela do próprio fiador — caso real da
+// RE/MAX Ativa ("PF com fiador PJ"), onde a escolha caía no `isDefault` e o
+// operador trocava o template à mão.
+//
+// `ContractTemplate.matchCriteria` guarda esses critérios; o form entrega os
+// FATOS; o scoring cruza os dois. Critério ausente = template genérico.
+// ============================================================================
+export const GARANTIA_TIPOS = [
+  "fiador",
+  "caucao",
+  "seguro_fianca",
+  "garantia_digital",
+  "titulo_capitalizacao",
+  "propria",
+  "sem_garantia",
+] as const;
+export type GarantiaTipo = (typeof GARANTIA_TIPOS)[number];
+
+// Espelha `garantiaSchema` de lib/forms/validation-locacao.ts — é de lá que o
+// fato chega (dataJson.garantia.tipo).
+export const GARANTIA_LABELS: Record<GarantiaTipo, string> = {
+  fiador: "Fiador",
+  caucao: "Caução",
+  seguro_fianca: "Seguro fiança",
+  garantia_digital: "Garantia digital",
+  titulo_capitalizacao: "Título de capitalização",
+  propria: "Garantia própria",
+  sem_garantia: "Sem garantia",
+};
+
+export type PessoaTipo = "pf" | "pj";
+export const PESSOA_LABELS: Record<PessoaTipo, string> = {
+  pf: "Pessoa física",
+  pj: "Pessoa jurídica",
+};
+
+/**
+ * Critério persistido no template. Extensível: campo novo = chave nova aqui, no
+ * schema Zod, em `parseMatchCriteria` e na lista de campos do scoring.
+ *
+ * `pessoa` é o LOCATÁRIO/PROPONENTE; `fiadorPessoa` é o FIADOR — eixos
+ * independentes, senão "PF com fiador PJ" não seria expressável.
+ */
+export interface TemplateMatchCriteria {
+  garantia?: GarantiaTipo;
+  fiadorPessoa?: PessoaTipo;
+  pessoa?: PessoaTipo;
+}
+
+/** Fatos lidos do form/proposta. `null` = não dá pra saber. */
+export interface TemplateFacts {
+  garantia: GarantiaTipo | null;
+  fiadorPessoa: PessoaTipo | null;
+  pessoa: PessoaTipo | null;
+}
+
+/** Campos comparáveis critério × fato. Adicionar campo novo passa por aqui. */
+const MATCH_FIELDS = ["garantia", "fiadorPessoa", "pessoa"] as const;
+
+export const matchCriteriaSchema = z
+  .object({
+    garantia: z.enum(GARANTIA_TIPOS).nullish(),
+    fiadorPessoa: z.enum(["pf", "pj"]).nullish(),
+    pessoa: z.enum(["pf", "pj"]).nullish(),
+  })
+  .strict()
+  .nullish();
+
+/**
+ * Normaliza o Json cru do banco/payload em critério tipado. Chave desconhecida
+ * ou valor fora do enum é DESCARTADO (não desclassifica nada) e critério vazio
+ * volta como `null` — um template com `{}` é genérico, não "impossível".
+ */
+export function parseMatchCriteria(raw: unknown): TemplateMatchCriteria | null {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const obj = raw as Record<string, unknown>;
+  const out: TemplateMatchCriteria = {};
+  if ((GARANTIA_TIPOS as readonly string[]).includes(obj.garantia as string)) {
+    out.garantia = obj.garantia as GarantiaTipo;
+  }
+  if (obj.fiadorPessoa === "pf" || obj.fiadorPessoa === "pj") {
+    out.fiadorPessoa = obj.fiadorPessoa;
+  }
+  if (obj.pessoa === "pf" || obj.pessoa === "pj") out.pessoa = obj.pessoa;
+  return Object.keys(out).length ? out : null;
+}
+
+/** Rótulos dos critérios pra badge na UI (vazio = template genérico). */
+export function matchCriteriaSummary(raw: unknown): string[] {
+  const c = parseMatchCriteria(raw);
+  if (!c) return [];
+  const out: string[] = [];
+  if (c.garantia) out.push(GARANTIA_LABELS[c.garantia]);
+  if (c.fiadorPessoa) out.push(`Fiador ${c.fiadorPessoa.toUpperCase()}`);
+  if (c.pessoa) out.push(PESSOA_LABELS[c.pessoa]);
+  return out;
+}
+
+function pessoaFromParte(parte: unknown): PessoaTipo | null {
+  if (!parte || typeof parte !== "object") return null;
+  const p = parte as Record<string, unknown>;
+  const nonEmpty = (v: unknown) => typeof v === "string" && v.trim().length > 0;
+  if (p.tipo_pessoa === "juridica" || nonEmpty(p.cnpj)) return "pj";
+  if (p.tipo_pessoa === "fisica" || nonEmpty(p.cpf)) return "pf";
+  return null;
+}
+
+/**
+ * Fatos do form de locação / da proposta.
+ *
+ * - `garantia` ← `dataJson.garantia.tipo` (enum do garantiaSchema).
+ * - `fiadorPessoa` ← `dataJson.garantia.fiador.tipo_pessoa`, só quando a
+ *   garantia É fiador (sem fiador o fato é desconhecido, não "PF").
+ * - `pessoa` ← natureza do LOCATÁRIO/PROPONENTE: "pj" se QUALQUER um for
+ *   jurídica, senão "pf". `tipo_pessoa` é o sinal canônico (discriminated union
+ *   do form); CPF/CNPJ preenchido é fallback.
+ *
+ * A página de proposta (`/pipeline/propostas/nova` e `/[id]/editar`) coleta
+ * `tipo_pessoa` por parte e, em locação, `garantia.tipo` (+ fiador PF/PJ) —
+ * `buildProposalDataJson` em lib/proposals/form-data.ts escreve exatamente as
+ * chaves lidas aqui, então a seleção de variante vale também pra proposta.
+ * Propostas ANTIGAS (criadas antes disso, partes só com `{ nome }`) seguem com
+ * fatos nulos e caem no `isDefault` — comportamento de antes, sem regressão.
+ */
+export function deriveTemplateFacts(dataJson: unknown): TemplateFacts {
+  const data = (dataJson && typeof dataJson === "object" ? dataJson : {}) as Record<
+    string,
+    unknown
+  >;
+
+  const garantiaObj = data.garantia as { tipo?: unknown; fiador?: unknown } | undefined;
+  const garantia = (GARANTIA_TIPOS as readonly string[]).includes(garantiaObj?.tipo as string)
+    ? (garantiaObj!.tipo as GarantiaTipo)
+    : null;
+  const fiadorPessoa = garantia === "fiador" ? pessoaFromParte(garantiaObj?.fiador) : null;
+
+  // `locatarios` (locação) e `compradores` (proposta de compra — ali o
+  // proponente é o comprador). O papel proprietário/locador não entra: a
+  // variante de template é do lado que contrata.
+  const parties = [
+    ...(Array.isArray(data.locatarios) ? data.locatarios : []),
+    ...(Array.isArray(data.compradores) ? data.compradores : []),
+  ];
+
+  let pessoa: PessoaTipo | null = null;
+  for (const p of parties) {
+    const tipo = pessoaFromParte(p);
+    if (tipo === "pj") {
+      pessoa = "pj";
+      break;
+    }
+    if (tipo === "pf") pessoa = "pf";
+  }
+
+  return { garantia, fiadorPessoa, pessoa };
+}
+
+/**
+ * Score puro do template contra os fatos:
+ *   +1 por campo de critério que BATE com um fato conhecido;
+ *   -1 (DESCLASSIFICADO) se qualquer campo contradiz um fato conhecido;
+ *    0 pra template genérico (sem critério) — e também pro campo cujo fato é
+ *      desconhecido, que não pontua nem desclassifica.
+ */
+export function scoreTemplateAgainstFacts(criteria: unknown, facts: TemplateFacts): number {
+  const c = parseMatchCriteria(criteria);
+  if (!c) return 0;
+  let score = 0;
+  for (const key of MATCH_FIELDS) {
+    const wanted = c[key];
+    if (!wanted) continue;
+    const fact = facts[key];
+    if (fact == null) continue;
+    if (fact !== wanted) return -1;
+    score += 1;
+  }
+  return score;
+}
+
+export interface TemplateCriteriaCandidate {
+  isDefault: boolean;
+  matchCriteria?: unknown;
+}
+
+/**
+ * Escolhe entre candidatos JÁ filtrados por modalidade/status: maior score
+ * vence, empate prefere `isDefault` (e depois a ordem recebida).
+ *
+ * Quando TODOS são desclassificados (a org marcou critérios e nenhum cobre este
+ * form) NÃO devolvemos null: cai no comportamento pré-critério (isDefault da
+ * modalidade). Falhar a geração com "nenhum template ativo" seria uma regressão
+ * pra quem hoje recebe um contrato — o operador troca o template no editor.
+ */
+export function pickTemplateByFacts<T extends TemplateCriteriaCandidate>(
+  candidates: T[],
+  facts: TemplateFacts
+): T {
+  if (candidates.length === 0) {
+    throw new Error("pickTemplateByFacts: lista de candidatos vazia");
+  }
+  const scored = candidates.map((c) => ({
+    c,
+    score: scoreTemplateAgainstFacts(c.matchCriteria, facts),
+  }));
+  const eligible = scored.filter((s) => s.score >= 0);
+  const pool = eligible.length ? eligible : scored;
+  const max = Math.max(...pool.map((s) => s.score));
+  const top = pool.filter((s) => s.score === max).map((s) => s.c);
+  return top.find((t) => t.isDefault) ?? top[0];
+}
+
+// ============================================================================
 // Locação — seleção de template independente da heurística de pagamento de
 // venda. O discriminador é o `schemaType` do form: residencial → modalidade
 // "locacao"; comercial → "locacao_comercial" (modalidades distintas pra que o
@@ -164,7 +382,8 @@ export function modalidadeForLocacaoSchemaType(schemaType: string): string {
 
 export async function selectLocacaoTemplate(
   orgId: string,
-  schemaType: string
+  schemaType: string,
+  dataJson?: unknown
 ): Promise<{ template: ContractTemplate } | null> {
   const modalidade = modalidadeForLocacaoSchemaType(schemaType);
   const { prisma } = await import("@/lib/db/prisma");
@@ -173,13 +392,17 @@ export async function selectLocacaoTemplate(
   });
   if (active.length === 0) return null;
 
-  // 1) match exato da modalidade de locação (prefere isDefault)
+  const facts = deriveTemplateFacts(dataJson);
+
+  // 1) match exato da modalidade de locação. Dentro do conjunto, as ESCOLHAS DO
+  //    FORM (garantia / fiador PF-PJ / locatário PF-PJ) desempatam variantes;
+  //    sem variante marcada o resultado é o de sempre (isDefault, senão a 1ª).
   const exact = active.filter((t) => t.modalidade === modalidade);
-  if (exact.length) return { template: exact.find((t) => t.isDefault) ?? exact[0] };
+  if (exact.length) return { template: pickTemplateByFacts(exact, facts) };
 
   // 2) fallback: qualquer template de locação ativo (modalidade começa com "locacao")
   const anyLocacao = active.filter((t) => (t.modalidade ?? "").startsWith("locacao"));
-  if (anyLocacao.length) return { template: anyLocacao.find((t) => t.isDefault) ?? anyLocacao[0] };
+  if (anyLocacao.length) return { template: pickTemplateByFacts(anyLocacao, facts) };
 
   return null;
 }
@@ -188,8 +411,9 @@ export async function selectLocacaoTemplate(
 // Contrato de Administração de Locação (imobiliária ↔ proprietário).
 // Modalidade "administracao_locacao" — nome deliberado que NÃO começa com
 // "locacao" pra ficar fora do fallback startsWith acima. Match exato, SEM
-// fallback: sem template ativo da modalidade, retorna null e o caller orienta
-// a rodar sync-templates.ts --apply --seed.
+// fallback: sem template ativo da modalidade, retorna null e o caller orienta a
+// ativar um modelo em /templates (o canônico é semeado na criação do tenant por
+// `seedCanonicalTemplatesForOrg`).
 // ============================================================================
 export const ADMINISTRACAO_LOCACAO_MODALIDADE = "administracao_locacao";
 
@@ -202,4 +426,128 @@ export async function selectAdministracaoTemplate(
   });
   if (exact.length === 0) return null;
   return { template: exact.find((t) => t.isDefault) ?? exact[0] };
+}
+
+// ============================================================================
+// FAMÍLIA do template (venda | locação | proposta).
+//
+// `category` é a forma de pagamento do negócio — existe SÓ no mundo de venda.
+// Derivar `modalidade` da categoria fora de venda é destrutivo: um template de
+// locação salvo pela tela de edição virava modalidade "a_vista" e sumia do
+// selectLocacaoTemplate ("Nenhum template de locação ativo") e do catálogo de
+// placeholders (que passava a oferecer campos de venda). A família é sempre
+// lida da MODALIDADE persistida, nunca da categoria.
+// ============================================================================
+export const LOCACAO_MODALIDADES = [
+  "locacao",
+  "locacao_comercial",
+  ADMINISTRACAO_LOCACAO_MODALIDADE,
+] as const;
+export type LocacaoModalidade = (typeof LOCACAO_MODALIDADES)[number];
+
+export const VENDA_MODALIDADES = ["a_vista", "financiamento"] as const;
+
+export type TemplateFamily = "venda" | "locacao" | "proposta";
+
+export function templateFamilyForModalidade(
+  modalidade: string | null | undefined
+): TemplateFamily {
+  const m = modalidade ?? "";
+  if (m.startsWith("proposta_")) return "proposta";
+  if ((LOCACAO_MODALIDADES as readonly string[]).includes(m)) return "locacao";
+  return "venda";
+}
+
+export const MODALIDADE_LABELS: Record<string, string> = {
+  a_vista: "Venda à vista",
+  financiamento: "Venda com financiamento",
+  locacao: "Locação residencial",
+  locacao_comercial: "Locação comercial",
+  administracao_locacao: "Administração de locação",
+  proposta_venda: "Proposta de compra",
+  proposta_locacao_residencial: "Proposta de locação residencial",
+  proposta_locacao_comercial: "Proposta de locação comercial",
+};
+
+export function modalidadeLabel(modalidade: string | null | undefined): string {
+  if (!modalidade) return "—";
+  return MODALIDADE_LABELS[modalidade] ?? modalidade;
+}
+
+/**
+ * schemaType coerente com a modalidade — usado na ingestão (from-docx) e ao
+ * corrigir a modalidade de um template já criado, pra os dois não divergirem.
+ */
+export const SCHEMA_TYPE_BY_MODALIDADE: Record<string, string> = {
+  a_vista: "compra_venda_v2",
+  financiamento: "compra_venda_v2",
+  locacao: "locacao_residencial_v1",
+  locacao_comercial: "locacao_comercial_v1",
+  administracao_locacao: "administracao_locacao_v1",
+  proposta_venda: "compra_venda_v1",
+  proposta_locacao_residencial: "locacao_residencial_v1",
+  proposta_locacao_comercial: "locacao_comercial_v1",
+};
+
+export function schemaTypeForModalidade(modalidade: string | null | undefined): string {
+  return SCHEMA_TYPE_BY_MODALIDADE[modalidade ?? ""] ?? "compra_venda_v2";
+}
+
+/**
+ * Modalidades oferecidas na ingestão "modelo da imobiliária (.docx) → template"
+ * — na ordem em que aparecem no diálogo. Fonte única do <select> e da validação
+ * do POST /api/templates/from-docx.
+ */
+export const UPLOAD_MODALIDADES = [
+  "locacao",
+  "locacao_comercial",
+  "administracao_locacao",
+  "a_vista",
+  "financiamento",
+] as const;
+
+export function isKnownModalidade(v: unknown): v is string {
+  return (
+    typeof v === "string" &&
+    ((VENDA_MODALIDADES as readonly string[]).includes(v) ||
+      (LOCACAO_MODALIDADES as readonly string[]).includes(v) ||
+      v.startsWith("proposta_"))
+  );
+}
+
+/**
+ * Resolve (category, modalidade) de uma ESCRITA de template.
+ *
+ * 1. `modalidade` explícita e conhecida sempre vence — é como o operador move
+ *    um template entre famílias (e conserta um que foi salvo na errada).
+ * 2. Senão, `category` só deriva a modalidade se o template JÁ é de venda.
+ *    Este é o guard do bug: a tela de edição manda `category` mesmo pra um
+ *    template de locação, e derivar dali virava "a_vista" — o template sumia
+ *    do selectLocacaoTemplate e do catálogo de placeholders de locação.
+ * 3. `category` só é persistida em template de venda; fora dela é null (não
+ *    existe forma de pagamento em locação/proposta e a categoria residual
+ *    puxaria o template pro resolver de venda).
+ */
+export function resolveTemplateTaxonomy(input: {
+  currentModalidade: string | null;
+  currentCategory: string | null;
+  category?: unknown;
+  modalidade?: unknown;
+}): { category: string | null; modalidade: string | null } {
+  const currentFamily = templateFamilyForModalidade(input.currentModalidade);
+  const explicit = isKnownModalidade(input.modalidade) ? input.modalidade : null;
+
+  const modalidade =
+    explicit ??
+    (currentFamily === "venda" && isTemplateCategory(input.category)
+      ? modalidadeForCategory(input.category)
+      : input.currentModalidade);
+
+  if (templateFamilyForModalidade(modalidade) !== "venda") {
+    return { category: null, modalidade };
+  }
+  return {
+    category: isTemplateCategory(input.category) ? input.category : input.currentCategory,
+    modalidade,
+  };
 }

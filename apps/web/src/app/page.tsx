@@ -1,10 +1,9 @@
 import { redirect } from "next/navigation";
 import { auth, getUserOrg } from "@/lib/auth/auth";
-import { getEffectiveUserId } from "@/lib/auth/impersonation";
-import { prisma } from "@/lib/db/prisma";
 import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
 import { MODULE } from "@/lib/modules/catalog";
 import { getOnboardingStatus } from "@/lib/onboarding/status";
+import { canSeeOnboarding } from "@/lib/onboarding/gate";
 
 export default async function HomePage() {
   const session = await auth();
@@ -12,17 +11,12 @@ export default async function HomePage() {
 
   const org = await getUserOrg(session.user.id);
   if (org) {
-    // 1º acesso: o DONO (owner) que ainda não viu o modal de boas-vindas e com
-    // onboarding incompleto é levado ao /onboarding UMA vez (o modal seta
-    // onboardingIntroSeenAt). Depois disso o guia é o checklist na sidebar — sem
-    // redirect forçado. Gate barato (flags no `org` já carregado + role).
+    // 1º acesso: quem configura o tenant (owner/admin) e ainda não viu o modal de
+    // boas-vindas, com onboarding incompleto, é levado ao /onboarding UMA vez (o
+    // modal seta onboardingIntroSeenAt). Depois disso o guia é o checklist na
+    // sidebar — sem redirect forçado. Gate barato (flags no `org` já carregado + role).
     if (!org.onboardingCompletedAt && !org.onboardingIntroSeenAt) {
-      const effUserId = await getEffectiveUserId(session.user.id);
-      const membership = await prisma.orgMembership.findFirst({
-        where: { userId: effUserId, orgId: org.id },
-        select: { role: true },
-      });
-      if (membership?.role === "owner") {
+      if (await canSeeOnboarding(session.user.id, org.id)) {
         const status = await getOnboardingStatus(org.id);
         if (!status.complete) redirect("/onboarding");
       }

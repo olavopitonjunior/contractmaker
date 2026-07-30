@@ -110,7 +110,10 @@ export type AIOperation =
   // `as never` em intent-fallback e sumia de qualquer filtro por operação.
   | "intent_classify"
   // Pesquisas de satisfação — resumo Haiku das respostas abertas de um lote
-  | "survey_summary";
+  | "survey_summary"
+  // Ingestão da base de conhecimento — desempate template/cláusulas/acervo
+  // quando a heurística determinística fica incerta (lib/knowledge/upload-classifier).
+  | "knowledge_upload_classification";
 
 export interface RecordUsageParams {
   orgId: string;

@@ -63,7 +63,7 @@ export default async function PublicProposalPage({
           where: { id: proposal.templateId },
           select: { handlebarsSource: true },
         })
-      : (await selectPropostaTemplate(proposal.orgId, proposal.schemaType))?.template ?? null;
+      : (await selectPropostaTemplate(proposal.orgId, proposal.schemaType, proposal.dataJson))?.template ?? null;
     html = tpl?.handlebarsSource
       ? renderProposalVia({
           templateSource: tpl.handlebarsSource,

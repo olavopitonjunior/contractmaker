@@ -18,6 +18,8 @@ import {
   schemaForLocacaoType,
   collectLocacaoFinalizeIssues,
 } from "@/lib/forms/validation-locacao";
+import { resolveFormRequiredFields } from "@/lib/forms/required-snapshot";
+import { findMissingRequired, getByPath } from "@/lib/forms/party-required";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
 import { MODULE } from "@/lib/modules/catalog";
@@ -100,6 +102,38 @@ export async function PATCH(
   const autoLockSetting =
     form.org.formSettings?.autoLockFormOnFinalize === true;
   let finalizedNow = false;
+
+  // Obrigatoriedade configurada pela imobiliária: BLOQUEIA o finalize (422) em
+  // vez de virar aviso. O form público é burlável — sem esta trava o preset
+  // seria só decoração de UI. Roda ANTES do merge pra não deixar o formulário
+  // meio-finalizado; a prévia usa o mesmo deep-merge do caminho real (a versão
+  // canônica roda logo abaixo sob row lock).
+  //
+  // Só a AUSÊNCIA de campo requerido bloqueia. Problema de FORMATO
+  // (collectLocacaoFinalizeIssues) segue como warning na resposta — foi assim
+  // que a esteira sempre funcionou e o cliente não pode ficar preso por um
+  // CPF que o OCR trouxe torto.
+  if (requestedStatus === "completo" && form.status !== "completo") {
+    const preview = deepMergeAtPaths(
+      structuredClone((form.dataJson ?? {}) as Record<string, unknown>),
+      (body.dataJson ?? {}) as Record<string, unknown>
+    ).merged;
+    const requiredByStep = await resolveFormRequiredFields(form);
+    const missingRequired = findMissingRequired(
+      requiredByStep.flat(),
+      (path) => getByPath(preview, path)
+    );
+    if (missingRequired.length > 0) {
+      return NextResponse.json(
+        {
+          error: "Campos obrigatórios não preenchidos",
+          reason: "required_fields_missing",
+          missingRequired,
+        },
+        { status: 422 }
+      );
+    }
+  }
 
   // Merge atômico sob row lock (lib/forms/atomic-merge.ts): releitura do
   // dataJson dentro da transação — o save do token principal não regride o

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ContractEditorPage } from "@/components/contracts/ContractEditorPage";
+import type { LocacaoSettings } from "@/lib/contracts/default-config";
 import { LeaseSignaturesTab } from "@/components/locacao/LeaseSignaturesTab";
 import { LocacaoAdminContractTab } from "@/components/locacao/LocacaoAdminContractTab";
 import type { LeaseSignerData } from "@/components/locacao/SendLeaseEnvelopeDialog";
@@ -95,6 +96,9 @@ interface LocacaoDealDetailProps {
   simplified?: boolean;
   /** Pesquisas de satisfação habilitadas (feature locacao.pesquisas, default OFF). */
   surveysEnabled?: boolean;
+  /** Padrão contratual de LOCAÇÃO da org — piso da aba Configurações do editor
+   *  (vale pro contrato de locação E pro de administração). */
+  orgDefaults?: LocacaoSettings;
 }
 
 const BRL = (v: number) =>
@@ -142,6 +146,7 @@ export function LocacaoDealDetail({
   serasaJobs = [],
   simplified = false,
   surveysEnabled = false,
+  orgDefaults,
 }: LocacaoDealDetailProps) {
   const router = useRouter();
   // Tab inicial via ?tab= (paridade com o DealDetail de vendas) — permite
@@ -182,6 +187,12 @@ export function LocacaoDealDetail({
   const locatarios =
     (deal.dataJson.locatarios as { nome?: string; razao_social?: string }[] | undefined) ?? [];
   const garantiaTipo = (deal.dataJson.garantia as { tipo?: string } | undefined)?.tipo;
+  // Bloco operador-only que alimenta o contrato de ADMINISTRAÇÃO — coletado no
+  // diálogo da aba Administração (não mais na criação do formulário). O
+  // LeaseContract é espelho desse mesmo bloco, então o dataJson basta.
+  const fiscalAdministracao = deal.dataJson.fiscal as
+    | React.ComponentProps<typeof LocacaoAdminContractTab>["fiscal"]
+    | undefined;
 
   const criarAdministracao = async () => {
     if (!lease) return;
@@ -349,6 +360,7 @@ export function LocacaoDealDetail({
         {/* DADOS — visão do form.dataJson (paridade com a aba Dados de vendas) */}
         <TabsContent value="dados" className="mt-4">
           <LocacaoDadosTab
+            dealId={deal.id}
             dataJson={deal.dataJson}
             formToken={deal.formToken}
             formStatus={deal.formStatus}
@@ -362,6 +374,8 @@ export function LocacaoDealDetail({
             <ContractEditorPage
               contract={contract}
               versions={versions}
+              settingsFamily="locacao"
+              orgDefaults={orgDefaults}
               // Locação tem aba Assinaturas própria — o CTA default do editor
               // levaria à tela de VENDAS `/deals/[id]`.
               signCta={{ onClick: () => setTab("assinaturas") }}
@@ -373,7 +387,7 @@ export function LocacaoDealDetail({
                 <p className="mt-3 text-sm font-medium">Contrato ainda não gerado</p>
                 <p className="text-sm text-muted-foreground">
                   {deal.formStatus === "completo"
-                    ? "A geração falhou — verifique se há um template de locação ativo (sync-templates --apply --seed)."
+                    ? "A geração falhou — ative ou envie um modelo de locação em Configurações → Modelos."
                     : "O contrato é gerado quando o cliente finaliza o formulário público, ou pelo botão \"Gerar contrato\" acima."}
                 </p>
               </CardContent>
@@ -389,6 +403,8 @@ export function LocacaoDealDetail({
             adminVersions={adminVersions}
             signerData={adminSignerData}
             imobiliariaNome={orgName}
+            orgDefaults={orgDefaults}
+            fiscal={fiscalAdministracao}
           />
         </TabsContent>
 
@@ -410,6 +426,7 @@ export function LocacaoDealDetail({
               contractId={contract.id}
               contractStatus={contract.status}
               data={extractLeaseSignerData(contract.dataJson)}
+              leaseContractId={lease?.id}
             />
           ) : (
             <Card>
