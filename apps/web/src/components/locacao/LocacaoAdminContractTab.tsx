@@ -61,7 +61,7 @@ export function LocacaoAdminContractTab({
       } else {
         toast.error(
           body.error ||
-            "Falha ao gerar. Verifique se há um template de administração ativo (sync-templates --apply --seed)."
+            "Falha ao gerar. Ative ou envie um modelo de administração em Configurações → Modelos."
         );
       }
     } catch {

@@ -364,7 +364,7 @@ export function LocacaoDealDetail({
                 <p className="mt-3 text-sm font-medium">Contrato ainda não gerado</p>
                 <p className="text-sm text-muted-foreground">
                   {deal.formStatus === "completo"
-                    ? "A geração falhou — verifique se há um template de locação ativo (sync-templates --apply --seed)."
+                    ? "A geração falhou — ative ou envie um modelo de locação em Configurações → Modelos."
                     : "O contrato é gerado quando o cliente finaliza o formulário público, ou pelo botão \"Gerar contrato\" acima."}
                 </p>
               </CardContent>

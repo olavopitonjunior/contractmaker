@@ -37,6 +37,8 @@ vi.mock("@/lib/db/prisma", () => {
     },
     contractTemplate: {
       findMany: vi.fn(),
+      findFirst: vi.fn().mockResolvedValue(null),
+      create: vi.fn(),
       count: vi.fn().mockResolvedValue(0),
     },
     orgGoogleAccount: {

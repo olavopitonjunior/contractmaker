@@ -21,7 +21,8 @@ export function propostaModalidadeForSchema(schemaType: string): string | null {
 /**
  * Seleção determinística do template de proposta. Match EXATO por modalidade +
  * preferência por `isDefault`. Sem fallback: se a org não tem template ativo da
- * modalidade, retorna null e o caller orienta a rodar sync-templates.ts --seed.
+ * modalidade, retorna null e o caller orienta a ativar um modelo em /templates
+ * (o canônico é semeado na criação do tenant por `seedCanonicalTemplatesForOrg`).
  * Mesmo contrato de `selectAdministracaoTemplate`.
  */
 export async function selectPropostaTemplate(

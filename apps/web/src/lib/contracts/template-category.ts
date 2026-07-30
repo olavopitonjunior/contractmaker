@@ -188,8 +188,9 @@ export async function selectLocacaoTemplate(
 // Contrato de Administração de Locação (imobiliária ↔ proprietário).
 // Modalidade "administracao_locacao" — nome deliberado que NÃO começa com
 // "locacao" pra ficar fora do fallback startsWith acima. Match exato, SEM
-// fallback: sem template ativo da modalidade, retorna null e o caller orienta
-// a rodar sync-templates.ts --apply --seed.
+// fallback: sem template ativo da modalidade, retorna null e o caller orienta a
+// ativar um modelo em /templates (o canônico é semeado na criação do tenant por
+// `seedCanonicalTemplatesForOrg`).
 // ============================================================================
 export const ADMINISTRACAO_LOCACAO_MODALIDADE = "administracao_locacao";
 
