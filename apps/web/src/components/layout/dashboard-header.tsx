@@ -1,5 +1,6 @@
 "use client";
 
+import { Fragment } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { SidebarTrigger } from "@/components/ui/sidebar";
@@ -121,21 +122,32 @@ export function DashboardHeader({
             </BreadcrumbLink>
           </BreadcrumbItem>
           {segments.length > 0 && <BreadcrumbSeparator className="hidden sm:inline-flex" />}
-          {segments.map((seg, idx) => (
-            <BreadcrumbItem key={seg.href} className="min-w-0">
-              {seg.isLast ? (
-                <BreadcrumbPage className="truncate">{seg.label}</BreadcrumbPage>
-              ) : (
-                <>
+          {/*
+            O separador é IRMÃO do item, nunca filho. `BreadcrumbItem` e
+            `BreadcrumbSeparator` são os dois `<li>`, e `<li>` dentro de `<li>`
+            é HTML inválido: o parser do browser fecha o primeiro ao ver o
+            segundo e monta os dois como irmãos. O React, que serializou
+            aninhado, procura o `<li>` do separador dentro do item, não acha e
+            aborta a hidratação — era a origem dos React #418 (um por segmento
+            intermediário) + #423 em toda rota aninhada. Rota de um segmento só
+            (ex.: /corretores) escapava porque o único segmento é `isLast` e não
+            emite separador. Ver dashboard-header.hydration.test.tsx.
+          */}
+          {segments.map((seg) => (
+            <Fragment key={seg.href}>
+              <BreadcrumbItem className="min-w-0">
+                {seg.isLast ? (
+                  <BreadcrumbPage className="truncate">{seg.label}</BreadcrumbPage>
+                ) : (
                   <BreadcrumbLink asChild>
                     <Link href={seg.href} className="truncate">
                       {seg.label}
                     </Link>
                   </BreadcrumbLink>
-                  {idx < segments.length - 1 && <BreadcrumbSeparator />}
-                </>
-              )}
-            </BreadcrumbItem>
+                )}
+              </BreadcrumbItem>
+              {!seg.isLast && <BreadcrumbSeparator />}
+            </Fragment>
           ))}
         </BreadcrumbList>
       </Breadcrumb>
