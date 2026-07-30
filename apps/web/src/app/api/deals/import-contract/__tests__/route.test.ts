@@ -90,6 +90,7 @@ describe("POST /api/deals/import-contract", () => {
     mockPrisma.salesForm.create.mockResolvedValue({
       id: "form-1",
       token: "tok-1",
+      title: "Venda apto",
     } as never);
     mockPrisma.deal.count.mockResolvedValue(0 as never);
     mockPrisma.deal.create.mockResolvedValue({
@@ -117,6 +118,7 @@ describe("POST /api/deals/import-contract", () => {
       googleDocUrl: "https://docs/gdoc-1",
       // Token do form pra revisão dos dados extraídos (frente deal-dados).
       formToken: "tok-1",
+      formUrl: "/f/tok-1/venda-apto",
     });
 
     // SalesForm criado com status="vinculado"

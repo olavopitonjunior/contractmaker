@@ -3,13 +3,14 @@ import { prisma } from "@/lib/db/prisma";
 import { resolveFormRequiredFields } from "@/lib/forms/required-snapshot";
 import { canAccessForm } from "@/lib/forms/form-gate";
 import { FormClosedNotice } from "@/components/forms/FormClosedNotice";
-import { FormPageClient } from "./form-client";
+import { FormPageClient } from "../form-client";
 
 export default async function PublicFormPage({
   params,
   searchParams,
 }: {
-  params: { token: string };
+  // `slug` é decorativo (título do negócio na URL) — a resolução é só por token.
+  params: { token: string; slug?: string[] };
   searchParams: { prefilled?: string };
 }) {
   const form = await prisma.salesForm.findUnique({

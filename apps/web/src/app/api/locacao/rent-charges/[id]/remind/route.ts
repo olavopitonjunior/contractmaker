@@ -24,8 +24,14 @@ const remindRequestSchema = z.object({
 
 /**
  * POST /api/locacao/rent-charges/[id]/remind
- * Dispara a régua de cobrança via Newton (cria NewtonRequest tipado).
- * Sem HITL — régua é automática.
+ *
+ * Registra a etapa da régua de cobrança como `NewtonRequest` tipada. **Não envia
+ * mensagem.** Desde 2026-07-25 (PR #193) o cron de sweep que levava essas rows ao
+ * WhatsApp foi removido, e o executor nunca chamou `triggerNewtonForRequest` direto.
+ * Na prática já era inerte antes disso: o trigger é gated por `locacao.newton`, que
+ * está OFF em todos os tenants. Hoje isto é anotação — quem cobra é pessoa.
+ *
+ * Sem HITL.
  */
 export async function POST(req: NextRequest, { params }: Params) {
   const ctx = await ensureLocacaoAccess(PERMISSION.RENT_REMIND);

@@ -54,13 +54,13 @@ export default function NewLocacaoDealFromProposalPage() {
         toast.error(data.error || "Falha ao processar proposta.");
         setUploading(false);
         if (data.formToken) {
-          router.push(`/f/${data.formToken}?prefilled=1`);
+          router.push(`${data.formUrl ?? `/f/${data.formToken}`}?prefilled=1`);
         }
         return;
       }
 
       toast.success("Dados extraídos. Revise antes de gerar o contrato.");
-      router.push(`/f/${data.formToken}?prefilled=1`);
+      router.push(`${data.formUrl ?? `/f/${data.formToken}`}?prefilled=1`);
     } catch (err) {
       console.error(err);
       toast.error("Erro de rede ao enviar o arquivo. Tente novamente.");

@@ -11,12 +11,14 @@ import {
 } from "@/components/forms/PartyLinksPanel";
 import { ComissaoLocacaoCard } from "@/components/locacao/ComissaoLocacaoCard";
 import type { ComissaoLocacaoValue } from "@/components/locacao/ComissaoLocacaoSection";
+import { formPublicPath } from "@/lib/forms/form-url";
 
 interface LocacaoDadosTabProps {
   dealId: string;
   dataJson: Record<string, unknown>;
   formToken: string | null;
   formStatus: string | null;
+  dealTitle?: string | null;
 }
 
 const BRL = (v: number) =>
@@ -92,6 +94,7 @@ export function LocacaoDadosTab({
   dataJson,
   formToken,
   formStatus,
+  dealTitle,
 }: LocacaoDadosTabProps) {
   const locadores = (dataJson.locadores as Parte[] | undefined) ?? [];
   const locatarios = (dataJson.locatarios as Parte[] | undefined) ?? [];
@@ -138,7 +141,11 @@ export function LocacaoDadosTab({
             </p>
             {formToken && (
               <Button variant="outline" size="sm" asChild>
-                <a href={`/f/${formToken}`} target="_blank" rel="noopener noreferrer">
+                <a
+                  href={formPublicPath(formToken, dealTitle)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
                   <ExternalLink className="h-4 w-4 mr-1.5" /> Abrir formulário
                 </a>
               </Button>
@@ -299,7 +306,11 @@ export function LocacaoDadosTab({
           />
           <div className="flex justify-end">
             <Button variant="outline" size="sm" asChild>
-              <a href={`/f/${formToken}`} target="_blank" rel="noopener noreferrer">
+              <a
+                href={formPublicPath(formToken, dealTitle)}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 <ExternalLink className="h-4 w-4 mr-1.5" /> Editar no formulário
               </a>
             </Button>
