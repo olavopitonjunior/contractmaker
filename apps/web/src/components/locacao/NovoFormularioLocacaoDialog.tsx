@@ -23,17 +23,6 @@ import {
 import { Plus, Copy, Check, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 
-const REGIME_IR = [
-  { value: "nao_retem", label: "Não retém IR" },
-  { value: "retem_imobiliaria", label: "Retém (imobiliária)" },
-  { value: "retem_inquilino", label: "Retém (inquilino)" },
-  { value: "retem_sem_controle", label: "Retém sem controle" },
-];
-const REGIME_COBRANCA = [
-  { value: "mes_a_vencer", label: "Mês a vencer" },
-  { value: "mes_vencido", label: "Mês vencido" },
-];
-
 interface NovoFormularioLocacaoDialogProps {
   /** Modo controlado (dropdown "Novo negócio") — esconde o trigger próprio. */
   open?: boolean;
@@ -42,8 +31,16 @@ interface NovoFormularioLocacaoDialogProps {
 
 /**
  * Diálogo do OPERADOR: cria um formulário público de locação. Coleta a
- * finalidade + a config fiscal/comissão (que NÃO é preenchida pelo cliente) e
- * gera o link /f/[token] pra enviar ao locador/locatário.
+ * finalidade + a comissão (que NÃO é preenchida pelo cliente) e gera o link
+ * /f/[token] pra enviar ao locador/locatário.
+ *
+ * Taxa de administração, regime de IR, regime de cobrança e NFS-e saíram daqui:
+ * são condições da ADMINISTRAÇÃO (imobiliária ↔ proprietário) e passaram a ser
+ * coletadas no diálogo que precede a geração daquele contrato (aba
+ * Administração do negócio). O POST segue aceitando `fiscal` por
+ * retrocompatibilidade de API — só esta UI parou de enviar; sem ele,
+ * `createLeaseContractFromDataJson` cai nos defaults da casa (10%, nao_retem,
+ * mes_a_vencer, sem NFS-e) até o operador acertar na administração.
  */
 export function NovoFormularioLocacaoDialog({
   open: controlledOpen,
@@ -67,16 +64,12 @@ export function NovoFormularioLocacaoDialog({
 
   const [title, setTitle] = useState("");
   const [finalidade, setFinalidade] = useState("residencial");
-  const [taxaAdmin, setTaxaAdmin] = useState(10);
   // Comissão completa (corretagem + angariadores) — antes só existia o input
   // de `taxa_locacao_percent`, e o array ia hard-coded vazio pro servidor.
   const [comissao, setComissao] = useState<ComissaoLocacaoValue>({
     taxa_locacao_percent: 0,
     angariadores: [],
   });
-  const [regimeIr, setRegimeIr] = useState("nao_retem");
-  const [regimeCobranca, setRegimeCobranca] = useState("mes_a_vencer");
-  const [emitirNfse, setEmitirNfse] = useState(false);
 
   const reset = () => {
     setLink(null);
@@ -100,12 +93,6 @@ export function NovoFormularioLocacaoDialog({
         finalidade,
         title: title.trim() || undefined,
         ...(force ? { force: true } : {}),
-        fiscal: {
-          taxa_admin_percent: taxaAdmin,
-          regime_ir: regimeIr,
-          regime_cobranca: regimeCobranca,
-          emitir_nfse: emitirNfse,
-        },
         comissao: {
           taxa_locacao_percent: comissao.taxa_locacao_percent ?? 0,
           angariadores: comissao.angariadores ?? [],
@@ -186,7 +173,7 @@ export function NovoFormularioLocacaoDialog({
         <DialogHeader>
           <DialogTitle>Novo formulário de locação</DialogTitle>
           <DialogDescription>
-            Defina a finalidade e a configuração fiscal/comissão. O link é preenchido pelo
+            Defina a finalidade e a comissão. O link é preenchido pelo
             locador/locatário e gera o contrato automaticamente.
           </DialogDescription>
         </DialogHeader>
@@ -218,38 +205,6 @@ export function NovoFormularioLocacaoDialog({
                     { value: "comercial", label: "Comercial" },
                   ]}
                 />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-sm">Taxa de administração (%)</Label>
-                <Input
-                  type="number"
-                  value={taxaAdmin}
-                  onChange={(e) => setTaxaAdmin(Number(e.target.value))}
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-sm">Regime de IR</Label>
-                <NativeSelect value={regimeIr} onChange={setRegimeIr} options={REGIME_IR} />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-sm">Regime de cobrança</Label>
-                <NativeSelect
-                  value={regimeCobranca}
-                  onChange={setRegimeCobranca}
-                  options={REGIME_COBRANCA}
-                />
-              </div>
-              <div className="flex items-center gap-2 pt-6">
-                <input
-                  type="checkbox"
-                  id="emitir-nfse"
-                  className="h-4 w-4 rounded border-input accent-primary"
-                  checked={emitirNfse}
-                  onChange={(e) => setEmitirNfse(e.target.checked)}
-                />
-                <Label htmlFor="emitir-nfse" className="cursor-pointer text-sm">
-                  Emitir NFS-e por repasse
-                </Label>
               </div>
             </div>
 

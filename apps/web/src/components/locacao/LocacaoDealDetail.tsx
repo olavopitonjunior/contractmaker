@@ -184,6 +184,12 @@ export function LocacaoDealDetail({
   const locatarios =
     (deal.dataJson.locatarios as { nome?: string; razao_social?: string }[] | undefined) ?? [];
   const garantiaTipo = (deal.dataJson.garantia as { tipo?: string } | undefined)?.tipo;
+  // Bloco operador-only que alimenta o contrato de ADMINISTRAÇÃO — coletado no
+  // diálogo da aba Administração (não mais na criação do formulário). O
+  // LeaseContract é espelho desse mesmo bloco, então o dataJson basta.
+  const fiscalAdministracao = deal.dataJson.fiscal as
+    | React.ComponentProps<typeof LocacaoAdminContractTab>["fiscal"]
+    | undefined;
 
   const criarAdministracao = async () => {
     if (!lease) return;
@@ -389,6 +395,7 @@ export function LocacaoDealDetail({
             signerData={adminSignerData}
             imobiliariaNome={orgName}
             orgDefaults={orgDefaults}
+            fiscal={fiscalAdministracao}
           />
         </TabsContent>
 

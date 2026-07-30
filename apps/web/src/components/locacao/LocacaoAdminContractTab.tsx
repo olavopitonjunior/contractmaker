@@ -10,7 +10,11 @@ import { ContractEditorPage } from "@/components/contracts/ContractEditorPage";
 import type { LocacaoSettings } from "@/lib/contracts/default-config";
 import { LeaseSignaturesTab } from "@/components/locacao/LeaseSignaturesTab";
 import type { LeaseSignerData } from "@/components/locacao/SendLeaseEnvelopeDialog";
-import { Building2, FileSignature, Loader2 } from "lucide-react";
+import {
+  DadosAdministracaoDialog,
+  type DadosAdministracaoValue,
+} from "@/components/locacao/DadosAdministracaoDialog";
+import { Building2, FileSignature, Loader2, RefreshCw } from "lucide-react";
 
 type ContractProp = React.ComponentProps<typeof ContractEditorPage>["contract"];
 type VersionsProp = React.ComponentProps<typeof ContractEditorPage>["versions"];
@@ -27,6 +31,8 @@ interface LocacaoAdminContractTabProps {
   /** Padrão contratual de LOCAÇÃO da org — o instrumento de administração usa o
    *  mesmo vocabulário (comarca, multas do aluguel), não o de venda. */
   orgDefaults?: LocacaoSettings;
+  /** `fiscal` do dataJson — pré-preenche o diálogo de dados da administração. */
+  fiscal?: DadosAdministracaoValue;
 }
 
 /**
@@ -34,9 +40,12 @@ interface LocacaoAdminContractTabProps {
  * CONTRATO DE ADMINISTRAÇÃO DE LOCAÇÃO (imobiliária ↔ proprietário). Espelha a
  * aba Contrato + Assinaturas, mas escopada ao instrumento kind="administracao".
  *
- * Empty state → CTA "Gerar contrato de administração" (POST admin-contract).
- * Com contrato → editor Google Docs (agente IA de locação, já é dealKind-aware)
- * + assinaturas via `LeaseSignaturesTab variant="administracao"`.
+ * Empty state → CTA "Gerar contrato de administração", que abre antes o
+ * diálogo de dados da administração (taxa/IR/cobrança/NFS-e, PATCH .../fiscal)
+ * e só então dispara o POST admin-contract. Com contrato → editor Google Docs
+ * (agente IA de locação, já é dealKind-aware) + assinaturas via
+ * `LeaseSignaturesTab variant="administracao"`, e o botão de regerar reabre o
+ * mesmo diálogo pré-preenchido.
  */
 export function LocacaoAdminContractTab({
   dealId,
@@ -45,9 +54,11 @@ export function LocacaoAdminContractTab({
   signerData,
   imobiliariaNome,
   orgDefaults,
+  fiscal,
 }: LocacaoAdminContractTabProps) {
   const router = useRouter();
   const [generating, setGenerating] = useState(false);
+  const [dadosOpen, setDadosOpen] = useState(false);
   // Âncora da seção de assinatura — o CTA do banner de aprovado do editor rola
   // até aqui (senão o CTA default do ContractEditorPage levaria à tela de
   // VENDAS `/deals/[id]`, fora do fluxo de administração).
@@ -76,6 +87,16 @@ export function LocacaoAdminContractTab({
     }
   };
 
+  const dadosDialog = (
+    <DadosAdministracaoDialog
+      dealId={dealId}
+      open={dadosOpen}
+      onOpenChange={setDadosOpen}
+      initial={fiscal}
+      onConfirmed={gerar}
+    />
+  );
+
   if (!adminContract) {
     return (
       <Card>
@@ -89,7 +110,7 @@ export function LocacaoAdminContractTab({
             o(s) proprietário(s): taxa de administração, poderes de gestão,
             repasse e prestação de contas. Pode ser gerado a qualquer momento.
           </p>
-          <Button onClick={gerar} disabled={generating} className="mt-4">
+          <Button onClick={() => setDadosOpen(true)} disabled={generating} className="mt-4">
             {generating ? (
               <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
             ) : (
@@ -98,12 +119,29 @@ export function LocacaoAdminContractTab({
             Gerar contrato de administração
           </Button>
         </CardContent>
+        {dadosDialog}
       </Card>
     );
   }
 
   return (
     <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setDadosOpen(true)}
+          disabled={generating}
+        >
+          {generating ? (
+            <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+          ) : (
+            <RefreshCw className="mr-1.5 h-4 w-4" />
+          )}
+          Revisar dados e regerar
+        </Button>
+      </div>
+      {dadosDialog}
       <ContractEditorPage
         contract={adminContract}
         versions={adminVersions}

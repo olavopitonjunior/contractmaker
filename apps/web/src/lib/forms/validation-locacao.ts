@@ -223,21 +223,32 @@ const garantiaSchema = z.object({
 });
 
 // ============================================================================
-// Config fiscal/operacional (A7-A16) — preenchida pelo OPERADOR no diálogo de
-// criação do form, não pelo cliente. Espelha os campos que o wizard interno
-// (NovoContratoWizard / api/locacao/contracts/wizard) já coleta e que dirigem
-// repasse/DIMOB/cobrança — NÃO entram no texto do contrato (template), mas
-// alimentam o LeaseContract (ver createLeaseContractFromDataJson).
+// Config fiscal/operacional (A7-A16) — preenchida pelo OPERADOR, não pelo
+// cliente. Espelha os campos que o wizard interno (NovoContratoWizard /
+// api/locacao/contracts/wizard) já coleta e que dirigem repasse/DIMOB/cobrança
+// — NÃO entram no texto do contrato de LOCAÇÃO (template), mas alimentam o
+// LeaseContract (ver createLeaseContractFromDataJson).
+//
+// O subconjunto que o instrumento de ADMINISTRAÇÃO precisa (taxa de adm, IR,
+// regime de cobrança, NFS-e) saiu do diálogo de criação do formulário e passou
+// a ser coletado no diálogo que precede a geração daquele contrato — é ali que
+// a relação imobiliária ↔ proprietário é acertada. Ver
+// `PATCH /api/locacao/deals/[dealId]/fiscal`.
 // ============================================================================
-const fiscalSchema = z.object({
+export const fiscalAdministracaoSchema = z.object({
   taxa_admin_percent: z.number().min(0).max(100).optional().default(10),
   regime_ir: z
     .enum(["nao_retem", "retem_sem_controle", "retem_imobiliaria", "retem_inquilino"])
     .optional()
     .default("nao_retem"),
   regime_cobranca: z.enum(["mes_vencido", "mes_a_vencer"]).optional().default("mes_a_vencer"),
-  isencao_multa_meses: z.number().int().min(0).optional().default(0),
   emitir_nfse: z.boolean().optional().default(false),
+});
+
+export type FiscalAdministracao = z.infer<typeof fiscalAdministracaoSchema>;
+
+const fiscalSchema = fiscalAdministracaoSchema.extend({
+  isencao_multa_meses: z.number().int().min(0).optional().default(0),
   repasse_garantido: z
     .enum(["nao", "alguns_meses", "todo_contrato"])
     .optional()
