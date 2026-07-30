@@ -10,6 +10,23 @@ import {
   templateFamilyForModalidade,
 } from "@/lib/contracts/template-category";
 
+/**
+ * Escopo multitenant deny-by-default.
+ *
+ * `ContractTemplate.orgId` é direto (não passa pelo pipeline como Contract), e
+ * o filtro vai NA QUERY: inexistente e cross-org devolvem o MESMO 404, sem
+ * confirmar a existência do template de outro tenant. Sem isto, o
+ * `handlebarsSource` — o texto contratual proprietário da imobiliária — era
+ * legível, editável e apagável por qualquer sessão autenticada só com o id.
+ */
+const NOT_FOUND = () =>
+  NextResponse.json({ error: "Template not found" }, { status: 404 });
+
+async function resolveOrgId(userId: string): Promise<string | null> {
+  const org = await getUserOrg(userId);
+  return org?.id ?? null;
+}
+
 export async function GET(
   _req: NextRequest,
   { params }: { params: { id: string } }
@@ -19,13 +36,14 @@ export async function GET(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const template = await prisma.contractTemplate.findUnique({
-    where: { id: params.id },
+  const orgId = await resolveOrgId(session.user.id);
+  if (!orgId) return NOT_FOUND();
+
+  const template = await prisma.contractTemplate.findFirst({
+    where: { id: params.id, orgId },
   });
 
-  if (!template) {
-    return NextResponse.json({ error: "Template not found" }, { status: 404 });
-  }
+  if (!template) return NOT_FOUND();
 
   return NextResponse.json(template);
 }
@@ -41,13 +59,14 @@ export async function PATCH(
 
   const body = await req.json();
 
-  const template = await prisma.contractTemplate.findUnique({
-    where: { id: params.id },
+  const orgId = await resolveOrgId(session.user.id);
+  if (!orgId) return NOT_FOUND();
+
+  const template = await prisma.contractTemplate.findFirst({
+    where: { id: params.id, orgId },
   });
 
-  if (!template) {
-    return NextResponse.json({ error: "Template not found" }, { status: 404 });
-  }
+  if (!template) return NOT_FOUND();
 
   // Categoria (forma de pagamento) é canônica SÓ em template de venda. Num
   // template de locação/proposta ela é ignorada — derivar a modalidade dela
@@ -143,14 +162,15 @@ export async function DELETE(
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const template = await prisma.contractTemplate.findUnique({
-    where: { id: params.id },
+  const orgId = await resolveOrgId(session.user.id);
+  if (!orgId) return NOT_FOUND();
+
+  const template = await prisma.contractTemplate.findFirst({
+    where: { id: params.id, orgId },
     include: { _count: { select: { contracts: true } } },
   });
 
-  if (!template) {
-    return NextResponse.json({ error: "Template not found" }, { status: 404 });
-  }
+  if (!template) return NOT_FOUND();
 
   // If template has contracts, archive instead of delete
   if (template._count.contracts > 0) {
