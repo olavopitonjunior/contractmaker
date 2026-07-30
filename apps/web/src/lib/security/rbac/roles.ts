@@ -12,6 +12,7 @@ export type RolePreset =
   | "sales"
   | "viewer"
   | "custom"
+  | "gerente"             // vê/opera só os deals onde é o gerente atribuído
   // Locação (presets):
   | "gestor_locacao"      // operador do módulo de locação
   | "gestor_financeiro"   // foca em /financeiro + repasses
@@ -26,6 +27,7 @@ export const ROLE_LABELS_PT: Record<RolePreset, string> = {
   sales: "Vendas",
   viewer: "Visualizador",
   custom: "Personalizado",
+  gerente: "Gerente",
   gestor_locacao: "Gestor de Locação",
   gestor_financeiro: "Gestor Financeiro",
   vistoriador: "Vistoriador",
@@ -40,6 +42,8 @@ export const ROLE_DESCRIPTIONS_PT: Record<RolePreset, string> = {
   sales: "Captação + pipeline. Apenas cobranças dos próprios deals no financeiro.",
   viewer: "Leitura global com PII mascarada.",
   custom: "Permissões individualizadas definidas pelo admin.",
+  gerente:
+    "Enxerga e opera apenas os negócios em que foi atribuído como gerente. Ações liberadas pelo admin em Configurações → Gerentes.",
   gestor_locacao: "Operador de locação — imóveis, contratos, vistorias, checklists, cobranças e despesas. Sem ações financeiras de saída.",
   gestor_financeiro: "Foco em cobranças, repasses, conciliação e relatórios de locação. Sem CRUD de imóveis.",
   vistoriador: "Apenas vistorias agendadas atribuídas a ele (PWA `/vistoria/[os]`).",
@@ -73,6 +77,9 @@ function financeAccess(): PermissionMap {
   return {
     [PERMISSION.ORG_SETTINGS_READ]: true,
     [PERMISSION.KYC_VIEW_STATUS]: true,
+    // Pipeline (retrocompat 2026-07): finance sempre viu o kanban inteiro.
+    [PERMISSION.DEAL_VIEW_ALL]: true,
+    [PERMISSION.ENVELOPE_VIEW]: true,
     [PERMISSION.CHARGE_CREATE_FROM_DEAL]: true,
     [PERMISSION.CHARGE_CREATE_AVULSA]: true,
     [PERMISSION.CHARGE_VIEW_ALL]: true,
@@ -112,6 +119,15 @@ function salesAccess(): PermissionMap {
     [PERMISSION.CHARGE_RESEND_NOTIFICATION]: true,
     [PERMISSION.CUSTOMER_VIEW_OWN_DEALS]: true,
     [PERMISSION.FEES_VIEW]: true,
+    // Pipeline (retrocompat 2026-07): sales sempre operou o kanban inteiro —
+    // grants explícitos preservam o status quo com as chaves novas.
+    [PERMISSION.DEAL_VIEW_ALL]: true,
+    [PERMISSION.DEAL_EDIT]: true,
+    [PERMISSION.DEAL_MANAGER_ASSIGN]: true,
+    [PERMISSION.CONTRACT_CREATE]: true,
+    [PERMISSION.CONTRACT_EDIT]: true,
+    [PERMISSION.ENVELOPE_VIEW]: true,
+    [PERMISSION.ENVELOPE_SEND]: true,
     // Corretor: opera as PRÓPRIAS propostas ponta a ponta (cria, envia,
     // converte, cancela, reenvia, atribui), mas só enxerga as dele/atribuídas.
     // Sem PROPOSAL_VIEW_ALL nem PROPOSAL_DELETE de propósito (delete é destrutivo).
@@ -138,6 +154,37 @@ function viewerAccess(): PermissionMap {
     [PERMISSION.REPORT_VIEW]: true,
     // Leitura global — vê todas as propostas (gestor/auditoria), sem criar.
     [PERMISSION.PROPOSAL_VIEW_ALL]: true,
+    // Pipeline (retrocompat 2026-07): leitura global do kanban.
+    [PERMISSION.DEAL_VIEW_ALL]: true,
+    [PERMISSION.ENVELOPE_VIEW]: true,
+  };
+}
+
+function gerenteAccess(): PermissionMap {
+  // Base CONSERVADORA do gerente: enxerga e acompanha os deals atribuídos a
+  // ele (vendas e locação), mas as ações (gerar/editar contrato, enviar
+  // assinatura, emitir proposta, cobrar) nascem DESLIGADAS — o admin liga o
+  // que quiser em /settings/gerentes (OrgManagerSettings.permissionsJson,
+  // só chaves de MANAGER_CONFIGURABLE_PERMISSIONS), valendo pra todos os
+  // gerentes da org.
+  return {
+    [PERMISSION.ORG_SETTINGS_READ]: true,
+    [PERMISSION.KYC_VIEW_STATUS]: true,
+    [PERMISSION.DEAL_VIEW_ASSIGNED_ONLY]: true,
+    [PERMISSION.DEAL_EDIT]: true,
+    [PERMISSION.ENVELOPE_VIEW]: true,
+    [PERMISSION.PROPOSAL_VIEW_OWN_ONLY]: true,
+    // Leituras de locação — sem elas o gerente vê o card no kanban de locação
+    // mas as abas do deal (seguros, vistorias, garantias, análise de crédito)
+    // negam. Tudo read-only; mutações continuam gated (LEASE_CREATE etc.).
+    [PERMISSION.LEASE_VIEW]: true,
+    [PERMISSION.PROPERTY_VIEW]: true,
+    [PERMISSION.GUARANTEE_VIEW]: true,
+    [PERMISSION.RENT_VIEW]: true,
+    [PERMISSION.INSURANCE_VIEW]: true,
+    [PERMISSION.INSPECTION_VIEW]: true,
+    [PERMISSION.CREDIT_ANALYSIS_VIEW]: true,
+    [PERMISSION.CHECKLIST_VIEW]: true,
   };
 }
 
@@ -185,6 +232,14 @@ function gestorLocacaoAccess(): PermissionMap {
     [PERMISSION.NEWTON_REQUEST_VIEW]: true,
     [PERMISSION.NEWTON_INTENT_APPROVE]: true,
     [PERMISSION.REPORT_VIEW]: true,
+    // Pipeline (retrocompat 2026-07): gestor de locação opera a esteira inteira.
+    [PERMISSION.DEAL_VIEW_ALL]: true,
+    [PERMISSION.DEAL_EDIT]: true,
+    [PERMISSION.DEAL_MANAGER_ASSIGN]: true,
+    [PERMISSION.CONTRACT_CREATE]: true,
+    [PERMISSION.CONTRACT_EDIT]: true,
+    [PERMISSION.ENVELOPE_VIEW]: true,
+    [PERMISSION.ENVELOPE_SEND]: true,
     // Gestor de locação: enxerga todas as propostas da carteira e opera todas.
     [PERMISSION.PROPOSAL_VIEW_ALL]: true,
     [PERMISSION.PROPOSAL_CREATE]: true,
@@ -257,6 +312,7 @@ export const ROLE_PRESETS: Record<Exclude<RolePreset, "custom">, PermissionMap> 
   finance: financeAccess(),
   sales: salesAccess(),
   viewer: viewerAccess(),
+  gerente: gerenteAccess(),
   gestor_locacao: gestorLocacaoAccess(),
   gestor_financeiro: gestorFinanceiroAccess(),
   vistoriador: vistoriadorAccess(),
@@ -264,11 +320,20 @@ export const ROLE_PRESETS: Record<Exclude<RolePreset, "custom">, PermissionMap> 
   inquilino: inquilinoPortalAccess(),
 };
 
+/**
+ * `orgOverrides`: overrides booleanos da ORG sobre o preset (hoje só o role
+ * `gerente`, vindos de OrgManagerSettings.permissionsJson). O fetch é do
+ * caller (getEffectivePermissions) — esta função permanece pura.
+ */
 export function resolvePermissions(
   role: RolePreset,
-  customPermissions?: PermissionMap | null
+  customPermissions?: PermissionMap | null,
+  orgOverrides?: PermissionMap | null
 ): PermissionMap {
-  if (role === "custom" && customPermissions) return customPermissions;
-  if (role === "custom") return {};
-  return ROLE_PRESETS[role];
+  if (role === "custom") return customPermissions ?? {};
+  const base = ROLE_PRESETS[role];
+  if (orgOverrides && Object.keys(orgOverrides).length > 0) {
+    return { ...base, ...orgOverrides };
+  }
+  return base;
 }

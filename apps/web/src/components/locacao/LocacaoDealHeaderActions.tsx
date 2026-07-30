@@ -40,6 +40,10 @@ import { AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { ReopenFormButton } from "@/components/forms/ReopenFormButton";
 import { isFormFinished } from "@/lib/forms/form-status";
+import { usePermissions } from "@/hooks/usePermissions";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { NO_PERMISSION_HINT } from "@/lib/security/rbac/ui";
+import { formPublicPath } from "@/lib/forms/form-url";
 
 interface LocacaoDealHeaderActionsProps {
   dealId: string;
@@ -74,6 +78,11 @@ export function LocacaoDealHeaderActions({
   archivedAt,
 }: LocacaoDealHeaderActionsProps) {
   const router = useRouter();
+  const perms = usePermissions();
+  // Gating de CTA (feature Gerente) — libera enquanto carrega pra não piscar.
+  const canCreateContract =
+    perms.loading || perms.can(PERMISSION.CONTRACT_CREATE);
+  const canEditDeal = perms.loading || perms.can(PERMISSION.DEAL_EDIT);
   const [markLostOpen, setMarkLostOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [editingTitle, setEditingTitle] = useState(false);
@@ -170,7 +179,9 @@ export function LocacaoDealHeaderActions({
 
   function copyFormLink() {
     if (!formToken) return;
-    navigator.clipboard.writeText(`${window.location.origin}/f/${formToken}`);
+    navigator.clipboard.writeText(
+      `${window.location.origin}${formPublicPath(formToken, title)}`
+    );
     toast.success("Link do formulário copiado!");
   }
 
@@ -320,7 +331,11 @@ export function LocacaoDealHeaderActions({
               </Badge>
             )}
             <Button variant="outline" size="sm" asChild>
-              <a href={`/f/${formToken}`} target="_blank" rel="noopener noreferrer">
+              <a
+                href={formPublicPath(formToken, title)}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 <ExternalLink className="h-4 w-4 mr-1" />
                 Formulário
               </a>
@@ -398,7 +413,12 @@ export function LocacaoDealHeaderActions({
             </AlertDialog>
           </>
         )}
-        <Button size="sm" onClick={generateContract} disabled={busy === "generate"}>
+        <Button
+          size="sm"
+          onClick={generateContract}
+          disabled={busy === "generate" || !canCreateContract}
+          title={canCreateContract ? undefined : NO_PERMISSION_HINT}
+        >
           <FileText className="h-4 w-4 mr-1" />
           {busy === "generate"
             ? "Gerando..."
@@ -441,15 +461,17 @@ export function LocacaoDealHeaderActions({
             </>
           )}
         </Button>
-        <Button
-          size="sm"
-          variant="outline"
-          className="text-destructive border-destructive/40 hover:bg-destructive/10"
-          onClick={() => setDeleteOpen(true)}
-        >
-          <Trash2 className="h-4 w-4 mr-1" />
-          Excluir negócio
-        </Button>
+        {canEditDeal && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="text-destructive border-destructive/40 hover:bg-destructive/10"
+            onClick={() => setDeleteOpen(true)}
+          >
+            <Trash2 className="h-4 w-4 mr-1" />
+            Excluir negócio
+          </Button>
+        )}
       </div>
 
       <MarkLostDialog

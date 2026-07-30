@@ -36,6 +36,19 @@ import { clicksignRoleLabel } from "@/lib/clicksign/roles";
 import { buildPartySuggestions, type PartyLike } from "@/lib/clicksign/party-suggestions";
 import { UserPlus } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { usePermissions } from "@/hooks/usePermissions";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { NO_PERMISSION_HINT } from "@/lib/security/rbac/ui";
+
+/**
+ * Gating de envio (feature Gerente). Enquanto as permissões carregam, libera —
+ * o botão não pisca de habilitado pra bloqueado. `usePermissions` tem cache em
+ * memória, então cada seção pode chamar sem custo de rede extra.
+ */
+function useCanSendEnvelope(): boolean {
+  const perms = usePermissions();
+  return perms.loading || perms.can(PERMISSION.ENVELOPE_SEND);
+}
 
 /**
  * Parte do dataJson. Reusa `PartyLike` do helper de sugestões (que já cobre
@@ -242,6 +255,7 @@ function AttachmentEnvelopesSection({
   // Filtra só envelopes attachment-based; os contract-based ficam nas seções
   // específicas de cada contrato logo abaixo.
   const attachmentEnvelopes = envelopes.filter((e) => e.source === "attachment");
+  const canSend = useCanSendEnvelope();
 
   return (
     <Card>
@@ -269,11 +283,13 @@ function AttachmentEnvelopesSection({
           <Button
             size="sm"
             onClick={() => setDialogOpen(true)}
-            disabled={attachments.length === 0}
+            disabled={attachments.length === 0 || !canSend}
             title={
-              attachments.length === 0
-                ? "Suba um PDF na aba Documentos primeiro"
-                : undefined
+              !canSend
+                ? NO_PERMISSION_HINT
+                : attachments.length === 0
+                  ? "Suba um PDF na aba Documentos primeiro"
+                  : undefined
             }
           >
             <Send className="h-3.5 w-3.5 mr-1.5" />
@@ -371,6 +387,7 @@ function ContractEnvelopesSection({
   const hasActiveOrClosed = envelopes.some(
     (e) => e.status === "running" || e.status === "closed"
   );
+  const canSend = useCanSendEnvelope();
 
   return (
     <Card>
@@ -404,7 +421,8 @@ function ContractEnvelopesSection({
           <Button
             size="sm"
             onClick={() => setSendOpen(true)}
-            disabled={hasActiveOrClosed}
+            disabled={hasActiveOrClosed || !canSend}
+            title={canSend ? undefined : NO_PERMISSION_HINT}
           >
             <Send className="h-3.5 w-3.5 mr-1.5" />
             {hasActiveOrClosed ? "Já enviado" : "Enviar para assinatura"}

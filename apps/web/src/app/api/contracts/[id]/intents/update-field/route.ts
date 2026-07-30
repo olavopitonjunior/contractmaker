@@ -7,6 +7,8 @@ import {
   authFailureResponse,
 } from "@/lib/api/require-auth";
 import { requireApproval, approvalResponse } from "@/lib/api/intents";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 /**
  * POST /api/contracts/[id]/intents/update-field
@@ -104,6 +106,16 @@ export async function POST(
       { status: 404 }
     );
   }
+  // Escopo do gerente + CONTRACT_EDIT.
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: apiAuth.actor.effectiveUserId,
+    orgId: apiAuth.org.id,
+    via: apiAuth.ident.via,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return denied;
+
   if (
     apiAuth.ident.via === "bearer" &&
     contract.userId !== apiAuth.ident.userId

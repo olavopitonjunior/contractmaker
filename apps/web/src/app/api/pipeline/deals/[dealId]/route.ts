@@ -10,6 +10,7 @@ import {
 } from "@/lib/notifications/deal-events";
 import { z } from "zod";
 import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
+import { getEffectivePermissions, canAccessDeal } from "@/lib/security/rbac/check";
 
 export async function GET(
   _req: NextRequest,
@@ -43,6 +44,20 @@ export async function GET(
   // renda + anexos). Antes só exigia auth(); qualquer conta lia deal alheio.
   // 404 pra não vazar existência.
   if (!deal || (deal.form?.orgId ?? deal.pipeline.orgId) !== org.id) {
+    return NextResponse.json({ error: "Deal not found" }, { status: 404 });
+  }
+
+  // Escopo por usuário (feature Gerente): visão restrita só acessa deals onde
+  // é gerente atribuído ou criador. 404 pra não vazar existência.
+  const eff = await getEffectivePermissions(session.user.id, org.id);
+  if (
+    !eff ||
+    !canAccessDeal({
+      effective: eff,
+      ownerUserId: deal.userId,
+      managerUserId: deal.managerUserId,
+    })
+  ) {
     return NextResponse.json({ error: "Deal not found" }, { status: 404 });
   }
 
@@ -95,6 +110,19 @@ export async function PATCH(
   const dealOrgId = existing.form?.orgId ?? existing.pipeline.orgId;
   if (dealOrgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  // Escopo por usuário (feature Gerente).
+  const eff = await getEffectivePermissions(session.user.id, org.id);
+  if (
+    !eff ||
+    !canAccessDeal({
+      effective: eff,
+      ownerUserId: existing.userId,
+      managerUserId: existing.managerUserId,
+    })
+  ) {
+    return NextResponse.json({ error: "Deal not found" }, { status: 404 });
   }
 
   const { contractSignedAt, chargeIssuedAt, commissionPaidAt, ...rest } = parsed.data;
@@ -201,6 +229,20 @@ export async function DELETE(
       { error: "Forbidden", reason: "deal de outra organização" },
       { status: 403 }
     );
+  }
+
+  // Escopo por usuário (feature Gerente) — delete é destrutivo; visão restrita
+  // só alcança os próprios deals (e mesmo assim o botão é gated na UI).
+  const eff = await getEffectivePermissions(session.user.id, org.id);
+  if (
+    !eff ||
+    !canAccessDeal({
+      effective: eff,
+      ownerUserId: deal.userId,
+      managerUserId: deal.managerUserId,
+    })
+  ) {
+    return NextResponse.json({ error: "Deal não encontrado" }, { status: 404 });
   }
 
   // Bloqueio: envelope ClickSign assinado ou em curso

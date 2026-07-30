@@ -3,6 +3,8 @@ import { z } from "zod";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { sendFormSummary } from "@/lib/forms/form-summary-mailer";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -50,6 +52,15 @@ export async function POST(
   if (deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Deal not found" }, { status: 404 });
   }
+  // Escopo do gerente + DEAL_EDIT (dispara e-mail com o dossiê).
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: session.user.id,
+    orgId: org.id,
+    permission: PERMISSION.DEAL_EDIT,
+  });
+  if (denied) return denied;
+
   if (deal.kind !== "venda") {
     return NextResponse.json(
       { error: "Resumo consolidado disponível apenas para negócios de venda" },

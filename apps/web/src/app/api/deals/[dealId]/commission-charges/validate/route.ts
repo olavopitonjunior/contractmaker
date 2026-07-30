@@ -3,6 +3,7 @@ import { z } from "zod";
 import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 import { resolvePlatformFee } from "@/lib/asaas/platform-fee";
+import { guardDealScope } from "@/lib/deals/route-helpers";
 import {
   validatePayer,
   validateCharge,
@@ -82,6 +83,15 @@ export async function POST(
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
   const { dealId } = await params;
+
+  // Escopo do gerente — o validate lê dados do negócio pra montar o wizard.
+  const denied = await guardDealScope({
+    dealId,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    via: ctx.via,
+  });
+  if (denied) return denied;
 
   const url = new URL(req.url);
   const step = url.searchParams.get("step") ?? "all";

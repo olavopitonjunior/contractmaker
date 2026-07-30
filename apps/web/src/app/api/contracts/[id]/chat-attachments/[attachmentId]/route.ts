@@ -5,6 +5,8 @@ import {
   isAuthFailure,
   authFailureResponse,
 } from "@/lib/api/require-auth";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -50,6 +52,16 @@ export async function DELETE(
   ) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente + CONTRACT_EDIT.
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    via: auth.ident.via,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return denied;
 
   await prisma.chatAttachment.delete({ where: { id: params.attachmentId } });
   return NextResponse.json({ ok: true });

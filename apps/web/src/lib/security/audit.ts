@@ -122,6 +122,9 @@ export type AuditAction =
   | "DEAL_STAGE_CHANGE"
   | "DEAL_ARCHIVED"
   | "DEAL_UNARCHIVED"
+  // Gerente do negócio (2026-07)
+  | "DEAL_MANAGER_ASSIGN"
+  | "ORG_MANAGER_SETTINGS_UPDATE"
   | "FORM_CREATE"
   | "FORM_UPDATE"
   | "FORM_PATCH_REJECTED_PATH"

@@ -3,6 +3,8 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
 import { MODULE } from "@/lib/modules/catalog";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
+import { getEffectivePermissions, dealScopeWhere } from "@/lib/security/rbac/check";
 import { Card, CardContent } from "@/components/ui/card";
 import { KanbanBoard } from "@/components/pipeline/KanbanBoard";
 import { NovoNegocioLocacaoDropdown } from "@/components/locacao/NovoNegocioLocacaoDropdown";
@@ -42,6 +44,12 @@ export default async function PipelineLocacaoPage({
   const modules = await getOrgModules(org.id);
   if (!isModuleEnabled(modules, MODULE.LOCACAO)) redirect("/pipeline");
 
+  // Escopo por usuário (feature Gerente) — id efetivo respeita impersonation,
+  // espelhando requireFeaturePage do kanban de vendas.
+  const effUserId = await getEffectiveUserId(session.user.id);
+  const eff = await getEffectivePermissions(effUserId, org.id);
+  const dealScope = dealScopeWhere(eff) ?? { id: "__none__" };
+
   const pipeline = await prisma.pipeline.findFirst({
     where: { orgId: org.id, kind: "locacao" },
     include: {
@@ -49,9 +57,11 @@ export default async function PipelineLocacaoPage({
         orderBy: { position: "asc" },
         include: {
           deals: {
-            where: includeArchived
-              ? { kind: "locacao" }
-              : { kind: "locacao", archivedAt: null },
+            where: {
+              kind: "locacao",
+              ...(includeArchived ? {} : { archivedAt: null }),
+              ...dealScope,
+            },
             orderBy: { createdAt: "desc" },
             include: {
               // Sem form.dataJson: o nome do locatário vive denormalizado

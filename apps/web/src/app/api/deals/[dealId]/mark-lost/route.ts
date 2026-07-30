@@ -9,6 +9,8 @@ import {
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { LOST_STAGE_NAME, stageConfigForKind } from "@/lib/pipeline/stage-config";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -64,6 +66,16 @@ export async function POST(
   if (dealOrgId !== apiAuth.org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente + DEAL_EDIT.
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: apiAuth.actor.effectiveUserId,
+    orgId: apiAuth.org.id,
+    via: apiAuth.ident.via,
+    permission: PERMISSION.DEAL_EDIT,
+  });
+  if (denied) return denied;
 
   const { terminalStages } = stageConfigForKind(deal.pipeline.kind);
   if (terminalStages.includes(deal.stage.name)) {

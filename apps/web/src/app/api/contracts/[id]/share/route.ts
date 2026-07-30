@@ -8,6 +8,8 @@ import {
   removeDocPermission,
 } from "@/lib/google/docs";
 import { resolveUserOrgId } from "@/lib/security/org-scope";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 /**
  * Compartilhamento do Google Doc do contrato com terceiros via Drive
@@ -37,7 +39,7 @@ async function loadContractWithDocId(contractId: string, userId: string) {
     },
   });
   if (!contract || contract.deal.pipeline.orgId !== orgId) return null;
-  return contract;
+  return { ...contract, orgId };
 }
 
 export async function GET(
@@ -52,6 +54,13 @@ export async function GET(
   if (!contract) {
     return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
   }
+  // Escopo do gerente (leitura da lista de compartilhamentos).
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: session.user.id,
+    orgId: contract.orgId,
+  });
+  if (denied) return denied;
   if (!contract.googleDocId) {
     return NextResponse.json({ permissions: [], googleDocsBacked: false });
   }
@@ -80,6 +89,14 @@ export async function POST(
   if (!contract) {
     return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
   }
+  // Escopo do gerente + permissão — dar acesso ao Doc a terceiros é mutação.
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: session.user.id,
+    orgId: contract.orgId,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return denied;
   if (!contract.googleDocId) {
     return NextResponse.json(
       { error: "Compartilhamento via Drive só funciona em contratos com Google Doc." },
@@ -132,6 +149,14 @@ export async function DELETE(
   if (!contract?.googleDocId) {
     return NextResponse.json({ error: "Contrato não encontrado ou sem Google Doc" }, { status: 404 });
   }
+  // Escopo do gerente + permissão (revoga acesso de terceiro ao Doc).
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: session.user.id,
+    orgId: contract.orgId,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return denied;
   const permissionId = new URL(req.url).searchParams.get("permissionId");
   if (!permissionId) {
     return NextResponse.json({ error: "permissionId é obrigatório" }, { status: 400 });

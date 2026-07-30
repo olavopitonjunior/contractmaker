@@ -14,6 +14,7 @@ import { importContractFromFile } from "@/lib/services/contract-import";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { MODULE } from "@/lib/modules/catalog";
 import { LOCACAO_SCHEMA_TYPE } from "@/lib/forms/validation-locacao";
+import { resolveManagerForCreate } from "@/lib/deals/manager";
 import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
 
 export const runtime = "nodejs";
@@ -71,6 +72,10 @@ export async function POST(req: NextRequest) {
 
   const file = formData.get("file");
   const title = ((formData.get("title") as string | null) || "").trim() || null;
+  // Gerente responsável (feature Gerente) — campo opcional do multipart; string
+  // vazia conta como ausente.
+  const managerUserId =
+    ((formData.get("managerUserId") as string | null) || "").trim() || undefined;
 
   const ALLOWED_TARGET_STAGES = ["Em contrato", "Assinado"] as const;
   type AllowedTargetStage = (typeof ALLOWED_TARGET_STAGES)[number];
@@ -112,6 +117,15 @@ export async function POST(req: NextRequest) {
         error: `Arquivo não parece ser um ${mime === "application/pdf" ? "PDF" : "DOCX"} válido (header inválido).`,
       },
       { status: 400 }
+    );
+  }
+
+  // Gerente resolvido antes da criação (fora da idempotência).
+  const manager = await resolveManagerForCreate(ctx.orgId, managerUserId);
+  if (!manager.ok) {
+    return NextResponse.json(
+      { error: manager.error, message: manager.message },
+      { status: manager.status }
     );
   }
 
@@ -206,6 +220,7 @@ export async function POST(req: NextRequest) {
             stageId: stage.id,
             userId: ctx.userId,
             formId: createdForm.id,
+            managerUserId: manager.managerUserId,
             kind: "locacao",
             sourceChannel: DEAL_SOURCE_CHANNEL.IMPORT_CONTRATO,
             title: title || `Contrato de locação importado — ${file.name}`,

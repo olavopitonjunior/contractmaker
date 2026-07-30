@@ -7,6 +7,7 @@ import { audit } from "@/lib/security/audit";
 import { ensureLocacaoAccess, isRouteError, parseJsonBody } from "@/lib/locacao/route-helpers";
 import { LOCACAO_SCHEMA_TYPE } from "@/lib/forms/validation-locacao";
 import { nextReadjustmentDate } from "@/lib/locacao/readjustment-calculator";
+import { resolveManagerForCreate } from "@/lib/deals/manager";
 
 export const dynamic = "force-dynamic";
 
@@ -44,6 +45,9 @@ const wizardSchema = z.object({
     "por_encomenda",
     "mista",
   ]),
+  // Gerente responsável (feature Gerente) — opcional; a org decide se é
+  // obrigatório (resolveManagerForCreate devolve 422).
+  managerUserId: z.string().min(1).optional(),
 });
 
 /**
@@ -90,6 +94,16 @@ export async function POST(req: NextRequest) {
     pipeline.stages.find((s) => s.name === "Em Aprovação") ??
     pipeline.stages.find((s) => s.name === "Formulário") ??
     pipeline.stages[0];
+
+  // Gerente responsável resolvido ANTES da transação (12º caminho de criação
+  // de deal — sem isto o wizard furava o toggle managerRequired da org).
+  const manager = await resolveManagerForCreate(ctx.orgId, d.managerUserId);
+  if (!manager.ok) {
+    return NextResponse.json(
+      { error: manager.error, message: manager.message },
+      { status: manager.status }
+    );
+  }
 
   const enderecoFmt = [property.rua, property.numero, property.bairro]
     .filter(Boolean)
@@ -154,6 +168,7 @@ export async function POST(req: NextRequest) {
         stageId: firstStage.id,
         pipelineId: pipeline.id,
         userId: ctx.userId,
+        managerUserId: manager.managerUserId,
         kind: "locacao",
         sourceChannel: DEAL_SOURCE_CHANNEL.WIZARD,
         title: titulo,

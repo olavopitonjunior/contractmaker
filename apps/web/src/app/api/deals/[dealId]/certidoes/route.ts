@@ -15,6 +15,8 @@ import { audit } from "@/lib/security/audit";
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
 import { FEATURE } from "@/lib/modules/catalog";
 import { z } from "zod";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 // maxDuration deve ser > DEFAULT_TIMEOUT_MS (630s) do callInfosimples para que
@@ -42,6 +44,19 @@ async function authorizeDeal(dealId: string) {
   if (!deal) return { error: "Deal not found", status: 404 as const };
   if (deal.pipeline.orgId !== org.id) {
     return { error: "Forbidden", status: 403 as const };
+  }
+  // Escopo do gerente + DEAL_EDIT (esta variante serve o POST, que dispara
+  // consultas pagas). Fora do escopo → 404 pra não vazar existência.
+  const denied = await guardDealScope({
+    dealId,
+    userId: session.user.id,
+    orgId: org.id,
+    permission: PERMISSION.DEAL_EDIT,
+  });
+  if (denied) {
+    return denied.status === 403
+      ? { error: "PERMISSION_DENIED", status: 403 as const }
+      : { error: "Deal not found", status: 404 as const };
   }
   return {
     deal,
@@ -84,6 +99,14 @@ async function authorizeDealRead(req: NextRequest, dealId: string) {
       response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
     };
   }
+  // Escopo do gerente (leitura — sem permission).
+  const denied = await guardDealScope({
+    dealId,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    via: ctx.via,
+  });
+  if (denied) return { response: denied };
   return { deal, ctx };
 }
 

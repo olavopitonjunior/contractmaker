@@ -19,6 +19,13 @@ vi.mock("@/lib/auth/auth", () => ({
   getUserOrg: vi.fn(),
 }));
 
+// Escopo do gerente (feature separada, #206): liberado aqui de propósito — o
+// que estes testes exercitam é a lógica de anexo. Sem o mock, o guard resolve
+// contra o prisma mockado, não acha o deal e devolve 404 antes do que interessa.
+vi.mock("@/lib/deals/route-helpers", () => ({
+  guardDealScope: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock("@/lib/security/audit", () => ({
   audit: vi.fn().mockResolvedValue(undefined),
   extractAuditContextFromRequest: vi.fn(() => ({

@@ -11,8 +11,10 @@ import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { withIdempotency } from "@/lib/api/idempotency";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { extractLocacaoContractDataJson } from "@/lib/extraction/locacao-extractor";
+import { formPublicPath } from "@/lib/forms/form-url";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { MODULE } from "@/lib/modules/catalog";
+import { resolveManagerForCreate } from "@/lib/deals/manager";
 import {
   LOCACAO_COMERCIAL_SCHEMA_TYPE,
   LOCACAO_SCHEMA_TYPE,
@@ -64,6 +66,10 @@ export async function POST(req: NextRequest) {
     (formData.get("finalidade") as string | null) === "comercial"
       ? "comercial"
       : null;
+  // Gerente responsável (feature Gerente) — campo opcional do multipart; string
+  // vazia conta como ausente.
+  const managerUserId =
+    ((formData.get("managerUserId") as string | null) || "").trim() || undefined;
 
   if (!(file instanceof File)) {
     return NextResponse.json(
@@ -92,6 +98,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(
       { error: "Arquivo não parece ser um PDF válido (header inválido)." },
       { status: 400 }
+    );
+  }
+
+  // Gerente resolvido antes da criação (fora da idempotência).
+  const manager = await resolveManagerForCreate(ctx.orgId, managerUserId);
+  if (!manager.ok) {
+    return NextResponse.json(
+      { error: manager.error, message: manager.message },
+      { status: manager.status }
     );
   }
 
@@ -162,6 +177,7 @@ export async function POST(req: NextRequest) {
           stageId: stage.id,
           userId: ctx.userId,
           formId: form.id,
+          managerUserId: manager.managerUserId,
           kind: "locacao",
           sourceChannel: DEAL_SOURCE_CHANNEL.UPLOAD_PROPOSTA,
           title: title || `Proposta de locação — ${file.name}`,
@@ -220,7 +236,12 @@ export async function POST(req: NextRequest) {
 
       return {
         status: 201,
-        body: { dealId: deal.id, formToken: form.token, formId: form.id },
+        body: {
+          dealId: deal.id,
+          formToken: form.token,
+          formUrl: formPublicPath(form.token, form.title),
+          formId: form.id,
+        },
       };
     },
   });

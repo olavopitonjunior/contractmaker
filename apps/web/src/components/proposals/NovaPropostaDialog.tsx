@@ -35,6 +35,9 @@ import {
   type RegistryWitness,
 } from "@/components/pipeline/WitnessPicker";
 import { computeDedupeKey } from "@/lib/proposals/signer-dedupe";
+import { usePermissions } from "@/hooks/usePermissions";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { NO_PERMISSION_HINT } from "@/lib/security/rbac/ui";
 
 const SCHEMA_BY_TIPO: Record<string, { label: string; value: string }[]> = {
   venda: [{ label: "Compra e venda", value: "compra_venda_v1" }],
@@ -63,6 +66,9 @@ const emptyParty = (): Party => ({ name: "", email: "", phone: "", canal: "email
  */
 export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
   const router = useRouter();
+  const perms = usePermissions();
+  const canCreateProposal =
+    perms.loading || perms.can(PERMISSION.PROPOSAL_CREATE);
   const isVenda = tipo === "venda";
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -302,7 +308,12 @@ export function NovaPropostaDialog({ tipo }: { tipo: "venda" | "locacao" }) {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button size="sm">
+        {/* Gating de CTA (feature Gerente) — libera enquanto carrega. */}
+        <Button
+          size="sm"
+          disabled={!canCreateProposal}
+          title={canCreateProposal ? undefined : NO_PERMISSION_HINT}
+        >
           <Plus className="mr-1 h-4 w-4" /> Nova proposta
         </Button>
       </DialogTrigger>

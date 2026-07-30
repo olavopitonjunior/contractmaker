@@ -13,6 +13,9 @@ import {
   type LeaseEnvelopeVariant,
 } from "@/components/locacao/SendLeaseEnvelopeDialog";
 import { cn } from "@/lib/utils";
+import { usePermissions } from "@/hooks/usePermissions";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { NO_PERMISSION_HINT } from "@/lib/security/rbac/ui";
 
 interface LeaseSignaturesTabProps {
   contractId: string;
@@ -48,6 +51,10 @@ export function LeaseSignaturesTab({
   const [sending, setSending] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+
+  const perms = usePermissions();
+  // Gating de envio (feature Gerente) — libera enquanto carrega pra não piscar.
+  const canSend = perms.loading || perms.can(PERMISSION.ENVELOPE_SEND);
 
   const isApproved = contractStatus === "aprovado";
   const hasActiveOrClosed = envelopes.some(
@@ -141,13 +148,15 @@ export function LeaseSignaturesTab({
           <Button
             size="sm"
             onClick={() => (data ? setDialogOpen(true) : handleSend())}
-            disabled={!isApproved || hasActiveOrClosed || sending}
+            disabled={!isApproved || hasActiveOrClosed || sending || !canSend}
             title={
-              !isApproved
-                ? "Aprove o contrato na aba Contrato antes de enviar"
-                : hasActiveOrClosed
-                  ? "Já existe um envelope para este contrato"
-                  : undefined
+              !canSend
+                ? NO_PERMISSION_HINT
+                : !isApproved
+                  ? "Aprove o contrato na aba Contrato antes de enviar"
+                  : hasActiveOrClosed
+                    ? "Já existe um envelope para este contrato"
+                    : undefined
             }
           >
             {sending ? (

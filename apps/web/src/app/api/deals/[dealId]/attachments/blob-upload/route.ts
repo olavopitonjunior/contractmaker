@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { handleUpload, type HandleUploadBody } from "@vercel/blob/client";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -41,6 +43,16 @@ export async function POST(
         });
         if (!deal) throw new Error("Deal not found");
         if (deal.pipeline.orgId !== org.id) throw new Error("Forbidden");
+
+        // Escopo do gerente + DEAL_EDIT. Aqui o handshake só sabe lançar —
+        // "Forbidden" vira 403 no catch abaixo.
+        const denied = await guardDealScope({
+          dealId: params.dealId,
+          userId: session.user.id,
+          orgId: org.id,
+          permission: PERMISSION.DEAL_EDIT,
+        });
+        if (denied) throw new Error("Forbidden");
 
         // O cliente escolhe o pathname; trava no prefixo deste deal pra impedir
         // gravar no espaço de outro deal.

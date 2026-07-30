@@ -5,6 +5,8 @@ import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { bulkDeleteSchema, buildBulkDeleteWhere } from "@/lib/certidoes/bulk-delete";
 import { archiveAttachment } from "@/lib/attachments/archive";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -49,6 +51,15 @@ export async function POST(
   if (deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente + DEAL_EDIT.
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: session.user.id,
+    orgId: org.id,
+    permission: PERMISSION.DEAL_EDIT,
+  });
+  if (denied) return denied;
 
   const built = buildBulkDeleteWhere(parsed.data);
   if ("error" in built) {

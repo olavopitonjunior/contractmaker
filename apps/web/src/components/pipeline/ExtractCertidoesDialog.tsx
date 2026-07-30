@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 import { ExtraCertidaoPicker, type CatalogMeta } from "./ExtraCertidaoPicker";
 import type { EndpointInfo } from "@/lib/certidoes/endpoints";
+import { formPublicPath } from "@/lib/forms/form-url";
 
 type Tier = "padrao" | "imovel" | "opcional" | "pesquisa";
 
@@ -429,7 +430,7 @@ export function ExtractCertidoesDialog({
   );
 
   const formUrl = formToken
-    ? `${typeof window !== "undefined" ? window.location.origin : ""}/f/${formToken}`
+    ? `${typeof window !== "undefined" ? window.location.origin : ""}${formPublicPath(formToken)}`
     : null;
 
   // ---- renderers ----------------------------------------------------------

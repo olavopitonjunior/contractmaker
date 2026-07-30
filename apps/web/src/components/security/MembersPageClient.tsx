@@ -41,7 +41,13 @@ interface Member {
   user: { id: string; name: string | null; email: string; image: string | null };
 }
 
-const ROLE_CHOICES: RolePreset[] = ["admin", "finance", "sales", "viewer"];
+const ROLE_CHOICES: RolePreset[] = [
+  "admin",
+  "finance",
+  "sales",
+  "gerente",
+  "viewer",
+];
 
 export function MembersPageClient() {
   const router = useRouter();
