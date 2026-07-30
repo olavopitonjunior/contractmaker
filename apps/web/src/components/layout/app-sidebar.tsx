@@ -23,6 +23,8 @@ import { BrandWordmark } from "@/components/layout/brand-mark";
 import { OnboardingSidebarChecklist } from "@/components/onboarding/OnboardingSidebarChecklist";
 import type { OnboardingStatus } from "@/lib/onboarding/status";
 import { FEATURE, isValidModule } from "@/lib/modules/catalog";
+import { usePermissions } from "@/hooks/usePermissions";
+import { PERMISSION, type PermissionKey } from "@/lib/security/rbac/permissions";
 import {
   LayoutDashboard,
   BookOpen,
@@ -42,13 +44,22 @@ import {
  *  Um array = anyOf (visível se QUALQUER uma estiver ligada) — ex.: Propostas,
  *  que aparece se vendas.propostas OU locacao.propostas. */
 type Requires = string | string[];
-type SubItem = { title: string; url: string; exact?: boolean; requires?: Requires };
+/** Gate de RBAC do item. Array = anyOf. Ortogonal ao gate de módulo (`requires`). */
+type RequiresPermission = PermissionKey | PermissionKey[];
+type SubItem = {
+  title: string;
+  url: string;
+  exact?: boolean;
+  requires?: Requires;
+  permission?: RequiresPermission;
+};
 type NavSimple = {
   kind: "item";
   title: string;
   url: string;
   icon: LucideIcon;
   requires?: Requires;
+  permission?: RequiresPermission;
 };
 type NavGroup = {
   kind: "group";
@@ -56,6 +67,7 @@ type NavGroup = {
   icon: LucideIcon;
   /** Gate de módulo/feature do grupo inteiro (além do filtro por sub-item). */
   requires?: Requires;
+  permission?: RequiresPermission;
   items: SubItem[];
 };
 type NavEntry = NavSimple | NavGroup;
@@ -80,6 +92,20 @@ function requiresEnabled(modules: ModulesView, requires?: Requires): boolean {
   return isValidModule(requires)
     ? modules.enabled[requires] === true
     : modules.features[requires] === true;
+}
+
+/**
+ * `permission` ausente => sempre visível. Enquanto as permissões carregam,
+ * fail-open: o menu não pisca nem some entre o primeiro paint e o fetch.
+ */
+function permissionAllowed(
+  can: (permission: PermissionKey) => boolean,
+  loading: boolean,
+  permission?: RequiresPermission
+): boolean {
+  if (!permission) return true;
+  if (loading) return true;
+  return Array.isArray(permission) ? permission.some(can) : can(permission);
 }
 
 const NAV: NavEntry[] = [
@@ -156,9 +182,25 @@ const NAV: NavEntry[] = [
     title: "Financeiro",
     icon: Wallet,
     requires: FEATURE.VENDAS_PAGADORIA,
+    // RBAC (2026-07, feature Gerente): sem NENHUMA leitura financeira o grupo
+    // some. CHARGE_VIEW_OWN_DEALS_ONLY entra no anyOf pra não regredir o
+    // corretor (`sales`), que hoje opera as cobranças dos próprios deals.
+    permission: [
+      PERMISSION.FINANCE_BALANCE_VIEW,
+      PERMISSION.CHARGE_VIEW_ALL,
+      PERMISSION.CHARGE_VIEW_OWN_DEALS_ONLY,
+    ],
     items: [
       { title: "Cobranças", url: "/financeiro/cobrancas" },
-      { title: "Clientes", url: "/financeiro/clientes" },
+      {
+        title: "Clientes",
+        url: "/financeiro/clientes",
+        // anyOf com o escopo próprio: o corretor mantém a carteira dele.
+        permission: [
+          PERMISSION.CUSTOMER_VIEW_ALL,
+          PERMISSION.CUSTOMER_VIEW_OWN_DEALS,
+        ],
+      },
       { title: "Conciliação", url: "/financeiro/conciliacao" },
       { title: "Extrato", url: "/financeiro/extrato" },
       { title: "Transferências", url: "/financeiro/transferencias" },
@@ -169,21 +211,73 @@ const NAV: NavEntry[] = [
     kind: "group",
     title: "Configurações",
     icon: Settings,
+    // Perfil/Segurança ficam SEM gate (todo membro precisa deles). Os itens de
+    // configuração da ORG pedem ORG_SETTINGS_READ — o preset `gerente` tem a
+    // chave, então nada muda pra ele; some só pra vistoriador/portais.
     items: [
       { title: "Meu perfil", url: "/settings/profile" },
-      { title: "Membros", url: "/settings/membros" },
+      {
+        title: "Membros",
+        url: "/settings/membros",
+        permission: PERMISSION.ORG_SETTINGS_READ,
+      },
+      {
+        title: "Gerentes",
+        url: "/settings/gerentes",
+        permission: PERMISSION.ORG_SETTINGS_READ,
+      },
       { title: "Segurança", url: "/settings/seguranca" },
-      { title: "Base de conhecimento", url: "/settings/knowledge-base" },
-      { title: "Estilos de documento", url: "/settings/document-styles" },
-      { title: "Formulário", url: "/settings/formulario" },
+      {
+        title: "Base de conhecimento",
+        url: "/settings/knowledge-base",
+        permission: PERMISSION.ORG_SETTINGS_READ,
+      },
+      {
+        title: "Estilos de documento",
+        url: "/settings/document-styles",
+        permission: PERMISSION.ORG_SETTINGS_READ,
+      },
+      {
+        title: "Formulário",
+        url: "/settings/formulario",
+        permission: PERMISSION.ORG_SETTINGS_READ,
+      },
       { title: "Notificações", url: "/settings/notificacoes" },
-      { title: "Contas bancárias", url: "/settings/pagamentos/contas" },
-      { title: "Destinatários de split", url: "/settings/pagamentos/split-recipients" },
-      { title: "Assinaturas", url: "/settings/signatures" },
-      { title: "Certidões", url: "/settings/certidoes" },
-      { title: "Uso de IA", url: "/settings/ai-usage" },
-      { title: "API tokens", url: "/settings/api-tokens" },
-      { title: "Uso da API", url: "/settings/api-usage" },
+      {
+        title: "Contas bancárias",
+        url: "/settings/pagamentos/contas",
+        permission: PERMISSION.ORG_SETTINGS_READ,
+      },
+      {
+        title: "Destinatários de split",
+        url: "/settings/pagamentos/split-recipients",
+        permission: PERMISSION.ORG_SETTINGS_READ,
+      },
+      {
+        title: "Assinaturas",
+        url: "/settings/signatures",
+        permission: PERMISSION.ORG_SETTINGS_READ,
+      },
+      {
+        title: "Certidões",
+        url: "/settings/certidoes",
+        permission: PERMISSION.ORG_SETTINGS_READ,
+      },
+      {
+        title: "Uso de IA",
+        url: "/settings/ai-usage",
+        permission: PERMISSION.ORG_SETTINGS_READ,
+      },
+      {
+        title: "API tokens",
+        url: "/settings/api-tokens",
+        permission: PERMISSION.ORG_SETTINGS_READ,
+      },
+      {
+        title: "Uso da API",
+        url: "/settings/api-usage",
+        permission: PERMISSION.ORG_SETTINGS_READ,
+      },
     ],
   },
 ];
@@ -215,18 +309,25 @@ export function AppSidebar({
   brand = null,
 }: AppSidebarProps) {
   const pathname = usePathname();
+  const { can, loading: permsLoading } = usePermissions();
   // Override manual de abertura por grupo; quando indefinido, deriva da rota ativa.
   const [openOverride, setOpenOverride] = useState<Record<string, boolean>>({});
 
-  // Filtra a navegação pelos entitlements da org: itens com `requires` só
-  // aparecem se o módulo/sub-função estiver habilitado; grupos somem se não
-  // sobrar nenhum filho visível.
+  // Filtra a navegação por DOIS eixos: entitlements da org (`requires`) e RBAC
+  // do usuário (`permission`). Grupos somem se não sobrar nenhum filho visível.
   const visibleNav = NAV.flatMap((entry): NavEntry[] => {
+    const allowed =
+      requiresEnabled(modules, entry.requires) &&
+      permissionAllowed(can, permsLoading, entry.permission);
     if (entry.kind === "item") {
-      return requiresEnabled(modules, entry.requires) ? [entry] : [];
+      return allowed ? [entry] : [];
     }
-    if (!requiresEnabled(modules, entry.requires)) return [];
-    const items = entry.items.filter((it) => requiresEnabled(modules, it.requires));
+    if (!allowed) return [];
+    const items = entry.items.filter(
+      (it) =>
+        requiresEnabled(modules, it.requires) &&
+        permissionAllowed(can, permsLoading, it.permission)
+    );
     return items.length > 0 ? [{ ...entry, items }] : [];
   });
 

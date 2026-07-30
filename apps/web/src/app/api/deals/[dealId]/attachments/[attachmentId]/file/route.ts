@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { downloadBufferFromUrl } from "@/lib/storage/s3";
+import { guardDealScope } from "@/lib/deals/route-helpers";
 
 export const runtime = "nodejs";
 
@@ -36,6 +37,14 @@ export async function GET(
   if (attachment.deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente — o proxy serve o binário do documento (RG/CNH/matrícula).
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: session.user.id,
+    orgId: org.id,
+  });
+  if (denied) return denied;
 
   try {
     const buffer = await downloadBufferFromUrl(attachment.url);

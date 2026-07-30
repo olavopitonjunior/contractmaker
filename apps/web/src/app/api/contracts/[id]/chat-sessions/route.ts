@@ -5,6 +5,7 @@ import {
   isAuthFailure,
   authFailureResponse,
 } from "@/lib/api/require-auth";
+import { guardContractScope } from "@/lib/deals/route-helpers";
 
 export const runtime = "nodejs";
 
@@ -38,6 +39,15 @@ export async function GET(
       { status: 403 }
     );
   }
+
+  // Escopo do gerente.
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    via: auth.ident.via,
+  });
+  if (denied) return denied;
 
   const sessions = await prisma.chatSession.findMany({
     where: { contractId: params.id, archived: false },
@@ -89,6 +99,15 @@ export async function POST(
   if (auth.ident.via === "bearer" && contract.userId !== auth.ident.userId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente.
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    via: auth.ident.via,
+  });
+  if (denied) return denied;
 
   const session = await prisma.chatSession.create({
     data: {

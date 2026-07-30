@@ -9,6 +9,7 @@ import {
   MembershipRequiredError,
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { guardDealScope } from "@/lib/deals/route-helpers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -60,6 +61,15 @@ async function authorize(req: NextRequest, dealId: string) {
       error: NextResponse.json({ error: "Deal não encontrado" }, { status: 404 }),
     };
   }
+
+  // Escopo do gerente — acrescentado ao gate CHARGE_CREATE_FROM_DEAL acima.
+  const denied = await guardDealScope({
+    dealId,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    via: ctx.via,
+  });
+  if (denied) return { error: denied };
 
   return { ctx, deal };
 }

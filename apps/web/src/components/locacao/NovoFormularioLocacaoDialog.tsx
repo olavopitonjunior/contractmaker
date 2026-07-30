@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import { PartyLinksPanel } from "@/components/forms/PartyLinksPanel";
+import { ManagerSelect } from "@/components/deals/ManagerSelect";
 import { Plus, Copy, Check, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 
@@ -67,6 +68,9 @@ export function NovoFormularioLocacaoDialog({
   const [regimeIr, setRegimeIr] = useState("nao_retem");
   const [regimeCobranca, setRegimeCobranca] = useState("mes_a_vencer");
   const [emitirNfse, setEmitirNfse] = useState(false);
+  // Gerente responsável pelo negócio (obrigatório quando a org liga o toggle).
+  const [managerUserId, setManagerUserId] = useState<string | null>(null);
+  const [managerRequired, setManagerRequired] = useState(false);
 
   const reset = () => {
     setLink(null);
@@ -74,6 +78,7 @@ export function NovoFormularioLocacaoDialog({
     setDealId(null);
     setCopied(false);
     setTitle("");
+    setManagerUserId(null);
     // Nova intenção de criação → nova key de idempotência.
     setIdemKey(crypto.randomUUID());
   };
@@ -88,6 +93,7 @@ export function NovoFormularioLocacaoDialog({
       body: JSON.stringify({
         finalidade,
         title: title.trim() || undefined,
+        ...(managerUserId ? { managerUserId } : {}),
         ...(force ? { force: true } : {}),
         fiscal: {
           taxa_admin_percent: taxaAdmin,
@@ -105,6 +111,10 @@ export function NovoFormularioLocacaoDialog({
   };
 
   const handleCreate = async () => {
+    if (managerRequired && !managerUserId) {
+      toast.error("Selecione o gerente responsável");
+      return;
+    }
     setSubmitting(true);
     try {
       let { res, data } = await postForm(idemKey, false);
@@ -126,6 +136,15 @@ export function NovoFormularioLocacaoDialog({
         // Erros ficam cacheados sob a key (ex.: 412 pipeline não seedada) —
         // rotaciona pra próxima tentativa no MESMO dialog não replayar o stale.
         setIdemKey(crypto.randomUUID());
+        // Fallback do gate server-side (org exige gerente e o client não sabia).
+        if (res.status === 422 && data?.error === "gerente_obrigatorio") {
+          setManagerRequired(true);
+          toast.error(
+            (typeof data.message === "string" && data.message) ||
+              "Selecione o gerente responsável",
+          );
+          return;
+        }
         toast.error(
           (typeof data?.error === "string" && data.error) ||
             "Falha ao criar o formulário.",
@@ -192,6 +211,12 @@ export function NovoFormularioLocacaoDialog({
                 Identifica o negócio no pipeline e evita cards duplicados.
               </p>
             </div>
+            <ManagerSelect
+              value={managerUserId}
+              onChange={setManagerUserId}
+              disabled={submitting}
+              onContextLoaded={(ctx) => setManagerRequired(ctx.managerRequired)}
+            />
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-1.5">
                 <Label className="text-sm">Finalidade</Label>

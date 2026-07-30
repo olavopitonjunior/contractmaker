@@ -13,6 +13,8 @@ import {
   AuthMethodNotAllowedError,
 } from "@/lib/clicksign/account";
 import type { ClicksignRole } from "@/lib/clicksign/roles";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -57,6 +59,15 @@ export async function GET(
   if (!deal) {
     return NextResponse.json({ error: "Deal não encontrado" }, { status: 404 });
   }
+
+  // Escopo do gerente (lista de envelopes = PII dos signatários).
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    via: ctx.via,
+  });
+  if (denied) return denied;
 
   const envelopes = await prisma.envelope.findMany({
     where: { dealId: params.dealId },
@@ -118,6 +129,16 @@ export async function POST(
   if (attachment.deal.pipeline.orgId !== ctx.orgId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente + ENVELOPE_SEND (envio custa por signatário).
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    via: ctx.via,
+    permission: PERMISSION.ENVELOPE_SEND,
+  });
+  if (denied) return denied;
 
   try {
     const envelope = await sendEnvelopeForAttachment({

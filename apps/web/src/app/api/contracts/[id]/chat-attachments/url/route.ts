@@ -7,6 +7,8 @@ import {
   authFailureResponse,
 } from "@/lib/api/require-auth";
 import { isPrivateHost, safeFetch, SsrfBlockedError } from "@/lib/security/ssrf";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -112,6 +114,16 @@ export async function POST(
   if (auth.ident.via === "bearer" && session.contract.userId !== auth.ident.userId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente + CONTRACT_EDIT.
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    via: auth.ident.via,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return denied;
 
   // Fetch com timeout
   const ctrl = new AbortController();

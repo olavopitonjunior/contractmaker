@@ -228,7 +228,9 @@ export async function notifyChargeEvent(params: {
     const charge = await prisma.commissionCharge.findFirst({
       where: { id: chargeId, orgId },
       include: {
-        deal: { select: { id: true, title: true, userId: true } },
+        deal: {
+          select: { id: true, title: true, userId: true, managerUserId: true },
+        },
         customer: { select: { name: true, email: true } },
       },
     });
@@ -283,6 +285,25 @@ export async function notifyChargeEvent(params: {
         batchId,
         metadata: { chargeId: charge.id, dealId: charge.deal.id, event },
       });
+
+      // Gerente do deal (feature Gerente): sino direcionado também pra ele —
+      // e-mail/WhatsApp seguem o canal externo com opt-in (user-channels), não
+      // a régua legada de e-mail do owner.
+      if (
+        charge.deal.managerUserId &&
+        charge.deal.managerUserId !== charge.deal.userId
+      ) {
+        await emitPagadoriaNotif({
+          orgId,
+          userId: charge.deal.managerUserId,
+          type: notifType,
+          title: `Cobrança ${eventLabel}${dealTitle ? ` — ${dealTitle}` : ""}`,
+          body: `${customerName} • ${valueStr}`,
+          linkUrl,
+          batchId: `${batchId}:mgr`,
+          metadata: { chargeId: charge.id, dealId: charge.deal.id, event },
+        });
+      }
 
       const owner = await prisma.user.findUnique({
         where: { id: charge.deal.userId },

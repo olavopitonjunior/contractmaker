@@ -7,6 +7,8 @@ import { prisma } from "@/lib/db/prisma";
 import { buildReportData, renderReportHtml } from "@/lib/certidoes/report";
 import { exportPdf } from "@/lib/render/exporter";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -42,6 +44,15 @@ export async function POST(
   if (deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  // Escopo do gerente + DEAL_EDIT (gera e persiste o PDF do relatório).
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: session.user.id,
+    orgId: org.id,
+    permission: PERMISSION.DEAL_EDIT,
+  });
+  if (denied) return denied;
+
   if (deal.certidaoJobs.length === 0) {
     return NextResponse.json(
       { error: "Nao ha certidoes extraidas para este negocio" },

@@ -130,6 +130,19 @@ export const PERMISSION = {
   PROPOSAL_DELETE: "proposal.delete",
   PROPOSAL_RESEND: "proposal.resend",
   PROPOSAL_ASSIGN: "proposal.assign",
+  // Pipeline & Contratos (2026-07, feature Gerente). Primeira RBAC de deals:
+  // VIEW_ALL / VIEW_ASSIGNED_ONLY espelham o par de propostas — quem não tem
+  // NENHUMA das duas mantém a visão org-wide (fail-open p/ CustomRoles antigas,
+  // ver dealScopeWhere em check.ts). DEAL_EDIT cobre os subrecursos do deal
+  // (dados, anexos, certidões, mark-*, notificações) — sem chave por subrecurso.
+  DEAL_VIEW_ALL: "deal.view.all",
+  DEAL_VIEW_ASSIGNED_ONLY: "deal.view.assigned_only",
+  DEAL_EDIT: "deal.edit",
+  DEAL_MANAGER_ASSIGN: "deal.manager.assign",
+  CONTRACT_CREATE: "contract.create",
+  CONTRACT_EDIT: "contract.edit",
+  ENVELOPE_VIEW: "envelope.view",
+  ENVELOPE_SEND: "envelope.send",
 } as const;
 
 export type PermissionKey =
@@ -262,7 +275,39 @@ export const PERMISSION_CATEGORIES: Record<string, PermissionKey[]> = {
     PERMISSION.PROPOSAL_RESEND,
     PERMISSION.PROPOSAL_ASSIGN,
   ],
+  "Pipeline & Contratos": [
+    PERMISSION.DEAL_VIEW_ALL,
+    PERMISSION.DEAL_VIEW_ASSIGNED_ONLY,
+    PERMISSION.DEAL_EDIT,
+    PERMISSION.DEAL_MANAGER_ASSIGN,
+    PERMISSION.CONTRACT_CREATE,
+    PERMISSION.CONTRACT_EDIT,
+    PERMISSION.ENVELOPE_VIEW,
+    PERMISSION.ENVELOPE_SEND,
+  ],
 };
+
+/**
+ * Subconjunto que o admin pode ligar/desligar pros gerentes da org na tela
+ * /settings/gerentes (persiste em OrgManagerSettings.permissionsJson como
+ * overrides sobre ROLE_PRESETS.gerente). Chaves de view/scope (DEAL_VIEW_*),
+ * org/members e financeiro org-wide ficam DE FORA de propósito — visão
+ * restrita do gerente não é configurável.
+ */
+export const MANAGER_CONFIGURABLE_PERMISSIONS: PermissionKey[] = [
+  PERMISSION.DEAL_EDIT,
+  PERMISSION.DEAL_MANAGER_ASSIGN,
+  PERMISSION.CONTRACT_CREATE,
+  PERMISSION.CONTRACT_EDIT,
+  PERMISSION.ENVELOPE_SEND,
+  PERMISSION.PROPOSAL_CREATE,
+  PERMISSION.PROPOSAL_SEND,
+  PERMISSION.PROPOSAL_CONVERT,
+  PERMISSION.PROPOSAL_CANCEL,
+  PERMISSION.PROPOSAL_RESEND,
+  PERMISSION.CHARGE_CREATE_FROM_DEAL,
+  PERMISSION.CHARGE_VIEW_OWN_DEALS_ONLY,
+];
 
 export const PERMISSION_LABELS_PT: Record<PermissionKey, string> = {
   [PERMISSION.ORG_SETTINGS_READ]: "Ver configurações da organização",
@@ -367,4 +412,12 @@ export const PERMISSION_LABELS_PT: Record<PermissionKey, string> = {
   [PERMISSION.PROPOSAL_DELETE]: "Excluir proposta",
   [PERMISSION.PROPOSAL_RESEND]: "Reenviar/lembrar proposta",
   [PERMISSION.PROPOSAL_ASSIGN]: "Atribuir responsável da proposta",
+  [PERMISSION.DEAL_VIEW_ALL]: "Ver todos os negócios",
+  [PERMISSION.DEAL_VIEW_ASSIGNED_ONLY]: "Ver apenas negócios atribuídos a ele",
+  [PERMISSION.DEAL_EDIT]: "Editar dados do negócio (anexos, certidões, etapas)",
+  [PERMISSION.DEAL_MANAGER_ASSIGN]: "Atribuir gerente do negócio",
+  [PERMISSION.CONTRACT_CREATE]: "Gerar/importar contrato",
+  [PERMISSION.CONTRACT_EDIT]: "Editar contrato (editor, configurações, aprovação)",
+  [PERMISSION.ENVELOPE_VIEW]: "Ver assinaturas do negócio",
+  [PERMISSION.ENVELOPE_SEND]: "Enviar para assinatura",
 };

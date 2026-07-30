@@ -5,6 +5,8 @@ import {
   orgScopedNotFound,
   resolveUserOrgId,
 } from "@/lib/security/org-scope";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 /**
  * Carrega a suggestion validando (a) que pertence ao contrato da URL e
@@ -36,6 +38,15 @@ async function loadScopedSuggestion(
   ) {
     return null;
   }
+  // Escopo do gerente + CONTRACT_EDIT (aceitar/rejeitar altera o documento).
+  // null → 404, mesmo contrato do helper.
+  const denied = await guardContractScope({
+    contractId,
+    userId,
+    orgId,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return null;
   return suggestion;
 }
 

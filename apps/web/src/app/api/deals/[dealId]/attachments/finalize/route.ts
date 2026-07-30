@@ -5,6 +5,8 @@ import { prisma } from "@/lib/db/prisma";
 import { downloadBufferFromUrl, deleteFromStorage } from "@/lib/storage/s3";
 import { extractAuditContextFromRequest } from "@/lib/security/audit";
 import { persistDealDocument } from "@/lib/deals/attachments";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -59,6 +61,15 @@ export async function POST(
   if (deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente + DEAL_EDIT.
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: session.user.id,
+    orgId: org.id,
+    permission: PERMISSION.DEAL_EDIT,
+  });
+  if (denied) return denied;
 
   // Validação de propriedade: só aceita URL do store Vercel Blob cujo pathname
   // pertence a ESTE deal. Impede registrar URL externa arbitrária (que seria

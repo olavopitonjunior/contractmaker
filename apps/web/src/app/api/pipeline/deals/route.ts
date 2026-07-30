@@ -13,11 +13,16 @@ import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { assertModuleEnabled, ModuleDisabledError } from "@/lib/modules/guard";
 import { MODULE } from "@/lib/modules/catalog";
+import { getEffectivePermissions, dealScopeWhere } from "@/lib/security/rbac/check";
+import { resolveManagerForCreate } from "@/lib/deals/manager";
 
 const createDealSchema = z.object({
   formId: z.string().optional(),
   title: z.string().min(1),
   value: z.number().optional(),
+  // Gerente responsável (feature Gerente) — opcional; a org decide se é
+  // obrigatório (resolveManagerForCreate devolve 422).
+  managerUserId: z.string().min(1).optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -37,6 +42,18 @@ export async function POST(req: NextRequest) {
   const parsed = createDealSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.message }, { status: 400 });
+  }
+
+  // Gerente responsável resolvido antes da criação (fora da idempotência).
+  const manager = await resolveManagerForCreate(
+    auth.org.id,
+    parsed.data.managerUserId
+  );
+  if (!manager.ok) {
+    return NextResponse.json(
+      { error: manager.error, message: manager.message },
+      { status: manager.status }
+    );
   }
 
   const idempotencyKey = req.headers.get("x-idempotency-key");
@@ -84,6 +101,7 @@ export async function POST(req: NextRequest) {
           stageId: firstStage.id,
           userId: auth.actor.effectiveUserId,
           formId: parsed.data.formId || null,
+          managerUserId: manager.managerUserId,
           sourceChannel: DEAL_SOURCE_CHANNEL.MANUAL,
           title: parsed.data.title,
           value: parsed.data.value || null,
@@ -133,6 +151,21 @@ export async function GET(req: NextRequest) {
   const pipeline = await getPipelineByKind(auth.org.id, MODULE.VENDAS);
   if (!pipeline) return NextResponse.json([]);
 
+  // Escopo por usuário (feature Gerente). Bearer/Newton: token é da org —
+  // sem scoping por usuário (age como serviço).
+  let scope = {};
+  if (auth.ident.via !== "bearer") {
+    const eff = await getEffectivePermissions(
+      auth.actor.effectiveUserId,
+      auth.org.id
+    );
+    const s = dealScopeWhere(eff);
+    if (s === null) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    scope = s;
+  }
+
   // Oculta arquivados por padrão; ?includeArchived=true inclui.
   const includeArchived =
     new URL(req.url).searchParams.get("includeArchived") === "true";
@@ -141,6 +174,7 @@ export async function GET(req: NextRequest) {
     where: {
       pipelineId: pipeline.id,
       ...(includeArchived ? {} : { archivedAt: null }),
+      ...scope,
     },
     orderBy: { createdAt: "desc" },
     include: {

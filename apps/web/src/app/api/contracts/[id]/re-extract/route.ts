@@ -11,6 +11,8 @@ import {
 import { exportDocAsPdf } from "@/lib/google/docs";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -67,6 +69,15 @@ export async function POST(
   if (contract.deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  // Escopo do gerente + CONTRACT_EDIT (re-extração reescreve o dataJson).
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: session.user.id,
+    orgId: org.id,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return denied;
+
   if (contract.templateId !== null) {
     return NextResponse.json(
       {

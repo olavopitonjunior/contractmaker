@@ -7,6 +7,8 @@ import {
   orgScopedNotFound,
   resolveUserOrgId,
 } from "@/lib/security/org-scope";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export async function GET(
   req: NextRequest,
@@ -21,6 +23,14 @@ export async function GET(
   if (!(await contractBelongsToOrg(params.id, orgId))) {
     return orgScopedNotFound("Contrato");
   }
+
+  // Escopo do gerente.
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: session.user.id,
+    orgId: orgId!,
+  });
+  if (denied) return denied;
 
   const url = new URL(req.url);
   const status = url.searchParams.get("status") || "pending";
@@ -61,6 +71,15 @@ export async function POST(
   if (!contract || !orgId || contract.deal.pipeline.orgId !== orgId) {
     return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
   }
+  // Escopo do gerente + CONTRACT_EDIT.
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: session.user.id,
+    orgId,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return denied;
+
   if (contract.status === "aprovado") {
     return NextResponse.json({ error: "Contrato aprovado é imutável" }, { status: 403 });
   }

@@ -8,6 +8,7 @@ import {
   type DadosContratoLite,
 } from "@/lib/asaas/commission";
 import { resolveDefaultDueDate } from "@/lib/asaas/due-date-resolver";
+import { guardDealScope } from "@/lib/deals/route-helpers";
 import {
   matchComissionadosToSplitRecipients,
   type ComissionadoLike,
@@ -182,6 +183,15 @@ export async function GET(
   if (membership?.role === "sales" && deal.userId !== ctx.userId) {
     return NextResponse.json({ error: "Deal não encontrado" }, { status: 404 });
   }
+
+  // Escopo do gerente (o resumo traz nome/CPF/e-mail das partes).
+  const denied = await guardDealScope({
+    dealId,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    via: ctx.via,
+  });
+  if (denied) return denied;
 
   const contract = deal.contracts[0];
   const data = (contract?.dataJson ?? null) as DadosContratoLite | null;

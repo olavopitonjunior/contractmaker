@@ -113,6 +113,33 @@ describe("resolveNotificationUsers — cascata de destinatários", () => {
     });
   });
 
+  it("gerente do deal recebe junto com o dono (rule deal_manager)", async () => {
+    dealFind.mockResolvedValue({
+      userId: "dono",
+      managerUserId: "gerente",
+      pipeline: { orgId: "org1" },
+    });
+    membershipMany.mockResolvedValue([member("dono"), member("gerente")]);
+
+    const r = await resolveNotificationUsers(notif({ metadata: { dealId: "deal1" } }));
+
+    expect(r.rule).toBe("deal_manager");
+    expect(r.users.map((u) => u.userId).sort()).toEqual(["dono", "gerente"]);
+  });
+
+  it("gerente que também é o dono aparece uma vez só", async () => {
+    dealFind.mockResolvedValue({
+      userId: "gerente",
+      managerUserId: "gerente",
+      pipeline: { orgId: "org1" },
+    });
+    membershipMany.mockResolvedValue([member("gerente")]);
+
+    const r = await resolveNotificationUsers(notif({ metadata: { dealId: "deal1" } }));
+
+    expect(r.users.map((u) => u.userId)).toEqual(["gerente"]);
+  });
+
   it("ex-membro não recebe: sem OrgMembership, some da lista", async () => {
     membershipMany.mockResolvedValue([]); // saiu da org
 
@@ -342,6 +369,32 @@ describe("resolveNotificationUsers — destinatários escolhidos pelo admin", ()
     expect(warn).toHaveBeenCalled();
     // O aviso nomeia quem sobrou — corte silencioso lê como "avisei todos".
     expect(String(warn.mock.calls[0]?.[0])).toMatch(/fora:/);
+    warn.mockRestore();
+  });
+
+  it("dono e GERENTE sobrevivem ao teto — o corte só derruba escolhidos", async () => {
+    // A ordem do input é [dono, gerente, ...escolhidos] e loadEligible a
+    // preserva; com 6 candidatos e teto 5, quem cai é o último escolhido.
+    const escolhidos = ["u1", "u2", "u3", "u4"];
+    comLista({ deal_updates: escolhidos });
+    dealFind.mockResolvedValue({
+      userId: "dono",
+      managerUserId: "gerente",
+      pipeline: { orgId: "org1" },
+    });
+    comMembros(member("dono"), member("gerente"), ...escolhidos.map((u) => member(u)));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const r = await resolveNotificationUsers(
+      notif({ metadata: { dealId: "deal1" } }),
+      "whatsapp"
+    );
+
+    expect(r.users).toHaveLength(5);
+    const ids = r.users.map((u) => u.userId);
+    expect(ids).toContain("dono");
+    expect(ids).toContain("gerente");
+    expect(ids).not.toContain("u4");
     warn.mockRestore();
   });
 

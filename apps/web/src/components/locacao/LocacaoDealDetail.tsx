@@ -36,6 +36,7 @@ import {
 } from "@/components/locacao/lease-detail/VistoriaTab";
 import { FileText, ExternalLink, Receipt, Building2, FileSignature } from "lucide-react";
 import { DealSurveysTab } from "@/components/surveys/DealSurveysTab";
+import { DealManagerChip } from "@/components/deals/DealManagerChip";
 import { toast } from "sonner";
 
 type ContractProp = React.ComponentProps<typeof ContractEditorPage>["contract"];
@@ -65,6 +66,8 @@ interface LocacaoDealDetailProps {
     formToken: string | null;
     formLockedAt: string | null;
     formReopenedAt: string | null;
+    /** Gerente responsável (scalar do Deal) — o nome sai do manager-context. */
+    managerUserId: string | null;
     dataJson: Record<string, unknown>;
     lostAt: string | null;
     lostReason: string | null;
@@ -219,6 +222,11 @@ export function LocacaoDealDetail({
           <div className="flex items-center gap-2 flex-wrap mb-1">
             {deal.stageName && <Badge variant="secondary">{deal.stageName}</Badge>}
             {lease && <Badge variant="outline">Locação · {lease.status}</Badge>}
+            <DealManagerChip
+              dealId={deal.id}
+              managerUserId={deal.managerUserId}
+              managerName={null}
+            />
           </div>
           <LocacaoDealHeaderActions
             dealId={deal.id}
@@ -344,6 +352,7 @@ export function LocacaoDealDetail({
             dataJson={deal.dataJson}
             formToken={deal.formToken}
             formStatus={deal.formStatus}
+            dealTitle={deal.title}
           />
         </TabsContent>
 

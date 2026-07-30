@@ -4,6 +4,8 @@ import { waitUntil } from "@vercel/functions";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { runSingleJob, pollPortalJob } from "@/lib/certidoes/executor";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 // I.7 (2026-05-11) — TJSP com auth GOV.BR (login_cpf/login_senha) demora
@@ -60,6 +62,15 @@ export async function POST(
   if (job.deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente + DEAL_EDIT (retry consome budget Infosimples).
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: session.user.id,
+    orgId: org.id,
+    permission: PERMISSION.DEAL_EDIT,
+  });
+  if (denied) return denied;
 
   if (job.retryCount >= MAX_RETRIES) {
     return NextResponse.json(

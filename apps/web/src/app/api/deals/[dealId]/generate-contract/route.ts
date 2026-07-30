@@ -11,6 +11,8 @@ import {
   generateContractForDeal,
   generateLocacaoContractForDeal,
 } from "@/lib/services/contract-generation";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -44,6 +46,16 @@ export async function POST(
   if (dealOrgId !== apiAuth.org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente + CONTRACT_CREATE.
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: apiAuth.actor.effectiveUserId,
+    orgId: apiAuth.org.id,
+    via: apiAuth.ident.via,
+    permission: PERMISSION.CONTRACT_CREATE,
+  });
+  if (denied) return denied;
 
   try {
     // Deals de locação usam o gerador próprio (template por schemaType +

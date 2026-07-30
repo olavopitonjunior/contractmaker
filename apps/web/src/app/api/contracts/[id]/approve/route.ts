@@ -10,6 +10,8 @@ import {
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { requireApproval, approvalResponse } from "@/lib/api/intents";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 const bodySchema = z.object({ force: z.boolean().optional().default(false) });
 
@@ -59,6 +61,15 @@ export async function POST(
         { status: 403 }
       );
     }
+    // Escopo do gerente + permissão de edição (aprovar congela o contrato).
+    const denied = await guardContractScope({
+      contractId: params.id,
+      userId: apiAuth.actor.effectiveUserId,
+      orgId: apiAuth.org.id,
+      via: apiAuth.ident.via,
+      permission: PERMISSION.CONTRACT_EDIT,
+    });
+    if (denied) return denied;
   }
 
   // Resolve identidade do ator pra labels do ChangeLog

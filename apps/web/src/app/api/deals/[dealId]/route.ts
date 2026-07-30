@@ -5,7 +5,9 @@ import {
   requireApiAuth,
   isAuthFailure,
   authFailureResponse,
+  type ApiAuthSuccess,
 } from "@/lib/api/require-auth";
+import { getEffectivePermissions, canAccessDeal } from "@/lib/security/rbac/check";
 import { etagFor } from "@/lib/api/etag";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
@@ -14,6 +16,33 @@ import { notifyDealEvent, stageChangeDedupeKey } from "@/lib/notifications/deal-
 import { waitUntil } from "@vercel/functions";
 
 export const runtime = "nodejs";
+
+/**
+ * Escopo por usuário (feature Gerente): visão restrita só alcança deals onde
+ * é gerente atribuído ou criador (404 pra não vazar existência). Bearer/Newton
+ * é serviço da ORG — passa direto. Null = segue o fluxo.
+ */
+async function dealScopeGuard(
+  apiAuth: ApiAuthSuccess,
+  deal: { userId: string; managerUserId: string | null }
+): Promise<NextResponse | null> {
+  if (apiAuth.ident.via === "bearer") return null;
+  const eff = await getEffectivePermissions(
+    apiAuth.actor.effectiveUserId,
+    apiAuth.org.id
+  );
+  if (
+    eff &&
+    canAccessDeal({
+      effective: eff,
+      ownerUserId: deal.userId,
+      managerUserId: deal.managerUserId,
+    })
+  ) {
+    return null;
+  }
+  return NextResponse.json({ error: "Deal not found" }, { status: 404 });
+}
 
 /**
  * GET /api/deals/:dealId
@@ -45,6 +74,9 @@ export async function GET(
   if (deal.pipeline.orgId !== auth.org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  const denied = await dealScopeGuard(auth, deal);
+  if (denied) return denied;
 
   const etag = etagFor({ updatedAt: deal.updatedAt });
   return NextResponse.json(
@@ -102,6 +134,9 @@ export async function PATCH(
   if (dealOrgId !== apiAuth.org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  const denied = await dealScopeGuard(apiAuth, deal);
+  if (denied) return denied;
 
   // Se for trocar stage, validar que a stage pertence ao mesmo pipeline.
   if (parsed.data.stageId && parsed.data.stageId !== deal.stageId) {
@@ -194,6 +229,8 @@ export async function DELETE(
       id: true,
       formId: true,
       title: true,
+      userId: true,
+      managerUserId: true,
       form: { select: { orgId: true } },
       stage: { select: { pipeline: { select: { orgId: true } } } },
     },
@@ -205,6 +242,9 @@ export async function DELETE(
   if (dealOrgId !== auth.org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  const denied = await dealScopeGuard(auth, deal);
+  if (denied) return denied;
 
   const { searchParams } = new URL(req.url);
   const soft = searchParams.get("soft") === "1";

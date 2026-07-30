@@ -37,6 +37,10 @@ describe("DELETE comment — invalida o hash de análise passiva", () => {
     (prisma.contractComment as unknown as Record<string, unknown>).findUnique = findUnique;
     (prisma.contractComment as unknown as Record<string, unknown>).delete = del;
     contractUpdate.mockResolvedValue({});
+    // guardContractScope (escopo do gerente) resolve o contrato pelo deal.
+    (prisma.contract.findUnique as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
+      deal: { userId: "u-1", managerUserId: null, pipeline: { orgId: "org-1" } },
+    });
   });
 
   it("deletar comentário de IA zera lastAnalyzedTextHash (re-passe no próximo open)", async () => {

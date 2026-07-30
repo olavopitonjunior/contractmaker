@@ -9,6 +9,8 @@ import {
 } from "@/lib/api/require-auth";
 import { appendEvent, serializeRequest } from "@/lib/newton/requests";
 import { triggerNewtonForRequest } from "@/lib/newton/trigger";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -49,6 +51,16 @@ export async function PATCH(
   if (existing.orgId !== auth.org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  // Escopo do gerente + DEAL_EDIT.
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    via: auth.ident.via,
+    permission: PERMISSION.DEAL_EDIT,
+  });
+  if (denied) return denied;
+
   if (existing.status === "fulfilled" || existing.status === "cancelled") {
     return NextResponse.json(
       { error: `Pedido já está ${existing.status}` },

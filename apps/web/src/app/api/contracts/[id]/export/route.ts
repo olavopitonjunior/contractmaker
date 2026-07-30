@@ -9,6 +9,7 @@ import { renderContratoHTML } from '@/lib/render/handlebars';
 import { exportDocx, exportPdf } from '@/lib/render/exporter';
 import { uploadBufferToStorage } from '@/lib/storage/s3';
 import { exportDocAsPdf, exportDocAsDocx } from '@/lib/google/docs';
+import { guardContractScope } from '@/lib/deals/route-helpers';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
@@ -45,6 +46,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     if (contract.deal.pipeline.orgId !== ctx.orgId) {
       return NextResponse.json({ error: 'Contrato não encontrado' }, { status: 404 });
     }
+
+    // Escopo do gerente — o export entrega o contrato inteiro (PII das partes).
+    // Só escopo, sem permission: exportar é leitura.
+    const denied = await guardContractScope({
+      contractId: params.id,
+      userId: ctx.userId,
+      orgId: ctx.orgId,
+      via: ctx.via,
+    });
+    if (denied) return denied;
 
     // Contratos importados (templateId=null) só podem ser exportados via
     // GDoc nativo — sem template Handlebars não há fonte pra renderizar HTML.

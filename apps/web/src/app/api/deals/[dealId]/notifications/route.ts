@@ -10,6 +10,8 @@ import {
   resolveEffectiveNotificationConfig,
 } from "@/lib/notifications/deal-events-config";
 import { resolveDealBrokers } from "@/lib/notifications/deal-brokers";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION, type PermissionKey } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -19,7 +21,7 @@ export const runtime = "nodejs";
  * chaves não enviadas; auth via deal.pipeline.orgId.
  */
 
-async function authorizeDeal(dealId: string) {
+async function authorizeDeal(dealId: string, permission?: PermissionKey) {
   const session = await auth();
   if (!session?.user) {
     return { error: "Unauthorized", status: 401 } as const;
@@ -39,6 +41,18 @@ async function authorizeDeal(dealId: string) {
   });
   if (!deal || deal.pipeline.orgId !== org.id) {
     return { error: "Deal not found", status: 404 } as const;
+  }
+  // Escopo do gerente (+ permission nas mutações).
+  const denied = await guardDealScope({
+    dealId,
+    userId: session.user.id,
+    orgId: org.id,
+    permission,
+  });
+  if (denied) {
+    return denied.status === 403
+      ? ({ error: "PERMISSION_DENIED", status: 403 } as const)
+      : ({ error: "Deal not found", status: 404 } as const);
   }
   return { deal, org, userId: session.user.id } as const;
 }
@@ -116,7 +130,7 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: { dealId: string } }
 ) {
-  const result = await authorizeDeal(params.dealId);
+  const result = await authorizeDeal(params.dealId, PERMISSION.DEAL_EDIT);
   if ("error" in result) {
     return NextResponse.json({ error: result.error }, { status: result.status });
   }

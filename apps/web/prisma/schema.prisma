@@ -45,6 +45,7 @@ model User {
   invitationsCreated  OrgInvitation[]      @relation("invitationCreator")
   invitationsApproved OrgInvitation[]      @relation("invitationApprover")
   deals               Deal[]
+  managedDeals        Deal[]               @relation("DealManager")
   contracts           Contract[]
   chatSessions        ChatSession[]
   documents           Document[]
@@ -271,6 +272,7 @@ model Organization {
   forms               SalesForm[]
   formSettings        OrgFormSettings?
   notificationSettings OrgNotificationSettings?
+  managerSettings     OrgManagerSettings?
   dealNotificationLogs DealNotificationLog[]
   userNotificationPrefs      UserNotificationPreference[]
   userNotificationDeliveries UserNotificationDelivery[]
@@ -580,12 +582,20 @@ model Deal {
   // Mesmo shape de OrgNotificationSettings.settingsJson (só as chaves
   // divergentes; ausente = herda). Ver lib/notifications/deal-events-config.ts.
   notificationsJson Json?
+  // Gerente (2026-07) — usuário da plataforma responsável pelo negócio,
+  // reatribuível (espelha Proposal.responsibleUserId; `userId` acima é o
+  // criador, imutável). Escopo do role `gerente`: só enxerga deals onde este
+  // campo = ele (dealScopeWhere em lib/security/rbac/check.ts). Null = sem
+  // gerente (deals legados; permitido quando OrgManagerSettings.managerRequired
+  // está off).
+  managerUserId    String?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
   pipeline               Pipeline                @relation(fields: [pipelineId], references: [id])
   stage                  PipelineStage           @relation(fields: [stageId], references: [id])
   user                   User                    @relation(fields: [userId], references: [id])
+  manager                User?                   @relation("DealManager", fields: [managerUserId], references: [id])
   form                   SalesForm?              @relation(fields: [formId], references: [id])
   contracts              Contract[]
   attachments            DealAttachment[]
@@ -606,6 +616,7 @@ model Deal {
   fromLead Lead?
 
   @@index([pipelineId, archivedAt])
+  @@index([managerUserId])
 }
 
 // Lead — pré-Deal. Newton acumula docs/notes/conversa antes de virar negocio
@@ -856,6 +867,23 @@ model OrgNotificationSettings {
   settingsJson Json     @default("{}")
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// Gerente (2026-07) — config da org pro role `gerente`: obrigatoriedade da
+// atribuição na criação de negócio (toggle único vendas+locação) e o conjunto
+// de permissões concedido a TODOS os gerentes da org (overrides booleanos
+// sobre ROLE_PRESETS.gerente; só chaves de MANAGER_CONFIGURABLE_PERMISSIONS).
+// Row ausente = defaults (required=false, sem overrides) — resolvido em
+// lib/security/rbac/check.ts::getEffectivePermissions.
+model OrgManagerSettings {
+  id              String   @id @default(cuid())
+  orgId           String   @unique
+  managerRequired Boolean  @default(false)
+  permissionsJson Json     @default("{}")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
 }

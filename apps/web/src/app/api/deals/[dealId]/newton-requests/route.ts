@@ -8,6 +8,8 @@ import {
 } from "@/lib/api/require-auth";
 import { appendEvent, serializeRequest } from "@/lib/newton/requests";
 import { newtonDisabledResponse } from "@/lib/newton/gate";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION, type PermissionKey } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -35,7 +37,11 @@ const createSchema = z.object({
 });
 
 /** Resolve a org do deal e garante que pertence à org do caller. */
-async function loadDealOrg(dealId: string, orgId: string) {
+async function loadDealOrg(
+  dealId: string,
+  orgId: string,
+  scope?: { userId: string; via: string; permission?: PermissionKey }
+) {
   const deal = await prisma.deal.findUnique({
     where: { id: dealId },
     include: {
@@ -46,6 +52,21 @@ async function loadDealOrg(dealId: string, orgId: string) {
   if (!deal) return { error: "Deal not found" as const, status: 404 as const };
   const dealOrgId = deal.form?.orgId ?? deal.pipeline.orgId;
   if (dealOrgId !== orgId) return { error: "Forbidden" as const, status: 403 as const };
+  // Escopo do gerente (bearer bypassa dentro do guard).
+  if (scope) {
+    const denied = await guardDealScope({
+      dealId,
+      userId: scope.userId,
+      orgId,
+      via: scope.via,
+      permission: scope.permission,
+    });
+    if (denied) {
+      return denied.status === 403
+        ? { error: "PERMISSION_DENIED" as const, status: 403 as const }
+        : { error: "Deal not found" as const, status: 404 as const };
+    }
+  }
   // O kind decide QUAL feature do Newton vale (vendas.newton vs locacao.newton).
   return { dealOrgId, dealKind: deal.kind };
 }
@@ -57,7 +78,10 @@ export async function GET(
   const auth = await requireApiAuth(req, { scope: "deals:r" });
   if (isAuthFailure(auth)) return authFailureResponse(auth);
 
-  const guard = await loadDealOrg(params.dealId, auth.org.id);
+  const guard = await loadDealOrg(params.dealId, auth.org.id, {
+    userId: auth.actor.effectiveUserId,
+    via: auth.ident.via,
+  });
   if ("error" in guard) {
     return NextResponse.json({ error: guard.error }, { status: guard.status });
   }
@@ -96,7 +120,11 @@ export async function POST(
     );
   }
 
-  const guard = await loadDealOrg(params.dealId, auth.org.id);
+  const guard = await loadDealOrg(params.dealId, auth.org.id, {
+    userId: auth.actor.effectiveUserId,
+    via: auth.ident.via,
+    permission: PERMISSION.DEAL_EDIT,
+  });
   if ("error" in guard) {
     return NextResponse.json({ error: guard.error }, { status: guard.status });
   }

@@ -14,6 +14,8 @@ import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { MODULE } from "@/lib/modules/catalog";
 import { importContractFromFile } from "@/lib/services/contract-import";
+import { resolveManagerForCreate } from "@/lib/deals/manager";
+import { formPublicPath } from "@/lib/forms/form-url";
 import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
 
 export const runtime = "nodejs";
@@ -84,6 +86,10 @@ export async function POST(req: NextRequest) {
 
   const file = formData.get("file");
   const title = ((formData.get("title") as string | null) || "").trim() || null;
+  // Gerente responsável (feature Gerente) — mesmo padrão do targetStage: campo
+  // opcional do multipart, string vazia = ausente.
+  const managerUserId =
+    ((formData.get("managerUserId") as string | null) || "").trim() || undefined;
 
   const ALLOWED_TARGET_STAGES = [
     "Confecção de Contrato",
@@ -137,6 +143,15 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Gerente resolvido antes da criação (fora da idempotência).
+  const manager = await resolveManagerForCreate(auth.org.id, managerUserId);
+  if (!manager.ok) {
+    return NextResponse.json(
+      { error: manager.error, message: manager.message },
+      { status: manager.status }
+    );
+  }
+
   const idempotencyKey = req.headers.get("x-idempotency-key");
 
   const result = await withIdempotency({
@@ -177,7 +192,7 @@ export async function POST(req: NextRequest) {
         include: {
           deal: {
             include: {
-              form: { select: { id: true, token: true } },
+              form: { select: { id: true, token: true, title: true } },
               contracts: {
                 where: { isLatest: true, kind: "contract" },
                 select: { id: true, googleDocUrl: true },
@@ -188,7 +203,7 @@ export async function POST(req: NextRequest) {
       });
 
       let deal: { id: string };
-      let form: { id: string; token: string };
+      let form: { id: string; token: string; title: string | null };
 
       if (prior?.deal?.form) {
         const priorContract = prior.deal.contracts[0];
@@ -229,6 +244,7 @@ export async function POST(req: NextRequest) {
             stageId: stage.id,
             userId: auth.actor.effectiveUserId,
             formId: createdForm.id,
+            managerUserId: manager.managerUserId,
             sourceChannel: DEAL_SOURCE_CHANNEL.IMPORT_CONTRATO,
             title: title || `Contrato importado — ${file.name}`,
             position: dealsInStage,
@@ -271,7 +287,11 @@ export async function POST(req: NextRequest) {
         });
 
         deal = { id: createdDeal.id };
-        form = { id: createdForm.id, token: createdForm.token };
+        form = {
+          id: createdForm.id,
+          token: createdForm.token,
+          title: createdForm.title,
+        };
       }
 
       // 4. Roda pipeline de import (Drive + extração + Contract)
@@ -330,6 +350,7 @@ export async function POST(req: NextRequest) {
           // Token do form pra mandar o operador revisar/completar os dados
           // extraídos (campos faltantes destacados) antes de gerar/assinar.
           formToken: form.token,
+          formUrl: formPublicPath(form.token, form.title),
         },
       };
     },
