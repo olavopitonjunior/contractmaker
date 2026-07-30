@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { z } from "zod";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/db/prisma";
@@ -7,6 +8,7 @@ import { isGoogleDocsFeatureEnabled } from "@/lib/google/client";
 import { insertPlaceholdersWithAI } from "@/lib/templates/ai-placeholder-insertion";
 import {
   UPLOAD_MODALIDADES,
+  matchCriteriaSchema,
   schemaTypeForModalidade,
 } from "@/lib/contracts/template-category";
 import {
@@ -15,6 +17,12 @@ import {
   resolveUniqueTemplateName,
   type DuplicateTemplate,
 } from "@/lib/templates/upload-dedup";
+import {
+  CLAUSE_SLOT_KEYS,
+  slotDeclarationComment,
+  type ClauseSlotKey,
+} from "@/lib/templates/clause-slots";
+import { applyClauseSlotToDoc } from "@/lib/templates/apply-clause-slot";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -29,7 +37,30 @@ const MAX_BYTES = 20 * 1024 * 1024;
 // (generateAdministracaoContractForDeal) copia o doc e substitui os
 // placeholders via buildLocacaoPlaceholderMap (o deal de adm é um deal de
 // locação, mesmo shape de dados).
-const MODALIDADES: string[] = [...UPLOAD_MODALIDADES];
+// Além das 5 modalidades históricas do diálogo antigo, a central de ingestão
+// também traz PROPOSTAS (proposta de venda e de locação res./comercial) — eram
+// o buraco que obrigava a criar template de proposta "do zero".
+const MODALIDADES: string[] = [
+  ...UPLOAD_MODALIDADES,
+  "proposta_venda",
+  "proposta_locacao_residencial",
+  "proposta_locacao_comercial",
+];
+
+/**
+ * Blocos de cláusula que a CONSOLIDAÇÃO isolou neste modelo:
+ * `{ "garantia": ["parágrafo 1", "parágrafo 2"] }`. Depois do upload, o 1º
+ * parágrafo de cada slot vira `{{slot_garantia}}` no Doc e o restante some — o
+ * texto passa a viver no acervo, uma cláusula por opção do formulário.
+ */
+const slotBlocksSchema = z.record(z.enum(CLAUSE_SLOT_KEYS), z.array(z.string()));
+
+/** Lê um campo JSON do multipart. Ausente → undefined; inválido → erro. */
+function readJsonField(formData: FormData, field: string): unknown {
+  const raw = formData.get(field);
+  if (typeof raw !== "string" || !raw.trim()) return undefined;
+  return JSON.parse(raw);
+}
 
 /** Sinaliza o 409 de dentro da transação do claim (aborta e faz rollback). */
 class DuplicateTemplateError extends Error {
@@ -121,6 +152,37 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Arquivo acima de 20MB" }, { status: 400 });
   }
 
+  // Pareamento objetivo (`matchCriteria`) e slots de cláusula vêm da central de
+  // ingestão. Ausentes = comportamento histórico do diálogo antigo.
+  let matchCriteria: Record<string, unknown> | null = null;
+  let slotBlocks: Partial<Record<ClauseSlotKey, string[]>> = {};
+  try {
+    const criteriaParsed = matchCriteriaSchema.safeParse(
+      readJsonField(formData, "matchCriteria")
+    );
+    if (!criteriaParsed.success) {
+      return NextResponse.json({ error: "matchCriteria inválido" }, { status: 400 });
+    }
+    matchCriteria = (criteriaParsed.data as Record<string, unknown> | null) ?? null;
+
+    const blocksRaw = readJsonField(formData, "slotBlocks");
+    if (blocksRaw !== undefined) {
+      const blocksParsed = slotBlocksSchema.safeParse(blocksRaw);
+      if (!blocksParsed.success) {
+        return NextResponse.json({ error: "slotBlocks inválido" }, { status: 400 });
+      }
+      slotBlocks = blocksParsed.data;
+    }
+  } catch {
+    return NextResponse.json(
+      { error: "matchCriteria/slotBlocks não são JSON válido" },
+      { status: 400 }
+    );
+  }
+  const declaredSlots = (Object.keys(slotBlocks) as ClauseSlotKey[]).filter(
+    (s) => (slotBlocks[s] ?? []).length > 0
+  );
+
   const buffer = Buffer.from(await file.arrayBuffer());
   // DOCX é um ZIP — valida o magic header (PK\3\4) contra renomeados.
   const isZip =
@@ -169,9 +231,19 @@ export async function POST(req: NextRequest) {
           googleTemplateDocId: null,
           modalidade,
           schemaType: schemaTypeForModalidade(modalidade),
-          handlebarsSource: "<!-- engine=google_docs: a fonte é o Google Doc -->",
+          // O "source" de um template google_docs é só um comentário — o
+          // conteúdo vive no Drive. É nele que a DECLARAÇÃO dos slots fica
+          // (`<!-- slots: {{slot_garantia}} -->`), pra `detectClauseSlots` ler
+          // das duas engines no mesmo lugar, sem coluna nova no schema.
+          handlebarsSource: [
+            "<!-- engine=google_docs: a fonte é o Google Doc -->",
+            slotDeclarationComment(declaredSlots),
+          ]
+            .filter(Boolean)
+            .join("\n"),
           version: "1.0.0",
           sourceHash,
+          matchCriteria: (matchCriteria ?? undefined) as object | undefined,
         },
         select: { id: true, name: true },
       });
@@ -220,6 +292,20 @@ export async function POST(req: NextRequest) {
     throw err;
   }
 
+  // Abre os slots ANTES do pass de IA: com a cláusula variável já trocada pelo
+  // token, o mapeamento de placeholders não gasta esforço num texto que vai
+  // deixar de existir. Best-effort — falha deixa a cláusula fixa no modelo.
+  const slotReports = [];
+  for (const slot of declaredSlots) {
+    slotReports.push(
+      await applyClauseSlotToDoc({
+        docId: uploaded.docId,
+        slot,
+        paragraphs: slotBlocks[slot] ?? [],
+      })
+    );
+  }
+
   // Pass de IA best-effort: insere {{placeholders}} no doc. Falha não
   // bloqueia — o template fica draft e o operador faz manualmente na revisão.
   // (Não derruba a claim-row: o doc já existe e o template é utilizável.)
@@ -232,7 +318,12 @@ export async function POST(req: NextRequest) {
     });
     await prisma.contractTemplate.update({
       where: { id: template.id },
-      data: { draftReport: report as object },
+      data: {
+        draftReport: {
+          ...(report as object),
+          ...(slotReports.length ? { slots: slotReports } : {}),
+        } as object,
+      },
     });
   } catch (err) {
     console.error("[templates/from-docx] Pass de IA falhou (segue draft):", err);
@@ -245,5 +336,6 @@ export async function POST(req: NextRequest) {
     webViewLink: uploaded.webViewLink,
     embedLink: uploaded.embedLink,
     report,
+    slots: slotReports,
   });
 }
