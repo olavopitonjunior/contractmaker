@@ -16,15 +16,16 @@ export const runtime = "nodejs";
 /**
  * PATCH /api/newton/requests/:requestId
  *
- * Newton (Bearer) atualiza o andamento de um pedido. `action` controla a
+ * Newton (Bearer) atualiza o andamento de uma pendência. `action` controla a
  * transição de status e dispara efeitos:
  *
- *   - chasing   — Newton cobrou; opcional cronJobIds (lembretes agendados),
- *                 marca lastNudgeAt.
- *   - awaiting  — cobrança feita, aguardando resposta.
+ *   - chasing   — legado. Desde 2026-07-25 o Newton não cobra por iniciativa
+ *                 própria; só chega aqui se o próprio operador pediu, em DM.
+ *                 Opcional cronJobIds, marca lastNudgeAt.
+ *   - awaiting  — aguardando resposta.
  *   - fulfilled — info chegou; grava resolutionNote, emite Notification in-app
- *                 para a negociadora e fecha. (O DM de aviso é enviado pelo
- *                 próprio Newton via whatsapp_send no turn.)
+ *                 para a negociadora e fecha. **A notificação in-app é o aviso** —
+ *                 o Newton não manda DM avisando por conta própria.
  *   - note      — só registra um evento na timeline (sem mudar status).
  */
 const patchSchema = z.object({

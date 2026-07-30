@@ -18,9 +18,33 @@ import { validateInWindow } from "./cron-window.js";
  * internacional também passa — normalizar só resolve o caso BR sem DDI, que é
  * o observado.
  */
+function isGroupJid(raw: unknown): boolean {
+  return /^\d{10,25}-group$/.test(String(raw ?? "").trim());
+}
+
+/**
+ * Envio proativo pra grupo é proibido desde 2026-07-25 (ver
+ * docs/newton-escopo-grupos.md). A persona já diz isso, mas prompt é instrução,
+ * não garantia — e o modelo ativo é nano-tier. Aqui a trava é determinística.
+ *
+ * Isto NÃO afeta o Newton responder num grupo quando é mencionado: essa resposta
+ * volta pelo fluxo natural do webhook na bridge, não por estas tools, que
+ * existem justamente pra mandar mensagem FORA daquele fluxo.
+ */
+function assertNotGroupTarget(raw: unknown, tool: string): void {
+  if (isGroupJid(raw)) {
+    throw new Error(
+      `${tool}: destino de grupo não é permitido. Envio proativo pra grupo foi ` +
+        `desligado — em grupo o Newton só responde quando mencionado, e a única ` +
+        `ação de escrita liberada é create_form. Pra falar com uma pessoa, use o ` +
+        `telefone E.164 dela.`
+    );
+  }
+}
+
 function normalizeWhatsappTo(raw: unknown): string {
   const s = String(raw ?? "").trim();
-  if (/^\d{10,25}-group$/.test(s)) return s;
+  if (isGroupJid(s)) return s;
   const d = s.replace(/\D/g, "");
   // 10-11 dígitos = BR sem DDI (fixo ou celular com 9º) → prefixa 55.
   if (d.length === 10 || d.length === 11) return `55${d}`;
@@ -1111,7 +1135,7 @@ export const tools: Tool[] = [
   {
     name: "whatsapp_send",
     description:
-      "Envia mensagem WhatsApp via Meta Cloud bridge (whatsapp-bridge.ia.br). Use quando quiser proativamente mandar mensagem fora do fluxo de resposta natural ao webhook (ex: avisar cliente que documento foi recebido, lembrar prazo, comentar em grupo). Phone deve ser E.164 sem '+': '5511987654321'. Body até 4096 chars. Opcional replyToMessageId pra responder uma mensagem específica em contexto. Retorna { messages: [{id}] } com wamid.",
+      "Envia mensagem WhatsApp via Meta Cloud bridge (whatsapp-bridge.ia.br). Use quando quiser proativamente mandar mensagem fora do fluxo de resposta natural ao webhook (ex: avisar cliente que documento foi recebido, lembrar prazo). SÓ DM: 'to' é telefone E.164 sem '+' ('5511987654321'). JID de grupo é **rejeitado pelo servidor** (erro), não só desaconselhado — envio proativo pra grupo foi desligado. Nunca use pra cobrar informação de ninguém: quem persegue documento/dado pendente é uma pessoa, no sistema. Body até 4096 chars. Opcional replyToMessageId pra responder uma mensagem específica em contexto. Retorna { messages: [{id}] } com wamid.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1131,6 +1155,7 @@ export const tools: Tool[] = [
       required: ["to", "body"],
     },
     handler: async (args) => {
+      assertNotGroupTarget(args.to, "whatsapp_send");
       const to = normalizeWhatsappTo(args.to);
       const body: Record<string, unknown> = {
         to,
@@ -1161,6 +1186,8 @@ export const tools: Tool[] = [
       "Use quando o user pedir lembretes/agendamentos recorrentes ou one-shot " +
       "('me lembra todo dia 9h', 'manda pra Cris segunda 10h'). " +
       "SEMPRE confirma com o user antes de chamar (regra PROACTIVE.md). " +
+      "SÓ DM: JID de grupo é rejeitado pelo servidor (erro), e não se agenda " +
+      "re-cobrança de informação pendente — nem uma vez, nem 'só um lembrete'. " +
       "Default channel='whatsapp' (Newton é WhatsApp-first); Telegram só se " +
       "user pedir explícito ou destinatário não tiver WA. " +
       "Janela 7h-22h SP enforced server-side; cron fora da janela retorna erro. " +
@@ -1199,7 +1226,8 @@ export const tools: Tool[] = [
         },
         to: {
           type: "string",
-          description: "Phone E.164 sem '+' (WA) ou chatId numérico (Telegram)",
+          description:
+            "Phone E.164 sem '+' (WA) ou chatId numérico (Telegram). JID de grupo é rejeitado.",
         },
         message: {
           type: "string",
@@ -1227,6 +1255,8 @@ export const tools: Tool[] = [
       const at = args.at as string | undefined;
       const to = args.to as string;
       const message = args.message as string;
+
+      assertNotGroupTarget(to, "schedule_proactive_message");
 
       const whenCount = [cronExpr, every, at].filter(Boolean).length;
       if (whenCount !== 1) {
@@ -1320,17 +1350,20 @@ export const tools: Tool[] = [
     },
   },
 
-  // ───────────── Newton Requests (cobrança de info a partir do negócio) ─────────────
-  // A negociadora registra, de dentro do Deal, uma informação que falta e para
-  // quem cobrar. Newton recebe o gatilho ([deal-request · sistema]), lê o pedido,
-  // cobra via whatsapp_send, agenda lembretes (schedule_proactive_message) e fecha
-  // com update_newton_request quando a info chega. Protocolo em persona REQUESTS.md.
+  // ───────────── Newton Requests (pendências registradas no negócio) ─────────────
+  // Desde 2026-07-25 isto é um REGISTRO INTERNO da negociadora, não uma fila de
+  // cobrança. O cron de re-cobrança (/api/cron/newton-requests/sweep) foi removido
+  // e criar pendência não dispara turn nenhum no Newton — ninguém é cutucado.
+  // Newton só LÊ essas rows (pra saber o que falta quando alguém pergunta) e pode
+  // registrar andamento. Não sai atrás da informação, não manda whatsapp_send por
+  // conta própria e não agenda lembrete. Quem persegue o dado é uma pessoa.
   {
     name: "list_newton_requests",
     description:
-      "Lista pedidos da negociadora ao Newton (fila de cobrança de info ancorada em Deal). " +
-      "Use no gatilho [deal-request] (filtra por dealId) e ao receber resposta de um contato/grupo " +
-      "(filtra por targetRef=telefone ou groupId pra achar o pedido aberto que aquela resposta fecha). " +
+      "Lista pendências que a negociadora registrou num Deal (registro interno — NÃO é fila de cobrança). " +
+      "Use pra consultar o que falta num negócio: quando alguém pergunta, ou ao receber resposta de um " +
+      "contato/grupo (filtra por targetRef=telefone ou groupId pra achar a pendência que aquela resposta fecha). " +
+      "Ler isto NÃO autoriza sair cobrando quem quer que seja. " +
       "Sem status, retorna pendentes (open|chasing|awaiting_reply). Retorna { requests: [{id, dealId, " +
       "ask, targetType, targetRef, targetLabel, status, priority, cronJobIds, events, ...}] }.",
     inputSchema: {
@@ -1371,10 +1404,11 @@ export const tools: Tool[] = [
   {
     name: "update_newton_request",
     description:
-      "Atualiza o andamento de um pedido (write). action: 'chasing' (cobrou — passe cronJobIds " +
-      "dos lembretes que agendou), 'awaiting' (aguardando resposta), 'fulfilled' (info chegou — passe " +
-      "resolutionNote; o backend avisa a negociadora in-app e fecha), 'note' (só registra evento). " +
-      "Ao fechar (fulfilled), MANDE TAMBÉM um DM via whatsapp_send pra negociadora avisando.",
+      "Atualiza o andamento de uma pendência (write). action: 'chasing' (legado — só use se o próprio " +
+      "user pediu que você cobrasse alguém em DM; não cobre por iniciativa própria), 'awaiting' " +
+      "(aguardando resposta), 'fulfilled' (info chegou — passe resolutionNote; o backend avisa a " +
+      "negociadora in-app e fecha), 'note' (só registra evento). O fechamento já notifica a negociadora " +
+      "no sistema — não mande DM avisando por conta própria.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1414,7 +1448,9 @@ export const tools: Tool[] = [
   {
     name: "resolve_deal_group",
     description:
-      "Descobre qual grupo de WhatsApp está vinculado a um Deal (read). Use ANTES de cobrar em grupo. " +
+      "Descobre qual grupo de WhatsApp está vinculado a um Deal (read). Use pra saber a qual negócio " +
+      "um grupo pertence antes de responder nele — não pra iniciar conversa: envio proativo pra grupo " +
+      "está desligado. " +
       "Retorna { link: { groupId, groupLabel, ... } } ou { link: null } se ainda não houver vínculo — " +
       "neste caso, confirme com o operador qual é o grupo do negócio e grave com link_deal_group.",
     inputSchema: {

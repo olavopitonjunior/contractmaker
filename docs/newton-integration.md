@@ -24,11 +24,22 @@ Sobrou de proativo, e é intencional:
 | `notifyDealEvent` / sweep de `Notification` | eventos do processo | notificação a corretor/usuário que optou por WhatsApp, não captura de dado |
 | `/api/cron/newton-requests/group-match` | horário | só resolve deal↔grupo (`DealGroupLink`). Não envia mensagem |
 
-**Comportamento esperado no grupo:** o Newton responde quando é chamado direto com
-`@`, e o único fluxo de escrita esperado hoje é **criar formulário de negócio**
-(`create_form` / `create_deal`). Esse gate é do runtime do agente (openclaw na VPS),
-não deste repo — mudar `vercel.json` não silencia o agente por si só. O bloco de
-política pronto pra colar está em [newton-escopo-grupos.md](newton-escopo-grupos.md).
+**Comportamento no grupo (aplicado em 2026-07-25):** o Newton só responde quando é
+chamado direto com `@` ou reply, e o único fluxo de escrita permitido é **criar
+formulário de negócio** — tool `create_form`, que já cria o Deal (`create_deal` não
+existe como tool MCP). Esse gate é do runtime do agente (openclaw na VPS), não deste
+repo: mudar `vercel.json` não silencia o agente por si só. A política foi gravada em
+`SOUL.md` + `AGENTS.md` via Mission Control → Persona. Detalhes em
+[newton-escopo-grupos.md](newton-escopo-grupos.md); o que foi escrito, em
+[newton-persona-snapshot-2026-07-25.md](newton-persona-snapshot-2026-07-25.md).
+
+**Crons do lado Newton:** auditados na aba Crons do MC — só `morning-briefing` e
+`stale-deals`, ambos com destino `telegram→` do Olavo, nenhum em grupo de WhatsApp, e
+sem execução há ~1 mês. Não havia cron de relatório em grupo.
+
+**Descrições das tools MCP** (`apps/mcp-server/src/tools.ts`) foram alinhadas: elas
+mandavam explicitamente "cobra via `whatsapp_send`, agenda lembretes" e "ao fechar,
+MANDE TAMBÉM um DM". Política no prompt brigando com instrução na tool é briga perdida.
 
 **Efeito colateral conhecido:** os executores de locação
 (`lib/locacao/executors/{dunning,detect-late-payment,suggest-readjustment,approve-repasse,request-inspection-feedback}.ts`)
