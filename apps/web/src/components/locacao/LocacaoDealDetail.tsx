@@ -344,6 +344,7 @@ export function LocacaoDealDetail({
             dataJson={deal.dataJson}
             formToken={deal.formToken}
             formStatus={deal.formStatus}
+            dealTitle={deal.title}
           />
         </TabsContent>
 
