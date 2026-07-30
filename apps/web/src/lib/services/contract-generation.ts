@@ -1241,7 +1241,9 @@ export async function generateLocacaoContractForDeal(
     : (deal.dataJson as Record<string, unknown>) || {};
   const schemaType = deal.form?.schemaType ?? "locacao_residencial_v1";
 
-  const selection = await selectLocacaoTemplate(orgId, schemaType);
+  // dataJson entra na seleção: além da modalidade, garantia e PF/PJ (locatário e
+  // fiador) escolhem a variante do template (ContractTemplate.matchCriteria).
+  const selection = await selectLocacaoTemplate(orgId, schemaType, dataJson);
   if (!selection) {
     throw new Error(
       "Nenhum template de locação ativo. Ative ou envie um modelo em Configurações → Modelos."

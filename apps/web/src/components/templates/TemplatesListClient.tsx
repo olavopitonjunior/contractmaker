@@ -19,6 +19,7 @@ import {
 import {
   CATEGORY_LABELS,
   isTemplateCategory,
+  matchCriteriaSummary,
   modalidadeLabel,
 } from "@/lib/contracts/template-category";
 
@@ -32,6 +33,7 @@ interface TemplateRow {
   description: string | null;
   modalidade: string | null;
   category?: string | null;
+  matchCriteria?: unknown;
   version: string;
   isDefault: boolean;
   status: string;
@@ -190,6 +192,19 @@ export function TemplatesListClient({
                       {categoryLabel(t.category)}
                     </Badge>
                   )}
+                  {/* Variante: mostra por qual escolha do formulário este modelo
+                      é escolhido dentro da modalidade (sem isso, dois modelos
+                      "Locação residencial" ficam indistinguíveis na lista). */}
+                  {matchCriteriaSummary(t.matchCriteria).map((label) => (
+                    <Badge
+                      key={label}
+                      variant="outline"
+                      className="text-xs border-sky-300 text-sky-700"
+                      title="Critério de seleção pelas escolhas do formulário"
+                    >
+                      {label}
+                    </Badge>
+                  ))}
                   <Badge
                     variant="outline"
                     className="text-xs gap-1"

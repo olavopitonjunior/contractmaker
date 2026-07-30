@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { z } from "zod";
 import {
+  matchCriteriaSchema,
+  parseMatchCriteria,
   resolveTemplateTaxonomy,
   schemaTypeForModalidade,
+  templateFamilyForModalidade,
 } from "@/lib/contracts/template-category";
 
 const createTemplateSchema = z.object({
@@ -17,7 +21,21 @@ const createTemplateSchema = z.object({
   version: z.string().optional(),
   engine: z.enum(["handlebars", "google_docs"]).optional(),
   googleTemplateDocId: z.string().optional(),
+  matchCriteria: matchCriteriaSchema,
 });
+
+/**
+ * Critério de variante só existe fora de venda (em venda quem discrimina é a
+ * `category`). Critério vazio vira SQL NULL = template genérico da modalidade.
+ */
+function matchCriteriaForWrite(
+  modalidade: string | null,
+  raw: unknown
+): Prisma.InputJsonValue | typeof Prisma.DbNull {
+  if (templateFamilyForModalidade(modalidade) === "venda") return Prisma.DbNull;
+  const parsed = parseMatchCriteria(raw);
+  return parsed ? (parsed as Prisma.InputJsonValue) : Prisma.DbNull;
+}
 
 export async function GET() {
   const session = await auth();
@@ -85,6 +103,7 @@ export async function POST(req: NextRequest) {
       handlebarsSource: parsed.data.handlebarsSource,
       modalidade,
       category,
+      matchCriteria: matchCriteriaForWrite(modalidade, parsed.data.matchCriteria),
       isDefault,
       version: parsed.data.version || "1.0.0",
       schemaType,

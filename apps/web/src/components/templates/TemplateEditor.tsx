@@ -17,16 +17,21 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  ADMINISTRACAO_LOCACAO_MODALIDADE,
   TEMPLATE_CATEGORIES,
   CATEGORY_LABELS,
   CATEGORY_TO_GROUP,
+  GARANTIA_TIPOS,
+  GARANTIA_LABELS,
   GROUP_LABELS,
   LOCACAO_MODALIDADES,
   modalidadeForCategory,
   modalidadeLabel,
+  parseMatchCriteria,
   templateFamilyForModalidade,
   type TemplateCategory,
   type TemplateFamily,
+  type TemplateMatchCriteria,
 } from "@/lib/contracts/template-category";
 import {
   AlertDialog,
@@ -58,6 +63,7 @@ interface TemplateEditorProps {
     handlebarsSource: string;
     modalidade: string | null;
     category?: string | null;
+    matchCriteria?: unknown;
     isDefault: boolean;
     version: string;
     status: string;
@@ -113,6 +119,40 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
         : modalidadeForCategory(category);
   const groupLabel = GROUP_LABELS[CATEGORY_TO_GROUP[category]];
 
+  // ——— Variante do template pelas escolhas do form (locação e proposta) ———
+  // "any" = critério não usado (Radix Select não aceita value=""). O contrato de
+  // administração fica de fora: `selectAdministracaoTemplate` é match exato de
+  // modalidade, sem variante.
+  const initialCriteria = parseMatchCriteria(template?.matchCriteria);
+  const [criteriaGarantia, setCriteriaGarantia] = useState<string>(
+    initialCriteria?.garantia ?? "any"
+  );
+  const [criteriaFiador, setCriteriaFiador] = useState<string>(
+    initialCriteria?.fiadorPessoa ?? "any"
+  );
+  const [criteriaPessoa, setCriteriaPessoa] = useState<string>(initialCriteria?.pessoa ?? "any");
+
+  const showCriteria =
+    family === "proposta" ||
+    (family === "locacao" && locacaoModalidade !== ADMINISTRACAO_LOCACAO_MODALIDADE);
+  const proponenteLabel = family === "proposta" ? "proponente" : "locatário";
+
+  function buildMatchCriteria(): TemplateMatchCriteria | null {
+    if (!showCriteria) return null;
+    const c: TemplateMatchCriteria = {};
+    if (criteriaGarantia !== "any") {
+      c.garantia = criteriaGarantia as TemplateMatchCriteria["garantia"];
+      // Fiador PF/PJ só faz sentido (e só desclassifica) junto de garantia=fiador.
+      if (criteriaGarantia === "fiador" && criteriaFiador !== "any") {
+        c.fiadorPessoa = criteriaFiador as TemplateMatchCriteria["fiadorPessoa"];
+      }
+    }
+    if (criteriaPessoa !== "any") {
+      c.pessoa = criteriaPessoa as TemplateMatchCriteria["pessoa"];
+    }
+    return Object.keys(c).length ? c : null;
+  }
+
   const engine = template?.engine || "handlebars";
   const canPreview =
     mode === "edit" &&
@@ -135,7 +175,17 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
       const payload =
         family === "venda"
           ? { name, description, handlebarsSource, category, isDefault, version }
-          : { name, description, handlebarsSource, modalidade, isDefault, version };
+          : {
+              name,
+              description,
+              handlebarsSource,
+              modalidade,
+              isDefault,
+              version,
+              // Sempre presente (null limpa) — senão desmarcar um critério na
+              // tela não apagaria o que já está gravado.
+              matchCriteria: buildMatchCriteria(),
+            };
 
       const url = mode === "create" ? "/api/templates" : `/api/templates/${template!.id}`;
       const method = mode === "create" ? "POST" : "PATCH";
@@ -298,6 +348,72 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
             </p>
           </div>
         </div>
+
+        {showCriteria && (
+          <div className="md:col-span-2 space-y-3 rounded-md border border-dashed p-3">
+            <div>
+              <Label>Variante (opcional)</Label>
+              <p className="text-xs text-muted-foreground pt-0.5">
+                Quando a imobiliária tem mais de um modelo da mesma modalidade, estes
+                critérios dizem qual usar: a esteira lê as escolhas do formulário e
+                escolhe a variante que bate. Deixe em “Qualquer” para o modelo genérico
+                — ele continua sendo o padrão quando nenhuma variante casa.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="criteria-garantia" className="text-xs">
+                  Garantia
+                </Label>
+                <Select value={criteriaGarantia} onValueChange={setCriteriaGarantia}>
+                  <SelectTrigger id="criteria-garantia">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="any">Qualquer</SelectItem>
+                    {GARANTIA_TIPOS.map((g) => (
+                      <SelectItem key={g} value={g}>
+                        {GARANTIA_LABELS[g]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {criteriaGarantia === "fiador" && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="criteria-fiador" className="text-xs">
+                    Tipo de fiador
+                  </Label>
+                  <Select value={criteriaFiador} onValueChange={setCriteriaFiador}>
+                    <SelectTrigger id="criteria-fiador">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="any">Qualquer</SelectItem>
+                      <SelectItem value="pf">Pessoa física</SelectItem>
+                      <SelectItem value="pj">Pessoa jurídica</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <Label htmlFor="criteria-pessoa" className="text-xs">
+                  Tipo de {proponenteLabel}
+                </Label>
+                <Select value={criteriaPessoa} onValueChange={setCriteriaPessoa}>
+                  <SelectTrigger id="criteria-pessoa">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="any">Qualquer</SelectItem>
+                    <SelectItem value="pf">Pessoa física</SelectItem>
+                    <SelectItem value="pj">Pessoa jurídica</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="space-y-2">

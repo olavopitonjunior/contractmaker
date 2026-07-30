@@ -163,7 +163,7 @@ async function runSend(
   // Documento (via completa) → PDF. O Aceite usa o mesmo pra montar o comprovante.
   const tpl = proposal.templateId
     ? await prisma.contractTemplate.findUnique({ where: { id: proposal.templateId } })
-    : (await selectPropostaTemplate(proposal.orgId, proposal.schemaType))?.template ?? null;
+    : (await selectPropostaTemplate(proposal.orgId, proposal.schemaType, proposal.dataJson))?.template ?? null;
   const dataJson = (proposal.dataJson ?? {}) as Record<string, unknown>;
   const html = tpl?.handlebarsSource
     ? renderProposalVia({
@@ -695,7 +695,7 @@ async function sendVendedorEnvelopeLocked(
   const contentVia = proposal.hiddenPaths.length > 0 ? "reduzida" : "completa";
   const tpl = proposal.templateId
     ? await prisma.contractTemplate.findUnique({ where: { id: proposal.templateId } })
-    : (await selectPropostaTemplate(proposal.orgId, proposal.schemaType))?.template ?? null;
+    : (await selectPropostaTemplate(proposal.orgId, proposal.schemaType, proposal.dataJson))?.template ?? null;
   const dataJson = (proposal.dataJson ?? {}) as Record<string, unknown>;
   const html = tpl?.handlebarsSource
     ? renderProposalVia({

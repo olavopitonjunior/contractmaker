@@ -8,10 +8,14 @@ vi.mock("@/lib/db/prisma", () => ({
 
 import {
   deriveCategoryFromPayment,
+  deriveTemplateFacts,
+  matchCriteriaSummary,
+  parseMatchCriteria,
   resolveTemplateId,
   modalidadeForCategory,
   resolveTemplateTaxonomy,
   schemaTypeForModalidade,
+  scoreTemplateAgainstFacts,
   selectLocacaoTemplate,
   selectAdministracaoTemplate,
   templateFamilyForModalidade,
@@ -244,6 +248,178 @@ describe("selectLocacaoTemplate × administracao_locacao", () => {
     ]);
     const result = await selectLocacaoTemplate("org-1", "locacao_residencial_v1");
     expect(result?.template.id).toBe("loc-def");
+  });
+});
+
+describe("deriveTemplateFacts", () => {
+  it("lê garantia, fiador PF/PJ e natureza do locatário do form de locação", () => {
+    expect(
+      deriveTemplateFacts({
+        garantia: { tipo: "fiador", fiador: { tipo_pessoa: "juridica", cnpj: "1" } },
+        locatarios: [{ tipo_pessoa: "fisica", cpf: "1" }],
+      })
+    ).toEqual({ garantia: "fiador", fiadorPessoa: "pj", pessoa: "pf" });
+  });
+
+  it("QUALQUER locatário jurídico torna o negócio PJ", () => {
+    expect(
+      deriveTemplateFacts({
+        locatarios: [{ tipo_pessoa: "fisica" }, { tipo_pessoa: "juridica" }],
+      }).pessoa
+    ).toBe("pj");
+  });
+
+  it("fiador só conta quando a garantia É fiador", () => {
+    // Rascunho que trocou pra caução mantendo o sub-objeto do fiador não pode
+    // virar fato "tem fiador PJ".
+    expect(
+      deriveTemplateFacts({
+        garantia: { tipo: "caucao", fiador: { tipo_pessoa: "juridica" } },
+      }).fiadorPessoa
+    ).toBeNull();
+  });
+
+  it("proposta: proponente é `compradores`; CPF/CNPJ salva quando não há tipo_pessoa", () => {
+    expect(deriveTemplateFacts({ compradores: [{ nome: "X", cnpj: "12" }] }).pessoa).toBe("pj");
+    expect(deriveTemplateFacts({ compradores: [{ nome: "X", cpf: "12" }] }).pessoa).toBe("pf");
+  });
+
+  it("dataJson pobre/ausente → tudo desconhecido (nunca desclassifica)", () => {
+    const vazio = { garantia: null, fiadorPessoa: null, pessoa: null };
+    // Shape do NovaPropostaDialog hoje: partes só com nome.
+    expect(deriveTemplateFacts({ locatarios: [{ nome: "Fulano" }] })).toEqual(vazio);
+    expect(deriveTemplateFacts({})).toEqual(vazio);
+    expect(deriveTemplateFacts(null)).toEqual(vazio);
+    expect(deriveTemplateFacts({ garantia: { tipo: "chutando" } })).toEqual(vazio);
+  });
+});
+
+describe("parseMatchCriteria / matchCriteriaSummary", () => {
+  it("descarta chave e valor fora do enum; critério vazio vira null", () => {
+    expect(parseMatchCriteria({ garantia: "fiador", lixo: "x", pessoa: "pj" })).toEqual({
+      garantia: "fiador",
+      pessoa: "pj",
+    });
+    expect(parseMatchCriteria({ garantia: "inexistente" })).toBeNull();
+    expect(parseMatchCriteria({})).toBeNull();
+    expect(parseMatchCriteria(null)).toBeNull();
+    expect(parseMatchCriteria("fiador")).toBeNull();
+  });
+
+  it("resume os critérios pra badge", () => {
+    expect(
+      matchCriteriaSummary({ garantia: "fiador", fiadorPessoa: "pj", pessoa: "pf" })
+    ).toEqual(["Fiador", "Fiador PJ", "Pessoa física"]);
+    expect(matchCriteriaSummary(null)).toEqual([]);
+  });
+});
+
+describe("scoreTemplateAgainstFacts", () => {
+  const facts = deriveTemplateFacts({
+    garantia: { tipo: "fiador", fiador: { tipo_pessoa: "juridica" } },
+    locatarios: [{ tipo_pessoa: "fisica" }],
+  });
+
+  it("genérico pontua 0; cada campo que bate soma 1", () => {
+    expect(scoreTemplateAgainstFacts(null, facts)).toBe(0);
+    expect(scoreTemplateAgainstFacts({}, facts)).toBe(0);
+    expect(scoreTemplateAgainstFacts({ garantia: "fiador" }, facts)).toBe(1);
+    expect(
+      scoreTemplateAgainstFacts({ garantia: "fiador", fiadorPessoa: "pj", pessoa: "pf" }, facts)
+    ).toBe(3);
+  });
+
+  it("campo que contradiz fato conhecido desclassifica", () => {
+    expect(scoreTemplateAgainstFacts({ garantia: "sem_garantia" }, facts)).toBe(-1);
+    expect(scoreTemplateAgainstFacts({ pessoa: "pj" }, facts)).toBe(-1);
+    // "PF com fiador PJ" × "PJ com fiador PJ": o eixo do fiador é independente.
+    expect(scoreTemplateAgainstFacts({ fiadorPessoa: "pf" }, facts)).toBe(-1);
+  });
+
+  it("fato desconhecido não pontua nem desclassifica", () => {
+    const cegos = deriveTemplateFacts({});
+    expect(scoreTemplateAgainstFacts({ garantia: "fiador", pessoa: "pj" }, cegos)).toBe(0);
+  });
+});
+
+describe("selectLocacaoTemplate × matchCriteria (variantes do form)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  const tpl = (
+    id: string,
+    matchCriteria: unknown = null,
+    isDefault = false,
+    modalidade = "locacao"
+  ) => ({ id, modalidade, isDefault, status: "active", matchCriteria }) as never;
+
+  const generico = tpl("generico", null, true);
+  const comFiadorPj = tpl("fiador-pj", { garantia: "fiador", fiadorPessoa: "pj" });
+  const comFiador = tpl("fiador", { garantia: "fiador" });
+  const semGarantiaPj = tpl("sem-garantia-pj", { garantia: "sem_garantia", pessoa: "pj" });
+
+  const formFiadorPj = {
+    garantia: { tipo: "fiador", fiador: { tipo_pessoa: "juridica" } },
+    locatarios: [{ tipo_pessoa: "fisica" }],
+  };
+
+  it("caso RE/MAX Ativa: form PF com fiador PJ escolhe a variante mais específica", async () => {
+    mockFindMany.mockResolvedValueOnce([generico, comFiador, comFiadorPj]);
+    const result = await selectLocacaoTemplate("org-1", "locacao_residencial_v1", formFiadorPj);
+    // 2 critérios batendo > 1 critério batendo > genérico isDefault.
+    expect(result?.template.id).toBe("fiador-pj");
+  });
+
+  it("form sem garantia não pega o template de fiador (desclassificado)", async () => {
+    mockFindMany.mockResolvedValueOnce([generico, comFiador, comFiadorPj]);
+    const result = await selectLocacaoTemplate("org-1", "locacao_residencial_v1", {
+      garantia: { tipo: "sem_garantia" },
+      locatarios: [{ tipo_pessoa: "fisica" }],
+    });
+    expect(result?.template.id).toBe("generico");
+  });
+
+  it("PJ sem garantia bate a variante por pessoa", async () => {
+    mockFindMany.mockResolvedValueOnce([generico, semGarantiaPj, comFiador]);
+    const result = await selectLocacaoTemplate("org-1", "locacao_residencial_v1", {
+      garantia: { tipo: "sem_garantia" },
+      locatarios: [{ tipo_pessoa: "juridica" }],
+    });
+    expect(result?.template.id).toBe("sem-garantia-pj");
+  });
+
+  it("REGRESSÃO: org sem nenhum matchCriteria mantém o comportamento antigo", async () => {
+    mockFindMany.mockResolvedValueOnce([
+      tpl("loc-old", null, false),
+      tpl("loc-def", null, true),
+    ]);
+    const result = await selectLocacaoTemplate("org-1", "locacao_residencial_v1", formFiadorPj);
+    expect(result?.template.id).toBe("loc-def");
+  });
+
+  it("sem dataJson (fatos nulos) nenhuma variante é descartada — vence o isDefault", async () => {
+    mockFindMany.mockResolvedValueOnce([comFiador, generico, comFiadorPj]);
+    const result = await selectLocacaoTemplate("org-1", "locacao_residencial_v1");
+    expect(result?.template.id).toBe("generico");
+  });
+
+  it("todos desclassificados → cai no comportamento pré-critério, não em erro", async () => {
+    // Org só com variantes de fiador e um form de caução: gerar um contrato com
+    // o padrão é melhor que estourar "nenhum template de locação ativo".
+    mockFindMany.mockResolvedValueOnce([comFiadorPj, tpl("fiador-def", { garantia: "fiador" }, true)]);
+    const result = await selectLocacaoTemplate("org-1", "locacao_residencial_v1", {
+      garantia: { tipo: "caucao" },
+    });
+    expect(result?.template.id).toBe("fiador-def");
+  });
+
+  it("o critério também desempata no fallback startsWith('locacao')", async () => {
+    // Nenhum template da modalidade comercial: cai nos residenciais e ainda
+    // assim respeita a variante.
+    mockFindMany.mockResolvedValueOnce([generico, comFiadorPj]);
+    const result = await selectLocacaoTemplate("org-1", "locacao_comercial_v1", formFiadorPj);
+    expect(result?.template.id).toBe("fiador-pj");
   });
 });
 

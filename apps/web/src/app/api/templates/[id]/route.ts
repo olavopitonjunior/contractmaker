@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
+import { Prisma } from "@prisma/client";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import {
+  matchCriteriaSchema,
+  parseMatchCriteria,
   resolveTemplateTaxonomy,
   schemaTypeForModalidade,
+  templateFamilyForModalidade,
 } from "@/lib/contracts/template-category";
 
 export async function GET(
@@ -60,6 +64,29 @@ export async function PATCH(
     nextModalidade !== template.modalidade
       ? schemaTypeForModalidade(nextModalidade)
       : template.schemaType;
+  // Critério de variante (locação/proposta). Só é reescrito quando o payload
+  // TRAZ o campo — a listagem manda PATCH { status } e não pode apagar o
+  // critério de quem já tem; `null` explícito limpa. Em venda é sempre null:
+  // ali quem discrimina é a categoria (forma de pagamento).
+  let nextMatchCriteria: Prisma.InputJsonValue | typeof Prisma.DbNull;
+  if (templateFamilyForModalidade(nextModalidade) === "venda") {
+    nextMatchCriteria = Prisma.DbNull;
+  } else {
+    let criteria: unknown = template.matchCriteria;
+    if (body.matchCriteria !== undefined) {
+      // Zod estrito só no que CHEGA. O valor já gravado passa pelo parser
+      // tolerante — validar o legado com `.strict()` faria um PATCH inocente
+      // (ex.: arquivar pela listagem) morrer em 400 por causa do banco.
+      const validated = matchCriteriaSchema.safeParse(body.matchCriteria);
+      if (!validated.success) {
+        return NextResponse.json({ error: validated.error.message }, { status: 400 });
+      }
+      criteria = validated.data;
+    }
+    const normalized = parseMatchCriteria(criteria);
+    nextMatchCriteria = normalized ? (normalized as Prisma.InputJsonValue) : Prisma.DbNull;
+  }
+
   const nextIsDefault =
     typeof body.isDefault === "boolean" ? body.isDefault : template.isDefault;
   const nextSource = body.handlebarsSource ?? template.handlebarsSource;
@@ -85,6 +112,7 @@ export async function PATCH(
       handlebarsSource: nextSource,
       modalidade: nextModalidade,
       category: nextCategory,
+      matchCriteria: nextMatchCriteria,
       schemaType: nextSchemaType,
       isDefault: nextIsDefault,
       version: body.version ?? template.version,

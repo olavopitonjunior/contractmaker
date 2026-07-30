@@ -40,6 +40,7 @@ export default async function EditTemplatePage({
         handlebarsSource: template.handlebarsSource,
         modalidade: template.modalidade,
         category: template.category,
+        matchCriteria: template.matchCriteria,
         isDefault: template.isDefault,
         version: template.version,
         status: template.status,
