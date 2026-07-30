@@ -49,8 +49,23 @@ interface DocumentosStepProps {
    * undefined = token principal (fluxo manual inalterado).
    */
   selfAssignment?: Assignment;
+  /**
+   * Visitante é membro da imobiliária (`viewerIsOrgMember`, resolvido no
+   * server). Só ele remove documento pelo formulário — o link normalmente está
+   * com o cliente, e antes qualquer portador apagava documento de qualquer
+   * parte sem deixar rastro. O DELETE da rota faz a mesma checagem; isto aqui é
+   * só a metade visual.
+   *
+   * Default false, e o link por parte (subtoken) segue removendo o que ELE
+   * mesmo enviou — correção do próprio upload, não exclusão de documento alheio.
+   */
+  viewerIsMember?: boolean;
 }
 
+// Espelha o teto da rota do formulário (POST /api/forms/[token]/attachments),
+// que na prática é o limite de corpo de função serverless da Vercel. Subir aqui
+// sem migrar a rota pro upload client-direct só troca este erro claro por um
+// 413 opaco da plataforma — ver o comentário em MAX_BYTES da rota.
 const MAX_BYTES = 10 * 1024 * 1024;
 const RESIZE_MAX_SIDE = 1500;
 const IMAGE_JPEG_QUALITY = 0.8;
@@ -329,6 +344,7 @@ export function DocumentosStep({
   adapter: adapterProp,
   allowedTopKeys,
   selfAssignment,
+  viewerIsMember = false,
 }: DocumentosStepProps) {
   const adapter = useMemo(
     () => adapterProp ?? createVendaAdapter(buildAssignmentOptions),
@@ -1235,7 +1251,14 @@ export function DocumentosStep({
                 doc={doc}
                 assignmentOptions={assignmentOptions}
                 onAssignmentChange={handleAssignmentChange}
-                onRemove={handleRemove}
+                // `undefined` esconde o X (DocumentCard renderiza só com
+                // onRemove). Membro remove qualquer um; num link por parte o
+                // GET já filtra pros documentos DAQUELA parte, então remover ali
+                // é sempre o próprio upload. Cliente no link principal não
+                // remove — o servidor devolve 403 de qualquer forma.
+                onRemove={
+                  viewerIsMember || allowedTopKeys ? handleRemove : undefined
+                }
                 onRetry={handleRetry}
                 onExtract={handleRetry}
               />

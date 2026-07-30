@@ -4,6 +4,7 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { bulkDeleteSchema, buildBulkDeleteWhere } from "@/lib/certidoes/bulk-delete";
+import { archiveAttachment } from "@/lib/attachments/archive";
 
 export const runtime = "nodejs";
 
@@ -76,32 +77,35 @@ export async function POST(
   }
 
   let attachmentsDeleted = 0;
+  const archivedIds: string[] = [];
   if (parsed.data.withAttachments) {
     const attachmentIds = candidates
       .map((c) => c.attachmentId)
       .filter((id): id is string => !!id);
     if (attachmentIds.length > 0) {
+      // Linha inteira: `archiveAttachment` grava o payload completo.
       const attachments = await prisma.dealAttachment.findMany({
         where: { id: { in: attachmentIds }, dealId: params.dealId },
-        select: { id: true, url: true },
       });
+      // O `del()` incondicional que existia aqui apagava blob COMPARTILHADO
+      // (o finalize copia a URL sem re-upload; o PDF assinado é espelhado com a
+      // mesma URL), derrubando documentos de outras linhas vivas. Nenhum
+      // caminho apaga blob hoje: arquiva a linha e o objeto fica de pé.
+      const ip = req.headers.get("x-forwarded-for") ?? null;
       for (const att of attachments) {
-        if (att.url && att.url.includes(".public.blob.vercel-storage.com")) {
-          try {
-            const { del } = await import("@vercel/blob");
-            await del(att.url);
-          } catch (err) {
-            console.warn(
-              "[certidoes bulk-delete] falha ao remover blob:",
-              err instanceof Error ? err.message : err
-            );
-          }
-        }
+        const archivedId = await prisma.$transaction((tx) =>
+          archiveAttachment(tx, {
+            row: att,
+            origin: "deal",
+            via: "certidao",
+            orgId: org.id,
+            userId: session.user.id,
+            ipAddress: ip,
+          })
+        );
+        archivedIds.push(archivedId);
       }
-      const res = await prisma.dealAttachment.deleteMany({
-        where: { id: { in: attachments.map((a) => a.id) } },
-      });
-      attachmentsDeleted = res.count;
+      attachmentsDeleted = attachments.length;
     }
   }
 
@@ -120,8 +124,33 @@ export async function POST(
       batchId: parsed.data.batchId ?? null,
       deleted: deleted.count,
       attachmentsDeleted,
+      // Ids nomeados, não só a contagem: corte silencioso lê como "nada
+      // aconteceu" quando alguém for investigar um documento faltando.
+      archivedIds,
     },
   });
 
-  return NextResponse.json({ deleted: deleted.count, attachmentsDeleted });
+  if (archivedIds.length > 0) {
+    // Ação dedicada — busca no AuditLog por exclusão de anexo precisa achar
+    // esta rota, não só a ação de certidão.
+    await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
+      action: "ATTACHMENT_DELETE",
+      result: "SUCCESS",
+      resource: params.dealId,
+      resourceType: "DealAttachment",
+      metadata: {
+        dealId: params.dealId,
+        via: "certidao_bulk",
+        count: archivedIds.length,
+        archivedIds,
+        recoverable: true,
+      },
+    });
+  }
+
+  return NextResponse.json({
+    deleted: deleted.count,
+    attachmentsDeleted,
+    archivedIds,
+  });
 }

@@ -3,8 +3,25 @@ import { z } from "zod";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { archiveAttachment } from "@/lib/attachments/archive";
 
 export const runtime = "nodejs";
+
+/**
+ * Categorias que o SISTEMA atribui e usa como chave de comportamento. O usuário
+ * não pode mover um documento seu pra dentro delas.
+ *
+ * O caso concreto que isso fecha: `persistFormSummaryPdf` casava a linha do
+ * resumo por `category = "resumo_formulario"`, então reclassificar um documento
+ * qualquer pra essa categoria fazia o próximo envio de resumo apagá-lo. As
+ * outras duas são gatilho de comportamento — `contrato_original` liga a
+ * re-extração de dados do CCV, `proposta_original` o banner de proposta.
+ */
+const RESERVED_CATEGORIES = new Set([
+  "resumo_formulario",
+  "contrato_original",
+  "proposta_original",
+]);
 
 const patchSchema = z.object({
   // Reclassificação ("mover para outra pasta"): grava em
@@ -16,7 +33,14 @@ const patchSchema = z.object({
       index: z.number().int().min(0),
     })
     .optional(),
-  category: z.string().nullable().optional(),
+  category: z
+    .string()
+    .nullable()
+    .optional()
+    .refine(
+      (v) => v == null || !RESERVED_CATEGORIES.has(v),
+      "Categoria reservada ao sistema — escolha outra"
+    ),
 });
 
 /**
@@ -98,10 +122,12 @@ export async function PATCH(
 /**
  * DELETE /api/deals/:dealId/attachments/:attachmentId
  *
- * Apaga um documento (DealAttachment) específico do negócio. Best-effort
- * deleta o blob no Vercel Blob/S3. CertidaoJob com FK para o attachment
- * recebe SET NULL via schema; Envelope de assinatura do anexo cai na cascata
- * (SET NULL violaria o CHECK envelope_subject_xor).
+ * Remove um documento (DealAttachment) específico do negócio. NÃO é exclusão
+ * definitiva: a linha vai pra `DeletedAttachment` (arquivo permanente) na mesma
+ * transação, e o blob no storage é preservado — dá pra restaurar depois.
+ * CertidaoJob com FK para o attachment recebe SET NULL via schema; Envelope de
+ * assinatura do anexo cai na cascata (SET NULL violaria o CHECK
+ * envelope_subject_xor).
  *
  * Bloqueio: Envelope ClickSign closed/running → 409 (mesma regra do DELETE de
  * contrato). Cancele o envelope antes de excluir o documento.
@@ -162,24 +188,25 @@ export async function DELETE(
     );
   }
 
-  // Deleta a ROW primeiro; só então avalia se o blob ficou órfão. O blob é
-  // compartilhado por referência (FormAttachment/ProposalAttachment/duplicatas
-  // de DealAttachment apontam pra mesma URL) — apagar incondicionalmente órfãva
-  // o arquivo das irmãs (bug: matrícula/IPTU davam 404). `deleteBlobIfUnreferenced`
-  // só remove do storage quando nenhuma outra row referencia a URL.
-  await prisma.dealAttachment.delete({ where: { id: attachment.id } });
-
-  // Inline (não waitUntil) DE PROPÓSITO: quanto menor a janela entre a contagem
-  // de referências e o delete no storage, menor a chance de um finalize de form
-  // concorrente copiar a URL pra um DealAttachment novo bem no meio (TOCTOU).
-  // Adiar pra waitUntil alargaria essa janela. O resíduo é raro e recuperável
-  // (um anexo dá 404, re-upload resolve); o fix definitivo é um cron de GC de
-  // órfãos com carência, no backlog.
-  const { deleteBlobIfUnreferenced } = await import(
-    "@/lib/contracts/delete-cleanup"
+  // Arquiva e apaga na MESMA transação: ou as duas coisas acontecem, ou
+  // nenhuma. Não existe mais estado "documento sumiu e não há registro".
+  //
+  // O blob NÃO é mais tocado. Antes chamávamos `deleteBlobIfUnreferenced` aqui,
+  // e o objeto ia embora junto com a última linha que o referenciava — foi o
+  // que impediu recuperar o documento do caso que originou esta mudança.
+  // `DeletedAttachment.url` entra em `BLOB_REF_CHECKS`, então nada trata o
+  // objeto como órfão enquanto houver linha arquivada.
+  const { deal: _deal, ...row } = attachment;
+  const archivedId = await prisma.$transaction((tx) =>
+    archiveAttachment(tx, {
+      row,
+      origin: "deal",
+      via: "ui_deal",
+      orgId: org.id,
+      userId: session.user.id,
+      ipAddress: req.headers.get("x-forwarded-for") ?? null,
+    })
   );
-  const blobOutcome = await deleteBlobIfUnreferenced(prisma, attachment.url);
-  const blobDeleted = blobOutcome === "deleted";
 
   await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
     action: "ATTACHMENT_DELETE",
@@ -190,10 +217,10 @@ export async function DELETE(
       dealId: attachment.dealId,
       filename: attachment.filename,
       category: attachment.category,
-      blobDeleted,
-      blobOutcome,
+      archivedId,
+      recoverable: true,
     },
   });
 
-  return NextResponse.json({ deleted: true });
+  return NextResponse.json({ deleted: true, archivedId, recoverable: true });
 }

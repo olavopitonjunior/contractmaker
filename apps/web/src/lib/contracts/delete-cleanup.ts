@@ -68,7 +68,8 @@ export async function deleteContractMemories(
 // URL numa coluna nova, INCLUA a contagem AQUI. Duas consequências de esquecer:
 //   1. o delete de anexo compartilhado apaga um blob que a coluna nova serve
 //      (reintroduz o 404 de blob compartilhado — bug do PR #150);
-//   2. o cron de GC de órfãos (blob-gc) trata o blob como órfão e o APAGA.
+//   2. o relatório de órfãos (blob-gc) o aponta como lixo — hoje ele só
+//      reporta, mas a lista errada leva a decisão errada.
 //
 // NÃO cobre blobs referenciados só em campos JSON/HTML (não dá pra `count` por
 // coluna): `Inspection.ambientesJson` (fotos/áudio de vistoria, prefixo
@@ -79,6 +80,11 @@ export async function deleteContractMemories(
 // contagem exata — path de delete) E por isBlobReferenced (sequencial com
 // short-circuit — o GC de órfãos, mais eficiente pro caso comum "referenciado").
 const BLOB_REF_CHECKS: Array<(db: Db, url: string) => Promise<number>> = [
+  // Arquivo de exclusões — PRIMEIRO na lista de propósito: é o short-circuit
+  // mais provável no único cenário em que o objeto ficaria sem nenhuma linha
+  // viva apontando pra ele. Enquanto houver anexo arquivado com esta URL o
+  // blob NÃO é órfão: apagá-lo tornaria a restauração um 404.
+  (db, url) => db.deletedAttachment.count({ where: { url } }),
   // Anexos (compartilhados por referência entre si — o finalize copia a URL)
   (db, url) => db.dealAttachment.count({ where: { url } }),
   (db, url) => db.formAttachment.count({ where: { url } }),

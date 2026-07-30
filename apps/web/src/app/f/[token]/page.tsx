@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db/prisma";
 import { resolveAllRequiredFields } from "@/lib/forms/presets";
-import { canAccessForm } from "@/lib/forms/form-gate";
+import { canAccessForm, viewerIsOrgMember } from "@/lib/forms/form-gate";
 import { FormClosedNotice } from "@/components/forms/FormClosedNotice";
 import { FormPageClient } from "./form-client";
 
@@ -52,6 +52,12 @@ export default async function PublicFormPage({
     proposalAttachmentUrl = proposalAttachment?.url ?? null;
   }
 
+  // Remover documento passa a ser só de quem é da imobiliária: o link fica com
+  // o cliente, e antes qualquer portador apagava documento de qualquer parte
+  // sem deixar rastro. O DELETE da rota faz a mesma checagem — isto é a metade
+  // visual.
+  const viewerIsMember = await viewerIsOrgMember(form.orgId);
+
   return (
     <FormPageClient
       token={form.token}
@@ -61,6 +67,7 @@ export default async function PublicFormPage({
       prefilled={isPrefilled}
       proposalAttachmentUrl={proposalAttachmentUrl}
       locked={Boolean(form.lockedAt)}
+      viewerIsMember={viewerIsMember}
     />
   );
 }

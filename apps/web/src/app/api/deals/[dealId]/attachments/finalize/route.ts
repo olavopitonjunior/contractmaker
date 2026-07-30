@@ -9,7 +9,7 @@ import { persistDealDocument } from "@/lib/deals/attachments";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const MAX_BYTES = 10 * 1024 * 1024;
+const MAX_BYTES = 20 * 1024 * 1024;
 const MIME_SHAPE = /^[\w.+-]+\/[\w.+-]+$/;
 
 const bodySchema = z.object({

@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db/prisma";
 
 export const runtime = "nodejs";
 
-const MAX_BYTES = 10 * 1024 * 1024;
+const MAX_BYTES = 20 * 1024 * 1024;
 
 /**
  * POST /api/deals/:dealId/attachments/blob-upload

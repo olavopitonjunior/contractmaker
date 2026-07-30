@@ -3,6 +3,7 @@ import { waitUntil } from "@vercel/functions";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { archiveDealAttachmentsBeforeCascade } from "@/lib/attachments/archive";
 import {
   notifyDealEvent,
   stageChangeDedupeKey,
@@ -266,8 +267,20 @@ export async function DELETE(
   // delete do deal/contratos/anexos SEM sinalizar, e mesmo assim os blobs eram
   // apagados depois (rows sobreviviam → 404 irrecuperável). Separado, o form é
   // best-effort de verdade e não arrasta o delete do deal.
+  const auditIp = req.headers.get("x-forwarded-for") ?? null;
   const counts = await prisma.$transaction(async (tx) => {
     const jobs = await tx.certidaoJob.deleteMany({ where: { dealId: deal.id } });
+    // Arquiva ANTES do deleteMany: apagar o negócio levava os documentos e o
+    // audit de DEAL_DELETE guardava só a CONTAGEM, sem os ids nem os nomes —
+    // não dava pra dizer depois o que exatamente se perdeu. Como as URLs
+    // arquivadas entram em BLOB_REF_CHECKS, o `deleteBlobs` lá embaixo passa a
+    // pular os blobs desses anexos sozinho.
+    await archiveDealAttachmentsBeforeCascade(tx, {
+      dealId: deal.id,
+      orgId: org.id,
+      userId: session.user.id,
+      ipAddress: auditIp,
+    });
     const atts = await tx.dealAttachment.deleteMany({ where: { dealId: deal.id } });
     await deleteContractMemories(tx, contractIds);
     const contracts = await tx.contract.deleteMany({ where: { dealId: deal.id } });

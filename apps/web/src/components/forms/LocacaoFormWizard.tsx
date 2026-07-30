@@ -53,6 +53,12 @@ interface LocacaoFormWizardProps {
    * desabilita campos e esconde o finalizar. Navegação continua ativa.
    */
   readOnly?: boolean;
+  /**
+   * Visitante é membro da org dona do form (`viewerIsOrgMember`, server-side).
+   * Libera remover documento na etapa 0. Default false — o link público está
+   * com o cliente. O servidor é o guard autoritativo (403); isto é UX.
+   */
+  viewerIsMember?: boolean;
 }
 
 // Steps de partes (locador/locatário) — validados de forma CIENTE de
@@ -121,6 +127,7 @@ export function LocacaoFormWizard({
   selfAssignment,
   finalizeMode = "main",
   readOnly = false,
+  viewerIsMember = false,
 }: LocacaoFormWizardProps) {
   const comercial = schemaType === LOCACAO_COMERCIAL_SCHEMA_TYPE;
   const stepLabels = stepLabelsForLocacaoType(schemaType);
@@ -333,7 +340,7 @@ export function LocacaoFormWizard({
 
   const steps = comercial
     ? [
-        <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} allowedTopKeys={pathScope} selfAssignment={selfAssignment} />,
+        <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} allowedTopKeys={pathScope} selfAssignment={selfAssignment} viewerIsMember={viewerIsMember} />,
         <LocacaoParteStep key="s1" form={form} listKey="locadores" singular="Locador" />,
         <LocacaoParteStep key="s2" form={form} listKey="locatarios" singular="Locatário" />,
         <ImovelLocacaoStep key="s3" form={form} comercial />,
@@ -342,7 +349,7 @@ export function LocacaoFormWizard({
         <ConfirmacaoStep key="s6" form={form} />,
       ]
     : [
-        <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} allowedTopKeys={pathScope} selfAssignment={selfAssignment} />,
+        <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} allowedTopKeys={pathScope} selfAssignment={selfAssignment} viewerIsMember={viewerIsMember} />,
         <LocacaoParteStep key="s1" form={form} listKey="locadores" singular="Locador" />,
         <LocacaoParteStep key="s2" form={form} listKey="locatarios" singular="Locatário" />,
         <ImovelLocacaoStep key="s3" form={form} />,
