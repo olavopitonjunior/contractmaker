@@ -1,5 +1,5 @@
 "use client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback } from "react";
 
 type ElevationScope =
   | "TRANSFER"
@@ -9,67 +9,56 @@ type ElevationScope =
   | "MEMBER_MANAGE"
   | "FEES_CONFIG";
 
-interface ElevationStatus {
-  elevated: boolean;
-  scopes: ElevationScope[];
-}
+const ALL_SCOPES: ElevationScope[] = [
+  "TRANSFER",
+  "KYC_EDIT",
+  "BANK_ACCOUNT",
+  "API_KEY_ROTATE",
+  "MEMBER_MANAGE",
+  "FEES_CONFIG",
+];
 
+/**
+ * DESATIVADO (2026-07-30, decisão do Olavo): a confirmação de identidade
+ * (senha + 2FA a cada 15min) saiu de todas as operações. O hook passa a
+ * reportar "sempre elevado com todos os scopes" — os checks preventivos
+ * `hasScope()` das telas (membros, gerentes, transferências, onboarding,
+ * dual-approvals) deixam de abrir o ElevationDialog, e o servidor
+ * (lib/security/elevation.ts::requireElevation) é no-op no mesmo commit.
+ * A API /api/security/elevation e o dialog seguem no código, inertes —
+ * religar = reverter este arquivo e o elevation.ts (git log de ambos).
+ */
 export function useElevation() {
-  const [status, setStatus] = useState<ElevationStatus>({ elevated: false, scopes: [] });
-  const [loading, setLoading] = useState(true);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/security/elevation", { credentials: "include" });
-      if (res.ok) {
-        const data = await res.json();
-        setStatus({ elevated: !!data.elevated, scopes: data.scopes ?? [] });
-      }
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
   const elevate = useCallback(
-    async (params: {
+    async (_params: {
       password: string;
       code?: string;
       recoveryCode?: string;
       scopes: ElevationScope[];
-    }) => {
-      const res = await fetch("/api/security/elevation", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify(params),
-      });
-      const data = await res.json();
-      if (!res.ok) {
-        return { ok: false as const, error: data.error ?? "Erro desconhecido" };
-      }
-      await refresh();
-      return { ok: true as const, scopes: data.scopes, expiresAt: data.expiresAt };
+    }): Promise<
+      | { ok: true; scopes: ElevationScope[]; expiresAt: string }
+      | { ok: false; error: string }
+    > => {
+      return {
+        ok: true,
+        scopes: ALL_SCOPES,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+      };
     },
-    [refresh]
+    []
   );
 
-  const revoke = useCallback(async () => {
-    await fetch("/api/security/elevation", {
-      method: "DELETE",
-      credentials: "include",
-    });
-    await refresh();
-  }, [refresh]);
+  const revoke = useCallback(async () => {}, []);
+  const refresh = useCallback(async () => {}, []);
+  const hasScope = useCallback((_scope: ElevationScope) => true, []);
 
-  const hasScope = useCallback(
-    (scope: ElevationScope) => status.elevated && status.scopes.includes(scope),
-    [status]
-  );
-
-  return { ...status, loading, elevate, revoke, refresh, hasScope };
+  return {
+    elevated: true,
+    scopes: ALL_SCOPES,
+    loading: false,
+    elevate,
+    revoke,
+    refresh,
+    hasScope,
+  };
 }
