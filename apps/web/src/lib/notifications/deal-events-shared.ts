@@ -36,6 +36,8 @@ export interface EventAudienceToggles {
   broker?: ChannelToggles;
   /** v2: partes do negócio (comprador/vendedor, locador/locatário). */
   party?: ChannelToggles;
+  /** v3: gerente atribuído ao negócio (`Deal.managerUserId`). */
+  manager?: ChannelToggles;
 }
 
 /**
@@ -77,6 +79,7 @@ export interface NotificationConfigJson {
 export interface ResolvedEventConfig {
   broker: { email: boolean; whatsapp: boolean };
   party: { email: boolean; whatsapp: boolean };
+  manager: { email: boolean; whatsapp: boolean };
 }
 
 export interface ResolvedNotificationConfig {
@@ -90,10 +93,19 @@ export interface ResolvedNotificationConfig {
  * Defaults de código. Corretor: email ligado, WhatsApp desligado (opt-in).
  * Parte: TUDO desligado — escrever pro cliente final da imobiliária é decisão
  * dela, evento a evento, nunca um default que liga sozinho numa migração.
+ *
+ * Gerente: TUDO ligado, por decisão do Olavo (2026-07-30). O gerente não é
+ * cliente final: é operador designado pela própria imobiliária pra tocar o
+ * negócio — mesmo racional do corretor, que também recebe sem opt-in
+ * individual. Quem tem telefone/e-mail cadastrado recebe sem configurar nada;
+ * quem não quer desliga na matriz da org (ou por deal, no `muted`).
+ * Sem allowlist de eventos: o gerente acompanha a esteira inteira e o
+ * vocabulário interno ("contrato pronto", "mudança de status") é o dele.
  */
 export const DEFAULT_EVENT: ResolvedEventConfig = {
   broker: { email: true, whatsapp: false },
   party: { email: false, whatsapp: false },
+  manager: { email: true, whatsapp: true },
 };
 
 /** Party zerado — usado pra silenciar eventos fora da allowlist. */

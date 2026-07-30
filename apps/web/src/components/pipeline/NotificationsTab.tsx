@@ -37,6 +37,7 @@ interface LogRow {
   id: string;
   event: string;
   channel: string;
+  audience: string;
   recipientLabel: string | null;
   status: string;
   createdAt: string;
@@ -52,6 +53,18 @@ interface NotifState {
   brokers: Broker[];
   log: LogRow[];
 }
+
+/**
+ * Quem recebeu, em uma palavra. O log mistura três públicos com regras
+ * diferentes (o corretor tem opt-in por canal, a parte é o cliente final, o
+ * gerente vem ligado por padrão) — sem o rótulo, "pulado" numa linha era
+ * indistinguível de "pulado" na outra.
+ */
+const AUDIENCE_LABEL: Record<string, string> = {
+  broker: "Corretor",
+  party: "Parte",
+  manager: "Gerente",
+};
 
 const STATUS_LABEL: Record<string, { text: string; cls: string }> = {
   sent: { text: "enviado", cls: "text-green-700 border-green-300 bg-green-50" },
@@ -140,7 +153,7 @@ export function NotificationsTab({ dealId }: { dealId: string }) {
         toast.error(data.error ?? "Falha ao enviar lembrete");
         return;
       }
-      toast.success("Lembrete enviado aos corretores do negócio");
+      toast.success("Lembrete enviado aos envolvidos no negócio");
       await load();
     } finally {
       setSendingReminder(false);
@@ -163,14 +176,14 @@ export function NotificationsTab({ dealId }: { dealId: string }) {
         <CardHeader className="pb-2">
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-base flex items-center gap-2">
-              <BellRing className="h-4 w-4" /> Atualizações aos corretores
+              <BellRing className="h-4 w-4" /> Atualizações aos envolvidos
             </CardTitle>
             <div
               className="flex items-center gap-2 text-sm"
-              title="Interrompe e-mail/WhatsApp aos corretores deste negócio. O sino interno da equipe não é afetado."
+              title="Interrompe e-mail/WhatsApp aos envolvidos neste negócio — corretores, partes e gerente. O sino interno da equipe não é afetado."
             >
               <span className="text-muted-foreground">
-                Silenciar envios aos corretores
+                Silenciar envios deste negócio
               </span>
               <Switch
                 checked={muted}
@@ -180,7 +193,9 @@ export function NotificationsTab({ dealId }: { dealId: string }) {
           </div>
           <p className="text-sm text-muted-foreground">
             Herda o padrão da imobiliária (Configurações → Notificações).
-            Alterações aqui valem só pra este negócio.
+            Alterações aqui valem só pra este negócio. A matriz abaixo é a dos{" "}
+            <strong>corretores</strong>; partes e gerente seguem o padrão da
+            imobiliária — o silenciador acima corta os três.
           </p>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -301,15 +316,15 @@ export function NotificationsTab({ dealId }: { dealId: string }) {
               size="sm"
               onClick={() => void sendFormReminder()}
               disabled={sendingReminder || muted}
-              title="Envia agora o lembrete de preenchimento do formulário aos corretores"
+              title="Envia agora o lembrete de preenchimento do formulário aos envolvidos no negócio"
             >
               {sendingReminder ? "Enviando..." : "Enviar lembrete do formulário"}
             </Button>
           </div>
           <p className="text-sm text-muted-foreground">
-            E-mails e WhatsApp enviados aos corretores. WhatsApp marcado como
-            &quot;enviado&quot; = encaminhado ao assistente (sem confirmação de
-            entrega).
+            E-mails e WhatsApp enviados aos envolvidos (corretores, partes e
+            gerente). WhatsApp marcado como &quot;enviado&quot; = encaminhado ao
+            assistente (sem confirmação de entrega).
           </p>
         </CardHeader>
         <CardContent>
@@ -331,6 +346,11 @@ export function NotificationsTab({ dealId }: { dealId: string }) {
                         <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                       ) : (
                         <MessageCircle className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      )}
+                      {AUDIENCE_LABEL[row.audience] && (
+                        <span className="text-[10px] uppercase font-medium text-muted-foreground border rounded px-1 shrink-0">
+                          {AUDIENCE_LABEL[row.audience]}
+                        </span>
                       )}
                       <span className="truncate">
                         {DEAL_NOTIF_EVENT_LABEL[

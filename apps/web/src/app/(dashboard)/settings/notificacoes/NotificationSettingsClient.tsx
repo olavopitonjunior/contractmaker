@@ -121,7 +121,7 @@ export default function NotificationSettingsClient() {
     ev: DealNotifEvent,
     channel: "email" | "whatsapp",
     value: boolean,
-    audience: "broker" | "party" = "broker"
+    audience: "broker" | "party" | "manager" = "broker"
   ) {
     if (!resolved) return;
     // Optimistic
@@ -131,7 +131,12 @@ export default function NotificationSettingsClient() {
         ...resolved.events,
         [ev]: {
           ...resolved.events[ev],
-          [audience]: { ...resolved.events[ev][audience], [channel]: value },
+          // `?? {}`: o público manager é opcional no tipo (resposta de API
+          // anterior à v3 não traz a chave).
+          [audience]: {
+            ...(resolved.events[ev][audience] ?? {}),
+            [channel]: value,
+          },
         },
       },
     });
@@ -246,6 +251,31 @@ export default function NotificationSettingsClient() {
             }
             onToggle={(ev, channel, value) =>
               void toggleEvent(ev, channel, value, "party")
+            }
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Gerente do negócio</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            O gerente atribuído ao negócio recebe os marcos por e-mail/WhatsApp
+            automaticamente — basta ter telefone no perfil. Desligue aqui o que
+            não quiser.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <EventChannelMatrix
+            audience="manager"
+            values={resolved.events}
+            whatsappDisabledReason={
+              temAgenteWhatsapp
+                ? null
+                : "Esta imobiliaria ainda nao tem agente de WhatsApp habilitado, entao esse canal fica indisponivel para o gerente. Os avisos por e-mail funcionam normalmente."
+            }
+            onToggle={(ev, channel, value) =>
+              void toggleEvent(ev, channel, value, "manager")
             }
           />
         </CardContent>

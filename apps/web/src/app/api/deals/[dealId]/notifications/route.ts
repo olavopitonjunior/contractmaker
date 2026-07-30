@@ -176,9 +176,11 @@ export async function PATCH(
     if (!toggles) continue;
     const curEvent = existingEvents[ev] ?? {};
     const curBroker = (curEvent.broker as Record<string, unknown>) ?? {};
-    // Spread do evento inteiro preserva o público `party` (configurado no
-    // padrão da imobiliária) — sem ele, mexer no toggle do corretor apagaria
-    // o override de parte deste negócio.
+    // Spread do evento inteiro preserva os públicos `party` e `manager`
+    // (configurados no padrão da imobiliária) — sem ele, mexer no toggle do
+    // corretor apagaria o override de parte/gerente deste negócio. Não há
+    // override POR DEAL desses dois: quem quer silenciar um negócio inteiro
+    // usa `muted`, que já corta os três públicos.
     mergedEvents[ev] = { ...curEvent, broker: { ...curBroker, ...toggles.broker } };
   }
   for (const ev of parsed.data.clearEvents ?? []) {

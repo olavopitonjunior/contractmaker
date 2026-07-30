@@ -5,8 +5,9 @@
  * org) e a aba Notificações do deal (override). O container decide o que fazer
  * no onToggle.
  *
- * `audience` escolhe a coluna de dados: "broker" (corretores, todos os eventos)
- * ou "party" (partes do negócio, só os eventos da allowlist — daí o `events`).
+ * `audience` escolhe a coluna de dados: "broker" (corretores, todos os
+ * eventos), "party" (partes do negócio, só os eventos da allowlist — daí o
+ * `events`) ou "manager" (gerente atribuído, todos os eventos).
  */
 
 import { Switch } from "@/components/ui/switch";
@@ -23,8 +24,12 @@ export type MatrixValues = Record<
   {
     broker: { email: boolean; whatsapp: boolean };
     party: { email: boolean; whatsapp: boolean };
+    /** Opcional: resposta de API anterior à v3 não traz o público gerente. */
+    manager?: { email: boolean; whatsapp: boolean };
   }
 >;
+
+const CELL_OFF = { email: false, whatsapp: false } as const;
 
 export function EventChannelMatrix({
   values,
@@ -44,7 +49,7 @@ export function EventChannelMatrix({
   disabled?: boolean;
   /** Eventos com override local (deal) — ganham marcador visual. */
   overriddenEvents?: Set<DealNotifEvent>;
-  audience?: "broker" | "party";
+  audience?: "broker" | "party" | "manager";
   /** Subconjunto de eventos a exibir. Default: todos. */
   events?: readonly DealNotifEvent[];
   /**
@@ -68,7 +73,11 @@ export function EventChannelMatrix({
             <MessageCircle className="h-3.5 w-3.5" /> WhatsApp
           </span>
         </div>
-        {rows.map((ev) => (
+        {rows.map((ev) => {
+          // `manager` é opcional no tipo (resposta pré-v3); sem contato o
+          // toggle simplesmente nasce desligado em vez de estourar.
+          const cell = values[ev]?.[audience] ?? CELL_OFF;
+          return (
           <div
             key={ev}
             className="grid grid-cols-[1fr_auto_auto] gap-4 px-4 py-2.5 items-center"
@@ -86,7 +95,7 @@ export function EventChannelMatrix({
             </span>
             <span className="w-16 flex justify-center">
               <Switch
-                checked={values[ev][audience].email}
+                checked={cell.email}
                 disabled={disabled}
                 onCheckedChange={(v) => onToggle(ev, "email", v)}
               />
@@ -96,13 +105,14 @@ export function EventChannelMatrix({
               title={whatsappDisabledReason ?? undefined}
             >
               <Switch
-                checked={values[ev][audience].whatsapp && !whatsappBlocked}
+                checked={cell.whatsapp && !whatsappBlocked}
                 disabled={disabled || whatsappBlocked}
                 onCheckedChange={(v) => onToggle(ev, "whatsapp", v)}
               />
             </span>
           </div>
-        ))}
+          );
+        })}
       </div>
       {whatsappDisabledReason && (
         <p className="text-xs text-amber-600">{whatsappDisabledReason}</p>

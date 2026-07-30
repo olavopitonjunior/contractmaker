@@ -151,3 +151,79 @@ describe("público party — defaults OFF e allowlist de eventos", () => {
     });
   });
 });
+
+// ── Público manager (v3) ────────────────────────────────────────────────────
+//
+// Espelho invertido do party: o gerente é operador designado pela imobiliária
+// (mesmo racional do corretor), então nasce LIGADO nos dois canais e SEM
+// allowlist de eventos. Quem não quer desliga na matriz da org.
+
+describe("público manager — default ON e sem allowlist", () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it("sem config nenhuma, TODO evento nasce com manager ligado nos 2 canais", async () => {
+    orgSettingsFind.mockResolvedValue(null);
+    const cfg = await resolveEffectiveNotificationConfig("org1");
+    for (const ev of DEAL_NOTIF_EVENTS) {
+      expect(cfg.events[ev].manager).toEqual({ email: true, whatsapp: true });
+    }
+  });
+
+  it("manager vale em evento FORA da allowlist de party — não há zeramento", async () => {
+    orgSettingsFind.mockResolvedValue(null);
+    const cfg = await resolveEffectiveNotificationConfig("org1");
+    expect(isPartyCapableEvent("stage_change")).toBe(false);
+    expect(cfg.events.stage_change.manager.email).toBe(true);
+    expect(cfg.events.stage_change.party.email).toBe(false);
+  });
+
+  it("org desliga UM canal do manager; o irmão sobrevive (merge por canal)", async () => {
+    orgSettingsFind.mockResolvedValue({
+      settingsJson: {
+        events: { stage_change: { manager: { whatsapp: false } } },
+      },
+    });
+    const cfg = await resolveEffectiveNotificationConfig("org1");
+    expect(cfg.events.stage_change.manager).toEqual({
+      email: true,
+      whatsapp: false,
+    });
+    // não contamina os públicos irmãos nem os outros eventos
+    expect(cfg.events.stage_change.broker.email).toBe(true);
+    expect(cfg.events.contract_ready.manager.whatsapp).toBe(true);
+  });
+
+  it("org desliga os dois canais → manager off naquele evento", async () => {
+    orgSettingsFind.mockResolvedValue({
+      settingsJson: {
+        events: { charge_paid: { manager: { email: false, whatsapp: false } } },
+      },
+    });
+    const cfg = await resolveEffectiveNotificationConfig("org1");
+    expect(cfg.events.charge_paid.manager).toEqual({
+      email: false,
+      whatsapp: false,
+    });
+  });
+
+  /**
+   * O override por deal não expõe `manager` na API — mas o merge precisa
+   * preservar o que a org configurou, senão mexer no toggle do corretor
+   * religaria o gerente que a imobiliária tinha desligado.
+   */
+  it("override de deal sem chave manager preserva o que a org desligou", async () => {
+    orgSettingsFind.mockResolvedValue({
+      settingsJson: {
+        events: { stage_change: { manager: { email: false, whatsapp: false } } },
+      },
+    });
+    const cfg = await resolveEffectiveNotificationConfig("org1", {
+      events: { stage_change: { broker: { email: false } } },
+    });
+    expect(cfg.events.stage_change.manager).toEqual({
+      email: false,
+      whatsapp: false,
+    });
+    expect(cfg.events.stage_change.broker.email).toBe(false);
+  });
+});
