@@ -43,6 +43,9 @@ const eventTogglesSchema = z
   .object({
     broker: channelTogglesSchema.optional(),
     party: channelTogglesSchema.optional(),
+    // Sem guard de allowlist: o gerente é operador da imobiliária e recebe os
+    // 8 marcos (ver DEFAULT_EVENT em deal-events-shared.ts).
+    manager: channelTogglesSchema.optional(),
   })
   .strict();
 
@@ -357,10 +360,12 @@ export async function PATCH(req: NextRequest) {
       const curEvent = currentEvents[ev] ?? {};
       const curBroker = (curEvent.broker as Record<string, unknown>) ?? {};
       const curParty = (curEvent.party as Record<string, unknown>) ?? {};
+      const curManager = (curEvent.manager as Record<string, unknown>) ?? {};
       mergedEvents[ev] = {
         ...curEvent,
         broker: { ...curBroker, ...toggles.broker },
         party: { ...curParty, ...toggles.party },
+        manager: { ...curManager, ...toggles.manager },
       };
     }
   }

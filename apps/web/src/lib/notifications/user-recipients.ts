@@ -28,7 +28,6 @@ export const MAX_RECIPIENTS_PER_NOTIFICATION = 5;
 export type RecipientRule =
   | "direct"
   | "deal_owner"
-  | "deal_manager"
   | "org_admins"
   | "org_selected"
   | "none";
@@ -87,8 +86,8 @@ async function loadEligible(
   });
 
   // Preserva a ORDEM do input — o teto (capped) corta o fim da lista, e os
-  // callers põem dono/gerente antes dos escolhidos justamente pra que o corte
-  // nunca os derrube. findMany não garante ordem por si.
+  // callers põem o dono do negócio antes dos escolhidos justamente pra que o
+  // corte nunca o derrube. findMany não garante ordem por si.
   const byInputOrder = new Map(unique.map((id, i) => [id, i]));
   memberships.sort(
     (a, b) => (byInputOrder.get(a.userId) ?? 0) - (byInputOrder.get(b.userId) ?? 0)
@@ -170,36 +169,37 @@ export async function resolveNotificationUsers(
       return { users, rule: "direct" };
     }
 
-    // 2. Ancorada num deal → dono do negócio + GERENTE atribuído, MAIS os
-    // escolhidos pelo admin. Dono e gerente vêm ANTES dos escolhidos na lista
-    // — o teto (capped) nunca derruba quem é do negócio.
+    // 2. Ancorada num deal → dono do negócio, MAIS os escolhidos pelo admin. O
+    // dono vem ANTES dos escolhidos na lista — o teto (capped) nunca derruba
+    // quem é do negócio.
+    //
+    // O GERENTE do deal NÃO entra aqui: os avisos externos dele (e-mail e
+    // WhatsApp dos marcos do processo) saem pelo motor lib/notifications/
+    // deal-events.ts, no público `manager`, com config própria por evento×canal
+    // e log auditável no DealNotificationLog. Somar de novo por esta cascata
+    // entregaria a MESMA notificação duas vezes, por dois trilhos com dedupes
+    // independentes (UserNotificationDelivery vs DealNotificationLog) — nenhum
+    // dos dois enxerga o outro. O sino interno dele continua vindo do fan-out
+    // `:mgr` de emitNotification.
     const dealId = dealIdFromMetadata(n.metadata) ?? dealIdFromLinkUrl(n.linkUrl);
     if (dealId) {
       const deal = await prisma.deal.findUnique({
         where: { id: dealId },
         select: {
           userId: true,
-          managerUserId: true,
           pipeline: { select: { orgId: true } },
         },
       });
       // Guard cross-org: a notificação não pode arrastar dono de outro tenant.
       if (deal?.userId && deal.pipeline.orgId === n.orgId) {
         const users = await loadEligible(
-          [deal.userId, deal.managerUserId, ...selected].filter(
-            (id): id is string => Boolean(id)
-          ),
+          [deal.userId, ...selected].filter((id): id is string => Boolean(id)),
           n.orgId,
           channel
         );
         return {
           users: capped(users, n.id),
-          rule:
-            selected.length > 0
-              ? "org_selected"
-              : deal.managerUserId
-                ? "deal_manager"
-                : "deal_owner",
+          rule: selected.length > 0 ? "org_selected" : "deal_owner",
         };
       }
     }
