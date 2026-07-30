@@ -53,10 +53,11 @@ export default async function PublicFormPage({
     proposalAttachmentUrl = proposalAttachment?.url ?? null;
   }
 
-  // Os campos de recebimento da comissão (PIX/conta do corretor) só aparecem
-  // pra quem é da imobiliária. O link é entregue ao CLIENTE — não é lugar de
-  // pedir dado bancário de terceiro pra ele, e a mesma checagem barra a escrita
-  // no POST de commissioners, senão esconder seria só cosmético.
+  // Duas coisas ficam só pra quem é da imobiliária, porque o link é entregue ao
+  // CLIENTE: os campos de recebimento da comissão (não é lugar de pedir dado
+  // bancário de terceiro pra ele) e remover documento (antes qualquer portador
+  // apagava documento de qualquer parte, sem deixar rastro). Nos dois casos o
+  // servidor faz a MESMA checagem — esconder sem barrar seria só cosmético.
   const viewerIsMember = await viewerIsOrgMember(form.orgId);
 
   return (

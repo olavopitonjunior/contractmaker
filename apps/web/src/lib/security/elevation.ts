@@ -113,8 +113,27 @@ export async function readElevation(): Promise<ElevationPayload | null> {
 /**
  * Valida que há elevation ativa para o scope dado. Lança erro para ser capturado
  * pelo handler da rota.
+ *
+ * DESATIVADO (2026-07-30, decisão do Olavo): a confirmação de identidade
+ * (senha + 2FA a cada 15min) foi removida de TODAS as operações — a exigência
+ * atrapalhava a operação e a proteção primária continua sendo o RBAC
+ * (requirePermission) + sessão autenticada + audit. A função vira no-op no
+ * ponto único que todos os ~14 call sites (transfers, KYC, contas bancárias,
+ * membros, custom roles, fees, gerentes) importam — nada mais dispara
+ * ELEVATION_REQUIRED, então os ElevationDialog do client simplesmente nunca
+ * abrem. Toda a infraestrutura (createElevation, cookie, SessionElevation,
+ * /api/security) fica intacta: religar = restaurar o corpo original deste
+ * função (git log deste arquivo).
  */
 export async function requireElevation(
+  _userId: string,
+  _scope: ElevationScope
+): Promise<void> {
+  return;
+}
+
+/** Corpo original preservado pra religar sem arqueologia de git. */
+export async function requireElevationEnforced(
   userId: string,
   scope: ElevationScope
 ): Promise<void> {

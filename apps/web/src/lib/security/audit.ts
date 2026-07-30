@@ -150,6 +150,12 @@ export type AuditAction =
   | "ATTACHMENT_DELETE"
   | "ATTACHMENT_EXTRACT"
   | "ATTACHMENT_RECLASSIFY"
+  // Restauração de anexo a partir de `DeletedAttachment`.
+  | "ATTACHMENT_RESTORE"
+  // Anexo do FORMULÁRIO. Não existiam: o DELETE da rota pública apagava
+  // documento sem escrever nada, então "sumiu um documento" era inauditável.
+  | "FORM_ATTACHMENT_UPLOAD"
+  | "FORM_ATTACHMENT_DELETE"
   // Newton — Leads (pré-Deal)
   | "LEAD_CREATE"
   | "LEAD_UPDATE"

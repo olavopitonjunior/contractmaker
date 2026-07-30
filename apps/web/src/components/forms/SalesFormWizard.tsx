@@ -68,10 +68,11 @@ interface SalesFormWizardProps {
   proposalAttachmentUrl?: string | null;
   /**
    * Visitante é membro da org dona do form (`viewerIsOrgMember`, server-side).
-   * Só ele vê os campos de recebimento da comissão (PIX/conta) na etapa de
-   * Comissão. Default `false`: o caso normal do link público é o CLIENTE, e o
-   * subtoken por parte nunca é membro. O servidor faz a mesma checagem no POST
-   * de commissioners — isto aqui é a metade visual dela.
+   * Duas coisas dependem dele, ambas por o link público estar normalmente com o
+   * CLIENTE: os campos de recebimento da comissão (PIX/conta) na etapa de
+   * Comissão, e remover documento na etapa 0. Default `false`, e o subtoken por
+   * parte nunca é membro. Nos dois casos o servidor é o guard autoritativo
+   * (403); isto aqui é a metade visual.
    */
   viewerIsMember?: boolean;
   /**
@@ -834,6 +835,7 @@ export function SalesFormWizard({
       token={token}
       allowedTopKeys={pathScope}
       selfAssignment={selfAssignment}
+      viewerIsMember={viewerIsMember}
     />,
     <VendedorStep key="step-1" form={form} />,
     <CompradorStep key="step-2" form={form} />,

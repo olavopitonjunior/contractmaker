@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { UseFormReturn } from "react-hook-form";
 import { Upload, Sparkles } from "lucide-react";
+import { upload } from "@vercel/blob/client";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -49,9 +50,23 @@ interface DocumentosStepProps {
    * undefined = token principal (fluxo manual inalterado).
    */
   selfAssignment?: Assignment;
+  /**
+   * Visitante é membro da imobiliária (`viewerIsOrgMember`, resolvido no
+   * server). Só ele remove documento pelo formulário — o link normalmente está
+   * com o cliente, e antes qualquer portador apagava documento de qualquer
+   * parte sem deixar rastro. O DELETE da rota faz a mesma checagem; isto aqui é
+   * só a metade visual.
+   *
+   * Default false, e o link por parte (subtoken) segue removendo o que ELE
+   * mesmo enviou — correção do próprio upload, não exclusão de documento alheio.
+   */
+  viewerIsMember?: boolean;
 }
 
-const MAX_BYTES = 10 * 1024 * 1024;
+// 20MB de verdade: o upload agora é client-direct pro Blob
+// (`attachments/blob-upload` + `/finalize`), então o arquivo não passa mais
+// pelo corpo da função e o teto de ~4.5MB da Vercel deixou de valer.
+const MAX_BYTES = 20 * 1024 * 1024;
 const RESIZE_MAX_SIDE = 1500;
 const IMAGE_JPEG_QUALITY = 0.8;
 const IMAGE_MIMES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
@@ -329,6 +344,7 @@ export function DocumentosStep({
   adapter: adapterProp,
   allowedTopKeys,
   selfAssignment,
+  viewerIsMember = false,
 }: DocumentosStepProps) {
   const adapter = useMemo(
     () => adapterProp ?? createVendaAdapter(buildAssignmentOptions),
@@ -840,7 +856,7 @@ export function DocumentosStep({
           continue;
         }
         if (rawFile.size > MAX_BYTES) {
-          toast.error(`${rawFile.name} excede 10 MB`);
+          toast.error(`${rawFile.name} excede 20 MB`);
           continue;
         }
         const tempId = `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -884,12 +900,38 @@ export function DocumentosStep({
             ? await resizeImage(rawFile, RESIZE_MAX_SIDE)
             : rawFile;
 
-          const body = new FormData();
-          body.append("file", file);
-          const uploadRes = await fetch(`/api/forms/${token}/attachments`, {
-            method: "POST",
-            body,
-          });
+          // Upload DIRETO pro Blob: o arquivo não passa pelo corpo da função,
+          // que era o teto real de ~4.5MB da Vercel (a mensagem de "10 MB" era
+          // otimista — um PDF de 6MB morria com 413 opaco antes de chegar na
+          // validação). `/blob-upload` só emite o token; `/finalize` cria a
+          // linha e é onde a checagem de magic bytes passou a rodar, agora
+          // sobre o objeto baixado do storage.
+          // Pathname sem o token no caminho: a URL do Blob é pública e
+          // permanente, e o token do formulário é segredo. `addRandomSuffix`
+          // no handshake garante unicidade.
+          const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+          const blob = await upload(
+            `form-attachments/${Date.now()}-${safeName}`,
+            file,
+            {
+              access: "public",
+              handleUploadUrl: `/api/forms/${token}/attachments/blob-upload`,
+              contentType: file.type,
+            }
+          );
+
+          const uploadRes = await fetch(
+            `/api/forms/${token}/attachments/finalize`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                url: blob.url,
+                filename: file.name,
+                mime: file.type,
+              }),
+            }
+          );
           const uploadData = await uploadRes.json();
           if (!uploadRes.ok) {
             setDocs((prev) =>
@@ -1165,7 +1207,7 @@ export function DocumentosStep({
               Clique ou arraste arquivos aqui
             </p>
             <p className="text-xs text-muted-foreground">
-              JPG, PNG, WebP ou PDF — até 10 MB por arquivo
+              JPG, PNG, WebP ou PDF — até 20 MB por arquivo
             </p>
             <input
               ref={inputRef}
@@ -1235,7 +1277,14 @@ export function DocumentosStep({
                 doc={doc}
                 assignmentOptions={assignmentOptions}
                 onAssignmentChange={handleAssignmentChange}
-                onRemove={handleRemove}
+                // `undefined` esconde o X (DocumentCard renderiza só com
+                // onRemove). Membro remove qualquer um; num link por parte o
+                // GET já filtra pros documentos DAQUELA parte, então remover ali
+                // é sempre o próprio upload. Cliente no link principal não
+                // remove — o servidor devolve 403 de qualquer forma.
+                onRemove={
+                  viewerIsMember || allowedTopKeys ? handleRemove : undefined
+                }
                 onRetry={handleRetry}
                 onExtract={handleRetry}
               />

@@ -15,9 +15,10 @@ interface FormPageClientProps {
   /** Form travado (SalesForm.lockedAt) → wizard somente-leitura. */
   locked?: boolean;
   /**
-   * Visitante tem OrgMembership na org do form (resolvido server-side por
-   * `viewerIsOrgMember`). Libera os campos de recebimento da comissão na etapa
-   * de Comissão — o cliente que recebeu o link não os vê.
+   * Visitante tem OrgMembership na org do form (`viewerIsOrgMember`, resolvido
+   * server-side). Libera os campos de recebimento da comissão na etapa de
+   * Comissão E remover documento na etapa 0 — o link público está normalmente
+   * com o cliente, que não deve ver nem uma coisa nem outra.
    */
   viewerIsMember?: boolean;
 }
@@ -56,6 +57,7 @@ export function FormPageClient({
             initialData={initialData}
             schemaType={schemaType}
             readOnly={locked}
+            viewerIsMember={viewerIsMember}
           />
         ) : (
           <SalesFormWizard
