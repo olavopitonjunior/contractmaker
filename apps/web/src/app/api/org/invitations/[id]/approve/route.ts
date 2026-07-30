@@ -127,7 +127,11 @@ export async function POST(
     actionUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(token)}`;
   }
 
-  await sendEmail({
+  // sendEmail NUNCA lança — devolve { ok:false }. Ler é obrigatório: esse
+  // e-mail carrega o ÚNICO link de criação de senha, então falha silenciosa
+  // deixa o convidado trancado do lado de fora com o aprovador achando que
+  // deu certo.
+  const sent = await sendEmail({
     to: invitation.email,
     subject: `Acesso aprovado — ${ctx.orgName}`,
     react: InvitationApprovedEmail({
@@ -138,5 +142,16 @@ export async function POST(
     }) as React.ReactElement,
   });
 
-  return NextResponse.json({ ok: true, userId: result.user.id });
+  if (!sent.ok) {
+    console.error(
+      "[invitations/approve] falha ao enviar e-mail de primeiro acesso",
+      { invitationId: id, error: sent.error }
+    );
+  }
+
+  return NextResponse.json({
+    ok: true,
+    userId: result.user.id,
+    emailSent: sent.ok,
+  });
 }

@@ -79,16 +79,19 @@ export async function POST(req: NextRequest) {
   };
 
   // Primeiro acesso (conta sem senha): não há senha antiga a confirmar.
-  const isFirstPassword = !user.passwordHash;
+  // Derivado do BANCO, nunca do corpo da request — o cliente não escolhe
+  // pular a verificação.
+  const existingHash = user.passwordHash;
+  const isFirstPassword = existingHash == null;
 
-  if (!isFirstPassword) {
+  if (existingHash != null) {
     if (!currentPassword) {
       return NextResponse.json(
         { error: "Informe a senha atual" },
         { status: 400 }
       );
     }
-    const ok = await bcrypt.compare(currentPassword, user.passwordHash!);
+    const ok = await bcrypt.compare(currentPassword, existingHash);
     if (!ok) {
       await audit(auditCtx, {
         action: "PASSWORD_CHANGE",

@@ -71,7 +71,14 @@ export function InvitationsTab({
         toast.error(data.error ?? "Falha ao aprovar");
         return;
       }
-      toast.success(`Convite aprovado — ${email} foi notificado`);
+      if (data.emailSent === false) {
+        toast.warning(
+          `Convite aprovado, mas o e-mail para ${email} NÃO saiu. Use "Reenviar convite" na aba Membros.`,
+          { duration: 10_000 }
+        );
+      } else {
+        toast.success(`Convite aprovado — ${email} foi notificado`);
+      }
       await load();
       onApproved?.();
     } finally {
