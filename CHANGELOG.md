@@ -4,6 +4,15 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-07-30 - Hardening da trava de grupo do Newton
+
+Follow-ups do review do #197, ambos em `apps/mcp-server/src/tools.ts`.
+
+### Alterado
+
+- **`isGroupJid` cobre mais formatos:** além de `<digitos>-group` (convenção da bridge), agora reconhece o sufixo nativo `@g.us` (case-insensitive) e o JID legado com hífen interno (`<criador>-<timestamp>-group`), que escapavam do regex só-dígitos.
+- **`normalizeWhatsappTo` é fail-closed:** JID de grupo lança `assertNotGroupTarget` em vez de passar intacto. Os handlers já barram antes, então o ramo é redundante hoje — de propósito, pra que um caller futuro sem o assert falhe em vez de mandar mensagem pro grupo.
+
 ## [Unreleased] - 2026-07-25 - Newton calado nos grupos: runtime + tools
 
 Segunda metade da mudança abaixo. A primeira tirou a iniciativa automática do lado
