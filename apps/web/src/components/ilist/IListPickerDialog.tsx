@@ -4,7 +4,7 @@
 // org-scoped (código, endereço, cidade ou corretor — debounce 300ms) e, ao
 // selecionar, busca o payload de import (3 shapes prontos + fotos) em
 // GET /api/ilist/listings/[id]. Usado por: locação (ImportarCrmDialog),
-// vendas (new-from-ilist) e propostas (NovaPropostaDialog).
+// vendas (new-from-ilist) e propostas (ProposalForm).
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";

@@ -2,7 +2,7 @@
  * Parsing monetário robusto BR/US — fonte única de verdade.
  *
  * Os parsers antigos (`parseNumber` em asaas/commission, `toNumber` em
- * quickChecks/memory/dimob e o inline de NovaPropostaDialog) faziam
+ * quickChecks/memory/dimob e o inline do diálogo de proposta) faziam
  * `replace(/\./g, "")` INCONDICIONAL — removiam todo ponto ANTES de checar se
  * havia vírgula. Resultado: "1000.00" → 100000 (100×), "1.5" → 15. Isso
  * inflava comissão, valor de cobrança e valor de proposta. Aqui o ponto só é

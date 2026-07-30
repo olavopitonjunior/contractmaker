@@ -84,8 +84,9 @@ export async function convertProposalToDeal(input: {
   const firstStage = pipeline.stages[0];
 
   // Normaliza o shape da proposta pro shape do FORM antes de copiar: a
-  // proposta guarda o aluguel em `locacao.valor_aluguel` (NovaPropostaDialog),
-  // mas o form/templates/derive leem `aluguel.valor`. Normalizando NA CÓPIA,
+  // proposta guarda o aluguel em `locacao.valor_aluguel`, mas o form/templates/
+  // derive leem `aluguel.valor` (a página de proposta já escreve os dois; propostas
+  // antigas só têm o primeiro). Normalizando NA CÓPIA,
   // todos os consumidores downstream (card, geração do contrato de locação,
   // cláusula de aluguel) enxergam o valor — não só este call-site.
   let normalizedData = dataJson;

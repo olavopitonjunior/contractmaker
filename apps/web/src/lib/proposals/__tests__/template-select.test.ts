@@ -60,9 +60,9 @@ describe("selectPropostaTemplate × matchCriteria", () => {
     expect(result?.template.id).toBe("generico");
   });
 
-  it("dataJson do NovaPropostaDialog (partes só com nome) → fatos nulos, vence o isDefault", async () => {
-    // Dependência conhecida: a coleta de garantia/tipo_pessoa na proposta é da
-    // Fase 4. Até lá a seleção é a de antes.
+  it("proposta ANTIGA (partes só com nome) → fatos nulos, vence o isDefault", async () => {
+    // Compatibilidade: propostas criadas antes da página (sem tipo_pessoa nem
+    // garantia) continuam selecionando como sempre — sem regressão.
     mockFindMany.mockResolvedValueOnce([fiadorPj, generico]);
     const result = await selectPropostaTemplate("org-1", "locacao_residencial_v1", {
       locatarios: [{ nome: "Fulano" }],

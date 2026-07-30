@@ -276,11 +276,12 @@ function pessoaFromParte(parte: unknown): PessoaTipo | null {
  *   jurídica, senão "pf". `tipo_pessoa` é o sinal canônico (discriminated union
  *   do form); CPF/CNPJ preenchido é fallback.
  *
- * DEPENDÊNCIA CONHECIDA (Fase 4 — página de proposta): o `NovaPropostaDialog`
- * monta as partes só com `{ nome }` e não coleta garantia nem tipo_pessoa, então
- * proposta criada por ali sai com os fatos nulos e a seleção segue no
- * `isDefault`. Quando a página de proposta passar a coletar isso, este derivador
- * já lê o dataJson novo sem mudança.
+ * A página de proposta (`/pipeline/propostas/nova` e `/[id]/editar`) coleta
+ * `tipo_pessoa` por parte e, em locação, `garantia.tipo` (+ fiador PF/PJ) —
+ * `buildProposalDataJson` em lib/proposals/form-data.ts escreve exatamente as
+ * chaves lidas aqui, então a seleção de variante vale também pra proposta.
+ * Propostas ANTIGAS (criadas antes disso, partes só com `{ nome }`) seguem com
+ * fatos nulos e caem no `isDefault` — comportamento de antes, sem regressão.
  */
 export function deriveTemplateFacts(dataJson: unknown): TemplateFacts {
   const data = (dataJson && typeof dataJson === "object" ? dataJson : {}) as Record<

@@ -5,8 +5,9 @@ import { prisma } from "@/lib/db/prisma";
 import { can } from "@/lib/security/rbac/check";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { loadScopedProposal } from "@/lib/proposals/route-helpers";
-import { DELETABLE_STATUSES } from "@/lib/proposals/status-sets";
+import { DELETABLE_STATUSES, EDITABLE_STATUSES } from "@/lib/proposals/status-sets";
 import { sanitizeHiddenPaths } from "@/lib/proposals/hidden-fields";
+import { computeDedupeKey } from "@/lib/proposals/signer-dedupe";
 import { runEnvelopeCancel } from "@/lib/clicksign/cancel-action";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
@@ -34,21 +35,39 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
   return NextResponse.json({ proposal: r.proposal, signers, events, attachments, envelopes });
 }
 
+const signerSchema = z.object({
+  role: z.enum(["proponente", "vendedor", "conjuge", "testemunha"]),
+  name: z.string().min(1),
+  email: z.string().optional().nullable(),
+  cpf: z.string().optional().nullable(),
+  phone: z.string().optional().nullable(),
+  notifyChannel: z.enum(["email", "whatsapp", "sms"]).optional(),
+  signingGroup: z.number().int().optional(),
+});
+
 const patchSchema = z.object({
   title: z.string().min(1).optional(),
   dataJson: z.record(z.unknown()).optional(),
   validUntil: z.string().datetime().nullable().optional(),
   comissaoIncluida: z.boolean().optional(),
   hiddenPaths: z.array(z.string()).optional(),
+  // Conjunto COMPLETO de signatários (substitui as linhas existentes). Só faz
+  // sentido antes do envio — depois quem manda é o EnvelopeSigner, editado
+  // pelas rotas /signers/[signerId]. Omitir preserva o conjunto atual.
+  signers: z.array(signerSchema).optional(),
 });
 
-// PATCH /api/proposals/[id] — só em rascunho.
+// PATCH /api/proposals/[id] — só antes do envio (EDITABLE_STATUSES).
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const r = await loadScopedProposal(req, params.id);
   if ("fail" in r) return r.fail;
-  if (r.proposal.status !== "rascunho") {
+  // Mesmo conjunto do claim de envio: tudo que ainda pode virar "enviada" é
+  // editável, nada depois. Antes só `rascunho` passava, o que travava a correção
+  // de uma proposta em `falha_envio` — exatamente o caso em que editar é o
+  // conserto (contato errado, dado faltando) antes de reenviar.
+  if (!EDITABLE_STATUSES.has(r.proposal.status)) {
     return NextResponse.json(
-      { error: "Só é possível editar uma proposta em rascunho." },
+      { error: "A proposta já foi enviada e não pode mais ser editada." },
       { status: 409 }
     );
   }
@@ -57,23 +76,66 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
     return NextResponse.json({ error: parsed.error.message }, { status: 400 });
   }
   const p = parsed.data;
-  const updated = await prisma.proposal.update({
-    where: { id: params.id },
-    data: {
-      ...(p.title !== undefined ? { title: p.title } : {}),
-      ...(p.dataJson !== undefined
-        ? { dataJson: p.dataJson as Prisma.InputJsonValue }
-        : {}),
-      ...(p.validUntil !== undefined
-        ? { validUntil: p.validUntil ? new Date(p.validUntil) : null }
-        : {}),
-      ...(p.comissaoIncluida !== undefined ? { comissaoIncluida: p.comissaoIncluida } : {}),
-      // hiddenPaths sempre sanitizado contra a allowlist do schemaType.
-      ...(p.hiddenPaths !== undefined
-        ? { hiddenPaths: sanitizeHiddenPaths(r.proposal.schemaType, p.hiddenPaths) }
-        : {}),
-    },
-  });
+  const proposalData = {
+    ...(p.title !== undefined ? { title: p.title } : {}),
+    ...(p.dataJson !== undefined
+      ? { dataJson: p.dataJson as Prisma.InputJsonValue }
+      : {}),
+    ...(p.validUntil !== undefined
+      ? { validUntil: p.validUntil ? new Date(p.validUntil) : null }
+      : {}),
+    ...(p.comissaoIncluida !== undefined ? { comissaoIncluida: p.comissaoIncluida } : {}),
+    // hiddenPaths sempre sanitizado contra a allowlist do schemaType.
+    ...(p.hiddenPaths !== undefined
+      ? { hiddenPaths: sanitizeHiddenPaths(r.proposal.schemaType, p.hiddenPaths) }
+      : {}),
+  };
+
+  let updated;
+  try {
+    updated = await prisma.$transaction(async (tx) => {
+      if (p.signers !== undefined) {
+        // Substituição atômica: o payload é o conjunto inteiro (a página de
+        // edição sempre manda todos). Deletar-e-recriar em vez de diff porque
+        // não há envelope ainda — nenhuma linha carrega estado de assinatura.
+        await tx.proposalSigner.deleteMany({ where: { proposalId: params.id } });
+        if (p.signers.length > 0) {
+          await tx.proposalSigner.createMany({
+            data: p.signers.map((s) => ({
+              proposalId: params.id,
+              role: s.role,
+              name: s.name,
+              email: s.email || null,
+              cpf: s.cpf || null,
+              phone: s.phone || null,
+              notifyChannel: s.notifyChannel ?? "email",
+              signingGroup: s.signingGroup ?? (s.role === "proponente" ? 1 : 2),
+              dedupeKey: computeDedupeKey({
+                name: s.name,
+                email: s.email,
+                cpf: s.cpf,
+                phone: s.phone,
+              }),
+            })),
+          });
+        }
+      }
+      return tx.proposal.update({ where: { id: params.id }, data: proposalData });
+    });
+  } catch (err) {
+    // Mesmo 409 acionável do POST: dois signatários com o mesmo contato colidem
+    // no @@unique([proposalId, dedupeKey]).
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
+      return NextResponse.json(
+        {
+          error:
+            "Dois signatários têm o mesmo contato. Informe e-mail ou CPF distinto para cada um (cada pessoa assina separadamente).",
+        },
+        { status: 409 }
+      );
+    }
+    throw err;
+  }
   await audit(
     extractAuditContextFromRequest(req, r.auth.org.id, r.auth.actor.effectiveUserId),
     {

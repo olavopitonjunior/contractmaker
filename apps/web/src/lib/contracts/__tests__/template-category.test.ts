@@ -286,7 +286,7 @@ describe("deriveTemplateFacts", () => {
 
   it("dataJson pobre/ausente → tudo desconhecido (nunca desclassifica)", () => {
     const vazio = { garantia: null, fiadorPessoa: null, pessoa: null };
-    // Shape do NovaPropostaDialog hoje: partes só com nome.
+    // Shape das propostas ANTIGAS (pré-página): partes só com nome.
     expect(deriveTemplateFacts({ locatarios: [{ nome: "Fulano" }] })).toEqual(vazio);
     expect(deriveTemplateFacts({})).toEqual(vazio);
     expect(deriveTemplateFacts(null)).toEqual(vazio);

@@ -7,6 +7,23 @@
  * API rejeitaria.
  */
 
+/**
+ * EDITÁVEL — a proposta ainda não saiu, então mexer no conteúdo é seguro.
+ *
+ * É EXATAMENTE o mesmo conjunto do claim atômico de envio em
+ * `executeProposalSend` (`status: { in: [...] }`): tudo que pode virar "enviada"
+ * pode ser editado antes; nada depois. Divergir os dois abriria a janela de
+ * editar o documento entre o claim e o congelamento do `sentSnapshotHtml`.
+ *
+ * Gateia: PATCH /api/proposals/[id], POST .../preview, a página /editar e o
+ * botão "Editar proposta" no detalhe.
+ */
+export const EDITABLE_STATUSES = new Set<string>([
+  "rascunho",
+  "aguardando_aprovacao",
+  "falha_envio",
+]);
+
 /** Terminais (nenhuma ação de progressão). Espelha `isTerminal` em status.ts. */
 export const TERMINAL_STATUSES = new Set<string>([
   "convertida",

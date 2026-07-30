@@ -29,10 +29,9 @@ export function propostaModalidadeForSchema(schemaType: string): string | null {
  * criação do tenant por `seedCanonicalTemplatesForOrg`). Mesmo contrato de
  * `selectAdministracaoTemplate`.
  *
- * Hoje o `dataJson` da proposta vem do NovaPropostaDialog sem garantia nem
- * tipo_pessoa (partes só com nome), então os fatos costumam ser nulos e a
- * seleção cai no `isDefault` — a coleta desses campos é da Fase 4 (página de
- * proposta); aqui já está pronto pra quando chegar.
+ * A página de proposta coleta `tipo_pessoa` das partes e, em locação,
+ * `garantia.tipo` + fiador PF/PJ — é daí que saem os fatos. Proposta antiga (sem
+ * esses campos) tem fatos nulos e cai no `isDefault`, como antes.
  */
 export async function selectPropostaTemplate(
   orgId: string,
