@@ -53,8 +53,9 @@ describe("createCommissioner — meio de recebimento define o rascunho", () => {
   });
 
   it("chave PIX de origem ANONIMA: grava a chave mas NAO nasce pagavel", async () => {
-    // Quem tem o link do formulario nao provou ser dono do documento que
-    // digitou. Cadastro ativo com chave de terceiro = desvio de repasse.
+    // Rede de seguranca. Na rota publica o dado de recebimento de nao-membro
+    // ja e descartado antes de chegar aqui, entao este caminho so vale se
+    // algum caller anonimo novo aparecer passando extras.
     await createCommissioner(
       "org-1",
       INPUT,

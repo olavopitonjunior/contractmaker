@@ -18,6 +18,13 @@ interface ComissaoConfigStepProps {
   form: UseFormReturn<any>;
   /** Token do form público — usado pra chamar /api/forms/[token]/commissioners */
   token?: string;
+  /**
+   * Visitante é membro da imobiliária. Só então os campos de recebimento
+   * (PIX/conta do corretor) aparecem — o link normalmente está na mão do
+   * cliente, que não tem por que ver nem digitar dado bancário de terceiro.
+   * O POST faz a mesma checagem; aqui é só a metade visual.
+   */
+  viewerIsMember?: boolean;
 }
 
 interface CommissionerLookup {
@@ -128,10 +135,12 @@ function CadastroRecebimento({
   form,
   index,
   token,
+  showReceiving,
 }: {
   form: UseFormReturn<any>;
   index: number;
   token: string;
+  showReceiving: boolean;
 }) {
   const [saving, setSaving] = useState(false);
   const [open, setOpen] = useState(false);
@@ -251,27 +260,29 @@ function CadastroRecebimento({
 
   return (
     <div className="pt-2 border-t border-dashed space-y-3">
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div>
-          <p className="text-sm font-medium">Dados para recebimento da comissão</p>
-          <p className="text-xs text-muted-foreground">
-            Opcional. Vão direto pro cadastro da imobiliária — não ficam
-            salvos neste formulário nem aparecem pra quem mais tem o link.
-          </p>
+      {showReceiving && (
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <p className="text-sm font-medium">Dados para recebimento da comissão</p>
+            <p className="text-xs text-muted-foreground">
+              Opcional. Vão direto pro cadastro da imobiliária — não ficam
+              salvos neste formulário nem aparecem pra quem mais tem o link.
+            </p>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="text-xs"
+            onClick={() => setOpen((v) => !v)}
+          >
+            <Landmark className="h-3.5 w-3.5 mr-1.5" />
+            {open ? "Ocultar" : "Preencher"}
+          </Button>
         </div>
-        <Button
-          type="button"
-          size="sm"
-          variant="ghost"
-          className="text-xs"
-          onClick={() => setOpen((v) => !v)}
-        >
-          <Landmark className="h-3.5 w-3.5 mr-1.5" />
-          {open ? "Ocultar" : "Preencher"}
-        </Button>
-      </div>
+      )}
 
-      {open && (
+      {showReceiving && open && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-md border border-dashed bg-background/60 p-3">
           <FormField label="Chave PIX" className="md:col-span-2">
             <Input
@@ -366,7 +377,11 @@ function CadastroRecebimento({
   );
 }
 
-export function ComissaoConfigStep({ form, token }: ComissaoConfigStepProps) {
+export function ComissaoConfigStep({
+  form,
+  token,
+  viewerIsMember = false,
+}: ComissaoConfigStepProps) {
   const quemPaga = form.watch("comissao.quem_paga");
   const quandoPaga = form.watch("comissao.quando_paga");
 
@@ -904,6 +919,7 @@ export function ComissaoConfigStep({ form, token }: ComissaoConfigStepProps) {
                     form={form}
                     index={index}
                     token={token}
+                    showReceiving={viewerIsMember}
                   />
                 )}
                 {splitRecipientId && (

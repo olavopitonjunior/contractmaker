@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db/prisma";
 import { resolveAllRequiredFields } from "@/lib/forms/presets";
-import { canAccessForm } from "@/lib/forms/form-gate";
+import { canAccessForm, viewerIsOrgMember } from "@/lib/forms/form-gate";
 import { FormClosedNotice } from "@/components/forms/FormClosedNotice";
 import { FormPageClient } from "./form-client";
 
@@ -52,6 +52,12 @@ export default async function PublicFormPage({
     proposalAttachmentUrl = proposalAttachment?.url ?? null;
   }
 
+  // Os campos de recebimento da comissão (PIX/conta do corretor) só aparecem
+  // pra quem é da imobiliária. O link é entregue ao CLIENTE — não é lugar de
+  // pedir dado bancário de terceiro pra ele, e a mesma checagem barra a escrita
+  // no POST de commissioners, senão esconder seria só cosmético.
+  const viewerIsMember = await viewerIsOrgMember(form.orgId);
+
   return (
     <FormPageClient
       token={form.token}
@@ -61,6 +67,7 @@ export default async function PublicFormPage({
       prefilled={isPrefilled}
       proposalAttachmentUrl={proposalAttachmentUrl}
       locked={Boolean(form.lockedAt)}
+      viewerIsMember={viewerIsMember}
     />
   );
 }

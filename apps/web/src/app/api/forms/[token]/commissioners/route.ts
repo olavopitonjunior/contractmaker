@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import { formClosedResponse } from "@/lib/forms/form-gate";
+import { formClosedResponse, viewerIsOrgMember } from "@/lib/forms/form-gate";
 import { audit } from "@/lib/security/audit";
 import { rateLimit } from "@/lib/security/ratelimit";
 import { detectPixKeyType } from "@/lib/asaas/pix";
@@ -23,9 +23,14 @@ export const runtime = "nodejs";
  * (walletId/pixAddressKey/bankAccount/bankHolderDoc/ownerCpfCnpj completo).
  *
  * O POST aceita dados de recebimento (`pix`, `banco`) — write-only: entram no
- * SplitRecipient e o GET acima não os devolve. Só valem pra cadastro NOVO;
- * num cadastro que já existe são ignorados (`receivingIgnored`), porque este
- * endpoint é anônimo e sobrescrever chave PIX alheia desviaria repasse.
+ * SplitRecipient e o GET acima não os devolve. Duas travas, porque aqui se
+ * grava para onde o dinheiro vai:
+ *
+ *  1. Só de MEMBRO da org (`viewerIsOrgMember`). De anônimo vêm descartados
+ *     (`receivingRejected`) — o link costuma estar com o cliente, e a UI já
+ *     esconde os campos pra ele. Sem esta checagem, esconder seria fachada.
+ *  2. Num cadastro que JÁ existe são ignorados (`receivingIgnored`), de quem
+ *     quer que venham: sobrescrever chave PIX alheia desviaria repasse.
  */
 
 // Máscara mínima: mantém 3 primeiros e 2 últimos dígitos.
@@ -217,14 +222,26 @@ export async function POST(
   }
 
   const data = parsed.data;
-  const hasPix = !!data.pix?.chave;
+
+  // Dado de recebimento só de quem é da imobiliária. O link do formulário está
+  // normalmente com o CLIENTE, e a UI já esconde os campos pra ele — mas
+  // esconder sem barrar aqui seria trava de fachada: bastava um POST direto.
+  // É esta checagem que fecha de fato o desvio de repasse; o `unverifiedSource`
+  // abaixo fica como rede, caso outro caller anônimo apareça.
+  const viewerIsMember = await viewerIsOrgMember(form.orgId);
+  // `sent*` = o que veio no body; `has*` = o que temos permissão de gravar.
   // Banco vai inteiro pro registry, mesmo parcial: guardar "Itaú, ag. 0000"
   // sem a conta ainda ajuda quem for fazer o repasse manual. Exigir os três
-  // campos aqui descartava em silêncio o que o corretor digitou.
-  const hasBank = !!(
+  // campos descartava em silêncio o que o corretor digitou.
+  const sentPix = !!data.pix?.chave;
+  const sentBank = !!(
     data.banco &&
     Object.values(data.banco).some((v) => typeof v === "string" && v.trim())
   );
+  const hasPix = viewerIsMember && sentPix;
+  const hasBank = viewerIsMember && sentBank;
+  // Mandou dado bancário sem ser da org: descartado, e a resposta diz isso.
+  const receivingRejected = !viewerIsMember && (sentPix || sentBank);
 
   // Detectar tipo de chave PIX (best-effort — formato inválido só rejeita
   // se o usuário marcou PIX como meio. Sem PIX vira rascunho).
@@ -257,7 +274,7 @@ export async function POST(
     // ignorados: este endpoint é anônimo, e deixá-lo gravar chave PIX num
     // corretor existente seria um vetor de desvio de repasse. Devolvemos o
     // flag pra UI dizer a verdade em vez de fingir que salvou.
-    const receivingIgnored = hasPix || hasBank;
+    const receivingIgnored = sentPix || sentBank;
     if (receivingIgnored) {
       // Tentativa repetida daqui é sinal de ataque (ou de corretor legítimo
       // batendo na trava). Sem esta linha o evento não existe em lugar nenhum.
@@ -277,8 +294,9 @@ export async function POST(
             source: "public_form",
             formId: form.id,
             reason: "receiving_data_ignored_on_existing_recipient",
-            hasPix,
-            hasBank,
+            viewerIsMember,
+            sentPix,
+            sentBank,
           },
         }
       );
@@ -316,7 +334,7 @@ export async function POST(
           }
         : undefined,
       banco: hasBank ? data.banco : undefined,
-    }, { unverifiedSource: true });
+    }, { unverifiedSource: !viewerIsMember });
     isDraft = created.pendingFields.length > 0;
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
@@ -344,7 +362,7 @@ export async function POST(
             },
             existed: true,
             isDraft: existing.pendingFields.length > 0,
-            receivingIgnored: hasPix || hasBank,
+            receivingIgnored: sentPix || sentBank,
           },
           { status: 200 }
         );
@@ -372,8 +390,10 @@ export async function POST(
         kind: "commissioner",
         isDraft,
         // Nunca o valor — só se veio. Rastro pra investigar repasse errado.
+        viewerIsMember,
         hasPix,
         hasBank,
+        receivingRejected,
       },
     }
   );
@@ -397,6 +417,7 @@ export async function POST(
       },
       existed: false,
       isDraft,
+      receivingRejected,
     },
     { status: 201 }
   );
