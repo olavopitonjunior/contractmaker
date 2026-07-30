@@ -12,6 +12,7 @@ import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { assertFeatureEnabled, ModuleDisabledError } from "@/lib/modules/guard";
 import { FEATURE, MODULE } from "@/lib/modules/catalog";
+import { resolveManagerForCreate } from "@/lib/deals/manager";
 import { z } from "zod";
 
 // Janela do soft-block de título repetido (recriação manual de card).
@@ -30,6 +31,10 @@ const postBodySchema = z
     corretorIds: z.array(z.string().min(1)).max(10).optional(),
     // false → Deal.notificationsJson.muted (nenhuma atualização deste negócio).
     sendUpdates: z.boolean().optional(),
+    // Gerente responsável pelo negócio (feature Gerente). Sempre opcional aqui —
+    // a obrigatoriedade é da org (OrgManagerSettings.managerRequired) e vem do
+    // resolveManagerForCreate como 422.
+    managerUserId: z.string().min(1).optional(),
   })
   .passthrough();
 
@@ -63,6 +68,18 @@ export async function POST(request: NextRequest) {
     );
   }
   const body = parsedBody.data;
+
+  // Resolve o gerente ANTES de qualquer create (e fora da idempotência): 422
+  // quando a org exige gerente e o campo veio vazio, 400 quando o id informado
+  // não é membro da org. Evita SalesForm órfão num input inválido.
+  const manager = await resolveManagerForCreate(auth.org.id, body.managerUserId);
+  if (!manager.ok) {
+    return NextResponse.json(
+      { error: manager.error, message: manager.message },
+      { status: manager.status },
+    );
+  }
+
   const idempotencyKey = request.headers.get("x-idempotency-key");
 
   const result = await withIdempotency({
@@ -134,6 +151,7 @@ export async function POST(request: NextRequest) {
             stageId: formularioStage.id,
             userId: auth.actor.effectiveUserId,
             formId: form.id,
+            managerUserId: manager.managerUserId,
             sourceChannel: DEAL_SOURCE_CHANNEL.FORM_PUBLICO,
             title: trimmedTitle || `Negocio - ${form.token.slice(0, 8)}`,
             position: dealsInStage,

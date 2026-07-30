@@ -13,6 +13,7 @@ import { getPipelineByKind } from "@/lib/modules/resolve";
 import { MODULE } from "@/lib/modules/catalog";
 import { getIListConnection } from "@/lib/ilist/connection";
 import { buildImportPayload } from "@/lib/ilist/import";
+import { resolveManagerForCreate } from "@/lib/deals/manager";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -21,6 +22,9 @@ const bodySchema = z.object({
   // PK da row do ESPELHO (org-scoped no lookup) — nunca ID cru da RexAPI.
   listingRowId: z.string().min(1),
   title: z.string().max(200).optional(),
+  // Gerente responsável (feature Gerente) — opcional; a org decide se é
+  // obrigatório (resolveManagerForCreate devolve 422).
+  managerUserId: z.string().min(1).optional(),
 });
 
 /**
@@ -76,6 +80,15 @@ export async function POST(req: NextRequest) {
   }
   const stage = pipeline.stages.find((s) => s.name === "Formulário") ?? pipeline.stages[0];
 
+  // Gerente responsável resolvido antes do SalesForm/Deal.
+  const manager = await resolveManagerForCreate(auth.org.id, parsed.data.managerUserId);
+  if (!manager.ok) {
+    return NextResponse.json(
+      { error: manager.error, message: manager.message },
+      { status: manager.status },
+    );
+  }
+
   const payload = await buildImportPayload(listing, connection.regionId);
 
   // Seed do dataJson: imóvel completo + comissão do listing (quando houver).
@@ -121,6 +134,7 @@ export async function POST(req: NextRequest) {
       stageId: stage.id,
       userId: auth.actor.effectiveUserId,
       formId: form.id,
+      managerUserId: manager.managerUserId,
       sourceChannel: DEAL_SOURCE_CHANNEL.ILIST,
       title,
       position: dealsInStage,

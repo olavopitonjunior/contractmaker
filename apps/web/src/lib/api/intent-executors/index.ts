@@ -280,6 +280,8 @@ export function ensureIntentExecutorsRegistered(): void {
       proposalId: string;
       allowUnsigned?: boolean;
       unsignedReason?: string | null;
+      // Gerente responsável escolhido na requisição original (feature Gerente).
+      managerUserId?: string | null;
     };
     const { convertProposalToDeal, ProposalConvertError } = await import(
       "@/lib/proposals/convert"
@@ -291,12 +293,18 @@ export function ensureIntentExecutorsRegistered(): void {
         actorUserId: ctx.requestedBy,
         allowUnsigned: p.allowUnsigned,
         unsignedReason: p.unsignedReason ?? undefined,
+        managerUserId: p.managerUserId ?? undefined,
       });
       return { status: 201, body: r };
     } catch (err) {
       if (err instanceof ProposalConvertError) {
         return {
-          status: err.code === "already_converted" ? 409 : 400,
+          status:
+            err.code === "already_converted"
+              ? 409
+              : err.code === "gerente_obrigatorio"
+                ? 422
+                : 400,
           body: { error: err.message, code: err.code },
         };
       }

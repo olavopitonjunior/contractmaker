@@ -34,6 +34,7 @@ import { DealSurveysTab } from "@/components/surveys/DealSurveysTab";
 import { CommissionChargeDialog } from "@/components/pipeline/CommissionChargeDialog";
 import { CommissionChargeList } from "@/components/pipeline/CommissionChargeList";
 import { DealProgressTimeline } from "@/components/pipeline/DealProgressTimeline";
+import { DealManagerChip } from "@/components/deals/DealManagerChip";
 import { toast } from "sonner";
 import Link from "next/link";
 import {
@@ -213,6 +214,8 @@ interface DealDetailProps {
     lostAt: Date | null;
     lostReason: string | null;
     archivedAt: Date | null;
+    /** Gerente responsável (scalar do Deal) — o nome sai do manager-context. */
+    managerUserId: string | null;
     stage: { name: string; color: string | null };
     form: {
       id: string;
@@ -756,7 +759,7 @@ export function DealDetail({
               </Button>
             </div>
           )}
-          <div className="flex items-center gap-2 mt-1">
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
             <Badge
               style={{ backgroundColor: deal.stage.color || undefined }}
               className="text-white text-xs"
@@ -768,6 +771,11 @@ export function DealDetail({
                 R$ {deal.value.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
               </span>
             )}
+            <DealManagerChip
+              dealId={deal.id}
+              managerUserId={deal.managerUserId}
+              managerName={null}
+            />
           </div>
         </div>
         <div className="w-full sm:w-auto sm:ml-auto flex gap-2 flex-wrap">

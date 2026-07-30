@@ -11,6 +11,7 @@ import { ArrowLeft, ClipboardCheck, ListChecks, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { UploadContractDropzone } from "@/components/pipeline/UploadContractDropzone";
+import { ManagerSelect } from "@/components/deals/ManagerSelect";
 
 export default function NewLocacaoDealFromProposalPage() {
   const router = useRouter();
@@ -20,6 +21,9 @@ export default function NewLocacaoDealFromProposalPage() {
   );
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
+  // Gerente responsável pelo negócio (obrigatório quando a org liga o toggle).
+  const [managerUserId, setManagerUserId] = useState<string | null>(null);
+  const [managerRequired, setManagerRequired] = useState(false);
 
   async function handleSubmit() {
     if (!file) {
@@ -30,12 +34,17 @@ export default function NewLocacaoDealFromProposalPage() {
       toast.error("Por ora só PDF funciona aqui. Exporte como PDF e tente de novo.");
       return;
     }
+    if (managerRequired && !managerUserId) {
+      toast.error("Selecione o gerente responsável");
+      return;
+    }
     setUploading(true);
 
     const formData = new FormData();
     formData.append("file", file);
     formData.append("finalidade", finalidade);
     if (title.trim()) formData.append("title", title.trim());
+    if (managerUserId) formData.append("managerUserId", managerUserId);
 
     const idempotencyKey =
       typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -51,7 +60,13 @@ export default function NewLocacaoDealFromProposalPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        toast.error(data.error || "Falha ao processar proposta.");
+        // Fallback do gate server-side (org exige gerente e o client não sabia).
+        if (res.status === 422 && data?.error === "gerente_obrigatorio") {
+          setManagerRequired(true);
+          toast.error(data.message || "Selecione o gerente responsável");
+        } else {
+          toast.error(data.error || "Falha ao processar proposta.");
+        }
         setUploading(false);
         if (data.formToken) {
           router.push(`/f/${data.formToken}?prefilled=1`);
@@ -147,6 +162,13 @@ export default function NewLocacaoDealFromProposalPage() {
               extração não conseguir decidir.
             </p>
           </div>
+
+          <ManagerSelect
+            value={managerUserId}
+            onChange={setManagerUserId}
+            disabled={uploading}
+            onContextLoaded={(ctx) => setManagerRequired(ctx.managerRequired)}
+          />
 
           <div className="space-y-2">
             <Label>Proposta</Label>

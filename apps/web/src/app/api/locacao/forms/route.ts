@@ -6,6 +6,7 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
 import { ensureLocacaoAccess, isRouteError, parseJsonBody } from "@/lib/locacao/route-helpers";
 import { withIdempotency } from "@/lib/api/idempotency";
+import { resolveManagerForCreate } from "@/lib/deals/manager";
 import {
   LOCACAO_SCHEMA_TYPE,
   LOCACAO_COMERCIAL_SCHEMA_TYPE,
@@ -35,6 +36,9 @@ const bodySchema = z.object({
   title: z.string().optional(),
   // Confirma a criação apesar do soft-block de título repetido (409).
   force: z.boolean().optional(),
+  // Gerente responsável (feature Gerente) — opcional aqui; a obrigatoriedade
+  // vem da org via resolveManagerForCreate (422).
+  managerUserId: z.string().min(1).optional(),
   fiscal: z
     .object({
       taxa_admin_percent: z.number().min(0).max(100).default(10),
@@ -66,6 +70,16 @@ export async function POST(req: NextRequest) {
 
   const schemaType =
     d.finalidade === "comercial" ? LOCACAO_COMERCIAL_SCHEMA_TYPE : LOCACAO_SCHEMA_TYPE;
+
+  // Gerente responsável validado ANTES da transação (e da idempotência): 422 se
+  // a org exige e o campo veio vazio, 400 se o id não é membro.
+  const manager = await resolveManagerForCreate(ctx.orgId, d.managerUserId);
+  if (!manager.ok) {
+    return NextResponse.json(
+      { error: manager.error, message: manager.message },
+      { status: manager.status }
+    );
+  }
 
   // Idempotência espelhando POST /api/forms (vendas): key ausente executa
   // sempre; key presente replaya a resposta em duplo-clique/retry de rede.
@@ -144,6 +158,7 @@ export async function POST(req: NextRequest) {
             stageId: firstStage.id,
             userId: ctx.userId,
             formId: form.id,
+            managerUserId: manager.managerUserId,
             kind: "locacao",
             sourceChannel: DEAL_SOURCE_CHANNEL.FORM_PUBLICO,
             title: trimmedTitle || `Locação - ${form.token.slice(0, 8)}`,
