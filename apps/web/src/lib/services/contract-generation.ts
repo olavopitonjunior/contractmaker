@@ -1160,7 +1160,7 @@ export async function generateContractForDeal(
   // waitUntil: essas análises gateiam o /approve (criam ContractComment
   // severity=error). `void` após o response era cancelado na Vercel.
   waitUntil(
-    analyzeCertidoesForContract(contract.id, deal.id, orgId).catch((err) => {
+    analyzeCertidoesForContract(contract.id, deal.id, orgId, userId).catch((err) => {
       console.error("[contract-generation] analyzeCertidoesForContract falhou:", err);
     })
   );
@@ -2031,11 +2031,17 @@ async function analyzeRenderQualityForContract(
  * editor sem precisar pedir.
  *
  * Não bloqueia generateContractForDeal — erros são engolidos no caller.
+ *
+ * `triggeredByUserId`: quem disparou a geração. Vai no `userId` do ChangeLog só
+ * como RASTRO (o `source` continua "system" — foi o pipeline que rodou, não a
+ * pessoa; a UI rotula "Sistema"). Sem ele a entry ficava órfã de qualquer
+ * vínculo com o ato humano que a originou.
  */
 async function analyzeCertidoesForContract(
   contractId: string,
   dealId: string,
-  _orgId: string
+  _orgId: string,
+  triggeredByUserId?: string | null
 ): Promise<void> {
   const { crossCheckCertidoes } = await import("@/lib/ai/crosscheck/certidoes");
   const { dedupeKeyFor } = await import("@/lib/ai/quickChecks");
@@ -2069,7 +2075,7 @@ async function analyzeCertidoesForContract(
     await prisma.contractChangeLog.create({
       data: {
         contractId,
-        userId: null,
+        userId: triggeredByUserId ?? null,
         action: "validation",
         summary:
           "Análise de certidões pulada — nenhum CertidaoJob emitido para o deal. Considere disparar via aba Certidões.",
@@ -2117,7 +2123,7 @@ async function analyzeCertidoesForContract(
   await prisma.contractChangeLog.create({
     data: {
       contractId,
-      userId: null,
+      userId: triggeredByUserId ?? null,
       action: "validation",
       summary: `Análise inicial de certidões: ${summary.total} achados (${summary.bySeverity.error} erros, ${summary.bySeverity.warning} warnings)`,
       details: {

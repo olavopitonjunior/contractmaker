@@ -542,6 +542,7 @@ export function ContractEditorPage({
           googleDocUrl={contract.googleDocUrl}
           readOnly={isApproved}
           status={status}
+          contractId={contract.id}
         />
       </div>
 
