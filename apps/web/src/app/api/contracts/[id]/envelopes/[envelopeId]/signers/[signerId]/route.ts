@@ -9,6 +9,8 @@ import {
 } from "@/lib/clicksign/signer-actions";
 import { CLICKSIGN_ROLES } from "@/lib/clicksign/roles";
 import { CLICKSIGN_AUTH_METHODS } from "@/lib/clicksign/types";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -69,6 +71,16 @@ export async function PATCH(
     return NextResponse.json({ error: "Signatário não encontrado" }, { status: 404 });
   }
 
+  // Escopo do gerente + ENVELOPE_SEND (reenvio/edição de signatário).
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    via: ctx.via,
+    permission: PERMISSION.ENVELOPE_SEND,
+  });
+  if (denied) return denied;
+
   const result =
     parsed.data.action === "resend"
       ? await resendSignerAction(signer)
@@ -97,6 +109,15 @@ export async function DELETE(
   if (!signer) {
     return NextResponse.json({ error: "Signatário não encontrado" }, { status: 404 });
   }
+
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    via: ctx.via,
+    permission: PERMISSION.ENVELOPE_SEND,
+  });
+  if (denied) return denied;
 
   const result = await removeSignerAction(signer);
   if (!result.ok) {

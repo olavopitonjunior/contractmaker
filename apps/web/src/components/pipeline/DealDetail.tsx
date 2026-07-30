@@ -35,6 +35,10 @@ import { DealSurveysTab } from "@/components/surveys/DealSurveysTab";
 import { CommissionChargeDialog } from "@/components/pipeline/CommissionChargeDialog";
 import { CommissionChargeList } from "@/components/pipeline/CommissionChargeList";
 import { DealProgressTimeline } from "@/components/pipeline/DealProgressTimeline";
+import { DealManagerChip } from "@/components/deals/DealManagerChip";
+import { usePermissions } from "@/hooks/usePermissions";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { NO_PERMISSION_HINT } from "@/lib/security/rbac/ui";
 import { toast } from "sonner";
 import Link from "next/link";
 import {
@@ -214,6 +218,8 @@ interface DealDetailProps {
     lostAt: Date | null;
     lostReason: string | null;
     archivedAt: Date | null;
+    /** Gerente responsável (scalar do Deal) — o nome sai do manager-context. */
+    managerUserId: string | null;
     stage: { name: string; color: string | null };
     form: {
       id: string;
@@ -273,6 +279,14 @@ export function DealDetail({
   surveysEnabled = false,
 }: DealDetailProps) {
   const router = useRouter();
+  const perms = usePermissions();
+  // Gating de CTA (feature Gerente). Enquanto as permissões carregam, tudo
+  // liberado — o header não pisca entre o primeiro paint e o fetch.
+  const canCreateContract =
+    perms.loading || perms.can(PERMISSION.CONTRACT_CREATE);
+  const canCreateCharge =
+    perms.loading || perms.can(PERMISSION.CHARGE_CREATE_FROM_DEAL);
+  const canEditDeal = perms.loading || perms.can(PERMISSION.DEAL_EDIT);
   const searchParams = useSearchParams();
   const tabParam = searchParams.get("tab");
   // `?tab=newton` num tenant sem Newton cai no default em vez de abrir uma aba morta.
@@ -757,7 +771,7 @@ export function DealDetail({
               </Button>
             </div>
           )}
-          <div className="flex items-center gap-2 mt-1">
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
             <Badge
               style={{ backgroundColor: deal.stage.color || undefined }}
               className="text-white text-xs"
@@ -769,6 +783,11 @@ export function DealDetail({
                 R$ {deal.value.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
               </span>
             )}
+            <DealManagerChip
+              dealId={deal.id}
+              managerUserId={deal.managerUserId}
+              managerName={null}
+            />
           </div>
         </div>
         <div className="w-full sm:w-auto sm:ml-auto flex gap-2 flex-wrap">
@@ -891,7 +910,8 @@ export function DealDetail({
             <Button
               size="sm"
               onClick={handleGenerateContract}
-              disabled={generating}
+              disabled={generating || !canCreateContract}
+              title={canCreateContract ? undefined : NO_PERMISSION_HINT}
             >
               <FileText className="h-4 w-4 mr-1" />
               {generating ? "Gerando..." : "Confeccionar Contrato"}
@@ -931,7 +951,7 @@ export function DealDetail({
               Marcar como perdido
             </Button>
           )}
-          {deal.contracts.length > 0 && (
+          {deal.contracts.length > 0 && canEditDeal && (
             <Button
               size="sm"
               variant="outline"
@@ -960,15 +980,17 @@ export function DealDetail({
               </>
             )}
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="text-destructive border-destructive/40 hover:bg-destructive/10"
-            onClick={() => setDeleteDialogOpen(true)}
-          >
-            <Trash2 className="h-4 w-4 mr-1" />
-            Excluir negócio
-          </Button>
+          {canEditDeal && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="text-destructive border-destructive/40 hover:bg-destructive/10"
+              onClick={() => setDeleteDialogOpen(true)}
+            >
+              <Trash2 className="h-4 w-4 mr-1" />
+              Excluir negócio
+            </Button>
+          )}
         </div>
       </div>
 
@@ -1177,7 +1199,8 @@ export function DealDetail({
                 size="sm"
                 variant="outline"
                 onClick={handleReExtract}
-                disabled={reExtracting}
+                disabled={reExtracting || !canCreateContract}
+                title={canCreateContract ? undefined : NO_PERMISSION_HINT}
               >
                 <RefreshCw
                   className={cn(
@@ -1402,7 +1425,11 @@ export function DealDetail({
                   <p className="text-muted-foreground mb-4">
                     Nenhum contrato gerado.
                   </p>
-                  <Button onClick={handleGenerateContract} disabled={generating}>
+                  <Button
+                    onClick={handleGenerateContract}
+                    disabled={generating || !canCreateContract}
+                    title={canCreateContract ? undefined : NO_PERMISSION_HINT}
+                  >
                     {generating ? "Gerando..." : "Confeccionar Contrato"}
                   </Button>
                 </CardContent>
@@ -1423,7 +1450,7 @@ export function DealDetail({
                       </div>
                       <div className="flex items-center gap-2">
                         <Badge variant="outline">{contract.status}</Badge>
-                        {contract.status === "rascunho" && (
+                        {contract.status === "rascunho" && canEditDeal && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -1514,6 +1541,8 @@ export function DealDetail({
                     setChargeDialogMode("commission_from_deal");
                     setChargeDialogOpen(true);
                   }}
+                  disabled={!canCreateCharge}
+                  title={canCreateCharge ? undefined : NO_PERMISSION_HINT}
                 >
                   <Wallet className="h-4 w-4 mr-1" />
                   Cobrança de comissão
@@ -1524,6 +1553,8 @@ export function DealDetail({
                     setChargeDialogMode("avulsa_in_deal");
                     setChargeDialogOpen(true);
                   }}
+                  disabled={!canCreateCharge}
+                  title={canCreateCharge ? undefined : NO_PERMISSION_HINT}
                 >
                   <FileText className="h-4 w-4 mr-1" />
                   Avulsa
@@ -1717,6 +1748,11 @@ function DocumentsTab({
   onRequestRemoveDealAttachment?: (attachmentId: string) => void;
 }) {
   const router = useRouter();
+  const docPerms = usePermissions();
+  // Gating do "Enviar para assinatura" nos cards (feature Gerente); libera
+  // enquanto carrega pra não piscar.
+  const canSendEnvelope =
+    docPerms.loading || docPerms.can(PERMISSION.ENVELOPE_SEND);
   // OCR seletivo: ids em voo mostram spinner. Diálogo de assinatura por card.
   const [extractingIds, setExtractingIds] = useState<Set<string>>(new Set());
   const [signAttachmentId, setSignAttachmentId] = useState<string | null>(null);
@@ -2107,11 +2143,13 @@ function DocumentsTab({
       : reassignable && isFormAttachment
         ? handleReassignFormDoc
         : undefined;
-    const onSend = isOcrEligible
-      ? (id: string) => setSignAttachmentId(id)
-      : isFormAttachment
-        ? handleSendFormDoc
-        : undefined;
+    const onSend = !canSendEnvelope
+      ? undefined
+      : isOcrEligible
+        ? (id: string) => setSignAttachmentId(id)
+        : isFormAttachment
+          ? handleSendFormDoc
+          : undefined;
     const isSigned = !!doc.category && SIGNED_CATS.has(doc.category);
     const card = (
       <DocumentCard

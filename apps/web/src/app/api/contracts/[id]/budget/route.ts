@@ -6,6 +6,7 @@ import {
   orgScopedNotFound,
   resolveUserOrgId,
 } from "@/lib/security/org-scope";
+import { guardContractScope } from "@/lib/deals/route-helpers";
 
 /**
  * Retorna { spent, budget, pct, remaining, ok } pra UI mostrar indicador
@@ -24,6 +25,14 @@ export async function GET(
   if (!(await contractBelongsToOrg(params.id, orgId))) {
     return orgScopedNotFound("Contrato");
   }
+  // Escopo do gerente.
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: session.user.id,
+    orgId: orgId!,
+  });
+  if (denied) return denied;
+
   const status = await getContractBudgetStatus(params.id);
   return NextResponse.json(status);
 }

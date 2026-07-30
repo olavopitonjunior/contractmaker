@@ -5,6 +5,7 @@ import {
   authFailureResponse,
 } from "@/lib/api/require-auth";
 import { prisma } from "@/lib/db/prisma";
+import { guardContractScope } from "@/lib/deals/route-helpers";
 
 /**
  * GET /api/contracts/[id]/summary
@@ -76,6 +77,15 @@ export async function GET(
   if (contract.deal.pipeline.orgId !== auth.org.id) {
     return NextResponse.json({ error: "not_found" }, { status: 404 });
   }
+
+  // Escopo do gerente (o summary devolve partes/valores do contrato).
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    via: auth.ident.via,
+  });
+  if (denied) return denied;
 
   // Cross-user guard adicional para Bearer: usuário só vê contratos próprios.
   if (ident.via === "bearer" && contract.userId !== ident.userId) {

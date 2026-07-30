@@ -9,6 +9,8 @@ import { checkOnrAuth } from "@/lib/certidoes/onr-auth";
 import { endpointInfo } from "@/lib/certidoes/endpoints";
 import { sanitizePayload } from "@/lib/certidoes/infosimples";
 import { z } from "zod";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 // I.7 (2026-05-11) — complete dispara runSingleJob via waitUntil; pode ser
@@ -73,6 +75,15 @@ export async function POST(
   if (jobDeal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente + DEAL_EDIT.
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: session.user.id,
+    orgId: org.id,
+    permission: PERMISSION.DEAL_EDIT,
+  });
+  if (denied) return denied;
   // Accept: (a) skipped jobs (missing data), (b) success/failed jobs whose
   // normalized result carries a user-fixable failureCategory (Phase A). Both
   // flows share the merge + re-plan + re-run logic below.

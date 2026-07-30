@@ -15,6 +15,7 @@ import { extractCcvDataJson } from "@/lib/extraction/ccv-extractor";
 import { formPublicPath } from "@/lib/forms/form-url";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { MODULE } from "@/lib/modules/catalog";
+import { resolveManagerForCreate } from "@/lib/deals/manager";
 import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
 
 export const runtime = "nodejs";
@@ -79,6 +80,10 @@ export async function POST(req: NextRequest) {
 
   const file = formData.get("file");
   const title = ((formData.get("title") as string | null) || "").trim() || null;
+  // Gerente responsável (feature Gerente) — campo opcional do multipart; string
+  // vazia conta como ausente.
+  const managerUserId =
+    ((formData.get("managerUserId") as string | null) || "").trim() || undefined;
 
   if (!(file instanceof File)) {
     return NextResponse.json(
@@ -114,6 +119,16 @@ export async function POST(req: NextRequest) {
         error: `Arquivo não parece ser um ${mime === "application/pdf" ? "PDF" : "DOCX"} válido (header inválido).`,
       },
       { status: 400 },
+    );
+  }
+
+  // Gerente resolvido antes da criação (fora da idempotência): input inválido
+  // não pode deixar SalesForm/Deal órfãos.
+  const manager = await resolveManagerForCreate(auth.org.id, managerUserId);
+  if (!manager.ok) {
+    return NextResponse.json(
+      { error: manager.error, message: manager.message },
+      { status: manager.status },
     );
   }
 
@@ -174,6 +189,7 @@ export async function POST(req: NextRequest) {
           stageId: stage.id,
           userId: auth.actor.effectiveUserId,
           formId: form.id,
+          managerUserId: manager.managerUserId,
           sourceChannel: DEAL_SOURCE_CHANNEL.UPLOAD_PROPOSTA,
           title: title || `Proposta — ${file.name}`,
           position: dealsInStage,

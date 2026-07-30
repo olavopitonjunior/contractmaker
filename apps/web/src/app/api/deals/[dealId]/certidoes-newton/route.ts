@@ -10,6 +10,8 @@ import { requireApproval } from "@/lib/api/intents";
 import { planCertidoesForDeal, diligentedPersonToInput } from "@/lib/certidoes/planner";
 import { getMonthlySpend } from "@/lib/certidoes/executor";
 import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -63,6 +65,16 @@ export async function POST(
   if (dealOrgId !== apiAuth.org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente + DEAL_EDIT.
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: apiAuth.actor.effectiveUserId,
+    orgId: apiAuth.org.id,
+    via: apiAuth.ident.via,
+    permission: PERMISSION.DEAL_EDIT,
+  });
+  if (denied) return denied;
 
   // Idempotência por batch: rejeita se já existe batch ativo recente.
   const activeBatch = await prisma.certidaoJob.findFirst({

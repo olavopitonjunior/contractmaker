@@ -22,6 +22,18 @@ export interface EmitNotificationParams {
    * (type, batchId) garante dedupe atômico. Duplicatas viram no-op.
    */
   batchId?: string | null;
+  /**
+   * Gerente (2026-07) — quando presente, o deal com gerente atribuído ganha
+   * uma SEGUNDA row direcionada (`userId = managerUserId`, batchId com sufixo
+   * ":mgr" pra preservar o dedupe (type, batchId)). É o que faz o sino do
+   * gerente funcionar: a leitura dele é restrita a rows direcionadas
+   * (GET /api/notifications) e o fan-out na escrita é O(1) por evento.
+   * Passar dealId é o OPT-IN do call site de que esta é uma notificação de
+   * PROCESSO do negócio (o gerente deve saber) — vale também quando a row
+   * principal é direcionada a outra pessoa (ex.: certidões → criador do job).
+   * Se o alvo direcionado JÁ é o gerente, não duplica.
+   */
+  dealId?: string | null;
 }
 
 /**
@@ -65,5 +77,49 @@ export async function emitNotification(
       "params:",
       { type: params.type, orgId: params.orgId }
     );
+  }
+
+  // Fan-out pro GERENTE do deal (row direcionada). Fora do try principal de
+  // propósito: falha aqui não pode mascarar o sucesso/erro da row principal.
+  if (params.dealId) {
+    try {
+      const deal = await prisma.deal.findUnique({
+        where: { id: params.dealId },
+        select: { managerUserId: true, pipeline: { select: { orgId: true } } },
+      });
+      // Guard cross-org: dealId de outra org não arrasta gerente alheio.
+      // Alvo direcionado já é o gerente → sem duplicata.
+      if (
+        deal?.managerUserId &&
+        deal.pipeline.orgId === params.orgId &&
+        deal.managerUserId !== params.userId
+      ) {
+        await prisma.notification.create({
+          data: {
+            orgId: params.orgId,
+            userId: deal.managerUserId,
+            type: params.type,
+            title: params.title.slice(0, 200),
+            body: params.body.slice(0, 500),
+            linkUrl: params.linkUrl,
+            metadata: (params.metadata as object) ?? undefined,
+            batchId: params.batchId ? `${params.batchId}:mgr` : null,
+          },
+        });
+      }
+    } catch (err) {
+      if (
+        err instanceof Prisma.PrismaClientKnownRequestError &&
+        err.code === "P2002"
+      ) {
+        return;
+      }
+      console.error(
+        "[notifications.emit] manager fan-out failed:",
+        err instanceof Error ? err.message : String(err),
+        "params:",
+        { type: params.type, orgId: params.orgId, dealId: params.dealId }
+      );
+    }
   }
 }

@@ -5,6 +5,8 @@ import {
   orgScopedNotFound,
   resolveUserOrgId,
 } from "@/lib/security/org-scope";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 /**
  * Carrega o comentário validando (a) que pertence ao contrato da URL e
@@ -36,6 +38,16 @@ async function loadScopedComment(
   ) {
     return null;
   }
+  // Escopo do gerente + CONTRACT_EDIT (todos os handlers deste arquivo são
+  // mutações). Devolve null → 404, mesmo contrato do helper; sem 403 separado
+  // pra não vazar existência do comentário.
+  const denied = await guardContractScope({
+    contractId,
+    userId,
+    orgId,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return null;
   return comment;
 }
 

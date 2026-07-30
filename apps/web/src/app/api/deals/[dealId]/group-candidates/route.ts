@@ -6,6 +6,7 @@ import {
   authFailureResponse,
 } from "@/lib/api/require-auth";
 import { computeDealGroupCandidates } from "@/lib/newton/group-match";
+import { guardDealScope } from "@/lib/deals/route-helpers";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -36,6 +37,15 @@ export async function GET(
   if (dealOrgId !== auth.org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente (GET — só escopo, sem permission).
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    via: auth.ident.via,
+  });
+  if (denied) return denied;
 
   const r = await computeDealGroupCandidates(params.dealId);
   if (!r) return NextResponse.json({ error: "Deal not found" }, { status: 404 });

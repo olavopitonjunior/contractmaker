@@ -17,7 +17,14 @@ import { generateSecureToken } from "@/lib/security/crypto";
 import { createPasswordResetToken } from "@/lib/auth/password-reset";
 // MemberInvitedEmail é importado dinamicamente abaixo (só no caminho de user existente).
 
-const ROLE_VALUES = ["admin", "finance", "sales", "viewer", "custom"] as const;
+const ROLE_VALUES = [
+  "admin",
+  "finance",
+  "sales",
+  "gerente",
+  "viewer",
+  "custom",
+] as const;
 
 const inviteSchema = z
   .object({

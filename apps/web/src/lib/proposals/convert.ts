@@ -7,6 +7,7 @@ import {
   deriveDealMetadata,
   deriveLocacaoDealMetadata,
 } from "@/lib/contracts/derive-deal-metadata";
+import { resolveManagerForCreate } from "@/lib/deals/manager";
 
 export class ProposalConvertError extends Error {
   constructor(
@@ -16,6 +17,9 @@ export class ProposalConvertError extends Error {
       | "already_converted"
       | "no_pipeline"
       | "dossier_pending"
+      // Feature Gerente: org exige gerente / id informado não é membro.
+      | "gerente_obrigatorio"
+      | "gerente_invalido"
   ) {
     super(message);
     this.name = "ProposalConvertError";
@@ -42,6 +46,9 @@ export async function convertProposalToDeal(input: {
   actorUserId: string;
   allowUnsigned?: boolean;
   unsignedReason?: string;
+  /** Gerente responsável pelo negócio (feature Gerente). Sempre opcional — a
+   *  obrigatoriedade é da org e vira `gerente_obrigatorio`. */
+  managerUserId?: string | null;
 }): Promise<{ dealId: string; formId: string }> {
   const proposal = await prisma.proposal.findUnique({
     where: { id: input.proposalId },
@@ -120,6 +127,18 @@ export async function convertProposalToDeal(input: {
     fallbackTitle: proposal.title,
   });
 
+  // Gerente responsável resolvido FORA da transação — mesma validação dos
+  // endpoints de criação (422 se a org exige, 400 se não é membro).
+  const manager = await resolveManagerForCreate(input.orgId, input.managerUserId);
+  if (!manager.ok) {
+    throw new ProposalConvertError(
+      manager.message,
+      manager.error === "gerente_obrigatorio"
+        ? "gerente_obrigatorio"
+        : "gerente_invalido"
+    );
+  }
+
   const attachments = await prisma.proposalAttachment.findMany({
     where: { proposalId: proposal.id },
   });
@@ -145,6 +164,7 @@ export async function convertProposalToDeal(input: {
         // NOT NULL — sem sessão (Max via Bearer), é o dono da proposta.
         userId: proposal.userId,
         formId: form.id,
+        managerUserId: manager.managerUserId,
         sourceChannel: DEAL_SOURCE_CHANNEL.PROPOSTA,
         title: meta.title,
         value: meta.value,

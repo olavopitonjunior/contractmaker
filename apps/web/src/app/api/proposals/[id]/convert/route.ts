@@ -17,6 +17,9 @@ import { convertProposalToDeal, ProposalConvertError } from "@/lib/proposals/con
 const bodySchema = z.object({
   allowUnsigned: z.boolean().optional(),
   unsignedReason: z.string().optional(),
+  // Gerente responsável do negócio criado (feature Gerente). Opcional — a
+  // obrigatoriedade vem da org (422 gerente_obrigatorio).
+  managerUserId: z.string().min(1).optional(),
 });
 
 /**
@@ -67,6 +70,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       proposalId: params.id,
       allowUnsigned: parsed.data.allowUnsigned ?? false,
       unsignedReason: parsed.data.unsignedReason ?? null,
+      managerUserId: parsed.data.managerUserId ?? null,
     },
     preview: {
       summary: `Converter a proposta "${proposal.title}" em negócio`,
@@ -82,11 +86,19 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           actorUserId: auth.actor.effectiveUserId,
           allowUnsigned: parsed.data.allowUnsigned,
           unsignedReason: parsed.data.unsignedReason,
+          managerUserId: parsed.data.managerUserId,
         });
         return { status: 201, body: r };
       } catch (err) {
         if (err instanceof ProposalConvertError) {
-          const status = err.code === "already_converted" ? 409 : 400;
+          // Mesmos códigos HTTP dos endpoints de criação: 422 quando a org
+          // exige gerente e ele não veio; 409 na corrida de conversão.
+          const status =
+            err.code === "already_converted"
+              ? 409
+              : err.code === "gerente_obrigatorio"
+                ? 422
+                : 400;
           return { status, body: { error: err.message, code: err.code } };
         }
         throw err;

@@ -28,6 +28,7 @@ export const MAX_RECIPIENTS_PER_NOTIFICATION = 5;
 export type RecipientRule =
   | "direct"
   | "deal_owner"
+  | "deal_manager"
   | "org_admins"
   | "org_selected"
   | "none";
@@ -84,6 +85,14 @@ async function loadEligible(
       user: { select: { name: true, phone: true, email: true, deletedAt: true } },
     },
   });
+
+  // Preserva a ORDEM do input — o teto (capped) corta o fim da lista, e os
+  // callers põem dono/gerente antes dos escolhidos justamente pra que o corte
+  // nunca os derrube. findMany não garante ordem por si.
+  const byInputOrder = new Map(unique.map((id, i) => [id, i]));
+  memberships.sort(
+    (a, b) => (byInputOrder.get(a.userId) ?? 0) - (byInputOrder.get(b.userId) ?? 0)
+  );
 
   const out: UserRecipient[] = [];
   for (const m of memberships) {
@@ -161,19 +170,36 @@ export async function resolveNotificationUsers(
       return { users, rule: "direct" };
     }
 
-    // 2. Ancorada num deal → dono do negócio, MAIS os escolhidos pelo admin.
+    // 2. Ancorada num deal → dono do negócio + GERENTE atribuído, MAIS os
+    // escolhidos pelo admin. Dono e gerente vêm ANTES dos escolhidos na lista
+    // — o teto (capped) nunca derruba quem é do negócio.
     const dealId = dealIdFromMetadata(n.metadata) ?? dealIdFromLinkUrl(n.linkUrl);
     if (dealId) {
       const deal = await prisma.deal.findUnique({
         where: { id: dealId },
-        select: { userId: true, pipeline: { select: { orgId: true } } },
+        select: {
+          userId: true,
+          managerUserId: true,
+          pipeline: { select: { orgId: true } },
+        },
       });
       // Guard cross-org: a notificação não pode arrastar dono de outro tenant.
       if (deal?.userId && deal.pipeline.orgId === n.orgId) {
-        const users = await loadEligible([deal.userId, ...selected], n.orgId, channel);
+        const users = await loadEligible(
+          [deal.userId, deal.managerUserId, ...selected].filter(
+            (id): id is string => Boolean(id)
+          ),
+          n.orgId,
+          channel
+        );
         return {
           users: capped(users, n.id),
-          rule: selected.length > 0 ? "org_selected" : "deal_owner",
+          rule:
+            selected.length > 0
+              ? "org_selected"
+              : deal.managerUserId
+                ? "deal_manager"
+                : "deal_owner",
         };
       }
     }

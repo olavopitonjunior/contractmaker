@@ -12,6 +12,7 @@ import { isSerasaConfigured } from "@/lib/serasa/client";
 import { sanitizeSerasaPayload } from "@/lib/serasa/sanitize";
 import { endpointInfo } from "@/lib/certidoes/endpoints";
 import { runBatch } from "@/lib/certidoes/executor";
+import { guardDealScope } from "@/lib/deals/route-helpers";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -68,6 +69,14 @@ export async function POST(
   if (deal.pipeline.orgId !== ctx.orgId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente — acrescentado ao ensureLocacaoAccess(LEASE_CREATE).
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+  });
+  if (denied) return denied;
 
   if (!isSerasaConfigured()) {
     return NextResponse.json(

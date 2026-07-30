@@ -3,6 +3,8 @@ import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 import { ClicksignError } from "@/lib/clicksign/client";
 import { syncEnvelopeState, EnvelopeNotSyncableError } from "@/lib/clicksign/sync";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -30,6 +32,16 @@ export async function POST(
   if (!envelope) {
     return NextResponse.json({ error: "Envelope não encontrado" }, { status: 404 });
   }
+
+  // Escopo do gerente + ENVELOPE_SEND (o sync escreve estado do envelope).
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    via: ctx.via,
+    permission: PERMISSION.ENVELOPE_SEND,
+  });
+  if (denied) return denied;
 
   const debug = new URL(req.url).searchParams.get("debug") === "1";
 

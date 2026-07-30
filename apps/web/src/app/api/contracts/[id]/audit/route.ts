@@ -31,6 +31,7 @@ import { prisma } from "@/lib/db/prisma";
 import { getOrchestratorGraph } from "@/lib/ai/orchestrator/graph";
 import type { ToolCallRecord } from "@/lib/ai/orchestrator/state";
 import { resolveUserOrgId } from "@/lib/security/org-scope";
+import { guardContractScope } from "@/lib/deals/route-helpers";
 
 export const runtime = "nodejs";
 
@@ -72,6 +73,14 @@ export async function GET(
   if (!contract || !userOrgId || contract.deal.pipeline.orgId !== userOrgId) {
     return NextResponse.json({ error: "Contract not found" }, { status: 404 });
   }
+
+  // Escopo do gerente.
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: session.user.id,
+    orgId: userOrgId,
+  });
+  if (denied) return denied;
 
   // Resolve session
   const url = new URL(req.url);

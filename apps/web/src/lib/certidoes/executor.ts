@@ -358,6 +358,7 @@ async function reportCertidaoProblem(
     linkUrl,
     batchId: job.batchId,
     metadata: { jobId: job.id, endpoint: job.endpoint, label: job.label, reason },
+    dealId: job.dealId,
   });
 }
 
@@ -456,6 +457,7 @@ async function runBatchHealthActions(
           linkUrl: `/deals/${dealId}`,
           metadata: { batchId, count: faltantes.length },
           batchId,
+          dealId,
         });
       }
     }
@@ -568,6 +570,7 @@ async function checkBatchCompletion(batchId: string): Promise<void> {
         linkUrl,
         metadata: { ...scopeMetadata, jobId: job.id },
         batchId,
+        dealId: first.deal?.id ?? null,
       });
       return;
     }
@@ -589,6 +592,7 @@ async function checkBatchCompletion(batchId: string): Promise<void> {
       linkUrl,
       metadata: scopeMetadata,
       batchId,
+      dealId: first.deal?.id ?? null,
     });
   } catch (err) {
     console.error(

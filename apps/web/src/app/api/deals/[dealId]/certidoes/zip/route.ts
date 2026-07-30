@@ -3,6 +3,7 @@ import JSZip from "jszip";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { downloadBufferFromUrl } from "@/lib/storage/s3";
+import { guardDealScope } from "@/lib/deals/route-helpers";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -51,6 +52,14 @@ export async function GET(
   if (deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente (ZIP entrega todas as certidões do negócio).
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: session.user.id,
+    orgId: org.id,
+  });
+  if (denied) return denied;
 
   if (deal.attachments.length === 0) {
     return NextResponse.json(

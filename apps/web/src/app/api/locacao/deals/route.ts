@@ -6,6 +6,7 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
 import { ensureLocacaoAccess, isRouteError, parseJsonBody } from "@/lib/locacao/route-helpers";
 import { LOCACAO_SCHEMA_TYPE } from "@/lib/forms/validation-locacao";
+import { resolveManagerForCreate } from "@/lib/deals/manager";
 
 export const dynamic = "force-dynamic";
 
@@ -14,6 +15,9 @@ const novoDealLocacaoSchema = z.object({
   tenantId: z.string().min(1),
   valorAluguel: z.number().positive(),
   vigenciaMeses: z.number().int().min(1).max(60).default(30),
+  // Gerente responsável (feature Gerente) — opcional; obrigatoriedade vem da
+  // org via resolveManagerForCreate (422).
+  managerUserId: z.string().min(1).optional(),
 });
 
 /**
@@ -75,6 +79,15 @@ export async function POST(req: NextRequest) {
 
   const titulo = `${enderecoFmt || "Imóvel"} — ${tenant.nome}`;
 
+  // Gerente responsável resolvido FORA da transação.
+  const manager = await resolveManagerForCreate(ctx.orgId, parsed.data.managerUserId);
+  if (!manager.ok) {
+    return NextResponse.json(
+      { error: manager.error, message: manager.message },
+      { status: manager.status }
+    );
+  }
+
   const result = await prisma.$transaction(async (tx) => {
     const form = await tx.salesForm.create({
       data: {
@@ -115,6 +128,7 @@ export async function POST(req: NextRequest) {
         stageId: firstStage.id,
         pipelineId: pipeline.id,
         userId: ctx.userId,
+        managerUserId: manager.managerUserId,
         kind: "locacao",
         sourceChannel: DEAL_SOURCE_CHANNEL.MANUAL,
         title: titulo,

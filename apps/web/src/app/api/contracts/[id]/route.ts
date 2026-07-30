@@ -3,6 +3,8 @@ import { z } from "zod";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -57,6 +59,14 @@ export async function PATCH(
   if (contract.deal?.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+  // Escopo do gerente + permissão de edição de contrato.
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: session.user.id,
+    orgId: org.id,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return denied;
   if (contract.status === "aprovado") {
     return NextResponse.json(
       { error: "Contrato aprovado nao pode ser editado" },
@@ -119,6 +129,14 @@ export async function DELETE(
       { status: 403 }
     );
   }
+  // Escopo do gerente + permissão (delete de versão é destrutivo).
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: session.user.id,
+    orgId: org.id,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return denied;
   if (contract.status === "aprovado") {
     return NextResponse.json(
       {

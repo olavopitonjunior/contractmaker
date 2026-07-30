@@ -17,6 +17,7 @@ import { ArrowLeft, FileSignature, Sparkles, Upload } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { UploadContractDropzone } from "@/components/pipeline/UploadContractDropzone";
+import { ManagerSelect } from "@/components/deals/ManagerSelect";
 
 export default function NewDealFromUploadPage() {
   const router = useRouter();
@@ -26,10 +27,17 @@ export default function NewDealFromUploadPage() {
   const [targetStage, setTargetStage] = useState<
     "Confecção de Contrato" | "Enviado para assinatura" | "Contrato assinado"
   >("Confecção de Contrato");
+  // Gerente responsável pelo negócio (obrigatório quando a org liga o toggle).
+  const [managerUserId, setManagerUserId] = useState<string | null>(null);
+  const [managerRequired, setManagerRequired] = useState(false);
 
   async function handleSubmit() {
     if (!file) {
       toast.error("Selecione um arquivo de contrato (PDF ou DOCX).");
+      return;
+    }
+    if (managerRequired && !managerUserId) {
+      toast.error("Selecione o gerente responsável");
       return;
     }
     setUploading(true);
@@ -38,6 +46,7 @@ export default function NewDealFromUploadPage() {
     formData.append("file", file);
     if (title.trim()) formData.append("title", title.trim());
     formData.append("targetStage", targetStage);
+    if (managerUserId) formData.append("managerUserId", managerUserId);
 
     const idempotencyKey =
       typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -53,7 +62,13 @@ export default function NewDealFromUploadPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        toast.error(data.error || "Falha ao importar contrato.");
+        // Fallback do gate server-side (org exige gerente e o client não sabia).
+        if (res.status === 422 && data?.error === "gerente_obrigatorio") {
+          setManagerRequired(true);
+          toast.error(data.message || "Selecione o gerente responsável");
+        } else {
+          toast.error(data.error || "Falha ao importar contrato.");
+        }
         setUploading(false);
         // Mesmo em erro, se vier um dealId já criado, redireciona pro deal pra
         // que o usuário possa investigar (DealAttachment subiu, mas o GDoc falhou).
@@ -175,6 +190,13 @@ export default function NewDealFromUploadPage() {
               (escritura, distrato consumado, etc.).
             </p>
           </div>
+
+          <ManagerSelect
+            value={managerUserId}
+            onChange={setManagerUserId}
+            disabled={uploading}
+            onContextLoaded={(ctx) => setManagerRequired(ctx.managerRequired)}
+          />
 
           <div className="space-y-2">
             <Label>Contrato</Label>

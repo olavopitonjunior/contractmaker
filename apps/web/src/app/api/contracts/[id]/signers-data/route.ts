@@ -3,6 +3,8 @@ import { z } from "zod";
 import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -92,6 +94,17 @@ export async function PATCH(
       { status: 404 }
     );
   }
+
+  // Escopo do gerente + ENVELOPE_SEND: este PATCH é preparo do envio pra
+  // assinatura (dados dos signatários), então herda o gate do envio.
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    via: ctx.via,
+    permission: PERMISSION.ENVELOPE_SEND,
+  });
+  if (denied) return denied;
 
   const dealData =
     (contract.deal.form?.dataJson as Record<string, unknown> | null) ||
