@@ -236,6 +236,17 @@ vi.mock("@/lib/db/prisma", () => {
       update: vi.fn().mockResolvedValue({}),
       findMany: vi.fn().mockResolvedValue([]),
     },
+    // Fallback relacional das partes de locação (lib/deals/parties.ts)
+    leaseContract: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      findUnique: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    // Link público /pay/[token] — lido (nunca cunhado) pelo aviso à parte
+    chargePublicLink: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      create: vi.fn(),
+    },
     splitRecipient: {
       findUnique: vi.fn().mockResolvedValue(null),
       findFirst: vi.fn().mockResolvedValue(null),

@@ -12,7 +12,9 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
 import {
   DEAL_NOTIF_EVENTS,
+  isPartyCapableEvent,
   resolveEffectiveNotificationConfig,
+  type DealNotifEvent,
 } from "@/lib/notifications/deal-events-config";
 import {
   USER_NOTIF_CATEGORIES,
@@ -38,7 +40,10 @@ const channelTogglesSchema = z
   .strict();
 
 const eventTogglesSchema = z
-  .object({ broker: channelTogglesSchema.optional() })
+  .object({
+    broker: channelTogglesSchema.optional(),
+    party: channelTogglesSchema.optional(),
+  })
   .strict();
 
 const settingsPatchSchema = z
@@ -329,13 +334,34 @@ export async function PATCH(req: NextRequest) {
     {};
   let mergedEvents: Record<string, unknown> | undefined;
   if (parsed.data.events !== undefined) {
+    // Party fora da allowlist é rejeitado no PATCH, não zerado em silêncio: o
+    // resolver já ignoraria, mas o admin veria um toggle "salvo" que nunca
+    // dispara. (A UI só oferece os eventos válidos; isto pega chamada direta.)
+    const foraDaAllowlist = Object.entries(parsed.data.events)
+      .filter(([ev, t]) => t?.party && !isPartyCapableEvent(ev as DealNotifEvent))
+      .map(([ev]) => ev);
+    if (foraDaAllowlist.length > 0) {
+      return NextResponse.json(
+        {
+          error:
+            "Este evento não pode ser enviado às partes do negócio.",
+          eventos: foraDaAllowlist,
+        },
+        { status: 422 }
+      );
+    }
+
     mergedEvents = { ...currentEvents };
     for (const [ev, toggles] of Object.entries(parsed.data.events)) {
       if (!toggles) continue;
-      const curBroker =
-        (currentEvents[ev]?.broker as Record<string, unknown> | undefined) ??
-        {};
-      mergedEvents[ev] = { broker: { ...curBroker, ...toggles.broker } };
+      const curEvent = currentEvents[ev] ?? {};
+      const curBroker = (curEvent.broker as Record<string, unknown>) ?? {};
+      const curParty = (curEvent.party as Record<string, unknown>) ?? {};
+      mergedEvents[ev] = {
+        ...curEvent,
+        broker: { ...curBroker, ...toggles.broker },
+        party: { ...curParty, ...toggles.party },
+      };
     }
   }
   // Matriz de avisos internos: valida ANTES de gravar. Marcar quem não é
