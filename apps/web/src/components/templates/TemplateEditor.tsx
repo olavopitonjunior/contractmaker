@@ -21,8 +21,12 @@ import {
   CATEGORY_LABELS,
   CATEGORY_TO_GROUP,
   GROUP_LABELS,
+  LOCACAO_MODALIDADES,
   modalidadeForCategory,
+  modalidadeLabel,
+  templateFamilyForModalidade,
   type TemplateCategory,
+  type TemplateFamily,
 } from "@/lib/contracts/template-category";
 import {
   AlertDialog,
@@ -83,17 +87,30 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
   const [isDefault, setIsDefault] = useState(template?.isDefault || false);
   const [version, setVersion] = useState(template?.version || "1.0.0");
 
-  // Tipo de documento: contrato (categoria) ou proposta (modalidade proposta_*).
-  const initialIsProposta = template?.modalidade?.startsWith("proposta_") ?? false;
-  const [docType, setDocType] = useState<"contrato" | "proposta">(
-    initialIsProposta ? "proposta" : "contrato"
+  // Família do documento: contrato de venda (categoria = forma de pagamento),
+  // contrato de locação (modalidade própria) ou proposta (modalidade
+  // proposta_*). A família vem da MODALIDADE persistida — a categoria só
+  // descreve pagamento e não existe fora de venda.
+  const initialFamily = templateFamilyForModalidade(template?.modalidade);
+  const [family, setFamily] = useState<TemplateFamily>(
+    mode === "create" ? "venda" : initialFamily
   );
   const [propostaModalidade, setPropostaModalidade] = useState(
-    initialIsProposta ? (template!.modalidade as string) : PROPOSTA_MODALIDADES[0].value
+    initialFamily === "proposta"
+      ? (template!.modalidade as string)
+      : PROPOSTA_MODALIDADES[0].value
+  );
+  const [locacaoModalidade, setLocacaoModalidade] = useState<string>(
+    initialFamily === "locacao" ? (template!.modalidade as string) : LOCACAO_MODALIDADES[0]
   );
 
-  // Modalidade (grupo) derivada da categoria — usada no preview e nos labels.
-  const modalidade = modalidadeForCategory(category);
+  // Modalidade efetiva do template — em venda é derivada da categoria.
+  const modalidade =
+    family === "proposta"
+      ? propostaModalidade
+      : family === "locacao"
+        ? locacaoModalidade
+        : modalidadeForCategory(category);
   const groupLabel = GROUP_LABELS[CATEGORY_TO_GROUP[category]];
 
   const engine = template?.engine || "handlebars";
@@ -112,10 +129,13 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
 
     setSaving(true);
     try {
+      // Venda manda `category` (a modalidade é derivada dela no servidor);
+      // locação e proposta mandam a `modalidade` — mandar categoria ali
+      // reclassificaria o template como venda.
       const payload =
-        docType === "proposta"
-          ? { name, description, handlebarsSource, modalidade: propostaModalidade, isDefault, version }
-          : { name, description, handlebarsSource, category, isDefault, version };
+        family === "venda"
+          ? { name, description, handlebarsSource, category, isDefault, version }
+          : { name, description, handlebarsSource, modalidade, isDefault, version };
 
       const url = mode === "create" ? "/api/templates" : `/api/templates/${template!.id}`;
       const method = mode === "create" ? "POST" : "PATCH";
@@ -178,20 +198,40 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
         </div>
         <div className="space-y-2">
           <Label>Tipo de documento</Label>
-          <Select
-            value={docType}
-            onValueChange={(v) => setDocType(v as "contrato" | "proposta")}
-            disabled={mode === "edit"}
-          >
+          <Select value={family} onValueChange={(v) => setFamily(v as TemplateFamily)}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="contrato">Contrato</SelectItem>
+              <SelectItem value="venda">Contrato de venda</SelectItem>
+              <SelectItem value="locacao">Contrato de locação</SelectItem>
               <SelectItem value="proposta">Proposta (oferta pré-contrato)</SelectItem>
             </SelectContent>
           </Select>
-          {docType === "proposta" ? (
+          {family === "locacao" ? (
+            <>
+              <Label htmlFor="loc-modalidade" className="pt-2 block">
+                Modalidade de locação
+              </Label>
+              <Select value={locacaoModalidade} onValueChange={setLocacaoModalidade}>
+                <SelectTrigger id="loc-modalidade">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {LOCACAO_MODALIDADES.map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {modalidadeLabel(m)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                O contrato de locação não tem “forma de pagamento” — a esteira usa
+                esta modalidade pra achar o template. Marque como principal pra ser
+                o padrão da modalidade.
+              </p>
+            </>
+          ) : family === "proposta" ? (
             <>
               <Label htmlFor="prop-modalidade" className="pt-2 block">Modelo de proposta</Label>
               <Select value={propostaModalidade} onValueChange={setPropostaModalidade}>
@@ -239,11 +279,22 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
         <div className="flex items-start gap-3 pt-6">
           <Switch id="isDefault" checked={isDefault} onCheckedChange={setIsDefault} />
           <div className="grid gap-0.5">
-            <Label htmlFor="isDefault">Principal do grupo (fallback)</Label>
+            <Label htmlFor="isDefault">
+              {family === "venda" ? "Principal do grupo (fallback)" : "Principal da modalidade"}
+            </Label>
             <p className="text-xs text-muted-foreground">
-              Usado quando uma categoria do grupo “{groupLabel}” não tiver template próprio
-              (ex.: consórcio sem modelo usa o principal de “com alienação fiduciária”).
-              Marcar desfaz o principal atual do mesmo grupo.
+              {family === "venda" ? (
+                <>
+                  Usado quando uma categoria do grupo “{groupLabel}” não tiver template próprio
+                  (ex.: consórcio sem modelo usa o principal de “com alienação fiduciária”).
+                  Marcar desfaz o principal atual do mesmo grupo.
+                </>
+              ) : (
+                <>
+                  Template usado por padrão em “{modalidadeLabel(modalidade)}”. Marcar
+                  desfaz o principal atual da mesma modalidade.
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -317,7 +368,7 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
         <TemplatePreview
           templateId={template.id}
           templateName={name}
-          templateModalidade={modalidade as "a_vista" | "financiamento"}
+          templateModalidade={modalidade}
           templateEngine={engine as "handlebars" | "google_docs"}
           previewStale={template.previewStale ?? false}
           open={previewOpen}

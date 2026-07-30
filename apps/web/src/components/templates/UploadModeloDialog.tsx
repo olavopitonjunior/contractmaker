@@ -15,14 +15,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { FileUp, Loader2 } from "lucide-react";
+import {
+  UPLOAD_MODALIDADES,
+  modalidadeLabel,
+} from "@/lib/contracts/template-category";
 
-const MODALIDADES = [
-  { value: "locacao", label: "Locação residencial" },
-  { value: "locacao_comercial", label: "Locação comercial" },
-  { value: "administracao_locacao", label: "Administração de locação" },
-  { value: "a_vista", label: "Venda à vista" },
-  { value: "financiamento", label: "Venda com financiamento" },
-];
+const MODALIDADES = UPLOAD_MODALIDADES.map((value) => ({
+  value,
+  label: modalidadeLabel(value),
+}));
 
 /**
  * "Novo do modelo da imobiliária (DOCX)": sobe o documento timbrado da

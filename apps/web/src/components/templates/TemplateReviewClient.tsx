@@ -27,6 +27,7 @@ import {
   Info,
   MousePointerClick,
 } from "lucide-react";
+import { modalidadeLabel } from "@/lib/contracts/template-category";
 
 interface CatalogEntry {
   token: string;
@@ -248,6 +249,12 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
               <CardTitle className="flex items-center justify-between text-sm">
                 <span>Status</span>
                 <span className="flex items-center gap-1.5">
+                  {/* A modalidade decide o catálogo de campos abaixo e qual
+                      esteira acha este template — deixá-la visível evita
+                      revisar um modelo de locação com campos de venda. */}
+                  <Badge variant="outline" className="text-xs">
+                    {modalidadeLabel(template.modalidade)}
+                  </Badge>
                   <Badge variant={status === "active" ? "default" : "outline"}>
                     {status === "active" ? "Ativo" : status === "draft" ? "Rascunho" : status}
                   </Badge>

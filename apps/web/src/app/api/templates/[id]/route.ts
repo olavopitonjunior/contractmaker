@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
-import { isTemplateCategory, modalidadeForCategory } from "@/lib/contracts/template-category";
+import {
+  resolveTemplateTaxonomy,
+  schemaTypeForModalidade,
+} from "@/lib/contracts/template-category";
 
 export async function GET(
   _req: NextRequest,
@@ -42,13 +45,21 @@ export async function PATCH(
     return NextResponse.json({ error: "Template not found" }, { status: 404 });
   }
 
-  // Categoria é canônica: se vier, deriva a modalidade (grupo) dela.
-  const nextCategory = isTemplateCategory(body.category)
-    ? body.category
-    : template.category;
-  const nextModalidade = isTemplateCategory(body.category)
-    ? modalidadeForCategory(body.category)
-    : body.modalidade ?? template.modalidade;
+  // Categoria (forma de pagamento) é canônica SÓ em template de venda. Num
+  // template de locação/proposta ela é ignorada — derivar a modalidade dela
+  // apagava a locação e o template sumia do selectLocacaoTemplate.
+  const { category: nextCategory, modalidade: nextModalidade } = resolveTemplateTaxonomy({
+    currentModalidade: template.modalidade,
+    currentCategory: template.category,
+    category: body.category,
+    modalidade: body.modalidade,
+  });
+  // schemaType acompanha a modalidade quando ela muda de fato (o template
+  // deixa de descrever o mesmo instrumento).
+  const nextSchemaType =
+    nextModalidade !== template.modalidade
+      ? schemaTypeForModalidade(nextModalidade)
+      : template.schemaType;
   const nextIsDefault =
     typeof body.isDefault === "boolean" ? body.isDefault : template.isDefault;
   const nextSource = body.handlebarsSource ?? template.handlebarsSource;
@@ -74,6 +85,7 @@ export async function PATCH(
       handlebarsSource: nextSource,
       modalidade: nextModalidade,
       category: nextCategory,
+      schemaType: nextSchemaType,
       isDefault: nextIsDefault,
       version: body.version ?? template.version,
       status: body.status ?? template.status,

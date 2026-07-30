@@ -16,7 +16,11 @@ import {
   Globe,
   Layers,
 } from "lucide-react";
-import { CATEGORY_LABELS, isTemplateCategory } from "@/lib/contracts/template-category";
+import {
+  CATEGORY_LABELS,
+  isTemplateCategory,
+  modalidadeLabel,
+} from "@/lib/contracts/template-category";
 
 function categoryLabel(category: string | null | undefined): string | null {
   return isTemplateCategory(category) ? CATEGORY_LABELS[category] : null;
@@ -54,11 +58,6 @@ function formatDate(iso: string): string {
   }
 }
 
-function modalidadeLabel(modalidade: string | null): string {
-  if (modalidade === "financiamento") return "Financiamento";
-  if (modalidade === "a_vista") return "À Vista";
-  return modalidade || "—";
-}
 
 export function TemplatesListClient({
   templates,

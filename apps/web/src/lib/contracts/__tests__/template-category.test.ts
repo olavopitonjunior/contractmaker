@@ -10,8 +10,11 @@ import {
   deriveCategoryFromPayment,
   resolveTemplateId,
   modalidadeForCategory,
+  resolveTemplateTaxonomy,
+  schemaTypeForModalidade,
   selectLocacaoTemplate,
   selectAdministracaoTemplate,
+  templateFamilyForModalidade,
   type TemplateLite,
 } from "../template-category";
 import { prisma } from "@/lib/db/prisma";
@@ -116,6 +119,104 @@ describe("resolveTemplateId", () => {
 
   it("lista vazia → null", () => {
     expect(resolveTemplateId("financiamento", [])).toBeNull();
+  });
+});
+
+describe("templateFamilyForModalidade", () => {
+  it("classifica por modalidade", () => {
+    expect(templateFamilyForModalidade("a_vista")).toBe("venda");
+    expect(templateFamilyForModalidade("financiamento")).toBe("venda");
+    expect(templateFamilyForModalidade(null)).toBe("venda");
+    expect(templateFamilyForModalidade("locacao")).toBe("locacao");
+    expect(templateFamilyForModalidade("locacao_comercial")).toBe("locacao");
+    expect(templateFamilyForModalidade("administracao_locacao")).toBe("locacao");
+    expect(templateFamilyForModalidade("proposta_locacao_residencial")).toBe("proposta");
+  });
+});
+
+describe("resolveTemplateTaxonomy", () => {
+  const locacao = { currentModalidade: "locacao", currentCategory: null };
+  const venda = { currentModalidade: "a_vista", currentCategory: "compra_e_venda" };
+
+  it("REGRESSÃO: categoria de venda não reclassifica template de locação", () => {
+    // A tela de edição mandava `category` pra qualquer template; o servidor
+    // derivava modalidade="a_vista" e o template sumia do selectLocacaoTemplate
+    // ("Nenhum template de locação ativo").
+    expect(resolveTemplateTaxonomy({ ...locacao, category: "outros" })).toEqual({
+      category: null,
+      modalidade: "locacao",
+    });
+    expect(resolveTemplateTaxonomy({ ...locacao, category: "financiamento" })).toEqual({
+      category: null,
+      modalidade: "locacao",
+    });
+  });
+
+  it("locação troca de modalidade dentro da família", () => {
+    expect(
+      resolveTemplateTaxonomy({ ...locacao, modalidade: "locacao_comercial" })
+    ).toEqual({ category: null, modalidade: "locacao_comercial" });
+    expect(
+      resolveTemplateTaxonomy({ ...locacao, modalidade: "administracao_locacao" })
+    ).toEqual({ category: null, modalidade: "administracao_locacao" });
+  });
+
+  it("venda: categoria é canônica e deriva a modalidade do grupo", () => {
+    expect(resolveTemplateTaxonomy({ ...venda, category: "consorcio" })).toEqual({
+      category: "consorcio",
+      modalidade: "financiamento",
+    });
+  });
+
+  it("venda sem categoria no payload preserva o que já estava", () => {
+    expect(resolveTemplateTaxonomy(venda)).toEqual({
+      category: "compra_e_venda",
+      modalidade: "a_vista",
+    });
+    // Ex.: PATCH { status: "archived" } vindo da listagem.
+    expect(resolveTemplateTaxonomy({ ...venda, category: "lixo" })).toEqual({
+      category: "compra_e_venda",
+      modalidade: "a_vista",
+    });
+  });
+
+  it("modalidade explícita conserta um template salvo na família errada", () => {
+    // Foi o caso do "Com fiador" da RE/MAX Ativa (locação salva como a_vista).
+    expect(
+      resolveTemplateTaxonomy({
+        currentModalidade: "a_vista",
+        currentCategory: "outros",
+        modalidade: "locacao",
+      })
+    ).toEqual({ category: null, modalidade: "locacao" });
+  });
+
+  it("ignora modalidade desconhecida", () => {
+    expect(resolveTemplateTaxonomy({ ...locacao, modalidade: "chutando" })).toEqual({
+      category: null,
+      modalidade: "locacao",
+    });
+  });
+
+  it("proposta não vira venda por categoria", () => {
+    expect(
+      resolveTemplateTaxonomy({
+        currentModalidade: "proposta_venda",
+        currentCategory: null,
+        category: "compra_e_venda",
+      })
+    ).toEqual({ category: null, modalidade: "proposta_venda" });
+  });
+});
+
+describe("schemaTypeForModalidade", () => {
+  it("mapeia cada modalidade ao schema do instrumento", () => {
+    expect(schemaTypeForModalidade("locacao")).toBe("locacao_residencial_v1");
+    expect(schemaTypeForModalidade("locacao_comercial")).toBe("locacao_comercial_v1");
+    expect(schemaTypeForModalidade("administracao_locacao")).toBe("administracao_locacao_v1");
+    expect(schemaTypeForModalidade("a_vista")).toBe("compra_venda_v2");
+    expect(schemaTypeForModalidade("proposta_venda")).toBe("compra_venda_v1");
+    expect(schemaTypeForModalidade(null)).toBe("compra_venda_v2");
   });
 });
 

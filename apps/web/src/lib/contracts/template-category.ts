@@ -203,3 +203,127 @@ export async function selectAdministracaoTemplate(
   if (exact.length === 0) return null;
   return { template: exact.find((t) => t.isDefault) ?? exact[0] };
 }
+
+// ============================================================================
+// FAMÍLIA do template (venda | locação | proposta).
+//
+// `category` é a forma de pagamento do negócio — existe SÓ no mundo de venda.
+// Derivar `modalidade` da categoria fora de venda é destrutivo: um template de
+// locação salvo pela tela de edição virava modalidade "a_vista" e sumia do
+// selectLocacaoTemplate ("Nenhum template de locação ativo") e do catálogo de
+// placeholders (que passava a oferecer campos de venda). A família é sempre
+// lida da MODALIDADE persistida, nunca da categoria.
+// ============================================================================
+export const LOCACAO_MODALIDADES = [
+  "locacao",
+  "locacao_comercial",
+  ADMINISTRACAO_LOCACAO_MODALIDADE,
+] as const;
+export type LocacaoModalidade = (typeof LOCACAO_MODALIDADES)[number];
+
+export const VENDA_MODALIDADES = ["a_vista", "financiamento"] as const;
+
+export type TemplateFamily = "venda" | "locacao" | "proposta";
+
+export function templateFamilyForModalidade(
+  modalidade: string | null | undefined
+): TemplateFamily {
+  const m = modalidade ?? "";
+  if (m.startsWith("proposta_")) return "proposta";
+  if ((LOCACAO_MODALIDADES as readonly string[]).includes(m)) return "locacao";
+  return "venda";
+}
+
+export const MODALIDADE_LABELS: Record<string, string> = {
+  a_vista: "Venda à vista",
+  financiamento: "Venda com financiamento",
+  locacao: "Locação residencial",
+  locacao_comercial: "Locação comercial",
+  administracao_locacao: "Administração de locação",
+  proposta_venda: "Proposta de compra",
+  proposta_locacao_residencial: "Proposta de locação residencial",
+  proposta_locacao_comercial: "Proposta de locação comercial",
+};
+
+export function modalidadeLabel(modalidade: string | null | undefined): string {
+  if (!modalidade) return "—";
+  return MODALIDADE_LABELS[modalidade] ?? modalidade;
+}
+
+/**
+ * schemaType coerente com a modalidade — usado na ingestão (from-docx) e ao
+ * corrigir a modalidade de um template já criado, pra os dois não divergirem.
+ */
+export const SCHEMA_TYPE_BY_MODALIDADE: Record<string, string> = {
+  a_vista: "compra_venda_v2",
+  financiamento: "compra_venda_v2",
+  locacao: "locacao_residencial_v1",
+  locacao_comercial: "locacao_comercial_v1",
+  administracao_locacao: "administracao_locacao_v1",
+  proposta_venda: "compra_venda_v1",
+  proposta_locacao_residencial: "locacao_residencial_v1",
+  proposta_locacao_comercial: "locacao_comercial_v1",
+};
+
+export function schemaTypeForModalidade(modalidade: string | null | undefined): string {
+  return SCHEMA_TYPE_BY_MODALIDADE[modalidade ?? ""] ?? "compra_venda_v2";
+}
+
+/**
+ * Modalidades oferecidas na ingestão "modelo da imobiliária (.docx) → template"
+ * — na ordem em que aparecem no diálogo. Fonte única do <select> e da validação
+ * do POST /api/templates/from-docx.
+ */
+export const UPLOAD_MODALIDADES = [
+  "locacao",
+  "locacao_comercial",
+  "administracao_locacao",
+  "a_vista",
+  "financiamento",
+] as const;
+
+export function isKnownModalidade(v: unknown): v is string {
+  return (
+    typeof v === "string" &&
+    ((VENDA_MODALIDADES as readonly string[]).includes(v) ||
+      (LOCACAO_MODALIDADES as readonly string[]).includes(v) ||
+      v.startsWith("proposta_"))
+  );
+}
+
+/**
+ * Resolve (category, modalidade) de uma ESCRITA de template.
+ *
+ * 1. `modalidade` explícita e conhecida sempre vence — é como o operador move
+ *    um template entre famílias (e conserta um que foi salvo na errada).
+ * 2. Senão, `category` só deriva a modalidade se o template JÁ é de venda.
+ *    Este é o guard do bug: a tela de edição manda `category` mesmo pra um
+ *    template de locação, e derivar dali virava "a_vista" — o template sumia
+ *    do selectLocacaoTemplate e do catálogo de placeholders de locação.
+ * 3. `category` só é persistida em template de venda; fora dela é null (não
+ *    existe forma de pagamento em locação/proposta e a categoria residual
+ *    puxaria o template pro resolver de venda).
+ */
+export function resolveTemplateTaxonomy(input: {
+  currentModalidade: string | null;
+  currentCategory: string | null;
+  category?: unknown;
+  modalidade?: unknown;
+}): { category: string | null; modalidade: string | null } {
+  const currentFamily = templateFamilyForModalidade(input.currentModalidade);
+  const explicit = isKnownModalidade(input.modalidade) ? input.modalidade : null;
+
+  const modalidade =
+    explicit ??
+    (currentFamily === "venda" && isTemplateCategory(input.category)
+      ? modalidadeForCategory(input.category)
+      : input.currentModalidade);
+
+  if (templateFamilyForModalidade(modalidade) !== "venda") {
+    return { category: null, modalidade };
+  }
+  return {
+    category: isTemplateCategory(input.category) ? input.category : input.currentCategory,
+    modalidade,
+  };
+}
