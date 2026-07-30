@@ -20,6 +20,11 @@ export const runtime = "nodejs";
  * Resolve `orgId` via `SalesForm.token` e filtra `SplitRecipient` por
  * `{ orgId, kind:"commissioner", active:true }`. Nunca expõe PII bancária
  * (walletId/pixAddressKey/bankAccount/bankHolderDoc/ownerCpfCnpj completo).
+ *
+ * O POST aceita dados de recebimento (`pix`, `banco`) — write-only: entram no
+ * SplitRecipient e o GET acima não os devolve. Só valem pra cadastro NOVO;
+ * num cadastro que já existe são ignorados (`receivingIgnored`), porque este
+ * endpoint é anônimo e sobrescrever chave PIX alheia desviaria repasse.
  */
 
 // Máscara mínima: mantém 3 primeiros e 2 últimos dígitos.
@@ -170,7 +175,13 @@ export async function POST(
 
   const data = parsed.data;
   const hasPix = !!data.pix?.chave;
-  const hasBank = !!(data.banco?.nome && data.banco?.agencia && data.banco?.conta);
+  // Banco vai inteiro pro registry, mesmo parcial: guardar "Itaú, ag. 0000"
+  // sem a conta ainda ajuda quem for fazer o repasse manual. Exigir os três
+  // campos aqui descartava em silêncio o que o corretor digitou.
+  const hasBank = !!(
+    data.banco &&
+    Object.values(data.banco).some((v) => typeof v === "string" && v.trim())
+  );
 
   // Detectar tipo de chave PIX (best-effort — formato inválido só rejeita
   // se o usuário marcou PIX como meio. Sem PIX vira rascunho).
@@ -199,6 +210,11 @@ export async function POST(
   };
   const preexisting = await findCommissionerMatch(form.orgId, registryInput);
   if (preexisting) {
+    // Dados de recebimento de um cadastro que JÁ existe são deliberadamente
+    // ignorados: este endpoint é anônimo, e deixá-lo gravar chave PIX num
+    // corretor existente seria um vetor de desvio de repasse. Devolvemos o
+    // flag pra UI dizer a verdade em vez de fingir que salvou.
+    const receivingIgnored = hasPix || hasBank;
     return NextResponse.json(
       {
         recipient: {
@@ -212,6 +228,8 @@ export async function POST(
           phone: preexisting.phone,
         },
         existed: true,
+        isDraft: preexisting.pendingFields.length > 0,
+        receivingIgnored,
       },
       { status: 200 }
     );
@@ -257,6 +275,8 @@ export async function POST(
               phone: existing.phone,
             },
             existed: true,
+            isDraft: existing.pendingFields.length > 0,
+            receivingIgnored: hasPix || hasBank,
           },
           { status: 200 }
         );
@@ -283,6 +303,9 @@ export async function POST(
         label: created.label,
         kind: "commissioner",
         isDraft,
+        // Nunca o valor — só se veio. Rastro pra investigar repasse errado.
+        hasPix,
+        hasBank,
       },
     }
   );
@@ -305,6 +328,7 @@ export async function POST(
         phone: created.phone,
       },
       existed: false,
+      isDraft,
     },
     { status: 201 }
   );

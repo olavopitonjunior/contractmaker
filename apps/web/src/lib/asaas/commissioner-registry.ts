@@ -116,16 +116,16 @@ export async function createCommissioner(
 ): Promise<SplitRecipient> {
   const doc = normalizeDoc(input.cpf || input.cnpj);
   const hasPix = !!extras?.pix?.chave;
-  const hasBank = !!(
-    extras?.banco?.nome &&
-    extras?.banco?.agencia &&
-    extras?.banco?.conta
-  );
   const recipientType = hasPix ? "pix_external" : "asaas_wallet";
-  const pendingFields: string[] = [];
-  if (!hasPix && !hasBank) {
-    pendingFields.push(recipientType === "pix_external" ? "pixAddressKey" : "walletId");
-  }
+  // Só PIX (ou walletId, que nunca vem por aqui) tira o cadastro do rascunho.
+  // Dados bancários NÃO: `composeSplits`/`splitDispatcher` só conhecem
+  // `asaas_wallet` (walletId) e `pix_external` (pixAddressKey) — conta bancária
+  // é TED manual, fora da esteira. Dar `active: true` a um recipient
+  // `asaas_wallet` com walletId nulo o colocaria no seletor de split do wizard
+  // e a cobrança só quebraria lá na frente, no Asaas (invalid_walletId).
+  // Mesma convenção do cadastro admin (POST /api/financeiro/split-recipients,
+  // que exige walletId ou chave PIX pra sair de pendingFields).
+  const pendingFields: string[] = hasPix ? [] : ["walletId"];
   const isDraft = pendingFields.length > 0;
 
   return prisma.splitRecipient.create({
