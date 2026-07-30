@@ -48,6 +48,7 @@ export function FormPageClient({
             token={token}
             initialData={initialData}
             schemaType={schemaType}
+            requiredFieldsByStep={requiredFieldsByStep}
             readOnly={locked}
           />
         ) : (

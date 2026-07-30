@@ -8,6 +8,17 @@ import { Separator } from "@/components/ui/separator";
 import { UFSelect } from "@/components/forms/UFSelect";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import { getByPath } from "@/lib/forms/party-required";
+import {
+  maskCPF,
+  maskCEP,
+  maskTelefone,
+  cpfRule,
+  cepRule,
+  telefoneRule,
+  dataNascimentoRule,
+  nomeCompletoRule,
+  nomeMaeRule,
+} from "@/lib/forms/field-formats";
 
 function FieldError({ error }: { error?: { message?: string } }) {
   if (!error?.message) return null;
@@ -94,14 +105,22 @@ export function ConjugeFields({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <FormField label="Nome do Cônjuge *" className="md:col-span-2">
           <Input
-            {...form.register(`${prefix}.conjuge.nome`)}
+            {...form.register(`${prefix}.conjuge.nome`, { validate: nomeCompletoRule })}
             placeholder="Nome completo do cônjuge"
           />
           <FieldError error={errors?.nome} />
         </FormField>
         <FormField label="CPF do Cônjuge *">
           <Input
-            {...form.register(`${prefix}.conjuge.cpf`)}
+            {...form.register(`${prefix}.conjuge.cpf`, {
+              validate: cpfRule,
+              onChange: (e) =>
+                form.setValue(`${prefix}.conjuge.cpf`, maskCPF(e.target.value), {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                }),
+            })}
+            inputMode="numeric"
             placeholder="000.000.000-00"
           />
           <FieldError error={errors?.cpf} />
@@ -111,9 +130,12 @@ export function ConjugeFields({
         </FormField>
         <FormField label="Data de Nascimento do Cônjuge">
           <Input
-            {...form.register(`${prefix}.conjuge.data_nascimento`)}
+            {...form.register(`${prefix}.conjuge.data_nascimento`, {
+              validate: dataNascimentoRule,
+            })}
             type="date"
           />
+          <FieldError error={errors?.data_nascimento} />
         </FormField>
         {showCertidaoFields && (
           <>
@@ -132,9 +154,10 @@ export function ConjugeFields({
             </FormField>
             <FormField label="Nome da Mãe do Cônjuge" className="md:col-span-2">
               <Input
-                {...form.register(`${prefix}.conjuge.nome_mae`)}
+                {...form.register(`${prefix}.conjuge.nome_mae`, { validate: nomeMaeRule })}
                 placeholder="Exigido pelas certidões PF (TJSP, PGFN, Antecedentes)"
               />
+              <FieldError error={errors?.nome_mae} />
             </FormField>
           </>
         )}
@@ -167,10 +190,20 @@ export function ConjugeFields({
         </FormField>
         <FormField label="Celular do Cônjuge (com DDD)">
           <Input
-            {...form.register(`${prefix}.conjuge.mobile_phone`)}
+            {...form.register(`${prefix}.conjuge.mobile_phone`, {
+              validate: telefoneRule,
+              onChange: (e) =>
+                form.setValue(
+                  `${prefix}.conjuge.mobile_phone`,
+                  maskTelefone(e.target.value),
+                  { shouldDirty: true, shouldValidate: true }
+                ),
+            })}
             type="tel"
+            inputMode="numeric"
             placeholder="(11) 99999-9999"
           />
+          <FieldError error={errors?.mobile_phone} />
         </FormField>
       </div>
 
@@ -242,9 +275,18 @@ export function ConjugeFields({
             </FormField>
             <FormField label="CEP">
               <Input
-                {...form.register(`${prefix}.conjuge.cep`)}
+                {...form.register(`${prefix}.conjuge.cep`, {
+                  validate: cepRule,
+                  onChange: (e) =>
+                    form.setValue(`${prefix}.conjuge.cep`, maskCEP(e.target.value), {
+                      shouldDirty: true,
+                      shouldValidate: true,
+                    }),
+                })}
+                inputMode="numeric"
                 placeholder="00000-000"
               />
+              <FieldError error={errors?.cep} />
             </FormField>
           </div>
         </>

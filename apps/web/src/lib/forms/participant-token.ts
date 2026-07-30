@@ -1,5 +1,9 @@
 import { randomBytes } from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
+import {
+  TERCEIRO_ROLE_PREFIX,
+  parseTerceiroRole,
+} from "./participant-category";
 
 /**
  * Subtoken por parte (vendedor/comprador; locador/locatário/fiador) pro form
@@ -47,6 +51,22 @@ export const PARTICIPANT_ROLES: ReadonlySet<ParticipantRole> = new Set([
   "fiador",
 ]);
 
+/**
+ * Role de categoria customizável da org (`terceiro:<slug>`) — ver
+ * `lib/forms/participant-category.ts`. Não é enum no banco: `role` sempre foi
+ * String, então a categoria nova não precisa de migration de dados.
+ */
+export type TerceiroRole = `${typeof TERCEIRO_ROLE_PREFIX}${string}`;
+
+/** Papel nativo OU categoria de terceiro. */
+export type AnyParticipantRole = ParticipantRole | TerceiroRole;
+
+export function isBuiltInParticipantRole(
+  role: string,
+): role is ParticipantRole {
+  return PARTICIPANT_ROLES.has(role as ParticipantRole);
+}
+
 const TTL_SECONDS = 7 * 24 * 60 * 60;
 
 /**
@@ -65,7 +85,7 @@ export type ResolveParticipantResult =
       ok: true;
       participant: {
         id: string;
-        role: ParticipantRole;
+        role: AnyParticipantRole;
         partyIndex: number;
         formId: string;
         tokenExp: Date;
@@ -104,7 +124,14 @@ export async function resolveParticipantToken(
   if (participant.tokenExp.getTime() < Date.now()) {
     return { ok: false, error: "Link expirado — peça um novo à imobiliária" };
   }
-  if (!PARTICIPANT_ROLES.has(participant.role as ParticipantRole)) {
+  // Nativo (allowlist fechada) OU `terceiro:<slug>` bem-formado. A EXISTÊNCIA
+  // da categoria não é checada aqui: quem resolve o token ainda não sabe a org,
+  // e a validação real (categoria ativa, módulo compatível) mora na página e no
+  // PATCH, que já carregam o form. Slug malformado morre aqui.
+  const isKnownRole =
+    isBuiltInParticipantRole(participant.role) ||
+    parseTerceiroRole(participant.role) !== null;
+  if (!isKnownRole) {
     return { ok: false, error: "Papel de participante desconhecido" };
   }
 
@@ -112,7 +139,7 @@ export async function resolveParticipantToken(
     ok: true,
     participant: {
       ...participant,
-      role: participant.role as ParticipantRole,
+      role: participant.role as AnyParticipantRole,
     },
   };
 }

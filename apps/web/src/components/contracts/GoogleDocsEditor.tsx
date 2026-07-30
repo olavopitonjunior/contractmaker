@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -9,7 +9,13 @@ interface GoogleDocsEditorProps {
   googleDocUrl?: string | null;
   readOnly?: boolean;
   status?: string;
+  /** Habilita o heartbeat de presença (atribuição da edição manual). */
+  contractId?: string;
 }
+
+// Menor que o TTL do marcador (10min) pra que uma aba aberta nunca fique sem
+// presença por causa de um ping perdido.
+const PRESENCE_PING_MS = 5 * 60 * 1000;
 
 /**
  * Wrapper de iframe para o editor Google Docs. Cobre o caminho de UI quando
@@ -29,7 +35,36 @@ export function GoogleDocsEditor({
   googleDocUrl,
   readOnly,
   status,
+  contractId,
 }: GoogleDocsEditorProps) {
+  // Heartbeat de presença: o webhook do Drive detecta que o Doc mudou, mas não
+  // QUEM mudou. Enquanto esta aba está aberta e visível, avisa o servidor que
+  // este usuário está com o editor — é o que permite atribuir a edição manual
+  // (best-effort, ver lib/contracts/editor-presence). Contrato aprovado é
+  // read-only: não há edição pra atribuir.
+  useEffect(() => {
+    if (!contractId || readOnly) return;
+    let cancelled = false;
+    const ping = () => {
+      if (cancelled || document.visibilityState !== "visible") return;
+      void fetch(`/api/contracts/${contractId}/editing-ping`, {
+        method: "POST",
+        credentials: "same-origin",
+        keepalive: true,
+      }).catch(() => {
+        // Silencioso: perder o ping só custa a atribuição.
+      });
+    };
+    ping();
+    const timer = setInterval(ping, PRESENCE_PING_MS);
+    document.addEventListener("visibilitychange", ping);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", ping);
+    };
+  }, [contractId, readOnly]);
+
   const embedSrc = useMemo(() => {
     const base = `https://docs.google.com/document/d/${googleDocId}/${
       readOnly ? "preview" : "edit"

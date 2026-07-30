@@ -20,9 +20,12 @@ import {
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import {
   DEFAULT_CONTRACT_SETTINGS,
-  resolveOrgContractDefaults,
   type ContractSettings,
 } from "@/lib/contracts/default-config";
+import {
+  loadOrgContractDefaults,
+  loadOrgLocacaoDefaults,
+} from "@/lib/contracts/org-defaults";
 import { assertModuleEnabled } from "@/lib/modules/guard";
 import { MODULE } from "@/lib/modules/catalog";
 import { enrichLocacaoData, enrichAdministracaoData } from "@/lib/locacao/enrich";
@@ -201,26 +204,10 @@ export interface EnrichContractContext {
   contractDefaults?: ContractSettings;
 }
 
-/**
- * Padrão de configurações contratuais da org (`OrgFormSettings.
- * contractDefaultsJson`). Nunca lança: sem row, sem coluna preenchida ou com
- * Json inválido, cai no padrão de fábrica — a geração de contrato não pode
- * quebrar por causa de uma preferência.
- */
-export async function loadOrgContractDefaults(
-  orgId: string
-): Promise<ContractSettings> {
-  try {
-    const settings = await prisma.orgFormSettings.findUnique({
-      where: { orgId },
-      select: { contractDefaultsJson: true },
-    });
-    return resolveOrgContractDefaults(settings?.contractDefaultsJson);
-  } catch (err) {
-    console.warn("[contract-defaults] falha ao carregar padrão da org:", err);
-    return DEFAULT_CONTRACT_SETTINGS;
-  }
-}
+// Padrão de configurações contratuais da org — a implementação mora em
+// `lib/contracts/org-defaults.ts` (server-safe e sem as deps pesadas deste
+// módulo); re-exportado aqui pra não quebrar callers antigos.
+export { loadOrgContractDefaults, loadOrgLocacaoDefaults };
 
 export function enrichContractData(
   data: Record<string, unknown>,
@@ -854,7 +841,9 @@ export async function generateContractForDeal(
   // do grupo (ex.: consórcio sem template → financiamento).
   const selection = await selectTemplateForDeal(orgId, dataJson);
   if (!selection) {
-    throw new Error("Nenhum template ativo encontrado para gerar o contrato.");
+    throw new Error(
+      "Nenhum template ativo para gerar o contrato. Ative ou envie um modelo em Configurações → Modelos."
+    );
   }
   const template = selection.template;
 
@@ -1171,7 +1160,7 @@ export async function generateContractForDeal(
   // waitUntil: essas análises gateiam o /approve (criam ContractComment
   // severity=error). `void` após o response era cancelado na Vercel.
   waitUntil(
-    analyzeCertidoesForContract(contract.id, deal.id, orgId).catch((err) => {
+    analyzeCertidoesForContract(contract.id, deal.id, orgId, userId).catch((err) => {
       console.error("[contract-generation] analyzeCertidoesForContract falhou:", err);
     })
   );
@@ -1239,10 +1228,12 @@ export async function generateLocacaoContractForDeal(
     : (deal.dataJson as Record<string, unknown>) || {};
   const schemaType = deal.form?.schemaType ?? "locacao_residencial_v1";
 
-  const selection = await selectLocacaoTemplate(orgId, schemaType);
+  // dataJson entra na seleção: além da modalidade, garantia e PF/PJ (locatário e
+  // fiador) escolhem a variante do template (ContractTemplate.matchCriteria).
+  const selection = await selectLocacaoTemplate(orgId, schemaType, dataJson);
   if (!selection) {
     throw new Error(
-      "Nenhum template de locação ativo. Rode sync-templates.ts --apply --seed."
+      "Nenhum template de locação ativo. Ative ou envie um modelo em Configurações → Modelos."
     );
   }
   const template = selection.template;
@@ -1266,7 +1257,11 @@ export async function generateLocacaoContractForDeal(
       }
     : undefined;
 
-  const enrichedData = enrichLocacaoData(dataJson, { administradora });
+  // Padrão contratual de LOCAÇÃO da imobiliária (multa de atraso, juros, multa
+  // rescisória, comarca). Ausente → padrão de fábrica.
+  const contractDefaults = await loadOrgLocacaoDefaults(orgId);
+
+  const enrichedData = enrichLocacaoData(dataJson, { administradora, contractDefaults });
 
   // engine="google_docs": o template É um Google Doc (modelo da imobiliária,
   // layout/timbrado preservados) — copiamos o doc e substituímos placeholders
@@ -1527,7 +1522,7 @@ export async function generateAdministracaoContractForDeal(
   const selection = await selectAdministracaoTemplate(orgId);
   if (!selection) {
     throw new Error(
-      "Nenhum template de administração de locação ativo. Rode sync-templates.ts --apply --seed."
+      "Nenhum template de administração de locação ativo. Ative ou envie um modelo em Configurações → Modelos."
     );
   }
   const template = selection.template;
@@ -1552,7 +1547,11 @@ export async function generateAdministracaoContractForDeal(
     endereco: org?.legalAddress ?? undefined,
   };
 
-  const enrichedData = enrichAdministracaoData(dataJson, { administradora });
+  const contractDefaults = await loadOrgLocacaoDefaults(orgId);
+  const enrichedData = enrichAdministracaoData(dataJson, {
+    administradora,
+    contractDefaults,
+  });
   const htmlContent = isGoogleDocsEngine
     ? `<p>Contrato de administração gerado a partir do modelo Google Doc (${template.name}).</p>`
     : renderContratoHTML(template.handlebarsSource, enrichedData);
@@ -1926,7 +1925,9 @@ async function analyzeContractDataValidity(
 
   // Campos obrigatórios da org (presets/OrgFormSettings) — SÓ para contratos
   // gerados por formulário de venda. Importados (templateId=null) e locação são
-  // isentos: o dataJson de OCR é parcial por natureza e locação não usa presets.
+  // isentos: o dataJson de OCR é parcial por natureza, e em locação a
+  // obrigatoriedade é cobrada no FINALIZE do formulário (422 em
+  // /api/locacao/forms/[token]), não como comentário no contrato.
   const isImported = contract.templateId === null;
   const isLocacao = contract.deal?.kind === "locacao";
   const orgId = contract.deal?.pipeline?.orgId;
@@ -2030,11 +2031,17 @@ async function analyzeRenderQualityForContract(
  * editor sem precisar pedir.
  *
  * Não bloqueia generateContractForDeal — erros são engolidos no caller.
+ *
+ * `triggeredByUserId`: quem disparou a geração. Vai no `userId` do ChangeLog só
+ * como RASTRO (o `source` continua "system" — foi o pipeline que rodou, não a
+ * pessoa; a UI rotula "Sistema"). Sem ele a entry ficava órfã de qualquer
+ * vínculo com o ato humano que a originou.
  */
 async function analyzeCertidoesForContract(
   contractId: string,
   dealId: string,
-  _orgId: string
+  _orgId: string,
+  triggeredByUserId?: string | null
 ): Promise<void> {
   const { crossCheckCertidoes } = await import("@/lib/ai/crosscheck/certidoes");
   const { dedupeKeyFor } = await import("@/lib/ai/quickChecks");
@@ -2068,7 +2075,7 @@ async function analyzeCertidoesForContract(
     await prisma.contractChangeLog.create({
       data: {
         contractId,
-        userId: null,
+        userId: triggeredByUserId ?? null,
         action: "validation",
         summary:
           "Análise de certidões pulada — nenhum CertidaoJob emitido para o deal. Considere disparar via aba Certidões.",
@@ -2116,7 +2123,7 @@ async function analyzeCertidoesForContract(
   await prisma.contractChangeLog.create({
     data: {
       contractId,
-      userId: null,
+      userId: triggeredByUserId ?? null,
       action: "validation",
       summary: `Análise inicial de certidões: ${summary.total} achados (${summary.bySeverity.error} erros, ${summary.bySeverity.warning} warnings)`,
       details: {

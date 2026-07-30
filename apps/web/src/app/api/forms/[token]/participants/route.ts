@@ -2,27 +2,25 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { requireAuth } from "@/lib/auth/context";
 import { prisma } from "@/lib/db/prisma";
+import { newParticipantToken } from "@/lib/forms/participant-token";
 import {
-  newParticipantToken,
-  type ParticipantRole,
-} from "@/lib/forms/participant-token";
+  isValidRole,
+  participantRoleSchema,
+} from "@/lib/forms/participant-category";
+import { listOrgParticipantCategories } from "@/lib/forms/participant-category-repo";
 import { audit } from "@/lib/security/audit";
 
 const bodySchema = z.object({
   // Quais roles criar/garantir. Sem `roles`, o default depende do schemaType
   // do form (venda: vendedor+comprador; locação: locador+locatario). Mandar
   // subset é útil quando o admin quer mandar link só pra uma parte primeiro.
-  roles: z
-    .array(z.enum(["vendedor", "comprador", "locador", "locatario", "fiador"]))
-    .min(1)
-    .max(3)
-    .optional(),
+  //
+  // Aceita também `terceiro:<slug>` — categoria customizável da org (a
+  // existência/atividade da categoria é checada abaixo, contra o banco). O
+  // teto subiu de 3 pra 10 porque um negócio pode ter vários terceiros; os
+  // papéis nativos continuam limitados pela allowlist por esteira.
+  roles: z.array(participantRoleSchema).min(1).max(10).optional(),
 });
-
-// Roles válidos por esteira — vendedor num form de locação (ou vice-versa)
-// criaria um subtoken com pathScope vazio/errado.
-const VENDA_ROLES: readonly ParticipantRole[] = ["vendedor", "comprador"];
-const LOCACAO_ROLES: readonly ParticipantRole[] = ["locador", "locatario", "fiador"];
 
 /**
  * GET /api/forms/[token]/participants
@@ -101,24 +99,36 @@ export async function POST(
   }
 
   const isLocacao = form.schemaType?.startsWith("locacao") ?? false;
-  const validRoles = isLocacao ? LOCACAO_ROLES : VENDA_ROLES;
-  const defaultRoles: ParticipantRole[] = isLocacao
+  const defaultRoles: string[] = isLocacao
     ? ["locador", "locatario"]
     : ["vendedor", "comprador"];
   const requestedRoles = parsed.data.roles ?? defaultRoles;
-  const invalid = requestedRoles.filter(
-    (r) => !validRoles.includes(r as ParticipantRole),
-  );
+
+  // Categorias de terceiro da org — só carregadas quando alguém pediu uma.
+  // `isValidRole` mantém a regra antiga intacta pros 5 nativos e, pro
+  // terceiro, exige categoria EXISTENTE, ATIVA e habilitada pra esteira.
+  const categories = requestedRoles.some((r) => r.startsWith("terceiro:"))
+    ? await listOrgParticipantCategories(ctx.orgId)
+    : [];
+  const invalid = requestedRoles
+    .map((r) => ({ role: r, check: isValidRole(r, form.schemaType, categories) }))
+    .filter((x) => !x.check.ok);
   if (invalid.length > 0) {
+    // 400 continua sendo a resposta de role NATIVO fora da esteira (contrato
+    // antigo, preservado). Categoria de terceiro inexistente/inativa/em módulo
+    // errado é 422: o body está bem formado, a configuração é que não bate.
+    const status = invalid.some((x) => x.role.startsWith("terceiro:")) ? 422 : 400;
     return NextResponse.json(
       {
-        error: `Role(s) ${invalid.join(", ")} não valem pra um formulário de ${isLocacao ? "locação" : "venda"}`,
+        error: invalid
+          .map((x) => (x.check.ok ? "" : x.check.error))
+          .join("; "),
       },
-      { status: 400 },
+      { status },
     );
   }
 
-  const requested = new Set<ParticipantRole>(requestedRoles as ParticipantRole[]);
+  const requested = new Set<string>(requestedRoles);
   const existing = await prisma.salesFormParticipant.findMany({
     where: { formId: form.id, role: { in: Array.from(requested) } },
   });

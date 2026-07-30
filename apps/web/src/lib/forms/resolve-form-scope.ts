@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
-import { type ParticipantRole } from "./participant-token";
+import { type AnyParticipantRole } from "./participant-token";
 
 /**
  * Resolve o `[token]` das rotas públicas de form/attachments aceitando DOIS
@@ -26,7 +26,8 @@ export interface FormScope {
   schemaType: string;
   /** Null = token principal (sem escopo por parte). */
   participantId: string | null;
-  role: ParticipantRole | null;
+  /** Papel nativo OU `terceiro:<slug>` — ver participant-category.ts. */
+  role: AnyParticipantRole | null;
   partyIndex: number | null;
   /** Setado = form travado; callers DEVEM bloquear writes (uploads/delete). */
   lockedAt: Date | null;
@@ -102,7 +103,7 @@ export async function resolveFormScope(token: string): Promise<FormScope | null>
     orgId: participant.form.orgId,
     schemaType: participant.form.schemaType,
     participantId: participant.id,
-    role: participant.role as ParticipantRole,
+    role: participant.role as AnyParticipantRole,
     partyIndex: participant.partyIndex,
     lockedAt: participant.form.lockedAt,
     completedAt: participant.form.completedAt,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useFieldArray, UseFormReturn } from "react-hook-form";
+import { Controller, useFieldArray, UseFormReturn } from "react-hook-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,8 +8,21 @@ import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { UFSelect } from "@/components/forms/UFSelect";
 import { NativeSelect } from "@/components/forms/NativeSelect";
+import { MoneyInput } from "@/components/forms/MoneyInput";
 import { ConjugeFields } from "@/components/forms/steps/ConjugeFields";
-import { maskCPF, maskCNPJ, maskCEP, maskTelefone } from "@/lib/forms/field-formats";
+import {
+  maskCPF,
+  maskCNPJ,
+  maskCEP,
+  maskTelefone,
+  cpfRule,
+  cnpjRule,
+  cepRule,
+  telefoneRule,
+  dataNascimentoRule,
+  nomeCompletoRule,
+} from "@/lib/forms/field-formats";
+import { getByPath } from "@/lib/forms/party-required";
 
 // Campos de parte (locador/locatário/fiador) bindados ao parteLocacaoSchema de
 // lib/forms/validation-locacao.ts. Reaproveitado por LocadorStep, LocatarioStep
@@ -46,6 +59,44 @@ export function FormField({
   );
 }
 
+/**
+ * Erros da parte no path `prefix` (funciona pra array — `locadores.0` — e pro
+ * fiador, que não é lista). Mesmo padrão do ConjugeFields.
+ */
+function usePartyErrors(form: UseFormReturn<any>, prefix: string) {
+  return getByPath(form.formState.errors, prefix) as
+    | Record<string, { message?: string }>
+    | undefined;
+}
+
+/**
+ * Campo monetário (R$) do form de locação. MoneyInput formata em pt-BR e
+ * devolve NÚMERO — o shape que o schema espera. Compartilhado pelos steps.
+ */
+export function MoneyField({
+  form,
+  name,
+  placeholder,
+}: {
+  form: UseFormReturn<any>;
+  name: string;
+  placeholder?: string;
+}) {
+  return (
+    <Controller
+      control={form.control}
+      name={name}
+      render={({ field }) => (
+        <MoneyInput
+          value={Number(field.value) || 0}
+          onChange={(v) => field.onChange(v)}
+          placeholder={placeholder}
+        />
+      )}
+    />
+  );
+}
+
 export function PessoaFisicaLocacaoFields({
   form,
   prefix,
@@ -56,12 +107,17 @@ export function PessoaFisicaLocacaoFields({
   const estadoCivil = form.watch(`${prefix}.estado_civil`);
   const showConjuge =
     estadoCivil === "Casado(a)" || estadoCivil === "União Estável";
+  const errors = usePartyErrors(form, prefix);
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <FormField label="Nome Completo *">
-          <Input {...form.register(`${prefix}.nome`)} placeholder="Nome completo" />
+          <Input
+            {...form.register(`${prefix}.nome`, { validate: nomeCompletoRule })}
+            placeholder="Nome completo"
+          />
+          <FieldError error={errors?.nome} />
         </FormField>
         <FormField label="Nacionalidade">
           <Input {...form.register(`${prefix}.nacionalidade`)} placeholder="Brasileiro(a)" />
@@ -83,23 +139,27 @@ export function PessoaFisicaLocacaoFields({
         <FormField label="CPF">
           <Input
             {...form.register(`${prefix}.cpf`, {
+              validate: cpfRule,
               onChange: (e) =>
-                form.setValue(`${prefix}.cpf`, maskCPF(e.target.value), { shouldDirty: true }),
+                form.setValue(`${prefix}.cpf`, maskCPF(e.target.value), {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                }),
             })}
             inputMode="numeric"
             placeholder="000.000.000-00"
           />
+          <FieldError error={errors?.cpf} />
         </FormField>
         <FormField label="Data de Nascimento">
-          <Input {...form.register(`${prefix}.data_nascimento`)} type="date" />
+          <Input
+            {...form.register(`${prefix}.data_nascimento`, { validate: dataNascimentoRule })}
+            type="date"
+          />
+          <FieldError error={errors?.data_nascimento} />
         </FormField>
         <FormField label="Renda mensal (R$)">
-          <Input
-            {...form.register(`${prefix}.renda_mensal`, { valueAsNumber: true })}
-            type="number"
-            inputMode="decimal"
-            placeholder="0,00"
-          />
+          <MoneyField form={form} name={`${prefix}.renda_mensal`} placeholder="Ex: 8.000,00" />
         </FormField>
         <FormField label="Email">
           <Input {...form.register(`${prefix}.email`)} type="email" placeholder="email@exemplo.com" />
@@ -107,15 +167,18 @@ export function PessoaFisicaLocacaoFields({
         <FormField label="Celular (com DDD)">
           <Input
             {...form.register(`${prefix}.mobile_phone`, {
+              validate: telefoneRule,
               onChange: (e) =>
                 form.setValue(`${prefix}.mobile_phone`, maskTelefone(e.target.value), {
                   shouldDirty: true,
+                  shouldValidate: true,
                 }),
             })}
             type="tel"
             inputMode="numeric"
             placeholder="(11) 99999-9999"
           />
+          <FieldError error={errors?.mobile_phone} />
         </FormField>
       </div>
 
@@ -146,12 +209,17 @@ export function PessoaFisicaLocacaoFields({
         <FormField label="CEP">
           <Input
             {...form.register(`${prefix}.cep`, {
+              validate: cepRule,
               onChange: (e) =>
-                form.setValue(`${prefix}.cep`, maskCEP(e.target.value), { shouldDirty: true }),
+                form.setValue(`${prefix}.cep`, maskCEP(e.target.value), {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                }),
             })}
             inputMode="numeric"
             placeholder="00000-000"
           />
+          <FieldError error={errors?.cep} />
         </FormField>
       </div>
 
@@ -171,6 +239,11 @@ export function PessoaJuridicaLocacaoFields({
   form: UseFormReturn<any>;
   prefix: string;
 }) {
+  const errors = usePartyErrors(form, prefix);
+  const repErrors = (errors?.representante ?? undefined) as
+    | Record<string, { message?: string }>
+    | undefined;
+
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -180,19 +253,23 @@ export function PessoaJuridicaLocacaoFields({
         <FormField label="CNPJ">
           <Input
             {...form.register(`${prefix}.cnpj`, {
+              validate: cnpjRule,
               onChange: (e) =>
-                form.setValue(`${prefix}.cnpj`, maskCNPJ(e.target.value), { shouldDirty: true }),
+                form.setValue(`${prefix}.cnpj`, maskCNPJ(e.target.value), {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                }),
             })}
             inputMode="numeric"
             placeholder="00.000.000/0000-00"
           />
+          <FieldError error={errors?.cnpj} />
         </FormField>
         <FormField label="Faturamento mensal (R$)">
-          <Input
-            {...form.register(`${prefix}.faturamento_mensal`, { valueAsNumber: true })}
-            type="number"
-            inputMode="decimal"
-            placeholder="0,00"
+          <MoneyField
+            form={form}
+            name={`${prefix}.faturamento_mensal`}
+            placeholder="Ex: 50.000,00"
           />
         </FormField>
         <FormField label="Logradouro" className="md:col-span-2">
@@ -217,7 +294,19 @@ export function PessoaJuridicaLocacaoFields({
           />
         </FormField>
         <FormField label="CEP">
-          <Input {...form.register(`${prefix}.cep`)} placeholder="00000-000" />
+          <Input
+            {...form.register(`${prefix}.cep`, {
+              validate: cepRule,
+              onChange: (e) =>
+                form.setValue(`${prefix}.cep`, maskCEP(e.target.value), {
+                  shouldDirty: true,
+                  shouldValidate: true,
+                }),
+            })}
+            inputMode="numeric"
+            placeholder="00000-000"
+          />
+          <FieldError error={errors?.cep} />
         </FormField>
       </div>
 
@@ -225,24 +314,46 @@ export function PessoaJuridicaLocacaoFields({
       <p className="text-sm font-semibold text-foreground">Representante Legal</p>
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <FormField label="Nome" className="md:col-span-2">
-          <Input {...form.register(`${prefix}.representante.nome`)} placeholder="Nome completo" />
+          <Input
+            {...form.register(`${prefix}.representante.nome`, { validate: nomeCompletoRule })}
+            placeholder="Nome completo"
+          />
+          <FieldError error={repErrors?.nome} />
         </FormField>
         <FormField label="CPF">
           <Input
             {...form.register(`${prefix}.representante.cpf`, {
+              validate: cpfRule,
               onChange: (e) =>
                 form.setValue(`${prefix}.representante.cpf`, maskCPF(e.target.value), {
                   shouldDirty: true,
+                  shouldValidate: true,
                 }),
             })}
+            inputMode="numeric"
             placeholder="000.000.000-00"
           />
+          <FieldError error={repErrors?.cpf} />
         </FormField>
         <FormField label="Email">
           <Input {...form.register(`${prefix}.representante.email`)} type="email" placeholder="email@exemplo.com" />
         </FormField>
         <FormField label="Celular">
-          <Input {...form.register(`${prefix}.representante.mobile_phone`)} placeholder="(11) 99999-9999" />
+          <Input
+            {...form.register(`${prefix}.representante.mobile_phone`, {
+              validate: telefoneRule,
+              onChange: (e) =>
+                form.setValue(
+                  `${prefix}.representante.mobile_phone`,
+                  maskTelefone(e.target.value),
+                  { shouldDirty: true, shouldValidate: true },
+                ),
+            })}
+            type="tel"
+            inputMode="numeric"
+            placeholder="(11) 99999-9999"
+          />
+          <FieldError error={repErrors?.mobile_phone} />
         </FormField>
       </div>
     </div>

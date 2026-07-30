@@ -2,6 +2,10 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import {
+  contractOrgScopeWhere,
+  resolveUserOrgId,
+} from "@/lib/security/org-scope";
 import { getOrchestratorGraph } from "@/lib/ai/orchestrator/graph";
 import type { ToolCallRecord } from "@/lib/ai/orchestrator/state";
 
@@ -66,8 +70,14 @@ export default async function ContractAuditPage({ params, searchParams }: PagePr
   const session = await auth();
   if (!session?.user) return null;
 
-  const contract = await prisma.contract.findUnique({
-    where: { id: params.id },
+  // Guard cross-org na query (ver contracts/[id]/page.tsx): a trilha de
+  // auditoria expõe mensagens e tool calls do contrato — inexistente e
+  // cross-org têm que ser indistinguíveis.
+  const orgId = await resolveUserOrgId(session.user.id);
+  if (!orgId) notFound();
+
+  const contract = await prisma.contract.findFirst({
+    where: contractOrgScopeWhere(params.id, orgId),
     select: {
       id: true,
       deal: { select: { id: true, title: true } },

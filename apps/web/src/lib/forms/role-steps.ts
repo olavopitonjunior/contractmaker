@@ -43,3 +43,15 @@ export const ROLE_STEP_INDEXES: Record<ParticipantRole, readonly number[]> = {
 export function getStepIndexesForRole(role: ParticipantRole): readonly number[] {
   return ROLE_STEP_INDEXES[role];
 }
+
+/**
+ * Versão tolerante pra QUALQUER role. Nativo → o mesmo array de sempre.
+ *
+ * Terceiro (`terceiro:<slug>`) não tem step do wizard: a tela dele é um único
+ * formulário genérico montado a partir das field defs da categoria
+ * (`TerceiroStep`), fora da numeração de `STEP_LABELS`. Devolver `[]` é o
+ * sinal de "não é wizard" — e também o fallback seguro pra role desconhecido.
+ */
+export function resolveRoleSteps(role: string): readonly number[] {
+  return ROLE_STEP_INDEXES[role as ParticipantRole] ?? [];
+}

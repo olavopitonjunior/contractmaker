@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -16,9 +16,17 @@ export const PARTY_ROLE_LABELS: Record<ParticipantRole, string> = {
 };
 
 interface PartyLink {
-  role: ParticipantRole;
+  /** Papel nativo OU `terceiro:<slug>` (categoria configurável da org). */
+  role: string;
   url: string;
   completedAt: string | null;
+}
+
+/** Categoria de terceiro oferecida junto dos papéis nativos. */
+export interface ExtraPartyOption {
+  /** `terceiro:<slug>` — ver lib/forms/participant-category.ts. */
+  role: string;
+  label: string;
 }
 
 export interface PartyLinksPanelProps {
@@ -26,6 +34,20 @@ export interface PartyLinksPanelProps {
   formToken: string;
   /** Papéis oferecidos (venda: vendedor/comprador; locação: locador/locatario/fiador). */
   roles: ParticipantRole[];
+  /**
+   * Categorias de TERCEIRO ativas da org (`terceiro:<slug>` + label). Opcional
+   * de propósito: os call-sites existentes não passam nada e o painel se
+   * comporta exatamente como antes.
+   */
+  extraParties?: ExtraPartyOption[];
+  /**
+   * Carrega as categorias de terceiro da org sozinho, filtrando por módulo.
+   *
+   * Só passe em tela do DASHBOARD: o endpoint é com sessão, e o painel também
+   * roda dentro do formulário PÚBLICO (SalesFormWizard/LocacaoFormWizard), onde
+   * um GET autenticado daria 401. Ausente = nenhuma requisição extra.
+   */
+  categoriesModule?: "venda" | "locacao";
   /** Compacto = embutido em dialog/success screen. */
   compact?: boolean;
 }
@@ -37,10 +59,54 @@ export interface PartyLinksPanelProps {
  * funciona pro corretor logado). Reaproveitado na tela de sucesso da criação
  * (venda e locação) e no header do detalhe.
  */
-export function PartyLinksPanel({ formToken, roles, compact = false }: PartyLinksPanelProps) {
+export function PartyLinksPanel({
+  formToken,
+  roles,
+  extraParties,
+  categoriesModule,
+  compact = false,
+}: PartyLinksPanelProps) {
   const [links, setLinks] = useState<PartyLink[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [copiedRole, setCopiedRole] = useState<string | null>(null);
+  const [fetched, setFetched] = useState<ExtraPartyOption[]>([]);
+
+  // Categorias de terceiro da org (só no dashboard — ver `categoriesModule`).
+  // Falha silenciosa de propósito: sem categoria, o painel volta a ser o de
+  // sempre em vez de quebrar a geração dos links nativos.
+  useEffect(() => {
+    if (!categoriesModule) return;
+    let alive = true;
+    fetch("/api/org/participant-categories?active=true")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!alive || !data?.categories) return;
+        setFetched(
+          (data.categories as Array<{
+            slug: string;
+            label: string;
+            appliesTo: string[];
+          }>)
+            .filter((c) => c.appliesTo.includes(categoriesModule))
+            .map((c) => ({ role: `terceiro:${c.slug}`, label: c.label })),
+        );
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [categoriesModule]);
+
+  const allExtras = useMemo(
+    () => [...(extraParties ?? []), ...fetched],
+    [extraParties, fetched],
+  );
+
+  // Rótulo por role: nativos do mapa fixo, terceiros do label da categoria.
+  const labelOf = (role: string): string =>
+    PARTY_ROLE_LABELS[role as ParticipantRole] ??
+    allExtras.find((e) => e.role === role)?.label ??
+    role;
 
   async function ensureLinks(): Promise<PartyLink[] | null> {
     if (links) return links;
@@ -49,7 +115,9 @@ export function PartyLinksPanel({ formToken, roles, compact = false }: PartyLink
       const res = await fetch(`/api/forms/${formToken}/participants/from-main`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roles }),
+        body: JSON.stringify({
+          roles: [...roles, ...allExtras.map((e) => e.role)],
+        }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -57,7 +125,7 @@ export function PartyLinksPanel({ formToken, roles, compact = false }: PartyLink
         return null;
       }
       const next: PartyLink[] = (data.participants || []).map(
-        (p: { role: ParticipantRole; url: string; completedAt: string | null }) => ({
+        (p: { role: string; url: string; completedAt: string | null }) => ({
           role: p.role,
           url: `${window.location.origin}${p.url}`,
           completedAt: p.completedAt,
@@ -76,12 +144,12 @@ export function PartyLinksPanel({ formToken, roles, compact = false }: PartyLink
   function copyLink(link: PartyLink) {
     navigator.clipboard.writeText(link.url);
     setCopiedRole(link.role);
-    toast.success(`Link do ${PARTY_ROLE_LABELS[link.role].toLowerCase()} copiado!`);
+    toast.success(`Link do ${labelOf(link.role).toLowerCase()} copiado!`);
     setTimeout(() => setCopiedRole(null), 2000);
   }
 
   function whatsapp(link: PartyLink) {
-    const msg = `Olá! Para seguirmos com o negócio, preencha seus dados como ${PARTY_ROLE_LABELS[link.role].toLowerCase()} neste link exclusivo: ${link.url}`;
+    const msg = `Olá! Para seguirmos com o negócio, preencha seus dados como ${labelOf(link.role).toLowerCase()} neste link exclusivo: ${link.url}`;
     window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank");
   }
 
@@ -115,7 +183,7 @@ export function PartyLinksPanel({ formToken, roles, compact = false }: PartyLink
           className="flex items-center justify-between gap-2 rounded-md border px-3 py-2"
         >
           <div className="flex items-center gap-2 min-w-0">
-            <span className="text-sm font-medium">{PARTY_ROLE_LABELS[link.role]}</span>
+            <span className="text-sm font-medium">{labelOf(link.role)}</span>
             {link.completedAt ? (
               <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-400">
                 Preencheu

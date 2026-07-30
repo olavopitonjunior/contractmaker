@@ -21,6 +21,12 @@ export function costCentsForMethod(
   return CLICKSIGN_COST_CENTS[method] ?? 0;
 }
 
+/**
+ * Custo do envelope = soma do custo POR SIGNATÁRIO. A quantidade de DOCUMENTOS
+ * do envelope não entra na conta: a ClickSign cobra por signatário, então
+ * contrato + laudo de vistoria no mesmo envelope custam o mesmo que só o
+ * contrato (é justamente o motivo de existir o `EnvelopeDocument`).
+ */
 export function envelopeCostCents(
   authMethods: AuthMethod[],
   overrides?: Record<string, unknown> | null

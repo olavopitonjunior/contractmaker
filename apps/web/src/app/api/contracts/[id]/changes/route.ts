@@ -91,6 +91,9 @@ export async function GET(
       htmlBefore: true,
       htmlAfter: true,
       sessionId: true,
+      // Autor: sem isso o painel não tinha como distinguir "ninguém sabe quem"
+      // de "foi o sistema" e rotulava tudo por `source`.
+      user: { select: { name: true, email: true } },
     },
   });
 
@@ -102,6 +105,7 @@ export async function GET(
       source: l.source,
       createdAt: l.createdAt.toISOString(),
       sessionId: l.sessionId,
+      userName: l.user?.name || l.user?.email || null,
       hasDiff: !!l.htmlBefore && !!l.htmlAfter && l.htmlBefore !== l.htmlAfter,
       htmlBefore: l.htmlBefore,
       htmlAfter: l.htmlAfter,

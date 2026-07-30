@@ -90,6 +90,9 @@ export async function POST(req: NextRequest) {
   // entry atribuída (sem diff — ver human-doc-edit). "echo" (edição do app/IA, já
   // logada como source:"ai") e "unknown" (Redis indisponível — fail-safe) NÃO
   // viram atribuição humana.
+  //
+  // QUEM editou: o payload do Drive não diz. `getRecentContractEditor` consulta o
+  // marcador de presença do editor embedado (best-effort, ambíguo → null).
   if (resourceState === "update" && contract.googleDocId) {
     try {
       const { checkDocEcho } = await import("@/lib/google/doc-edit-marker");
@@ -97,8 +100,15 @@ export async function POST(req: NextRequest) {
         const { recordHumanDocEdit } = await import(
           "@/lib/contracts/human-doc-edit"
         );
+        const { getRecentContractEditor } = await import(
+          "@/lib/contracts/editor-presence"
+        );
         await recordHumanDocEdit(
-          { db: prisma, now: () => new Date() },
+          {
+            db: prisma,
+            now: () => new Date(),
+            resolveEditorUserId: getRecentContractEditor,
+          },
           { contractId: contract.id, details: { channelId, resourceId } }
         );
       }

@@ -93,6 +93,9 @@ interface SendEnvelopeInput {
    *  avulsos pra ESTE envelope sem mexer no contrato. Sem ela (Newton/bearer,
    *  locação direta), cai na derivação por dataJson. */
   signers?: EnvelopeSignerInput[];
+  /** Documentos EXTRA no MESMO envelope (ex.: laudo de vistoria junto do
+   *  contrato de locação). Mesmos signatários, mesmo custo. */
+  extraDocuments?: ExtraDocumentInput[];
 }
 
 /** Signer payload aceito pelo helper interno e pelo fluxo avulso. */
@@ -120,6 +123,23 @@ interface SendEnvelopeForAttachmentInput {
   envelopeName?: string;
   deadlineAt?: Date | null;
   signers: EnvelopeSignerInput[];
+}
+
+/**
+ * Documento EXTRA anexado ao MESMO envelope do sujeito principal. A ClickSign v3
+ * aceita N documentos por envelope e cobra por SIGNATÁRIO — então contrato +
+ * laudo de vistoria juntos custam metade de dois envelopes separados. Cada
+ * signatário ganha os mesmos requirements (auth + qualificação) em TODOS os
+ * documentos.
+ *
+ * NÃO é um segundo sujeito: o CHECK `envelope_subject_xor` continua valendo
+ * (contractId|attachmentId|proposalId). A origem fica em `sourceAttachmentId`.
+ */
+export interface ExtraDocumentInput {
+  buffer: Buffer;
+  filename: string;
+  /** DealAttachment de onde o PDF veio (laudo de vistoria, etc.). */
+  sourceAttachmentId?: string | null;
 }
 
 export async function getMonthlySpendCents(orgId: string): Promise<number> {
@@ -172,6 +192,10 @@ async function createEnvelopeFromBuffer(input: {
   signerRoles?: SignerRoleOverride[];
   pdfBuffer: Buffer;
   filename: string;
+  /** Documentos EXTRA no mesmo envelope (laudo de vistoria junto do contrato).
+   *  Sem eles o fluxo é byte-a-byte o de sempre: 1 documento, 2 requirements
+   *  por signatário. */
+  extraDocuments?: ExtraDocumentInput[];
   /** Prefixo do path Blob ("envelopes/<id>/"). Usado pra organizar snapshots. */
   storageKeyPrefix: string;
   /** Credenciais ClickSign da org (resolvidas no entry-point). */
@@ -386,6 +410,58 @@ async function createEnvelopeFromBuffer(input: {
     const documentClicksignId = pickResourceId(docResp);
     if (!documentClicksignId) throw new Error("Resposta sem id de documento");
 
+    // Documentos EXTRA no mesmo envelope. `addDocument` é um POST numa coleção,
+    // então é chamável N vezes — a ClickSign devolve um id por documento e cada
+    // signatário assina todos sem custo adicional (a cobrança é por signatário).
+    const extras = input.extraDocuments ?? [];
+    const documentRows: Array<{
+      documentClicksignId: string;
+      kind: "primary" | "attachment";
+      filename: string;
+      sourceAttachmentId: string | null;
+      position: number;
+    }> = [
+      {
+        documentClicksignId,
+        kind: "primary",
+        filename,
+        sourceAttachmentId: attachmentId,
+        position: 0,
+      },
+    ];
+    for (const [i, extra] of extras.entries()) {
+      const extraResp = await addDocument(
+        {
+          envelopeId: clicksignEnvelopeId,
+          filename: extra.filename,
+          contentBase64: extra.buffer.toString("base64"),
+        },
+        creds
+      );
+      const extraId = pickResourceId(extraResp);
+      if (!extraId) {
+        throw new Error(`Resposta sem id do documento extra "${extra.filename}"`);
+      }
+      documentRows.push({
+        documentClicksignId: extraId,
+        kind: "attachment",
+        filename: extra.filename,
+        sourceAttachmentId: extra.sourceAttachmentId ?? null,
+        position: i + 1,
+      });
+    }
+
+    // Persistidas assim que os ids existem — antes dos requirements — pra que um
+    // envelope que morra no meio ainda deixe rastro de quais documentos subiram.
+    // `skipDuplicates` + o @@unique([envelopeId, documentClicksignId]) tornam o
+    // retry idempotente.
+    await prisma.envelopeDocument.createMany({
+      data: documentRows.map((d) => ({ ...d, envelopeId: envelope.id })),
+      skipDuplicates: true,
+    });
+
+    const documentIds = documentRows.map((d) => d.documentClicksignId);
+
     const signerIdMap = new Map<string, { signerId: string; reqIds: string[] }>();
     for (const localSigner of envelope.signers) {
       const signerResp = await addSigner(
@@ -411,16 +487,6 @@ async function createEnvelopeFromBuffer(input: {
       const signerId = pickResourceId(signerResp);
       if (!signerId) throw new Error("Resposta sem id de signer");
 
-      const authReq = await addRequirement(
-        {
-          envelopeId: clicksignEnvelopeId,
-          documentClicksignId,
-          signerClicksignId: signerId,
-          action: "provide_evidence",
-          auth: authMethod,
-        },
-        creds
-      );
       // Role já resolvido e persistido no row (input → override → default),
       // então o fallback abaixo é inalcançável na prática — o que é bom,
       // porque `EnvelopeSigner` NÃO persiste `subKind` (é transiente, resolvido
@@ -430,20 +496,36 @@ async function createEnvelopeFromBuffer(input: {
       const role: ClicksignRole =
         (localSigner.role as ClicksignRole | null) ??
         defaultRoleForSourceKind(localSigner.sourceKind);
-      const signReq = await addRequirement(
-        {
-          envelopeId: clicksignEnvelopeId,
-          documentClicksignId,
-          signerClicksignId: signerId,
-          action: "agree",
-          role,
-        },
-        creds
-      );
-      const reqIds = [
-        pickResourceId(authReq),
-        pickResourceId(signReq),
-      ].filter(Boolean) as string[];
+
+      // Requirements são POR (signatário × documento) — o par auth+agree se
+      // repete em cada documento do envelope. Com 1 documento (caso de sempre)
+      // isso é exatamente o comportamento anterior.
+      const reqIds: string[] = [];
+      for (const docId of documentIds) {
+        const authReq = await addRequirement(
+          {
+            envelopeId: clicksignEnvelopeId,
+            documentClicksignId: docId,
+            signerClicksignId: signerId,
+            action: "provide_evidence",
+            auth: authMethod,
+          },
+          creds
+        );
+        const signReq = await addRequirement(
+          {
+            envelopeId: clicksignEnvelopeId,
+            documentClicksignId: docId,
+            signerClicksignId: signerId,
+            action: "agree",
+            role,
+          },
+          creds
+        );
+        for (const id of [pickResourceId(authReq), pickResourceId(signReq)]) {
+          if (id) reqIds.push(id);
+        }
+      }
       signerIdMap.set(localSigner.id, { signerId, reqIds });
     }
 
@@ -626,6 +708,7 @@ export async function sendEnvelopeForContract(input: SendEnvelopeInput) {
     witnessScope: pipelineKind(moduleForDealKind(contract.deal?.pipeline?.kind)),
     pdfBuffer,
     filename,
+    extraDocuments: input.extraDocuments,
     storageKeyPrefix: `envelopes/${contract.id}/`,
     creds,
     settings,

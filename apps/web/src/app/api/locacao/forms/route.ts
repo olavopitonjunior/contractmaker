@@ -11,7 +11,9 @@ import { formPublicPath } from "@/lib/forms/form-url";
 import {
   LOCACAO_SCHEMA_TYPE,
   LOCACAO_COMERCIAL_SCHEMA_TYPE,
+  comissaoLocacaoSchema,
 } from "@/lib/forms/validation-locacao";
+import { resolveRequiredPresetSnapshot } from "@/lib/forms/required-snapshot";
 
 // Janela do soft-block de título repetido (recriação manual de card).
 const DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
@@ -23,15 +25,10 @@ export const dynamic = "force-dynamic";
 // only) e cria SalesForm(schemaType locação) + Deal(kind=locacao) no 1º stage do
 // pipeline de locação. O cliente preenche partes/imóvel/aluguel/garantia em
 // /f/[token]; o finalize gera o contrato (ver [token]/route.ts).
-const angariadorSchema = z.object({
-  party_id: z.string().optional(),
-  nome: z.string().min(2),
-  forma_comissao: z.enum(["percentual", "valor_fixo"]).default("percentual"),
-  percentual: z.number().min(0).max(100).optional(),
-  valor_fixo: z.number().min(0).optional(),
-  meses_comissao: z.number().int().min(0).optional(),
-});
-
+//
+// A comissão (corretagem + angariadores) usa o MESMO schema do dataJson
+// (`comissaoLocacaoSchema`) — a duplicata inline divergiu quando o angariador
+// ganhou qualificação (cpf/cnpj/creci/contato) e derrubava esses campos no 422.
 const bodySchema = z.object({
   finalidade: z.enum(["residencial", "comercial"]).default("residencial"),
   title: z.string().optional(),
@@ -53,12 +50,7 @@ const bodySchema = z.object({
       repasse_garantido_meses: z.number().int().min(0).optional(),
     })
     .optional(),
-  comissao: z
-    .object({
-      taxa_locacao_percent: z.number().min(0).max(100).default(0),
-      angariadores: z.array(angariadorSchema).default([]),
-    })
-    .optional(),
+  comissao: comissaoLocacaoSchema.optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -134,6 +126,10 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // Congela o preset de obrigatoriedade vigente (ver required-snapshot.ts):
+      // trocar a config depois não muda as exigências deste link.
+      const requiredPreset = await resolveRequiredPresetSnapshot(ctx.orgId, schemaType);
+
       // Título gravado TRIMADO — o dup-check compara contra o armazenado.
       const result = await prisma.$transaction(async (tx) => {
         const form = await tx.salesForm.create({
@@ -142,6 +138,7 @@ export async function POST(req: NextRequest) {
             title: trimmedTitle || null,
             schemaType,
             status: "rascunho",
+            requiredPreset,
             // Config fiscal/comissão (operador-only) já pré-gravada — o auto-save do
             // cliente faz deep-merge e não toca essas chaves.
             dataJson: {

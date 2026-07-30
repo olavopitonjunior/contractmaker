@@ -4,14 +4,27 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import { ChevronLeft, FileText } from "lucide-react";
+import { ChevronLeft, FileText, Pencil } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { proposalStatusView, proposalEventLabel } from "@/lib/proposals/status-view";
+import { EDITABLE_STATUSES } from "@/lib/proposals/status-sets";
 import { useProposalPolling } from "@/hooks/useProposalPolling";
 import { ProposalProgressTimeline } from "./ProposalProgressTimeline";
 import { ProposalAssigneeControl } from "./ProposalAssigneeControl";
 import { ProposalActionBar } from "./ProposalActionBar";
+import { ProposalDocumentCard } from "./ProposalDocumentCard";
 import type { ProposalPermissions } from "./ProposalRowActions";
 
 // Rótulo/cor por signatário. Duas fontes de vocabulário DISJUNTAS:
@@ -91,6 +104,7 @@ export function ProposalDetailClient({
   attachments,
   members,
   permissions,
+  sentSnapshotHtml,
 }: {
   proposal: Proposal;
   signers: { id: string; name: string; role: string; channel: string; status: string }[];
@@ -98,9 +112,17 @@ export function ProposalDetailClient({
   attachments: { id: string; filename: string; category: string | null; url: string }[];
   members: { id: string; name: string }[];
   permissions: ProposalPermissions;
+  /** Documento congelado no envio (null enquanto a proposta não saiu). */
+  sentSnapshotHtml: string | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [contactEdit, setContactEdit] = useState<null | {
+    signerId: string;
+    name: string;
+    email: string;
+    phone: string;
+  }>(null);
 
   // Tempo real: pulla o status enquanto a proposta está viva; refresh do server
   // component quando muda (webhook → DB → aqui em ~3.5s).
@@ -120,9 +142,20 @@ export function ProposalDetailClient({
   const liveStatus = live?.status ?? proposal.status;
   const sv = proposalStatusView(liveStatus);
   const pz = prazoLabel(proposal.validUntil);
+  // Derivado do status AO VIVO (não do prop do servidor): se a proposta for
+  // enviada em outra aba, o botão de editar some junto com o preview — mesmo
+  // conjunto que o PATCH e o /preview aceitam no servidor.
+  const canEdit = EDITABLE_STATUSES.has(liveStatus);
 
-  // Ações por-signatário (no EnvelopeSigner do envelope em curso).
-  async function signerAction(signerId: string, kind: "resend" | "remove" | "edit") {
+  // Ações por-signatário (no EnvelopeSigner do envelope em curso). "contact" é
+  // alimentada pelo diálogo abaixo — dois `window.prompt` em sequência não davam
+  // contexto (qual
+  // signatário?), não validavam nada e um Esc no 2º já tinha coletado o 1º.
+  async function signerAction(
+    signerId: string,
+    kind: "resend" | "remove" | "contact",
+    patchBody?: Record<string, string>
+  ) {
     let url = `/api/proposals/${proposal.id}/signers/${signerId}`;
     let method = "PATCH";
     let body: string | undefined;
@@ -133,13 +166,8 @@ export function ProposalDetailClient({
       if (!window.confirm("Remover este signatário da proposta?")) return;
       method = "DELETE";
     } else {
-      const email = window.prompt("Novo e-mail (deixe em branco pra não alterar):") ?? "";
-      const phone = window.prompt("Novo WhatsApp/telefone (deixe em branco pra não alterar):") ?? "";
-      const patch: Record<string, string> = {};
-      if (email.trim()) patch.email = email.trim();
-      if (phone.trim()) patch.phone = phone.trim();
-      if (Object.keys(patch).length === 0) return;
-      body = JSON.stringify(patch);
+      if (!patchBody || Object.keys(patchBody).length === 0) return;
+      body = JSON.stringify(patchBody);
     }
     setBusy(true);
     try {
@@ -151,8 +179,13 @@ export function ProposalDetailClient({
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
       toast.success(
-        kind === "resend" ? "Notificação reenviada" : kind === "remove" ? "Signatário removido" : "Contato atualizado"
+        kind === "resend"
+          ? "Notificação reenviada"
+          : kind === "remove"
+            ? "Signatário removido"
+            : "Contato atualizado"
       );
+      setContactEdit(null);
       router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro na ação");
@@ -185,15 +218,24 @@ export function ProposalDetailClient({
             </span>
           </div>
         </div>
-        <ProposalActionBar
-          proposal={{
-            id: proposal.id,
-            status: liveStatus,
-            instrument: proposal.instrument,
-            convertedDealId: proposal.convertedDealId,
-          }}
-          permissions={permissions}
-        />
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {canEdit && (
+            <Button variant="outline" asChild>
+              <Link href={`/pipeline/propostas/${proposal.id}/editar`}>
+                <Pencil className="mr-1.5 h-4 w-4" /> Editar proposta
+              </Link>
+            </Button>
+          )}
+          <ProposalActionBar
+            proposal={{
+              id: proposal.id,
+              status: liveStatus,
+              instrument: proposal.instrument,
+              convertedDealId: proposal.convertedDealId,
+            }}
+            permissions={permissions}
+          />
+        </div>
       </div>
 
       {/* Linha do tempo */}
@@ -330,7 +372,18 @@ export function ProposalDetailClient({
                           <button className="text-primary hover:underline" onClick={() => signerAction(s.id, "resend")} disabled={busy}>
                             Reenviar
                           </button>
-                          <button className="text-primary hover:underline" onClick={() => signerAction(s.id, "edit")} disabled={busy}>
+                          <button
+                            className="text-primary hover:underline"
+                            onClick={() =>
+                              setContactEdit({
+                                signerId: s.id,
+                                name: s.name,
+                                email: "",
+                                phone: "",
+                              })
+                            }
+                            disabled={busy}
+                          >
                             Editar contato
                           </button>
                           <button className="text-destructive hover:underline" onClick={() => signerAction(s.id, "remove")} disabled={busy}>
@@ -346,6 +399,13 @@ export function ProposalDetailClient({
           })()}
         </Card>
       </div>
+
+      {/* Documento — preview antes do envio, snapshot congelado depois */}
+      <ProposalDocumentCard
+        proposalId={proposal.id}
+        editable={canEdit}
+        snapshotHtml={sentSnapshotHtml}
+      />
 
       {/* Documentos */}
       {attachments.length > 0 && (
@@ -383,6 +443,66 @@ export function ProposalDetailClient({
           </ol>
         )}
       </Card>
+
+      {/* Editar contato do signatário */}
+      <Dialog open={contactEdit != null} onOpenChange={(o) => !o && setContactEdit(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar contato</DialogTitle>
+            <DialogDescription>
+              {contactEdit?.name} — preencha só o que quiser alterar. Campos em
+              branco ficam como estão.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label htmlFor="signer-email">E-mail</Label>
+              <Input
+                id="signer-email"
+                type="email"
+                value={contactEdit?.email ?? ""}
+                onChange={(e) =>
+                  setContactEdit((c) => (c ? { ...c, email: e.target.value } : c))
+                }
+                placeholder="novo@email.com"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="signer-phone">WhatsApp / telefone</Label>
+              <Input
+                id="signer-phone"
+                inputMode="tel"
+                value={contactEdit?.phone ?? ""}
+                onChange={(e) =>
+                  setContactEdit((c) => (c ? { ...c, phone: e.target.value } : c))
+                }
+                placeholder="(11) 98765-4321"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setContactEdit(null)} disabled={busy}>
+              Cancelar
+            </Button>
+            <Button
+              disabled={
+                busy ||
+                !contactEdit ||
+                (!contactEdit.email.trim() && !contactEdit.phone.trim())
+              }
+              onClick={() => {
+                if (!contactEdit) return;
+                const patch: Record<string, string> = {};
+                if (contactEdit.email.trim()) patch.email = contactEdit.email.trim();
+                if (contactEdit.phone.trim()) patch.phone = contactEdit.phone.trim();
+                void signerAction(contactEdit.signerId, "contact", patch);
+              }}
+            >
+              Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

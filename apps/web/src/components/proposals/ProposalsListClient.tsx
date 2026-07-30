@@ -9,9 +9,13 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { proposalStatusView, initials } from "@/lib/proposals/status-view";
 import { OPEN_STATUSES } from "@/lib/proposals/status-sets";
-import { NovaPropostaDialog } from "./NovaPropostaDialog";
+import { Button } from "@/components/ui/button";
+import { Plus } from "lucide-react";
 import { ProposalFilters, type ListFilters } from "./ProposalFilters";
 import { ProposalRowActions, type ProposalPermissions } from "./ProposalRowActions";
+import { usePermissions } from "@/hooks/usePermissions";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { NO_PERMISSION_HINT } from "@/lib/security/rbac/ui";
 
 export interface ProposalRow {
   id: string;
@@ -72,6 +76,12 @@ export function ProposalsListClient({
   kpis: { open: number; converted: number; expiring: number };
 }) {
   const router = useRouter();
+  // Gating de CTA (feature Gerente) — libera enquanto carrega pra não piscar.
+  // A página `/pipeline/propostas/nova` já barra no servidor (redirect); aqui é
+  // só não oferecer o caminho a quem não pode criar.
+  const perms = usePermissions();
+  const canCreateProposal =
+    perms.loading || perms.can(PERMISSION.PROPOSAL_CREATE);
 
   // Tempo real leve: enquanto houver proposta em aberto, dá refresh no server
   // component a cada 10s (o webhook já atualizou o DB). Sem polling por-proposta.
@@ -95,7 +105,21 @@ export function ProposalsListClient({
             Ofertas antes do negócio — envie, acompanhe a assinatura e converta em um clique.
           </p>
         </div>
-        <NovaPropostaDialog tipo={tipo} />
+        {/* <Link>, não onClick: a criação virou PÁGINA justamente pra poder ser
+            aberta em nova guia (ctrl/cmd+clique) e sobreviver a um clique fora.
+            Sem permissão vira botão desabilitado — `disabled` num <a> não
+            desabilita nada, então o Link some junto. */}
+        {canCreateProposal ? (
+          <Button size="sm" asChild>
+            <Link href={`/pipeline/propostas/nova?tipo=${tipo}`}>
+              <Plus className="mr-1 h-4 w-4" /> Nova proposta
+            </Link>
+          </Button>
+        ) : (
+          <Button size="sm" disabled title={NO_PERMISSION_HINT}>
+            <Plus className="mr-1 h-4 w-4" /> Nova proposta
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-3 gap-3 sm:max-w-xl">

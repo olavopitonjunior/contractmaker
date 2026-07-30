@@ -5,6 +5,8 @@ import {
   getContractOrgId,
   resolveUserOrgId,
   requireOrgAdmin,
+  contractOrgScopeWhere,
+  dealOrgScopeWhere,
 } from "../org-scope";
 import { getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
@@ -129,5 +131,50 @@ describe("requireOrgAdmin", () => {
     mockPrisma.orgMembership.findFirst.mockResolvedValueOnce(null);
     const r = await requireOrgAdmin("super-admin");
     expect(r.ok).toBe(true);
+  });
+});
+
+// ============================================================================
+// Filtros de escopo pra Server Component: o guard vive DENTRO da query, então
+// cross-org e inexistente viram o mesmo `null` → notFound().
+// ============================================================================
+describe("contractOrgScopeWhere", () => {
+  it("amarra o contrato à org pelo caminho deal.pipeline", () => {
+    expect(contractOrgScopeWhere("c1", "org-A")).toEqual({
+      id: "c1",
+      deal: { pipeline: { orgId: "org-A" } },
+    });
+  });
+
+  it("não usa template.orgId — contrato importado tem templateId null", () => {
+    const where = contractOrgScopeWhere("c1", "org-A") as Record<string, unknown>;
+    expect(where.template).toBeUndefined();
+    expect(where.orgId).toBeUndefined();
+  });
+
+  it("o filtro é o guard: com a org errada a query não casa o contrato", async () => {
+    // Simula o Prisma respeitando o where — é o comportamento que a page
+    // depende (findFirst devolve null e a page chama notFound()).
+    const row = { id: "c1", deal: { pipeline: { orgId: "org-A" } } };
+    mockPrisma.contract.findFirst = vi.fn(async (args: any) =>
+      args.where.deal.pipeline.orgId === "org-A" ? row : null
+    ) as never;
+
+    expect(
+      await mockPrisma.contract.findFirst({ where: contractOrgScopeWhere("c1", "org-A") })
+    ).toEqual(row);
+    expect(
+      await mockPrisma.contract.findFirst({ where: contractOrgScopeWhere("c1", "org-B") })
+    ).toBeNull();
+  });
+});
+
+describe("dealOrgScopeWhere", () => {
+  it("amarra o deal à org pelo pipeline (Deal não tem orgId direto)", () => {
+    expect(dealOrgScopeWhere("d1", "org-A")).toEqual({
+      id: "d1",
+      pipeline: { orgId: "org-A" },
+    });
+    expect((dealOrgScopeWhere("d1", "org-A") as Record<string, unknown>).orgId).toBeUndefined();
   });
 });

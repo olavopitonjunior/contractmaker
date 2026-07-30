@@ -23,7 +23,7 @@ Feature completa em produção desde 2026-07-24 (PRs #172 núcleo · #179 WhatsA
 ## Canais (`lib/surveys/channels.ts`)
 
 - **email**: `sendEmail` com branding da org; opt-out no rodapé.
-- **whatsapp** (via Newton): cria `NewtonRequest` one-shot com `dedupeTag @unique` (`[survey_invite][id]` / `[survey_reminder][id][n]`); o `ask` instrui o agente a mandar UMA mensagem e marcar `fulfilled`. Telefone: partes usam `mobile_phone` (`telefone` legado) → `normalizeBrPhone` → E.164 sem `+`. **Janela 7h–22h SP**: fora dela o envio fica `deferred` (invite pending; cron envia quando abrir). **Fallback automático pra email** quando inviável (Newton OFF, sem deal, telefone inválido). Gate: `vendas.newton`/`locacao.newton` (default OFF).
+- **whatsapp** (via Newton): cria `NewtonRequest` one-shot com `dedupeTag @unique` (`[survey_invite][id]` / `[survey_reminder][id][n]`); o `ask` instrui o agente a mandar UMA mensagem e marcar `fulfilled`. Telefone: partes usam `mobile_phone` (`telefone` legado) → `normalizeBrPhone` → E.164 sem `+`; o **corretor** usa `User.phone` (era `null` hardcoded em `recipients.ts` até 2026-07-28 — o papel `corretor` nunca saía por WhatsApp, caía sempre no fallback de e-mail). Quem não tem telefone cadastrado segue caindo no fallback. **Janela 7h–22h SP**: fora dela o envio fica `deferred` (invite pending; cron envia quando abrir). **Fallback automático pra email** quando inviável (Newton OFF, sem deal, telefone inválido). Gate: `vendas.newton`/`locacao.newton` (default OFF).
 - **manual**: gera link copiável (`/s/[token]`).
 
 ## Régua
