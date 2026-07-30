@@ -417,6 +417,7 @@ export function LocacaoDealDetail({
               contractId={contract.id}
               contractStatus={contract.status}
               data={extractLeaseSignerData(contract.dataJson)}
+              leaseContractId={lease?.id}
             />
           ) : (
             <Card>

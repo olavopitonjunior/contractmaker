@@ -14,7 +14,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, ArrowLeft, Plus, Send, Trash2, UsersRound, Wallet } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  ClipboardCheck,
+  Plus,
+  Send,
+  Trash2,
+  UsersRound,
+  Wallet,
+} from "lucide-react";
 import {
   CLICKSIGN_ROLE_OPTIONS,
   defaultRoleForSourceKind,
@@ -71,6 +80,17 @@ interface SendLeaseEnvelopeDialogProps {
   variant?: LeaseEnvelopeVariant;
   /** Nome da org pra pré-preencher a linha da imobiliária (variant administracao). */
   imobiliaria?: { nome?: string };
+  /** LeaseContract do deal. Habilita anexar o laudo de vistoria no MESMO
+   *  envelope (mesma cobrança por signatário). Ausente = seção não aparece. */
+  leaseContractId?: string;
+}
+
+/** Vistoria com laudo pronto, candidata a entrar no envelope do contrato. */
+interface InspectionOption {
+  id: string;
+  tipo: string;
+  status: string;
+  laudoPdfUrl: string | null;
 }
 
 type RowKind =
@@ -289,6 +309,7 @@ export function SendLeaseEnvelopeDialog({
   onSent,
   variant = "locacao",
   imobiliaria,
+  leaseContractId,
 }: SendLeaseEnvelopeDialogProps) {
   const [submitting, setSubmitting] = useState(false);
   const [orderEnabled, setOrderEnabled] = useState(false);
@@ -297,6 +318,8 @@ export function SendLeaseEnvelopeDialog({
   const [sigConfig, setSigConfig] = useState<SignatureConfig | null>(null);
   const [authMethod, setAuthMethod] = useState("email");
   const [witnessPickerOpen, setWitnessPickerOpen] = useState(false);
+  const [inspections, setInspections] = useState<InspectionOption[]>([]);
+  const [selectedInspections, setSelectedInspections] = useState<string[]>([]);
 
   useEffect(() => {
     if (!open) return;
@@ -304,6 +327,23 @@ export function SendLeaseEnvelopeDialog({
     setSubmitting(false);
     setOrderEnabled(false);
     setStep("edit");
+    setInspections([]);
+    setSelectedInspections([]);
+
+    // Laudos prontos deste contrato: podem viajar como documento EXTRA do mesmo
+    // envelope. Só na locação — a administração não tem vistoria pra anexar.
+    if (leaseContractId && variant === "locacao") {
+      fetch(
+        `/api/locacao/inspections?status=laudo_gerado&leaseContractId=${encodeURIComponent(leaseContractId)}`
+      )
+        .then((r) => (r.ok ? r.json() : null))
+        .then((body: { inspections?: InspectionOption[] } | null) => {
+          setInspections(
+            (body?.inspections ?? []).filter((i) => Boolean(i.laudoPdfUrl))
+          );
+        })
+        .catch(() => {});
+    }
 
     fetch("/api/signatures/config")
       .then((r) => (r.ok ? r.json() : null))
@@ -422,7 +462,13 @@ export function SendLeaseEnvelopeDialog({
       const res = await fetch(`/api/contracts/${contractId}/envelopes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ authMethod, signers }),
+        body: JSON.stringify({
+          authMethod,
+          signers,
+          ...(selectedInspections.length > 0
+            ? { inspectionIds: selectedInspections }
+            : {}),
+        }),
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
@@ -504,6 +550,41 @@ export function SendLeaseEnvelopeDialog({
               </Button>
             </div>
 
+            {inspections.length > 0 && (
+              <div className="rounded-md border bg-muted/30 p-3 space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <ClipboardCheck className="h-4 w-4" />
+                  <span className="text-sm font-medium">
+                    Anexar laudo de vistoria
+                  </span>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Vai no MESMO envelope do contrato: os signatários assinam os
+                  dois documentos e a cobrança por assinante não muda.
+                </p>
+                {inspections.map((i) => (
+                  <label
+                    key={i.id}
+                    className="flex items-center gap-2 text-sm cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedInspections.includes(i.id)}
+                      onChange={(e) =>
+                        setSelectedInspections((prev) =>
+                          e.target.checked
+                            ? [...prev, i.id]
+                            : prev.filter((id) => id !== i.id)
+                        )
+                      }
+                      className="h-4 w-4 rounded border-input accent-primary"
+                    />
+                    <span>Laudo de vistoria ({i.tipo})</span>
+                  </label>
+                ))}
+              </div>
+            )}
+
             {sigConfig && !sigConfig.configured && (
               <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 flex items-start gap-2">
                 <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
@@ -578,7 +659,14 @@ export function SendLeaseEnvelopeDialog({
             </div>
           </div>
         ) : (
-          <ReviewStep rows={rows} orderEnabled={orderEnabled} costCents={costCents} />
+          <ReviewStep
+            rows={rows}
+            orderEnabled={orderEnabled}
+            costCents={costCents}
+            extraDocuments={inspections
+              .filter((i) => selectedInspections.includes(i.id))
+              .map((i) => `Laudo de vistoria (${i.tipo})`)}
+          />
         )}
 
         <DialogFooter>
@@ -731,15 +819,24 @@ function ReviewStep({
   rows,
   orderEnabled,
   costCents,
+  extraDocuments = [],
 }: {
   rows: EditableRow[];
   orderEnabled: boolean;
   costCents: number;
+  /** Documentos além do contrato que vão no mesmo envelope. */
+  extraDocuments?: string[];
 }) {
   const roleLabel = (role: ClicksignRole) =>
     ROLE_OPTIONS.find((o) => o.value === role)?.label ?? role;
   return (
     <div className="space-y-3 py-1">
+      {extraDocuments.length > 0 && (
+        <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+          <span className="font-medium">Documentos no envelope:</span>{" "}
+          {["Contrato", ...extraDocuments].join(" + ")}
+        </div>
+      )}
       <div className="rounded-lg border divide-y">
         {rows.map((r, idx) => (
           <div key={r.rowId} className="flex items-start gap-3 px-4 py-3">

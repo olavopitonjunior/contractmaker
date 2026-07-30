@@ -58,14 +58,36 @@ export interface ProcessResult {
  * no fechamento normal quanto na recuperação por reentrega.
  */
 function triggerSignedPdfDownload(
-  envelope: { id: string; orgId: string; clicksignId: string | null },
+  envelope: {
+    id: string;
+    orgId: string;
+    clicksignId: string | null;
+    documentClicksignId: string | null;
+  },
   payload: WebhookPayload
 ): void {
   const fromPayload = getSignedDocumentUrlFromPayload(payload);
-  if (fromPayload) {
+  // A URL do payload (compat v2) é do documento DO EVENTO. Num envelope com
+  // vários documentos ela pode ser a de um documento EXTRA — gravá-la como
+  // `signedDocumentUrl` trocaria o contrato assinado pelo anexo. Só confiamos
+  // nela quando o evento é do documento primary (ou quando não dá pra saber, em
+  // envelope antigo sem `documentClicksignId`).
+  const eventDocKey = getDocumentKeyFromPayload(payload);
+  const isPrimaryEvent =
+    !eventDocKey ||
+    !envelope.documentClicksignId ||
+    eventDocKey === envelope.documentClicksignId;
+  if (fromPayload && isPrimaryEvent) {
     waitUntil(downloadSignedPdf(envelope.id, fromPayload));
   } else if (envelope.clicksignId) {
-    waitUntil(resolveAndDownload(envelope.id, envelope.orgId, envelope.clicksignId));
+    waitUntil(
+      resolveAndDownload(
+        envelope.id,
+        envelope.orgId,
+        envelope.clicksignId,
+        envelope.documentClicksignId
+      )
+    );
   }
 }
 
@@ -134,8 +156,18 @@ export async function processClickSignWebhookPayload(
         where: { clicksignId: clicksignEnvelopeId, ...orgScope },
       })
     : documentKey
-      ? await prisma.envelope.findFirst({
-          where: { documentClicksignId: documentKey, ...orgScope },
+      ? // O `document.key` pode ser o do documento PRIMARY (coluna escalar, e
+        // único caminho pros envelopes anteriores ao EnvelopeDocument) ou o de
+        // um documento EXTRA do mesmo envelope. Sem o segundo OR, um evento do
+        // laudo num envelope unificado caía em `unknownEnvelope`.
+        await prisma.envelope.findFirst({
+          where: {
+            ...orgScope,
+            OR: [
+              { documentClicksignId: documentKey },
+              { documents: { some: { documentClicksignId: documentKey } } },
+            ],
+          },
         })
       : null;
   if (!envelope) {
@@ -362,11 +394,19 @@ export async function resolveSigner(
   return candidates.find((s) => !skip.includes(s.status)) ?? candidates[0];
 }
 
-/** Lookup signed_file_url via /documents quando o webhook v3 não traz a URL. */
+/**
+ * Lookup signed_file_url via /documents quando o webhook v3 não traz a URL.
+ *
+ * `primaryDocumentId` é o documento SUJEITO do envelope: num envelope com vários
+ * documentos (contrato + laudo de vistoria) o primeiro da lista remota pode ser
+ * o extra, e `persistSignedPdf` grava o que recebe como o assinado principal.
+ * Os extras são baixados depois, dentro de `persistSignedPdf`.
+ */
 async function resolveAndDownload(
   envelopeId: string,
   orgId: string,
-  clicksignId: string
+  clicksignId: string,
+  primaryDocumentId?: string | null
 ) {
   try {
     const creds = await resolveClickSignCreds(orgId);
@@ -374,9 +414,17 @@ async function resolveAndDownload(
     const docs = await listEnvelopeDocuments(clicksignId, creds);
     const docsData = (docs as { data?: unknown }).data;
     if (!Array.isArray(docsData)) return;
-    for (const doc of docsData as Array<{
+    const list = docsData as Array<{
+      id?: string;
       links?: { files?: { signed?: string; original?: string } };
-    }>) {
+    }>;
+    const ordered = primaryDocumentId
+      ? [
+          ...list.filter((d) => d.id === primaryDocumentId),
+          ...list.filter((d) => d.id !== primaryDocumentId),
+        ]
+      : list;
+    for (const doc of ordered) {
       const url = doc.links?.files?.signed ?? doc.links?.files?.original;
       if (url) {
         await downloadSignedPdf(envelopeId, url);

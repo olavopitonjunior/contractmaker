@@ -2693,6 +2693,7 @@ model Envelope {
   org        Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
   signers    EnvelopeSigner[]
   events     EnvelopeEvent[]
+  documents  EnvelopeDocument[]
 
   @@unique([proposalId, via])
   @@index([contractId])
@@ -2701,6 +2702,44 @@ model Envelope {
   @@index([dealId])
   @@index([orgId, status])
   @@index([status, updatedAt])
+}
+
+// Documentos de UM envelope ClickSign. A v3 aceita N documentos por envelope e
+// cobra POR SIGNATÁRIO (não por documento) — então contrato + laudo de vistoria
+// no mesmo envelope custam metade de dois envelopes separados.
+//
+// `Envelope.documentClicksignId` PERMANECE como o documento `primary` (compat:
+// envelopes criados antes desta tabela não têm rows aqui e continuam lidos pela
+// coluna escalar). O CHECK `envelope_subject_xor` NÃO muda: o sujeito do
+// envelope segue sendo um só (contrato | anexo | proposta); os documentos
+// `attachment` são carga extra do mesmo envelope, não um segundo sujeito.
+model EnvelopeDocument {
+  id                  String   @id @default(cuid())
+  envelopeId          String
+  // `data.id` do documento na ClickSign (o mesmo valor que chega no webhook
+  // como `document.key`).
+  documentClicksignId String
+  // "primary" = o sujeito do envelope (contrato/anexo/proposta).
+  // "attachment" = documento EXTRA anexado ao mesmo envelope.
+  kind                String   @default("primary")
+  // DealAttachment de origem quando kind="attachment" (laudo de vistoria, etc.).
+  // Escalar sem FK de propósito: o documento é um SNAPSHOT enviado à ClickSign e
+  // não pode sumir do histórico do envelope se o anexo for apagado da pasta.
+  sourceAttachmentId  String?
+  filename            String
+  // PDF assinado DESTE documento, gravado no close (o do primary continua
+  // espelhado em `Envelope.signedDocumentUrl`).
+  signedPdfUrl        String?
+  position            Int      @default(0)
+  createdAt           DateTime @default(now())
+
+  envelope Envelope @relation(fields: [envelopeId], references: [id], onDelete: Cascade)
+
+  @@unique([envelopeId, documentClicksignId])
+  @@index([envelopeId])
+  // Lookup do webhook: evento de um documento EXTRA traz o `document.key` dele,
+  // que não bate com `Envelope.documentClicksignId`.
+  @@index([documentClicksignId])
 }
 
 model EnvelopeSigner {

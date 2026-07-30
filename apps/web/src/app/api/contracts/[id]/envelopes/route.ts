@@ -13,6 +13,10 @@ import {
   AuthMethodNotAllowedError,
 } from "@/lib/clicksign/account";
 import { buildEnvelopeSendPreview } from "@/lib/clicksign/preview";
+import {
+  collectInspectionExtraDocuments,
+  linkInspectionsToEnvelope,
+} from "@/lib/locacao/inspection-signature";
 import { requireApproval, approvalResponse } from "@/lib/api/intents";
 
 export const runtime = "nodejs";
@@ -90,6 +94,10 @@ const sendSchema = z.object({
     )
     .max(30)
     .optional(),
+  // Vistorias cujo laudo vai JUNTO no mesmo envelope (locação). A ClickSign
+  // cobra por signatário, não por documento — anexar o laudo aqui evita o 2º
+  // envelope (e a 2ª cobrança por assinante) do envio avulso.
+  inspectionIds: z.array(z.string().min(1).max(40)).max(5).optional(),
 });
 
 export async function GET(
@@ -141,7 +149,7 @@ export async function POST(
 
   const contract = await prisma.contract.findFirst({
     where: { id: params.id, deal: { pipeline: { orgId: ctx.orgId } } },
-    select: { id: true, status: true },
+    select: { id: true, status: true, dealId: true },
   });
   if (!contract) {
     return NextResponse.json(
@@ -218,6 +226,25 @@ export async function POST(
     return approvalResponse(result);
   }
 
+  // Laudos de vistoria que viajam no MESMO envelope (locação). Resolvidos
+  // server-side a partir dos ids: o cliente não escolhe arquivo, só a vistoria —
+  // o helper valida org + mesmo deal + laudo pronto. Exclusivo do caminho de
+  // sessão: o bearer (Newton) envia o que foi aprovado no preview.
+  let extraDocuments;
+  let inspectionIds: string[] = [];
+  if (parsed.data.inspectionIds && parsed.data.inspectionIds.length > 0) {
+    const collected = await collectInspectionExtraDocuments({
+      orgId: ctx.orgId,
+      dealId: contract.dealId,
+      inspectionIds: parsed.data.inspectionIds,
+    });
+    if (!collected.ok) {
+      return NextResponse.json({ error: collected.error }, { status: 422 });
+    }
+    extraDocuments = collected.documents;
+    inspectionIds = collected.inspectionIds;
+  }
+
   // Session: comportamento atual. Passa signerRoles (papéis "Assina como" +
   // ordem escolhidos na popup) — sem isso o executor cairia no default por
   // sourceKind e ignoraria o que o usuário selecionou.
@@ -231,7 +258,12 @@ export async function POST(
         : null,
       signerRoles: parsed.data.signerRoles,
       signers: parsed.data.signers,
+      extraDocuments,
     });
+    // Só depois do envelope existir: as vistorias passam a apontar pra ele, e os
+    // ganchos de close/cancel (que resolvem por `Inspection.envelopeId`) fecham
+    // ou revertem o laudo junto com o contrato.
+    await linkInspectionsToEnvelope(inspectionIds, envelope.id);
     return NextResponse.json({ envelope }, { status: 201 });
   } catch (err) {
     if (err instanceof ClickSignNotConfiguredError) {
