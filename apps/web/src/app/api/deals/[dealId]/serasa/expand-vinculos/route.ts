@@ -9,6 +9,8 @@ import { endpointInfo } from "@/lib/certidoes/endpoints";
 import { sanitizeSerasaPayload } from "@/lib/serasa/sanitize";
 import { isSerasaConfigured } from "@/lib/serasa/client";
 import { audit } from "@/lib/security/audit";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 /**
  * POST /api/deals/:dealId/serasa/expand-vinculos
@@ -68,6 +70,15 @@ export async function POST(
   if (deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente + DEAL_EDIT (consulta Serasa paga).
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: session.user.id,
+    orgId: org.id,
+    permission: PERMISSION.DEAL_EDIT,
+  });
+  if (denied) return denied;
 
   if (!isSerasaConfigured()) {
     return NextResponse.json(

@@ -24,6 +24,7 @@ import {
   AccountCapabilityDeniedError,
 } from "@/lib/security/rbac/guard";
 import { requireApproval, approvalResponse } from "@/lib/api/intents";
+import { guardDealScope } from "@/lib/deals/route-helpers";
 
 // Discriminated union igual ao /financeiro/charges/nova — extraído inline pra
 // evitar import circular; em refactor futuro mover para lib/asaas/zod-splits.ts
@@ -150,6 +151,16 @@ export async function POST(
   if (membership?.role === "sales" && deal.userId !== ctx.userId) {
     return NextResponse.json({ error: "Deal não encontrado" }, { status: 404 });
   }
+
+  // 4b. Escopo do gerente — ACRESCENTADO ao gate CHARGE_* acima, não o
+  // substitui: a permissão diz "pode cobrar", o escopo diz "deste negócio".
+  const denied = await guardDealScope({
+    dealId,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    via: ctx.via,
+  });
+  if (denied) return denied;
 
   // 5. Bearer → cria intent. Session → executa direto.
   const {
@@ -333,6 +344,15 @@ export async function GET(
   if (membership?.role === "sales" && deal.userId !== ctx.userId) {
     return NextResponse.json({ error: "Deal não encontrado" }, { status: 404 });
   }
+
+  // Escopo do gerente (lista de cobranças do negócio).
+  const denied = await guardDealScope({
+    dealId,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    via: ctx.via,
+  });
+  if (denied) return denied;
 
   const charges = await prisma.commissionCharge.findMany({
     where: { dealId, orgId: ctx.orgId },

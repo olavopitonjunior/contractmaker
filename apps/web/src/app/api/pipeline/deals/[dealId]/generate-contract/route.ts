@@ -5,6 +5,8 @@ import {
   generateContractForDeal,
   generateLocacaoContractForDeal,
 } from "@/lib/services/contract-generation";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -33,6 +35,16 @@ export async function POST(
     if (!deal) {
       return NextResponse.json({ error: "Deal not found" }, { status: 404 });
     }
+
+    // Cross-org + escopo do gerente + CONTRACT_CREATE. Esta rota não tinha
+    // checagem de org própria — o guard fecha as duas coisas.
+    const denied = await guardDealScope({
+      dealId: params.dealId,
+      userId: session.user.id,
+      orgId: org.id,
+      permission: PERMISSION.CONTRACT_CREATE,
+    });
+    if (denied) return denied;
 
     const generate =
       deal.kind === "locacao"

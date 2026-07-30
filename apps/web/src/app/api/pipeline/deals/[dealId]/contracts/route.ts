@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -50,6 +52,15 @@ export async function DELETE(
       { status: 403 }
     );
   }
+
+  // Escopo do gerente + CONTRACT_EDIT (apaga TODAS as versões do contrato).
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: session.user.id,
+    orgId: org.id,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return denied;
 
   if (deal.contracts.length === 0) {
     return NextResponse.json({ deleted: { contracts: 0, googleDocsTrashed: 0 } });

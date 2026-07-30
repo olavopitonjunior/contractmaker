@@ -9,6 +9,8 @@ import {
 } from "@/lib/api/require-auth";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import type { AgentEvent } from "@/lib/ai/types";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -55,6 +57,16 @@ export async function POST(
       { status: 403 }
     );
   }
+
+  // Escopo do gerente + CONTRACT_EDIT (a IA resolve editando o documento).
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    via: auth.ident.via,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return denied;
 
   if (comment.resolved) {
     return NextResponse.json(

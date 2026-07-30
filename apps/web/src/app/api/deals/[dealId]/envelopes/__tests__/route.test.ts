@@ -42,6 +42,13 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockGetUserOrg.mockResolvedValue(createMockOrg() as never);
   mockAuth.mockResolvedValue(createMockSession() as never);
+  // Escopo do gerente (guardDealScope): a rota busca o deal pra resolver
+  // criador/gerente. Default = deal da org do mock, criado pelo próprio user.
+  mockPrisma.deal.findUnique.mockResolvedValue({
+    userId: "user-1",
+    managerUserId: null,
+    pipeline: { orgId: "org-1" },
+  } as never);
 });
 
 function makeReq(body: unknown) {

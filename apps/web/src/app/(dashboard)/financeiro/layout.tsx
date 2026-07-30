@@ -11,6 +11,8 @@ import {
 } from "@/lib/asaas/account";
 import { AccountSwitcher } from "@/components/financeiro/AccountSwitcher";
 import { getEffectiveUserId } from "@/lib/auth/impersonation";
+import { getEffectivePermissions, can } from "@/lib/security/rbac/check";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -42,6 +44,19 @@ export default async function FinanceiroLayout({
   // (feature OFF) é redirecionado pra /locacao — antes de qualquer lookup Asaas.
   const modules = await getOrgModules(org.id);
   if (!isFeatureEnabled(modules, FEATURE.VENDAS_PAGADORIA)) redirect("/locacao");
+
+  // Defesa em profundidade (feature Gerente): usuário de visão restrita — vê só
+  // os deals atribuídos — sem NENHUMA leitura financeira não entra no módulo.
+  // Espelha o gate da sidebar; o par de chaves de escopo é o discriminador.
+  const effective = await getEffectivePermissions(effUserId, org.id);
+  const restricted =
+    can(effective, PERMISSION.DEAL_VIEW_ASSIGNED_ONLY) &&
+    !can(effective, PERMISSION.DEAL_VIEW_ALL);
+  const hasFinanceRead =
+    can(effective, PERMISSION.FINANCE_BALANCE_VIEW) ||
+    can(effective, PERMISSION.CHARGE_VIEW_ALL) ||
+    can(effective, PERMISSION.CHARGE_VIEW_OWN_DEALS_ONLY);
+  if (restricted && !hasFinanceRead) redirect("/pipeline");
 
   const h = await headers();
   const pathname = h.get("x-pathname") ?? "";

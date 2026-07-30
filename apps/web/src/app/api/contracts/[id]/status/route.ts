@@ -8,6 +8,8 @@ import {
 } from "@/lib/api/require-auth";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -60,6 +62,16 @@ export async function PATCH(
   if (contractOrgId !== apiAuth.org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente + CONTRACT_EDIT.
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: apiAuth.actor.effectiveUserId,
+    orgId: apiAuth.org.id,
+    via: apiAuth.ident.via,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return denied;
 
   if (contract.status === "aprovado") {
     return NextResponse.json(

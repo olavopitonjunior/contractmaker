@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { waitUntil } from "@vercel/functions";
 import { Prisma } from "@prisma/client";
+import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { DEAL_SOURCE_CHANNEL } from "@/lib/pipeline/source-channel";
 import {
@@ -11,8 +12,15 @@ import {
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { matchDealGroup } from "@/lib/newton/group-match";
+import { resolveManagerForCreate } from "@/lib/deals/manager";
 
 export const runtime = "nodejs";
+
+// Body opcional — a conversão v1 não exigia payload nenhum. Só o gerente
+// responsável (feature Gerente) entra aqui, sempre opcional.
+const bodySchema = z.object({
+  managerUserId: z.string().min(1).optional(),
+});
 
 /**
  * POST /api/leads/:leadId/convert-to-deal
@@ -29,6 +37,14 @@ export async function POST(
 ) {
   const apiAuth = await requireApiAuth(req, { scope: "deals:rw" });
   if (isAuthFailure(apiAuth)) return authFailureResponse(apiAuth);
+
+  const parsedBody = bodySchema.safeParse(await req.json().catch(() => ({})));
+  if (!parsedBody.success) {
+    return NextResponse.json(
+      { error: parsedBody.error.message },
+      { status: 400 }
+    );
+  }
 
   const lead = await prisma.lead.findUnique({
     where: { id: params.leadId },
@@ -57,6 +73,18 @@ export async function POST(
     );
   }
 
+  // Gerente responsável resolvido FORA da transação.
+  const manager = await resolveManagerForCreate(
+    apiAuth.org.id,
+    parsedBody.data.managerUserId
+  );
+  if (!manager.ok) {
+    return NextResponse.json(
+      { error: manager.error, message: manager.message },
+      { status: manager.status }
+    );
+  }
+
   const result = await prisma.$transaction(async (tx) => {
     const form = await tx.salesForm.create({
       data: {
@@ -73,6 +101,7 @@ export async function POST(
         stageId: pipeline.stages[0].id,
         userId: apiAuth.actor.effectiveUserId,
         formId: form.id,
+        managerUserId: manager.managerUserId,
         sourceChannel: DEAL_SOURCE_CHANNEL.LEAD,
         title: lead.title,
       },

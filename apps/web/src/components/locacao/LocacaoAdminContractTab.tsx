@@ -10,6 +10,9 @@ import { ContractEditorPage } from "@/components/contracts/ContractEditorPage";
 import { LeaseSignaturesTab } from "@/components/locacao/LeaseSignaturesTab";
 import type { LeaseSignerData } from "@/components/locacao/SendLeaseEnvelopeDialog";
 import { Building2, FileSignature, Loader2 } from "lucide-react";
+import { usePermissions } from "@/hooks/usePermissions";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { NO_PERMISSION_HINT } from "@/lib/security/rbac/ui";
 
 type ContractProp = React.ComponentProps<typeof ContractEditorPage>["contract"];
 type VersionsProp = React.ComponentProps<typeof ContractEditorPage>["versions"];
@@ -42,6 +45,10 @@ export function LocacaoAdminContractTab({
   imobiliariaNome,
 }: LocacaoAdminContractTabProps) {
   const router = useRouter();
+  const perms = usePermissions();
+  // Gating de CTA (feature Gerente) — libera enquanto carrega pra não piscar.
+  const canCreateContract =
+    perms.loading || perms.can(PERMISSION.CONTRACT_CREATE);
   const [generating, setGenerating] = useState(false);
   // Âncora da seção de assinatura — o CTA do banner de aprovado do editor rola
   // até aqui (senão o CTA default do ContractEditorPage levaria à tela de
@@ -84,7 +91,12 @@ export function LocacaoAdminContractTab({
             o(s) proprietário(s): taxa de administração, poderes de gestão,
             repasse e prestação de contas. Pode ser gerado a qualquer momento.
           </p>
-          <Button onClick={gerar} disabled={generating} className="mt-4">
+          <Button
+            onClick={gerar}
+            disabled={generating || !canCreateContract}
+            title={canCreateContract ? undefined : NO_PERMISSION_HINT}
+            className="mt-4"
+          >
             {generating ? (
               <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
             ) : (

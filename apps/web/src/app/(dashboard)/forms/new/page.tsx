@@ -11,6 +11,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import { Copy, ExternalLink, X } from "lucide-react";
 import { PartyLinksPanel } from "@/components/forms/PartyLinksPanel";
+import { ManagerSelect } from "@/components/deals/ManagerSelect";
 
 interface CorretorOption {
   id: string;
@@ -29,6 +30,9 @@ export default function NewFormPage() {
   const [corretorQuery, setCorretorQuery] = useState("");
   const [corretorOptions, setCorretorOptions] = useState<CorretorOption[]>([]);
   const [sendUpdates, setSendUpdates] = useState(true);
+  // Gerente responsável pelo negócio (obrigatório quando a org liga o toggle).
+  const [managerUserId, setManagerUserId] = useState<string | null>(null);
+  const [managerRequired, setManagerRequired] = useState(false);
   // Key por INTENÇÃO (mount / "Criar Outro"), não por clique: duplo-clique e
   // retry de rede replayam a mesma resposta 201 no servidor em vez de criar
   // um segundo form + deal.
@@ -74,6 +78,7 @@ export default function NewFormPage() {
           ? { corretorIds: corretores.map((c) => c.id) }
           : {}),
         ...(sendUpdates ? {} : { sendUpdates: false }),
+        ...(managerUserId ? { managerUserId } : {}),
         ...(force ? { force: true } : {}),
       }),
     });
@@ -81,6 +86,10 @@ export default function NewFormPage() {
   }
 
   async function handleCreate() {
+    if (managerRequired && !managerUserId) {
+      toast.error("Selecione o gerente responsável");
+      return;
+    }
     setLoading(true);
     try {
       let { res, data } = await postForm(idemKey, false);
@@ -118,7 +127,13 @@ export default function NewFormPage() {
         // Qualquer erro pode ter sido cacheado sob a key — rotaciona pra
         // próxima tentativa não replayar a resposta stale.
         setIdemKey(crypto.randomUUID());
-        toast.error(data.error || "Erro ao criar formulário");
+        // Fallback do gate server-side (org exige gerente e o client não sabia).
+        if (res.status === 422 && data?.error === "gerente_obrigatorio") {
+          setManagerRequired(true);
+          toast.error(data.message || "Selecione o gerente responsável");
+        } else {
+          toast.error(data.error || "Erro ao criar formulário");
+        }
       }
     } catch {
       setIdemKey(crypto.randomUUID());
@@ -237,6 +252,13 @@ export default function NewFormPage() {
             </p>
           </div>
 
+          <ManagerSelect
+            value={managerUserId}
+            onChange={setManagerUserId}
+            disabled={!!createdUrl}
+            onContextLoaded={(ctx) => setManagerRequired(ctx.managerRequired)}
+          />
+
           <div className="flex items-center justify-between border rounded-md p-3">
             <div>
               <p className="text-sm font-medium">Enviar atualizações do processo</p>
@@ -296,6 +318,7 @@ export default function NewFormPage() {
                   setTitle("");
                   setCorretores([]);
                   setSendUpdates(true);
+                  setManagerUserId(null);
                   // Nova intenção de criação → nova key de idempotência.
                   setIdemKey(crypto.randomUUID());
                 }}

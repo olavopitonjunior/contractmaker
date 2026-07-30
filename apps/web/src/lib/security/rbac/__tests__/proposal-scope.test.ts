@@ -43,6 +43,19 @@ describe("proposalScopeWhere — o filtro que evita IDOR", () => {
     });
   });
 
+  it("gerente (VIEW_OWN_ONLY + deals restritos) → ganha o braço do deal convertido", () => {
+    // Sem isso, a proposta que o gerente converteu em negócio dele sumiria da
+    // lista assim que outro corretor fosse o criador/responsável.
+    expect(proposalScopeWhere(eff("gerente", "g1"))).toEqual({
+      orgId: "org1",
+      OR: [
+        { userId: "g1" },
+        { responsibleUserId: "g1" },
+        { convertedDeal: { managerUserId: "g1" } },
+      ],
+    });
+  });
+
   it("role sem permissão de proposta → null (caller trata como 403)", () => {
     // vistoriador não tem nenhuma permissão de proposta.
     expect(proposalScopeWhere(eff("vistoriador"))).toBeNull();
@@ -81,6 +94,36 @@ describe("canAccessProposal — acesso a uma proposta específica", () => {
         effective: corretor,
         ownerUserId: "corretorB",
         responsibleUserId: "corretorC",
+      })
+    ).toBe(false);
+  });
+
+  it("gerente acessa proposta convertida no negócio em que é o gerente", () => {
+    const gerente = eff("gerente", "g1");
+    expect(
+      canAccessProposal({
+        effective: gerente,
+        ownerUserId: "corretorB",
+        convertedDealManagerUserId: "g1",
+      })
+    ).toBe(true);
+    expect(
+      canAccessProposal({
+        effective: gerente,
+        ownerUserId: "corretorB",
+        convertedDealManagerUserId: "g2",
+      })
+    ).toBe(false);
+  });
+
+  it("corretor NÃO ganha o braço do deal convertido (não tem visão restrita)", () => {
+    // O braço é exclusivo de quem é restricted em DEALS; pro corretor o campo
+    // é ignorado — senão qualquer um viraria dono da proposta pelo deal.
+    expect(
+      canAccessProposal({
+        effective: eff("sales", "corretorA"),
+        ownerUserId: "corretorB",
+        convertedDealManagerUserId: "corretorA",
       })
     ).toBe(false);
   });

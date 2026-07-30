@@ -11,6 +11,8 @@ import {
   orgScopedNotFound,
   resolveUserOrgId,
 } from "@/lib/security/org-scope";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export async function POST(
   req: NextRequest,
@@ -26,6 +28,15 @@ export async function POST(
   if (!(await contractBelongsToOrg(params.id, userOrgId))) {
     return orgScopedNotFound("Contrato");
   }
+
+  // Escopo do gerente + CONTRACT_EDIT (cria nova versão do contrato).
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: session.user.id,
+    orgId: userOrgId!,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return denied;
 
   const body = await req.json().catch(() => ({}));
   const htmlFromClient: string | undefined = body?.htmlContent;

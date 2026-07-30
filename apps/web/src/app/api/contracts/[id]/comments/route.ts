@@ -8,6 +8,8 @@ import {
 } from "@/lib/api/require-auth";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export async function GET(
   req: NextRequest,
@@ -25,6 +27,15 @@ export async function GET(
   if (!owner || owner.deal.pipeline.orgId !== auth.org.id) {
     return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
   }
+
+  // Escopo do gerente.
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    via: auth.ident.via,
+  });
+  if (denied) return denied;
 
   const url = new URL(req.url);
   const includeResolved = url.searchParams.get("includeResolved") === "true";
@@ -76,6 +87,16 @@ export async function POST(
       { status: 403 }
     );
   }
+  // Escopo do gerente + CONTRACT_EDIT.
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    via: auth.ident.via,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return denied;
+
   if (contract.status === "aprovado") {
     return NextResponse.json({ error: "Contrato aprovado não pode receber comentários" }, { status: 403 });
   }

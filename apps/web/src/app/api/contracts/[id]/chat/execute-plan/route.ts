@@ -11,6 +11,8 @@ import { assertContractBudget, ContractBudgetExceededError } from "@/lib/ai/budg
 import type { AgentContext, AgentEvent, PlanStep } from "@/lib/ai/types";
 import { unmetDependencies } from "@/lib/ai/plan-deps";
 import { getDocPlainText } from "@/lib/google/docs";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -88,6 +90,16 @@ export async function POST(
   ) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente + CONTRACT_EDIT (o plano aplica edições no documento).
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    via: auth.ident.via,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return denied;
   if (plan.status !== "proposed") {
     return NextResponse.json(
       { error: `Plan já está em status '${plan.status}', não pode ser executado novamente.` },

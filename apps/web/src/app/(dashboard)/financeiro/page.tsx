@@ -24,6 +24,8 @@ import {
 } from "@/lib/asaas/account";
 import { AccountSwitcher } from "@/components/financeiro/AccountSwitcher";
 import { getEffectiveUserId } from "@/lib/auth/impersonation";
+import { getEffectivePermissions, can } from "@/lib/security/rbac/check";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -45,6 +47,16 @@ export default async function FinanceiroPage({
   // Impersonation: sob "trocar de tenant", quem resolve membership/RBAC é o dono
   // do tenant, não o super_admin (ver lib/auth/impersonation.ts).
   const effUserId = await getEffectiveUserId(session.user.id);
+
+  // Defesa em profundidade (feature Gerente) — mesmo gate do layout, repetido
+  // aqui porque a dashboard expõe saldo/KPIs agregados da org inteira.
+  const effective = await getEffectivePermissions(effUserId, org.id);
+  const restricted =
+    can(effective, PERMISSION.DEAL_VIEW_ASSIGNED_ONLY) &&
+    !can(effective, PERMISSION.DEAL_VIEW_ALL);
+  if (restricted && !can(effective, PERMISSION.FINANCE_BALANCE_VIEW)) {
+    redirect("/pipeline");
+  }
 
   const sp = (await searchParams) ?? {};
   const accessible = await listAccessibleAccounts(effUserId, org.id);

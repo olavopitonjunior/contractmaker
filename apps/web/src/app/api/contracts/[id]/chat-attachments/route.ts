@@ -8,6 +8,8 @@ import {
 } from "@/lib/api/require-auth";
 import { classifyAndExtract } from "@/lib/ai/ocr";
 import { extractDocx } from "@/lib/extraction/docx";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -49,6 +51,15 @@ export async function GET(
   if (auth.ident.via === "bearer" && session.contract.userId !== auth.ident.userId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente.
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    via: auth.ident.via,
+  });
+  if (denied) return denied;
 
   const items = await prisma.chatAttachment.findMany({
     where: { sessionId },
@@ -127,6 +138,16 @@ export async function POST(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   const orgId = session.contract.deal.pipeline.orgId;
+
+  // Escopo do gerente + CONTRACT_EDIT (anexo entra no contexto do agente).
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    via: auth.ident.via,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return denied;
 
   if (!ALLOWED_TYPES.has(file.type)) {
     return NextResponse.json(

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -42,6 +44,15 @@ export async function DELETE(
   if (person.deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente + DEAL_EDIT.
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: session.user.id,
+    orgId: org.id,
+    permission: PERMISSION.DEAL_EDIT,
+  });
+  if (denied) return denied;
 
   // Guard: bloqueia a remoção se a pessoa já tem certidões — preserva o histórico
   // (os jobs ficariam órfãos). Âncora PRIMÁRIA = diligentedPersonId (estável, não

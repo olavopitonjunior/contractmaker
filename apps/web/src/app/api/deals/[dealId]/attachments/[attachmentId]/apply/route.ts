@@ -15,6 +15,8 @@ import {
   deriveDealMetadata,
   deriveLocacaoDealMetadata,
 } from "@/lib/contracts/derive-deal-metadata";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -73,6 +75,16 @@ export async function POST(
       { status: 400 }
     );
   }
+
+  // Escopo do gerente + DEAL_EDIT (aplica dados extraídos no form).
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: apiAuth.actor.effectiveUserId,
+    orgId: apiAuth.org.id,
+    via: apiAuth.ident.via,
+    permission: PERMISSION.DEAL_EDIT,
+  });
+  if (denied) return denied;
 
   const attachment = await prisma.dealAttachment.findUnique({
     where: { id: params.attachmentId },

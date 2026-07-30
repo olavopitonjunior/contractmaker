@@ -10,6 +10,8 @@ import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { classifyAndExtract, humanizeOcrError } from "@/lib/ai/ocr";
 import { suggestAssignment } from "@/lib/forms/extracted-to-form";
 import { suggestLocacaoAssignment } from "@/lib/forms/extracted-to-form-locacao";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -51,6 +53,16 @@ export async function POST(
   if (dealOrgId !== apiAuth.org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente + DEAL_EDIT (extração grava extractedData no anexo).
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: apiAuth.actor.effectiveUserId,
+    orgId: apiAuth.org.id,
+    via: apiAuth.ident.via,
+    permission: PERMISSION.DEAL_EDIT,
+  });
+  if (denied) return denied;
 
   const attachment = await prisma.dealAttachment.findUnique({
     where: { id: params.attachmentId },

@@ -13,6 +13,7 @@ import {
   recordCreditAnalysis,
   readDealInsurance,
 } from "@/lib/locacao/insurance-service";
+import { guardDealScope } from "@/lib/deals/route-helpers";
 
 export const runtime = "nodejs";
 
@@ -92,6 +93,16 @@ export async function POST(req: NextRequest, { params }: { params: { dealId: str
     scope: "locacao:rw",
   });
   if (isRouteError(ctx)) return ctx;
+
+  // Escopo do gerente — acrescentado ao RBAC por ramo do ensureLocacaoApiAccess.
+  // Bearer (o caso normal do Max) bypassa dentro do guard: token é da ORG.
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    via: ctx.via,
+  });
+  if (denied) return denied;
 
   const parsed = bodySchema.safeParse(raw);
   if (!parsed.success) {

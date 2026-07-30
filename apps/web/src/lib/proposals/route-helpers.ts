@@ -36,12 +36,23 @@ export async function loadScopedProposal(
     return { fail: NextResponse.json({ error: "Não encontrada" }, { status: 404 }) };
   }
   const eff = await getEffectivePermissions(auth.actor.effectiveUserId, auth.org.id);
+  // Gerente: a proposta já convertida no negócio dele também é dele. Query
+  // extra só quando há deal convertido (a esmagadora maioria não tem).
+  const convertedDealManagerUserId = proposal.convertedDealId
+    ? (
+        await prisma.deal.findUnique({
+          where: { id: proposal.convertedDealId },
+          select: { managerUserId: true },
+        })
+      )?.managerUserId ?? null
+    : null;
   if (
     !eff ||
     !canAccessProposal({
       effective: eff,
       ownerUserId: proposal.userId,
       responsibleUserId: proposal.responsibleUserId,
+      convertedDealManagerUserId,
     })
   ) {
     return { fail: NextResponse.json({ error: "Não encontrada" }, { status: 404 }) };

@@ -22,6 +22,7 @@ import {
   Building2,
 } from "lucide-react";
 import { getIListConnection } from "@/lib/ilist/connection";
+import { getEffectivePermissions, dealScopeWhere } from "@/lib/security/rbac/check";
 
 export default async function PipelinePage({
   searchParams,
@@ -31,7 +32,12 @@ export default async function PipelinePage({
   // Gate de módulo: tenant só-locação (vendas OFF) é redirecionado pra /locacao.
   // NÃO usar layout aqui — /pipeline/locacao é filho deste segmento e precisa
   // continuar acessível pra quem só tem locação.
-  const { orgId } = await requireFeaturePage(FEATURE.VENDAS_PIPELINE, "/locacao");
+  const { userId, orgId } = await requireFeaturePage(FEATURE.VENDAS_PIPELINE, "/locacao");
+
+  // Escopo por usuário (feature Gerente): visão restrita só vê deals onde é
+  // gerente atribuído ou criador; demais roles seguem org-wide ({}).
+  const eff = await getEffectivePermissions(userId, orgId);
+  const dealScope = dealScopeWhere(eff) ?? { id: "__none__" };
 
   // ?arquivados=1 mostra também os deals arquivados (recuperação). Default oculta.
   const includeArchived = searchParams?.arquivados === "1";
@@ -48,7 +54,10 @@ export default async function PipelinePage({
         orderBy: { position: "asc" },
         include: {
           deals: {
-            where: includeArchived ? undefined : { archivedAt: null },
+            where: {
+              ...(includeArchived ? {} : { archivedAt: null }),
+              ...dealScope,
+            },
             orderBy: { position: "asc" },
             include: {
               // NÃO selecionar form.dataJson aqui: é o payload inteiro do

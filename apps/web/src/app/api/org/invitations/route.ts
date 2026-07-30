@@ -18,7 +18,14 @@ import {
   getNotifyEmails,
 } from "@/lib/auth/invitations";
 
-const ROLE_VALUES = ["admin", "finance", "sales", "viewer", "member"] as const;
+const ROLE_VALUES = [
+  "admin",
+  "finance",
+  "sales",
+  "gerente",
+  "viewer",
+  "member",
+] as const;
 
 const createInvitationSchema = z.object({
   email: z.string().email().max(200),

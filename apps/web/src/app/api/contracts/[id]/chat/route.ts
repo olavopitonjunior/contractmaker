@@ -9,6 +9,8 @@ import {
   isAuthFailure,
   authFailureResponse,
 } from "@/lib/api/require-auth";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -46,6 +48,16 @@ export async function POST(
       { status: 403 }
     );
   }
+
+  // Escopo do gerente + CONTRACT_EDIT (o agente edita o documento).
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: auth.actor.effectiveUserId,
+    orgId: auth.org.id,
+    via: auth.ident.via,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return denied;
 
   if (contract.status === "aprovado") {
     return NextResponse.json(

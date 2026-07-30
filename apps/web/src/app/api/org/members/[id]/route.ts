@@ -11,7 +11,14 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { requireElevation, ElevationRequiredError } from "@/lib/security/elevation";
 import { audit } from "@/lib/security/audit";
 
-const ROLE_VALUES = ["admin", "finance", "sales", "viewer", "custom"] as const;
+const ROLE_VALUES = [
+  "admin",
+  "finance",
+  "sales",
+  "gerente",
+  "viewer",
+  "custom",
+] as const;
 
 const patchSchema = z.object({
   role: z.enum(ROLE_VALUES).optional(),

@@ -5,6 +5,8 @@ import { prisma } from "@/lib/db/prisma";
 import { cancelEnvelopeFlow } from "@/lib/clicksign/executor";
 import { updateEnvelope } from "@/lib/clicksign/envelopes";
 import { ClicksignError } from "@/lib/clicksign/client";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -33,6 +35,13 @@ export async function GET(
   if (!envelope || envelope.contractId !== params.id) {
     return NextResponse.json({ error: "Envelope não encontrado" }, { status: 404 });
   }
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: authResult.ctx.userId,
+    orgId: authResult.ctx.orgId,
+    via: authResult.ctx.via,
+  });
+  if (denied) return denied;
   return NextResponse.json({ envelope });
 }
 
@@ -56,6 +65,14 @@ export async function PATCH(
   if (!envelope || envelope.contractId !== params.id) {
     return NextResponse.json({ error: "Envelope não encontrado" }, { status: 404 });
   }
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: authResult.ctx.userId,
+    orgId: authResult.ctx.orgId,
+    via: authResult.ctx.via,
+    permission: PERMISSION.ENVELOPE_SEND,
+  });
+  if (denied) return denied;
   if (envelope.status !== "draft" && envelope.status !== "running") {
     return NextResponse.json(
       { error: "Envelope não pode mais ser editado" },
@@ -118,6 +135,14 @@ export async function DELETE(
   if (!envelope || envelope.contractId !== params.id) {
     return NextResponse.json({ error: "Envelope não encontrado" }, { status: 404 });
   }
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: authResult.ctx.userId,
+    orgId: authResult.ctx.orgId,
+    via: authResult.ctx.via,
+    permission: PERMISSION.ENVELOPE_SEND,
+  });
+  if (denied) return denied;
   if (envelope.status === "closed") {
     return NextResponse.json(
       { error: "Envelope já finalizado" },

@@ -142,6 +142,12 @@ vi.mock("@/lib/db/prisma", () => {
       count: vi.fn().mockResolvedValue(0),
       // requireAuth (context.ts) atualiza lastActiveAt em fire-and-forget.
       updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+      // getEffectivePermissions (feature Gerente): default owner = visão
+      // org-wide, preservando o status quo dos testes pré-feature. Testes de
+      // escopo restrito sobrepõem com role "gerente".
+      findUnique: vi
+        .fn()
+        .mockResolvedValue({ role: "owner", customRole: null }),
     },
     auditLog: {
       create: vi.fn().mockResolvedValue({}),
@@ -228,6 +234,11 @@ vi.mock("@/lib/db/prisma", () => {
       findUnique: vi.fn().mockResolvedValue(null),
       create: vi.fn().mockResolvedValue({}),
       update: vi.fn().mockResolvedValue({}),
+    },
+    // Gerente do negócio (2026-07) — row ausente = defaults (toggle off)
+    orgManagerSettings: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      upsert: vi.fn().mockResolvedValue({}),
     },
     dealNotificationLog: {
       create: vi.fn().mockResolvedValue({ id: "log-mock" }),

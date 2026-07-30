@@ -7,6 +7,7 @@ import {
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { generateAdministracaoContractForDeal } from "@/lib/services/contract-generation";
+import { guardDealScope } from "@/lib/deals/route-helpers";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -40,6 +41,15 @@ export async function POST(
   if (deal.pipeline.orgId !== ctx.orgId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente — ACRESCENTADO ao ensureLocacaoAccess(LEASE_CREATE),
+  // que continua sendo o gate de permissão desta rota.
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+  });
+  if (denied) return denied;
 
   try {
     const result = await generateAdministracaoContractForDeal(

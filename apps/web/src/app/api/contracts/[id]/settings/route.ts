@@ -12,6 +12,8 @@ import {
   syncRenderedHtmlDiffToDoc,
   type DocSyncReport,
 } from "@/lib/contracts/settings-doc-sync";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -70,6 +72,16 @@ export async function PATCH(
   if (!contract) {
     return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
   }
+
+  // Escopo do gerente + permissão de edição de contrato.
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    via: ctx.via,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return denied;
 
   if (contract.status === "aprovado") {
     return NextResponse.json(

@@ -6,6 +6,8 @@ import {
   notifyDealEvent,
   stageChangeDedupeKey,
 } from "@/lib/notifications/deal-events";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export async function POST(
   _req: NextRequest,
@@ -32,6 +34,16 @@ export async function POST(
   if (!deal) {
     return NextResponse.json({ error: "Deal not found" }, { status: 404 });
   }
+
+  // Cross-org + escopo do gerente + DEAL_EDIT. Esta rota legada não checava
+  // org própria — o guard fecha as duas coisas.
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: session.user.id,
+    orgId: org.id,
+    permission: PERMISSION.DEAL_EDIT,
+  });
+  if (denied) return denied;
 
   // Aceita stages do meio do funil pós-assinatura — usuário pode chamar este
   // endpoint legado pra pular direto pra "Comissão paga" (compat).
