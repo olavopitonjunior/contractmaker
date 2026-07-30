@@ -5,6 +5,8 @@ import { LocacaoDealDetail } from "@/components/locacao/LocacaoDealDetail";
 import { LOCACAO_SIMPLIFIED_MODE } from "@/lib/env/staging";
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
 import { FEATURE } from "@/lib/modules/catalog";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
+import { getEffectivePermissions, canAccessDeal } from "@/lib/security/rbac/check";
 import type { AgentEvent } from "@/lib/ai/types";
 
 export const dynamic = "force-dynamic";
@@ -51,6 +53,22 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
   if (!deal || deal.kind !== "locacao") notFound();
   // Cross-org guard via pipeline.orgId (Deal não tem orgId direto).
   if (deal.pipeline.orgId !== org.id) notFound();
+
+  // Escopo por usuário (feature Gerente): visão restrita só abre deals onde é
+  // gerente atribuído ou criador — sem isto o filtro do kanban era só
+  // cosmético (a URL entregava o dossiê). 404 pra não vazar existência.
+  const effUserId = await getEffectiveUserId(session.user.id);
+  const eff = await getEffectivePermissions(effUserId, org.id);
+  if (
+    !eff ||
+    !canAccessDeal({
+      effective: eff,
+      ownerUserId: deal.userId,
+      managerUserId: deal.managerUserId,
+    })
+  ) {
+    notFound();
+  }
 
   // Contrato mais recente do deal (mesma shape de /contracts/[id]).
   // kind="contract" — o instrumento de locação; a administração vive em row própria.

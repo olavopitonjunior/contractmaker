@@ -25,6 +25,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Plus, ChevronLeft, ChevronRight, Check } from "lucide-react";
 import { ImportarClientePicker, type ImportedTenant } from "@/components/locacao/ImportarClientePicker";
+import { ManagerSelect } from "@/components/deals/ManagerSelect";
 
 interface Option {
   id: string;
@@ -43,6 +44,8 @@ interface Props {
 interface FormState {
   // Passo 1
   propertyId: string;
+  // Gerente responsável (feature Gerente) — obrigatório se a org exigir.
+  managerUserId: string | null;
   // Passo 2
   tenantIds: string[];
   // Passo 3
@@ -123,8 +126,10 @@ export function NovoContratoWizard({
   };
   const [step, setStep] = useState(0);
   const [saving, setSaving] = useState(false);
+  const [managerRequired, setManagerRequired] = useState(false);
   const [form, setForm] = useState<FormState>({
     propertyId: "",
+    managerUserId: null,
     tenantIds: [],
     garantiaTipo: "sem_garantia",
     caucaoSubtipo: "valor",
@@ -164,7 +169,8 @@ export function NovoContratoWizard({
     .filter(Boolean);
 
   function canAdvance(): boolean {
-    if (step === 0) return !!form.propertyId;
+    if (step === 0)
+      return !!form.propertyId && (!managerRequired || !!form.managerUserId);
     if (step === 1) return form.tenantIds.length > 0;
     if (step === 2) return !!form.garantiaTipo;
     if (step === 3) {
@@ -207,6 +213,7 @@ export function NovoContratoWizard({
           taxaAdminPercent: Number(form.taxaAdminPercent),
           emitirNfse: form.emitirNfse,
           finalidade: form.finalidade,
+          ...(form.managerUserId ? { managerUserId: form.managerUserId } : {}),
         }),
       });
       if (!res.ok) {
@@ -293,6 +300,11 @@ export function NovoContratoWizard({
               <p className="text-xs text-muted-foreground">
                 Só imóveis com status disponível/anunciado/em_negociacao aparecem.
               </p>
+              <ManagerSelect
+                value={form.managerUserId}
+                onChange={(userId) => setForm((s) => ({ ...s, managerUserId: userId }))}
+                onContextLoaded={(ctx) => setManagerRequired(ctx.managerRequired)}
+              />
             </div>
           )}
 

@@ -1,7 +1,9 @@
 import { notFound } from "next/navigation";
-import { auth } from "@/lib/auth/auth";
+import { auth, getUserOrg } from "@/lib/auth/auth";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/db/prisma";
 import { ContractEditorPage } from "@/components/contracts/ContractEditorPage";
+import { getEffectivePermissions, canAccessDeal } from "@/lib/security/rbac/check";
 
 export default async function ContractPage({
   params,
@@ -9,12 +11,22 @@ export default async function ContractPage({
   params: { id: string };
 }) {
   const session = await auth();
-  if (!session?.user) return null;
+  if (!session?.user?.id) return null;
+  const org = await getUserOrg(session.user.id);
+  if (!org) notFound();
 
   const contract = await prisma.contract.findUnique({
     where: { id: params.id },
     include: {
-      deal: { select: { id: true, title: true } },
+      deal: {
+        select: {
+          id: true,
+          title: true,
+          userId: true,
+          managerUserId: true,
+          pipeline: { select: { orgId: true } },
+        },
+      },
       template: { select: { id: true, name: true } },
       chatSessions: {
         where: { archived: false },
@@ -27,6 +39,23 @@ export default async function ContractPage({
   });
 
   if (!contract) notFound();
+
+  // Cross-org + escopo por usuário (feature Gerente): o editor entrega o HTML
+  // do contrato inteiro + histórico de chat + dataJson — a org vem do DEAL
+  // (contrato importado tem template null; ver CLAUDE.md). 404 sem vazar.
+  if (contract.deal.pipeline.orgId !== org.id) notFound();
+  const effUserId = await getEffectiveUserId(session.user.id);
+  const eff = await getEffectivePermissions(effUserId, org.id);
+  if (
+    !eff ||
+    !canAccessDeal({
+      effective: eff,
+      ownerUserId: contract.deal.userId,
+      managerUserId: contract.deal.managerUserId,
+    })
+  ) {
+    notFound();
+  }
 
   const versions = await prisma.contract.findMany({
     // Escopo por kind: o histórico de versões é do MESMO instrumento — sem o
