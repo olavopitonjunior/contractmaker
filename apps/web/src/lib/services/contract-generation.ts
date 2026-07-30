@@ -17,6 +17,7 @@ import {
   selectLocacaoTemplate,
   selectAdministracaoTemplate,
 } from "@/lib/contracts/template-category";
+import { resolveClauseSlots } from "@/lib/templates/clause-slots";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import {
   DEFAULT_CONTRACT_SETTINGS,
@@ -1263,6 +1264,24 @@ export async function generateLocacaoContractForDeal(
 
   const enrichedData = enrichLocacaoData(dataJson, { administradora, contractDefaults });
 
+  // Slots de cláusula (`{{{slot_garantia}}}`): quando o template veio da
+  // CONSOLIDAÇÃO de N modelos quase idênticos, o bloco que variava entre eles
+  // não está no template — está no acervo, uma cláusula por opção do form. Aqui
+  // a opção escolhida puxa a cláusula certa. Template sem marcador nem consulta
+  // o banco e o resultado é `{}` (canônicos seguem intactos).
+  //
+  // Os valores entram no `enrichedData` ANTES do create — então ficam no
+  // `Contract.dataJson` e todo re-render posterior (export PDF, diff da aba
+  // Configurações, memória) reproduz o mesmo texto sem reconsultar o acervo.
+  const slotFormat = template.engine === "google_docs" ? "text" : "html";
+  const { values: slotValues } = await resolveClauseSlots({
+    orgId,
+    templateSource: template.handlebarsSource,
+    data: enrichedData,
+    format: slotFormat,
+  });
+  Object.assign(enrichedData, slotValues);
+
   // engine="google_docs": o template É um Google Doc (modelo da imobiliária,
   // layout/timbrado preservados) — copiamos o doc e substituímos placeholders
   // (campos simples + blocos compostos resolvidos server-side). O htmlContent
@@ -1322,6 +1341,10 @@ export async function generateLocacaoContractForDeal(
         created = { docId: copy.docId, webViewLink: copy.webViewLink };
 
         const map = buildLocacaoPlaceholderMap(enrichedData);
+        // Slots resolvidos acima — `{{slot_garantia}}` no Doc do modelo vira a
+        // cláusula do acervo (ou o fallback canônico). Doc sem o token não casa
+        // nada no replaceAllText, então isto é inócuo pros modelos antigos.
+        Object.assign(map, slotValues);
         map["contrato_numero"] = numeroContrato;
         map["contrato_id"] = contract.id;
         map["contrato_versao"] = String(contract.version);

@@ -31,6 +31,9 @@ vi.mock("@/lib/db/prisma", () => {
       findUnique: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
+      // Arquivamento em lote — usado pela reingestão de cláusulas de slot
+      // (POST /api/templates/ingest/clauses).
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       delete: vi.fn(),
       count: vi.fn().mockResolvedValue(0),
       groupBy: vi.fn().mockResolvedValue([]),
