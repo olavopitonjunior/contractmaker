@@ -40,6 +40,7 @@ import { AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { ReopenFormButton } from "@/components/forms/ReopenFormButton";
 import { isFormFinished } from "@/lib/forms/form-status";
+import { formPublicPath } from "@/lib/forms/form-url";
 
 interface LocacaoDealHeaderActionsProps {
   dealId: string;
@@ -170,7 +171,9 @@ export function LocacaoDealHeaderActions({
 
   function copyFormLink() {
     if (!formToken) return;
-    navigator.clipboard.writeText(`${window.location.origin}/f/${formToken}`);
+    navigator.clipboard.writeText(
+      `${window.location.origin}${formPublicPath(formToken, title)}`
+    );
     toast.success("Link do formulário copiado!");
   }
 
@@ -320,7 +323,11 @@ export function LocacaoDealHeaderActions({
               </Badge>
             )}
             <Button variant="outline" size="sm" asChild>
-              <a href={`/f/${formToken}`} target="_blank" rel="noopener noreferrer">
+              <a
+                href={formPublicPath(formToken, title)}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 <ExternalLink className="h-4 w-4 mr-1" />
                 Formulário
               </a>

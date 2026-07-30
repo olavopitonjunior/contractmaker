@@ -6,6 +6,7 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
 import { ensureLocacaoAccess, isRouteError, parseJsonBody } from "@/lib/locacao/route-helpers";
 import { withIdempotency } from "@/lib/api/idempotency";
+import { formPublicPath } from "@/lib/forms/form-url";
 import {
   LOCACAO_SCHEMA_TYPE,
   LOCACAO_COMERCIAL_SCHEMA_TYPE,
@@ -176,7 +177,7 @@ export async function POST(req: NextRequest) {
         body: {
           id: result.form.id,
           token: result.form.token,
-          url: `/f/${result.form.token}`,
+          url: formPublicPath(result.form.token, result.form.title),
           dealId: result.deal.id,
         },
       };
