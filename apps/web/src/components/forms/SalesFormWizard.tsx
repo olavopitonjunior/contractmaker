@@ -101,6 +101,12 @@ interface SalesFormWizardProps {
    * autoritativo (403 nos writes); isto é UX.
    */
   readOnly?: boolean;
+  /**
+   * Visitante é membro da org dona do form (`viewerIsOrgMember`, server-side).
+   * Libera remover documento na etapa 0. Default false: o caso normal do link
+   * público é o CLIENTE. O servidor é o guard autoritativo (403); isto é UX.
+   */
+  viewerIsMember?: boolean;
 }
 
 const FULL_STEP_INDEXES: readonly number[] = [0, 1, 2, 3, 4, 5, 6];
@@ -433,6 +439,7 @@ export function SalesFormWizard({
   selfAssignment,
   finalizeMode = "main",
   readOnly = false,
+  viewerIsMember = false,
 }: SalesFormWizardProps) {
   // `visibleStepIndexes` mapeia cursor virtual (0..N-1) para índice "real"
   // dos 8 steps existentes. Default = todos os 8. Subtoken passa subset.
@@ -825,6 +832,7 @@ export function SalesFormWizard({
       token={token}
       allowedTopKeys={pathScope}
       selfAssignment={selfAssignment}
+      viewerIsMember={viewerIsMember}
     />,
     <VendedorStep key="step-1" form={form} />,
     <CompradorStep key="step-2" form={form} />,

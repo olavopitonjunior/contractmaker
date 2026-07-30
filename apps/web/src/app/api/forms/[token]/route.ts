@@ -409,21 +409,37 @@ export async function PATCH(
 
       // Auto-envio do resumo consolidado por e-mail (opt-in por org). Roda
       // inteiramente em waitUntil pra não somar latência ao finalize; gera o
-      // PDF + baixa anexos + envia. summarySentAt protege contra re-disparo
-      // em re-finalize (o form é reabrível). Só venda (compra_venda_v1).
+      // PDF + baixa anexos + envia. Só venda (compra_venda_v1).
+      //
+      // O guard do `summarySentAt` que este comentário prometia NÃO EXISTIA: o
+      // campo só era escrito, nunca lido como condição, então cada re-finalize
+      // reenviava o e-mail (o form é reabrível). Implementado abaixo, com a
+      // nuance que faltava: reabrir o formulário significa conteúdo novo, e aí
+      // reenviar é o certo — o bloqueio vale só pra re-finalize sem reabertura.
       if (form.schemaType === "compra_venda_v1") {
         waitUntil(
           (async () => {
-            const settings = await prisma.orgFormSettings.findUnique({
-              where: { orgId: form.orgId },
-              select: {
-                autoSendSummaryOnComplete: true,
-                summaryRecipientEmail: true,
-                summaryIncludeAttachments: true,
-              },
-            });
+            const [settings, current] = await Promise.all([
+              prisma.orgFormSettings.findUnique({
+                where: { orgId: form.orgId },
+                select: {
+                  autoSendSummaryOnComplete: true,
+                  summaryRecipientEmail: true,
+                  summaryIncludeAttachments: true,
+                },
+              }),
+              prisma.salesForm.findUnique({
+                where: { id: form.id },
+                select: { summarySentAt: true, reopenedAt: true },
+              }),
+            ]);
             const recipient = settings?.summaryRecipientEmail?.trim();
             if (!settings?.autoSendSummaryOnComplete || !recipient) return;
+            const sentAt = current?.summarySentAt ?? null;
+            const reopenedAt = current?.reopenedAt ?? null;
+            const alreadySent =
+              sentAt !== null && !(reopenedAt !== null && reopenedAt > sentAt);
+            if (alreadySent) return;
             const result = await sendFormSummary({
               formId: form.id,
               to: recipient,
