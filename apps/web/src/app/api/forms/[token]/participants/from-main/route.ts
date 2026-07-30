@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
+import { newParticipantToken } from "@/lib/forms/participant-token";
 import {
-  newParticipantToken,
-  type ParticipantRole,
-} from "@/lib/forms/participant-token";
+  isValidRole,
+  participantRoleSchema,
+} from "@/lib/forms/participant-category";
+import { listOrgParticipantCategories } from "@/lib/forms/participant-category-repo";
 import { formClosedResponse } from "@/lib/forms/form-gate";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { rateLimit } from "@/lib/security/ratelimit";
@@ -12,14 +14,11 @@ import { rateLimit } from "@/lib/security/ratelimit";
 export const runtime = "nodejs";
 
 const bodySchema = z.object({
-  roles: z
-    .array(z.enum(["vendedor", "comprador", "locador", "locatario", "fiador"]))
-    .min(1)
-    .max(3),
+  // Papéis nativos + `terceiro:<slug>` (categoria customizável da org). Teto
+  // de 10 porque um negócio pode ter vários terceiros; o rate-limit por
+  // token+IP abaixo continua sendo a trava de abuso.
+  roles: z.array(participantRoleSchema).min(1).max(10),
 });
-
-const VENDA_ROLES: readonly string[] = ["vendedor", "comprador"];
-const LOCACAO_ROLES: readonly string[] = ["locador", "locatario", "fiador"];
 
 /**
  * POST /api/forms/[token]/participants/from-main  (PÚBLICO, sem session)
@@ -79,19 +78,25 @@ export async function POST(
     );
   }
 
-  const isLocacao = form.schemaType?.startsWith("locacao") ?? false;
-  const validRoles = isLocacao ? LOCACAO_ROLES : VENDA_ROLES;
-  const invalid = parsed.data.roles.filter((r) => !validRoles.includes(r));
+  // Mesma validação da rota autenticada: nativo precisa casar a esteira;
+  // terceiro precisa de categoria existente, ativa e habilitada pro módulo.
+  const categories = parsed.data.roles.some((r) => r.startsWith("terceiro:"))
+    ? await listOrgParticipantCategories(form.orgId)
+    : [];
+  const invalid = parsed.data.roles
+    .map((r) => ({ role: r, check: isValidRole(r, form.schemaType, categories) }))
+    .filter((x) => !x.check.ok);
   if (invalid.length > 0) {
+    const status = invalid.some((x) => x.role.startsWith("terceiro:")) ? 422 : 400;
     return NextResponse.json(
       {
-        error: `Role(s) ${invalid.join(", ")} não valem pra um formulário de ${isLocacao ? "locação" : "venda"}`,
+        error: invalid.map((x) => (x.check.ok ? "" : x.check.error)).join("; "),
       },
-      { status: 400 },
+      { status },
     );
   }
 
-  const requested = Array.from(new Set<ParticipantRole>(parsed.data.roles));
+  const requested = Array.from(new Set<string>(parsed.data.roles));
   const existing = await prisma.salesFormParticipant.findMany({
     where: { formId: form.id, role: { in: requested } },
   });

@@ -283,6 +283,7 @@ export default function NewFormPage() {
                 <PartyLinksPanel
                   formToken={createdToken}
                   roles={["vendedor", "comprador"]}
+                  categoriesModule="venda"
                 />
               )}
 

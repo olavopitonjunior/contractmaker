@@ -9,6 +9,8 @@ import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
 import { MODULE } from "@/lib/modules/catalog";
 import { FormSettingsClient } from "./FormSettingsClient";
 import { ContractDefaultsCard } from "./ContractDefaultsCard";
+import { ParticipantCategoriesCard } from "./ParticipantCategoriesCard";
+import { listOrgParticipantCategories } from "@/lib/forms/participant-category-repo";
 
 export default async function FormularioSettingsPage() {
   const session = await auth();
@@ -33,6 +35,9 @@ export default async function FormularioSettingsPage() {
     MODULE.LOCACAO
   );
   const defaults = resolveOrgContractDefaults(settings.contractDefaultsJson);
+
+  // Categorias de terceiro (links por parte com campos customizáveis).
+  const participantCategories = await listOrgParticipantCategories(org.id);
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -65,6 +70,11 @@ export default async function FormularioSettingsPage() {
           autoSendSummaryOnComplete: settings.autoSendSummaryOnComplete,
           summaryIncludeAttachments: settings.summaryIncludeAttachments,
         }}
+      />
+
+      <ParticipantCategoriesCard
+        initial={participantCategories}
+        locacaoEnabled={locacaoEnabled}
       />
 
       <ContractDefaultsCard

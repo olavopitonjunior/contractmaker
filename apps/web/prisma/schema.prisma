@@ -270,6 +270,7 @@ model Organization {
   pipelines           Pipeline[]
   forms               SalesForm[]
   formSettings        OrgFormSettings?
+  participantCategories FormParticipantCategory[]
   notificationSettings OrgNotificationSettings?
   dealNotificationLogs DealNotificationLog[]
   userNotificationPrefs      UserNotificationPreference[]
@@ -2391,6 +2392,42 @@ model OrgFormSettings {
   updatedAt           DateTime @updatedAt
 
   org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// Categorias de TERCEIRO nos links por parte do formulário público.
+//
+// Os 5 papéis nativos (vendedor/comprador; locador/locatario/fiador) seguem
+// fechados em código — cada um escreve numa subárvore conhecida do
+// DadosContrato, com step, validação e OCR próprios. Terceiro é o caso aberto:
+// a imobiliária cria a categoria (interveniente anuente, gestor do condomínio,
+// procurador externo…) e declara os campos que quer coletar.
+//
+// `SalesFormParticipant.role` guarda "terceiro:<slug>" — a coluna sempre foi
+// String, então não há migration de dados. As respostas vão pra
+// `SalesForm.dataJson.terceiros.<slug>[]`, namespace ADITIVO que não colide com
+// nenhuma chave dos schemas de venda ou locação.
+//
+// Ver lib/forms/participant-category.ts.
+model FormParticipantCategory {
+  id          String   @id @default(cuid())
+  orgId       String
+  /// kebab-case; entra no role e no path do dataJson.
+  slug        String
+  label       String
+  description String?
+  /// "venda" | "locacao" — em quais esteiras a categoria é oferecida.
+  appliesTo   String[] @default([])
+  /// [{ key, label, type, required }] — ver categoryFieldsSchema.
+  fields      Json     @default("[]")
+  /// Desativar em vez de deletar quando já houver link emitido.
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, slug])
+  @@index([orgId, active])
 }
 
 // Cadastro de destinatários de split de pagamento (Fase 5).

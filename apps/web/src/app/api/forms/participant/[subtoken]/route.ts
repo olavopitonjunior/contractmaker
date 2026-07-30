@@ -2,15 +2,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/prisma";
 import { resolveParticipantToken } from "@/lib/forms/participant-token";
 import {
-  ROLE_PATHS,
-  filterDataJsonByRole,
+  filterDataJsonByPaths,
+  narrowIncomingToPaths,
 } from "@/lib/forms/role-paths";
 import {
   mergeSalesFormDataJson,
   FormNotFoundError,
 } from "@/lib/forms/atomic-merge";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
-import { ROLE_STEP_INDEXES } from "@/lib/forms/role-steps";
+import { resolveParticipantScope } from "@/lib/forms/participant-scope";
+import { requiredPathsForCategory } from "@/lib/forms/participant-category";
 import {
   resolveFormRequiredFields,
   requiredPathsForRoleScope,
@@ -66,12 +67,17 @@ export async function GET(
     })
     .catch(() => {});
 
-  const role = participant.role as keyof typeof ROLE_PATHS;
+  const scope = await resolveParticipantScope(
+    participant.role,
+    participant.form.orgId,
+  );
   const fullData = (participant.form.dataJson ?? {}) as Record<string, unknown>;
-  const filtered = filterDataJsonByRole(fullData, role);
+  // Filtro por PATHS (não só top-level): num link de terceiro o participante
+  // recebe apenas `terceiros.<slug>`, nunca as respostas de outra categoria.
+  const filtered = filterDataJsonByPaths(fullData, scope.paths);
 
   return NextResponse.json({
-    role,
+    role: scope.role,
     partyIndex: participant.partyIndex,
     formTitle: participant.form.title,
     formStatus: participant.form.status,
@@ -81,15 +87,28 @@ export async function GET(
       ? participant.form.lockedAt.toISOString()
       : null,
     dataJson: filtered,
-    allowedTopKeys: ROLE_PATHS[role],
+    allowedTopKeys: scope.topKeys,
+    pathScope: scope.paths,
+    // Só no link de terceiro: as field defs que a tela renderiza.
+    category: scope.category
+      ? {
+          slug: scope.category.slug,
+          label: scope.category.label,
+          description: scope.category.description,
+          fields: scope.category.fields,
+          active: scope.category.active,
+        }
+      : null,
   }, { headers: { "Cache-Control": "no-store" } });
 }
 
 /**
  * PATCH /api/forms/participant/[subtoken]
  * Público — sem session. Auto-save do subtoken. Allowlist enforced via
- * `mergeSalesFormDataJson({ allowedTopKeys: ROLE_PATHS[role] })` — merge
- * atômico sob row lock (ver lib/forms/atomic-merge.ts).
+ * `mergeSalesFormDataJson({ allowedTopKeys: scope.topKeys })` — merge atômico
+ * sob row lock (ver lib/forms/atomic-merge.ts). Quando o escopo é aninhado
+ * (link de terceiro, `terceiros.<slug>`), o payload passa antes por
+ * `narrowIncomingToPaths`; papel nativo segue o caminho de sempre.
  */
 export async function PATCH(
   req: NextRequest,
@@ -117,8 +136,34 @@ export async function PATCH(
   if (closed) return closed;
 
   const body = await req.json().catch(() => ({}));
-  const role = participant.role as keyof typeof ROLE_PATHS;
-  const incoming = (body.dataJson ?? {}) as Record<string, unknown>;
+  const scope = await resolveParticipantScope(
+    participant.role,
+    participant.form.orgId,
+  );
+  const role = scope.role;
+  const rawIncoming = (body.dataJson ?? {}) as Record<string, unknown>;
+
+  // Link de terceiro cuja categoria foi apagada/desativada: sem definição não
+  // há campo válido pra gravar, então o link congela (403) em vez de aceitar
+  // um payload que ninguém consegue mais interpretar.
+  if (scope.slug && (!scope.category || !scope.category.active)) {
+    return NextResponse.json(
+      {
+        error: "Este link não está mais disponível — fale com a imobiliária.",
+        reason: "category_unavailable",
+      },
+      { status: 403 },
+    );
+  }
+
+  // Escopo ANINHADO (terceiro) precisa ser recortado antes do merge: o
+  // `allowedTopKeys` de `deepMergeAtPaths` só sabe chave de primeiro nível, e
+  // liberar `terceiros` inteiro deixaria uma categoria escrever na subárvore de
+  // outra. Papel nativo NÃO passa por aqui — segue exatamente o caminho antigo.
+  const narrowed = scope.nested
+    ? narrowIncomingToPaths(rawIncoming, scope.paths)
+    : { incoming: rawIncoming, rejectedPaths: [] as string[] };
+  const incoming = narrowed.incoming;
 
   // Status do subtoken: "completo" só se body explicitamente pediu.
   // Form principal só transiciona pra "completo" via token principal —
@@ -129,20 +174,29 @@ export async function PATCH(
   // bloqueio do finalize do token principal de locação (422 antes de gravar
   // qualquer coisa). Só LOCAÇÃO: em venda o "concluir parte" nunca bloqueou e
   // mudar isso agora endureceria links já em circulação.
-  if (markCompleted && participant.form.schemaType?.startsWith("locacao")) {
-    const byStep = await resolveFormRequiredFields(participant.form);
-    const scoped = requiredPathsForRoleScope(
-      byStep,
-      ROLE_STEP_INDEXES[role],
-      ROLE_PATHS[role],
-    );
+  //
+  // TERCEIRO é a exceção: a obrigatoriedade não vem de preset nenhum, e sim
+  // das field defs `required: true` da categoria — e vale nas DUAS esteiras,
+  // porque a categoria (e o link) nasceram junto com esta regra.
+  if (markCompleted && (scope.slug || participant.form.schemaType?.startsWith("locacao"))) {
+    const scoped = scope.slug
+      ? requiredPathsForCategory(
+          scope.slug,
+          participant.partyIndex,
+          scope.category?.fields ?? [],
+        )
+      : requiredPathsForRoleScope(
+          await resolveFormRequiredFields(participant.form),
+          scope.stepIndexes,
+          scope.topKeys,
+        );
     if (scoped.length > 0) {
       const preview = deepMergeAtPaths(
         structuredClone(
           (participant.form.dataJson ?? {}) as Record<string, unknown>,
         ),
         incoming,
-        ROLE_PATHS[role],
+        scope.topKeys,
       ).merged;
       const missingRequired = findMissingRequired(scoped, (path) =>
         getByPath(preview, path),
@@ -170,11 +224,11 @@ export async function PATCH(
     mergeOutcome = await mergeSalesFormDataJson({
       where: { id: participant.formId },
       incoming,
-      allowedTopKeys: ROLE_PATHS[role],
+      allowedTopKeys: scope.topKeys,
       // Um subtoken recém-aberto também ecoa a própria fatia template-vazia
       // no mount — o guard impede que isso apague o que o operador (ou outra
       // sessão da mesma parte) já preencheu naquela chave.
-      protectBlankPartyArrays: ROLE_PATHS[role].filter((k) =>
+      protectBlankPartyArrays: scope.topKeys.filter((k) =>
         (PARTY_ARRAY_KEYS as readonly string[]).includes(k),
       ),
       also: async (tx) => {
@@ -197,12 +251,17 @@ export async function PATCH(
     throw error;
   }
 
-  if (mergeOutcome.rejectedPaths.length > 0) {
+  // Rejeições do recorte de escopo aninhado (terceiro) entram no MESMO relatório
+  // das rejeitadas pelo merge — pro operador ver "o cliente mandou fora do escopo"
+  // num lugar só, independente de qual camada barrou.
+  const rejectedPaths = [...narrowed.rejectedPaths, ...mergeOutcome.rejectedPaths];
+
+  if (rejectedPaths.length > 0) {
     // Log + audit (não bloqueia save — bug de UI não pode quebrar fluxo).
     console.warn("[participant PATCH] rejected paths", {
       participantId: participant.id,
       role,
-      rejectedPaths: mergeOutcome.rejectedPaths,
+      rejectedPaths,
     });
     audit(
       extractAuditContextFromRequest(req, participant.form.orgId, null),
@@ -213,7 +272,7 @@ export async function PATCH(
         resource: participant.id,
         metadata: {
           role,
-          rejectedPaths: mergeOutcome.rejectedPaths,
+          rejectedPaths,
         },
       },
     );
@@ -270,12 +329,14 @@ export async function PATCH(
     // waitUntil obrigatório: `void promise` após o response é cancelado na
     // Vercel (feedback_vercel_fire_and_forget).
     const isLocacao = participant.form.schemaType?.startsWith("locacao");
+    // Terceiro não tem rótulo fixo — o nome é o label da categoria da org.
+    const roleLabel = scope.category?.label ?? ROLE_LABELS[role] ?? role;
     waitUntil(emitNotification({
       orgId: participant.form.orgId,
       type: "participant_completed",
-      title: `${ROLE_LABELS[role] ?? role} preencheu os dados`,
+      title: `${roleLabel} preencheu os dados`,
       body: `"${participant.form.title ?? "Formulário"}" — a parte ${
-        ROLE_LABELS[role]?.toLowerCase() ?? role
+        roleLabel.toLowerCase()
       } concluiu a qualificação pelo link exclusivo.`,
       linkUrl: isLocacao ? undefined : `/forms/${participant.formId}/share`,
       metadata: { formId: participant.formId, participantId: participant.id, role },
@@ -287,7 +348,7 @@ export async function PATCH(
     role,
     completedAt:
       (participant.completedAt ?? completedNow)?.toISOString() ?? null,
-    rejectedPaths: mergeOutcome.rejectedPaths,
+    rejectedPaths,
     skippedBlankArrayKeys: mergeOutcome.skippedBlankArrayKeys,
   });
 }

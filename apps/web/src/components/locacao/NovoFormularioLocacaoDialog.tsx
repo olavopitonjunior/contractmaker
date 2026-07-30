@@ -230,6 +230,7 @@ export function NovoFormularioLocacaoDialog({
               <PartyLinksPanel
                 formToken={formToken}
                 roles={["locador", "locatario"]}
+                categoriesModule="locacao"
                 compact
               />
             )}

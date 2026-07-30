@@ -292,7 +292,11 @@ export function LocacaoDadosTab({
 
       {formToken && (
         <>
-          <PartyLinksPanel formToken={formToken} roles={partyRoles} />
+          <PartyLinksPanel
+            formToken={formToken}
+            roles={partyRoles}
+            categoriesModule="locacao"
+          />
           <div className="flex justify-end">
             <Button variant="outline" size="sm" asChild>
               <a href={`/f/${formToken}`} target="_blank" rel="noopener noreferrer">
