@@ -8,6 +8,7 @@ import { Separator } from "@/components/ui/separator";
 import { MoneyInput } from "@/components/forms/MoneyInput";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import { maskCPF, maskCNPJ, maskTelefone } from "@/lib/forms/field-formats";
+import { formatMoneyBR } from "@/lib/format/money";
 import {
   angariadorValorMensal,
   angariadorValorTotal,
@@ -63,8 +64,13 @@ interface ComissaoLocacaoSectionProps {
   disabled?: boolean;
 }
 
-const BRL = (v: number) =>
-  v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+// Formatação determinística (lib/format/money.ts), NÃO `toLocaleString` com
+// `style: "currency"`: o ICU intercala um espaço não-quebrável entre símbolo e
+// número cuja forma varia por versão (U+00A0 × U+202F), e o ICU do Node da
+// Vercel não é o do browser. Como o `ComissaoLocacaoCard` é renderizado no
+// servidor na aba Dados do deal, essa diferença aparecia no primeiro paint e
+// quebrava a hidratação (React #418). Mesma saída visual: "R$ 1.500,00".
+const BRL = (v: number) => formatMoneyBR(v);
 
 /** Number ou undefined a partir do input (string vazia não vira 0). */
 function toNumberOrUndefined(raw: string): number | undefined {

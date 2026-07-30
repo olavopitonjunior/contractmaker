@@ -69,7 +69,6 @@ interface TemplateEditorProps {
     status: string;
     engine?: string;
     googleTemplateDocId?: string | null;
-    previewStale?: boolean;
   };
   mode: "create" | "edit";
 }
@@ -452,17 +451,10 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
           <Button
             variant="outline"
             onClick={() => setPreviewOpen(true)}
-            title={
-              template?.previewStale
-                ? "Preview desatualizado — abre o último upload e oferece atualizar"
-                : "Abrir preview embedado no Google Docs"
-            }
+            title="Renderiza o modelo com dados de exemplo"
           >
             <Eye className="h-4 w-4 mr-1" />
             Visualizar preview
-            {template?.previewStale && (
-              <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
-            )}
           </Button>
         )}
 
@@ -496,7 +488,6 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
           templateName={name}
           templateModalidade={modalidade}
           templateEngine={engine as "handlebars" | "google_docs"}
-          previewStale={template.previewStale ?? false}
           open={previewOpen}
           onOpenChange={setPreviewOpen}
         />

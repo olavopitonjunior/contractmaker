@@ -278,6 +278,15 @@ const NAV: NavEntry[] = [
         url: "/settings/api-usage",
         permission: PERMISSION.ORG_SETTINGS_READ,
       },
+      {
+        // Conexão do Google Drive da imobiliária. A página existe desde sempre e
+        // o hub `/settings` já a lista, mas ela nunca tinha entrada no submenu —
+        // e é pra cá que apontam o onboarding (lib/onboarding/steps.ts) e as
+        // mensagens de erro de Drive expirado (lib/google/auth-error.ts).
+        title: "Integrações",
+        url: "/settings/integracoes",
+        permission: PERMISSION.ORG_SETTINGS_READ,
+      },
     ],
   },
 ];

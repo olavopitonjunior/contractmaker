@@ -94,10 +94,14 @@ export function parsePercentBR(raw: unknown): number {
  * propósito: `toLocaleString("pt-BR", { style: "currency" })` intercala um
  * espaço não-quebrável que difere entre o ICU do Node e o do browser e quebra
  * a hidratação do React. Aceita número ou string (usa parseMoneyBR).
+ *
+ * `decimals: 0` corta os centavos ("R$ 1.500") — é o formato das telas de
+ * proposta, onde valor de imóvel com ",00" só faz ruído. Arredonda, não trunca.
  */
-export function formatMoneyBR(raw: unknown): string {
+export function formatMoneyBR(raw: unknown, opts?: { decimals?: number }): string {
+  const decimals = opts?.decimals ?? 2;
   const n = parseMoneyBR(raw);
-  const [int, dec] = Math.abs(n).toFixed(2).split(".");
+  const [int, dec] = Math.abs(n).toFixed(decimals).split(".");
   const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  return `${n < 0 ? "-" : ""}R$ ${grouped},${dec}`;
+  return `${n < 0 ? "-" : ""}R$ ${grouped}${dec ? `,${dec}` : ""}`;
 }

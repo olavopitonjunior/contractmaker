@@ -17,44 +17,28 @@ import { usePermissions } from "@/hooks/usePermissions";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { NO_PERMISSION_HINT } from "@/lib/security/rbac/ui";
 
+/**
+ * Datas, prazo e valor chegam FORMATADOS do server component
+ * (`.../pipeline/propostas/page.tsx`). Não formatar aqui: `toLocale*` depende do
+ * padrão de locale do ICU do runtime (o do Node da Vercel ≠ o do browser) e o
+ * prazo depende de `Date.now()` (muda entre SSR e hidratação) — os dois viram
+ * hydration mismatch (React #418/#423). Ver lib/format/datetime.ts.
+ */
 export interface ProposalRow {
   id: string;
   title: string;
   status: string;
   instrument: string;
-  validUntil: string | null;
-  createdAt: string;
-  sentAt: string | null;
-  firstViewedAt: string | null;
+  /** "28/07". */
+  createdAtLabel: string;
+  /** "28/07" ou "" quando não enviada. */
+  sentAtLabel: string;
+  /** "28/07" ou "" quando nunca vista. */
+  firstViewedAtLabel: string;
+  prazo: { label: string; tone: "none" | "warn" | "danger" };
   convertedDealId: string | null;
   responsible: { name: string; isNonUser: boolean; image: string | null };
-  resumo: { proponente: string | null; imovel: string | null; valor: number | null };
-}
-
-function money(v: number | null): string {
-  if (v == null) return "—";
-  // "R$ " manual + grouping do número (determinístico) — evita o espaço variável do
-  // style:"currency" do ICU (U+00A0/U+202F) que difere Node×browser → React #418.
-  return "R$ " + v.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
-}
-
-function shortDate(iso: string | null): string {
-  if (!iso) return "—";
-  // timeZone explícito: o server roda em UTC e o client em BRT — sem fixar o fuso,
-  // o toLocale diverge entre SSR e hidratação → React #418 (hydration mismatch).
-  return new Date(iso).toLocaleDateString("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    timeZone: "America/Sao_Paulo",
-  });
-}
-
-function prazo(validUntil: string | null): { label: string; tone: "" | "warn" | "danger" } {
-  if (!validUntil) return { label: "—", tone: "" };
-  const days = Math.ceil((new Date(validUntil).getTime() - Date.now()) / 86_400_000);
-  if (days < 0) return { label: "vencida", tone: "danger" };
-  if (days === 0) return { label: "vence hoje", tone: "danger" };
-  return { label: `${days}d`, tone: days <= 2 ? "warn" : "" };
+  resumo: { proponente: string | null; imovel: string | null; valorLabel: string | null };
 }
 
 export function ProposalsListClient({
@@ -155,7 +139,7 @@ export function ProposalsListClient({
               <TableBody>
                 {proposals.map((p) => {
                   const sv = proposalStatusView(p.status);
-                  const pz = prazo(p.validUntil);
+                  const pz = p.prazo;
                   return (
                     <TableRow key={p.id} className="group">
                       <TableCell className="max-w-[280px]">
@@ -188,8 +172,8 @@ export function ProposalsListClient({
                         </div>
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {money(p.resumo.valor)}
-                        {tipo === "locacao" && p.resumo.valor != null && (
+                        {p.resumo.valorLabel ?? "—"}
+                        {tipo === "locacao" && p.resumo.valorLabel != null && (
                           <span className="text-xs text-muted-foreground">/mês</span>
                         )}
                       </TableCell>
@@ -198,15 +182,13 @@ export function ProposalsListClient({
                           {sv.label}
                         </Badge>
                         <div className="mt-0.5 text-[11px] text-muted-foreground">
-                          {p.sentAt ? `enviada ${shortDate(p.sentAt)}` : `criada ${shortDate(p.createdAt)}`}
-                          {p.firstViewedAt ? ` · vista ${shortDate(p.firstViewedAt)}` : ""}
+                          {p.sentAtLabel
+                            ? `enviada ${p.sentAtLabel}`
+                            : `criada ${p.createdAtLabel}`}
+                          {p.firstViewedAtLabel ? ` · vista ${p.firstViewedAtLabel}` : ""}
                         </div>
                       </TableCell>
                       <TableCell
-                        // prazo deriva de Date.now() (relativo) → pode divergir SSR×
-                        // hidratação num limite de dia. suppressHydrationWarning mantém
-                        // o valor do client sem disparar React #418.
-                        suppressHydrationWarning
                         className={
                           pz.tone === "danger"
                             ? "text-destructive font-medium"

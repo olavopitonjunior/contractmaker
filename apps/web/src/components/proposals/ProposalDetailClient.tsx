@@ -48,53 +48,39 @@ const SIGNER_STATUS_LABEL: Record<string, string> = {
   canceled: "Cancelado",
 };
 
+/**
+ * Tudo que dependeria de locale ou do relógio já chega FORMATADO do server
+ * component (`.../propostas/[id]/page.tsx`): datas, prazo e valor são strings.
+ *
+ * Não voltar a formatar aqui. `toLocale*` resolve o padrão de data no ICU do
+ * runtime, e o ICU do Node da Vercel não é o do browser do usuário — a mesma
+ * data saía "28/07/2026 20:23" no HTML do servidor e "28/07/2026, 20:23" na
+ * hidratação. E o prazo relativo ("faltam 5d") deriva de `Date.now()`, que muda
+ * entre o SSR e a hidratação. Qualquer um dos dois é hydration mismatch: React
+ * #418 e, quando escala, #423 (a raiz inteira re-renderiza no client e o card
+ * "Documento" fica em branco). Ver lib/format/datetime.ts.
+ */
 interface Proposal {
   id: string;
   title: string;
   status: string;
   kind: string;
   instrument: string;
-  validUntil: string | null;
-  createdAt: string;
-  sentAt: string | null;
-  deliveredAt: string | null;
-  firstViewedAt: string | null;
+  createdAtLabel: string;
+  sentAtLabel: string;
+  deliveredAtLabel: string;
+  firstViewedAtLabel: string;
   viewCount: number;
-  lastReminderAt: string | null;
+  lastReminderAtLabel: string;
   reminderCount: number;
-  completedAt: string | null;
-  convertedAt: string | null;
+  validUntilLabel: string;
+  prazo: { label: string; danger: boolean };
   convertedDealId: string | null;
   dossierUrl: string | null;
-  resumo: { proponente: string | null; imovel: string | null; valor: number | null };
+  resumo: { proponente: string | null; imovel: string | null; valorLabel: string | null };
   responsible: { name: string; isNonUser: boolean; image: string | null };
   responsibleUserId: string | null;
   responsibleName: string | null;
-}
-
-function money(v: number | null): string {
-  if (v == null) return "—";
-  // "R$ " manual + grouping do número (determinístico): o style:"currency" do ICU
-  // emite um espaço variável (U+00A0/U+202F) entre símbolo e número que difere
-  // Node×browser → hydration mismatch (React #418). O grouping "500.000" é estável.
-  return "R$ " + v.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
-}
-function fmt(iso: string | null): string {
-  if (!iso) return "—";
-  // timeZone explícito: server (UTC) e client (BRT) precisam formatar igual, senão
-  // a HORA diverge (22:16 vs 19:16) → React #418 (hydration mismatch) a cada load.
-  return new Date(iso).toLocaleString("pt-BR", {
-    dateStyle: "short",
-    timeStyle: "short",
-    timeZone: "America/Sao_Paulo",
-  });
-}
-function prazoLabel(validUntil: string | null): { label: string; danger: boolean } {
-  if (!validUntil) return { label: "sem prazo", danger: false };
-  const days = Math.ceil((new Date(validUntil).getTime() - Date.now()) / 86_400_000);
-  if (days < 0) return { label: "vencida", danger: true };
-  if (days === 0) return { label: "vence hoje", danger: true };
-  return { label: `faltam ${days}d`, danger: days <= 2 };
 }
 
 export function ProposalDetailClient({
@@ -108,7 +94,7 @@ export function ProposalDetailClient({
 }: {
   proposal: Proposal;
   signers: { id: string; name: string; role: string; channel: string; status: string }[];
-  events: { id: string; eventName: string; receivedAt: string }[];
+  events: { id: string; eventName: string; receivedAtLabel: string }[];
   attachments: { id: string; filename: string; category: string | null; url: string }[];
   members: { id: string; name: string }[];
   permissions: ProposalPermissions;
@@ -141,7 +127,7 @@ export function ProposalDetailClient({
   });
   const liveStatus = live?.status ?? proposal.status;
   const sv = proposalStatusView(liveStatus);
-  const pz = prazoLabel(proposal.validUntil);
+  const pz = proposal.prazo;
   // Derivado do status AO VIVO (não do prop do servidor): se a proposta for
   // enviada em outra aba, o botão de editar some junto com o preview — mesmo
   // conjunto que o PATCH e o /preview aceitam no servidor.
@@ -249,7 +235,7 @@ export function ProposalDetailClient({
           <h2 className="font-medium">Resumo</h2>
           <Row label="Proponente" value={proposal.resumo.proponente ?? "—"} />
           <Row label="Imóvel" value={proposal.resumo.imovel ?? "—"} />
-          <Row label="Valor" value={money(proposal.resumo.valor)} />
+          <Row label="Valor" value={proposal.resumo.valorLabel ?? "—"} />
           <Row
             label="Instrumento"
             value={proposal.instrument === "aceite" ? "Aceite via WhatsApp" : "Assinatura (envelope)"}
@@ -282,26 +268,22 @@ export function ProposalDetailClient({
       <div className="grid gap-4 md:grid-cols-2">
         <Card className="space-y-2 p-4">
           <h2 className="font-medium">Datas</h2>
-          <Row label="Criada" value={fmt(proposal.createdAt)} />
-          <Row label="Enviada" value={fmt(proposal.sentAt)} />
-          <Row label="Entregue" value={fmt(proposal.deliveredAt)} />
+          <Row label="Criada" value={proposal.createdAtLabel} />
+          <Row label="Enviada" value={proposal.sentAtLabel} />
+          <Row label="Entregue" value={proposal.deliveredAtLabel} />
           <Row
             label="Visualizada"
             value={
-              proposal.firstViewedAt
-                ? `${fmt(proposal.firstViewedAt)}${proposal.viewCount > 1 ? ` (${proposal.viewCount}×)` : ""}`
-                : "—"
+              proposal.viewCount > 1
+                ? `${proposal.firstViewedAtLabel} (${proposal.viewCount}×)`
+                : proposal.firstViewedAtLabel
             }
           />
           <div className="flex justify-between text-sm">
             <span className="text-muted-foreground">Validade</span>
             <span className="font-medium">
-              {fmt(proposal.validUntil)}{" "}
-              {/* prazo relativo (Date.now) → suppressHydrationWarning evita #418 no limite de dia. */}
-              <span
-                suppressHydrationWarning
-                className={pz.danger ? "text-destructive" : "text-muted-foreground"}
-              >
+              {proposal.validUntilLabel}{" "}
+              <span className={pz.danger ? "text-destructive" : "text-muted-foreground"}>
                 ({pz.label})
               </span>
             </span>
@@ -309,7 +291,7 @@ export function ProposalDetailClient({
           {proposal.reminderCount > 0 && (
             <Row
               label="Último lembrete"
-              value={`${fmt(proposal.lastReminderAt)} (${proposal.reminderCount}×)`}
+              value={`${proposal.lastReminderAtLabel} (${proposal.reminderCount}×)`}
             />
           )}
         </Card>
@@ -436,7 +418,7 @@ export function ProposalDetailClient({
                 <span className="absolute -left-[23px] top-1 h-2.5 w-2.5 rounded-full border-2 border-background bg-primary" />
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                   <span className="text-sm">{proposalEventLabel(e.eventName)}</span>
-                  <span className="text-xs text-muted-foreground">{fmt(e.receivedAt)}</span>
+                  <span className="text-xs text-muted-foreground">{e.receivedAtLabel}</span>
                 </div>
               </li>
             ))}

@@ -19,6 +19,7 @@ import {
   selectLocacaoTemplate,
   selectAdministracaoTemplate,
   templateFamilyForModalidade,
+  previewFixturesForModalidade,
   type TemplateLite,
 } from "../template-category";
 import { prisma } from "@/lib/db/prisma";
@@ -444,5 +445,43 @@ describe("selectAdministracaoTemplate", () => {
     mockFindMany.mockResolvedValueOnce([]);
     const result = await selectAdministracaoTemplate("org-1");
     expect(result).toBeNull();
+  });
+});
+
+describe("previewFixturesForModalidade", () => {
+  it("venda oferece as duas amostras do grupo, rotuladas", () => {
+    const fixtures = previewFixturesForModalidade("a_vista");
+    expect(fixtures.map((f) => f.value)).toEqual(["a_vista", "financiamento"]);
+    expect(fixtures.map((f) => f.label)).toEqual([
+      "Venda à vista",
+      "Venda com financiamento",
+    ]);
+    // A modalidade do template não muda a lista — o grupo é o mesmo.
+    expect(previewFixturesForModalidade("financiamento")).toEqual(fixtures);
+  });
+
+  it("locação, administração e proposta têm UMA amostra (a própria)", () => {
+    // O diálogo mostrava "À Vista | Financiamento" hardcoded pra qualquer
+    // template handlebars — inclusive proposta, cujo schema é outro.
+    for (const m of [
+      "locacao",
+      "locacao_comercial",
+      "administracao_locacao",
+      "proposta_venda",
+      "proposta_locacao_residencial",
+      "proposta_locacao_comercial",
+    ]) {
+      const fixtures = previewFixturesForModalidade(m);
+      expect(fixtures).toHaveLength(1);
+      expect(fixtures[0].value).toBe(m);
+      expect(fixtures[0].label).not.toBe(m); // tem rótulo legível
+    }
+  });
+
+  it("modalidade nula cai no grupo de venda (template legado)", () => {
+    expect(previewFixturesForModalidade(null).map((f) => f.value)).toEqual([
+      "a_vista",
+      "financiamento",
+    ]);
   });
 });

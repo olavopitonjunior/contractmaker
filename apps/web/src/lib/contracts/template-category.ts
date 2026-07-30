@@ -474,6 +474,35 @@ export function modalidadeLabel(modalidade: string | null | undefined): string {
   return MODALIDADE_LABELS[modalidade] ?? modalidade;
 }
 
+export interface PreviewFixture {
+  /** Modalidade cuja amostra alimenta o render (`getPreviewSampleData`). */
+  value: string;
+  label: string;
+}
+
+/**
+ * Amostras oferecidas no preview de um template.
+ *
+ * VENDA é a única família com duas: o mesmo texto-base costuma cobrir à vista e
+ * financiamento, e alternar entre as amostras é como se testa
+ * `{{#if pagamento.alienacao_fiduciaria}}` e afins. Locação, administração e
+ * proposta têm schema próprio por modalidade — oferecer a amostra de outra
+ * modalidade ali só renderiza um documento vazio. Por isso a lista tem UM item,
+ * e a UI esconde as abas quando não há escolha a fazer.
+ *
+ * Era hardcode "À Vista | Financiamento" no diálogo: template de proposta ou de
+ * locação mostrava as abas de venda e o preview saía com as chaves erradas.
+ */
+export function previewFixturesForModalidade(
+  modalidade: string | null | undefined
+): PreviewFixture[] {
+  if (templateFamilyForModalidade(modalidade) === "venda") {
+    return VENDA_MODALIDADES.map((m) => ({ value: m, label: modalidadeLabel(m) }));
+  }
+  const m = modalidade ?? "";
+  return [{ value: m, label: modalidadeLabel(m) }];
+}
+
 /**
  * schemaType coerente com a modalidade — usado na ingestão (from-docx) e ao
  * corrigir a modalidade de um template já criado, pra os dois não divergirem.

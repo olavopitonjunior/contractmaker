@@ -1,13 +1,8 @@
 import { notFound } from "next/navigation";
-import { createHash } from "crypto";
 import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { resolveUserOrgId } from "@/lib/security/org-scope";
 import { TemplateEditor } from "@/components/templates/TemplateEditor";
-
-function sha(s: string): string {
-  return createHash("sha256").update(s).digest("hex").slice(0, 16);
-}
 
 export default async function EditTemplatePage({
   params,
@@ -31,14 +26,8 @@ export default async function EditTemplatePage({
 
   if (!template) notFound();
 
-  const fixtureModalidade =
-    template.modalidade === "financiamento" ? "financiamento" : "a_vista";
-  const expectedKey = sha(template.handlebarsSource + ":" + fixtureModalidade);
-  const previewStale =
-    template.engine !== "google_docs" &&
-    !!template.googleTemplateDocId &&
-    template.previewSourceHash !== expectedKey;
-
+  // Não há mais "preview desatualizado": o preview handlebars é renderizado na
+  // hora a cada abertura (nada de doc cacheado no Drive).
   return (
     <TemplateEditor
       mode="edit"
@@ -55,7 +44,6 @@ export default async function EditTemplatePage({
         status: template.status,
         engine: template.engine,
         googleTemplateDocId: template.googleTemplateDocId,
-        previewStale,
       }}
     />
   );

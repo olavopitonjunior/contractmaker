@@ -3,6 +3,7 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { isGoogleDocsConfigured } from "@/lib/google/client";
 import { getDocPlainText } from "@/lib/google/docs";
+import { googleErrorMessage } from "@/lib/google/auth-error";
 import { extractPlaceholdersFromText } from "@/lib/google/replace-placeholders";
 import {
   catalogForModalidade,
@@ -90,8 +91,9 @@ export async function POST(
       })),
     });
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
     console.error("[templates/validate-gdoc/id] Erro:", err);
-    return NextResponse.json({ error: msg }, { status: 502 });
+    // `invalid_grant` cru não diz nada pra quem está na tela — e é o erro mais
+    // comum aqui (refresh token da org expira em 7 dias no modo Testing).
+    return NextResponse.json({ error: googleErrorMessage(err) }, { status: 502 });
   }
 }
