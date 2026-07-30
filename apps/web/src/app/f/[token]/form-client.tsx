@@ -16,8 +16,9 @@ interface FormPageClientProps {
   locked?: boolean;
   /**
    * Visitante tem OrgMembership na org do form (`viewerIsOrgMember`, resolvido
-   * server-side). Libera remover documento na etapa 0 — o link público está
-   * normalmente com o cliente.
+   * server-side). Libera os campos de recebimento da comissão na etapa de
+   * Comissão E remover documento na etapa 0 — o link público está normalmente
+   * com o cliente, que não deve ver nem uma coisa nem outra.
    */
   viewerIsMember?: boolean;
 }

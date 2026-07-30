@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
-import { Plus, Trash2, UserPlus, Building2, Search } from "lucide-react";
+import { Plus, Trash2, UserPlus, Building2, Search, Landmark } from "lucide-react";
 import { MoneyInput } from "@/components/forms/MoneyInput";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import { OBSERVACOES_MAX } from "@/lib/forms/validation";
@@ -18,6 +18,13 @@ interface ComissaoConfigStepProps {
   form: UseFormReturn<any>;
   /** Token do form público — usado pra chamar /api/forms/[token]/commissioners */
   token?: string;
+  /**
+   * Visitante é membro da imobiliária. Só então os campos de recebimento
+   * (PIX/conta do corretor) aparecem — o link normalmente está na mão do
+   * cliente, que não tem por que ver nem digitar dado bancário de terceiro.
+   * O POST faz a mesma checagem; aqui é só a metade visual.
+   */
+  viewerIsMember?: boolean;
 }
 
 interface CommissionerLookup {
@@ -75,24 +82,73 @@ function CheckboxField({
   );
 }
 
+interface RecebimentoState {
+  pixAddressKey: string;
+  bankName: string;
+  bankBranch: string;
+  bankAccount: string;
+  bankAccountType: string;
+  bankHolderName: string;
+  bankHolderDoc: string;
+}
+
+const EMPTY_RECEBIMENTO: RecebimentoState = {
+  pixAddressKey: "",
+  bankName: "",
+  bankBranch: "",
+  bankAccount: "",
+  bankAccountType: "corrente",
+  bankHolderName: "",
+  bankHolderDoc: "",
+};
+
+function hasAnyRecebimento(r: RecebimentoState): boolean {
+  return !!(
+    r.pixAddressKey.trim() ||
+    r.bankName.trim() ||
+    r.bankBranch.trim() ||
+    r.bankAccount.trim() ||
+    r.bankHolderName.trim() ||
+    r.bankHolderDoc.trim()
+  );
+}
+
 /**
- * Botão "Salvar como cadastro reutilizável" — persiste o comissionado como
- * SplitRecipient via /api/forms/[token]/commissioners e armazena o id no
- * form. Próximos negócios encontram esse cadastro pelo autocomplete.
+ * Dados de recebimento da comissão (PIX + conta bancária) e o botão que
+ * persiste o comissionado como SplitRecipient via
+ * /api/forms/[token]/commissioners. O id volta pro form e próximos negócios
+ * acham o cadastro pelo autocomplete.
  *
- * Sem dados de PIX/banco, o cadastro fica como rascunho (active=false) —
- * admin completa em /settings/pagamentos/split-recipients depois.
+ * Este estado NÃO vive no react-hook-form DE PROPÓSITO. O que está no RHF é
+ * autossalvo em `SalesForm.dataJson`, e o dataJson é devolvido inteiro por
+ * GET /api/forms/[token] pra qualquer portador do link — que inclui o cliente,
+ * e o resumo enviado por e-mail. Chave PIX e conta do corretor não podem
+ * trafegar por aí. Aqui os campos são write-only: sobem no POST, ficam no
+ * SplitRecipient (cuja whitelist no GET público nunca expõe PII bancária) e
+ * saem da tela.
+ *
+ * Só chave PIX torna o cadastro pagável pela esteira (`pix_external`). Conta
+ * bancária é TED manual: fica guardada pro repasse fora da esteira e o
+ * cadastro segue rascunho — mesma convenção do cadastro admin.
  */
-function SaveAsCadastroButton({
+function CadastroRecebimento({
   form,
   index,
   token,
+  showReceiving,
 }: {
   form: UseFormReturn<any>;
   index: number;
   token: string;
+  showReceiving: boolean;
 }) {
   const [saving, setSaving] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [receb, setReceb] = useState<RecebimentoState>(EMPTY_RECEBIMENTO);
+  const fieldId = useId();
+
+  const set = (patch: Partial<RecebimentoState>) =>
+    setReceb((r) => ({ ...r, ...patch }));
 
   const handleSave = async () => {
     const base = `comissao.comissionados.${index}`;
@@ -109,6 +165,37 @@ function SaveAsCadastroButton({
       toast.error("Preencha pelo menos Nome e CPF/CNPJ antes de salvar.");
       return;
     }
+
+    const chavePix = receb.pixAddressKey.trim();
+    // `titularCpfCnpj` tem min(11) no schema da rota — mandar um doc curto
+    // reprovaria o body inteiro. Sem doc válido, o titular fica implícito.
+    const docDigits = doc.replace(/\D/g, "");
+    const pix = chavePix
+      ? {
+          chave: chavePix,
+          titularNome: nome,
+          titularCpfCnpj: docDigits.length >= 11 ? doc : undefined,
+        }
+      : undefined;
+
+    const banco =
+      receb.bankName.trim() ||
+      receb.bankBranch.trim() ||
+      receb.bankAccount.trim() ||
+      receb.bankHolderName.trim() ||
+      receb.bankHolderDoc.trim()
+        ? {
+            nome: receb.bankName.trim() || undefined,
+            agencia: receb.bankBranch.trim() || undefined,
+            conta: receb.bankAccount.trim() || undefined,
+            tipoConta: receb.bankAccount.trim()
+              ? (receb.bankAccountType as "corrente" | "poupanca")
+              : undefined,
+            titularNome: receb.bankHolderName.trim() || undefined,
+            titularDoc: receb.bankHolderDoc.trim() || undefined,
+          }
+        : undefined;
+
     setSaving(true);
     try {
       const res = await fetch(`/api/forms/${token}/commissioners`, {
@@ -123,6 +210,8 @@ function SaveAsCadastroButton({
           email: String(form.getValues(`${base}.email`) || "") || undefined,
           phone:
             String(form.getValues(`${base}.mobile_phone`) || "") || undefined,
+          pix,
+          banco,
         }),
       });
       if (!res.ok) {
@@ -137,34 +226,162 @@ function SaveAsCadastroButton({
           shouldDirty: true,
         });
       }
-      toast.success(
-        data?.existed
-          ? "Cadastro já existia e foi vinculado."
-          : "Cadastro salvo. Próximos negócios podem reusá-lo."
-      );
+      // Some da tela: o dado agora vive no cadastro, e este formulário não é
+      // lugar pra guardar chave PIX/conta.
+      setReceb(EMPTY_RECEBIMENTO);
+      setOpen(false);
+      if (data?.existed && data?.receivingIgnored) {
+        // Não mentir: a rota ignora dados de recebimento de cadastro existente.
+        toast.warning(
+          "Cadastro já existia e foi vinculado. Por segurança, os dados de recebimento não foram alterados — peça à imobiliária para atualizá-los."
+        );
+      } else if (data?.existed) {
+        toast.success("Cadastro já existia e foi vinculado.");
+      } else if (chavePix) {
+        toast.success(
+          "Cadastro salvo com a chave PIX. A imobiliária confirma o meio de repasse antes do primeiro pagamento."
+        );
+      } else if (data?.isDraft) {
+        toast.success(
+          "Cadastro salvo. Sem chave PIX ele fica como rascunho — a imobiliária completa o meio de repasse depois."
+        );
+      } else {
+        toast.success("Cadastro salvo. Próximos negócios podem reusá-lo.");
+      }
     } catch (err) {
-      console.error("[SaveAsCadastroButton]", err);
+      console.error("[CadastroRecebimento]", err);
       toast.error("Erro ao salvar cadastro.");
     } finally {
       setSaving(false);
     }
   };
 
+  const preenchido = hasAnyRecebimento(receb);
+
   return (
-    <Button
-      type="button"
-      size="sm"
-      variant="outline"
-      onClick={handleSave}
-      disabled={saving}
-      className="text-xs"
-    >
-      {saving ? "Salvando..." : "Salvar como cadastro reutilizável"}
-    </Button>
+    <div className="pt-2 border-t border-dashed space-y-3">
+      {showReceiving && (
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <div>
+            <p className="text-sm font-medium">Dados para recebimento da comissão</p>
+            <p className="text-xs text-muted-foreground">
+              Opcional. Vão direto pro cadastro da imobiliária — não ficam
+              salvos neste formulário nem aparecem pra quem mais tem o link.
+            </p>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="text-xs"
+            onClick={() => setOpen((v) => !v)}
+          >
+            <Landmark className="h-3.5 w-3.5 mr-1.5" />
+            {open ? "Ocultar" : "Preencher"}
+          </Button>
+        </div>
+      )}
+
+      {showReceiving && open && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 rounded-md border border-dashed bg-background/60 p-3">
+          <FormField label="Chave PIX" className="md:col-span-2">
+            <Input
+              id={`${fieldId}-pix`}
+              value={receb.pixAddressKey}
+              onChange={(e) => set({ pixAddressKey: e.target.value })}
+              maxLength={200}
+              placeholder="CPF, CNPJ, e-mail, telefone ou chave aleatória"
+            />
+            <p className="text-xs text-muted-foreground">
+              É o que permite o repasse automático da comissão. A imobiliária
+              confirma a chave antes do primeiro pagamento.
+            </p>
+          </FormField>
+
+          <FormField label="Banco">
+            <Input
+              value={receb.bankName}
+              onChange={(e) => set({ bankName: e.target.value })}
+              maxLength={80}
+              placeholder="Ex: Itaú"
+            />
+          </FormField>
+          <FormField label="Agência">
+            <Input
+              value={receb.bankBranch}
+              onChange={(e) => set({ bankBranch: e.target.value })}
+              maxLength={20}
+              placeholder="0000"
+            />
+          </FormField>
+          <FormField label="Conta">
+            <Input
+              value={receb.bankAccount}
+              onChange={(e) => set({ bankAccount: e.target.value })}
+              maxLength={30}
+              placeholder="00000-0"
+            />
+          </FormField>
+          <FormField label="Tipo de conta">
+            <NativeSelect
+              value={receb.bankAccountType}
+              onChange={(v) => set({ bankAccountType: v })}
+              options={[
+                { value: "corrente", label: "Corrente" },
+                { value: "poupanca", label: "Poupança" },
+              ]}
+            />
+          </FormField>
+          <FormField label="Titular da conta">
+            <Input
+              value={receb.bankHolderName}
+              onChange={(e) => set({ bankHolderName: e.target.value })}
+              maxLength={200}
+              placeholder="Se for diferente do comissionado"
+            />
+          </FormField>
+          <FormField label="CPF/CNPJ do titular">
+            <Input
+              value={receb.bankHolderDoc}
+              onChange={(e) => set({ bankHolderDoc: e.target.value })}
+              maxLength={18}
+              placeholder="000.000.000-00"
+            />
+          </FormField>
+        </div>
+      )}
+
+      <div className="flex items-center gap-3 flex-wrap">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={handleSave}
+          disabled={saving}
+          className="text-xs"
+        >
+          {saving
+            ? "Salvando..."
+            : preenchido
+              ? "Salvar cadastro e dados de recebimento"
+              : "Salvar como cadastro reutilizável"}
+        </Button>
+        {preenchido && (
+          <p className="text-xs text-amber-700 dark:text-amber-500">
+            Clique em salvar — os dados de recebimento se perdem se você sair
+            sem salvar.
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
 
-export function ComissaoConfigStep({ form, token }: ComissaoConfigStepProps) {
+export function ComissaoConfigStep({
+  form,
+  token,
+  viewerIsMember = false,
+}: ComissaoConfigStepProps) {
   const quemPaga = form.watch("comissao.quem_paga");
   const quandoPaga = form.watch("comissao.quando_paga");
 
@@ -698,13 +915,18 @@ export function ComissaoConfigStep({ form, token }: ComissaoConfigStepProps) {
                 </div>
 
                 {token && !splitRecipientId && (
-                  <div className="pt-2 border-t border-dashed">
-                    <SaveAsCadastroButton
-                      form={form}
-                      index={index}
-                      token={token}
-                    />
-                  </div>
+                  <CadastroRecebimento
+                    form={form}
+                    index={index}
+                    token={token}
+                    showReceiving={viewerIsMember}
+                  />
+                )}
+                {splitRecipientId && (
+                  <p className="pt-2 border-t border-dashed text-xs text-muted-foreground">
+                    Dados de recebimento deste cadastro são mantidos pela
+                    imobiliária.
+                  </p>
                 )}
               </div>
             );

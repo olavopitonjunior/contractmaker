@@ -67,6 +67,15 @@ interface SalesFormWizardProps {
    */
   proposalAttachmentUrl?: string | null;
   /**
+   * Visitante é membro da org dona do form (`viewerIsOrgMember`, server-side).
+   * Duas coisas dependem dele, ambas por o link público estar normalmente com o
+   * CLIENTE: os campos de recebimento da comissão (PIX/conta) na etapa de
+   * Comissão, e remover documento na etapa 0. Default `false`, e o subtoken por
+   * parte nunca é membro. Nos dois casos o servidor é o guard autoritativo
+   * (403); isto aqui é a metade visual.
+   */
+  viewerIsMember?: boolean;
+  /**
    * Subset de step indexes (0..7) a mostrar. Usado por subtoken (PR 4)
    * pra esconder steps que não pertencem ao role (vendedor não vê
    * comprador, comprador não vê imóvel/comissão/pagamento). Quando
@@ -101,12 +110,6 @@ interface SalesFormWizardProps {
    * autoritativo (403 nos writes); isto é UX.
    */
   readOnly?: boolean;
-  /**
-   * Visitante é membro da org dona do form (`viewerIsOrgMember`, server-side).
-   * Libera remover documento na etapa 0. Default false: o caso normal do link
-   * público é o CLIENTE. O servidor é o guard autoritativo (403); isto é UX.
-   */
-  viewerIsMember?: boolean;
 }
 
 const FULL_STEP_INDEXES: readonly number[] = [0, 1, 2, 3, 4, 5, 6];
@@ -433,13 +436,13 @@ export function SalesFormWizard({
   requiredFieldsByStep,
   prefilled,
   proposalAttachmentUrl,
+  viewerIsMember = false,
   stepIndexes,
   endpoint,
   pathScope,
   selfAssignment,
   finalizeMode = "main",
   readOnly = false,
-  viewerIsMember = false,
 }: SalesFormWizardProps) {
   // `visibleStepIndexes` mapeia cursor virtual (0..N-1) para índice "real"
   // dos 8 steps existentes. Default = todos os 8. Subtoken passa subset.
@@ -839,7 +842,12 @@ export function SalesFormWizard({
     <ImovelStep key="step-3" form={form} />,
     <StatusDebitosStep key="step-4" form={form} />,
     <PagamentoStep key="step-5" form={form} />,
-    <ComissaoConfigStep key="step-6" form={form} token={token} />,
+    <ComissaoConfigStep
+      key="step-6"
+      form={form}
+      token={token}
+      viewerIsMember={viewerIsMember}
+    />,
   ];
 
   return (

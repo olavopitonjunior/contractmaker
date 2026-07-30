@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import { formClosedResponse } from "@/lib/forms/form-gate";
+import { formClosedResponse, viewerIsOrgMember } from "@/lib/forms/form-gate";
 import { audit } from "@/lib/security/audit";
+import { rateLimit } from "@/lib/security/ratelimit";
 import { detectPixKeyType } from "@/lib/asaas/pix";
 import {
   createCommissioner,
@@ -20,6 +21,16 @@ export const runtime = "nodejs";
  * Resolve `orgId` via `SalesForm.token` e filtra `SplitRecipient` por
  * `{ orgId, kind:"commissioner", active:true }`. Nunca expõe PII bancária
  * (walletId/pixAddressKey/bankAccount/bankHolderDoc/ownerCpfCnpj completo).
+ *
+ * O POST aceita dados de recebimento (`pix`, `banco`) — write-only: entram no
+ * SplitRecipient e o GET acima não os devolve. Duas travas, porque aqui se
+ * grava para onde o dinheiro vai:
+ *
+ *  1. Só de MEMBRO da org (`viewerIsOrgMember`). De anônimo vêm descartados
+ *     (`receivingRejected`) — o link costuma estar com o cliente, e a UI já
+ *     esconde os campos pra ele. Sem esta checagem, esconder seria fachada.
+ *  2. Num cadastro que JÁ existe são ignorados (`receivingIgnored`), de quem
+ *     quer que venham: sobrescrever chave PIX alheia desviaria repasse.
  */
 
 // Máscara mínima: mantém 3 primeiros e 2 últimos dígitos.
@@ -37,6 +48,21 @@ export async function GET(
   const { token } = await params;
   const { searchParams } = new URL(req.url);
   const q = (searchParams.get("q") ?? "").trim();
+
+  // `?q=` livre sobre o roster inteiro da org — sem teto, o token do form vira
+  // ferramenta de enumeração de corretores. Mesmo padrão de participants/from-main.
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const limited = await rateLimit({
+    identifier: `commissioners-list:${token}:${ip}`,
+    limit: 30,
+    window: "1 m",
+  });
+  if (!limited.success) {
+    return NextResponse.json(
+      { error: "Muitas tentativas — aguarde um instante." },
+      { status: 429 }
+    );
+  }
 
   const form = await prisma.salesForm.findUnique({
     where: { token },
@@ -101,7 +127,19 @@ export async function GET(
 const createSchema = z.object({
   label: z.string().trim().min(1).max(120),
   tipoPessoa: z.enum(["fisica", "juridica"]),
-  cpfCnpj: z.string().trim().min(11).max(18),
+  // Dígitos, não só comprimento: `normalizeDoc` descarta não-dígitos, então
+  // um doc alfabético de 11+ chars passava no Zod, normalizava pra "" e fazia
+  // `findCommissionerMatch` PULAR o dedupe por documento — caindo no match só
+  // por nome, que é mais fraco. Era um jeito barato de forçar cadastro novo.
+  cpfCnpj: z
+    .string()
+    .trim()
+    .min(11)
+    .max(18)
+    .refine((v) => {
+      const d = v.replace(/\D/g, "").length;
+      return d === 11 || d === 14;
+    }, "CPF/CNPJ inválido — informe 11 (CPF) ou 14 (CNPJ) dígitos"),
   creci: z.string().trim().max(50).optional(),
   papel: z
     .enum([
@@ -147,6 +185,21 @@ export async function POST(
 ) {
   const { token } = await params;
 
+  // Escreve PII bancária a partir de request anônimo — teto apertado pra
+  // impedir varredura automatizada plantando cadastros.
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const limited = await rateLimit({
+    identifier: `commissioners-create:${token}:${ip}`,
+    limit: 10,
+    window: "1 m",
+  });
+  if (!limited.success) {
+    return NextResponse.json(
+      { error: "Muitas tentativas — aguarde um instante." },
+      { status: 429 }
+    );
+  }
+
   const form = await prisma.salesForm.findUnique({
     where: { token },
     select: { id: true, orgId: true, status: true, completedAt: true, reopenedAt: true },
@@ -169,8 +222,26 @@ export async function POST(
   }
 
   const data = parsed.data;
-  const hasPix = !!data.pix?.chave;
-  const hasBank = !!(data.banco?.nome && data.banco?.agencia && data.banco?.conta);
+
+  // Dado de recebimento só de quem é da imobiliária. O link do formulário está
+  // normalmente com o CLIENTE, e a UI já esconde os campos pra ele — mas
+  // esconder sem barrar aqui seria trava de fachada: bastava um POST direto.
+  // É esta checagem que fecha de fato o desvio de repasse; o `unverifiedSource`
+  // abaixo fica como rede, caso outro caller anônimo apareça.
+  const viewerIsMember = await viewerIsOrgMember(form.orgId);
+  // `sent*` = o que veio no body; `has*` = o que temos permissão de gravar.
+  // Banco vai inteiro pro registry, mesmo parcial: guardar "Itaú, ag. 0000"
+  // sem a conta ainda ajuda quem for fazer o repasse manual. Exigir os três
+  // campos descartava em silêncio o que o corretor digitou.
+  const sentPix = !!data.pix?.chave;
+  const sentBank = !!(
+    data.banco &&
+    Object.values(data.banco).some((v) => typeof v === "string" && v.trim())
+  );
+  const hasPix = viewerIsMember && sentPix;
+  const hasBank = viewerIsMember && sentBank;
+  // Mandou dado bancário sem ser da org: descartado, e a resposta diz isso.
+  const receivingRejected = !viewerIsMember && (sentPix || sentBank);
 
   // Detectar tipo de chave PIX (best-effort — formato inválido só rejeita
   // se o usuário marcou PIX como meio. Sem PIX vira rascunho).
@@ -199,6 +270,37 @@ export async function POST(
   };
   const preexisting = await findCommissionerMatch(form.orgId, registryInput);
   if (preexisting) {
+    // Dados de recebimento de um cadastro que JÁ existe são deliberadamente
+    // ignorados: este endpoint é anônimo, e deixá-lo gravar chave PIX num
+    // corretor existente seria um vetor de desvio de repasse. Devolvemos o
+    // flag pra UI dizer a verdade em vez de fingir que salvou.
+    const receivingIgnored = sentPix || sentBank;
+    if (receivingIgnored) {
+      // Tentativa repetida daqui é sinal de ataque (ou de corretor legítimo
+      // batendo na trava). Sem esta linha o evento não existe em lugar nenhum.
+      await audit(
+        {
+          orgId: form.orgId,
+          userId: null,
+          ipAddress: req.headers.get("x-forwarded-for") ?? null,
+          userAgent: req.headers.get("user-agent") ?? null,
+        },
+        {
+          action: "SPLIT_RECIPIENT_UPDATED",
+          result: "DENIED",
+          resourceType: "split_recipient",
+          resource: `split_recipient:${preexisting.id}`,
+          metadata: {
+            source: "public_form",
+            formId: form.id,
+            reason: "receiving_data_ignored_on_existing_recipient",
+            viewerIsMember,
+            sentPix,
+            sentBank,
+          },
+        }
+      );
+    }
     return NextResponse.json(
       {
         recipient: {
@@ -212,6 +314,8 @@ export async function POST(
           phone: preexisting.phone,
         },
         existed: true,
+        isDraft: preexisting.pendingFields.length > 0,
+        receivingIgnored,
       },
       { status: 200 }
     );
@@ -230,7 +334,7 @@ export async function POST(
           }
         : undefined,
       banco: hasBank ? data.banco : undefined,
-    });
+    }, { unverifiedSource: !viewerIsMember });
     isDraft = created.pendingFields.length > 0;
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {
@@ -257,6 +361,8 @@ export async function POST(
               phone: existing.phone,
             },
             existed: true,
+            isDraft: existing.pendingFields.length > 0,
+            receivingIgnored: sentPix || sentBank,
           },
           { status: 200 }
         );
@@ -283,6 +389,11 @@ export async function POST(
         label: created.label,
         kind: "commissioner",
         isDraft,
+        // Nunca o valor — só se veio. Rastro pra investigar repasse errado.
+        viewerIsMember,
+        hasPix,
+        hasBank,
+        receivingRejected,
       },
     }
   );
@@ -305,6 +416,8 @@ export async function POST(
         phone: created.phone,
       },
       existed: false,
+      isDraft,
+      receivingRejected,
     },
     { status: 201 }
   );
