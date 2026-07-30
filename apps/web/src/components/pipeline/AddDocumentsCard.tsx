@@ -6,7 +6,9 @@ import { Upload } from "lucide-react";
 import { toast } from "sonner";
 import { Card, CardContent } from "@/components/ui/card";
 
-const MAX_BYTES = 10 * 1024 * 1024;
+// 20MB: o upload do negócio é client-direct pro Blob (blob-upload + finalize),
+// então não passa pelo corpo da função e o teto de ~4.5MB da Vercel não vale.
+const MAX_BYTES = 20 * 1024 * 1024;
 const UPLOAD_CONCURRENCY = 3;
 
 interface AddDocumentsCardProps {
@@ -66,7 +68,7 @@ export function AddDocumentsCard({ dealId, onUploaded }: AddDocumentsCardProps) 
 
       const valid = arr.filter((f) => {
         if (f.size > MAX_BYTES) {
-          toast.error(`${f.name} excede 10 MB`);
+          toast.error(`${f.name} excede 20 MB`);
           return false;
         }
         return true;
@@ -155,7 +157,7 @@ export function AddDocumentsCard({ dealId, onUploaded }: AddDocumentsCardProps) 
               : "Clique ou arraste arquivos aqui"}
           </p>
           <p className="text-xs text-muted-foreground">
-            Qualquer arquivo até 10 MB. PDFs e imagens podem ser lidos pela IA.
+            Qualquer arquivo até 20 MB. PDFs e imagens podem ser lidos pela IA.
           </p>
           <input
             ref={inputRef}

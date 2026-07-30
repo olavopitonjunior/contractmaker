@@ -1059,8 +1059,9 @@ export function DealDetail({
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir este documento?</AlertDialogTitle>
             <AlertDialogDescription>
-              O arquivo será removido do negócio. Certidões emitidas que apontavam
-              para este documento ficam órfãs (não são apagadas). Não pode ser desfeito.
+              O arquivo sai da pasta e vai para &quot;Documentos removidos&quot;, logo
+              abaixo — dá para restaurar depois. Certidões emitidas que apontavam
+              para este documento ficam órfãs (não são apagadas).
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -2242,7 +2243,7 @@ function DocumentsTab({
         );
       })}
 
-      <DocumentosRemovidos dealId={dealId} />
+      <DocumentosRemovidos dealId={dealId} attachmentCount={fallbackAttachments.length} />
 
       <SendAttachmentEnvelopeDialog
         open={!!signAttachmentId}
@@ -2279,7 +2280,32 @@ function DocumentsTab({
  * Fica recolhido e só aparece quando há algo removido — a pasta é do trabalho
  * do dia, não do histórico.
  */
-function DocumentosRemovidos({ dealId }: { dealId: string }) {
+/**
+ * Data/hora determinística, sem `Intl`. `toLocaleString` renderiza diferente no
+ * servidor e no cliente (fuso/ICU) e quebra a hidratação — React #418/#423, que
+ * derruba a subárvore inteira. Este componente aparece justamente na aba onde
+ * isso foi observado em produção.
+ */
+function formatDeletedAt(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function DocumentosRemovidos({
+  dealId,
+  attachmentCount,
+}: {
+  dealId: string;
+  /**
+   * Muda quando um documento é removido (ou restaurado). Entra nas deps do
+   * efeito porque `router.refresh()` re-renderiza o server component mas NÃO
+   * remonta este client component nem re-dispara o efeito — sem isto, o
+   * documento recém-excluído só aparecia aqui depois de recarregar a página.
+   */
+  attachmentCount: number;
+}) {
   interface RemovedItem {
     id: string;
     filename: string;
@@ -2307,7 +2333,7 @@ function DocumentosRemovidos({ dealId }: { dealId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [dealId]);
+  }, [dealId, attachmentCount]);
 
   if (!items || items.length === 0) return null;
 
@@ -2369,7 +2395,7 @@ function DocumentosRemovidos({ dealId }: { dealId: string }) {
               <div className="min-w-0">
                 <p className="truncate font-medium">{item.filename}</p>
                 <p className="text-xs text-muted-foreground">
-                  {new Date(item.deletedAt).toLocaleString("pt-BR")}
+                  {formatDeletedAt(item.deletedAt)}
                   {item.origin === "form" ? " · do formulário" : ""}
                 </p>
               </div>
