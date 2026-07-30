@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -9,14 +10,12 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { FileText, ExternalLink, ArrowLeft, ShieldCheck, Copy, Wallet, FileSignature, Trash2, FileX, RefreshCw, XOctagon, RotateCcw, Bot, Pencil, Check, CheckCircle2, ClipboardCheck, X, Archive, ArchiveRestore, Lock, LockOpen, ShieldAlert, Users, BellRing } from "lucide-react";
-import { SendAttachmentEnvelopeDialog } from "@/components/pipeline/SendAttachmentEnvelopeDialog";
 import { buildPartySuggestions } from "@/lib/clicksign/party-suggestions";
 import { isExplicitlyUnmarried } from "@/lib/forms/estado-civil";
-import { AddDocumentsCard } from "@/components/pipeline/AddDocumentsCard";
 import { MarkLostDialog } from "@/components/pipeline/MarkLostDialog";
 import { LostDealBanner } from "@/components/pipeline/LostDealBanner";
 import { cn } from "@/lib/utils";
-import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
+import type { DocumentCardData } from "@/components/forms/DocumentCard";
 import { ReopenFormButton } from "@/components/forms/ReopenFormButton";
 import { isFormFinished } from "@/lib/forms/form-status";
 import { formPublicPath } from "@/lib/forms/form-url";
@@ -26,14 +25,6 @@ import {
   buildNegotiationSummary,
   type SummarySection,
 } from "@/lib/forms/negotiation-summary";
-import { CertidoesTab } from "@/components/pipeline/CertidoesTab";
-import { SignaturesTab } from "@/components/pipeline/SignaturesTab";
-import { SendFormSummaryDialog } from "@/components/forms/SendFormSummaryDialog";
-import { NewtonRequestsTab } from "@/components/pipeline/NewtonRequestsTab";
-import { NotificationsTab } from "@/components/pipeline/NotificationsTab";
-import { DealSurveysTab } from "@/components/surveys/DealSurveysTab";
-import { CommissionChargeDialog } from "@/components/pipeline/CommissionChargeDialog";
-import { CommissionChargeList } from "@/components/pipeline/CommissionChargeList";
 import { DealProgressTimeline } from "@/components/pipeline/DealProgressTimeline";
 import { DealManagerChip } from "@/components/deals/DealManagerChip";
 import { usePermissions } from "@/hooks/usePermissions";
@@ -52,6 +43,88 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
+
+/**
+ * Placeholder enquanto o chunk da aba baixa. Compacto de propósito — a aba
+ * inicial ("dados") é estática, então isto só aparece em troca de aba.
+ */
+function TabLoading() {
+  return (
+    <div className="min-h-[120px] px-3 py-6 text-sm text-muted-foreground">
+      Carregando…
+    </div>
+  );
+}
+
+// Code splitting: tudo que só aparece em aba não-inicial ou em dialog sai do
+// chunk da página (o custo aqui é bundle/parse — o Radix Tabs já desmonta o
+// conteúdo inativo). Sem `ssr: false` pra não mudar o comportamento de render.
+const CertidoesTab = dynamic(
+  () => import("@/components/pipeline/CertidoesTab").then((m) => m.CertidoesTab),
+  { loading: () => <TabLoading /> }
+);
+const SignaturesTab = dynamic(
+  () => import("@/components/pipeline/SignaturesTab").then((m) => m.SignaturesTab),
+  { loading: () => <TabLoading /> }
+);
+const NewtonRequestsTab = dynamic(
+  () =>
+    import("@/components/pipeline/NewtonRequestsTab").then(
+      (m) => m.NewtonRequestsTab
+    ),
+  { loading: () => <TabLoading /> }
+);
+const NotificationsTab = dynamic(
+  () =>
+    import("@/components/pipeline/NotificationsTab").then(
+      (m) => m.NotificationsTab
+    ),
+  { loading: () => <TabLoading /> }
+);
+const DealSurveysTab = dynamic(
+  () => import("@/components/surveys/DealSurveysTab").then((m) => m.DealSurveysTab),
+  { loading: () => <TabLoading /> }
+);
+const CommissionChargeList = dynamic(
+  () =>
+    import("@/components/pipeline/CommissionChargeList").then(
+      (m) => m.CommissionChargeList
+    ),
+  { loading: () => <TabLoading /> }
+);
+const AddDocumentsCard = dynamic(
+  () =>
+    import("@/components/pipeline/AddDocumentsCard").then(
+      (m) => m.AddDocumentsCard
+    ),
+  { loading: () => <TabLoading /> }
+);
+const DocumentCard = dynamic(
+  () => import("@/components/forms/DocumentCard").then((m) => m.DocumentCard),
+  { loading: () => <TabLoading /> }
+);
+// Dialogs: sem placeholder — o gatilho já é o próprio estado de abertura.
+const CommissionChargeDialog = dynamic(
+  () =>
+    import("@/components/pipeline/CommissionChargeDialog").then(
+      (m) => m.CommissionChargeDialog
+    ),
+  { loading: () => null }
+);
+const SendAttachmentEnvelopeDialog = dynamic(
+  () =>
+    import("@/components/pipeline/SendAttachmentEnvelopeDialog").then(
+      (m) => m.SendAttachmentEnvelopeDialog
+    ),
+  { loading: () => null }
+);
+const SendFormSummaryDialog = dynamic(
+  () =>
+    import("@/components/forms/SendFormSummaryDialog").then(
+      (m) => m.SendFormSummaryDialog
+    ),
+  { loading: () => null }
+);
 
 type Parte = {
   nome?: string;
