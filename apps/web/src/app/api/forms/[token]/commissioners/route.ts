@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
 import { formClosedResponse } from "@/lib/forms/form-gate";
 import { audit } from "@/lib/security/audit";
+import { rateLimit } from "@/lib/security/ratelimit";
 import { detectPixKeyType } from "@/lib/asaas/pix";
 import {
   createCommissioner,
@@ -42,6 +43,21 @@ export async function GET(
   const { token } = await params;
   const { searchParams } = new URL(req.url);
   const q = (searchParams.get("q") ?? "").trim();
+
+  // `?q=` livre sobre o roster inteiro da org — sem teto, o token do form vira
+  // ferramenta de enumeração de corretores. Mesmo padrão de participants/from-main.
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const limited = await rateLimit({
+    identifier: `commissioners-list:${token}:${ip}`,
+    limit: 30,
+    window: "1 m",
+  });
+  if (!limited.success) {
+    return NextResponse.json(
+      { error: "Muitas tentativas — aguarde um instante." },
+      { status: 429 }
+    );
+  }
 
   const form = await prisma.salesForm.findUnique({
     where: { token },
@@ -106,7 +122,19 @@ export async function GET(
 const createSchema = z.object({
   label: z.string().trim().min(1).max(120),
   tipoPessoa: z.enum(["fisica", "juridica"]),
-  cpfCnpj: z.string().trim().min(11).max(18),
+  // Dígitos, não só comprimento: `normalizeDoc` descarta não-dígitos, então
+  // um doc alfabético de 11+ chars passava no Zod, normalizava pra "" e fazia
+  // `findCommissionerMatch` PULAR o dedupe por documento — caindo no match só
+  // por nome, que é mais fraco. Era um jeito barato de forçar cadastro novo.
+  cpfCnpj: z
+    .string()
+    .trim()
+    .min(11)
+    .max(18)
+    .refine((v) => {
+      const d = v.replace(/\D/g, "").length;
+      return d === 11 || d === 14;
+    }, "CPF/CNPJ inválido — informe 11 (CPF) ou 14 (CNPJ) dígitos"),
   creci: z.string().trim().max(50).optional(),
   papel: z
     .enum([
@@ -151,6 +179,21 @@ export async function POST(
   { params }: { params: Promise<{ token: string }> }
 ) {
   const { token } = await params;
+
+  // Escreve PII bancária a partir de request anônimo — teto apertado pra
+  // impedir varredura automatizada plantando cadastros.
+  const ip = req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown";
+  const limited = await rateLimit({
+    identifier: `commissioners-create:${token}:${ip}`,
+    limit: 10,
+    window: "1 m",
+  });
+  if (!limited.success) {
+    return NextResponse.json(
+      { error: "Muitas tentativas — aguarde um instante." },
+      { status: 429 }
+    );
+  }
 
   const form = await prisma.salesForm.findUnique({
     where: { token },
@@ -215,6 +258,31 @@ export async function POST(
     // corretor existente seria um vetor de desvio de repasse. Devolvemos o
     // flag pra UI dizer a verdade em vez de fingir que salvou.
     const receivingIgnored = hasPix || hasBank;
+    if (receivingIgnored) {
+      // Tentativa repetida daqui é sinal de ataque (ou de corretor legítimo
+      // batendo na trava). Sem esta linha o evento não existe em lugar nenhum.
+      await audit(
+        {
+          orgId: form.orgId,
+          userId: null,
+          ipAddress: req.headers.get("x-forwarded-for") ?? null,
+          userAgent: req.headers.get("user-agent") ?? null,
+        },
+        {
+          action: "SPLIT_RECIPIENT_UPDATED",
+          result: "DENIED",
+          resourceType: "split_recipient",
+          resource: `split_recipient:${preexisting.id}`,
+          metadata: {
+            source: "public_form",
+            formId: form.id,
+            reason: "receiving_data_ignored_on_existing_recipient",
+            hasPix,
+            hasBank,
+          },
+        }
+      );
+    }
     return NextResponse.json(
       {
         recipient: {
@@ -248,7 +316,7 @@ export async function POST(
           }
         : undefined,
       banco: hasBank ? data.banco : undefined,
-    });
+    }, { unverifiedSource: true });
     isDraft = created.pendingFields.length > 0;
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {

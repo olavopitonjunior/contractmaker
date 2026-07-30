@@ -112,7 +112,8 @@ export interface CommissionerReceivingExtras {
 export async function createCommissioner(
   orgId: string,
   input: CommissionerInput,
-  extras?: CommissionerReceivingExtras
+  extras?: CommissionerReceivingExtras,
+  opts?: { unverifiedSource?: boolean }
 ): Promise<SplitRecipient> {
   const doc = normalizeDoc(input.cpf || input.cnpj);
   const hasPix = !!extras?.pix?.chave;
@@ -125,7 +126,19 @@ export async function createCommissioner(
   // e a cobrança só quebraria lá na frente, no Asaas (invalid_walletId).
   // Mesma convenção do cadastro admin (POST /api/financeiro/split-recipients,
   // que exige walletId ou chave PIX pra sair de pendingFields).
-  const pendingFields: string[] = hasPix ? [] : ["walletId"];
+  //
+  // `unverifiedSource`: origem anônima (form público). A chave PIX é GRAVADA,
+  // mas o cadastro NÃO nasce pagável — quem tem o link do formulário não provou
+  // ser o dono do documento que digitou, e um cadastro ativo com chave de
+  // terceiro desvia repasse. Fica em pendingFields ["pixAddressKey"], que o
+  // splitDispatcher já pula, e a confirmação (admin em /corretores ou o próprio
+  // corretor pelo magic link enviado ao e-mail que a imobiliária conhece) é a
+  // prova de posse que falta.
+  const pendingFields: string[] = !hasPix
+    ? ["walletId"]
+    : opts?.unverifiedSource
+      ? ["pixAddressKey"]
+      : [];
   const isDraft = pendingFields.length > 0;
 
   return prisma.splitRecipient.create({

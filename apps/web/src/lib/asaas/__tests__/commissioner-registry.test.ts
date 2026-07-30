@@ -36,7 +36,7 @@ describe("createCommissioner — meio de recebimento define o rascunho", () => {
     expect(data.active).toBe(false);
   });
 
-  it("com chave PIX: pix_external ativo, pronto pro split", async () => {
+  it("com chave PIX de origem confiavel: pix_external ativo, pronto pro split", async () => {
     await createCommissioner("org-1", INPUT, {
       pix: {
         chave: "sandra@imob.com",
@@ -50,6 +50,32 @@ describe("createCommissioner — meio de recebimento define o rascunho", () => {
     expect(data.pixAddressKey).toBe("sandra@imob.com");
     expect(data.pendingFields).toEqual([]);
     expect(data.active).toBe(true);
+  });
+
+  it("chave PIX de origem ANONIMA: grava a chave mas NAO nasce pagavel", async () => {
+    // Quem tem o link do formulario nao provou ser dono do documento que
+    // digitou. Cadastro ativo com chave de terceiro = desvio de repasse.
+    await createCommissioner(
+      "org-1",
+      INPUT,
+      { pix: { chave: "atacante@pix.com", keyType: "EMAIL" } },
+      { unverifiedSource: true }
+    );
+    const data = lastCreateData();
+    expect(data.pixAddressKey).toBe("atacante@pix.com");
+    expect(data.active).toBe(false);
+    // Nao-vazio importa duas vezes: splitDispatcher pula, e deal-brokers.ts
+    // (`active || pendingFields.length > 0`) mantem o corretor recebendo aviso.
+    expect(data.pendingFields).toEqual(["pixAddressKey"]);
+  });
+
+  it("origem anonima sem PIX: continua o rascunho de sempre", async () => {
+    await createCommissioner("org-1", INPUT, undefined, {
+      unverifiedSource: true,
+    });
+    const data = lastCreateData();
+    expect(data.pendingFields).toEqual(["walletId"]);
+    expect(data.active).toBe(false);
   });
 
   it("só conta bancária: dados gravados, mas SEGUE rascunho", async () => {

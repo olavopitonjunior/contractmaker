@@ -228,6 +228,10 @@ function CadastroRecebimento({
         );
       } else if (data?.existed) {
         toast.success("Cadastro já existia e foi vinculado.");
+      } else if (chavePix) {
+        toast.success(
+          "Cadastro salvo com a chave PIX. A imobiliária confirma o meio de repasse antes do primeiro pagamento."
+        );
       } else if (data?.isDraft) {
         toast.success(
           "Cadastro salvo. Sem chave PIX ele fica como rascunho — a imobiliária completa o meio de repasse depois."
@@ -278,7 +282,8 @@ function CadastroRecebimento({
               placeholder="CPF, CNPJ, e-mail, telefone ou chave aleatória"
             />
             <p className="text-xs text-muted-foreground">
-              É o que permite o repasse automático da comissão.
+              É o que permite o repasse automático da comissão. A imobiliária
+              confirma a chave antes do primeiro pagamento.
             </p>
           </FormField>
 
