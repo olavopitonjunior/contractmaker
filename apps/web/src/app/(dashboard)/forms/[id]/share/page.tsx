@@ -4,6 +4,7 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
+import { formPublicPath } from "@/lib/forms/form-url";
 import { ShareByPartyClient } from "./ShareByPartyClient";
 
 export default async function ShareFormByPartyPage({
@@ -45,7 +46,7 @@ export default async function ShareFormByPartyPage({
 
       <ShareByPartyClient
         formToken={form.token}
-        mainFormUrl={`/f/${form.token}`}
+        mainFormUrl={formPublicPath(form.token, form.title)}
         initialLockedAt={form.lockedAt?.toISOString() ?? null}
         initialParticipants={form.participants.map((p) => ({
           id: p.id,

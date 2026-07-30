@@ -7,6 +7,7 @@ import {
   type ParticipantRole,
 } from "@/lib/forms/participant-token";
 import { audit } from "@/lib/security/audit";
+import { formPublicPath } from "@/lib/forms/form-url";
 
 /**
  * POST /api/forms/[token]/rotate-links
@@ -35,6 +36,7 @@ export async function POST(
     where: { token: params.token, orgId: ctx.orgId },
     select: {
       id: true,
+      title: true,
       participants: {
         select: { id: true, role: true, partyIndex: true },
       },
@@ -84,7 +86,7 @@ export async function POST(
 
   return NextResponse.json({
     token: newMainToken,
-    mainUrl: `/f/${newMainToken}`,
+    mainUrl: formPublicPath(newMainToken, form.title),
     participants: rotatedParticipants,
   });
 }

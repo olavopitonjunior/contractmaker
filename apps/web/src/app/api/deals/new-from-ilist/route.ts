@@ -11,6 +11,7 @@ import {
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { MODULE } from "@/lib/modules/catalog";
+import { formPublicPath } from "@/lib/forms/form-url";
 import { getIListConnection } from "@/lib/ilist/connection";
 import { buildImportPayload } from "@/lib/ilist/import";
 
@@ -142,7 +143,12 @@ export async function POST(req: NextRequest) {
   });
 
   return NextResponse.json(
-    { dealId: deal.id, formToken: form.token, formId: form.id },
+    {
+      dealId: deal.id,
+      formToken: form.token,
+      formUrl: formPublicPath(form.token, form.title),
+      formId: form.id,
+    },
     { status: 201 },
   );
 }
