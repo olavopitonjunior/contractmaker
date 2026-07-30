@@ -1,8 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import { getEffectivePermissions, can } from "@/lib/security/rbac/check";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
+
+/**
+ * Escopo de leitura do sino (feature Gerente): usuário com visão RESTRITA de
+ * deals (DEAL_VIEW_ASSIGNED_ONLY sem DEAL_VIEW_ALL) NÃO vê as rows org-wide —
+ * só as direcionadas a ele. Tudo dos deals dele chega via fan-out na escrita
+ * (emitNotification cria a row direcionada). Sem isso o gerente veria o sino
+ * de todos os deals da org, furando o escopo do kanban.
+ */
+async function bellScope(
+  userId: string,
+  orgId: string
+): Promise<{ orgId: string; OR?: { userId: string | null }[]; userId?: string }> {
+  const eff = await getEffectivePermissions(userId, orgId);
+  const restricted =
+    can(eff, PERMISSION.DEAL_VIEW_ASSIGNED_ONLY) &&
+    !can(eff, PERMISSION.DEAL_VIEW_ALL);
+  return restricted
+    ? { orgId, userId }
+    : { orgId, OR: [{ userId: null }, { userId }] };
+}
 
 /**
  * GET /api/notifications?unread=1&limit=20
@@ -28,11 +50,8 @@ export async function GET(req: NextRequest) {
   // Notificações com `userId` são DIRECIONADAS ao alvo; as org-wide têm
   // userId=null. Escopo = org + (org-wide OU minhas). Isso torna privadas as
   // notificações direcionadas (ex.: support_answered, dual-approval), em vez de
-  // vazá-las pra toda a org.
-  const audienceScope = {
-    orgId: org.id,
-    OR: [{ userId: null }, { userId: session.user.id }],
-  };
+  // vazá-las pra toda a org. Visão restrita (gerente) só vê as direcionadas.
+  const audienceScope = await bellScope(session.user.id, org.id);
 
   const [items, unreadCount] = await Promise.all([
     prisma.notification.findMany({
@@ -72,12 +91,9 @@ export async function POST(req: NextRequest) {
   }
 
   const now = new Date();
+  const scope = await bellScope(session.user.id, org.id);
   const result = await prisma.notification.updateMany({
-    where: {
-      orgId: org.id,
-      read: false,
-      OR: [{ userId: null }, { userId: session.user.id }],
-    },
+    where: { ...scope, read: false },
     data: { read: true, readAt: now },
   });
 

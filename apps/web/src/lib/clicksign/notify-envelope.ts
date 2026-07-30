@@ -136,6 +136,7 @@ export async function notifyEnvelopeMilestone(params: {
       linkUrl,
       batchId,
       metadata: { envelopeId, ...(dealId ? { dealId } : {}) },
+      dealId: dealId ?? null,
     });
   } catch (err) {
     // Sino nunca quebra o webhook.

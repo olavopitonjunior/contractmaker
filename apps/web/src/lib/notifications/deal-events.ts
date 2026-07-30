@@ -230,6 +230,7 @@ export async function notifyDealEvent(
         linkUrl: dealPath,
         metadata: { dealId, event, ...(context?.extra ?? {}) },
         batchId,
+        dealId,
       });
     }
 
