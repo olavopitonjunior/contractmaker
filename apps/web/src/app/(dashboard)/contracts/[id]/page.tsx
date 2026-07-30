@@ -2,6 +2,10 @@ import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { ContractEditorPage } from "@/components/contracts/ContractEditorPage";
+import {
+  contractOrgScopeWhere,
+  resolveUserOrgId,
+} from "@/lib/security/org-scope";
 import { resolveSettingsFamily } from "@/lib/contracts/default-config";
 import {
   loadOrgContractDefaults,
@@ -16,16 +20,23 @@ export default async function ContractPage({
   const session = await auth();
   if (!session?.user) return null;
 
-  const contract = await prisma.contract.findUnique({
-    where: { id: params.id },
+  // Guard cross-org NA QUERY (deny-by-default): sem ele qualquer usuário
+  // autenticado abria o contrato de outro tenant só com o id. Escopo via
+  // `deal.pipeline.orgId` — Deal não tem orgId direto. Mismatch e inexistente
+  // caem no MESMO notFound(), pra não confirmar a existência do recurso.
+  const orgId = await resolveUserOrgId(session.user.id);
+  if (!orgId) notFound();
+
+  const contract = await prisma.contract.findFirst({
+    where: contractOrgScopeWhere(params.id, orgId),
     include: {
       // `pipeline.kind` discrimina a família da aba Configurações (venda ×
-      // locação) e carrega o orgId sem uma query extra.
+      // locação).
       deal: {
         select: {
           id: true,
           title: true,
-          pipeline: { select: { orgId: true, kind: true } },
+          pipeline: { select: { kind: true } },
         },
       },
       template: { select: { id: true, name: true } },
@@ -53,12 +64,10 @@ export default async function ContractPage({
     contractKind: contract.kind,
     pipelineKind: contract.deal.pipeline?.kind ?? null,
   });
-  const orgId = contract.deal.pipeline?.orgId;
-  const orgDefaults = orgId
-    ? settingsFamily === "locacao"
+  const orgDefaults =
+    settingsFamily === "locacao"
       ? await loadOrgLocacaoDefaults(orgId)
-      : await loadOrgContractDefaults(orgId)
-    : undefined;
+      : await loadOrgContractDefaults(orgId);
 
   return (
     <ContractEditorPage
