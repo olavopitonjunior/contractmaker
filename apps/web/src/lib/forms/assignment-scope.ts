@@ -1,4 +1,4 @@
-import { ROLE_PATHS } from "./role-paths";
+import { resolveRolePaths } from "./role-paths";
 import type { ParticipantRole } from "./participant-token";
 
 /**
@@ -104,12 +104,16 @@ export function topKeyForKind(kind: string, esteira: Esteira): string | null {
  */
 export function assignmentAllowedForRole(
   kind: string,
-  role: ParticipantRole,
+  role: ParticipantRole | string,
   esteira: Esteira,
 ): boolean {
   const topKey = topKeyForKind(kind, esteira);
   if (topKey === null) return true;
-  return (ROLE_PATHS[role] as readonly string[]).includes(topKey);
+  // `resolveRolePaths` em vez de `ROLE_PATHS[role]`: role de terceiro
+  // (`terceiro:<slug>`) devolve `["terceiros.<slug>"]`, que nunca casa um
+  // topKey de parte — logo o terceiro só consegue anexar como `outro`. Com o
+  // acesso direto ao mapa isto seria `undefined.includes` (500).
+  return resolveRolePaths(role).includes(topKey);
 }
 
 /** Deriva a esteira a partir do `SalesForm.schemaType`. */

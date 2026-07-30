@@ -19,7 +19,10 @@ import {
   EventChannelMatrix,
   type MatrixValues,
 } from "@/components/notifications/EventChannelMatrix";
-import type { DealNotifEvent } from "@/lib/notifications/deal-events-shared";
+import {
+  PARTY_CAPABLE_EVENTS,
+  type DealNotifEvent,
+} from "@/lib/notifications/deal-events-shared";
 
 interface ResolvedConfig {
   events: MatrixValues;
@@ -117,7 +120,8 @@ export default function NotificationSettingsClient() {
   async function toggleEvent(
     ev: DealNotifEvent,
     channel: "email" | "whatsapp",
-    value: boolean
+    value: boolean,
+    audience: "broker" | "party" = "broker"
   ) {
     if (!resolved) return;
     // Optimistic
@@ -125,10 +129,15 @@ export default function NotificationSettingsClient() {
       ...resolved,
       events: {
         ...resolved.events,
-        [ev]: { broker: { ...resolved.events[ev].broker, [channel]: value } },
+        [ev]: {
+          ...resolved.events[ev],
+          [audience]: { ...resolved.events[ev][audience], [channel]: value },
+        },
       },
     });
-    const ok = await patch({ events: { [ev]: { broker: { [channel]: value } } } });
+    const ok = await patch({
+      events: { [ev]: { [audience]: { [channel]: value } } },
+    });
     if (!ok) void load();
   }
 
@@ -208,6 +217,37 @@ export default function NotificationSettingsClient() {
         </CardHeader>
         <CardContent>
           <EventChannelMatrix values={resolved.events} onToggle={toggleEvent} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Partes do negócio</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Avisos para o <strong>cliente</strong> (comprador, vendedor, locador
+            ou locatário), com a marca da imobiliária e linguagem sem jargão.
+            Vêm <strong>desligados</strong>: ligue só o que você quer que chegue
+            direto na mão dele.
+          </p>
+          <p className="text-sm text-muted-foreground">
+            Só marcos que o cliente entende sozinho aparecem aqui. Os demais
+            eventos continuam exclusivos da equipe e dos corretores.
+          </p>
+        </CardHeader>
+        <CardContent>
+          <EventChannelMatrix
+            audience="party"
+            events={PARTY_CAPABLE_EVENTS}
+            values={resolved.events}
+            whatsappDisabledReason={
+              temAgenteWhatsapp
+                ? null
+                : "Esta imobiliaria ainda nao tem agente de WhatsApp habilitado, entao esse canal fica indisponivel para as partes. Os avisos por e-mail funcionam normalmente."
+            }
+            onToggle={(ev, channel, value) =>
+              void toggleEvent(ev, channel, value, "party")
+            }
+          />
         </CardContent>
       </Card>
 

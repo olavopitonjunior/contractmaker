@@ -9,48 +9,36 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { proposalStatusView, initials } from "@/lib/proposals/status-view";
 import { OPEN_STATUSES } from "@/lib/proposals/status-sets";
-import { NovaPropostaDialog } from "./NovaPropostaDialog";
+import { Button } from "@/components/ui/button";
+import { Plus } from "lucide-react";
 import { ProposalFilters, type ListFilters } from "./ProposalFilters";
 import { ProposalRowActions, type ProposalPermissions } from "./ProposalRowActions";
+import { usePermissions } from "@/hooks/usePermissions";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { NO_PERMISSION_HINT } from "@/lib/security/rbac/ui";
 
+/**
+ * Datas, prazo e valor chegam FORMATADOS do server component
+ * (`.../pipeline/propostas/page.tsx`). Não formatar aqui: `toLocale*` depende do
+ * padrão de locale do ICU do runtime (o do Node da Vercel ≠ o do browser) e o
+ * prazo depende de `Date.now()` (muda entre SSR e hidratação) — os dois viram
+ * hydration mismatch (React #418/#423). Ver lib/format/datetime.ts.
+ */
 export interface ProposalRow {
   id: string;
   title: string;
   status: string;
   instrument: string;
-  validUntil: string | null;
-  createdAt: string;
-  sentAt: string | null;
-  firstViewedAt: string | null;
+  /** "28/07". */
+  createdAtLabel: string;
+  /** "28/07" ou "" quando não enviada. */
+  sentAtLabel: string;
+  /** "28/07" ou "" quando nunca vista. */
+  firstViewedAtLabel: string;
+  prazo: { label: string; tone: "none" | "warn" | "danger" };
   convertedDealId: string | null;
   responsible: { name: string; isNonUser: boolean; image: string | null };
-  resumo: { proponente: string | null; imovel: string | null; valor: number | null };
-}
-
-function money(v: number | null): string {
-  if (v == null) return "—";
-  // "R$ " manual + grouping do número (determinístico) — evita o espaço variável do
-  // style:"currency" do ICU (U+00A0/U+202F) que difere Node×browser → React #418.
-  return "R$ " + v.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
-}
-
-function shortDate(iso: string | null): string {
-  if (!iso) return "—";
-  // timeZone explícito: o server roda em UTC e o client em BRT — sem fixar o fuso,
-  // o toLocale diverge entre SSR e hidratação → React #418 (hydration mismatch).
-  return new Date(iso).toLocaleDateString("pt-BR", {
-    day: "2-digit",
-    month: "2-digit",
-    timeZone: "America/Sao_Paulo",
-  });
-}
-
-function prazo(validUntil: string | null): { label: string; tone: "" | "warn" | "danger" } {
-  if (!validUntil) return { label: "—", tone: "" };
-  const days = Math.ceil((new Date(validUntil).getTime() - Date.now()) / 86_400_000);
-  if (days < 0) return { label: "vencida", tone: "danger" };
-  if (days === 0) return { label: "vence hoje", tone: "danger" };
-  return { label: `${days}d`, tone: days <= 2 ? "warn" : "" };
+  resumo: { proponente: string | null; imovel: string | null; valorLabel: string | null };
 }
 
 export function ProposalsListClient({
@@ -72,6 +60,12 @@ export function ProposalsListClient({
   kpis: { open: number; converted: number; expiring: number };
 }) {
   const router = useRouter();
+  // Gating de CTA (feature Gerente) — libera enquanto carrega pra não piscar.
+  // A página `/pipeline/propostas/nova` já barra no servidor (redirect); aqui é
+  // só não oferecer o caminho a quem não pode criar.
+  const perms = usePermissions();
+  const canCreateProposal =
+    perms.loading || perms.can(PERMISSION.PROPOSAL_CREATE);
 
   // Tempo real leve: enquanto houver proposta em aberto, dá refresh no server
   // component a cada 10s (o webhook já atualizou o DB). Sem polling por-proposta.
@@ -95,7 +89,21 @@ export function ProposalsListClient({
             Ofertas antes do negócio — envie, acompanhe a assinatura e converta em um clique.
           </p>
         </div>
-        <NovaPropostaDialog tipo={tipo} />
+        {/* <Link>, não onClick: a criação virou PÁGINA justamente pra poder ser
+            aberta em nova guia (ctrl/cmd+clique) e sobreviver a um clique fora.
+            Sem permissão vira botão desabilitado — `disabled` num <a> não
+            desabilita nada, então o Link some junto. */}
+        {canCreateProposal ? (
+          <Button size="sm" asChild>
+            <Link href={`/pipeline/propostas/nova?tipo=${tipo}`}>
+              <Plus className="mr-1 h-4 w-4" /> Nova proposta
+            </Link>
+          </Button>
+        ) : (
+          <Button size="sm" disabled title={NO_PERMISSION_HINT}>
+            <Plus className="mr-1 h-4 w-4" /> Nova proposta
+          </Button>
+        )}
       </div>
 
       <div className="grid grid-cols-3 gap-3 sm:max-w-xl">
@@ -131,7 +139,7 @@ export function ProposalsListClient({
               <TableBody>
                 {proposals.map((p) => {
                   const sv = proposalStatusView(p.status);
-                  const pz = prazo(p.validUntil);
+                  const pz = p.prazo;
                   return (
                     <TableRow key={p.id} className="group">
                       <TableCell className="max-w-[280px]">
@@ -164,8 +172,8 @@ export function ProposalsListClient({
                         </div>
                       </TableCell>
                       <TableCell className="text-right tabular-nums">
-                        {money(p.resumo.valor)}
-                        {tipo === "locacao" && p.resumo.valor != null && (
+                        {p.resumo.valorLabel ?? "—"}
+                        {tipo === "locacao" && p.resumo.valorLabel != null && (
                           <span className="text-xs text-muted-foreground">/mês</span>
                         )}
                       </TableCell>
@@ -174,15 +182,13 @@ export function ProposalsListClient({
                           {sv.label}
                         </Badge>
                         <div className="mt-0.5 text-[11px] text-muted-foreground">
-                          {p.sentAt ? `enviada ${shortDate(p.sentAt)}` : `criada ${shortDate(p.createdAt)}`}
-                          {p.firstViewedAt ? ` · vista ${shortDate(p.firstViewedAt)}` : ""}
+                          {p.sentAtLabel
+                            ? `enviada ${p.sentAtLabel}`
+                            : `criada ${p.createdAtLabel}`}
+                          {p.firstViewedAtLabel ? ` · vista ${p.firstViewedAtLabel}` : ""}
                         </div>
                       </TableCell>
                       <TableCell
-                        // prazo deriva de Date.now() (relativo) → pode divergir SSR×
-                        // hidratação num limite de dia. suppressHydrationWarning mantém
-                        // o valor do client sem disparar React #418.
-                        suppressHydrationWarning
                         className={
                           pz.tone === "danger"
                             ? "text-destructive font-medium"

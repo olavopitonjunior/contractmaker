@@ -189,3 +189,86 @@ describe("render dos templates .hbs", () => {
     }
   });
 });
+
+describe("buildViaContext — enrich por esteira (schemaType)", () => {
+  const LOCACAO = {
+    locatarios: [{ nome: "Ana", cpf: "12345678900" }],
+    locadores: [{ nome: "José" }],
+    imoveis: [{ endereco: "R. Sete", cidade: "Santos", uf: "SP" }],
+    locacao: { valor_aluguel: 3200, prazo_meses: 30 },
+    aluguel: { vigencia_inicio: "2026-08-01", vigencia_meses: 12 },
+    imovel: { kind: "comercial_sala" },
+    foro: "Santos/SP",
+  };
+
+  it("proposta de locação usa o enrich de LOCAÇÃO", () => {
+    const ctx = buildViaContext({
+      schemaType: "locacao_residencial_v1",
+      dataJson: structuredClone(LOCACAO),
+      hiddenPaths: [],
+      via: "completa",
+      numero: "1",
+    });
+    const config = ctx.config as Record<string, unknown>;
+    // Marcas exclusivas do enrich de locação.
+    expect(config.multa_atraso_percent).toBe(10);
+    expect(config.multa_rescisoria_meses).toBe(3);
+    expect(config.foro_texto).toBe("Santos/SP");
+    expect((ctx.imovel as Record<string, unknown>).tipo_texto).toBe("sala comercial");
+    // E nada do vocabulário de venda vaza pra proposta de aluguel.
+    expect(config.multa_penal_moratoria).toBeUndefined();
+    expect(config.prazo_escritura_dias).toBeUndefined();
+    expect(ctx.desistencia).toBeUndefined();
+  });
+
+  it("proposta de venda continua no enrich de VENDA", () => {
+    const ctx = buildViaContext({
+      schemaType: "compra_venda_v1",
+      dataJson: structuredClone(VENDA),
+      hiddenPaths: [],
+      via: "completa",
+      numero: "1",
+      comissaoIncluida: true,
+    });
+    const config = ctx.config as Record<string, unknown>;
+    expect(config.multa_penal_moratoria).toBe(2);
+    expect(config.multa_atraso_percent).toBeUndefined();
+  });
+
+  it("locação sem comissão no dado não imprime o bloco de intermediação vazio", () => {
+    // O enrich de venda materializava `comissao` mesmo ausente, e o
+    // `{{#if comissao_incluida}}` do template acabava impresso sem valor.
+    const ctx = buildViaContext({
+      schemaType: "locacao_comercial_v1",
+      dataJson: structuredClone(LOCACAO),
+      hiddenPaths: [],
+      via: "completa",
+      numero: "1",
+      comissaoIncluida: true,
+    });
+    expect(ctx.comissao_incluida).toBe(false);
+
+    const html = renderProposalVia({
+      templateSource: tpl("proposta_locacao_comercial_v1.hbs"),
+      schemaType: "locacao_comercial_v1",
+      dataJson: structuredClone(LOCACAO),
+      hiddenPaths: [],
+      via: "completa",
+      numero: "1",
+      comissaoIncluida: true,
+    });
+    expect(html).not.toContain("Intermediação");
+  });
+
+  it("locação COM comissão no dado mantém o bloco", () => {
+    const ctx = buildViaContext({
+      schemaType: "locacao_residencial_v1",
+      dataJson: { ...structuredClone(LOCACAO), comissao: { percentual: 8 } },
+      hiddenPaths: [],
+      via: "completa",
+      numero: "1",
+      comissaoIncluida: true,
+    });
+    expect(ctx.comissao_incluida).toBe(true);
+  });
+});

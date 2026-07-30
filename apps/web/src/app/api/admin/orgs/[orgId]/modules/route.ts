@@ -17,6 +17,8 @@ import {
   type FeatureKey,
 } from "@/lib/modules/catalog";
 import { seedPipeline } from "@/lib/pipelines/seed";
+import { seedCanonicalTemplatesForOrg } from "@/lib/templates/canonical-seed";
+import { canonicalModalidadesForModules } from "@/lib/templates/canonical-templates";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -144,6 +146,18 @@ export async function PATCH(
   // org). Idempotente: no-op quando o pipeline do kind já existe.
   if (enabled === true) {
     await seedPipeline(params.orgId, module === MODULE.LOCACAO ? "locacao" : "venda");
+    // ...e os templates canônicos DAQUELE módulo. A criação do tenant só semeia
+    // os módulos escolhidos ali; sem isto, ligar Vendas depois deixava a org sem
+    // nenhum template de venda e a 1ª geração morria em "Nenhum template ativo".
+    // Idempotente por natureza (pula modalidade que a org já tem). Best-effort:
+    // o módulo já foi habilitado e o backfill segue em `sync-templates --seed`.
+    try {
+      await seedCanonicalTemplatesForOrg(params.orgId, {
+        onlyModalidades: canonicalModalidadesForModules([module]),
+      });
+    } catch (err) {
+      console.error("[admin/orgs/modules] seed de templates falhou:", err);
+    }
   }
 
   await audit(extractAuditContextFromRequest(req, params.orgId, session.user.id), {

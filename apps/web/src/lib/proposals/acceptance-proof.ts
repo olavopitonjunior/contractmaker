@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
 import { prisma } from "@/lib/db/prisma";
 import { exportPdfToBuffer } from "@/lib/render/exporter";
+import { loadOrgDocumentStyleExport } from "@/lib/render/org-document-style";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { renderProposalVia } from "./render";
 import { selectPropostaTemplate } from "./template-select";
@@ -109,7 +110,7 @@ export async function buildAcceptanceProof(
     const dataJson = (proposal.dataJson ?? {}) as Record<string, unknown>;
     const tpl = proposal.templateId
       ? await prisma.contractTemplate.findUnique({ where: { id: proposal.templateId } })
-      : (await selectPropostaTemplate(proposal.orgId, proposal.schemaType))?.template ?? null;
+      : (await selectPropostaTemplate(proposal.orgId, proposal.schemaType, proposal.dataJson))?.template ?? null;
     proposalHtml = tpl?.handlebarsSource
       ? renderProposalVia({
           templateSource: tpl.handlebarsSource,
@@ -127,7 +128,9 @@ export async function buildAcceptanceProof(
     proposalHtml,
     facts: { ...facts, numero: proposal.id.slice(-8) },
   });
-  const pdf = await exportPdfToBuffer(html, "A4", null);
+  // Leiaute da org (mesmo caminho do export de contrato); `null` se não houver.
+  const style = await loadOrgDocumentStyleExport(proposal.orgId);
+  const pdf = await exportPdfToBuffer(html, "A4", style);
   const contentHash = createHash("sha256").update(pdf).digest("hex");
 
   const url = await uploadBufferToStorage({

@@ -13,9 +13,16 @@ export async function GET(req: NextRequest) {
   if (isRouteError(ctx)) return ctx;
   const url = new URL(req.url);
   const status = url.searchParams.get("status");
+  // Filtro por contrato: a popup de envio do contrato lista só as vistorias
+  // DELE pra oferecer o laudo como documento extra do envelope.
+  const leaseContractId = url.searchParams.get("leaseContractId");
 
   const inspections = await prisma.inspection.findMany({
-    where: { orgId: ctx.orgId, ...(status ? { status } : {}) },
+    where: {
+      orgId: ctx.orgId,
+      ...(status ? { status } : {}),
+      ...(leaseContractId ? { leaseContractId } : {}),
+    },
     include: {
       property: { select: { id: true, rua: true, numero: true, cidade: true, uf: true } },
       leaseContract: { select: { id: true } },

@@ -34,7 +34,31 @@ export interface ChannelToggles {
 
 export interface EventAudienceToggles {
   broker?: ChannelToggles;
-  // v2: party?: ChannelToggles;
+  /** v2: partes do negócio (comprador/vendedor, locador/locatário). */
+  party?: ChannelToggles;
+}
+
+/**
+ * Eventos que PODEM alcançar as partes. Allowlist deliberadamente curta: o
+ * cliente final só recebe marcos que ele entende sem contexto interno —
+ * contrato assinado e cobrança emitida. "Contrato pronto", "mudança de status"
+ * e afins são vocabulário da esteira, não do cliente.
+ *
+ * É defesa, não só documentação: o resolver ZERA `party` de qualquer evento
+ * fora desta lista, então config antiga (ou escrita à mão no JSON) nunca
+ * ressuscita um envio que o produto não aprovou.
+ */
+export const PARTY_CAPABLE_EVENTS = [
+  "contract_signed",
+  "charge_created",
+] as const satisfies readonly DealNotifEvent[];
+
+export type PartyCapableEvent = (typeof PARTY_CAPABLE_EVENTS)[number];
+
+export function isPartyCapableEvent(
+  event: DealNotifEvent
+): event is PartyCapableEvent {
+  return (PARTY_CAPABLE_EVENTS as readonly string[]).includes(event);
 }
 
 /** Shape persistido (org settingsJson e deal notificationsJson). */
@@ -52,6 +76,7 @@ export interface NotificationConfigJson {
 
 export interface ResolvedEventConfig {
   broker: { email: boolean; whatsapp: boolean };
+  party: { email: boolean; whatsapp: boolean };
 }
 
 export interface ResolvedNotificationConfig {
@@ -61,9 +86,17 @@ export interface ResolvedNotificationConfig {
   muted: boolean;
 }
 
-/** Defaults de código: email ligado, WhatsApp desligado (opt-in). */
+/**
+ * Defaults de código. Corretor: email ligado, WhatsApp desligado (opt-in).
+ * Parte: TUDO desligado — escrever pro cliente final da imobiliária é decisão
+ * dela, evento a evento, nunca um default que liga sozinho numa migração.
+ */
 export const DEFAULT_EVENT: ResolvedEventConfig = {
   broker: { email: true, whatsapp: false },
+  party: { email: false, whatsapp: false },
 };
+
+/** Party zerado — usado pra silenciar eventos fora da allowlist. */
+export const PARTY_OFF = { email: false, whatsapp: false } as const;
 
 export const DEFAULT_FORM_REMINDER = { enabled: true, days: [2, 5] };

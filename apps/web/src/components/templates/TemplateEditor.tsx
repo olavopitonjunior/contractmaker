@@ -17,12 +17,21 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  ADMINISTRACAO_LOCACAO_MODALIDADE,
   TEMPLATE_CATEGORIES,
   CATEGORY_LABELS,
   CATEGORY_TO_GROUP,
+  GARANTIA_TIPOS,
+  GARANTIA_LABELS,
   GROUP_LABELS,
+  LOCACAO_MODALIDADES,
   modalidadeForCategory,
+  modalidadeLabel,
+  parseMatchCriteria,
+  templateFamilyForModalidade,
   type TemplateCategory,
+  type TemplateFamily,
+  type TemplateMatchCriteria,
 } from "@/lib/contracts/template-category";
 import {
   AlertDialog,
@@ -54,12 +63,12 @@ interface TemplateEditorProps {
     handlebarsSource: string;
     modalidade: string | null;
     category?: string | null;
+    matchCriteria?: unknown;
     isDefault: boolean;
     version: string;
     status: string;
     engine?: string;
     googleTemplateDocId?: string | null;
-    previewStale?: boolean;
   };
   mode: "create" | "edit";
 }
@@ -83,18 +92,65 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
   const [isDefault, setIsDefault] = useState(template?.isDefault || false);
   const [version, setVersion] = useState(template?.version || "1.0.0");
 
-  // Tipo de documento: contrato (categoria) ou proposta (modalidade proposta_*).
-  const initialIsProposta = template?.modalidade?.startsWith("proposta_") ?? false;
-  const [docType, setDocType] = useState<"contrato" | "proposta">(
-    initialIsProposta ? "proposta" : "contrato"
+  // Família do documento: contrato de venda (categoria = forma de pagamento),
+  // contrato de locação (modalidade própria) ou proposta (modalidade
+  // proposta_*). A família vem da MODALIDADE persistida — a categoria só
+  // descreve pagamento e não existe fora de venda.
+  const initialFamily = templateFamilyForModalidade(template?.modalidade);
+  const [family, setFamily] = useState<TemplateFamily>(
+    mode === "create" ? "venda" : initialFamily
   );
   const [propostaModalidade, setPropostaModalidade] = useState(
-    initialIsProposta ? (template!.modalidade as string) : PROPOSTA_MODALIDADES[0].value
+    initialFamily === "proposta"
+      ? (template!.modalidade as string)
+      : PROPOSTA_MODALIDADES[0].value
+  );
+  const [locacaoModalidade, setLocacaoModalidade] = useState<string>(
+    initialFamily === "locacao" ? (template!.modalidade as string) : LOCACAO_MODALIDADES[0]
   );
 
-  // Modalidade (grupo) derivada da categoria — usada no preview e nos labels.
-  const modalidade = modalidadeForCategory(category);
+  // Modalidade efetiva do template — em venda é derivada da categoria.
+  const modalidade =
+    family === "proposta"
+      ? propostaModalidade
+      : family === "locacao"
+        ? locacaoModalidade
+        : modalidadeForCategory(category);
   const groupLabel = GROUP_LABELS[CATEGORY_TO_GROUP[category]];
+
+  // ——— Variante do template pelas escolhas do form (locação e proposta) ———
+  // "any" = critério não usado (Radix Select não aceita value=""). O contrato de
+  // administração fica de fora: `selectAdministracaoTemplate` é match exato de
+  // modalidade, sem variante.
+  const initialCriteria = parseMatchCriteria(template?.matchCriteria);
+  const [criteriaGarantia, setCriteriaGarantia] = useState<string>(
+    initialCriteria?.garantia ?? "any"
+  );
+  const [criteriaFiador, setCriteriaFiador] = useState<string>(
+    initialCriteria?.fiadorPessoa ?? "any"
+  );
+  const [criteriaPessoa, setCriteriaPessoa] = useState<string>(initialCriteria?.pessoa ?? "any");
+
+  const showCriteria =
+    family === "proposta" ||
+    (family === "locacao" && locacaoModalidade !== ADMINISTRACAO_LOCACAO_MODALIDADE);
+  const proponenteLabel = family === "proposta" ? "proponente" : "locatário";
+
+  function buildMatchCriteria(): TemplateMatchCriteria | null {
+    if (!showCriteria) return null;
+    const c: TemplateMatchCriteria = {};
+    if (criteriaGarantia !== "any") {
+      c.garantia = criteriaGarantia as TemplateMatchCriteria["garantia"];
+      // Fiador PF/PJ só faz sentido (e só desclassifica) junto de garantia=fiador.
+      if (criteriaGarantia === "fiador" && criteriaFiador !== "any") {
+        c.fiadorPessoa = criteriaFiador as TemplateMatchCriteria["fiadorPessoa"];
+      }
+    }
+    if (criteriaPessoa !== "any") {
+      c.pessoa = criteriaPessoa as TemplateMatchCriteria["pessoa"];
+    }
+    return Object.keys(c).length ? c : null;
+  }
 
   const engine = template?.engine || "handlebars";
   const canPreview =
@@ -112,10 +168,33 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
 
     setSaving(true);
     try {
+      // Venda manda `category` E a `modalidade` derivada dela. Só a categoria
+      // não basta: `resolveTemplateTaxonomy` só deriva modalidade de categoria
+      // quando o template JÁ é de venda — mover um template de locação/proposta
+      // PARA venda exige a modalidade explícita, senão o PATCH era um no-op
+      // silencioso com toast de sucesso.
       const payload =
-        docType === "proposta"
-          ? { name, description, handlebarsSource, modalidade: propostaModalidade, isDefault, version }
-          : { name, description, handlebarsSource, category, isDefault, version };
+        family === "venda"
+          ? {
+              name,
+              description,
+              handlebarsSource,
+              category,
+              modalidade: modalidadeForCategory(category),
+              isDefault,
+              version,
+            }
+          : {
+              name,
+              description,
+              handlebarsSource,
+              modalidade,
+              isDefault,
+              version,
+              // Sempre presente (null limpa) — senão desmarcar um critério na
+              // tela não apagaria o que já está gravado.
+              matchCriteria: buildMatchCriteria(),
+            };
 
       const url = mode === "create" ? "/api/templates" : `/api/templates/${template!.id}`;
       const method = mode === "create" ? "POST" : "PATCH";
@@ -178,20 +257,40 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
         </div>
         <div className="space-y-2">
           <Label>Tipo de documento</Label>
-          <Select
-            value={docType}
-            onValueChange={(v) => setDocType(v as "contrato" | "proposta")}
-            disabled={mode === "edit"}
-          >
+          <Select value={family} onValueChange={(v) => setFamily(v as TemplateFamily)}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="contrato">Contrato</SelectItem>
+              <SelectItem value="venda">Contrato de venda</SelectItem>
+              <SelectItem value="locacao">Contrato de locação</SelectItem>
               <SelectItem value="proposta">Proposta (oferta pré-contrato)</SelectItem>
             </SelectContent>
           </Select>
-          {docType === "proposta" ? (
+          {family === "locacao" ? (
+            <>
+              <Label htmlFor="loc-modalidade" className="pt-2 block">
+                Modalidade de locação
+              </Label>
+              <Select value={locacaoModalidade} onValueChange={setLocacaoModalidade}>
+                <SelectTrigger id="loc-modalidade">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {LOCACAO_MODALIDADES.map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {modalidadeLabel(m)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                O contrato de locação não tem “forma de pagamento” — a esteira usa
+                esta modalidade pra achar o template. Marque como principal pra ser
+                o padrão da modalidade.
+              </p>
+            </>
+          ) : family === "proposta" ? (
             <>
               <Label htmlFor="prop-modalidade" className="pt-2 block">Modelo de proposta</Label>
               <Select value={propostaModalidade} onValueChange={setPropostaModalidade}>
@@ -239,14 +338,91 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
         <div className="flex items-start gap-3 pt-6">
           <Switch id="isDefault" checked={isDefault} onCheckedChange={setIsDefault} />
           <div className="grid gap-0.5">
-            <Label htmlFor="isDefault">Principal do grupo (fallback)</Label>
+            <Label htmlFor="isDefault">
+              {family === "venda" ? "Principal do grupo (fallback)" : "Principal da modalidade"}
+            </Label>
             <p className="text-xs text-muted-foreground">
-              Usado quando uma categoria do grupo “{groupLabel}” não tiver template próprio
-              (ex.: consórcio sem modelo usa o principal de “com alienação fiduciária”).
-              Marcar desfaz o principal atual do mesmo grupo.
+              {family === "venda" ? (
+                <>
+                  Usado quando uma categoria do grupo “{groupLabel}” não tiver template próprio
+                  (ex.: consórcio sem modelo usa o principal de “com alienação fiduciária”).
+                  Marcar desfaz o principal atual do mesmo grupo.
+                </>
+              ) : (
+                <>
+                  Template usado por padrão em “{modalidadeLabel(modalidade)}”. Marcar
+                  desfaz o principal atual da mesma modalidade.
+                </>
+              )}
             </p>
           </div>
         </div>
+
+        {showCriteria && (
+          <div className="md:col-span-2 space-y-3 rounded-md border border-dashed p-3">
+            <div>
+              <Label>Variante (opcional)</Label>
+              <p className="text-xs text-muted-foreground pt-0.5">
+                Quando a imobiliária tem mais de um modelo da mesma modalidade, estes
+                critérios dizem qual usar: a esteira lê as escolhas do formulário e
+                escolhe a variante que bate. Deixe em “Qualquer” para o modelo genérico
+                — ele continua sendo o padrão quando nenhuma variante casa.
+              </p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="criteria-garantia" className="text-xs">
+                  Garantia
+                </Label>
+                <Select value={criteriaGarantia} onValueChange={setCriteriaGarantia}>
+                  <SelectTrigger id="criteria-garantia">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="any">Qualquer</SelectItem>
+                    {GARANTIA_TIPOS.map((g) => (
+                      <SelectItem key={g} value={g}>
+                        {GARANTIA_LABELS[g]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {criteriaGarantia === "fiador" && (
+                <div className="space-y-1.5">
+                  <Label htmlFor="criteria-fiador" className="text-xs">
+                    Tipo de fiador
+                  </Label>
+                  <Select value={criteriaFiador} onValueChange={setCriteriaFiador}>
+                    <SelectTrigger id="criteria-fiador">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="any">Qualquer</SelectItem>
+                      <SelectItem value="pf">Pessoa física</SelectItem>
+                      <SelectItem value="pj">Pessoa jurídica</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <div className="space-y-1.5">
+                <Label htmlFor="criteria-pessoa" className="text-xs">
+                  Tipo de {proponenteLabel}
+                </Label>
+                <Select value={criteriaPessoa} onValueChange={setCriteriaPessoa}>
+                  <SelectTrigger id="criteria-pessoa">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="any">Qualquer</SelectItem>
+                    <SelectItem value="pf">Pessoa física</SelectItem>
+                    <SelectItem value="pj">Pessoa jurídica</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       <div className="space-y-2">
@@ -275,17 +451,10 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
           <Button
             variant="outline"
             onClick={() => setPreviewOpen(true)}
-            title={
-              template?.previewStale
-                ? "Preview desatualizado — abre o último upload e oferece atualizar"
-                : "Abrir preview embedado no Google Docs"
-            }
+            title="Renderiza o modelo com dados de exemplo"
           >
             <Eye className="h-4 w-4 mr-1" />
             Visualizar preview
-            {template?.previewStale && (
-              <span className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-amber-500" />
-            )}
           </Button>
         )}
 
@@ -317,9 +486,8 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
         <TemplatePreview
           templateId={template.id}
           templateName={name}
-          templateModalidade={modalidade as "a_vista" | "financiamento"}
+          templateModalidade={modalidade}
           templateEngine={engine as "handlebars" | "google_docs"}
-          previewStale={template.previewStale ?? false}
           open={previewOpen}
           onOpenChange={setPreviewOpen}
         />

@@ -86,6 +86,28 @@ export async function resolveUserOrgId(
   }
 }
 
+/**
+ * Filtro Prisma que amarra um Contract à org — pra usar em `findFirst`.
+ *
+ * Server Components não têm `NextResponse`, então o padrão dos helpers acima
+ * (checar depois e devolver 404) não serve numa page: o guard tem que estar na
+ * PRÓPRIA query, e o `null` resultante vira `notFound()`. Assim inexistente e
+ * cross-org são indistinguíveis por construção — não há caminho em que a página
+ * carregue o dado e só depois decida esconder.
+ *
+ * O dono é `deal.pipeline.orgId`: Deal não tem orgId direto e Contract herda
+ * dele (usar `template.orgId` quebraria em contrato importado, que tem
+ * `templateId: null`).
+ */
+export function contractOrgScopeWhere(contractId: string, orgId: string) {
+  return { id: contractId, deal: { pipeline: { orgId } } };
+}
+
+/** Idem para Deal — o escopo vem do pipeline. */
+export function dealOrgScopeWhere(dealId: string, orgId: string) {
+  return { id: dealId, pipeline: { orgId } };
+}
+
 /** Resposta padrão deny-by-default — 404 genérico sem vazar existência. */
 export function orgScopedNotFound(entity = "Recurso"): NextResponse {
   return NextResponse.json(

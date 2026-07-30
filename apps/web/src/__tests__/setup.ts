@@ -37,6 +37,8 @@ vi.mock("@/lib/db/prisma", () => {
     },
     contractTemplate: {
       findMany: vi.fn(),
+      findFirst: vi.fn().mockResolvedValue(null),
+      create: vi.fn(),
       count: vi.fn().mockResolvedValue(0),
     },
     orgGoogleAccount: {
@@ -256,6 +258,17 @@ vi.mock("@/lib/db/prisma", () => {
       update: vi.fn().mockResolvedValue({}),
       findMany: vi.fn().mockResolvedValue([]),
     },
+    // Fallback relacional das partes de locação (lib/deals/parties.ts)
+    leaseContract: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      findUnique: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    // Link público /pay/[token] — lido (nunca cunhado) pelo aviso à parte
+    chargePublicLink: {
+      findUnique: vi.fn().mockResolvedValue(null),
+      create: vi.fn(),
+    },
     splitRecipient: {
       findUnique: vi.fn().mockResolvedValue(null),
       findFirst: vi.fn().mockResolvedValue(null),
@@ -271,8 +284,14 @@ vi.mock("@/lib/db/prisma", () => {
       create: vi.fn(),
       update: vi.fn().mockResolvedValue({}),
     },
+    // Criação de tenant (POST /api/admin/orgs) — 1:1 com a org.
+    brandingSettings: {
+      create: vi.fn().mockResolvedValue({}),
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
     orgModule: {
       findMany: vi.fn().mockResolvedValue([]),
+      count: vi.fn().mockResolvedValue(0),
       findUnique: vi.fn().mockResolvedValue(null),
       upsert: vi.fn().mockResolvedValue({}),
       createMany: vi.fn().mockResolvedValue({ count: 0 }),
@@ -352,6 +371,26 @@ vi.mock("@/lib/db/prisma", () => {
       findMany: vi.fn().mockResolvedValue([]),
       update: vi.fn(),
       updateMany: vi.fn(),
+    },
+    envelopeEvent: {
+      create: vi.fn().mockResolvedValue({}),
+      findMany: vi.fn().mockResolvedValue([]),
+    },
+    // Documentos do envelope (contrato + laudo de vistoria no mesmo envelope).
+    // Default vazio = envelope de documento único / legado.
+    envelopeDocument: {
+      findMany: vi.fn().mockResolvedValue([]),
+      count: vi.fn().mockResolvedValue(0),
+      create: vi.fn(),
+      createMany: vi.fn().mockResolvedValue({ count: 0 }),
+      update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    inspection: {
+      findFirst: vi.fn().mockResolvedValue(null),
+      findMany: vi.fn().mockResolvedValue([]),
+      update: vi.fn().mockResolvedValue({}),
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
     proposal: {
       findUnique: vi.fn().mockResolvedValue(null),

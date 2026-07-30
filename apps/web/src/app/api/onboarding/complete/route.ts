@@ -1,22 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
-import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/db/prisma";
 import { getOnboardingStatus } from "@/lib/onboarding/status";
+// Mesmo gate do checklist/redirect (lib/onboarding/gate.ts) — ver e concluir o
+// onboarding são a mesma permissão: owner|admin.
+import { resolveOnboardingActor } from "@/lib/onboarding/gate";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-/** owner/admin da org (impersonation-aware). */
-async function resolveOwnerAdmin(userId: string, orgId: string) {
-  const effUserId = await getEffectiveUserId(userId);
-  const membership = await prisma.orgMembership.findFirst({
-    where: { userId: effUserId, orgId },
-    select: { role: true },
-  });
-  return { effUserId, isOwnerAdmin: !!membership && ["owner", "admin"].includes(membership.role) };
-}
 
 /** GET /api/onboarding/complete — status derivado do onboarding (pra rehidratar o wizard). */
 export async function GET(req: NextRequest) {
@@ -43,7 +35,7 @@ export async function POST(req: NextRequest) {
   const org = await getUserOrg(session.user.id);
   if (!org) return NextResponse.json({ error: "No organization" }, { status: 400 });
 
-  const { isOwnerAdmin } = await resolveOwnerAdmin(session.user.id, org.id);
+  const { isOwnerAdmin } = await resolveOnboardingActor(session.user.id, org.id);
   if (!isOwnerAdmin) {
     return NextResponse.json(
       { error: "Apenas owner/admin podem concluir o onboarding." },

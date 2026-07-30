@@ -6,7 +6,11 @@ import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
 import {
   contractSettingsSchema,
+  locacaoSettingsSchema,
   buildSettingsPatch,
+  buildLocacaoSettingsPatch,
+  foreignSettingsFields,
+  resolveSettingsFamily,
 } from "@/lib/contracts/default-config";
 import {
   syncRenderedHtmlDiffToDoc,
@@ -26,6 +30,13 @@ type SkipReason = "no_google_doc" | "no_template" | "google_docs_engine";
  * Salva as configurações contratuais (foro, desistência, local/data de
  * assinatura, multas/juros/prazos) do contrato e reflete a mudança no texto do
  * Google Doc.
+ *
+ * ## Família (venda × locação)
+ *
+ * Os dois vocabulários não são intercambiáveis (`foro` enum vs comarca; multa
+ * em % vs em meses de aluguel). A família sai do contrato — `pipeline.kind` e
+ * `Contract.kind="administracao"` — e decide schema E patch. Payload da outra
+ * família é 400 nomeando os campos, nunca um save silencioso pela metade.
  *
  * ## O detalhe que faz a feature funcionar
  *
@@ -51,22 +62,21 @@ export async function PATCH(
   if (!authResult.ok) return authResult.response;
   const { ctx } = authResult;
 
-  const parsed = contractSettingsSchema.safeParse(
-    await req.json().catch(() => null)
-  );
-  if (!parsed.success) {
-    return NextResponse.json(
-      { error: "Payload inválido", issues: parsed.error.flatten() },
-      { status: 400 }
-    );
-  }
+  const body = await req.json().catch(() => null);
 
   // Cross-org guard — Deal não tem orgId direto; o escopo vem do pipeline.
+  // O contrato é carregado ANTES da validação de propósito: o schema depende da
+  // família (venda × locação), e a família depende do contrato.
   const contract = await prisma.contract.findFirst({
     where: { id: params.id, deal: { pipeline: { orgId: ctx.orgId } } },
     include: {
       template: { select: { handlebarsSource: true, engine: true } },
-      deal: { include: { form: { select: { id: true } } } },
+      deal: {
+        include: {
+          form: { select: { id: true } },
+          pipeline: { select: { kind: true } },
+        },
+      },
     },
   });
   if (!contract) {
@@ -101,8 +111,53 @@ export async function PATCH(
     );
   }
 
+  const family = resolveSettingsFamily({
+    contractKind: contract.kind,
+    pipelineKind: contract.deal.pipeline?.kind ?? null,
+  });
+
+  // Payload da família errada: o Zod sozinho deixaria passar (o `.strip()`
+  // descarta em silêncio e `foro: "arbitragem"` é uma comarca válida), então o
+  // operador veria "salvo" sem nada mudar no contrato.
+  const foreign = foreignSettingsFields(family, body);
+  if (foreign.length > 0) {
+    return NextResponse.json(
+      {
+        error:
+          family === "locacao"
+            ? "Este é um contrato de locação — os campos enviados são de venda"
+            : "Este é um contrato de venda — os campos enviados são de locação",
+        fields: foreign,
+      },
+      { status: 400 }
+    );
+  }
+
+  // Cada família tem schema E patch próprios (o de locação grava
+  // `config.foro_texto`/multa em meses; o de venda, o bloco de desistência e as
+  // multas percentuais). Branches separados evitam cast do resultado do Zod.
+  let patch: Record<string, unknown>;
+  if (family === "locacao") {
+    const parsed = locacaoSettingsSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Payload inválido", issues: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+    patch = buildLocacaoSettingsPatch(parsed.data);
+  } else {
+    const parsed = contractSettingsSchema.safeParse(body);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Payload inválido", issues: parsed.error.flatten() },
+        { status: 400 }
+      );
+    }
+    patch = buildSettingsPatch(parsed.data);
+  }
+
   const currentData = (contract.dataJson as Record<string, unknown> | null) ?? {};
-  const patch = buildSettingsPatch(parsed.data);
   const merged = deepMergeAtPaths(structuredClone(currentData), patch).merged;
 
   // --- Reflete no Google Doc ---

@@ -3,12 +3,19 @@ import { recordHumanDocEdit } from "../human-doc-edit";
 
 const NOW = new Date("2026-07-23T12:00:00Z");
 
-function makeDeps(recent: { id: string } | null) {
+function makeDeps(
+  recent: { id: string; userId?: string | null } | null,
+  resolveEditorUserId?: (contractId: string) => Promise<string | null>
+) {
   const findFirst = vi.fn(async () => recent);
   const create = vi.fn(async () => ({ id: "new-id" }));
   const update = vi.fn(async () => ({}));
   return {
-    deps: { db: { contractChangeLog: { findFirst, create, update } } as never, now: () => NOW },
+    deps: {
+      db: { contractChangeLog: { findFirst, create, update } } as never,
+      now: () => NOW,
+      ...(resolveEditorUserId ? { resolveEditorUserId } : {}),
+    },
     findFirst,
     create,
     update,
@@ -40,6 +47,61 @@ describe("recordHumanDocEdit (sem diff — atribuição)", () => {
     expect(r.changeLogId).toBe("e1");
     expect(create).not.toHaveBeenCalled();
     expect(update).toHaveBeenCalledWith({ where: { id: "e1" }, data: { createdAt: NOW } });
+  });
+
+  it("sem marcador de presença → entry SEM userId e sem flag de atribuição", async () => {
+    const { deps, create } = makeDeps(null, async () => null);
+    await recordHumanDocEdit(deps, { contractId: "c1" });
+    const data = (create.mock.calls[0][0] as { data: Record<string, unknown> }).data;
+    expect(data.userId).toBeNull();
+    expect(data.details).not.toHaveProperty("attribution");
+  });
+
+  it("com marcador → atribui userId e DECLARA a heurística em details", async () => {
+    const resolve = vi.fn(async () => "user-7");
+    const { deps, create } = makeDeps(null, resolve);
+    await recordHumanDocEdit(deps, { contractId: "c1", details: { channelId: "ch" } });
+    expect(resolve).toHaveBeenCalledWith("c1");
+    const data = (create.mock.calls[0][0] as { data: Record<string, unknown> }).data;
+    expect(data.userId).toBe("user-7");
+    expect(data.source).toBe("user");
+    expect(data.details).toMatchObject({
+      manual: true,
+      channelId: "ch",
+      attribution: "editor_ping",
+    });
+  });
+
+  it("resolver que lança não derruba o registro (entry sai sem userId)", async () => {
+    const { deps, create } = makeDeps(null, async () => {
+      throw new Error("redis down");
+    });
+    const r = await recordHumanDocEdit(deps, { contractId: "c1" });
+    expect(r.outcome).toBe("created");
+    const data = (create.mock.calls[0][0] as { data: Record<string, unknown> }).data;
+    expect(data.userId).toBeNull();
+  });
+
+  it("coalesce de entry órfã + marcador → enriquece userId na mesma entry", async () => {
+    const { deps, update } = makeDeps({ id: "e1", userId: null }, async () => "user-7");
+    await recordHumanDocEdit(deps, { contractId: "c1" });
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "e1" },
+      data: expect.objectContaining({
+        createdAt: NOW,
+        userId: "user-7",
+        details: expect.objectContaining({ attribution: "editor_ping" }),
+      }),
+    });
+  });
+
+  it("coalesce de entry JÁ atribuída não troca o autor", async () => {
+    const { deps, update } = makeDeps({ id: "e1", userId: "user-1" }, async () => "user-9");
+    await recordHumanDocEdit(deps, { contractId: "c1" });
+    expect(update).toHaveBeenCalledWith({
+      where: { id: "e1" },
+      data: { createdAt: NOW },
+    });
   });
 
   it("busca a entry recente por action + janela de coalesce", async () => {

@@ -4,14 +4,27 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { toast } from "sonner";
-import { ChevronLeft, FileText } from "lucide-react";
+import { ChevronLeft, FileText, Pencil } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { proposalStatusView, proposalEventLabel } from "@/lib/proposals/status-view";
+import { EDITABLE_STATUSES } from "@/lib/proposals/status-sets";
 import { useProposalPolling } from "@/hooks/useProposalPolling";
 import { ProposalProgressTimeline } from "./ProposalProgressTimeline";
 import { ProposalAssigneeControl } from "./ProposalAssigneeControl";
 import { ProposalActionBar } from "./ProposalActionBar";
+import { ProposalDocumentCard } from "./ProposalDocumentCard";
 import type { ProposalPermissions } from "./ProposalRowActions";
 
 // Rótulo/cor por signatário. Duas fontes de vocabulário DISJUNTAS:
@@ -35,53 +48,39 @@ const SIGNER_STATUS_LABEL: Record<string, string> = {
   canceled: "Cancelado",
 };
 
+/**
+ * Tudo que dependeria de locale ou do relógio já chega FORMATADO do server
+ * component (`.../propostas/[id]/page.tsx`): datas, prazo e valor são strings.
+ *
+ * Não voltar a formatar aqui. `toLocale*` resolve o padrão de data no ICU do
+ * runtime, e o ICU do Node da Vercel não é o do browser do usuário — a mesma
+ * data saía "28/07/2026 20:23" no HTML do servidor e "28/07/2026, 20:23" na
+ * hidratação. E o prazo relativo ("faltam 5d") deriva de `Date.now()`, que muda
+ * entre o SSR e a hidratação. Qualquer um dos dois é hydration mismatch: React
+ * #418 e, quando escala, #423 (a raiz inteira re-renderiza no client e o card
+ * "Documento" fica em branco). Ver lib/format/datetime.ts.
+ */
 interface Proposal {
   id: string;
   title: string;
   status: string;
   kind: string;
   instrument: string;
-  validUntil: string | null;
-  createdAt: string;
-  sentAt: string | null;
-  deliveredAt: string | null;
-  firstViewedAt: string | null;
+  createdAtLabel: string;
+  sentAtLabel: string;
+  deliveredAtLabel: string;
+  firstViewedAtLabel: string;
   viewCount: number;
-  lastReminderAt: string | null;
+  lastReminderAtLabel: string;
   reminderCount: number;
-  completedAt: string | null;
-  convertedAt: string | null;
+  validUntilLabel: string;
+  prazo: { label: string; danger: boolean };
   convertedDealId: string | null;
   dossierUrl: string | null;
-  resumo: { proponente: string | null; imovel: string | null; valor: number | null };
+  resumo: { proponente: string | null; imovel: string | null; valorLabel: string | null };
   responsible: { name: string; isNonUser: boolean; image: string | null };
   responsibleUserId: string | null;
   responsibleName: string | null;
-}
-
-function money(v: number | null): string {
-  if (v == null) return "—";
-  // "R$ " manual + grouping do número (determinístico): o style:"currency" do ICU
-  // emite um espaço variável (U+00A0/U+202F) entre símbolo e número que difere
-  // Node×browser → hydration mismatch (React #418). O grouping "500.000" é estável.
-  return "R$ " + v.toLocaleString("pt-BR", { maximumFractionDigits: 0 });
-}
-function fmt(iso: string | null): string {
-  if (!iso) return "—";
-  // timeZone explícito: server (UTC) e client (BRT) precisam formatar igual, senão
-  // a HORA diverge (22:16 vs 19:16) → React #418 (hydration mismatch) a cada load.
-  return new Date(iso).toLocaleString("pt-BR", {
-    dateStyle: "short",
-    timeStyle: "short",
-    timeZone: "America/Sao_Paulo",
-  });
-}
-function prazoLabel(validUntil: string | null): { label: string; danger: boolean } {
-  if (!validUntil) return { label: "sem prazo", danger: false };
-  const days = Math.ceil((new Date(validUntil).getTime() - Date.now()) / 86_400_000);
-  if (days < 0) return { label: "vencida", danger: true };
-  if (days === 0) return { label: "vence hoje", danger: true };
-  return { label: `faltam ${days}d`, danger: days <= 2 };
 }
 
 export function ProposalDetailClient({
@@ -91,16 +90,25 @@ export function ProposalDetailClient({
   attachments,
   members,
   permissions,
+  sentSnapshotHtml,
 }: {
   proposal: Proposal;
   signers: { id: string; name: string; role: string; channel: string; status: string }[];
-  events: { id: string; eventName: string; receivedAt: string }[];
+  events: { id: string; eventName: string; receivedAtLabel: string }[];
   attachments: { id: string; filename: string; category: string | null; url: string }[];
   members: { id: string; name: string }[];
   permissions: ProposalPermissions;
+  /** Documento congelado no envio (null enquanto a proposta não saiu). */
+  sentSnapshotHtml: string | null;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [contactEdit, setContactEdit] = useState<null | {
+    signerId: string;
+    name: string;
+    email: string;
+    phone: string;
+  }>(null);
 
   // Tempo real: pulla o status enquanto a proposta está viva; refresh do server
   // component quando muda (webhook → DB → aqui em ~3.5s).
@@ -119,10 +127,21 @@ export function ProposalDetailClient({
   });
   const liveStatus = live?.status ?? proposal.status;
   const sv = proposalStatusView(liveStatus);
-  const pz = prazoLabel(proposal.validUntil);
+  const pz = proposal.prazo;
+  // Derivado do status AO VIVO (não do prop do servidor): se a proposta for
+  // enviada em outra aba, o botão de editar some junto com o preview — mesmo
+  // conjunto que o PATCH e o /preview aceitam no servidor.
+  const canEdit = EDITABLE_STATUSES.has(liveStatus);
 
-  // Ações por-signatário (no EnvelopeSigner do envelope em curso).
-  async function signerAction(signerId: string, kind: "resend" | "remove" | "edit") {
+  // Ações por-signatário (no EnvelopeSigner do envelope em curso). "contact" é
+  // alimentada pelo diálogo abaixo — dois `window.prompt` em sequência não davam
+  // contexto (qual
+  // signatário?), não validavam nada e um Esc no 2º já tinha coletado o 1º.
+  async function signerAction(
+    signerId: string,
+    kind: "resend" | "remove" | "contact",
+    patchBody?: Record<string, string>
+  ) {
     let url = `/api/proposals/${proposal.id}/signers/${signerId}`;
     let method = "PATCH";
     let body: string | undefined;
@@ -133,13 +152,8 @@ export function ProposalDetailClient({
       if (!window.confirm("Remover este signatário da proposta?")) return;
       method = "DELETE";
     } else {
-      const email = window.prompt("Novo e-mail (deixe em branco pra não alterar):") ?? "";
-      const phone = window.prompt("Novo WhatsApp/telefone (deixe em branco pra não alterar):") ?? "";
-      const patch: Record<string, string> = {};
-      if (email.trim()) patch.email = email.trim();
-      if (phone.trim()) patch.phone = phone.trim();
-      if (Object.keys(patch).length === 0) return;
-      body = JSON.stringify(patch);
+      if (!patchBody || Object.keys(patchBody).length === 0) return;
+      body = JSON.stringify(patchBody);
     }
     setBusy(true);
     try {
@@ -151,8 +165,13 @@ export function ProposalDetailClient({
       const d = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(d.error ?? `HTTP ${res.status}`);
       toast.success(
-        kind === "resend" ? "Notificação reenviada" : kind === "remove" ? "Signatário removido" : "Contato atualizado"
+        kind === "resend"
+          ? "Notificação reenviada"
+          : kind === "remove"
+            ? "Signatário removido"
+            : "Contato atualizado"
       );
+      setContactEdit(null);
       router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro na ação");
@@ -185,15 +204,24 @@ export function ProposalDetailClient({
             </span>
           </div>
         </div>
-        <ProposalActionBar
-          proposal={{
-            id: proposal.id,
-            status: liveStatus,
-            instrument: proposal.instrument,
-            convertedDealId: proposal.convertedDealId,
-          }}
-          permissions={permissions}
-        />
+        <div className="flex flex-wrap items-center justify-end gap-2">
+          {canEdit && (
+            <Button variant="outline" asChild>
+              <Link href={`/pipeline/propostas/${proposal.id}/editar`}>
+                <Pencil className="mr-1.5 h-4 w-4" /> Editar proposta
+              </Link>
+            </Button>
+          )}
+          <ProposalActionBar
+            proposal={{
+              id: proposal.id,
+              status: liveStatus,
+              instrument: proposal.instrument,
+              convertedDealId: proposal.convertedDealId,
+            }}
+            permissions={permissions}
+          />
+        </div>
       </div>
 
       {/* Linha do tempo */}
@@ -207,7 +235,7 @@ export function ProposalDetailClient({
           <h2 className="font-medium">Resumo</h2>
           <Row label="Proponente" value={proposal.resumo.proponente ?? "—"} />
           <Row label="Imóvel" value={proposal.resumo.imovel ?? "—"} />
-          <Row label="Valor" value={money(proposal.resumo.valor)} />
+          <Row label="Valor" value={proposal.resumo.valorLabel ?? "—"} />
           <Row
             label="Instrumento"
             value={proposal.instrument === "aceite" ? "Aceite via WhatsApp" : "Assinatura (envelope)"}
@@ -240,26 +268,22 @@ export function ProposalDetailClient({
       <div className="grid gap-4 md:grid-cols-2">
         <Card className="space-y-2 p-4">
           <h2 className="font-medium">Datas</h2>
-          <Row label="Criada" value={fmt(proposal.createdAt)} />
-          <Row label="Enviada" value={fmt(proposal.sentAt)} />
-          <Row label="Entregue" value={fmt(proposal.deliveredAt)} />
+          <Row label="Criada" value={proposal.createdAtLabel} />
+          <Row label="Enviada" value={proposal.sentAtLabel} />
+          <Row label="Entregue" value={proposal.deliveredAtLabel} />
           <Row
             label="Visualizada"
             value={
-              proposal.firstViewedAt
-                ? `${fmt(proposal.firstViewedAt)}${proposal.viewCount > 1 ? ` (${proposal.viewCount}×)` : ""}`
-                : "—"
+              proposal.viewCount > 1
+                ? `${proposal.firstViewedAtLabel} (${proposal.viewCount}×)`
+                : proposal.firstViewedAtLabel
             }
           />
           <div className="flex justify-between text-sm">
             <span className="text-muted-foreground">Validade</span>
             <span className="font-medium">
-              {fmt(proposal.validUntil)}{" "}
-              {/* prazo relativo (Date.now) → suppressHydrationWarning evita #418 no limite de dia. */}
-              <span
-                suppressHydrationWarning
-                className={pz.danger ? "text-destructive" : "text-muted-foreground"}
-              >
+              {proposal.validUntilLabel}{" "}
+              <span className={pz.danger ? "text-destructive" : "text-muted-foreground"}>
                 ({pz.label})
               </span>
             </span>
@@ -267,7 +291,7 @@ export function ProposalDetailClient({
           {proposal.reminderCount > 0 && (
             <Row
               label="Último lembrete"
-              value={`${fmt(proposal.lastReminderAt)} (${proposal.reminderCount}×)`}
+              value={`${proposal.lastReminderAtLabel} (${proposal.reminderCount}×)`}
             />
           )}
         </Card>
@@ -330,7 +354,18 @@ export function ProposalDetailClient({
                           <button className="text-primary hover:underline" onClick={() => signerAction(s.id, "resend")} disabled={busy}>
                             Reenviar
                           </button>
-                          <button className="text-primary hover:underline" onClick={() => signerAction(s.id, "edit")} disabled={busy}>
+                          <button
+                            className="text-primary hover:underline"
+                            onClick={() =>
+                              setContactEdit({
+                                signerId: s.id,
+                                name: s.name,
+                                email: "",
+                                phone: "",
+                              })
+                            }
+                            disabled={busy}
+                          >
                             Editar contato
                           </button>
                           <button className="text-destructive hover:underline" onClick={() => signerAction(s.id, "remove")} disabled={busy}>
@@ -346,6 +381,13 @@ export function ProposalDetailClient({
           })()}
         </Card>
       </div>
+
+      {/* Documento — preview antes do envio, snapshot congelado depois */}
+      <ProposalDocumentCard
+        proposalId={proposal.id}
+        editable={canEdit}
+        snapshotHtml={sentSnapshotHtml}
+      />
 
       {/* Documentos */}
       {attachments.length > 0 && (
@@ -376,13 +418,73 @@ export function ProposalDetailClient({
                 <span className="absolute -left-[23px] top-1 h-2.5 w-2.5 rounded-full border-2 border-background bg-primary" />
                 <div className="flex flex-wrap items-baseline justify-between gap-x-3">
                   <span className="text-sm">{proposalEventLabel(e.eventName)}</span>
-                  <span className="text-xs text-muted-foreground">{fmt(e.receivedAt)}</span>
+                  <span className="text-xs text-muted-foreground">{e.receivedAtLabel}</span>
                 </div>
               </li>
             ))}
           </ol>
         )}
       </Card>
+
+      {/* Editar contato do signatário */}
+      <Dialog open={contactEdit != null} onOpenChange={(o) => !o && setContactEdit(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar contato</DialogTitle>
+            <DialogDescription>
+              {contactEdit?.name} — preencha só o que quiser alterar. Campos em
+              branco ficam como estão.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <Label htmlFor="signer-email">E-mail</Label>
+              <Input
+                id="signer-email"
+                type="email"
+                value={contactEdit?.email ?? ""}
+                onChange={(e) =>
+                  setContactEdit((c) => (c ? { ...c, email: e.target.value } : c))
+                }
+                placeholder="novo@email.com"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="signer-phone">WhatsApp / telefone</Label>
+              <Input
+                id="signer-phone"
+                inputMode="tel"
+                value={contactEdit?.phone ?? ""}
+                onChange={(e) =>
+                  setContactEdit((c) => (c ? { ...c, phone: e.target.value } : c))
+                }
+                placeholder="(11) 98765-4321"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setContactEdit(null)} disabled={busy}>
+              Cancelar
+            </Button>
+            <Button
+              disabled={
+                busy ||
+                !contactEdit ||
+                (!contactEdit.email.trim() && !contactEdit.phone.trim())
+              }
+              onClick={() => {
+                if (!contactEdit) return;
+                const patch: Record<string, string> = {};
+                if (contactEdit.email.trim()) patch.email = contactEdit.email.trim();
+                if (contactEdit.phone.trim()) patch.phone = contactEdit.phone.trim();
+                void signerAction(contactEdit.signerId, "contact", patch);
+              }}
+            >
+              Salvar
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

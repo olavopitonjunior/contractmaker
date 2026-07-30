@@ -12,104 +12,31 @@
  *
  * Env:
  *   DATABASE_URL — Prisma connection (pass prod URL as inline env var to target prod)
+ *
+ * Os metadados dos templates canônicos e a criação de row vivem em
+ * `src/lib/templates/canonical-templates.ts` / `canonical-seed.ts` (fonte única,
+ * compartilhada com o seed automático de `POST /api/admin/orgs`). Este script é
+ * a via de UPDATE de conteúdo (`--apply`) + backfill de orgs antigas (`--seed`).
  */
 import { createHash } from "crypto";
 import fs from "fs";
 import path from "path";
 import { PrismaClient } from "@prisma/client";
+import {
+  CANONICAL_TEMPLATES as TEMPLATES,
+  canonicalModalidadesForModules,
+  type CanonicalTemplate,
+} from "../src/lib/templates/canonical-templates";
+import {
+  seedCanonicalTemplatesForOrg,
+  type CanonicalSeedClient,
+} from "../src/lib/templates/canonical-seed";
 
 const prisma = new PrismaClient();
 
 const DRY_RUN = !process.argv.includes("--apply");
 const SEED = process.argv.includes("--seed");
 const UPDATE_METADATA = process.argv.includes("--update-metadata");
-
-interface TemplateFile {
-  // "administracao_locacao" deliberadamente NÃO começa com "locacao" — o
-  // fallback de selectLocacaoTemplate casa startsWith("locacao") e pegaria o
-  // contrato de administração como template de locação.
-  modalidade:
-    | "a_vista"
-    | "financiamento"
-    | "locacao"
-    | "locacao_comercial"
-    | "administracao_locacao"
-    | "proposta_venda"
-    | "proposta_locacao_residencial"
-    | "proposta_locacao_comercial";
-  filename: string;
-  canonicalName: string;
-  canonicalDescription: string;
-  // schemaType da row criada no --seed (default compra_venda_v2 p/ venda).
-  schemaType?: string;
-}
-
-const TEMPLATES: TemplateFile[] = [
-  {
-    modalidade: "a_vista",
-    filename: "ccv_a_vista_v2.hbs",
-    canonicalName: "CCV - Pagamento À Vista",
-    canonicalDescription:
-      "Instrumento particular de compromisso de venda e compra - modalidade pagamento à vista",
-  },
-  {
-    modalidade: "financiamento",
-    filename: "ccv_financiamento_v2.hbs",
-    canonicalName: "CCV - Financiamento Imobiliário",
-    canonicalDescription:
-      "Instrumento particular de compromisso de venda e compra - modalidade financiamento imobiliário",
-  },
-  {
-    modalidade: "locacao",
-    filename: "locacao_residencial_v3.hbs",
-    canonicalName: "Locação Residencial",
-    canonicalDescription:
-      "Instrumento particular de contrato de locação residencial com administração - Lei nº 8.245/91",
-    schemaType: "locacao_residencial_v1",
-  },
-  {
-    modalidade: "locacao_comercial",
-    filename: "locacao_comercial_v3.hbs",
-    canonicalName: "Locação Comercial",
-    canonicalDescription:
-      "Instrumento particular de contrato de locação não residencial (comercial) com administração - Lei nº 8.245/91",
-    schemaType: "locacao_comercial_v1",
-  },
-  {
-    modalidade: "administracao_locacao",
-    filename: "administracao_locacao_v1.hbs",
-    canonicalName: "Administração de Locação",
-    canonicalDescription:
-      "Instrumento particular de contrato de administração de locação de imóvel (imobiliária ↔ proprietário) - CC arts. 653-666 e Lei nº 8.245/91",
-    schemaType: "administracao_locacao_v1",
-  },
-  // Propostas comerciais (oferta pré-contrato). schemaType igual ao do contrato
-  // correspondente — a conversão herda o dataJson sem tradução.
-  {
-    modalidade: "proposta_venda",
-    filename: "proposta_venda_v1.hbs",
-    canonicalName: "Proposta de Compra",
-    canonicalDescription:
-      "Proposta de compra de imóvel (oferta do proponente antes do contrato)",
-    schemaType: "compra_venda_v1",
-  },
-  {
-    modalidade: "proposta_locacao_residencial",
-    filename: "proposta_locacao_residencial_v1.hbs",
-    canonicalName: "Proposta de Locação Residencial",
-    canonicalDescription:
-      "Proposta de locação residencial (oferta do proponente antes do contrato)",
-    schemaType: "locacao_residencial_v1",
-  },
-  {
-    modalidade: "proposta_locacao_comercial",
-    filename: "proposta_locacao_comercial_v1.hbs",
-    canonicalName: "Proposta de Locação Comercial",
-    canonicalDescription:
-      "Proposta de locação não residencial/comercial (oferta do proponente antes do contrato)",
-    schemaType: "locacao_comercial_v1",
-  },
-];
 
 function sha(s: string): string {
   return createHash("sha256").update(s).digest("hex").slice(0, 16);
@@ -142,6 +69,49 @@ async function main() {
   let seeded = 0;
   let renamed = 0;
 
+  // Pass de seed por ORG — roda SEMPRE que --seed é passado. Antes vivia dentro
+  // do `if (dbRows.length === 0)` do loop de templates, então só disparava
+  // quando NENHUMA org do banco tinha a modalidade: bastava uma org antiga ter
+  // o template pra todo tenant novo ficar sem nenhum e a primeira geração
+  // morrer em "Nenhum template ativo".
+  if (SEED) {
+    const orgs = await prisma.organization.findMany({ select: { id: true, name: true } });
+    for (const org of orgs) {
+      // Escopo por MÓDULO habilitado: um tenant só-locação não deve ganhar CCV
+      // à vista/financiamento num backfill. Org SEM rows de OrgModule = org
+      // anterior à modularização → semeia tudo (comportamento legado, que é
+      // também o fail-open de lib/modules/read.ts).
+      const orgModules = await prisma.orgModule.findMany({
+        where: { orgId: org.id, enabled: true },
+        select: { module: true },
+      });
+      const hasModuleRows =
+        (await prisma.orgModule.count({ where: { orgId: org.id } })) > 0;
+      const onlyModalidades = hasModuleRows
+        ? canonicalModalidadesForModules(orgModules.map((m) => m.module))
+        : undefined;
+
+      const { created, skipped: seedSkipped } = await seedCanonicalTemplatesForOrg(org.id, {
+        db: prisma as unknown as CanonicalSeedClient,
+        // CLI lê do disco (fonte da verdade local), não do módulo embarcado.
+        loadSource: (t: CanonicalTemplate) =>
+          fs.readFileSync(resolveTemplatePath(t.filename), "utf-8"),
+        dryRun: DRY_RUN,
+        onlyModalidades,
+      });
+      if (created.length > 0) {
+        console.log(
+          `${DRY_RUN ? "[seed] would create" : "  ✓ seeded"} org=${org.id} (${org.name}): ` +
+            created.join(", ")
+        );
+      } else {
+        console.log(`↷  seed org=${org.id} (${org.name}): nada a criar (${seedSkipped.length} ok)`);
+      }
+      seeded += created.length;
+    }
+    console.log();
+  }
+
   for (const t of TEMPLATES) {
     const filePath = resolveTemplatePath(t.filename);
     const source = fs.readFileSync(filePath, "utf-8");
@@ -173,46 +143,6 @@ async function main() {
     if (dbRows.length === 0) {
       console.log(`⚠  ${t.filename}: nenhum ContractTemplate ativo com modalidade=${t.modalidade}`);
       notFound++;
-
-      if (SEED) {
-        // Sem orgId disponível, não podemos criar — precisa rodar por org.
-        // Buscamos todas as orgs e seedamos uma row por org pra essa modalidade.
-        const orgs = await prisma.organization.findMany({ select: { id: true } });
-        for (const org of orgs) {
-          const exists = await prisma.contractTemplate.findFirst({
-            where: { orgId: org.id, modalidade: t.modalidade, status: "active" },
-            select: { id: true },
-          });
-          if (exists) continue;
-
-          // Desfaz isDefault de outros templates da mesma modalidade pra essa org
-          // antes de criar — invariant "um default por (org, modalidade)".
-          if (!DRY_RUN) {
-            await prisma.contractTemplate.updateMany({
-              where: { orgId: org.id, modalidade: t.modalidade, isDefault: true },
-              data: { isDefault: false },
-            });
-            await prisma.contractTemplate.create({
-              data: {
-                orgId: org.id,
-                name: t.canonicalName,
-                description: t.canonicalDescription,
-                handlebarsSource: source,
-                modalidade: t.modalidade,
-                isDefault: true,
-                status: "active",
-                schemaType: t.schemaType ?? "compra_venda_v2",
-                version: "2.0.0",
-                engine: "handlebars",
-              },
-            });
-            console.log(`  ✓ seeded org=${org.id} → ${t.canonicalName}`);
-          } else {
-            console.log(`  [seed] would create for org=${org.id} → ${t.canonicalName}`);
-          }
-          seeded++;
-        }
-      }
       continue;
     }
 

@@ -13,6 +13,8 @@ import { ProposalsListClient } from "@/components/proposals/ProposalsListClient"
 import { statusesForFilter } from "@/lib/proposals/list-filters";
 import { OPEN_STATUSES } from "@/lib/proposals/status-sets";
 import { responsibleDisplay } from "@/lib/proposals/status-view";
+import { formatDayMonthBR, deadlineBR } from "@/lib/format/datetime";
+import { formatMoneyBR } from "@/lib/format/money";
 
 export const dynamic = "force-dynamic";
 
@@ -164,15 +166,20 @@ export default async function PropostasPage({
         responsibleUser: p.responsibleUser,
         user: p.user,
       });
+      // Datas, prazo e valor saem formatados do servidor — o client component não
+      // pode usar `toLocale*` (padrão de locale difere entre o ICU do Node e o do
+      // browser) nem `Date.now()` no render (muda entre SSR e hidratação). Os dois
+      // dão hydration mismatch (React #418/#423). Ver lib/format/datetime.ts.
+      const prazo = deadlineBR(p.validUntil);
       return {
         id: p.id,
         title: p.title,
         status: p.status,
         instrument: p.instrument,
-        validUntil: p.validUntil?.toISOString() ?? null,
-        createdAt: p.createdAt.toISOString(),
-        sentAt: p.sentAt?.toISOString() ?? null,
-        firstViewedAt: p.firstViewedAt?.toISOString() ?? null,
+        createdAtLabel: formatDayMonthBR(p.createdAt),
+        sentAtLabel: formatDayMonthBR(p.sentAt, ""),
+        firstViewedAtLabel: formatDayMonthBR(p.firstViewedAt, ""),
+        prazo: { label: prazo.shortLabel, tone: prazo.tone },
         convertedDealId: p.convertedDealId,
         responsible: resp,
         resumo: summarize(p.dataJson),
@@ -211,7 +218,7 @@ export default async function PropostasPage({
 function summarize(dataJson: unknown): {
   proponente: string | null;
   imovel: string | null;
-  valor: number | null;
+  valorLabel: string | null;
 } {
   const d = (dataJson ?? {}) as Record<string, unknown>;
   const imoveis = d.imoveis as Array<{ endereco?: string; numero?: string }> | undefined;
@@ -225,5 +232,10 @@ function summarize(dataJson: unknown): {
   const pag = d.pagamento as { valor_total?: number } | undefined;
   const loc = d.locacao as { valor_aluguel?: number } | undefined;
   const valor = pag?.valor_total ?? loc?.valor_aluguel ?? null;
-  return { proponente, imovel, valor: typeof valor === "number" ? valor : null };
+  return {
+    proponente,
+    imovel,
+    // Determinístico (sem ICU), pelo mesmo motivo das datas.
+    valorLabel: typeof valor === "number" ? formatMoneyBR(valor, { decimals: 0 }) : null,
+  };
 }

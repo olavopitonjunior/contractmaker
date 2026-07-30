@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseMoneyBR, parsePercentBR } from "../money";
+import { formatMoneyBR, parseMoneyBR, parsePercentBR } from "../money";
 
 describe("parseMoneyBR", () => {
   it.each([
@@ -69,5 +69,34 @@ describe("parsePercentBR", () => {
   it("NÃO infla o percentual ~1000× (regressão do 3º review)", () => {
     // "6.500" (6,5%) NÃO pode virar 6500 (comissão ~1000× maior).
     expect(parsePercentBR("6.500")).toBe(6.5);
+  });
+});
+
+describe("formatMoneyBR", () => {
+  it.each([
+    [0, "R$ 0,00"],
+    [1500, "R$ 1.500,00"],
+    [1500.5, "R$ 1.500,50"],
+    [1234567.89, "R$ 1.234.567,89"],
+    [-250.4, "-R$ 250,40"],
+    ["2500", "R$ 2.500,00"],
+    ["1.500,50", "R$ 1.500,50"],
+  ])("formatMoneyBR(%p) === %p", (input, expected) => {
+    expect(formatMoneyBR(input)).toBe(expected);
+  });
+
+  it("usa separadores ASCII (sem NBSP do Intl) pra não quebrar hidratação", () => {
+    expect(formatMoneyBR(1000)).not.toMatch(/\u00a0/);
+  });
+
+  // `decimals: 0` \u00e9 o formato das telas de proposta (valor de im\u00f3vel sem ",00").
+  it.each([
+    [0, "R$ 0"],
+    [500000, "R$ 500.000"],
+    [1234567.89, "R$ 1.234.568"], // arredonda, n\u00e3o trunca
+    [-2500, "-R$ 2.500"],
+    ["850.000,50", "R$ 850.001"],
+  ])("formatMoneyBR(%p, { decimals: 0 }) === %p", (input, expected) => {
+    expect(formatMoneyBR(input, { decimals: 0 })).toBe(expected);
   });
 });

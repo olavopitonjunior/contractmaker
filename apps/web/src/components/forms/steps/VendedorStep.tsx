@@ -345,7 +345,15 @@ function PessoaFisicaFields({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormField label="CNPJ *">
               <Input
-                {...form.register(`${prefix}.socio_pj.cnpj`)}
+                {...form.register(`${prefix}.socio_pj.cnpj`, {
+                  onChange: (e) =>
+                    form.setValue(
+                      `${prefix}.socio_pj.cnpj`,
+                      maskCNPJ(e.target.value),
+                      { shouldDirty: true }
+                    ),
+                })}
+                inputMode="numeric"
                 placeholder="00.000.000/0000-00"
               />
             </FormField>
@@ -436,7 +444,16 @@ function PessoaJuridicaFields({
         </FormField>
 
         <FormField label="CEP">
-          <Input {...form.register(`${prefix}.cep`)} placeholder="00000-000" />
+          <Input
+            {...form.register(`${prefix}.cep`, {
+              onChange: (e) =>
+                form.setValue(`${prefix}.cep`, maskCEP(e.target.value), {
+                  shouldDirty: true,
+                }),
+            })}
+            inputMode="numeric"
+            placeholder="00000-000"
+          />
         </FormField>
       </div>
 

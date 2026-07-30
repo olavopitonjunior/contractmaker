@@ -8,7 +8,10 @@ import { createHash } from "node:crypto";
 import { Prisma } from "@prisma/client";
 import { waitUntil } from "@vercel/functions";
 import { prisma } from "@/lib/db/prisma";
-import { persistSignedPdf } from "@/lib/clicksign/signed-pdf";
+import {
+  persistSignedPdf,
+  persistSignedDocumentByKey,
+} from "@/lib/clicksign/signed-pdf";
 import { audit } from "@/lib/security/audit";
 import {
   getAcceptanceEventFromPayload,
@@ -58,15 +61,89 @@ export interface ProcessResult {
  * no fechamento normal quanto na recuperação por reentrega.
  */
 function triggerSignedPdfDownload(
-  envelope: { id: string; orgId: string; clicksignId: string | null },
+  envelope: {
+    id: string;
+    orgId: string;
+    clicksignId: string | null;
+    documentClicksignId: string | null;
+  },
   payload: WebhookPayload
 ): void {
   const fromPayload = getSignedDocumentUrlFromPayload(payload);
-  if (fromPayload) {
+  // A URL do payload (compat v2) é do documento DO EVENTO. Num envelope com
+  // vários documentos ela pode ser a de um documento EXTRA — gravá-la como
+  // `signedDocumentUrl` trocaria o contrato assinado pelo anexo. Só confiamos
+  // nela quando o evento é do documento primary (ou quando não dá pra saber, em
+  // envelope antigo sem `documentClicksignId`).
+  const eventDocKey = getDocumentKeyFromPayload(payload);
+  const isPrimaryEvent =
+    !eventDocKey ||
+    !envelope.documentClicksignId ||
+    eventDocKey === envelope.documentClicksignId;
+  if (fromPayload && isPrimaryEvent) {
     waitUntil(downloadSignedPdf(envelope.id, fromPayload));
   } else if (envelope.clicksignId) {
-    waitUntil(resolveAndDownload(envelope.id, envelope.orgId, envelope.clicksignId));
+    waitUntil(
+      resolveAndDownload(
+        envelope.id,
+        envelope.orgId,
+        envelope.clicksignId,
+        envelope.documentClicksignId
+      )
+    );
   }
+}
+
+/**
+ * O QUE um evento de fechamento pode fechar.
+ *
+ * Na v3 o fechamento é POR DOCUMENTO: `document_closed` chega uma vez por
+ * documento do envelope. Num envelope unificado (contrato + laudo de vistoria)
+ * o laudo costuma fechar PRIMEIRO — tratá-lo como fechamento do envelope
+ * promovia o deal, concluía a Inspection e avisava as partes que "o contrato foi
+ * assinado" antes de o contrato existir assinado.
+ *
+ *  - `attachment`      → evento de um documento EXTRA. Só persiste o assinado DELE.
+ *  - `primary_partial` → evento do documento PRINCIPAL num envelope que TEM
+ *                        extras. Baixa o assinado do principal, mas NÃO fecha:
+ *                        o `close`/`auto_close` do envelope cascateia quando
+ *                        todos os documentos fecharem.
+ *  - `full`            → comportamento antigo (fecha o envelope). Cobre
+ *                        `close`/`auto_close` sempre e o `document_closed` de
+ *                        envelope de documento único — inclusive todo envelope
+ *                        anterior à tabela `EnvelopeDocument`.
+ */
+type CloseScope =
+  | { kind: "attachment"; documentClicksignId: string }
+  | { kind: "primary_partial" }
+  | { kind: "full" };
+
+async function resolveCloseScope(
+  envelopeId: string,
+  eventName: string | null,
+  documentKey: string | null
+): Promise<CloseScope> {
+  // `close`/`auto_close` são do ENVELOPE — seguem fechando sempre.
+  if (eventName !== "document_closed") return { kind: "full" };
+
+  const docs = await prisma.envelopeDocument.findMany({
+    where: { envelopeId },
+    select: { documentClicksignId: true, kind: true },
+  });
+  // Envelope sem rows (documento único / legado) → caminho antigo intacto.
+  if (docs.length === 0) return { kind: "full" };
+
+  const eventDoc = documentKey
+    ? docs.find((d) => d.documentClicksignId === documentKey)
+    : undefined;
+  if (eventDoc?.kind === "attachment") {
+    return { kind: "attachment", documentClicksignId: eventDoc.documentClicksignId };
+  }
+  // Deliberadamente conservador: num envelope COM extras, qualquer
+  // `document_closed` que não seja identificável como extra (o primary, ou uma
+  // key que não casa com nenhuma row) não fecha o envelope.
+  if (docs.some((d) => d.kind === "attachment")) return { kind: "primary_partial" };
+  return { kind: "full" };
 }
 
 export function computeEventDedupeKey(
@@ -134,8 +211,18 @@ export async function processClickSignWebhookPayload(
         where: { clicksignId: clicksignEnvelopeId, ...orgScope },
       })
     : documentKey
-      ? await prisma.envelope.findFirst({
-          where: { documentClicksignId: documentKey, ...orgScope },
+      ? // O `document.key` pode ser o do documento PRIMARY (coluna escalar, e
+        // único caminho pros envelopes anteriores ao EnvelopeDocument) ou o de
+        // um documento EXTRA do mesmo envelope. Sem o segundo OR, um evento do
+        // laudo num envelope unificado caía em `unknownEnvelope`.
+        await prisma.envelope.findFirst({
+          where: {
+            ...orgScope,
+            OR: [
+              { documentClicksignId: documentKey },
+              { documents: { some: { documentClicksignId: documentKey } } },
+            ],
+          },
         })
       : null;
   if (!envelope) {
@@ -187,12 +274,23 @@ export async function processClickSignWebhookPayload(
       // for um evento de fechamento e o PDF ainda estiver faltando, re-dispara
       // SÓ o download (idempotente por findFirst) — senão o contrato assinado
       // ficava permanentemente ausente da pasta apesar da reentrega.
-      if (
-        eventName &&
-        closeEvents.includes(eventName) &&
-        !envelope.signedDocumentUrl
-      ) {
-        triggerSignedPdfDownload(envelope, payload);
+      if (eventName && closeEvents.includes(eventName)) {
+        const scope = await resolveCloseScope(envelope.id, eventName, documentKey);
+        if (scope.kind === "attachment") {
+          // Reentrega do `document_closed` de um documento EXTRA: recupera só o
+          // assinado DELE (idempotente por `signedPdfUrl` já preenchido) e
+          // NUNCA a URL do primary — senão o laudo reentregue gravaria o
+          // contrato como assinado antes da hora.
+          waitUntil(
+            persistSignedDocumentByKey(
+              envelope.id,
+              scope.documentClicksignId,
+              "[clicksign webhook]"
+            )
+          );
+        } else if (!envelope.signedDocumentUrl) {
+          triggerSignedPdfDownload(envelope, payload);
+        }
       }
       return {
         ok: true,
@@ -261,6 +359,28 @@ export async function processClickSignWebhookPayload(
     case "close":
     case "auto_close":
     case "document_closed": {
+      const scope = await resolveCloseScope(envelope.id, eventName, documentKey);
+      if (scope.kind === "attachment") {
+        // (a) Documento EXTRA fechou: guarda o assinado dele e NADA mais. O
+        // envelope segue running — o contrato ainda não foi assinado.
+        waitUntil(
+          persistSignedDocumentByKey(
+            envelope.id,
+            scope.documentClicksignId,
+            "[clicksign webhook]"
+          )
+        );
+        break;
+      }
+      if (scope.kind === "primary_partial") {
+        // (c) Documento PRINCIPAL fechou, mas o envelope tem extras: baixa o
+        // contrato assinado sem fechar o envelope. O `close`/`auto_close`
+        // cascateia quando todos os documentos fecharem.
+        triggerSignedPdfDownload(envelope, payload);
+        break;
+      }
+      // (b) `close`/`auto_close`, ou `document_closed` de envelope de documento
+      // único: comportamento antigo, intacto.
       await prisma.envelope.update({
         where: { id: envelope.id },
         data: { status: "closed", closedAt: new Date() },
@@ -362,11 +482,19 @@ export async function resolveSigner(
   return candidates.find((s) => !skip.includes(s.status)) ?? candidates[0];
 }
 
-/** Lookup signed_file_url via /documents quando o webhook v3 não traz a URL. */
+/**
+ * Lookup signed_file_url via /documents quando o webhook v3 não traz a URL.
+ *
+ * `primaryDocumentId` é o documento SUJEITO do envelope: num envelope com vários
+ * documentos (contrato + laudo de vistoria) o primeiro da lista remota pode ser
+ * o extra, e `persistSignedPdf` grava o que recebe como o assinado principal.
+ * Os extras são baixados depois, dentro de `persistSignedPdf`.
+ */
 async function resolveAndDownload(
   envelopeId: string,
   orgId: string,
-  clicksignId: string
+  clicksignId: string,
+  primaryDocumentId?: string | null
 ) {
   try {
     const creds = await resolveClickSignCreds(orgId);
@@ -374,9 +502,17 @@ async function resolveAndDownload(
     const docs = await listEnvelopeDocuments(clicksignId, creds);
     const docsData = (docs as { data?: unknown }).data;
     if (!Array.isArray(docsData)) return;
-    for (const doc of docsData as Array<{
+    const list = docsData as Array<{
+      id?: string;
       links?: { files?: { signed?: string; original?: string } };
-    }>) {
+    }>;
+    const ordered = primaryDocumentId
+      ? [
+          ...list.filter((d) => d.id === primaryDocumentId),
+          ...list.filter((d) => d.id !== primaryDocumentId),
+        ]
+      : list;
+    for (const doc of ordered) {
       const url = doc.links?.files?.signed ?? doc.links?.files?.original;
       if (url) {
         await downloadSignedPdf(envelopeId, url);

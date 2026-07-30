@@ -33,6 +33,7 @@ export default async function TemplateReviewPage({
           id: template.id,
           name: template.name,
           modalidade: template.modalidade ?? "a_vista",
+          matchCriteria: template.matchCriteria,
           status: template.status,
           isDefault: template.isDefault,
           docId: template.googleTemplateDocId,
