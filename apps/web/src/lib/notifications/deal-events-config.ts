@@ -3,9 +3,10 @@
  * defaults de código ← OrgNotificationSettings.settingsJson ← Deal.
  * notificationsJson. Chave ausente = herda da camada de baixo.
  *
- * v1: público "broker" (corretores). O shape já comporta "party" (partes) na
- * v2 sem migração — só nova chave. Constantes/tipos client-safe em
- * deal-events-shared.ts (este módulo importa prisma — só server).
+ * Três públicos, todos no mesmo shape (chave nova, sem migração): "broker"
+ * (v1, corretores), "party" (v2, partes do negócio) e "manager" (v3, gerente
+ * atribuído). Constantes/tipos client-safe em deal-events-shared.ts (este
+ * módulo importa prisma — só server).
  */
 
 import { prisma } from "@/lib/db/prisma";
@@ -54,6 +55,10 @@ function mergeEvent(
       email: patch.party?.email ?? base.party.email,
       whatsapp: patch.party?.whatsapp ?? base.party.whatsapp,
     },
+    manager: {
+      email: patch.manager?.email ?? base.manager.email,
+      whatsapp: patch.manager?.whatsapp ?? base.manager.whatsapp,
+    },
   };
 }
 
@@ -83,6 +88,8 @@ export async function resolveEffectiveNotificationConfig(
     const resolved = mergeEvent(withOrg, dealJson.events?.[ev]);
     // Allowlist de party é a última palavra: config antiga (ou JSON escrito à
     // mão) não liga o cliente final num evento que o produto não aprovou.
+    // `manager` NÃO passa por allowlist: o gerente é operador da imobiliária e
+    // acompanha os 8 marcos da esteira, como o corretor.
     events[ev] = isPartyCapableEvent(ev)
       ? resolved
       : { ...resolved, party: { ...PARTY_OFF } };

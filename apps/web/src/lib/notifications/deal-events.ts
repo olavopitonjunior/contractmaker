@@ -1,14 +1,18 @@
 /**
- * Motor de notificações do processo (venda/locação) → corretores e PARTES.
- * Espelha o fan-out de lib/financeiro/notifications.ts::notifyChargeEvent.
+ * Motor de notificações do processo (venda/locação) → corretores, PARTES e
+ * GERENTE. Espelha o fan-out de lib/financeiro/notifications.ts::notifyChargeEvent.
  *
- * Dois públicos, textos e transportes diferentes:
+ * Três públicos, textos e transportes diferentes:
  *  - `broker` (v1): quem trabalha o negócio. Email brandado + WhatsApp direto
  *    pelo sidecar Newton (`triggerNewtonDealNotify`). Default: email ligado.
  *  - `party` (v2): o cliente final (comprador/vendedor, locador/locatário).
  *    Email com template próprio + WhatsApp SÓ via NewtonRequest one-shot e SÓ
  *    em tenant com Newton. Default: tudo DESLIGADO, e só nos eventos da
  *    allowlist `PARTY_CAPABLE_EVENTS`.
+ *  - `manager` (v3): o gerente atribuído (`Deal.managerUserId`), usuário
+ *    INTERNO da plataforma. Mesmos textos do corretor (é operador da esteira,
+ *    entende o vocabulário) + WhatsApp pelo sidecar na audiência
+ *    `platform_user`. Default: TUDO ligado, sem allowlist de eventos.
  *
  * Idempotência por canal×destinatário via unique do
  * DealNotificationLog (insert-first; P2002 = já enviado). Sino (Notification)
@@ -31,6 +35,7 @@ import { sendEmail } from "@/lib/email/client";
 import { DealUpdateEmail } from "@/lib/email/templates/deal-update";
 import { DealPartyUpdateEmail } from "@/lib/email/templates/deal-party-update";
 import { triggerNewtonDealNotify } from "@/lib/newton/deal-notify-trigger";
+import { triggerNewtonNotify } from "@/lib/newton/notify-trigger";
 import { isNewtonEnabledForDeal } from "@/lib/newton/gate";
 import { isWithinWhatsappWindow } from "@/lib/newton/whatsapp-window";
 import { appendEvent } from "@/lib/newton/requests";
@@ -44,6 +49,7 @@ import {
 } from "./deal-events-config";
 import { resolveDealBrokers, type BrokerRecipient } from "./deal-brokers";
 import { resolveDealParties, type PartyRecipient } from "./deal-parties";
+import { resolveDealManager, type ManagerRecipient } from "./deal-manager";
 import type { DroppedParty } from "@/lib/deals/parties";
 
 /**
@@ -156,7 +162,7 @@ async function claimLogRow(params: {
   dealId: string;
   event: DealNotifEvent;
   channel: "email" | "whatsapp";
-  audience: "broker" | "party";
+  audience: "broker" | "party" | "manager";
   recipientKey: string;
   recipientLabel: string | null;
   dedupeKey: string;
@@ -462,6 +468,160 @@ async function notifyParties(params: {
   }
 }
 
+/**
+ * Fan-out para o GERENTE do negócio — um destinatário só, e usuário INTERNO da
+ * plataforma. Duas diferenças em relação aos outros públicos:
+ *
+ *  - **Textos do corretor, não da parte**: o gerente opera a esteira, então
+ *    "o negócio X avançou para o status Y" é a frase certa pra ele.
+ *  - **WhatsApp pelo sidecar na audiência `platform_user`** (mesmo caminho de
+ *    user-channels.ts), não por NewtonRequest one-shot: se ele responder, o
+ *    telefone resolve via `lookup_user_by_phone` e o agente atende normalmente.
+ *
+ * `recipientKey` leva o prefixo `manager:` porque a unique do
+ * DealNotificationLog é (dealId, event, channel, recipientKey, dedupeKey) —
+ * SEM audience. Sem o prefixo, um gerente que também fosse corretor com
+ * splitRecipientId igual ao userId colidiria e um dos dois envios sumiria.
+ */
+async function notifyManager(params: {
+  orgId: string;
+  dealId: string;
+  dealKind: string;
+  event: DealNotifEvent;
+  dedupeKey: string;
+  channels: { email: boolean; whatsapp: boolean };
+  manager: ManagerRecipient;
+  texts: { title: string; body: string };
+  dealTitle: string;
+  stageName: string | null;
+  formPublicUrl: string | null;
+  dealPath: string;
+  baseUrl: string;
+  orgName: string;
+}): Promise<void> {
+  const {
+    orgId,
+    dealId,
+    dealKind,
+    event,
+    dedupeKey,
+    channels,
+    manager,
+    texts,
+    dealTitle,
+    stageName,
+    formPublicUrl,
+    dealPath,
+    baseUrl,
+    orgName,
+  } = params;
+
+  const recipientKey = `manager:${manager.userId}`;
+
+  if (channels.email && manager.email) {
+    const logId = await claimLogRow({
+      orgId,
+      dealId,
+      event,
+      channel: "email",
+      audience: "manager",
+      recipientKey,
+      recipientLabel: manager.label,
+      dedupeKey,
+    });
+    if (logId) {
+      try {
+        const result = await sendEmail({
+          to: manager.email,
+          subject: `${texts.title} — ${dealTitle}`,
+          react: DealUpdateEmail({
+            recipientName: manager.label,
+            eventTitle: texts.title,
+            eventBody: texts.body,
+            dealTitle,
+            stageName: event === "stage_change" ? stageName : undefined,
+            ctaUrl: event === "form_reminder" ? formPublicUrl : null,
+            ctaLabel: event === "form_reminder" ? "Abrir formulário" : null,
+            forTeam: true,
+          }),
+          orgId,
+          tags: [
+            { name: "kind", value: "deal-notify-manager" },
+            { name: "event", value: event },
+          ],
+        });
+        await settleLogRow(
+          logId,
+          result.ok ? "sent" : "failed",
+          result.ok
+            ? { emailId: result.id }
+            : { error: result.error ?? "envio recusado" }
+        );
+      } catch (err) {
+        // Erro por CANAL: o WhatsApp abaixo ainda deve tentar, e a linha do log
+        // não pode ficar "pending" pra sempre.
+        await settleLogRow(logId, "failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
+
+  if (!channels.whatsapp || !manager.phone) return;
+
+  const logId = await claimLogRow({
+    orgId,
+    dealId,
+    event,
+    channel: "whatsapp",
+    audience: "manager",
+    recipientKey,
+    recipientLabel: manager.label,
+    dedupeKey,
+  });
+  if (!logId) return;
+
+  try {
+    // Mesmos gates do público party: tenant sem Newton e madrugada viram
+    // `skipped` VISÍVEL no histórico do negócio — não existe cron de
+    // reconciliação neste motor, então silêncio aqui seria indistinguível de
+    // falha.
+    const newtonOn = await isNewtonEnabledForDeal(orgId, dealKind).catch(
+      () => false
+    );
+    if (!newtonOn) {
+      await settleLogRow(logId, "skipped", { reason: "newton_off_para_a_org" });
+      return;
+    }
+    if (!isWithinWhatsappWindow()) {
+      await settleLogRow(logId, "skipped", { reason: "fora_da_janela_7h_22h" });
+      return;
+    }
+
+    const outcome = await triggerNewtonNotify({
+      orgId,
+      audience: "platform_user",
+      phone: manager.phone,
+      recipientName: manager.label,
+      message: `${texts.title}: ${texts.body} Acompanhe em ${baseUrl}${dealPath}`,
+      dealId,
+      orgName,
+      linkUrl: `${baseUrl}${dealPath}`,
+    });
+    if (outcome === "skipped") {
+      await settleLogRow(logId, "skipped", {
+        reason: "newton_gate_off_ou_sidecar_ausente",
+      });
+    } else {
+      await settleLogRow(logId, "sent", { via: "platform_user" });
+    }
+  } catch (err) {
+    await settleLogRow(logId, "failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 export async function notifyDealEvent(
   params: NotifyDealEventParams
 ): Promise<void> {
@@ -473,6 +633,7 @@ export async function notifyDealEvent(
         id: true,
         title: true,
         userId: true,
+        managerUserId: true,
         notificationsJson: true,
         pipeline: { select: { orgId: true, kind: true } },
         stage: { select: { name: true } },
@@ -513,7 +674,7 @@ export async function notifyDealEvent(
       });
     }
 
-    // ── Envios externos (corretores + partes) ───────────────────────────────
+    // ── Envios externos (corretores + partes + gerente) ─────────────────────
     if (config.muted) return;
     const eventCfg = config.events[event];
     const brokerOn = eventCfg.broker.email || eventCfg.broker.whatsapp;
@@ -522,9 +683,44 @@ export async function notifyDealEvent(
     const partyOn =
       isPartyCapableEvent(event) &&
       (eventCfg.party.email || eventCfg.party.whatsapp);
-    if (!brokerOn && !partyOn) return;
+    // Sem allowlist: o gerente acompanha os 8 marcos (ver DEFAULT_EVENT).
+    const managerOn = eventCfg.manager.email || eventCfg.manager.whatsapp;
+    if (!brokerOn && !partyOn && !managerOn) return;
 
     const baseUrl = process.env.NEXTAUTH_URL ?? "https://imobpro.ia.br";
+
+    // Gerente e parte querem o mesmo nome fantasia; carregar uma vez só.
+    let brandPromise: ReturnType<typeof getOrgBrand> | null = null;
+    const orgBrandOnce = () => {
+      if (!brandPromise) brandPromise = getOrgBrand(orgId);
+      return brandPromise.catch(() => null);
+    };
+
+    if (managerOn) {
+      const manager = await resolveDealManager({
+        managerUserId: deal.managerUserId ?? null,
+        orgId,
+      });
+      if (manager) {
+        const brand = await orgBrandOnce();
+        await notifyManager({
+          orgId,
+          dealId,
+          dealKind: deal.pipeline.kind,
+          event,
+          dedupeKey,
+          channels: eventCfg.manager,
+          manager,
+          texts,
+          dealTitle: deal.title,
+          stageName,
+          formPublicUrl: context?.formPublicUrl ?? null,
+          dealPath,
+          baseUrl,
+          orgName: brand?.displayName ?? "imobiliária",
+        });
+      }
+    }
 
     if (partyOn) {
       const { recipients: parties, dropped } = await resolveDealParties({
@@ -534,7 +730,7 @@ export async function notifyDealEvent(
       });
       if (parties.length > 0) {
         const [brand, publicUrl] = await Promise.all([
-          getOrgBrand(orgId).catch(() => null),
+          orgBrandOnce(),
           resolvePartyPublicUrl({ event, baseUrl, extra: context?.extra }),
         ]);
         await notifyParties({

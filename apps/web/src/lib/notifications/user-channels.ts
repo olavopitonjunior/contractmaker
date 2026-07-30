@@ -96,12 +96,28 @@ const NOTIFICATION_SELECT = {
   body: true,
   linkUrl: true,
   metadata: true,
+  // Só pra reconhecer o fan-out `:mgr` (ver MANAGER_BELL_SUFFIX abaixo).
+  batchId: true,
 } as const;
 
 interface NotificationRow extends NotificationRowLite {
   title: string;
   body: string;
+  batchId?: string | null;
 }
+
+/**
+ * Sufixo do batchId das rows que `emitNotification` cria pro GERENTE do deal
+ * (e `notifyChargeEvent`, no financeiro). Essas rows são **bell-only**: existem
+ * pra que o sino do gerente — cuja leitura é restrita a notificações
+ * direcionadas — mostre o evento. O canal EXTERNO dele (e-mail/WhatsApp dos
+ * marcos) sai pelo motor lib/notifications/deal-events.ts, público `manager`,
+ * com config por evento×canal e log próprio.
+ *
+ * Sem este skip o gerente receberia tudo em duplicata, por dois trilhos com
+ * dedupes independentes que não se enxergam.
+ */
+const MANAGER_BELL_SUFFIX = ":mgr";
 
 /** Caches por execução do sweep — a org repete em quase toda notificação. */
 interface SweepCache {
@@ -370,6 +386,11 @@ export async function dispatchUserNotification(params: {
 
     const policy = policyForType(notification.type);
     if (!policy) return zero; // fora da allowlist — no-op silencioso
+
+    // Fan-out bell-only pro gerente: pula ANTES de resolver destinatários — não
+    // é uma linha que este canal deva entregar, e resolver/claimar geraria
+    // linha de UserNotificationDelivery pra um envio que nunca deve sair.
+    if (notification.batchId?.endsWith(MANAGER_BELL_SUFFIX)) return zero;
 
     const orgName = await orgNameOf(notification.orgId, cache);
     const result = { ...zero };

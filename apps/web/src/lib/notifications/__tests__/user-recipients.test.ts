@@ -113,21 +113,35 @@ describe("resolveNotificationUsers — cascata de destinatários", () => {
     });
   });
 
-  it("gerente do deal recebe junto com o dono (rule deal_manager)", async () => {
+  /**
+   * INVERTIDO em 2026-07-30: o gerente saiu desta cascata. Os avisos externos
+   * dele (e-mail/WhatsApp dos marcos) passaram a sair pelo motor
+   * lib/notifications/deal-events.ts, no público `manager`, com config própria
+   * por evento×canal e log no DealNotificationLog. Mantê-lo aqui entregaria a
+   * MESMA notificação duas vezes, por dois trilhos cujos dedupes não se
+   * enxergam. O sino dele continua vindo do fan-out `:mgr` de emitNotification.
+   */
+  it("gerente do deal NÃO entra na cascata — quem resolve é o motor deal-events", async () => {
     dealFind.mockResolvedValue({
       userId: "dono",
       managerUserId: "gerente",
       pipeline: { orgId: "org1" },
     });
-    membershipMany.mockResolvedValue([member("dono"), member("gerente")]);
+    membershipMany.mockResolvedValue([member("dono")]);
 
     const r = await resolveNotificationUsers(notif({ metadata: { dealId: "deal1" } }));
 
-    expect(r.rule).toBe("deal_manager");
-    expect(r.users.map((u) => u.userId).sort()).toEqual(["dono", "gerente"]);
+    expect(r.rule).toBe("deal_owner");
+    expect(r.users.map((u) => u.userId)).toEqual(["dono"]);
+    // O gerente nem chega a ser consultado na elegibilidade.
+    expect(membershipMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({ userId: { in: ["dono"] } }),
+      })
+    );
   });
 
-  it("gerente que também é o dono aparece uma vez só", async () => {
+  it("gerente que também é o dono continua recebendo — pelo trilho de dono", async () => {
     dealFind.mockResolvedValue({
       userId: "gerente",
       managerUserId: "gerente",
@@ -137,6 +151,7 @@ describe("resolveNotificationUsers — cascata de destinatários", () => {
 
     const r = await resolveNotificationUsers(notif({ metadata: { dealId: "deal1" } }));
 
+    expect(r.rule).toBe("deal_owner");
     expect(r.users.map((u) => u.userId)).toEqual(["gerente"]);
   });
 
@@ -372,13 +387,15 @@ describe("resolveNotificationUsers — destinatários escolhidos pelo admin", ()
     warn.mockRestore();
   });
 
-  it("dono e GERENTE sobrevivem ao teto — o corte só derruba escolhidos", async () => {
-    // A ordem do input é [dono, gerente, ...escolhidos] e loadEligible a
-    // preserva; com 6 candidatos e teto 5, quem cai é o último escolhido.
-    const escolhidos = ["u1", "u2", "u3", "u4"];
+  it("o dono sobrevive ao teto — o corte só derruba escolhidos", async () => {
+    // A ordem do input é [dono, ...escolhidos] e loadEligible a preserva; com
+    // 6 candidatos e teto 5, quem cai é o último escolhido.
+    const escolhidos = ["u1", "u2", "u3", "u4", "u5"];
     comLista({ deal_updates: escolhidos });
     dealFind.mockResolvedValue({
       userId: "dono",
+      // Mesmo com gerente atribuído: ele não entra por aqui (recebe pelo motor
+      // deal-events), então não ocupa vaga no teto.
       managerUserId: "gerente",
       pipeline: { orgId: "org1" },
     });
@@ -393,8 +410,8 @@ describe("resolveNotificationUsers — destinatários escolhidos pelo admin", ()
     expect(r.users).toHaveLength(5);
     const ids = r.users.map((u) => u.userId);
     expect(ids).toContain("dono");
-    expect(ids).toContain("gerente");
-    expect(ids).not.toContain("u4");
+    expect(ids).not.toContain("gerente");
+    expect(ids).not.toContain("u5");
     warn.mockRestore();
   });
 

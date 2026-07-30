@@ -951,8 +951,11 @@ model DealNotificationLog {
   dealId         String
   event          String // DealNotifEvent (stage_change | form_completed | ...)
   channel        String // email | whatsapp
-  audience       String   @default("broker") // broker | party (v2)
-  recipientKey   String // splitRecipientId do corretor
+  audience       String   @default("broker") // broker | party (v2) | manager (v3)
+  // splitRecipientId (broker) | "party:<email|telefone>" | "manager:<userId>".
+  // O prefixo é obrigatório nos dois últimos: a unique abaixo NÃO inclui
+  // audience, então chave crua colidiria entre públicos.
+  recipientKey   String
   recipientLabel String?
   dedupeKey      String // por evento: stageId+dia, contractId, envelopeId, chargeId, formId+marco
   status         String   @default("sent") // pending (claim) | sent | skipped | failed
