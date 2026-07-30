@@ -4,6 +4,36 @@ Todas as mudancas notaveis neste projeto serao documentadas neste arquivo.
 
 O formato segue [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [Unreleased] - 2026-07-25 - Newton calado nos grupos: runtime + tools
+
+Segunda metade da mudança abaixo. A primeira tirou a iniciativa automática do lado
+Contractmaker; esta fecha o comportamento do agente em si.
+
+### Adicionado
+
+- **Trava determinística contra envio proativo pra grupo** (`assertNotGroupTarget` em `apps/mcp-server/src/tools.ts`): `whatsapp_send` e `schedule_proactive_message` agora rejeitam JID de grupo (`<id>-group`) com erro. O `normalizeWhatsappTo` deixava passar intacto, então a proibição era 100% prompt — e o modelo ativo é nano-tier. Responder num grupo mencionado continua funcionando: essa resposta volta pelo webhook da bridge, não por essas tools.
+
+### Alterado
+
+- **Persona do agente (fora do repo, via Mission Control → Persona):** `SOUL.md` ganhou a subseção "Escopo de ação em grupo" e perdeu o bullet que autorizava responder sem `@`; `AGENTS.md` ganhou nota de precedência em "Group Chats" e um bloco absoluto em "Red Lines". Registro do que foi gravado, com os backups pra rollback, em `docs/newton-persona-snapshot-2026-07-25.md`.
+- **Descrições das tools MCP** (`apps/mcp-server/src/tools.ts`): `whatsapp_send`, `schedule_proactive_message`, `list_newton_requests`, `update_newton_request` e o comentário do bloco Newton Requests mandavam o agente cobrar informação, agendar lembretes e mandar DM ao fechar. Agora dizem o contrário — o inbox é registro interno, envio proativo é só DM e nunca re-cobrança.
+
+### Corrigido na VPS (fora do repo)
+
+- **O relatório em grupo existia, e não era cron do openclaw.** `🗂️ Resumo de propostas — Negócios NC` saía 2×/dia (08:30 e 17:30) do `proposal-tracker.js`, scheduler próprio do sidecar, configurado por env no `.env` de `/docker/openclaw-mvzp/`. Desligado esvaziando `NC_PROP_CHASE_TIMES`; `NC_PROP_GROUP_ID` mantido de propósito, preservando a consulta por `@` com as tools `prop_*`. Junto, `handlePropTool` passou a chamar `ingestGroupDelta` — sem isso a consulta responderia dado congelado, já que o único chamador era o `runChasePass` que não roda mais. Backups `.env.bak-prop-chase-off-*` e `proposal-tracker.js.bak-preingest-*`.
+- Crons do openclaw auditados (aba Crons do MC): `morning-briefing` e `stale-deals`, ambos `telegram→` DM do Olavo, sem execução há ~1 mês. Max não tem cron. A aba Crons **não enxerga** os schedulers do sidecar — foi por isso que a primeira auditoria concluiu, erradamente, que não havia relatório em grupo.
+- Smoke no sandbox do MC: com a política só no `SOUL.md` o modelo ainda respondia sem `@` e se oferecia pra cobrar diariamente; com o bloco em "Red Lines", parou. O caminho positivo (`create_form`) fica inconclusivo — o sandbox interrompe na 1ª tool call.
+
+### Deploy
+
+- **MCP server na VPS: feito.** `dist/` copiado pra `/docker/openclaw-mvzp/contractmaker-mcp-server/dist/` (backup `dist.bak-groupguard-*`) e container `sidecar` recriado. O boot confirma `connected to https://imobpro.ia.br (81 tools)` — eram 80 antes, ou seja, o MCP da VPS estava atrás do repo e o deploy trouxe também o que já estava em `master` sem ter subido.
+- **`doc-collector` desligado**: `WATCH_DOC_COLLECTOR: "1"` → `"0"` em `/docker/openclaw-mvzp/docker-compose.yml` (backup `.bak-doccollector-off-*`). Era o watcher que observava grupos com `group_config.watch_documents=1` e, ao ver documento novo, perguntava na DM da aprovadora. Não postava no grupo, mas era captura passiva — fora do escopo desejado. A linha `[doc-collector] ativo` sumiu do boot.
+
+### Pendente
+
+- **Inbound de WhatsApp está 403** — `turn sem orgId e NEWTON_REQUIRE_ORG_ID=1`. O bridge (`whatsapp-newton-bridge`) não manda `orgId` no forward pro sidecar, enquanto o Contractmaker manda. Correção na branch `fix/forward-orgid` daquele repo; depende de setar `NEWTON_ORG_ID` no projeto Vercel antes do deploy. Enquanto isso, o `@` no grupo não responde nada.
+- Validação temporal: 24h com pendência aberta no inbox e nenhuma mensagem no grupo.
+
 ## [Unreleased] - 2026-07-25 - Newton para de capturar informação nos grupos
 
 ### Removido
