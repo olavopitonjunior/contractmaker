@@ -44,6 +44,7 @@ import {
 } from "./deal-events-config";
 import { resolveDealBrokers, type BrokerRecipient } from "./deal-brokers";
 import { resolveDealParties, type PartyRecipient } from "./deal-parties";
+import type { DroppedParty } from "@/lib/deals/parties";
 
 /**
  * dedupeKey de stage_change: 1 notificação por (stage destino, dia BRT) —
@@ -274,6 +275,8 @@ async function notifyParties(params: {
   dedupeKey: string;
   channels: { email: boolean; whatsapp: boolean };
   parties: PartyRecipient[];
+  /** Partes fundidas no dedupe por contato repetido — vai pro detail do log. */
+  dropped: DroppedParty[];
   publicUrl: string | null;
   orgName: string;
 }): Promise<void> {
@@ -286,9 +289,19 @@ async function notifyParties(params: {
     dedupeKey,
     channels,
     parties,
+    dropped,
     publicUrl,
     orgName,
   } = params;
+
+  /**
+   * Anexa as partes fundidas ao detail de cada linha de log. O dedupe por
+   * contato é agressivo por desenho (duas pessoas que dividem o telefone da
+   * família viram uma): sem esse rastro no histórico do negócio, "o comprador
+   * não foi avisado" era indistinguível de uma falha de envio.
+   */
+  const withDropped = (detail: Record<string, unknown>) =>
+    dropped.length > 0 ? { ...detail, droppedParties: dropped } : detail;
 
   const texts = buildPartyTexts({
     event,
@@ -334,9 +347,11 @@ async function notifyParties(params: {
         await settleLogRow(
           logId,
           result.ok ? "sent" : "failed",
-          result.ok
-            ? { emailId: result.id }
-            : { error: result.error ?? "envio recusado" }
+          withDropped(
+            result.ok
+              ? { emailId: result.id }
+              : { error: result.error ?? "envio recusado" }
+          )
         );
       }
     }
@@ -358,11 +373,19 @@ async function notifyParties(params: {
     if (!logId) continue;
 
     if (!whatsappAllowed) {
-      await settleLogRow(logId, "skipped", { reason: "newton_off_para_a_org" });
+      await settleLogRow(
+        logId,
+        "skipped",
+        withDropped({ reason: "newton_off_para_a_org" })
+      );
       continue;
     }
     if (!withinWindow) {
-      await settleLogRow(logId, "skipped", { reason: "fora_da_janela_7h_22h" });
+      await settleLogRow(
+        logId,
+        "skipped",
+        withDropped({ reason: "fora_da_janela_7h_22h" })
+      );
       continue;
     }
 
@@ -424,11 +447,17 @@ async function notifyParties(params: {
         targetLabel: party.label,
         kind: "create",
       });
-      await settleLogRow(logId, "sent", { via: "newton_request", requestId });
+      await settleLogRow(
+        logId,
+        "sent",
+        withDropped({ via: "newton_request", requestId })
+      );
     } catch (err) {
-      await settleLogRow(logId, "failed", {
-        error: err instanceof Error ? err.message : String(err),
-      });
+      await settleLogRow(
+        logId,
+        "failed",
+        withDropped({ error: err instanceof Error ? err.message : String(err) })
+      );
     }
   }
 }
@@ -497,7 +526,7 @@ export async function notifyDealEvent(
     const baseUrl = process.env.NEXTAUTH_URL ?? "https://imobpro.ia.br";
 
     if (partyOn) {
-      const parties = await resolveDealParties({
+      const { recipients: parties, dropped } = await resolveDealParties({
         dealId,
         dealKind: deal.pipeline.kind,
         formDataJson: deal.form?.dataJson ?? null,
@@ -516,6 +545,7 @@ export async function notifyDealEvent(
           dedupeKey,
           channels: eventCfg.party,
           parties,
+          dropped,
           publicUrl,
           orgName: brand?.displayName ?? "imobiliária",
         });

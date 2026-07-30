@@ -57,6 +57,9 @@ const patchSchema = z.object({
   signers: z.array(signerSchema).optional(),
 });
 
+/** Sinaliza o 409 de dentro da transação do PATCH (aborta e faz rollback). */
+class ProposalNotEditableError extends Error {}
+
 // PATCH /api/proposals/[id] — só antes do envio (EDITABLE_STATUSES).
 export async function PATCH(req: NextRequest, { params }: { params: { id: string } }) {
   const r = await loadScopedProposal(req, params.id);
@@ -94,6 +97,19 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
   let updated;
   try {
     updated = await prisma.$transaction(async (tx) => {
+      // Guarda ATÔMICA. O `EDITABLE_STATUSES.has(...)` acima é check-then-act: a
+      // proposta é lida, o corpo é validado e só então a transação abre. Nessa
+      // janela o claim de envio (`executeProposalSend`, que usa EXATAMENTE o
+      // mesmo conjunto de status) pode ter movido a proposta pra "enviada" — e a
+      // substituição de signatários rodaria por baixo dele, montando o envelope
+      // com uma lista que ninguém aprovou. `count === 0` = perdemos a corrida →
+      // 409 e rollback de tudo que veio depois.
+      const claimed = await tx.proposal.updateMany({
+        where: { id: params.id, status: { in: [...EDITABLE_STATUSES] } },
+        data: { updatedAt: new Date() },
+      });
+      if (claimed.count === 0) throw new ProposalNotEditableError();
+
       if (p.signers !== undefined) {
         // Substituição atômica: o payload é o conjunto inteiro (a página de
         // edição sempre manda todos). Deletar-e-recriar em vez de diff porque
@@ -123,6 +139,12 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       return tx.proposal.update({ where: { id: params.id }, data: proposalData });
     });
   } catch (err) {
+    if (err instanceof ProposalNotEditableError) {
+      return NextResponse.json(
+        { error: "A proposta já foi enviada e não pode mais ser editada." },
+        { status: 409 }
+      );
+    }
     // Mesmo 409 acionável do POST: dois signatários com o mesmo contato colidem
     // no @@unique([proposalId, dedupeKey]).
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === "P2002") {

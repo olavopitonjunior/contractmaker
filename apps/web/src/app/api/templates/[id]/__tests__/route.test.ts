@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
+import { Prisma } from "@prisma/client";
 import { GET, PATCH, DELETE } from "../route";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
@@ -118,6 +119,50 @@ describe("PATCH /api/templates/[id]", () => {
     expect(res.status).toBe(200);
     expect(p.contractTemplate.update).toHaveBeenCalledTimes(1);
     expect(p.contractTemplate.update.mock.calls[0][0].data.name).toBe("Novo nome");
+  });
+
+  /**
+   * Trocar a família pra "venda" na tela de edição. `category` sozinha NÃO move
+   * entre famílias (o guard de `resolveTemplateTaxonomy` protege o template de
+   * locação que a tela sempre manda categoria); é a modalidade explícita que
+   * autoriza. O editor manda os dois — este é o contrato que ele depende.
+   */
+  it("categoria + modalidade explícita move proposta → venda", async () => {
+    p.contractTemplate.findFirst = findFirstHonoringWhere({
+      ...TEMPLATE,
+      modalidade: "proposta_locacao_residencial",
+      category: null,
+      matchCriteria: { garantia: "fiador" },
+      schemaType: "locacao_residencial_v1",
+    });
+
+    const res = await PATCH(
+      req({ category: "financiamento", modalidade: "financiamento" }),
+      { params: { id: "t1" } }
+    );
+
+    expect(res.status).toBe(200);
+    const data = p.contractTemplate.update.mock.calls[0][0].data;
+    expect(data.modalidade).toBe("financiamento");
+    expect(data.category).toBe("financiamento");
+    // Em venda quem discrimina é a categoria — o critério de variante é limpo,
+    // e o schemaType acompanha a modalidade nova.
+    expect(data.schemaType).toBe("compra_venda_v2");
+    expect(data.matchCriteria).toBe(Prisma.DbNull);
+  });
+
+  it("só `category` (sem modalidade) NÃO tira o template de proposta — guard do resolver", async () => {
+    p.contractTemplate.findFirst = findFirstHonoringWhere({
+      ...TEMPLATE,
+      modalidade: "proposta_locacao_residencial",
+      category: null,
+    });
+
+    await PATCH(req({ category: "financiamento" }), { params: { id: "t1" } });
+
+    const data = p.contractTemplate.update.mock.calls[0][0].data;
+    expect(data.modalidade).toBe("proposta_locacao_residencial");
+    expect(data.category).toBeNull();
   });
 });
 

@@ -169,12 +169,22 @@ export function TemplateEditor({ template, mode }: TemplateEditorProps) {
 
     setSaving(true);
     try {
-      // Venda manda `category` (a modalidade é derivada dela no servidor);
-      // locação e proposta mandam a `modalidade` — mandar categoria ali
-      // reclassificaria o template como venda.
+      // Venda manda `category` E a `modalidade` derivada dela. Só a categoria
+      // não basta: `resolveTemplateTaxonomy` só deriva modalidade de categoria
+      // quando o template JÁ é de venda — mover um template de locação/proposta
+      // PARA venda exige a modalidade explícita, senão o PATCH era um no-op
+      // silencioso com toast de sucesso.
       const payload =
         family === "venda"
-          ? { name, description, handlebarsSource, category, isDefault, version }
+          ? {
+              name,
+              description,
+              handlebarsSource,
+              category,
+              modalidade: modalidadeForCategory(category),
+              isDefault,
+              version,
+            }
           : {
               name,
               description,

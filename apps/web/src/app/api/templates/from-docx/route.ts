@@ -13,6 +13,7 @@ import {
   computeSourceHash,
   findDuplicateTemplate,
   resolveUniqueTemplateName,
+  type DuplicateTemplate,
 } from "@/lib/templates/upload-dedup";
 
 export const runtime = "nodejs";
@@ -29,6 +30,24 @@ const MAX_BYTES = 20 * 1024 * 1024;
 // placeholders via buildLocacaoPlaceholderMap (o deal de adm é um deal de
 // locação, mesmo shape de dados).
 const MODALIDADES: string[] = [...UPLOAD_MODALIDADES];
+
+/** Sinaliza o 409 de dentro da transação do claim (aborta e faz rollback). */
+class DuplicateTemplateError extends Error {
+  constructor(readonly existing: DuplicateTemplate) {
+    super("DUPLICATE_TEMPLATE");
+  }
+}
+
+/**
+ * Remove a claim-row quando o pipeline falha. Best-effort: um erro aqui só
+ * significa que o hash segue ocupado por um draft — o operador reingere com
+ * `force=true`.
+ */
+async function dropClaimRow(id: string): Promise<void> {
+  await prisma.contractTemplate.delete({ where: { id } }).catch((err) => {
+    console.error("[templates/from-docx] falha ao limpar a claim-row:", err);
+  });
+}
 
 /**
  * POST /api/templates/from-docx (multipart)
@@ -117,40 +136,73 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Dedup por conteúdo antes de gastar Drive + IA.
   const sourceHash = computeSourceHash(buffer);
-  if (!force) {
-    const existing = await findDuplicateTemplate(prisma, org.id, sourceHash);
-    if (existing) {
+  const baseName =
+    name ?? `Modelo da imobiliária — ${file.name.replace(/\.docx$/i, "")}`;
+
+  // ─── CLAIM-ROW ────────────────────────────────────────────────────────────
+  // O dedup-check e a criação da row rodam na MESMA transação e ANTES do
+  // pipeline Drive+IA. O check ficava separado do create por ~2min de pipeline:
+  // duas requests com o MESMO arquivo (o upload em lote da UI, um duplo-clique)
+  // passavam as duas pelo check e criavam dois drafts.
+  //
+  // A row nasce sem `googleTemplateDocId` — é um CLAIM do hash. A 2ª request
+  // concorrente enxerga a claim-row (status "draft" participa do dedup) e leva
+  // 409 na hora. `force=true` continua pulando o check.
+  let template: { id: string; name: string };
+  try {
+    template = await prisma.$transaction(async (tx) => {
+      if (!force) {
+        const existing = await findDuplicateTemplate(tx, org.id, sourceHash);
+        if (existing) throw new DuplicateTemplateError(existing);
+      }
+      const templateName = await resolveUniqueTemplateName(tx, org.id, baseName);
+      return tx.contractTemplate.create({
+        data: {
+          orgId: org.id,
+          name: templateName,
+          description: "Template criado a partir do modelo DOCX da imobiliária.",
+          engine: "google_docs",
+          status: "draft",
+          isDefault: false,
+          // Preenchido depois que o Drive converter o DOCX.
+          googleTemplateDocId: null,
+          modalidade,
+          schemaType: schemaTypeForModalidade(modalidade),
+          handlebarsSource: "<!-- engine=google_docs: a fonte é o Google Doc -->",
+          version: "1.0.0",
+          sourceHash,
+        },
+        select: { id: true, name: true },
+      });
+    });
+  } catch (err) {
+    if (err instanceof DuplicateTemplateError) {
       return NextResponse.json(
         {
           code: "DUPLICATE_TEMPLATE",
           error: "Este arquivo já foi importado como template.",
-          existing: {
-            id: existing.id,
-            name: existing.name,
-            status: existing.status,
-            modalidade: existing.modalidade,
-          },
+          existing: err.existing,
         },
         { status: 409 }
       );
     }
+    throw err;
   }
 
-  const baseName =
-    name ?? `Modelo da imobiliária — ${file.name.replace(/\.docx$/i, "")}`;
-  const templateName = await resolveUniqueTemplateName(prisma, org.id, baseName);
-
+  // Daqui pra frente a claim-row EXISTE. Qualquer falha tem de removê-la: um
+  // draft sem `googleTemplateDocId` seria um template quebrado na listagem E
+  // ocuparia o hash pra sempre (o operador nunca mais reingeriria o arquivo).
   let uploaded: { docId: string; webViewLink: string; embedLink: string };
   try {
     uploaded = await uploadFileAsGoogleDoc({
       buffer,
       sourceMime: DOCX_MIME,
-      name: `[MODELO] ${templateName}`,
+      name: `[MODELO] ${template.name}`,
       orgId: org.id,
     });
   } catch (err) {
+    await dropClaimRow(template.id);
     const msg = err instanceof Error ? err.message : String(err);
     return NextResponse.json(
       { error: `Falha ao converter DOCX em Google Doc: ${msg}` },
@@ -158,25 +210,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const template = await prisma.contractTemplate.create({
-    data: {
-      orgId: org.id,
-      name: templateName,
-      description: "Template criado a partir do modelo DOCX da imobiliária.",
-      engine: "google_docs",
-      status: "draft",
-      isDefault: false,
-      googleTemplateDocId: uploaded.docId,
-      modalidade,
-      schemaType: schemaTypeForModalidade(modalidade),
-      handlebarsSource: "<!-- engine=google_docs: a fonte é o Google Doc -->",
-      version: "1.0.0",
-      sourceHash,
-    },
-  });
+  try {
+    await prisma.contractTemplate.update({
+      where: { id: template.id },
+      data: { googleTemplateDocId: uploaded.docId },
+    });
+  } catch (err) {
+    await dropClaimRow(template.id);
+    throw err;
+  }
 
   // Pass de IA best-effort: insere {{placeholders}} no doc. Falha não
   // bloqueia — o template fica draft e o operador faz manualmente na revisão.
+  // (Não derruba a claim-row: o doc já existe e o template é utilizável.)
   let report = null;
   try {
     report = await insertPlaceholdersWithAI({

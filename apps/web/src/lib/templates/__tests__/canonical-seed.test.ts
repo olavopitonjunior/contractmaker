@@ -6,7 +6,10 @@ import {
   seedCanonicalTemplatesForOrg,
   loadEmbeddedCanonicalSource,
 } from "../canonical-seed";
-import { CANONICAL_TEMPLATES } from "../canonical-templates";
+import {
+  CANONICAL_TEMPLATES,
+  canonicalModalidadesForModules,
+} from "../canonical-templates";
 import { CANONICAL_TEMPLATE_SOURCES } from "../canonical-sources.generated";
 
 const findFirst = prisma.contractTemplate.findFirst as unknown as ReturnType<typeof vi.fn>;
@@ -155,6 +158,49 @@ describe("seedCanonicalTemplatesForOrg", () => {
       where: { orgId: "org-xyz", modalidade: "a_vista" },
       select: { id: true },
     });
+  });
+});
+
+describe("canonicalModalidadesForModules", () => {
+  it("só-locação não inclui nenhuma modalidade de venda", () => {
+    const only = canonicalModalidadesForModules(["locacao"]);
+    expect(only).toEqual([
+      "locacao",
+      "locacao_comercial",
+      "administracao_locacao",
+      "proposta_locacao_residencial",
+      "proposta_locacao_comercial",
+    ]);
+  });
+
+  it("só-vendas cobre à vista, financiamento e proposta de compra", () => {
+    expect(canonicalModalidadesForModules(["vendas"])).toEqual([
+      "a_vista",
+      "financiamento",
+      "proposta_venda",
+    ]);
+  });
+
+  it("os dois módulos cobrem o catálogo inteiro (nenhuma modalidade órfã)", () => {
+    expect(canonicalModalidadesForModules(["vendas", "locacao"]).sort()).toEqual(
+      CANONICAL_TEMPLATES.map((t) => t.modalidade).sort()
+    );
+  });
+
+  it("lista vazia ou módulo desconhecido → nada a semear (não 'tudo')", () => {
+    expect(canonicalModalidadesForModules([])).toEqual([]);
+    expect(canonicalModalidadesForModules(["financeiro"])).toEqual([]);
+  });
+
+  it("`onlyModalidades: []` faz o seed não criar nada", async () => {
+    vi.clearAllMocks();
+    stubDb();
+    const { created } = await seedCanonicalTemplatesForOrg("org1", {
+      loadSource: fakeLoader,
+      onlyModalidades: [],
+    });
+    expect(created).toEqual([]);
+    expect(create).not.toHaveBeenCalled();
   });
 });
 

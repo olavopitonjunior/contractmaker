@@ -12,7 +12,7 @@
 import {
   dedupeParties,
   resolveTitularParties,
-  type DealParty,
+  type DroppedParty,
   type DealPartyRole,
 } from "@/lib/deals/parties";
 
@@ -41,14 +41,18 @@ export function partyRecipientKey(p: {
  * Partes titulares COM contato do deal, deduplicadas. Quem não tem e-mail nem
  * telefone fica de fora: não há canal, e uma linha de log sem destino só
  * poluiria o histórico do negócio.
+ *
+ * `dropped` carrega quem foi FUNDIDO no dedupe (contato repetido). Vai pro
+ * `detail` do DealNotificationLog — sem isso, "fulano não recebeu o aviso" era
+ * indistinguível de falha de envio.
  */
 export async function resolveDealParties(params: {
   dealId: string;
   dealKind: string;
   formDataJson: unknown;
-}): Promise<PartyRecipient[]> {
+}): Promise<{ recipients: PartyRecipient[]; dropped: DroppedParty[] }> {
   const dealKind = params.dealKind === "locacao" ? "locacao" : "venda";
-  const parties: DealParty[] = dedupeParties(
+  const { parties, dropped } = dedupeParties(
     await resolveTitularParties({
       dealId: params.dealId,
       dealKind,
@@ -56,11 +60,11 @@ export async function resolveDealParties(params: {
     })
   );
 
-  const out: PartyRecipient[] = [];
+  const recipients: PartyRecipient[] = [];
   for (const p of parties) {
     const key = partyRecipientKey(p);
     if (!key) continue;
-    out.push({
+    recipients.push({
       key,
       role: p.role,
       label: p.name,
@@ -68,5 +72,5 @@ export async function resolveDealParties(params: {
       phone: p.phone,
     });
   }
-  return out;
+  return { recipients, dropped };
 }

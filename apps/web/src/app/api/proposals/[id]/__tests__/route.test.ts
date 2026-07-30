@@ -42,6 +42,8 @@ function scoped(status: string) {
 beforeEach(() => {
   vi.clearAllMocks();
   mockPrisma.proposal.update.mockResolvedValue({ id: "p1" } as never);
+  // Guarda atômica do PATCH: por padrão a proposta ainda está editável.
+  mockPrisma.proposal.updateMany.mockResolvedValue({ count: 1 } as never);
 });
 
 describe("PATCH /api/proposals/[id] — guard de status", () => {
@@ -140,5 +142,49 @@ describe("PATCH /api/proposals/[id] — substituição de signatários", () => {
     await PATCH(req({ signers: [] }), { params: { id: "p1" } });
     expect(mockPrisma.proposalSigner.deleteMany).toHaveBeenCalled();
     expect(mockPrisma.proposalSigner.createMany).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * O guard de status no topo da rota é check-then-act: entre a leitura e a
+ * transação, o claim de envio (`executeProposalSend`, mesmo conjunto de status)
+ * pode ter movido a proposta pra "enviada". Sem a guarda atômica, os
+ * signatários eram substituídos por baixo do envio.
+ */
+describe("PATCH /api/proposals/[id] — corrida com o claim de envio", () => {
+  it("guarda atômica usa o MESMO conjunto de status do claim de envio", async () => {
+    scoped("rascunho");
+    await PATCH(req({ title: "novo" }), { params: { id: "p1" } });
+
+    const call = mockPrisma.proposal.updateMany.mock.calls[0][0] as {
+      where: { id: string; status: { in: string[] } };
+    };
+    expect(call.where.id).toBe("p1");
+    expect([...call.where.status.in].sort()).toEqual([
+      "aguardando_aprovacao",
+      "falha_envio",
+      "rascunho",
+    ]);
+  });
+
+  it("status mudou entre o load e a transação → 409 e nada é gravado", async () => {
+    scoped("rascunho"); // a leitura ainda vê "rascunho"…
+    // …mas quando a transação abre, o claim de envio já levou a proposta.
+    mockPrisma.proposal.updateMany.mockResolvedValue({ count: 0 } as never);
+
+    const res = await PATCH(
+      req({ signers: [{ role: "proponente", name: "Maria", email: "m@ex.com" }] }),
+      { params: { id: "p1" } }
+    );
+
+    expect(res.status).toBe(409);
+    expect(await res.json()).toEqual({
+      error: "A proposta já foi enviada e não pode mais ser editada.",
+    });
+    // A guarda vem ANTES de mexer nos signatários — a lista do envelope fica
+    // exatamente como o claim de envio a congelou.
+    expect(mockPrisma.proposalSigner.deleteMany).not.toHaveBeenCalled();
+    expect(mockPrisma.proposalSigner.createMany).not.toHaveBeenCalled();
+    expect(mockPrisma.proposal.update).not.toHaveBeenCalled();
   });
 });

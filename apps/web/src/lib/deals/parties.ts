@@ -66,6 +66,16 @@ export function partiesFromFormList(
   return out;
 }
 
+/** Parte fundida em outra pelo dedupe — rastro pro log de notificações. */
+export interface DroppedParty {
+  nome: string;
+  role: DealPartyRole;
+  /** Por que caiu: contato idêntico ao de outra parte, ou mesmo nome sem contato. */
+  reason: "email_duplicado" | "telefone_duplicado" | "nome_duplicado_sem_contato";
+  /** Nome da parte que ABSORVEU esta (a primeira ocorrência). */
+  mergedInto: string;
+}
+
 /**
  * Funde entradas que compartilham e-mail OU telefone — a MESMA pessoa aparece
  * duas vezes com frequência (titular listado como vendedor e como locador num
@@ -75,26 +85,54 @@ export function partiesFromFormList(
  *
  * A primeira ocorrência manda no papel e no nome; a segunda só completa
  * contato faltante.
+ *
+ * `dropped` existe porque a fusão é AGRESSIVA por desenho: duas pessoas
+ * DIFERENTES que compartilham o telefone da família (ou o e-mail do casal) viram
+ * uma só, e a que sumiu não recebe nada. Sem rastro, "o comprador não foi
+ * avisado" era indistinguível de um bug de envio. Não muda o comportamento de
+ * envio — só o torna auditável (ver `notifyDealEvent`).
  */
-export function dedupeParties(parties: DealParty[]): DealParty[] {
+export function dedupeParties(parties: DealParty[]): {
+  parties: DealParty[];
+  dropped: DroppedParty[];
+} {
   const out: DealParty[] = [];
+  const dropped: DroppedParty[] = [];
   for (const p of parties) {
-    const hit = out.find(
-      (q) =>
-        (p.email !== null && q.email === p.email) ||
-        (p.phone !== null && q.phone === p.phone) ||
-        (p.email === null &&
-          p.phone === null &&
-          q.name.toLowerCase() === p.name.toLowerCase())
-    );
+    let reason: DroppedParty["reason"] | null = null;
+    const hit = out.find((q) => {
+      if (p.email !== null && q.email === p.email) {
+        reason = "email_duplicado";
+        return true;
+      }
+      if (p.phone !== null && q.phone === p.phone) {
+        reason = "telefone_duplicado";
+        return true;
+      }
+      if (
+        p.email === null &&
+        p.phone === null &&
+        q.name.toLowerCase() === p.name.toLowerCase()
+      ) {
+        reason = "nome_duplicado_sem_contato";
+        return true;
+      }
+      return false;
+    });
     if (hit) {
+      dropped.push({
+        nome: p.name,
+        role: p.role,
+        reason: reason ?? "nome_duplicado_sem_contato",
+        mergedInto: hit.name,
+      });
       hit.email ??= p.email;
       hit.phone ??= p.phone;
       continue;
     }
     out.push({ ...p });
   }
-  return out;
+  return { parties: out, dropped };
 }
 
 /**

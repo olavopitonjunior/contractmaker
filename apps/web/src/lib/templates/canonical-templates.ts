@@ -107,3 +107,44 @@ export const CANONICAL_TEMPLATES: CanonicalTemplate[] = [
 export const CANONICAL_TEMPLATE_FILENAMES: string[] = CANONICAL_TEMPLATES.map(
   (t) => t.filename
 );
+
+/**
+ * Modalidades canônicas de cada MÓDULO habilitável do tenant (as chaves são as
+ * de `lib/modules/catalog.ts`, referenciadas por string pra este arquivo seguir
+ * sem dependências).
+ *
+ * Existe porque o seed semeava as 8 modalidades pra todo tenant — inclusive um
+ * só-locação, que ganhava CCV à vista/financiamento contradizendo as próprias
+ * rows de `OrgModule` escritas na mesma request.
+ */
+export const CANONICAL_MODALIDADES_BY_MODULE: Record<string, CanonicalModalidade[]> = {
+  vendas: ["a_vista", "financiamento", "proposta_venda"],
+  locacao: [
+    "locacao",
+    "locacao_comercial",
+    "administracao_locacao",
+    "proposta_locacao_residencial",
+    "proposta_locacao_comercial",
+  ],
+};
+
+/**
+ * União das modalidades dos módulos informados, na ordem do catálogo canônico.
+ *
+ * Lista vazia devolve lista VAZIA (nada a semear), NÃO "todas": quem quiser o
+ * comportamento legado "org sem entitlements ganha tudo" decide isso no call
+ * site (é o que `sync-templates --seed` faz pra org anterior à modularização).
+ * Devolver tudo aqui faria um tenant com todos os módulos DESLIGADOS receber as
+ * 8 modalidades — exatamente o bug que este helper existe pra fechar.
+ */
+export function canonicalModalidadesForModules(
+  modules: readonly string[]
+): CanonicalModalidade[] {
+  const wanted = new Set<string>();
+  for (const m of modules) {
+    for (const mod of CANONICAL_MODALIDADES_BY_MODULE[m] ?? []) wanted.add(mod);
+  }
+  return CANONICAL_TEMPLATES.filter((t) => wanted.has(t.modalidade)).map(
+    (t) => t.modalidade
+  );
+}

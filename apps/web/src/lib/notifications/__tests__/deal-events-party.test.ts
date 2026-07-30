@@ -323,4 +323,66 @@ describe("notifyDealEvent — público party (v2)", () => {
     });
     expect(sendEmail).toHaveBeenCalledTimes(1);
   });
+
+  /**
+   * A fusão por contato é agressiva por desenho (duas pessoas que dividem o
+   * telefone da família viram uma). Sem rastro, "o comprador não recebeu" era
+   * indistinguível de falha de envio.
+   */
+  it("quem foi fundido no dedupe fica registrado no detail do log", async () => {
+    dealFind.mockResolvedValue(
+      dealRow({
+        form: {
+          id: "form1",
+          dataJson: {
+            vendedores: [{ nome: "Maria Souza", email: "casal@ex.com" }],
+            compradores: [{ nome: "José Souza", email: "casal@ex.com" }],
+          },
+        },
+      })
+    );
+    orgSettingsFind.mockResolvedValue(partyOnly({ email: true }));
+
+    await notifyDealEvent({
+      dealId: "deal1",
+      orgId: "org1",
+      event: "contract_signed",
+      dedupeKey: "env1",
+    });
+
+    // Comportamento de envio inalterado: UM e-mail.
+    expect(sendEmail).toHaveBeenCalledTimes(1);
+    expect(logUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: "sent",
+          detail: expect.objectContaining({
+            droppedParties: [
+              {
+                nome: "José Souza",
+                role: "comprador",
+                reason: "email_duplicado",
+                mergedInto: "Maria Souza",
+              },
+            ],
+          }),
+        }),
+      })
+    );
+  });
+
+  it("sem fusão, o detail do log não ganha `droppedParties`", async () => {
+    dealFind.mockResolvedValue(dealRow());
+    orgSettingsFind.mockResolvedValue(partyOnly({ email: true }));
+
+    await notifyDealEvent({
+      dealId: "deal1",
+      orgId: "org1",
+      event: "contract_signed",
+      dedupeKey: "env1",
+    });
+
+    const detail = logUpdate.mock.calls[0][0].data.detail;
+    expect(detail.droppedParties).toBeUndefined();
+  });
 });

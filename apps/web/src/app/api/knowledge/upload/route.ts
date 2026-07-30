@@ -187,23 +187,51 @@ export async function POST(req: NextRequest) {
     } else if (classification.kind === "clauses") {
       const segments = segmentClauses(text);
       if (segments.length >= 2) {
-        const created: Array<{ id: string; title: string }> = [];
-        const embedTargets: EmbedTarget[] = [];
-        for (const segment of segments) {
-          const itemTitle = `${title} — ${segment.title}`.slice(0, 300);
-          const row = await createKnowledgeItemRows({
-            orgId: org.id,
-            category: "clause",
-            title: itemTitle,
-            content: segment.content,
-            tags,
-            source,
-            createdBy: effUserId,
-          });
-          created.push({ id: row.parentId, title: itemTitle });
-          embedTargets.push(...row.embedTargets);
+        // TUDO OU NADA: os N itens nascem numa transação interativa. O loop solto
+        // deixava as cláusulas 1..k-1 gravadas (e sem embedding, porque o lote só
+        // sai no fim) quando a k-ésima falhava — e o retry do operador duplicava
+        // as que já tinham entrado.
+        let created: Array<{ id: string; title: string }>;
+        let embedTargets: EmbedTarget[];
+        try {
+          ({ created, embedTargets } = await prisma.$transaction(
+            async (tx) => {
+              const rows: Array<{ id: string; title: string }> = [];
+              const targets: EmbedTarget[] = [];
+              for (const segment of segments) {
+                const itemTitle = `${title} — ${segment.title}`.slice(0, 300);
+                const row = await createKnowledgeItemRows(
+                  {
+                    orgId: org.id,
+                    category: "clause",
+                    title: itemTitle,
+                    content: segment.content,
+                    tags,
+                    source,
+                    createdBy: effUserId,
+                  },
+                  tx
+                );
+                rows.push({ id: row.parentId, title: itemTitle });
+                targets.push(...row.embedTargets);
+              }
+              return { created: rows, embedTargets: targets };
+            },
+            // Um documento com dezenas de cláusulas estoura os 5s default.
+            { timeout: 30_000, maxWait: 10_000 }
+          ));
+        } catch (err) {
+          console.error("[knowledge/upload] ingestão de cláusulas falhou:", err);
+          return NextResponse.json(
+            {
+              error:
+                "Falha ao gravar as cláusulas — nada foi salvo. Tente enviar o documento novamente.",
+            },
+            { status: 500 }
+          );
         }
-        // Um único lote de embedding pros N itens (1 chamada ao Voyage).
+        // Um único lote de embedding pros N itens (1 chamada ao Voyage). Fora da
+        // transação: o Voyage é externo e não pode segurar conexão do pool.
         waitUntil(
           embedKnowledgeItem(embedTargets, { orgId: org.id, userId: effUserId })
         );
@@ -232,15 +260,37 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const { parentId, embedTargets } = await createKnowledgeItemRows({
-    orgId: org.id,
-    category,
-    title,
-    content: text,
-    tags,
-    source,
-    createdBy: effUserId,
-  });
+  // Mesma garantia do caminho de cláusulas: um documento longo vira parent +
+  // N linhas-filhas, e uma falha no meio deixaria o parent sem os chunks.
+  let parentId: string;
+  let embedTargets: EmbedTarget[];
+  try {
+    ({ parentId, embedTargets } = await prisma.$transaction(
+      (tx) =>
+        createKnowledgeItemRows(
+          {
+            orgId: org.id,
+            category,
+            title,
+            content: text,
+            tags,
+            source,
+            createdBy: effUserId,
+          },
+          tx
+        ),
+      { timeout: 30_000, maxWait: 10_000 }
+    ));
+  } catch (err) {
+    console.error("[knowledge/upload] ingestão falhou:", err);
+    return NextResponse.json(
+      {
+        error:
+          "Falha ao gravar o documento — nada foi salvo. Tente enviar novamente.",
+      },
+      { status: 500 }
+    );
+  }
 
   // Embedding best-effort em background — não segura a resposta no Voyage.
   waitUntil(embedKnowledgeItem(embedTargets, { orgId: org.id, userId: effUserId }));

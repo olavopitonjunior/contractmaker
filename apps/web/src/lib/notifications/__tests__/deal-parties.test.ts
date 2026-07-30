@@ -13,7 +13,7 @@ describe("resolveDealParties — titulares contactáveis do negócio", () => {
   });
 
   it("venda: vendedores + compradores do form, com papel e contato normalizados", async () => {
-    const parties = await resolveDealParties({
+    const { recipients: parties } = await resolveDealParties({
       dealId: "deal1",
       dealKind: "venda",
       formDataJson: {
@@ -42,7 +42,7 @@ describe("resolveDealParties — titulares contactáveis do negócio", () => {
   });
 
   it("parte sem e-mail e sem telefone fica de fora (não há canal)", async () => {
-    const parties = await resolveDealParties({
+    const { recipients: parties } = await resolveDealParties({
       dealId: "deal1",
       dealKind: "venda",
       formDataJson: { vendedores: [{ nome: "Só Nome" }] },
@@ -51,7 +51,7 @@ describe("resolveDealParties — titulares contactáveis do negócio", () => {
   });
 
   it("dedup: mesmo e-mail em duas listas vira um destinatário só", async () => {
-    const parties = await resolveDealParties({
+    const { recipients: parties } = await resolveDealParties({
       dealId: "deal1",
       dealKind: "venda",
       formDataJson: {
@@ -66,7 +66,7 @@ describe("resolveDealParties — titulares contactáveis do negócio", () => {
   });
 
   it("dedup por telefone quando o e-mail não bate (um dos dois está vazio)", async () => {
-    const parties = await resolveDealParties({
+    const { recipients: parties } = await resolveDealParties({
       dealId: "deal1",
       dealKind: "locacao",
       formDataJson: {
@@ -93,7 +93,7 @@ describe("resolveDealParties — titulares contactáveis do negócio", () => {
         ],
       },
     });
-    const parties = await resolveDealParties({
+    const { recipients: parties } = await resolveDealParties({
       dealId: "deal1",
       dealKind: "locacao",
       formDataJson: {},
@@ -106,7 +106,7 @@ describe("resolveDealParties — titulares contactáveis do negócio", () => {
   });
 
   it("locação COM partes no form não consulta o LeaseContract", async () => {
-    const parties = await resolveDealParties({
+    const { recipients: parties } = await resolveDealParties({
       dealId: "deal1",
       dealKind: "locacao",
       formDataJson: { locatarios: [{ nome: "Zé", email: "ze@ex.com" }] },
@@ -116,12 +116,72 @@ describe("resolveDealParties — titulares contactáveis do negócio", () => {
   });
 
   it("venda nunca cai no fallback de locação, mesmo sem partes", async () => {
-    const parties = await resolveDealParties({
+    const { recipients: parties } = await resolveDealParties({
       dealId: "deal1",
       dealKind: "venda",
       formDataJson: null,
     });
     expect(leaseFind).not.toHaveBeenCalled();
     expect(parties).toEqual([]);
+  });
+
+  /**
+   * O dedupe funde por CONTATO, então duas pessoas diferentes que dividem o
+   * telefone (casal, familiares) viram uma só e a segunda não recebe nada.
+   * O comportamento de envio segue igual — o que muda é ter rastro.
+   */
+  it("reporta as partes fundidas (nome, papel, motivo)", async () => {
+    const { recipients, dropped } = await resolveDealParties({
+      dealId: "deal1",
+      dealKind: "venda",
+      formDataJson: {
+        vendedores: [{ nome: "João", email: "casal@ex.com" }],
+        compradores: [
+          { nome: "Maria", email: "casal@ex.com" },
+          { nome: "Pedro", mobile_phone: "11999998888" },
+        ],
+      },
+    });
+
+    expect(recipients).toHaveLength(2);
+    expect(dropped).toEqual([
+      {
+        nome: "Maria",
+        role: "comprador",
+        reason: "email_duplicado",
+        mergedInto: "João",
+      },
+    ]);
+  });
+
+  it("sem fusão, `dropped` é vazio", async () => {
+    const { dropped } = await resolveDealParties({
+      dealId: "deal1",
+      dealKind: "venda",
+      formDataJson: {
+        vendedores: [{ nome: "João", email: "j@ex.com" }],
+        compradores: [{ nome: "Maria", email: "m@ex.com" }],
+      },
+    });
+    expect(dropped).toEqual([]);
+  });
+
+  it("fusão por telefone é reportada com o motivo próprio", async () => {
+    const { dropped } = await resolveDealParties({
+      dealId: "deal1",
+      dealKind: "locacao",
+      formDataJson: {
+        locadores: [{ nome: "Ana", mobile_phone: "11912345678" }],
+        locatarios: [{ nome: "Ana Paula", telefone: "11912345678" }],
+      },
+    });
+    expect(dropped).toEqual([
+      {
+        nome: "Ana Paula",
+        role: "locatario",
+        reason: "telefone_duplicado",
+        mergedInto: "Ana",
+      },
+    ]);
   });
 });

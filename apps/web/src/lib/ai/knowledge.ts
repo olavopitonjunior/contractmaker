@@ -71,6 +71,23 @@ export interface EmbedTarget {
 }
 
 /**
+ * Superfície mínima do Prisma que a criação de linhas usa. Existe pro caller
+ * passar o `tx` de uma transação interativa (`prisma.$transaction`) e ingerir N
+ * itens de forma atômica — sem isso, uma falha no meio do loop deixava as
+ * primeiras linhas órfãs (sem embedding) e o retry duplicava.
+ *
+ * `any` nos args porque a assinatura genérica do PrismaClient não é atribuível
+ * a um parâmetro tipado (contravariância) — mesmo padrão de
+ * `lib/templates/upload-dedup.ts`.
+ */
+export type KnowledgeWriteClient = {
+  knowledgeItem: {
+    /* eslint-disable-next-line @typescript-eslint/no-explicit-any */
+    create: (args: any) => Promise<any>;
+  };
+};
+
+/**
  * Cria as linhas do knowledge item **sem** gerar embeddings — retorna os alvos
  * de embedding pro caller decidir quando embutir (síncrono via
  * `createKnowledgeItem`, ou em background via `waitUntil(embedKnowledgeItem(...))`
@@ -78,9 +95,13 @@ export interface EmbedTarget {
  *
  * Mantém a semântica original: single-chunk embute a própria linha; multi-chunk
  * cria um parent-resumo (não embutido) + linhas-filhas embutidas.
+ *
+ * `db` permite passar o `tx` de uma transação interativa — é como o upload de
+ * uma coleção de cláusulas cria os N itens tudo-ou-nada.
  */
 export async function createKnowledgeItemRows(
-  input: CreateKnowledgeItemInput
+  input: CreateKnowledgeItemInput,
+  db: KnowledgeWriteClient = prisma
 ): Promise<{ parentId: string; embedTargets: EmbedTarget[] }> {
   const chunks = chunkText(input.content);
   if (chunks.length === 0) {
@@ -91,7 +112,7 @@ export async function createKnowledgeItemRows(
 
   // Short path: single chunk = single row (no parent/children split)
   if (chunks.length === 1) {
-    const parent = await prisma.knowledgeItem.create({
+    const parent = await db.knowledgeItem.create({
       data: {
         orgId: input.orgId,
         category: input.category,
@@ -113,7 +134,7 @@ export async function createKnowledgeItemRows(
   }
 
   // Multi-chunk path: create parent row, then chunk rows linked to parent
-  const parent = await prisma.knowledgeItem.create({
+  const parent = await db.knowledgeItem.create({
     data: {
       orgId: input.orgId,
       category: input.category,
@@ -131,7 +152,7 @@ export async function createKnowledgeItemRows(
 
   const chunkRows = await Promise.all(
     chunks.map((chunk) =>
-      prisma.knowledgeItem.create({
+      db.knowledgeItem.create({
         data: {
           orgId: input.orgId,
           category: input.category,

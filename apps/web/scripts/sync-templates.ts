@@ -24,6 +24,7 @@ import path from "path";
 import { PrismaClient } from "@prisma/client";
 import {
   CANONICAL_TEMPLATES as TEMPLATES,
+  canonicalModalidadesForModules,
   type CanonicalTemplate,
 } from "../src/lib/templates/canonical-templates";
 import {
@@ -76,12 +77,27 @@ async function main() {
   if (SEED) {
     const orgs = await prisma.organization.findMany({ select: { id: true, name: true } });
     for (const org of orgs) {
+      // Escopo por MÓDULO habilitado: um tenant só-locação não deve ganhar CCV
+      // à vista/financiamento num backfill. Org SEM rows de OrgModule = org
+      // anterior à modularização → semeia tudo (comportamento legado, que é
+      // também o fail-open de lib/modules/read.ts).
+      const orgModules = await prisma.orgModule.findMany({
+        where: { orgId: org.id, enabled: true },
+        select: { module: true },
+      });
+      const hasModuleRows =
+        (await prisma.orgModule.count({ where: { orgId: org.id } })) > 0;
+      const onlyModalidades = hasModuleRows
+        ? canonicalModalidadesForModules(orgModules.map((m) => m.module))
+        : undefined;
+
       const { created, skipped: seedSkipped } = await seedCanonicalTemplatesForOrg(org.id, {
         db: prisma as unknown as CanonicalSeedClient,
         // CLI lê do disco (fonte da verdade local), não do módulo embarcado.
         loadSource: (t: CanonicalTemplate) =>
           fs.readFileSync(resolveTemplatePath(t.filename), "utf-8"),
         dryRun: DRY_RUN,
+        onlyModalidades,
       });
       if (created.length > 0) {
         console.log(

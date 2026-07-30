@@ -16,6 +16,7 @@ import { seedDefaultDocumentStyle } from "@/lib/org/seed-document-style";
 import { sendOwnerAccessEmail } from "@/lib/org/owner-access";
 import { seedAndEmbedDefaultClauses } from "@/lib/knowledge/seed-clauses";
 import { seedCanonicalTemplatesForOrg } from "@/lib/templates/canonical-seed";
+import { canonicalModalidadesForModules } from "@/lib/templates/canonical-templates";
 import { waitUntil } from "@vercel/functions";
 
 export const runtime = "nodejs";
@@ -229,8 +230,14 @@ export async function POST(req: NextRequest) {
   // ativo" — o operador tinha que rodar sync-templates.ts na mão. Best-effort
   // como os vizinhos: a org já está commitada, e o backfill continua disponível
   // via `sync-templates --apply --seed`.
+  //
+  // Restrito aos MÓDULOS escolhidos: um tenant só-locação não nasce com CCV à
+  // vista/financiamento (contradizia as rows de OrgModule desta mesma request).
+  // Habilitar o módulo depois semeia o que falta (PATCH .../modules).
   try {
-    const { created } = await seedCanonicalTemplatesForOrg(result.org.id);
+    const { created } = await seedCanonicalTemplatesForOrg(result.org.id, {
+      onlyModalidades: canonicalModalidadesForModules(enabledModules),
+    });
     console.log(
       `[admin/orgs] templates canônicos semeados em ${result.org.id}: ${created.length}`
     );

@@ -262,8 +262,14 @@ vi.mock("@/lib/db/prisma", () => {
       create: vi.fn(),
       update: vi.fn().mockResolvedValue({}),
     },
+    // Criação de tenant (POST /api/admin/orgs) — 1:1 com a org.
+    brandingSettings: {
+      create: vi.fn().mockResolvedValue({}),
+      findUnique: vi.fn().mockResolvedValue(null),
+    },
     orgModule: {
       findMany: vi.fn().mockResolvedValue([]),
+      count: vi.fn().mockResolvedValue(0),
       findUnique: vi.fn().mockResolvedValue(null),
       upsert: vi.fn().mockResolvedValue({}),
       createMany: vi.fn().mockResolvedValue({ count: 0 }),

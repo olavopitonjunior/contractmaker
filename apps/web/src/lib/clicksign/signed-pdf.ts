@@ -36,6 +36,26 @@ export async function persistSignedPdf(
   await persistExtraSignedDocuments(envelopeId, logPrefix);
 }
 
+/**
+ * Persiste o assinado de UM documento EXTRA do envelope, identificado pelo
+ * `document.key` da ClickSign.
+ *
+ * Na v3 o fechamento é POR DOCUMENTO: num envelope unificado (contrato + laudo
+ * de vistoria) o `document_closed` do laudo chega ANTES do contrato ser
+ * assinado. O webhook precisa guardar o laudo assinado sem tocar em nada do
+ * envelope — daí a variante parcial. Idempotente (pula quem já tem
+ * `signedPdfUrl`) e no-op quando a key não é de um documento extra.
+ */
+export async function persistSignedDocumentByKey(
+  envelopeId: string,
+  documentClicksignId: string,
+  logPrefix = "[clicksign]"
+): Promise<void> {
+  await persistExtraSignedDocuments(envelopeId, logPrefix, {
+    onlyDocumentClicksignId: documentClicksignId,
+  });
+}
+
 async function persistPrimarySignedPdf(
   envelopeId: string,
   url: string,
@@ -187,11 +207,19 @@ async function persistPrimarySignedPdf(
  */
 async function persistExtraSignedDocuments(
   envelopeId: string,
-  logPrefix: string
+  logPrefix: string,
+  opts: { onlyDocumentClicksignId?: string } = {}
 ): Promise<void> {
   try {
     const pending = await prisma.envelopeDocument.findMany({
-      where: { envelopeId, kind: "attachment", signedPdfUrl: null },
+      where: {
+        envelopeId,
+        kind: "attachment",
+        signedPdfUrl: null,
+        ...(opts.onlyDocumentClicksignId
+          ? { documentClicksignId: opts.onlyDocumentClicksignId }
+          : {}),
+      },
       orderBy: { position: "asc" },
     });
     if (pending.length === 0) return;
