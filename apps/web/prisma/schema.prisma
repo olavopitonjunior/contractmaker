@@ -1163,6 +1163,11 @@ model ContractTemplate {
   // (vira "desatualizado" na UI até o próximo POST /preview re-gerar).
   previewSourceHash   String?
   previewUpdatedAt    DateTime?
+  // SHA-256 (hex) do arquivo ORIGINAL enviado na ingestão DOCX→template.
+  // Identidade do modelo pra dedup no upload em lote: subir o mesmo .docx de
+  // novo devolve 409 DUPLICATE_TEMPLATE em vez de criar outro draft.
+  // Não confundir com `previewSourceHash` (hash do handlebarsSource do preview).
+  sourceHash          String?
   // Relatório do pass de IA na ingestão DOCX→template (engine google_docs):
   // { inserted, skippedAmbiguous, notMapped, missingRequired, ranAt }.
   // Persiste após a ativação como histórico da revisão.
@@ -1174,6 +1179,8 @@ model ContractTemplate {
   contracts   Contract[]
   suggestions TemplateSuggestion[]
   proposals   Proposal[]
+
+  @@index([orgId, sourceHash])
 }
 
 // ============================================
