@@ -10,8 +10,11 @@ import { decryptTotpSecret, verifyTotpCode } from "@/lib/security/totp";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
+// `currentPassword` é opcional porque conta criada por convite/provisionamento
+// nasce sem `passwordHash` — não há senha antiga pra confirmar. A sessão já
+// autentica a pessoa; a exigência volta assim que existe hash (abaixo).
 const schema = z.object({
-  currentPassword: z.string().min(1).max(200),
+  currentPassword: z.string().max(200).optional(),
   newPassword: z.string().min(8).max(200),
   twoFactorCode: z
     .string()
@@ -63,14 +66,10 @@ export async function POST(req: NextRequest) {
     where: { id: userId },
     select: { id: true, passwordHash: true },
   });
-  if (!user?.passwordHash) {
-    return NextResponse.json(
-      { error: "Conta sem senha definida. Use o link de redefinir senha." },
-      { status: 400 }
-    );
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const ok = await bcrypt.compare(currentPassword, user.passwordHash);
   const org = await getUserOrg(userId).catch(() => null);
   const auditCtx = {
     orgId: org?.id ?? "system",
@@ -79,13 +78,25 @@ export async function POST(req: NextRequest) {
     userAgent,
   };
 
-  if (!ok) {
-    await audit(auditCtx, {
-      action: "PASSWORD_CHANGE",
-      result: "FAILURE",
-      metadata: { reason: "wrong_current_password" },
-    }).catch(() => {});
-    return NextResponse.json({ error: "Senha atual incorreta" }, { status: 401 });
+  // Primeiro acesso (conta sem senha): não há senha antiga a confirmar.
+  const isFirstPassword = !user.passwordHash;
+
+  if (!isFirstPassword) {
+    if (!currentPassword) {
+      return NextResponse.json(
+        { error: "Informe a senha atual" },
+        { status: 400 }
+      );
+    }
+    const ok = await bcrypt.compare(currentPassword, user.passwordHash!);
+    if (!ok) {
+      await audit(auditCtx, {
+        action: "PASSWORD_CHANGE",
+        result: "FAILURE",
+        metadata: { reason: "wrong_current_password" },
+      }).catch(() => {});
+      return NextResponse.json({ error: "Senha atual incorreta" }, { status: 401 });
+    }
   }
 
   const totpRow = await prisma.twoFactorSecret.findUnique({
@@ -131,7 +142,8 @@ export async function POST(req: NextRequest) {
     result: "SUCCESS",
     resourceType: "user",
     resource: `user:${userId}`,
+    metadata: { firstPassword: isFirstPassword },
   }).catch(() => {});
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, firstPassword: isFirstPassword });
 }

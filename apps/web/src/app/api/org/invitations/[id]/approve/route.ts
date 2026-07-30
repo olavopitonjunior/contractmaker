@@ -5,10 +5,15 @@ import { audit } from "@/lib/security/audit";
 import { sendEmail } from "@/lib/email/client";
 import { InvitationApprovedEmail } from "@/lib/email/templates/invitation-approved";
 import { isApprover } from "@/lib/auth/invitations";
+import { createPasswordResetToken } from "@/lib/auth/password-reset";
 
 /**
- * POST /api/org/invitations/:id/approve — aprova convite, cria User (sem
- * passwordHash) + OrgMembership, e dispara magic link de boas-vindas.
+ * POST /api/org/invitations/:id/approve — aprova convite, cria User +
+ * OrgMembership, e dispara e-mail de primeiro acesso.
+ *
+ * Quem ainda não tem senha (caso normal: conta criada aqui) recebe link de
+ * /reset-password?token= com reason `welcome` e DEFINE a senha na hora. Quem
+ * já tinha conta com senha recebe só o link de login.
  *
  * Gate: apenas emails listados em INVITE_APPROVER_EMAILS (default
  * olavo.piton@gmail.com) podem aprovar.
@@ -54,16 +59,17 @@ export async function POST(
   const result = await prisma.$transaction(async (tx) => {
     let user = await tx.user.findUnique({
       where: { email: invitation.email },
-      select: { id: true, email: true, name: true },
+      select: { id: true, email: true, name: true, passwordHash: true },
     });
     if (!user) {
       user = await tx.user.create({
         data: {
           email: invitation.email,
           name: invitation.name ?? null,
-          // Sem passwordHash: usuário só entra via magic link.
+          // Sem passwordHash: a senha é criada pelo próprio convidado no
+          // link de boas-vindas (/reset-password?token=), abaixo.
         },
-        select: { id: true, email: true, name: true },
+        select: { id: true, email: true, name: true, passwordHash: true },
       });
     }
 
@@ -111,7 +117,15 @@ export async function POST(
   );
 
   const baseUrl = process.env.NEXTAUTH_URL ?? "http://localhost:3000";
-  const loginUrl = `${baseUrl}/login?email=${encodeURIComponent(invitation.email)}`;
+
+  // Sem senha definida → link que CRIA a senha (não existe "senha atual" pra
+  // pedir). Com senha → só login.
+  const needsPassword = !result.user.passwordHash;
+  let actionUrl = `${baseUrl}/login?email=${encodeURIComponent(invitation.email)}`;
+  if (needsPassword) {
+    const { token } = await createPasswordResetToken(invitation.email, "welcome");
+    actionUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(token)}`;
+  }
 
   await sendEmail({
     to: invitation.email,
@@ -119,7 +133,8 @@ export async function POST(
     react: InvitationApprovedEmail({
       inviteeName: invitation.name,
       orgName: ctx.orgName,
-      loginUrl,
+      actionUrl,
+      mode: needsPassword ? "set-password" : "login",
     }) as React.ReactElement,
   });
 
