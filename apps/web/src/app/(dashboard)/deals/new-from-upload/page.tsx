@@ -83,7 +83,7 @@ export default function NewDealFromUploadPage() {
       // mantido — o finalize do form NÃO gera um novo (guard server-side).
       if (data.formToken) {
         toast.success("Contrato importado! Revise os dados extraídos.");
-        router.push(`/f/${data.formToken}?prefilled=1`);
+        router.push(`${data.formUrl ?? `/f/${data.formToken}`}?prefilled=1`);
       } else {
         toast.success("Contrato importado! Abrindo no editor...");
         router.push(`/contracts/${data.contractId}`);

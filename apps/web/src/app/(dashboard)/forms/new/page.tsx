@@ -118,7 +118,8 @@ export default function NewFormPage() {
       }
 
       if (res.ok) {
-        const fullUrl = `${window.location.origin}/f/${data.token}`;
+        // `data.url` já vem com o slug do título (formPublicPath no servidor).
+        const fullUrl = `${window.location.origin}${data.url ?? `/f/${data.token}`}`;
         setCreatedUrl(fullUrl);
         setCreatedToken(data.token);
         toast.success("Formulário criado!");
@@ -294,7 +295,7 @@ export default function NewFormPage() {
                   Copiar Link
                 </Button>
                 <Button asChild className="flex-1">
-                  <a href={`/f/${createdToken}`} target="_blank">
+                  <a href={createdUrl} target="_blank">
                     <ExternalLink className="h-4 w-4 mr-2" />
                     Abrir Formulário
                   </a>

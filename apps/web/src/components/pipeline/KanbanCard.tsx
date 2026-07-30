@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
+import { formPublicPath } from "@/lib/forms/form-url";
 import {
   DealProgressTimeline,
   type PipelineKind,
@@ -104,7 +105,7 @@ export function KanbanCard({
     e.preventDefault();
     e.stopPropagation();
     if (!deal.formToken) return;
-    const url = `${window.location.origin}/f/${deal.formToken}`;
+    const url = `${window.location.origin}${formPublicPath(deal.formToken, deal.title)}`;
     navigator.clipboard.writeText(url);
     toast.success("Link do formulário copiado!");
   }

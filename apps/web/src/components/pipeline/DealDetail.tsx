@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import { DocumentCard, type DocumentCardData } from "@/components/forms/DocumentCard";
 import { ReopenFormButton } from "@/components/forms/ReopenFormButton";
 import { isFormFinished } from "@/lib/forms/form-status";
+import { formPublicPath } from "@/lib/forms/form-url";
 import type { SelectGroup } from "@/components/forms/NativeSelect";
 import type { Assignment, DocumentKind } from "@/lib/forms/extracted-to-form";
 import {
@@ -497,7 +498,7 @@ export function DealDetail({
 
   function handleCopyFormLink() {
     if (!formToken) return;
-    const url = `${window.location.origin}/f/${formToken}`;
+    const url = `${window.location.origin}${formPublicPath(formToken, deal.title)}`;
     navigator.clipboard.writeText(url);
     toast.success("Link do formulário copiado!");
   }
@@ -800,7 +801,7 @@ export function DealDetail({
               )}
               <Button variant="outline" size="sm" asChild>
                 <a
-                  href={`/f/${formToken}`}
+                  href={formPublicPath(formToken, deal.title)}
                   target="_blank"
                   rel="noopener noreferrer"
                 >

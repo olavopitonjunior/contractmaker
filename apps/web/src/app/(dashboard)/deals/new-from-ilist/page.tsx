@@ -60,7 +60,7 @@ export default function NewDealFromIListPage() {
         throw new Error(data.error ?? `HTTP ${res.status}`);
       }
       toast.success("Imóvel importado. Complete as partes no formulário.");
-      router.push(`/f/${data.formToken}?prefilled=1`);
+      router.push(`${data.formUrl ?? `/f/${data.formToken}`}?prefilled=1`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha ao criar o negócio");
       setCreating(false);

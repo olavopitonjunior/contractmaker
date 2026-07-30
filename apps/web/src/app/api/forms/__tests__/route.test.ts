@@ -53,6 +53,7 @@ describe("POST /api/forms (retrofit Newton)", () => {
     mockPrisma.salesForm.create.mockResolvedValue({
       id: "f1",
       token: "tok123abc",
+      title: "Maria",
     } as never);
     mockPrisma.pipeline.findFirst.mockResolvedValue(null as never);
 
@@ -61,7 +62,7 @@ describe("POST /api/forms (retrofit Newton)", () => {
     const body = await res.json();
     expect(body.id).toBe("f1");
     expect(body.dealId).toBeNull();
-    expect(body.url).toBe("/f/tok123abc");
+    expect(body.url).toBe("/f/tok123abc/maria");
   });
 
   it("cria form + deal quando pipeline configurada", async () => {

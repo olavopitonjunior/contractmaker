@@ -9,6 +9,7 @@ import {
 import { withIdempotency } from "@/lib/api/idempotency";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
+import { formPublicPath } from "@/lib/forms/form-url";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { assertFeatureEnabled, ModuleDisabledError } from "@/lib/modules/guard";
 import { FEATURE, MODULE } from "@/lib/modules/catalog";
@@ -234,7 +235,7 @@ export async function POST(request: NextRequest) {
         body: {
           id: form.id,
           token: form.token,
-          url: `/f/${form.token}`,
+          url: formPublicPath(form.token, form.title),
           dealId,
         },
       };

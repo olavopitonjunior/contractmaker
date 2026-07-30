@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db/prisma";
 import { requireCronAuth } from "@/lib/security/cron-auth";
 import { isCronAllowedInStaging } from "@/lib/env/staging";
 import { notifyDealEvent } from "@/lib/notifications/deal-events";
+import { formPublicPath } from "@/lib/forms/form-url";
 import { resolveEffectiveNotificationConfig } from "@/lib/notifications/deal-events-config";
 
 export const runtime = "nodejs";
@@ -41,6 +42,7 @@ export async function GET(req: NextRequest) {
       id: true,
       orgId: true,
       token: true,
+      title: true,
       createdAt: true,
       deal: {
         select: { id: true, lostAt: true, archivedAt: true },
@@ -87,7 +89,7 @@ export async function GET(req: NextRequest) {
       dedupeKey: `d${ageDays}`,
       context: {
         formId: form.id,
-        formPublicUrl: `${baseUrl}/f/${form.token}`,
+        formPublicUrl: `${baseUrl}${formPublicPath(form.token, form.title)}`,
         extra: { ageDays },
       },
     });

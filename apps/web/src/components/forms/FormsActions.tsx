@@ -7,6 +7,7 @@ import { ExternalLink, Copy, Plus, Check, Users } from "lucide-react";
 import { toast } from "sonner";
 import Link from "next/link";
 import { SendFormSummaryDialog } from "@/components/forms/SendFormSummaryDialog";
+import { formPublicPath } from "@/lib/forms/form-url";
 
 interface FormsActionsProps {
   formId: string;
@@ -22,9 +23,10 @@ export function FormsActions({ formId, token, status, hasDeal, dealId, title, sc
   const router = useRouter();
   const [copied, setCopied] = useState(false);
   const [creating, setCreating] = useState(false);
+  const publicPath = formPublicPath(token, title);
 
   function handleCopy() {
-    const url = `${window.location.origin}/f/${token}`;
+    const url = `${window.location.origin}${publicPath}`;
     navigator.clipboard.writeText(url);
     setCopied(true);
     toast.success("Link copiado!");
@@ -61,11 +63,11 @@ export function FormsActions({ formId, token, status, hasDeal, dealId, title, sc
         className="w-full truncate rounded border border-dashed bg-muted/40 px-2 py-1 text-left text-[11px] font-mono text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
         title="Clique para copiar o link"
       >
-        /f/{token}
+        {publicPath}
       </button>
       <div className="flex gap-2 flex-wrap">
         <Button variant="outline" size="sm" asChild>
-          <Link href={`/f/${token}`} target="_blank">
+          <Link href={publicPath} target="_blank">
             <ExternalLink className="mr-1 h-3 w-3" />
             Abrir
           </Link>

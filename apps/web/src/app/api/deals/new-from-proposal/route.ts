@@ -12,6 +12,7 @@ import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { extractCcvDataJson } from "@/lib/extraction/ccv-extractor";
+import { formPublicPath } from "@/lib/forms/form-url";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { MODULE } from "@/lib/modules/catalog";
 import { resolveManagerForCreate } from "@/lib/deals/manager";
@@ -263,6 +264,7 @@ export async function POST(req: NextRequest) {
         body: {
           dealId: deal.id,
           formToken: form.token,
+          formUrl: formPublicPath(form.token, form.title),
           formId: form.id,
         },
       };

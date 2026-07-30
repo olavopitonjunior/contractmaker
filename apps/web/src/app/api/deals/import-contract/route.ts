@@ -15,6 +15,7 @@ import { getPipelineByKind } from "@/lib/modules/resolve";
 import { MODULE } from "@/lib/modules/catalog";
 import { importContractFromFile } from "@/lib/services/contract-import";
 import { resolveManagerForCreate } from "@/lib/deals/manager";
+import { formPublicPath } from "@/lib/forms/form-url";
 import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
 
 export const runtime = "nodejs";
@@ -191,7 +192,7 @@ export async function POST(req: NextRequest) {
         include: {
           deal: {
             include: {
-              form: { select: { id: true, token: true } },
+              form: { select: { id: true, token: true, title: true } },
               contracts: {
                 where: { isLatest: true, kind: "contract" },
                 select: { id: true, googleDocUrl: true },
@@ -202,7 +203,7 @@ export async function POST(req: NextRequest) {
       });
 
       let deal: { id: string };
-      let form: { id: string; token: string };
+      let form: { id: string; token: string; title: string | null };
 
       if (prior?.deal?.form) {
         const priorContract = prior.deal.contracts[0];
@@ -286,7 +287,11 @@ export async function POST(req: NextRequest) {
         });
 
         deal = { id: createdDeal.id };
-        form = { id: createdForm.id, token: createdForm.token };
+        form = {
+          id: createdForm.id,
+          token: createdForm.token,
+          title: createdForm.title,
+        };
       }
 
       // 4. Roda pipeline de import (Drive + extração + Contract)
@@ -345,6 +350,7 @@ export async function POST(req: NextRequest) {
           // Token do form pra mandar o operador revisar/completar os dados
           // extraídos (campos faltantes destacados) antes de gerar/assinar.
           formToken: form.token,
+          formUrl: formPublicPath(form.token, form.title),
         },
       };
     },

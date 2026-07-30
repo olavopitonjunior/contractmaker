@@ -9,11 +9,13 @@ import {
   PartyLinksPanel,
   type PartyLinksPanelProps,
 } from "@/components/forms/PartyLinksPanel";
+import { formPublicPath } from "@/lib/forms/form-url";
 
 interface LocacaoDadosTabProps {
   dataJson: Record<string, unknown>;
   formToken: string | null;
   formStatus: string | null;
+  dealTitle?: string | null;
 }
 
 const BRL = (v: number) =>
@@ -84,7 +86,7 @@ function Field({ label, value }: { label: string; value: string | null | undefin
  * com a aba Dados de vendas. Edição é pelo formulário público (link no topo);
  * editor estruturado inline fica como follow-up.
  */
-export function LocacaoDadosTab({ dataJson, formToken, formStatus }: LocacaoDadosTabProps) {
+export function LocacaoDadosTab({ dataJson, formToken, formStatus, dealTitle }: LocacaoDadosTabProps) {
   const locadores = (dataJson.locadores as Parte[] | undefined) ?? [];
   const locatarios = (dataJson.locatarios as Parte[] | undefined) ?? [];
   const imovel = (dataJson.imovel ?? {}) as Record<string, unknown>;
@@ -119,7 +121,11 @@ export function LocacaoDadosTab({ dataJson, formToken, formStatus }: LocacaoDado
           </p>
           {formToken && (
             <Button variant="outline" size="sm" asChild>
-              <a href={`/f/${formToken}`} target="_blank" rel="noopener noreferrer">
+              <a
+                href={formPublicPath(formToken, dealTitle)}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 <ExternalLink className="h-4 w-4 mr-1.5" /> Abrir formulário
               </a>
             </Button>
@@ -272,7 +278,11 @@ export function LocacaoDadosTab({ dataJson, formToken, formStatus }: LocacaoDado
           <PartyLinksPanel formToken={formToken} roles={partyRoles} />
           <div className="flex justify-end">
             <Button variant="outline" size="sm" asChild>
-              <a href={`/f/${formToken}`} target="_blank" rel="noopener noreferrer">
+              <a
+                href={formPublicPath(formToken, dealTitle)}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 <ExternalLink className="h-4 w-4 mr-1.5" /> Editar no formulário
               </a>
             </Button>

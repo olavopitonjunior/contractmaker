@@ -6,6 +6,7 @@ import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { notifyDealEvent } from "@/lib/notifications/deal-events";
 import { guardDealScope } from "@/lib/deals/route-helpers";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
+import { formPublicPath } from "@/lib/forms/form-url";
 
 export const runtime = "nodejs";
 
@@ -32,7 +33,7 @@ export async function POST(
     select: {
       id: true,
       pipeline: { select: { orgId: true } },
-      form: { select: { id: true, token: true, completedAt: true } },
+      form: { select: { id: true, token: true, title: true, completedAt: true } },
     },
   });
   if (!deal || deal.pipeline.orgId !== org.id) {
@@ -73,7 +74,7 @@ export async function POST(
     dedupeKey: `manual-${stamp}`,
     context: {
       formId: deal.form.id,
-      formPublicUrl: `${baseUrl}/f/${deal.form.token}`,
+      formPublicUrl: `${baseUrl}${formPublicPath(deal.form.token, deal.form.title)}`,
       extra: { manual: true, by: session.user.id },
     },
   });

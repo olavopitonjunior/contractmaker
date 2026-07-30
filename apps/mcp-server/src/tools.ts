@@ -3,23 +3,23 @@ import { callApi, callBridge, logProactiveOutbound } from "./index.js";
 import { validateInWindow } from "./cron-window.js";
 
 /**
- * Normaliza o destino do WhatsApp para E.164 sem '+'.
+ * Reconhece JID de grupo. Cobre três formatos, de propósito:
  *
- * A descrição da tool exige "5511987654321", mas **não se pode confiar no
- * modelo pra isso**: verificado em produção (2026-07-25) que o agente recebeu
- * a instrução com `5511999063228` e ainda assim chamou a tool com
- * `11999063228`, sem o 55. A mensagem não chegou.
+ * 1. `<digitos>-group` — a convenção da bridge, o único que aparece na prática.
+ * 2. `<digitos>-<digitos>-group` — JID legado do WhatsApp, onde o id do grupo é
+ *    `<criador>-<timestamp>`; o `\d+-group` puro não pegava o hífen interno.
+ * 3. `...@g.us` — sufixo nativo do WhatsApp, case-insensitive.
  *
- * E o modo de falha é silencioso em duas camadas: a bridge devolve o erro no
- * CORPO com HTTP 200, e quem chama registra "enviado". Por isso a trava é
- * aqui, determinística, e não no prompt.
- *
- * JID de grupo (`<id>-group`) passa intacto. Número que já parece E.164
- * internacional também passa — normalizar só resolve o caso BR sem DDI, que é
- * o observado.
+ * Só o (1) é esperado aqui; (2) e (3) são cinto-e-suspensórios pro dia em que a
+ * bridge mudar de formato ou um id vier cru da API do WhatsApp. Sem piso de
+ * dígitos: o sufixo já é o sinal, e telefone de pessoa nunca termina em `-group`
+ * nem em `@g.us`. Fail-closed é barato — recusar um destino que não era grupo dá
+ * erro visível, aceitar dá mensagem proativa em grupo, exatamente o que a trava
+ * abaixo existe pra impedir.
  */
 function isGroupJid(raw: unknown): boolean {
-  return /^\d{10,25}-group$/.test(String(raw ?? "").trim());
+  const s = String(raw ?? "").trim();
+  return /@g\.us$/i.test(s) || /^\d{1,25}(?:-\d{1,25})?-group$/.test(s);
 }
 
 /**
@@ -42,9 +42,30 @@ function assertNotGroupTarget(raw: unknown, tool: string): void {
   }
 }
 
+/**
+ * Normaliza o destino do WhatsApp para E.164 sem '+'.
+ *
+ * A descrição da tool exige "5511987654321", mas **não se pode confiar no
+ * modelo pra isso**: verificado em produção (2026-07-25) que o agente recebeu
+ * a instrução com `5511999063228` e ainda assim chamou a tool com
+ * `11999063228`, sem o 55. A mensagem não chegou.
+ *
+ * E o modo de falha é silencioso em duas camadas: a bridge devolve o erro no
+ * CORPO com HTTP 200, e quem chama registra "enviado". Por isso a trava é
+ * aqui, determinística, e não no prompt.
+ *
+ * JID de grupo **lança**: não existe forma normalizada de um grupo pra esta
+ * função devolver, e deixar passar intacto (como antes) sugeria que grupo é
+ * destino válido. Os handlers já chamam `assertNotGroupTarget` antes, então este
+ * ramo é redundante hoje — de propósito, pra que um caller futuro que esqueça o
+ * assert falhe em vez de mandar mensagem pro grupo.
+ *
+ * Número que já parece E.164 internacional passa — normalizar só resolve o caso
+ * BR sem DDI, que é o observado.
+ */
 function normalizeWhatsappTo(raw: unknown): string {
   const s = String(raw ?? "").trim();
-  if (isGroupJid(s)) return s;
+  assertNotGroupTarget(s, "normalizeWhatsappTo");
   const d = s.replace(/\D/g, "");
   // 10-11 dígitos = BR sem DDI (fixo ou celular com 9º) → prefixa 55.
   if (d.length === 10 || d.length === 11) return `55${d}`;

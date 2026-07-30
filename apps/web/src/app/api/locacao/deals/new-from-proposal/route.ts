@@ -11,6 +11,7 @@ import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { withIdempotency } from "@/lib/api/idempotency";
 import { uploadBufferToStorage } from "@/lib/storage/s3";
 import { extractLocacaoContractDataJson } from "@/lib/extraction/locacao-extractor";
+import { formPublicPath } from "@/lib/forms/form-url";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { MODULE } from "@/lib/modules/catalog";
 import { resolveManagerForCreate } from "@/lib/deals/manager";
@@ -235,7 +236,12 @@ export async function POST(req: NextRequest) {
 
       return {
         status: 201,
-        body: { dealId: deal.id, formToken: form.token, formId: form.id },
+        body: {
+          dealId: deal.id,
+          formToken: form.token,
+          formUrl: formPublicPath(form.token, form.title),
+          formId: form.id,
+        },
       };
     },
   });
