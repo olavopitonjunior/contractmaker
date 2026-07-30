@@ -98,7 +98,11 @@ function defaultValues(comercial: boolean): Record<string, unknown> {
     },
     aluguel: {
       valor: 0,
+      // `encargos` é derivado (condomínio + IPTU + outros) pelo AluguelStep.
       encargos: 0,
+      condominio_mensal: 0,
+      iptu_mensal: 0,
+      outros_encargos: 0,
       dia_vencimento: 10,
       indice_reajuste: "IGPM",
       vigencia_inicio: "",

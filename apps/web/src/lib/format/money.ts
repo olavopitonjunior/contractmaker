@@ -88,3 +88,16 @@ export function parsePercentBR(raw: unknown): number {
   if (Number.isNaN(n)) return 0;
   return negative ? -n : n;
 }
+
+/**
+ * Formata valor monetário em pt-BR ("R$ 1.500,00"). Determinístico de
+ * propósito: `toLocaleString("pt-BR", { style: "currency" })` intercala um
+ * espaço não-quebrável que difere entre o ICU do Node e o do browser e quebra
+ * a hidratação do React. Aceita número ou string (usa parseMoneyBR).
+ */
+export function formatMoneyBR(raw: unknown): string {
+  const n = parseMoneyBR(raw);
+  const [int, dec] = Math.abs(n).toFixed(2).split(".");
+  const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return `${n < 0 ? "-" : ""}R$ ${grouped},${dec}`;
+}

@@ -127,7 +127,11 @@ const imovelLocacaoSchema = z.object({
 // Reajuste e vigência.
 const aluguelSchema = z.object({
   valor: z.number().min(0).default(0),
-  // Encargos embutidos no boleto mensal (IPTU/condomínio quando repassados).
+  // Encargos embutidos no boleto mensal — TOTAL. Desde 2026-07 é a SOMA
+  // derivada de condominio_mensal + iptu_mensal + outros_encargos (o form
+  // grava o total aqui). Continua sendo o campo lido por
+  // createLeaseContractFromDataJson → LeaseContract.valorEncargos e pelo
+  // RentCharge, então não muda de nome nem de significado pros forms antigos.
   encargos: z.number().optional().default(0),
   dia_vencimento: z.number().min(1).max(28).optional().default(10),
   indice_reajuste: z.enum(["IGPM", "IPCA", "outro"]).optional().default("IGPM"),
@@ -136,11 +140,62 @@ const aluguelSchema = z.object({
   taxa_admin_percent: z.number().optional().default(10),
   // Forma de pagamento preferida do aluguel mensal.
   meio_pagamento: z.enum(["pix", "boleto", "qualquer"]).optional().default("pix"),
-  // Valores de referência lançados no mesmo boleto pela administradora
-  // (cláusula de encargos do template v3) — informativos, não somam no valor.
+  // Itens de ENTRADA dos encargos lançados no mesmo boleto pela administradora
+  // (cláusula de encargos do template v3). A soma dos três alimenta `encargos`.
   iptu_mensal: z.number().min(0).optional(),
   condominio_mensal: z.number().min(0).optional(),
+  // Aditivo (2026-07): terceiro item da soma — taxa de lixo, seguro incêndio,
+  // rateio de obra etc. Também é o destino do valor legado quando um form
+  // antigo tinha `encargos` digitado à mão e nenhum item detalhado.
+  outros_encargos: z.number().min(0).optional().default(0),
 });
+
+/**
+ * Itens de entrada dos encargos mensais (aluguel.*). Valores frouxos porque a
+ * chamada vem tanto do form (números) quanto de um dataJson cru (unknown).
+ */
+export type EncargosItens = {
+  iptu_mensal?: unknown;
+  condominio_mensal?: unknown;
+  outros_encargos?: unknown;
+};
+
+/**
+ * Total mensal de encargos = condomínio + IPTU + outros. Fonte única da soma
+ * (UI do form e testes). Arredonda a 2 casas pra não vazar float (0.1+0.2).
+ */
+export function sumEncargosMensais(itens: EncargosItens | null | undefined): number {
+  if (!itens) return 0;
+  const parcela = (v: unknown) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+  const total =
+    parcela(itens.condominio_mensal) +
+    parcela(itens.iptu_mensal) +
+    parcela(itens.outros_encargos);
+  return Math.round(total * 100) / 100;
+}
+
+/**
+ * Migração suave dos encargos ao ABRIR um form antigo (ou vindo do OCR), onde
+ * `encargos` era um total digitado à mão. Devolve o novo `outros_encargos` que
+ * faz a soma dos itens bater com esse total, ou `null` quando não há nada a
+ * migrar (form novo, ou itens já cobrindo o total). Puro — o componente só
+ * aplica o resultado.
+ */
+export function seedOutrosEncargos(
+  aluguel: (EncargosItens & { encargos?: unknown }) | null | undefined
+): number | null {
+  if (!aluguel) return null;
+  const legado = Number(aluguel.encargos);
+  if (!Number.isFinite(legado) || legado <= 0) return null;
+  const soma = sumEncargosMensais(aluguel);
+  if (legado <= soma) return null;
+  const outrosAtual = Number(aluguel.outros_encargos);
+  const base = Number.isFinite(outrosAtual) && outrosAtual > 0 ? outrosAtual : 0;
+  return Math.round((base + legado - soma) * 100) / 100;
+}
 
 // Garantia locatícia (art. 37 Lei 8.245). Fiador só quando tipo="fiador".
 const garantiaSchema = z.object({

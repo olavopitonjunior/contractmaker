@@ -1,10 +1,13 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { UseFormReturn } from "react-hook-form";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/forms/NativeSelect";
-import { FormField } from "./_PartyFields";
+import { seedOutrosEncargos, sumEncargosMensais } from "@/lib/forms/validation-locacao";
+import { formatMoneyBR } from "@/lib/format/money";
+import { FormField, MoneyField } from "./_PartyFields";
 
 const INDICE_OPTIONS = [
   { value: "IGPM", label: "IGP-M (FGV)" },
@@ -27,8 +30,46 @@ const DIA_OPTIONS = Array.from({ length: 28 }, (_, i) => ({
  * Aluguel & reajuste (aluguelSchema). A taxa de administração e os campos
  * fiscais (regime IR, repasse, NFS-e) NÃO aparecem aqui — são definidos pelo
  * operador no diálogo de criação do formulário.
+ *
+ * Encargos: condomínio + IPTU + outros são os campos de ENTRADA; o total
+ * (`aluguel.encargos`, que alimenta LeaseContract.valorEncargos) é derivado e
+ * só exibido.
  */
 export function AluguelStep({ form }: { form: UseFormReturn<any> }) {
+  const condominio = form.watch("aluguel.condominio_mensal");
+  const iptu = form.watch("aluguel.iptu_mensal");
+  const outros = form.watch("aluguel.outros_encargos");
+  const encargosTotal = sumEncargosMensais({
+    condominio_mensal: Number(condominio) || 0,
+    iptu_mensal: Number(iptu) || 0,
+    outros_encargos: Number(outros) || 0,
+  });
+
+  const seededRef = useRef(false);
+
+  useEffect(() => {
+    const aluguel = (form.getValues("aluguel" as never) ?? {}) as Record<string, unknown>;
+
+    // Migração suave do form legado (ou do OCR): `encargos` era um total
+    // digitado à mão. Ao abrir, a diferença entre ele e os itens detalhados vai
+    // pra "outros encargos", de modo que o total continue batendo com o que já
+    // estava gravado — nada é perdido. Só na primeira passada; depois disso a
+    // soma manda. Idempotente: reaberto, legado já == soma e não re-semeia.
+    if (!seededRef.current) {
+      seededRef.current = true;
+      const semeado = seedOutrosEncargos(aluguel);
+      if (semeado !== null) {
+        form.setValue("aluguel.outros_encargos", semeado, { shouldDirty: false });
+        return; // o setValue re-dispara este efeito com o item já semeado
+      }
+    }
+
+    const total = sumEncargosMensais(aluguel);
+    if ((Number(aluguel.encargos) || 0) !== total) {
+      form.setValue("aluguel.encargos", total, { shouldDirty: true });
+    }
+  }, [condominio, iptu, outros, form]);
+
   return (
     <Card className="border border-border">
       <CardHeader className="pb-3">
@@ -37,40 +78,7 @@ export function AluguelStep({ form }: { form: UseFormReturn<any> }) {
       <CardContent className="space-y-4 pt-0">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormField label="Valor do aluguel (R$) *">
-            <Input
-              {...form.register("aluguel.valor", { valueAsNumber: true })}
-              type="number"
-              inputMode="decimal"
-              placeholder="0,00"
-            />
-          </FormField>
-          <FormField label="Encargos mensais (IPTU/condomínio) (R$)">
-            <Input
-              {...form.register("aluguel.encargos", { valueAsNumber: true })}
-              type="number"
-              inputMode="decimal"
-              placeholder="0,00"
-            />
-          </FormField>
-          <FormField label="IPTU mensal de referência (R$)">
-            <Input
-              {...form.register("aluguel.iptu_mensal", { valueAsNumber: true })}
-              type="number"
-              min={0}
-              step="0.01"
-              inputMode="decimal"
-              placeholder="0,00"
-            />
-          </FormField>
-          <FormField label="Condomínio mensal de referência (R$)">
-            <Input
-              {...form.register("aluguel.condominio_mensal", { valueAsNumber: true })}
-              type="number"
-              min={0}
-              step="0.01"
-              inputMode="decimal"
-              placeholder="0,00"
-            />
+            <MoneyField form={form} name="aluguel.valor" placeholder="Ex: 2.500,00" />
           </FormField>
           <FormField label="Dia de vencimento">
             <NativeSelect
@@ -106,6 +114,35 @@ export function AluguelStep({ form }: { form: UseFormReturn<any> }) {
               placeholder="30"
             />
           </FormField>
+        </div>
+
+        <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-4">
+          <div>
+            <p className="text-sm font-semibold text-foreground">Encargos mensais</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Valores lançados no mesmo boleto do aluguel. O total é somado
+              automaticamente.
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <FormField label="Condomínio (R$)">
+              <MoneyField form={form} name="aluguel.condominio_mensal" placeholder="Ex: 450,00" />
+            </FormField>
+            <FormField label="IPTU (R$)">
+              <MoneyField form={form} name="aluguel.iptu_mensal" placeholder="Ex: 120,00" />
+            </FormField>
+            <FormField label="Outros encargos (R$)">
+              <MoneyField form={form} name="aluguel.outros_encargos" placeholder="Ex: 60,00" />
+            </FormField>
+          </div>
+          <div className="flex items-center justify-between rounded-md border border-border bg-background px-3 py-2">
+            <span className="text-sm font-medium text-muted-foreground">
+              Encargos mensais (total)
+            </span>
+            <span className="text-sm font-semibold tabular-nums text-foreground">
+              {formatMoneyBR(encargosTotal)}
+            </span>
+          </div>
         </div>
       </CardContent>
     </Card>

@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   dadosLocacaoSchema,
+  dadosLocacaoComercialSchema,
   collectLocacaoFinalizeIssues,
+  sumEncargosMensais,
+  seedOutrosEncargos,
 } from "../validation-locacao";
 
 const baseValid = {
@@ -230,5 +233,156 @@ describe("collectLocacaoFinalizeIssues", () => {
     expect(p).toEqual(
       expect.arrayContaining(["garantia.fiador.cpf", "garantia.fiador.endereco"])
     );
+  });
+});
+
+describe("encargos mensais detalhados", () => {
+  it("aplica default 0 em outros_encargos (campo aditivo)", () => {
+    const parsed = dadosLocacaoSchema.parse(baseValid);
+    expect(parsed.aluguel.outros_encargos).toBe(0);
+    // Comercial reusa o mesmo aluguelSchema.
+    expect(dadosLocacaoComercialSchema.parse(baseValid).aluguel.outros_encargos).toBe(0);
+  });
+
+  it("aceita outros_encargos informado e rejeita negativo", () => {
+    const ok = dadosLocacaoSchema.safeParse({
+      ...baseValid,
+      aluguel: { valor: 2500, outros_encargos: 75.5 },
+    });
+    expect(ok.success).toBe(true);
+    if (ok.success) expect(ok.data.aluguel.outros_encargos).toBe(75.5);
+
+    expect(
+      dadosLocacaoSchema.safeParse({
+        ...baseValid,
+        aluguel: { valor: 2500, outros_encargos: -1 },
+      }).success
+    ).toBe(false);
+  });
+
+  it("não quebra form legado que só tinha `encargos` manual", () => {
+    const parsed = dadosLocacaoSchema.parse({
+      ...baseValid,
+      aluguel: { valor: 2500, encargos: 500 },
+    });
+    expect(parsed.aluguel.encargos).toBe(500);
+    expect(parsed.aluguel.outros_encargos).toBe(0);
+  });
+
+  it("soma condomínio + IPTU + outros", () => {
+    expect(
+      sumEncargosMensais({
+        condominio_mensal: 450,
+        iptu_mensal: 120.5,
+        outros_encargos: 30.25,
+      })
+    ).toBe(600.75);
+  });
+
+  it("ignora ausentes, nulos, negativos e não-numéricos", () => {
+    expect(sumEncargosMensais(null)).toBe(0);
+    expect(sumEncargosMensais(undefined)).toBe(0);
+    expect(sumEncargosMensais({})).toBe(0);
+    expect(
+      sumEncargosMensais({
+        condominio_mensal: 100,
+        iptu_mensal: null,
+        outros_encargos: "abc",
+      })
+    ).toBe(100);
+    // Negativo não abate o total (o MoneyInput também trava em min 0).
+    expect(sumEncargosMensais({ condominio_mensal: 100, iptu_mensal: -50 })).toBe(100);
+  });
+
+  it("arredonda a 2 casas (sem lixo de float)", () => {
+    expect(sumEncargosMensais({ condominio_mensal: 0.1, iptu_mensal: 0.2 })).toBe(0.3);
+  });
+
+  it("aceita strings vindas de um dataJson cru", () => {
+    expect(
+      sumEncargosMensais({ condominio_mensal: "450", outros_encargos: "50" })
+    ).toBe(500);
+  });
+});
+
+describe("seedOutrosEncargos (migração suave do form legado)", () => {
+  it("joga o total legado em outros quando não há itens", () => {
+    expect(seedOutrosEncargos({ encargos: 500 })).toBe(500);
+  });
+
+  it("semeia só a diferença quando já há itens detalhados (caso OCR)", () => {
+    expect(
+      seedOutrosEncargos({ encargos: 500, iptu_mensal: 120, condominio_mensal: 300 })
+    ).toBe(80);
+  });
+
+  it("é idempotente — reabrir o form já migrado não semeia de novo", () => {
+    const primeiro = seedOutrosEncargos({ encargos: 500 });
+    expect(primeiro).toBe(500);
+    expect(seedOutrosEncargos({ encargos: 500, outros_encargos: primeiro })).toBeNull();
+  });
+
+  it("não semeia quando não há total legado ou os itens já o cobrem", () => {
+    expect(seedOutrosEncargos(null)).toBeNull();
+    expect(seedOutrosEncargos({})).toBeNull();
+    expect(seedOutrosEncargos({ encargos: 0 })).toBeNull();
+    expect(seedOutrosEncargos({ encargos: 100, condominio_mensal: 100 })).toBeNull();
+    // Itens maiores que o legado: a soma manda, nada a migrar.
+    expect(seedOutrosEncargos({ encargos: 100, condominio_mensal: 300 })).toBeNull();
+  });
+});
+
+describe("formato das sub-partes do fiador no finalize", () => {
+  const base = {
+    locadores: [{ tipo_pessoa: "fisica", nome: "João Locador" }],
+    locatarios: [{ tipo_pessoa: "fisica", nome: "Maria Locatária" }],
+    imovel: {
+      descricao: "Apartamento de 2 quartos no Centro",
+      rua: "Rua das Flores",
+      numero: "100",
+      cidade: "São Paulo",
+      uf: "SP",
+    },
+    aluguel: { valor: 2500, vigencia_inicio: "2026-06-01" },
+  };
+  const paths = (data: Record<string, unknown>) =>
+    collectLocacaoFinalizeIssues(data).map((i) => i.path);
+
+  it("valida CPF/telefone do cônjuge do fiador", () => {
+    const p = paths({
+      ...base,
+      garantia: {
+        tipo: "fiador",
+        fiador: {
+          tipo_pessoa: "fisica",
+          nome: "Carlos Fiador",
+          cpf: "39053344705",
+          endereco: "Rua X, 10",
+          conjuge: { nome: "Ana Fiadora", cpf: "11111111111", mobile_phone: "119" },
+        },
+      },
+    });
+    expect(p).toEqual(
+      expect.arrayContaining([
+        "garantia.fiador.conjuge.cpf",
+        "garantia.fiador.conjuge.mobile_phone",
+      ])
+    );
+  });
+
+  it("valida CPF do representante do fiador PJ", () => {
+    const p = paths({
+      ...base,
+      garantia: {
+        tipo: "fiador",
+        fiador: {
+          tipo_pessoa: "juridica",
+          razao_social: "Fiadora Ltda",
+          cnpj: "11222333000181",
+          representante: { nome: "Ana Representante", cpf: "11111111111" },
+        },
+      },
+    });
+    expect(p).toContain("garantia.fiador.representante.cpf");
   });
 });

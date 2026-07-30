@@ -23,6 +23,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
+import { MoneyInput } from "@/components/forms/MoneyInput";
+import { formatMoneyBR } from "@/lib/format/money";
 import { Plus, ChevronLeft, ChevronRight, Check } from "lucide-react";
 import { ImportarClientePicker, type ImportedTenant } from "@/components/locacao/ImportarClientePicker";
 
@@ -392,22 +394,22 @@ export function NovoContratoWizard({
 
           {step === 3 && (
             <div className="grid grid-cols-2 gap-3">
+              {/* Valores em R$ pelo MoneyInput (pt-BR). O estado continua string
+                  — `Number(...)` no submit segue funcionando. */}
               <div className="space-y-1">
                 <Label>Aluguel (R$)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={form.valorAluguel}
-                  onChange={(e) => setForm({ ...form, valorAluguel: e.target.value })}
+                <MoneyInput
+                  value={Number(form.valorAluguel) || 0}
+                  onChange={(v) => setForm({ ...form, valorAluguel: String(v) })}
+                  placeholder="Ex: 2.500,00"
                 />
               </div>
               <div className="space-y-1">
                 <Label>Encargos (R$)</Label>
-                <Input
-                  type="number"
-                  step="0.01"
-                  value={form.valorEncargos}
-                  onChange={(e) => setForm({ ...form, valorEncargos: e.target.value })}
+                <MoneyInput
+                  value={Number(form.valorEncargos) || 0}
+                  onChange={(v) => setForm({ ...form, valorEncargos: String(v) })}
+                  placeholder="Ex: 450,00"
                 />
               </div>
               <div className="space-y-1">
@@ -523,8 +525,8 @@ export function NovoContratoWizard({
                     ` · ${form.garantiaProvider}`}
                 </div>
                 <div>
-                  <strong>Aluguel:</strong> R$ {form.valorAluguel} · encargos R${" "}
-                  {form.valorEncargos} · vencimento dia {form.diaVencimento}
+                  <strong>Aluguel:</strong> {formatMoneyBR(form.valorAluguel)} · encargos{" "}
+                  {formatMoneyBR(form.valorEncargos)} · vencimento dia {form.diaVencimento}
                 </div>
                 <div>
                   <strong>Taxa adm:</strong> {form.taxaAdminPercent}% · índice{" "}
