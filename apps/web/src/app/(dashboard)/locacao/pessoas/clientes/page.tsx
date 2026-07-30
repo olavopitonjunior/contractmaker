@@ -7,6 +7,9 @@ import { NovoClienteDialog } from "@/components/locacao/NovoClienteDialog";
 import { ImportarCrmDialog } from "@/components/locacao/ImportarCrmDialog";
 import { summarizeSerasaJobs } from "@/lib/locacao/client-credit";
 import { LEASE_INSURERS, matchInsurerKey } from "@/lib/locacao/insurers";
+import { getEffectiveUserId } from "@/lib/auth/impersonation";
+import { getEffectivePermissions, can } from "@/lib/security/rbac/check";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const dynamic = "force-dynamic";
 
@@ -15,6 +18,18 @@ export default async function LocacaoClientesPage() {
   if (!session?.user?.id) redirect("/login");
   const org = await getUserOrg(session.user.id);
   if (!org) redirect("/");
+
+  // Defesa em profundidade (feature Gerente): lista org-wide de clientes. Quem
+  // só enxerga os deals atribuídos não vê a carteira inteira da imobiliária.
+  const effUserId = await getEffectiveUserId(session.user.id);
+  const effective = await getEffectivePermissions(effUserId, org.id);
+  const restricted =
+    can(effective, PERMISSION.DEAL_VIEW_ASSIGNED_ONLY) &&
+    !can(effective, PERMISSION.DEAL_VIEW_ALL);
+  const hasClientRead =
+    can(effective, PERMISSION.CUSTOMER_VIEW_ALL) ||
+    can(effective, PERMISSION.CLIENT_VIEW);
+  if (restricted && !hasClientRead) redirect("/pipeline");
 
   const clients = await prisma.leaseClient.findMany({
     where: { orgId: org.id },
