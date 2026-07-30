@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
+import { archiveAttachment } from "@/lib/attachments/archive";
 import {
   requireApiAuth,
   isAuthFailure,
@@ -128,7 +129,9 @@ export async function DELETE(
           pipeline: { select: { orgId: true } },
         },
       },
-      attachment: { select: { id: true, url: true, filename: true } },
+      // Linha inteira (não um select parcial): `archiveAttachment` grava o
+      // payload completo pra permitir restaurar depois.
+      attachment: true,
     },
   });
   if (!job || job.dealId !== params.dealId || !job.deal) {
@@ -157,26 +160,27 @@ export async function DELETE(
   }
 
   let attachmentDeleted = false;
+  let archivedId: string | null = null;
   if (withAttachment && job.attachment) {
-    // Best-effort: remove o blob no Vercel Blob (mesma heurística do
-    // endpoint de attachments). Falha no blob não bloqueia o delete da row.
-    if (
-      job.attachment.url &&
-      job.attachment.url.includes(".public.blob.vercel-storage.com")
-    ) {
-      try {
-        const { del } = await import("@vercel/blob");
-        await del(job.attachment.url);
-      } catch (err) {
-        console.warn(
-          "[certidao DELETE] falha ao remover blob:",
-          err instanceof Error ? err.message : err
-        );
-      }
-    }
-    // CertidaoJob.attachmentId é SET NULL no schema, mas como vamos deletar o
-    // job logo em seguida, deletar o anexo primeiro é seguro.
-    await prisma.dealAttachment.delete({ where: { id: job.attachment.id } });
+    // O `del()` incondicional que existia aqui era um bug: o blob é
+    // COMPARTILHADO por referência (o finalize do form copia a URL sem
+    // re-upload, e o PDF assinado é espelhado com a mesma URL em
+    // lib/clicksign/signed-pdf.ts), então apagar o objeto derrubava documentos
+    // de outras linhas vivas — o sintoma "documento sumiu" com a linha intacta.
+    // Hoje nenhum caminho apaga blob: a linha é arquivada e o objeto fica.
+    //
+    // CertidaoJob.attachmentId é SET NULL no schema, mas como o job é apagado
+    // logo em seguida, arquivar o anexo primeiro é seguro.
+    archivedId = await prisma.$transaction((tx) =>
+      archiveAttachment(tx, {
+        row: job.attachment!,
+        origin: "deal",
+        via: "certidao",
+        orgId: org.id,
+        userId: session.user.id,
+        ipAddress: req.headers.get("x-forwarded-for") ?? null,
+      })
+    );
     attachmentDeleted = true;
   }
 
@@ -192,8 +196,28 @@ export async function DELETE(
       endpoint: job.endpoint,
       status: job.status,
       attachmentDeleted,
+      archivedId,
     },
   });
 
-  return NextResponse.json({ ok: true, attachmentDeleted });
+  // `ATTACHMENT_DELETE` separado: sem isto, uma busca no AuditLog por exclusão
+  // de anexo não encontrava nada desta rota — o rastro ficava escondido atrás
+  // de uma ação de certidão.
+  if (archivedId && job.attachment) {
+    await audit(extractAuditContextFromRequest(req, org.id, session.user.id), {
+      action: "ATTACHMENT_DELETE",
+      result: "SUCCESS",
+      resource: job.attachment.id,
+      resourceType: "DealAttachment",
+      metadata: {
+        dealId: params.dealId,
+        filename: job.attachment.filename,
+        via: "certidao",
+        archivedId,
+        recoverable: true,
+      },
+    });
+  }
+
+  return NextResponse.json({ ok: true, attachmentDeleted, archivedId });
 }

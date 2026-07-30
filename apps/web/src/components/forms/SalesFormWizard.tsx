@@ -67,6 +67,15 @@ interface SalesFormWizardProps {
    */
   proposalAttachmentUrl?: string | null;
   /**
+   * Visitante é membro da org dona do form (`viewerIsOrgMember`, server-side).
+   * Duas coisas dependem dele, ambas por o link público estar normalmente com o
+   * CLIENTE: os campos de recebimento da comissão (PIX/conta) na etapa de
+   * Comissão, e remover documento na etapa 0. Default `false`, e o subtoken por
+   * parte nunca é membro. Nos dois casos o servidor é o guard autoritativo
+   * (403); isto aqui é a metade visual.
+   */
+  viewerIsMember?: boolean;
+  /**
    * Subset de step indexes (0..7) a mostrar. Usado por subtoken (PR 4)
    * pra esconder steps que não pertencem ao role (vendedor não vê
    * comprador, comprador não vê imóvel/comissão/pagamento). Quando
@@ -427,6 +436,7 @@ export function SalesFormWizard({
   requiredFieldsByStep,
   prefilled,
   proposalAttachmentUrl,
+  viewerIsMember = false,
   stepIndexes,
   endpoint,
   pathScope,
@@ -825,13 +835,19 @@ export function SalesFormWizard({
       token={token}
       allowedTopKeys={pathScope}
       selfAssignment={selfAssignment}
+      viewerIsMember={viewerIsMember}
     />,
     <VendedorStep key="step-1" form={form} />,
     <CompradorStep key="step-2" form={form} />,
     <ImovelStep key="step-3" form={form} />,
     <StatusDebitosStep key="step-4" form={form} />,
     <PagamentoStep key="step-5" form={form} />,
-    <ComissaoConfigStep key="step-6" form={form} token={token} />,
+    <ComissaoConfigStep
+      key="step-6"
+      form={form}
+      token={token}
+      viewerIsMember={viewerIsMember}
+    />,
   ];
 
   return (

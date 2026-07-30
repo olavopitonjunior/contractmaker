@@ -43,9 +43,16 @@ export interface SendFormSummaryResult {
 const CATEGORY = "resumo_formulario";
 
 /**
- * Sobe o PDF pra storage e persiste como DealAttachment, substituindo a versão
- * anterior da mesma categoria (o PDF regenerado tem hash novo a cada envio,
- * então dedupe por conteúdo não serve — replace explícito). Retorna a URL.
+ * Sobe o PDF pra storage e persiste como DealAttachment. Retorna a URL.
+ *
+ * Era um `deleteMany({ dealId, category })` seguido de `create` — o ÚNICO
+ * caminho do sistema que apagava documento sem clique de ninguém, e sem audit.
+ * Dois problemas: (1) o `category` do PATCH de anexo não tinha whitelist, então
+ * quem reclassificasse um documento seu pra "resumo_formulario" o perdia no
+ * próximo envio; (2) o form é reabrível e cada re-finalize re-executava o
+ * delete. Agora nada é apagado: a chave do blob é determinística por
+ * (dealId, formId), então re-envio sobrescreve o MESMO objeto e a linha
+ * existente é atualizada no lugar.
  */
 export async function persistFormSummaryPdf(
   dealId: string,
@@ -60,18 +67,30 @@ export async function persistFormSummaryPdf(
     body: buffer,
     contentType: "application/pdf",
   });
-  await prisma.dealAttachment.deleteMany({ where: { dealId, category: CATEGORY } });
-  await prisma.dealAttachment.create({
-    data: {
-      dealId,
-      filename,
-      mime: "application/pdf",
-      url,
-      category: CATEGORY,
-      source: "form_summary",
-      byteSize: buffer.byteLength,
-    },
+  // Casa por URL (determinística) E por `source`, nunca só por categoria: a
+  // categoria é editável pelo usuário, a origem não.
+  const existing = await prisma.dealAttachment.findFirst({
+    where: { dealId, url, source: "form_summary" },
+    select: { id: true },
   });
+  if (existing) {
+    await prisma.dealAttachment.update({
+      where: { id: existing.id },
+      data: { filename, byteSize: buffer.byteLength, category: CATEGORY },
+    });
+  } else {
+    await prisma.dealAttachment.create({
+      data: {
+        dealId,
+        filename,
+        mime: "application/pdf",
+        url,
+        category: CATEGORY,
+        source: "form_summary",
+        byteSize: buffer.byteLength,
+      },
+    });
+  }
   return url;
 }
 

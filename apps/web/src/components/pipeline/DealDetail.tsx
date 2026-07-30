@@ -1059,8 +1059,9 @@ export function DealDetail({
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir este documento?</AlertDialogTitle>
             <AlertDialogDescription>
-              O arquivo será removido do negócio. Certidões emitidas que apontavam
-              para este documento ficam órfãs (não são apagadas). Não pode ser desfeito.
+              O arquivo sai da pasta e vai para &quot;Documentos removidos&quot;, logo
+              abaixo — dá para restaurar depois. Certidões emitidas que apontavam
+              para este documento ficam órfãs (não são apagadas).
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -2242,6 +2243,8 @@ function DocumentsTab({
         );
       })}
 
+      <DocumentosRemovidos dealId={dealId} attachmentCount={fallbackAttachments.length} />
+
       <SendAttachmentEnvelopeDialog
         open={!!signAttachmentId}
         onOpenChange={(o) => {
@@ -2263,5 +2266,160 @@ function DocumentsTab({
         }}
       />
     </div>
+  );
+}
+
+/**
+ * "Documentos removidos" — a outra metade do arquivo de exclusões.
+ *
+ * Excluir documento deixou de ser destrutivo: a linha vai pra
+ * `DeletedAttachment` e o blob é preservado. Sem esta lista o corretor não teria
+ * como saber que dá pra desfazer, e o arquivo viraria só um registro de
+ * auditoria invisível.
+ *
+ * Fica recolhido e só aparece quando há algo removido — a pasta é do trabalho
+ * do dia, não do histórico.
+ */
+/**
+ * Data/hora determinística, sem `Intl`. `toLocaleString` renderiza diferente no
+ * servidor e no cliente (fuso/ICU) e quebra a hidratação — React #418/#423, que
+ * derruba a subárvore inteira. Este componente aparece justamente na aba onde
+ * isso foi observado em produção.
+ */
+function formatDeletedAt(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)}/${d.getFullYear()} ${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function DocumentosRemovidos({
+  dealId,
+  attachmentCount,
+}: {
+  dealId: string;
+  /**
+   * Muda quando um documento é removido (ou restaurado). Entra nas deps do
+   * efeito porque `router.refresh()` re-renderiza o server component mas NÃO
+   * remonta este client component nem re-dispara o efeito — sem isto, o
+   * documento recém-excluído só aparecia aqui depois de recarregar a página.
+   */
+  attachmentCount: number;
+}) {
+  interface RemovedItem {
+    id: string;
+    filename: string;
+    category: string | null;
+    origin: string;
+    deletedVia: string;
+    deletedAt: string;
+    restored: boolean;
+  }
+  const router = useRouter();
+  const [items, setItems] = useState<RemovedItem[] | null>(null);
+  const [open, setOpen] = useState(false);
+  const [restoring, setRestoring] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/deals/${dealId}/attachments/restore`)
+      .then((r) => (r.ok ? r.json() : { items: [] }))
+      .then((d) => {
+        if (!cancelled) setItems(Array.isArray(d?.items) ? d.items : []);
+      })
+      .catch(() => {
+        if (!cancelled) setItems([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [dealId, attachmentCount]);
+
+  if (!items || items.length === 0) return null;
+
+  const handleRestore = async (archivedId: string) => {
+    setRestoring(archivedId);
+    try {
+      const res = await fetch(`/api/deals/${dealId}/attachments/restore`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ archivedId }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(data?.error ?? "Falha ao restaurar documento.");
+        return;
+      }
+      toast.success("Documento restaurado.");
+      setItems((prev) =>
+        prev
+          ? prev.map((i) => (i.id === archivedId ? { ...i, restored: true } : i))
+          : prev
+      );
+      router.refresh();
+    } catch {
+      toast.error("Erro ao restaurar documento.");
+    } finally {
+      setRestoring(null);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader className="pb-2">
+        <button
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="flex w-full items-center justify-between text-left"
+        >
+          <CardTitle className="text-sm text-muted-foreground">
+            Documentos removidos{" "}
+            <span className="font-normal">({items.length})</span>
+          </CardTitle>
+          <span className="text-xs text-muted-foreground">
+            {open ? "Ocultar" : "Ver"}
+          </span>
+        </button>
+      </CardHeader>
+      {open && (
+        <CardContent className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            Nada é apagado de vez: o arquivo continua guardado e pode voltar pra
+            pasta.
+          </p>
+          {items.map((item) => (
+            <div
+              key={item.id}
+              className="flex items-center justify-between gap-3 rounded-md border p-2 text-sm"
+            >
+              <div className="min-w-0">
+                <p className="truncate font-medium">{item.filename}</p>
+                <p className="text-xs text-muted-foreground">
+                  {formatDeletedAt(item.deletedAt)}
+                  {item.origin === "form" ? " · do formulário" : ""}
+                </p>
+              </div>
+              {item.restored ? (
+                <span className="shrink-0 text-xs text-green-700 dark:text-green-400">
+                  restaurado
+                </span>
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0 text-xs"
+                  disabled={restoring === item.id}
+                  onClick={() => handleRestore(item.id)}
+                >
+                  <ArchiveRestore className="mr-1.5 h-3.5 w-3.5" />
+                  {restoring === item.id ? "Restaurando..." : "Restaurar"}
+                </Button>
+              )}
+            </div>
+          ))}
+        </CardContent>
+      )}
+    </Card>
   );
 }

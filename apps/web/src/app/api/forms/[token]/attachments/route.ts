@@ -4,7 +4,9 @@ import { Prisma } from "@prisma/client";
 import { put } from "@vercel/blob";
 import { prisma } from "@/lib/db/prisma";
 import { resolveFormScope, formLockedResponse } from "@/lib/forms/resolve-form-scope";
-import { formClosedResponse } from "@/lib/forms/form-gate";
+import { formClosedResponse, viewerIsOrgMember } from "@/lib/forms/form-gate";
+import { audit } from "@/lib/security/audit";
+import { archiveAttachment } from "@/lib/attachments/archive";
 import { signatureMatchesMime } from "@/lib/security/file-signature";
 import { RateLimits } from "@/lib/security/ratelimit";
 import {
@@ -29,6 +31,17 @@ function stripAssignment(ed: unknown): Prisma.InputJsonValue | undefined {
   return rest as Prisma.InputJsonValue;
 }
 
+// ⚠️ Teto REAL aqui é ~4.5MB, não 10: este POST recebe o arquivo pelo CORPO da
+// função (`req.formData()`), e a Vercel corta o corpo de função serverless
+// nesse tamanho — um PDF de 6MB morre com 413 opaco da plataforma antes de
+// chegar nesta constante. Os anexos do NEGÓCIO já não têm esse problema:
+// `attachments/blob-upload` emite token e o navegador sobe direto pro Blob.
+//
+// Migrar esta rota pro mesmo desenho é o que remove o limite de verdade, e não
+// é trocar um número: o servidor deixa de ver os bytes, então
+// `signatureMatchesMime` (magic bytes — o content-type do formData é forjável)
+// precisa passar a rodar sobre o objeto já no storage. Enquanto isso não
+// acontece, subir esta constante só troca um erro claro por um opaco.
 const MAX_BYTES = 10 * 1024 * 1024;
 const ALLOWED_MIMES = [
   "image/jpeg",
@@ -200,6 +213,31 @@ export async function POST(
       },
     });
 
+    // Sem isto o upload no formulário não deixava rastro nenhum, e comparar
+    // "o que entrou" com "o que está lá" — a pergunta que se faz quando alguém
+    // diz que um documento sumiu — era impossível.
+    await audit(
+      {
+        orgId: scope.orgId,
+        userId: null,
+        ipAddress: req.headers.get("x-forwarded-for") ?? null,
+        userAgent: req.headers.get("user-agent") ?? null,
+      },
+      {
+        action: "FORM_ATTACHMENT_UPLOAD",
+        result: "SUCCESS",
+        resource: attachment.id,
+        resourceType: "FormAttachment",
+        metadata: {
+          formId: form.id,
+          filename: file.name,
+          byteSize: buffer.byteLength,
+          byParticipant: scope.participantId ?? null,
+          ocrCacheHit: !!cached,
+        },
+      }
+    );
+
     // NÃO dispara worker fire-and-forget. Extração agora é on-demand:
     // o usuário clica "Extrair com IA" no card e o cliente bate em
     // POST /attachments/[id]/extract. Cache hit (cached !== null) já tem
@@ -319,6 +357,25 @@ export async function DELETE(
   const closed = await formClosedResponse(scope);
   if (closed) return closed;
 
+  // Só quem é da imobiliária exclui. Esta rota era ANÔNIMA: qualquer portador
+  // do link `/f/[token]` — comprador, vendedor, quem recebeu encaminhado —
+  // apagava documento de qualquer parte, e sem audit nenhum. Era o buraco que
+  // tornava impossível responder "esse documento sumiu, quem apagou?".
+  //
+  // O subtoken segue podendo remover o que ELE mesmo enviou: é correção do
+  // próprio upload, não exclusão de documento alheio.
+  const viewerIsMember = await viewerIsOrgMember(scope.orgId);
+  if (!viewerIsMember && !scope.participantId) {
+    return NextResponse.json(
+      {
+        error:
+          "Só a imobiliária pode remover documentos. Envie o arquivo correto — ela organiza depois.",
+        reason: "member_only",
+      },
+      { status: 403 }
+    );
+  }
+
   const attachment = await prisma.formAttachment.findUnique({
     where: { id },
   });
@@ -330,16 +387,44 @@ export async function DELETE(
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // Deleta a ROW primeiro; só remove o blob se ninguém mais o referenciar. O
-  // finalize copia FormAttachment.url pro DealAttachment.url (mesmo objeto, sem
-  // re-upload) — apagar o blob aqui incondicionalmente órfãva a matrícula/RG já
-  // copiados pro deal. `deleteBlobIfUnreferenced` faz o ref-count antes.
-  await prisma.formAttachment.delete({ where: { id } });
-
-  const { deleteBlobIfUnreferenced } = await import(
-    "@/lib/contracts/delete-cleanup"
+  // Arquiva e apaga na MESMA transação, e NÃO toca no blob. Antes chamávamos
+  // `deleteBlobIfUnreferenced`, e quando nada mais referenciava a URL o objeto
+  // ia embora — foi o que impediu recuperar o documento do caso que originou
+  // esta mudança. `DeletedAttachment.url` entra em BLOB_REF_CHECKS, então nada
+  // trata o objeto como órfão enquanto houver linha arquivada.
+  const archivedId = await prisma.$transaction((tx) =>
+    archiveAttachment(tx, {
+      row: attachment,
+      origin: "form",
+      via: "ui_form",
+      orgId: scope.orgId,
+      userId: null,
+      ipAddress: req.headers.get("x-forwarded-for") ?? null,
+    })
   );
-  await deleteBlobIfUnreferenced(prisma, attachment.url);
 
-  return NextResponse.json({ ok: true });
+  await audit(
+    {
+      orgId: scope.orgId,
+      userId: null,
+      ipAddress: req.headers.get("x-forwarded-for") ?? null,
+      userAgent: req.headers.get("user-agent") ?? null,
+    },
+    {
+      action: "FORM_ATTACHMENT_DELETE",
+      result: "SUCCESS",
+      resource: attachment.id,
+      resourceType: "FormAttachment",
+      metadata: {
+        formId: scope.formId,
+        filename: attachment.filename,
+        category: attachment.category,
+        byParticipant: scope.participantId ?? null,
+        archivedId,
+        recoverable: true,
+      },
+    }
+  );
+
+  return NextResponse.json({ ok: true, archivedId, recoverable: true });
 }

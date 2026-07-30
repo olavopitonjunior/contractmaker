@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db/prisma";
 import { resolveFormRequiredFields } from "@/lib/forms/required-snapshot";
-import { canAccessForm } from "@/lib/forms/form-gate";
+import { canAccessForm, viewerIsOrgMember } from "@/lib/forms/form-gate";
 import { FormClosedNotice } from "@/components/forms/FormClosedNotice";
 import { FormPageClient } from "../form-client";
 
@@ -47,6 +47,13 @@ export default async function PublicFormPage({
     proposalAttachmentUrl = proposalAttachment?.url ?? null;
   }
 
+  // Duas coisas ficam só pra quem é da imobiliária, porque o link é entregue ao
+  // CLIENTE: os campos de recebimento da comissão (não é lugar de pedir dado
+  // bancário de terceiro pra ele) e remover documento (antes qualquer portador
+  // apagava documento de qualquer parte, sem deixar rastro). Nos dois casos o
+  // servidor faz a MESMA checagem — esconder sem barrar seria só cosmético.
+  const viewerIsMember = await viewerIsOrgMember(form.orgId);
+
   return (
     <FormPageClient
       token={form.token}
@@ -56,6 +63,7 @@ export default async function PublicFormPage({
       prefilled={isPrefilled}
       proposalAttachmentUrl={proposalAttachmentUrl}
       locked={Boolean(form.lockedAt)}
+      viewerIsMember={viewerIsMember}
     />
   );
 }

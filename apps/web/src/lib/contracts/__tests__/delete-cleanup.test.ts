@@ -13,6 +13,8 @@ vi.mock("@/lib/storage/s3", () => ({
 }));
 
 type Counts = Partial<{
+  /** Arquivo de exclusões — segura o blob de um documento removido. */
+  archived: number;
   deal: number;
   form: number;
   proposal: number; // proposalAttachment
@@ -33,6 +35,7 @@ type Counts = Partial<{
 
 function makeDb(counts: Counts) {
   return {
+    deletedAttachment: { count: vi.fn().mockResolvedValue(counts.archived ?? 0) },
     dealAttachment: { count: vi.fn().mockResolvedValue(counts.deal ?? 0) },
     formAttachment: { count: vi.fn().mockResolvedValue(counts.form ?? 0) },
     proposalAttachment: { count: vi.fn().mockResolvedValue(counts.proposal ?? 0) },
@@ -64,6 +67,18 @@ describe("deleteBlobIfUnreferenced (ref-count guard)", () => {
   it("mantém o blob quando outra tabela ainda o referencia", async () => {
     const db = makeDb({ form: 1 }); // FormAttachment ainda aponta pra esse blob
     const outcome = await deleteBlobIfUnreferenced(db, "https://blob.test/x.pdf");
+    expect(outcome).toBe("kept");
+    expect(deleteFromStorage).not.toHaveBeenCalled();
+  });
+
+  it("mantém o blob de um documento ARQUIVADO (restauração depende disso)", async () => {
+    // Invariante central do arquivo de exclusões: excluir documento não apaga
+    // o objeto no storage. `DeletedAttachment` é a ÚNICA linha que sobra
+    // apontando pra URL, então se ela não contasse como referência o blob
+    // sumiria e "restaurar" devolveria um 404 — que foi exatamente o que
+    // impediu recuperar o documento do caso que originou este trabalho.
+    const db = makeDb({ archived: 1 });
+    const outcome = await deleteBlobIfUnreferenced(db, "https://blob.test/removido.pdf");
     expect(outcome).toBe("kept");
     expect(deleteFromStorage).not.toHaveBeenCalled();
   });

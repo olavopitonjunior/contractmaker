@@ -112,20 +112,33 @@ export interface CommissionerReceivingExtras {
 export async function createCommissioner(
   orgId: string,
   input: CommissionerInput,
-  extras?: CommissionerReceivingExtras
+  extras?: CommissionerReceivingExtras,
+  opts?: { unverifiedSource?: boolean }
 ): Promise<SplitRecipient> {
   const doc = normalizeDoc(input.cpf || input.cnpj);
   const hasPix = !!extras?.pix?.chave;
-  const hasBank = !!(
-    extras?.banco?.nome &&
-    extras?.banco?.agencia &&
-    extras?.banco?.conta
-  );
   const recipientType = hasPix ? "pix_external" : "asaas_wallet";
-  const pendingFields: string[] = [];
-  if (!hasPix && !hasBank) {
-    pendingFields.push(recipientType === "pix_external" ? "pixAddressKey" : "walletId");
-  }
+  // Só PIX (ou walletId, que nunca vem por aqui) tira o cadastro do rascunho.
+  // Dados bancários NÃO: `composeSplits`/`splitDispatcher` só conhecem
+  // `asaas_wallet` (walletId) e `pix_external` (pixAddressKey) — conta bancária
+  // é TED manual, fora da esteira. Dar `active: true` a um recipient
+  // `asaas_wallet` com walletId nulo o colocaria no seletor de split do wizard
+  // e a cobrança só quebraria lá na frente, no Asaas (invalid_walletId).
+  // Mesma convenção do cadastro admin (POST /api/financeiro/split-recipients,
+  // que exige walletId ou chave PIX pra sair de pendingFields).
+  //
+  // `unverifiedSource`: origem anônima (form público). A chave PIX é GRAVADA,
+  // mas o cadastro NÃO nasce pagável — quem tem o link do formulário não provou
+  // ser o dono do documento que digitou, e um cadastro ativo com chave de
+  // terceiro desvia repasse. Fica em pendingFields ["pixAddressKey"], que o
+  // splitDispatcher já pula, e a confirmação (admin em /corretores ou o próprio
+  // corretor pelo magic link enviado ao e-mail que a imobiliária conhece) é a
+  // prova de posse que falta.
+  const pendingFields: string[] = !hasPix
+    ? ["walletId"]
+    : opts?.unverifiedSource
+      ? ["pixAddressKey"]
+      : [];
   const isDraft = pendingFields.length > 0;
 
   return prisma.splitRecipient.create({

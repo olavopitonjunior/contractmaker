@@ -14,6 +14,13 @@ interface FormPageClientProps {
   proposalAttachmentUrl?: string | null;
   /** Form travado (SalesForm.lockedAt) → wizard somente-leitura. */
   locked?: boolean;
+  /**
+   * Visitante tem OrgMembership na org do form (`viewerIsOrgMember`, resolvido
+   * server-side). Libera os campos de recebimento da comissão na etapa de
+   * Comissão E remover documento na etapa 0 — o link público está normalmente
+   * com o cliente, que não deve ver nem uma coisa nem outra.
+   */
+  viewerIsMember?: boolean;
 }
 
 export function FormPageClient({
@@ -24,6 +31,7 @@ export function FormPageClient({
   prefilled,
   proposalAttachmentUrl,
   locked,
+  viewerIsMember,
 }: FormPageClientProps) {
   const isLocacao = isLocacaoSchemaType(schemaType);
 
@@ -50,6 +58,7 @@ export function FormPageClient({
             schemaType={schemaType}
             requiredFieldsByStep={requiredFieldsByStep}
             readOnly={locked}
+            viewerIsMember={viewerIsMember}
           />
         ) : (
           <SalesFormWizard
@@ -59,6 +68,7 @@ export function FormPageClient({
             prefilled={prefilled}
             proposalAttachmentUrl={proposalAttachmentUrl}
             readOnly={locked}
+            viewerIsMember={viewerIsMember}
           />
         )}
       </main>

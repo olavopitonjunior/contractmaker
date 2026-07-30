@@ -100,8 +100,19 @@ vi.mock("@/lib/db/prisma", () => {
       findMany: vi.fn().mockResolvedValue([]),
       create: vi.fn(),
       createMany: vi.fn(),
+      update: vi.fn(),
       delete: vi.fn(),
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
+    },
+    // Arquivo permanente de anexos excluídos. `count` default 0 pro
+    // ref-check de blob; `create` devolve id pra archiveAttachment.
+    deletedAttachment: {
+      findUnique: vi.fn(),
+      findFirst: vi.fn(),
+      findMany: vi.fn().mockResolvedValue([]),
+      create: vi.fn().mockResolvedValue({ id: "archived-mock" }),
+      createMany: vi.fn().mockResolvedValue({ count: 0 }),
+      count: vi.fn().mockResolvedValue(0),
     },
     diligentedPerson: {
       findMany: vi.fn().mockResolvedValue([]),

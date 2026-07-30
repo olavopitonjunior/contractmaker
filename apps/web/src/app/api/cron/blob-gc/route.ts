@@ -18,14 +18,17 @@ export const maxDuration = 60;
  * o resíduo TOCTOU do PR #150. Ver lib/storage/orphan-gc.ts pras invariantes de
  * segurança (escopo por prefixo, ref-check abrangente, carência, stores por env).
  *
- * DRY-RUN por padrão: só reporta os candidatos. Deleção real exige
- * `BLOB_GC_DELETE=true` — assim o deploy do cron NÃO apaga nada até revisar o que
- * ele reportaria. Só opera com Vercel Blob (listStorage retorna vazio em S3/local).
+ * ⛔ RELATÓRIO APENAS — NUNCA APAGA. Decisão de produto (2026-07-30): o sistema
+ * não exclui nada automaticamente. A env `BLOB_GC_DELETE` deixou de ser lida e
+ * o cron saiu do vercel.json; o que sobra é um endpoint manual de diagnóstico,
+ * pra responder "quanto lixo de storage existe" sem tocar em nada.
  *
- * ⚠️ PRÉ-CONDIÇÃO de BLOB_GC_DELETE=true: o Blob store DESTE ambiente NÃO pode ser
- * compartilhado com outro (prod ≠ staging hoje). Num store compartilhado o GC de
- * um ambiente apagaria blobs vivos do outro (ver orphan-gc.ts). Rollout: rodar
- * dry-run, revisar os candidatos reportados, e só então setar BLOB_GC_DELETE.
+ * Contexto de quem for reativar: um documento excluído hoje tem o blob
+ * PRESERVADO de propósito (`DeletedAttachment` guarda a linha e a URL entra em
+ * BLOB_REF_CHECKS), porque é isso que torna a restauração possível. Um GC que
+ * apague por "órfão" reintroduz exatamente a perda que este trabalho fechou.
+ * Se um dia houver custo de storage que justifique, a conversa é sobre expurgo
+ * explícito e auditado — não sobre religar esta flag.
  */
 export async function GET(req: NextRequest) {
   const cronDenied = requireCronAuth(req);
@@ -34,7 +37,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ skipped: "staging-disabled", path: "/api/cron/blob-gc" });
   }
 
-  const apply = process.env.BLOB_GC_DELETE === "true";
+  // Travado em false. Não é configurável: ver o bloco de doc acima.
+  const apply = false;
   // Só o ambiente staging varre as variantes `staging/<prefix>`. Em prod, varrer
   // `staging/` apagaria blobs de staging se o token do Blob fosse compartilhado
   // (defesa cross-env — ver orphan-gc.ts). Rotação semanal do prefixo inicial

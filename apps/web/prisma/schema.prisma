@@ -685,6 +685,11 @@ model DealAttachment {
   // com LeadAttachment. Forward-only: anexos antigos ficam null (dedupe cai pra
   // url). Sem @@unique dura — a dedupe é no código (evita 500 em corrida/legado).
   contentHash   String?
+  // Setado quando a linha nasceu de uma restauração: aponta pro
+  // `DeletedAttachment.id` de origem. Sem FK — o arquivo é imutável e não pode
+  // cascatear nada. Serve pra UI não oferecer "restaurar" de novo pra algo que
+  // já voltou (o registro do arquivo é mantido como histórico).
+  restoredFromId String?
   createdAt     DateTime @default(now())
 
   deal         Deal          @relation(fields: [dealId], references: [id], onDelete: Cascade)
@@ -694,6 +699,53 @@ model DealAttachment {
   @@index([dealId])
   @@index([dealId, category])
   @@index([contentHash])
+  @@index([restoredFromId])
+}
+
+/// Arquivo PERMANENTE de anexos excluídos (deal e formulário).
+///
+/// Por que existe: `DELETE /api/forms/[token]/attachments` era anônimo e não
+/// escrevia audit nenhum — não havia como responder "esse documento foi
+/// excluído por quem, quando?". A linha aqui é a fonte da verdade do rastro
+/// (escrita na MESMA transação do delete), e `audit()` é só o índice
+/// pesquisável, porque ele engole exceção por design.
+///
+/// Nada expurga esta tabela: por decisão de produto o sistema não apaga nada
+/// automaticamente. Não há `purgeAfter` nem cron de retenção, e o blob no
+/// storage também nunca é removido — é o que torna a restauração real.
+///
+/// Sem FK para Deal/SalesForm DE PROPÓSITO: `Deal → DealAttachment` é
+/// `onDelete: Cascade`, então uma FK aqui levaria o arquivo junto ao apagar o
+/// deal — exatamente o registro que precisa sobreviver. `dealId`/`formId` são
+/// colunas soltas, e a restauração recusa quando o pai não existe mais.
+model DeletedAttachment {
+  id              String   @id @default(cuid())
+  orgId           String
+  /// "deal" | "form" — de qual tabela a linha veio.
+  origin          String
+  /// Id da linha original. Não é único: reexcluir um anexo restaurado gera
+  /// uma segunda entrada, e as duas importam para a história.
+  originalId      String
+  dealId          String?
+  formId          String?
+  filename        String
+  url             String
+  category        String?
+  /// Linha original inteira, para recriar no restore sem depender de o schema
+  /// atual ter as mesmas colunas de quando foi excluída.
+  payload         Json
+  /// Null quando a exclusão veio de rota pública/anônima (era o caso do
+  /// formulário antes do gate de membro).
+  deletedByUserId String?
+  /// "ui_deal" | "ui_form" | "deal_delete" | "certidao"
+  deletedVia      String
+  ipAddress       String?
+  deletedAt       DateTime @default(now())
+
+  @@index([orgId, deletedAt])
+  @@index([dealId])
+  @@index([formId])
+  @@index([url])
 }
 
 model CertidaoJob {
