@@ -1,0 +1,356 @@
+{{!--
+  ORIGEM: fichas PDF "PROPOSTA DE LOCAÇÃO" da RE/MAX Ativa I (4 arquivos),
+  convertidas em 2026-07-30 e APROVADAS pelo dono do produto.
+  COBERTURA: 6 combinações (locatário PF|PJ × fiador PF|PJ|sem) num arquivo só.
+  O rótulo "MORADOR" das fichas PF/PJ foi normalizado para "FIADOR" (decisão aprovada).
+--}}
+{{!--
+  PROPOSTA DE LOCAÇÃO — RE/MAX Ativa I (CRECI 25319-J)
+  ---------------------------------------------------------------------------
+  Arquivo ÚNICO que cobre as 4 fichas da Ativa. Os blocos trocam sozinhos:
+
+    locatarios.[0].tipo_pessoa      "fisica"  -> ficha PF
+                                    "juridica" -> ficha PJ (+ 2 representantes)
+    garantia.tipo === "fiador"      -> imprime a 2ª página "FIADOR"
+    garantia.fiador.tipo_pessoa     "fisica"  -> fiador PF (+ cônjuge + imóveis)
+                                    "juridica" -> fiador PJ (+ 2 representantes)
+
+  A caixa das 3 cláusulas fica sempre na ÚLTIMA página (pág. 1 quando não há
+  fiador, pág. 2 quando há) — igual ao original.
+
+  schemaType: locacao_residencial_v1 / locacao_comercial_v1
+  modalidade: proposta_locacao_residencial / proposta_locacao_comercial
+
+  Só usa helpers registrados em lib/render/handlebars.ts:
+  moeda · cpf · cnpj · dataExtenso · numero · existe · eq · gt · or
+  Campos do formulário da Ativa que NÃO têm chave no schema de locação ficam
+  como linha pautada em branco (para preenchimento manual) — lista em resumo.md.
+--}}
+
+{{#*inline "campoPF"}}
+  <tr>
+    <td colspan="3" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nome</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.nome}}</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Data de Nasc.</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{dataExtenso this.data_nascimento}}</div></td>
+  </tr>
+  <tr>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">CPF</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{cpf this.cpf}}</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">RG</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.rg}}</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Estado civil</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.estado_civil}}</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nacionalidade</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.nacionalidade}}</div></td>
+  </tr>
+  <tr>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nº Celular</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.mobile_phone}}</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nº Fone</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nº Recado</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Outros</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+  </tr>
+  <tr>
+    <td colspan="4" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">E-mail</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.email}}</div></td>
+  </tr>
+  <tr>
+    <td colspan="2" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Endereço</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.endereco}}</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nº</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.numero}}</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Compl.</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.complemento}}</div></td>
+  </tr>
+  <tr>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Bairro</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.bairro}}</div></td>
+    <td colspan="2" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Cidade/Município</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.cidade}}</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">UF</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.uf}}</div></td>
+  </tr>
+  <tr>
+    <td colspan="2" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Profissão</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.profissao}}</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Salário atual</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{#if (gt this.renda_mensal 0)}}{{moeda this.renda_mensal}}{{/if}}</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Outras rendas</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+  </tr>
+  <tr>
+    <td colspan="2" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Empresa</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Data de admissão</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Tempo</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+  </tr>
+  <tr>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Endereço da empresa</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nº</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Compl.</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Bairro</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+  </tr>
+  <tr>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Cidade/Município</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">UF</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Responsável</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nº Fone</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+  </tr>
+{{/inline}}
+
+{{#*inline "campoRepr"}}
+  <tr>
+    <td colspan="3" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nome</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.nome}}</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Data de Nasc.</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+  </tr>
+  <tr>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">CPF</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{cpf this.cpf}}</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">RG</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Estado civil</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nacionalidade</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+  </tr>
+  <tr>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nº Celular</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.mobile_phone}}</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nº Fone</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nº Recado</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Outros</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+  </tr>
+  <tr>
+    <td colspan="4" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">E-mail</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.email}}</div></td>
+  </tr>
+  <tr>
+    <td colspan="2" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Endereço</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">nº</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Compl.</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+  </tr>
+  <tr>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Bairro</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td colspan="2" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Cidade/Município</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">UF</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+  </tr>
+  <tr>
+    <td colspan="2" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Profissão</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Salário atual</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Outras rendas</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+  </tr>
+{{/inline}}
+
+{{#*inline "campoPJ"}}
+  <tr>
+    <td colspan="3" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Razão Social</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.razao_social}}</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Data de Abertura</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+  </tr>
+  <tr>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">CNPJ</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{cnpj this.cnpj}}</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">I.E</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">CNAE</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Segmento</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+  </tr>
+  <tr>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nº Celular</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nº Fone</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nº Recado</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Outros</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+  </tr>
+  <tr>
+    <td colspan="4" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">E-mail</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+  </tr>
+  <tr>
+    <td colspan="2" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Endereço da empresa</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.endereco}}</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">nº</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.numero}}</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Compl.</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.complemento}}</div></td>
+  </tr>
+  <tr>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Bairro</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.bairro}}</div></td>
+    <td colspan="2" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Cidade/Município</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.cidade}}</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">UF</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{this.uf}}</div></td>
+  </tr>
+  <tr>
+    <td colspan="4" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Faturamento</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{#if (gt this.faturamento_mensal 0)}}{{moeda this.faturamento_mensal}}{{/if}}</div></td>
+  </tr>
+{{/inline}}
+
+{{#*inline "referencias"}}
+  <tr>
+    <td colspan="4" style="background:#d9d9d9;border:1px solid #000;padding:3px 7px;font-size:8.5pt;font-weight:bold;">REFERÊNCIAS</td>
+  </tr>
+  <tr>
+    <td colspan="2" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nome</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Parentesco</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nº Fone</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+  </tr>
+  <tr>
+    <td colspan="2" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Empresa</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Gerente</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nº Fone</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+  </tr>
+{{/inline}}
+
+{{#*inline "clausulas"}}
+  <table style="width:100%;border-collapse:collapse;border:1px solid #000;margin-top:10px;">
+    <tr><td style="padding:4px 7px;font-size:7.5pt;line-height:1.35;border-bottom:1px solid #000;"><strong>1-</strong> Nos termos do artigo 427 do Código Civil, a assinatura desta proposta de locação torna-a irrevogável pelo proponente/locatário. A desistência implicará no pagamento de multa compensatória ao locador/administradora, equivalente a um mês de aluguel, a título de perdas e danos.</td></tr>
+    <tr><td style="padding:4px 7px;font-size:7.5pt;line-height:1.35;border-bottom:1px solid #000;"><strong>2-</strong> Considerando que o contrato de locação tem natureza jurídica consensual, fica determinado que a proposta de locação poderá ser imotivadamente recusa pelo locador/administradora, sem qualquer ônus.</td></tr>
+    <tr><td style="padding:4px 7px;font-size:7.5pt;line-height:1.35;"><strong>3-</strong> Responsabilizo-me pela veracidade de todas as informações registradas acima e, de pleno acordo, assino o presente cadastro de locação.</td></tr>
+  </table>
+{{/inline}}
+
+<div style="font-family:'EB Garamond',Georgia,serif;color:#111;max-width:760px;margin:0 auto;">
+
+  {{!-- ================= PÁGINA 1 ================= --}}
+
+  <table style="width:100%;border-collapse:collapse;margin-bottom:6px;">
+    <tr>
+      <td style="vertical-align:middle;font-size:19pt;font-weight:bold;letter-spacing:.3px;">PROPOSTA DE LOCAÇÃO{{#if (eq locatarios.[0].tipo_pessoa "juridica")}} PJ{{/if}}</td>
+      <td style="vertical-align:middle;text-align:right;">
+        <div style="font-size:7pt;letter-spacing:3px;color:#333;">IMÓVEIS</div>
+        <div style="font-size:17pt;font-weight:bold;color:#003da5;">RE/MAX</div>
+        <div style="font-size:11pt;font-weight:bold;color:#003da5;">Ativa I</div>
+        <div style="font-size:6.5pt;color:#555;">CRECI: 25319-J</div>
+      </td>
+    </tr>
+  </table>
+  <div style="border-top:4px solid #002f6c;margin-bottom:8px;"></div>
+
+  <table style="width:100%;border-collapse:collapse;border:1px solid #000;table-layout:fixed;">
+    <tr>
+      <td style="border:1px solid #000;padding:4px 7px;font-size:9pt;text-align:center;width:9%;">{{#unless (or (eq imovel.kind "comercial_sala") (eq imovel.kind "loja") (eq imovel.kind "galpao"))}}<strong>X</strong>{{else}}&nbsp;{{/unless}}</td>
+      <td style="border:1px solid #000;padding:4px 7px;font-size:8.5pt;font-weight:bold;width:16%;">Residencial</td>
+      <td style="border:1px solid #000;padding:4px 7px;font-size:9pt;text-align:center;width:9%;">{{#if (or (eq imovel.kind "comercial_sala") (eq imovel.kind "loja") (eq imovel.kind "galpao"))}}<strong>X</strong>{{else}}&nbsp;{{/if}}</td>
+      <td style="border:1px solid #000;padding:4px 7px;font-size:8.5pt;font-weight:bold;width:16%;">Comercial</td>
+      <td style="border:1px solid #000;padding:4px 7px;font-size:8.5pt;width:16%;"><span style="font-weight:bold;">REF.</span> {{numero_proposta}}</td>
+      <td style="border:1px solid #000;padding:4px 7px;font-size:8.5pt;width:17%;"><span style="font-weight:bold;">Consultor</span></td>
+      <td style="border:1px solid #000;padding:4px 7px;font-size:8.5pt;width:17%;"><span style="font-weight:bold;">Mídia</span></td>
+    </tr>
+  </table>
+
+  <table style="width:100%;border-collapse:collapse;border:1px solid #000;border-top:none;table-layout:fixed;">
+
+    <tr><td colspan="4" style="background:#d9d9d9;border:1px solid #000;padding:3px 7px;font-size:8.5pt;font-weight:bold;">INFORMAÇÕES DO IMÓVEL</td></tr>
+    <tr>
+      <td colspan="2" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Endereço</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{imovel.rua}}</div></td>
+      <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nº</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{imovel.numero}}</div></td>
+      <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Compl.</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{imovel.complemento}}</div></td>
+    </tr>
+    <tr>
+      <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Bairro</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{imovel.bairro}}</div></td>
+      <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Condomínio</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{imovel.condominio_nome}}</div></td>
+      <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Cidade/Município</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{imovel.cidade}}</div></td>
+      <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">UF</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{imovel.uf}}</div></td>
+    </tr>
+
+    <tr><td colspan="4" style="background:#d9d9d9;border:1px solid #000;padding:3px 7px;font-size:8.5pt;font-weight:bold;">PROPOSTA / VALORES</td></tr>
+    <tr>
+      <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Aluguel</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{#if (gt aluguel.valor 0)}}{{moeda aluguel.valor}}{{/if}}</div></td>
+      <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">IPTU / ITR</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{#if (gt aluguel.iptu_mensal 0)}}{{moeda aluguel.iptu_mensal}}{{/if}}</div></td>
+      <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Condomínio</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{#if (gt aluguel.condominio_mensal 0)}}{{moeda aluguel.condominio_mensal}}{{/if}}</div></td>
+      <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Garantia</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{#if (eq garantia.tipo "fiador")}}Fiador{{else if (eq garantia.tipo "caucao")}}Caução{{else if (eq garantia.tipo "seguro_fianca")}}Seguro-fiança{{else if (eq garantia.tipo "garantia_digital")}}Garantia digital{{else if (eq garantia.tipo "titulo_capitalizacao")}}Título de capitalização{{else if (eq garantia.tipo "propria")}}Garantia própria{{else if (eq garantia.tipo "sem_garantia")}}Sem garantia{{/if}}</div></td>
+    </tr>
+    <tr>
+      <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">PG Fiança</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{#if (gt garantia.caucao_meses 0)}}{{garantia.caucao_meses}} aluguel(éis){{else if (gt garantia.titulo_valor 0)}}{{moeda garantia.titulo_valor}}{{else if (existe garantia.provider)}}{{garantia.provider}}{{/if}}</div></td>
+      <td colspan="2" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Finalidade da locação</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{#if (existe imovel.destinacao)}}{{imovel.destinacao}}{{else}}{{#unless (or (eq imovel.kind "comercial_sala") (eq imovel.kind "loja") (eq imovel.kind "galpao"))}}Residencial{{else}}Comercial{{/unless}}{{/if}}</div></td>
+      <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Tempo da locação</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">{{#if (gt aluguel.vigencia_meses 0)}}{{aluguel.vigencia_meses}} meses{{/if}}</div></td>
+    </tr>
+    <tr>
+      <td colspan="4" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Cláusulas Específicas</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    </tr>
+    <tr>
+      <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nº de Moradores</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+      <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nº de Animais</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+      <td colspan="2" style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Tipos / Observações</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+    </tr>
+
+    <tr><td colspan="4" style="background:#d9d9d9;border:1px solid #000;padding:3px 7px;font-size:8.5pt;font-weight:bold;">INFORMAÇÕES PESSOAIS E PROFISSIONAIS DO(A) LOCATÁRIO(A)</td></tr>
+    {{#if (eq locatarios.[0].tipo_pessoa "juridica")}}
+      {{> campoPJ locatarios.[0]}}
+      <tr><td colspan="4" style="background:#d9d9d9;border:1px solid #000;padding:3px 7px;font-size:8.5pt;font-weight:bold;">INFORMAÇÕES REPRESENTANTE LEGAL</td></tr>
+      {{> campoRepr locatarios.[0].representante}}
+      {{!-- O schema tem UM `representante` por PJ. O 2º representante da ficha da
+           Ativa não tem chave: sai em branco (`{{> campoRepr}}` sem contexto). --}}
+      <tr><td colspan="4" style="background:#d9d9d9;border:1px solid #000;padding:3px 7px;font-size:8.5pt;font-weight:bold;">INFORMAÇÕES REPRESENTANTE LEGAL / 2º REPRESENTANTE</td></tr>
+      {{> campoRepr}}
+    {{else}}
+      {{> campoPF locatarios.[0]}}
+      {{!-- "Cônjuge / 2º locatário": usa o 2º locatário PF quando existe; senão o
+           cônjuge do titular. As duas chaves são do schema de locação. --}}
+      <tr><td colspan="4" style="background:#d9d9d9;border:1px solid #000;padding:3px 7px;font-size:8.5pt;font-weight:bold;">INFORMAÇÕES PESSOAIS E PROFISSIONAIS DO(A) CÔNJUGE / 2º LOCATÁRIO(A)</td></tr>
+      {{#if (eq locatarios.[1].tipo_pessoa "fisica")}}{{> campoPF locatarios.[1]}}{{else}}{{> campoPF locatarios.[0].conjuge}}{{/if}}
+    {{/if}}
+
+    {{> referencias}}
+  </table>
+
+  {{#unless (eq garantia.tipo "fiador")}}
+    {{> clausulas}}
+  {{/unless}}
+
+  <table style="width:100%;border-collapse:collapse;margin-top:22px;">
+    <tr>
+      <td style="width:34%;font-size:9pt;vertical-align:bottom;padding-right:16px;">{{#if (existe assinatura.cidade)}}{{assinatura.cidade}}{{else}}{{imovel.cidade}}{{/if}},<span style="display:inline-block;min-width:150px;border-bottom:1px solid #000;">&nbsp;{{#if (existe assinatura.data)}}{{dataExtenso assinatura.data}}{{/if}}</span></td>
+      <td style="width:33%;text-align:center;vertical-align:bottom;"><div style="border-top:1px solid #000;padding-top:3px;font-size:8pt;">ASSINATURA LOCATÁRIO</div><div style="font-size:7.5pt;color:#555;">{{#each locatarios}}{{#if (eq this.tipo_pessoa "fisica")}}{{this.nome}}{{else}}{{this.razao_social}}{{/if}}{{#unless @last}}; {{/unless}}{{/each}}</div></td>
+      <td style="width:33%;text-align:center;vertical-align:bottom;"><div style="border-top:1px solid #000;padding-top:3px;font-size:8pt;">ASSINATURA LOCADOR</div><div style="font-size:7.5pt;color:#555;">{{#each locadores}}{{#if (eq this.tipo_pessoa "fisica")}}{{this.nome}}{{else}}{{this.razao_social}}{{/if}}{{#unless @last}}; {{/unless}}{{/each}}</div></td>
+    </tr>
+  </table>
+
+  {{!-- ================= PÁGINA 2 — FIADOR ================= --}}
+  {{#if (eq garantia.tipo "fiador")}}
+  <div style="page-break-before:always;"></div>
+
+  <table style="width:100%;border-collapse:collapse;margin-bottom:6px;">
+    <tr>
+      <td style="vertical-align:middle;font-size:19pt;font-weight:bold;letter-spacing:.3px;">FIADOR</td>
+      <td style="vertical-align:middle;text-align:right;">
+        <div style="font-size:7pt;letter-spacing:3px;color:#333;">IMÓVEIS</div>
+        <div style="font-size:17pt;font-weight:bold;color:#003da5;">RE/MAX</div>
+        <div style="font-size:11pt;font-weight:bold;color:#003da5;">Ativa I</div>
+        <div style="font-size:6.5pt;color:#555;">CRECI: 25319-J</div>
+      </td>
+    </tr>
+  </table>
+  <div style="border-top:4px solid #002f6c;margin-bottom:8px;"></div>
+
+  <table style="width:100%;border-collapse:collapse;border:1px solid #000;table-layout:fixed;">
+    <tr><td colspan="4" style="background:#d9d9d9;border:1px solid #000;padding:3px 7px;font-size:8.5pt;font-weight:bold;">INFORMAÇÕES PESSOAIS E PROFISSIONAIS DO(A) FIADOR(A)</td></tr>
+    {{#if (eq garantia.fiador.tipo_pessoa "juridica")}}
+      {{> campoPJ garantia.fiador}}
+      <tr><td colspan="4" style="background:#d9d9d9;border:1px solid #000;padding:3px 7px;font-size:8.5pt;font-weight:bold;">INFORMAÇÕES REPRESENTANTE LEGAL</td></tr>
+      {{> campoRepr garantia.fiador.representante}}
+      {{!-- Idem locatário PJ: sem chave pro 2º representante — sai em branco. --}}
+      <tr><td colspan="4" style="background:#d9d9d9;border:1px solid #000;padding:3px 7px;font-size:8.5pt;font-weight:bold;">INFORMAÇÕES REPRESENTANTE LEGAL / 2º REPRESENTANTE</td></tr>
+      {{> campoRepr}}
+    {{else}}
+      {{> campoPF garantia.fiador}}
+      <tr><td colspan="4" style="background:#d9d9d9;border:1px solid #000;padding:3px 7px;font-size:8.5pt;font-weight:bold;">INFORMAÇÕES PESSOAIS E PROFISSIONAIS DO(A) CÔNJUGE / 2º FIADOR(A)</td></tr>
+      {{> campoPF garantia.fiador.conjuge}}
+
+      <tr><td colspan="4" style="background:#d9d9d9;border:1px solid #000;padding:3px 7px;font-size:8.5pt;font-weight:bold;">INFORMAÇÕES DO(S) IMÓVEL(EIS) DO(A) FIADOR(A)</td></tr>
+      <tr>
+        <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Imóvel 1</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+        <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nº</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+        <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Compl.</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+        <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Bairro</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+      </tr>
+      <tr>
+        <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Cidade/Município</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+        <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">UF</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+        <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Matrícula</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+        <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">CPD</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+      </tr>
+      <tr>
+        <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Imóvel 2</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+        <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Nº</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+        <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Compl.</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+        <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Bairro</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+      </tr>
+      <tr>
+        <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Cidade/Município</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+        <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">UF</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+        <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">Matrícula</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+        <td style="padding:4px 7px 1px;vertical-align:bottom;"><div style="font-size:7pt;color:#444;line-height:1.1;">CPD</div><div style="font-size:9.5pt;min-height:15px;border-bottom:1px solid #000;">&nbsp;</div></td>
+      </tr>
+    {{/if}}
+
+    {{> referencias}}
+  </table>
+
+  {{> clausulas}}
+
+  <table style="width:100%;border-collapse:collapse;margin-top:22px;">
+    <tr>
+      <td style="width:34%;font-size:9pt;vertical-align:bottom;padding-right:16px;">{{#if (existe assinatura.cidade)}}{{assinatura.cidade}}{{else}}{{imovel.cidade}}{{/if}},<span style="display:inline-block;min-width:150px;border-bottom:1px solid #000;">&nbsp;{{#if (existe assinatura.data)}}{{dataExtenso assinatura.data}}{{/if}}</span></td>
+      <td style="width:33%;text-align:center;vertical-align:bottom;"><div style="border-top:1px solid #000;padding-top:3px;font-size:8pt;">ASSINATURA LOCATÁRIO</div><div style="font-size:7.5pt;color:#555;">{{#each locatarios}}{{#if (eq this.tipo_pessoa "fisica")}}{{this.nome}}{{else}}{{this.razao_social}}{{/if}}{{#unless @last}}; {{/unless}}{{/each}}</div></td>
+      <td style="width:33%;text-align:center;vertical-align:bottom;"><div style="border-top:1px solid #000;padding-top:3px;font-size:8pt;">ASSINATURA FIADOR</div><div style="font-size:7.5pt;color:#555;">{{#if (eq garantia.fiador.tipo_pessoa "juridica")}}{{garantia.fiador.razao_social}}{{else}}{{garantia.fiador.nome}}{{/if}}</div></td>
+    </tr>
+  </table>
+  {{/if}}
+
+  {{#if via_reduzida}}
+  <p style="margin-top:22px;font-size:8pt;color:#555;border-top:1px solid #ccc;padding-top:7px;">
+    Este instrumento reproduz as condições essenciais da Proposta nº {{numero_proposta}},
+    arquivada na íntegra junto à imobiliária.
+  </p>
+  {{/if}}
+
+</div>

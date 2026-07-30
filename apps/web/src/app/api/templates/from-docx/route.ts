@@ -5,6 +5,15 @@ import { prisma } from "@/lib/db/prisma";
 import { uploadFileAsGoogleDoc } from "@/lib/google/upload-file-as-gdoc";
 import { isGoogleDocsFeatureEnabled } from "@/lib/google/client";
 import { insertPlaceholdersWithAI } from "@/lib/templates/ai-placeholder-insertion";
+import {
+  UPLOAD_MODALIDADES,
+  schemaTypeForModalidade,
+} from "@/lib/contracts/template-category";
+import {
+  computeSourceHash,
+  findDuplicateTemplate,
+  resolveUniqueTemplateName,
+} from "@/lib/templates/upload-dedup";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -13,26 +22,13 @@ const DOCX_MIME =
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const MAX_BYTES = 20 * 1024 * 1024;
 
-const MODALIDADES = [
-  "locacao",
-  "locacao_comercial",
-  "a_vista",
-  "financiamento",
-  // Contrato de administração de locação (imobiliária ↔ proprietário). O modelo
-  // da imobiliária vira template engine="google_docs" igual aos demais; a
-  // geração (generateAdministracaoContractForDeal) copia o doc e substitui os
-  // placeholders via buildLocacaoPlaceholderMap (o deal de adm é um deal de
-  // locação, mesmo shape de dados).
-  "administracao_locacao",
-];
-
-const SCHEMA_TYPE_BY_MODALIDADE: Record<string, string> = {
-  locacao: "locacao_residencial_v1",
-  locacao_comercial: "locacao_comercial_v1",
-  a_vista: "compra_venda_v2",
-  financiamento: "compra_venda_v2",
-  administracao_locacao: "administracao_locacao_v1",
-};
+// Modalidades aceitas na ingestão de modelo. `administracao_locacao` é o
+// contrato de administração (imobiliária ↔ proprietário): vira template
+// engine="google_docs" igual aos demais; a geração
+// (generateAdministracaoContractForDeal) copia o doc e substitui os
+// placeholders via buildLocacaoPlaceholderMap (o deal de adm é um deal de
+// locação, mesmo shape de dados).
+const MODALIDADES: string[] = [...UPLOAD_MODALIDADES];
 
 /**
  * POST /api/templates/from-docx (multipart)
@@ -42,6 +38,16 @@ const SCHEMA_TYPE_BY_MODALIDADE: Record<string, string> = {
  * cria ContractTemplate engine="google_docs" em status DRAFT e roda o pass
  * de IA que insere {{placeholders}} (best-effort — falha não bloqueia; o
  * operador revisa e ajusta na página de revisão antes de ativar).
+ *
+ * UM arquivo por request — o pipeline Drive + IA é pesado e cabe no
+ * maxDuration de 120s. O upload em lote da UI é uma fila sequencial client-side
+ * que chama esta rota N vezes.
+ *
+ * Dedup por conteúdo (SHA-256 do DOCX em `ContractTemplate.sourceHash`):
+ * arquivo já ingerido no org (e não arquivado) devolve 409 DUPLICATE_TEMPLATE
+ * sem criar nada. `force=true` no formData ignora o dedup — o operador decide.
+ * Colisão de NOME não bloqueia: sufixa " (2)", " (3)"… (nome é rótulo, o hash
+ * é que é identidade).
  */
 export async function POST(req: NextRequest) {
   const session = await auth();
@@ -81,6 +87,7 @@ export async function POST(req: NextRequest) {
   const file = formData.get("file");
   const modalidade = String(formData.get("modalidade") ?? "");
   const name = (String(formData.get("name") ?? "").trim() || null) ?? null;
+  const force = String(formData.get("force") ?? "") === "true";
 
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "Campo file ausente" }, { status: 400 });
@@ -110,8 +117,30 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const templateName =
+  // Dedup por conteúdo antes de gastar Drive + IA.
+  const sourceHash = computeSourceHash(buffer);
+  if (!force) {
+    const existing = await findDuplicateTemplate(prisma, org.id, sourceHash);
+    if (existing) {
+      return NextResponse.json(
+        {
+          code: "DUPLICATE_TEMPLATE",
+          error: "Este arquivo já foi importado como template.",
+          existing: {
+            id: existing.id,
+            name: existing.name,
+            status: existing.status,
+            modalidade: existing.modalidade,
+          },
+        },
+        { status: 409 }
+      );
+    }
+  }
+
+  const baseName =
     name ?? `Modelo da imobiliária — ${file.name.replace(/\.docx$/i, "")}`;
+  const templateName = await resolveUniqueTemplateName(prisma, org.id, baseName);
 
   let uploaded: { docId: string; webViewLink: string; embedLink: string };
   try {
@@ -139,9 +168,10 @@ export async function POST(req: NextRequest) {
       isDefault: false,
       googleTemplateDocId: uploaded.docId,
       modalidade,
-      schemaType: SCHEMA_TYPE_BY_MODALIDADE[modalidade],
+      schemaType: schemaTypeForModalidade(modalidade),
       handlebarsSource: "<!-- engine=google_docs: a fonte é o Google Doc -->",
       version: "1.0.0",
+      sourceHash,
     },
   });
 
@@ -164,6 +194,7 @@ export async function POST(req: NextRequest) {
 
   return NextResponse.json({
     templateId: template.id,
+    name: template.name,
     docId: uploaded.docId,
     webViewLink: uploaded.webViewLink,
     embedLink: uploaded.embedLink,

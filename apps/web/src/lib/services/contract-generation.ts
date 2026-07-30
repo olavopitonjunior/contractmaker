@@ -854,7 +854,9 @@ export async function generateContractForDeal(
   // do grupo (ex.: consórcio sem template → financiamento).
   const selection = await selectTemplateForDeal(orgId, dataJson);
   if (!selection) {
-    throw new Error("Nenhum template ativo encontrado para gerar o contrato.");
+    throw new Error(
+      "Nenhum template ativo para gerar o contrato. Ative ou envie um modelo em Configurações → Modelos."
+    );
   }
   const template = selection.template;
 
@@ -1239,10 +1241,12 @@ export async function generateLocacaoContractForDeal(
     : (deal.dataJson as Record<string, unknown>) || {};
   const schemaType = deal.form?.schemaType ?? "locacao_residencial_v1";
 
-  const selection = await selectLocacaoTemplate(orgId, schemaType);
+  // dataJson entra na seleção: além da modalidade, garantia e PF/PJ (locatário e
+  // fiador) escolhem a variante do template (ContractTemplate.matchCriteria).
+  const selection = await selectLocacaoTemplate(orgId, schemaType, dataJson);
   if (!selection) {
     throw new Error(
-      "Nenhum template de locação ativo. Rode sync-templates.ts --apply --seed."
+      "Nenhum template de locação ativo. Ative ou envie um modelo em Configurações → Modelos."
     );
   }
   const template = selection.template;
@@ -1527,7 +1531,7 @@ export async function generateAdministracaoContractForDeal(
   const selection = await selectAdministracaoTemplate(orgId);
   if (!selection) {
     throw new Error(
-      "Nenhum template de administração de locação ativo. Rode sync-templates.ts --apply --seed."
+      "Nenhum template de administração de locação ativo. Ative ou envie um modelo em Configurações → Modelos."
     );
   }
   const template = selection.template;

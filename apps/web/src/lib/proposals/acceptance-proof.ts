@@ -109,7 +109,7 @@ export async function buildAcceptanceProof(
     const dataJson = (proposal.dataJson ?? {}) as Record<string, unknown>;
     const tpl = proposal.templateId
       ? await prisma.contractTemplate.findUnique({ where: { id: proposal.templateId } })
-      : (await selectPropostaTemplate(proposal.orgId, proposal.schemaType))?.template ?? null;
+      : (await selectPropostaTemplate(proposal.orgId, proposal.schemaType, proposal.dataJson))?.template ?? null;
     proposalHtml = tpl?.handlebarsSource
       ? renderProposalVia({
           templateSource: tpl.handlebarsSource,

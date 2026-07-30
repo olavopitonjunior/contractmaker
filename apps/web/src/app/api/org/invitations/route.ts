@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { prisma } from "@/lib/db/prisma";
 import { requireAuth } from "@/lib/auth/context";
 import {
@@ -17,14 +16,11 @@ import {
   getApproverEmails,
   getNotifyEmails,
 } from "@/lib/auth/invitations";
+import {
+  createInvitationSchema,
+  formatInvitationValidationError,
+} from "@/lib/auth/invitation-schema";
 
-const ROLE_VALUES = ["admin", "finance", "sales", "viewer", "member"] as const;
-
-const createInvitationSchema = z.object({
-  email: z.string().email().max(200),
-  name: z.string().trim().min(2).max(120).optional(),
-  role: z.enum(ROLE_VALUES).optional().default("member"),
-});
 
 /**
  * GET /api/org/invitations — lista convites da org. Filtro ?status=pending.
@@ -92,7 +88,10 @@ export async function POST(req: NextRequest) {
   const parsed = createInvitationSchema.safeParse(raw);
   if (!parsed.success) {
     return NextResponse.json(
-      { error: "Dados inválidos", details: parsed.error.format() },
+      {
+        error: formatInvitationValidationError(parsed.error),
+        details: parsed.error.format(),
+      },
       { status: 400 }
     );
   }

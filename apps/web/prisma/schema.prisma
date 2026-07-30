@@ -1148,6 +1148,12 @@ model ContractTemplate {
   // Grupo "com alienação fiduciária": financiamento | fgts | consorcio
   // `modalidade` é derivada do grupo (a_vista | financiamento) p/ retrocompat.
   category            String?
+  // Critério de seleção pelas ESCOLHAS DO FORM (locação/proposta), lido junto
+  // com a modalidade: { garantia?, fiadorPessoa?: "pf"|"pj", pessoa?: "pf"|"pj" }.
+  // Null/vazio = template GENÉRICO da modalidade (comportamento pré-critério).
+  // Campo que contradiz o fato do form desclassifica o template.
+  // Venda não usa (a discriminação de venda é `category`); ADM também não.
+  matchCriteria       Json?
   // Google Docs migration: quando engine="google_docs", aponta para o doc-modelo
   // armazenado no Drive da service account. Os contratos são criados via
   // files.copy seguido de batchUpdate(replaceAllText).
@@ -1157,6 +1163,11 @@ model ContractTemplate {
   // (vira "desatualizado" na UI até o próximo POST /preview re-gerar).
   previewSourceHash   String?
   previewUpdatedAt    DateTime?
+  // SHA-256 (hex) do arquivo ORIGINAL enviado na ingestão DOCX→template.
+  // Identidade do modelo pra dedup no upload em lote: subir o mesmo .docx de
+  // novo devolve 409 DUPLICATE_TEMPLATE em vez de criar outro draft.
+  // Não confundir com `previewSourceHash` (hash do handlebarsSource do preview).
+  sourceHash          String?
   // Relatório do pass de IA na ingestão DOCX→template (engine google_docs):
   // { inserted, skippedAmbiguous, notMapped, missingRequired, ranAt }.
   // Persiste após a ativação como histórico da revisão.
@@ -1168,6 +1179,8 @@ model ContractTemplate {
   contracts   Contract[]
   suggestions TemplateSuggestion[]
   proposals   Proposal[]
+
+  @@index([orgId, sourceHash])
 }
 
 // ============================================

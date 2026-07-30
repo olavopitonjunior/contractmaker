@@ -1,4 +1,5 @@
 import type { ContractTemplate } from "@prisma/client";
+import { deriveTemplateFacts, pickTemplateByFacts } from "@/lib/contracts/template-category";
 
 /**
  * Modalidade do template de proposta por schemaType. São três, deliberadamente
@@ -19,14 +20,24 @@ export function propostaModalidadeForSchema(schemaType: string): string | null {
 }
 
 /**
- * Seleção determinística do template de proposta. Match EXATO por modalidade +
- * preferência por `isDefault`. Sem fallback: se a org não tem template ativo da
- * modalidade, retorna null e o caller orienta a rodar sync-templates.ts --seed.
- * Mesmo contrato de `selectAdministracaoTemplate`.
+ * Seleção determinística do template de proposta. Match EXATO por modalidade;
+ * dentro dela, as ESCOLHAS DA PROPOSTA (garantia, fiador PF/PJ, proponente
+ * PF/PJ) escolhem a variante via `matchCriteria` e o empate prefere `isDefault`
+ * — org sem variante marcada tem o comportamento de antes. Sem fallback de
+ * modalidade: se a org não tem template ativo da modalidade, retorna null e o
+ * caller orienta a ativar um modelo em /templates (o canônico é semeado na
+ * criação do tenant por `seedCanonicalTemplatesForOrg`). Mesmo contrato de
+ * `selectAdministracaoTemplate`.
+ *
+ * Hoje o `dataJson` da proposta vem do NovaPropostaDialog sem garantia nem
+ * tipo_pessoa (partes só com nome), então os fatos costumam ser nulos e a
+ * seleção cai no `isDefault` — a coleta desses campos é da Fase 4 (página de
+ * proposta); aqui já está pronto pra quando chegar.
  */
 export async function selectPropostaTemplate(
   orgId: string,
-  schemaType: string
+  schemaType: string,
+  dataJson?: unknown
 ): Promise<{ template: ContractTemplate } | null> {
   const modalidade = propostaModalidadeForSchema(schemaType);
   if (!modalidade) return null;
@@ -35,5 +46,5 @@ export async function selectPropostaTemplate(
     where: { orgId, status: "active", modalidade },
   });
   if (exact.length === 0) return null;
-  return { template: exact.find((t) => t.isDefault) ?? exact[0] };
+  return { template: pickTemplateByFacts(exact, deriveTemplateFacts(dataJson)) };
 }
