@@ -2,11 +2,12 @@ import { redirect } from "next/navigation";
 import { headers } from "next/headers";
 import type { CSSProperties } from "react";
 import { auth, getUserOrg } from "@/lib/auth/auth";
-import { isImpersonating, getEffectiveUserId } from "@/lib/auth/impersonation";
+import { isImpersonating } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/db/prisma";
 import { getTenantBranding, getOrgBrand } from "@/lib/tenant/branding";
 import { getOrgModules } from "@/lib/modules/read";
 import { getOnboardingStatus, type OnboardingStatus } from "@/lib/onboarding/status";
+import { canSeeOnboarding } from "@/lib/onboarding/gate";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { DashboardHeader } from "@/components/layout/dashboard-header";
@@ -43,17 +44,12 @@ export default async function DashboardLayout({
   const modules = org ? await getOrgModules(org.id) : null;
   // "Testar como": super_admin operando este tenant como o dono → banner de aviso.
   const impersonating = org ? await isImpersonating(session.user.id) : false;
-  // Onboarding: checklist "Primeiros passos" na sidebar — só pra OWNER com o
-  // onboarding em aberto (`onboardingCompletedAt` null). Gate barato primeiro
+  // Onboarding: checklist "Primeiros passos" na sidebar — só pra OWNER/ADMIN com
+  // o onboarding em aberto (`onboardingCompletedAt` null). Gate barato primeiro
   // (flag + role) — o status completo (~6 counts) só roda nessa janela.
   let onboarding: OnboardingStatus | null = null;
   if (org && !org.onboardingCompletedAt) {
-    const effUserId = await getEffectiveUserId(session.user.id);
-    const membership = await prisma.orgMembership.findFirst({
-      where: { userId: effUserId, orgId: org.id },
-      select: { role: true },
-    });
-    if (membership?.role === "owner") {
+    if (await canSeeOnboarding(session.user.id, org.id)) {
       onboarding = await getOnboardingStatus(org.id);
     }
   }

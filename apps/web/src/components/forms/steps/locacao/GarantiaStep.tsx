@@ -8,6 +8,7 @@ import { NativeSelect } from "@/components/forms/NativeSelect";
 import {
   FormField,
   FieldError,
+  MoneyField,
   PessoaFisicaLocacaoFields,
   PessoaJuridicaLocacaoFields,
 } from "./_PartyFields";
@@ -67,14 +68,7 @@ export function GarantiaStep({ form }: { form: UseFormReturn<any> }) {
               />
             </FormField>
             <FormField label="Valor nominal do título (R$)">
-              <Input
-                {...form.register("garantia.titulo_valor", { valueAsNumber: true })}
-                type="number"
-                min={0}
-                step="0.01"
-                inputMode="decimal"
-                placeholder="15000"
-              />
+              <MoneyField form={form} name="garantia.titulo_valor" placeholder="Ex: 15.000,00" />
             </FormField>
             <FormField label="Nº da proposta/formulário">
               <Input {...form.register("garantia.titulo_proposta")} placeholder="Ex.: 1234567-001" />

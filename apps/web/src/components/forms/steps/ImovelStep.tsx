@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { UFSelect } from "@/components/forms/UFSelect";
+import { maskCEP } from "@/lib/forms/field-formats";
 
 interface ImovelStepProps {
   form: UseFormReturn<any>;
@@ -134,7 +135,13 @@ export function ImovelStep({ form }: ImovelStepProps) {
 
                 <FormField label="CEP">
                   <Input
-                    {...form.register(`${prefix}.cep`)}
+                    {...form.register(`${prefix}.cep`, {
+                      onChange: (e) =>
+                        form.setValue(`${prefix}.cep`, maskCEP(e.target.value), {
+                          shouldDirty: true,
+                        }),
+                    })}
+                    inputMode="numeric"
                     placeholder="00000-000"
                   />
                 </FormField>

@@ -1,17 +1,22 @@
 /**
  * Auto-cadastro de corretores no finalize do form (vendas e locação).
- * Para cada `comissao.comissionados[]` do dataJson sem `splitRecipientId`,
- * faz match-ou-cria no registry (SplitRecipient kind="commissioner") e
- * backfilla o `splitRecipientId` no dataJson do form — assim o wizard de
- * cobrança e o resolvedor de notificações enxergam a linha verde sem
- * re-matching heurístico.
+ * Para cada `comissao.comissionados[]` (venda) ou `comissao.angariadores[]`
+ * (locação) do dataJson sem `splitRecipientId`, faz match-ou-cria no registry
+ * (SplitRecipient kind="commissioner") e backfilla o `splitRecipientId` no
+ * dataJson do form — assim o wizard de cobrança e o resolvedor de notificações
+ * enxergam a linha verde sem re-matching heurístico.
  *
- * Fire-and-forget (caller usa waitUntil): nunca lança. No-op quando o form
- * não tem comissionados (ex.: locação sem seção de comissão).
+ * As duas listas passam pelo MESMO helper (e pelo mesmo update de dataJson) de
+ * propósito: dois writers no mesmo blob correriam entre si. O angariador de
+ * locação não tem `papel` próprio no form — entra no registry como `captador`,
+ * que é exatamente o que ele é (quem angariou o imóvel).
+ *
+ * Fire-and-forget (caller usa waitUntil): nunca lança. No-op quando o form não
+ * tem nenhuma das duas listas.
  */
 
-import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
+import { mergeSalesFormDataJson } from "@/lib/forms/atomic-merge";
 import { audit } from "@/lib/security/audit";
 import {
   upsertCommissionerFromFormData,
@@ -32,13 +37,27 @@ export async function autoRegisterFormCommissioners(params: {
 
     const data = (form.dataJson as Record<string, unknown> | null) ?? {};
     const comissao = data.comissao as Record<string, unknown> | undefined;
-    const comissionados = Array.isArray(comissao?.comissionados)
-      ? (comissao!.comissionados as Array<Record<string, unknown>>)
-      : [];
-    if (comissionados.length === 0) return;
+    const asList = (v: unknown): Array<Record<string, unknown>> =>
+      Array.isArray(v) ? (v as Array<Record<string, unknown>>) : [];
+    // Venda (`comissionados`) e locação (`angariadores`) na mesma varredura —
+    // um form só tem uma das duas.
+    const entries: Array<{
+      row: Record<string, unknown>;
+      defaultPapel: string | null;
+    }> = [
+      ...asList(comissao?.comissionados).map((row) => ({
+        row,
+        defaultPapel: null,
+      })),
+      ...asList(comissao?.angariadores).map((row) => ({
+        row,
+        defaultPapel: "captador",
+      })),
+    ];
+    if (entries.length === 0) return;
 
     let changed = false;
-    for (const c of comissionados) {
+    for (const { row: c, defaultPapel } of entries) {
       if (typeof c !== "object" || c === null) continue;
       if (typeof c.splitRecipientId === "string" && c.splitRecipientId) continue;
 
@@ -53,7 +72,7 @@ export async function autoRegisterFormCommissioners(params: {
         email: typeof c.email === "string" ? c.email : null,
         mobile_phone: typeof c.mobile_phone === "string" ? c.mobile_phone : null,
         creci: typeof c.creci === "string" ? c.creci : null,
-        papel: typeof c.papel === "string" ? c.papel : null,
+        papel: typeof c.papel === "string" ? c.papel : defaultPapel,
       };
 
       const result = await upsertCommissionerFromFormData(orgId, input).catch(
@@ -92,11 +111,15 @@ export async function autoRegisterFormCommissioners(params: {
     }
 
     if (changed) {
-      // Form está finalizado (fechado pra escrita pública) — corrida com
-      // autosave é negligível; update direto do blob já mutado in-place.
-      await prisma.salesForm.update({
+      // Merge atômico escopado em `comissao` em vez de regravar o blob inteiro:
+      // no finalize o form já está fechado pra escrita pública, mas o operador
+      // também dispara este helper ao editar a comissão do deal de locação —
+      // aí um autosave concorrente ainda existe, e regravar `data` (lido antes
+      // dos upserts) apagaria o que ele gravou nas outras chaves.
+      await mergeSalesFormDataJson({
         where: { id: formId },
-        data: { dataJson: data as Prisma.InputJsonValue },
+        incoming: { comissao: data.comissao },
+        allowedTopKeys: ["comissao"],
       });
     }
   } catch (err) {

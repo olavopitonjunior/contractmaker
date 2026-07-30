@@ -196,7 +196,12 @@ export async function syncEnvelopeState(
       where: { id: envelope.id },
       data: { status: "closed", closedAt: new Date() },
     });
-    const signedUrl = await resolveSignedUrl(envelope.clicksignId, envResp, creds);
+    const signedUrl = await resolveSignedUrl(
+      envelope.clicksignId,
+      envResp,
+      creds,
+      envelope.documentClicksignId
+    );
     if (signedUrl) waitUntil(downloadSignedPdf(envelope.id, signedUrl));
     envelopeUpdated = true;
     const promote = await autoPromoteDealOnContractSigned(envelope.id);
@@ -233,7 +238,12 @@ export async function syncEnvelopeState(
     envelope.status === "closed" &&
     !envelope.signedDocumentUrl
   ) {
-    const signedUrl = await resolveSignedUrl(envelope.clicksignId, envResp, creds);
+    const signedUrl = await resolveSignedUrl(
+      envelope.clicksignId,
+      envResp,
+      creds,
+      envelope.documentClicksignId
+    );
     if (signedUrl) {
       await downloadSignedPdf(envelope.id, signedUrl);
       envelopeUpdated = true;
@@ -423,21 +433,37 @@ function parseDate(s: string | null | undefined): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+/**
+ * URL do PDF assinado do documento PRIMARY. `primaryDocumentId` importa quando o
+ * envelope tem mais de um documento (contrato + laudo de vistoria): sem a
+ * preferência explícita, "o primeiro da lista" pode ser o extra e viraria o
+ * `signedDocumentUrl` do envelope. Os extras são baixados dentro de
+ * `persistSignedPdf`.
+ */
 async function resolveSignedUrl(
   clicksignId: string,
   envResp: unknown,
-  creds: ClicksignCreds
+  creds: ClicksignCreds,
+  primaryDocumentId?: string | null
 ): Promise<string | null> {
-  const fromIncluded = extractSignedUrl(envResp);
+  const fromIncluded = extractSignedUrl(envResp, primaryDocumentId);
   if (fromIncluded) return fromIncluded;
 
   try {
     const docs = await listEnvelopeDocuments(clicksignId, creds);
     const docsData = (docs as { data?: unknown }).data;
     if (!Array.isArray(docsData)) return null;
-    for (const doc of docsData as Array<{
+    const list = docsData as Array<{
+      id?: string;
       links?: { files?: { signed?: string; original?: string } };
-    }>) {
+    }>;
+    const ordered = primaryDocumentId
+      ? [
+          ...list.filter((d) => d.id === primaryDocumentId),
+          ...list.filter((d) => d.id !== primaryDocumentId),
+        ]
+      : list;
+    for (const doc of ordered) {
       const signedUrl = doc.links?.files?.signed;
       if (signedUrl) return signedUrl;
       const originalUrl = doc.links?.files?.original;
@@ -449,12 +475,21 @@ async function resolveSignedUrl(
   return null;
 }
 
-function extractSignedUrl(resp: unknown): string | null {
+function extractSignedUrl(
+  resp: unknown,
+  primaryDocumentId?: string | null
+): string | null {
   const included = (resp as {
-    included?: Array<{ attributes?: Record<string, unknown> }>;
+    included?: Array<{ id?: string; attributes?: Record<string, unknown> }>;
   }).included;
   if (!Array.isArray(included)) return null;
-  for (const item of included) {
+  const ordered = primaryDocumentId
+    ? [
+        ...included.filter((i) => i.id === primaryDocumentId),
+        ...included.filter((i) => i.id !== primaryDocumentId),
+      ]
+    : included;
+  for (const item of ordered) {
     const downloads = item.attributes?.downloads as
       | { signed_file_url?: string }
       | undefined;

@@ -271,6 +271,7 @@ model Organization {
   pipelines           Pipeline[]
   forms               SalesForm[]
   formSettings        OrgFormSettings?
+  participantCategories FormParticipantCategory[]
   notificationSettings OrgNotificationSettings?
   managerSettings     OrgManagerSettings?
   dealNotificationLogs DealNotificationLog[]
@@ -1172,6 +1173,13 @@ model SalesForm {
   privacyAcceptedAt    DateTime?
   privacyIpHash        String?
   privacyPolicyVersion String?
+  // Snapshot do preset de obrigatoriedade vigente na org quando este
+  // formulário NASCEU (só LOCAÇÃO grava — venda resolve ao vivo). Garante que
+  // trocar a configuração da imobiliária não muda as exigências de um link já
+  // entregue ao cliente. NULL = formulário anterior à feature → comportamento
+  // antigo (nada obrigatório além do piso do wizard). Ver lib/forms/presets.ts
+  // (locacaoSettingsForForm).
+  requiredPreset       String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -1228,6 +1236,12 @@ model ContractTemplate {
   // Grupo "com alienação fiduciária": financiamento | fgts | consorcio
   // `modalidade` é derivada do grupo (a_vista | financiamento) p/ retrocompat.
   category            String?
+  // Critério de seleção pelas ESCOLHAS DO FORM (locação/proposta), lido junto
+  // com a modalidade: { garantia?, fiadorPessoa?: "pf"|"pj", pessoa?: "pf"|"pj" }.
+  // Null/vazio = template GENÉRICO da modalidade (comportamento pré-critério).
+  // Campo que contradiz o fato do form desclassifica o template.
+  // Venda não usa (a discriminação de venda é `category`); ADM também não.
+  matchCriteria       Json?
   // Google Docs migration: quando engine="google_docs", aponta para o doc-modelo
   // armazenado no Drive da service account. Os contratos são criados via
   // files.copy seguido de batchUpdate(replaceAllText).
@@ -1237,6 +1251,11 @@ model ContractTemplate {
   // (vira "desatualizado" na UI até o próximo POST /preview re-gerar).
   previewSourceHash   String?
   previewUpdatedAt    DateTime?
+  // SHA-256 (hex) do arquivo ORIGINAL enviado na ingestão DOCX→template.
+  // Identidade do modelo pra dedup no upload em lote: subir o mesmo .docx de
+  // novo devolve 409 DUPLICATE_TEMPLATE em vez de criar outro draft.
+  // Não confundir com `previewSourceHash` (hash do handlebarsSource do preview).
+  sourceHash          String?
   // Relatório do pass de IA na ingestão DOCX→template (engine google_docs):
   // { inserted, skippedAmbiguous, notMapped, missingRequired, ranAt }.
   // Persiste após a ativação como histórico da revisão.
@@ -1248,6 +1267,8 @@ model ContractTemplate {
   contracts   Contract[]
   suggestions TemplateSuggestion[]
   proposals   Proposal[]
+
+  @@index([orgId, sourceHash])
 }
 
 // ============================================
@@ -2414,8 +2435,18 @@ model OrgFinancialSettings {
 model OrgFormSettings {
   id                  String   @id @default(cuid())
   orgId               String   @unique
-  preset              String   @default("legado") // legado | minimo | padrao | completo | custom
+  // VENDA. Valores canônicos da UI nova: essencial | completo | custom.
+  // legado | minimo | padrao continuam válidos (orgs anteriores a 2026-07-28)
+  // e resolvem os MESMOS arrays de sempre — ver lib/forms/presets.ts.
+  preset              String   @default("legado") // legado | minimo | padrao | completo | essencial | custom
   customRequiredPaths Json     @default("[]")
+  // LOCAÇÃO — par espelhado do de venda. Aditivo: os campos NÃO são
+  // compartilhados porque os steps e os paths das duas esteiras são
+  // diferentes (locação tem locadores/locatarios/imovel singular/aluguel).
+  // Default "legado" = nada obrigatório, que é como locação sempre se
+  // comportou antes desta config existir.
+  locacaoPreset              String @default("legado") // legado | essencial | completo | custom
+  locacaoCustomRequiredPaths Json   @default("[]")
   // Segurança do link do formulário: quando true, o SalesForm trava sozinho
   // (SalesForm.lockedAt) no momento em que o cliente finaliza — congela os
   // dados contra edição posterior por quem ainda tiver o link. Default false
@@ -2441,6 +2472,42 @@ model OrgFormSettings {
   updatedAt           DateTime @updatedAt
 
   org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+}
+
+// Categorias de TERCEIRO nos links por parte do formulário público.
+//
+// Os 5 papéis nativos (vendedor/comprador; locador/locatario/fiador) seguem
+// fechados em código — cada um escreve numa subárvore conhecida do
+// DadosContrato, com step, validação e OCR próprios. Terceiro é o caso aberto:
+// a imobiliária cria a categoria (interveniente anuente, gestor do condomínio,
+// procurador externo…) e declara os campos que quer coletar.
+//
+// `SalesFormParticipant.role` guarda "terceiro:<slug>" — a coluna sempre foi
+// String, então não há migration de dados. As respostas vão pra
+// `SalesForm.dataJson.terceiros.<slug>[]`, namespace ADITIVO que não colide com
+// nenhuma chave dos schemas de venda ou locação.
+//
+// Ver lib/forms/participant-category.ts.
+model FormParticipantCategory {
+  id          String   @id @default(cuid())
+  orgId       String
+  /// kebab-case; entra no role e no path do dataJson.
+  slug        String
+  label       String
+  description String?
+  /// "venda" | "locacao" — em quais esteiras a categoria é oferecida.
+  appliesTo   String[] @default([])
+  /// [{ key, label, type, required }] — ver categoryFieldsSchema.
+  fields      Json     @default("[]")
+  /// Desativar em vez de deletar quando já houver link emitido.
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  org Organization @relation(fields: [orgId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, slug])
+  @@index([orgId, active])
 }
 
 // Cadastro de destinatários de split de pagamento (Fase 5).
@@ -2706,6 +2773,7 @@ model Envelope {
   org        Organization     @relation(fields: [orgId], references: [id], onDelete: Cascade)
   signers    EnvelopeSigner[]
   events     EnvelopeEvent[]
+  documents  EnvelopeDocument[]
 
   @@unique([proposalId, via])
   @@index([contractId])
@@ -2714,6 +2782,44 @@ model Envelope {
   @@index([dealId])
   @@index([orgId, status])
   @@index([status, updatedAt])
+}
+
+// Documentos de UM envelope ClickSign. A v3 aceita N documentos por envelope e
+// cobra POR SIGNATÁRIO (não por documento) — então contrato + laudo de vistoria
+// no mesmo envelope custam metade de dois envelopes separados.
+//
+// `Envelope.documentClicksignId` PERMANECE como o documento `primary` (compat:
+// envelopes criados antes desta tabela não têm rows aqui e continuam lidos pela
+// coluna escalar). O CHECK `envelope_subject_xor` NÃO muda: o sujeito do
+// envelope segue sendo um só (contrato | anexo | proposta); os documentos
+// `attachment` são carga extra do mesmo envelope, não um segundo sujeito.
+model EnvelopeDocument {
+  id                  String   @id @default(cuid())
+  envelopeId          String
+  // `data.id` do documento na ClickSign (o mesmo valor que chega no webhook
+  // como `document.key`).
+  documentClicksignId String
+  // "primary" = o sujeito do envelope (contrato/anexo/proposta).
+  // "attachment" = documento EXTRA anexado ao mesmo envelope.
+  kind                String   @default("primary")
+  // DealAttachment de origem quando kind="attachment" (laudo de vistoria, etc.).
+  // Escalar sem FK de propósito: o documento é um SNAPSHOT enviado à ClickSign e
+  // não pode sumir do histórico do envelope se o anexo for apagado da pasta.
+  sourceAttachmentId  String?
+  filename            String
+  // PDF assinado DESTE documento, gravado no close (o do primary continua
+  // espelhado em `Envelope.signedDocumentUrl`).
+  signedPdfUrl        String?
+  position            Int      @default(0)
+  createdAt           DateTime @default(now())
+
+  envelope Envelope @relation(fields: [envelopeId], references: [id], onDelete: Cascade)
+
+  @@unique([envelopeId, documentClicksignId])
+  @@index([envelopeId])
+  // Lookup do webhook: evento de um documento EXTRA traz o `document.key` dele,
+  // que não bate com `Envelope.documentClicksignId`.
+  @@index([documentClicksignId])
 }
 
 model EnvelopeSigner {

@@ -112,6 +112,7 @@ export function SubtokenFormClient({
             token={subtoken}
             initialData={initialData}
             schemaType={schemaType}
+            requiredFieldsByStep={requiredFieldsByStep}
             stepIndexes={stepIndexes}
             endpoint={participantEndpoint}
             pathScope={pathScope}

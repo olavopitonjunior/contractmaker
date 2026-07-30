@@ -8,6 +8,7 @@ import {
   deriveLocacaoDealMetadata,
 } from "@/lib/contracts/derive-deal-metadata";
 import { resolveManagerForCreate } from "@/lib/deals/manager";
+import { resolveRequiredPresetSnapshot } from "@/lib/forms/required-snapshot";
 
 export class ProposalConvertError extends Error {
   constructor(
@@ -90,8 +91,9 @@ export async function convertProposalToDeal(input: {
   const firstStage = pipeline.stages[0];
 
   // Normaliza o shape da proposta pro shape do FORM antes de copiar: a
-  // proposta guarda o aluguel em `locacao.valor_aluguel` (NovaPropostaDialog),
-  // mas o form/templates/derive leem `aluguel.valor`. Normalizando NA CÓPIA,
+  // proposta guarda o aluguel em `locacao.valor_aluguel`, mas o form/templates/
+  // derive leem `aluguel.valor` (a página de proposta já escreve os dois; propostas
+  // antigas só têm o primeiro). Normalizando NA CÓPIA,
   // todos os consumidores downstream (card, geração do contrato de locação,
   // cláusula de aluguel) enxergam o valor — não só este call-site.
   let normalizedData = dataJson;
@@ -143,11 +145,19 @@ export async function convertProposalToDeal(input: {
     where: { proposalId: proposal.id },
   });
 
+  // Snapshot do preset de obrigatoriedade (só locação grava — ver
+  // lib/forms/required-snapshot.ts).
+  const requiredPreset = await resolveRequiredPresetSnapshot(
+    input.orgId,
+    proposal.schemaType
+  );
+
   const deal = await prisma.$transaction(async (tx) => {
     const form = await tx.salesForm.create({
       data: {
         orgId: input.orgId,
         title: meta.title,
+        requiredPreset,
         // schemaType herdado — SEM isto, locação convertida viraria form de
         // compra e venda (default do campo) e o contrato sairia errado.
         schemaType: proposal.schemaType,

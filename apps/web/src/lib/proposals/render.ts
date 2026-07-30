@@ -1,8 +1,29 @@
 import { renderContratoHTML } from "@/lib/render/handlebars";
 import { enrichContractData } from "@/lib/services/contract-generation";
+import { enrichLocacaoData } from "@/lib/locacao/enrich";
 import { sanitizeHiddenPaths } from "./hidden-fields";
 
 export type ProposalVia = "completa" | "reduzida";
+
+/**
+ * Enrich da esteira certa. `schemaType` começa com "locacao" nas propostas de
+ * aluguel (locacao_residencial_v1, locacao_comercial_v1) — usar o enrich de
+ * VENDA nelas injetava multas/prazos de compra e venda no contexto e materia-
+ * lizava `comissao` mesmo quando o dado não existia (o `{{#if
+ * comissao_incluida}}` do template imprimia o bloco de intermediação vazio).
+ *
+ * Nenhuma chave dos templates de proposta de locação vem do enrich de venda —
+ * `locatarios`/`locadores`/`imovel`/`aluguel`/`garantia` são dados crus e
+ * `numero_proposta`/`via_reduzida`/`comissao_incluida` são postos aqui.
+ */
+function enrichForSchema(
+  schemaType: string,
+  dataJson: Record<string, unknown>
+): Record<string, unknown> {
+  return schemaType.startsWith("locacao")
+    ? enrichLocacaoData(dataJson)
+    : enrichContractData(dataJson);
+}
 
 /**
  * Remove uma chave de um objeto aninhado por dot-path. Suporta índice de array
@@ -53,7 +74,7 @@ export function buildViaContext(input: {
   /** Comissão é opcional na proposta. Só entra no documento quando true. */
   comissaoIncluida?: boolean;
 }): Record<string, unknown> {
-  let ctx = enrichContractData(input.dataJson);
+  let ctx = enrichForSchema(input.schemaType, input.dataJson);
   ctx.numero_proposta = input.numero;
 
   // `enrichContractData` sempre materializa `comissao` (mesmo vazia). Se a

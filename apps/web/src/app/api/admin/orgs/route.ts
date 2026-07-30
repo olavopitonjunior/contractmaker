@@ -15,6 +15,8 @@ import { seedPipeline } from "@/lib/pipelines/seed";
 import { seedDefaultDocumentStyle } from "@/lib/org/seed-document-style";
 import { sendOwnerAccessEmail } from "@/lib/org/owner-access";
 import { seedAndEmbedDefaultClauses } from "@/lib/knowledge/seed-clauses";
+import { seedCanonicalTemplatesForOrg } from "@/lib/templates/canonical-seed";
+import { canonicalModalidadesForModules } from "@/lib/templates/canonical-templates";
 import { waitUntil } from "@vercel/functions";
 
 export const runtime = "nodejs";
@@ -222,6 +224,26 @@ export async function POST(req: NextRequest) {
       metadata: { name, subdomain, ownerEmail, ownerCreated: !existingUser, modules: enabledModules },
     }
   );
+
+  // Templates canônicos (.hbs embarcados). Sem isto o tenant nasce com ZERO
+  // ContractTemplate e a PRIMEIRA geração de contrato morre em "Nenhum template
+  // ativo" — o operador tinha que rodar sync-templates.ts na mão. Best-effort
+  // como os vizinhos: a org já está commitada, e o backfill continua disponível
+  // via `sync-templates --apply --seed`.
+  //
+  // Restrito aos MÓDULOS escolhidos: um tenant só-locação não nasce com CCV à
+  // vista/financiamento (contradizia as rows de OrgModule desta mesma request).
+  // Habilitar o módulo depois semeia o que falta (PATCH .../modules).
+  try {
+    const { created } = await seedCanonicalTemplatesForOrg(result.org.id, {
+      onlyModalidades: canonicalModalidadesForModules(enabledModules),
+    });
+    console.log(
+      `[admin/orgs] templates canônicos semeados em ${result.org.id}: ${created.length}`
+    );
+  } catch (err) {
+    console.error("[admin/orgs] seed de templates falhou (org já criada):", err);
+  }
 
   // Biblioteca-base de cláusulas (opt-out, default true) — banco pelos módulos
   // escolhidos na criação (não pelo getOrgModules, que ainda não reflete a org

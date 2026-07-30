@@ -127,7 +127,11 @@ const imovelLocacaoSchema = z.object({
 // Reajuste e vigência.
 const aluguelSchema = z.object({
   valor: z.number().min(0).default(0),
-  // Encargos embutidos no boleto mensal (IPTU/condomínio quando repassados).
+  // Encargos embutidos no boleto mensal — TOTAL. Desde 2026-07 é a SOMA
+  // derivada de condominio_mensal + iptu_mensal + outros_encargos (o form
+  // grava o total aqui). Continua sendo o campo lido por
+  // createLeaseContractFromDataJson → LeaseContract.valorEncargos e pelo
+  // RentCharge, então não muda de nome nem de significado pros forms antigos.
   encargos: z.number().optional().default(0),
   dia_vencimento: z.number().min(1).max(28).optional().default(10),
   indice_reajuste: z.enum(["IGPM", "IPCA", "outro"]).optional().default("IGPM"),
@@ -136,11 +140,62 @@ const aluguelSchema = z.object({
   taxa_admin_percent: z.number().optional().default(10),
   // Forma de pagamento preferida do aluguel mensal.
   meio_pagamento: z.enum(["pix", "boleto", "qualquer"]).optional().default("pix"),
-  // Valores de referência lançados no mesmo boleto pela administradora
-  // (cláusula de encargos do template v3) — informativos, não somam no valor.
+  // Itens de ENTRADA dos encargos lançados no mesmo boleto pela administradora
+  // (cláusula de encargos do template v3). A soma dos três alimenta `encargos`.
   iptu_mensal: z.number().min(0).optional(),
   condominio_mensal: z.number().min(0).optional(),
+  // Aditivo (2026-07): terceiro item da soma — taxa de lixo, seguro incêndio,
+  // rateio de obra etc. Também é o destino do valor legado quando um form
+  // antigo tinha `encargos` digitado à mão e nenhum item detalhado.
+  outros_encargos: z.number().min(0).optional().default(0),
 });
+
+/**
+ * Itens de entrada dos encargos mensais (aluguel.*). Valores frouxos porque a
+ * chamada vem tanto do form (números) quanto de um dataJson cru (unknown).
+ */
+export type EncargosItens = {
+  iptu_mensal?: unknown;
+  condominio_mensal?: unknown;
+  outros_encargos?: unknown;
+};
+
+/**
+ * Total mensal de encargos = condomínio + IPTU + outros. Fonte única da soma
+ * (UI do form e testes). Arredonda a 2 casas pra não vazar float (0.1+0.2).
+ */
+export function sumEncargosMensais(itens: EncargosItens | null | undefined): number {
+  if (!itens) return 0;
+  const parcela = (v: unknown) => {
+    const n = Number(v);
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+  const total =
+    parcela(itens.condominio_mensal) +
+    parcela(itens.iptu_mensal) +
+    parcela(itens.outros_encargos);
+  return Math.round(total * 100) / 100;
+}
+
+/**
+ * Migração suave dos encargos ao ABRIR um form antigo (ou vindo do OCR), onde
+ * `encargos` era um total digitado à mão. Devolve o novo `outros_encargos` que
+ * faz a soma dos itens bater com esse total, ou `null` quando não há nada a
+ * migrar (form novo, ou itens já cobrindo o total). Puro — o componente só
+ * aplica o resultado.
+ */
+export function seedOutrosEncargos(
+  aluguel: (EncargosItens & { encargos?: unknown }) | null | undefined
+): number | null {
+  if (!aluguel) return null;
+  const legado = Number(aluguel.encargos);
+  if (!Number.isFinite(legado) || legado <= 0) return null;
+  const soma = sumEncargosMensais(aluguel);
+  if (legado <= soma) return null;
+  const outrosAtual = Number(aluguel.outros_encargos);
+  const base = Number.isFinite(outrosAtual) && outrosAtual > 0 ? outrosAtual : 0;
+  return Math.round((base + legado - soma) * 100) / 100;
+}
 
 // Garantia locatícia (art. 37 Lei 8.245). Fiador só quando tipo="fiador".
 const garantiaSchema = z.object({
@@ -168,21 +223,32 @@ const garantiaSchema = z.object({
 });
 
 // ============================================================================
-// Config fiscal/operacional (A7-A16) — preenchida pelo OPERADOR no diálogo de
-// criação do form, não pelo cliente. Espelha os campos que o wizard interno
-// (NovoContratoWizard / api/locacao/contracts/wizard) já coleta e que dirigem
-// repasse/DIMOB/cobrança — NÃO entram no texto do contrato (template), mas
-// alimentam o LeaseContract (ver createLeaseContractFromDataJson).
+// Config fiscal/operacional (A7-A16) — preenchida pelo OPERADOR, não pelo
+// cliente. Espelha os campos que o wizard interno (NovoContratoWizard /
+// api/locacao/contracts/wizard) já coleta e que dirigem repasse/DIMOB/cobrança
+// — NÃO entram no texto do contrato de LOCAÇÃO (template), mas alimentam o
+// LeaseContract (ver createLeaseContractFromDataJson).
+//
+// O subconjunto que o instrumento de ADMINISTRAÇÃO precisa (taxa de adm, IR,
+// regime de cobrança, NFS-e) saiu do diálogo de criação do formulário e passou
+// a ser coletado no diálogo que precede a geração daquele contrato — é ali que
+// a relação imobiliária ↔ proprietário é acertada. Ver
+// `PATCH /api/locacao/deals/[dealId]/fiscal`.
 // ============================================================================
-const fiscalSchema = z.object({
+export const fiscalAdministracaoSchema = z.object({
   taxa_admin_percent: z.number().min(0).max(100).optional().default(10),
   regime_ir: z
     .enum(["nao_retem", "retem_sem_controle", "retem_imobiliaria", "retem_inquilino"])
     .optional()
     .default("nao_retem"),
   regime_cobranca: z.enum(["mes_vencido", "mes_a_vencer"]).optional().default("mes_a_vencer"),
-  isencao_multa_meses: z.number().int().min(0).optional().default(0),
   emitir_nfse: z.boolean().optional().default(false),
+});
+
+export type FiscalAdministracao = z.infer<typeof fiscalAdministracaoSchema>;
+
+const fiscalSchema = fiscalAdministracaoSchema.extend({
+  isencao_multa_meses: z.number().int().min(0).optional().default(0),
   repasse_garantido: z
     .enum(["nao", "alguns_meses", "todo_contrato"])
     .optional()
@@ -190,11 +256,27 @@ const fiscalSchema = z.object({
   repasse_garantido_meses: z.number().int().min(0).optional(),
 });
 
-// Angariador (A11) — corretor captador com comissão recorrente sobre o aluguel.
-// `meses_comissao` null/0 = todo o contrato.
-const angariadorSchema = z.object({
+// Angariador (A11) — corretor captador com comissão RECORRENTE sobre o aluguel
+// (percentual do aluguel OU valor fixo, × `meses_comissao`). `meses_comissao`
+// null/0 = todo o contrato. Não confundir com `taxa_locacao_percent` (comissão
+// de CORRETAGEM, one-shot sobre o 1º aluguel).
+//
+// Os campos de qualificação (tipo_pessoa/cpf/cnpj/creci/email/mobile_phone) são
+// ADITIVOS (2026-07): `materializeLeaseParties` já lia `a.cpf || a.cnpj` do
+// dataJson antes de existir UI, e `splitRecipientId` é o backfill do registry
+// de corretores (SplitRecipient kind="commissioner"), espelhando
+// `comissao.comissionados[]` de venda.
+export const angariadorLocacaoSchema = z.object({
   party_id: z.string().optional(),
+  /** Backfill do registry (lib/asaas/commissioner-registry.ts). */
+  splitRecipientId: z.string().optional(),
   nome: z.string().min(2, "Nome do angariador obrigatório"),
+  tipo_pessoa: z.enum(["fisica", "juridica"]).optional().default("fisica"),
+  cpf: z.string().optional().default(""),
+  cnpj: z.string().optional().default(""),
+  creci: z.string().optional().default(""),
+  email: z.string().email("Email inválido").optional().or(z.literal("")),
+  mobile_phone: z.string().optional().default(""),
   forma_comissao: z.enum(["percentual", "valor_fixo"]).optional().default("percentual"),
   percentual: z.number().min(0).max(100).optional(),
   valor_fixo: z.number().min(0).optional(),
@@ -203,10 +285,13 @@ const angariadorSchema = z.object({
 
 // Comissão da imobiliária — taxa de locação cobrada à vista (1º aluguel) +
 // angariadores. Base dos boletos de comissão (ver aba Cobrança do deal).
-const comissaoSchema = z.object({
+export const comissaoLocacaoSchema = z.object({
   taxa_locacao_percent: z.number().min(0).max(100).optional().default(0),
-  angariadores: z.array(angariadorSchema).optional().default([]),
+  angariadores: z.array(angariadorLocacaoSchema).optional().default([]),
 });
+
+export type AngariadorLocacao = z.infer<typeof angariadorLocacaoSchema>;
+export type ComissaoLocacao = z.infer<typeof comissaoLocacaoSchema>;
 
 export const dadosLocacaoSchema = z
   .object({
@@ -236,7 +321,7 @@ export const dadosLocacaoSchema = z
       .default({}),
     // Operador-only (não renderizadas no template): config fiscal + comissão.
     fiscal: fiscalSchema.optional(),
-    comissao: comissaoSchema.optional(),
+    comissao: comissaoLocacaoSchema.optional(),
   })
   .superRefine((data, ctx) => {
     // Caução limitada a 3 aluguéis (art. 38 §2º Lei 8.245/91).
@@ -324,7 +409,7 @@ export const dadosLocacaoComercialSchema = z
       })
       .default({}),
     fiscal: fiscalSchema.optional(),
-    comissao: comissaoSchema.optional(),
+    comissao: comissaoLocacaoSchema.optional(),
   })
   .superRefine((data, ctx) => {
     if (data.garantia?.tipo === "caucao") {

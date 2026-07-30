@@ -3,6 +3,7 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/db/prisma";
 import { getDocPlainText } from "@/lib/google/docs";
+import { googleErrorMessage } from "@/lib/google/auth-error";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,7 +39,15 @@ export async function GET(_req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: "Modelo não é Google Docs." }, { status: 400 });
   }
 
-  const text = await getDocPlainText(template.googleTemplateDocId);
+  let text: string;
+  try {
+    text = await getDocPlainText(template.googleTemplateDocId);
+  } catch (err) {
+    // Sem o try/catch o `invalid_grant` cru subia como 500 sem corpo útil.
+    console.error("[templates/doc-text] Erro ao ler o Doc:", err);
+    return NextResponse.json({ error: googleErrorMessage(err) }, { status: 502 });
+  }
+
   const paragraphs = text
     .split(/\n+/)
     .map((p) => p.trim())

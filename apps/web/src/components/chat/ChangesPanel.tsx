@@ -18,6 +18,8 @@ interface ChangeLogItem {
   hasDiff: boolean;
   htmlBefore: string | null;
   htmlAfter: string | null;
+  /** name || email do autor; null quando a entry não tem userId. */
+  userName?: string | null;
 }
 
 interface ChangesPanelProps {
@@ -194,16 +196,32 @@ export function ChangesPanel({
   );
 }
 
-/** Rótulo de autor da edição a partir de source/action. */
+/**
+ * Rótulo de autor da edição — MESMA semântica do ChangeLogPanel
+ * (ver `changeLogAuthorLabel`): nome quando a entry tem userId; senão admite não
+ * saber. "Você" saiu: o painel é visível a qualquer membro da org, e a entry
+ * podia ser de outra pessoa.
+ */
 function authorBadge(item: ChangeLogItem): { label: string; className: string } {
-  if (item.action === "human_doc_edit")
-    return { label: "Manual", className: "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300" };
+  const manual = item.action === "human_doc_edit";
+  const className = manual
+    ? "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300"
+    : "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300";
   switch (item.source) {
     case "ai":
-      return { label: "IA", className: "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300" };
+      return {
+        label: "IA",
+        className:
+          "bg-violet-100 text-violet-800 dark:bg-violet-950 dark:text-violet-300",
+      };
     case "user":
-      return { label: "Você", className: "bg-sky-100 text-sky-800 dark:bg-sky-950 dark:text-sky-300" };
+      return {
+        label: item.userName || "Manual (autor não identificado)",
+        className,
+      };
     default:
+      // "system" fica "Sistema" mesmo com userId — ali o usuário é o gatilho do
+      // pipeline, não o autor da mudança.
       return { label: "Sistema", className: "bg-muted text-muted-foreground" };
   }
 }
@@ -212,6 +230,7 @@ function authorBadge(item: ChangeLogItem): { label: string; className: string } 
  *  demais (snake_case da IA) já existiam e ficam como estão. */
 function actionLabel(action: string): string {
   if (action === "human_doc_edit") return "Edição manual";
+  if (action === "settings_update") return "Configurações";
   return action;
 }
 
@@ -242,9 +261,12 @@ function ChangeItem({
       <div className="flex items-center gap-1.5">
         <span
           className={cn(
-            "text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0",
+            // max-w + truncate: rótulos longos ("Manual (autor não identificado)",
+            // e-mails) não podem comer a linha inteira do item.
+            "text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 max-w-[55%] truncate",
             author.className
           )}
+          title={author.label}
         >
           {author.label}
         </span>

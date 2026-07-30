@@ -279,3 +279,78 @@ describe("enrich locação: tipo do imóvel e foro (correções QA 2026-06-06)",
     expect(html).not.toContain("comarca de localização do imóvel");
   });
 });
+
+// ============================================================================
+// Padrão contratual da ORG (contractDefaultsJson.locacao) sobre o hard-coded.
+// ============================================================================
+describe("enrichLocacaoData — padrão da org × padrão de fábrica", () => {
+  const vazio = () => ({}) as Record<string, unknown>;
+
+  it("sem ctx, mantém os números que o módulo sempre praticou", () => {
+    const config = enrichLocacaoData(vazio()).config as Record<string, unknown>;
+    expect(config.multa_atraso_percent).toBe(10);
+    expect(config.juros_mensais_atraso).toBe(1);
+    expect(config.multa_rescisoria_meses).toBe(3);
+  });
+
+  it("padrão da org sobrepõe o de fábrica", () => {
+    const config = enrichLocacaoData(vazio(), {
+      contractDefaults: {
+        foro: "Santos/SP",
+        assinatura: { cidade: "Santos", uf: "SP", data: "" },
+        config: {
+          multa_atraso_percent: 2,
+          juros_mensais_atraso: 0.5,
+          multa_rescisoria_meses: 1,
+        },
+      },
+    });
+    const cfg = config.config as Record<string, unknown>;
+    expect(cfg.multa_atraso_percent).toBe(2);
+    expect(cfg.juros_mensais_atraso).toBe(0.5);
+    expect(cfg.multa_rescisoria_meses).toBe(1);
+    // Comarca da org vira o foro e a ponte que o template imprime.
+    expect(config.foro).toBe("Santos/SP");
+    expect(cfg.foro_texto).toBe("Santos/SP");
+    // Cidade da org materializa o município do fecho.
+    expect(cfg.municipio_imovel).toBe("Santos/SP");
+  });
+
+  it("o dado do negócio VENCE o padrão da org (enrich é aditivo)", () => {
+    const out = enrichLocacaoData(
+      { foro: "Campinas/SP", config: { multa_atraso_percent: 20 } },
+      {
+        contractDefaults: {
+          foro: "Santos/SP",
+          assinatura: { cidade: "", uf: "", data: "" },
+          config: {
+            multa_atraso_percent: 2,
+            juros_mensais_atraso: 1,
+            multa_rescisoria_meses: 3,
+          },
+        },
+      }
+    );
+    const cfg = out.config as Record<string, unknown>;
+    expect(out.foro).toBe("Campinas/SP");
+    expect(cfg.foro_texto).toBe("Campinas/SP");
+    expect(cfg.multa_atraso_percent).toBe(20);
+  });
+
+  it("padrão da org vazio não inventa assinatura nem foro", () => {
+    const out = enrichLocacaoData(vazio(), {
+      contractDefaults: {
+        foro: "",
+        assinatura: { cidade: "", uf: "", data: "" },
+        config: {
+          multa_atraso_percent: 10,
+          juros_mensais_atraso: 1,
+          multa_rescisoria_meses: 3,
+        },
+      },
+    });
+    expect(out.foro).toBeUndefined();
+    expect(out.assinatura).toBeUndefined();
+    expect((out.config as Record<string, unknown>).foro_texto).toBeUndefined();
+  });
+});

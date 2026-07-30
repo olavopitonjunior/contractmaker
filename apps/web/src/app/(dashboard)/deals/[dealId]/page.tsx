@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { getEffectiveUserId } from "@/lib/auth/impersonation";
 import { prisma } from "@/lib/db/prisma";
+import { dealOrgScopeWhere, resolveUserOrgId } from "@/lib/security/org-scope";
 import { DealDetail } from "@/components/pipeline/DealDetail";
 import { isNewtonEnabledForDeal } from "@/lib/newton/gate";
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
@@ -18,8 +19,13 @@ export default async function DealPage({
   const org = await getUserOrg(session.user.id);
   if (!org) notFound();
 
-  const deal = await prisma.deal.findUnique({
-    where: { id: params.dealId },
+  // Guard cross-org na query — o DealDetail de VENDAS tinha o mesmo buraco do
+  // editor de contrato (a page de locação já filtrava por pipeline.orgId).
+  const orgId = await resolveUserOrgId(session.user.id);
+  if (!orgId) notFound();
+
+  const deal = await prisma.deal.findFirst({
+    where: dealOrgScopeWhere(params.dealId, orgId),
     include: {
       // Deal não tem orgId direto — o escopo vem do pipeline.
       pipeline: { select: { orgId: true } },

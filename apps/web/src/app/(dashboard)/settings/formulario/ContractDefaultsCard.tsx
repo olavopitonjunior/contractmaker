@@ -8,9 +8,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { NativeSelect } from "@/components/forms/NativeSelect";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   DEFAULT_CONTRACT_SETTINGS,
+  DEFAULT_LOCACAO_SETTINGS,
   type ContractSettings,
+  type LocacaoSettings,
 } from "@/lib/contracts/default-config";
 
 /**
@@ -19,10 +22,59 @@ import {
  * Vale para contratos NOVOS: a geração aplica este padrão onde o negócio não
  * definiu nada. Contrato já criado se ajusta na aba "Configurações" do editor.
  *
+ * Uma aba por esteira: os vocabulários não se traduzem (em venda `foro` é um
+ * enum que troca a cláusula inteira; em locação é a comarca em texto, e a multa
+ * rescisória é contada em meses de aluguel). A aba Locação só aparece pra org
+ * que tem o módulo — o gating vem do server component.
+ *
  * Local/data de assinatura não entram aqui de propósito — são por negócio (a
  * data é a da assinatura; a cidade sai do imóvel).
  */
-export function ContractDefaultsCard({ initial }: { initial: ContractSettings }) {
+export function ContractDefaultsCard({
+  initial,
+  initialLocacao,
+  locacaoEnabled = false,
+}: {
+  initial: ContractSettings;
+  initialLocacao: LocacaoSettings;
+  locacaoEnabled?: boolean;
+}) {
+  if (!locacaoEnabled) return <VendaDefaults initial={initial} />;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Padrão contratual</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Condições aplicadas aos contratos novos desta imobiliária. Cada
+          contrato pode sobrescrevê-las na aba <strong>Configurações</strong> do
+          editor.
+        </p>
+      </CardHeader>
+      <CardContent>
+        <Tabs defaultValue="venda">
+          <TabsList>
+            <TabsTrigger value="venda">Vendas</TabsTrigger>
+            <TabsTrigger value="locacao">Locação</TabsTrigger>
+          </TabsList>
+          <TabsContent value="venda" className="mt-4">
+            <VendaDefaults initial={initial} embedded />
+          </TabsContent>
+          <TabsContent value="locacao" className="mt-4">
+            <LocacaoDefaults initial={initialLocacao} />
+          </TabsContent>
+        </Tabs>
+      </CardContent>
+    </Card>
+  );
+}
+
+function VendaDefaults({
+  initial,
+  embedded = false,
+}: {
+  initial: ContractSettings;
+  embedded?: boolean;
+}) {
   const [values, setValues] = useState<ContractSettings>(initial);
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -62,18 +114,9 @@ export function ContractDefaultsCard({ initial }: { initial: ContractSettings })
     }
   }
 
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-base">Padrão contratual (venda)</CardTitle>
-        <p className="text-sm text-muted-foreground">
-          Condições aplicadas aos contratos novos desta imobiliária. Cada
-          contrato pode sobrescrevê-las na aba <strong>Configurações</strong> do
-          editor.
-        </p>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+  const body = (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div className="flex flex-col gap-1.5">
             <Label className="text-sm text-muted-foreground">
               Foro de resolução de disputas
@@ -235,34 +278,186 @@ export function ContractDefaultsCard({ initial }: { initial: ContractSettings })
           </div>
         </div>
 
-        <div className="flex items-center gap-2 pt-2">
-          <Button onClick={save} disabled={saving || !dirty}>
-            {saving ? (
-              <>
-                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                Salvando…
-              </>
-            ) : (
-              <>
-                <Save className="mr-1.5 h-4 w-4" />
-                Salvar padrão
-              </>
-            )}
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setValues(DEFAULT_CONTRACT_SETTINGS);
+      <div className="flex items-center gap-2 pt-2">
+        <Button onClick={save} disabled={saving || !dirty}>
+          {saving ? (
+            <>
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              Salvando…
+            </>
+          ) : (
+            <>
+              <Save className="mr-1.5 h-4 w-4" />
+              Salvar padrão
+            </>
+          )}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setValues(DEFAULT_CONTRACT_SETTINGS);
+            setDirty(true);
+          }}
+          disabled={saving}
+        >
+          <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+          Restaurar sugerido
+        </Button>
+      </div>
+    </div>
+  );
+
+  if (embedded) return body;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">Padrão contratual (venda)</CardTitle>
+        <p className="text-sm text-muted-foreground">
+          Condições aplicadas aos contratos novos desta imobiliária. Cada
+          contrato pode sobrescrevê-las na aba <strong>Configurações</strong> do
+          editor.
+        </p>
+      </CardHeader>
+      <CardContent>{body}</CardContent>
+    </Card>
+  );
+}
+
+/**
+ * Padrão de locação. Vocabulário próprio (ver `locacaoSettingsSchema`): a
+ * comarca é texto livre e a multa rescisória é contada em MESES de aluguel.
+ */
+function LocacaoDefaults({ initial }: { initial: LocacaoSettings }) {
+  const [values, setValues] = useState<LocacaoSettings>(initial);
+  const [saving, setSaving] = useState(false);
+  const [dirty, setDirty] = useState(false);
+
+  function patchConfig(next: Partial<LocacaoSettings["config"]>) {
+    setValues((v) => ({ ...v, config: { ...v.config, ...next } }));
+    setDirty(true);
+  }
+  const num = (raw: string, fallback: number) => {
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : fallback;
+  };
+
+  async function save() {
+    setSaving(true);
+    try {
+      const res = await fetch("/api/org/form-settings", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        // Só o branch de locação: o PATCH mescla por branch, então o padrão de
+        // venda não é tocado.
+        body: JSON.stringify({ contractDefaults: { locacao: values } }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        toast.error(body?.error ?? "Não foi possível salvar o padrão.");
+        return;
+      }
+      toast.success("Padrão salvo — vale para os próximos contratos.");
+      setDirty(false);
+    } catch {
+      toast.error("Erro de rede ao salvar.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="flex flex-col gap-1.5 md:col-span-2">
+          <Label className="text-sm text-muted-foreground">Foro (comarca)</Label>
+          <Input
+            value={values.foro}
+            placeholder="Ex.: São Paulo/SP"
+            onChange={(e) => {
+              setValues((v) => ({ ...v, foro: e.target.value }));
               setDirty(true);
             }}
-            disabled={saving}
-          >
-            <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-            Restaurar sugerido
-          </Button>
+          />
+          <p className="text-xs text-muted-foreground">
+            Em branco, o contrato usa a comarca de localização do imóvel.
+          </p>
         </div>
-      </CardContent>
-    </Card>
+
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-sm text-muted-foreground">
+            Multa por atraso (%)
+          </Label>
+          <Input
+            type="number"
+            step="0.01"
+            min={0}
+            value={values.config.multa_atraso_percent}
+            onChange={(e) =>
+              patchConfig({ multa_atraso_percent: num(e.target.value, 10) })
+            }
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <Label className="text-sm text-muted-foreground">
+            Juros por atraso (% ao mês)
+          </Label>
+          <Input
+            type="number"
+            step="0.01"
+            min={0}
+            value={values.config.juros_mensais_atraso}
+            onChange={(e) =>
+              patchConfig({ juros_mensais_atraso: num(e.target.value, 1) })
+            }
+          />
+        </div>
+
+        <div className="flex flex-col gap-1.5 md:col-span-2">
+          <Label className="text-sm text-muted-foreground">
+            Multa rescisória (meses de aluguel)
+          </Label>
+          <Input
+            type="number"
+            step="0.5"
+            min={0}
+            value={values.config.multa_rescisoria_meses}
+            onChange={(e) =>
+              patchConfig({ multa_rescisoria_meses: num(e.target.value, 3) })
+            }
+          />
+        </div>
+      </div>
+
+      <div className="flex items-center gap-2 pt-2">
+        <Button onClick={save} disabled={saving || !dirty}>
+          {saving ? (
+            <>
+              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              Salvando…
+            </>
+          ) : (
+            <>
+              <Save className="mr-1.5 h-4 w-4" />
+              Salvar padrão
+            </>
+          )}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            setValues(DEFAULT_LOCACAO_SETTINGS);
+            setDirty(true);
+          }}
+          disabled={saving}
+        >
+          <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+          Restaurar sugerido
+        </Button>
+      </div>
+    </div>
   );
 }

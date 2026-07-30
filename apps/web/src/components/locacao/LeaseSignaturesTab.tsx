@@ -27,6 +27,9 @@ interface LeaseSignaturesTabProps {
   variant?: LeaseEnvelopeVariant;
   /** Nome da org pra pré-preencher a linha da imobiliária (variant administracao). */
   imobiliaria?: { nome?: string };
+  /** LeaseContract do deal — habilita anexar o laudo de vistoria no mesmo
+   *  envelope do contrato (uma cobrança por signatário em vez de duas). */
+  leaseContractId?: string;
 }
 
 /**
@@ -46,6 +49,7 @@ export function LeaseSignaturesTab({
   data,
   variant = "locacao",
   imobiliaria,
+  leaseContractId,
 }: LeaseSignaturesTabProps) {
   const { envelopes, loading, refetch } = useEnvelopePolling(contractId);
   const [sending, setSending] = useState(false);
@@ -207,6 +211,7 @@ export function LeaseSignaturesTab({
           data={data}
           variant={variant}
           imobiliaria={imobiliaria}
+          leaseContractId={leaseContractId}
           onSent={refetch}
         />
       )}

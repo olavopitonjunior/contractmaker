@@ -9,9 +9,12 @@ import {
   PartyLinksPanel,
   type PartyLinksPanelProps,
 } from "@/components/forms/PartyLinksPanel";
+import { ComissaoLocacaoCard } from "@/components/locacao/ComissaoLocacaoCard";
+import type { ComissaoLocacaoValue } from "@/components/locacao/ComissaoLocacaoSection";
 import { formPublicPath } from "@/lib/forms/form-url";
 
 interface LocacaoDadosTabProps {
+  dealId: string;
   dataJson: Record<string, unknown>;
   formToken: string | null;
   formStatus: string | null;
@@ -86,7 +89,13 @@ function Field({ label, value }: { label: string; value: string | null | undefin
  * com a aba Dados de vendas. Edição é pelo formulário público (link no topo);
  * editor estruturado inline fica como follow-up.
  */
-export function LocacaoDadosTab({ dataJson, formToken, formStatus, dealTitle }: LocacaoDadosTabProps) {
+export function LocacaoDadosTab({
+  dealId,
+  dataJson,
+  formToken,
+  formStatus,
+  dealTitle,
+}: LocacaoDadosTabProps) {
   const locadores = (dataJson.locadores as Parte[] | undefined) ?? [];
   const locatarios = (dataJson.locatarios as Parte[] | undefined) ?? [];
   const imovel = (dataJson.imovel ?? {}) as Record<string, unknown>;
@@ -109,29 +118,42 @@ export function LocacaoDadosTab({ dataJson, formToken, formStatus, dealTitle }: 
     ...(garantia.tipo === "fiador" ? (["fiador"] as const) : []),
   ];
 
+  // Comissão é do OPERADOR (não vem do link público) — editável mesmo antes de
+  // o cliente preencher qualquer coisa.
+  const comissaoCard = (
+    <ComissaoLocacaoCard
+      dealId={dealId}
+      initialValue={comissao as ComissaoLocacaoValue}
+      valorAluguel={valorAluguel}
+    />
+  );
+
   if (isEmpty) {
     return (
-      <Card>
-        <CardContent className="py-10 text-center space-y-3">
-          <p className="text-sm text-muted-foreground">
-            Nenhum dado preenchido ainda.{" "}
-            {formStatus === "completo"
-              ? ""
-              : "Os dados aparecem aqui conforme o formulário é preenchido."}
-          </p>
-          {formToken && (
-            <Button variant="outline" size="sm" asChild>
-              <a
-                href={formPublicPath(formToken, dealTitle)}
-                target="_blank"
-                rel="noopener noreferrer"
-              >
-                <ExternalLink className="h-4 w-4 mr-1.5" /> Abrir formulário
-              </a>
-            </Button>
-          )}
-        </CardContent>
-      </Card>
+      <div className="space-y-4">
+        <Card>
+          <CardContent className="py-10 text-center space-y-3">
+            <p className="text-sm text-muted-foreground">
+              Nenhum dado preenchido ainda.{" "}
+              {formStatus === "completo"
+                ? ""
+                : "Os dados aparecem aqui conforme o formulário é preenchido."}
+            </p>
+            {formToken && (
+              <Button variant="outline" size="sm" asChild>
+                <a
+                  href={formPublicPath(formToken, dealTitle)}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <ExternalLink className="h-4 w-4 mr-1.5" /> Abrir formulário
+                </a>
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+        {comissaoCard}
+      </div>
     );
   }
 
@@ -273,9 +295,15 @@ export function LocacaoDadosTab({ dataJson, formToken, formStatus, dealTitle }: 
         </Card>
       </div>
 
+      {comissaoCard}
+
       {formToken && (
         <>
-          <PartyLinksPanel formToken={formToken} roles={partyRoles} />
+          <PartyLinksPanel
+            formToken={formToken}
+            roles={partyRoles}
+            categoriesModule="locacao"
+          />
           <div className="flex justify-end">
             <Button variant="outline" size="sm" asChild>
               <a

@@ -36,7 +36,31 @@ const ACTION_CONFIG: Record<string, { icon: typeof Bot; color: string; label: st
   data_patch: { icon: FileText, color: "text-amber-500", label: "Dados atualizados" },
   validation: { icon: Shield, color: "text-cyan-500", label: "Validação" },
   ocr_extraction: { icon: FileText, color: "text-teal-500", label: "Extração OCR" },
+  human_doc_edit: { icon: PenLine, color: "text-amber-600", label: "Edição manual" },
+  settings_update: { icon: FileText, color: "text-violet-500", label: "Configurações" },
+  // Ping cru do watch do Drive — "documento mudou", sem dizer o quê nem quem.
+  // Rotulava "Edição manual" pelo fallback, o que afirmava mais do que se sabe.
+  google_doc_updated: { icon: FileText, color: "text-muted-foreground", label: "Documento atualizado" },
 };
+
+/**
+ * Rótulo de autor HONESTO. Antes, qualquer entry sem `userId` virava "Sistema" —
+ * inclusive `source:"user"` (edição manual detectada no Doc, cujo autor o webhook
+ * do Drive não sabe). Regras:
+ *  - "ai": sempre "IA" (o userId, quando existe, é quem PEDIU, não quem escreveu).
+ *  - "user": nome/e-mail quando houver; senão, admite não saber.
+ *  - "system": "Sistema" — mesmo com userId (que ali é só o gatilho do pipeline).
+ */
+export function changeLogAuthorLabel(log: {
+  source: string;
+  user?: { name: string | null; email: string } | null;
+}): string {
+  if (log.source === "ai") return "IA";
+  if (log.source === "user") {
+    return log.user?.name || log.user?.email || "Manual (autor não identificado)";
+  }
+  return "Sistema";
+}
 
 interface ChangeLogPanelProps {
   contractId: string;
@@ -72,7 +96,8 @@ export function ChangeLogPanel({ contractId }: ChangeLogPanelProps) {
         {logs.map((log) => {
           const config = ACTION_CONFIG[log.action] || ACTION_CONFIG.manual_edit;
           const Icon = config.icon;
-          const SourceIcon = log.source === "ai" ? Bot : User;
+          // Só `source:"user"` é gente; "ai" e "system" são a máquina.
+          const SourceIcon = log.source === "user" ? User : Bot;
           const date = new Date(log.createdAt);
 
           return (
@@ -87,7 +112,7 @@ export function ChangeLogPanel({ contractId }: ChangeLogPanelProps) {
                   </Badge>
                   <span className="text-[10px] text-muted-foreground flex items-center gap-0.5">
                     <SourceIcon className="h-3 w-3" />
-                    {log.source === "ai" ? "IA" : log.user?.name || log.user?.email || "Sistema"}
+                    {changeLogAuthorLabel(log)}
                   </span>
                 </div>
                 <p className="text-muted-foreground leading-relaxed">

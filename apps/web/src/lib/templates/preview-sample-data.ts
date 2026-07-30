@@ -348,17 +348,195 @@ export const previewSampleDataLocacaoComercial = {
   },
 };
 
+/**
+ * Administração de locação (imobiliária ↔ proprietário). O template só usa
+ * `locadores`, `imovel`, `aluguel`, `comissao.taxa_locacao_percent` e `config`
+ * — o resto do `config` (taxa de administração, repasse, foro, vigência) é
+ * materializado por `enrichLocacaoData`. Reaproveita a amostra de locação
+ * residencial porque as partes e o imóvel são os mesmos do negócio.
+ */
+export const previewSampleDataAdministracaoLocacao = {
+  ...previewSampleDataLocacao,
+  comissao: {
+    taxa_locacao_percent: 100,
+  },
+  config: {
+    ...previewSampleDataLocacao.config,
+    taxa_admin_percent: 10,
+    administracao_exclusiva: true,
+  },
+};
+
+// ——————————————————————————————————————————————————————————————————————
+// PROPOSTAS. Schema próprio (`proposta_*`): as partes e os imóveis são listas,
+// e o bloco de negócio fica em `pagamento` (venda) ou `locacao` (aluguel) —
+// NÃO em `aluguel`, que é o vocabulário do contrato. As amostras de aluguel
+// carregam os dois porque `enrichLocacaoData` lê `aluguel`/`imovel` pra
+// materializar `config` (foro, multas, vigência) e o template da proposta lê
+// `locacao`/`imoveis`.
+// ——————————————————————————————————————————————————————————————————————
+
+export const previewSampleDataPropostaVenda = {
+  compradores: [
+    {
+      nome: "Carlos Eduardo Almeida",
+      cpf: "567.890.123-44",
+      email: "carlos.almeida@example.com",
+      mobile_phone: "(11) 97777-1111",
+      profissao: "Médico",
+      estado_civil: "Casado(a)",
+      renda: 42000,
+      endereco: "Rua Augusta",
+      numero: "2500",
+      bairro: "Cerqueira César",
+      cidade: "São Paulo",
+      uf: "SP",
+    },
+    {
+      nome: "Beatriz Oliveira Lima",
+      cpf: "678.901.234-55",
+      email: "beatriz.lima@example.com",
+      profissao: "Arquiteta",
+      cidade: "São Paulo",
+      uf: "SP",
+    },
+  ],
+  vendedores: [
+    {
+      nome: "João Silva Santos",
+      cpf: "123.456.789-00",
+      email: "joao.silva@example.com",
+      cidade: "São Paulo",
+      uf: "SP",
+    },
+  ],
+  imoveis: [
+    {
+      endereco: "Avenida Brigadeiro Faria Lima",
+      rua: "Avenida Brigadeiro Faria Lima",
+      numero: "3500",
+      complemento: "Apto 121",
+      bairro: "Itaim Bibi",
+      cidade: "São Paulo",
+      uf: "SP",
+      cep: "04538-132",
+      matricula: "152.834",
+    },
+  ],
+  pagamento: {
+    valor_total: 1250000,
+    sinal: 125000,
+    sinal_arras: 125000,
+    forma:
+      "sinal de 10% na assinatura e o saldo em recursos próprios em até 60 dias",
+  },
+  comissao: {
+    percentual: 6,
+    valor: 75000,
+  },
+  config: {
+    condicoes_internas:
+      "Proposta válida por 5 (cinco) dias úteis. Sujeita à análise da documentação do imóvel.",
+  },
+  assinatura: {
+    cidade: "São Paulo",
+    uf: "SP",
+    data: "2026-05-19",
+  },
+};
+
+export const previewSampleDataPropostaLocacaoResidencial = {
+  locadores: [
+    {
+      nome: "Helena Castro Natrielli",
+      cpf: "123.456.789-00",
+      email: "helena.castro@example.com",
+      cidade: "São Paulo",
+      uf: "SP",
+    },
+  ],
+  locatarios: [
+    {
+      nome: "Carlos Eduardo Almeida",
+      cpf: "567.890.123-44",
+      email: "carlos.almeida@example.com",
+      mobile_phone: "(11) 97777-1111",
+      profissao: "Médico",
+      renda: 28000,
+      bairro: "Cerqueira César",
+      cidade: "São Paulo",
+      uf: "SP",
+    },
+  ],
+  imoveis: [
+    {
+      endereco: "Avenida Brigadeiro Faria Lima",
+      numero: "3500",
+      complemento: "Apto 121",
+      bairro: "Itaim Bibi",
+      cidade: "São Paulo",
+      uf: "SP",
+      cep: "04538-132",
+    },
+  ],
+  locacao: {
+    valor_aluguel: 8500,
+    prazo_meses: 30,
+    data_entrada: "2026-07-01",
+    garantia: "Título de capitalização (Porto Seguro), no valor de 3 aluguéis",
+  },
+  comissao: {
+    percentual: 100,
+    valor: 8500,
+  },
+  // Lidos pelo enrich de locação (config: foro, multas, vigência).
+  imovel: previewSampleDataLocacao.imovel,
+  aluguel: previewSampleDataLocacao.aluguel,
+  foro: "São Paulo/SP",
+  config: {
+    condicoes_internas:
+      "Proposta condicionada à aprovação cadastral e à assinatura do contrato em até 10 dias.",
+  },
+};
+
+export const previewSampleDataPropostaLocacaoComercial = {
+  ...previewSampleDataPropostaLocacaoResidencial,
+  locatarios: [
+    {
+      razao_social: "Vestuário Bom Retiro Comércio Ltda",
+      nome: "Vestuário Bom Retiro Comércio Ltda",
+      cnpj: "12.345.678/0001-90",
+      email: "contato@bomretiro.example.com",
+      cidade: "São Paulo",
+      uf: "SP",
+    },
+  ],
+  locacao: {
+    ...previewSampleDataPropostaLocacaoResidencial.locacao,
+    destinacao: "comércio varejista de vestuário e acessórios",
+    luvas: 25000,
+  },
+  imovel: previewSampleDataLocacaoComercial.imovel,
+};
+
+const SAMPLE_BY_MODALIDADE: Record<string, Record<string, unknown>> = {
+  a_vista: previewSampleDataAVista as Record<string, unknown>,
+  financiamento: previewSampleDataFinanciamento as Record<string, unknown>,
+  locacao: previewSampleDataLocacao as Record<string, unknown>,
+  locacao_comercial: previewSampleDataLocacaoComercial as Record<string, unknown>,
+  administracao_locacao: previewSampleDataAdministracaoLocacao as Record<string, unknown>,
+  proposta_venda: previewSampleDataPropostaVenda as Record<string, unknown>,
+  proposta_locacao_residencial:
+    previewSampleDataPropostaLocacaoResidencial as Record<string, unknown>,
+  proposta_locacao_comercial:
+    previewSampleDataPropostaLocacaoComercial as Record<string, unknown>,
+};
+
 export function getPreviewSampleData(
-  modalidade: "a_vista" | "financiamento" | "locacao" | "locacao_comercial" | string | null | undefined
+  modalidade: string | null | undefined
 ): Record<string, unknown> {
-  if (modalidade === "financiamento") {
-    return previewSampleDataFinanciamento as Record<string, unknown>;
-  }
-  if (modalidade === "locacao_comercial") {
-    return previewSampleDataLocacaoComercial as Record<string, unknown>;
-  }
-  if (modalidade === "locacao") {
-    return previewSampleDataLocacao as Record<string, unknown>;
-  }
-  return previewSampleDataAVista as Record<string, unknown>;
+  return (
+    SAMPLE_BY_MODALIDADE[modalidade ?? ""] ??
+    (previewSampleDataAVista as Record<string, unknown>)
+  );
 }

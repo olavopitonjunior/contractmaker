@@ -2,7 +2,7 @@
  * Parsing monetário robusto BR/US — fonte única de verdade.
  *
  * Os parsers antigos (`parseNumber` em asaas/commission, `toNumber` em
- * quickChecks/memory/dimob e o inline de NovaPropostaDialog) faziam
+ * quickChecks/memory/dimob e o inline do diálogo de proposta) faziam
  * `replace(/\./g, "")` INCONDICIONAL — removiam todo ponto ANTES de checar se
  * havia vírgula. Resultado: "1000.00" → 100000 (100×), "1.5" → 15. Isso
  * inflava comissão, valor de cobrança e valor de proposta. Aqui o ponto só é
@@ -87,4 +87,21 @@ export function parsePercentBR(raw: unknown): number {
   }
   if (Number.isNaN(n)) return 0;
   return negative ? -n : n;
+}
+
+/**
+ * Formata valor monetário em pt-BR ("R$ 1.500,00"). Determinístico de
+ * propósito: `toLocaleString("pt-BR", { style: "currency" })` intercala um
+ * espaço não-quebrável que difere entre o ICU do Node e o do browser e quebra
+ * a hidratação do React. Aceita número ou string (usa parseMoneyBR).
+ *
+ * `decimals: 0` corta os centavos ("R$ 1.500") — é o formato das telas de
+ * proposta, onde valor de imóvel com ",00" só faz ruído. Arredonda, não trunca.
+ */
+export function formatMoneyBR(raw: unknown, opts?: { decimals?: number }): string {
+  const decimals = opts?.decimals ?? 2;
+  const n = parseMoneyBR(raw);
+  const [int, dec] = Math.abs(n).toFixed(decimals).split(".");
+  const grouped = int.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return `${n < 0 ? "-" : ""}R$ ${grouped}${dec ? `,${dec}` : ""}`;
 }

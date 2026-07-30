@@ -1,18 +1,16 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db/prisma";
-import { resolveAllRequiredFields } from "@/lib/forms/presets";
+import { resolveFormRequiredFields } from "@/lib/forms/required-snapshot";
 import {
   resolveParticipantToken,
   type ParticipantRole,
 } from "@/lib/forms/participant-token";
-import {
-  ROLE_PATHS,
-  filterDataJsonByRole,
-} from "@/lib/forms/role-paths";
-import { ROLE_STEP_INDEXES } from "@/lib/forms/role-steps";
+import { filterDataJsonByPaths } from "@/lib/forms/role-paths";
+import { resolveParticipantScope } from "@/lib/forms/participant-scope";
 import { canAccessForm } from "@/lib/forms/form-gate";
 import { FormClosedNotice } from "@/components/forms/FormClosedNotice";
 import { SubtokenFormClient } from "./form-client";
+import { TerceiroFormClient } from "./terceiro-client";
 
 export default async function PublicParticipantFormPage({
   params,
@@ -34,35 +32,53 @@ export default async function PublicParticipantFormPage({
     return <FormClosedNotice />;
   }
 
-  const role = participant.role as ParticipantRole;
+  const scope = await resolveParticipantScope(
+    participant.role,
+    participant.form.orgId,
+  );
   const fullData = (participant.form.dataJson ?? {}) as Record<string, unknown>;
-  const filtered = filterDataJsonByRole(fullData, role);
+  // Filtro por PATHS: nos 5 papéis nativos o escopo é top-level e o resultado é
+  // idêntico ao `filterDataJsonByRole` de sempre; no terceiro, recorta só
+  // `terceiros.<slug>` — outra categoria do mesmo formulário fica invisível.
+  const filtered = filterDataJsonByPaths(fullData, scope.paths);
 
-  // Locação usa o LocacaoFormWizard (validação 100% client/finalize) — sem
-  // preset de required fields da org.
-  const isLocacao = participant.form.schemaType?.startsWith("locacao") ?? false;
+  // Link de terceiro: tela própria (um passo só, montada das field defs da
+  // categoria) em vez do wizard. Categoria removida/desativada depois do envio
+  // do link → o link deixa de servir, como um form fechado.
+  if (scope.slug) {
+    if (!scope.category || !scope.category.active) return <FormClosedNotice />;
+    return (
+      <TerceiroFormClient
+        subtoken={params.subtoken}
+        category={{
+          slug: scope.category.slug,
+          label: scope.category.label,
+          description: scope.category.description,
+          fields: scope.category.fields,
+        }}
+        partyIndex={participant.partyIndex}
+        initialData={filtered}
+        formTitle={participant.form.title}
+        completedAt={participant.completedAt?.toISOString() ?? null}
+        locked={Boolean(participant.form.lockedAt)}
+      />
+    );
+  }
 
-  // Required fields ainda vem do server pra preset da org, mas só os steps
-  // visíveis pro role serão renderizados — paths fora desses steps são
-  // ignorados pelo validateAndNavigate dentro do wizard.
-  const orgFormSettings = isLocacao
-    ? null
-    : await prisma.orgFormSettings.findUnique({
-        where: { orgId: participant.form.orgId },
-      });
-  const requiredFieldsByStep = isLocacao
-    ? []
-    : resolveAllRequiredFields(orgFormSettings).map((paths) => Array.from(paths));
+  // Required fields vêm do server (preset da org por MÓDULO — locação pelo
+  // snapshot do próprio form), mas só os steps visíveis pro role são
+  // renderizados: paths fora desses steps são ignorados pelo wizard.
+  const requiredFieldsByStep = await resolveFormRequiredFields(participant.form);
 
   return (
     <SubtokenFormClient
       subtoken={params.subtoken}
-      role={role}
+      role={participant.role as ParticipantRole}
       schemaType={participant.form.schemaType}
       initialData={filtered}
       requiredFieldsByStep={requiredFieldsByStep}
-      stepIndexes={Array.from(ROLE_STEP_INDEXES[role])}
-      pathScope={Array.from(ROLE_PATHS[role])}
+      stepIndexes={Array.from(scope.stepIndexes)}
+      pathScope={Array.from(scope.paths)}
       partyIndex={participant.partyIndex}
       formTitle={participant.form.title}
       completedAt={participant.completedAt?.toISOString() ?? null}

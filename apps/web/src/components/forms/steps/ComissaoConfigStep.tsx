@@ -13,6 +13,7 @@ import { Plus, Trash2, UserPlus, Building2, Search, Landmark } from "lucide-reac
 import { MoneyInput } from "@/components/forms/MoneyInput";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import { OBSERVACOES_MAX } from "@/lib/forms/validation";
+import { maskCPF, maskCNPJ, maskTelefone } from "@/lib/forms/field-formats";
 
 interface ComissaoConfigStepProps {
   form: UseFormReturn<any>;
@@ -821,8 +822,17 @@ export function ComissaoConfigStep({
                     <FormField label="CPF do Corretor">
                       <Input
                         {...form.register(
-                          `comissao.comissionados.${index}.cpf`
+                          `comissao.comissionados.${index}.cpf`,
+                          {
+                            onChange: (e) =>
+                              form.setValue(
+                                `comissao.comissionados.${index}.cpf`,
+                                maskCPF(e.target.value),
+                                { shouldDirty: true }
+                              ),
+                          }
                         )}
+                        inputMode="numeric"
                         placeholder="000.000.000-00"
                       />
                     </FormField>
@@ -830,8 +840,17 @@ export function ComissaoConfigStep({
                     <FormField label="CNPJ da Imobiliária">
                       <Input
                         {...form.register(
-                          `comissao.comissionados.${index}.cnpj`
+                          `comissao.comissionados.${index}.cnpj`,
+                          {
+                            onChange: (e) =>
+                              form.setValue(
+                                `comissao.comissionados.${index}.cnpj`,
+                                maskCNPJ(e.target.value),
+                                { shouldDirty: true }
+                              ),
+                          }
                         )}
+                        inputMode="numeric"
                         placeholder="00.000.000/0000-00"
                       />
                     </FormField>
@@ -892,8 +911,17 @@ export function ComissaoConfigStep({
                   <FormField label="Celular (com DDD)">
                     <Input
                       type="tel"
+                      inputMode="numeric"
                       {...form.register(
-                        `comissao.comissionados.${index}.mobile_phone`
+                        `comissao.comissionados.${index}.mobile_phone`,
+                        {
+                          onChange: (e) =>
+                            form.setValue(
+                              `comissao.comissionados.${index}.mobile_phone`,
+                              maskTelefone(e.target.value),
+                              { shouldDirty: true }
+                            ),
+                        }
                       )}
                       placeholder="(11) 99999-9999"
                     />
@@ -1005,7 +1033,15 @@ export function ComissaoConfigStep({
                 </FormField>
                 <FormField label="CPF">
                   <Input
-                    {...form.register(`testemunhas.${index}.cpf`)}
+                    {...form.register(`testemunhas.${index}.cpf`, {
+                      onChange: (e) =>
+                        form.setValue(
+                          `testemunhas.${index}.cpf`,
+                          maskCPF(e.target.value),
+                          { shouldDirty: true }
+                        ),
+                    })}
+                    inputMode="numeric"
                     placeholder="000.000.000-00"
                   />
                 </FormField>

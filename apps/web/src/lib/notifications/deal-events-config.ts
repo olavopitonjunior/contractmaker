@@ -13,6 +13,8 @@ import {
   DEAL_NOTIF_EVENTS,
   DEFAULT_EVENT,
   DEFAULT_FORM_REMINDER,
+  PARTY_OFF,
+  isPartyCapableEvent,
   type DealNotifEvent,
   type EventAudienceToggles,
   type NotificationConfigJson,
@@ -24,6 +26,8 @@ export {
   DEAL_NOTIF_EVENTS,
   DEAL_NOTIF_EVENT_LABEL,
   DEFAULT_FORM_REMINDER,
+  PARTY_CAPABLE_EVENTS,
+  isPartyCapableEvent,
 } from "./deal-events-shared";
 export type {
   DealNotifEvent,
@@ -45,6 +49,10 @@ function mergeEvent(
     broker: {
       email: patch.broker?.email ?? base.broker.email,
       whatsapp: patch.broker?.whatsapp ?? base.broker.whatsapp,
+    },
+    party: {
+      email: patch.party?.email ?? base.party.email,
+      whatsapp: patch.party?.whatsapp ?? base.party.whatsapp,
     },
   };
 }
@@ -72,7 +80,12 @@ export async function resolveEffectiveNotificationConfig(
   const events = {} as Record<DealNotifEvent, ResolvedEventConfig>;
   for (const ev of DEAL_NOTIF_EVENTS) {
     const withOrg = mergeEvent(DEFAULT_EVENT, orgJson.events?.[ev]);
-    events[ev] = mergeEvent(withOrg, dealJson.events?.[ev]);
+    const resolved = mergeEvent(withOrg, dealJson.events?.[ev]);
+    // Allowlist de party é a última palavra: config antiga (ou JSON escrito à
+    // mão) não liga o cliente final num evento que o produto não aprovou.
+    events[ev] = isPartyCapableEvent(ev)
+      ? resolved
+      : { ...resolved, party: { ...PARTY_OFF } };
   }
 
   return {
