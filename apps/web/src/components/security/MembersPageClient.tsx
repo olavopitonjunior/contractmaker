@@ -103,7 +103,12 @@ export function MembersPageClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify(inviteData),
+        // Nome é opcional: manda `undefined` em vez de "" (o schema do backend
+        // reprova string vazia — convite só com e-mail voltava 400).
+        body: JSON.stringify({
+          ...inviteData,
+          name: inviteData.name.trim() || undefined,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
