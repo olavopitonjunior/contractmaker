@@ -245,11 +245,27 @@ const fiscalSchema = z.object({
   repasse_garantido_meses: z.number().int().min(0).optional(),
 });
 
-// Angariador (A11) — corretor captador com comissão recorrente sobre o aluguel.
-// `meses_comissao` null/0 = todo o contrato.
-const angariadorSchema = z.object({
+// Angariador (A11) — corretor captador com comissão RECORRENTE sobre o aluguel
+// (percentual do aluguel OU valor fixo, × `meses_comissao`). `meses_comissao`
+// null/0 = todo o contrato. Não confundir com `taxa_locacao_percent` (comissão
+// de CORRETAGEM, one-shot sobre o 1º aluguel).
+//
+// Os campos de qualificação (tipo_pessoa/cpf/cnpj/creci/email/mobile_phone) são
+// ADITIVOS (2026-07): `materializeLeaseParties` já lia `a.cpf || a.cnpj` do
+// dataJson antes de existir UI, e `splitRecipientId` é o backfill do registry
+// de corretores (SplitRecipient kind="commissioner"), espelhando
+// `comissao.comissionados[]` de venda.
+export const angariadorLocacaoSchema = z.object({
   party_id: z.string().optional(),
+  /** Backfill do registry (lib/asaas/commissioner-registry.ts). */
+  splitRecipientId: z.string().optional(),
   nome: z.string().min(2, "Nome do angariador obrigatório"),
+  tipo_pessoa: z.enum(["fisica", "juridica"]).optional().default("fisica"),
+  cpf: z.string().optional().default(""),
+  cnpj: z.string().optional().default(""),
+  creci: z.string().optional().default(""),
+  email: z.string().email("Email inválido").optional().or(z.literal("")),
+  mobile_phone: z.string().optional().default(""),
   forma_comissao: z.enum(["percentual", "valor_fixo"]).optional().default("percentual"),
   percentual: z.number().min(0).max(100).optional(),
   valor_fixo: z.number().min(0).optional(),
@@ -258,10 +274,13 @@ const angariadorSchema = z.object({
 
 // Comissão da imobiliária — taxa de locação cobrada à vista (1º aluguel) +
 // angariadores. Base dos boletos de comissão (ver aba Cobrança do deal).
-const comissaoSchema = z.object({
+export const comissaoLocacaoSchema = z.object({
   taxa_locacao_percent: z.number().min(0).max(100).optional().default(0),
-  angariadores: z.array(angariadorSchema).optional().default([]),
+  angariadores: z.array(angariadorLocacaoSchema).optional().default([]),
 });
+
+export type AngariadorLocacao = z.infer<typeof angariadorLocacaoSchema>;
+export type ComissaoLocacao = z.infer<typeof comissaoLocacaoSchema>;
 
 export const dadosLocacaoSchema = z
   .object({
@@ -291,7 +310,7 @@ export const dadosLocacaoSchema = z
       .default({}),
     // Operador-only (não renderizadas no template): config fiscal + comissão.
     fiscal: fiscalSchema.optional(),
-    comissao: comissaoSchema.optional(),
+    comissao: comissaoLocacaoSchema.optional(),
   })
   .superRefine((data, ctx) => {
     // Caução limitada a 3 aluguéis (art. 38 §2º Lei 8.245/91).
@@ -379,7 +398,7 @@ export const dadosLocacaoComercialSchema = z
       })
       .default({}),
     fiscal: fiscalSchema.optional(),
-    comissao: comissaoSchema.optional(),
+    comissao: comissaoLocacaoSchema.optional(),
   })
   .superRefine((data, ctx) => {
     if (data.garantia?.tipo === "caucao") {

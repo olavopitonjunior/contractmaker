@@ -5,6 +5,8 @@ import {
   collectLocacaoFinalizeIssues,
   sumEncargosMensais,
   seedOutrosEncargos,
+  comissaoLocacaoSchema,
+  angariadorLocacaoSchema,
 } from "../validation-locacao";
 
 const baseValid = {
@@ -384,5 +386,103 @@ describe("formato das sub-partes do fiador no finalize", () => {
       },
     });
     expect(p).toContain("garantia.fiador.representante.cpf");
+  });
+});
+
+// ============================================================================
+// Comissão de locação — corretagem (one-shot) + angariadores (recorrente).
+// Superfície do OPERADOR: não entra no wizard público (ver ROLE_PATHS).
+// ============================================================================
+describe("comissaoLocacaoSchema", () => {
+  it("aceita corretagem sem angariadores e aplica defaults", () => {
+    const parsed = comissaoLocacaoSchema.parse({ taxa_locacao_percent: 100 });
+    expect(parsed.taxa_locacao_percent).toBe(100);
+    expect(parsed.angariadores).toEqual([]);
+  });
+
+  it("preenche taxa 0 quando omitida (comissão opcional)", () => {
+    expect(comissaoLocacaoSchema.parse({}).taxa_locacao_percent).toBe(0);
+  });
+
+  it("rejeita taxa fora de 0..100", () => {
+    expect(comissaoLocacaoSchema.safeParse({ taxa_locacao_percent: 101 }).success).toBe(
+      false
+    );
+    expect(comissaoLocacaoSchema.safeParse({ taxa_locacao_percent: -1 }).success).toBe(
+      false
+    );
+  });
+
+  it("aceita angariador com qualificação completa (aditivo 2026-07)", () => {
+    const parsed = comissaoLocacaoSchema.parse({
+      taxa_locacao_percent: 50,
+      angariadores: [
+        {
+          nome: "Carla Angariadora",
+          tipo_pessoa: "fisica",
+          cpf: "111.444.777-35",
+          creci: "199.905",
+          email: "carla@imob.com",
+          mobile_phone: "(11) 99999-0000",
+          forma_comissao: "percentual",
+          percentual: 10,
+          meses_comissao: 12,
+          splitRecipientId: "sr-1",
+        },
+      ],
+    });
+    expect(parsed.angariadores[0]).toMatchObject({
+      cpf: "111.444.777-35",
+      creci: "199.905",
+      splitRecipientId: "sr-1",
+    });
+  });
+
+  it("angariador legado (só nome + percentual) segue válido com defaults", () => {
+    const parsed = angariadorLocacaoSchema.parse({ nome: "Carla", percentual: 10 });
+    expect(parsed.tipo_pessoa).toBe("fisica");
+    expect(parsed.forma_comissao).toBe("percentual");
+    expect(parsed.cpf).toBe("");
+  });
+
+  it("aceita angariador PJ com valor fixo", () => {
+    const parsed = angariadorLocacaoSchema.parse({
+      nome: "Imobiliária Parceira",
+      tipo_pessoa: "juridica",
+      cnpj: "11.222.333/0001-81",
+      forma_comissao: "valor_fixo",
+      valor_fixo: 150,
+    });
+    expect(parsed.forma_comissao).toBe("valor_fixo");
+    expect(parsed.valor_fixo).toBe(150);
+  });
+
+  it("rejeita angariador sem nome utilizável", () => {
+    expect(angariadorLocacaoSchema.safeParse({ nome: "C" }).success).toBe(false);
+    expect(angariadorLocacaoSchema.safeParse({}).success).toBe(false);
+  });
+
+  it("rejeita e-mail inválido do angariador mas aceita string vazia", () => {
+    expect(
+      angariadorLocacaoSchema.safeParse({ nome: "Carla", email: "nao-email" }).success
+    ).toBe(false);
+    expect(
+      angariadorLocacaoSchema.safeParse({ nome: "Carla", email: "" }).success
+    ).toBe(true);
+  });
+
+  it("dadosLocacaoSchema carrega a comissão inteira (residencial e comercial)", () => {
+    const comissao = {
+      taxa_locacao_percent: 100,
+      angariadores: [{ nome: "Carla", cpf: "111.444.777-35", percentual: 10 }],
+    };
+    const res = dadosLocacaoSchema.parse({ ...baseValid, comissao });
+    expect(res.comissao?.angariadores[0].cpf).toBe("111.444.777-35");
+    const com = dadosLocacaoComercialSchema.parse({
+      ...baseValid,
+      imovel: { ...baseValid.imovel, destinacao: "Padaria" },
+      comissao,
+    });
+    expect(com.comissao?.taxa_locacao_percent).toBe(100);
   });
 });

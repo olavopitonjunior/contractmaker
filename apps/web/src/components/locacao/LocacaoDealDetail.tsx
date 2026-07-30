@@ -346,6 +346,7 @@ export function LocacaoDealDetail({
         {/* DADOS — visão do form.dataJson (paridade com a aba Dados de vendas) */}
         <TabsContent value="dados" className="mt-4">
           <LocacaoDadosTab
+            dealId={deal.id}
             dataJson={deal.dataJson}
             formToken={deal.formToken}
             formStatus={deal.formStatus}

@@ -15,6 +15,11 @@ import {
 } from "@/components/ui/dialog";
 import { NativeSelect } from "@/components/forms/NativeSelect";
 import { PartyLinksPanel } from "@/components/forms/PartyLinksPanel";
+import { Separator } from "@/components/ui/separator";
+import {
+  ComissaoLocacaoSection,
+  type ComissaoLocacaoValue,
+} from "@/components/locacao/ComissaoLocacaoSection";
 import { Plus, Copy, Check, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
 
@@ -63,7 +68,12 @@ export function NovoFormularioLocacaoDialog({
   const [title, setTitle] = useState("");
   const [finalidade, setFinalidade] = useState("residencial");
   const [taxaAdmin, setTaxaAdmin] = useState(10);
-  const [taxaLocacao, setTaxaLocacao] = useState(0);
+  // Comissão completa (corretagem + angariadores) — antes só existia o input
+  // de `taxa_locacao_percent`, e o array ia hard-coded vazio pro servidor.
+  const [comissao, setComissao] = useState<ComissaoLocacaoValue>({
+    taxa_locacao_percent: 0,
+    angariadores: [],
+  });
   const [regimeIr, setRegimeIr] = useState("nao_retem");
   const [regimeCobranca, setRegimeCobranca] = useState("mes_a_vencer");
   const [emitirNfse, setEmitirNfse] = useState(false);
@@ -74,6 +84,7 @@ export function NovoFormularioLocacaoDialog({
     setDealId(null);
     setCopied(false);
     setTitle("");
+    setComissao({ taxa_locacao_percent: 0, angariadores: [] });
     // Nova intenção de criação → nova key de idempotência.
     setIdemKey(crypto.randomUUID());
   };
@@ -95,7 +106,10 @@ export function NovoFormularioLocacaoDialog({
           regime_cobranca: regimeCobranca,
           emitir_nfse: emitirNfse,
         },
-        comissao: { taxa_locacao_percent: taxaLocacao, angariadores: [] },
+        comissao: {
+          taxa_locacao_percent: comissao.taxa_locacao_percent ?? 0,
+          angariadores: comissao.angariadores ?? [],
+        },
       }),
     });
     // Body lido UMA vez — reler depois lança "body already consumed" e
@@ -167,7 +181,8 @@ export function NovoFormularioLocacaoDialog({
           </Button>
         </DialogTrigger>
       )}
-      <DialogContent className="sm:max-w-lg">
+      {/* A seção de comissão (angariadores) estica o diálogo — rola dentro. */}
+      <DialogContent className="sm:max-w-2xl max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Novo formulário de locação</DialogTitle>
           <DialogDescription>
@@ -213,14 +228,6 @@ export function NovoFormularioLocacaoDialog({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label className="text-sm">Taxa de locação / comissão (%)</Label>
-                <Input
-                  type="number"
-                  value={taxaLocacao}
-                  onChange={(e) => setTaxaLocacao(Number(e.target.value))}
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
                 <Label className="text-sm">Regime de IR</Label>
                 <NativeSelect value={regimeIr} onChange={setRegimeIr} options={REGIME_IR} />
               </div>
@@ -245,6 +252,13 @@ export function NovoFormularioLocacaoDialog({
                 </Label>
               </div>
             </div>
+
+            <Separator />
+
+            {/* Comissão do operador — o cliente do link nunca vê nem edita. O
+                aluguel ainda não existe nesta tela, então os previews em R$ só
+                aparecem depois, na aba Dados do negócio. */}
+            <ComissaoLocacaoSection value={comissao} onChange={setComissao} />
           </div>
         ) : (
           <div className="space-y-3 py-2">
