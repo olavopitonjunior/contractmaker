@@ -13,6 +13,7 @@ import { mergeAuditMetadata } from "@/lib/audit/newton";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { assertModuleEnabled, ModuleDisabledError } from "@/lib/modules/guard";
 import { MODULE } from "@/lib/modules/catalog";
+import { getEffectivePermissions, dealScopeWhere } from "@/lib/security/rbac/check";
 
 const createDealSchema = z.object({
   formId: z.string().optional(),
@@ -133,6 +134,21 @@ export async function GET(req: NextRequest) {
   const pipeline = await getPipelineByKind(auth.org.id, MODULE.VENDAS);
   if (!pipeline) return NextResponse.json([]);
 
+  // Escopo por usuário (feature Gerente). Bearer/Newton: token é da org —
+  // sem scoping por usuário (age como serviço).
+  let scope = {};
+  if (auth.ident.via !== "bearer") {
+    const eff = await getEffectivePermissions(
+      auth.actor.effectiveUserId,
+      auth.org.id
+    );
+    const s = dealScopeWhere(eff);
+    if (s === null) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+    scope = s;
+  }
+
   // Oculta arquivados por padrão; ?includeArchived=true inclui.
   const includeArchived =
     new URL(req.url).searchParams.get("includeArchived") === "true";
@@ -141,6 +157,7 @@ export async function GET(req: NextRequest) {
     where: {
       pipelineId: pipeline.id,
       ...(includeArchived ? {} : { archivedAt: null }),
+      ...scope,
     },
     orderBy: { createdAt: "desc" },
     include: {

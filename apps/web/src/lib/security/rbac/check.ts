@@ -1,5 +1,11 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db/prisma";
-import { PermissionKey, PermissionMap, PERMISSION } from "./permissions";
+import {
+  PermissionKey,
+  PermissionMap,
+  PERMISSION,
+  MANAGER_CONFIGURABLE_PERMISSIONS,
+} from "./permissions";
 import { resolvePermissions, RolePreset } from "./roles";
 
 export interface EffectivePermissions {
@@ -29,12 +35,29 @@ export async function getEffectivePermissions(
     ? (membership.customRole.permissions as PermissionMap)
     : null;
 
+  // Gerente: o preset é mesclado com os overrides da ORG (um conjunto pra
+  // todos os gerentes — OrgManagerSettings.permissionsJson). Filtrado pela
+  // whitelist na leitura também (defesa em profundidade; o PATCH já valida).
+  let orgOverrides: PermissionMap | null = null;
+  if (role === "gerente") {
+    const settings = await prisma.orgManagerSettings.findUnique({
+      where: { orgId },
+      select: { permissionsJson: true },
+    });
+    const raw = (settings?.permissionsJson ?? {}) as Record<string, unknown>;
+    const filtered: PermissionMap = {};
+    for (const key of MANAGER_CONFIGURABLE_PERMISSIONS) {
+      if (typeof raw[key] === "boolean") filtered[key] = raw[key] as boolean;
+    }
+    orgOverrides = filtered;
+  }
+
   return {
     userId,
     orgId,
     role,
     customRoleName: membership.customRole?.name ?? null,
-    permissions: resolvePermissions(role, custom),
+    permissions: resolvePermissions(role, custom, orgOverrides),
   };
 }
 
@@ -105,6 +128,60 @@ export function canAccessProposal(params: {
  *
  * Uso: `prisma.proposal.findMany({ where: { ...scope, status: "enviada" } })`.
  */
+/**
+ * Checa se o user pode acessar UM deal específico.
+ * DEAL_VIEW_ALL → qualquer deal da org (org check é do caller).
+ * DEAL_VIEW_ASSIGNED_ONLY (gerente) → deals onde ele é o gerente atribuído
+ * (`managerUserId`) OU o criador (`userId` — deal criado pelo próprio gerente
+ * não pode sumir dele).
+ * Nenhuma das duas chaves → true (fail-open deliberado: CustomRoles gravadas
+ * antes da feature Gerente não têm as chaves novas e hoje veem o kanban
+ * inteiro; só DEAL_VIEW_ASSIGNED_ONLY estreita — a chave restritiva é opt-in).
+ */
+export function canAccessDeal(params: {
+  effective: EffectivePermissions;
+  ownerUserId: string; // Deal.userId (quem criou)
+  managerUserId?: string | null; // Deal.managerUserId (gerente atribuído)
+}): boolean {
+  const { effective, ownerUserId, managerUserId } = params;
+  if (can(effective, PERMISSION.DEAL_VIEW_ALL)) return true;
+  if (can(effective, PERMISSION.DEAL_VIEW_ASSIGNED_ONLY)) {
+    return (
+      effective.userId === ownerUserId ||
+      (!!managerUserId && effective.userId === managerUserId)
+    );
+  }
+  return true; // fail-open (status quo pré-feature) — ver docstring
+}
+
+/**
+ * Cláusula `where` de escopo de deal — espalhar no `where` de TODA listagem
+ * de deal (kanban vendas/locação, listas, KPIs). Espelha proposalScopeWhere,
+ * mas com fail-open: sem nenhuma das chaves de view, mantém a visão org-wide
+ * (status quo pré-feature; roles/CustomRoles antigas não regridem).
+ *
+ * `null` = caller sem permissões resolvidas (sem membership) — tratar como
+ * 403/lista vazia. O escopo de org (pipeline.orgId) é responsabilidade do
+ * caller, que já resolve o pipeline via getPipelineByKind(orgId, ...).
+ */
+export function dealScopeWhere(
+  effective: EffectivePermissions | null
+): Prisma.DealWhereInput | null {
+  if (!effective) return null;
+  const restricted =
+    can(effective, PERMISSION.DEAL_VIEW_ASSIGNED_ONLY) &&
+    !can(effective, PERMISSION.DEAL_VIEW_ALL);
+  if (restricted) {
+    return {
+      OR: [
+        { managerUserId: effective.userId },
+        { userId: effective.userId },
+      ],
+    };
+  }
+  return {};
+}
+
 export function proposalScopeWhere(
   effective: EffectivePermissions | null
 ):
