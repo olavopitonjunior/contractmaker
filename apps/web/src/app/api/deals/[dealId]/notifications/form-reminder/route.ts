@@ -4,6 +4,8 @@ import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { notifyDealEvent } from "@/lib/notifications/deal-events";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -36,6 +38,15 @@ export async function POST(
   if (!deal || deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Deal not found" }, { status: 404 });
   }
+  // Escopo do gerente + DEAL_EDIT (dispara lembrete ao cliente).
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: session.user.id,
+    orgId: org.id,
+    permission: PERMISSION.DEAL_EDIT,
+  });
+  if (denied) return denied;
+
   if (!deal.form) {
     return NextResponse.json(
       { error: "Este negócio não tem formulário vinculado" },

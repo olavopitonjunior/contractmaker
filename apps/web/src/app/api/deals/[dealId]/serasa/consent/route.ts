@@ -4,6 +4,8 @@ import { z } from "zod";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { audit } from "@/lib/security/audit";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 /**
  * POST /api/deals/:dealId/serasa/consent
@@ -43,6 +45,18 @@ async function authorizeDeal(dealId: string) {
   if (!deal) return { error: "Deal not found", status: 404 as const };
   if (deal.pipeline.orgId !== org.id) {
     return { error: "Forbidden", status: 403 as const };
+  }
+  // Escopo do gerente + DEAL_EDIT (grava/revoga consentimento LGPD).
+  const denied = await guardDealScope({
+    dealId,
+    userId: session.user.id,
+    orgId: org.id,
+    permission: PERMISSION.DEAL_EDIT,
+  });
+  if (denied) {
+    return denied.status === 403
+      ? { error: "PERMISSION_DENIED", status: 403 as const }
+      : { error: "Deal not found", status: 404 as const };
   }
   return { deal, org, userId: session.user.id };
 }

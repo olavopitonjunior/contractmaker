@@ -5,6 +5,8 @@ import { prisma } from "@/lib/db/prisma";
 import { isValidEmail } from "@/lib/clicksign/mapping";
 import { addSignerToEnvelope } from "@/lib/clicksign/signer-actions";
 import type { ClicksignRole } from "@/lib/clicksign/roles";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -43,6 +45,16 @@ export async function POST(
   if (!envelope) {
     return NextResponse.json({ error: "Envelope não encontrado" }, { status: 404 });
   }
+
+  // Escopo do gerente + ENVELOPE_SEND (signatário novo = custo novo).
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    via: ctx.via,
+    permission: PERMISSION.ENVELOPE_SEND,
+  });
+  if (denied) return denied;
 
   const result = await addSignerToEnvelope(envelope, {
     name: parsed.data.name,

@@ -22,9 +22,11 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
-import { auth } from "@/lib/auth/auth";
+import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { generateAddendumForDeal } from "@/lib/services/addendum-generation";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -74,8 +76,20 @@ export async function POST(
   if (!deal) {
     return NextResponse.json({ error: "Deal não encontrado" }, { status: 404 });
   }
-  // Note: a verificação completa de pertencimento a org cabe ao middleware
-  // ou requireApiAuth — aqui só validamos existência.
+  // Cross-org + escopo do gerente + CONTRACT_CREATE (aditamento é contrato
+  // novo). Antes esta rota só validava existência do deal — o guard fecha o
+  // cross-org junto com o escopo.
+  const org = await getUserOrg(session.user.id);
+  if (!org) {
+    return NextResponse.json({ error: "No organization" }, { status: 400 });
+  }
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: session.user.id,
+    orgId: org.id,
+    permission: PERMISSION.CONTRACT_CREATE,
+  });
+  if (denied) return denied;
 
   const body = await req.json().catch(() => null);
   if (!body) {

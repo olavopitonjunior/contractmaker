@@ -14,6 +14,8 @@ import {
 } from "@/lib/clicksign/account";
 import { buildEnvelopeSendPreview } from "@/lib/clicksign/preview";
 import { requireApproval, approvalResponse } from "@/lib/api/intents";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -111,6 +113,15 @@ export async function GET(
     );
   }
 
+  // Escopo do gerente (lista de envelopes = PII dos signatários).
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    via: ctx.via,
+  });
+  if (denied) return denied;
+
   const envelopes = await prisma.envelope.findMany({
     where: { contractId: params.id },
     include: {
@@ -149,6 +160,16 @@ export async function POST(
       { status: 404 }
     );
   }
+  // Escopo do gerente + ENVELOPE_SEND (envio custa dinheiro por signatário).
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    via: ctx.via,
+    permission: PERMISSION.ENVELOPE_SEND,
+  });
+  if (denied) return denied;
+
   if (contract.status !== "aprovado") {
     return NextResponse.json(
       { error: "Contrato precisa estar aprovado antes de enviar para assinatura" },

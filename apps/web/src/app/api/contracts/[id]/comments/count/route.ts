@@ -6,6 +6,7 @@ import {
   orgScopedNotFound,
   resolveUserOrgId,
 } from "@/lib/security/org-scope";
+import { guardContractScope } from "@/lib/deals/route-helpers";
 
 export async function GET(
   req: NextRequest,
@@ -20,6 +21,14 @@ export async function GET(
   if (!(await contractBelongsToOrg(params.id, orgId))) {
     return orgScopedNotFound("Contrato");
   }
+
+  // Escopo do gerente.
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: session.user.id,
+    orgId: orgId!,
+  });
+  if (denied) return denied;
 
   const url = new URL(req.url);
   const authorType = url.searchParams.get("authorType");

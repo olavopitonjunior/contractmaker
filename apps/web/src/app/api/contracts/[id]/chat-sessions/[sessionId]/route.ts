@@ -6,6 +6,7 @@ import {
   isAuthFailure,
   authFailureResponse,
 } from "@/lib/api/require-auth";
+import { guardContractScope } from "@/lib/deals/route-helpers";
 
 export const runtime = "nodejs";
 
@@ -44,6 +45,14 @@ async function loadOwnedSession(
   if (isBearer && session.contract.userId !== authUserId) {
     return { error: "Forbidden", status: 403 as const };
   }
+  // Escopo do gerente (bearer bypassa dentro do guard).
+  const denied = await guardContractScope({
+    contractId,
+    userId: authUserId,
+    orgId,
+    via: isBearer ? "bearer" : "session",
+  });
+  if (denied) return { error: "Session not found", status: 404 as const };
   return { session };
 }
 

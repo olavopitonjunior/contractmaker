@@ -5,6 +5,8 @@ import { prisma } from "@/lib/db/prisma";
 import { cancelEnvelopeFlow } from "@/lib/clicksign/executor";
 import { updateEnvelope } from "@/lib/clicksign/envelopes";
 import { ClicksignError } from "@/lib/clicksign/client";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -43,6 +45,16 @@ export async function PATCH(
   if (!envelope) {
     return NextResponse.json({ error: "Envelope não encontrado" }, { status: 404 });
   }
+  // Escopo do gerente + ENVELOPE_SEND.
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    via: ctx.via,
+    permission: PERMISSION.ENVELOPE_SEND,
+  });
+  if (denied) return denied;
+
   if (envelope.status !== "draft" && envelope.status !== "running") {
     return NextResponse.json(
       { error: "Envelope não pode mais ser editado" },
@@ -125,6 +137,16 @@ export async function DELETE(
   if (envelope.deal?.pipeline.orgId !== ctx.orgId) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente + ENVELOPE_SEND (cancelar é ação de envio).
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: ctx.userId,
+    orgId: ctx.orgId,
+    via: ctx.via,
+    permission: PERMISSION.ENVELOPE_SEND,
+  });
+  if (denied) return denied;
 
   try {
     await cancelEnvelopeFlow(envelope.id);

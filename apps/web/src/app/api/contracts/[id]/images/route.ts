@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { put } from "@vercel/blob";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import { guardContractScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -30,6 +32,15 @@ export async function POST(
   if (!contract || contract.deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
   }
+  // Escopo do gerente + CONTRACT_EDIT.
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: session.user.id,
+    orgId: org.id,
+    permission: PERMISSION.CONTRACT_EDIT,
+  });
+  if (denied) return denied;
+
   if (contract.status === "aprovado") {
     return NextResponse.json(
       { error: "Contrato aprovado não pode receber imagens" },

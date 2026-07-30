@@ -6,6 +6,7 @@ import { getMonthlySpend, observedPriceByEndpoint } from "@/lib/certidoes/execut
 import type { ExtractionPlan } from "@/lib/certidoes/types";
 import { checkGovBrAuth } from "@/lib/certidoes/govbr-auth";
 import { checkOnrAuth } from "@/lib/certidoes/onr-auth";
+import { guardDealScope } from "@/lib/deals/route-helpers";
 import {
   listAllForPicker,
   listCoveredUfs,
@@ -52,6 +53,14 @@ export async function GET(
   if (deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente (GET — plano de extração; sem permission).
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: session.user.id,
+    orgId: org.id,
+  });
+  if (denied) return denied;
 
   const dealData =
     (deal.form?.dataJson as Record<string, unknown> | null) ||

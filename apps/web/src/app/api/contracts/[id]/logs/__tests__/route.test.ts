@@ -15,9 +15,11 @@ function createRequest() {
   });
 }
 
+// mockResolvedValue (não -Once): além do contractBelongsToOrg, o guard de
+// escopo do gerente (guardContractScope) faz um segundo findUnique.
 function mockContractInOrg(orgId: string) {
-  mockPrisma.contract.findUnique.mockResolvedValueOnce({
-    deal: { pipeline: { orgId } },
+  mockPrisma.contract.findUnique.mockResolvedValue({
+    deal: { userId: "user-1", managerUserId: null, pipeline: { orgId } },
   } as any);
 }
 

@@ -102,3 +102,218 @@ export async function loadScopedDeal(
 
   return { auth, eff, deal };
 }
+
+/**
+ * Shape lite do contrato — o suficiente pra autorização. A org do contrato vem
+ * do DEAL (`deal.pipeline.orgId`): contrato importado tem `templateId = null`,
+ * então `template.orgId` não serve como fonte única (ver CLAUDE.md §Schemas
+ * críticos). `Contract.dealId` é obrigatório no schema, logo o deal sempre
+ * existe; o `template.orgId` fica só como fallback defensivo.
+ */
+export interface ScopedContractLite {
+  id: string;
+  dealId: string;
+  orgId: string;
+  deal: { userId: string; managerUserId: string | null };
+}
+
+/**
+ * Gêmeo de `loadScopedDeal` pras rotas com raiz em CONTRATO
+ * (`/api/contracts/[id]/*`): resolve o contrato, deriva a org pelo deal,
+ * aplica cross-org + `canAccessDeal` (404) e a permission opcional (403).
+ * Bearer bypassa o scoping por usuário (token é da ORG), como no deal.
+ */
+export async function loadScopedContract(
+  req: NextRequest,
+  contractId: string,
+  opts?: { permission?: PermissionKey; scope?: string }
+): Promise<
+  | { fail: NextResponse }
+  | {
+      auth: ApiAuthSuccess;
+      eff: EffectivePermissions;
+      contract: ScopedContractLite;
+    }
+> {
+  const auth = await requireApiAuth(req, {
+    scope: opts?.scope ?? "contracts:rw",
+  });
+  if (isAuthFailure(auth)) return { fail: authFailureResponse(auth) };
+
+  const row = await prisma.contract.findUnique({
+    where: { id: contractId },
+    select: {
+      id: true,
+      dealId: true,
+      deal: {
+        select: {
+          userId: true,
+          managerUserId: true,
+          pipeline: { select: { orgId: true } },
+        },
+      },
+      template: { select: { orgId: true } },
+    },
+  });
+
+  const notFound = () => ({
+    fail: NextResponse.json({ error: "Não encontrado" }, { status: 404 }),
+  });
+
+  const orgId = row?.deal?.pipeline?.orgId ?? row?.template?.orgId;
+  if (!row || !orgId || orgId !== auth.org.id) return notFound();
+
+  const eff = await getEffectivePermissions(
+    auth.actor.effectiveUserId,
+    auth.org.id
+  );
+  if (!eff) return notFound();
+
+  const isBearer = auth.ident.via === "bearer";
+  if (
+    !isBearer &&
+    !canAccessDeal({
+      effective: eff,
+      ownerUserId: row.deal?.userId ?? "",
+      managerUserId: row.deal?.managerUserId ?? null,
+    })
+  ) {
+    return notFound();
+  }
+
+  if (opts?.permission && !isBearer && !can(eff, opts.permission)) {
+    return {
+      fail: NextResponse.json(
+        { error: "PERMISSION_DENIED", permission: opts.permission },
+        { status: 403 }
+      ),
+    };
+  }
+
+  return {
+    auth,
+    eff,
+    contract: {
+      id: row.id,
+      dealId: row.dealId,
+      orgId,
+      deal: {
+        userId: row.deal?.userId ?? "",
+        managerUserId: row.deal?.managerUserId ?? null,
+      },
+    },
+  };
+}
+
+/**
+ * Gate de escopo pra rotas que resolvem auth por conta própria — session-only
+ * (`auth()` + `getUserOrg`) ou `requireAuth` de lib/auth/context. NÃO substitui
+ * a autenticação nem o cross-org check do caller: é ACRESCENTADO depois deles.
+ *
+ * Devolve a NextResponse de erro (404 fora do escopo, 403 sem a permission) ou
+ * `null` pra seguir o fluxo. `via: "bearer"` bypassa o scoping por usuário
+ * (token é da ORG), espelhando `loadScopedDeal`.
+ */
+export async function guardDealScope(params: {
+  dealId: string;
+  userId: string;
+  orgId: string;
+  via?: string;
+  permission?: PermissionKey;
+}): Promise<NextResponse | null> {
+  const { dealId, userId, orgId, via, permission } = params;
+  if (via === "bearer") return null;
+
+  const deal = await prisma.deal.findUnique({
+    where: { id: dealId },
+    select: {
+      userId: true,
+      managerUserId: true,
+      pipeline: { select: { orgId: true } },
+    },
+  });
+  const notFound = () =>
+    NextResponse.json({ error: "Não encontrado" }, { status: 404 });
+
+  // Cross-org: só compara quando o pipeline veio (o caller já validou a org por
+  // conta própria; aqui é defesa em profundidade, não a checagem primária).
+  if (!deal || (deal.pipeline?.orgId && deal.pipeline.orgId !== orgId)) {
+    return notFound();
+  }
+
+  const eff = await getEffectivePermissions(userId, orgId);
+  if (
+    !eff ||
+    !canAccessDeal({
+      effective: eff,
+      ownerUserId: deal.userId,
+      managerUserId: deal.managerUserId,
+    })
+  ) {
+    return notFound();
+  }
+
+  if (permission && !can(eff, permission)) {
+    return NextResponse.json(
+      { error: "PERMISSION_DENIED", permission },
+      { status: 403 }
+    );
+  }
+
+  return null;
+}
+
+/**
+ * Versão do `guardDealScope` ancorada no CONTRATO — pras rotas
+ * `/api/contracts/[id]/*` que não usam `requireApiAuth`.
+ */
+export async function guardContractScope(params: {
+  contractId: string;
+  userId: string;
+  orgId: string;
+  via?: string;
+  permission?: PermissionKey;
+}): Promise<NextResponse | null> {
+  const { contractId, userId, orgId, via, permission } = params;
+  if (via === "bearer") return null;
+
+  const row = await prisma.contract.findUnique({
+    where: { id: contractId },
+    select: {
+      deal: {
+        select: {
+          userId: true,
+          managerUserId: true,
+          pipeline: { select: { orgId: true } },
+        },
+      },
+    },
+  });
+  const notFound = () =>
+    NextResponse.json({ error: "Não encontrado" }, { status: 404 });
+
+  if (!row) return notFound();
+  const contractOrgId = row.deal?.pipeline?.orgId;
+  if (contractOrgId && contractOrgId !== orgId) return notFound();
+
+  const eff = await getEffectivePermissions(userId, orgId);
+  if (
+    !eff ||
+    !canAccessDeal({
+      effective: eff,
+      ownerUserId: row.deal?.userId ?? "",
+      managerUserId: row.deal?.managerUserId ?? null,
+    })
+  ) {
+    return notFound();
+  }
+
+  if (permission && !can(eff, permission)) {
+    return NextResponse.json(
+      { error: "PERMISSION_DENIED", permission },
+      { status: 403 }
+    );
+  }
+
+  return null;
+}

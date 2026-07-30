@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { runPassiveAnalysis, type PassiveAnalysisTrigger } from "@/lib/ai/agent";
+import { guardContractScope } from "@/lib/deals/route-helpers";
 
 export const maxDuration = 60;
 
@@ -34,6 +35,14 @@ export async function POST(
   if (!contract || contract.deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Contrato não encontrado" }, { status: 404 });
   }
+  // Escopo do gerente (a análise lê o contrato inteiro e cria comentários).
+  const denied = await guardContractScope({
+    contractId: params.id,
+    userId: session.user.id,
+    orgId: org.id,
+  });
+  if (denied) return denied;
+
   if (contract.status === "aprovado") {
     return NextResponse.json({
       findings: [],

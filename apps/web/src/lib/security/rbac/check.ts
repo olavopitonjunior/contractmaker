@@ -105,16 +105,42 @@ export function canAccessProposal(params: {
   effective: EffectivePermissions;
   ownerUserId: string; // Proposal.userId (quem criou)
   responsibleUserId?: string | null; // Proposal.responsibleUserId (corretor atribuído)
+  // Deal.managerUserId do deal convertido (Proposal.convertedDeal). Só entra na
+  // conta pra quem tem visão restrita de DEALS (gerente): a proposta que virou
+  // um negócio dele continua acessível mesmo sem ser o criador/responsável.
+  convertedDealManagerUserId?: string | null;
 }): boolean {
-  const { effective, ownerUserId, responsibleUserId } = params;
+  const {
+    effective,
+    ownerUserId,
+    responsibleUserId,
+    convertedDealManagerUserId,
+  } = params;
   if (can(effective, PERMISSION.PROPOSAL_VIEW_ALL)) return true;
   if (can(effective, PERMISSION.PROPOSAL_VIEW_OWN_ONLY)) {
+    if (effective.userId === ownerUserId) return true;
+    if (!!responsibleUserId && effective.userId === responsibleUserId) {
+      return true;
+    }
     return (
-      effective.userId === ownerUserId ||
-      (!!responsibleUserId && effective.userId === responsibleUserId)
+      isDealRestricted(effective) &&
+      !!convertedDealManagerUserId &&
+      effective.userId === convertedDealManagerUserId
     );
   }
   return false;
+}
+
+/**
+ * Visão restrita de DEALS: só quem tem DEAL_VIEW_ASSIGNED_ONLY *sem*
+ * DEAL_VIEW_ALL (preset `gerente`). Usado pra decidir se o braço "gerente do
+ * deal convertido" entra no escopo de proposta.
+ */
+function isDealRestricted(effective: EffectivePermissions): boolean {
+  return (
+    can(effective, PERMISSION.DEAL_VIEW_ASSIGNED_ONLY) &&
+    !can(effective, PERMISSION.DEAL_VIEW_ALL)
+  );
 }
 
 /**
@@ -182,12 +208,18 @@ export function dealScopeWhere(
   return {};
 }
 
+export type ProposalScopeOr =
+  | { userId: string }
+  | { responsibleUserId: string }
+  | { convertedDeal: { managerUserId: string } };
+
+export type ProposalScopeWhere =
+  | { orgId: string }
+  | { orgId: string; OR: ProposalScopeOr[] };
+
 export function proposalScopeWhere(
   effective: EffectivePermissions | null
-):
-  | { orgId: string }
-  | { orgId: string; OR: [{ userId: string }, { responsibleUserId: string }] }
-  | null {
+): ProposalScopeWhere | null {
   if (!effective) return null;
   if (can(effective, PERMISSION.PROPOSAL_VIEW_ALL)) {
     return { orgId: effective.orgId };
@@ -195,10 +227,17 @@ export function proposalScopeWhere(
   if (can(effective, PERMISSION.PROPOSAL_VIEW_OWN_ONLY)) {
     // Criador OU responsável atribuído. Nome de não-usuário (responsibleName)
     // é só rótulo — não entra no scope.
-    return {
-      orgId: effective.orgId,
-      OR: [{ userId: effective.userId }, { responsibleUserId: effective.userId }],
-    };
+    const or: ProposalScopeOr[] = [
+      { userId: effective.userId },
+      { responsibleUserId: effective.userId },
+    ];
+    // Gerente (visão restrita de deals): a proposta que já virou um negócio
+    // dele entra no escopo. Relação: Proposal.convertedDeal (@relation
+    // "ProposalConvertedDeal", FK convertedDealId → Deal.id).
+    if (isDealRestricted(effective)) {
+      or.push({ convertedDeal: { managerUserId: effective.userId } });
+    }
+    return { orgId: effective.orgId, OR: or };
   }
   return null;
 }

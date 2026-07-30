@@ -18,7 +18,8 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth/auth";
+import { auth, getUserOrg } from "@/lib/auth/auth";
+import { guardDealScope } from "@/lib/deals/route-helpers";
 import { prisma } from "@/lib/db/prisma";
 import { crossCheckCertidoes } from "@/lib/ai/crosscheck/certidoes";
 import { getDealSigningState } from "@/lib/contracts/signing-state";
@@ -50,6 +51,19 @@ export async function GET(
   if (!deal) {
     return NextResponse.json({ error: "Deal não encontrado" }, { status: 404 });
   }
+
+  // Cross-org + escopo do gerente. Esta rota só exigia sessão — o guard
+  // acrescenta o escopo de org E o do gerente de uma vez.
+  const org = await getUserOrg(session.user.id);
+  if (!org) {
+    return NextResponse.json({ error: "No organization" }, { status: 400 });
+  }
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: session.user.id,
+    orgId: org.id,
+  });
+  if (denied) return denied;
 
   // Sem contrato rascunho, ainda podemos rodar análise usando os dados do
   // formulário/lead se quisermos no futuro. Por enquanto, devolve findings

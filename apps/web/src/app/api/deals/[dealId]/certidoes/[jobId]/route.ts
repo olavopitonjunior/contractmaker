@@ -7,6 +7,8 @@ import {
   isAuthFailure,
   authFailureResponse,
 } from "@/lib/api/require-auth";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
@@ -37,6 +39,15 @@ export async function GET(
   if (job.deal.pipeline.orgId !== apiAuth.org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente (GET do job traz payload/resultado com PII).
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: apiAuth.actor.effectiveUserId,
+    orgId: apiAuth.org.id,
+    via: apiAuth.ident.via,
+  });
+  if (denied) return denied;
 
   return NextResponse.json({
     job: {
@@ -126,6 +137,15 @@ export async function DELETE(
   if (job.deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente + DEAL_EDIT.
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: session.user.id,
+    orgId: org.id,
+    permission: PERMISSION.DEAL_EDIT,
+  });
+  if (denied) return denied;
 
   if (!DELETABLE.includes(job.status)) {
     return NextResponse.json(

@@ -2,10 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { auth, getUserOrg } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION, type PermissionKey } from "@/lib/security/rbac/permissions";
 
 export const runtime = "nodejs";
 
-async function authorizeDeal(dealId: string) {
+async function authorizeDeal(dealId: string, permission?: PermissionKey) {
   const session = await auth();
   if (!session?.user) return { error: "Unauthorized", status: 401 as const };
   const org = await getUserOrg(session.user.id);
@@ -21,6 +23,18 @@ async function authorizeDeal(dealId: string) {
   if (!deal) return { error: "Deal not found", status: 404 as const };
   if (deal.pipeline.orgId !== org.id) {
     return { error: "Forbidden", status: 403 as const };
+  }
+  // Escopo do gerente (+ permission nas mutações).
+  const denied = await guardDealScope({
+    dealId,
+    userId: session.user.id,
+    orgId: org.id,
+    permission,
+  });
+  if (denied) {
+    return denied.status === 403
+      ? { error: "PERMISSION_DENIED", status: 403 as const }
+      : { error: "Deal not found", status: 404 as const };
   }
   return { deal, org, userId: session.user.id };
 }
@@ -70,7 +84,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { dealId: string } }
 ) {
-  const authResult = await authorizeDeal(params.dealId);
+  const authResult = await authorizeDeal(params.dealId, PERMISSION.DEAL_EDIT);
   if ("error" in authResult) {
     return NextResponse.json({ error: authResult.error }, { status: authResult.status });
   }

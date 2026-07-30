@@ -5,6 +5,8 @@ import { prisma } from "@/lib/db/prisma";
 import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { LOST_STAGE_NAME, stageConfigForKind } from "@/lib/pipeline/stage-config";
 import { queueSurveyDispatch } from "@/lib/surveys/dispatch";
+import { guardDealScope } from "@/lib/deals/route-helpers";
+import { PERMISSION } from "@/lib/security/rbac/permissions";
 
 const Body = z.object({
   reason: z.string().min(3).max(500),
@@ -73,6 +75,15 @@ export async function POST(
   if (deal.pipeline.orgId !== org.id) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
+
+  // Escopo do gerente + DEAL_EDIT.
+  const denied = await guardDealScope({
+    dealId: params.dealId,
+    userId: session.user.id,
+    orgId: org.id,
+    permission: PERMISSION.DEAL_EDIT,
+  });
+  if (denied) return denied;
 
   const { terminalStages } = stageConfigForKind(deal.pipeline.kind);
   if (terminalStages.includes(deal.stage.name)) {
