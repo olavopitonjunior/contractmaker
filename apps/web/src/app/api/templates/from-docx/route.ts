@@ -22,7 +22,18 @@ import {
   slotDeclarationComment,
   type ClauseSlotKey,
 } from "@/lib/templates/clause-slots";
-import { applyClauseSlotToDoc } from "@/lib/templates/apply-clause-slot";
+import {
+  applyClauseSlotToDoc,
+  type ApplyClauseSlotReport,
+} from "@/lib/templates/apply-clause-slot";
+
+/**
+ * O "source" de um template engine="google_docs" é só um cabeçalho — o conteúdo
+ * real vive no Drive. É logo abaixo dele que a declaração dos slots entra,
+ * quando (e só quando) o token de fato foi escrito no documento.
+ */
+const GOOGLE_DOCS_SOURCE_HEADER =
+  "<!-- engine=google_docs: a fonte é o Google Doc -->";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -179,7 +190,9 @@ export async function POST(req: NextRequest) {
       { status: 400 }
     );
   }
-  const declaredSlots = (Object.keys(slotBlocks) as ClauseSlotKey[]).filter(
+  // O que o cliente PEDIU. O que será DECLARADO no template depende do
+  // resultado real de `applyClauseSlotToDoc` (ver mais abaixo).
+  const requestedSlots = (Object.keys(slotBlocks) as ClauseSlotKey[]).filter(
     (s) => (slotBlocks[s] ?? []).length > 0
   );
 
@@ -231,16 +244,10 @@ export async function POST(req: NextRequest) {
           googleTemplateDocId: null,
           modalidade,
           schemaType: schemaTypeForModalidade(modalidade),
-          // O "source" de um template google_docs é só um comentário — o
-          // conteúdo vive no Drive. É nele que a DECLARAÇÃO dos slots fica
-          // (`<!-- slots: {{slot_garantia}} -->`), pra `detectClauseSlots` ler
-          // das duas engines no mesmo lugar, sem coluna nova no schema.
-          handlebarsSource: [
-            "<!-- engine=google_docs: a fonte é o Google Doc -->",
-            slotDeclarationComment(declaredSlots),
-          ]
-            .filter(Boolean)
-            .join("\n"),
+          // Nasce SEM declaração de slot. A declaração
+          // (`<!-- slots: {{slot_garantia}} -->`) só é escrita depois que o
+          // token de fato entrou no Doc — ver o bloco de slots mais abaixo.
+          handlebarsSource: GOOGLE_DOCS_SOURCE_HEADER,
           version: "1.0.0",
           sourceHash,
           matchCriteria: (matchCriteria ?? undefined) as object | undefined,
@@ -294,9 +301,9 @@ export async function POST(req: NextRequest) {
 
   // Abre os slots ANTES do pass de IA: com a cláusula variável já trocada pelo
   // token, o mapeamento de placeholders não gasta esforço num texto que vai
-  // deixar de existir. Best-effort — falha deixa a cláusula fixa no modelo.
-  const slotReports = [];
-  for (const slot of declaredSlots) {
+  // deixar de existir.
+  const slotReports: ApplyClauseSlotReport[] = [];
+  for (const slot of requestedSlots) {
     slotReports.push(
       await applyClauseSlotToDoc({
         docId: uploaded.docId,
@@ -304,6 +311,36 @@ export async function POST(req: NextRequest) {
         paragraphs: slotBlocks[slot] ?? [],
       })
     );
+  }
+
+  // ─── DECLARAÇÃO DO SLOT ───────────────────────────────────────────────────
+  // Só declaramos o que REALMENTE entrou no documento. Declarar um slot que não
+  // foi aberto é a pior falha possível deste fluxo: na geração,
+  // `replacePlaceholdersInDoc` não acharia `{{slot_garantia}}` (ele não existe
+  // no Doc), a cláusula resolvida seria descartada em silêncio e o contrato
+  // sairia com a garantia HARDCODED da variante de referência — cliente escolhe
+  // caução no formulário e assina fiador.
+  //
+  // Quando `applied: false`, o modelo simplesmente segue com a cláusula fixa
+  // (comportamento pré-consolidação) e o motivo vai pro `draftReport.slots`, que
+  // a página de revisão mostra e usa pra travar a ativação.
+  const openedSlots = slotReports.filter((r) => r.applied).map((r) => r.slot);
+  if (openedSlots.length > 0) {
+    try {
+      await prisma.contractTemplate.update({
+        where: { id: template.id },
+        data: {
+          handlebarsSource: [
+            GOOGLE_DOCS_SOURCE_HEADER,
+            slotDeclarationComment(openedSlots),
+          ].join("\n"),
+        },
+      });
+    } catch (err) {
+      // Sem a declaração o template é um modelo comum com um `{{slot_*}}` órfão
+      // — que `cleanupOrphanPlaceholders` remove na geração. Degrada, não quebra.
+      console.error("[templates/from-docx] falha ao declarar os slots:", err);
+    }
   }
 
   // Pass de IA best-effort: insere {{placeholders}} no doc. Falha não
@@ -316,17 +353,27 @@ export async function POST(req: NextRequest) {
       modalidade,
       orgId: org.id,
     });
-    await prisma.contractTemplate.update({
-      where: { id: template.id },
-      data: {
-        draftReport: {
-          ...(report as object),
-          ...(slotReports.length ? { slots: slotReports } : {}),
-        } as object,
-      },
-    });
   } catch (err) {
     console.error("[templates/from-docx] Pass de IA falhou (segue draft):", err);
+  }
+
+  // O relatório é gravado FORA do try do pass de IA: os avisos de slot precisam
+  // chegar à página de revisão mesmo quando a IA falha (antes, um erro na IA
+  // engolia junto o motivo de o slot não ter aberto).
+  if (report || slotReports.length > 0) {
+    try {
+      await prisma.contractTemplate.update({
+        where: { id: template.id },
+        data: {
+          draftReport: {
+            ...((report ?? {}) as object),
+            ...(slotReports.length ? { slots: slotReports } : {}),
+          } as object,
+        },
+      });
+    } catch (err) {
+      console.error("[templates/from-docx] falha ao gravar o draftReport:", err);
+    }
   }
 
   return NextResponse.json({

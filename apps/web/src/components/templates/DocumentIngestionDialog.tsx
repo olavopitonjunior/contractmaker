@@ -274,15 +274,24 @@ export function DocumentIngestionDialog({
   // ── Criação ──────────────────────────────────────────────────────────────
   async function sendTemplate(
     entry: Entry,
-    extra?: { slotBlocks?: Record<string, string[]> }
+    extra?: {
+      slotBlocks?: Record<string, string[]>;
+      /**
+       * Sobrescreve o `matchCriteria` do card. A consolidação passa `{}`: o
+       * template da família é GENÉRICO por definição — quem discrimina a
+       * variante é o slot de cláusula, não o critério de seleção.
+       */
+      criteria?: Partial<Record<CriteriaField, string>>;
+    }
   ): Promise<string | null> {
     const modalidade = modalidadeForIngest(entry.docType!, entry.subOption);
     if (!modalidade) return null;
+    const criteria = extra?.criteria ?? entry.criteria;
     const fd = new FormData();
     fd.append("file", entry.file);
     fd.append("modalidade", modalidade);
-    if (Object.keys(entry.criteria).length) {
-      fd.append("matchCriteria", JSON.stringify(entry.criteria));
+    if (Object.keys(criteria).length) {
+      fd.append("matchCriteria", JSON.stringify(criteria));
     }
     if (extra?.slotBlocks && Object.keys(extra.slotBlocks).length) {
       fd.append("slotBlocks", JSON.stringify(extra.slotBlocks));
@@ -339,11 +348,11 @@ export function DocumentIngestionDialog({
       members.forEach((m) => patch(m.id, { status: "sending" }));
 
       try {
-        const templateId = await sendTemplate(reference, {
-          slotBlocks: { garantia: g.primary.byDoc[reference.id] ?? [] },
-        });
-        templates += 1;
-
+        // ORDEM IMPORTA: as cláusulas primeiro. Se elas falharem, abortamos sem
+        // ter criado nada — e o operador só reaperta "Confirmar e criar". Na
+        // ordem inversa, uma falha aqui deixaria um template com slot apontando
+        // pra um acervo vazio, e o retry esbarraria no 409 de duplicata (o
+        // arquivo já teria virado template) — sem caminho de conserto na tela.
         const res = await fetch("/api/templates/ingest/clauses", {
           method: "POST",
           headers: { "content-type": "application/json" },
@@ -357,22 +366,42 @@ export function DocumentIngestionDialog({
         if (!res.ok) throw new Error(data?.error ?? "Falha ao gravar as cláusulas");
         clauses += variants.length;
 
+        // O template da família é GENÉRICO: `criteria: {}` (ver F4). Marcá-lo
+        // com a garantia da variante de referência o desclassificaria em todo
+        // formulário que escolhesse outra garantia.
+        const templateId = await sendTemplate(reference, {
+          slotBlocks: { garantia: g.primary.byDoc[reference.id] ?? [] },
+          criteria: {},
+        });
+        templates += 1;
+
         patch(reference.id, {
           status: "done",
           templateId: templateId ?? undefined,
           message: `Modelo da família criado com slot de garantia · ${variants.length} cláusula(s) no acervo`,
         });
+        const labeled = new Set(variants.map((v) => v.entry.id));
         for (const m of members) {
           if (m.id === reference.id) continue;
           patch(m.id, {
             status: "done",
-            message: "Consolidado — virou variante de garantia do modelo da família",
+            // Honestidade sobre o que aconteceu com cada arquivo: sem opção do
+            // formulário escolhida, a versão não virou cláusula — a garantia
+            // dela vai cair no texto padrão do sistema na geração.
+            message: labeled.has(m.id)
+              ? "Consolidado — virou variante de garantia do modelo da família"
+              : "Sem opção do formulário escolhida — esta versão não virou cláusula",
           });
         }
       } catch (err) {
         failures += 1;
         const msg = err instanceof Error ? err.message : "Falha na consolidação";
-        for (const m of members) patch(m.id, { status: "send_error", message: msg });
+        for (const m of members) {
+          patch(m.id, {
+            status: "send_error",
+            message: `${msg} — nada foi criado para este grupo. Clique em "Tentar de novo" para repetir.`,
+          });
+        }
       }
     }
 
@@ -403,9 +432,10 @@ export function DocumentIngestionDialog({
         }
       } catch (err) {
         failures += 1;
+        const msg = err instanceof Error ? err.message : "Falha ao criar";
         patch(entry.id, {
           status: "send_error",
-          message: err instanceof Error ? err.message : "Falha ao criar",
+          message: `${msg} — nada foi criado para este arquivo.`,
         });
       }
     }
@@ -431,6 +461,7 @@ export function DocumentIngestionDialog({
   }
 
   const readyCount = entries.filter((e) => e.status === "ready").length;
+  const failedCount = entries.filter((e) => e.status === "send_error").length;
   const analyzed = entries.filter(
     (e) => e.status !== "pending" && e.status !== "analyzing"
   ).length;
@@ -542,7 +573,28 @@ export function DocumentIngestionDialog({
             )}
 
             {!busy && phase === "done" && (
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                {failedCount > 0 && (
+                  <Button
+                    variant="secondary"
+                    className="flex-1"
+                    onClick={() => {
+                      // Nada foi criado pros itens que falharam (a criação é
+                      // abortiva por grupo/arquivo), então basta devolvê-los
+                      // à fila e repetir.
+                      setEntries((prev) =>
+                        prev.map((e) =>
+                          e.status === "send_error"
+                            ? { ...e, status: "ready", message: undefined }
+                            : e
+                        )
+                      );
+                      setPhase("triage");
+                    }}
+                  >
+                    Tentar de novo ({failedCount})
+                  </Button>
+                )}
                 <Button variant="outline" className="flex-1" onClick={reset}>
                   Enviar outros
                 </Button>

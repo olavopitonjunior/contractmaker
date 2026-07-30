@@ -36,6 +36,9 @@ export default async function TemplateReviewPage({
           matchCriteria: template.matchCriteria,
           status: template.status,
           isDefault: template.isDefault,
+          // Relatório da ingestão — traz os avisos de slot de cláusula, que
+          // travam a ativação até o operador decidir (ver TemplateReviewClient).
+          draftReport: template.draftReport,
           docId: template.googleTemplateDocId,
           embedLink: `https://docs.google.com/document/d/${template.googleTemplateDocId}/edit?embedded=true&rm=embedded`,
         }}

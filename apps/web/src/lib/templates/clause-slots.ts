@@ -206,8 +206,11 @@ export async function resolveClauseSlots(
           },
           select: { id: true, content: true },
           // Mais recente vence: reingerir o modelo atualiza a cláusula do slot
-          // sem obrigar o operador a apagar a antiga.
-          orderBy: { updatedAt: "desc" },
+          // sem obrigar o operador a apagar a antiga. `id` é o desempate — duas
+          // cláusulas gravadas na MESMA transação têm `updatedAt` idêntico e a
+          // ordem viraria a do plano de execução do Postgres, ou seja, o
+          // contrato poderia sair com uma cláusula diferente a cada geração.
+          orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
           take: 1,
         })) as Array<{ id: string; content: string }>;
         const hit = rows?.[0];
