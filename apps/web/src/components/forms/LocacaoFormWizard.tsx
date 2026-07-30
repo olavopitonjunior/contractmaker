@@ -18,8 +18,10 @@ import {
 } from "@/components/forms/PartyLinksPanel";
 import type { ParticipantRole } from "@/lib/forms/participant-token";
 import {
+  effectiveRequiredPaths,
   findSignatureRecommendations,
   getByPath,
+  isValueEmpty,
   PARTY_SUB_LABELS,
 } from "@/lib/forms/party-required";
 import { LocacaoParteStep } from "@/components/forms/steps/locacao/_PartyFields";
@@ -35,6 +37,12 @@ interface LocacaoFormWizardProps {
   token: string;
   initialData: Record<string, unknown>;
   schemaType: string;
+  /**
+   * Campos obrigatórios por step (índice REAL das 7 etapas), resolvidos no
+   * servidor a partir do preset de LOCAÇÃO da org + snapshot do form
+   * (lib/forms/required-snapshot.ts). Ausente/vazio = só o piso histórico.
+   */
+  requiredFieldsByStep?: readonly (readonly string[])[];
   /** Subtoken por parte: subset de índices REAIS dos steps visíveis. */
   stepIndexes?: readonly number[];
   /** Override do endpoint de auto-save (subtoken usa /api/forms/participant/...). */
@@ -73,6 +81,52 @@ const STEP_REQUIRED: Record<number, string[]> = {
   3: ["imovel.descricao"],
   4: ["aluguel.valor"],
 };
+
+// Rótulos pro toast de campos faltando. O wizard de locação não renderiza
+// <FieldError> em todos os campos (só nos que têm regra de formato), então o
+// toast precisa DIZER o que falta — senão a trava vira "não avança e não
+// explica".
+const LOCACAO_FIELD_LABELS: Record<string, string> = {
+  locadores: "Locador",
+  locatarios: "Locatário",
+  nome: "Nome",
+  razao_social: "Razão social",
+  cpf: "CPF",
+  cnpj: "CNPJ",
+  rg: "RG",
+  data_nascimento: "Data de nascimento",
+  nacionalidade: "Nacionalidade",
+  estado_civil: "Estado civil",
+  profissao: "Profissão",
+  email: "E-mail",
+  mobile_phone: "Celular",
+  endereco: "Endereço",
+  rua: "Logradouro",
+  numero: "Número",
+  bairro: "Bairro",
+  cidade: "Cidade",
+  uf: "UF",
+  cep: "CEP",
+  matricula: "Matrícula",
+  descricao: "Descrição do imóvel",
+  valor: "Valor do aluguel",
+  vigencia_inicio: "Início da vigência",
+  dia_vencimento: "Dia de vencimento",
+};
+
+const PARTY_LIST_RE = /^(locadores|locatarios)\.(\d+)\.(.+)$/;
+
+/** "locadores.1.cpf" → "Locador 2 — CPF". Usado só na mensagem de erro. */
+function describeLocacaoPath(path: string): string {
+  const m = PARTY_LIST_RE.exec(path);
+  if (m) {
+    const who = m[1] === "locadores" ? "Locador" : "Locatário";
+    const field = m[3].split(".").pop() ?? m[3];
+    return `${who} ${Number(m[2]) + 1} — ${LOCACAO_FIELD_LABELS[field] ?? field}`;
+  }
+  const last = path.split(".").pop() ?? path;
+  return LOCACAO_FIELD_LABELS[path] ?? LOCACAO_FIELD_LABELS[last] ?? path;
+}
 
 function defaultValues(comercial: boolean): Record<string, unknown> {
   const parte = {
@@ -119,6 +173,7 @@ export function LocacaoFormWizard({
   token,
   initialData,
   schemaType,
+  requiredFieldsByStep,
   stepIndexes,
   endpoint: endpointProp,
   pathScope,
@@ -218,8 +273,19 @@ export function LocacaoFormWizard({
 
   // `step` aqui é o índice REAL (PARTY_STEP/STEP_REQUIRED são indexados pelo
   // schema completo de 7 etapas).
+  //
+  // Duas camadas, nesta ordem:
+  //   1. PISO histórico (PARTY_STEP/STEP_REQUIRED) — vale sempre, mesmo em org
+  //      sem preset configurado. É o que locação já exigia antes.
+  //   2. Preset da org (`requiredFieldsByStep`) — obrigatoriedade configurável,
+  //      remapeada por tipo_pessoa como em venda (PJ não tem CPF/estado civil;
+  //      e-mail/celular vão pro representante legal).
   const validateStep = (step: number): boolean => {
-    // Steps de partes: exige nome (PF) ou razão social (PJ) de CADA parte.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const readValue = (path: string): unknown => form.getValues(path as any);
+
+    // (1) Piso: steps de partes exigem nome (PF) ou razão social (PJ) de CADA
+    // parte.
     const partyStep = PARTY_STEP[step];
     if (partyStep) {
       const parties =
@@ -235,19 +301,42 @@ export function LocacaoFormWizard({
           return false;
         }
       }
-      return true;
+    } else {
+      const required = STEP_REQUIRED[step] ?? [];
+      for (const path of required) {
+        const raw = readValue(path);
+        // `0` conta como vazio aqui (valor do aluguel nasce 0 no default).
+        const empty =
+          raw === undefined || raw === null || raw === "" || raw === 0 ||
+          (Array.isArray(raw) && raw.length === 0);
+        if (empty) {
+          toast.error(
+            `Preencha os campos obrigatórios da etapa ${step + 1} antes de avançar.`,
+          );
+          return false;
+        }
+      }
     }
 
-    const required = STEP_REQUIRED[step] ?? [];
-    for (const path of required) {
-      const raw = form.getValues(path as never) as unknown;
-      const empty =
-        raw === undefined || raw === null || raw === "" || raw === 0 ||
-        (Array.isArray(raw) && raw.length === 0);
-      if (empty) {
-        toast.error(`Preencha os campos obrigatórios da etapa ${step + 1} antes de avançar.`);
-        return false;
-      }
+    // (2) Obrigatoriedade configurada pela imobiliária.
+    const configured = requiredFieldsByStep?.[step] ?? [];
+    if (configured.length === 0) return true;
+
+    const paths = effectiveRequiredPaths(configured, readValue);
+    const missing = paths.filter((p) => isValueEmpty(readValue(p)));
+    for (const p of paths) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      if (missing.includes(p)) form.setError(p as any, { type: "required", message: "Campo obrigatório" });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      else form.clearErrors(p as any);
+    }
+    if (missing.length > 0) {
+      const labels = missing.slice(0, 4).map(describeLocacaoPath);
+      const extra = missing.length > labels.length ? ` (+${missing.length - labels.length})` : "";
+      toast.error(
+        `Preencha os campos obrigatórios da etapa ${step + 1}: ${labels.join(", ")}${extra}`,
+      );
+      return false;
     }
     return true;
   };
@@ -300,6 +389,21 @@ export function LocacaoFormWizard({
           );
         }
         setIsComplete(true);
+      } else if (res.status === 422) {
+        // Obrigatoriedade da imobiliária (mesma regra do wizard, reaplicada no
+        // servidor). Diz QUAIS campos faltam e deixa o usuário voltar.
+        const data = await res.json().catch(() => ({}));
+        const missing: string[] = Array.isArray(data?.missingRequired)
+          ? data.missingRequired
+          : [];
+        const labels = missing.slice(0, 4).map(describeLocacaoPath);
+        toast.error(
+          labels.length > 0
+            ? `Faltam campos obrigatórios: ${labels.join(", ")}${
+                missing.length > labels.length ? ` (+${missing.length - labels.length})` : ""
+              }`
+            : "Faltam campos obrigatórios para finalizar.",
+        );
       } else {
         toast.error("Erro ao finalizar o formulário.");
       }

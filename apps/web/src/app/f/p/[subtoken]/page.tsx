@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db/prisma";
-import { resolveAllRequiredFields } from "@/lib/forms/presets";
+import { resolveFormRequiredFields } from "@/lib/forms/required-snapshot";
 import {
   resolveParticipantToken,
   type ParticipantRole,
@@ -38,21 +38,10 @@ export default async function PublicParticipantFormPage({
   const fullData = (participant.form.dataJson ?? {}) as Record<string, unknown>;
   const filtered = filterDataJsonByRole(fullData, role);
 
-  // Locação usa o LocacaoFormWizard (validação 100% client/finalize) — sem
-  // preset de required fields da org.
-  const isLocacao = participant.form.schemaType?.startsWith("locacao") ?? false;
-
-  // Required fields ainda vem do server pra preset da org, mas só os steps
-  // visíveis pro role serão renderizados — paths fora desses steps são
-  // ignorados pelo validateAndNavigate dentro do wizard.
-  const orgFormSettings = isLocacao
-    ? null
-    : await prisma.orgFormSettings.findUnique({
-        where: { orgId: participant.form.orgId },
-      });
-  const requiredFieldsByStep = isLocacao
-    ? []
-    : resolveAllRequiredFields(orgFormSettings).map((paths) => Array.from(paths));
+  // Required fields vêm do server (preset da org por MÓDULO — locação pelo
+  // snapshot do próprio form), mas só os steps visíveis pro role são
+  // renderizados: paths fora desses steps são ignorados pelo wizard.
+  const requiredFieldsByStep = await resolveFormRequiredFields(participant.form);
 
   return (
     <SubtokenFormClient

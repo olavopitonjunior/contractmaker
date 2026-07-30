@@ -9,33 +9,56 @@ import {
 } from "@/lib/security/rbac/guard";
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
-import { isKnownFormPath } from "@/lib/forms/presets";
+import {
+  isKnownFormPath,
+  isKnownLocacaoFormPath,
+  LOCACAO_PRESET_VALUES,
+  VENDA_PRESET_VALUES,
+} from "@/lib/forms/presets";
 import {
   contractSettingsSchema,
   locacaoSettingsSchema,
 } from "@/lib/contracts/default-config";
 
-const PRESETS = ["legado", "minimo", "padrao", "completo", "custom"] as const;
+// Aceita os valores LEGADOS de venda (legado/minimo/padrao) além dos canônicos
+// da UI nova (essencial/completo/custom) — o campo é String no banco e não há
+// migração de dados. Ver lib/forms/presets.ts.
+const PRESETS = VENDA_PRESET_VALUES;
+const LOCACAO_PRESETS = LOCACAO_PRESET_VALUES;
 
 // 7 etapas → índices válidos 0..6 (era 0..7, que aceitava um step inexistente
 // cujo override nunca casava em resolveRequiredFields → obrigatoriedade fantasma).
-const customRequiredPathItemSchema = z.object({
-  step: z.number().int().min(0).max(6),
-  path: z
-    .string()
-    .min(1)
-    .max(120)
-    // Restringe a paths plausíveis do form (letras, dígitos, ., _, -, []).
-    // Evita injeção via path malformado em qualquer consumidor futuro.
-    .regex(/^[a-zA-Z0-9_.[\]\-]+$/, "Path inválido")
-    // Rejeita paths órfãos (campo renomeado/typo): sem isto, viram string morta
-    // que nunca dispara obrigatoriedade. Normaliza índices de array antes de checar.
-    .refine(isKnownFormPath, "Path desconhecido — não corresponde a um campo do formulário"),
-});
+function customPathItemSchema(isKnown: (path: string) => boolean) {
+  return z.object({
+    step: z.number().int().min(0).max(6),
+    path: z
+      .string()
+      .min(1)
+      .max(120)
+      // Restringe a paths plausíveis do form (letras, dígitos, ., _, -, []).
+      // Evita injeção via path malformado em qualquer consumidor futuro.
+      .regex(/^[a-zA-Z0-9_.[\]\-]+$/, "Path inválido")
+      // Rejeita paths órfãos (campo renomeado/typo): sem isto, viram string morta
+      // que nunca dispara obrigatoriedade. Normaliza índices de array antes de checar.
+      .refine(isKnown, "Path desconhecido — não corresponde a um campo do formulário"),
+  });
+}
+
+const customRequiredPathItemSchema = customPathItemSchema(isKnownFormPath);
+const locacaoCustomRequiredPathItemSchema = customPathItemSchema(
+  isKnownLocacaoFormPath,
+);
 
 const formSettingsPatchSchema = z.object({
   preset: z.enum(PRESETS).optional(),
   customRequiredPaths: z.array(customRequiredPathItemSchema).max(200).optional(),
+  // Par espelhado pra LOCAÇÃO — paths e steps são de outro schema, por isso
+  // colunas separadas em vez de um objeto único.
+  locacaoPreset: z.enum(LOCACAO_PRESETS).optional(),
+  locacaoCustomRequiredPaths: z
+    .array(locacaoCustomRequiredPathItemSchema)
+    .max(200)
+    .optional(),
   autoLockFormOnFinalize: z.boolean().optional(),
   // Resumo consolidado por e-mail. String vazia limpa o destinatário.
   summaryRecipientEmail: z
@@ -133,6 +156,12 @@ export async function PATCH(req: NextRequest) {
       ...(parsed.data.customRequiredPaths !== undefined
         ? { customRequiredPaths: parsed.data.customRequiredPaths }
         : {}),
+      ...(parsed.data.locacaoPreset !== undefined
+        ? { locacaoPreset: parsed.data.locacaoPreset }
+        : {}),
+      ...(parsed.data.locacaoCustomRequiredPaths !== undefined
+        ? { locacaoCustomRequiredPaths: parsed.data.locacaoCustomRequiredPaths }
+        : {}),
       ...(parsed.data.autoLockFormOnFinalize !== undefined
         ? { autoLockFormOnFinalize: parsed.data.autoLockFormOnFinalize }
         : {}),
@@ -165,6 +194,12 @@ export async function PATCH(req: NextRequest) {
         preset: updated.preset,
         customRequiredPathsCount: Array.isArray(parsed.data.customRequiredPaths)
           ? parsed.data.customRequiredPaths.length
+          : undefined,
+        locacaoPreset: updated.locacaoPreset,
+        locacaoCustomRequiredPathsCount: Array.isArray(
+          parsed.data.locacaoCustomRequiredPaths,
+        )
+          ? parsed.data.locacaoCustomRequiredPaths.length
           : undefined,
       },
     },

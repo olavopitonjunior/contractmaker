@@ -14,6 +14,7 @@ import { importContractFromFile } from "@/lib/services/contract-import";
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import { MODULE } from "@/lib/modules/catalog";
 import { LOCACAO_SCHEMA_TYPE } from "@/lib/forms/validation-locacao";
+import { resolveRequiredPresetSnapshot } from "@/lib/forms/required-snapshot";
 import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
 
 export const runtime = "nodejs";
@@ -196,6 +197,11 @@ export async function POST(req: NextRequest) {
             schemaType: LOCACAO_SCHEMA_TYPE,
             dataJson: {},
             status: "vinculado",
+            // Snapshot do preset de obrigatoriedade (required-snapshot.ts).
+            requiredPreset: await resolveRequiredPresetSnapshot(
+              ctx.orgId,
+              LOCACAO_SCHEMA_TYPE
+            ),
           },
         });
 

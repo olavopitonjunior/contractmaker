@@ -17,6 +17,7 @@ import {
   LOCACAO_COMERCIAL_SCHEMA_TYPE,
   LOCACAO_SCHEMA_TYPE,
 } from "@/lib/forms/validation-locacao";
+import { resolveRequiredPresetSnapshot } from "@/lib/forms/required-snapshot";
 import type { ImportableMime } from "@/lib/google/upload-file-as-gdoc";
 
 export const runtime = "nodejs";
@@ -152,6 +153,8 @@ export async function POST(req: NextRequest) {
           schemaType,
           dataJson: extracted as Prisma.InputJsonValue,
           status: "rascunho",
+          // Snapshot do preset de obrigatoriedade (required-snapshot.ts).
+          requiredPreset: await resolveRequiredPresetSnapshot(ctx.orgId, schemaType),
         },
       });
 

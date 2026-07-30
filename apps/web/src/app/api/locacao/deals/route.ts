@@ -6,6 +6,7 @@ import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
 import { ensureLocacaoAccess, isRouteError, parseJsonBody } from "@/lib/locacao/route-helpers";
 import { LOCACAO_SCHEMA_TYPE } from "@/lib/forms/validation-locacao";
+import { resolveRequiredPresetSnapshot } from "@/lib/forms/required-snapshot";
 
 export const dynamic = "force-dynamic";
 
@@ -75,6 +76,12 @@ export async function POST(req: NextRequest) {
 
   const titulo = `${enderecoFmt || "Imóvel"} — ${tenant.nome}`;
 
+  // Snapshot do preset de obrigatoriedade vigente (ver required-snapshot.ts).
+  const requiredPreset = await resolveRequiredPresetSnapshot(
+    ctx.orgId,
+    LOCACAO_SCHEMA_TYPE
+  );
+
   const result = await prisma.$transaction(async (tx) => {
     const form = await tx.salesForm.create({
       data: {
@@ -82,6 +89,7 @@ export async function POST(req: NextRequest) {
         title: titulo,
         schemaType: LOCACAO_SCHEMA_TYPE,
         status: "vinculado",
+        requiredPreset,
         dataJson: {
           // Chaves PLURAIS — shape canônico do dadosLocacaoSchema. As versões
           // singulares quebravam aba Dados/credit-analysis/derive (review 06/10).

@@ -1925,7 +1925,9 @@ async function analyzeContractDataValidity(
 
   // Campos obrigatórios da org (presets/OrgFormSettings) — SÓ para contratos
   // gerados por formulário de venda. Importados (templateId=null) e locação são
-  // isentos: o dataJson de OCR é parcial por natureza e locação não usa presets.
+  // isentos: o dataJson de OCR é parcial por natureza, e em locação a
+  // obrigatoriedade é cobrada no FINALIZE do formulário (422 em
+  // /api/locacao/forms/[token]), não como comentário no contrato.
   const isImported = contract.templateId === null;
   const isLocacao = contract.deal?.kind === "locacao";
   const orgId = contract.deal?.pipeline?.orgId;

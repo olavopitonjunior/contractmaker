@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db/prisma";
-import { resolveAllRequiredFields } from "@/lib/forms/presets";
+import { resolveFormRequiredFields } from "@/lib/forms/required-snapshot";
 import { canAccessForm } from "@/lib/forms/form-gate";
 import { FormClosedNotice } from "@/components/forms/FormClosedNotice";
 import { FormPageClient } from "./form-client";
@@ -27,16 +27,10 @@ export default async function PublicFormPage({
     return <FormClosedNotice />;
   }
 
-  // Resolve OrgFormSettings server-side e calcula required fields por step
-  // (preset de venda). Locação tem validação própria no wizard/servidor, então
-  // pula esse cálculo (os steps não batem com o preset de venda).
-  const isLocacao = form.schemaType?.startsWith("locacao");
-  const orgFormSettings = isLocacao
-    ? null
-    : await prisma.orgFormSettings.findUnique({ where: { orgId: form.orgId } });
-  const requiredFieldsByStep = isLocacao
-    ? []
-    : resolveAllRequiredFields(orgFormSettings).map((paths) => Array.from(paths));
+  // Campos obrigatórios por step, resolvidos server-side pelo MÓDULO do form:
+  // venda lê o preset da org ao vivo; locação lê o snapshot gravado no próprio
+  // formulário (retrocompat — ver lib/forms/required-snapshot.ts).
+  const requiredFieldsByStep = await resolveFormRequiredFields(form);
 
   // Banner "dados extraídos da proposta" — só quando vier `?prefilled=1` na URL
   // (link de redirect de `/deals/new-from-proposal`) E houver attachment de

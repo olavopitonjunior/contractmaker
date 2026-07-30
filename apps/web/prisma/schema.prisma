@@ -1092,6 +1092,13 @@ model SalesForm {
   privacyAcceptedAt    DateTime?
   privacyIpHash        String?
   privacyPolicyVersion String?
+  // Snapshot do preset de obrigatoriedade vigente na org quando este
+  // formulário NASCEU (só LOCAÇÃO grava — venda resolve ao vivo). Garante que
+  // trocar a configuração da imobiliária não muda as exigências de um link já
+  // entregue ao cliente. NULL = formulário anterior à feature → comportamento
+  // antigo (nada obrigatório além do piso do wizard). Ver lib/forms/presets.ts
+  // (locacaoSettingsForForm).
+  requiredPreset       String?
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
@@ -2347,8 +2354,18 @@ model OrgFinancialSettings {
 model OrgFormSettings {
   id                  String   @id @default(cuid())
   orgId               String   @unique
-  preset              String   @default("legado") // legado | minimo | padrao | completo | custom
+  // VENDA. Valores canônicos da UI nova: essencial | completo | custom.
+  // legado | minimo | padrao continuam válidos (orgs anteriores a 2026-07-28)
+  // e resolvem os MESMOS arrays de sempre — ver lib/forms/presets.ts.
+  preset              String   @default("legado") // legado | minimo | padrao | completo | essencial | custom
   customRequiredPaths Json     @default("[]")
+  // LOCAÇÃO — par espelhado do de venda. Aditivo: os campos NÃO são
+  // compartilhados porque os steps e os paths das duas esteiras são
+  // diferentes (locação tem locadores/locatarios/imovel singular/aluguel).
+  // Default "legado" = nada obrigatório, que é como locação sempre se
+  // comportou antes desta config existir.
+  locacaoPreset              String @default("legado") // legado | essencial | completo | custom
+  locacaoCustomRequiredPaths Json   @default("[]")
   // Segurança do link do formulário: quando true, o SalesForm trava sozinho
   // (SalesForm.lockedAt) no momento em que o cliente finaliza — congela os
   // dados contra edição posterior por quem ainda tiver o link. Default false

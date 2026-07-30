@@ -46,15 +46,20 @@ export default async function FormularioSettingsPage() {
         <h1 className="font-display text-2xl font-semibold tracking-tight">Formulário público</h1>
         <p className="text-sm text-muted-foreground mt-1">
           Defina quais campos do formulário <code>/f/[token]</code> são
-          obrigatórios. Pequenos negócios podem usar Mínimo; cartórios e
-          certidões TJSP/PGFN exigem Completo.
+          obrigatórios, por esteira. Essencial cobre o mínimo pra gerar o
+          contrato e mandar assinar; Completo cobre a qualificação inteira que
+          os modelos e as certidões usam.
         </p>
       </div>
 
       <FormSettingsClient
+        locacaoEnabled={locacaoEnabled}
         initial={{
           preset: settings.preset,
           customRequiredPaths: settings.customRequiredPaths as unknown,
+          locacaoPreset: settings.locacaoPreset,
+          locacaoCustomRequiredPaths:
+            settings.locacaoCustomRequiredPaths as unknown,
           autoLockFormOnFinalize: settings.autoLockFormOnFinalize,
           summaryRecipientEmail: settings.summaryRecipientEmail,
           autoSendSummaryOnComplete: settings.autoSendSummaryOnComplete,

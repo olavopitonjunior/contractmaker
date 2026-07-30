@@ -10,6 +10,7 @@ import {
   LOCACAO_SCHEMA_TYPE,
   LOCACAO_COMERCIAL_SCHEMA_TYPE,
 } from "@/lib/forms/validation-locacao";
+import { resolveRequiredPresetSnapshot } from "@/lib/forms/required-snapshot";
 
 // Janela do soft-block de título repetido (recriação manual de card).
 const DUPLICATE_WINDOW_MS = 15 * 60 * 1000;
@@ -119,6 +120,10 @@ export async function POST(req: NextRequest) {
         }
       }
 
+      // Congela o preset de obrigatoriedade vigente (ver required-snapshot.ts):
+      // trocar a config depois não muda as exigências deste link.
+      const requiredPreset = await resolveRequiredPresetSnapshot(ctx.orgId, schemaType);
+
       // Título gravado TRIMADO — o dup-check compara contra o armazenado.
       const result = await prisma.$transaction(async (tx) => {
         const form = await tx.salesForm.create({
@@ -127,6 +132,7 @@ export async function POST(req: NextRequest) {
             title: trimmedTitle || null,
             schemaType,
             status: "rascunho",
+            requiredPreset,
             // Config fiscal/comissão (operador-only) já pré-gravada — o auto-save do
             // cliente faz deep-merge e não toca essas chaves.
             dataJson: {

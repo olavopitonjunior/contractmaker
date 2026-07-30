@@ -7,6 +7,7 @@ import {
   deriveDealMetadata,
   deriveLocacaoDealMetadata,
 } from "@/lib/contracts/derive-deal-metadata";
+import { resolveRequiredPresetSnapshot } from "@/lib/forms/required-snapshot";
 
 export class ProposalConvertError extends Error {
   constructor(
@@ -124,11 +125,19 @@ export async function convertProposalToDeal(input: {
     where: { proposalId: proposal.id },
   });
 
+  // Snapshot do preset de obrigatoriedade (só locação grava — ver
+  // lib/forms/required-snapshot.ts).
+  const requiredPreset = await resolveRequiredPresetSnapshot(
+    input.orgId,
+    proposal.schemaType
+  );
+
   const deal = await prisma.$transaction(async (tx) => {
     const form = await tx.salesForm.create({
       data: {
         orgId: input.orgId,
         title: meta.title,
+        requiredPreset,
         // schemaType herdado — SEM isto, locação convertida viraria form de
         // compra e venda (default do campo) e o contrato sairia errado.
         schemaType: proposal.schemaType,

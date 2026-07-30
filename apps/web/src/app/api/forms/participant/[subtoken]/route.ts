@@ -9,6 +9,13 @@ import {
   mergeSalesFormDataJson,
   FormNotFoundError,
 } from "@/lib/forms/atomic-merge";
+import { deepMergeAtPaths } from "@/lib/forms/dataJson-merge";
+import { ROLE_STEP_INDEXES } from "@/lib/forms/role-steps";
+import {
+  resolveFormRequiredFields,
+  requiredPathsForRoleScope,
+} from "@/lib/forms/required-snapshot";
+import { findMissingRequired, getByPath } from "@/lib/forms/party-required";
 import { PARTY_ARRAY_KEYS } from "@/lib/forms/blank-party";
 import { syncDealClientName } from "@/lib/forms/sync-deal-client-name";
 import { formClosedResponse } from "@/lib/forms/form-gate";
@@ -117,6 +124,41 @@ export async function PATCH(
   // Form principal só transiciona pra "completo" via token principal —
   // subtoken faz "completedAt" apenas no próprio participant.
   const markCompleted = body.markCompleted === true;
+
+  // Obrigatoriedade configurada pela org, no ESCOPO DESTA PARTE. Espelha o
+  // bloqueio do finalize do token principal de locação (422 antes de gravar
+  // qualquer coisa). Só LOCAÇÃO: em venda o "concluir parte" nunca bloqueou e
+  // mudar isso agora endureceria links já em circulação.
+  if (markCompleted && participant.form.schemaType?.startsWith("locacao")) {
+    const byStep = await resolveFormRequiredFields(participant.form);
+    const scoped = requiredPathsForRoleScope(
+      byStep,
+      ROLE_STEP_INDEXES[role],
+      ROLE_PATHS[role],
+    );
+    if (scoped.length > 0) {
+      const preview = deepMergeAtPaths(
+        structuredClone(
+          (participant.form.dataJson ?? {}) as Record<string, unknown>,
+        ),
+        incoming,
+        ROLE_PATHS[role],
+      ).merged;
+      const missingRequired = findMissingRequired(scoped, (path) =>
+        getByPath(preview, path),
+      );
+      if (missingRequired.length > 0) {
+        return NextResponse.json(
+          {
+            error: "Campos obrigatórios não preenchidos",
+            reason: "required_fields_missing",
+            missingRequired,
+          },
+          { status: 422 },
+        );
+      }
+    }
+  }
 
   // Merge atômico: releitura do dataJson sob FOR UPDATE dentro da transação —
   // o save do participante nunca regride edições concorrentes do token
