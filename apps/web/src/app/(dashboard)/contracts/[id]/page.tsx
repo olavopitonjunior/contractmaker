@@ -2,6 +2,11 @@ import { notFound } from "next/navigation";
 import { auth } from "@/lib/auth/auth";
 import { prisma } from "@/lib/db/prisma";
 import { ContractEditorPage } from "@/components/contracts/ContractEditorPage";
+import { resolveSettingsFamily } from "@/lib/contracts/default-config";
+import {
+  loadOrgContractDefaults,
+  loadOrgLocacaoDefaults,
+} from "@/lib/contracts/org-defaults";
 
 export default async function ContractPage({
   params,
@@ -14,7 +19,15 @@ export default async function ContractPage({
   const contract = await prisma.contract.findUnique({
     where: { id: params.id },
     include: {
-      deal: { select: { id: true, title: true } },
+      // `pipeline.kind` discrimina a família da aba Configurações (venda ×
+      // locação) e carrega o orgId sem uma query extra.
+      deal: {
+        select: {
+          id: true,
+          title: true,
+          pipeline: { select: { orgId: true, kind: true } },
+        },
+      },
       template: { select: { id: true, name: true } },
       chatSessions: {
         where: { archived: false },
@@ -36,8 +49,21 @@ export default async function ContractPage({
     orderBy: { version: "desc" },
   });
 
+  const settingsFamily = resolveSettingsFamily({
+    contractKind: contract.kind,
+    pipelineKind: contract.deal.pipeline?.kind ?? null,
+  });
+  const orgId = contract.deal.pipeline?.orgId;
+  const orgDefaults = orgId
+    ? settingsFamily === "locacao"
+      ? await loadOrgLocacaoDefaults(orgId)
+      : await loadOrgContractDefaults(orgId)
+    : undefined;
+
   return (
     <ContractEditorPage
+      settingsFamily={settingsFamily}
+      orgDefaults={orgDefaults}
       contract={{
         id: contract.id,
         dealId: contract.dealId,

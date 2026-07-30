@@ -5,6 +5,8 @@ import { prisma } from "@/lib/db/prisma";
 import { Button } from "@/components/ui/button";
 import { ArrowLeft } from "lucide-react";
 import { resolveOrgContractDefaults } from "@/lib/contracts/default-config";
+import { getOrgModules, isModuleEnabled } from "@/lib/modules/read";
+import { MODULE } from "@/lib/modules/catalog";
 import { FormSettingsClient } from "./FormSettingsClient";
 import { ContractDefaultsCard } from "./ContractDefaultsCard";
 
@@ -24,6 +26,13 @@ export default async function FormularioSettingsPage() {
       data: { orgId: org.id },
     });
   }
+
+  // A aba "Locação" do padrão contratual só existe pra quem tem o módulo.
+  const locacaoEnabled = isModuleEnabled(
+    await getOrgModules(org.id),
+    MODULE.LOCACAO
+  );
+  const defaults = resolveOrgContractDefaults(settings.contractDefaultsJson);
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -54,7 +63,9 @@ export default async function FormularioSettingsPage() {
       />
 
       <ContractDefaultsCard
-        initial={resolveOrgContractDefaults(settings.contractDefaultsJson)}
+        initial={defaults.venda}
+        initialLocacao={defaults.locacao}
+        locacaoEnabled={locacaoEnabled}
       />
     </div>
   );

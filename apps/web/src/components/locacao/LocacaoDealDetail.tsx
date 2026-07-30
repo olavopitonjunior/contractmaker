@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { ContractEditorPage } from "@/components/contracts/ContractEditorPage";
+import type { LocacaoSettings } from "@/lib/contracts/default-config";
 import { LeaseSignaturesTab } from "@/components/locacao/LeaseSignaturesTab";
 import { LocacaoAdminContractTab } from "@/components/locacao/LocacaoAdminContractTab";
 import type { LeaseSignerData } from "@/components/locacao/SendLeaseEnvelopeDialog";
@@ -92,6 +93,9 @@ interface LocacaoDealDetailProps {
   simplified?: boolean;
   /** Pesquisas de satisfação habilitadas (feature locacao.pesquisas, default OFF). */
   surveysEnabled?: boolean;
+  /** Padrão contratual de LOCAÇÃO da org — piso da aba Configurações do editor
+   *  (vale pro contrato de locação E pro de administração). */
+  orgDefaults?: LocacaoSettings;
 }
 
 const BRL = (v: number) =>
@@ -139,6 +143,7 @@ export function LocacaoDealDetail({
   serasaJobs = [],
   simplified = false,
   surveysEnabled = false,
+  orgDefaults,
 }: LocacaoDealDetailProps) {
   const router = useRouter();
   // Tab inicial via ?tab= (paridade com o DealDetail de vendas) — permite
@@ -353,6 +358,8 @@ export function LocacaoDealDetail({
             <ContractEditorPage
               contract={contract}
               versions={versions}
+              settingsFamily="locacao"
+              orgDefaults={orgDefaults}
               // Locação tem aba Assinaturas própria — o CTA default do editor
               // levaria à tela de VENDAS `/deals/[id]`.
               signCta={{ onClick: () => setTab("assinaturas") }}
@@ -380,6 +387,7 @@ export function LocacaoDealDetail({
             adminVersions={adminVersions}
             signerData={adminSignerData}
             imobiliariaNome={orgName}
+            orgDefaults={orgDefaults}
           />
         </TabsContent>
 

@@ -20,9 +20,12 @@ import {
 import { getPipelineByKind } from "@/lib/modules/resolve";
 import {
   DEFAULT_CONTRACT_SETTINGS,
-  resolveOrgContractDefaults,
   type ContractSettings,
 } from "@/lib/contracts/default-config";
+import {
+  loadOrgContractDefaults,
+  loadOrgLocacaoDefaults,
+} from "@/lib/contracts/org-defaults";
 import { assertModuleEnabled } from "@/lib/modules/guard";
 import { MODULE } from "@/lib/modules/catalog";
 import { enrichLocacaoData, enrichAdministracaoData } from "@/lib/locacao/enrich";
@@ -201,26 +204,10 @@ export interface EnrichContractContext {
   contractDefaults?: ContractSettings;
 }
 
-/**
- * Padrão de configurações contratuais da org (`OrgFormSettings.
- * contractDefaultsJson`). Nunca lança: sem row, sem coluna preenchida ou com
- * Json inválido, cai no padrão de fábrica — a geração de contrato não pode
- * quebrar por causa de uma preferência.
- */
-export async function loadOrgContractDefaults(
-  orgId: string
-): Promise<ContractSettings> {
-  try {
-    const settings = await prisma.orgFormSettings.findUnique({
-      where: { orgId },
-      select: { contractDefaultsJson: true },
-    });
-    return resolveOrgContractDefaults(settings?.contractDefaultsJson);
-  } catch (err) {
-    console.warn("[contract-defaults] falha ao carregar padrão da org:", err);
-    return DEFAULT_CONTRACT_SETTINGS;
-  }
-}
+// Padrão de configurações contratuais da org — a implementação mora em
+// `lib/contracts/org-defaults.ts` (server-safe e sem as deps pesadas deste
+// módulo); re-exportado aqui pra não quebrar callers antigos.
+export { loadOrgContractDefaults, loadOrgLocacaoDefaults };
 
 export function enrichContractData(
   data: Record<string, unknown>,
@@ -1270,7 +1257,11 @@ export async function generateLocacaoContractForDeal(
       }
     : undefined;
 
-  const enrichedData = enrichLocacaoData(dataJson, { administradora });
+  // Padrão contratual de LOCAÇÃO da imobiliária (multa de atraso, juros, multa
+  // rescisória, comarca). Ausente → padrão de fábrica.
+  const contractDefaults = await loadOrgLocacaoDefaults(orgId);
+
+  const enrichedData = enrichLocacaoData(dataJson, { administradora, contractDefaults });
 
   // engine="google_docs": o template É um Google Doc (modelo da imobiliária,
   // layout/timbrado preservados) — copiamos o doc e substituímos placeholders
@@ -1556,7 +1547,11 @@ export async function generateAdministracaoContractForDeal(
     endereco: org?.legalAddress ?? undefined,
   };
 
-  const enrichedData = enrichAdministracaoData(dataJson, { administradora });
+  const contractDefaults = await loadOrgLocacaoDefaults(orgId);
+  const enrichedData = enrichAdministracaoData(dataJson, {
+    administradora,
+    contractDefaults,
+  });
   const htmlContent = isGoogleDocsEngine
     ? `<p>Contrato de administração gerado a partir do modelo Google Doc (${template.name}).</p>`
     : renderContratoHTML(template.handlebarsSource, enrichedData);

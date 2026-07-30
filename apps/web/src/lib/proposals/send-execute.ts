@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { prisma } from "@/lib/db/prisma";
 import { exportPdfToBuffer } from "@/lib/render/exporter";
+import { loadOrgDocumentStyleExport } from "@/lib/render/org-document-style";
 import {
   createEnvelope,
   addDocument,
@@ -345,7 +346,10 @@ async function runClickSignEnvelope(p: {
   deadlineAt: Date | null;
   costCents: number;
 }): Promise<{ envelopeId: string }> {
-  const pdf = await exportPdfToBuffer(p.html, "A4", null);
+  // Mesmo leiaute do PDF de contrato (DocumentStyle default da org). Sem preset
+  // volta ao clássico — `null` continua sendo o fallback.
+  const style = await loadOrgDocumentStyleExport(p.orgId);
+  const pdf = await exportPdfToBuffer(p.html, "A4", style);
   const defaultAuth = (p.settings.defaultAuthMethod as AuthMethod) ?? "email";
   const rawName = `Proposta — ${p.title}${p.via === "reduzida" ? " (proprietário)" : ""}`;
   const name = STAGING_MODE ? `[STAGING] ${rawName}` : rawName;

@@ -19,8 +19,8 @@ import { z } from "zod";
  * com `{{#if (eq foro "arbitragem")}}`); em locação é a comarca em texto livre
  * ("São Paulo/SP"). Os blocos `config` também divergem (locação tem
  * `multa_atraso_percent`/`multa_rescisoria_meses`). Um padrão único por org
- * corromperia uma das duas — por isso a coluna nasce namespaced por módulo,
- * mesmo com só o branch de venda implementado.
+ * corromperia uma das duas — por isso a coluna é namespaced por módulo, e cada
+ * branch tem schema, padrão de fábrica, extract e patch próprios.
  */
 
 /**
@@ -95,43 +95,205 @@ export const DEFAULT_CONTRACT_SETTINGS: ContractSettings = {
   },
 };
 
+/**
+ * Configurações contratuais de LOCAÇÃO.
+ *
+ * Não é um subconjunto do shape de venda — é outro vocabulário:
+ *
+ *  - `foro` é a COMARCA em texto livre ("São Paulo/SP"), não o enum
+ *    arbitragem|justica-publica. Vazio = o template mantém o fallback
+ *    "comarca de localização do imóvel".
+ *  - `config` tem multa de atraso (% sobre o aluguel), juros mensais e a multa
+ *    rescisória expressa em MESES de aluguel (art. 4º da Lei 8.245/91), não em
+ *    percentual sobre o valor do negócio.
+ *
+ * `assinatura` é o único bloco compartilhado com venda (cidade/UF/data do
+ * fecho) — `enrichLocacaoData` consome exatamente os mesmos campos pra
+ * materializar `config.municipio_imovel` e `config.data_assinatura`.
+ */
+export const locacaoSettingsSchema = z
+  .object({
+    foro: z.string().max(160),
+    assinatura: z
+      .object({
+        cidade: z.string().max(120),
+        uf: z.string().max(2),
+        // "" = usar a data em que o contrato for assinado.
+        data: z
+          .string()
+          .regex(/^\d{4}-\d{2}-\d{2}$/, "Data deve ser AAAA-MM-DD")
+          .or(z.literal("")),
+      })
+      .strict(),
+    config: z
+      .object({
+        multa_atraso_percent: z.number().min(0).max(100),
+        juros_mensais_atraso: z.number().min(0).max(100),
+        multa_rescisoria_meses: z.number().min(0).max(120),
+      })
+      .strict(),
+  })
+  .strict();
+
+export type LocacaoSettings = z.infer<typeof locacaoSettingsSchema>;
+
+/**
+ * Padrão de fábrica da locação.
+ *
+ * São os mesmos números que `enrichLocacaoData` praticava hard-coded desde a
+ * primeira versão do módulo — multa de atraso 10% (padrão do modelo NNI; a Lei
+ * 8.245/91 não impõe os 2% do CDC), juros de 1% ao mês e multa rescisória de 3
+ * aluguéis. Mudar daqui pra frente é decisão explícita da imobiliária.
+ */
+export const DEFAULT_LOCACAO_SETTINGS: LocacaoSettings = {
+  foro: "",
+  assinatura: { cidade: "", uf: "", data: "" },
+  config: {
+    multa_atraso_percent: 10,
+    juros_mensais_atraso: 1,
+    multa_rescisoria_meses: 3,
+  },
+};
+
 /** Shape de `OrgFormSettings.contractDefaultsJson`. */
 export const orgContractDefaultsSchema = z.object({
   venda: contractSettingsSchema.deepPartial().optional(),
-  // Reservado — locação tem semântica própria de `foro`/`config` (ver topo).
-  locacao: z.record(z.unknown()).optional(),
+  locacao: locacaoSettingsSchema.deepPartial().optional(),
 });
 
 export type OrgContractDefaults = z.infer<typeof orgContractDefaultsSchema>;
+
+/** Famílias de configuração contratual — uma por esteira. */
+export type SettingsFamily = "venda" | "locacao";
+
+/**
+ * Descobre a família de um contrato.
+ *
+ * `pipeline.kind` é a fonte primária (o Deal não tem orgId/kind confiável em
+ * todo caminho); `Contract.kind="administracao"` é locação por definição —
+ * é o instrumento imobiliária ↔ proprietário.
+ */
+export function resolveSettingsFamily(input: {
+  contractKind?: string | null;
+  pipelineKind?: string | null;
+}): SettingsFamily {
+  if (input.contractKind === "administracao") return "locacao";
+  return input.pipelineKind === "locacao" ? "locacao" : "venda";
+}
+
+/**
+ * Campos que só existem na OUTRA família.
+ *
+ * Zod sozinho não pega o caso perigoso: um payload de venda tem `foro:
+ * "arbitragem"`, que é uma string válida como comarca, e o `.strip()` padrão
+ * descartaria `desistencia`/`config.multa_penal_*` em silêncio — o operador
+ * veria "salvo" e o contrato não mudaria. Aqui o mismatch vira 400 nomeando
+ * exatamente o que veio errado.
+ */
+const VENDA_ONLY_TOP_KEYS = ["desistencia"] as const;
+const VENDA_ONLY_CONFIG_KEYS = [
+  "multa_penal_moratoria",
+  "base_calculo_multa",
+  "atualizacao_monetaria",
+  "prazo_atraso_rescisao",
+  "multa_cominatoria_diaria",
+  "multa_penal_compensatoria",
+  "prazo_multa_rescisoria",
+] as const;
+const LOCACAO_ONLY_CONFIG_KEYS = [
+  "multa_atraso_percent",
+  "multa_rescisoria_meses",
+] as const;
 
 type AnyObj = Record<string, unknown>;
 const obj = (v: unknown): AnyObj =>
   v && typeof v === "object" && !Array.isArray(v) ? (v as AnyObj) : {};
 
+export function foreignSettingsFields(
+  family: SettingsFamily,
+  payload: unknown
+): string[] {
+  const data = obj(payload);
+  const config = obj(data.config);
+  const found: string[] = [];
+
+  if (family === "locacao") {
+    for (const k of VENDA_ONLY_TOP_KEYS) if (k in data) found.push(k);
+    for (const k of VENDA_ONLY_CONFIG_KEYS) if (k in config) found.push(`config.${k}`);
+  } else {
+    for (const k of LOCACAO_ONLY_CONFIG_KEYS) if (k in config) found.push(`config.${k}`);
+  }
+  return found;
+}
+
+// `Number(null)` e `Number("")` são 0 (finito!), então checar só
+// `Number.isFinite` transformaria ausência em zero silencioso — uma multa
+// "0%" no contrato em vez do padrão.
+const num = (v: unknown, fallback: number): number => {
+  if (typeof v === "number") return Number.isFinite(v) ? v : fallback;
+  if (typeof v !== "string" || v.trim() === "") return fallback;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+};
+const text = (v: unknown, fallback: string): string =>
+  typeof v === "string" && v.trim() ? v : fallback;
+
 /**
- * Resolve o padrão de venda da org sobre o padrão de fábrica.
+ * Resolve os padrões da org sobre o padrão de fábrica — os DOIS branches.
  *
  * `contractDefaultsJson` é Json livre no banco, então tudo aqui é defensivo:
  * chave desconhecida ou tipo errado cai no default em vez de explodir a
  * geração de contrato.
  */
-export function resolveOrgContractDefaults(
+export function resolveOrgContractDefaults(contractDefaultsJson: unknown): {
+  venda: ContractSettings;
+  locacao: LocacaoSettings;
+} {
+  return {
+    venda: resolveOrgVendaDefaults(contractDefaultsJson),
+    locacao: resolveOrgLocacaoDefaults(contractDefaultsJson),
+  };
+}
+
+/** Branch de locação de `contractDefaultsJson`, com fallback de fábrica. */
+export function resolveOrgLocacaoDefaults(
+  contractDefaultsJson: unknown
+): LocacaoSettings {
+  const locacao = obj(obj(contractDefaultsJson).locacao);
+  const d = DEFAULT_LOCACAO_SETTINGS;
+  const assinatura = obj(locacao.assinatura);
+  const config = obj(locacao.config);
+
+  return {
+    foro: text(locacao.foro, d.foro),
+    assinatura: {
+      cidade: text(assinatura.cidade, d.assinatura.cidade),
+      uf: text(assinatura.uf, d.assinatura.uf),
+      data: text(assinatura.data, d.assinatura.data),
+    },
+    config: {
+      multa_atraso_percent: num(
+        config.multa_atraso_percent,
+        d.config.multa_atraso_percent
+      ),
+      juros_mensais_atraso: num(
+        config.juros_mensais_atraso,
+        d.config.juros_mensais_atraso
+      ),
+      multa_rescisoria_meses: num(
+        config.multa_rescisoria_meses,
+        d.config.multa_rescisoria_meses
+      ),
+    },
+  };
+}
+
+/** Branch de venda de `contractDefaultsJson`, com fallback de fábrica. */
+export function resolveOrgVendaDefaults(
   contractDefaultsJson: unknown
 ): ContractSettings {
   const venda = obj(obj(contractDefaultsJson).venda);
   const d = DEFAULT_CONTRACT_SETTINGS;
-
-  // `Number(null)` e `Number("")` são 0 (finito!), então checar só
-  // `Number.isFinite` transformaria ausência em zero silencioso — uma multa
-  // "0%" no contrato em vez do padrão.
-  const num = (v: unknown, fallback: number): number => {
-    if (typeof v === "number") return Number.isFinite(v) ? v : fallback;
-    if (typeof v !== "string" || v.trim() === "") return fallback;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : fallback;
-  };
-  const text = (v: unknown, fallback: string): string =>
-    typeof v === "string" && v.trim() ? v : fallback;
 
   const desistencia = obj(venda.desistencia);
   const assinatura = obj(venda.assinatura);
@@ -202,18 +364,6 @@ export function extractContractSettings(
   const assinatura = obj(data.assinatura);
   const config = obj(data.config);
   const foro = data.foro;
-
-  // `Number(null)` e `Number("")` são 0 (finito!), então checar só
-  // `Number.isFinite` transformaria ausência em zero silencioso — uma multa
-  // "0%" no contrato em vez do padrão.
-  const num = (v: unknown, fallback: number): number => {
-    if (typeof v === "number") return Number.isFinite(v) ? v : fallback;
-    if (typeof v !== "string" || v.trim() === "") return fallback;
-    const n = Number(v);
-    return Number.isFinite(n) ? n : fallback;
-  };
-  const text = (v: unknown, fallback: string): string =>
-    typeof v === "string" && v.trim() ? v : fallback;
 
   return {
     desistencia: {
@@ -301,6 +451,76 @@ export function buildSettingsPatch(s: ContractSettings): Record<string, unknown>
   return {
     desistencia: s.desistencia,
     // Top-level de propósito: os templates v2 leem `foro`, não `config.foro`.
+    foro: s.foro,
+    assinatura: s.assinatura,
+    config: configPatch,
+  };
+}
+
+/**
+ * Lê as configurações de LOCAÇÃO efetivas de um `dataJson`.
+ *
+ * `foro` aceita as duas origens que o form/enrich produzem: o top-level
+ * (campo "Foro (comarca)" do formulário) e `config.foro_texto` (a ponte que o
+ * enrich materializa e o template realmente imprime).
+ */
+export function extractLocacaoSettings(
+  dataJson: unknown,
+  defaults: LocacaoSettings = DEFAULT_LOCACAO_SETTINGS
+): LocacaoSettings {
+  const data = obj(dataJson);
+  const assinatura = obj(data.assinatura);
+  const config = obj(data.config);
+
+  return {
+    foro: text(data.foro, text(config.foro_texto, defaults.foro)),
+    assinatura: {
+      cidade: text(assinatura.cidade, defaults.assinatura.cidade),
+      uf: text(assinatura.uf, defaults.assinatura.uf),
+      data: text(assinatura.data, defaults.assinatura.data),
+    },
+    config: {
+      multa_atraso_percent: num(
+        config.multa_atraso_percent,
+        defaults.config.multa_atraso_percent
+      ),
+      juros_mensais_atraso: num(
+        config.juros_mensais_atraso,
+        defaults.config.juros_mensais_atraso
+      ),
+      multa_rescisoria_meses: num(
+        config.multa_rescisoria_meses,
+        defaults.config.multa_rescisoria_meses
+      ),
+    },
+  };
+}
+
+/**
+ * Patch de `dataJson` pra locação — mesma lógica de pontes do de venda.
+ *
+ * `config.foro_texto` é a ponte que o template imprime (`enrichLocacaoData` a
+ * deriva de `foro`); sem gravá-la aqui, mudar a comarca não mexeria no texto,
+ * porque o dataJson já vem enriquecido e o enrich não sobrescreve.
+ * `foro_texto: ""` é gravado de propósito quando a comarca é apagada — o
+ * template volta ao fallback "comarca de localização do imóvel" (string vazia
+ * passa pelo `deepMergeAtPaths`, que só ignora null/undefined).
+ */
+export function buildLocacaoSettingsPatch(
+  s: LocacaoSettings
+): Record<string, unknown> {
+  const municipio = [s.assinatura.cidade, s.assinatura.uf]
+    .filter(Boolean)
+    .join("/");
+
+  const configPatch: Record<string, unknown> = {
+    ...s.config,
+    foro_texto: s.foro,
+    ...(municipio ? { municipio_imovel: municipio } : {}),
+    ...(s.assinatura.data ? { data_assinatura: s.assinatura.data } : {}),
+  };
+
+  return {
     foro: s.foro,
     assinatura: s.assinatura,
     config: configPatch,

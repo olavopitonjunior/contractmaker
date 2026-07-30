@@ -4,6 +4,7 @@ import { prisma } from "@/lib/db/prisma";
 import { LocacaoDealDetail } from "@/components/locacao/LocacaoDealDetail";
 import { LOCACAO_SIMPLIFIED_MODE } from "@/lib/env/staging";
 import { getOrgModules, isFeatureEnabled } from "@/lib/modules/read";
+import { loadOrgLocacaoDefaults } from "@/lib/contracts/org-defaults";
 import { FEATURE } from "@/lib/modules/catalog";
 import type { AgentEvent } from "@/lib/ai/types";
 
@@ -190,9 +191,14 @@ export default async function LocacaoDealPage({ params }: { params: { dealId: st
   const modulesView = await getOrgModules(org.id);
   const surveysEnabled = isFeatureEnabled(modulesView, FEATURE.LOCACAO_PESQUISAS);
 
+  // Padrão contratual de LOCAÇÃO da org — piso da aba Configurações do editor
+  // (contrato de locação e de administração).
+  const orgDefaults = await loadOrgLocacaoDefaults(org.id);
+
   return (
     <LocacaoDealDetail
       surveysEnabled={surveysEnabled}
+      orgDefaults={orgDefaults}
       deal={{
         id: deal.id,
         title: deal.title,

@@ -10,7 +10,10 @@ import {
 import { PERMISSION } from "@/lib/security/rbac/permissions";
 import { audit } from "@/lib/security/audit";
 import { isKnownFormPath } from "@/lib/forms/presets";
-import { contractSettingsSchema } from "@/lib/contracts/default-config";
+import {
+  contractSettingsSchema,
+  locacaoSettingsSchema,
+} from "@/lib/contracts/default-config";
 
 const PRESETS = ["legado", "minimo", "padrao", "completo", "custom"] as const;
 
@@ -46,10 +49,15 @@ const formSettingsPatchSchema = z.object({
    * aba "Configurações" do editor.
    *
    * Namespaced por módulo: em venda `foro` é enum, em locação é comarca em
-   * texto livre — um objeto único corromperia uma das duas esteiras. Só o
-   * branch de venda é validado por ora.
+   * texto livre — um objeto único corromperia uma das duas esteiras. Os dois
+   * branches são opcionais e o PATCH é parcial (ver merge abaixo).
    */
-  contractDefaults: z.object({ venda: contractSettingsSchema }).optional(),
+  contractDefaults: z
+    .object({
+      venda: contractSettingsSchema.optional(),
+      locacao: locacaoSettingsSchema.optional(),
+    })
+    .optional(),
 });
 
 /**
@@ -107,7 +115,17 @@ export async function PATCH(req: NextRequest) {
   // Quando preset !== "custom" mas o user mandou customRequiredPaths, os
   // paths viram override em cima do preset. Quando preset === "custom" e
   // não veio customRequiredPaths no payload, MANTÉM o existing.
-  await ensureRow(ctx.orgId);
+  const row = await ensureRow(ctx.orgId);
+
+  // `contractDefaults` é MESCLADO por branch, nunca substituído: a tela de
+  // padrões salva uma aba por vez, e um replace do Json inteiro apagaria o
+  // padrão da outra esteira em silêncio.
+  const currentDefaults =
+    (row.contractDefaultsJson as Record<string, unknown> | null) ?? {};
+  const mergedDefaults = parsed.data.contractDefaults
+    ? { ...currentDefaults, ...parsed.data.contractDefaults }
+    : null;
+
   const updated = await prisma.orgFormSettings.update({
     where: { orgId: ctx.orgId },
     data: {
@@ -127,9 +145,7 @@ export async function PATCH(req: NextRequest) {
       ...(parsed.data.summaryIncludeAttachments !== undefined
         ? { summaryIncludeAttachments: parsed.data.summaryIncludeAttachments }
         : {}),
-      ...(parsed.data.contractDefaults !== undefined
-        ? { contractDefaultsJson: parsed.data.contractDefaults as object }
-        : {}),
+      ...(mergedDefaults ? { contractDefaultsJson: mergedDefaults as object } : {}),
     },
   });
 

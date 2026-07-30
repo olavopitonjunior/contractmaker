@@ -23,6 +23,11 @@ import { SuggestionsToolbar } from "./SuggestionsToolbar";
 import { ShareDialog } from "./ShareDialog";
 import { ApprovalReviewDialog, type ApprovalReviewData } from "./ApprovalReviewDialog";
 import { ContractSettingsPanel } from "./ContractSettingsPanel";
+import type {
+  ContractSettings,
+  LocacaoSettings,
+  SettingsFamily,
+} from "@/lib/contracts/default-config";
 import { ExportDialog } from "@/components/export/ExportDialog";
 import { PromoteToTemplateDialog } from "@/components/templates/PromoteToTemplateDialog";
 import { useAutoAnalyze } from "@/hooks/useAutoAnalyze";
@@ -85,12 +90,20 @@ interface ContractEditorPageProps {
    *    pra trocar de aba ou rolar até o `LeaseSignaturesTab` correto (senão o
    *    operador cairia no módulo de vendas). */
   signCta?: false | { onClick: () => void; label?: string };
+  /** Vocabulário da aba Configurações. Default "venda"; locação/administração
+   *  passam "locacao" (comarca em texto, multa rescisória em meses). */
+  settingsFamily?: SettingsFamily;
+  /** Padrão contratual da org (`contractDefaultsJson`) do branch da família —
+   *  o piso que a aba Configurações mostra pro que o contrato não gravou. */
+  orgDefaults?: ContractSettings | LocacaoSettings;
 }
 
 export function ContractEditorPage({
   contract,
   versions,
   signCta,
+  settingsFamily = "venda",
+  orgDefaults,
 }: ContractEditorPageProps) {
   const router = useRouter();
   const [saving, setSaving] = useState(false);
@@ -619,6 +632,8 @@ export function ContractEditorPage({
           <ContractSettingsPanel
             contractId={contract.id}
             dataJson={(contract.dataJson ?? {}) as Record<string, unknown>}
+            family={settingsFamily}
+            orgDefaults={orgDefaults}
             onSaved={() => {
               // O iframe do Drive é colaborativo e reflete a edição sozinho; o
               // refresh serve pro dataJson do server component.

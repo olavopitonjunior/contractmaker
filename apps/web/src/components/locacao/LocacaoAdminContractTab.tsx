@@ -7,6 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { ContractEditorPage } from "@/components/contracts/ContractEditorPage";
+import type { LocacaoSettings } from "@/lib/contracts/default-config";
 import { LeaseSignaturesTab } from "@/components/locacao/LeaseSignaturesTab";
 import type { LeaseSignerData } from "@/components/locacao/SendLeaseEnvelopeDialog";
 import { Building2, FileSignature, Loader2 } from "lucide-react";
@@ -23,6 +24,9 @@ interface LocacaoAdminContractTabProps {
   signerData: LeaseSignerData;
   /** Nome da org (administradora) pra pré-preencher a linha da imobiliária. */
   imobiliariaNome?: string;
+  /** Padrão contratual de LOCAÇÃO da org — o instrumento de administração usa o
+   *  mesmo vocabulário (comarca, multas do aluguel), não o de venda. */
+  orgDefaults?: LocacaoSettings;
 }
 
 /**
@@ -40,6 +44,7 @@ export function LocacaoAdminContractTab({
   adminVersions,
   signerData,
   imobiliariaNome,
+  orgDefaults,
 }: LocacaoAdminContractTabProps) {
   const router = useRouter();
   const [generating, setGenerating] = useState(false);
@@ -102,6 +107,8 @@ export function LocacaoAdminContractTab({
       <ContractEditorPage
         contract={adminContract}
         versions={adminVersions}
+        settingsFamily="locacao"
+        orgDefaults={orgDefaults}
         signCta={{
           onClick: () =>
             signRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
