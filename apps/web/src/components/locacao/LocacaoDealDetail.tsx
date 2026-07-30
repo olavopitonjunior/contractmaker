@@ -1,22 +1,20 @@
 "use client";
 
 import { useState } from "react";
+import dynamic from "next/dynamic";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import { ContractEditorPage } from "@/components/contracts/ContractEditorPage";
-import { LeaseSignaturesTab } from "@/components/locacao/LeaseSignaturesTab";
-import { LocacaoAdminContractTab } from "@/components/locacao/LocacaoAdminContractTab";
+// Import só de tipo: serve pra derivar ContractProp/VersionsProp sem puxar o
+// editor pro chunk inicial (o componente entra via next/dynamic abaixo).
+import type { ContractEditorPage as ContractEditorPageComponent } from "@/components/contracts/ContractEditorPage";
 import type { LeaseSignerData } from "@/components/locacao/SendLeaseEnvelopeDialog";
 import { LocacaoDealHeaderActions } from "@/components/locacao/LocacaoDealHeaderActions";
 import { LocacaoDadosTab } from "@/components/locacao/LocacaoDadosTab";
-import {
-  LocacaoDocumentsTab,
-  type LocacaoAttachment,
-} from "@/components/locacao/LocacaoDocumentsTab";
+import type { LocacaoAttachment } from "@/components/locacao/LocacaoDocumentsTab";
 import {
   LocacaoCreditAnalysisCard,
   type SerasaJobSummary,
@@ -24,23 +22,88 @@ import {
 import { DealProgressTimeline } from "@/components/pipeline/DealProgressTimeline";
 import { LostDealBanner } from "@/components/pipeline/LostDealBanner";
 import { Field } from "@/components/locacao/lease-detail/LeaseSection";
-import { SegurosTab, type PolicyView } from "@/components/locacao/lease-detail/SegurosTab";
+import type { PolicyView } from "@/components/locacao/lease-detail/SegurosTab";
 import type { FiancaConsolidado } from "@/components/locacao/lease-detail/FiancaComparativoCard";
-import {
-  GarantiasTab,
-  type GuaranteeView,
-} from "@/components/locacao/lease-detail/GarantiasTab";
-import {
-  VistoriaTab,
-  type InspectionView,
-} from "@/components/locacao/lease-detail/VistoriaTab";
+import type { GuaranteeView } from "@/components/locacao/lease-detail/GarantiasTab";
+import type { InspectionView } from "@/components/locacao/lease-detail/VistoriaTab";
 import { FileText, ExternalLink, Receipt, Building2, FileSignature } from "lucide-react";
-import { DealSurveysTab } from "@/components/surveys/DealSurveysTab";
 import { DealManagerChip } from "@/components/deals/DealManagerChip";
 import { toast } from "sonner";
 
-type ContractProp = React.ComponentProps<typeof ContractEditorPage>["contract"];
-type VersionsProp = React.ComponentProps<typeof ContractEditorPage>["versions"];
+/**
+ * Placeholder enquanto o chunk da aba baixa. A aba inicial ("dados") é
+ * estática, então isto só aparece em troca de aba.
+ */
+function TabLoading() {
+  return (
+    <div className="min-h-[120px] px-3 py-6 text-sm text-muted-foreground">
+      Carregando…
+    </div>
+  );
+}
+
+// Code splitting: abas não-iniciais saem do chunk da página (o custo é
+// bundle/parse — o Radix Tabs já desmonta o conteúdo inativo). Sem `ssr: false`.
+const ContractEditorPage = dynamic(
+  () =>
+    import("@/components/contracts/ContractEditorPage").then(
+      (m) => m.ContractEditorPage
+    ),
+  { loading: () => <TabLoading /> }
+);
+const LeaseSignaturesTab = dynamic(
+  () =>
+    import("@/components/locacao/LeaseSignaturesTab").then(
+      (m) => m.LeaseSignaturesTab
+    ),
+  { loading: () => <TabLoading /> }
+);
+const LocacaoAdminContractTab = dynamic(
+  () =>
+    import("@/components/locacao/LocacaoAdminContractTab").then(
+      (m) => m.LocacaoAdminContractTab
+    ),
+  { loading: () => <TabLoading /> }
+);
+const LocacaoDocumentsTab = dynamic(
+  () =>
+    import("@/components/locacao/LocacaoDocumentsTab").then(
+      (m) => m.LocacaoDocumentsTab
+    ),
+  { loading: () => <TabLoading /> }
+);
+const SegurosTab = dynamic(
+  () =>
+    import("@/components/locacao/lease-detail/SegurosTab").then(
+      (m) => m.SegurosTab
+    ),
+  { loading: () => <TabLoading /> }
+);
+const GarantiasTab = dynamic(
+  () =>
+    import("@/components/locacao/lease-detail/GarantiasTab").then(
+      (m) => m.GarantiasTab
+    ),
+  { loading: () => <TabLoading /> }
+);
+const VistoriaTab = dynamic(
+  () =>
+    import("@/components/locacao/lease-detail/VistoriaTab").then(
+      (m) => m.VistoriaTab
+    ),
+  { loading: () => <TabLoading /> }
+);
+const DealSurveysTab = dynamic(
+  () => import("@/components/surveys/DealSurveysTab").then((m) => m.DealSurveysTab),
+  { loading: () => <TabLoading /> }
+);
+
+type ContractProp = React.ComponentProps<
+  typeof ContractEditorPageComponent
+>["contract"];
+type VersionsProp = React.ComponentProps<
+  typeof ContractEditorPageComponent
+>["versions"];
 
 interface LeaseProp {
   id: string;
