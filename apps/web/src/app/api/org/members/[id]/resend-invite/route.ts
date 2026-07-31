@@ -74,7 +74,10 @@ export async function POST(
   const { token } = await createPasswordResetToken(email, "welcome");
   const setupUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(token)}`;
 
-  await sendEmail({
+  // sendEmail NUNCA lança — devolve { ok:false }. Sem ler esse retorno a rota
+  // responde "reenviado" pra um e-mail que não saiu, e o link de definir senha
+  // é a única porta de entrada de quem ainda não tem senha.
+  const sent = await sendEmail({
     to: email,
     subject: `Bem-vindo a ${ctx.orgName} no Contractmaker`,
     react: WelcomeSetPasswordEmail({
@@ -83,6 +86,13 @@ export async function POST(
       setupUrl,
     }) as any,
   });
+
+  if (!sent.ok) {
+    console.error("[members/resend-invite] falha ao enviar convite", {
+      membershipId: membership.id,
+      error: sent.error,
+    });
+  }
 
   await audit(
     {
@@ -100,5 +110,5 @@ export async function POST(
     }
   );
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, emailSent: sent.ok });
 }
