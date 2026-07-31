@@ -42,12 +42,23 @@ interface ValidateResult {
   unknown: string[];
   missingRequired: string[];
   catalog: CatalogEntry[];
+  /** Estado dos slots reconciliado com o Doc (ver validate-gdoc). */
+  slots?: SlotReport[];
+}
+/** Espelha `ApplyClauseSlotReport` (lib/templates/apply-clause-slot.ts). */
+interface SlotReport {
+  slot: string;
+  applied: boolean;
+  token: string | null;
+  removed?: number;
+  issues?: { paragraph: string; reason: string }[];
 }
 interface DraftReport {
   inserted?: { token: string; trecho: string }[];
   skippedAmbiguous?: { token: string; trecho: string; reason: string }[];
   notMapped?: string[];
   missingRequired?: string[];
+  slots?: SlotReport[];
   ranAt?: string;
 }
 interface TemplateInfo {
@@ -57,6 +68,8 @@ interface TemplateInfo {
   matchCriteria?: unknown;
   status: string;
   isDefault: boolean;
+  /** `ContractTemplate.draftReport` — inclui os avisos de slot da ingestão. */
+  draftReport?: unknown;
   docId: string;
   embedLink: string;
 }
@@ -67,6 +80,24 @@ const SKIP_REASON: Record<string, string> = {
   "unknown-token": "chave fora do catálogo",
 };
 
+const SLOT_LABEL: Record<string, string> = {
+  garantia: "cláusula de garantia",
+};
+
+const SLOT_ISSUE_REASON: Record<string, string> = {
+  ambiguous: "o texto se repete em mais de um lugar do documento",
+  "not-found": "não localizei esse trecho no documento",
+  "too-short": "o trecho é curto demais para ser localizado com segurança",
+  "doc-unreadable": "não consegui ler o documento no Drive",
+  "batch-failed": "o Google recusou a edição",
+};
+
+function parseDraftReport(raw: unknown): DraftReport | null {
+  return raw && typeof raw === "object" && !Array.isArray(raw)
+    ? (raw as DraftReport)
+    : null;
+}
+
 export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
   const router = useRouter();
   const [validation, setValidation] = useState<ValidateResult | null>(null);
@@ -76,9 +107,21 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
   const [isDefault, setIsDefault] = useState(template.isDefault);
   const [confirmOpen, setConfirmOpen] = useState(false);
 
-  // Revisão por IA
+  // Revisão por IA — parte do relatório persistido na ingestão (é ele que traz
+  // os avisos de slot), sobrescrito quando o operador roda a IA de novo.
   const [aiRunning, setAiRunning] = useState(false);
-  const [report, setReport] = useState<DraftReport | null>(null);
+  const [report, setReport] = useState<DraftReport | null>(() =>
+    parseDraftReport(template.draftReport)
+  );
+
+  /**
+   * Slots de cláusula que a ingestão NÃO conseguiu abrir. O modelo ficou com a
+   * cláusula da variante de referência CHUMBADA — ativar assim faz todo contrato
+   * dessa família sair com aquela garantia, seja qual for a escolha do
+   * formulário. Trava a ativação (o operador ainda pode insistir, como no caso
+   * dos campos obrigatórios ausentes).
+   */
+  const failedSlots = (report?.slots ?? []).filter((s) => !s.applied);
 
   // Mapeamento manual
   const [paragraphs, setParagraphs] = useState<string[]>([]);
@@ -93,6 +136,11 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Falha na validação");
       setValidation(data);
+      // A revalidação reconcilia a declaração de slot com o Doc — se o operador
+      // consertou o modelo à mão, o aviso (e a trava da ativação) some aqui.
+      if (Array.isArray(data.slots)) {
+        setReport((prev) => ({ ...(prev ?? {}), slots: data.slots as SlotReport[] }));
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Falha na validação");
     } finally {
@@ -137,7 +185,7 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
   }
 
   async function activate() {
-    if ((validation?.missingRequired ?? []).length > 0) {
+    if ((validation?.missingRequired ?? []).length > 0 || failedSlots.length > 0) {
       setConfirmOpen(true);
       return;
     }
@@ -150,7 +198,12 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
       const res = await fetch(`/api/templates/${template.id}/rerun-ai`, { method: "POST" });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Falha na revisão por IA");
-      setReport(data.report as DraftReport);
+      // `rerun-ai` só devolve o pass de placeholders — preserva os avisos de
+      // slot da ingestão, senão rodar a IA "limparia" a trava da ativação.
+      setReport((prev) => ({
+        ...(data.report as DraftReport),
+        slots: prev?.slots,
+      }));
       const n = (data.report?.inserted ?? []).length;
       toast.success(n > 0 ? `A IA preencheu ${n} campo(s).` : "A IA revisou o modelo.");
       await Promise.all([revalidate(), refreshDocText()]);
@@ -199,13 +252,37 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Ativar com campos obrigatórios ausentes?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Os campos{" "}
-              <code className="rounded bg-muted px-1">
-                {(validation?.missingRequired ?? []).map((t) => `{{${t}}}`).join(", ")}
-              </code>{" "}
-              não estão no modelo — não serão preenchidos nos contratos até você inseri-los.
+            <AlertDialogTitle>
+              {failedSlots.length > 0
+                ? "Ativar com a cláusula variável chumbada?"
+                : "Ativar com campos obrigatórios ausentes?"}
+            </AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2">
+                {failedSlots.length > 0 && (
+                  <p>
+                    Não consegui trocar a{" "}
+                    {failedSlots
+                      .map((s) => SLOT_LABEL[s.slot] ?? s.slot)
+                      .join(", ")}{" "}
+                    pelo campo variável. Do jeito que está, <b>todo contrato desta
+                    família sai com a garantia deste arquivo</b> — mesmo quando o
+                    cliente escolher outra no formulário.
+                  </p>
+                )}
+                {(validation?.missingRequired ?? []).length > 0 && (
+                  <p>
+                    Os campos{" "}
+                    <code className="rounded bg-muted px-1">
+                      {(validation?.missingRequired ?? [])
+                        .map((t) => `{{${t}}}`)
+                        .join(", ")}
+                    </code>{" "}
+                    não estão no modelo — não serão preenchidos nos contratos até
+                    você inseri-los.
+                  </p>
+                )}
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -221,6 +298,39 @@ export function TemplateReviewClient({ template }: { template: TemplateInfo }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Slot de cláusula que não abriu — o aviso mais grave desta tela: o
+          modelo consolidado ficou com a garantia de UMA variante chumbada. */}
+      {failedSlots.length > 0 && (
+        <div className="flex gap-2.5 rounded-xl border border-destructive/40 bg-destructive/10 p-3.5 text-sm">
+          <AlertTriangle className="mt-0.5 h-4 w-4 flex-none text-destructive" />
+          <div className="space-y-1.5">
+            <p>
+              <b>A cláusula que varia entre as versões continua fixa no modelo.</b>{" "}
+              A consolidação tentou substituí-la pelo campo{" "}
+              <code className="rounded bg-muted px-1">{"{{slot_garantia}}"}</code>{" "}
+              e não conseguiu — então todo contrato gerado por este modelo sai com
+              a garantia deste arquivo, mesmo quando o formulário disser outra.
+            </p>
+            {failedSlots.map((s, i) => (
+              <div key={i} className="text-xs text-muted-foreground">
+                {(s.issues ?? []).map((iss, j) => (
+                  <p key={j}>
+                    • {SLOT_ISSUE_REASON[iss.reason] ?? iss.reason}:{" "}
+                    <span className="italic">“{iss.paragraph}”</span>
+                  </p>
+                ))}
+              </div>
+            ))}
+            <p className="text-xs">
+              Como resolver: abra o Doc ao lado, apague o texto da cláusula de
+              garantia e escreva{" "}
+              <code className="rounded bg-muted px-1">{"{{slot_garantia}}"}</code>{" "}
+              no lugar. As cláusulas de cada variante já estão no acervo.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Como funciona */}
       <div className="flex gap-2.5 rounded-xl border border-info/30 bg-info/10 p-3.5 text-sm">

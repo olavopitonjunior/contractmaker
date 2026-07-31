@@ -153,15 +153,22 @@ describe("suggestLocacaoAssignment", () => {
 });
 
 describe("labels do wizard de locação", () => {
-  it("etapa 0 é Documentos nas duas finalidades (7 etapas)", () => {
+  it("etapa 0 é Documentos nas duas finalidades (6 etapas)", () => {
     expect(LOCACAO_STEP_LABELS[0]).toBe("Documentos");
     expect(LOCACAO_COMERCIAL_STEP_LABELS[0]).toBe("Documentos");
-    expect(LOCACAO_STEP_LABELS).toHaveLength(7);
-    expect(LOCACAO_COMERCIAL_STEP_LABELS).toHaveLength(7);
+    expect(LOCACAO_STEP_LABELS).toHaveLength(6);
+    expect(LOCACAO_COMERCIAL_STEP_LABELS).toHaveLength(6);
     // Guard do index-shift do wizard: partes em 1-2, imóvel em 3, aluguel em 4.
     expect(LOCACAO_STEP_LABELS[1]).toBe("Locador(es)");
     expect(LOCACAO_STEP_LABELS[2]).toBe("Locatário(s)");
     expect(LOCACAO_STEP_LABELS[3]).toBe("Imóvel");
     expect(LOCACAO_STEP_LABELS[4]).toBe("Aluguel e Reajuste");
+  });
+
+  it("a Garantia é a última etapa (a Confirmação saiu em 2026-07-30)", () => {
+    expect(LOCACAO_STEP_LABELS[5]).toBe("Garantia");
+    expect(LOCACAO_COMERCIAL_STEP_LABELS[5]).toBe("Garantia");
+    expect(LOCACAO_STEP_LABELS).not.toContain("Confirmação e Assinatura");
+    expect(LOCACAO_COMERCIAL_STEP_LABELS).not.toContain("Confirmação e Assinatura");
   });
 });

@@ -31,6 +31,9 @@ vi.mock("@/lib/db/prisma", () => {
       findUnique: vi.fn(),
       create: vi.fn(),
       update: vi.fn(),
+      // Arquivamento em lote — usado pela reingestão de cláusulas de slot
+      // (POST /api/templates/ingest/clauses).
+      updateMany: vi.fn().mockResolvedValue({ count: 0 }),
       delete: vi.fn(),
       count: vi.fn().mockResolvedValue(0),
       groupBy: vi.fn().mockResolvedValue([]),
@@ -60,6 +63,17 @@ vi.mock("@/lib/db/prisma", () => {
     },
     orgInvitation: {
       count: vi.fn().mockResolvedValue(0),
+    },
+    // Catálogo de garantias locatícias (tipo × garantidor). Vazio por padrão =
+    // org cai nos defaults em código, que é o caminho da maioria dos testes.
+    garantiaOption: {
+      findMany: vi.fn().mockResolvedValue([]),
+      findFirst: vi.fn().mockResolvedValue(null),
+      count: vi.fn().mockResolvedValue(0),
+      create: vi.fn(),
+      createMany: vi.fn().mockResolvedValue({ count: 0 }),
+      update: vi.fn(),
+      delete: vi.fn(),
     },
     contractClause: {
       findFirst: vi.fn(),

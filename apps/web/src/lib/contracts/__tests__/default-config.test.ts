@@ -92,7 +92,21 @@ describe("resolveOrgLocacaoDefaults", () => {
       multa_atraso_percent: 10,
       juros_mensais_atraso: 1,
       multa_rescisoria_meses: 3,
+      honorarios_advocaticios_percent: 10,
     });
+  });
+
+  it("honorários advocatícios da org sobrepõem os 10% de fábrica", () => {
+    const out = resolveOrgLocacaoDefaults({
+      locacao: { config: { honorarios_advocaticios_percent: 20 } },
+    });
+    expect(out.config.honorarios_advocaticios_percent).toBe(20);
+    // Json inválido não vira 0% silencioso.
+    expect(
+      resolveOrgLocacaoDefaults({
+        locacao: { config: { honorarios_advocaticios_percent: "" } },
+      }).config.honorarios_advocaticios_percent
+    ).toBe(10);
   });
 
   it("comarca é texto livre (não enum) e sobrepõe o padrão", () => {
@@ -146,6 +160,7 @@ describe("foreignSettingsFields", () => {
     expect(found).toEqual([
       "config.multa_atraso_percent",
       "config.multa_rescisoria_meses",
+      "config.honorarios_advocaticios_percent",
     ]);
   });
 
@@ -267,6 +282,16 @@ describe("extractLocacaoSettings", () => {
     };
     expect(extractLocacaoSettings({}, org).config.multa_atraso_percent).toBe(2);
   });
+
+  it("lê honorários advocatícios do contrato e cai no padrão quando ausente", () => {
+    expect(
+      extractLocacaoSettings({ config: { honorarios_advocaticios_percent: 20 } })
+        .config.honorarios_advocaticios_percent
+    ).toBe(20);
+    expect(
+      extractLocacaoSettings({}).config.honorarios_advocaticios_percent
+    ).toBe(10);
+  });
 });
 
 describe("buildLocacaoSettingsPatch", () => {
@@ -278,12 +303,14 @@ describe("buildLocacaoSettingsPatch", () => {
         multa_atraso_percent: 8,
         juros_mensais_atraso: 1,
         multa_rescisoria_meses: 3,
+        honorarios_advocaticios_percent: 20,
       },
     });
     const config = patch.config as Record<string, unknown>;
     expect(patch.foro).toBe("Santos/SP");
     expect(config.foro_texto).toBe("Santos/SP");
     expect(config.multa_atraso_percent).toBe(8);
+    expect(config.honorarios_advocaticios_percent).toBe(20);
     expect(config.municipio_imovel).toBe("Santos/SP");
     expect(config.data_assinatura).toBe("2026-08-01");
     // Nada do vocabulário de venda vaza pro dataJson de locação.
@@ -318,5 +345,28 @@ describe("locacaoSettingsSchema", () => {
       assinatura: { cidade: "SP", uf: "SP", data: "01/08/2026" },
     });
     expect(r.success).toBe(false);
+  });
+
+  it("honorários advocatícios: aceita 0–100 e rejeita fora da faixa", () => {
+    const comHonorarios = (v: unknown) =>
+      locacaoSettingsSchema.safeParse({
+        ...DEFAULT_LOCACAO_SETTINGS,
+        config: {
+          ...DEFAULT_LOCACAO_SETTINGS.config,
+          honorarios_advocaticios_percent: v,
+        },
+      }).success;
+    expect(comHonorarios(0)).toBe(true);
+    expect(comHonorarios(20)).toBe(true);
+    expect(comHonorarios(101)).toBe(false);
+    expect(comHonorarios(-1)).toBe(false);
+  });
+
+  it("honorários advocatícios são vocabulário de locação (não de venda)", () => {
+    expect(
+      foreignSettingsFields("venda", {
+        config: { honorarios_advocaticios_percent: 10 },
+      })
+    ).toContain("config.honorarios_advocaticios_percent");
   });
 });

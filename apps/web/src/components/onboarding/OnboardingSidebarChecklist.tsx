@@ -104,8 +104,11 @@ export function OnboardingSidebarChecklist({
           {status.steps.map((step, i) => {
             const meta = STEP_META[step.key];
             const url = stepUrl(step.key, { locacaoOnly });
+            // Alguns destinos levam query (`?novo=1`, `?ingest=1`) — o
+            // `pathname` nunca traz, então compare só a parte do caminho.
+            const urlPath = url.split("?")[0];
             const active =
-              pathname === url || pathname.startsWith(url + "/");
+              pathname === urlPath || pathname.startsWith(urlPath + "/");
             const isNext = step.key === firstPending;
             const isLast = i === status.steps.length - 1;
             const Icon = meta.icon;

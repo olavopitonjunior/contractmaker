@@ -18,6 +18,7 @@ export const MOMENTO_LABELS = {
   assinatura: "Na assinatura do contrato",
   escritura: "Na escritura pública",
   registro: "No registro do imóvel",
+  contrato_financiamento: "Na assinatura do contrato de financiamento",
   dias: "X dias após a assinatura",
   data_exata: "Em data específica",
 } as const;
@@ -29,6 +30,8 @@ export const MOMENTO_TEXTO = {
   escritura: "contados da lavratura da escritura pública",
   registro:
     "contados do registro do Contrato de Financiamento com Alienação Fiduciária junto ao Cartório de Registro de Imóveis competente",
+  contrato_financiamento:
+    "contados da assinatura do Contrato de Financiamento junto à instituição financeira",
   dias: "contados da assinatura deste instrumento",
   data_exata: "",
 } as const;

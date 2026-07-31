@@ -291,6 +291,35 @@ describe("enrichLocacaoData — padrão da org × padrão de fábrica", () => {
     expect(config.multa_atraso_percent).toBe(10);
     expect(config.juros_mensais_atraso).toBe(1);
     expect(config.multa_rescisoria_meses).toBe(3);
+    // Honorários advocatícios viraram configuração (D3) — fallback 10%.
+    expect(config.honorarios_advocaticios_percent).toBe(10);
+  });
+
+  it("honorários advocatícios: org sobrepõe fábrica, negócio sobrepõe org", () => {
+    const org = {
+      foro: "",
+      assinatura: { cidade: "", uf: "", data: "" },
+      config: {
+        multa_atraso_percent: 10,
+        juros_mensais_atraso: 1,
+        multa_rescisoria_meses: 3,
+        honorarios_advocaticios_percent: 20,
+      },
+    };
+    expect(
+      (enrichLocacaoData(vazio(), { contractDefaults: org }).config as Record<
+        string,
+        unknown
+      >).honorarios_advocaticios_percent
+    ).toBe(20);
+    expect(
+      (
+        enrichLocacaoData(
+          { config: { honorarios_advocaticios_percent: 15 } },
+          { contractDefaults: org }
+        ).config as Record<string, unknown>
+      ).honorarios_advocaticios_percent
+    ).toBe(15);
   });
 
   it("padrão da org sobrepõe o de fábrica", () => {
@@ -302,6 +331,7 @@ describe("enrichLocacaoData — padrão da org × padrão de fábrica", () => {
           multa_atraso_percent: 2,
           juros_mensais_atraso: 0.5,
           multa_rescisoria_meses: 1,
+          honorarios_advocaticios_percent: 20,
         },
       },
     });
@@ -327,6 +357,7 @@ describe("enrichLocacaoData — padrão da org × padrão de fábrica", () => {
             multa_atraso_percent: 2,
             juros_mensais_atraso: 1,
             multa_rescisoria_meses: 3,
+            honorarios_advocaticios_percent: 10,
           },
         },
       }
@@ -346,11 +377,59 @@ describe("enrichLocacaoData — padrão da org × padrão de fábrica", () => {
           multa_atraso_percent: 10,
           juros_mensais_atraso: 1,
           multa_rescisoria_meses: 3,
+          honorarios_advocaticios_percent: 10,
         },
       },
     });
     expect(out.foro).toBeUndefined();
     expect(out.assinatura).toBeUndefined();
     expect((out.config as Record<string, unknown>).foro_texto).toBeUndefined();
+  });
+});
+
+describe("enrichLocacaoData — seguro-fiança: tomador e vigência (D4)", () => {
+  const cfg = (data: Record<string, unknown>) =>
+    enrichLocacaoData(data).config as Record<string, unknown>;
+
+  it("deriva os textos do tomador da apólice", () => {
+    expect(
+      cfg({ garantia: { tipo: "seguro_fianca", seguro_tomador: "inquilino" } })
+        .seguro_tomador_texto
+    ).toBe("o LOCATÁRIO");
+    expect(
+      cfg({ garantia: { tipo: "seguro_fianca", seguro_tomador: "proprietario" } })
+        .seguro_tomador_texto
+    ).toBe("o LOCADOR");
+  });
+
+  it("deriva os textos da vigência da apólice", () => {
+    expect(
+      cfg({ garantia: { tipo: "seguro_fianca", seguro_vigencia: "anual_renovavel" } })
+        .seguro_vigencia_texto
+    ).toBe("com renovação anual obrigatória enquanto durar a locação");
+    expect(
+      cfg({
+        garantia: { tipo: "garantia_digital", seguro_vigencia: "prazo_contrato" },
+      }).seguro_vigencia_texto
+    ).toBe("pelo prazo integral da locação");
+  });
+
+  it("sem escolha (ou valor desconhecido) não materializa texto nenhum", () => {
+    const semEscolha = cfg({ garantia: { tipo: "seguro_fianca" } });
+    expect(semEscolha.seguro_tomador_texto).toBeUndefined();
+    expect(semEscolha.seguro_vigencia_texto).toBeUndefined();
+    expect(cfg({}).seguro_tomador_texto).toBeUndefined();
+    expect(
+      cfg({ garantia: { seguro_tomador: "terceiro" } }).seguro_tomador_texto
+    ).toBeUndefined();
+  });
+
+  it("é idempotente: texto já gravado no dataJson vence", () => {
+    expect(
+      cfg({
+        garantia: { tipo: "seguro_fianca", seguro_tomador: "inquilino" },
+        config: { seguro_tomador_texto: "a IMOBILIÁRIA" },
+      }).seguro_tomador_texto
+    ).toBe("a IMOBILIÁRIA");
   });
 });

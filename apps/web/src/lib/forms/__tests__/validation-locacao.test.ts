@@ -90,6 +90,40 @@ describe("dadosLocacaoSchema", () => {
     expect(comFiador.success).toBe(true);
   });
 
+  it("seguro-fiança: tomador e vigência são opcionais e restritos ao enum", () => {
+    // Ausentes — o operador/imobiliária escolhe, nada é forçado.
+    const semEscolha = dadosLocacaoSchema.parse({
+      ...baseValid,
+      garantia: { tipo: "seguro_fianca", provider: "Porto Seguro" },
+    });
+    expect(semEscolha.garantia?.seguro_tomador).toBeUndefined();
+    expect(semEscolha.garantia?.seguro_vigencia).toBeUndefined();
+
+    const comEscolha = dadosLocacaoSchema.parse({
+      ...baseValid,
+      garantia: {
+        tipo: "seguro_fianca",
+        seguro_tomador: "proprietario",
+        seguro_vigencia: "prazo_contrato",
+      },
+    });
+    expect(comEscolha.garantia?.seguro_tomador).toBe("proprietario");
+    expect(comEscolha.garantia?.seguro_vigencia).toBe("prazo_contrato");
+
+    expect(
+      dadosLocacaoSchema.safeParse({
+        ...baseValid,
+        garantia: { tipo: "seguro_fianca", seguro_tomador: "imobiliaria" },
+      }).success
+    ).toBe(false);
+    expect(
+      dadosLocacaoSchema.safeParse({
+        ...baseValid,
+        garantia: { tipo: "garantia_digital", seguro_vigencia: "mensal" },
+      }).success
+    ).toBe(false);
+  });
+
   it("exige descrição do imóvel com >= 10 caracteres", () => {
     expect(
       dadosLocacaoSchema.safeParse({

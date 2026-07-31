@@ -124,3 +124,26 @@ describe("POST /api/admin/orgs — seed de templates por módulo", () => {
     expect(res.status).toBe(201);
   });
 });
+
+describe("POST /api/admin/orgs — catálogo de garantias", () => {
+  it("tenant com locação nasce com as garantidoras padrão", async () => {
+    await POST(req({ ...BASE, modules: ["locacao"] }));
+    expect(p.garantiaOption.createMany).toHaveBeenCalledTimes(1);
+    const data = p.garantiaOption.createMany.mock.calls[0][0].data;
+    expect(data).toHaveLength(4);
+    expect(data.map((d: { provider: string }) => d.provider)).toContain(
+      "Porto Seguro"
+    );
+  });
+
+  it("tenant só-vendas não ganha catálogo de garantia", async () => {
+    await POST(req({ ...BASE, modules: ["vendas"] }));
+    expect(p.garantiaOption.createMany).not.toHaveBeenCalled();
+  });
+
+  it("falha do seed de garantias não derruba a criação (defaults valem por código)", async () => {
+    p.garantiaOption.createMany.mockRejectedValueOnce(new Error("boom"));
+    const res = await POST(req({ ...BASE, modules: ["locacao"] }));
+    expect(res.status).toBe(201);
+  });
+});

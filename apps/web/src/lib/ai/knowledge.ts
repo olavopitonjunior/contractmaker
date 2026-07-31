@@ -35,6 +35,48 @@ export interface CreateKnowledgeItemInput {
   isVariable?: boolean;
   status?: string;
   usageCount?: number;
+  /**
+   * Grava UMA row com o `content` INTEGRAL, sem repartir em chunks.
+   *
+   * Chunkar é ótimo pra RAG (o vetor precisa caber na janela do Voyage) e
+   * PÉSSIMO pra conteúdo que é LIDO DE VOLTA inteiro. Uma cláusula de slot é o
+   * segundo caso: `resolveClauseSlots` pega UMA linha por tag e injeta o
+   * `content` dela no contrato. Com chunking, uma cláusula de 6.6k chars virava
+   * um parent com `content = slice(0, 500)` (um preview cortado no meio da
+   * frase) + N filhas que herdam as MESMAS tags e nascem `approved` — e o
+   * contrato saía com o preview ou com um pedaço do meio.
+   *
+   * Default: ligado automaticamente quando as tags marcam um slot (`slot:*`).
+   * A coluna é `@db.Text`, então 6.6k chars cabem sem drama. O EMBEDDING (se
+   * rodar) continua usando o texto truncado no 1º chunk — o vetor é aproximação
+   * pra busca, o `content` é o que vira contrato.
+   */
+  noChunk?: boolean;
+}
+
+/**
+ * Prefixo da tag que marca a cláusula como conteúdo de um slot de template.
+ *
+ * Cópia deliberada de `SLOT_TAG_PREFIX` (lib/templates/clause-slots.ts) em vez
+ * de import: este módulo é caminho quente de toda API de KB e importar de lá
+ * arrastaria junto o Handlebars do render. A paridade entre os dois é travada
+ * por teste em `lib/templates/__tests__/clause-slots.test.ts`.
+ */
+export const SLOT_CLAUSE_TAG_PREFIX = "slot:";
+
+/** Tags marcam uma cláusula de slot? (→ nunca chunkar: ela é lida inteira). */
+export function isSlotClauseTags(tags: string[] | undefined | null): boolean {
+  return (tags ?? []).some((t) => t.startsWith(SLOT_CLAUSE_TAG_PREFIX));
+}
+
+/**
+ * Mesma limpeza que `chunkText` aplica antes de repartir. Existe pra que a row
+ * `noChunk` guarde EXATAMENTE o que o caminho chunkado guardaria num conteúdo
+ * curto — sem isso, um `\r\n` faria o seed "atualizar" a mesma cláusula em toda
+ * rodada.
+ */
+export function normalizeKnowledgeContent(text: string): string {
+  return text.replace(/\r\n/g, "\n").trim();
 }
 
 export interface KnowledgeItemRow {
@@ -110,14 +152,20 @@ export async function createKnowledgeItemRows(
 
   const extras = clauseExtras(input);
 
+  // Cláusula de slot nunca é chunkada: ela é lida de volta INTEIRA pra dentro
+  // do contrato (ver `noChunk` em CreateKnowledgeItemInput).
+  const noChunk = input.noChunk ?? isSlotClauseTags(input.tags);
+
   // Short path: single chunk = single row (no parent/children split)
-  if (chunks.length === 1) {
+  if (noChunk || chunks.length === 1) {
     const parent = await db.knowledgeItem.create({
       data: {
         orgId: input.orgId,
         category: input.category,
         title: input.title,
-        content: chunks[0].text,
+        // `noChunk` persiste o texto inteiro; sem ele, o único chunk (que num
+        // conteúdo curto é o mesmo texto limpo).
+        content: noChunk ? normalizeKnowledgeContent(input.content) : chunks[0].text,
         chunkIndex: 0,
         chunkTotal: 1,
         parentId: null,
@@ -129,6 +177,8 @@ export async function createKnowledgeItemRows(
     });
     return {
       parentId: parent.id,
+      // O VETOR usa só o 1º chunk quando o texto passa da janela do Voyage —
+      // truncar a busca é aceitável, truncar o contrato não.
       embedTargets: [{ id: parent.id, text: `${input.title}\n\n${chunks[0].text}` }],
     };
   }

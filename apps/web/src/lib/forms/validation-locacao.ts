@@ -214,6 +214,12 @@ const garantiaSchema = z.object({
   // Subscritora do título / seguradora / provedora da garantia digital.
   provider: z.string().optional().default(""),
   cobertura_meses: z.number().optional().default(0),
+  // Seguro-fiança / garantia digital: quem contrata a apólice e por quanto
+  // tempo ela vale. Sem `.default()` de propósito — o padrão de mercado varia
+  // por seguradora e por imobiliária, então quem preenche escolhe; ausente, o
+  // enrich não deriva texto nenhum e a cláusula segue genérica.
+  seguro_tomador: z.enum(["inquilino", "proprietario"]).optional(),
+  seguro_vigencia: z.enum(["anual_renovavel", "prazo_contrato"]).optional(),
   // Caução: nº de aluguéis depositados (art. 38 §2º — máx 3).
   caucao_meses: z.number().optional().default(0),
   // Título de capitalização caucionado (art. 37, II): valor nominal + proposta.
@@ -360,6 +366,13 @@ export const LOCACAO_SCHEMA_TYPE = "locacao_residencial_v1" as const;
 
 // Passos do wizard PÚBLICO (client-facing) — a config fiscal/comissão é do
 // operador (diálogo de criação), não aparece aqui.
+//
+// A etapa "Confirmação e Assinatura" saiu em 2026-07-30: ela coletava só
+// cidade/UF/data de assinatura e foro — todos com fallback pronto no
+// `enrichLocacaoData` (padrão da org > cidade do imóvel). Na prática o cliente
+// abandonava o formulário na última tela. Cidade/UF viraram configuração da
+// imobiliária (aba Locação do padrão contratual); a data continua por negócio;
+// o consentimento LGPD continua no wizard (`isLastStep`).
 export const LOCACAO_STEP_LABELS = [
   "Documentos",
   "Locador(es)",
@@ -367,7 +380,6 @@ export const LOCACAO_STEP_LABELS = [
   "Imóvel",
   "Aluguel e Reajuste",
   "Garantia",
-  "Confirmação e Assinatura",
 ] as const;
 
 // ============================================================================
@@ -451,7 +463,6 @@ export const LOCACAO_COMERCIAL_STEP_LABELS = [
   "Imóvel e Destinação",
   "Aluguel e Reajuste",
   "Garantia",
-  "Confirmação e Assinatura",
 ] as const;
 
 // Discriminadores de locação aceitos no fluxo público + helpers de seleção.

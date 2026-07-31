@@ -103,9 +103,10 @@ export const DEFAULT_CONTRACT_SETTINGS: ContractSettings = {
  *  - `foro` é a COMARCA em texto livre ("São Paulo/SP"), não o enum
  *    arbitragem|justica-publica. Vazio = o template mantém o fallback
  *    "comarca de localização do imóvel".
- *  - `config` tem multa de atraso (% sobre o aluguel), juros mensais e a multa
+ *  - `config` tem multa de atraso (% sobre o aluguel), juros mensais, a multa
  *    rescisória expressa em MESES de aluguel (art. 4º da Lei 8.245/91), não em
- *    percentual sobre o valor do negócio.
+ *    percentual sobre o valor do negócio, e os honorários advocatícios (% sobre
+ *    o débito, cobrados na via judicial/extrajudicial).
  *
  * `assinatura` é o único bloco compartilhado com venda (cidade/UF/data do
  * fecho) — `enrichLocacaoData` consome exatamente os mesmos campos pra
@@ -130,6 +131,7 @@ export const locacaoSettingsSchema = z
         multa_atraso_percent: z.number().min(0).max(100),
         juros_mensais_atraso: z.number().min(0).max(100),
         multa_rescisoria_meses: z.number().min(0).max(120),
+        honorarios_advocaticios_percent: z.number().min(0).max(100),
       })
       .strict(),
   })
@@ -143,7 +145,9 @@ export type LocacaoSettings = z.infer<typeof locacaoSettingsSchema>;
  * São os mesmos números que `enrichLocacaoData` praticava hard-coded desde a
  * primeira versão do módulo — multa de atraso 10% (padrão do modelo NNI; a Lei
  * 8.245/91 não impõe os 2% do CDC), juros de 1% ao mês e multa rescisória de 3
- * aluguéis. Mudar daqui pra frente é decisão explícita da imobiliária.
+ * aluguéis. Os honorários advocatícios de 10% são o que as cláusulas de locação
+ * já praticavam escritas à mão. Mudar daqui pra frente é decisão explícita da
+ * imobiliária.
  */
 export const DEFAULT_LOCACAO_SETTINGS: LocacaoSettings = {
   foro: "",
@@ -152,6 +156,7 @@ export const DEFAULT_LOCACAO_SETTINGS: LocacaoSettings = {
     multa_atraso_percent: 10,
     juros_mensais_atraso: 1,
     multa_rescisoria_meses: 3,
+    honorarios_advocaticios_percent: 10,
   },
 };
 
@@ -203,6 +208,7 @@ const VENDA_ONLY_CONFIG_KEYS = [
 const LOCACAO_ONLY_CONFIG_KEYS = [
   "multa_atraso_percent",
   "multa_rescisoria_meses",
+  "honorarios_advocaticios_percent",
 ] as const;
 
 type AnyObj = Record<string, unknown>;
@@ -283,6 +289,10 @@ export function resolveOrgLocacaoDefaults(
       multa_rescisoria_meses: num(
         config.multa_rescisoria_meses,
         d.config.multa_rescisoria_meses
+      ),
+      honorarios_advocaticios_percent: num(
+        config.honorarios_advocaticios_percent,
+        d.config.honorarios_advocaticios_percent
       ),
     },
   };
@@ -491,6 +501,10 @@ export function extractLocacaoSettings(
       multa_rescisoria_meses: num(
         config.multa_rescisoria_meses,
         defaults.config.multa_rescisoria_meses
+      ),
+      honorarios_advocaticios_percent: num(
+        config.honorarios_advocaticios_percent,
+        defaults.config.honorarios_advocaticios_percent
       ),
     },
   };

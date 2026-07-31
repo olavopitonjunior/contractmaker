@@ -3,6 +3,7 @@
 import { SalesFormWizard } from "@/components/forms/SalesFormWizard";
 import { LocacaoFormWizard } from "@/components/forms/LocacaoFormWizard";
 import { isLocacaoSchemaType } from "@/lib/forms/validation-locacao";
+import type { GarantiaOptionLike } from "@/lib/forms/garantia-catalog";
 import { BrandMark } from "@/components/layout/brand-mark";
 
 interface FormPageClientProps {
@@ -10,6 +11,8 @@ interface FormPageClientProps {
   schemaType: string;
   initialData: Record<string, unknown>;
   requiredFieldsByStep: readonly (readonly string[])[];
+  /** Catálogo de garantias da org — só usado no wizard de locação. */
+  garantiaOptions?: readonly GarantiaOptionLike[];
   prefilled?: boolean;
   proposalAttachmentUrl?: string | null;
   /** Form travado (SalesForm.lockedAt) → wizard somente-leitura. */
@@ -28,6 +31,7 @@ export function FormPageClient({
   schemaType,
   initialData,
   requiredFieldsByStep,
+  garantiaOptions,
   prefilled,
   proposalAttachmentUrl,
   locked,
@@ -57,6 +61,7 @@ export function FormPageClient({
             initialData={initialData}
             schemaType={schemaType}
             requiredFieldsByStep={requiredFieldsByStep}
+            garantiaOptions={garantiaOptions}
             readOnly={locked}
             viewerIsMember={viewerIsMember}
           />

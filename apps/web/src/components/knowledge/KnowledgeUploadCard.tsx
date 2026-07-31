@@ -1,6 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,7 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { FileText, FileUp, Loader2 } from "lucide-react";
+import { FileText, FileUp, Layers, Loader2 } from "lucide-react";
 
 /** Rótulos PT-BR das categorias de KnowledgeItem (espelha KnowledgeBaseClient). */
 const CATEGORY_OPTIONS: Array<{ value: string; label: string }> = [
@@ -132,6 +133,15 @@ export function KnowledgeUploadCard({ onDone }: { onDone?: () => void }) {
         )}
         Subir PDF/DOCX
       </Button>
+      {/* Atalho pra quem chegou aqui querendo mandar um MODELO: a central de
+          ingestão aceita o lote inteiro (contratos + cláusulas), classifica e
+          consolida. Este card continua existindo pra quem já sabe o que quer. */}
+      <Button variant="ghost" size="sm" asChild disabled={loading}>
+        <Link href="/templates?ingest=1">
+          <Layers className="h-4 w-4 mr-1" />
+          Enviar documentos da imobiliária
+        </Link>
+      </Button>
 
       <Dialog
         open={warning !== null}
@@ -158,10 +168,8 @@ export function KnowledgeUploadCard({ onDone }: { onDone?: () => void }) {
               disabled={loading}
               onClick={() => {
                 setWarning(null);
-                toast.info(
-                  "Use “Importar modelos da imobiliária (.docx)” e selecione o mesmo arquivo."
-                );
-                router.push("/templates");
+                toast.info("Selecione o mesmo arquivo na central que vai abrir.");
+                router.push("/templates?ingest=1");
               }}
             >
               Enviar como modelo

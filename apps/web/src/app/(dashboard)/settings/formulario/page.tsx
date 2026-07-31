@@ -10,7 +10,9 @@ import { MODULE } from "@/lib/modules/catalog";
 import { FormSettingsClient } from "./FormSettingsClient";
 import { ContractDefaultsCard } from "./ContractDefaultsCard";
 import { ParticipantCategoriesCard } from "./ParticipantCategoriesCard";
+import { GarantiaOptionsCard } from "./GarantiaOptionsCard";
 import { listOrgParticipantCategories } from "@/lib/forms/participant-category-repo";
+import { listGarantiaOptions } from "@/lib/forms/garantia-option-repo";
 
 export default async function FormularioSettingsPage() {
   const session = await auth();
@@ -38,6 +40,10 @@ export default async function FormularioSettingsPage() {
 
   // Categorias de terceiro (links por parte com campos customizáveis).
   const participantCategories = await listOrgParticipantCategories(org.id);
+
+  // Catálogo de garantias — só faz sentido pra quem tem locação. Org sem row
+  // nenhuma recebe os defaults (sem `id`), que a tela mostra como "Sugerida".
+  const garantiaOptions = locacaoEnabled ? await listGarantiaOptions(org.id) : [];
 
   return (
     <div className="space-y-6 max-w-3xl">
@@ -76,6 +82,8 @@ export default async function FormularioSettingsPage() {
         initial={participantCategories}
         locacaoEnabled={locacaoEnabled}
       />
+
+      {locacaoEnabled && <GarantiaOptionsCard initial={garantiaOptions} />}
 
       <ContractDefaultsCard
         initial={defaults.venda}

@@ -31,7 +31,7 @@ import { locacaoDocAdapter } from "@/components/forms/steps/locacao/locacao-doc-
 import { ImovelLocacaoStep } from "@/components/forms/steps/locacao/ImovelLocacaoStep";
 import { AluguelStep } from "@/components/forms/steps/locacao/AluguelStep";
 import { GarantiaStep } from "@/components/forms/steps/locacao/GarantiaStep";
-import { ConfirmacaoStep } from "@/components/forms/steps/locacao/ConfirmacaoStep";
+import type { GarantiaOptionLike } from "@/lib/forms/garantia-catalog";
 
 interface LocacaoFormWizardProps {
   token: string;
@@ -43,6 +43,12 @@ interface LocacaoFormWizardProps {
    * (lib/forms/required-snapshot.ts). Ausente/vazio = só o piso histórico.
    */
   requiredFieldsByStep?: readonly (readonly string[])[];
+  /**
+   * Catálogo de garantias da org (tipo × garantidor), resolvido no SERVIDOR
+   * pela page do formulário — como o `requiredFieldsByStep`. O form é anônimo,
+   * então não há API autenticada pra ele consultar. Ausente = defaults.
+   */
+  garantiaOptions?: readonly GarantiaOptionLike[];
   /** Subtoken por parte: subset de índices REAIS dos steps visíveis. */
   stepIndexes?: readonly number[];
   /** Override do endpoint de auto-save (subtoken usa /api/forms/participant/...). */
@@ -74,7 +80,9 @@ interface LocacaoFormWizardProps {
 // isso, uma parte Pessoa Jurídica trava o avanço com "campo obrigatório"
 // fantasma (não há campo `nome` na tela pra preencher).
 // Índices acompanham LOCACAO_STEP_LABELS — etapa 0 é "Documentos" (sem
-// validação, igual venda), partes começam em 1.
+// validação, igual venda), partes começam em 1. A etapa final de confirmação
+// saiu em 2026-07-30: a Garantia (5) é a última, e o consentimento LGPD
+// continua sendo renderizado pelo wizard no `isLastStep`.
 const PARTY_STEP: Record<number, { list: "locadores" | "locatarios"; label: string }> = {
   1: { list: "locadores", label: "locador" },
   2: { list: "locatarios", label: "locatário" },
@@ -180,6 +188,7 @@ export function LocacaoFormWizard({
   initialData,
   schemaType,
   requiredFieldsByStep,
+  garantiaOptions,
   stepIndexes,
   endpoint: endpointProp,
   pathScope,
@@ -453,8 +462,7 @@ export function LocacaoFormWizard({
         <LocacaoParteStep key="s2" form={form} listKey="locatarios" singular="Locatário" />,
         <ImovelLocacaoStep key="s3" form={form} comercial />,
         <AluguelStep key="s4" form={form} />,
-        <GarantiaStep key="s5" form={form} />,
-        <ConfirmacaoStep key="s6" form={form} />,
+        <GarantiaStep key="s5" form={form} garantiaOptions={garantiaOptions} />,
       ]
     : [
         <DocumentosStep key="s0" form={form} token={token} adapter={locacaoDocAdapter} allowedTopKeys={pathScope} selfAssignment={selfAssignment} viewerIsMember={viewerIsMember} />,
@@ -462,8 +470,7 @@ export function LocacaoFormWizard({
         <LocacaoParteStep key="s2" form={form} listKey="locatarios" singular="Locatário" />,
         <ImovelLocacaoStep key="s3" form={form} />,
         <AluguelStep key="s4" form={form} />,
-        <GarantiaStep key="s5" form={form} />,
-        <ConfirmacaoStep key="s6" form={form} />,
+        <GarantiaStep key="s5" form={form} garantiaOptions={garantiaOptions} />,
       ];
 
   return (

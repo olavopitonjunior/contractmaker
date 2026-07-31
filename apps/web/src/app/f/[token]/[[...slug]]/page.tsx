@@ -2,6 +2,8 @@ import { notFound } from "next/navigation";
 import { prisma } from "@/lib/db/prisma";
 import { resolveFormRequiredFields } from "@/lib/forms/required-snapshot";
 import { canAccessForm, viewerIsOrgMember } from "@/lib/forms/form-gate";
+import { listGarantiaOptions } from "@/lib/forms/garantia-option-repo";
+import { isLocacaoSchemaType } from "@/lib/forms/validation-locacao";
 import { FormClosedNotice } from "@/components/forms/FormClosedNotice";
 import { FormPageClient } from "../form-client";
 
@@ -33,6 +35,13 @@ export default async function PublicFormPage({
   // formulário (retrocompat — ver lib/forms/required-snapshot.ts).
   const requiredFieldsByStep = await resolveFormRequiredFields(form);
 
+  // Catálogo de garantias da imobiliária — desce daqui porque o formulário é
+  // ANÔNIMO (não pode chamar uma API autenticada). Mesmo caminho do
+  // requiredFieldsByStep. Só locação usa.
+  const garantiaOptions = isLocacaoSchemaType(form.schemaType)
+    ? await listGarantiaOptions(form.orgId, { activeOnly: true })
+    : undefined;
+
   // Banner "dados extraídos da proposta" — só quando vier `?prefilled=1` na URL
   // (link de redirect de `/deals/new-from-proposal`) E houver attachment de
   // proposta. Sem o attachment, sem botão "ver original".
@@ -60,6 +69,7 @@ export default async function PublicFormPage({
       schemaType={form.schemaType}
       initialData={(form.dataJson as Record<string, unknown>) || {}}
       requiredFieldsByStep={requiredFieldsByStep}
+      garantiaOptions={garantiaOptions}
       prefilled={isPrefilled}
       proposalAttachmentUrl={proposalAttachmentUrl}
       locked={Boolean(form.lockedAt)}

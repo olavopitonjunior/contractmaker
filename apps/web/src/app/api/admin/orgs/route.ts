@@ -13,6 +13,7 @@ import { audit, extractAuditContextFromRequest } from "@/lib/security/audit";
 import { MODULE, MODULE_CATALOG, isValidModule, type ModuleKey } from "@/lib/modules/catalog";
 import { seedPipeline } from "@/lib/pipelines/seed";
 import { seedDefaultDocumentStyle } from "@/lib/org/seed-document-style";
+import { seedDefaultGarantiaOptions } from "@/lib/forms/garantia-option-repo";
 import { sendOwnerAccessEmail } from "@/lib/org/owner-access";
 import { seedAndEmbedDefaultClauses } from "@/lib/knowledge/seed-clauses";
 import { seedCanonicalTemplatesForOrg } from "@/lib/templates/canonical-seed";
@@ -243,6 +244,19 @@ export async function POST(req: NextRequest) {
     );
   } catch (err) {
     console.error("[admin/orgs] seed de templates falhou (org já criada):", err);
+  }
+
+  // Catálogo de garantias locatícias (seguro-fiança × as 4 seguradoras padrão).
+  // Só pra quem tem locação. Best-effort como os vizinhos — e inofensivo se
+  // falhar: sem row nenhuma, `listGarantiaOptions` devolve EXATAMENTE esses
+  // mesmos defaults por código. Semear aqui só materializa, pra que o admin
+  // encontre a lista já editável em /settings/formulario.
+  if (locacaoEnabled) {
+    try {
+      await seedDefaultGarantiaOptions(result.org.id);
+    } catch (err) {
+      console.error("[admin/orgs] seed de garantias falhou (org já criada):", err);
+    }
   }
 
   // Biblioteca-base de cláusulas (opt-out, default true) — banco pelos módulos

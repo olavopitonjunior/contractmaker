@@ -240,9 +240,10 @@ export function resolveAllRequiredFields(
 }
 
 // ===================================================================
-// LOCAÇÃO — presets por step do wizard de locação (7 etapas,
+// LOCAÇÃO — presets por step do wizard de locação (6 etapas,
 // LOCACAO_STEP_LABELS): 0 Documentos, 1 Locador(es), 2 Locatário(s),
-// 3 Imóvel, 4 Aluguel e Reajuste, 5 Garantia, 6 Confirmação.
+// 3 Imóvel, 4 Aluguel e Reajuste, 5 Garantia. A antiga etapa 6
+// (Confirmação) saiu em 2026-07-30 — ver LOCACAO_STEP_LABELS.
 //
 // Paths batem com `dadosLocacaoSchema` (lib/forms/validation-locacao.ts) —
 // `imovel`/`aluguel`/`garantia` são objetos SINGULARES aqui (em venda são
@@ -256,7 +257,6 @@ export function resolveAllRequiredFields(
 // ===================================================================
 
 const LOCACAO_PRESET_LEGADO: readonly (readonly string[])[] = [
-  [],
   [],
   [],
   [],
@@ -290,7 +290,6 @@ const LOCACAO_PRESET_ESSENCIAL: readonly (readonly string[])[] = [
   ],
   ["imovel.rua", "imovel.numero", "imovel.cidade", "imovel.uf", "imovel.descricao"],
   ["aluguel.valor", "aluguel.vigencia_inicio"],
-  [],
   [],
 ] as const;
 
@@ -344,7 +343,6 @@ const LOCACAO_PRESET_COMPLETO: readonly (readonly string[])[] = [
     "imovel.descricao",
   ],
   ["aluguel.valor", "aluguel.vigencia_inicio", "aluguel.dia_vencimento"],
-  [],
   [],
 ] as const;
 

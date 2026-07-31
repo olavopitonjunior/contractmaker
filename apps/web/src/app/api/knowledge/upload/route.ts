@@ -175,7 +175,7 @@ export async function POST(req: NextRequest) {
           reason: classification.reason,
           confidence: classification.confidence,
           suggestion:
-            "Use “Importar modelos da imobiliária (.docx)” em Templates — o layout é preservado e a IA insere os campos variáveis. Se preferir guardar só como referência, envie assim mesmo para o acervo.",
+            "Use “Enviar documentos da imobiliária” em Modelos — o layout é preservado, nós dizemos que documento é esse e você confirma. Se preferir guardar só como referência, envie assim mesmo para o acervo.",
         },
         { status: 409 }
       );

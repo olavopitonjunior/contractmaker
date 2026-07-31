@@ -110,6 +110,7 @@ describe("PATCH /api/contracts/[id]/settings — família do contrato", () => {
           multa_atraso_percent: 8,
           juros_mensais_atraso: 1,
           multa_rescisoria_meses: 3,
+          honorarios_advocaticios_percent: 10,
         },
       }),
       { params: { id: "c1" } }

@@ -41,6 +41,25 @@ const STEP_NOTE: Partial<Record<OnboardingStepKey, string>> = {
   deal: "É o seu primeiro contrato saindo. Tudo que você configurou converge aqui.",
 };
 
+// Passo a passo do que vai acontecer depois do CTA. Só onde o fluxo não é
+// óbvio pelo nome do botão — hoje, o envio dos modelos.
+const STEP_BULLETS: Partial<Record<OnboardingStepKey, Array<{ t: string; d: string }>>> = {
+  templates: [
+    {
+      t: "Você envia",
+      d: "Todos os seus DOCX timbrados de uma vez — contratos, propostas e cláusulas.",
+    },
+    {
+      t: "Nós organizamos",
+      d: "Dizemos o que é cada arquivo, agrupamos os parecidos e separamos o que é cláusula.",
+    },
+    {
+      t: "Você confirma",
+      d: "Confere a sugestão e pronto: a biblioteca da sua imobiliária fica montada.",
+    },
+  ],
+};
+
 function ProgressRing({ pct, done, total }: { pct: number; done: number; total: number }) {
   const R = 42;
   const C = 2 * Math.PI * R;
@@ -166,6 +185,7 @@ export function OnboardingWizard({
   const activeStep = status.steps.find((s) => s.key === active);
   const ActiveIcon = meta.icon;
   const note = STEP_NOTE[active];
+  const bullets = STEP_BULLETS[active];
 
   return (
     <div>
@@ -304,6 +324,21 @@ export function OnboardingWizard({
                 active !== "profile" &&
                 active !== "clicksign" && (
                 <div className="space-y-4">
+                  {bullets && (
+                    <ol className="grid gap-2.5 rounded-xl border border-border bg-muted/40 p-3.5">
+                      {bullets.map((b, i) => (
+                        <li key={b.t} className="flex items-start gap-2.5">
+                          <span className="mt-0.5 grid h-5 w-5 flex-none place-items-center rounded-full bg-brand-accent/10 text-[11px] font-bold tabular-nums text-brand-accent">
+                            {i + 1}
+                          </span>
+                          <span className="text-sm leading-snug">
+                            <strong className="font-semibold">{b.t}</strong>
+                            <span className="text-muted-foreground"> — {b.d}</span>
+                          </span>
+                        </li>
+                      ))}
+                    </ol>
+                  )}
                   {note && (
                     <div className="flex gap-2.5 rounded-xl border border-info/30 bg-info/10 p-3.5 text-sm">
                       <Info className="mt-0.5 h-4 w-4 flex-none text-info" />

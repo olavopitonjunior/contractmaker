@@ -577,6 +577,22 @@ function LocacaoSettingsForm({
               A multa por rescisão antecipada é proporcional ao tempo restante
               do contrato (art. 4º da Lei 8.245/91).
             </p>
+            <Field
+              label="Honorários advocatícios (%)"
+              className="col-span-2"
+            >
+              <Input
+                type="number"
+                step="0.01"
+                min={0}
+                {...form.register("config.honorarios_advocaticios_percent", {
+                  valueAsNumber: true,
+                })}
+              />
+            </Field>
+            <p className="col-span-2 text-xs text-muted-foreground">
+              Percentual sobre o débito na cobrança judicial ou extrajudicial.
+            </p>
           </CardContent>
         </Card>
 

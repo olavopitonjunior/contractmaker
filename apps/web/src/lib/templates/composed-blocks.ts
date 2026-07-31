@@ -108,6 +108,18 @@ export function clausulaGarantia(data: Record<string, unknown>): string {
   return renderBlock(GARANTIA_HBS, data);
 }
 
+/**
+ * A MESMA cláusula, em HTML (sem o achatamento pra texto plano).
+ *
+ * É o fallback do slot de garantia (`lib/templates/clause-slots.ts`) quando o
+ * template consolidado declara `{{{slot_garantia}}}` mas o acervo do tenant não
+ * tem cláusula pra opção escolhida no form: o contrato sai com a condicional
+ * embutida do canônico, exatamente como antes de existir slot.
+ */
+export function clausulaGarantiaHtml(data: Record<string, unknown>): string {
+  return renderContratoHTML(GARANTIA_HBS, data);
+}
+
 const ADMINISTRADORA_HBS = `{{#if (existe config.administradora_nome)}}
 <p>Os aluguéis e demais encargos da locação deverão ser pagos pela PARTE LOCATÁRIA até o dia {{aluguel.dia_vencimento}} ({{numeroExtenso aluguel.dia_vencimento}}) de cada mês vencido para {{config.administradora_nome}}{{#if (existe config.administradora_creci)}}, regularmente inscrita no CRECI sob nº {{config.administradora_creci}}{{/if}}{{#if (existe config.administradora_endereco)}}, com sede na {{config.administradora_endereco}}{{/if}}, empresa nomeada para exercer a administração da presente locação (doravante "ADMINISTRADORA").</p>
 {{else}}
